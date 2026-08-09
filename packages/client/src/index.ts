@@ -1757,18 +1757,37 @@ export class ObjectStackClient {
    *
    * When the discovery response was served from the environment-scoped mount
    * (`scoping.scoped`), `routes.data` is `{base}/environments/{id}/data`; the
-   * advertised `scoping.environmentId` names the segment to strip so the
-   * returned base is the UNSCOPED one (the scoped client re-appends its own
-   * environment id, which need not be the one discovery resolved).
+   * scope segment must come off so the returned base is the UNSCOPED one (the
+   * scoped client re-appends its own environment id, which need not be the one
+   * discovery resolved). `scoping.environmentId` names that segment when the
+   * server resolved one — but rest advertises it as `req.params?.environmentId`,
+   * so a host that did not populate the route param answers `scoped: true` with
+   * NO id and a `routes.data` still carrying the literal `:environmentId`. That
+   * case strips one trailing `/environments/{segment}` on the strength of
+   * `scoped` alone, which is sound because a scoped response's base ends with
+   * that segment by construction. If NEITHER shape is present the advertised
+   * base is not one this derivation understands, so it declines rather than
+   * return a base of unknown shape — handing back a still-scoped base would make
+   * `scope()` build a doubled `/environments/…/environments/…` URL, i.e.
+   * strictly WORSE than the hardcode this replaces. Declining is always
+   * byte-identical to today.
    */
   _apiBase(): string {
     const data = this.discoveryInfo?.routes?.data;
     if (typeof data === 'string' && data.endsWith('/data')) {
       let base = data.slice(0, -'/data'.length);
       const scoping = this.discoveryInfo?.scoping;
-      if (scoping?.scoped && typeof scoping.environmentId === 'string' && scoping.environmentId) {
-        const scopedSuffix = `/environments/${scoping.environmentId}`;
-        if (base.endsWith(scopedSuffix)) base = base.slice(0, -scopedSuffix.length);
+      if (scoping?.scoped) {
+        const advertised = typeof scoping.environmentId === 'string' && scoping.environmentId
+          ? `/environments/${scoping.environmentId}`
+          : undefined;
+        if (advertised && base.endsWith(advertised)) {
+          base = base.slice(0, -advertised.length);
+        } else {
+          const stripped = base.replace(/\/environments\/[^/]+$/, '');
+          if (stripped === base) return '/api/v1';
+          base = stripped;
+        }
       }
       if (base) return base;
     }

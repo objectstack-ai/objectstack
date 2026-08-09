@@ -1701,6 +1701,44 @@ describe('ScopedProjectClient', () => {
         );
     });
 
+    it('[#6714] a scoped response whose environmentId the host never resolved still strips ONE scope segment', async () => {
+        const { client, fetchMock } = createMockClient({ types: [] });
+        // `rest-server.ts` advertises `scoping.environmentId` as
+        // `req.params?.environmentId` — a host that did not populate the route
+        // param answers `scoped: true` with NO id, and `routes.data` keeps the
+        // literal `:environmentId`. Stripping on the strength of `scoped` alone
+        // is sound (a scoped base ends with that segment by construction) and
+        // is what keeps `scope()` from stacking two scope segments.
+        (client as any)['discoveryInfo'] = {
+            routes: {
+                data: '/backend/api/v9/environments/:environmentId/data',
+                metadata: '/backend/api/v9/environments/:environmentId/meta',
+            },
+            scoping: { enabled: true, resolution: 'auto', scoped: true },
+        };
+        await client.project('proj-other').meta.getTypes();
+        expect(String(fetchMock.mock.calls[0][0])).toBe(
+            'http://localhost:3000/backend/api/v9/environments/proj-other/meta',
+        );
+    });
+
+    it('[#6714] scoped:true with no recognisable scope segment DECLINES — convention, never a doubled prefix', async () => {
+        const { client, fetchMock } = createMockClient({ types: [] });
+        // A base the derivation does not understand: `scoped` claims the
+        // response came off the scoped mount, but `routes.data` carries no
+        // `/environments/{seg}` to remove. Returning it unchanged would build
+        // `…/tenants/t1/environments/proj-other/meta` — a URL neither mount
+        // serves, i.e. strictly worse than the hardcode. Decline instead.
+        (client as any)['discoveryInfo'] = {
+            routes: { data: '/backend/api/v9/tenants/t1/data' },
+            scoping: { enabled: true, resolution: 'auto', scoped: true },
+        };
+        await client.project('proj-other').meta.getTypes();
+        expect(String(fetchMock.mock.calls[0][0])).toBe(
+            'http://localhost:3000/api/v1/environments/proj-other/meta',
+        );
+    });
+
     it('prefixes the screen-flow automation.resume / getScreen calls', async () => {
         const { client, fetchMock } = createMockClient({ success: true, data: { success: true } });
         const scoped = client.project('proj-123');
