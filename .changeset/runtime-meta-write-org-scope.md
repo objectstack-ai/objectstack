@@ -1,5 +1,5 @@
 ---
-"@objectstack/runtime": minor
+"@objectstack/runtime": patch
 ---
 
 fix(runtime): a metadata write carries the session's organization only for types that declare `allowOrgOverride` (#7018)
