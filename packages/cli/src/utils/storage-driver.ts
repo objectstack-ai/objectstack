@@ -55,6 +55,12 @@ import type {
   DatasourceDriverHandle,
   IDatasourceDriverFactory,
 } from '@objectstack/service-datasource';
+import {
+  type BuiltinDriverId,
+  DATABASE_DRIVER_SELECTION_ALIASES,
+  driverHasLocalDefault,
+  resolveDatabaseDriverId,
+} from '@objectstack/spec/data';
 
 /** Engines the shared sqlite step-down (`resolveSqliteDriver`) can produce. */
 export type SqliteFamilyEngine = 'better-sqlite3' | 'sqlite-wasm' | 'memory';
@@ -62,16 +68,65 @@ export type SqliteFamilyEngine = 'better-sqlite3' | 'sqlite-wasm' | 'memory';
 /** The optional package that provides the libSQL/Turso driver. */
 export const TURSO_DRIVER_PACKAGE = '@objectstack/driver-turso';
 
-/** Driver kinds this resolver treats as libSQL/Turso. */
-const TURSO_DRIVER_KINDS = new Set(['turso', 'libsql']);
+/**
+ * Where each no-local-default kind's connection target actually comes from —
+ * the one clause that differs between their otherwise identical refusals.
+ *
+ * Covers exactly the kinds the shared table marks `hasLocalDefault: false`.
+ * That set is runtime data from `@objectstack/spec`, not a type, so the
+ * completeness of this table is pinned by a test rather than by the compiler
+ * (`driver-vocabulary-parity.test.ts`) — the point either way is that a driver
+ * cannot get another driver's example and send an operator to the wrong server.
+ */
+const MISSING_URL_EXAMPLES: Readonly<Partial<Record<BuiltinDriverId, string>>> = {
+  postgres: 'postgres://user:password@host:5432/dbname',
+  mysql: 'mysql://user:password@host:3306/dbname',
+  mongodb: 'mongodb://host:27017/dbname (or mongodb+srv://…)',
+  turso:
+    'libsql://my-db.turso.io with OS_DATABASE_AUTH_TOKEN / --database-auth-token, '
+    + 'or file:./data/objectstack.db for a local libSQL file',
+};
 
 /**
- * Thrown by {@link resolveStorageDefinition} when a driver kind is *recognized* but the
- * selection cannot be turned into a datasource definition at all — today only
- * `turso`/libSQL selected with **no URL** (`OS_DATABASE_DRIVER=turso` /
- * `--database-driver turso` on its own). Every other kind has a meaningful default
- * for a missing URL; libSQL has none — `TursoDriverConfig.url` is required and there
- * is no local file, host or database name to guess.
+ * The refusal for "you named a driver whose database lives somewhere I cannot
+ * guess, and then did not tell me where" (#6345 fork 2).
+ *
+ * Generalized from the wording `turso` has carried since #5602, because that
+ * wording was already right for every one of these kinds — the maintainer's
+ * ruling is that all four say it, on both hosts, instead of three of them
+ * inventing a different wrong default. It is a FIX instruction: it names the
+ * variable to set, shows the shape, and states what booting anyway would have
+ * cost, because the failure it replaces (connecting to some localhost the
+ * operator never named) is one that LOOKS like success.
+ */
+function missingUrlMessage(kind: BuiltinDriverId): string {
+  // The fallback is deliberately TRUE rather than borrowed from another arm: a
+  // driver added to the shared table with `hasLocalDefault: false` and no example
+  // here still gets a correct instruction. `driver-vocabulary-parity.test.ts` pins
+  // that every such id HAS an example, so the generic branch stays unused rather
+  // than quietly becoming the normal answer.
+  const example = MISSING_URL_EXAMPLES[kind] ?? 'the URL of the database this driver connects to';
+  return (
+    `The \`${kind}\` driver was selected (OS_DATABASE_DRIVER / --database-driver) but no database `
+    + `URL was given, and ${kind} has no local default to fall back on — its database lives on a `
+    + 'server or endpoint this process cannot guess. Set OS_DATABASE_URL (or --database) to it — '
+    + `e.g. ${example}. Booting on a guessed default instead would connect you `
+    + 'to a database you never named, and every write would land in the wrong place (#3276).'
+  );
+}
+
+/**
+ * Thrown by {@link resolveStorageDefinition} for a driver selection that cannot
+ * become a datasource definition. Two cases since #6345:
+ *
+ *  - a spelling no builtin claims (`--database-driver sqlite3`), which used to
+ *    fall through to the dev SQLite default while `os migrate` refused the same
+ *    value by name;
+ *  - a recognized kind with **no local default** selected with **no URL**
+ *    (`postgres` / `mysql` / `mongodb` / `turso`). Only `turso` refused before;
+ *    the other three guessed — `url: undefined` into `pg`, an invented
+ *    `mongodb://localhost:27017/objectstack` — and connected an operator to a
+ *    database they never named. The ruling generalizes the refusal instead.
  *
  * Not the "package missing" case: that is {@link MissingDriverPackageError}, which
  * says something completely different to the operator (install this, versus tell me
@@ -84,11 +139,38 @@ const TURSO_DRIVER_KINDS = new Set(['turso', 'libsql']);
  * silently became SQLite-in-memory).
  */
 export class UnsupportedDriverError extends Error {
+  /**
+   * The selection that was refused.
+   *
+   * Read {@link recognized} before treating this as a driver id: for the
+   * unknown-spelling case it is the operator's raw token (`sqlite3`), NOT a
+   * canonical kind.
+   */
   readonly driverType: string;
-  constructor(driverType: string, message: string) {
+  /**
+   * Was the refused selection a driver this CLI KNOWS (`turso` with no URL), or
+   * a spelling nothing claims (`--database-driver sqlite3`)?
+   *
+   * Both are fatal and both are this class — `serve.ts` re-throws on the type,
+   * and an operator needs the same "stop, do not fall back to SQLite" outcome
+   * either way. But they are not the same fact, and a consumer asking "which
+   * driver kinds exist" must not read an unrecognized token as one.
+   *
+   * That consumer is real: `commands/database-driver-allowlist.pin.test.ts`
+   * (#6860) derives the canonical kinds by using {@link resolveStorageDefinition}
+   * as its oracle and reading `driverType` out of this error. When #6345 taught
+   * the resolver to refuse unknown spellings too, that oracle started reporting
+   * every stray string literal in this file (`safe`, `on-disconnect`, `factory`)
+   * as a driver kind. This flag is what keeps the two answers apart.
+   */
+  readonly recognized: boolean;
+  constructor(driverType: string, message: string, opts: { recognized?: boolean } = {}) {
     super(message);
     this.name = 'UnsupportedDriverError';
     this.driverType = driverType;
+    // Defaults to `true` so the pre-#6345 call sites (turso with no URL) keep
+    // their meaning without restating it.
+    this.recognized = opts.recognized ?? true;
   }
 }
 
@@ -230,8 +312,51 @@ export function resolveStorageDefinition(
   // kinds. Never in production, never destructive.
   const autoMigrate = isDev ? ({ autoMigrate: 'safe' } as const) : {};
 
-  if (driverType === 'mongodb' || driverType === 'mongo') {
-    const url = databaseUrl ?? 'mongodb://localhost:27017/objectstack';
+  // ONE vocabulary since #6345 (`@objectstack/spec`'s driver table). The arms
+  // below therefore branch on the CANONICAL id and never on a spelling: the
+  // hand-written `driverType === 'pg' || driverType === 'postgresql'` chains
+  // were half of the fork this card closes — the standalone stack's enum had
+  // its own answer, and 10 of 21 spellings disagreed.
+  const kind = resolveDatabaseDriverId(driverType);
+
+  // An EXPLICIT selection nothing claims is refused, loudly (#6345 fork 1).
+  //
+  // `driverType` is `explicit || inferDriverTypeFromUrl(url)`, and the inferring
+  // half only ever yields a canonical id or `''` — so a non-empty value that
+  // resolves to nothing can only have come from an operator naming a driver.
+  // It used to fall through to the trailing dev default, i.e. `os dev
+  // --database-driver sqlite3` silently booted SQLite while `os migrate` refused
+  // the same value by name. #6344 killed that silent fallback on the standalone
+  // side; this is its mirror, and it is what makes the two hosts answer the same
+  // question the same way for EVERY input rather than only for the legal ones.
+  if (driverType && !kind) {
+    throw new UnsupportedDriverError(
+      driverType,
+      `Unsupported driver "${driverType}" (OS_DATABASE_DRIVER / --database-driver). `
+        + `Supported drivers: ${DATABASE_DRIVER_SELECTION_ALIASES.join(', ')}. `
+        + 'Booting on the SQLite default instead would silently ignore the driver you asked for '
+        + 'and write into a local database (#3276). Fix the value, or leave the driver unset to '
+        + 'let the database URL scheme select it.',
+      // NOT a driver kind — `driverType` here is the operator's raw token, and a
+      // caller enumerating kinds must not count it as one.
+      { recognized: false },
+    );
+  }
+
+  // Fork 2 (#6345): a kind with NO local default, selected with no URL. Every
+  // such selection used to be answered by a guess, differently on each side:
+  // postgres/mysql got `config.url === undefined` and the `pg`/`mysql2` client
+  // then connected to ITS own localhost; mongodb got an invented
+  // `mongodb://localhost:27017/objectstack`. Both connect an operator to a
+  // database they never named, which is the #3276 class. `turso` already had
+  // this refusal; the maintainer's ruling generalizes it rather than leaving
+  // one kind honest and three guessing.
+  if (kind && !(databaseUrl ?? '').trim() && !driverHasLocalDefault(kind)) {
+    throw new UnsupportedDriverError(kind, missingUrlMessage(kind));
+  }
+
+  if (kind === 'mongodb') {
+    const url = databaseUrl!;
     return {
       driverId: 'mongodb',
       config: { url },
@@ -241,7 +366,7 @@ export function resolveStorageDefinition(
     };
   }
 
-  if (driverType === 'sqlite' || driverType === 'sql') {
+  if (kind === 'sqlite') {
     const filePath = (databaseUrl ?? ':memory:')
       .replace(/^file:/, '')
       .replace(/^sqlite:/, '')
@@ -259,7 +384,7 @@ export function resolveStorageDefinition(
     };
   }
 
-  if (driverType === 'sqlite-wasm' || driverType === 'wasm-sqlite' || driverType === 'wasm') {
+  if (kind === 'sqlite-wasm') {
     const filePath = (databaseUrl ?? ':memory:')
       .replace(/^file:/, '')
       .replace(/^wasm-sqlite:\/\//, '')
@@ -275,7 +400,7 @@ export function resolveStorageDefinition(
     };
   }
 
-  if (driverType === 'postgres' || driverType === 'postgresql' || driverType === 'pg') {
+  if (kind === 'postgres') {
     return {
       driverId: 'postgres',
       config: { url: databaseUrl, ...autoMigrate },
@@ -285,7 +410,7 @@ export function resolveStorageDefinition(
     };
   }
 
-  if (driverType === 'mysql' || driverType === 'mysql2') {
+  if (kind === 'mysql') {
     return {
       driverId: 'mysql',
       config: { url: databaseUrl, ...autoMigrate },
@@ -307,19 +432,9 @@ export function resolveStorageDefinition(
   // `TursoDriverConfig` declares no such key, and handing it one would be a config
   // the driver silently ignores. No `sqliteFilePath` either — the telemetry sibling
   // is provisioned next to an on-disk SQLite primary, which a libSQL endpoint is not.
-  if (TURSO_DRIVER_KINDS.has(driverType)) {
-    const url = (databaseUrl ?? '').trim();
-    if (!url) {
-      throw new UnsupportedDriverError(
-        'turso',
-        'The `turso`/libSQL driver was selected (OS_DATABASE_DRIVER / --database-driver) '
-          + 'but no database URL was given, and libSQL has no default to fall back on. '
-          + 'Set OS_DATABASE_URL (or --database) to your libSQL endpoint — e.g. '
-          + 'libsql://my-db.turso.io with OS_DATABASE_AUTH_TOKEN / --database-auth-token, '
-          + 'or file:./data/objectstack.db for a local libSQL file. Booting on the SQLite '
-          + 'default instead would silently ignore the driver you asked for.',
-      );
-    }
+  if (kind === 'turso') {
+    // The no-URL refusal is the shared one above; by here a URL is present.
+    const url = databaseUrl!.trim();
     return {
       driverId: 'turso',
       config: { url, ...(authToken ? { authToken } : {}) },
@@ -332,7 +447,7 @@ export function resolveStorageDefinition(
   // #3276: explicit in-memory (mingo) driver. Honored in dev AND production — an
   // operator asking for `memory` gets the mingo InMemoryDriver (ephemeral, not
   // real SQL), never the SQLite `:memory:` default.
-  if (driverType === 'memory' || driverType === 'mingo' || driverType === 'in-memory') {
+  if (kind === 'memory') {
     return {
       driverId: 'memory',
       config: {},
@@ -361,9 +476,15 @@ export function resolveStorageDefinition(
   return null;
 }
 
-/** True for the driver ids {@link loadTursoDriverFactory}'s factory builds. */
+/**
+ * True for the driver ids {@link loadTursoDriverFactory}'s factory builds.
+ *
+ * Resolved through the shared table since #6345 rather than a local `Set`, so
+ * "which spellings mean libSQL" has one answer across the CLI, the standalone
+ * stack and the metadata gate.
+ */
 export function isTursoDriverId(driverId: string): boolean {
-  return TURSO_DRIVER_KINDS.has(driverId.trim().toLowerCase());
+  return resolveDatabaseDriverId(driverId) === 'turso';
 }
 
 /** The exact command an operator runs to install the optional libSQL driver. */

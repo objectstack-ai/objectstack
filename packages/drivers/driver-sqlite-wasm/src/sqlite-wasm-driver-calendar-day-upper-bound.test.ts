@@ -29,7 +29,7 @@ describe('SqliteWasmDriver — bare-day $lte covers the whole day (#3777)', () =
       await driver.create(
         'task',
         { id, title: id, created_at: new Date(at) },
-        { bypassTenantAudit: true } as any,
+        { bypassTenantAudit: true },
       );
     }
   });

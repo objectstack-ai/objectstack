@@ -49,7 +49,7 @@ describe('[#5495] TursoDriver autonumber re-seed', () => {
   it('LOCAL: serves the create on the first attempt after a seed replay lands above the counter', async () => {
     const knex = (driver as any).knex;
 
-    await driver.create('crm_case', { organization_id: 'orgA', title: 'first' }, { bypassTenantAudit: true } as any);
+    await driver.create('crm_case', { organization_id: 'orgA', title: 'first' }, { bypassTenantAudit: true });
 
     const rows = [];
     for (let n = 2; n <= 30; n++) {
@@ -60,7 +60,7 @@ describe('[#5495] TursoDriver autonumber re-seed', () => {
     const created = await driver.create(
       'crm_case',
       { organization_id: 'orgA', title: 'after the seeds' },
-      { bypassTenantAudit: true } as any,
+      { bypassTenantAudit: true },
     );
     expect(created.case_number).toBe('CASE-00031');
   });

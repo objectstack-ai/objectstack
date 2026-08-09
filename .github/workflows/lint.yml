@@ -345,6 +345,48 @@ jobs:
       - name: objectui pin-changeset digest guard
         run: pnpm check:objectui-changeset
 
+      # Changeset-family gate self-tests (#6509). The SELF-TEST halves only —
+      # the real scans stay in pr-automation.yml's `changeset-check`, and the
+      # split is the whole point of this step.
+      #
+      # Why they moved here. `check-empty-changeset.mjs` and
+      # `check-adr-0087-registration.mjs` were called from exactly one place in
+      # the repository: the `changeset-check` job, which a PR carrying
+      # `skip-changeset` is exempted from WHOLESALE (job-level `if:` plus the two
+      # per-step label reads). And "this PR edits a CI-internal script" is the
+      # textbook `skip-changeset` case — such a PR releases nothing, so by the
+      # workflow's own prescription it takes the label. The consequence is the
+      # exact inversion of #4690: a PR that edits these two checkers is the PR
+      # most likely to skip their own fixtures.
+      #
+      # Not hypothetical, and not this card's own reasoning either. PR #6876
+      # (#5620, merged) added FIVE consumer assertions to
+      # `check-empty-changeset.mjs` that never executed once on its own CI: it
+      # carried `skip-changeset`, so on run 31289894461 the step
+      # `Reject an empty-frontmatter changeset added by this PR` — the only thing
+      # that runs `--self-test` — reports `conclusion: skipped`. Every assertion
+      # in that PR was verified locally and by nothing else.
+      #
+      # This step is deliberately UNCONDITIONAL. No `if:`, no label read, no
+      # paths filter: an exemption is precisely what the two self-tests must not
+      # have, or the gap simply moves. That property is not left to prose —
+      # `check-empty-changeset.mjs`'s own consumer block asserts this step's
+      # shape (present, unguarded, self-test halves only), so removing or
+      # conditioning it reds the very check it was removing.
+      #
+      # Why the SELF-TEST halves only, and not `pnpm check:empty-changeset`:
+      # that script chains the real scan, whose verdict is a function of the
+      # PR's DIFF and therefore needs `$MERGE_BASE`. This job has no branch
+      # point, so a real scan here would fall back to reading stock — which is
+      # #6129, "judge the author for what main gained while their PR was open",
+      # in the direction of a false RED. The self-test halves have no such
+      # dependency: measured, both pass with REPO_ROOT pointing at a directory
+      # that is not a git repository at all. They build their own throwaway
+      # repos in $TMPDIR and read two files (this workflow and
+      # pr-automation.yml). ~0.8s + ~5.0s.
+      - name: Changeset-family gate self-tests
+        run: pnpm check:changeset-gate-self-tests
+
       # Release-notes drift guard: the platform is one version-locked train, so
       # every released @objectstack/spec major must have a curated, navigable
       # release page at content/docs/releases/v<major>.mdx. Catches the gap that

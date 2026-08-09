@@ -111,7 +111,7 @@ describe('TursoDriver — temporal conformance (local mode)', () => {
           on: r.on,
           why: r.why,
         },
-        { bypassTenantAudit: true } as any,
+        { bypassTenantAudit: true },
       );
     }
   });
@@ -153,7 +153,7 @@ describe('TursoDriver — Field.time conformance (local mode)', () => {
           at: r.writerForm === 'native' ? new Date(`1970-01-01T${r.at}Z`) : r.at,
           why: r.why,
         },
-        { bypassTenantAudit: true } as any,
+        { bypassTenantAudit: true },
       );
     }
   });
