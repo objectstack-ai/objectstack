@@ -308,3 +308,33 @@ describe('ActionDescriptorSchema.handlerContract', () => {
     expect(() => ActionDescriptorSchema.parse({ ...base, handlerContract: 'sandboxed' })).toThrow();
   });
 });
+
+// ---------------------------------------------------------------------------
+// ActionDescriptorSchema — retired `isAsync` (#6748, ADR-0049)
+// ---------------------------------------------------------------------------
+describe('ActionDescriptorSchema.isAsync retirement', () => {
+  const base = { type: 'demo', version: '1.0.0', name: 'Demo' };
+
+  it('REJECTS an authored isAsync, with the live mechanism in the message', () => {
+    // Tombstoned, not deleted: ActionDescriptorSchema is not `.strict()`, so a
+    // plain deletion would let the five shipped descriptors (and every plugin
+    // one) keep writing the key, parse clean, and lose it in silence — the
+    // ADR-0104 silent-strip shape. `retiredKey()` makes it audible.
+    expect(() => ActionDescriptorSchema.parse({ ...base, isAsync: true }))
+      .toThrow(/ActionDescriptor\.isAsync.*removed.*supportsPause: true/s);
+  });
+
+  it('rejects `isAsync: false` too — absence is the only accepted spelling', () => {
+    // The realistic upgrade shape: a descriptor that spelled out the schema
+    // default. It must not slip through as "well, that was the default anyway".
+    expect(() => ActionDescriptorSchema.parse({ ...base, isAsync: false }))
+      .toThrow(/ActionDescriptor\.isAsync.*removed/s);
+  });
+
+  it('parses cleanly once the key is gone, and publishes no isAsync of its own', () => {
+    const desc = defineActionDescriptor({ ...base, supportsPause: true, resumeAuthority: 'any' });
+    expect(desc).not.toHaveProperty('isAsync');
+    // The capability the key gestured at survives under its ONE enforced name.
+    expect(desc.supportsPause).toBe(true);
+  });
+});

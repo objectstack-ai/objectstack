@@ -12,9 +12,16 @@ import type {
   IStorageService,
   StorageUploadOptions,
   StorageFileInfo,
+  StorageListOptions,
+  StorageListPage,
   PresignedUploadDescriptor,
   PresignedDownloadDescriptor,
   PresignedDownloadOptions,
+} from '@objectstack/spec/contracts';
+import {
+  decodeStorageListCursor,
+  encodeStorageListCursor,
+  resolveStorageListLimit,
 } from '@objectstack/spec/contracts';
 
 /**
@@ -44,6 +51,35 @@ export interface LocalStorageAdapterOptions {
   signingSecret?: string;
   /** Optional MetricsRegistry for instrumentation. Defaults to NoopMetricsRegistry. */
   metrics?: MetricsRegistry;
+}
+
+/**
+ * Directory under `rootDir` holding in-flight multipart chunks. Skipped by
+ * `list()` — chunks are not stored objects, and S3 does not surface multipart
+ * parts through `ListObjectsV2` either.
+ */
+const PARTS_DIR_NAME = '.parts';
+
+/**
+ * Insert `value` into the ascending array `out`, keeping it sorted and no
+ * longer than `max`.
+ *
+ * Bounds `list()`'s memory to the page size instead of the size of the tree,
+ * while still producing a globally ordered result from a traversal that does
+ * not visit keys in order.
+ */
+function insertBounded(out: string[], value: string, max: number): void {
+  if (out.length >= max && value >= out[out.length - 1]!) return;
+
+  let low = 0;
+  let high = out.length;
+  while (low < high) {
+    const mid = (low + high) >> 1;
+    if (out[mid]! < value) low = mid + 1;
+    else high = mid;
+  }
+  out.splice(low, 0, value);
+  if (out.length > max) out.length = max;
 }
 
 interface PresignTokenPayload {
@@ -76,7 +112,7 @@ export class LocalStorageAdapter implements IStorageService {
 
   constructor(options: LocalStorageAdapterOptions) {
     this.rootDir = options.rootDir;
-    this.partsDir = join(this.rootDir, '.parts');
+    this.partsDir = join(this.rootDir, PARTS_DIR_NAME);
     this.baseUrl = options.baseUrl ?? '';
     this.basePath = options.basePath ?? '/api/v1/storage';
     this.signingSecret = options.signingSecret ?? randomUUID();
@@ -87,7 +123,7 @@ export class LocalStorageAdapter implements IStorageService {
    * Wrap a storage operation with metrics instrumentation. Never swallows
    * the underlying error; instrumentation failures are silently ignored.
    */
-  private async track<T>(op: 'put' | 'get' | 'delete' | 'head', fn: () => Promise<T>): Promise<T> {
+  private async track<T>(op: 'put' | 'get' | 'delete' | 'head' | 'list', fn: () => Promise<T>): Promise<T> {
     const started = Date.now();
     const baseLabels = { adapter: 'local', op } as const;
     try {
@@ -189,17 +225,132 @@ export class LocalStorageAdapter implements IStorageService {
     });
   }
 
-  // `list(prefix)` is gone (#5541), following its removal from IStorageService
-  // (#5540, ADR-0049 enforce-or-remove; analysis #5266). This implementation was
-  // a single-level `readdir` that reported subdirectories as files, so it and the
-  // S3 adapter's recursive-but-truncated one answered the same call differently
-  // and neither said so. Nothing in the repo called either. Enumerate the records
-  // you wrote (`sys_file` / file references, paginated through ObjectQL) instead
-  // of the bucket; if a first-party caller ever needs real bucket enumeration it
-  // returns cursor-shaped — `list(prefix, { cursor, limit })` — with
-  // adapter-conformance cases proving both backends agree before it ships.
-  // Absence is pinned in `storage-adapter-list-retirement.test.ts`: an excess
-  // method on a class is not a type error, so tsc cannot hold this line.
+  // ---------------------------------------------------------------------------
+  // Prefix enumeration (#6781)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Cursor-shaped prefix enumeration — see `IStorageService.list` for the
+   * contract every adapter shares.
+   *
+   * This backend EMULATES the S3 key-space semantics rather than the reverse,
+   * which is the whole reason the restored member is safe where the retired one
+   * was not (#5266 / #5540). Three consequences worth stating in code:
+   *
+   * - `prefix` is a **raw string prefix over keys**, not a directory path. The
+   *   walk therefore filters on `key.startsWith(prefix)` and never resolves
+   *   `prefix` as a path — `list('a')` sees `ab.txt`, exactly as S3 does. The
+   *   retired implementation did `readdir(rootDir/prefix)`, which is where the
+   *   one-level-deep dialect came from.
+   * - Only `isFile()` entries are emitted. Directories are recursed into and
+   *   never stat'd into results (the retired implementation returned them as
+   *   `StorageFileInfo` values whose `size` was a directory inode).
+   * - The adapter's own `.parts/` multipart staging area is skipped: those bytes
+   *   are in-flight chunks, not stored objects, and S3 does not expose its
+   *   multipart parts through `ListObjectsV2` either.
+   *
+   * Memory is bounded by `limit`, not by the size of the tree: the walk keeps at
+   * most `limit + 1` keys (the extra one answers "is there a next page?") and
+   * only stats the ones that survive.
+   *
+   * Shape and behaviour are pinned in `storage-adapter-list-contract.test.ts`
+   * and `storage-adapter-list.conformance.test.ts` — the latter runs every case
+   * against the S3 adapter too, because tsc cannot notice two backends drifting
+   * apart (an optional member may simply be absent, and an extra method on a
+   * class is never an error).
+   */
+  async list(prefix: string, options?: StorageListOptions): Promise<StorageListPage> {
+    // Argument refusals come from the contract's shared helpers so this adapter
+    // and the S3 one cannot answer a bad `limit`/`cursor` two different ways.
+    // Deliberately OUTSIDE `track()`: a refused call never reached the disk, so
+    // counting it as a failed storage operation would misreport the backend.
+    const limit = resolveStorageListLimit(options?.limit);
+    const after = options?.cursor === undefined ? undefined : decodeStorageListCursor(options.cursor);
+
+    return this.track('list', async () => {
+      const keys: string[] = [];
+      await this.collectListKeys('', prefix, after, limit + 1, keys);
+
+      const hasMore = keys.length > limit;
+      const page = hasMore ? keys.slice(0, limit) : keys;
+
+      const items: StorageFileInfo[] = [];
+      for (const key of page) {
+        try {
+          // Inline stat to avoid double-counting `head` operations.
+          const stat = await fs.stat(this.resolvePath(key));
+          items.push({ key, size: stat.size, lastModified: stat.mtime });
+        } catch {
+          // Deleted between the walk and the stat. Dropping it shortens the
+          // page but must NOT suppress `nextCursor` — which is why the cursor
+          // below is taken from `page` (the keys) rather than from `items`.
+        }
+      }
+
+      return hasMore
+        ? { items, nextCursor: encodeStorageListCursor(page[page.length - 1]!) }
+        : { items };
+    });
+  }
+
+  /**
+   * Depth-first walk collecting at most `want` matching keys in ascending key
+   * order.
+   *
+   * ⚠️ Directory-entry order is NOT global key order — `readdir` of `a` sorted
+   * gives `a` before `a.txt`, yet `a.txt` sorts BEFORE `a/x` (`.` is 0x2E, `/`
+   * is 0x2F). So results are merged through a bounded sorted insert rather than
+   * appended; a plain "take the first N encountered" would page out of order and
+   * a cursor built from it would skip keys.
+   */
+  private async collectListKeys(
+    dir: string,
+    prefix: string,
+    after: string | undefined,
+    want: number,
+    out: string[],
+  ): Promise<void> {
+    const absolute = dir ? join(this.rootDir, dir) : this.rootDir;
+
+    let entries;
+    try {
+      entries = await fs.readdir(absolute, { withFileTypes: true });
+    } catch (err: any) {
+      // A missing root (nothing uploaded yet) enumerates empty, like an empty
+      // bucket. Anything else is a real I/O fault and must surface.
+      if (err?.code === 'ENOENT' || err?.code === 'ENOTDIR') return;
+      throw err;
+    }
+
+    entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+
+    for (const entry of entries) {
+      const key = dir ? `${dir}/${entry.name}` : entry.name;
+
+      if (entry.isDirectory()) {
+        // Multipart staging is adapter-internal, never a stored object.
+        if (dir === '' && entry.name === PARTS_DIR_NAME) continue;
+
+        const branch = `${key}/`;
+        // Prune by prefix: every key under `branch` starts with `branch`, so the
+        // subtree can hold a match only if one string prefixes the other.
+        if (!branch.startsWith(prefix) && !prefix.startsWith(branch)) continue;
+        // Prune by cursor: if `branch` sorts before `after` and `after` is not
+        // inside it, then every key under it also sorts before `after`.
+        if (after !== undefined && !after.startsWith(branch) && branch <= after) continue;
+
+        await this.collectListKeys(key, prefix, after, want, out);
+        continue;
+      }
+
+      // Symlinks, sockets and FIFOs are not stored objects either.
+      if (!entry.isFile()) continue;
+      if (!key.startsWith(prefix)) continue;
+      if (after !== undefined && key <= after) continue;
+
+      insertBounded(out, key, want);
+    }
+  }
 
   // ---------------------------------------------------------------------------
   // Presigned URL helpers

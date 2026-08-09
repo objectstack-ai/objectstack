@@ -318,7 +318,19 @@ function buildSandboxContext(engineCtx: any, ql: any): ScriptContext {
     // Preserve `undefined` for `previous` on insert events so hooks can
     // reliably distinguish create (`!ctx.previous`) from update/delete.
     previous: unwrapProxyToPlain(previousRaw),
-    user: engineCtx?.user ?? engineCtx?.session?.user,
+    // `engineCtx.user` is the ONLY source, and the `?? engineCtx?.session?.user`
+    // limb that used to follow it was removed in #6316 (same family as #5906
+    // above, and as #4984): `HookContext['session']` declares no `user` key
+    // (`packages/spec/src/data/hook.zod.ts`) and its sole producer —
+    // ObjectQL's `buildSession()` (`packages/objectql/src/engine.ts`), which
+    // every HookContext assembly site in the engine calls — builds the session
+    // field by field and writes none. The limb resolved `undefined` on every
+    // real path, so deleting it changes no behaviour; what it changed was the
+    // reading, which advertised a second data source that has never existed.
+    // Keep it deleted: a `session.user` that some future engine "might" set is
+    // a contract to DECLARE on `HookContextSchema.session`, not to anticipate
+    // with consumer-side tolerance here (PD #12).
+    user: engineCtx?.user,
     session: engineCtx?.session,
     event: typeof engineCtx?.event === 'string' ? engineCtx.event : undefined,
     object: typeof engineCtx?.object === 'string' ? engineCtx.object : undefined,
@@ -343,7 +355,17 @@ function buildActionSandboxContext(actionCtx: any, ql: any): ScriptContext {
   return {
     input: unwrapProxyToPlain(actionCtx?.params ?? {}),
     previous: undefined,
-    user: actionCtx?.user ?? actionCtx?.session?.user,
+    // Same removal as the hook face above (#6316), measured on this face's own
+    // shapes: `ActionSession` (`packages/spec/src/ui/action-params.zod.ts`)
+    // declares `userId` / `organizationId` / `positions` / `roles` and no
+    // `user`, and its sole producer `buildActionSession()`
+    // (`../action-execution.ts`) writes exactly those four — for both action ctx
+    // assembly sites (`action-execution.ts` MCP `run_action`, `domains/actions.ts`
+    // REST `/actions`). The third `executeAction` caller, ObjectQL's
+    // `ScopedRepo.execute()`, passes neither `user` nor `session`, so `ctx.user`
+    // stays `undefined` there — unchanged by this removal, and the correct
+    // semantics: that path carries no caller identity.
+    user: actionCtx?.user,
     session: actionCtx?.session,
     object: typeof actionCtx?.object === 'string' ? actionCtx.object : undefined,
     recordId,

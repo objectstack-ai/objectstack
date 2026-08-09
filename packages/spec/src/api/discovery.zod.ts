@@ -210,6 +210,31 @@ export const ApiRoutesSchema = lazySchema(() => z.object({
     + 'absent when no host mounts it'
   ),
 
+  /**
+   * Base URL for the transactional-email surface — the base under which
+   * `POST {email}/send` is mounted.
+   *
+   * Declared by #6714 (replicating the #6633 / `datasources` precedent): the
+   * SDK's `email.send` hard-coded `/api/v1/email/send`, while the REST
+   * server's `registerEmailEndpoints` mounts under `getApiBasePath()` and
+   * therefore already follows `apiPath` — so on any `apiPath` deployment the
+   * stock client's email.send was a live 404, not a latent gap. With the key
+   * declared, the host that mounts the surface advertises WHERE, and the SDK
+   * follows — falling back to the `/api/v1/email` convention when
+   * unadvertised.
+   *
+   * `optional`, not `nullable` — same reasoning as `datasources`: the key is
+   * ABSENT when no email surface is mounted. The runtime dispatcher serves no
+   * `/email` domain, so it must never advertise one (ADR-0076 D12), and the
+   * `getDiscovery()` builder in `metadata-protocol` emits nothing here either
+   * — the mount belongs to the REST host, which that builder cannot see. The
+   * one producer that CAN answer truthfully is the REST discovery endpoint,
+   * which projects the value from its recorded route registrations.
+   */
+  email: z.string().optional().describe(
+    'e.g. /api/v1/email — base for the email/send endpoint; absent when no host mounts it'
+  ),
+
   // `workflow` was removed here (#4451, v17): no host ever mounted a workflow
   // surface and nothing ever registered the slot (ADR-0115 Evidence 5), so no
   // builder could truthfully populate the field. State machines are enforced

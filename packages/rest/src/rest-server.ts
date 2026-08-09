@@ -35,6 +35,10 @@ import type { DirectMountedRoute, MountedRouteSource } from './direct-mount.js';
 import { RestServerConfig, RestApiConfig, CrudEndpointsConfig, MetadataEndpointsConfig, BatchEndpointsConfig, RouteGenerationConfig } from '@objectstack/spec/api';
 import { DataProtocol, MetadataProtocol } from '@objectstack/spec/api';
 import type { FieldErrorCode } from '@objectstack/spec/api';
+// The async-import row ceiling has exactly one definition, in the spec, whose
+// TSDoc is its public statement (#6535). rest is the only enforcer, so it reads
+// that export rather than re-declaring the literal beside a "mirrors spec" comment.
+import { IMPORT_JOB_MAX_ROWS } from '@objectstack/spec/api';
 import { PUBLIC_FORM_SERVER_MANAGED_FIELDS } from '@objectstack/spec/security';
 import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
 import { stripReadDecorations } from '@objectstack/spec/kernel';
@@ -1398,8 +1402,6 @@ export function apiAccessDenialFromEnable(
 
 /** Platform object backing async import jobs (see sys-import-job.object.ts). */
 const IMPORT_JOB_OBJECT = 'sys_import_job';
-/** Hard ceiling on rows per async import job (mirrors spec IMPORT_JOB_MAX_ROWS). */
-const IMPORT_JOB_MAX_ROWS = 50_000;
 /** Cap on per-row results persisted on the job (failures first). */
 const IMPORT_JOB_RESULTS_CAP = 500;
 /** Undo (logical rollback) is only recorded for jobs at or under this row
@@ -3478,6 +3480,22 @@ export class RestServer {
                         else delete discovery.routes.packages;
                         if (direct.datasources) discovery.routes.datasources = direct.datasources;
                         else delete discovery.routes.datasources;
+
+                        // [#6714] Email surface — same mounted ⇒ advertised
+                        // discipline, over the RouteManager recording:
+                        // `registerEmailEndpoints` registers
+                        // `POST {base}/email/send` at THIS server's base (it
+                        // follows `apiPath`), and the advertisement is a
+                        // projection of that recorded row — never recomputed —
+                        // so the SDK's `getRoute('email')` follows the real
+                        // mount instead of the `/api/v1` convention the client
+                        // used to hard-code (a live 404 on any `apiPath`
+                        // deployment). Not mounted ⇒ not advertised.
+                        const emailBase = this.getMountedEmailRouteBase(
+                            isScoped ? (req.params?.environmentId ?? ':environmentId') : undefined,
+                        );
+                        if (emailBase) discovery.routes.email = emailBase;
+                        else delete discovery.routes.email;
                     }
 
                     // Cross-object atomic batch capability (#3298). `declared ===
@@ -9352,6 +9370,51 @@ export class RestServer {
             ? (packagesScoped?.replace(':environmentId', scopedEnvironmentId) ?? packagesUnscoped)
             : packagesUnscoped;
         return { packages, datasources };
+    }
+
+    /**
+     * [#6714] The advertised base for the email surface, projected from the
+     * RECORDED route registrations — never recomputed from config.
+     *
+     * Same mounted ⇒ advertised discipline as {@link getDirectMountRouteBases}
+     * (ADR-0076 D12), over the other recording: `registerEmailEndpoints`
+     * registers `POST {base}/email/send` through the RouteManager, so the
+     * RouteManager's table — the very rows the registrar wrote to mount — is
+     * the mount fact this method projects. A future change that moves the
+     * email mount moves the advertisement with it, and a change that touches
+     * only one side goes red on the parity pin
+     * (`discovery-advertised-direct-mounts.parity.test.ts`).
+     *
+     * @param scopedEnvironmentId when the discovery response being built is
+     *   served from the environment-scoped mount, the resolved environment id
+     *   (or the `:environmentId` placeholder when unresolved); `undefined` for
+     *   the unscoped mount.
+     * @returns the advertised `routes.email` base (`{mountBase}/email` — the
+     *   consumer appends `/send`), or `undefined` when no email route is
+     *   recorded for this boot.
+     */
+    getMountedEmailRouteBase(scopedEnvironmentId?: string): string | undefined {
+        const SCOPED_SEGMENT = '/environments/:environmentId';
+        const SEND_SUFFIX = '/email/send';
+        let unscoped: string | undefined;
+        let scoped: string | undefined;
+        for (const { method, path } of this.routeManager.getAll()) {
+            // The email registrar's send route (`POST {base}/email/send`) IS
+            // the surface: the advertised base is the recorded path minus the
+            // `/send` leaf — recognised, never rebuilt.
+            if (method !== 'POST' || !path.endsWith(SEND_SUFFIX)) continue;
+            const base = path.slice(0, -'/send'.length);
+            if (path.includes(SCOPED_SEGMENT)) scoped = base;
+            else unscoped = base;
+        }
+        // Same scoped/unscoped selection as the packages projection above: a
+        // scoped discovery response advertises the scoped mount when one is
+        // recorded (environment id substituted), the unscoped mount answers
+        // everywhere else, and an unscoped caller is never handed a
+        // `:environmentId` pattern nothing can consume.
+        return scopedEnvironmentId !== undefined
+            ? (scoped?.replace(':environmentId', scopedEnvironmentId) ?? unscoped)
+            : unscoped;
     }
 
     /**
