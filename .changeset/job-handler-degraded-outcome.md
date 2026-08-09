@@ -1,5 +1,6 @@
 ---
 "@objectstack/spec": minor
+"@objectstack/service-job": minor
 ---
 
 feat(spec): give `JobHandler` an optional "ran, but the work did not happen" report (#6617)
@@ -41,6 +42,15 @@ rejected precisely because it would change failure semantics that third-party
   current behaviour. (A `ctx.reportOutcome` callback would have forced every
   third-party implementation to construct a new context member — which is why
   the return-value shape was chosen.)
+
+**One consumer needed widening too, and it is additive as well.**
+`runWithPolicy` in `@objectstack/service-job` typed its run as
+`() => Promise< void >`, which rejects a handler that may resolve an outcome —
+TypeScript's return-type `void` special case does not reach through
+`Promise< void >`. It is now generic with `T = void`, so every existing call
+still infers `T = void` and behaviour is unchanged; what changed is that the
+retry wrapper no longer *erases* what the run resolved to. Retry semantics are
+untouched: only a rejected promise retries.
 
 Consuming the report — mapping `degraded` onto a `sys_job_run.status` distinct
 from `success` — is the services half, tracked in #5548, and is deliberately not
