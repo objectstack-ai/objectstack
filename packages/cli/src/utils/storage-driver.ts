@@ -139,11 +139,38 @@ function missingUrlMessage(kind: BuiltinDriverId): string {
  * silently became SQLite-in-memory).
  */
 export class UnsupportedDriverError extends Error {
+  /**
+   * The selection that was refused.
+   *
+   * Read {@link recognized} before treating this as a driver id: for the
+   * unknown-spelling case it is the operator's raw token (`sqlite3`), NOT a
+   * canonical kind.
+   */
   readonly driverType: string;
-  constructor(driverType: string, message: string) {
+  /**
+   * Was the refused selection a driver this CLI KNOWS (`turso` with no URL), or
+   * a spelling nothing claims (`--database-driver sqlite3`)?
+   *
+   * Both are fatal and both are this class — `serve.ts` re-throws on the type,
+   * and an operator needs the same "stop, do not fall back to SQLite" outcome
+   * either way. But they are not the same fact, and a consumer asking "which
+   * driver kinds exist" must not read an unrecognized token as one.
+   *
+   * That consumer is real: `commands/database-driver-allowlist.pin.test.ts`
+   * (#6860) derives the canonical kinds by using {@link resolveStorageDefinition}
+   * as its oracle and reading `driverType` out of this error. When #6345 taught
+   * the resolver to refuse unknown spellings too, that oracle started reporting
+   * every stray string literal in this file (`safe`, `on-disconnect`, `factory`)
+   * as a driver kind. This flag is what keeps the two answers apart.
+   */
+  readonly recognized: boolean;
+  constructor(driverType: string, message: string, opts: { recognized?: boolean } = {}) {
     super(message);
     this.name = 'UnsupportedDriverError';
     this.driverType = driverType;
+    // Defaults to `true` so the pre-#6345 call sites (turso with no URL) keep
+    // their meaning without restating it.
+    this.recognized = opts.recognized ?? true;
   }
 }
 
@@ -310,6 +337,9 @@ export function resolveStorageDefinition(
         + 'Booting on the SQLite default instead would silently ignore the driver you asked for '
         + 'and write into a local database (#3276). Fix the value, or leave the driver unset to '
         + 'let the database URL scheme select it.',
+      // NOT a driver kind — `driverType` here is the operator's raw token, and a
+      // caller enumerating kinds must not count it as one.
+      { recognized: false },
     );
   }
 
