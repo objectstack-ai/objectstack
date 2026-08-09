@@ -1147,6 +1147,36 @@ describe('unknown keys are rejected, not stripped (#4001 PR B)', () => {
       expect(result.success).toBe(false);
       expect(result.error!.issues.map((i) => i.message).join('\n')).toContain('FormView.sharing');
     });
+
+    // #4829 — the ADR-0045 publish gate's acceptance face, both directions.
+    //
+    // `_unpublished` is machine-managed but DECLARED, because the write path
+    // validates against this very schema (`saveMetaItem` → 422;
+    // `Registry.validate('app', …)` → `AppSchema.parse`): an undeclared key
+    // would make the platform's own visibility flip unwritable. What keeps it
+    // out of an author's hands is the `_` prefix plus the prescriptions below —
+    // so both halves are pinned, or "machine-managed" is only a comment.
+    it('accepts the machine-managed `_unpublished` gate — the flip has to be writable', () => {
+      expect(AppSchema.safeParse({ name: 'app_a', label: 'A', _unpublished: true }).success).toBe(true);
+      expect(AppSchema.safeParse({ name: 'app_a', label: 'A', _unpublished: false }).success).toBe(true);
+    });
+
+    it('answers the author-shaped publish spellings with "not authorable", never a rename', () => {
+      // A bare edit-distance suggestion here would read "did you mean
+      // `_unpublished`?" — teaching the one thing the key exists to prevent.
+      for (const key of ['unpublished', 'published', 'draft']) {
+        const message = unknownKeyIssue(AppSchema, { name: 'app_a', label: 'A', [key]: true })!.message;
+        expect(message).toContain('Publish state is not authorable');
+        expect(message).toContain('publish-drafts');
+        expect(message).not.toMatch(new RegExp(`\`${key}\`\\s*→`));
+      }
+    });
+
+    it('still accepts `hidden` — it keeps its (navigation-only) authoring contract', () => {
+      // The Account app's shape. Retiring `hidden` was NOT the fix: the key was
+      // never wrong, the second contract layered onto it was.
+      expect(AppSchema.safeParse({ name: 'account', label: 'Account', hidden: true }).success).toBe(true);
+    });
   });
 
   describe('navigation items (discriminated union)', () => {

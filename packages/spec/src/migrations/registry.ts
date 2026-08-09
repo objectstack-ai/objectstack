@@ -1223,6 +1223,7 @@ const step17: MigrationStep = {
     'dataset-measure-array-string-agg-removed',
     'inline-action-api-params-to-body-extra',
     'page-tabs-type-to-tab-style',
+    'app-hidden-to-unpublished',
   ],
   semantic: [
     {

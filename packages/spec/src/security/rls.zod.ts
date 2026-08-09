@@ -76,7 +76,7 @@ import { strictObject } from '../shared/strict-object';
  * - Manual Sharing: Individual record sharing
  * 
  * ObjectStack RLS:
- * - A small, fixed expression grammar (equality, set-membership, always-true)
+ * - A constrained CEL predicate grammar: comparisons and set-membership against literals or `current_user.*` values, composable with `&&` / `||`; anything that does not lower to a filter fails closed
  * - Subquery-shaped needs are pre-resolved by the runtime (§7.3.1)
  * - Multiple policies OR-combine for union (any-match-allows) semantics
  * 
@@ -309,6 +309,12 @@ export const RowLevelSecurityPolicySchema = lazySchema(() => strictObject(
    *
    * **Supported expression grammar (reference compiler)**
    *
+   * ⚠️ **STALE — the enumeration below UNDER-states what compiles (#6919).**
+   * The `.describe()` on this property carries the current truth: `!=`, the
+   * ordering comparisons, `in` over an inline literal list, `&&`, `||` and a
+   * bare `true` all lower today. Rewriting this block is tracked in #6919; do
+   * not read the four-item list as the accepted set.
+   *
    * The reference RLS compiler implements a deliberately **small, fixed
    * grammar** rather than a general SQL parser. Exactly four forms compile;
    * anything else fails closed (the policy matches zero rows). Keep `using`
@@ -355,7 +361,7 @@ export const RowLevelSecurityPolicySchema = lazySchema(() => strictObject(
    */
   using: z.string()
     .optional()
-    .describe('Filter condition for SELECT/UPDATE/DELETE. One of the four compiler-supported forms: `field = current_user.<prop>`, `field = \'literal\'`, `field IN (current_user.<array>)`, or `1 = 1`. Optional for INSERT-only policies.'),
+    .describe('Filter condition for SELECT/UPDATE/DELETE, authored in canonical CEL (ADR-0058 D1). It enforces when the predicate lowers to an ObjectQL filter: a field compared against a literal or a `current_user.*` context value using `==`, `!=`, `<`, `<=`, `>` or `>=`; `in` against a `current_user.*` array or an inline literal list (e.g. status in [\'draft\', \'pending\']); these combined with `&&` / `||`; or the bare allow-all `true`. Anything that does not lower fails closed — the policy matches zero rows. The legacy SQL-ish spellings are still accepted through a transitional bridge that rewrites `=` to `==` and `IN` to `in` (deprecated under ADR-0058 D1); SQL `AND` / `OR` / `NOT IN` / `IS NULL` / `LIKE` are NOT bridged and fail closed. Optional for INSERT-only policies.'),
 
   /**
    * CHECK clause - Validation for INSERT/UPDATE operations.
