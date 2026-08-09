@@ -34,7 +34,8 @@
  * "fix" that simply stopped threading the org anywhere would pass every red
  * case and fail there, silently retiring ADR-0005 per-org overlays.
  *
- * Predicted 4 red / 4 green; measured 4 red / 4 green, against the real stack:
+ * Predicted 4 red / 4 green; measured 4 red / 4 green, against the real stack
+ * (re-measured 2026-08-09 on the merged #7043 base — same 4/4, same shapes):
  *
  *   with the fix          without it (origin/main)
  *   ------------------    ---------------------------------------------------
@@ -130,6 +131,10 @@ function makeEngine() {
             getArtifactItem: () => undefined,
             getObject: () => undefined,
             getPackage: () => undefined,
+            // `getMetaItems` filters every listed item through the disabled-
+            // package gate and, for apps, merges nav contributions (ADR-0029
+            // D7) — the same stubs every metadata-protocol harness carries.
+            // No package is disabled and nothing contributes nav here.
             isPackageDisabled: () => false,
             applyNavContributions: (app: unknown) => app,
             registerItem: (type: string, name: string, item: unknown) => {
@@ -211,16 +216,17 @@ function makeDispatcher(protocol: unknown, engine: any, activeOrganizationId: st
 }
 
 /**
- * An authenticated, metadata-authoring request context.
+ * An authenticated request context — the anonymous-deny gate (#3963) is
+ * unconditional, and since #7019 the dispatcher's `/meta` PUT also requires
+ * the `manage_metadata` capability (ADR-0066 D1). These tests are about which
+ * PARTITION an authorized write lands in, so the caller is authorized: without
+ * the capability every PUT 403s before the scoping decision is ever reached,
+ * and each case would pass for the wrong reason.
  *
- * Two gates run before any of the code under test here, and BOTH are granted
- * explicitly so this file is order- and shard-independent — it must never
- * depend on a capability another suite happens to have registered:
- *
- *  - the anonymous-deny gate (#3963), unconditional ⇒ a real `userId`;
- *  - the ADR-0066 D1 authoring capability on `PUT /meta/:type/:name`
- *    (#6603 / PR #7027) ⇒ `manage_metadata`, or the door answers 403 and
- *    never reaches the scoping decision this file is about.
+ * Both gates are satisfied HERE, explicitly, rather than inherited from
+ * whatever another suite happens to have registered — that is what makes this
+ * file order- and shard-independent, which is how the 403 reached CI at all:
+ * the branch was cut before #7027 merged, so the gate did not exist locally.
  */
 const ctx = (): any => ({
     request: { headers: {} },
