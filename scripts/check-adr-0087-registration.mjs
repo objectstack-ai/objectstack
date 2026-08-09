@@ -187,10 +187,18 @@ const isChangesetFile = (p) => p.startsWith('.changeset/') && p.endsWith('.md') 
 /**
  * Split a changeset into its frontmatter bump entries and its body.
  *
- * The entry regex is deliberately the SAME shape `check-changeset-no-major.mjs`
- * and `check-empty-changeset.mjs` use. Three gates reading one block must agree on
- * what counts as a declaration, or one of them is judging a different file than it
- * appears to.
+ * The entry regex is deliberately the SAME shape `check-changeset-no-major.mjs`,
+ * `check-empty-changeset.mjs` and `objectui-changeset-digest.mjs` use. Four
+ * readers of one block must agree on what counts as a declaration, or one of them
+ * is judging a different file than it appears to. `check-empty-changeset.mjs`'s
+ * self-test asserts that agreement byte-for-byte across all four (#7004).
+ *
+ * This parser's stake in #7004 is signal (1) of `breakingDeclaration` below: a
+ * `major` carrying a trailing YAML comment (or a quoted bump value) used to read
+ * as no bump at all, so the frontmatter signal went missing and only signals (2)
+ * `**BREAKING` and (3) the `!` summary could still carry the declaration. A
+ * changeset using (1) alone — which the ADR-0087 worklist treats as a full
+ * declaration — was invisible to this gate.
  *
  * @param {string} text
  * @returns {{ fenced: boolean, bumps: {pkg: string, bump: string}[], body: string }}
@@ -205,7 +213,10 @@ export function parseChangeset(text) {
   let end = -1;
   for (let j = i + 1; j < lines.length; j++) {
     if (lines[j].trim() === '---') { end = j; break; }
-    const m = /^\s*["']?([^"':]+)["']?\s*:\s*([A-Za-z]+)\s*$/.exec(lines[j]);
+    if (/^\s*#/.test(lines[j])) continue; // a whole-line YAML comment declares nothing
+    // "<name>": <bump>   |   '<name>': <bump>   |   <name>: <bump>
+    // with an optionally quoted bump value and an optional trailing ` # comment`.
+    const m = /^\s*["']?([^"':]+)["']?\s*:\s*["']?([A-Za-z]+)["']?(?:\s+#.*)?\s*$/.exec(lines[j]);
     if (m) bumps.push({ pkg: m[1].trim(), bump: m[2].trim().toLowerCase() });
   }
   if (end < 0) return { fenced: false, bumps: [], body: text };
@@ -2030,6 +2041,45 @@ function selfTest() {
 
   assert(breakingDeclaration(parseChangeset(CS({ body: 'feat(spec)!: x\n' }))).breaking, 'P6: a conventional-commit bang is a declaration');
   assert(!breakingDeclaration(parseChangeset(CS({ bumps: [['a', 'patch']], body: 'plain\n' }))).breaking, 'P7: a plain patch is not');
+
+  // ---- P9-P14 (#7004): the shapes the old entry anchor hid from signal (1) ---
+  //
+  // This gate's stake in #7004 is the PARTIAL miss: `breakingDeclaration` reads
+  // three signals, and a `major` wearing a trailing YAML comment (or a quoted
+  // bump value) used to vanish from signal (1) — leaving (2) `**BREAKING` and
+  // (3) the `!` summary to carry a declaration they may not carry at all. So
+  // each fixture below states the bump WITHOUT either of the other two signals:
+  // a plain body, so `major` is the only thing that can make it breaking.
+  //
+  // Predicted direction on reverse verification: restoring the old anchor
+  // (`([A-Za-z]+)\s*$`) turns P9-P13 red (breaking goes false, signals loses
+  // `major`) and P14 red in the other direction (a phantom `# note` bump).
+  const PLAIN = 'a summary line\n\nsome prose that is quite long indeed and explains the change.\n';
+  const bumpsOf = (text) => parseChangeset(text).bumps.map((b) => `${b.pkg}=${b.bump}`);
+  assert(
+    bumpsOf(`---\n'@objectstack/spec': major # keep\n---\n\n${PLAIN}`).join(',') === '@objectstack/spec=major',
+    'P9 (#7004): a trailing YAML comment still yields the `major` bump — changesets reads it as one',
+  );
+  assert(
+    breakingDeclaration(parseChangeset(`---\n'@objectstack/spec': major # keep\n---\n\n${PLAIN}`)).signals.includes('major'),
+    'P10 (#7004): signal (1) fires on a comment-bearing major, with no `**BREAKING` and no `!` in the body to carry it instead',
+  );
+  assert(
+    breakingDeclaration(parseChangeset(`---\n'@objectstack/spec': "major"\n---\n\n${PLAIN}`)).signals.includes('major'),
+    'P11 (#7004): signal (1) fires on a QUOTED bump value',
+  );
+  assert(
+    breakingDeclaration(parseChangeset(`---\n'@objectstack/spec': 'major' # keep\n---\n\n${PLAIN}`)).signals.includes('major'),
+    'P12 (#7004): signal (1) fires on a quoted bump value carrying a comment',
+  );
+  assert(
+    !breakingDeclaration(parseChangeset(`---\n'@objectstack/spec': minor # keep\n---\n\n${PLAIN}`)).breaking,
+    'P13 (#7004): control — the same comment-bearing shape with `minor` is NOT breaking, so P9-P12 are about the bump word and not about the comment merely being tolerated',
+  );
+  assert(
+    bumpsOf(`---\n# note: major\n'@objectstack/real': patch\n---\n\n${PLAIN}`).join(',') === '@objectstack/real=patch',
+    'P14 (#7004): a whole-line comment containing a colon is not a bump — it used to parse as a package named `# note` bumped major, i.e. a phantom breaking declaration',
+  );
   assert(extractIds("  id: 'object-titleFormat-to-nameField',\n").length === 1, 'P8: an id with a capital letter must be extracted');
 
   // ---- I1 (#6566): a bare `import` of this module must NOT run the gate -----

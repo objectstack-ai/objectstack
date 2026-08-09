@@ -467,7 +467,7 @@ QueryAST-aligned options for DataEngine.aggregate operations
 | **context** | `{ userId?: string; actor?: string; attributedUserId?: string; email?: string; … }` | optional |  |
 | **where** | `Record<string, any> \| any` | optional |  |
 | **groupBy** | `string[]` | optional |  |
-| **aggregations** | `{ function: Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct'>; field?: string; alias: string; distinct?: boolean; … }[]` | optional |  |
+| **aggregations** | `{ function: Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct'>; field?: string; alias: string; filter?: any }[]` | optional |  |
 | **having** | `any` | optional | HAVING — filter over the aggregated rows (aggregation aliases + groupBy projections); applied engine-side after aggregation |
 | **timezone** | `string` | optional |  |
 
