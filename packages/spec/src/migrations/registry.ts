@@ -1134,6 +1134,37 @@ const step17: MigrationStep = {
     + 'objectui publishes and the renderer already reads first in the flat carriers — which is '
     + '`displayField` → `labelField` again: converge on the spelling that works, not the one '
     + 'that declares well, and keep one spelling rather than two (Prime Directive #12).\n\n'
+    + '#6946 closes that reconciliation from the other side, on three keys the two earlier '
+    + 'passes left standing (maintainer ruling 2026-08-09, decision-inbox round: objectui#3829 '
+    + 'route (c) and objectui#3818). Two are the plain B class — declared here, read NOWHERE. '
+    + '`page:header.icon` is resolved by objectui only per header ACTION (`action.icon`); the '
+    + "header's own props bag is never asked for one, and `@object-ui/layout`'s `<PageHeader>` "
+    + 'takes an `icon` React prop from a host with no schema fallback beside the '
+    + '`schema?.actions ?? schema?.properties?.actions` fallback four lines away. '
+    + '`page:card.actions` has no actions area to render into at all: the card renderer builds '
+    + 'its `<Card>` from `title`, `bordered`, `children` and `footer`, full stop. Both sat in '
+    + "objectui's own unpublished-exemption map as \"spec declares it, NO renderer read point\", "
+    + 'which is what put the contract decision — wire it, publish it with a KNOWN GAP marker, or '
+    + 'retire it — in front of the maintainer; the ruling retired it. Neither has a lossless '
+    + 'rewrite target (a header has no second icon slot, and moving a card\'s action ids into '
+    + '`children` as components is a page rewrite, not a mechanical one), so both are pure '
+    + 'strips. ⚠️ `page:header.actions` is LIVE and untouched — the strip is scoped by component '
+    + 'type, never by key name.\n\n'
+    + 'The third, `record:details.layout`, is a sharper shape and the one worth reading twice: '
+    + 'it IS read. The renderer computes '
+    + "`schema.layout === 'inline' || schema.layout === 'compact' ? 'horizontal' : 'vertical'`, "
+    + 'while the declared enum is `auto | custom` — so neither legal value can match, both take '
+    + 'the same branch, and a key that was accepted and read still selected nothing, under a '
+    + '`.describe()` promising "auto uses object highlightFields, custom uses explicit sections". '
+    + 'The behaviour that prose describes is real, but the renderer keys it off whether '
+    + '`sections` was authored, never off this flag. Every gate stayed green because '
+    + '`check:react-declaration-parity` compares two DECLARATIONS and objectui declared the same '
+    + '`auto | custom` enum — perfect agreement over a key nothing honoured — while a THIRD '
+    + "spelling (`stacked | inline | compact`) sat in `@object-ui/types`' mirror. A pure strip "
+    + 'for the same reason: `auto`, `custom` and omission were behaviourally identical, so there '
+    + 'is no value to carry. ⚠️ `record:highlights.layout` is a different, live, honoured key '
+    + 'and is untouched. objectui#3829 and objectui#3818 drop the exemptions, the input and the '
+    + 'dead branch on the next pin bump.\n\n'
     + 'Finally it narrows the aggregation vocabulary: `array_agg` and `string_agg` leave '
     + '`AggregationFunction` (#6188, ADR-0049). The enum declared eight functions and the SQL '
     + 'family compiles five — `SqlDriver.mapAggregateFunc` and the Turso '
@@ -1271,6 +1302,8 @@ const step17: MigrationStep = {
     'dataset-measure-array-string-agg-removed',
     'inline-action-api-params-to-body-extra',
     'page-tabs-type-to-tab-style',
+    'page-structure-inert-keys-removed',
+    'record-details-layout-removed',
     'app-hidden-to-unpublished',
   ],
   semantic: [
@@ -3374,6 +3407,25 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // takes (`query-joins-retired` / `query-cursor-retired` /
     // `query-distinct-retired` / `query-window-functions-retired`, #4286).
     'data/AggregationNode:distinct',
+    // #6946 — three SDUI page-component props, retired by maintainer ruling
+    // 2026-08-09 (decision-inbox round, 「全部接受」): objectui#3829 route (c)
+    // for the first two, objectui#3818 for the third. Registered per key, as
+    // gate (b) reads them — nothing radiates from a neighbouring key, and this
+    // family needs that literally: `ui/PageHeaderProps:actions` and
+    // `ui/RecordHighlightsProps:layout` are LIVE keys sharing these leaf names.
+    //
+    // The first two are the B class — declared here, read NOWHERE in objectui
+    // (the header resolves icons per action; the card renders
+    // title/bordered/children/footer and has no actions area), and carried in
+    // that repo's own `UNPUBLISHED_EXEMPTIONS` map as exactly that.
+    'ui/PageCardProps:actions',
+    'ui/PageHeaderProps:icon',
+    // The third is a sharper shape: `layout` IS read, but only against
+    // `inline`/`compact` — values its `auto | custom` enum never permitted — so
+    // both legal values took the same branch. Declared on BOTH sides with the
+    // same enum, which is why the declaration-parity ratchet (two declarations,
+    // never a declaration vs an implementation) reported agreement over it.
+    'ui/RecordDetailsProps:layout',
   ],
 };
 

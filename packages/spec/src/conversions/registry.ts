@@ -5786,6 +5786,314 @@ const pageTabsTypeToTabStyle: MetadataConversion = {
 };
 
 /**
+ * `page:header.icon` and `page:card.actions` — two declared page-component props
+ * with NO renderer read point at all (protocol 17, #6946, ADR-0049).
+ *
+ * Maintainer ruling 2026-08-09 (decision-inbox round, 「全部接受」) on
+ * objectui#3829, **route (c)**: retire both upstream. That card had put three
+ * shapes on the table — wire the key, publish it with a KNOWN GAP marker (the
+ * `record:activity.showSubscriptionToggle` precedent), or retire it here — and
+ * the ruling took the third, so the platform contract loses two keys rather
+ * than growing two features nobody asked for.
+ *
+ * What "no read point" means, per key, measured against objectui at the
+ * `.objectui-sha` pin (`09987b68`) rather than inherited from the card:
+ *
+ *   - **`page:header.icon`** — `PageHeaderRenderer` resolves `icon` only inside
+ *     the ACTION pipeline (`action.icon`, per button); the header's own props
+ *     bag is never asked for one. `@object-ui/layout`'s `<PageHeader>` does
+ *     draw an `icon`, but only from a REACT prop a host passes: unlike
+ *     `actions`, which four lines away falls back to `schema?.actions ??
+ *     schema?.properties?.actions`, `icon` has no schema fallback, so an
+ *     authored node cannot reach it. The registration publishes no `icon`
+ *     input either.
+ *   - **`page:card.actions`** — `PageCardRenderer` builds its `<Card>` from
+ *     `title`, `bordered`, `body ?? children` and `footer`, full stop. There is
+ *     no actions area in the markup and no `actions` input in the
+ *     registration. Its sibling `page:header` DOES read `actions` off the bag,
+ *     which is exactly why the divergence survived: the two declarations look
+ *     identical.
+ *
+ * Both keys are in objectui's own `UNPUBLISHED_EXEMPTIONS` map as B-class
+ * ("spec declares it, NO renderer read point") entries pointing at objectui#3829
+ * — an independent measurement of the same fact, taken in the other repo.
+ *
+ * **Pure lossless deletes.** Neither key ever had an effect to lose, and
+ * neither has a lossless rewrite target: the header has no second icon slot
+ * (its identity is the record chrome), and the card has no actions area to move
+ * a list into — buttons belong in `children`/`footer` as components, which is a
+ * page rewrite and not a mechanical one. So this strips, exactly as
+ * {@link recordPickerInertKeysRemoved} does for the picker's two inert keys.
+ *
+ * ⚠️ `page:header.actions` is NOT touched — it is read (`containers.tsx`, and
+ * `@object-ui/layout`'s header) and stays. One key name, two components, one
+ * of them live: the strip is scoped by component `type`, never by key name.
+ *
+ * objectui#3829 (drop the two exemptions) is Blocked-by #6946 and proceeds on
+ * the next pin bump.
+ */
+const pageStructureInertKeysRemoved: MetadataConversion = {
+  id: 'page-structure-inert-keys-removed',
+  toMajor: 17,
+  retiredFromLoadPath: true,
+  surface: 'page.component.page:header.icon / page.component.page:card.actions',
+  summary:
+    "page:header prop 'icon' and page:card prop 'actions' removed (#6946 — neither has a renderer "
+    + 'read point in objectui; the header resolves icons per action and the card renders '
+    + 'title/children/footer only)',
+  apply(stack, emit) {
+    return mapPageComponents(stack, (component, path) => {
+      const properties = component.properties;
+      if (!isDict(properties)) return component;
+      // Scoped by component type: `actions` is LIVE on `page:header` and `icon`
+      // is live on half a dozen other components, so a key-name-only strip
+      // would delete working metadata.
+      const key =
+        component.type === 'page:header' ? 'icon'
+          : component.type === 'page:card' ? 'actions'
+            : null;
+      if (!key) return component;
+      const stripped = stripKeys(properties, [key], emit, `${path}.properties`);
+      if (stripped === properties) return component;
+      return { ...component, properties: stripped };
+    });
+  },
+  fixture: {
+    before: {
+      pages: [
+        {
+          name: 'connect_agent',
+          regions: [
+            {
+              name: 'header',
+              components: [
+                // The published platform-page shape: title + subtitle + a
+                // decorative icon nothing drew.
+                {
+                  type: 'page:header',
+                  properties: { title: 'Connect an Agent', subtitle: 'Governed MCP access.', icon: 'bot' },
+                },
+                // `page:header.actions` SURVIVES — the live half of the same key
+                // name (see the ⚠️ above).
+                { type: 'page:header', properties: { title: 'Lead', actions: ['convert_lead'], icon: 'user' } },
+                // `icon` on a component that is not a page header — not this
+                // entry's key, and live on that one.
+                { type: 'element:button', properties: { label: 'Open', icon: 'external-link' } },
+                {
+                  type: 'page:card',
+                  properties: { title: 'Shortcuts', actions: ['new_task'], footer: [{ type: 'element:text' }] },
+                },
+                // A card nested inside a card's `children` (#6775 reach): the
+                // descent visits it, so the inner `actions` goes too.
+                {
+                  type: 'page:card',
+                  properties: {
+                    title: 'Outer',
+                    children: [
+                      { type: 'page:card', properties: { title: 'Inner', actions: ['edit'] } },
+                    ],
+                  },
+                },
+              ],
+            },
+          ],
+        },
+        // The named-slot shape (#6776): a header authored into a slotted
+        // record page's `details` slot.
+        {
+          name: 'connect_agent_detail',
+          kind: 'slotted',
+          regions: [],
+          slots: {
+            details: { type: 'page:header', properties: { title: 'Agent', icon: 'bot' } },
+          },
+        },
+      ],
+    },
+    after: {
+      pages: [
+        {
+          name: 'connect_agent',
+          regions: [
+            {
+              name: 'header',
+              components: [
+                {
+                  type: 'page:header',
+                  properties: { title: 'Connect an Agent', subtitle: 'Governed MCP access.' },
+                },
+                { type: 'page:header', properties: { title: 'Lead', actions: ['convert_lead'] } },
+                { type: 'element:button', properties: { label: 'Open', icon: 'external-link' } },
+                {
+                  type: 'page:card',
+                  properties: { title: 'Shortcuts', footer: [{ type: 'element:text' }] },
+                },
+                {
+                  type: 'page:card',
+                  properties: {
+                    title: 'Outer',
+                    children: [
+                      { type: 'page:card', properties: { title: 'Inner' } },
+                    ],
+                  },
+                },
+              ],
+            },
+          ],
+        },
+        {
+          name: 'connect_agent_detail',
+          kind: 'slotted',
+          regions: [],
+          slots: {
+            details: { type: 'page:header', properties: { title: 'Agent' } },
+          },
+        },
+      ],
+    },
+    expectedNotices: 5,
+  },
+};
+
+/**
+ * `record:details.layout` — a mode selector whose two declared modes were never
+ * implemented (protocol 17, #6946, ADR-0049).
+ *
+ * Maintainer ruling 2026-08-09 (decision-inbox round, 「全部接受」) on
+ * objectui#3818: the removal direction.
+ *
+ * This one is NOT a zero-read-point key, and the distinction is the whole
+ * finding. `RecordDetailsRenderer` does read it — and reads it against values
+ * this schema never permitted:
+ *
+ *     const layout = schema.layout === 'inline' || schema.layout === 'compact'
+ *       ? 'horizontal' : 'vertical';
+ *
+ * The declared enum is `auto | custom`. Neither matches, so both legal values
+ * take the same `vertical` branch: the key was accepted, read, and could not
+ * change anything. Its `.describe()` meanwhile promised "auto uses object
+ * highlightFields, custom uses explicit sections" — a behaviour the renderer
+ * implements, but keyed off whether `sections` is authored at all, never off
+ * this flag.
+ *
+ * **Why every gate stayed green over it.** `check:react-declaration-parity`
+ * compares two DECLARATIONS, not a declaration against an implementation
+ * (AGENTS.md) — and objectui's registry declared `layout` with the SAME
+ * `auto | custom` enum, so the gate saw perfect agreement over a key nothing
+ * honoured. A third spelling, `stacked | inline | compact`, sat in
+ * `@object-ui/types`' `RecordDetailsComponentProps` mirror. Three declarations
+ * of one key, none of them the branch the renderer takes.
+ *
+ * **A PURE STRIP, deliberately.** There is no value to carry: `auto` and
+ * `custom` were behaviourally identical to each other and to omission, so a
+ * rewrite would have nowhere lossless to go. What already decides the body is
+ * what the author wrote — `sections` for explicit groups, its absence for the
+ * object's `highlightFields`.
+ *
+ * ⚠️ `record:highlights.layout` is a DIFFERENT, live key (`horizontal |
+ * vertical`, honoured) and is untouched: this entry is scoped by component
+ * `type`.
+ *
+ * objectui#3818 (delete the `layout` input and the dead `inline|compact`
+ * branch) is Blocked-by #6946 and proceeds on the next pin bump.
+ */
+const recordDetailsLayoutRemoved: MetadataConversion = {
+  id: 'record-details-layout-removed',
+  toMajor: 17,
+  retiredFromLoadPath: true,
+  surface: 'page.component.record:details.layout',
+  summary:
+    "record:details component prop 'layout' removed (#6946 — the declared auto|custom modes were "
+    + 'never implemented; the renderer branches only on inline|compact, values the schema never '
+    + 'permitted, so both legal values selected nothing)',
+  apply(stack, emit) {
+    return mapPageComponents(stack, (component, path) => {
+      if (component.type !== 'record:details') return component;
+      const properties = component.properties;
+      if (!isDict(properties)) return component;
+      const stripped = stripKeys(properties, ['layout'], emit, `${path}.properties`);
+      if (stripped === properties) return component;
+      return { ...component, properties: stripped };
+    });
+  },
+  fixture: {
+    before: {
+      pages: [
+        {
+          name: 'task_detail_layout',
+          regions: [
+            {
+              name: 'main',
+              components: [
+                // The `custom` spelling, alongside the `sections` that actually
+                // decides the body.
+                {
+                  type: 'record:details',
+                  properties: {
+                    layout: 'custom',
+                    columns: '2',
+                    sections: [{ name: 'basics', fields: ['subject'] }],
+                  },
+                },
+                // The `auto` spelling — the declared default, written out.
+                { type: 'record:details', properties: { layout: 'auto' } },
+                // `layout` on a component that is not `record:details`:
+                // `record:highlights.layout` is LIVE and must survive.
+                { type: 'record:highlights', properties: { layout: 'horizontal', fields: ['status'] } },
+              ],
+            },
+          ],
+        },
+        {
+          name: 'task_detail_layout_slotted',
+          kind: 'slotted',
+          regions: [],
+          slots: {
+            details: [
+              { type: 'record:details', properties: { layout: 'custom', fields: ['name'] } },
+            ],
+          },
+        },
+      ],
+    },
+    after: {
+      pages: [
+        {
+          name: 'task_detail_layout',
+          regions: [
+            {
+              name: 'main',
+              components: [
+                {
+                  type: 'record:details',
+                  properties: {
+                    columns: '2',
+                    sections: [{ name: 'basics', fields: ['subject'] }],
+                  },
+                },
+                { type: 'record:details', properties: {} },
+                { type: 'record:highlights', properties: { layout: 'horizontal', fields: ['status'] } },
+              ],
+            },
+          ],
+        },
+        {
+          name: 'task_detail_layout_slotted',
+          kind: 'slotted',
+          regions: [],
+          slots: {
+            details: [
+              { type: 'record:details', properties: { fields: ['name'] } },
+            ],
+          },
+        },
+      ],
+    },
+    expectedNotices: 3,
+  },
+};
+
+/**
  * `app.hidden: true` → `app._unpublished: true` on **stored** rows (protocol 17,
  * #4829, ADR-0045 amended 2026-08-09).
  *
@@ -5941,6 +6249,8 @@ export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConv
     pageCardBodyToChildren,
     inlineActionApiParamsToBodyExtra,
     pageTabsTypeToTabStyle,
+    pageStructureInertKeysRemoved,
+    recordDetailsLayoutRemoved,
     appHiddenToUnpublished,
   ],
 };

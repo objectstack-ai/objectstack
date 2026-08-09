@@ -381,6 +381,18 @@
         "toMajor": 17
       },
       {
+        "surface": "page.component.page:header.icon / page.component.page:card.actions",
+        "to": "page:header prop 'icon' and page:card prop 'actions' removed (#6946 — neither has a renderer read point in objectui; the header resolves icons per action and the card renders title/children/footer only)",
+        "conversionId": "page-structure-inert-keys-removed",
+        "toMajor": 17
+      },
+      {
+        "surface": "page.component.record:details.layout",
+        "to": "record:details component prop 'layout' removed (#6946 — the declared auto|custom modes were never implemented; the renderer branches only on inline|compact, values the schema never permitted, so both legal values selected nothing)",
+        "conversionId": "record-details-layout-removed",
+        "toMajor": 17
+      },
+      {
         "surface": "app.hidden",
         "to": "stored app publish gate 'hidden' → '_unpublished' (#4829, ADR-0045 amended — `hidden` carried BOTH the publish gate and 'keep out of the App Switcher', so the built-in Account app was withheld from every non-builder; the gate is now the machine-managed `_unpublished`, and `hidden` is navigation presentation only, never an access gate. Stored rows only — an authored `hidden: true` is left untouched)",
         "conversionId": "app-hidden-to-unpublished",
@@ -1272,6 +1284,18 @@
           "surface": "page.component.page:tabs.type",
           "to": "page:tabs component prop 'type' → 'tabStyle' (#6776 — a props key named `type` collides with the node's dispatch key and is unauthorable in flat/JSX carriers; `tabStyle` is the spelling the renderer reads in all of them)",
           "conversionId": "page-tabs-type-to-tab-style",
+          "toMajor": 17
+        },
+        {
+          "surface": "page.component.page:header.icon / page.component.page:card.actions",
+          "to": "page:header prop 'icon' and page:card prop 'actions' removed (#6946 — neither has a renderer read point in objectui; the header resolves icons per action and the card renders title/children/footer only)",
+          "conversionId": "page-structure-inert-keys-removed",
+          "toMajor": 17
+        },
+        {
+          "surface": "page.component.record:details.layout",
+          "to": "record:details component prop 'layout' removed (#6946 — the declared auto|custom modes were never implemented; the renderer branches only on inline|compact, values the schema never permitted, so both legal values selected nothing)",
+          "conversionId": "record-details-layout-removed",
           "toMajor": 17
         },
         {

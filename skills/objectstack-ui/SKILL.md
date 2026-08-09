@@ -1027,7 +1027,6 @@ export const LeadDetailPage = definePage({
           properties: {
             title: '{first_name} {last_name}',
             subtitle: '{company}',
-            icon: 'user-plus',
             breadcrumb: true,
             actions: [ConvertLeadAction],   // inline action buttons in header
           },

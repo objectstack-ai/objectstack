@@ -2906,7 +2906,7 @@ describe('RestServer metadata translation — page documents', () => {
         components: [
           {
             type: 'page:header',
-            properties: { title: 'Connect an Agent', subtitle: 'Give any MCP-capable client…', icon: 'bot' },
+            properties: { title: 'Connect an Agent', subtitle: 'Give any MCP-capable client…', actions: ['connect_agent'] },
           },
         ],
       },
@@ -2923,7 +2923,7 @@ describe('RestServer metadata translation — page documents', () => {
     expect(out.item.label).toBe('连接智能体');
     expect(out.item.regions[0].components[0].properties.title).toBe('连接智能体');
     expect(out.item.regions[0].components[0].properties.subtitle).toBe('让任意支持 MCP 的 AI 客户端受控访问此环境。');
-    expect(out.item.regions[0].components[0].properties.icon).toBe('bot');
+    expect(out.item.regions[0].components[0].properties.actions).toEqual(['connect_agent']);
   });
 
   it('translates page documents in a list response', async () => {
