@@ -106,9 +106,15 @@ export default class Start extends Command {
       char: 'd',
       description: 'Database URL: file:./db.sqlite | libsql://... | postgres://... | mongodb://... | memory:// (overrides $OS_DATABASE_URL; defaults to file:<home>/data/objectstack.db)',
     }),
+    // `options:` is an ENFORCED allowlist — oclif rejects anything outside it at
+    // parse time, before the command body runs. It must therefore offer every
+    // driver kind `resolveStorageDefinition` accepts, or the flag refuses a driver
+    // that the equivalent `OS_DATABASE_DRIVER` env var happily selects — one thing,
+    // two answers (#6860: `mysql` and `sqlite-wasm` were missing and unusable via
+    // the flag). `database-driver-allowlist.pin.test.ts` pins the agreement.
     'database-driver': Flags.string({
-      description: 'Force driver kind when URL is ambiguous: sqlite | turso | postgres | mongodb | memory (overrides $OS_DATABASE_DRIVER)',
-      options: ['sqlite', 'turso', 'postgres', 'mongodb', 'memory'],
+      description: 'Force driver kind when URL is ambiguous: sqlite | sqlite-wasm | turso | postgres | mysql | mongodb | memory (overrides $OS_DATABASE_DRIVER)',
+      options: ['sqlite', 'sqlite-wasm', 'turso', 'postgres', 'mysql', 'mongodb', 'memory'],
     }),
     'database-auth-token': Flags.string({
       description: 'Auth token for libsql/Turso connections (overrides $OS_DATABASE_AUTH_TOKEN / $TURSO_AUTH_TOKEN)',

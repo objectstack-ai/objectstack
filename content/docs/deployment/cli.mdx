@@ -131,7 +131,7 @@ os dev --database file:./data/test.db --auth-secret $(openssl rand -hex 32)
 |---|---|---|
 | `-a, --artifact <path\|url>` | `OS_ARTIFACT_PATH` | Boot a pre-built artifact directly; **skips auto-compile** |
 | `-d, --database <url>` | `OS_DATABASE_URL` | `file:…` / `libsql://` / `postgres://` / `mongodb://` / `memory://` |
-| `--database-driver <kind>` | `OS_DATABASE_DRIVER` | Force `sqlite` \| `turso` \| `postgres` \| `mongodb` \| `memory` |
+| `--database-driver <kind>` | `OS_DATABASE_DRIVER` | Force `sqlite` \| `sqlite-wasm` \| `turso` \| `postgres` \| `mysql` \| `mongodb` \| `memory` |
 | `--database-auth-token <t>` | `OS_DATABASE_AUTH_TOKEN` | libsql/Turso token |
 | `--auth-secret <s>` | `OS_AUTH_SECRET` | Override the dev-fallback secret |
 | `--environment-id <id>` | `OS_ENVIRONMENT_ID` | Environment identifier (default `env_local`) |
@@ -320,7 +320,7 @@ os start
 |---|---|---|
 | `-a, --artifact <path\|url>` | `OS_ARTIFACT_PATH` | File path or `http(s)://` URL to the compiled artifact |
 | `-d, --database <url>` | `OS_DATABASE_URL` | `file:…` / `libsql://` / `postgres://` / `mongodb://` / `memory://` |
-| `--database-driver <kind>` | `OS_DATABASE_DRIVER` | Force `sqlite` \| `turso` \| `postgres` \| `mongodb` \| `memory` when the URL is ambiguous |
+| `--database-driver <kind>` | `OS_DATABASE_DRIVER` | Force `sqlite` \| `sqlite-wasm` \| `turso` \| `postgres` \| `mysql` \| `mongodb` \| `memory` when the URL is ambiguous |
 | `--database-auth-token <token>` | `OS_DATABASE_AUTH_TOKEN` | Auth token for libsql/Turso |
 | `--auth-secret <secret>` | `OS_AUTH_SECRET` / `AUTH_SECRET` | Secret for `@objectstack/plugin-auth`. If neither the flag nor the env var is set, `os start` **auto-generates one** and persists it at `<home>/auth-secret` |
 | `--home <dir>` | `OS_HOME` | Home directory for persistent state (default `<cwd>/.objectstack` when an `objectstack.config.ts` is present, otherwise `~/.objectstack`) |
