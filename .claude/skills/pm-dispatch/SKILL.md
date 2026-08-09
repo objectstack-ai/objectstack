@@ -1302,7 +1302,12 @@ execute as **one atomic pair**, in order:
    > Worktree: `<repo>-issue-<n>`
    > Domain: `domain:<x>`
    > File surface: `<directories you expect to touch>` (stop on breach; explain in the report)
+   > Container & model: `<S 级机械卡 / M / L>`, `mode:subagent | mode:cloud`, `model: sonnet | opus`
    > Serial constraints cleared: `<name the same-file/same-package predecessor PRs and in-flight claims; "none" if none>`
+
+   「Container & model」行的判读规则见「Resource limits」的容器判定条与 step 5 的
+   「Model tiering」—— 尺寸与档位是同一次判读的两个输出,写在一行里,⛔ 不要
+   只写其中一个。
 
    最后一行是 services 车道一班 28 PR 零合并冲突的机制(#5885):把「查过串行
    约束」从内心活动变成落在评论里的读数,竞态复读与串行判断都成了 30 秒的事 ——
@@ -1368,26 +1373,105 @@ commits.
 
 One `Agent` call per issue, `subagent_type: "os-dev"` (fall back to
 `general-purpose` with the same prompt if the custom agent isn't loaded), run
-in parallel in the background. **Model split (maintainer policy): pass
-`model: "opus"` on every dev dispatch.** The PM session itself stays on the
-stronger orchestration model — triage, review, and decision framing are where
-its judgment pays; implementation goes to Opus. Prompt template — fill every placeholder, paste
-the full issue body, never a summary:
+in parallel in the background.
+
+#### Model tiering(维护者 2026-08-09 批准 —— 取代旧的「一律 opus」)
+
+⚠️ **这条改写了一条旧的绝对规则,读到这里请以本节为准。** 本节此前写的是
+「**Model split (maintainer policy): pass `model: "opus"` on every dev dispatch**」,
+2026-08-08 的交接又把它复述成「所有派发至少 opus」。**那个绝对形式已废止** ——
+凡在别处(旧交接笔记、座位贴、他人转述)读到「所有派发一律/至少 opus」,一律以
+本节覆盖它,⛔ 不要两条并存着理解成「opus 是下限、sonnet 是违规」。授权出处是
+维护者 2026-08-09 的在席批准(原话引用见 #6863 正文与本卡 PR)。
+
+**新政策:按卡的类别分档,`model` 逐次派发显式传参,永不省略。**
+
+- **S 级机械卡 ⇒ `model: "sonnet"`。** 判据是「正确性由门禁农场机械判定」而非
+  「改动小」:单文件散文 / 注释修正、一处新增(one-spread additions)、死词表行
+  删除、alias / tombstone 台账维护。这类卡的失败模式是漏跑门,不是判断失误 ——
+  而漏跑门是 CI 抓的,不是模型档位抓的。
+- **M / L 卡、裁决实施卡、多面语义卡,以及任何带设计判断的卡 ⇒ `model: "opus"`。**
+  边界情况上抬不下压:**拿不准就派 opus**。一次错派 sonnet 的返工,贵过它省下的
+  那点额度。
+- PM 座位自己留在更强的编排档:分诊、复核、决策成框才是它的判断付费的地方。
+
+**档位必须显式传参,不能靠定义里的 pin 兜底。** 实测的解析顺序有四级(2026-08-09
+对照 Claude Code subagent 文档核过):`CLAUDE_CODE_SUBAGENT_MODEL` 环境变量 →
+**逐次派发的 `model` 参数** → agent 定义的 `model:` frontmatter → 主会话模型。
+两个方向的后果都要记住:
+
+- `.claude/agents/os-dev.md` 的 `model: opus`(#6686 / PR #6688,由 #6836 的
+  `check:agent-model-declared` 守着)**不会**否决你传的 `model: "sonnet"` ——
+  参数在 frontmatter 之上,本节的分档因此确实生效,不是一纸空文。
+- 反过来,那条 pin 只管**你什么都不传**的情形。省略 `model` 不等于「按 os-dev 的
+  opus 走」这句话今天恰好成立,但它成立的理由是那行 pin,而 pin 的历史正是被删过
+  一次(#6686:四个 dev 连坐同一堵额度墙,三个留下未验证的 worktree)。所以
+  **每次派发都显式写 `model`**,让档位是这次派发的属性,而不是某个文件此刻的状态。
+- ⚠️ `CLAUDE_CODE_SUBAGENT_MODEL` 压在两者之上。本容器当前**未设置**(2026-08-09
+  实测),但它一旦被设,会静默盖掉你所有的分档决定且仓内无任何显示。另有一条静默
+  降级:传入的档位若被组织的 `availableModels` 白名单挡下,回退的是**继承的模型**,
+  不是 frontmatter 的 pin。
+
+**分档写进认领评论**(step 4 的容器判定行已经在给尺寸分级,顺手带上档位),这样
+选择可审计、交接会话不用重判。
+
+#### Prompt template
+
+Fill every placeholder. **默认 ⛔ 不再整段粘贴 issue 正文** —— 派发词让 dev 自己去
+GitHub 读全文与全部评论(premise-first 本来就强制它读一遍),正文只粘那些「GitHub
+上读不到、或读到了也会被读错」的部分:
+
+- **裁决原文逐字引用**(中文不翻译);
+- **「裁决(不可重裁)」/「PM 机制假设(须实测,鼓励证伪)」的分区**(下面那一段
+  说明了为什么这个分区不能省);
+- **卡特定条款**与**同日变更**(same-day churn)行。
+
+⚠️ **代价与缓解:notes 12 的读取截断。** 长正文经工具读取可能被静默截断,粘贴时
+这个风险由 PM 承担,改为自读后落到 dev 身上 —— 所以派发词**必须**要求 dev 自查
+正文完整性(读到疑似截断就二次读取确认),这一条不是可选的礼貌话。先例:#6776
+的派发即按此形运行并成功。
+
+⛔ **标准非协商条款不再逐条抄进派发词。** worktree / 分支纪律、build-first、
+filter 方向、ADR-0112 拒收断言、authorable-surface 锚点与 `gen:schema` MERGE 态禁令、
+foreground 姿态、英文政策、报告契约 —— 这些已**一次性下沉进
+`.claude/agents/os-dev.md`**(生产者侧修复,正是本文自己引用的 PD#12 直觉)。派发词
+只带**增量**。下面模板里保留的每一条,要么是逐卡可变的,要么是评审侧对账时点名要
+看的:
 
 ```
 Your task is issue {backlog_repo}#{n}. The code lands in {target_repo}
 (from the issue's repo:* routing label; same repo when unlabeled).
 
 ISSUE TITLE: {title}
-ISSUE BODY:
-{body}
+
+⛔ READ THE ISSUE YOURSELF — this prompt does NOT contain the body.
+Read {backlog_repo}#{n}'s full body AND all of its comments on GitHub before
+your first edit (premise-first already requires that read; this just makes it
+the only source). Then VERIFY YOU GOT THE WHOLE BODY: long bodies can be
+silently truncated by the read tool, and a truncated body reads exactly like a
+short one. If the text ends mid-sentence, mid-list, or mid-code-fence, or a
+section the title implies is simply absent — read it a second time before
+acting on it. Report the truncation if it persists; ⛔ never implement from a
+body you are not sure is complete.
 
 {on rework rounds only:}
 PREVIOUS ATTEMPT REVIEW — fix all of these before returning:
 {feedback}
 
-Follow your operating procedure (you are the os-dev agent). Non-negotiables:
-- The ISSUE BODY above is a LEAD, not a spec: verify its premise against
+裁决(不可重裁 —— 执行,不重开):
+{ruling quotes, verbatim, Chinese untranslated}
+
+PM 机制假设(须实测,鼓励证伪):
+{the PM's own guesses about how the code works}
+
+Card-specific clauses:
+{only the conditional standard clauses whose 适用判据 this card hits, plus any
+same-day-churn line — see the paragraphs below this template}
+
+Follow your operating procedure (you are the os-dev agent) — its standard
+non-negotiables are binding whether or not they appear above. Deltas for this
+card:
+- The ISSUE BODY is a LEAD, not a spec: verify its premise against
   origin/main BEFORE implementing. If the premise no longer holds (already
   fixed, wrong attribution, capability already exists), return
   premise_still_valid: false with evidence and NO PR — that is a successful
@@ -1395,46 +1479,29 @@ Follow your operating procedure (you are the os-dev agent). Non-negotiables:
 - Work in {target_repo}: branch claude/issue-{n}-{slug} off origin/main,
   in a DEDICATED worktree of that repo.
 - The issue is already claimed; do not touch its assignee.
-- Deliver: implementation + tests + changeset, pushed, as a DRAFT PR in
-  {target_repo} whose body starts with "Fixes {backlog_repo}#{n}".
-  Never merge anything. 如果你只实现了这张卡的一半(另一半 needs_decision 待裁,
-  或按范围被有意排除),首行改写成 "Part of {backlog_repo}#{n}" 并在正文说明留下
-  的是哪一半 —— ⛔ 不要用 `Fixes` 关掉一张还在决策箱里的卡。
-- If the issue underspecifies a decision that changes the public contract
-  (spec schema, API shape, naming), STOP and return status "needs_decision"
-  with your open questions — do not guess.
-- Any NEW fake engine your tests introduce must open its `delete()` with
-  `assertEngineDeleteDispatch(options)` from `@objectstack/objectql`, never a
-  hand-mirrored `if (!where?.id && !multi)` — `check:engine-double-contract`
-  went red on four dev agents' new tests in two days (#5173 / #5191 / #5192 /
-  #5584), one CI lap each. Copy a pinned fake, don't write the guard.
-- Before opening the PR, run the gate list ENUMERATED FROM
-  `.github/workflows/lint.yml` (and the workflow files it names) — every
-  `check:*` step, one by one. ⛔ 禁止凭记忆挑门:#5738 的首轮 CI 红就是本地跑了
-  六个门却漏掉不在记忆清单里的 `check:engine-double-contract`;改为「从 lint.yml
-  逐个列门跑全」后被后续四个 dev 继承,再无门红。门禁族跑在 ESLint / TypeScript
-  Type Check 两个 job 里(Operational notes 10)。
-- 新 worktree 里的**第一条验证命令是 build,不是 typecheck / test**:`pnpm install`
-  之后先把被改包的**依赖闭包**建起来(`pnpm --filter '@objectstack/你的包^...' build`,
-  后缀 `^...` = 它依赖的包)。跳过这步,tsc 读到的是别人留下的陈旧 `dist/*.d.ts`,
-  假红假绿两个方向都会骗人(#6371)。
-- 「消费半径清扫」的过滤器**方向是前缀**:`pnpm --filter '...@objectstack/你的包'`
-  才是**下游消费者**;`'@objectstack/你的包...'`(后缀)扫的是上游依赖,方向反了。
-  签名收窄 / 导出类型变更 / 契约收紧打到的永远是下游。报告里写「N 个包全绿」时
-  **必须同时写清用的哪个方向**,否则这句话无法复核(#6218)。
-- 跨包类型改动(签名收窄、导出类型变更)光贴一个绿**不构成**清扫证据:附一次
-  反向验证 —— 临时塞一个新类型不认的键、确认它会红、再还原 —— 证明你确实读到了
-  新的 `.d.ts`。
-- If your change touches `packages/spec`: spec build(`gen:schema`)会**重写锚点**
-  `authorable-surface.base.json` —— 那是预期产物,⛔ 不要 revert、不要手改;
-  何时写/往哪写见 #5358/#5370,字节门见 #4650。
-- Everything you post to GitHub — the PR title and body, and any issues you
-  file for out-of-scope findings — is written in ENGLISH (maintainer policy,
-  2026-08-06). Quote existing Chinese rulings verbatim without translating.
+- Local gates for this card: {name the gate families this card's surface
+  touches, e.g. check:engine-double-contract for a new fake engine}. Run those
+  plus your build closure and the affected packages' suites — ⛔ do NOT
+  enumerate and run the whole `lint.yml` farm locally; CI runs it once, and you
+  wait for CI to converge before reporting either way.
 Return ONLY the JSON report defined in your agent definition.
 ```
 
-**上面三条验证条款治的是同一个病:验证动作看起来做了,实际对被测风险失明。**
+**「读 GitHub」比「粘正文」多担一个风险,少担两个 —— 这笔交换是有方向的。**
+粘贴正文时 PM 替 dev 读了一遍,截断风险归 PM(notes 12);改为自读之后,截断风险
+归 dev,所以模板里那段自查是**风险转移的对价**,⛔ 不是可以省的客套。换来的是:
+派发词不再随卡的长度线性膨胀,而且 dev 读到的是**当下**的 issue —— 包括派发之后
+才追加的评论和维护者补充,那正是粘贴式派发永远看不见的一面。
+
+**卡特定条款 = 有「适用判据」的那几条。** 下面几段里带「适用判据」的标准条款
+(多面组件的共享一致性覆盖、拒收类用例的 `code`+`status`、过滤 / 谓词语义的编译面
+清单)**仍然逐卡判定、命中才抄进派发词** —— 它们是条件性的,不是通用的,所以没有
+下沉进 os-dev 定义。真正下沉的是**无条件那一批**(worktree、build-first、filter
+方向、锚点与 `gen:schema`、英文政策、报告契约),它们对每张卡都成立,重复抄写只是
+在为同一句话反复付费。
+
+**下沉进 os-dev 定义的那三条验证条款(build-first、filter 方向、跨包反向验证)治
+的是同一个病:验证动作看起来做了,实际对被测风险失明。**
 两种失明,成因不同、处方不同,一个 PR 可以同时踩中(#6210 就是),而且叠加之后
 症状互相掩盖 —— 方向扫反 + 产物陈旧,得到的「25 个包全绿」既不相关也不新鲜:
 
@@ -1452,6 +1519,11 @@ Return ONLY the JSON report defined in your agent definition.
   **依赖它的**(下游消费者)。#6210 收窄五个驱动的方法签名后按后缀扫,报告
   「25 个包全绿」,CI 全仓 typecheck 随即红在 `@objectstack/dogfood`(120 个任务
   118 绿)—— 那句「全绿」在方法论上与被测风险完全无关,却读起来像一次充分的清扫。
+
+⛔ **这两段解释留在 PM 侧,条款正文不在这里。** 三条条款的可执行措辞已住进
+`.claude/agents/os-dev.md`(「Standard clauses live HERE」一节),派发词⛔ 不再抄;
+留在本文的是**为什么**,因为它是 PM 复核侧的判据来源 —— step 7 那条「N 个包全绿,
+问清方向与时序」要问得出口,PM 得先认识这个病。
 
 **破坏性 / 契约收紧类改动以全仓门禁为准**;局部闭包只能用来加速迭代,⛔ 不能
 用来下结论。这一族的第三个成员是拒收用例的恒绿(#6142,见 step 7 复核清单)——
@@ -1685,8 +1757,13 @@ PM 先给每张候选卡判定验证重量,命中任一判据即**单独派一�
   ~10 分钟的验证管线。
 - **轻卡不升舱**:S/M 级(文档、JSDoc、单文件面)留 `mode:subagent` 共享容器
   —— 为轻卡单开容器是纯开销,规则的两个方向同等硬。
-- **判定写进认领评论**(「容器判定:S 级,`mode:subagent` 共享容器」/「L 级,
-  `mode:cloud` 单容器」),台账可审计,交接会话不用重判。
+- **判定写进认领评论,并带上模型档位**(step 5「Model tiering」)。这一行现在同时
+  承载两个决定 —— 尺寸/容器 与 档位 —— 因为两者用的是同一次判读,分开写只会漂移:
+  「容器判定:S 级机械卡,`mode:subagent` 共享容器,`model: sonnet`」/
+  「L 级,`mode:cloud` 单容器,`model: opus`」。台账可审计:事后复盘一张卡为什么
+  跑成那样,读认领评论就够,不必去猜当时传了什么参数。**S 级但不机械**(判断面在
+  设计上,不在门禁上)照样写 `model: opus` —— 尺寸不是档位的充分判据,别让这一行
+  的「S 级」自动推出 sonnet。
 - 实测背景(2026-08-06/07 夜班):9 dev 共享一容器,重验证在 flock 后串行,
   一张重卡(#5837 级,数十分钟级验证管线)拖长**整批**墙钟;把它单容器化,
   批内轻卡不再排它的队,重卡自己也不用和八个邻居分内存。
@@ -1999,6 +2076,11 @@ against the report's own claims:
   notes 10)。dev 可能在自己的 ESLint 还没出结论时就交了「本地绿」的报告 ——
   #5584 的 advisory 红就是这样漏过复核、红着合并进 main 的;os-dev 定义侧已要求
   「PR 开出后等 CI 收敛再交报告」,本条是它在复核侧的对账。
+  ⚠️ **本地门禁改为按面收窄之后(step 5 / os-dev「Local verification scope」),这条
+  从「双保险的第二道」变成了唯一的一道** —— dev 不再在本地跑全 farm,所以「一个不
+  显眼的门在 CI 转红」现在是**预期内**的形态,而不是异常。⛔ 因此不要因为报告写了
+  「本地全绿」就跳过亲核 job 结论:那句话现在覆盖的面本来就比以前小。多花的那一
+  个 push-fix 回合是这笔交换**已经付过**的价钱,不是 REWORK 的理由;红着合并才是。
 - The diff plausibly satisfies the issue's acceptance criteria.
 - **收益穿过它必经的那道边界之后还在吗?** 判据(不是每单都做):这批工作的价值主张
   是否**依赖某个下游组件如实转发** —— HTTP 错误信封、序列化、日志汇聚、跨进程传输。
