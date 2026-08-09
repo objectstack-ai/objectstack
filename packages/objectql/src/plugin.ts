@@ -2,6 +2,7 @@
 
 import { ObjectQL } from './engine.js';
 import { assembleMetadataProtocol } from '@objectstack/metadata-protocol';
+import type { MetadataAuthoringChannel } from '@objectstack/metadata-protocol';
 import { Plugin, PluginContext } from '@objectstack/core';
 import { applyConversionsToStoredItem } from '@objectstack/spec';
 import { StorageNameMapping } from '@objectstack/spec/system';
@@ -65,6 +66,25 @@ export interface ObjectQLPluginOptions {
   hostContext?: Record<string, any>;
   /** Scope sys_metadata reads/writes to this project. */
   environmentId?: string;
+  /**
+   * [#6710] Which authoring channel this kernel's metadata writes arrive on —
+   * the explicit expression of ADR-0005's "package author's own bootstrap
+   * channel".
+   *
+   * **Leave unset on every kernel that serves `PUT /api/v1/meta/*` to end
+   * users.** The default `'environment'` runs the #4463 runtime authoring
+   * rules (the 26 shared `AUTHORING_RULES` that `os validate` / `os lint`
+   * run), which for a Studio tenant or an MCP/AI author is the ONLY
+   * author-time gate — there is no `os lint` for a `sys_metadata` overlay row.
+   *
+   * Set `'package-author'` ONLY on the genuine control-plane assembly. Before
+   * #6710 this was inferred from `environmentId === undefined`, which is a row
+   * -scoping key and not a topology signal: the CLI's host-config assembler
+   * leaves it undefined too, so the flagship showcase's own boot shape ran the
+   * gate on nothing. Omitting this option now means MORE enforcement, never
+   * less — which is the whole point of declaring it rather than deducing it.
+   */
+  authoringChannel?: MetadataAuthoringChannel;
   /**
    * Override the kernel's default plugin-start timeout for this plugin.
    * Defaults to 120000 (120s). Schema sync to a remote SQL backend
@@ -165,6 +185,12 @@ export class ObjectQLPlugin implements Plugin {
   private ql: ObjectQL | undefined;
   private hostContext?: Record<string, any>;
   private environmentId?: string;
+  /**
+   * [#6710] Declared authoring channel, forwarded to the ONE protocol
+   * assembly. `undefined` here is not "unknown" — `assembleMetadataProtocol`
+   * resolves it to `'environment'`, the gated channel.
+   */
+  private authoringChannel?: MetadataAuthoringChannel;
   private skipSchemaSync = false;
   /** Serializes reload-time schema syncs so overlapping reloads can't race DDL. */
   private reloadSchemaSync: Promise<void> = Promise.resolve();
@@ -204,6 +230,7 @@ export class ObjectQLPlugin implements Plugin {
     }
     this.hostContext = opts.hostContext ?? hostContext;
     this.environmentId = opts.environmentId;
+    this.authoringChannel = opts.authoringChannel;
     if (typeof opts.startupTimeout === 'number' && opts.startupTimeout > 0) {
       this.startupTimeout = opts.startupTimeout;
     }
@@ -292,7 +319,13 @@ export class ObjectQLPlugin implements Plugin {
       // @objectstack/metadata-protocol — this built-in mode is the
       // single-kernel convenience mount of the same code path the
       // MetadataProtocolPlugin uses (identical objects/protocol/analytics).
-      const protocolShim = assembleMetadataProtocol(ctx, this.ql, this.environmentId);
+      // [#6710] `authoringChannel` rides the same seam as `environmentId`, and
+      // an undefined one resolves to `'environment'` (gated) inside the
+      // assembly — including on the legacy positional `(ObjectQL, hostContext)`
+      // constructor path, which returns before any option is read.
+      const protocolShim = assembleMetadataProtocol(ctx, this.ql, this.environmentId, {
+        authoringChannel: this.authoringChannel,
+      });
       this.subscribeMetadataRebind(ctx, protocolShim);
     } else {
       ctx.logger.info('registerProtocol=false — protocol assembly delegated to MetadataProtocolPlugin (ADR-0076 Step 2, #2462)');

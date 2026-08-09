@@ -2762,14 +2762,7 @@ export class AutomationEngine implements IAutomationService {
         if (reentryKey) this.activeRecordFlows.add(reentryKey);
 
         // Initialize variable context
-        const variables = new Map<string, unknown>();
-        if (flow.variables) {
-            for (const v of flow.variables) {
-                if (v.isInput && context?.params?.[v.name] !== undefined) {
-                    variables.set(v.name, context.params[v.name]);
-                }
-            }
-        }
+        const variables = this.seedDeclaredVariables(flow, context);
         // Inject trigger record. `$record` is the canonical handle; `record` is a
         // friendlier alias so templates/conditions can write `{record.title}` and
         // `record.status`. We also flatten the record's own fields to top-level
@@ -5708,6 +5701,56 @@ export class AutomationEngine implements IAutomationService {
     }
 
     /**
+     * Seed a run's variable map from the flow's DECLARED variables — the one
+     * place `declared` is turned into `bound` (#4697).
+     *
+     * Two sources, in this precedence:
+     *
+     * 1. `context.params[name]`, for an `isInput` variable, when the caller
+     *    supplied it. The boundary is `!== undefined`, so an explicit `false`,
+     *    `null`, `0` or `''` is a supplied value and wins over the default —
+     *    only *absence* falls through.
+     * 2. `defaultValue`, when the declaration carries one. This is the half
+     *    that did not exist before #4697: a declared variable the caller left
+     *    out stayed **unbound**, and conditions are strict CEL, where reading
+     *    an unbound name ABORTS the predicate (`Unknown variable: X`) instead
+     *    of yielding `false`. A screen flow collecting an optional checkbox hit
+     *    exactly that — the runner returns only the fields the user touched, so
+     *    the untouched path aborted the outgoing edge and the run stopped
+     *    (hotcrm#643). The workaround was an `assignment` node per screen,
+     *    mirroring the screen field's own `defaultValue`.
+     *
+     * `defaultValue` is honoured for a NON-input variable too: params are not
+     * readable there by definition, so the default is the only thing that can
+     * bind it, and "declared means bound" would otherwise hold for half the
+     * declarations. A declaration with no `defaultValue` behaves exactly as
+     * before — existing flows are untouched.
+     *
+     * Seeding happens BEFORE the trigger record is flattened to top-level
+     * names, and that flattening skips names already present. So a declared
+     * variable — bound from a param or from its default — shadows a record
+     * field of the same name, which is the rule params already followed; a
+     * default cannot make the same name resolve from a different source
+     * depending on whether the caller passed it.
+     */
+    private seedDeclaredVariables(
+        flow: FlowParsed,
+        context?: AutomationContext,
+    ): Map<string, unknown> {
+        const variables = new Map<string, unknown>();
+        if (!flow.variables) return variables;
+        for (const v of flow.variables) {
+            const supplied = v.isInput ? context?.params?.[v.name] : undefined;
+            if (supplied !== undefined) {
+                variables.set(v.name, supplied);
+            } else if (v.defaultValue !== undefined) {
+                variables.set(v.name, v.defaultValue);
+            }
+        }
+        return variables;
+    }
+
+    /**
      * Execute a flow without triggering retry logic (used by retryExecution to prevent recursion).
      */
     private async executeWithoutRetry(
@@ -5724,14 +5767,7 @@ export class AutomationEngine implements IAutomationService {
             return { success: false, error: `Flow '${flowName}' is disabled` };
         }
 
-        const variables = new Map<string, unknown>();
-        if (flow.variables) {
-            for (const v of flow.variables) {
-                if (v.isInput && context?.params?.[v.name] !== undefined) {
-                    variables.set(v.name, context.params[v.name]);
-                }
-            }
-        }
+        const variables = this.seedDeclaredVariables(flow, context);
         if (context?.record) {
             variables.set('$record', context.record);
         }

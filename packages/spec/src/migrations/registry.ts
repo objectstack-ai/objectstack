@@ -570,6 +570,22 @@ const step17: MigrationStep = {
     + 'driver it is a canonical key and is untouched. Retired from the load path not for lying '
     + 'but because the authoring gate already rejects the spellings loudly; the chain and the '
     + 'stored-row replay are the seams that accept them.\n\n'
+    + 'Finishing the same datasource surface, the canonical driver id `mongo` is renamed to '
+    + '`mongodb` (#6345). The two spellings have both been accepted since #4410 and both still '
+    + 'are, so no boot breaks and no data moves — what changed is which one is CANONICAL, and '
+    + 'that string is published as `DRIVER_CATALOG.id` and is what the Studio connection form '
+    + 'writes into `datasource.driver`. Every row written before the rename therefore carries '
+    + '`mongo` while the form now emits `mongodb`, leaving one deployment with two spellings of '
+    + 'one driver and any reader that matches a stored driver against the published catalog id '
+    + 'silently missing the older rows. The `datasource-driver-mongo-to-mongodb` conversion '
+    + 'converges the stored value at every rehydration seam; it stays on the LIVE load path '
+    + '(unlike the config-key aliases beside it) precisely because `mongo` is still legal — '
+    + 'there is no loud rejection for it to pre-empt, and nothing to lose by converging early. '
+    + 'The rename is what let the driver-selection id and the config-contract id become one '
+    + 'string: `packages/spec`\'s driver vocabulary is now a single table both boot hosts read, '
+    + 'which closed the last fork where `OS_DATABASE_DRIVER=pg` booted under `os start` and was '
+    + 'refused by `os migrate`. `turso`/libSQL joins the same table with a real config contract, '
+    + 'so a libSQL `config` is validated instead of waved through.\n\n'
     + 'The `script` flow node converges on its one real path (#4343). It had four ways to name '
     + 'what it ran and only one of them ran anything: `config.actionType: \'email\' | \'slack\'` '
     + 'were logger-backed stubs that wrote a line, reported success and delivered nothing under '
@@ -1235,6 +1251,7 @@ const step17: MigrationStep = {
     'flow-node-wait-timeout-keys-removed',
     'datasource-read-replicas-removed',
     'datasource-config-driver-key-aliases',
+    'datasource-driver-mongo-to-mongodb',
     'flow-node-script-branch-keys-removed',
     'object-managed-by-system-to-system-data',
     'retry-policy-converged',

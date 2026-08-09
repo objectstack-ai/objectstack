@@ -279,6 +279,12 @@
         "toMajor": 17
       },
       {
+        "surface": "datasource.driver",
+        "to": "datasource driver id 'mongo' → 'mongodb' — the canonical id both boot hosts, the driver package and the published DRIVER_CATALOG already used (#6345)",
+        "conversionId": "datasource-driver-mongo-to-mongodb",
+        "toMajor": 17
+      },
+      {
         "surface": "flow.node.script.config.actionType / flow.node.script.config.template / flow.node.script.config.recipients / flow.node.script.config.variables / flow.node.script.config.script",
         "to": "script flow-node config keys 'actionType' (→ 'function' when it was shorthand for one; otherwise removed — 'email'/'slack' were logger-backed stubs that delivered nothing), plus 'template' / 'recipients' / 'variables' (fed those stubs) and 'script' (inline JS the runtime never executed) (#4343)",
         "conversionId": "flow-node-script-branch-keys-removed",
@@ -1150,6 +1156,12 @@
           "surface": "datasource.config",
           "to": "datasource config keys → canonical per driver: sqlite 'file'/'database' → 'filename', postgres/mysql 'connectionString' → 'url' and 'user' → 'username', mongo 'uri' → 'url' and 'user' → 'username' (#4456 — driver-factory `??` fallback graduation)",
           "conversionId": "datasource-config-driver-key-aliases",
+          "toMajor": 17
+        },
+        {
+          "surface": "datasource.driver",
+          "to": "datasource driver id 'mongo' → 'mongodb' — the canonical id both boot hosts, the driver package and the published DRIVER_CATALOG already used (#6345)",
+          "conversionId": "datasource-driver-mongo-to-mongodb",
           "toMajor": 17
         },
         {

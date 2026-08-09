@@ -95,8 +95,12 @@ describe('MongoConfigSchema', () => {
 });
 
 describe('MongoDriverSpec', () => {
+  // `mongodb` since #6345: the canonical driver id was renamed to the spelling
+  // both boot hosts and `@objectstack/driver-mongodb` already used, so driver
+  // selection and config-contract selection are one string. `mongo` stays an
+  // accepted ALIAS — pinned in `config-registry.test.ts`.
   it('should have correct id', () => {
-    expect(MongoDriverSpec.id).toBe('mongo');
+    expect(MongoDriverSpec.id).toBe('mongodb');
   });
 
   it('should have correct label', () => {

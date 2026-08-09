@@ -161,7 +161,8 @@ export interface QueryOptions {
 
 /**
  * Canonical query options using Spec protocol field names.
- * This is the recommended interface for `data.find()` queries.
+ * This is the vocabulary `data.find()` still accepts — `find` itself
+ * carries `@deprecated`; new code should call `data.query()` instead.
  *
  *  Canonical field mapping (QueryAST-aligned):
  *   - `where`   — filter conditions (replaces legacy `filter`/`filters`)

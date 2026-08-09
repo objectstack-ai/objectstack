@@ -3173,7 +3173,11 @@ const DATASOURCE_CONFIG_KEY_ALIASES: Readonly<
   'sqlite-wasm': [['file', 'filename'], ['database', 'filename']],
   postgres: [['connectionString', 'url'], ['user', 'username']],
   mysql: [['connectionString', 'url'], ['user', 'username']],
-  mongo: [['uri', 'url'], ['user', 'username']],
+  // `mongodb` since #6345 — the canonical id was renamed from `mongo` so the
+  // contract canon matches what both boot hosts, the driver package and every
+  // URL scheme already said. Keyed by the CANONICAL id `resolveDriverId`
+  // returns, so a stored `driver: 'mongo'` still lands here through the alias.
+  mongodb: [['uri', 'url'], ['user', 'username']],
 };
 
 /**
@@ -3269,6 +3273,85 @@ const datasourceConfigDriverKeyAliases: MetadataConversion = {
     },
     // app_db 1 + archive_db 1 + warehouse 2 + orders 1 + events 1 + scratch 0.
     expectedNotices: 6,
+  },
+};
+
+/**
+ * `datasource.driver: 'mongo'` → `'mongodb'` (protocol 17, #6345).
+ *
+ * ## Why a stored value has to move at all
+ *
+ * `mongo` and `mongodb` have both been accepted spellings since #4410, and both
+ * still are — this conversion does NOT rescue a broken boot, and a deployment
+ * that never runs it keeps connecting exactly as before. What moved is the
+ * CANONICAL id: #6345's ruling renamed it to `mongodb`, the spelling both boot
+ * hosts, the driver package (`@objectstack/driver-mongodb`) and every URL scheme
+ * already used, so that the id which selects a driver and the id which selects
+ * its config contract are one string with no mapping layer between them.
+ *
+ * That rename is visible in data because the canonical id is PUBLISHED as
+ * `DRIVER_CATALOG.id` (`@objectstack/service-datasource`), documented as "used
+ * as `datasource.driver`" — it is literally what Studio's connection form writes
+ * into a datasource row. After the rename the form emits `mongodb`, while every
+ * row written before it carries `mongo`. Left alone, one deployment's datasource
+ * list holds two spellings of one driver, and any surface that matches a stored
+ * `driver` against the published catalog id (a form pre-selecting the current
+ * driver, a grouped list, an equality filter) silently fails to match the older
+ * rows. So the stored value converges here rather than each reader learning to
+ * accept both.
+ *
+ * ## Why D2 and not D3
+ *
+ * There is a concrete stored value with a lossless, behaviour-preserving
+ * rewrite, which is the D2 test exactly. `mongo` and `mongodb` resolve to the
+ * same contract and build the same driver, before and after, so replaying this
+ * cannot change where any data lives — contrast
+ * {@link datasourceConfigDriverKeyAliases}, whose scope guard exists because
+ * rewriting a sqlite `path:` WOULD have moved a database.
+ *
+ * ## Why it stays on the LIVE load path
+ *
+ * Unlike the key-alias conversion above, `mongo` is not a spelling the authoring
+ * gate rejects — it is still a legal alias, deliberately, so that nothing breaks
+ * for a deployment that skipped the migration. There is therefore no loud
+ * rejection for a live-window entry to pre-empt, and every rehydration seam
+ * converging on one spelling is the whole point.
+ */
+const datasourceDriverMongoToMongodb: MetadataConversion = {
+  id: 'datasource-driver-mongo-to-mongodb',
+  toMajor: 17,
+  surface: 'datasource.driver',
+  summary:
+    "datasource driver id 'mongo' → 'mongodb' — the canonical id both boot hosts, the driver "
+    + 'package and the published DRIVER_CATALOG already used (#6345)',
+  apply(stack, emit) {
+    return mapDatasources(stack, (ds, path) => {
+      // Only the exact legacy canon, trimmed and lower-cased the same way
+      // `resolveDriverId` reads it. `mongodb` is already canonical, and any other
+      // spelling (a plugin driver, a typo) is not this conversion's business.
+      if (typeof ds.driver !== 'string' || ds.driver.trim().toLowerCase() !== 'mongo') return ds;
+      emit({ from: 'mongo', to: 'mongodb', path: `${path}.driver` });
+      return { ...ds, driver: 'mongodb' };
+    });
+  },
+  fixture: {
+    before: {
+      datasources: [
+        { name: 'events', driver: 'mongo', config: { url: 'mongodb://mongo.internal:27017/events' } },
+        // Already canonical — untouched, and emits nothing.
+        { name: 'audit', driver: 'mongodb', config: { url: 'mongodb://mongo.internal:27017/audit' } },
+        // A different driver whose id merely CONTAINS the string: never rewritten.
+        { name: 'cache', driver: 'com.vendor.mongolike', config: { url: 'x://y' } },
+      ],
+    },
+    after: {
+      datasources: [
+        { name: 'events', driver: 'mongodb', config: { url: 'mongodb://mongo.internal:27017/events' } },
+        { name: 'audit', driver: 'mongodb', config: { url: 'mongodb://mongo.internal:27017/audit' } },
+        { name: 'cache', driver: 'com.vendor.mongolike', config: { url: 'x://y' } },
+      ],
+    },
+    expectedNotices: 1,
   },
 };
 
@@ -5420,6 +5503,12 @@ export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConv
     jobIdRemoved,
     translationValidationMessagesRemoved,
     datasourceConfigDriverKeyAliases,
+    // AFTER `datasourceConfigDriverKeyAliases`: that one keys its rename pairs
+    // by canonical driver id, and a stored `driver: 'mongo'` reaches them
+    // through the alias either way — but running the id rename second keeps the
+    // two notices in the order an operator reads them (config keys fixed under
+    // the driver they were written for, then the driver id itself converged).
+    datasourceDriverMongoToMongodb,
     // AFTER `flowNodeScriptConfigAliases`: the shorthand-`actionType` rule asks
     // whether `config.function` is set, and that rename is what sets it.
     flowNodeScriptBranchKeysRemoved,

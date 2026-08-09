@@ -98,17 +98,25 @@ describe('applyConversionsToStoredItem (stored sys_metadata rows, #3903)', () =>
   // one spelling per key (deleting the fallbacks without this replay would
   // silently move a sqlite `file:` row's data to `:memory:`).
   describe('stored datasource rows (datasource-config-driver-key-aliases, #4456)', () => {
+    // The fourth column is the driver id the stored pass SERVES, which differs
+    // from the stored one for exactly one row: #6345 renamed the canonical mongo
+    // id to `mongodb`, and `datasource-driver-mongo-to-mongodb` converges the
+    // stored spelling in the same replay. Both conversions run over one row here,
+    // which is the case worth pinning — the config-key rename is keyed by
+    // canonical driver id, so it has to keep landing for a row whose id is itself
+    // being renamed.
     it.each([
-      ['sqlite', { file: './data/app.db' }, { filename: './data/app.db' }],
-      ['sqlite', { database: './data/app.db' }, { filename: './data/app.db' }],
-      ['postgres', { connectionString: 'postgresql://db/x', user: 'svc' }, { url: 'postgresql://db/x', username: 'svc' }],
-      ['mysql', { host: 'db', database: 'orders', user: 'svc' }, { host: 'db', database: 'orders', username: 'svc' }],
-      ['mongo', { uri: 'mongodb://db/x', user: 'svc' }, { url: 'mongodb://db/x', username: 'svc' }],
-    ])('serves a stored %s row with legacy config keys canonical', (driver, config, expected) => {
+      ['sqlite', { file: './data/app.db' }, { filename: './data/app.db' }, 'sqlite'],
+      ['sqlite', { database: './data/app.db' }, { filename: './data/app.db' }, 'sqlite'],
+      ['postgres', { connectionString: 'postgresql://db/x', user: 'svc' }, { url: 'postgresql://db/x', username: 'svc' }, 'postgres'],
+      ['mysql', { host: 'db', database: 'orders', user: 'svc' }, { host: 'db', database: 'orders', username: 'svc' }, 'mysql'],
+      ['mongo', { uri: 'mongodb://db/x', user: 'svc' }, { url: 'mongodb://db/x', username: 'svc' }, 'mongodb'],
+      ['mongodb', { uri: 'mongodb://db/x', user: 'svc' }, { url: 'mongodb://db/x', username: 'svc' }, 'mongodb'],
+    ])('serves a stored %s row with legacy config keys canonical', (driver, config, expected, servedDriver) => {
       const row = { name: 'legacy_ds', driver, config, origin: 'runtime' };
       const out = applyConversionsToStoredItem('datasource', row) as { config: Record<string, unknown> };
       expect(out.config).toEqual(expected);
-      expect(out).toMatchObject({ name: 'legacy_ds', driver, origin: 'runtime' });
+      expect(out).toMatchObject({ name: 'legacy_ds', driver: servedDriver, origin: 'runtime' });
     });
 
     it('leaves `database` alone for the drivers where it is canonical', () => {

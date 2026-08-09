@@ -83,9 +83,20 @@ export type PoolUnsupportedDriverId = (typeof POOL_UNSUPPORTED_DRIVER_IDS)[numbe
 /**
  * Does this driver id read a declared `datasource.pool`?
  *
- * `true` for the pooled built-ins (`postgres` / `mysql` / `mongo`) **and** for
+ * `true` for the pooled built-ins (`postgres` / `mysql` / `mongodb`) **and** for
  * every id outside the built-in table — an unknown id is not ours to judge, so
  * it is left alone rather than rejected against a contract we do not ship.
+ *
+ * `turso` answers `true` as well, and did so before #6345 made it a builtin
+ * (then via the unknown-id branch, now via "not in the rejected set") — so this
+ * function's verdict for it is unchanged. Whether that verdict is RIGHT is a
+ * separate, pre-existing question this card deliberately does not answer:
+ * `TursoDriverConfig` has no `min`/`max`, only `concurrency`, and in local mode
+ * the driver is a better-sqlite3 `SqlDriver` — the very engine
+ * {@link POOL_UNSUPPORTED_DRIVER_IDS} rejects a `pool` block for. A declared
+ * `pool` on a turso datasource is therefore dropped in silence today. Changing
+ * that is a new rejection on an authoring surface and needs its own ruling; see
+ * the #6345 PR's follow-ups.
  */
 export function driverReadsDeclaredPool(driver: unknown): boolean {
   const id = resolveDriverId(driver);
@@ -168,7 +179,7 @@ export function unsupportedPoolMessage(driver: string, datasourceName?: string):
   return (
     `${subject} declares a \`pool\` block, but the '${driver}' driver does not read it: ${reason} ` +
     `Remove \`pool\` from this datasource declaration; it stays meaningful on the pooled drivers ` +
-    `(postgres / mysql / mongo).`
+    `(postgres / mysql / mongodb).`
   );
 }
 

@@ -14,6 +14,7 @@
  * the metadata-driven behaviours.
  */
 import type { Hook, HookContext } from '@objectstack/spec/data';
+import { HookSchema } from '@objectstack/spec/data';
 import type { Expression } from '@objectstack/spec';
 import type { Logger } from '@objectstack/spec/contracts';
 import type { HookHandler } from './engine.js';
@@ -66,6 +67,34 @@ const noopLogger: HookDiagnosticsLogger = {
   warn: () => {},
   error: () => {},
 };
+
+/**
+ * The values `HookSchema` declares for an omitted `retryPolicy` key — READ from
+ * the declaration, never restated here (#6832).
+ *
+ * `wrapDeclarativeHook` used to answer "how many times does an under-specified
+ * hook retry?" with a hand-written `?? 0`, while `hook.zod.ts` answered `3` (and
+ * `1000` for the backoff). Which number you got depended on whether the metadata
+ * had been through `HookSchema` — `defineStack` / `PUT /meta` / Studio parse and
+ * got 3, this public export and `hook-binder.ts`'s own call did not and got 0.
+ * That is verbatim the divergence #4247 removed from flow `errorHandling`, whose
+ * ruling `flow.zod.ts` still carries: **one contract, one number**. Reading the
+ * numbers out of the schema is what makes there be only one — a third key added
+ * to `hook.retryPolicy` needs no edit on this side.
+ *
+ * The value is resolved on first use, not at module load: `HookSchema` is a
+ * `lazySchema` precisely so its closures are never allocated in a process that
+ * binds no hooks.
+ */
+let declaredRetryPolicy: { maxRetries: number; backoffMs: number } | undefined;
+function retryPolicyDefaults(): { maxRetries: number; backoffMs: number } {
+  // Parsing `{}` asks the schema what an empty-but-present block means, which is
+  // exactly the question the executor has to answer. `.unwrap()` steps past the
+  // `.optional()`; the ABSENCE of the block is a different question, answered at
+  // the call site.
+  declaredRetryPolicy ??= HookSchema.shape.retryPolicy.unwrap().parse({});
+  return declaredRetryPolicy;
+}
 
 /**
  * A hook declared a `condition` and the platform could not work out its value
@@ -308,8 +337,23 @@ export function wrapDeclarativeHook(
     }
   }
 
-  const retryMax = Math.max(0, Number(meta.retryPolicy?.maxRetries ?? 0));
-  const retryBackoffMs = Math.max(0, Number(meta.retryPolicy?.backoffMs ?? 0));
+  // `retryPolicy` is `.optional()` with NO `.default({})`, so the block's ABSENCE
+  // and its EMPTINESS are two different declarations and stay two different
+  // answers (#6832):
+  //
+  //   - no `retryPolicy` at all      → no retry policy was declared → 0 / 0, and
+  //     the parsed path agrees: `HookSchema` leaves the key `undefined`.
+  //   - `retryPolicy: {}`, or a block with only one key set → the author DID ask
+  //     for retries; each omitted key takes the value the schema declares for it.
+  //
+  // Only the second case was broken. #4247's answer — delete the executor's
+  // fallback and let the parsed default stand — does not transplant here, because
+  // the whole point is a path that never parses; and its mirror image, a bare
+  // `?? 3`, would be worse than the defect: every hook that never wrote a
+  // `retryPolicy` would start retrying three times.
+  const declaredRetry = meta.retryPolicy ? retryPolicyDefaults() : undefined;
+  const retryMax = Math.max(0, Number(meta.retryPolicy?.maxRetries ?? declaredRetry?.maxRetries ?? 0));
+  const retryBackoffMs = Math.max(0, Number(meta.retryPolicy?.backoffMs ?? declaredRetry?.backoffMs ?? 0));
   const timeoutMs = typeof meta.timeout === 'number' && meta.timeout > 0 ? meta.timeout : undefined;
   const onError = meta.onError ?? 'abort';
   // `async` is only meaningful for after* events; ignore on before* (we must

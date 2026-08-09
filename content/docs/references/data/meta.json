@@ -34,6 +34,7 @@
     "driver-mysql",
     "driver-postgres",
     "driver-sqlite",
+    "driver-turso",
     "field-value"
   ]
 }
