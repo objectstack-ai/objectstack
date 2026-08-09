@@ -668,8 +668,8 @@ describe('#4226 — sort / select / expand on the list path (real ObjectQL engin
         //
         // When that lands, this test SHOULD go red. Update it then; do not
         // reach for it as evidence that the direct path is fine.
-        const asc = await engine.find('showcase_task', { orderBy: [{ field: 'sort_key', order: 'asc' }] } as any);
-        const desc = await engine.find('showcase_task', { orderBy: [{ field: 'sort_key', order: 'desc' }] } as any);
+        const asc = await engine.find('showcase_task', { orderBy: [{ field: 'sort_key', order: 'asc' }] });
+        const desc = await engine.find('showcase_task', { orderBy: [{ field: 'sort_key', order: 'desc' }] });
         expect(asc.map((r: any) => r.title)).toEqual(INSERTION_ORDER);
         // Direction-blind, and the rows carry the values they were meant to be
         // ordered by — the exact signature from the issue's transcript.
