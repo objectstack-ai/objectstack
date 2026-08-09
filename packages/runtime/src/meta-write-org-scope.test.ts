@@ -210,11 +210,22 @@ function makeDispatcher(protocol: unknown, engine: any, activeOrganizationId: st
     return new HttpDispatcher(kernel);
 }
 
-/** An authenticated request context — the anonymous-deny gate (#3963) is unconditional. */
+/**
+ * An authenticated, metadata-authoring request context.
+ *
+ * Two gates run before any of the code under test here, and BOTH are granted
+ * explicitly so this file is order- and shard-independent — it must never
+ * depend on a capability another suite happens to have registered:
+ *
+ *  - the anonymous-deny gate (#3963), unconditional ⇒ a real `userId`;
+ *  - the ADR-0066 D1 authoring capability on `PUT /meta/:type/:name`
+ *    (#6603 / PR #7027) ⇒ `manage_metadata`, or the door answers 403 and
+ *    never reaches the scoping decision this file is about.
+ */
 const ctx = (): any => ({
     request: { headers: {} },
     environmentId: 'env_1',
-    executionContext: { userId: 'usr_1', systemPermissions: [] },
+    executionContext: { userId: 'usr_1', systemPermissions: ['manage_metadata'] },
 });
 
 function makeStack(activeOrganizationId: string | undefined) {
