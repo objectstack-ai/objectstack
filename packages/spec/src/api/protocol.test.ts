@@ -58,6 +58,7 @@ import {
   GetFieldLabelsRequestSchema,
   GetFieldLabelsResponseSchema,
 } from './protocol.zod';
+import type { ListNotificationsRequest } from './protocol.zod';
 
 describe('ObjectStack Protocol', () => {
 
@@ -270,6 +271,69 @@ describe('ObjectStack Protocol', () => {
       unreadCount: 1,
     }).success).toBe(true);
     expect(MarkNotificationsReadRequestSchema.safeParse({ ids: ['n1', 'n2'] }).success).toBe(true);
+  });
+
+  /**
+   * [#6361] `GET /api/v1/notifications` declares no pagination — on either half.
+   *
+   * Maintainer ruling 2026-08-07 (Option A), ruled jointly with #6363: one
+   * capability's two halves are never half-deleted. `cursor` was declared on the
+   * request AND the response and honoured on neither, and `limit` declared a
+   * `.default(20)` no request path has ever applied (the server windows at 50).
+   *
+   * Asserted on the SHAPES rather than only through `safeParse`, and that choice
+   * is the whole point: both retired keys were `optional`, so every parse was
+   * green before the removal and every parse is green after it. A value-level
+   * test cannot see this class of defect at all — which is exactly why the
+   * family's double-assertion ratchet (#3877 Stage D) was blind to it.
+   */
+  it('[#6361] tombstones `cursor` on BOTH halves, with the prescription', () => {
+    // BOTH halves or neither — the ruling's "one capability, two halves" clause,
+    // asserted rather than trusted. A half-deletion is the specific outcome the
+    // maintainer ruled out, so it gets a test rather than a comment.
+    for (const [half, schema] of [
+      ['request', ListNotificationsRequestSchema],
+      ['response', ListNotificationsResponseSchema],
+    ] as const) {
+      const probe = half === 'request'
+        ? { read: false, limit: 10, cursor: 'n_42' }
+        : { notifications: [], unreadCount: 0, cursor: 'n_42' };
+      const result = schema.safeParse(probe);
+
+      // Refused, not stripped. Neither schema is `.strict()`, so a BARE DELETION
+      // would have parsed this cleanly and dropped the key — the silent-strip
+      // class (#3733, ADR-0104), i.e. the very defect this issue reports,
+      // re-created one layer down. That is why the assertion is on the refusal.
+      expect(result.success, `${half} half must refuse a retired \`cursor\``).toBe(false);
+      const issue = result.error!.issues.find((i) => i.path.join('.') === 'cursor');
+      expect(issue, `${half} half must fault on the \`cursor\` path`).toBeDefined();
+
+      // The message IS the migration doc (retiredKey's contract), so its
+      // substance is asserted, not merely its existence: what was removed, that
+      // the route is not paginated, and the replacement to reach for.
+      expect(issue!.message).toMatch(/`cursor` was removed from GET \/api\/v1\/notifications/);
+      expect(issue!.message).toMatch(/not paginated/i);
+      expect(issue!.message).toMatch(/limit/);
+      expect(issue!.message).toMatch(/#6361/);
+    }
+
+    // `tsc` is the first channel retiredKey buys — the input type is `never`.
+    // Pinned as a compile-time fact so deleting the tombstone cannot pass as a
+    // refactor. @ts-expect-error fails the build if the key becomes writable.
+    // @ts-expect-error `cursor` is retired: its input type is `never`.
+    const rejectedByTsc: ListNotificationsRequest = { cursor: 'n_42' };
+    void rejectedByTsc;
+
+    // The surviving keys, named. `limit` is plainly optional now — parsing an
+    // empty query stamps NO number onto it, where it used to stamp 20 that no
+    // request path had ever applied. Stated through the parse result so it holds
+    // if Zod's internal representation of a default ever moves.
+    expect(Object.keys((ListNotificationsRequestSchema as any).shape)).toEqual(['read', 'type', 'limit', 'cursor']);
+    const parsedEmpty = ListNotificationsRequestSchema.parse({});
+    expect(Object.prototype.hasOwnProperty.call(parsedEmpty, 'limit')).toBe(false);
+    expect(ListNotificationsRequestSchema.parse({ limit: 7 }).limit).toBe(7);
+    // The response half keeps exactly #6363's landed business, and gains nothing.
+    expect(ListNotificationsResponseSchema.safeParse({ notifications: [], unreadCount: 0 }).success).toBe(true);
   });
 
   /**

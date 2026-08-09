@@ -1083,7 +1083,12 @@ export const DEFAULT_NOTIFICATION_ROUTES: RestApiRouteRegistration = {
       category: 'notification',
       public: false,
       summary: 'List notifications',
-      description: 'Returns paginated list of notifications for the current user',
+      // NOT "paginated" (#6361). The route answers the newest `limit` rows and
+      // stops; there is no continuation token on either half of the contract
+      // since `cursor` was removed in protocol 17. The catalog is a
+      // machine-readable surface (Route & surface ownership rule 4), so a
+      // pagination claim here is read by SDKs and codegen as a capability.
+      description: 'Returns the newest window of notifications for the current user (not paginated)',
       tags: ['Notifications'],
       responseSchema: 'ListNotificationsResponseSchema',
       cacheable: false,

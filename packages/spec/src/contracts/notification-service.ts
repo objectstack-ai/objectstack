@@ -62,9 +62,19 @@ export interface NotificationResult {
 
 /**
  * Filters for {@link INotificationService.listInbox}. Mirrors
- * `ListNotificationsRequestSchema` minus `cursor` — no implementation paginates
- * by cursor yet, and declaring a parameter nothing honours is the
- * `declared ≠ enforced` gap this file exists to close (#4127).
+ * `ListNotificationsRequestSchema` — now EXACTLY, key for key.
+ *
+ * It used to mirror it "minus `cursor`": #4127 dropped the key from this
+ * internal contract because no implementation paginates by cursor, while the
+ * wire schema kept declaring it to callers for another nine majors. That split
+ * is what #6361 closed — the wire half was removed in protocol 17 (maintainer
+ * ruling 2026-08-07, Option A), so the two faces of one query finally agree and
+ * this interface no longer has to explain a subtraction. The `declared ≠
+ * enforced` gap this file exists to close (#4127) is closed on both faces.
+ *
+ * `limit` stays advisory on purpose: implementations CLAMP rather than refuse
+ * (the platform inbox windows at 50 and bounds requests into 1..200), which is
+ * why neither this interface nor the wire schema declares a maximum.
  */
 export interface InboxQuery {
     /** Filter by read state; omitted returns both. */

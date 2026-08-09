@@ -38,6 +38,7 @@ import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
 import { MessagingServicePlugin, MessagingService } from '@objectstack/service-messaging';
 import {
   envelopeViolations,
+  ListNotificationsRequestSchema,
   ListNotificationsResponseSchema,
   MarkNotificationsReadResponseSchema,
   MarkAllNotificationsReadResponseSchema,
@@ -230,15 +231,28 @@ describe('[#5792] the notification wire bodies conform to the schemas the catalo
   //
   // Both were pinned here as the measured behaviour of `origin/main`, on the
   // note that whichever way #6361 / #6363 were ruled, these assertions are the
-  // ones that must flip. #6363 has been ruled (2026-08-07, Option A: make the
-  // declaration true) and its assertion has flipped — it now pins the fix, over
-  // the wire, which is the only place the whole stack is in play. The `cursor`
-  // half is unchanged: it is one capability's two halves and is being retired
-  // with #6361, so it stays pinned as measured until that lands.
+  // ones that must flip. BOTH have now been ruled (2026-08-07, Option A, and
+  // ruled JOINTLY — one capability's two halves are never half-deleted), and
+  // both assertions have flipped:
+  //
+  //   * #6363 made the declaration true — `unreadCount` really is the total;
+  //   * #6361 removed the declaration instead — `cursor` is gone from the
+  //     request half, the response half and the SDK producer, because there was
+  //     no implementation to make it true ABOUT. Opposite repairs, same rule:
+  //     declared must equal enforced.
+  //
+  // The two directions are why the pair is worth keeping side by side. Note the
+  // #6361 assertion below now pins something subtler than the #6363 one: the
+  // WIRE did not change (an unknown `?cursor=` was ignored before and is
+  // ignored now), so what it proves is that the CONTRACT stopped promising the
+  // thing the wire never delivered. A test that only checked "page2 === page1"
+  // would be just as green before and after, which is exactly the vacuity this
+  // family keeps paying for.
   //
   // The Stage D input stands either way, and is if anything sharper now: the
   // ratchet still cannot see EITHER fact. Both had to be written by hand, and
-  // the fix below would have been just as invisible to it as the defect was.
+  // the fixes below would have been just as invisible to it as the defects were
+  // — a removed optional key changes no parse verdict at all.
   describe('[#6361 / #6363] the gaps the double assertion cannot see', () => {
     it('[#6363] `unreadCount` is the TOTAL the schema describes, and survives a smaller window', async () => {
       const all = await getJson(GAP_USER, '/api/v1/notifications');
@@ -261,22 +275,46 @@ describe('[#5792] the notification wire bodies conform to the schemas the catalo
       expect(ListNotificationsResponseSchema.safeParse(windowed).success).toBe(true);
     });
 
-    it('[#6361 / #6363] `cursor` is declared on both sides and honoured on neither', async () => {
+    it('[#6361] `cursor` is declared on NEITHER side now, and the wire is unchanged', async () => {
       const page1 = await getJson(GAP_USER, '/api/v1/notifications?limit=2');
       const ids1 = page1.notifications.map((n: any) => n.id);
 
-      // Response half (#6363): the declared `cursor` key is never emitted.
+      // Both halves are TOMBSTONED — retired, not silently dropped. Asserted as
+      // a refusal on each schema, because a bare deletion on a non-strict object
+      // would have re-created this very issue's defect (silent strip, ADR-0104).
       expect(Object.prototype.hasOwnProperty.call(page1, 'cursor')).toBe(false);
-      expect(declaredListKeys().has('cursor')).toBe(true);
+      for (const schema of [ListNotificationsRequestSchema, ListNotificationsResponseSchema]) {
+        const refused = schema.safeParse({ notifications: [], unreadCount: 0, cursor: 'n_42' });
+        expect(refused.success).toBe(false);
+        expect(refused.error!.issues.some((i) => i.path.join('.') === 'cursor')).toBe(true);
+      }
 
-      // Request half (#6361): sending the declared `cursor` returns the SAME
-      // page. An SDK caller paginating by the published contract loops forever.
-      const page2 = await getJson(GAP_USER, `/api/v1/notifications?limit=2&cursor=${encodeURIComponent(ids1[ids1.length - 1])}`);
-      expect(page2.notifications.map((n: any) => n.id)).toEqual(ids1);
-
-      // Both pages conform — the whole reason this needed measuring by hand.
+      // ⚠️ WIRE BEHAVIOUR DELIBERATELY UNCHANGED, measured over a real socket:
+      // a request still carrying `?cursor=` is IGNORED, not refused. Nothing
+      // validates this query against a schema, so the unknown key is simply not
+      // read — it returned the same window before the removal and it returns the
+      // same window after. Removing a declaration must not silently start
+      // rejecting traffic, and this is the assertion that would catch it.
+      const stillSent = await getJson(
+        GAP_USER,
+        `/api/v1/notifications?limit=2&cursor=${encodeURIComponent(ids1[ids1.length - 1])}`,
+      );
+      expect(stillSent.notifications.map((n: any) => n.id)).toEqual(ids1);
       expect(ListNotificationsResponseSchema.safeParse(page1).success).toBe(true);
-      expect(ListNotificationsResponseSchema.safeParse(page2).success).toBe(true);
+      expect(ListNotificationsResponseSchema.safeParse(stillSent).success).toBe(true);
+    });
+
+    it('[#6361] the removed `limit` default was never in effect — the server window still answers', async () => {
+      // The other half of the ruling, over the wire. The declaration used to say
+      // `default(20)`; the server has always answered its own window. With the
+      // fiction removed, the two agree by SAYING LESS rather than by changing
+      // behaviour — so the fixture's whole inbox must still come back on a
+      // request that names no limit.
+      const all = await getJson(GAP_USER, '/api/v1/notifications');
+      expect(all.notifications.length).toBeGreaterThan(1);
+      // Never truncated at the retired declared default.
+      expect(all.notifications.length).toBeLessThanOrEqual(50);
+      expect(ListNotificationsRequestSchema.parse({})).not.toHaveProperty('limit');
     });
   });
 });

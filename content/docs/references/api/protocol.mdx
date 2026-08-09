@@ -1073,8 +1073,8 @@ Install package response
 | :--- | :--- | :--- | :--- |
 | **read** | `boolean` | optional | Filter by read status |
 | **type** | `string` | optional | Filter by notification type |
-| **limit** | `number` | ✅ | Maximum number of notifications to return |
-| **cursor** | `string` | optional | Pagination cursor |
+| **limit** | `number` | optional | Maximum number of notifications to return — the newest N. Omitted leaves the window to the server, which is not a fixed part of this contract: the platform inbox answers 50 and clamps any requested value into 1..200 rather than refusing it. This endpoint is not paginated — there is no continuation token, so a larger window is the only way to see more. |
+| **cursor** | `never` | optional | [REMOVED] `cursor` was removed from GET /api/v1/notifications in @objectstack/spec 17 (#6361, ADR-0049) — it was declared on the request AND the response and honoured on neither: the server reads only `read`/`type`/`limit`, and no emit site ever wrote the response key, so a caller paginating by it re-read the first window forever with no error and no 400. Delete the key; the `cursor` argument of `client.notifications.list()` was removed with it. This route is NOT paginated — it answers the newest `limit` notifications and stops, so ask for a bigger window (`limit`, clamped by the server into 1..200) instead of a next page. A first-class inbox cursor, if ever built, will be a response-minted opaque token, not this key. |
 
 
 ---
@@ -1085,9 +1085,9 @@ Install package response
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **notifications** | `{ id: string; type: string; title: string; body: string; … }[]` | ✅ | List of notifications |
+| **notifications** | `{ id: string; type: string; title: string; body: string; … }[]` | ✅ | List of notifications — the newest window, not a page |
 | **unreadCount** | `number` | ✅ | Total number of unread notifications |
-| **cursor** | `string` | optional | Next page cursor |
+| **cursor** | `never` | optional | [REMOVED] `cursor` was removed from GET /api/v1/notifications in @objectstack/spec 17 (#6361, ADR-0049) — it was declared on the request AND the response and honoured on neither: the server reads only `read`/`type`/`limit`, and no emit site ever wrote the response key, so a caller paginating by it re-read the first window forever with no error and no 400. Delete the key; the `cursor` argument of `client.notifications.list()` was removed with it. This route is NOT paginated — it answers the newest `limit` notifications and stops, so ask for a bigger window (`limit`, clamped by the server into 1..200) instead of a next page. A first-class inbox cursor, if ever built, will be a response-minted opaque token, not this key. |
 
 
 ---
