@@ -44,6 +44,7 @@ Register a new package in the Control Plane
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **manifestId** | `string` | ✅ | Globally unique reverse-domain package identifier (e.g. com.acme.crm) |
+| **namespace** | `string` | optional | Metadata namespace claimed by the package (mirrors manifest.namespace; e.g. "crm" → object names "crm_account") |
 | **ownerOrgId** | `string` | ✅ | Owner organization ID |
 | **displayName** | `string` | ✅ | Display name shown in Studio and Marketplace |
 | **description** | `string` | optional | Short package description |
@@ -69,6 +70,7 @@ Register a new package in the Control Plane
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | UUID of the package (stable, never reused) |
 | **manifestId** | `string` | ✅ | Globally unique reverse-domain package identifier (e.g. com.acme.crm) |
+| **namespace** | `string` | optional | Metadata namespace claimed by the package (mirrors manifest.namespace; e.g. "crm" → object names "crm_account") |
 | **ownerOrgId** | `string` | ✅ | Organization ID of the package owner/publisher |
 | **displayName** | `string` | ✅ | Display name shown in Studio and Marketplace |
 | **description** | `string` | optional | Short package description |
