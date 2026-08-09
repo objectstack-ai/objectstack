@@ -2,6 +2,8 @@
 "@objectstack/spec": minor
 ---
 
+<!-- adr-0087: not-required (no-migration-prescription) this change retires NO key — the endpoint vocabulary is byte-identical and only the unknown-key POSTURE moves, from strip to reject. There is nothing for `objectstack migrate meta` to rewrite: an undeclared key was never honoured in the first place (it was dropped at parse, so it never reached storage, the matcher or the executor), which means no stored shape carries it and no authored shape that ever WORKED becomes invalid. The upgrade channel is the schema rejection itself, and it is strictly more specific than a ledger line could be: it names the offending key at the author's own path and carries either a rename (`cacheTTL` → `cacheTtl`) or a wrong-layer prescription (`namespace` → `manifest.namespace`; the six stored-envelope keys → not authorable at all). A ledger entry could only say "a key you may have written might have been a typo", which prescribes nothing and dilutes the registry. The one ADR-0087 entry that DOES govern this surface, `declarative-apis-endpoints-live`, is already registered for protocol 17 and is updated by this PR rather than duplicated. Measured blast radius: 0 affected entries across `examples/*` (2 endpoints) and the `cloud` repo (0 endpoints). -->
+
 `ApiEndpointSchema` rejects undeclared keys (#5384), and the author-state type is named on the upgrade path (#5227)
 
 `api` became a registered metadata type at #5312, which made
