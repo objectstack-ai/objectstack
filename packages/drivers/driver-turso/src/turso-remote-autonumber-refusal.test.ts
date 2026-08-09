@@ -63,12 +63,21 @@
  * green, since none of them depends on the refusal existing.
  *
  * Measured with `refuseUngeneratableRemoteAutonumber`'s body emptied
- * (`return;`), and the prediction held with one addition worth recording: the
- * REMOTE block goes 0/6, and every one of the six failures is the "it resolved"
- * message carrying `case_number=null` in it — so the reverted suite does not
- * merely go red, it reprints the defect. The 12 cases outside that block stay
- * green, confirming they pin facts that are true on both sides of the change and
- * would survive a future re-implementation of A.
+ * (`return;`) — `8 failed | 923 passed` across the package, and the prediction
+ * held:
+ *
+ *   - this file's REMOTE block goes 0/6, every failure through "it resolved";
+ *   - the two rewritten boundary pins (`turso-autonumber-resync.test.ts`,
+ *     `turso-autonumber-batch-resync.test.ts`) fail the same way, which is the
+ *     point of rewriting rather than deleting them — they now go red for the
+ *     defect too;
+ *   - the 11 cases outside the REMOTE block stay green, confirming they pin
+ *     facts true on both sides of the change and would survive a future
+ *     re-implementation of A.
+ *
+ * One detail not predicted and worth keeping: the reverted suite does not merely
+ * go red, it REPRINTS the defect — every failure message carries the resolved
+ * row with `"case_number":null` (or `""` for the empty-string case) inside it.
  */
 
 import { describe, it, expect, afterEach } from 'vitest';
