@@ -658,3 +658,55 @@ describe('unknown keys are rejected, not stripped (#4001)', () => {
     });
   });
 });
+
+/**
+ * [#6698] The `modifyAllRecords` `.describe()` is a published contract, not a
+ * code comment: it is the field help Studio renders inline, and it is the cell
+ * the generated `content/docs/references/security/permission.mdx` table carries
+ * — so an author (very often an AI maintainer, ADR-0033) deciding whether this
+ * bit covers their object reads THIS text and nothing else.
+ *
+ * It used to read `Modify All Data (Bypass Sharing)` beside a JSDoc block
+ * promising a bypass of "Sharing Rules and Ownership checks". On an object with
+ * NO owner field it bypasses neither: record sharing does not enforce there at
+ * all (`checkEdit` / `checkDelete` answer `abstain` before the bypass is ever
+ * probed, #6428), so the platform's own row-level write floor
+ * `created_by == current_user.id` (#1985) survives and the by-id write is still
+ * refused — measured and pinned in plugin-security's
+ * `row-write-widener-composition.test.ts`.
+ *
+ * The assertions read the text back OUT of the schema and match the FACTS it
+ * must carry rather than its wording: re-spell the qualification however reads
+ * best and this stays green; drop it — or empty the `.describe()`, which is why
+ * every assertion here is POSITIVE — and it goes red. Both halves are pinned on
+ * purpose: a declaration that forgot to say the bit is a genuine super-user
+ * bypass would be the opposite lie, since on the common owner-bearing object it
+ * does exactly what it says.
+ */
+describe('[#6698] modifyAllRecords declares its bypass AND the limit of that bypass', () => {
+  const description = ObjectPermissionSchema.shape.modifyAllRecords.description ?? '';
+
+  /** Idioms that SCOPE the bypass to the objects record sharing enforces on. */
+  const OWNERLESS_LIMIT =
+    /owner-?less|no owner field|without an owner|objects (that )?(record )?sharing enforces on|as (record )?sharing computes/i;
+  /** Idioms naming the gate that SURVIVES the bypass on such an object. */
+  const SURVIVING_FLOOR = /created_by|ownership floor|write floor|abstain/i;
+
+  it('still tells the author this is a super-user bypass, not an inert bit', () => {
+    expect(description, 'modifyAllRecords must carry a description — it is the form field help')
+      .not.toBe('');
+    expect(description, 'the capability must stay nameable in the text').toMatch(/modify all data/i);
+    expect(description, 'on an owner-bearing object the bypass is real and must stay legible')
+      .toMatch(/bypass/i);
+  });
+
+  it('scopes the bypass to the objects record sharing actually enforces on', () => {
+    expect(description, `no owner-less qualification found in: ${description}`)
+      .toMatch(OWNERLESS_LIMIT);
+  });
+
+  it('discloses the platform write floor that survives on an owner-less object', () => {
+    expect(description, `no surviving-floor disclosure found in: ${description}`)
+      .toMatch(SURVIVING_FLOOR);
+  });
+});
