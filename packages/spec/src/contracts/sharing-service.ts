@@ -34,6 +34,14 @@
  *      {@link SharingWriteVerdict} for the measured fail-open that
  *      collapsing the two into one `true` produced (#5492 E2).
  *
+ *   3. **Enforcement runs on the FULL envelope.** Every method on both
+ *      interfaces below adjudicates access, so each takes a complete
+ *      {@link ExecutionContext} — the whole `resolveAuthzContext` result,
+ *      threaded through unchanged — rather than a per-site subset (#6523,
+ *      applying the #6206 ruling). {@link SharingExecutionContext}, the
+ *      six-field shape those parameters used to name, carries the boundary
+ *      and the measured consequence of the narrow spelling.
+ *
  * Manual share CRUD is exposed via `grant()`, `revoke()`, and
  * `listShares()`. The REST layer wires these to
  * `/data/:object/:id/shares`.
@@ -46,6 +54,12 @@
 // drift apart (#6139). Erased at compile time, so this module stays the pure
 // type-declaration surface it has always been — no runtime coupling added.
 import type { TenancyPosture } from '../security/tenancy-posture';
+// Type-only: the full `resolveAuthzContext` envelope. Every enforcement method
+// on {@link ISharingService} and {@link ISharingRuleService} declares its
+// context parameter as this type (#6523, applying the #6206 ruling default —
+// no per-site subset contracts). See {@link SharingExecutionContext} for the
+// boundary that draws and why.
+import type { ExecutionContext } from '../kernel/execution-context.zod.js';
 
 /**
  * Recipient categories a `sys_record_share` ROW may carry — mirrors the
@@ -113,7 +127,67 @@ export interface GrantShareInput {
   reason?: string;
 }
 
-/** Minimal execution-context shape the service needs from callers. */
+/**
+ * ⛔ NOT an enforcement context type (#6523, applying the #6206 ruling of
+ * 2026-08-07: converge on the full envelope, keep no per-site subset).
+ *
+ * ## What this used to be, and what it cost
+ *
+ * This was the declared context parameter of **36 signatures across three
+ * contracts** — `ISharingService` / `ISharingRuleService` here,
+ * `IApprovalService` (12) and `IReportService` (9) — every one of which
+ * ADJUDICATES access. It names six of the `resolveAuthzContext` envelope's
+ * fields and drops the four the ruling called out by name:
+ * `accessible_org_ids` (under the `group` tenancy posture this IS the Layer 0
+ * wall, ADR-0105 D2), `org_user_ids`, `posture` (ADR-0095 D2: resolved once,
+ * carried, never re-derived at the enforcement site) and `tabPermissions`.
+ *
+ * The damage ran in the MIRROR direction of the share-link case (#6206 /
+ * #6430), and that direction is worth stating precisely because it is the one
+ * a reviewer does not expect. Nothing here trimmed a value: the engine
+ * middleware passes its whole execution context down
+ * (`plugin-sharing/src/sharing-plugin.ts` — `buildReadFilter(ctx.object, exec
+ * ?? {})`), so the VALUES arrived complete. It was the declared TYPE that was
+ * narrow, so the receiving implementation could not READ what it had been
+ * handed without casting its way out of its own contract. The measured
+ * specimen, on `main` at the time of writing:
+ *
+ * ```
+ * // plugin-approvals/src/approval-service.ts — isOverrideActor()
+ * const posture = (context as any).posture;
+ * ```
+ *
+ * — a privileged-override gate reaching for ADR-0095's resolved posture
+ * through `as any`, because the contract said the field was not there. An
+ * `as any` on an enforcement input is not a style blemish: it turns off
+ * checking for the whole expression, so the next field read through it is
+ * unverified too, and it makes the honest reading ("this gate consults the
+ * posture") indistinguishable from a typo.
+ *
+ * ## What it is now
+ *
+ * Nothing in `packages/spec/src/contracts` takes this type any more. It stays
+ * EXPORTED and UNCHANGED IN SHAPE for one reason: the three implementations
+ * (`plugin-sharing`, `plugin-approvals`, `plugin-reports`) still annotate
+ * their own method parameters with it, and re-typing them is the consumer
+ * half of this convergence — a separate change with its own review, exactly as
+ * #6430's contract half and its plugin half were separated. It is therefore
+ * MIGRATION RESIDUE, not a vocabulary to reach for. ⛔ Do not add a new use;
+ * ⛔ do not widen it field-by-field, which would rebuild the per-site subset
+ * the ruling removed, one field at a time.
+ *
+ * ## What holds the line (and what cannot)
+ *
+ * TypeScript cannot police this. Structural subtyping makes a value of this
+ * type assignable to {@link ExecutionContext} — all six fields exist there
+ * with compatible types and nothing in the wider type is required — so passing
+ * a narrowed context into an enforcement path still COMPILES, and an
+ * `@ts-expect-error` asserting otherwise would be unsatisfied and fail the
+ * build. What the contract can do, and now does, is declare the enforcement
+ * parameter as the full envelope so that any narrowing is visible AT THE CALL
+ * SITE, and so that an implementation may read the whole envelope it is
+ * already being handed — without `as any`.
+ */
 export interface SharingExecutionContext {
   userId?: string;
   tenantId?: string;
@@ -173,6 +247,16 @@ export type SharingWriteVerdict = 'allow' | 'abstain' | 'deny';
  * complete bypass (no filter, every write gate answers `allow` / `true`) so
  * that platform-internal writers (audit, migrations, the sharing plugin
  * itself) cannot deadlock on their own enforcement.
+ *
+ * ## The context every method takes (#6523, #6206 ruling)
+ *
+ * `context` is the complete {@link ExecutionContext} — the caller's whole
+ * `resolveAuthzContext` envelope, passed through unchanged. Callers MUST NOT
+ * rebuild a subset of it, and implementations may read ALL of it:
+ * `accessible_org_ids` (the `group`-posture Layer 0 wall, ADR-0105 D2),
+ * `org_user_ids`, `systemPermissions`, `posture` (ADR-0095 D2) and
+ * `tabPermissions` included. Which of those a deployment makes load-bearing
+ * depends on its tenancy posture, which the caller cannot know.
  */
 export interface ISharingService {
   /**
@@ -182,7 +266,7 @@ export interface ISharingService {
    */
   buildReadFilter(
     object: string,
-    context: SharingExecutionContext,
+    context: ExecutionContext,
   ): Promise<unknown | null>;
 
   /**
@@ -214,7 +298,7 @@ export interface ISharingService {
   checkEdit(
     object: string,
     recordId: string,
-    context: SharingExecutionContext,
+    context: ExecutionContext,
   ): Promise<SharingWriteVerdict>;
 
   /**
@@ -236,7 +320,7 @@ export interface ISharingService {
   canEdit(
     object: string,
     recordId: string,
-    context: SharingExecutionContext,
+    context: ExecutionContext,
   ): Promise<boolean>;
 
   /**
@@ -255,7 +339,7 @@ export interface ISharingService {
   checkDelete(
     object: string,
     recordId: string,
-    context: SharingExecutionContext,
+    context: ExecutionContext,
   ): Promise<SharingWriteVerdict>;
 
   /**
@@ -277,7 +361,7 @@ export interface ISharingService {
   canDelete(
     object: string,
     recordId: string,
-    context: SharingExecutionContext,
+    context: ExecutionContext,
   ): Promise<boolean>;
 
   /**
@@ -295,7 +379,7 @@ export interface ISharingService {
   canManageShares(
     object: string,
     recordId: string,
-    context: SharingExecutionContext,
+    context: ExecutionContext,
   ): Promise<boolean>;
 
   /**
@@ -311,7 +395,7 @@ export interface ISharingService {
    * nothing). Upserts match on `(object, record, recipient, source)` so a
    * manual grant never clobbers a rule-materialised row (D7).
    */
-  grant(input: GrantShareInput, context: SharingExecutionContext): Promise<RecordShare>;
+  grant(input: GrantShareInput, context: ExecutionContext): Promise<RecordShare>;
 
   /**
    * Remove a share row by id.
@@ -328,7 +412,7 @@ export interface ISharingService {
    */
   revoke(
     shareId: string,
-    context: SharingExecutionContext,
+    context: ExecutionContext,
     scope?: { object: string; recordId: string },
   ): Promise<void>;
 
@@ -344,7 +428,7 @@ export interface ISharingService {
   listShares(
     object: string,
     recordId: string,
-    context: SharingExecutionContext,
+    context: ExecutionContext,
   ): Promise<RecordShare[]>;
 }
 
@@ -438,26 +522,31 @@ export interface SharingRuleEvaluationResult {
  * `sys_record_share` with `source='rule'` and `source_id=rule.id` so
  * stale grants from a rule update can be reconciled without touching
  * manual or team-derived shares.
+ *
+ * Rule management is capability-gated and rule EVALUATION writes grants that
+ * decide other principals' visibility, so every method here takes the full
+ * {@link ExecutionContext} on the same terms as {@link ISharingService}
+ * (#6523).
  */
 export interface ISharingRuleService {
-  defineRule(input: DefineSharingRuleInput, context: SharingExecutionContext): Promise<SharingRuleRow>;
-  listRules(filter: { object?: string; activeOnly?: boolean }, context: SharingExecutionContext): Promise<SharingRuleRow[]>;
-  getRule(idOrName: string, context: SharingExecutionContext): Promise<SharingRuleRow | null>;
-  deleteRule(idOrName: string, context: SharingExecutionContext): Promise<void>;
+  defineRule(input: DefineSharingRuleInput, context: ExecutionContext): Promise<SharingRuleRow>;
+  listRules(filter: { object?: string; activeOnly?: boolean }, context: ExecutionContext): Promise<SharingRuleRow[]>;
+  getRule(idOrName: string, context: ExecutionContext): Promise<SharingRuleRow | null>;
+  deleteRule(idOrName: string, context: ExecutionContext): Promise<void>;
 
   /**
    * Re-evaluate a rule across every record of its object_name and
    * reconcile the resulting `sys_record_share` rows. Admin-initiated;
    * use after rule edits or for backfill.
    */
-  evaluateRule(idOrName: string, context: SharingExecutionContext): Promise<SharingRuleEvaluationResult>;
+  evaluateRule(idOrName: string, context: ExecutionContext): Promise<SharingRuleEvaluationResult>;
 
   /**
    * Incremental evaluation triggered by the lifecycle hook — re-checks
    * every active rule for `object` against this single record and
    * upserts/reconciles only that record's share rows.
    */
-  evaluateAllForRecord(object: string, recordId: string, context: SharingExecutionContext): Promise<SharingRuleEvaluationResult[]>;
+  evaluateAllForRecord(object: string, recordId: string, context: ExecutionContext): Promise<SharingRuleEvaluationResult[]>;
 }
 
 // ─────────────────────────────────────────────────────────────────────

@@ -775,12 +775,19 @@ export const UserFilterFieldSchema = lazySchema(() => strictObject({
  * `packages/spec` and objectui two sources of truth for one contract — the
  * fork #2231's derive-by-reference unification exists to prevent (PD#12).
  *
- * ⚠️ Scope of the promotion: `allowAddTab` declares that the tab bar RENDERS an
- * add-tab affordance. The button objectui renders today carries no click
- * handler, so it is presentational — filed against the renderer as #5236, and
- * deliberately NOT written into the `.describe()`, because a contract that
- * promises "end users can add presets" would be advertising a capability the
- * runtime does not deliver (PD#10).
+ * ⚠️ Scope of the promotion, and its RESOLUTION (#5236 → #6961). At promotion
+ * time `allowAddTab` was described as declaring only that the tab bar RENDERS
+ * an add-tab affordance: the button objectui rendered carried no click handler,
+ * so it was presentational, and the narrower wording was deliberate — a
+ * contract promising "end users can add presets" would have advertised a
+ * capability the runtime did not deliver (PD#10). The maintainer then ruled
+ * **A1 — implement, session-scoped** (#5236, 2026-08-06), objectui#3926
+ * delivered it (`packages/plugin-list/src/UserFilters.tsx` — naming popover,
+ * snapshot of the applied filters, component state only, remove affordance on
+ * the added tab), and the `.describe()` below was upgraded back to the real
+ * semantics. The narrowing was the interim state the ruling closed, not the
+ * contract: the key now promises the behaviour, and PD#10 is satisfied by the
+ * delivery rather than by the hedge.
  *
  * ## What closing flips, and why that flip is wanted (批 6e's question)
  *
@@ -814,7 +821,7 @@ export const UserFiltersSchema = lazySchema(() => strictObject({
   showAllRecords: z.boolean().optional()
     .describe('Show an "All records" tab before the presets (tabs element)'),
   allowAddTab: z.boolean().optional()
-    .describe('Render an "add tab" affordance after the presets (tabs element). Page lists only — object views use `listViews` for named presets'),
+    .describe('Let end users add their own tab after the presets (tabs element): the affordance asks for a name and snapshots the filters currently applied as a new tab. SESSION-SCOPED — an added tab lives only for the current mount, is never written back as metadata (ADR-0047), and carries a remove control the authored presets do not. Page lists only — object views use `listViews` for named presets'),
 }).describe('End-user quick-filter configuration (Airtable "User filters" parity)'));
 
 /**
