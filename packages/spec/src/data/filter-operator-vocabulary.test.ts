@@ -13,16 +13,19 @@
  *   gate and `service-analytics`' coverage test DERIVE from. An entry here is a
  *   claim that backends implement the operator.
  *
- * `$icontains` is declared and not yet enforced (#5701 is the contract half of
- * the #4706 ruling; #5702 writes the lowerings). Measured on the branch that
+ * `$icontains` is declared and still not enforced (#5701 is the contract half
+ * of the #4706 ruling; #5702 wrote the lowerings for the SQL family only, and
+ * #6520 is what the remaining JS faces wait on). Measured on the branch that
  * added it to `FILTER_OPERATORS` early: driver-memory's gate stopped refusing
  * it and `match({ name: 'zzz' }, { name: { $icontains: 'acme' } })` returned
  * `true` — the predicate silently dropped, every row matched. That is the
- * widening #3948 is about, so the staging is not a stylistic choice.
+ * widening #3948 is about, so the staging is not a stylistic choice, and
+ * #5702 landing did NOT clear it: the array is read by the two faces that
+ * still refuse the operator, not by the three that answer it.
  *
  * The pin below is deliberately an EQUALITY, not a subset check, so it fails in
  * both directions: a second staged operator added without recording it fails
- * here, and so does clearing `$icontains` in #5702 — which is the point. The
+ * here, and so does clearing `$icontains` in #6520 — which is the point. The
  * failure message is the instruction.
  */
 
@@ -50,8 +53,10 @@ describe('the declaration surface and the enforcement surface', () => {
         + 'add it here plus a note on FILTER_OPERATORS saying which issue implements it — an '
         + 'operator in FILTER_OPERATORS with no backend arm makes driver-memory accept it and '
         + "silently DROP the predicate (measured, #5701). If you are CLEARING one because you "
-        + 'just implemented it (#5702): remove it from this list AND delete the staging paragraph '
-        + 'on FILTER_OPERATORS, which is now describing something that is no longer true.',
+        + 'just implemented it on EVERY face (for `$icontains` that is #6520 — #5702 did the SQL '
+        + 'family and correctly left the staging in place): remove it from this list AND delete '
+        + 'the staging paragraph on FILTER_OPERATORS, which is now describing something that is '
+        + 'no longer true.',
     ).toEqual(['$icontains']);
   });
 

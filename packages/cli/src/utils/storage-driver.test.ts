@@ -88,11 +88,28 @@ describe('resolveStorageDefinition (#3826 — a definition, not a driver)', () =
     expect(resolveStorageDefinition('in-memory', { isDev: false })!.driverId).toBe('memory');
   });
 
-  it('declares mongodb with the default URL when none is supplied', () => {
-    const r = resolveStorageDefinition('mongodb', { isDev: false });
+  it('declares mongodb from the URL it was given', () => {
+    const r = resolveStorageDefinition('mongodb', {
+      databaseUrl: 'mongodb://db.internal:27017/app',
+      isDev: false,
+    });
     expect(r!.driverId).toBe('mongodb');
-    expect(r!.config).toEqual({ url: 'mongodb://localhost:27017/objectstack' });
+    expect(r!.config).toEqual({ url: 'mongodb://db.internal:27017/app' });
     expect(r!.trackName).toBe('MongoDBDriver');
+  });
+
+  // VERDICT FLIPPED by #6345 fork 2 (maintainer ruling, 2026-08-09). This pin
+  // used to assert `config: { url: 'mongodb://localhost:27017/objectstack' }` for
+  // a mongodb selection with no URL — a DSN the CLI invented, naming a host the
+  // operator never did. It is the same defect as postgres's `url: undefined`
+  // (which let the `pg` client pick its own localhost) wearing a different
+  // mechanism, and the standalone stack answered the same selection with a
+  // `file:` DSN. All three now refuse, in the wording `turso` has carried since
+  // #5602. The full 8-cell matrix lives in `driver-vocabulary-parity.test.ts`;
+  // this one stays here because it is the assertion that changed.
+  it('REFUSES mongodb with no URL rather than inventing localhost:27017 (#6345)', () => {
+    expect(() => resolveStorageDefinition('mongodb', { isDev: false })).toThrow(UnsupportedDriverError);
+    expect(() => resolveStorageDefinition('mongodb', { isDev: true })).toThrow(/no database URL was given/);
   });
 
   it('declares postgres / mysql with the DSN in config and their SqlDriver labels', () => {
@@ -139,9 +156,31 @@ describe('resolveStorageDefinition (#3826 — a definition, not a driver)', () =
 
   // Production with no driver configured registers nothing (loud downstream
   // failure), rather than silently inventing an engine.
-  it('returns null for an unknown/absent driver in PROD', () => {
+  it('returns null when NO driver is configured in PROD', () => {
     expect(resolveStorageDefinition('', { isDev: false })).toBeNull();
-    expect(resolveStorageDefinition('nonsense', { isDev: false })).toBeNull();
+  });
+
+  // VERDICT FLIPPED by #6345 fork 1. `'nonsense'` used to share the `''` answer —
+  // null in prod, and in DEV the trailing SQLite default, i.e.
+  // `os dev --database-driver sqlite3` silently booted SQLite while `os migrate`
+  // refused the same value by name (#6344 killed the silent fallback on that
+  // side only). The two are not the same input: `''` means "nobody chose", while
+  // a non-empty value can only have come from an operator naming a driver, since
+  // URL inference yields a canonical id or `''`. So the two answers separate.
+  it('REFUSES an explicitly-named unknown driver, in dev AND prod (#6345)', () => {
+    for (const isDev of [false, true]) {
+      expect(() => resolveStorageDefinition('nonsense', { isDev })).toThrow(UnsupportedDriverError);
+      // The four contract-only aliases: they resolve a CONFIG contract but no
+      // host has ever accepted them as a boot selection, and the ruling keeps it
+      // that way rather than widening a flag nobody asked to widen.
+      expect(() => resolveStorageDefinition('sqlite3', { isDev })).toThrow(UnsupportedDriverError);
+      expect(() => resolveStorageDefinition('mariadb', { isDev })).toThrow(UnsupportedDriverError);
+    }
+    // The refusal enumerates what DOES work, from the shared table.
+    let message = '';
+    try { resolveStorageDefinition('nonsense', { isDev: false }); } catch (e) { message = (e as Error).message; }
+    expect(message).toContain('pg');
+    expect(message).toContain('mongodb');
   });
 });
 

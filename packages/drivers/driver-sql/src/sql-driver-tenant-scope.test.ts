@@ -433,7 +433,7 @@ describe('SqlDriver tenant scope (organization_id)', () => {
       await driver.create(
         'account',
         { id: 'x1', organization_id: 'org_a', name: 'X1' },
-        { bypassTenantAudit: true } as any,
+        { bypassTenantAudit: true },
       );
       expect(warnSpy).toHaveLength(0);
     });

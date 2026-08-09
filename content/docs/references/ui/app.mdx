@@ -72,7 +72,8 @@ const result = ActionNavItemSchema.parse(data);
 | **branding** | `{ primaryColor?: string; accentColor?: string; logo?: string; favicon?: string }` | optional | App-specific branding |
 | **active** | `boolean` | optional | Whether the app is enabled |
 | **isDefault** | `boolean` | optional | Is default app |
-| **hidden** | `boolean` | optional | Hide from the App Switcher; the shell surfaces hidden apps via the avatar menu instead |
+| **hidden** | `boolean` | optional | Hide from the App Switcher; the shell surfaces hidden apps via the avatar menu instead (navigation only — never an access gate) |
+| **_unpublished** | `boolean` | optional | Machine-managed publish gate (ADR-0045 §3) — true = unpublished, externally unobservable. Written by AI materialization, cleared by publish-drafts. Never authored. |
 | **navigation** | `({ id: string; label: string \| Record<string, string>; icon?: string; order?: number; … } \| { type: 'separator'; id?: string; order?: number } \| … +7 more)[]` | optional | Full navigation tree for the app sidebar |
 | **areas** | `{ id: string; label: string \| Record<string, string>; icon?: string; description?: string \| Record<string, string>; … }[]` | optional | Navigation areas for partitioning navigation by business domain |
 | **contextSelectors** | `{ id: string; label: string \| Record<string, string>; icon?: string; optionsSource: object; … }[]` | optional | App-level scope dropdowns whose value is injected into nav items as `{<id>}` template vars |

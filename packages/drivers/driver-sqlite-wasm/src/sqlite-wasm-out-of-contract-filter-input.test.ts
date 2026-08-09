@@ -41,8 +41,8 @@ describe('[#5347/#5348] driver-sqlite-wasm inherits the out-of-contract filter r
     await driver.initObjects([
       { name: 'deal', fields: { stage: { type: 'string' }, score: { type: 'number' } } },
     ]);
-    await driver.create('deal', { id: '1', stage: 'won', score: 10 }, { bypassTenantAudit: true } as any);
-    await driver.create('deal', { id: '2', stage: null, score: 20 }, { bypassTenantAudit: true } as any);
+    await driver.create('deal', { id: '1', stage: 'won', score: 10 }, { bypassTenantAudit: true });
+    await driver.create('deal', { id: '2', stage: null, score: 20 }, { bypassTenantAudit: true });
   });
 
   afterAll(async () => {
@@ -53,7 +53,7 @@ describe('[#5347/#5348] driver-sqlite-wasm inherits the out-of-contract filter r
     const rows = await driver.find(
       'deal',
       { object: 'deal', fields: ['id'], where } as any,
-      { bypassTenantAudit: true } as any,
+      { bypassTenantAudit: true },
     );
     return (rows as any[]).map((r) => String(r.id)).sort();
   };

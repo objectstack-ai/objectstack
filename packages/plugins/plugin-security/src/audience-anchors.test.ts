@@ -62,11 +62,21 @@ describe('describeHighPrivilegeBits (anchor-binding predicate)', () => {
     expect(describeHighPrivilegeBits({ systemPermissions: ['manage_users'], objects: {} })).toMatch(/system permissions/);
   });
 
-  it("a plain '*' wildcard without D5 bits is anchor-safe for everyone (#2753 — member_default's shape)", () => {
+  it("a plain '*' wildcard without D5 bits is anchor-safe for everyone (#2753)", () => {
     // D5 lists exactly viewAll/modifyAll, delete/purge/transfer, and system
     // permissions; the blanket wildcard ban was an over-tightening that made
-    // the platform's own baseline unbindable to the anchor. The wildcard ban
+    // the platform's then-baseline unbindable to the anchor. The wildcard ban
     // is the GUEST tier's rule (D9), asserted below.
+    //
+    // [#6842] The fixture below is a SYNTHETIC read/create/edit wildcard, not
+    // the shape of any set the platform ships. It is what `member_default`
+    // carried when #2753 was written; #5491 removed that wildcard outright, so
+    // naming this "member_default's shape" went stale without a gate moving.
+    // The shipped set that still carries a plain `'*'` is `viewer_readonly`,
+    // whose wildcard is read-ONLY — a strictly weaker corner of the same
+    // predicate, which is why the fixture stays synthetic rather than being
+    // re-pointed at that set. `audience-anchor-set-claims.pin.test.ts` holds
+    // both of those facts to the shipped `defaultPermissionSets`.
     expect(describeHighPrivilegeBits({ objects: { '*': { allowRead: true, allowCreate: true, allowEdit: true } } })).toBeNull();
     expect(describeHighPrivilegeBits({ objects: { '*': { allowRead: true, allowDelete: true } } })).toMatch(/delete\/purge\/transfer/);
   });
@@ -102,7 +112,15 @@ describe('describeHighPrivilegeBits (anchor-binding predicate)', () => {
 
   it('allowExport:false / unset stays anchor-safe (member_default keeps binding)', () => {
     // The platform baseline deliberately carries no export grant, so the
-    // everyone anchor must still accept it.
+    // everyone anchor must still accept it — that claim is still true, and
+    // the pin file holds it to the shipped array.
+    //
+    // [#6842] The FIRST fixture is the baseline's actual shape: explicit named
+    // objects, read bits, export off — how `member_default` ships since #5491.
+    // The SECOND repeats the check on a wildcard grant, which models no shipped
+    // set (the only anchor-safe wildcard carrier today is the read-only
+    // `viewer_readonly`); it is here to keep the export axis independent of the
+    // wildcard axis, not to illustrate the baseline.
     expect(describeHighPrivilegeBits({ objects: { a: { allowRead: true, allowExport: false } } })).toBeNull();
     expect(describeHighPrivilegeBits({ objects: { '*': { allowRead: true, allowCreate: true, allowEdit: true } } })).toBeNull();
   });

@@ -905,6 +905,130 @@ function selfTest() {
       );
     }
 
+    // ── The second consumer: where THIS SELF-TEST runs (#6509) ───────────────
+    //
+    // Everything above pins the job that runs the REAL scan. This block pins the
+    // job that runs the self-test, and it exists because for a long time they
+    // were the same job -- which made the assertions above skippable by a label.
+    //
+    // The defect, stated once. `changeset-check` is exempt WHOLESALE when a PR
+    // carries `skip-changeset`, and a PR that edits a CI-internal script is the
+    // textbook case for that label (it releases nothing; the workflow itself
+    // prescribes the label for exactly that). So a PR editing this file was
+    // routinely the PR that skipped this file's own fixtures. Measured specimen,
+    // not a worry: PR #6876 (#5620, merged) added the five `allow-major`
+    // assertions above and NONE of them executed on its own CI -- it carried the
+    // label, and on run 31289894461 the step that runs `--self-test` reports
+    // `conclusion: skipped`. Both directions of that gap are real, and they are
+    // not symmetric: a BROKEN assertion is merely deferred onto the next
+    // unlabelled PR (an unrelated author eats the red), while a DELETED one is
+    // silent forever, because nothing afterwards remembers it existed.
+    //
+    // The fix is wiring, so the fixture for it has to read the wiring. Without
+    // this block `lint.yml`'s step could be deleted tomorrow with every
+    // assertion above still green -- the same "phantom check" shape (#4690) this
+    // whole family is written against.
+    //
+    // What is pinned is the property that closes the gap, not the step's prose:
+    // the self-test halves run in a job NO PR-level exemption reaches, and the
+    // merge-base-dependent halves stay out of it.
+    //
+    // RESIDUAL, recorded rather than implied. This assertion is run BY the step
+    // it pins, so a PR that deletes that step AND carries `skip-changeset` is
+    // still not caught -- both places that would have run it are gone in the
+    // same diff. That is a strictly smaller hole than the one it replaces (which
+    // swallowed EVERY labelled PR, including one that merely edits an
+    // assertion), it is a deletion visible in a `.github/**` diff rather than a
+    // silent no-op, and closing it entirely would need a gate outside this
+    // family asserting this family's wiring, which is a coupling with its own
+    // cost. Stated so the next reader inherits the fact and not a false sense of
+    // closure.
+    {
+      const lintPath = join(REPO_ROOT, '.github/workflows/lint.yml');
+      const lintPresent = existsSync(lintPath);
+      assert(lintPresent, 'consumer: .github/workflows/lint.yml must exist -- it is where this self-test runs unconditionally (#6509)');
+      const lintYaml = lintPresent ? readFileSync(lintPath, 'utf8') : '';
+      const uncommented = (text) => text.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
+
+      // Scoped to the `lint` job: `typecheck` is a separate required job with a
+      // separate purpose, and a step landing there instead would be a different
+      // fact than the one asserted here.
+      const lintJobStart = lintYaml.indexOf('\n  lint:');
+      const lintJobEnd = lintYaml.indexOf('\n  typecheck:');
+      const lintJob = lintJobStart === -1 ? '' : lintYaml.slice(lintJobStart, lintJobEnd === -1 ? undefined : lintJobEnd);
+      const lintSteps = lintJob.split(/\n(?=      - name: )/).map(uncommented);
+      const wiredSteps = lintSteps.filter((s) => /run: pnpm check:changeset-gate-self-tests\b/.test(s));
+      assert(
+        wiredSteps.length === 1,
+        `consumer: the ESLint job of lint.yml must run \`pnpm check:changeset-gate-self-tests\` exactly once (found ${wiredSteps.length}) -- that step is the only place these two checkers' fixtures are executed on a PR carrying \`skip-changeset\` (#6509)`,
+      );
+      // The load-bearing half. A conditioned step is the defect again with one
+      // more hop: whatever the condition reads, it is a way for a PR to arrange
+      // that this self-test does not run on it.
+      assert(
+        wiredSteps.every((s) => !/^\s*if:/m.test(s)),
+        'consumer: the changeset-family self-test step in lint.yml must carry NO `if:` -- an exemptable self-test is #6509 itself, and the exemption it must not have is the one that hid PR #6876\'s five assertions',
+      );
+      // Same property, one level up: a label read anywhere in this workflow
+      // would mean some step of it can be waived by the author of the PR under
+      // test.
+      assert(
+        !/skip-changeset/.test(uncommented(lintYaml)),
+        'consumer: lint.yml must not read the `skip-changeset` label anywhere -- the whole point of running the self-tests here is that this workflow has no PR-level exemption',
+      );
+      // And one level up again: "runs on every PR" is what "unconditional"
+      // means in practice. A `paths:` filter is a condition written in the
+      // trigger instead of in an `if:`, and it would silently restore the gap
+      // for every PR whose file list misses the glob.
+      const onBlock = uncommented((lintYaml.match(/\non:\n([\s\S]*?)\n(?=[A-Za-z_])/) ?? ['', ''])[1]);
+      assert(
+        /^\s+pull_request:/m.test(onBlock),
+        'consumer: lint.yml must keep its `pull_request:` trigger -- a self-test that does not run on pull requests is not wired at all (#6509)',
+      );
+      assert(
+        !/\bpaths(-ignore)?\s*:/.test(onBlock),
+        'consumer: lint.yml must carry no `paths:`/`paths-ignore:` filter -- a path-filtered trigger is an exemption written one level up, and this self-test may not have one (#6509)',
+      );
+
+      // The other half of the split: the merge-base-dependent scans stay out of
+      // this job. `check:empty-changeset` / `check:adr-0087-registration` chain
+      // the REAL scan, whose verdict is a function of the PR's diff; this job
+      // has no branch point, so running one here reads stock and reports main's
+      // drift against the author -- #6129 in the false-RED direction.
+      const strayScans = uncommented(lintYaml)
+        .split('\n')
+        .filter((l) => /check-empty-changeset\.mjs|check-adr-0087-registration\.mjs|pnpm check:empty-changeset\b|pnpm check:adr-0087-registration\b/.test(l));
+      assert(
+        strayScans.length === 0,
+        `consumer: lint.yml must invoke these gates ONLY through \`pnpm check:changeset-gate-self-tests\` (found ${strayScans.length} direct invocation(s)) -- the real scans need $MERGE_BASE and this job has no branch point, which is #6129 in the false-RED direction`,
+      );
+
+      // What that pnpm script actually is. The step above is a name; this is the
+      // thing the name resolves to, and it is where "self-test halves only" and
+      // "BOTH of them" are actually true or false.
+      const pkgPath = join(REPO_ROOT, 'package.json');
+      const pkgPresent = existsSync(pkgPath);
+      assert(pkgPresent, 'consumer: the repository root package.json must exist -- it carries the script lint.yml runs');
+      let wiring = '';
+      try {
+        wiring = JSON.parse(pkgPresent ? readFileSync(pkgPath, 'utf8') : '{}').scripts?.['check:changeset-gate-self-tests'] ?? '';
+      } catch {
+        wiring = '';
+      }
+      assert(
+        /check-empty-changeset\.mjs --self-test/.test(wiring),
+        'consumer: `check:changeset-gate-self-tests` must run `check-empty-changeset.mjs --self-test` -- the step in lint.yml is only as real as the script it resolves to',
+      );
+      assert(
+        /check-adr-0087-registration\.mjs --self-test/.test(wiring),
+        'consumer: `check:changeset-gate-self-tests` must run `check-adr-0087-registration.mjs --self-test` too -- both checkers live in the same exempted job and both were unwired by it (#6509). `check-changeset-no-major.mjs` is deliberately absent: it has no `--self-test` to run.',
+      );
+      assert(
+        !/check-(?:empty-changeset|adr-0087-registration)\.mjs(?! --self-test)/.test(wiring),
+        'consumer: every invocation in `check:changeset-gate-self-tests` must carry `--self-test` -- chaining a real scan into the lint job is the #6129 direction this split exists to avoid',
+      );
+    }
+
     // ── Parser unit rows ─────────────────────────────────────────────────────
     assert(isEmptyDeclaration('---\n---\n\nbody\n'), 'parser: the canonical empty shape is empty');
     assert(isEmptyDeclaration('\n---\n\n---\n\nbody\n'), 'parser: blank lines around/inside the fence stay empty');

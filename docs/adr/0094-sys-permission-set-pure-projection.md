@@ -1,9 +1,12 @@
 # ADR-0094: Permission-Set Definitions Have One Authoritative Store — `sys_permission_set` Becomes a Pure Projection
 
-**Status**: Accepted (2026-07-14)
+**Status**: Accepted (2026-07-14); **D5 retired 2026-08-09** (see D5-R)
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0005](./0005-metadata-customization-overlay.md) (overlay store), [ADR-0056](./0056-permission-model-landing-verification.md) (landing verification), [ADR-0086](./0086-authz-metadata-config-boundary-and-cross-package-composition.md) (two doors / provenance)
 **Closes**: framework#2875 (root cause behind the #2857 display-freshness class)
+**Revised**: 2026-08-09 — D5's env-overlay customization direction is retired for
+artifact-backed permission sets (#6609 maintainer ruling A, executed by #6858, on the
+ADR-0005 rollback landed by #6483 / PR #6608)
 **Consumers**: `@objectstack/plugin-security`, `@objectstack/metadata-protocol`, Setup/Studio surfaces
 
 ---
@@ -33,11 +36,14 @@ not by a subscriber a new write path might forget to trigger:
    the data plane are migrated into the metadata store once.
 
 Package-owned records (`managed_by:'package'`) keep the shipped declaration as their
-BASELINE (boot seeding / publish materialization), and — per the revised D5 — the
-environment customizes them through the standard ADR-0005 overlay: the record projects
-the effective (overlay-wins) body with its package provenance preserved, and removing
-the overlay resets it to the declaration. Forging package provenance through the data
-door stays impossible.
+BASELINE (boot seeding / publish materialization). D5's 2026-07-14 direction — that the
+environment customizes them through the standard ADR-0005 overlay — was **retired on
+2026-08-09** (D5-R): `permission` is back to `allowOrgOverride: false`, so an overlay of
+a CODE-DECLARED (artifact-backed) set is refused with 403 `NOT_OVERRIDABLE` at the moment
+of the write. Environment authoring survives on a different tier — `allowRuntimeCreate`,
+for sets whose definition lives only in `sys_metadata` — and that tier is a direct edit
+of the one stored definition, **not** an overlay. Forging package provenance through the
+data door stays impossible.
 
 ---
 
@@ -124,8 +130,36 @@ CRUD/FLS checks — applies first) translates every **non-system** write:
 | `insert` (Setup "New" / clone) | `saveMetaItem('permission', name, body)` → projector creates the record |
 | `update` (facet/label/active edits) | merge patch into the layered effective body → `saveMetaItem` → projector updates the record |
 | `delete` of a **runtime-only** set | `deleteMetaItem` (hard delete) → projector retires the record (trash applies) |
-| `delete` of an **artifact-backed** set | `deleteMetaItem` (overlay tombstone = reset, ADR-0005) → projector re-projects the **declared** body; the record resets instead of vanishing |
+| `delete` of an **artifact-backed** set | `deleteMetaItem` (overlay tombstone = reset, ADR-0005) → projector re-projects the **declared** body; the record resets instead of vanishing. **Since D5-R this row describes a path that is normally empty**: with no overlay left to lift the delete is a no-op success, and on an environment-scoped kernel the `override-artifact` intent refuses it — see the tier gate below |
 | `restore` (un-trash) | record restore proceeds, then the definition is re-authored into metadata from the restored row |
+
+**The tier gate (2026-08-09).** The table above is the *translation* map, and it is
+unchanged: the middleware always redirects. Whether the redirected metadata write is
+then ACCEPTED is ADR-0005's call, not this ADR's, and since the #6483 rollback the
+answer depends on the target's provenance:
+
+| Target's definition | `saveMetaItem` / `deleteMetaItem` | Why |
+| :-- | :-- | :-- |
+| **artifact-backed** — ships in a code package (`*.permission.ts`, a stack's `permissionSets`) | **403 `NOT_OVERRIDABLE`** | `permission` is `allowOrgOverride: false`; the write is an `override-artifact` intent |
+| **`sys_metadata`-only** — runtime-created through the data door, or a package set authored and published through the METADATA door (ADR-0070 package-first authoring) | accepted | `runtime-only` intent, and `permission` keeps `allowRuntimeCreate: true` |
+
+The gate reads **artifact provenance**, never the record's `managed_by` column, and the
+two disagree in production. Measured on the real showcase stack
+(`packages/qa/dogfood/test/two-doors-permission.dogfood.test.ts`): `member_default`'s row
+is `managed_by:'admin'` while its definition ships as a platform artifact, and its
+data-door edit is **refused** — the record's provenance column was never what the gate
+read. The mirror case is `twodoors_pkgset`, whose row is `managed_by:'package'` while its
+definition lives in `sys_metadata` (that materialization is pinned in the same file);
+that an edit of such a row still **lands** is pinned as a unit case in
+`packages/plugins/plugin-security/src/permission-set-projection.test.ts`, whose protocol
+stub models this gate.
+
+The refusal is left to the producer deliberately: `plugin-security` does not re-derive
+artifact-backing to pre-empt it. That rule belongs to the metadata protocol
+(`isArtifactBacked`, which excludes the `'sys_metadata'` rehydration sentinel), and a
+second copy of it in a consumer is the parallel-allowlist failure Prime Directive #8
+exists to prevent — the `managed_by`-keyed heuristic the single-store branch uses is
+already provably not the same fact.
 
 The driver write for insert/update/delete never executes; `opCtx.result` is the
 projected record. Renaming a set through the data door is rejected (the name is the
@@ -158,7 +192,7 @@ convergence pass:
 
 The pass is idempotent and re-runs harmlessly on every boot.
 
-### D5 — Env-scope overlays of package-owned sets are FIRST-CLASS customizations (revised 2026-07-14)
+### D5 — Env-scope overlays of package-owned sets are FIRST-CLASS customizations (revised 2026-07-14; RETIRED 2026-08-09 — see D5-R)
 
 **History.** As first landed, the projector refused env-scope bodies for
 package-owned records (the #2867 rule), which left an authored overlay of a
@@ -198,24 +232,89 @@ review; ADR-0091 recertification covers overlays like any other grant source.
 This is the same trade every overlayable type makes — permission sets no
 longer get a bespoke, stricter rule that the rest of the platform contradicts.
 
+### D5-R — D5's direction is RETIRED for artifact-backed sets (2026-08-09)
+
+**What changed under this ADR.** D5 rested on one premise: that `permission`
+declares `allowOrgOverride: true`, so refusing an env overlay would make it
+"the one metadata type whose declared flag is a lie". #6483 removed the
+premise. The 2026-08-08 maintainer ruling read ADR-0005's security row —
+*"Authorization correctness; overlays would create silent privilege drift"* —
+as excluding `permission` outright, ruled the unratified `true` back to
+`false` without waiting for a row-count measurement, and PR #6608 landed it
+(merged 2026-08-09). The maintainer then ruled **option A** on the conflict
+this ADR raised (#6609): accept the tightening, and stop pointing at the path
+that now refuses. This section is that follow-through (#6858).
+
+**The decision.** For a permission set whose definition ships as a code
+artifact, the ADR-0005 overlay is **no longer a customization channel of any
+kind**. The supported channel is the one ADR-0086 always named: edit the
+package and re-publish. D5's "no more flat 403" sentence is withdrawn — the
+403 is back, it is fail-closed, and it is issued by the producer at the moment
+of the write with a `NOT_OVERRIDABLE` envelope naming ADR-0005.
+
+**What survives, stated narrowly so it is not mistaken for a re-route.**
+Environment authoring of permission sets continues on the `allowRuntimeCreate`
+tier — sets created through the data door, and package sets authored and
+published through the METADATA door, whose definition lives in `sys_metadata`
+rather than in an artifact. That tier was measured unaffected at PR #6608's
+boundary probe and is deliberately left open. It is **not** the capability D5
+described: it edits the single stored definition in place, so there is no
+code-vs-overlay layering, no `overlay`/`code` diff in the Studio layered view,
+and no "delete = reset to the shipped declaration". Calling it a re-route
+would re-introduce exactly the FORK D5 rejected under a new name; it is
+recorded here as the surviving neighbour, not as D5's successor.
+
+**Why retire rather than restore the flag** (the three axes the ruling weighed):
+*business* — the direction was confirmed 2026-07-14 and never exercised: zero
+live org-scoped `permission` overlay rows in the in-repo corpus at rollback,
+and no example app customizes a packaged set from the environment, so there is
+no measured pull to preserve; *long-term* — ADR-0005 excludes the
+authorization surface definitionally, and restoring the flag needs the
+admission pair (an overlay schema AND a written render-only rationale) that
+cannot be written for a surface whose whole effect is to rewrite authorization;
+*authoring safety* — an ADR that points an author, human or agent, at a write
+path that 403s is the most expensive kind of documentation error, because the
+code it produces is confident and wrong. Restoring `allowOrgOverride: true`
+for `permission` remains possible only through an ADR-0005 revision that
+ratifies that pair — never by editing the registry entry, and never by adding
+a tolerant fallback in a consumer.
+
+**The consequences D5 accepted, re-read under the retirement.** The
+whole-document overlay risk D5 took on (an env overlay widening a vendor
+baseline; a vendor tightening not reaching a pinned name) is gone with the
+channel. Its mitigations are correspondingly moot for `permission`, with one
+carry-over: `supportsOverlay: true` is unchanged, so an overlay row authored
+BEFORE the rollback still merges overlay-wins at read time. The corpus has
+none; an environment that has one should treat it as legacy state to be lifted
+by an operator (`OS_METADATA_WRITABLE=permission` for the removal), because
+the ordinary delete path is `override-artifact` intent and refuses like any
+other write.
+
 ## Consequences
 
 **Positive.**
 - One truth. No write path — present or future — can desync the record from metadata
   through the data plane: the choke point is the engine middleware every ObjectQL write
   traverses, not an opt-in subscriber.
-- Setup edits of declared sets finally **enforce** (they become env overlays), and
-  Studio edits/creations appear in Setup **before the save returns** (awaited
-  projection — acceptance criterion "no projection race").
+- Setup edits of declared sets are no longer silently enforcement-inert — the
+  divergence that motivated this ADR is closed at the other end since D5-R: they
+  are **refused**, loudly, instead of updating a record nothing enforces. Studio
+  edits/creations of `sys_metadata`-backed sets appear in Setup **before the save
+  returns** (awaited projection — acceptance criterion "no projection race").
 - Display and enforcement can no longer disagree: both derive from the layered
   effective body (projection + in-memory registry sync).
 - Legacy data is migrated, not stranded (D4 backfill).
 
 **Negative / behavior changes.**
-- "Deleting" an artifact-backed set through Setup now **resets** it to the declared
-  body instead of deleting the row (the definition ships with the app and cannot be
-  deleted from the env — the honest semantic; previously the delete produced a ghost:
-  row gone, enforcement unchanged).
+- "Deleting" an artifact-backed set through Setup never removes the row (the
+  definition ships with the app and cannot be deleted from the env — the honest
+  semantic; previously the delete produced a ghost: row gone, enforcement
+  unchanged). Since D5-R the delete no longer *resets* either, because there is
+  no overlay left to lift: with nothing to remove it is a no-op success, and on an
+  environment-scoped kernel the `override-artifact` intent refuses it outright.
+- Since D5-R, a data-door edit of an artifact-backed set answers 403
+  `NOT_OVERRIDABLE` (ADR-0005). The Setup surface must present that refusal, not
+  retry it or fall back to a local edit.
 - Record drift authored through the data door **before** this change and shadowed by
   metadata is discarded at first boot (loud warn). It was never enforced.
 - Renames through the data door are rejected.
@@ -246,6 +345,13 @@ longer get a bespoke, stricter rule that the rest of the platform contradicts.
 
 - framework#2875 (this ADR), #2857 / #2867 (display-freshness gap and projection
   band-aid), ADR-0005, ADR-0086 (D3/D4/D5/P2), ADR-0090 (D12), ADR-0056.
+- D5-R (2026-08-09): #6483 / PR #6608 (the ADR-0005 rollback and its boundary
+  probe), #6609 (the conflict ruling — option A), #6858 (this revision),
+  #5768 (the objectui consumer symptom). Enforcement lives in
+  `packages/spec/src/kernel/metadata-plugin.zod.ts` (the registry row),
+  `packages/metadata-protocol/src/protocol.ts` (`saveMetaItem` /
+  `deleteMetaItem` tier gates) and
+  `packages/metadata-protocol/src/sys-metadata-repository.ts` (`assertAllowed`).
 - Implementation: `packages/plugins/plugin-security/src/permission-set-projection.ts`,
   `packages/metadata-protocol/src/protocol.ts` (`registerMutationProjector`),
   `packages/plugins/plugin-security/src/security-plugin.ts` (wiring).

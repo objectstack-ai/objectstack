@@ -279,6 +279,12 @@
         "toMajor": 17
       },
       {
+        "surface": "datasource.driver",
+        "to": "datasource driver id 'mongo' → 'mongodb' — the canonical id both boot hosts, the driver package and the published DRIVER_CATALOG already used (#6345)",
+        "conversionId": "datasource-driver-mongo-to-mongodb",
+        "toMajor": 17
+      },
+      {
         "surface": "flow.node.script.config.actionType / flow.node.script.config.template / flow.node.script.config.recipients / flow.node.script.config.variables / flow.node.script.config.script",
         "to": "script flow-node config keys 'actionType' (→ 'function' when it was shorthand for one; otherwise removed — 'email'/'slack' were logger-backed stubs that delivered nothing), plus 'template' / 'recipients' / 'variables' (fed those stubs) and 'script' (inline JS the runtime never executed) (#4343)",
         "conversionId": "flow-node-script-branch-keys-removed",
@@ -372,6 +378,12 @@
         "surface": "page.component.page:tabs.type",
         "to": "page:tabs component prop 'type' → 'tabStyle' (#6776 — a props key named `type` collides with the node's dispatch key and is unauthorable in flat/JSX carriers; `tabStyle` is the spelling the renderer reads in all of them)",
         "conversionId": "page-tabs-type-to-tab-style",
+        "toMajor": 17
+      },
+      {
+        "surface": "app.hidden",
+        "to": "stored app publish gate 'hidden' → '_unpublished' (#4829, ADR-0045 amended — `hidden` carried BOTH the publish gate and 'keep out of the App Switcher', so the built-in Account app was withheld from every non-builder; the gate is now the machine-managed `_unpublished`, and `hidden` is navigation presentation only, never an access gate. Stored rows only — an authored `hidden: true` is left untouched)",
+        "conversionId": "app-hidden-to-unpublished",
         "toMajor": 17
       }
     ],
@@ -1140,6 +1152,12 @@
           "toMajor": 17
         },
         {
+          "surface": "datasource.driver",
+          "to": "datasource driver id 'mongo' → 'mongodb' — the canonical id both boot hosts, the driver package and the published DRIVER_CATALOG already used (#6345)",
+          "conversionId": "datasource-driver-mongo-to-mongodb",
+          "toMajor": 17
+        },
+        {
           "surface": "flow.node.script.config.actionType / flow.node.script.config.template / flow.node.script.config.recipients / flow.node.script.config.variables / flow.node.script.config.script",
           "to": "script flow-node config keys 'actionType' (→ 'function' when it was shorthand for one; otherwise removed — 'email'/'slack' were logger-backed stubs that delivered nothing), plus 'template' / 'recipients' / 'variables' (fed those stubs) and 'script' (inline JS the runtime never executed) (#4343)",
           "conversionId": "flow-node-script-branch-keys-removed",
@@ -1233,6 +1251,12 @@
           "surface": "page.component.page:tabs.type",
           "to": "page:tabs component prop 'type' → 'tabStyle' (#6776 — a props key named `type` collides with the node's dispatch key and is unauthorable in flat/JSX carriers; `tabStyle` is the spelling the renderer reads in all of them)",
           "conversionId": "page-tabs-type-to-tab-style",
+          "toMajor": 17
+        },
+        {
+          "surface": "app.hidden",
+          "to": "stored app publish gate 'hidden' → '_unpublished' (#4829, ADR-0045 amended — `hidden` carried BOTH the publish gate and 'keep out of the App Switcher', so the built-in Account app was withheld from every non-builder; the gate is now the machine-managed `_unpublished`, and `hidden` is navigation presentation only, never an access gate. Stored rows only — an authored `hidden: true` is left untouched)",
+          "conversionId": "app-hidden-to-unpublished",
           "toMajor": 17
         }
       ],

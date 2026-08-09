@@ -193,7 +193,7 @@ function declareDatetimeSweep(cell: DialectCell): void {
             on: r.on,
             why: r.why,
           },
-          { bypassTenantAudit: true } as any,
+          { bypassTenantAudit: true },
         );
       }
     });
@@ -307,7 +307,7 @@ function declareTimeSweep(cell: DialectCell): void {
             at: r.writerForm === 'native' ? new Date(`1970-01-01T${r.at}Z`) : r.at,
             why: r.why,
           },
-          { bypassTenantAudit: true } as any,
+          { bypassTenantAudit: true },
         );
       }
     });
