@@ -194,14 +194,58 @@ describe('#5189 — publishPackage gates `api` items', () => {
       expect(precondition!.message).toContain('publishPackage(id, { namespace })');
     });
 
-    it('does NOT infer the namespace from the item being judged', async () => {
+    it('does NOT infer the namespace from the item being judged — the key cannot even be authored (#5384)', async () => {
       // The item declares a `namespace` field and a matching path; believing it
       // would make the carve-out gate vacuous.
+      //
+      // ⚠️ [#5384] The MECHANISM that guarantees this changed, and the change is
+      // a strengthening — so the assertion moved with it rather than being
+      // deleted. Before: `ApiEndpointSchema` was an open `z.object`, the key
+      // parsed through and was silently stripped, and the gate went on reading
+      // the manifest — so the proof was "the gate ignores it". Now the schema is
+      // `strictObject` and `namespace` is refused BY NAME before the gate runs:
+      // the gate cannot infer a namespace from the item because the item can no
+      // longer express one. `namespace` was deliberately NOT peeled as a stored
+      // envelope key in #5309 — it is authored here, and peeling it would hide
+      // exactly the typo class #5384 exists to catch.
+      //
+      // Which refusal SPEAKS is therefore what changed; that publish refuses is
+      // unchanged, and both halves are asserted.
       await manager.register('api', 'list_things', apiItem({ namespace: NS }));
 
       const result = await manager.publishPackage(PKG);
       expect(result.success).toBe(false);
+
+      // The named verdict entry — `publishPackage` speaks in `validationErrors[]`,
+      // not in an ADR-0112 envelope, so the entry is what carries the refusal.
+      const refusal = result.validationErrors!.find(e => e.message.includes('ApiEndpointSchema'));
+      expect(
+        refusal,
+        'the closed shape must refuse the authored `namespace` key by name',
+      ).toBeDefined();
+      expect(refusal!.name).toBe('list_things');
+      expect(refusal!.type).toBe('api');
+      // The offending key is echoed back …
+      expect(refusal!.message).toContain('namespace');
+      // … with the ADR-0121 D2 wrong-layer prescription, not a bare "unrecognized".
+      expect(refusal!.message).toContain('manifest.namespace');
+    });
+
+    it('the carve-out gate is not vacuous: a clean item with no namespace supplied still hits the precondition', async () => {
+      // CONTROL for the case above. Without it, that test would keep passing if
+      // the shape started refusing EVERY item for some unrelated reason — the
+      // failure mode this file's own §1 warns about. Same call, same absent
+      // namespace, but a body the schema accepts: the refusal that speaks must
+      // be the manifest precondition, and it must NOT be a schema error.
+      await manager.register('api', 'list_things', apiItem());
+
+      const result = await manager.publishPackage(PKG);
+      expect(result.success).toBe(false);
       expect(result.validationErrors!.some(e => e.message.includes('manifest.namespace'))).toBe(true);
+      expect(
+        result.validationErrors!.some(e => e.message.includes('ApiEndpointSchema')),
+        'a clean endpoint body must not produce a schema error',
+      ).toBe(false);
     });
   });
 

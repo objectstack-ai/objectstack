@@ -24,9 +24,10 @@
  *   A. the CLI parses through the registry's schemas — one undeclared key, the
  *      same verdict from both gates, for every registered metadata type. Three
  *      carriers are structurally different and are asserted at their real
- *      positions; one type (`api`) has a schema #4001 has not closed yet, so
- *      there the claim is AGREEMENT plus "the author is still told", with the
- *      gap filed rather than papered over (#5384);
+ *      positions. The one type that was NOT closed when this file was written
+ *      (`api`) closed at **#5384**, so its weaker claim — AGREEMENT plus "the
+ *      author is still told" — has been replaced by the full one, both gates
+ *      REJECT, and the not-yet-closed table is now empty;
  *   B. the commands GATE on that parse — the issue's undeclared-key repro and
  *      the #4001 batch-13 `responsiveStyles.large` → `.lg` negative control,
  *      run through the real binary: non-zero exit, prescription in the output,
@@ -91,6 +92,15 @@ const GATED_AT: Readonly<Record<string, string>> = {
   agent: 'agents',
   tool: 'tools',
   skill: 'skills',
+  // [#5384] `api` GRADUATED here from NOT_YET_CLOSED — the deliberate ratchet
+  // step this file's own note asked for. `ApiEndpointSchema` is `strictObject`
+  // as of #5384, so the stack's `apis:` array and the registry schema now reject
+  // an undeclared key identically, and "both gates agree, and the author is
+  // still told" is no longer the strongest claim available: "both gates REJECT"
+  // is. The blocker was never this vocabulary — #5309 (PR #6576) moved the
+  // stored envelope (`packageId` / `state` / …) off the body first, which is
+  // what made the closure a vocabulary change instead of a storage compromise.
+  api: 'apis',
 };
 
 /**
@@ -113,22 +123,28 @@ const STRUCTURAL_EXCEPTIONS: Readonly<Record<string, string>> = {
  * Registered types whose SCHEMA is not closed yet, so "both gates reject" is
  * not the claim to make — "both gates agree, and the author is still told" is.
  *
- * `api` is the live one. #5312 registered the type and the stack authors it at
+ * **EMPTY as of #5384, and that is a hard zero rather than a gap.** `api` was
+ * the one live row: #5312 registered the type and the stack authors it at
  * `apis:` (ADR-0121; note the neighbouring singular `api:` block, which is
- * server-facing REST config, not metadata), but `ApiEndpointSchema` is still a
- * plain `z.object` — the #4001 campaign has not reached it, and the strictness
- * ledger still files all of `api/` as wire. An undeclared key on an endpoint
- * is therefore DROPPED on both the write path and here, identically. Filed as
- * #5384 (sub-issue of #4001) rather than papered over.
+ * server-facing REST config, not metadata), while `ApiEndpointSchema` was still
+ * a plain `z.object` — an undeclared key on an endpoint was DROPPED on both the
+ * write path and here, identically. What this table asserted for it was the
+ * weaker pair: the CLI is no looser than the write path, and the #3786
+ * pre-parse layer still names the key, so the author is not left with silence.
  *
- * What is asserted instead: the CLI is no looser than the write path, and the
- * #3786 pre-parse layer still names the key, so the author is not left with
- * silence. When #5384 closes the shape, the agreement assertions below go red
- * — that is the ratchet working; move the row into `GATED_AT` then.
+ * That row is GONE, in the direction the note above it predicted: #5384 closed
+ * the shape with `strictObject`, the agreement assertions went red, and `api`
+ * moved into `GATED_AT` — the deliberate ratchet step, not a surprise. The
+ * blocker was never the endpoint vocabulary; #5309 (PR #6576) split the stored
+ * envelope off the authored body first, and only then was closing it a
+ * vocabulary change.
+ *
+ * The table and its assertions STAY, for the next type that registers ahead of
+ * its closure — which is how `api` arrived in the first place. While it is
+ * empty the case below asserts the emptiness explicitly, because a loop over
+ * nothing is a green that proves nothing.
  */
-const NOT_YET_CLOSED: Readonly<Record<string, { collection: string; tracking: string }>> = {
-  api: { collection: 'apis', tracking: '#5384 (sub-issue of #4001)' },
-};
+const NOT_YET_CLOSED: Readonly<Record<string, { collection: string; tracking: string }>> = {};
 
 /** Every `unrecognized_keys` issue naming `INJECTED_KEY`, with its path. */
 function undeclaredKeyRejections(result: { success: boolean; error?: any }): string[] {
@@ -295,6 +311,17 @@ describe('the CLI parses metadata through the registry schemas (#5000)', () => {
   });
 
   it('is no looser than the write path on a type #4001 has not closed, and still names the key', () => {
+    // [#5384] The table is EMPTY, so the loop below runs zero times — and a
+    // green from a loop over nothing proves nothing. Assert the zero itself, so
+    // the state is pinned rather than assumed: if a type is ever added back
+    // here, this line is the one that must be consciously edited, and the loop
+    // resumes covering it.
+    expect(
+      Object.keys(NOT_YET_CLOSED),
+      'a registered type is back on the not-yet-closed list — the loop below now covers it, and '
+        + 'this expectation records the regression deliberately rather than passing vacuously',
+    ).toEqual([]);
+
     for (const [type, { collection, tracking }] of Object.entries(NOT_YET_CLOSED)) {
       const registry = getMetadataTypeSchema(type);
       expect(registry, `no registered schema for '${type}'`).toBeDefined();

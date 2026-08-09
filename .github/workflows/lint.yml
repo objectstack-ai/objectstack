@@ -878,6 +878,33 @@ jobs:
       - name: Check SKILL.md compatibility declarations match the workspace majors
         run: pnpm check:skill-compatibility
 
+      # The fourth gate over the .claude/ file tree, and the first to read
+      # .claude/agents/ at all (#6803). An agent definition that declares no `model:`
+      # INHERITS the dispatching session's model, so the role's tier is set by whoever
+      # dispatched it and when — a property of the caller's ambient state rather than
+      # of the role. Measured cost: four devs dispatched from one smaller-model session
+      # all died on the same shared quota wall, three leaving uncommitted and wholly
+      # ungated work in their worktrees (#6686). The failure is batched, and invisible
+      # to the dispatcher, whose pre-dispatch checks never ask what model the batch runs.
+      #
+      # The caller-side half of this rule already existed and did not hold: pm-dispatch
+      # SKILL.md §5 has said 'pass `model: "opus"` on every dev dispatch' since before
+      # that incident, and a seat that had read it still dispatched twelve agents in a
+      # row without passing it. That is why the assertion is over the DEFINITION, which
+      # holds regardless of caller compliance, rather than more prose at the call site.
+      #
+      # It asserts PRESENCE, never which tier — the tier is maintainer policy (#6803
+      # puts changing it out of scope), and a policy change should not have to edit a
+      # gate to land. `model: inherit` stays legal for a role that genuinely follows its
+      # caller, but only with a written justification the script re-checks against the
+      # live file, so a deliberate inherit is a recorded decision and a silent one is red.
+      #
+      # Same job and same reasons as its neighbours: no paths filter and required, so it
+      # cannot go dormant on exactly the PR that breaks it — and a `.claude/**` filter
+      # would blind it to the PR that adds a new agent definition anywhere else.
+      - name: Check every agent definition declares a model
+        run: pnpm check:agent-model-declared
+
       - name: Check the react-blocks contract is in sync with the spec
         run: pnpm --filter @objectstack/spec check:react-blocks
 
