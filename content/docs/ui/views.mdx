@@ -103,7 +103,7 @@ A List View controls how a collection of records is presented. It supports multi
 | `data` | `ViewData` | optional | Data source configuration (defaults to the `object` provider) |
 | `filter` | `array` | optional | Base filter criteria |
 | `sort` | `array` | optional | Sort configuration |
-| `searchableFields` | `string[]` | optional | Fields the toolbar search scans — **narrows** the object's set, never widens it (ADR-0061). Entries must be the object's **own** columns: a lookup (`project_id`) or a dotted path (`project_id.name`) is refused, and every toolbar search on the list then returns `400 INVALID_FIELD` (#4254). To search by a related record's title, [mirror it into a stored field](/docs/data-modeling/schema-design#searching-by-a-related-records-title--mirror-the-value) on the object and list that |
+| `searchableFields` | `string[]` | optional | Fields the toolbar search scans — **narrows** the set the object allows, never widens it (ADR-0061). Every entry must be in that allowed set, or every toolbar search on the list returns `400 INVALID_FIELD` (#4254) — see [Toolbar search](#toolbar-search-searchablefields) below |
 | `grouping` | `object` | optional | Row grouping configuration |
 | `pagination` | `object` | optional | Pagination settings |
 | `selection` | `object` | optional | Row selection mode |
@@ -117,6 +117,53 @@ A List View controls how a collection of records is presented. It supports multi
 The view's machine name is its **key** in the container (`listViews.urgent` on
 object `task` becomes `task.urgent`); the default `list` claims `task.default`.
 List and form views share that one namespace — don't reuse a key.
+
+### Toolbar search (`searchableFields`)
+
+The toolbar's search box scans a set the **object** owns. A list view's
+`searchableFields` **narrows** that set for this one list — it can never widen
+it, and the runtime enforces that by **refusing the request**, not by quietly
+dropping the extra name (ADR-0061, #4254).
+
+**What the object allows** is resolved server-side, and it is the whole rule:
+
+| The object … | The allowed set is |
+| :--- | :--- |
+| declares `searchableFields` | **that list, verbatim** — whatever the field types are |
+| declares nothing | the auto-default: the name field + the text-like columns (`text` / `email` / `phone` / `url` / `autonumber` / `textarea` / `markdown` / `select` / `status`) |
+
+So field **type** decides only in the second row. On an object that declares
+`searchableFields: ['subject', 'account_id']`, a view narrowing to
+`['account_id']` — a lookup — is **accepted** and scanned (a `$contains` over
+the stored id: narrow, but the engine executes it); on that same object,
+narrowing to a `text` column the object left out is **refused**. Judge every
+entry against the object's allowed set, never against the type list.
+
+A **dotted path** (`account_id.name`) is not a valid entry on either branch —
+`search` scans this object's own columns, and the narrowing is intersected with
+the allowed set by exact name. To search by a related record's title,
+[mirror it into a stored field](/docs/data-modeling/schema-design#searching-by-a-related-records-title--mirror-the-value)
+on the object and list that.
+
+<Callout type="warn">
+**One bad entry `400`s EVERY search on that list.** Clients echo this
+declaration verbatim as the `$searchFields` override — the active view's list
+wins over the object's — and the ingress gate refuses any entry outside the
+allowed set before the engine ever runs. The blast radius is the list's whole
+search box, for every user and every term: not a narrower result, no result at
+all.
+</Callout>
+
+| What you write on the view | `os validate` | Toolbar search at runtime |
+| :--- | :--- | :--- |
+| a subset of the allowed set | clean | scans exactly those columns |
+| key omitted, or `searchableFields: []` | clean | scans the object's full allowed set |
+| a renamed / mistyped column, or a dotted path | `searchable-field-unknown` | `400 INVALID_FIELD` |
+| a real column outside the allowed set | `searchable-field-unsearchable` | `400 INVALID_FIELD` |
+
+Both diagnostics are **errors**, not warnings — `os validate` fails the build.
+The object's own set, and the stored-mirror prescription, are covered under
+[Global search](/docs/data-modeling/schema-design#global-search--searchable--searchablefields).
 
 ### Column Configuration
 

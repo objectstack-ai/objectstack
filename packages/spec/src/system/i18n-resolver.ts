@@ -29,6 +29,22 @@
  * `['en']`) → literal `label` from the metadata. Helpers never throw — they
  * always return at minimum the metadata literal so unconfigured languages
  * gracefully degrade.
+ *
+ * ## The OTHER half of `I18nLabel`, and where it lives
+ *
+ * This file resolves form **1** of {@link I18nLabelSchema} — a plain-string
+ * label whose translations live in a bundle, addressed by the conventions
+ * above. Form **2**, the inline locale map (`{ en: 'Owner', 'zh-CN': '负责人' }`)
+ * the author writes into the metadata document itself, is resolved by
+ * `ui/i18n-label-resolver.ts`'s `resolveI18nLabel` (#6765, #6761 ruling B) —
+ * the shared seat for that rule, kept in lockstep with objectui's
+ * `pickLocalized` by an executed parity table.
+ *
+ * They compose, inline map first: objectui's own call sites read
+ * `translateLabel(pickLocalized(label, language), language)`, i.e. collapse the
+ * map to a string, then look that string up in the bundle. A caller holding an
+ * `I18nLabel` that may be either form wants `resolveI18nLabel` before anything
+ * here.
  */
 
 import type { TranslationBundle, TranslationData } from './translation.zod';

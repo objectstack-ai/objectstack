@@ -344,7 +344,7 @@ export function checkSearchableFieldList(
           (dotted
             ? `'search' scans this object's own columns, so a related record's ` +
               `column cannot be a search target — expand the relation and search ` +
-              `the related object, or copy the value onto a formula field here. `
+              `the related object, or copy the value onto a stored text field here. `
             : `Fix the name, or add "${name}" to ${objectName}.fields. `) +
           `Clients echo this declaration verbatim as the '$searchFields' ` +
           `override, so a stale entry becomes a 400 INVALID_FIELD on list ` +
@@ -411,7 +411,7 @@ export function checkSearchableFieldList(
         (isReference
           ? `A ${meta?.type} column stores only the referenced record's id, so it ` +
             `cannot be a keyword target — drop "${name}" from this view and, to ` +
-            `search by the related record's title, mirror it onto a text/formula ` +
+            `search by the related record's title, mirror it onto a stored text ` +
             `field here and declare that instead. `
           : `Drop "${name}" from this view, or target a text-like field instead. `) +
         `Declaring 'searchableFields' on object "${objectName}" chooses the ` +
