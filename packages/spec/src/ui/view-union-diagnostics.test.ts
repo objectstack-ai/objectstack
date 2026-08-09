@@ -32,7 +32,7 @@
  *    #7025's sweep rule forbids.
  *
  * The expected values below were measured on `origin/main` @ `0f539bd` before
- * the change and re-measured after: 41 bodies, identical verdicts, identical
+ * the change and re-measured after: 42 bodies, identical verdicts, identical
  * parse output, identical issue-code sets (report sha256
  * `fca9df8937bbb9f736f11895a6e1ddf23b7fb25d9b13cfa7e67c71c8dfaaf2b2`).
  */
