@@ -215,6 +215,16 @@ function git(cwd, args, { captureStderr = false } = {}) {
  * the two live specimens puts it in the last), so `body` carries the whole text
  * for `hasBreakingAnnotation` to scan.
  *
+ * The entry regex is deliberately the SAME shape the three changeset GATES use
+ * (`check-changeset-no-major.mjs`, `check-empty-changeset.mjs`,
+ * `check-adr-0087-registration.mjs`), and `check-empty-changeset.mjs`'s
+ * self-test asserts all four are byte-identical (#7004). This file is the fourth
+ * carrier and the one #7004's report did not name; it reads objectui's
+ * changesets rather than this repo's, so its stake is the release RECORD, not a
+ * gate: a bump entry the regex cannot see makes the changeset read
+ * "release-nothing" and drops the commit from the digest entirely — which is
+ * #4731's harm exactly, arrived at through the parser instead of a type filter.
+ *
  * @param {string} text
  * @returns {{ packages: Record<string, string>, summary: string, body: string }}
  */
@@ -230,7 +240,10 @@ export function parseChangeset(text) {
         i++;
         break;
       }
-      const m = /^\s*["']?([^"':]+)["']?\s*:\s*([A-Za-z]+)\s*$/.exec(lines[i]);
+      if (/^\s*#/.test(lines[i])) continue; // a whole-line YAML comment declares nothing
+      // "<name>": <bump>   |   '<name>': <bump>   |   <name>: <bump>
+      // with an optionally quoted bump value and an optional trailing ` # comment`.
+      const m = /^\s*["']?([^"':]+)["']?\s*:\s*["']?([A-Za-z]+)["']?(?:\s+#.*)?\s*$/.exec(lines[i]);
       if (m && LEVEL_RANK[m[2].toLowerCase()]) packages[m[1].trim()] = m[2].toLowerCase();
     }
   }
@@ -1935,6 +1948,39 @@ function selfTest() {
           '✓ check-adr-0087-registration: 1 declared-breaking changeset(s), each carrying an ADR-0087 disposition.',
         ),
       `status=${gateGreen.status}\n${gateGreen.stdout}\n${gateGreen.stderr}`,
+    );
+    // ---- #7004: the frontmatter shapes the old entry anchor hid ------------
+    //
+    // This file is the FOURTH carrier of the family's entry regex and the one
+    // #7004's report did not name. Its consequence is neither a false green nor
+    // a false red but a silent DROP: an entry the regex cannot see makes the
+    // changeset read `release-nothing`, so the commit leaves the digest — the
+    // #4731 harm, reached through the parser instead of through a type filter.
+    // Worst, as ever, for breaking changes, which is the one class that must
+    // never vanish from a release record.
+    //
+    // Predicted direction on reverse verification: restoring the old anchor
+    // (`([A-Za-z]+)\s*$`) turns C1-C5 red (packages goes `{}`) and C6 red in the
+    // other direction (a phantom package named `# note`).
+    const pkgsOf = (block) => JSON.stringify(parseChangeset(`---\n${block}\n---\n\nsummary\n`).packages);
+    check('#7004 C1 a trailing YAML comment still declares its package', pkgsOf('"@object-ui/layout": major # keep') === '{"@object-ui/layout":"major"}', pkgsOf('"@object-ui/layout": major # keep'));
+    check('#7004 C2 a trailing comment after a tab', pkgsOf('"@object-ui/layout": minor\t# keep') === '{"@object-ui/layout":"minor"}', pkgsOf('"@object-ui/layout": minor\t# keep'));
+    check('#7004 C3 a double-quoted bump value', pkgsOf('"@object-ui/layout": "major"') === '{"@object-ui/layout":"major"}', pkgsOf('"@object-ui/layout": "major"'));
+    check('#7004 C4 a single-quoted bump value with a comment', pkgsOf('"@object-ui/layout": \'minor\' # keep') === '{"@object-ui/layout":"minor"}', pkgsOf('"@object-ui/layout": \'minor\' # keep'));
+    check(
+      '#7004 C5 a commented entry beside an uncommented one — BOTH survive',
+      pkgsOf('"@object-ui/a": major # keep\n"@object-ui/b": patch') === '{"@object-ui/a":"major","@object-ui/b":"patch"}',
+      pkgsOf('"@object-ui/a": major # keep\n"@object-ui/b": patch'),
+    );
+    check(
+      '#7004 C6 a whole-line comment containing a colon is NOT a package (it used to parse as one named `# note`)',
+      pkgsOf('# note: major\n"@object-ui/real": patch') === '{"@object-ui/real":"patch"}',
+      pkgsOf('# note: major\n"@object-ui/real": patch'),
+    );
+    check(
+      '#7004 C7 control — the same shape with an unknown bump word still declares nothing, so C1-C6 are about the entry regex and not about LEVEL_RANK being bypassed',
+      pkgsOf('"@object-ui/layout": enormous # keep') === '{}',
+      pkgsOf('"@object-ui/layout": enormous # keep'),
     );
   } finally {
     rmSync(tmp, { recursive: true, force: true });
