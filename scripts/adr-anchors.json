@@ -301,6 +301,15 @@
         "ADR-0106"
       ],
       "invariant": "ADR-0106 D7 — getMetadataReadableFields differs from getReadableFields in exactly one place, and the asymmetry is the decision. On the DATA plane a caller resolving to zero permission sets falls OPEN, mirroring the engine middleware, because reporting a narrowing the data path would not enforce is its own drift. On the METADATA plane the same caller resolves the configured fallback permission set (the two-step /auth/me/permissions performs), so a guest-facing deployment's schema exposure is a deliberate permission-set decision rather than an accidental everything-default. Converging the two methods in either direction reverses this."
+    },
+    {
+      "file": "packages/plugins/plugin-security/src/permission-set-projection.ts",
+      "adrs": [
+        "ADR-0094",
+        "ADR-0005",
+        "ADR-0086"
+      ],
+      "invariant": "This file IS ADR-0094's machinery (write-through + awaited projector + boot reconciliation), and since 2026-08-09 it is also the site of ADR-0094 D5-R. The 2026-07-14 direction confirmation that once sat in its header — package sets are customized through an ADR-0005 env overlay — is RETIRED: #6483 rolled `permission` back to `allowOrgOverride: false`, so a metadata write against a CODE-DECLARED (artifact-backed) set is refused 403 NOT_OVERRIDABLE, while a set whose definition lives only in `sys_metadata` rides `allowRuntimeCreate` and still works. Two rules follow and must not be quietly undone: (1) the refusal is LEFT TO THE PRODUCER — never re-derive artifact-backing here to pre-empt it, and never add a tolerant fallback (`??`, catch-and-continue) around the refused `saveMetaItem`; `isArtifactBacked` is the protocol's rule and the `managed_by` column is measurably not that fact; (2) the two write points that DO catch (the `restore` leg and the reconcile backfill) catch because the record already exists by then — they report on the durability channel (#4632) and must keep doing so rather than being 'fixed' into throwing. Restoring the overlay channel needs an ADR-0005 revision ratifying an admission pair, not an edit here or in the registry."
     }
   ]
 }
