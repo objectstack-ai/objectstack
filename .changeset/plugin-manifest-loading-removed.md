@@ -4,6 +4,8 @@
 
 refactor(spec)!: remove `manifest.loading` — a whole plugin loading block nothing read, including a sandbox that isolated nothing (#4914)
 
+<!-- adr-0087: registered plugin-manifest-loading-retired -->
+
 `manifest.loading` and the entire `PluginLoadingConfig` block behind it are
 removed under ADR-0049 enforce-or-remove (maintainer ruling 2026-08-04). The
 block declared a complete plugin loading policy — `strategy`, `preload`,
