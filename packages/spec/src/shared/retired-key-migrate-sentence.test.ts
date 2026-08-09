@@ -21,14 +21,25 @@
  * rest>." (`ui/dashboard.zod.ts` `compareTo.offset` is the model; the script
  * node's `config.actionType` is the other member.)
  *
+ * [#7030] Widened, not duplicated: `packages/lint/src/validate-expressions.ts`
+ * carries one live occurrence of the identical sentence (the lint diagnostic
+ * for a script node's retired dispatch keys — same #6856 ruling, same
+ * false-antecedent risk, since that branch too can DELETE the key rather than
+ * rewrite it into anything). `judgeMigrateSentences` is a plain text scan with
+ * no dependency on `retiredKey()` or on anything `packages/spec`-specific, so
+ * this pin's INPUT (the CORPORA it walks) widens for free — the matching
+ * mechanism below is unchanged. A second, standalone pin over that one lint
+ * site could only drift from this one the moment either wording changes;
+ * one pin covering both corpora cannot.
+ *
  * Mechanism: a SOURCE scan over string literals (this pin pins textual facts —
  * the sentences ARE text in source). Comment lines are skipped: descriptive
  * prose about the tool ("`os migrate meta` rewrites sources") is not a
  * prescription. `migrations/registry.ts` is out of scope structurally — it is
  * the migration LEDGER, whose `notes` are release prose over whole migrations,
  * not tombstone prescriptions an author meets in a parse error. That is a
- * scope bound on the corpus, not a per-site exemption: every prescription
- * string in every schema file is judged, with no allowlist.
+ * scope bound on the spec corpus, not a per-site exemption: every
+ * prescription string in every scanned file is judged, with no allowlist.
  *
  * What this pin deliberately does NOT check: a tombstone whose prescription
  * carries no `os migrate meta` sentence at all (#6914's worklist) — absence of
@@ -43,10 +54,33 @@ import url from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 const HERE = path.dirname(url.fileURLToPath(import.meta.url));
-const SRC_ROOT = path.resolve(HERE, '..');
+const SPEC_SRC_ROOT = path.resolve(HERE, '..');
+/** #7030: `packages/lint/src`, the one other corpus carrying this sentence. */
+const LINT_SRC_ROOT = path.resolve(HERE, '../../../lint/src');
 
-/** The migration ledger — release prose, not tombstone prescriptions (see module doc). */
-const OUT_OF_SCOPE = new Set([path.join('migrations', 'registry.ts')]);
+/** One scanned corpus: a root directory, plus its own out-of-scope exemptions. */
+interface Corpus {
+  /** Short label, used as the `file` prefix on judged sites (e.g. `spec:`, `lint:`). */
+  name: string;
+  root: string;
+  /** Paths relative to `root` that are structurally out of scope (see module doc). */
+  outOfScope: Set<string>;
+}
+
+const CORPORA: Corpus[] = [
+  {
+    name: 'spec',
+    root: SPEC_SRC_ROOT,
+    // The migration ledger — release prose, not tombstone prescriptions (see module doc).
+    outOfScope: new Set([path.join('migrations', 'registry.ts')]),
+  },
+  {
+    // #7030: `validate-expressions.ts`'s script-node lint diagnostic is the only site.
+    name: 'lint',
+    root: LINT_SRC_ROOT,
+    outOfScope: new Set(),
+  },
+];
 
 const MARKER = /(?:Run )?`os migrate meta --from \d+`/g;
 
@@ -66,7 +100,7 @@ const MIXED_AT_MARKER =
   /^Run `os migrate meta --from \d+` to rewrite the [^;'"]+ case[^;'"]* automatically; [^;'"]+\.['"]/;
 
 interface JudgedSite {
-  /** Path relative to `packages/spec/src`. */
+  /** Corpus-prefixed path, e.g. `spec:data/object.zod.ts` or `lint:validate-expressions.ts`. */
   file: string;
   /** 1-based line of the sentence's marker (best effort across concatenation). */
   line: number;
@@ -129,16 +163,18 @@ function* walk(dir: string): Generator<string> {
 
 function judgeTree(): JudgedSite[] {
   const all: JudgedSite[] = [];
-  for (const file of walk(SRC_ROOT)) {
-    const rel = path.relative(SRC_ROOT, file);
-    if (OUT_OF_SCOPE.has(rel)) continue;
-    all.push(...judgeMigrateSentences(fs.readFileSync(file, 'utf8'), rel));
+  for (const corpus of CORPORA) {
+    for (const file of walk(corpus.root)) {
+      const rel = path.relative(corpus.root, file);
+      if (corpus.outOfScope.has(rel)) continue;
+      all.push(...judgeMigrateSentences(fs.readFileSync(file, 'utf8'), `${corpus.name}:${rel}`));
+    }
   }
   return all;
 }
 
-describe('retiredKey() `os migrate meta` sentences are the house sentence (#6856 route D)', () => {
-  it('every prescription sentence in packages/spec/src is house-form or MIXED two-clause', () => {
+describe('`os migrate meta` sentences are the house sentence, across corpora (#6856 route D, widened #7030)', () => {
+  it('every prescription sentence in packages/spec/src and packages/lint/src is house-form or MIXED two-clause', () => {
     const judged = judgeTree();
     const violations = judged.filter((j) => !j.ok);
     expect(
@@ -149,15 +185,28 @@ describe('retiredKey() `os migrate meta` sentences are the house sentence (#6856
     ).toEqual([]);
   });
 
-  it('anti-vacuity: the scanner actually judges the corpus (floor, not a census)', () => {
-    // 54 prescription sentences at the time of the sweep. The floor guards
-    // against the SCANNER going blind (a regex or comment-filter regression
-    // reporting an empty corpus as green), not against tombstones aging out —
-    // lower it deliberately, with the removal that shrinks the corpus, when
-    // that day comes. #6914's 35 pending sentences will only raise the count.
+  it('anti-vacuity: the scanner actually judges every corpus (floor, not a census)', () => {
+    // 54 prescription sentences in packages/spec/src at the time of the #6856
+    // sweep; packages/lint/src contributes one more under #7030's widened
+    // scan. The floor guards against a SCANNER going blind on either corpus (a
+    // regex or comment-filter regression reporting an empty tree as green),
+    // not against tombstones aging out — lower it deliberately, with the
+    // removal that shrinks a corpus, when that day comes. #6914's 35 pending
+    // sentences will only raise the count further.
     const judged = judgeTree();
     expect(judged.length).toBeGreaterThanOrEqual(50);
     expect(judged.every((j) => j.ok)).toBe(true);
+  });
+
+  it('anti-vacuity: the lint corpus specifically is reached, not just outnumbered by spec', () => {
+    // The combined floor above (>=50) is already satisfied by packages/spec/src
+    // alone, so a broken LINT_SRC_ROOT (wrong relative path, corpus silently
+    // walking zero files) would NOT fail it — this assertion is the one thing
+    // that actually exercises #7030's widening rather than merely declaring it.
+    const judged = judgeTree();
+    const lintSites = judged.filter((j) => j.file.startsWith('lint:'));
+    expect(lintSites.length).toBeGreaterThanOrEqual(1);
+    expect(lintSites.every((j) => j.ok)).toBe(true);
   });
 
   it('goes RED on the retired "rewrite it" spelling, naming the site', () => {
