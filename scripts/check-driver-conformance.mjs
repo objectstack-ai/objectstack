@@ -417,7 +417,12 @@ const LEDGER = [
       + '(`memory-analytics.ts`) DOES implement `count_distinct`, so this package answers one declared '
       + 'function two ways depending on which face you enter — the divergence class #5374 fixed for '
       + '`$contains` in this same package. #5499 freezes it, so the cell is open by decision, not by '
-      + 'difficulty: the fix is one arm beside its neighbours. Tracked as #6814.',
+      + 'difficulty: the fix is one arm beside its neighbours. Tracked as #6814. '
+      + '[#6401] Re-measured when the case-set gained its `groupByAlias` axis: on THAT axis this driver '
+      + 'AGREES. `performAggregation`\'s `normalizeGroupBy` (`memory-driver.ts:1066-1068`) already returns '
+      + '`{ field, alias: node.alias ?? node.field }` and projects the group value under `alias` — the answer '
+      + '#6401 converged the three SQL faces onto. It had reached it independently, so the enforce leg needed '
+      + 'NO mechanical alignment here. The cell stays open on `count_distinct` alone.',
     issue: 'https://github.com/objectstack-ai/objectstack/issues/6814',
   },
   {
@@ -434,7 +439,15 @@ const LEDGER = [
       + 'package has no suite for the cell, which is the debt. #5499 freezes it; the fix is a `$ne: null` '
       + 'before the `$addToSet` (or sizing a `$setDifference` against `[null]`). Tracked as #6814. Note the '
       + 'real-mongod suites are opt-in since #5517, so whatever clears this cell needs a server-free half '
-      + 'like `mongodb-filter-logic-translation.test.ts` has.',
+      + 'like `mongodb-filter-logic-translation.test.ts` has. '
+      + '[#6401] Re-measured when the case-set gained its `groupByAlias` axis, and the finding is WIDER than '
+      + 'the alias: `buildAggregationPipeline` annotates `groupBy` as `string[]` and builds '
+      + '`groupId[field] = \'$\' + field` (`mongodb-aggregation.ts:66-69`, mirrored in the `$project` at '
+      + '`:85-88`). A STRUCTURED `GroupByNode` — aliased or not — is an object there, so the `$group._id` key '
+      + 'becomes the literal `"[object Object]"` and its value `"$[object Object]"`. This face cannot take '
+      + 'the structured half of the declared union at all, so the alias is unreachable rather than ignored. '
+      + '`mongodb-driver.ts:512` passes `(query as any).groupBy`, which is why the union never met that '
+      + '`string[]` annotation at `tsc`. Read from the source; not executed. Same #6814 home.',
     issue: 'https://github.com/objectstack-ai/objectstack/issues/6814',
   },
 ];
