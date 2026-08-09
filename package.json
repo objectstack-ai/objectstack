@@ -67,7 +67,7 @@
     "check:prerelease-pins": "node scripts/check-prerelease-pin-watch.mjs --self-test && node scripts/check-prerelease-pin-watch.mjs",
     "check:empty-changeset": "node scripts/check-empty-changeset.mjs --self-test && node scripts/check-empty-changeset.mjs",
     "check:adr-0087-registration": "node scripts/check-adr-0087-registration.mjs --self-test && node scripts/check-adr-0087-registration.mjs",
-    "check:changeset-gate-self-tests": "node scripts/check-empty-changeset.mjs --self-test && node scripts/check-adr-0087-registration.mjs --self-test",
+    "check:changeset-gate-self-tests": "node scripts/check-empty-changeset.mjs --self-test && node scripts/check-adr-0087-registration.mjs --self-test && node scripts/check-changeset-no-major.mjs --self-test",
     "check:override-consistency": "node scripts/check-override-consistency.mjs --self-test && node scripts/check-override-consistency.mjs",
     "check:release-notes": "node scripts/check-release-notes.mjs",
     "check:release-body": "node scripts/release-github-releases.mjs --self-test",
