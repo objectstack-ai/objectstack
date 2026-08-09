@@ -65,6 +65,7 @@ import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objects
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
 import { HttpDispatcher } from './http-dispatcher.js';
+import type { HttpDispatcherResult } from './http-dispatcher.js';
 import { declaresOrgOverride, organizationIdForMetaWrite } from './meta-write-org-scope.js';
 
 const ACTIVE_ORG = 'org_alpha';
@@ -279,8 +280,20 @@ const VIEW = {
 /** `allowOrgOverride: false` — the ADR-0045 publish-visibility specimen. */
 const APP = { name: 'crm', label: 'CRM' };
 
+/**
+ * The dispatcher's `response` is optional on `HttpDispatcherResult` — a route
+ * that declines answers `{ handled: false }`. Every case here drives a route
+ * that MUST answer, so an absent response is a failure of the harness rather
+ * than a value to narrow around at each call site: this says so once, loudly,
+ * and hands back a response the assertions can read.
+ */
+function responseOf(result: HttpDispatcherResult): NonNullable<HttpDispatcherResult['response']> {
+    const response = result.response;
+    if (!response) throw new Error('the dispatcher handled the route but returned no response');
+    return response;
+}
+
 describe('#7018 — the registry decides whether a metadata write carries the session org', () => {
-    let warn: ReturnType<typeof vi.spyOn>;
     let error: ReturnType<typeof vi.spyOn>;
 
     beforeEach(() => {
@@ -288,7 +301,7 @@ describe('#7018 — the registry decides whether a metadata write carries the se
         // subject and must not drown the run. `error` is spied rather than
         // silenced-and-forgotten — the ADR-0045 flip reports its own failure
         // there (#4754), and the last case reads it back.
-        warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        vi.spyOn(console, 'warn').mockImplementation(() => {});
         error = vi.spyOn(console, 'error').mockImplementation(() => {});
     });
 
@@ -317,9 +330,9 @@ describe('#7018 — the registry decides whether a metadata write carries the se
     it('a NON-overridable type lands env-wide even though the session has an active org', async () => {
         const { engine, dispatcher } = makeStack(ACTIVE_ORG);
 
-        const res = await dispatcher.handleMetadata(`/flow/${FLOW.name}`, ctx(), 'PUT', FLOW);
+        const res = responseOf(await dispatcher.handleMetadata(`/flow/${FLOW.name}`, ctx(), 'PUT', FLOW));
 
-        expect(res.response.status).toBe(200);
+        expect(res.status).toBe(200);
         const row = metaRow(engine, 'flow', FLOW.name);
         expect(row).toBeDefined();
         // THE assertion. Before #7018 this was `'org_alpha'` — a row
@@ -337,9 +350,9 @@ describe('#7018 — the registry decides whether a metadata write carries the se
             fields: { subject: { type: 'text', label: 'Subject' } },
         };
 
-        const res = await dispatcher.handleMetadata(`/object/${OBJECT.name}`, ctx(), 'PUT', OBJECT);
+        const res = responseOf(await dispatcher.handleMetadata(`/object/${OBJECT.name}`, ctx(), 'PUT', OBJECT));
 
-        expect(res.response.status).toBe(200);
+        expect(res.status).toBe(200);
         expect(metaRow(engine, 'object', OBJECT.name)!.organization_id).toBeNull();
     });
 
@@ -352,20 +365,20 @@ describe('#7018 — the registry decides whether a metadata write carries the se
         const withOrg = makeStack(ACTIVE_ORG);
         const withoutOrg = makeStack(undefined);
 
-        const a = await withOrg.dispatcher.handleMetadata(`/flow/${FLOW.name}`, ctx(), 'PUT', FLOW);
-        const b = await withoutOrg.dispatcher.handleMetadata(`/flow/${FLOW.name}`, ctx(), 'PUT', FLOW);
+        const a = responseOf(await withOrg.dispatcher.handleMetadata(`/flow/${FLOW.name}`, ctx(), 'PUT', FLOW));
+        const b = responseOf(await withoutOrg.dispatcher.handleMetadata(`/flow/${FLOW.name}`, ctx(), 'PUT', FLOW));
 
-        expect(a.response.status).toBe(200);
-        expect(a.response.body.data).toEqual(b.response.body.data);
-        expect(a.response.body.data).toMatchObject({ success: true, state: 'active' });
+        expect(a.status).toBe(200);
+        expect(a.body.data).toEqual(b.body.data);
+        expect(a.body.data).toMatchObject({ success: true, state: 'active' });
     });
 
     it('CONTROL — an `allowOrgOverride: true` type keeps its org scoping exactly as before', async () => {
         const { engine, dispatcher } = makeStack(ACTIVE_ORG);
 
-        const res = await dispatcher.handleMetadata(`/view/${VIEW.name}`, ctx(), 'PUT', VIEW);
+        const res = responseOf(await dispatcher.handleMetadata(`/view/${VIEW.name}`, ctx(), 'PUT', VIEW));
 
-        expect(res.response.status).toBe(200);
+        expect(res.status).toBe(200);
         // ADR-0005's per-org overlay is the point of the flag and must survive
         // this change untouched — `getMetaItem`/`getMetaItems` load it on demand.
         expect(metaRow(engine, 'view', VIEW.name)!.organization_id).toBe(ACTIVE_ORG);
@@ -374,9 +387,9 @@ describe('#7018 — the registry decides whether a metadata write carries the se
     it('CONTROL — the plural URL spelling of an overridable type is scoped the same way', async () => {
         const { engine, dispatcher } = makeStack(ACTIVE_ORG);
 
-        const res = await dispatcher.handleMetadata(`/views/${VIEW.name}`, ctx(), 'PUT', VIEW);
+        const res = responseOf(await dispatcher.handleMetadata(`/views/${VIEW.name}`, ctx(), 'PUT', VIEW));
 
-        expect(res.response.status).toBe(200);
+        expect(res.status).toBe(200);
         expect(metaRow(engine, 'view', VIEW.name)!.organization_id).toBe(ACTIVE_ORG);
     });
 
@@ -403,11 +416,11 @@ describe('#7018 — the registry decides whether a metadata write carries the se
             success: true, publishedCount: 0, failedCount: 0, published: [], failed: [],
         });
 
-        const res = await dispatcher.handlePackages('/crm_pkg/publish-drafts', 'POST', {}, {}, ctx());
+        const res = responseOf(await dispatcher.handlePackages('/crm_pkg/publish-drafts', 'POST', {}, {}, ctx()));
 
-        expect(res.response.status).toBe(200);
-        expect(res.response.body.data.unhiddenApps).toEqual([APP.name]);
-        expect(res.response.body.data.unhideError).toBeUndefined();
+        expect(res.status).toBe(200);
+        expect(res.body.data.unhiddenApps).toEqual([APP.name]);
+        expect(res.body.data.unhideError).toBeUndefined();
 
         // One row, still env-wide — not a second, org-scoped row shadowing it.
         const appRows = engine.metaRows().filter((r: any) => r.type === 'app' && r.state === 'active');
@@ -438,12 +451,12 @@ describe('#7018 — the registry decides whether a metadata write carries the se
         });
         error.mockClear();
 
-        const res = await dispatcher.handlePackages('/crm_pkg/publish-drafts', 'POST', {}, {}, ctx());
+        const res = responseOf(await dispatcher.handlePackages('/crm_pkg/publish-drafts', 'POST', {}, {}, ctx()));
 
-        expect(res.response.body.data.unhiddenApps).toEqual([APP.name]);
-        const flipComplaints = error.mock.calls
+        expect(res.body.data.unhiddenApps).toEqual([APP.name]);
+        const flipComplaints = (error.mock.calls as unknown[][])
             .map((c) => String(c[0]))
-            .filter((line) => line.includes('visibility flip'));
+            .filter((line: string) => line.includes('visibility flip'));
         expect(flipComplaints).toEqual([]);
     });
 });
