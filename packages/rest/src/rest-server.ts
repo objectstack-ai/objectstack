@@ -8,6 +8,7 @@ import {
     isMcpServerEnabled,
     looksLikeInternalErrorLeak,
     isUniqueViolationError,
+    matchMissingColumnOfRelation,
     declaresServerFault,
     INTERNAL_ERROR_MESSAGE,
 } from '@objectstack/types';
@@ -903,13 +904,18 @@ export function mapDataError(error: any, object?: string): { status: number; bod
     // NOTE: this is a last-resort safety net — the validation layer should
     // ideally reject these before they reach the driver (see follow-ups on
     // unknown-field rejection + provenance-aware required checks).
+    // [#6615] The Postgres limb is the shared `matchMissingColumnOfRelation`
+    // rather than a fourth open-coded copy of that phrase: its message contains
+    // a legal missing-TABLE phrase as a substring, and `service-analytics` and
+    // `metadata` each had to repair the same superstring hole. Same regex as
+    // before, same position last in the chain — only its owner moved.
     const unknownColumn =
-        /has no column named\s+["'`]?([a-z0-9_]+)/i.exec(raw) ||
-        /no such column:\s*["'`]?([a-z0-9_.]+)/i.exec(raw) ||
-        /unknown column\s+["'`]([a-z0-9_]+)["'`]/i.exec(raw) ||
-        /column\s+["'`]([a-z0-9_]+)["'`]\s+of relation\s+\S+\s+does not exist/i.exec(raw);
+        /has no column named\s+["'`]?([a-z0-9_]+)/i.exec(raw)?.[1] ??
+        /no such column:\s*["'`]?([a-z0-9_.]+)/i.exec(raw)?.[1] ??
+        /unknown column\s+["'`]([a-z0-9_]+)["'`]/i.exec(raw)?.[1] ??
+        matchMissingColumnOfRelation(raw);
     if (unknownColumn) {
-        const field = unknownColumn[1]?.split('.').pop();
+        const field = unknownColumn.split('.').pop();
         return {
             status: 400,
             body: {

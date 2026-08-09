@@ -12,6 +12,10 @@ import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { Dataset } from '@objectstack/spec/ui';
 import type { Logger } from '@objectstack/spec/contracts';
 import { createLogger, bucketKeyToCalendarRange, zonedDateStartToUtcMs } from '@objectstack/core';
+// [#6615] The Postgres `"x" of relation "y"` phrase, owned once. This is the
+// only reason this package depends on `@objectstack/types` — see the module's
+// docblock for why the edge is acyclic and why it was worth adding.
+import { matchMissingColumnOfRelation } from '@objectstack/types';
 import { CubeRegistry } from './cube-registry.js';
 import type { AnalyticsStrategy, AnalyticsDriverCapabilities, StrategyContext } from './strategies/types.js';
 import { NativeSQLStrategy } from './strategies/native-sql-strategy.js';
@@ -136,9 +140,17 @@ function hasDeclaredErrorEnvelope(err: unknown): boolean {
  * them is the safe direction of error: a wording this misses merely keeps
  * today's verdict, while one it over-matches would turn a genuinely missing
  * table into a hard failure and regress #5033's deliberate leniency.
+ *
+ * [#6615] "Deliberately that regex rather than a second dialect of it" is now
+ * enforced rather than asserted: the phrase moved to
+ * {@link matchMissingColumnOfRelation} in `@objectstack/types`, which
+ * `rest-server.ts`'s `mapDataError` and `metadata`'s `MISSING_TABLE.excludes`
+ * also read. The two faces can no longer disagree about what postgres says by
+ * one of them being edited. Same pattern, byte for byte — only its owner moved.
  */
-const MISSING_COLUMN_OF_RELATION =
-  /column\s+["'`]([a-z0-9_]+)["'`]\s+of relation\s+\S+\s+does not exist/i;
+function isMissingColumnOfRelation(message: string): boolean {
+  return matchMissingColumnOfRelation(message) !== undefined;
+}
 
 /**
  * Detect the "backing object/table isn't present in this kernel" class of
@@ -173,7 +185,7 @@ const MISSING_COLUMN_OF_RELATION =
  * behaviour change for #5033's leniency.
  *
  * [#6035] The residue #5717 left and named here is now closed by
- * {@link MISSING_COLUMN_OF_RELATION}, subtracted BEFORE any limb below runs.
+ * {@link isMissingColumnOfRelation}, subtracted BEFORE any limb below runs.
  * The anchor above cannot do it alone, for a reason worth stating plainly: the
  * missing-COLUMN wording literally CONTAINS a well-formed missing-relation
  * wording, so no tightening of "does this say a relation is missing" can ever
@@ -184,7 +196,7 @@ function isMissingSourceError(err: unknown): boolean {
   const raw = String((err as { message?: unknown })?.message ?? err ?? '');
   // [#6035] Missing COLUMN is not missing SOURCE — the paragraph above promises
   // column errors stay hard failures, and this is where that promise is kept.
-  if (MISSING_COLUMN_OF_RELATION.test(raw)) return false;
+  if (isMissingColumnOfRelation(raw)) return false;
   const msg = raw.toLowerCase();
   return (
     msg.includes('no such table') ||      // sqlite / libsql
@@ -213,7 +225,7 @@ function isMissingSourceError(err: unknown): boolean {
  * `undefined` when the driver's phrasing carries no name. Unparseable ⇒ the
  * caller keeps today's degradation, never a louder guess.
  *
- * [#6035] It subtracts {@link MISSING_COLUMN_OF_RELATION} for the same reason
+ * [#6035] It subtracts {@link isMissingColumnOfRelation} for the same reason
  * its sibling does, and the reason is CONSISTENCY rather than a second bug:
  * measured on `origin/main`, the column wording made this function answer
  * `sys_team`, so fixing only "is something missing" would leave the pair
@@ -227,7 +239,7 @@ function isMissingSourceError(err: unknown): boolean {
  */
 function missingSourceRelation(err: unknown): string | undefined {
   const msg = String((err as { message?: unknown })?.message ?? err ?? '');
-  if (MISSING_COLUMN_OF_RELATION.test(msg)) return undefined;
+  if (isMissingColumnOfRelation(msg)) return undefined;
   const patterns = [
     /no such table:\s*[`"'[]?([A-Za-z0-9_$.]+)/i,                        // sqlite / libsql
     /relation\s+[`"']?([A-Za-z0-9_$.]+)[`"']?\s+does not exist/i,        // postgres
