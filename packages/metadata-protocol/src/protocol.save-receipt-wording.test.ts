@@ -199,16 +199,25 @@ describe('#5265 — a save receipt names what was actually written', () => {
     }
 
     it('an org-scoped runtime-only save names the org, not an overlay', async () => {
+        // [#6190, 2026-08-09] Re-spelled from `hook` to `view`. The claim is
+        // about the RECEIPT — "(org=…)" rather than the overlay phrasing — and
+        // the receipt does not vary by type. What changed is which types can
+        // reach this receipt at all: since the #6190 ruling an org-scoped write
+        // requires a type that declares `allowOrgOverride`, and the
+        // overlay-less-yet-overridable population is empty by ruling (see the
+        // population pin above). `view` is runtime-only here for the reason the
+        // case below states — no artifact was shipped at this name — so this
+        // still measures a RUNTIME-ONLY org-scoped save, not an overlay.
         const { protocol } = makeProtocol();
 
         const result = await protocol.saveMetaItem({
-            type: 'hook', name: 'rc5_acct', item: OVERLAYLESS_PROBES.hook,
+            type: 'view', name: 'rc5_probe_view', item: VIEW,
             organizationId: 'org_alpha',
         });
 
         expect(result.message).not.toContain('customization overlay');
         expect(result.message).toBe(
-            `Saved hook 'rc5_acct' (org=org_alpha, state=active) [seq=${result.seq}]`,
+            `Saved view 'rc5_probe_view' (org=org_alpha, state=active) [seq=${result.seq}]`,
         );
     });
 
