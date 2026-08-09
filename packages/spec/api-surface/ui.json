@@ -389,6 +389,7 @@
     "diagnoseViewMetadata (function)",
     "expandViewContainer (function)",
     "expandViewContainerWithDiagnostics (function)",
+    "isActionParamValuePresent (function)",
     "isAggregatedViewContainer (function)",
     "isRecordContextBlockType (function)",
     "normalizeFilterOperator (function)",

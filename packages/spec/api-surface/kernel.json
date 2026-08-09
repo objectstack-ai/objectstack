@@ -532,6 +532,7 @@
     "listLintableAuthoringCollections (function)",
     "listMetadataCreateSeedTypes (function)",
     "listMetadataTypeSchemaTypes (function)",
+    "listUnregisteredKindSchemaTypes (function)",
     "lowerRequiresFeature (function)",
     "registerMetadataTypeActions (function)",
     "registerMetadataTypeSchema (function)",

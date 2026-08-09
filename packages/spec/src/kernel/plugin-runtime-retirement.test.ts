@@ -2,6 +2,11 @@
 
 import { describe, it, expect } from 'vitest';
 
+import {
+  EXPORT_ENTRY_POINTS,
+  exportNamesOf,
+  holdersOf,
+} from '../../scripts/lib/export-origins-testkit';
 // ─── [#4834] the `plugin-runtime.zod` family is REMOVED ─────────────────────
 //
 // ADR-0049 enforce-or-remove, ruled REMOVE. `DynamicLoadRequestSchema`,
@@ -52,64 +57,22 @@ describe('[#4834] plugin-runtime family removal — no entry exports any of the 
     'DynamicUnloadRequestInput',
   ] as const;
 
-  it('resolves the export surface: the retired names have ZERO holders across every public entry', async () => {
-    const ts = (await import('typescript')).default;
-    const { resolve, dirname } = await import('node:path');
-    const { fileURLToPath } = await import('node:url');
-    const { readFileSync } = await import('node:fs');
-
-    const specDir = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
-    // Every public entry point, read from package.json's exports map so a
-    // future entry cannot silently escape the absence assertions below.
-    const pkg = JSON.parse(readFileSync(resolve(specDir, 'package.json'), 'utf8')) as {
-      exports: Record<string, unknown>;
-    };
-    const entries: Record<string, string> = {};
-    for (const sub of Object.keys(pkg.exports)) {
-      if (sub === '.') entries[sub] = resolve(specDir, 'src/index.ts');
-      else if (/^\.\/[a-z-]+$/.test(sub)) entries[sub] = resolve(specDir, `src/${sub.slice(2)}/index.ts`);
-      // './openapi.json' / './package.json' are not TypeScript entry points.
-    }
-    // Anti-vacuity (1): the enumeration found the real surface — including the
-    // entry that used to own every retired name, and the root barrel that
-    // re-exported it.
+  it('resolves the export surface: the retired names have ZERO holders across every public entry', () => {
+    // Anti-vacuity: the baseline must cover the real surface. (This used to
+    // enumerate package.json's exports map and build its own `ts.createProgram`
+    // right here; `export-origins/` IS that resolution, computed once at build
+    // time and checked in — #4796. `holdersOf` is now the baseline's query, and
+    // `export-origins.test.ts` pins that it discriminates.)
     for (const needed of ['.', './kernel']) {
-      expect(Object.keys(entries), `exports map must include ${needed}`).toContain(needed);
+      expect(EXPORT_ENTRY_POINTS, `exports map must include ${needed}`).toContain(needed);
     }
-    expect(Object.keys(entries).length).toBeGreaterThan(10);
-
-    const program = ts.createProgram(Object.values(entries), {
-      module: ts.ModuleKind.ESNext,
-      moduleResolution: ts.ModuleResolutionKind.Bundler,
-      skipLibCheck: true,
-      noEmit: true,
-    });
-    const checker = program.getTypeChecker();
-
-    const exportsOf = (sub: string) => {
-      const sf = program.getSourceFile(entries[sub]);
-      const moduleSym = sf && checker.getSymbolAtLocation(sf);
-      // Anti-vacuity (2): without this guard a resolution failure would make
-      // every absence assertion below pass for free — exactly how a gate goes
-      // dormant (#4642).
-      expect(moduleSym, `${sub} module symbol must resolve`).toBeTruthy();
-      return checker.getExportsOfModule(moduleSym!);
-    };
-
-    /** Every entry that exports `name` — for a removal this must be []. */
-    const holdersOf = (name: string): string[] => {
-      const out: string[] = [];
-      for (const sub of Object.keys(entries)) {
-        if (exportsOf(sub).some((e) => e.getName() === name)) out.push(sub);
-      }
-      return out;
-    };
+    expect(EXPORT_ENTRY_POINTS.length).toBeGreaterThan(10);
 
     // Anti-vacuity (3): `holdersOf` actually finds holders when a name IS
     // exported — proven on a surviving kernel neighbour, so `[]` below means
     // "absent", not "the probe is broken".
     expect(holdersOf('PluginSchema')).toContain('./kernel');
-    const kernelNames = exportsOf('./kernel').map((e) => e.getName());
+    const kernelNames = exportNamesOf('./kernel');
     expect(kernelNames.length, './kernel must still export a non-trivial surface').toBeGreaterThan(40);
 
     // The removal itself: NO public entry exports any of the twelve names —

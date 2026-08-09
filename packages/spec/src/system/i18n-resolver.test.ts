@@ -908,7 +908,7 @@ describe('translatePage', () => {
         components: [
           {
             type: 'page:header',
-            properties: { title: 'Connect an Agent', subtitle: 'Give any MCP-capable client…', icon: 'bot' },
+            properties: { title: 'Connect an Agent', subtitle: 'Give any MCP-capable client…', actions: ['connect_agent'] },
           },
         ],
       },
@@ -926,9 +926,9 @@ describe('translatePage', () => {
     expect(out.regions[0].components[0].properties.subtitle).toBe('让任意支持 MCP 的 AI 客户端受控访问此环境。');
   });
 
-  it('preserves non-translatable header properties such as icon', () => {
+  it('preserves non-translatable header properties such as actions', () => {
     const out = translatePage(page, bundle, { locale: 'zh-CN' });
-    expect(out.regions[0].components[0].properties.icon).toBe('bot');
+    expect(out.regions[0].components[0].properties.actions).toEqual(['connect_agent']);
   });
 
   it('leaves non-header components untouched', () => {

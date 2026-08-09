@@ -480,17 +480,30 @@ describe('#6285 refusal through saveMetaItem / publishMetaItem', () => {
         expect(err.status).toBe(422);
     });
 
-    it('allows an ORG-SCOPED write of the same flow — the row already names its organization', async () => {
-        // The limb negation at the caller face, and worth driving end-to-end
-        // rather than only on the pure function: #6283 flipped flow's
-        // `allowOrgOverride` to `false`, so the ADR-0005 gate now 403s an org
-        // overlay of a PACKAGED flow. A brand-new runtime-created flow is a
-        // different door (`allowRuntimeCreate: true` survived that flip), and
-        // this pins which of the two an org-scoped write of a new flow takes.
+    it('[#6190] an ORG-SCOPED write of the same flow is now refused BEFORE this rule runs', async () => {
+        // Replaced wholesale rather than re-spelled, because what changed is
+        // this case's REACHABILITY, and a fixture that keeps asserting a
+        // verdict nothing can produce is green for an empty reason.
+        //
+        // It used to pin the limb NEGATION at the caller face: an org-scoped
+        // write escaped #6285's 422 because "the row already names its
+        // organization". The 2026-08-08 ruling on #6190 refuses an org-scoped
+        // write of any non-org-overridable type — `flow` among them — at a gate
+        // that runs EARLIER than `assertRuntimeAuthoringRules`. So the negation
+        // is no longer reachable through `saveMetaItem`/`publishMetaItem` for
+        // `flow`: the write never gets far enough to be judged by this rule.
+        //
+        // Recorded here, not acted on: whether #6285's org-present limb should
+        // survive at all now that nothing can reach it through these two doors
+        // is a question for that rule's own owner (#6710 is in flight in that
+        // region), and this PR deliberately does not touch it. What this case
+        // pins is the honest current fact — which refusal an org-scoped
+        // platform-schedule flow actually gets.
         const { protocol, rows } = makeProtocol();
-        const result = await save(protocol, scheduledSweep(), { organizationId: 'org_a' });
-        expect(result.success).toBe(true);
-        expect(flowRows(rows).map((r) => r.organization_id)).toEqual(['org_a']);
+        const err = await save(protocol, scheduledSweep(), { organizationId: 'org_a' }).catch((e: any) => e);
+        expect(err.code).toBe('NOT_OVERRIDABLE');
+        expect(err.status).toBe(403);
+        expect(flowRows(rows)).toEqual([]);
     });
 
     it('allows a DRAFT of the identical body, and refuses the publish that promotes it', async () => {

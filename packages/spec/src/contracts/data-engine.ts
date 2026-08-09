@@ -17,7 +17,9 @@ import type { IDataDriver } from './data-driver.js';
  *
  * `onFieldsDropped` is invoked by the engine when caller-supplied write fields
  * are LEGALLY stripped from the payload before the driver write — static
- * `readonly` (#2948) or a TRUE `readonlyWhen` predicate (#3042). The write
+ * `readonly` (#2948), a TRUE `readonlyWhen` predicate (#3042), or an
+ * implicitly-readonly runtime-owned type (#5503; `RUNTIME_OWNED_FIELD_TYPES`,
+ * today `autonumber` — the one strip that also runs on INSERT). The write
  * still succeeds; the listener exists so callers that report per-field success
  * (e.g. a flow's `update_record` step) can surface a warning instead of a
  * silent success (#3356's masked stage write-backs).
@@ -48,7 +50,9 @@ export interface WriteObservabilityOptions {
    * It covers every drop `onFieldsDropped` reports, i.e. both
    * `DroppedFieldsEvent['reason']` arms: static `readonly: true` (#2948, which
    * only runs for non-system callers) and a TRUE `readonlyWhen` predicate
-   * (#3042, which runs for every caller, `isSystem` included). Covering only
+   * (#3042, which runs for every caller, `isSystem` included) — plus, since
+   * #5503, the implicitly-readonly runtime-owned strip, which reports under
+   * the same `'readonly'` arm (see the INSERT section below). Covering only
    * the static arm would leave a trusted caller — the very caller this option
    * exists for, one that already passes `{ context: { isSystem: true } }` and
    * is therefore exempt from the static strip — still losing `readonlyWhen`
@@ -81,8 +85,30 @@ export interface WriteObservabilityOptions {
    * client toggle write-refusal on a security-adjacent path. Widening strict to
    * the wire is a SEPARATE decision, not a side effect of this one.
    *
-   * INSERT ignores it, for the same reason `onFieldsDropped` never fires there:
-   * insert is exempt from both strips, so there is nothing to refuse.
+   * ## INSERT — refuses runtime-owned values (since #5503)
+   *
+   * Until #5503 this paragraph declared the option inert on insert — true
+   * when written (#5126 predates the runtime-owned strip), false since. At
+   * this seam insert remains deliberately exempt from the two AUTHOR-DECLARED
+   * strips (#3413: an in-process create may seed a `readonly: true` field's
+   * initial value, and `readonlyWhen` cannot lock anything on a create at
+   * all), but the implicitly-readonly runtime-owned strip #5503 added runs on
+   * insert too — and it is exactly the one strict refuses. An insert whose
+   * payload carries a runtime-owned value (`RUNTIME_OWNED_FIELD_TYPES`, today
+   * `autonumber` — a caller-supplied record number) behaves like update at
+   * this seam: with this option `true` it throws `ReadonlyFieldRejectedError`
+   * (`operation: 'insert'`) and nothing is written; without it the value is
+   * stripped, the write completes, and `onFieldsDropped` fires with
+   * `reason: 'readonly'`. The engine-level writers exempt from that strip —
+   * and therefore never refused — are the two the error message itself names:
+   * `isSystem`, and the `preserveAudit` historical import reinstating legacy
+   * record numbers (#3493). Layer note: that exemption pair is THIS
+   * in-process seam's. The DataProtocol ingress enforces its own
+   * author-declared `readonly` policy on create (#3043), where
+   * `preserveAudit` is UPDATE-only (#6640) — see `FieldSchema.readonly`;
+   * nothing here widens or narrows it. `ReadonlyFieldRejectedError`'s own doc
+   * records the same contract from the error's side: "Thrown by
+   * `engine.update` — and, since #5503, by `engine.insert`".
    */
   strictReadonlyWrites?: boolean;
 }

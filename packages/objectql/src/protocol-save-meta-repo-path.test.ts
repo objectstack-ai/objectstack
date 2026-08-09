@@ -307,7 +307,6 @@ describe('saveMetaItem — repository write path (post PR-10d.6)', () => {
             protocol.saveMetaItem({
                 type: 'object',
                 name: 'maint_asset',
-                organizationId: 'org_alpha',
                 packageId: 'app.objectstack.hotcrm', // Studio had a code package selected
                 mode: 'draft',
                 item: { name: 'maint_asset', label: 'Asset', fields: { name: { type: 'text', label: 'Name' } } },
@@ -330,7 +329,6 @@ describe('saveMetaItem — repository write path (post PR-10d.6)', () => {
             protocol.saveMetaItem({
                 type: 'object',
                 name: 'maint_asset',
-                organizationId: 'org_alpha',
                 packageId: 'platform.core',
                 mode: 'draft',
                 item: { name: 'maint_asset', label: 'Asset', fields: { name: { type: 'text', label: 'Name' } } },
@@ -347,10 +345,11 @@ describe('saveMetaItem — repository write path (post PR-10d.6)', () => {
         // No manifests map / empty → isLoadedPackage('com.acme.beta') is false.
         const inserts = spyInserts(engine);
         const protocol = new ObjectStackProtocolImplementation(engine);
+        // [#6190] Env-wide — the org was scenery; this case is about the
+        // PACKAGE binding surviving a runtime-only create.
         await protocol.saveMetaItem({
             type: 'object',
             name: 'maint_ticket',
-            organizationId: 'org_alpha',
             packageId: 'com.acme.beta',
             mode: 'draft',
             item: { name: 'maint_ticket', label: 'Ticket', fields: { name: { type: 'text', label: 'Name' } } },

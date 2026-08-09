@@ -989,6 +989,7 @@
     "getAuthEndpointUrl (function)",
     "getDefaultRouteRegistrations (function)",
     "identityFreeEndpointGateFailure (function)",
+    "makeApiErrorSchema (function)",
     "normalizeEndpointPath (function)",
     "readServiceSelfInfo (function)",
     "resolveDiscoveryEnvironment (function)",

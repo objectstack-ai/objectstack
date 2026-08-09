@@ -259,11 +259,18 @@ describe('overlay whitelist enforcement (shared-DB invariant)', () => {
 
         for (const { type, item } of runtimeCreatable) {
             it(`accepts brand-new ${type}`, async () => {
+                // [#6190] These writes used to pass `organizationId: 'org_alpha'`.
+                // The org was scenery: what this loop measures is the two-tier
+                // verdict — brand-new items of `allowRuntimeCreate` types are
+                // NOT caught by the overlay whitelist. Since the 2026-08-08
+                // ruling an org-scoped write of these very types is refused by a
+                // different gate, so keeping the org here would have measured
+                // that refusal instead of this one. Pinned in metadata-protocol's
+                // `protocol.org-scoped-write-refused.test.ts`.
                 const result = await protocol.saveMetaItem({
                     type,
                     name: item.name,
                     item,
-                    organizationId: 'org_alpha',
                 });
                 expect(result.success).toBe(true);
             });

@@ -87,6 +87,33 @@ function changed(before: Map<string, string>, after: Map<string, string>): strin
   return [...names].filter((n) => before.get(n) !== after.get(n)).sort();
 }
 
+/**
+ * The message of the error `run` throws, for the cases where the MESSAGE is the
+ * thing under test (#6751). `expect(...).toThrow()` cannot serve those: the
+ * reader threw before the fix too — with a bare `TypeError` — so a throw-only
+ * assertion is green on the defect it is supposed to pin.
+ */
+function messageOf(run: () => unknown): string {
+  try {
+    run();
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
+  return expect.fail('expected the shard reader to reject, but it returned a value');
+}
+
+/** Rewrite one shard's parsed document, in the canonical byte shape. */
+function rewriteShard(
+  root: string,
+  name: string,
+  mutate: (doc: Record<string, unknown>) => void,
+): void {
+  const file = path.join(root, `${name}.json`);
+  const doc = JSON.parse(fs.readFileSync(file, 'utf-8'));
+  mutate(doc);
+  fs.writeFileSync(file, JSON.stringify(doc, null, 2) + '\n');
+}
+
 describe('sharded artifacts — locality: a change in one category moves one file (#5837)', () => {
   it('routes a key to the shard its category segment names, and only that one', () => {
     // The routing law itself. Everything below is a consequence of it, so it is
@@ -227,6 +254,79 @@ describe('sharded artifacts — the aggregate reads the whole directory (#5837)'
     doc.category = 'data';
     fs.writeFileSync(path.join(dir, 'ai.json'), JSON.stringify(doc, null, 2) + '\n');
     expect(() => aggregateCategoryShards(dir, 'keys')).toThrow(/declares category "data"/);
+  });
+
+  /**
+   * The fourth defect class of this reader (#6751). The other three name the
+   * shard file and carry an issue anchor; a non-string entry used to reach
+   * `categoryOfDefKey` — whose parameter is declared `string` — and die on
+   * `key.indexOf is not a function`. All three call sites in `build-schemas.ts`
+   * print `error.message` and nothing else, so that bare text WAS the whole
+   * diagnostic: no file among 14 shards, no entry, no anchor.
+   *
+   * Note what these cases may not do: assert only that it throws. The unfixed
+   * reader throws too, so `expect(...).toThrow()` — and even `toThrow(/./)` —
+   * stays green on exactly the defect. The message is the contract here, so the
+   * file, the entry and the anchor are each pinned by name.
+   */
+  it('names the shard file, the entry index and the anchor when an entry is not a string', () => {
+    writeShards(dir, authorableSurfaceShardTexts(KEYS));
+    rewriteShard(dir, 'ui', (doc) => {
+      (doc.keys as unknown[])[0] = 12345;
+    });
+
+    const message = messageOf(() => aggregateCategoryShards(dir, 'keys'));
+    expect(message, 'names the shard file').toContain('ui.json');
+    expect(message, 'names the entry').toContain('keys[0]');
+    expect(message, 'carries the issue anchor').toContain('#5837');
+    expect(message, 'says what was found instead').toContain('is a number, not a string');
+    expect(message, 'quotes the offending value').toContain('12345');
+    // The regression this exists for, stated as itself.
+    expect(message, 'never the bare JS error again').not.toContain('indexOf');
+  });
+
+  it('distinguishes null and object entries, which `typeof` alone reports as one', () => {
+    // `typeof null === 'object'` is the trap the type label exists for: telling
+    // an author "object" when they wrote `null` sends them looking for a brace.
+    writeShards(dir, authorableSurfaceShardTexts(KEYS));
+    rewriteShard(dir, 'ui', (doc) => {
+      (doc.keys as unknown[])[1] = null;
+    });
+    expect(messageOf(() => aggregateCategoryShards(dir, 'keys'))).toContain(
+      'keys[1] is null, not a string',
+    );
+
+    writeShards(dir, authorableSurfaceShardTexts(KEYS));
+    rewriteShard(dir, 'ui', (doc) => {
+      (doc.keys as unknown[])[1] = { 'ui/View:name': true };
+    });
+    expect(messageOf(() => aggregateCategoryShards(dir, 'keys'))).toContain(
+      'keys[1] is an object, not a string',
+    );
+  });
+
+  it('speaks the same way for every sharded artifact, naming that artifact’s own field', () => {
+    // `categoryOfDefKey` is shared by all three category-sharded ratchets
+    // (authorable-surface/, json-schema.manifest/, authorable-defaults/), so the
+    // dumb message appeared under three different prefixes. The field name is
+    // part of the message for the same reason the file name is.
+    //
+    // The entry here is an ARRAY on purpose, and it is the worst of the class:
+    // `['ui/View'].indexOf('/')` is a perfectly valid Array.prototype call that
+    // answers -1, so this case never produced a TypeError at all — it fell
+    // through to `cannot shard "ui/View": … has no category segment`, naming a
+    // key that is not in the file and a cause that is not the defect. A wrong
+    // diagnosis outranks a bare one, which is why the type is checked before
+    // the routing rather than left to whatever `indexOf` happens to mean.
+    writeShards(dir, schemaManifestShardTexts(['ai/Agent', 'ui/View', 'ui/Dashboard']));
+    rewriteShard(dir, 'ui', (doc) => {
+      (doc.schemas as unknown[])[1] = ['ui/View'];
+    });
+
+    const message = messageOf(() => aggregateCategoryShards(dir, 'schemas'));
+    expect(message).toContain('ui.json');
+    expect(message).toContain('schemas[1] is an array, not a string');
+    expect(message).toContain('#5837');
   });
 
   it('refuses a stray file in a generator-owned directory', () => {

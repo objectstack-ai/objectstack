@@ -163,12 +163,24 @@ export function emptyFieldConstraintError(field: string, path: string): Error {
  * they are refused here like any other undeclared operator, with the spec's
  * prescription attached (see {@link retiredFilterOperatorError}).
  *
- * Note what this does NOT do: it does not add `$icontains`. That name is
- * declared by `StringOperatorSchema` but deliberately absent from
- * `FILTER_OPERATORS` (#5701), and this set is derived, so this driver refuses it
- * — fail-closed, an unimplemented capability rather than a silent widening. The
- * `$icontains` implementation for the JS faces is #5499-frozen; see the
- * `driver-memory` row of `scripts/check-driver-conformance.mjs`.
+ * ## [#6520] `$icontains` arrives here by DERIVATION, and that is the risk
+ *
+ * This set is `FILTER_OPERATORS` itself, so #6520 adding `$icontains` to the
+ * spec admitted it here with no edit to this file. That is the property #5701
+ * measured and warned about: while the matcher had no arm, admission alone
+ * turned a loud refusal into `match({ name: 'zzz' }, { name: { $icontains:
+ * 'acme' } }) === true` — the predicate dropped, every row matched, which on an
+ * RLS read scope is a permission bypass rather than a degraded filter (#3948).
+ *
+ * So the arms and the word list HAD to land in one PR, and #6520 did that:
+ * `memory-matcher.ts` and `memory-driver.ts` both carry a `$icontains` case, and
+ * `memory-analytics.ts` lowers it too. Re-verified by deleting the matcher's arm
+ * on the #6520 branch — with the name admitted, the reference matcher answered
+ * EVERY row, which is the measurement, not a prediction.
+ *
+ * The lesson for the next operator is the ordering rather than this name: an
+ * entry in `FILTER_OPERATORS` is a claim that this driver evaluates it, and this
+ * file will make that claim on the spec's behalf whether or not it is true.
  *
  * Everything else is refused. That includes the mingo operators this driver used
  * to hand through by accident (`$elemMatch`, `$size`, `$type`, `$mod`, `$where`,
@@ -624,6 +636,13 @@ function assertFieldConstraintShape(
     if (op === '$null' && typeof spec[op] !== 'boolean') {
       throw nonBooleanNullComparandError(field, spec[op], `${path}.$null`);
     }
+    // [#6520] `$icontains`' comparand is a NON-EMPTY string, the third
+    // comparand-shape rule and the twin of `driver-sql`'s
+    // `icontainsComparandError` — deliberately the same two rejections in one
+    // check, because they are one mistake at one position.
+    if (op === '$icontains' && (typeof spec[op] !== 'string' || spec[op] === '')) {
+      throw icontainsComparandError(field, spec[op], `${path}.$icontains`);
+    }
   }
   // [#5702] The `$options`-without-`$regex` companion check that stood here is
   // GONE. It was needed while `$options` was an allowlisted MODIFIER — a key the
@@ -631,6 +650,32 @@ function assertFieldConstraintShape(
   // are retired now, so the loop above refuses either of them on sight and there
   // is no surviving shape for a companion rule to judge. See
   // {@link retiredFilterOperatorError}.
+}
+
+/**
+ * [#6520] `$icontains` received a comparand that is not a non-empty string.
+ *
+ * Word for word `driver-sql`'s `icontainsComparandError`, and deliberately so:
+ * #3948 made the backends agree that an uncompilable filter is a refusal rather
+ * than a silent match-everything, and a suite that swaps this driver for SQL has
+ * to see the same refusal for the same input. Two rejections, one constructor,
+ * because they are one mistake at the comparand position:
+ *
+ * - **non-string** — `StringOperatorSchema` declares `$icontains: z.string()`,
+ *   so coercing `42` to `"42"` would answer a query nobody wrote;
+ * - **empty string** — every row contains the empty substring, so the predicate
+ *   constrains nothing. A dropped predicate WIDENS a result set, and on an RLS
+ *   read scope that is a permission bypass rather than a degraded filter.
+ */
+function icontainsComparandError(field: string, value: unknown, path: string): Error {
+  const shown = typeof value === 'string' ? `""` : JSON.stringify(value) ?? String(value);
+  return unsupportedFilterError(
+    `Operator "$icontains" on field "${field}" at ${path} requires a NON-EMPTY string comparand, ` +
+      `received ${shown}. "$icontains" is a case-insensitive LITERAL substring search, so its ` +
+      `comparand is the text to look for — an empty one matches every row (a predicate that ` +
+      `constrains nothing), and a non-string one would have to be coerced into text this query ` +
+      `never asked for.`,
+  );
 }
 
 /**

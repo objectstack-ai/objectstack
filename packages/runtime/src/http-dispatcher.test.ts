@@ -48,6 +48,20 @@ const AUTHED_CALLER = () => ({ request: {}, executionContext: { userId: 'u_test'
  */
 const METADATA_AUTHOR = () => ({ request: {}, executionContext: { userId: 'u1', systemPermissions: ['manage_metadata'] } }) as any;
 
+/**
+ * [#7033 / #7023] The same move again for the `/packages` domain, which now
+ * carries an anonymous-deny floor plus per-route capability predicates
+ * (`manage_metadata` for every state-changing route, `studio.access` /
+ * `setup.access` for every read). The package tests below are about ROUTING and
+ * ERROR MAPPING — which protocol/metadata method a path reaches, which status a
+ * miss returns — and were only ever anonymous incidentally, so without a caller
+ * they would now all stop at the 401 floor before reaching the behaviour each
+ * one is named after. This caller holds ALL three capabilities so a single
+ * context clears both the write and the read gate; the gates themselves are
+ * pinned in `domains/packages-capability-gate.test.ts`.
+ */
+const PKG_ADMIN = () => ({ request: {}, executionContext: { userId: 'u_pkg_admin', systemPermissions: ['manage_metadata', 'studio.access', 'setup.access'] } }) as any;
+
 describe('HttpDispatcher', () => {
     let kernel: ObjectKernel;
     let dispatcher: HttpDispatcher;
@@ -1446,7 +1460,7 @@ describe('HttpDispatcher', () => {
                 return null;
             });
 
-            const result = await dispatcher.handlePackages('/com.acme.crm/publish', 'POST', { publishedBy: 'admin' }, {}, { request: {} });
+            const result = await dispatcher.handlePackages('/com.acme.crm/publish', 'POST', { publishedBy: 'admin' }, {}, PKG_ADMIN());
             expect(result.handled).toBe(true);
             expect(result.response?.status).toBe(200);
             expect(mockMetadata.publishPackage).toHaveBeenCalledWith('com.acme.crm', { publishedBy: 'admin' });
@@ -1467,7 +1481,7 @@ describe('HttpDispatcher', () => {
                 return null;
             });
 
-            const result = await dispatcher.handlePackages('/com.acme.crm/revert', 'POST', {}, {}, { request: {} });
+            const result = await dispatcher.handlePackages('/com.acme.crm/revert', 'POST', {}, {}, PKG_ADMIN());
             expect(result.handled).toBe(true);
             expect(result.response?.status).toBe(200);
             expect(mockMetadata.revertPackage).toHaveBeenCalledWith('com.acme.crm');
@@ -1483,7 +1497,7 @@ describe('HttpDispatcher', () => {
                 return null;
             });
 
-            const result = await dispatcher.handlePackages('/crm/publish', 'POST', {}, {}, { request: {} });
+            const result = await dispatcher.handlePackages('/crm/publish', 'POST', {}, {}, PKG_ADMIN());
             expect(result.handled).toBe(true);
             expect(result.response?.status).toBe(503);
         });
@@ -1504,7 +1518,7 @@ describe('HttpDispatcher', () => {
                 'PATCH',
                 { name: '  Acme CRM v2 ', version: '1.2.0' },
                 {},
-                { request: {} },
+                PKG_ADMIN(),
             );
             expect(result.handled).toBe(true);
             expect(result.response?.status).toBe(200);
@@ -1524,7 +1538,7 @@ describe('HttpDispatcher', () => {
                 return null;
             });
 
-            await dispatcher.handlePackages('/a.b', 'PATCH', { manifest: { description: 'hi' } }, {}, { request: {} });
+            await dispatcher.handlePackages('/a.b', 'PATCH', { manifest: { description: 'hi' } }, {}, PKG_ADMIN());
             expect(updatePackage).toHaveBeenCalledWith({ packageId: 'a.b', patch: { description: 'hi' } });
         });
 
@@ -1547,7 +1561,7 @@ describe('HttpDispatcher', () => {
                 'POST',
                 { manifest: { id: 'com.acme.new', name: 'New', version: '0.1.0', type: 'app' } },
                 {},
-                { request: {} },
+                PKG_ADMIN(),
             );
             expect(result.response?.status).toBe(201);
             expect(mockRegistry.getPackage).toHaveBeenCalledWith('com.acme.new');
@@ -1571,7 +1585,7 @@ describe('HttpDispatcher', () => {
                 'POST',
                 { manifest: { id: 'com.acme.crm', name: 'Clobber', version: '9.9.9' } },
                 {},
-                { request: {} },
+                PKG_ADMIN(),
             );
             expect(result.response?.status).toBe(409);
             // The existing manifest must NOT be overwritten.
@@ -1597,7 +1611,7 @@ describe('HttpDispatcher', () => {
                 'POST',
                 { manifest: { id: 'com.acme.crm', name: 'Upgraded', version: '2.0.0' } },
                 { overwrite: 'true' },
-                { request: {} },
+                PKG_ADMIN(),
             );
             expect(result.response?.status).toBe(201);
             expect(installPackage).toHaveBeenCalled();
@@ -1619,7 +1633,7 @@ describe('HttpDispatcher', () => {
                 'POST',
                 { manifest: { name: 'No Id' } },
                 {},
-                { request: {} },
+                PKG_ADMIN(),
             );
             expect(result.response?.status).toBe(400);
             expect(mockRegistry.installPackage).not.toHaveBeenCalled();
@@ -1630,7 +1644,7 @@ describe('HttpDispatcher', () => {
                 if (name === 'objectql') return Promise.resolve({ registry: { getAllPackages: vi.fn().mockReturnValue([]) } });
                 return null;
             });
-            const result = await dispatcher.handlePackages('/a.b', 'PATCH', {}, {}, { request: {} });
+            const result = await dispatcher.handlePackages('/a.b', 'PATCH', {}, {}, PKG_ADMIN());
             expect(result.response?.status).toBe(400);
         });
 
@@ -1639,7 +1653,7 @@ describe('HttpDispatcher', () => {
                 if (name === 'objectql') return Promise.resolve({ registry: { getAllPackages: vi.fn().mockReturnValue([]) } });
                 return null;
             });
-            const result = await dispatcher.handlePackages('/a.b', 'PATCH', { version: '1.2' }, {}, { request: {} });
+            const result = await dispatcher.handlePackages('/a.b', 'PATCH', { version: '1.2' }, {}, PKG_ADMIN());
             expect(result.response?.status).toBe(400);
         });
 
@@ -1651,7 +1665,7 @@ describe('HttpDispatcher', () => {
                     return Promise.resolve({ registry: { getAllPackages: vi.fn().mockReturnValue([]), updatePackageManifest } });
                 return null;
             });
-            const result = await dispatcher.handlePackages('/nope', 'PATCH', { name: 'x' }, {}, { request: {} });
+            const result = await dispatcher.handlePackages('/nope', 'PATCH', { name: 'x' }, {}, PKG_ADMIN());
             expect(updatePackageManifest).toHaveBeenCalledWith('nope', { name: 'x' });
             expect(result.response?.status).toBe(404);
         });
@@ -1666,7 +1680,7 @@ describe('HttpDispatcher', () => {
                 return null;
             });
 
-            const result = await dispatcher.handlePackages('/app.edu/publish-drafts', 'POST', {}, {}, { request: {} });
+            const result = await dispatcher.handlePackages('/app.edu/publish-drafts', 'POST', {}, {}, PKG_ADMIN());
 
             expect(result.handled).toBe(true);
             expect(result.response?.status).toBe(200);
@@ -1691,7 +1705,7 @@ describe('HttpDispatcher', () => {
             const trigger = vi.fn().mockResolvedValue(undefined);
             (kernel as any).context.trigger = trigger;
 
-            const result = await dispatcher.handlePackages('/com.example.ops/publish-drafts', 'POST', {}, {}, { request: {} });
+            const result = await dispatcher.handlePackages('/com.example.ops/publish-drafts', 'POST', {}, {}, PKG_ADMIN());
 
             expect(result.response?.status).toBe(200);
             expect(trigger).toHaveBeenCalledWith(
@@ -1712,7 +1726,7 @@ describe('HttpDispatcher', () => {
             const trigger = vi.fn().mockResolvedValue(undefined);
             (kernel as any).context.trigger = trigger;
 
-            await dispatcher.handlePackages('/app.empty/publish-drafts', 'POST', {}, {}, { request: {} });
+            await dispatcher.handlePackages('/app.empty/publish-drafts', 'POST', {}, {}, PKG_ADMIN());
             expect(trigger).not.toHaveBeenCalled();
         });
 
@@ -1723,7 +1737,7 @@ describe('HttpDispatcher', () => {
                 return null;
             });
 
-            const result = await dispatcher.handlePackages('/app.edu/publish-drafts', 'POST', {}, {}, { request: {} });
+            const result = await dispatcher.handlePackages('/app.edu/publish-drafts', 'POST', {}, {}, PKG_ADMIN());
             expect(result.handled).toBe(true);
             expect(result.response?.status).toBe(501);
         });
@@ -1740,7 +1754,7 @@ describe('HttpDispatcher', () => {
                 return null;
             });
 
-            const result = await dispatcher.handlePackages('/app.edu/commits', 'GET', {}, {}, { request: {} });
+            const result = await dispatcher.handlePackages('/app.edu/commits', 'GET', {}, {}, PKG_ADMIN());
 
             expect(result.handled).toBe(true);
             expect(result.response?.status).toBe(200);
@@ -1756,7 +1770,7 @@ describe('HttpDispatcher', () => {
                 return null;
             });
 
-            const result = await dispatcher.handlePackages('/app.edu/commits/cmt_1/revert', 'POST', { actor: 'ai:claude' }, {}, { request: {} });
+            const result = await dispatcher.handlePackages('/app.edu/commits/cmt_1/revert', 'POST', { actor: 'ai:claude' }, {}, PKG_ADMIN());
 
             expect(result.handled).toBe(true);
             expect(result.response?.status).toBe(200);
@@ -1771,7 +1785,7 @@ describe('HttpDispatcher', () => {
                 return null;
             });
 
-            const result = await dispatcher.handlePackages('/app.edu/rollback', 'POST', { commitId: 'c1' }, {}, { request: {} });
+            const result = await dispatcher.handlePackages('/app.edu/rollback', 'POST', { commitId: 'c1' }, {}, PKG_ADMIN());
 
             expect(result.handled).toBe(true);
             expect(result.response?.status).toBe(200);
@@ -1785,7 +1799,7 @@ describe('HttpDispatcher', () => {
                 return null;
             });
 
-            const result = await dispatcher.handlePackages('/app.edu/rollback', 'POST', {}, {}, { request: {} });
+            const result = await dispatcher.handlePackages('/app.edu/rollback', 'POST', {}, {}, PKG_ADMIN());
             expect(result.handled).toBe(true);
             expect(result.response?.status).toBe(400);
         });
@@ -1796,7 +1810,7 @@ describe('HttpDispatcher', () => {
                 if (name === 'objectql') return Promise.resolve({ registry: { getAllPackages: vi.fn().mockReturnValue([]) } });
                 return null;
             });
-            const result = await dispatcher.handlePackages('/app.edu/commits', 'GET', {}, {}, { request: {} });
+            const result = await dispatcher.handlePackages('/app.edu/commits', 'GET', {}, {}, PKG_ADMIN());
             expect(result.handled).toBe(true);
             expect(result.response?.status).toBe(501);
         });
@@ -1834,7 +1848,7 @@ describe('HttpDispatcher', () => {
                 return null;
             });
 
-            const result = await dispatcher.handlePackages('/com.workspace/publish-drafts', 'POST', {}, {}, { request: {} });
+            const result = await dispatcher.handlePackages('/com.workspace/publish-drafts', 'POST', {}, {}, PKG_ADMIN());
 
             expect(result.response?.status).toBe(200);
             const seedApplied = (result.response as any)?.body?.data?.seedApplied;
@@ -1875,7 +1889,7 @@ describe('HttpDispatcher', () => {
                 return null;
             });
 
-            const result = await dispatcher.handlePackages('/app.production_management/publish-drafts', 'POST', {}, {}, { request: {} });
+            const result = await dispatcher.handlePackages('/app.production_management/publish-drafts', 'POST', {}, {}, PKG_ADMIN());
 
             expect(result.response?.status).toBe(200);
             expect(getMetaItems).toHaveBeenCalledWith(expect.objectContaining({ type: 'app', packageId: 'app.production_management' }));
@@ -1914,7 +1928,7 @@ describe('HttpDispatcher', () => {
                 return null;
             });
 
-            const result = await dispatcher.handlePackages('/app.acct/publish-drafts', 'POST', {}, {}, { request: {} });
+            const result = await dispatcher.handlePackages('/app.acct/publish-drafts', 'POST', {}, {}, PKG_ADMIN());
 
             expect(result.response?.status).toBe(200);
             expect(saveMetaItem).toHaveBeenCalledTimes(1);
@@ -1938,7 +1952,7 @@ describe('HttpDispatcher', () => {
                 return null;
             });
 
-            const result = await dispatcher.handlePackages('/app.edu/publish-drafts', 'POST', {}, {}, { request: {} });
+            const result = await dispatcher.handlePackages('/app.edu/publish-drafts', 'POST', {}, {}, PKG_ADMIN());
 
             // The draft publish itself succeeded — the flip failure is surfaced, not fatal.
             expect(result.response?.status).toBe(200);
@@ -1970,7 +1984,7 @@ describe('HttpDispatcher', () => {
             const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
             try {
-                const result = await dispatcher.handlePackages('/app.edu/publish-drafts', 'POST', {}, {}, { request: {} });
+                const result = await dispatcher.handlePackages('/app.edu/publish-drafts', 'POST', {}, {}, PKG_ADMIN());
 
                 // Unchanged contract: the drafts ARE published, so this still 200s
                 // and still carries the machine-readable `unhideError`.
@@ -2025,7 +2039,7 @@ describe('HttpDispatcher', () => {
             const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
             try {
-                const result = await dispatcher.handlePackages('/app.partial/publish-drafts', 'POST', {}, {}, { request: {} });
+                const result = await dispatcher.handlePackages('/app.partial/publish-drafts', 'POST', {}, {}, PKG_ADMIN());
 
                 // The loop stopped at `gamma` — `delta` was never attempted.
                 expect(result.response?.status).toBe(200);
@@ -2086,7 +2100,7 @@ describe('HttpDispatcher', () => {
             });
 
             const manifest = { id: 'app.demo', name: 'Demo', version: '1.0.0', type: 'application' };
-            const result = await dispatcher.handlePackages('', 'POST', { manifest, settings: { a: 1 } }, {}, { request: {} });
+            const result = await dispatcher.handlePackages('', 'POST', { manifest, settings: { a: 1 } }, {}, PKG_ADMIN());
 
             expect(result.handled).toBe(true);
             expect(result.response?.status).toBe(201);
@@ -2108,7 +2122,7 @@ describe('HttpDispatcher', () => {
             });
 
             const manifest = { id: 'app.fb', name: 'FB', version: '1.0.0', type: 'application' };
-            const result = await dispatcher.handlePackages('', 'POST', { manifest }, {}, { request: {} });
+            const result = await dispatcher.handlePackages('', 'POST', { manifest }, {}, PKG_ADMIN());
 
             expect(result.response?.status).toBe(201);
             expect(mockRegistry.installPackage).toHaveBeenCalledWith(manifest, undefined);

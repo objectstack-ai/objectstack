@@ -187,7 +187,7 @@ describe('collectExpectedEntries', () => {
                   type: 'page:header',
                   // `title` duplicates `label` — resolved by the label
                   // fallback, so it must NOT emit its own entry.
-                  properties: { title: 'Connect an Agent', subtitle: 'Governed MCP access.', icon: 'bot' },
+                  properties: { title: 'Connect an Agent', subtitle: 'Governed MCP access.', actions: ['connect_agent'] },
                 },
               ],
             },

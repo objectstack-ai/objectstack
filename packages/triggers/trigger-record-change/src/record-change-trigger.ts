@@ -277,8 +277,8 @@ export class RecordChangeTrigger implements FlowTrigger {
     /**
      * Build the flow execution context from an ObjectQL hook context. The new
      * record comes from `ctx.result` (after-hooks) or falls back to the
-     * mutation input payload / previous row; the old record from `ctx.previous`
-     * (with the `__previous` stash audit also uses as a fallback).
+     * mutation input payload / previous row; the old record from `ctx.previous`,
+     * which the engine binds ahead of every dispatch.
      *
      * Async because the seeded `record` is hydrated with read-time computed
      * fields (see {@link hydrateComputedFields}) via a data-engine re-read.
@@ -294,9 +294,23 @@ export class RecordChangeTrigger implements FlowTrigger {
         // through to `previous` below.
         const input = (ctx.input ?? {}) as { data?: Record<string, unknown>; id?: unknown };
         const after = ctx.result as Record<string, unknown> | undefined;
-        const previous =
-            (ctx.previous as Record<string, unknown> | undefined) ??
-            ((ctx as unknown as { __previous?: Record<string, unknown> }).__previous ?? undefined);
+        // `ctx.previous` is the ONE key the pre-image arrives under, and the ENGINE
+        // is its single producer: it binds `previous` before dispatching the hook on
+        // every write shape — by-id update (`engine.ts:7010`, immediately ahead of
+        // the `beforeUpdate` dispatch at `:7012`), by-id delete (`bindPreImage`,
+        // `engine.ts:7869`, called at `:7897` ahead of the `beforeDelete` dispatch at
+        // `:7899`), and each per-row context of a predicate write (`engine.ts:1746`
+        // after-phase / `:1825` before-phase) — #5272 / #5574 / #5846.
+        //
+        // A `ctx.__previous` stash limb used to sit below this read, for the
+        // side-channel `plugin-audit`'s `captureBefore` wrote. #6656 retired
+        // `captureBefore`, which left the stash with ZERO producers, so the limb was
+        // removed here (#6978) instead of being kept "for safety" — ADR-0049
+        // enforce-or-remove, and PD #12: an undeclared side-channel key is exactly
+        // the second de-facto contract a consumer-side `??` fossilizes. A future
+        // producer of `__previous` is therefore ignored by design; the way to hand
+        // this consumer a pre-image is to bind the declared `ctx.previous`.
+        const previous = ctx.previous as Record<string, unknown> | undefined;
 
         const inputData = input.data && typeof input.data === 'object' ? input.data : undefined;
         const record: Record<string, unknown> =

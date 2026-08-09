@@ -3,6 +3,7 @@
 import { z } from 'zod';
 import { QuerySchema } from '../data/query.zod';
 import { ErrorCode } from './error-code-ledger.zod';
+import { StandardErrorCode } from './errors.zod';
 
 // ==========================================
 // 1. Base Envelopes
@@ -12,11 +13,17 @@ import { lazySchema } from '../shared/lazy-schema';
 export const ApiErrorSchema = lazySchema(() => z.object({
   /**
    * Machine-readable semantic code (ADR-0112): a `StandardErrorCode` member or
-   * a code registered in `ERROR_CODE_LEDGER`. A closed set on purpose — an
-   * unregistered code fails parse, so the envelope conformance suites catch
-   * invented codes instead of letting a new dialect grow (#3841).
+   * a code the SERVING side has registered in its ledger. A closed set on
+   * purpose — an unregistered code fails parse, so the envelope conformance
+   * suites catch invented codes instead of letting a new dialect grow (#3841).
+   *
+   * The ledger is federated (#4805): this schema unions the standard catalog
+   * with `ERROR_CODE_LEDGER`, which registers FRAMEWORK packages only. A
+   * downstream product repo maintains its own ledger and validates against
+   * `StandardErrorCode ∪ <its own ledger>` — see {@link makeApiErrorSchema},
+   * which is that union as a single parse.
    */
-  code: ErrorCode.describe('Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ ERROR_CODE_LEDGER)'),
+  code: ErrorCode.describe('Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ the ledger the serving side registers — ERROR_CODE_LEDGER for framework packages)'),
   message: z.string().describe('Readable error message'),
   category: z.string().optional().describe('Error category (e.g. validation, authorization)'),
   /**
@@ -36,6 +43,42 @@ export const ApiErrorSchema = lazySchema(() => z.object({
   details: z.unknown().optional().describe('Additional error context (e.g. field validation errors)'),
   requestId: z.string().optional().describe('Request ID for tracking'),
 }));
+
+/**
+ * The error envelope with a CALLER-SUPPLIED code vocabulary:
+ * `StandardErrorCode ∪ extraCodes` (#4805).
+ *
+ * For a downstream product repo — one whose packages are not registered in
+ * `ERROR_CODE_LEDGER`, which by rule holds framework packages only — checking
+ * a response body used to mean two separate assertions: `envelopeViolations`
+ * for the shape, then a hand-written membership test for the code. This is
+ * both in one parse, so a conformance suite gets ONE verdict with a Zod issue
+ * path pointing at the offending field.
+ *
+ * ```ts
+ * const CloudApiError = makeApiErrorSchema(CLOUD_ERROR_CODES);
+ * CloudApiError.safeParse(body);   // shape + vocabulary, one verdict
+ * ```
+ *
+ * The envelope shape is `ApiErrorSchema`'s, reused rather than restated, so a
+ * field added to the base envelope reaches every downstream ledger with it.
+ *
+ * `ERROR_CODE_LEDGER`'s own entries are deliberately NOT included: they are
+ * the framework packages' vocabulary, and a downstream service that also
+ * relays framework-produced errors states so explicitly by passing them in —
+ * `makeApiErrorSchema([...REGISTERED_ERROR_CODES, ...MY_CODES])`.
+ *
+ * `ApiErrorSchema` itself is unchanged: this is additive, and a code neither
+ * standard nor supplied here still fails parse. Federating the ledger does not
+ * open the vocabulary, it only moves where the other half of it is declared.
+ */
+export function makeApiErrorSchema<const TExtra extends readonly string[]>(extraCodes: TExtra) {
+  const vocabulary: string[] = [...StandardErrorCode.options, ...extraCodes];
+  return ApiErrorSchema.extend({
+    code: (z.enum(vocabulary as [string, ...string[]]) as z.ZodType<StandardErrorCode | TExtra[number]>)
+      .describe('Error code (StandardErrorCode ∪ the ledger this consumer registered)'),
+  });
+}
 
 /**
  * The envelope SKELETON — deliberately not the whole response contract.

@@ -160,10 +160,10 @@ export const NotifyConfigSchema = lazySchema(() => strictObject({
   severity: z.string().optional().describe('info | warning | critical'),
   /** Click-through target object — only effective together with `sourceId` (#2675). */
   sourceObject: z.string().optional()
-    .describe('Object name of the record the notification links to (writes sys_notification.source_object). Requires sourceId.'),
+    .describe('Object name of the record the notification links to (writes sys_notification.source_object). Only takes effect together with sourceId — a half-specified click-through target is dropped at execute time, so the inbox never renders a dead link.'),
   /** Click-through target record id — only effective together with `sourceObject`. */
   sourceId: z.string().optional()
-    .describe('Record id the notification links to (writes sys_notification.source_id). Requires sourceObject.'),
+    .describe('Record id the notification links to (writes sys_notification.source_id). Only takes effect together with sourceObject — a half-specified click-through target is dropped at execute time, so the inbox never renders a dead link.'),
   /** User id that caused the event. */
   actorId: z.string().optional().describe('User id that caused the event (writes sys_notification.actor_id)'),
   /** Explicit click-through URL; overrides the sourceObject/sourceId link. */

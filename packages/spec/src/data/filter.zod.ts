@@ -379,39 +379,39 @@ export const RangeOperatorSchema = lazySchema(() => z.object({
  * `$contains`. An application whose users search non-ASCII text should not read
  * `$icontains` as "accent- and case-blind search" — it is not one.
  *
- * ### Implementation status — answered by the SQL family, refused by the rest
+ * ### Implementation status — EVERY face answers it (#6520)
  *
- * #5701 shipped this declaration deliberately ahead of every runtime, and
- * #5702 (closed 2026-08-08, retuned by #6518) landed the lowerings on the SQL
- * family. Measured per backend, by running `{ name: { $icontains: 'acme' } }`
- * against a fixture holding BOTH `acme corp` and `ACME CORP` — not by grepping
- * for a case arm, which is blind to the face that inherits its compiler and so
- * undercounts:
+ * #5701 shipped this declaration deliberately ahead of every runtime, #5702
+ * (closed 2026-08-08, retuned by #6518) landed the lowerings on the SQL family,
+ * and #6520 closed the remainder in one PR. Measured per face, by running
+ * `{ name: { $icontains: 'acme' } }` against a fixture holding BOTH `acme corp`
+ * and `ACME CORP` — not by grepping for a case arm, which is blind to the face
+ * that inherits its compiler and so undercounts:
  *
- * | driver | `$icontains` | how it gets there |
+ * | face | `$icontains` | how it gets there |
  * |---|---|---|
  * | `driver-sql` | ANSWERS both rows | its own `case '$icontains'`, folding through the same emitter that carries the escaping |
  * | `driver-sqlite-wasm` | ANSWERS both rows | INHERITED — `SqliteWasmDriver extends SqlDriver`; this package carries no text case arm of its own, on a different ENGINE |
  * | `driver-turso` | ANSWERS both rows, on BOTH transports | local inherits `SqlDriver`; the remote transport compiles independently and has its own arm |
- * | `driver-memory` | REFUSES — `INVALID_FILTER` / 400 | no arm; its `SUPPORTED_FIELD_OPERATORS` derives from {@link FILTER_OPERATORS}, which deliberately omits it |
- * | `driver-mongodb` | REFUSES — `INVALID_FILTER` / 400 | no arm; falls to its translator's `default:` |
+ * | `driver-memory` — query path, reference matcher, analytics face | ANSWERS both rows | #6520; the pattern faces take {@link asciiCaseInsensitiveRegexSource}, the matcher {@link asciiCaseInsensitiveContains} |
+ * | `driver-mongodb` | ANSWERS both rows | #6520; an ASCII-only `$regex`, never `$options: 'i'` |
+ * | objectql `having` | ANSWERS both rows | #6520; {@link asciiCaseInsensitiveContains} over the aggregated row |
+ * | `formula` `matchesFilterCondition` | ANSWERS both rows | #6520; the same helper, on the RLS write-side `check` |
+ * | `service-analytics` (3 compilers) | ANSWERS both rows | #6520; an ASCII fold rendered into SQL on both sides of the `LIKE` |
  *
- * The other JS evaluators sit on the refusing side too: objectql's `having`
- * face records the omission in its own source, and `formula`'s `matchesFilter`
- * has no `$icontains` arm.
+ * **So the sentence an author needs is no longer "not portable".** `$icontains`
+ * is executable on every backend and every evaluation face the platform ships,
+ * and it folds the SAME domain on all of them. The divergence #6520 was filed
+ * over — an app whose tests run on the in-memory double and whose production
+ * runs SQL getting two answers from one filter — is closed.
  *
- * **So the sentence an author needs is no longer "no backend answers this".**
- * It is: `$icontains` is EXECUTABLE on the SQL family and refused — loudly,
- * fail-closed, never silently — everywhere else, so a filter that uses it is
- * not portable across backends today. An app whose tests run on the in-memory
- * double and whose production runs SQL gets two different answers from one
- * filter: that divergence, and the remaining implementations, are #6520.
- *
- * **The vocabulary gate below is still closed, and #5702 is no longer what it
- * waits for.** `$icontains` stays out of {@link FILTER_OPERATORS} on purpose —
- * that array is a runtime allowlist, and listing an operator the in-memory
- * `match()` cannot evaluate makes it answer `true` for a NON-match (measured;
- * see that array's docblock). It joins when the JS faces get arms, in #6520.
+ * One posture note that is NOT about `$icontains` and is easy to misread from
+ * this table: `formula`'s evaluator answers an operator it does not know with a
+ * silent `false` (fail-closed — it governs a WRITE-side `check`, so an
+ * unevaluable condition DENIES), where the other JS faces throw
+ * `INVALID_FILTER`. That difference is deliberate and documented on
+ * `matches-filter.ts`; what #6520 changed is that no operator this array
+ * DECLARES is answered that way any more.
  *
  * The `$contains`-family alignment the ruling above requires is likewise part
  * done rather than pending: #6518 made that family case-EXACT across the SQL
@@ -420,14 +420,15 @@ export const RangeOperatorSchema = lazySchema(() => z.object({
  *
  * `FILTER_TEXT_CASES` (`filter-text-conformance.ts`) is the standard that
  * measures all of the above, and the driver-conformance ledger still carries a
- * DEBT row for each of the two backends left, so what is open stays counted
+ * DEBT row for `driver-memory` and `driver-mongodb` — on requirement 2 alone
+ * now, since #6520 closed requirement 1 on both — so what is open stays counted
  * rather than assumed.
  *
  * @see FILTER_TEXT_CASES — the conformance standard for every operator here.
  * @see RETIRED_FILTER_OPERATORS — why `$regex` is not in this list.
  * @see https://github.com/objectstack-ai/objectstack/issues/4706 (the ruling)
  * @see https://github.com/objectstack-ai/objectstack/issues/5702 (the SQL family — landed)
- * @see https://github.com/objectstack-ai/objectstack/issues/6520 (the JS faces — open)
+ * @see https://github.com/objectstack-ai/objectstack/issues/6520 (the JS faces — landed)
  */
 export const StringOperatorSchema = lazySchema(() => z.object({
   /** Contains substring, CASE-SENSITIVELY - SQL: LIKE %?% (case-exact) */
@@ -456,11 +457,119 @@ export const StringOperatorSchema = lazySchema(() => z.object({
     + 'LITERALLY — "%", "_" and regex metacharacters are ordinary characters, not '
     + 'wildcards. Case-SENSITIVE containment is $contains. [#5701 declared it; #5702 '
     + 'lowered it on the SQL family (driver-sql, driver-sqlite-wasm, driver-turso on '
-    + 'both transports). driver-memory and driver-mongodb still REFUSE it with '
-    + 'INVALID_FILTER / 400, so a filter using it is not portable across backends yet '
-    + '— #6520.]'
+    + 'both transports); #6520 lowered it on every JS evaluation face, so it is '
+    + 'portable across every backend the platform ships.]'
   ),
 }));
+
+// ============================================================================
+// The ASCII fold — ONE implementation for every JS evaluation face (#6520)
+// ============================================================================
+
+/** `A`..`Z`, and the `a`..`z` they fold onto. The domain #4706 Q1 = A pinned. */
+const ASCII_UPPER_FIRST = 0x41; // 'A'
+const ASCII_UPPER_LAST = 0x5a; // 'Z'
+const ASCII_CASE_DELTA = 0x20; // 'a' - 'A'
+
+/**
+ * [#6520] Fold a string's ASCII case, and NOTHING else — the `$icontains`
+ * comparison domain, as a function.
+ *
+ * ## Why this is in the spec and not four times in four packages
+ *
+ * `$icontains` has six JS evaluation faces (`driver-memory`'s query path,
+ * reference matcher and analytics face, `driver-mongodb`, objectql's `having`,
+ * `@objectstack/formula`'s `matchesFilterCondition`) plus three SQL compilers in
+ * `service-analytics`. Every one of them needs the same fold, and this repo has
+ * already measured what happens when such a rule is written out per package:
+ * *"a list written out here would agree with the spec on the day it was typed
+ * and never again"* (`driver-memory/src/filter-refusal.ts`, on the operator
+ * vocabulary) — the #3948 shape, reached through the fold instead of the word
+ * list. One definition means a fold that is wrong is wrong everywhere at once,
+ * which is the only way six faces can be held to one answer.
+ *
+ * ## Why not `toLowerCase()`
+ *
+ * `String.prototype.toLowerCase()` is the FULL Unicode fold: it maps `É` to `é`
+ * and `МОСКВА` to `москва`. The contract says those must NOT match (#4706 Q1 =
+ * A), and the reason is not preference — SQLite has no ICU in this repo's build,
+ * so its `lower()` folds ASCII only, and three of the five drivers are SQLite
+ * underneath. A Unicode promise here would be one the SQL family could not keep,
+ * so a JS face that reaches for `toLowerCase()` does not merely differ from the
+ * ruling: it re-opens the divergence the ruling closed. `FILTER_TEXT_CASES`'
+ * `CAFÉ` / `café` pair is the row that catches it.
+ *
+ * The same trap wears a second disguise on the regex-evaluating faces: a
+ * `RegExp` built with the `i` flag ALSO folds the whole Unicode range. Those
+ * faces take {@link asciiCaseInsensitiveRegexSource}, not an `i` flag.
+ *
+ * @see asciiCaseInsensitiveContains — the containment test built on this.
+ * @see https://github.com/objectstack-ai/objectstack/issues/4706 (the ruling)
+ * @see https://github.com/objectstack-ai/objectstack/issues/6520 (the JS faces)
+ */
+export function foldAsciiCase(value: string): string {
+  let out = '';
+  for (let i = 0; i < value.length; i++) {
+    const code = value.charCodeAt(i);
+    out += code >= ASCII_UPPER_FIRST && code <= ASCII_UPPER_LAST
+      ? String.fromCharCode(code + ASCII_CASE_DELTA)
+      : value[i];
+  }
+  return out;
+}
+
+/**
+ * [#6520] Does `haystack` contain `needle`, ignoring ASCII case only?
+ *
+ * The `$icontains` predicate for every face that can compare two JS strings
+ * directly — the reference matcher, objectql's `having`, `formula`. The fold
+ * runs on BOTH sides, which is the half that is easy to get wrong: folding only
+ * the comparand compares a folded needle against a raw haystack and matches just
+ * the rows that were already lower-case. `FILTER_TEXT_CASES`' first row (an
+ * upper-case row from a lower-case comparand) is the one that catches it, and
+ * `driver-sql`'s emitter carries the same note over its own two-sided fold.
+ */
+export function asciiCaseInsensitiveContains(haystack: string, needle: string): boolean {
+  return foldAsciiCase(haystack).includes(foldAsciiCase(needle));
+}
+
+/**
+ * [#6520] `comparand` as a regular-expression SOURCE that matches it LITERALLY,
+ * ignoring ASCII case only.
+ *
+ * For the faces that cannot fold the stored value because they hand a pattern to
+ * an engine rather than comparing two strings: `driver-memory`'s mingo query
+ * path and its analytics face, and `driver-mongodb`'s translator. Neither can
+ * apply {@link foldAsciiCase} to the column, so the fold has to live in the
+ * PATTERN — each ASCII letter becomes the two-member character class `[Aa]`,
+ * which folds that position on both sides without touching any other character.
+ *
+ * Two properties, and the second is the one an `i` flag would destroy:
+ *
+ * - **The comparand is LITERAL.** Every regex metacharacter is escaped, so
+ *   `a.b` matches `a.b` and not `axb` — the `$regex` defect #4706 retired the
+ *   operator over, restated as a requirement (`FILTER_TEXT_CASES`' `.` row).
+ * - **The fold is ASCII-ONLY.** `É` is not an ASCII letter, so it is emitted as
+ *   itself and compares literally. A `new RegExp(source, 'i')` would fold it and
+ *   fail the `CAFÉ` row — so callers pass NO flags. The returned source is
+ *   already case-insensitive exactly where the contract says it should be.
+ */
+export function asciiCaseInsensitiveRegexSource(comparand: string): string {
+  let out = '';
+  for (let i = 0; i < comparand.length; i++) {
+    const ch = comparand[i];
+    const code = comparand.charCodeAt(i);
+    if (code >= ASCII_UPPER_FIRST && code <= ASCII_UPPER_LAST) {
+      out += `[${ch}${String.fromCharCode(code + ASCII_CASE_DELTA)}]`;
+    } else if (code >= ASCII_UPPER_FIRST + ASCII_CASE_DELTA && code <= ASCII_UPPER_LAST + ASCII_CASE_DELTA) {
+      out += `[${String.fromCharCode(code - ASCII_CASE_DELTA)}${ch}]`;
+    } else {
+      // Escape every regex metacharacter — the comparand is text, not a pattern.
+      out += /[\\^$.*+?()[\]{}|/]/.test(ch) ? `\\${ch}` : ch;
+    }
+  }
+  return out;
+}
 
 // ============================================================================
 // 3.5 Special Operators
@@ -1332,23 +1441,29 @@ export const FilterArraySchema: z.ZodType<FilterArray, FilterArray> = z.lazy(() 
  * not narrow a query, it WIDENS it, and on an RLS read scope that is a
  * permission bypass rather than a degraded feature (#3948).
  *
- * ## `$icontains` is DECLARED but deliberately NOT here yet
+ * ## `$icontains` JOINED this array in #6520 — the staging is over
  *
- * {@link StringOperatorSchema}, {@link FieldOperatorsSchema} and {@link Filter}
- * declare `$icontains` (#5701, the contract half of the #4706 ruling). This
- * array does not, and the difference is deliberate rather than an oversight:
- * those three are declaration and TYPE surfaces with no runtime allowlist
- * reader (verified — `NormalizedFilterSchema` is their only consumer, and
- * nothing parses a filter through it at runtime), so declaring there is inert.
- * Adding it HERE would flip driver-memory from a loud refusal to the silent
- * widening measured above, on a face that still cannot answer the operator.
+ * It was declared by {@link StringOperatorSchema} and deliberately absent here
+ * from #5701 until #6520, and that gap was the mechanism described above rather
+ * than an oversight: adding the name while `driver-memory`'s matcher had no arm
+ * flipped a loud refusal into the silent widening measured above.
  *
- * **`$icontains` joins this array in the PR that gives the JS faces an arm
- * (#6520), not before** — #5702 implemented the SQL family and correctly did
- * NOT add it here, because the array is read by the faces that still refuse.
- * `filter-operator-vocabulary.test.ts` pins the difference between
- * the two surfaces at exactly `{ $icontains }`, so this staging cannot silently
- * grow a second member, and clearing it is what makes that pin fail.
+ * The gap closed the only way it could — **in ONE PR with the arms**, which is
+ * the constraint the #6520 ruling made binding (maintainer, 2026-08-08: the word
+ * list must not land ahead of the evaluators). #6520 gave every JS evaluation
+ * face an ASCII fold ({@link foldAsciiCase}) in the same commit that added the
+ * name here: `driver-memory` (query path, reference matcher and analytics face),
+ * `driver-mongodb`, objectql's `having`, `@objectstack/formula`, and
+ * `service-analytics`' three SQL compilers. So the claim this array makes —
+ * *backends implement this operator* — is true of `$icontains` for the first
+ * time.
+ *
+ * What that means for the NEXT operator is unchanged, and is the reason the
+ * measurement above is kept: stage it in {@link FieldOperatorsSchema} alone,
+ * record it in `filter-operator-vocabulary.test.ts`, and add it here only when
+ * every face can answer it. That pin now asserts an EMPTY difference between the
+ * declaration and enforcement surfaces, so a name added to one and not the other
+ * fails in either direction.
  *
  * Retired operators (`$regex`, `$options`) are not here either, and never were.
  * Their prescriptions live in {@link RETIRED_FILTER_OPERATORS}.
@@ -1361,7 +1476,7 @@ export const FILTER_OPERATORS = [
   // Set & Range
   '$in', '$nin', '$between',
   // String
-  '$contains', '$notContains', '$startsWith', '$endsWith',
+  '$contains', '$notContains', '$startsWith', '$endsWith', '$icontains',
   // Special
   '$null', '$exists',
 ] as const;

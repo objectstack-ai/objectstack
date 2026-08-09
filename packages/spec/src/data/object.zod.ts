@@ -1797,7 +1797,7 @@ const ObjectSchemaBase = strictObject(
   /**
    * Search Engine Config 
    */
-  searchableFields: z.array(z.string()).optional().describe('Fields the `$search` query matches against (ADR-0061). Canonical default for the record picker, list quick-search and global search; views may narrow it. When unset, search auto-defaults to the name/title field plus short-text fields.'),
+  searchableFields: z.array(z.string()).optional().describe('Fields the `$search` query matches against (ADR-0061). Canonical default for the record picker, list quick-search and global search; views may narrow it. When unset, search auto-defaults to the name/title field plus short-text fields. Entries must name a STORED column: a virtual `formula` field is computed on read and materializes no column, so searching it can never match and it is refused (#6674) — mirror the value onto a stored text field and declare that.'),
 
   /**
    * System Capabilities

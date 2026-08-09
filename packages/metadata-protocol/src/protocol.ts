@@ -45,6 +45,7 @@ import {
     parseFilterAST, isFilterAST, VALID_AST_OPERATORS, REFERENCE_VALUE_TYPES, referenceTargetOf,
     AggregationFunction, DateGranularity, resolveSearchFieldResolution,
     SEARCHABLE_TEXTUAL_TYPES, SEARCHABLE_ENUM_TYPES, SEARCH_AUTO_EXCLUDED_FIELDS,
+    isVirtualSearchField,
     RUNTIME_OWNED_FIELD_TYPES,
     RPC_QUERY_ALIAS_SLOTS, foldQueryAliasSlots,
     type QueryAliasConflict, type QueryAliasSlot,
@@ -1554,6 +1555,42 @@ function unusableFilterError(param: string, detail: string): Error {
     err.param = param;
     return err;
 }
+
+/**
+ * [#6994] Field types whose value NO driver materialises, so no driver can
+ * ORDER BY them.
+ *
+ * `formula` is the whole set today, and deliberately not a synonym for
+ * "computed": the three computed types diverge exactly here.
+ *
+ * | type | column | sortable |
+ * |---|---|---|
+ * | `formula` | none — `SqlDriver.createColumn` returns early; `driver-turso`'s transport skips it with the same `Virtual — no column` note | **no** |
+ * | `summary` | `table.float`, maintained by the engine | yes (measured #6924: `orderBy <summary> desc` -> E D C B A over 5 4 3 2 1) |
+ * | `autonumber` | `table.string`, engine-assigned | yes |
+ *
+ * So the spec's own `COMPUTED_VALUE_TYPES` (`formula`/`summary`/`autonumber`)
+ * is the WRITE contract — "never client-written" — and is the wrong set to
+ * gate a sort with: it would refuse the two types that sort correctly.
+ *
+ * This is a local set rather than a shared spec constant because the same fact
+ * is currently spelled in five places, none of them in `packages/spec`:
+ * `driver-sql`'s `fieldHasColumn` and `createColumn`, `driver-turso`'s
+ * `remote-transport`, `objectql`'s `planFormulaProjection` and
+ * `search-companion`, and `plugin-audit`'s `VIRTUAL_FIELD_TYPES`.
+ * Consolidating them is a cross-package change and is filed separately; adding
+ * a sixth local spelling here — with that ledger written down — keeps this fix
+ * inside one package rather than opening a spec-wide edit for one string.
+ *
+ * One deliberate divergence from `fieldHasColumn`: that helper short-circuits
+ * on `multiple` (a `multiple` field is a JSON column whatever its type), so it
+ * would answer "has a column" for a `multiple` formula. This set does not,
+ * because the questions differ — `fieldHasColumn` asks whether DDL emits a
+ * column, this asks whether there is a persisted VALUE to order by, and a
+ * formula's value is computed on read and never written, so that JSON column
+ * is always empty. Ordering by it degrades exactly as the bare case does.
+ */
+const UNMATERIALIZED_SORT_TYPES: ReadonlySet<string> = new Set(['formula']);
 
 /**
  * [#4226] A sort the normalizer cannot turn into a usable `SortNode[]`, or one
@@ -4673,6 +4710,26 @@ export class ObjectStackProtocolImplementation implements
      *   both boot hydration (`loadMetaFromDb`) and runtime authoring
      *   (`applyObjectRegistryMutation`) register the schema before its table
      *   is reachable.
+     *
+     *   [#6190] That justification rested on a premise the WRITE path did not
+     *   enforce until this note was written. `allowOrgOverride: false` closed
+     *   the overlay tier only; `object` is also `allowRuntimeCreate: true`, and
+     *   that tier stamped `organization_id` on the row like any other — so a
+     *   Studio-authored `object` COULD legitimately exist as a per-org row,
+     *   invisible to boot hydration, and this gate's fail-closed answer meant
+     *   404 for every record in a table that still held the data. The premise
+     *   is now true by enforcement: {@link orgScopedWriteRefusal} refuses an
+     *   org-scoped write of any type the registry declares non-org-overridable,
+     *   on both minting paths, so the only org-scoped `object` rows that can
+     *   exist are residue written before that gate (#6190's ruling 2 = A:
+     *   handled non-destructively — made audible by
+     *   {@link reportUnhydratableOrgScopedRows} and disposed of operationally,
+     *   NOT rewritten by a migration). Fail-closed stays the right answer for
+     *   those: the registry entry is genuinely absent, and serving the table
+     *   would serve one org's rows to every org. Pinned by
+     *   `protocol.org-scoped-write-refused.test.ts`, which keeps `object` as
+     *   its named specimen precisely so this paragraph cannot go stale
+     *   silently again.
      * - **No registry on the engine at all → skip.** There is no source of
      *   truth to consult, so the check cannot answer; failing closed would
      *   break every registry-less host (edge/Lite embeddings, engine doubles)
@@ -4815,8 +4872,9 @@ export class ObjectStackProtocolImplementation implements
      * copies it into a real column" — a prescription the platform cannot
      * deliver, so the refusal handed the author a dead end at the exact moment
      * they asked for help. Measured on a REAL `SqlDriver` (better-sqlite3) and
-     * on `InMemoryDriver`, with a `formula` field named directly (NOT dotted,
-     * so this gate lets it through):
+     * on `InMemoryDriver`, with a `formula` field named directly — which at the
+     * time was NOT dotted and NOT unknown, so this gate let it through
+     * (#6994 closes that, third verdict below):
      *
      * ```
      * control  orderBy title asc    -> A B C D E      (a real column sorts)
@@ -4844,6 +4902,27 @@ export class ObjectStackProtocolImplementation implements
      * "Stored" is #6673's vocabulary for the same correction on the SEARCH
      * axis (`validate-searchable-fields.ts`, "a stored text field"); the two
      * axes deliberately say the same word.
+     *
+     * [#6994] The non-dotted half of that same defect, refused as the THIRD
+     * verdict below. It is the SORT axis finally growing the verdict its two
+     * neighbours in this class already have: `assertSearchFieldsExist` splits
+     * `unknown` from `unsearchable` (a known field whose TYPE search cannot
+     * scan) and `assertExpandFieldsExist` splits `unknown` from `notRelations`
+     * (a known field whose TYPE cannot be expanded). Sort had only `unknown`
+     * and `dotted`, so "known field, wrong type for this axis" was the one
+     * member of the family with no door — which is why a `formula` field
+     * reached a driver that has no column for it.
+     *
+     * SCOPE, stated because it is a real limit and not an oversight: this is an
+     * INGRESS gate, so it covers what reaches {@link findData} — the REST list
+     * route, `POST /data/:object/query`, the export route (which funnels its
+     * `$orderby` through here) and the RPC dispatcher. An internal caller that
+     * reaches `engine.find()` directly — hooks, flows, reports, expand
+     * sub-reads — still gets the silent drop, exactly as the projection and
+     * search axes note for themselves. Closing that half means deciding whether
+     * `engine.find` REFUSES or keeps its deliberate internal-caller tolerance,
+     * which is an engine-core contract decision rather than a gate fix; it is
+     * tracked separately.
      */
     private assertSortFieldsExist(object: string, orderBy: ReadonlyArray<{ field: string }>, param: string): void {
         if (orderBy.length === 0) return;
@@ -4866,25 +4945,78 @@ export class ObjectStackProtocolImplementation implements
             );
         }
         const dotted = names.filter((f) => f.includes('.'));
-        if (dotted.length === 0) return;
-        const first = dotted[0];
-        const head = first.split('.')[0];
-        const headDef: any = gate.fields[head];
-        const crossesRelation = headDef != null && REFERENCE_VALUE_TYPES.has(headDef.type);
+        if (dotted.length > 0) {
+            const first = dotted[0];
+            const head = first.split('.')[0];
+            const headDef: any = gate.fields[head];
+            const crossesRelation = headDef != null && REFERENCE_VALUE_TYPES.has(headDef.type);
+            throw invalidSortError(
+                param,
+                (crossesRelation
+                    ? `sorts by '${first}', which follows the relationship '${head}' into another object — `
+                      + `sort reaches only columns of '${object}' itself`
+                    : `sorts by '${first}', a dotted path — sort reaches only whole columns of '${object}', `
+                      + "not values inside them")
+                + (dotted.length > 1 ? ` (also: ${dotted.slice(1).join(', ')})` : ''),
+                {
+                    hint: ` Denormalise the value onto '${object}' (a stored field, written when the`
+                        + ' source changes) and sort by that. Not a formula field: it is virtual,'
+                        + ' no driver materialises a column for one, and ORDER BY on it is silently'
+                        + ' dropped.',
+                    extra: { field: first, fields: dotted, object },
+                },
+            );
+        }
+
+        // [#6994] The third verdict on this axis: a name that is a REAL,
+        // non-dotted field of this object and still cannot be ordered by,
+        // because its TYPE materialises no column ({@link
+        // UNMATERIALIZED_SORT_TYPES} — `formula`, today the whole set).
+        //
+        // This is the shape the doc comment above already describes and this
+        // gate already let through: being in `gate.known` is what carried it
+        // past the unknown check, being undotted is what carried it past the
+        // check just above. Re-measured on this branch's base (real `SqlDriver`
+        // over better-sqlite3, real `ObjectQL`, real protocol on top):
+        //
+        // ```
+        // FORMULA  orderBy sort_key asc  -> ["C","A","E","B","D"]  5 rows, 200
+        //   its sort_key values          -> ["C","A","E","B","D"]
+        // FORMULA  orderBy sort_key desc -> ["C","A","E","B","D"]  asc === desc
+        // RAW SQL  order by sort_key     -> sqlite: no such column: sort_key
+        // ```
+        //
+        // The response literally carries the values it was asked to sort by,
+        // out of order, under a 200 — so the answer contradicts the request in
+        // plain view and still reports success.
+        //
+        // PRECEDENCE — `unknown` > `dotted` > this. It is last for the same
+        // reason the expand gate reports `unknown` before `not-a-reference`:
+        // identity errors first, then shape, then type. The two above are
+        // therefore unchanged verdict-for-verdict, and a dotted path whose head
+        // is a formula field keeps the dotted answer (it is wrong about the
+        // shape too, and the shape is what the caller wrote).
+        const unmaterialized = names.filter(
+            (f) => UNMATERIALIZED_SORT_TYPES.has(String(gate.fields[f]?.type ?? '')),
+        );
+        if (unmaterialized.length === 0) return;
+        const virtualFirst = unmaterialized[0];
+        const virtualType = String(gate.fields[virtualFirst]?.type);
         throw invalidSortError(
             param,
-            (crossesRelation
-                ? `sorts by '${first}', which follows the relationship '${head}' into another object — `
-                  + `sort reaches only columns of '${object}' itself`
-                : `sorts by '${first}', a dotted path — sort reaches only whole columns of '${object}', `
-                  + "not values inside them")
-            + (dotted.length > 1 ? ` (also: ${dotted.slice(1).join(', ')})` : ''),
+            `sorts by '${virtualFirst}', a ${virtualType} field on '${object}' — a ${virtualType} `
+            + 'value is computed on read, so no driver materialises a column to order by'
+            + (unmaterialized.length > 1 ? ` (also: ${unmaterialized.slice(1).join(', ')})` : ''),
             {
+                // Deliberately the same remedy, in the same words, as the
+                // dotted refusal above and as #6673's SEARCH-axis correction:
+                // one vocabulary across the doors, so an author refused twice
+                // is not sent two different ways.
                 hint: ` Denormalise the value onto '${object}' (a stored field, written when the`
-                    + ' source changes) and sort by that. Not a formula field: it is virtual,'
-                    + ' no driver materialises a column for one, and ORDER BY on it is silently'
-                    + ' dropped.',
-                extra: { field: first, fields: dotted, object },
+                    + ' source changes) and sort by that. A formula field is virtual: with no'
+                    + ' column behind it the ORDER BY reaches the driver, finds nothing, and is'
+                    + ' dropped — the arbitrary order this refusal replaces.',
+                extra: { field: virtualFirst, fields: unmaterialized, object },
             },
         );
     }
@@ -5064,11 +5196,16 @@ export class ObjectStackProtocolImplementation implements
      * export would stop downloading "the unsearched superset … in a file that
      * looks authoritative".
      *
-     * Two rejections, one code, different messages, because the fixes differ
-     * (the same split the expand axis draws): a name that is no field at all
-     * is a typo, while a REAL field outside the searchable set needs the
-     * OBJECT changed — added to a declared `searchableFields`, or declared
-     * searchable at all when the auto-default excludes its type. The allowed
+     * Rejections share one code and differ in message, because the fixes
+     * differ (the same split the expand axis draws): a name that is no field
+     * at all is a typo, while a REAL field outside the searchable set needs
+     * the OBJECT changed — added to a declared `searchableFields`, or declared
+     * searchable at all when the auto-default excludes its type. [#6674] adds
+     * the one case where changing the OBJECT cannot help either: a VIRTUAL
+     * (`formula`) field has no stored column on any driver, so declaring it
+     * searchable is not a narrower search but a scan of nothing — it used to
+     * clear this gate precisely BECAUSE the object declared it, the fail-open
+     * shape this axis exists to refuse. The allowed
      * set itself comes from {@link resolveSearchFieldResolution} in
      * `@objectstack/spec/data` — the same function the engine's search
      * expansion consumes — so this gate cannot admit a field the engine would
@@ -5140,10 +5277,24 @@ export class ObjectStackProtocolImplementation implements
         const declaredSet = new Set<string>(Array.isArray(gate.schema?.searchableFields) ? gate.schema.searchableFields : []);
         const unknown = names.filter((n) => !allowedSet.has(n) && !gate.known.has(n) && !declaredSet.has(n));
         const staleDeclared = names.filter((n) => !allowedSet.has(n) && !gate.known.has(n) && declaredSet.has(n));
-        const unsearchable = names.filter((n) => !allowedSet.has(n) && gate.known.has(n));
+        // [#6674] A VIRTUAL field is its own rejection, split out of
+        // `unsearchable` before the source branch below rather than after it,
+        // because BOTH of that branch's messages are wrong for it. The declared
+        // one ("a field outside it cannot be a search target until it is added
+        // there") is false — it may already BE in the list, which is exactly the
+        // shape this closes; the auto one prescribes "declare `searchableFields`
+        // to choose the searchable set explicitly", which for a formula field is
+        // an instruction to author the refused declaration. The fix is neither:
+        // the value has no column anywhere, so it must be mirrored onto a stored
+        // one. Judged by the same `@objectstack/spec/data` predicate the
+        // resolution applies, so gate and engine cannot disagree about which
+        // types have a column.
+        const virtual = names.filter((n) => !allowedSet.has(n) && gate.known.has(n) && isVirtualSearchField(gate.fields[n]));
+        const unsearchable = names.filter((n) => !allowedSet.has(n) && gate.known.has(n) && !isVirtualSearchField(gate.fields[n]));
         const [offenders, reason] =
             unknown.length > 0 ? [unknown, 'unknown' as const]
             : staleDeclared.length > 0 ? [staleDeclared, 'stale-declared' as const]
+            : virtual.length > 0 ? [virtual, 'virtual' as const]
             : [unsearchable, 'unsearchable' as const];
         if (offenders.length === 0) return;
         const first = offenders[0];
@@ -5154,6 +5305,18 @@ export class ObjectStackProtocolImplementation implements
                 + (offenders.length > 1 ? ` (also: ${offenders.slice(1).join(', ')})` : '')
                 + '. The declaration is stale — searching it can never match, and the engine '
                 + "silently skipped it. Fix the object's 'searchableFields' to name real fields.";
+        } else if (reason === 'virtual') {
+            const vtype = gate.fields[first]?.type ?? 'formula';
+            detail = `Field '${first}' on object '${object}' is a virtual '${vtype}' field and cannot be searched`
+                + (offenders.length > 1 ? ` (also: ${offenders.slice(1).join(', ')})` : '')
+                + `. Its value is computed on read and never stored, so no driver materializes a `
+                + `column for 'search' to scan and the entry can never match — measured as 0 rows, `
+                + 'with no error, on both the in-memory and the SQL backends.'
+                + (declaredSet.has(first)
+                    ? ` The object's 'searchableFields' declares it, which is what made the entry `
+                      + 'look like coverage; remove it there as well.'
+                    : '')
+                + ` Mirror the computed value onto a stored text field on '${object}' and search that instead.`;
         } else if (reason === 'unknown') {
             // A dotted path is a special unknown: plausible vocabulary from the
             // select/sort axes, but search scans this object's own columns.
@@ -7518,6 +7681,110 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
+     * [#6190] The org-scope half of the same family: a write that would stamp
+     * `sys_metadata.organization_id` on a type the registry declares has NO
+     * per-org channel. Returns the refusal, or `null` when the write is fine.
+     *
+     * ## Why a write-time refusal and not a read-time repair
+     *
+     * `allowOrgOverride` and `allowRuntimeCreate` are orthogonal tiers (see
+     * {@link isRuntimeCreateAllowed}), and the runtime-create tier never
+     * consulted the ORG dimension: `SysMetadataRepository.put` stamps
+     * `organization_id: this.organizationId` whatever the type is, so a
+     * Studio-authored item of an `allowOrgOverride: false` type persisted a
+     * per-org row that the platform can never read back. Cold boot
+     * (`loadMetaFromDb`, `organization_id: null`) walks past it and the
+     * env-wide consumers never ask for it — the write path was strictly more
+     * permissive than the read path, which is the false-compliance shape
+     * ADR-0049 forbids. Measured consequences, both silent before this gate:
+     *
+     *  - `flow` — the row binds its triggers for the life of the process that
+     *    wrote it and stops firing after the next restart, with no log line
+     *    (#6190's original report; the cold-boot warn that made the residue
+     *    audible shipped separately, see
+     *    {@link reportUnhydratableOrgScopedRows}).
+     *  - `object` — worse, and fails CLOSED: the object is absent from the
+     *    registry after boot while its physical table still holds the data, so
+     *    {@link assertObjectRegistered} answers 404 `OBJECT_NOT_FOUND` for
+     *    every record in it.
+     *
+     * Maintainer ruling 2026-08-08 on #6190 (option A of three): refuse the
+     * write. Option B — silently coercing the row to env-wide — was rejected
+     * because it rewrites the tenancy statement the author made; option D —
+     * the log alone — leaves declared ≠ enforced.
+     *
+     * ## Shape decisions
+     *
+     *  - **Registry-derived, never a hand-written type list** (Prime Directive
+     *    #8): the predicate is {@link isOverlayAllowed} — the same one the
+     *    sibling refusal below it uses, over the same derived
+     *    {@link OVERLAY_ALLOWED_TYPES} set. A type that gains
+     *    `allowOrgOverride: true` tomorrow is admitted here the same day, with
+     *    nothing to keep in sync.
+     *  - **The operator hatch stays ONE door.** Because the predicate is
+     *    `isOverlayAllowed`, `OS_METADATA_WRITABLE` unlocks org scoping exactly
+     *    as it unlocks the overlay — which is what this file already promises a
+     *    few lines down ("unlocking a type there unlocks it here too") and what
+     *    the ruling asked for by naming this the *sibling* of the
+     *    `NOT_OVERRIDABLE` refusal. Two differently-keyed notions of
+     *    "overridable" inside one method would be the drift, not the safety.
+     *
+     *    The DIAGNOSTIC is deliberately wider than the refusal:
+     *    {@link reportUnhydratableOrgScopedRows} ignores the hatch and reports
+     *    an org-scoped row of any non-org-overridable type, because the hatch
+     *    unlocks the write and cannot teach `loadMetaFromDb` to read the row
+     *    back. So an operator who deliberately opens the door still gets told,
+     *    at every boot, that what they wrote did not survive it. Warning is
+     *    free and should be maximal; refusing removes a capability, and the
+     *    declaration — including its documented override — decides that.
+     *  - **Statically-declared types only.** A type with no entry in
+     *    `DEFAULT_METADATA_TYPE_REGISTRY` is plugin-registered at runtime, and
+     *    both existing gates ({@link isRuntimeCreateAllowed} here,
+     *    `assertAllowed` in the repository) treat that family as permissive by
+     *    construction — `getMetaTypes()` synthesises `allowRuntimeCreate: true`
+     *    for it. Refusing those here would extend a ruling measured over the
+     *    registry to a surface nobody measured, so they keep today's behaviour.
+     *    Their org rows are skipped by cold boot too; that gap is stated in the
+     *    PR rather than silently widened here.
+     *  - **`NOT_OVERRIDABLE`, not a new code.** The condition IS "this type has
+     *    no per-org override channel", the sentence `NOT_OVERRIDABLE` already
+     *    carries, and the code vocabulary is a closed set owned by
+     *    `packages/spec`'s ledger (ADR-0112 D3) — a cross-package edit this
+     *    card is not authorised to make. The message carries the distinction.
+     *
+     * Pinned by `protocol.org-scoped-write-refused.test.ts`.
+     */
+    private static orgScopedWriteRefusal(
+        type: string,
+        name: string,
+        organizationId: string | null | undefined,
+    ): Error | null {
+        if (!organizationId) return null;
+        const singular = PLURAL_TO_SINGULAR[type] ?? type;
+        if (this.isOverlayAllowed(type)) return null;
+        if (!this.STATIC_REGISTRY_TYPES.has(singular) && !this.STATIC_REGISTRY_TYPES.has(type)) return null;
+        const err: any = new Error(
+            `[not_overridable] Metadata item '${type}/${name}' cannot be written org-scoped `
+            + `(organization '${organizationId}'). `
+            + `The metadata-type registry declares allowOrgOverride=false for '${singular}', so the platform has `
+            + `no per-org channel for it: boot hydration loads env-wide rows only, so this row would be absent `
+            + `from the registry after the next restart — a '${singular}' that answered today would stop `
+            + `(an 'object' answers 404 OBJECT_NOT_FOUND for every record in its still-populated table, a 'flow' `
+            + `silently stops firing). Save it env-wide instead (retry with no active organization), or ship the `
+            + `per-org variant as its own deployment (ADR-0005: "Per-org variants are a deployment, not an `
+            + `overlay"). An operator may set OS_METADATA_WRITABLE=${singular} to grant a runtime escape hatch, `
+            + `but note the row still will not survive a restart — the hatch unlocks the write, not the read, `
+            + `and boot logs every such row it walks past. `
+            + `See docs/adr/0005-metadata-customization-overlay.md and #6190.`
+        );
+        err.code = 'NOT_OVERRIDABLE';
+        err.status = 403;
+        err.organizationId = organizationId;
+        err.docs = 'docs/adr/0005-metadata-customization-overlay.md';
+        return err;
+    }
+
+    /**
      * Does an artifact (npm-package-loaded) item exist at `(type, name)`?
      *
      * The schema registry's `_packageId` tag is set only when
@@ -8240,7 +8507,8 @@ export class ObjectStackProtocolImplementation implements
             // which for `object` reads the contributor definition and applies
             // exactly the artifact test the sibling verb applies to the plain
             // key), so this limb inherits that judgement instead of open-coding
-            // a second one.
+            // a second one — PLUS the package-binding check below, which exists
+            // because that inherited judgement is measurably falsifiable here.
             //
             // Not theoretical, and NOT already covered by the gate at the top of
             // `deleteMetaItem`: that two-tier authorization — which refuses an
@@ -8261,18 +8529,129 @@ export class ObjectStackProtocolImplementation implements
                 && !this.isArtifactBacked(singular, name)
                 && typeof registry.unregisterObject === 'function'
             ) {
-                try {
-                    registry.unregisterObject(name);
-                } catch (err: any) {
+                // [#7012] …AND `isArtifactBacked` ALONE CANNOT SEE THAT.
+                // See {@link installedPackageBindingForObject} for the whole
+                // argument; the one-line version is that an overlay row bound
+                // to the packaged owner's id DESTROYS the packaged contributor
+                // at write time, which turns the predicate above `false` for an
+                // object the package still ships.
+                const boundPackageId = this.installedPackageBindingForObject(name);
+                if (boundPackageId !== undefined) {
                     console.warn(
                         `[Protocol] object '${name}' was deleted from sys_metadata but stays registered: `
-                        + `${err?.message ?? err}`,
+                        + `its owner contributor is bound to installed package '${boundPackageId}'. `
+                        + `A package-shipped object must not be retired by an overlay delete, and this seam `
+                        + `cannot tell one from a package-bound runtime-authored object (#7012 / #6853), so `
+                        + `the entry survives — listable, and rowless if the delete really was the whole item `
+                        + `— until the next restart.`,
                     );
+                } else {
+                    try {
+                        registry.unregisterObject(name);
+                    } catch (err: any) {
+                        console.warn(
+                            `[Protocol] object '${name}' was deleted from sys_metadata but stays registered: `
+                            + `${err?.message ?? err}`,
+                        );
+                    }
                 }
             }
         } catch {
             // Best-effort registry refresh; next read fixes it anyway
         }
+    }
+
+    /**
+     * [#7012] The package binding of a registered `object`, but only when it
+     * names a package this process has actually INSTALLED. `undefined` means
+     * "no installed package answers for this object" — the only state in which
+     * {@link restoreArtifactRegistryView}'s tier 3 may unregister it.
+     *
+     * ## Why tier 3 needs a second predicate at all
+     *
+     * `isArtifactBacked` is the natural question ("does a code package ship
+     * this?") and it is the WRONG question at this exact point, because the
+     * thing it reads has already been destroyed by the time the walk runs.
+     *
+     * `SchemaRegistry.registerObject` splices out the same-package `own`
+     * contributor before pushing the new one. So an overlay row whose
+     * `package_id` equals the packaged owner's id does not SHADOW the packaged
+     * definition — it REPLACES it, and no second copy exists anywhere in the
+     * registry. {@link loadMetaFromDb} replays that replacement on every boot,
+     * with no authorization gate and no log, stamping `_provenance: 'org'`
+     * server-side (deliberately — cloud#970). `getArtifactItem` for an `object`
+     * is exactly `_provenance !== 'org'`, so `isArtifactBacked` answers `false`
+     * for an object a code package still ships, and tier 3 then took the whole
+     * entry. Measured end to end on a tenant kernel with no escape hatch:
+     *
+     * ```
+     * loadMetaFromDb -> {"loaded":1,"errors":0,"invalid":0}   warnings: []
+     * DELETE         -> {"success":true,"reset":true}
+     * objectContributors: []   getObject: null
+     * data CRUD: OBJECT_NOT_FOUND / 404   (while the table still holds the rows)
+     * ```
+     *
+     * ## Why the BINDING is trustworthy where the definition is not
+     *
+     * The replacement rule fires only when the two package ids MATCH, so the
+     * surviving contributor provably carries the packaged owner's id — the one
+     * fact the overwrite cannot change, precisely because it is the overwrite's
+     * own precondition. The second half, "is that package installed", is a fact
+     * about the PROCESS rather than about the destroyed body:
+     * `SchemaRegistry.installPackage` writes the record and
+     * `ObjectQL.registerApp` calls it immediately before registering the
+     * manifest's objects, so a package-shipped object always has one. Durable
+     * packages (`sys_packages`) are re-installed at boot by `service-package`,
+     * and nested `registerPlugin` objects are keyed to the PARENT package,
+     * which `registerApp` installed. The `'sys_metadata'` sentinel — the key an
+     * overlay row bound to no package keeps — is handled by construction rather
+     * than by a special case: nothing installs a package under it, so it never
+     * resolves to a record.
+     *
+     * ## What this deliberately does NOT ask
+     *
+     * - NOT `enabled` / `status`. `disablePackage` flips lifecycle flags and
+     *   removes no contributor, so a disabled package's objects stay registered
+     *   and stay dispatchable; reading the flag here would unregister a
+     *   definition nothing else removes — the same outage through a second door.
+     * - NOT the manifest's `objects` list. That would re-ask "is this
+     *   code-shipped", which is the question whose answer was destroyed; it is
+     *   also absent for `registerPlugin`-contributed objects.
+     *
+     * ## The accepted cost, ruled and not to be worked around
+     *
+     * A package-bound RUNTIME-authored object (Studio's package workspace,
+     * #4636) carries a real `package_id` too, so it is indistinguishable from a
+     * package-shipped one by binding alone: some genuinely deleted objects stay
+     * registered until restart. Per this walk's own REGISTER WIDE / RETIRE
+     * NARROW argument that is the cheap direction — a surplus entry degrades to
+     * "listable but rowless" and the next reload heals it, a wrongly retired one
+     * 404s data CRUD for every tenant. The honest fix for the distinguishability
+     * itself is #6853's direction B (the tenant overlay registers as its own
+     * contributor layer instead of splicing out the packaged `own`), which
+     * re-arms `isArtifactBacked` here and at `saveMetaItem`'s overlay gate; it is
+     * an ADR-0029 amendment and a separate card by maintainer ruling
+     * (2026-08-09).
+     *
+     * Name-addressed, like every other verb in the walk: `getObjectOwner` reads
+     * the contributor list under the same key `getObject` and
+     * {@link SchemaRegistry.unregisterObject} resolve (`computeFQN` is identity,
+     * so the registry key IS the object name), which is what keeps the decision
+     * and the removal talking about the same entry.
+     */
+    private installedPackageBindingForObject(name: string): string | undefined {
+        const registry: any = (this.engine as any)?.registry;
+        if (
+            !registry
+            || typeof registry.getObjectOwner !== 'function'
+            || typeof registry.getPackage !== 'function'
+        ) {
+            return undefined;
+        }
+        const packageId: unknown = registry.getObjectOwner(name)?.packageId;
+        if (typeof packageId !== 'string' || packageId === '') return undefined;
+        const installed = registry.getPackage(packageId);
+        return installed === undefined || installed === null ? undefined : packageId;
     }
 
     /**
@@ -8455,6 +8834,24 @@ export class ObjectStackProtocolImplementation implements
             throw this.isArtifactBacked(request.type, request.name)
                 ? ObjectStackProtocolImplementation.codeOnlyOverrideError(request.type, request.name)
                 : ObjectStackProtocolImplementation.codeOnlyCreateError(request.type);
+        }
+
+        // [#6190] …and the ORG dimension of the same declaration, on the tier
+        // that never consulted it. Placed HERE — before the topology carve-out
+        // below, before the destructive diff, before the schema parse — for the
+        // two reasons #5086 put its own refusal first: the verdict depends on
+        // nothing but the type and the requested scope, and "refused, not
+        // refused after writing" is the property the issue was filed about, so
+        // the gate must precede every path that could persist a row. Draft
+        // saves are gated identically (the branch is below): a draft is the
+        // first half of the SECOND minting path this closes, and #4463 D1
+        // recorded what happens when only one of the two doors gates.
+        // See {@link orgScopedWriteRefusal} for the ruling and the shape.
+        {
+            const orgRefusal = ObjectStackProtocolImplementation.orgScopedWriteRefusal(
+                request.type, request.name, request.organizationId,
+            );
+            if (orgRefusal) throw orgRefusal;
         }
 
         if (this.environmentId !== undefined) {
@@ -9397,6 +9794,21 @@ export class ObjectStackProtocolImplementation implements
             err.code = 'NOT_OVERRIDABLE';
             err.status = 403;
             throw err;
+        }
+        // [#6190] The draft→active promotion is the OTHER way an org-scoped row
+        // of a non-org-overridable type reaches `active` — `publishMetaItem`
+        // and, behind Studio's "publish whole app", `publishPackageDrafts`.
+        // `saveMetaItem`'s gate now refuses to MINT such a draft, so what this
+        // door closes is the promotion of residue that predates the refusal:
+        // a legacy org-scoped draft row must not be promotable into a fresh
+        // active phantom. Exactly the #4463 D1 posture — gating one door and
+        // not the other makes the refusal bypassable by anyone who saves
+        // `?mode=draft` and then POSTs `/publish`.
+        {
+            const orgRefusal = ObjectStackProtocolImplementation.orgScopedWriteRefusal(
+                request.type, request.name, request.organizationId,
+            );
+            if (orgRefusal) throw orgRefusal;
         }
         // ADR-0010 L3 — lock blocks publish too (publishing is a write).
         const _publishLockErr = await this.assertLockAllowsWrite({

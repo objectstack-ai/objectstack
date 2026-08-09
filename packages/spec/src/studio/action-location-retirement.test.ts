@@ -2,6 +2,12 @@
 
 import { describe, it, expect } from 'vitest';
 
+import {
+  EXPORT_ENTRY_POINTS,
+  exportNamesOf,
+  holderOriginsOf,
+  originFile,
+} from '../../scripts/lib/export-origins-testkit';
 // ─── [#4737] `ActionLocation` has ONE owner per name (./studio renamed) ──────
 //
 // Dual-source ledger #4535, cluster C17. Before this change `ActionLocationSchema`
@@ -32,74 +38,20 @@ import { describe, it, expect } from 'vitest';
 // from ./studio under the bare name — green to the dual-source gate, a lie to
 // authors — and resurrecting the old 3-value const each turn it red).
 describe('[#4737] studio ActionLocation dual-source retirement', () => {
-  it('resolves the export surface: one owner per name, across every public entry', async () => {
-    const ts = (await import('typescript')).default;
-    const { resolve, relative } = await import('node:path');
-    const { dirname } = await import('node:path');
-    const { fileURLToPath } = await import('node:url');
-    const { readFileSync } = await import('node:fs');
-
-    const specDir = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
-    // Every public entry point, read from package.json's exports map so a
-    // future entry cannot silently escape the uniqueness pins below.
-    const pkg = JSON.parse(readFileSync(resolve(specDir, 'package.json'), 'utf8')) as {
-      exports: Record<string, unknown>;
-    };
-    const entries: Record<string, string> = {};
-    for (const sub of Object.keys(pkg.exports)) {
-      if (sub === '.') entries[sub] = resolve(specDir, 'src/index.ts');
-      else if (/^\.\/[a-z-]+$/.test(sub)) entries[sub] = resolve(specDir, `src/${sub.slice(2)}/index.ts`);
-      // './openapi.json' / './package.json' are not TypeScript entry points.
-    }
-    // Anti-vacuity: the enumeration must have found the real surface.
+  it('resolves the export surface: one owner per name, across every public entry', () => {
+    // Anti-vacuity: the baseline must cover the real surface. (This used to
+    // enumerate package.json's exports map and build its own `ts.createProgram`
+    // right here; `export-origins/` IS that resolution, computed once at build
+    // time and checked in — #4796.)
     for (const needed of ['./studio', './ui']) {
-      expect(Object.keys(entries), `exports map must include ${needed}`).toContain(needed);
+      expect(EXPORT_ENTRY_POINTS, `exports map must include ${needed}`).toContain(needed);
     }
-    expect(Object.keys(entries).length).toBeGreaterThan(10);
-
-    const program = ts.createProgram(Object.values(entries), {
-      module: ts.ModuleKind.ESNext,
-      moduleResolution: ts.ModuleResolutionKind.Bundler,
-      skipLibCheck: true,
-      noEmit: true,
-    });
-    const checker = program.getTypeChecker();
-    const unalias = (s: import('typescript').Symbol) =>
-      s.getFlags() & ts.SymbolFlags.Alias ? checker.getAliasedSymbol(s) : s;
-
-    const exportsOf = (sub: string) => {
-      const sf = program.getSourceFile(entries[sub]);
-      const moduleSym = sf && checker.getSymbolAtLocation(sf);
-      // Without this guard a resolution failure would make every assertion
-      // below pass vacuously — the exact way a gate goes dormant (#4642).
-      expect(moduleSym, `${sub} module symbol must resolve`).toBeTruthy();
-      return checker.getExportsOfModule(moduleSym!);
-    };
-
-    const originOf = (sym: import('typescript').Symbol, label: string) => {
-      const decl = unalias(sym).declarations?.[0];
-      expect(decl, `${label} must have a declaration`).toBeTruthy();
-      const declFile = decl!.getSourceFile();
-      return `${relative(specDir, declFile.fileName)}:${
-        declFile.getLineAndCharacterOfPosition(decl!.getStart()).line + 1
-      }`;
-    };
-
-    /** Every entry that exports `name`, with each occurrence's declaration origin. */
-    const holdersOf = (name: string) => {
-      const out: Array<{ sub: string; origin: string }> = [];
-      for (const sub of Object.keys(entries)) {
-        for (const sym of exportsOf(sub).filter((e) => e.getName() === name)) {
-          out.push({ sub, origin: originOf(sym, `${sub} ${name}`) });
-        }
-      }
-      return out;
-    };
+    expect(EXPORT_ENTRY_POINTS.length).toBeGreaterThan(10);
 
     // 1. The renamed-away side: `./studio` still has a non-trivial surface —
     //    so the `not.toContain` cannot pass by resolving nothing — and no
     //    longer names the old export, while surviving neighbours stand.
-    const studioNames = exportsOf('./studio').map((e) => e.getName());
+    const studioNames = exportNamesOf('./studio');
     expect(studioNames.length, './studio must export a non-trivial surface').toBeGreaterThan(40);
     for (const retired of ['ActionLocationSchema', 'ActionLocation']) {
       expect(studioNames, `./studio must not export ${retired}`).not.toContain(retired);
@@ -111,11 +63,11 @@ describe('[#4737] studio ActionLocation dual-source retirement', () => {
     //    studio/plugin.zod.ts and is exported by ./studio alone (plus nothing
     //    else — the rename must not fan out).
     for (const name of ['ActionContributionLocationSchema', 'ActionContributionLocation']) {
-      const holders = holdersOf(name);
+      const holders = holderOriginsOf(name);
       expect(holders.length, `${name} must be exported (by ./studio)`).toBeGreaterThan(0);
       for (const h of holders) {
         expect(h.sub, `${name} must only be exported by ./studio`).toBe('./studio');
-        expect(h.origin).toMatch(/^src\/studio\/plugin\.zod\.ts:\d+$/);
+        expect(originFile(h.origin)).toBe('src/studio/plugin.zod.ts');
       }
     }
 
@@ -127,17 +79,17 @@ describe('[#4737] studio ActionLocation dual-source retirement', () => {
     //    valid manifest contribution locations — the C14/C15 lesson: a
     //    re-export can lie about the domain even when the symbol is honest.
     for (const name of ['ActionLocationSchema', 'ActionLocation']) {
-      const holders = holdersOf(name);
+      const holders = holderOriginsOf(name);
       expect(holders.map((h) => h.sub), `${name} must be owned by ./ui alone`).toEqual(['./ui']);
-      expect(holders[0].origin).toMatch(/^src\/ui\/action\.zod\.ts:\d+$/);
+      expect(originFile(holders[0].origin)).toBe('src/ui/action.zod.ts');
     }
 
     // 4. The canonical list constant travels with it: `ACTION_LOCATIONS` (the
     //    array objectui pins by reference) stays ./ui-owned and distinct from
     //    the studio declaration file.
-    const listHolders = holdersOf('ACTION_LOCATIONS');
+    const listHolders = holderOriginsOf('ACTION_LOCATIONS');
     expect(listHolders.map((h) => h.sub), 'ACTION_LOCATIONS must be owned by ./ui alone').toEqual(['./ui']);
-    expect(listHolders[0].origin).toMatch(/^src\/ui\/action\.zod\.ts:\d+$/);
+    expect(originFile(listHolders[0].origin)).toBe('src/ui/action.zod.ts');
   });
 
   it('keeps the runtime namespaces consistent with the compiler view', async () => {

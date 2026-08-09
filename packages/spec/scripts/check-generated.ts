@@ -91,6 +91,16 @@ const GATED: ReadonlyArray<{
   // that has cost real triage time (AGENTS.md records the trap). Flagged so the
   // failure explains itself instead of sending the next reader after a ghost.
   { check: 'check:api-surface', gen: 'gen:api-surface', artifact: 'api-surface/', readsDist: true },
+  // The #4796 declaration-origin baseline. Reads `src/`, NOT the dist — so it
+  // carries no `readsDist` caveat and needs no build. It sits next to
+  // `check:api-surface` because they answer adjacent questions about the same
+  // surface: that one records WHICH NAMES each entry point exports, this one
+  // records WHICH DECLARATION each of those names resolves to. Seventeen
+  // export-surface pin tests read it instead of each building their own
+  // `ts.createProgram` inside a vitest case (~55s of compilation per CI lap,
+  // and a non-deterministic timeout that ejected unrelated PRs from the merge
+  // queue), so its freshness is what those pins mean.
+  { check: 'check:export-origins', gen: 'gen:export-origins', artifact: 'export-origins/' },
   {
     check: 'check:docs',
     gen: 'gen:docs',

@@ -2,10 +2,12 @@
 
 import { describe, it, expect } from 'vitest';
 import {
+  isVirtualSearchField,
   resolveSearchFieldResolution,
   resolveSearchFields,
   SEARCH_AUTO_EXCLUDED_FIELDS,
   SEARCH_AUTO_EXCLUDED_TYPES,
+  SEARCH_VIRTUAL_TYPES,
   SEARCHABLE_ENUM_TYPES,
   SEARCHABLE_TEXTUAL_TYPES,
 } from './search-fields';
@@ -185,5 +187,135 @@ describe('[#6934] search type vocabularies are pairwise disjoint', () => {
         `'${t}' is declared searchable but the auto-default rejected it`,
       ).toEqual({ allowed: ['probe'], source: 'auto' });
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// [#6674] A VIRTUAL field declared in `searchableFields` is not admitted.
+//
+// The fail-open shape #4254 closed on the unknown-name axis, surviving one axis
+// over: a `formula` entry names a REAL field, so the existence filter passed it,
+// the declared branch returned it verbatim, and every search against it matched
+// nothing — measured 0 rows on driver-memory and 0 rows WITH NO ERROR on
+// driver-sql/better-sqlite3, because no driver materializes a column for a value
+// that is computed on read.
+//
+// What is pinned here is the DECIDING face: what a declaration is admitted to
+// say. The loud half lives at the two enforcement faces (the #4254 REST ingress
+// gate and the linter), which read `isVirtualSearchField` to word their refusal
+// from this same judgment.
+// ---------------------------------------------------------------------------
+describe('[#6674] a virtual field declared in searchableFields', () => {
+  const fields = {
+    id: { type: 'text' },
+    name: { type: 'text' },
+    project_name: { type: 'text' },
+    project_id: { type: 'lookup' },
+    payload: { type: 'json' },
+    project_name_formula: { type: 'formula' },
+  };
+
+  it('is dropped from the declared allowed set', () => {
+    // Before #6674 this returned
+    //   { allowed: ['name', 'project_name_formula'], source: 'declared' }
+    // — the card's own transcript, admitted verbatim.
+    expect(
+      resolveSearchFieldResolution({
+        fields,
+        searchableFields: ['name', 'project_name_formula'],
+      }),
+    ).toEqual({ allowed: ['name'], source: 'declared' });
+  });
+
+  it('CONTROL — the declared branch still bypasses the auto-default exclusions', () => {
+    // The dividing line is STORAGE, not search quality. `lookup` and `json` are
+    // auto-EXCLUDED types, and declaring them is still the author's choice: the
+    // engine runs a `$contains` over the stored foreign key / the stored JSON
+    // text. Narrow and rarely useful, but a scan that CAN match — so it must not
+    // be swept up by the virtual filter. This control is what keeps #6674 from
+    // silently becoming "the declared branch is type-filtered after all", which
+    // would reject metadata the runtime accepts (ADR-0072 D1, and the #4830
+    // changeset's explicit carve-out).
+    expect(
+      resolveSearchFieldResolution({
+        fields,
+        searchableFields: ['project_id', 'payload'],
+      }),
+    ).toEqual({ allowed: ['project_id', 'payload'], source: 'declared' });
+  });
+
+  it('CONTROL — a declaration naming no virtual field is untouched', () => {
+    expect(
+      resolveSearchFieldResolution({ fields, searchableFields: ['name', 'project_name'] }),
+    ).toEqual({ allowed: ['name', 'project_name'], source: 'declared' });
+  });
+
+  it('an ALL-virtual declaration falls through to the auto-default', () => {
+    // The degenerate case, pinned rather than left to be discovered: the
+    // declared list filters to empty and resolution falls through exactly as it
+    // has for an all-STALE declaration since #4254. Direction is worth naming —
+    // search widens, from "matched nothing, ever" to the auto-default set. It is
+    // not left silent: the linter reports the declaration as a build error, and
+    // the ingress gate refuses any echoed `$searchFields` naming the entry.
+    expect(
+      resolveSearchFieldResolution({ fields, searchableFields: ['project_name_formula'] }),
+    ).toEqual({ allowed: ['name', 'project_name'], source: 'auto' });
+  });
+
+  it('the override intersection can no longer reach a virtual field', () => {
+    expect(
+      resolveSearchFields({
+        fields,
+        searchableFields: ['name', 'project_name_formula'],
+        requestedFields: 'project_name_formula',
+      }),
+    ).toEqual(['name']); // empty intersection → the tolerant fallback, never the formula
+  });
+
+  it('the auto-default never admitted one (the already-correct baseline)', () => {
+    expect(resolveSearchFieldResolution({ fields }).allowed).not.toContain('project_name_formula');
+  });
+});
+
+describe('[#6674] SEARCH_VIRTUAL_TYPES is a storage fact', () => {
+  it('is exactly the driver-virtual set', () => {
+    // Mirrors `fieldHasColumn` (driver-sql/src/schema-drift.ts) and
+    // driver-turso's "Virtual — no column" skips. A driver growing a second
+    // virtual type must widen this deliberately — a silent divergence would put
+    // the refusal and the storage rule back out of step, which is the drift
+    // #4254 moved this resolution into the spec to prevent.
+    expect([...SEARCH_VIRTUAL_TYPES].sort()).toEqual(['formula']);
+  });
+
+  it('is disjoint from all three search vocabularies', () => {
+    // Same contradiction #6934 pins for the other pairs: a type both virtual and
+    // searchable-textual would be admitted to the auto-default AND refused by
+    // name, with the outcome decided by evaluation order rather than by a rule.
+    const overlap = (a: ReadonlySet<string>, b: ReadonlySet<string>) =>
+      [...a].filter((t) => b.has(t)).sort();
+    expect(overlap(SEARCH_VIRTUAL_TYPES, SEARCHABLE_TEXTUAL_TYPES)).toEqual([]);
+    expect(overlap(SEARCH_VIRTUAL_TYPES, SEARCHABLE_ENUM_TYPES)).toEqual([]);
+    expect(overlap(SEARCH_VIRTUAL_TYPES, SEARCH_AUTO_EXCLUDED_TYPES)).toEqual([]);
+  });
+
+  it('an unreadable type is NOT virtual — unresolvable is not wrong', () => {
+    // The lint mirror feeds stub metadata (`{}`) for registry-injected system
+    // columns whose real type it cannot see. A stub must survive the filter, or
+    // `searchableFields: ['name', 'created_at']` would lose its system entry at
+    // resolution time and 400 at the gate (ADR-0072 D1).
+    expect(isVirtualSearchField({})).toBe(false);
+    expect(isVirtualSearchField(undefined)).toBe(false);
+    expect(isVirtualSearchField(null)).toBe(false);
+    expect(isVirtualSearchField({ type: 'text' })).toBe(false);
+    expect(isVirtualSearchField({ type: 'formula' })).toBe(true);
+  });
+
+  it('a declared system column survives the filter via its stub meta', () => {
+    expect(
+      resolveSearchFieldResolution({
+        fields: { name: { type: 'text' }, created_at: {} },
+        searchableFields: ['name', 'created_at'],
+      }),
+    ).toEqual({ allowed: ['name', 'created_at'], source: 'declared' });
   });
 });

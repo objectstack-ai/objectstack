@@ -160,6 +160,7 @@ all.
 | key omitted, or `searchableFields: []` | clean | scans the object's full allowed set |
 | a renamed / mistyped column, or a dotted path | `searchable-field-unknown` | `400 INVALID_FIELD` |
 | a real column outside the allowed set | `searchable-field-unsearchable` | `400 INVALID_FIELD` |
+| a virtual `formula` column — no stored column to scan (#6674) | `searchable-field-unsearchable` | `400 INVALID_FIELD` |
 
 Both diagnostics are **errors**, not warnings — `os validate` fails the build.
 The object's own set, and the stored-mirror prescription, are covered under

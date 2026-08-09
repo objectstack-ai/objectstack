@@ -189,6 +189,15 @@ const objectBody = (name: string) => ({
     },
 });
 
+/** [#6190] The org-scoped specimen — `view` is `allowOrgOverride: true`, so it
+ *  is a type that legitimately carries per-org rows. See the third case. */
+const viewBody = (name: string) => ({
+    name,
+    label: 'Project Tasks',
+    object: 'proj_task',
+    columns: [{ field: 'title', label: 'Title' }],
+});
+
 describe('publishPackageDrafts — env-wide draft under a non-null active org (#3115)', () => {
     it('saves the object draft env-wide (organization_id = NULL) when no org is threaded', async () => {
         const { engine, rows } = makeStubEngine();
@@ -249,10 +258,21 @@ describe('publishPackageDrafts — env-wide draft under a non-null active org (#
         const protocol = new ObjectStackProtocolImplementation(engine);
 
         // A per-org overlay draft (organization_id = org_alpha).
+        //
+        // [#6190, 2026-08-09] Re-spelled from `object` to `view`. The org-scope
+        // resolution this case guards (#3115 — promote the draft in the scope
+        // `listDrafts` surfaced it from) is unchanged and is what is measured
+        // here; what changed is which TYPES may carry an org-scoped row at all.
+        // `object` is `allowOrgOverride: false`, so since the #6190 ruling its
+        // org-scoped draft cannot be written in the first place — a fixture
+        // that kept spelling it would have been pinning a write the platform
+        // refuses, i.e. nothing. `view` is `allowOrgOverride: true`: it HAS a
+        // per-org channel, its org rows ARE read back, and it therefore
+        // exercises the #3115 seam exactly as `object` used to.
         await protocol.saveMetaItem({
-            type: 'object',
-            name: 'proj_task',
-            item: objectBody('proj_task'),
+            type: 'view',
+            name: 'proj_task_grid',
+            item: viewBody('proj_task_grid'),
             organizationId: 'org_alpha',
             packageId: 'app.projects',
             mode: 'draft',

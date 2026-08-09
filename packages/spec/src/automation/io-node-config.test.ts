@@ -102,6 +102,40 @@ describe('NotifyConfigSchema — strict as of #4001 批 9', () => {
         .error?.issues.some((i) => i.code === 'unrecognized_keys')).not.toBe(true);
     }
   });
+
+  it('sourceObject/sourceId describes state the documented pair tolerance, not a phantom requirement (#7085)', () => {
+    const shape = (NotifyConfigSchema as unknown as { shape: Record<string, { description?: string }> }).shape;
+    for (const [key, partner] of [
+      ['sourceObject', 'sourceId'],
+      ['sourceId', 'sourceObject'],
+    ] as const) {
+      const doc = shape[key]!.description ?? '';
+
+      // Non-empty arm FIRST — the negative arm below passes vacuously on ''
+      // (the #6918 demonstration), so this arm is what gives it teeth.
+      expect(doc.length, `${key} .describe() must not be empty`).toBeGreaterThan(0);
+
+      // Substance, by idiom borrowed from the module JSDoc (#6881 — no third
+      // spelling): the pair only takes effect together, and a half-specified
+      // click-through target is DROPPED at execute time rather than rejected
+      // at the gate.
+      expect(doc).toMatch(/only takes effect together/i);
+      expect(doc).toContain(partner);
+      expect(doc).toMatch(/dropped at execute time/i);
+
+      // The #7085 defect: "Requires <partner>." read as gate-enforced
+      // requiredness, while the schema deliberately keeps both keys optional
+      // (module JSDoc: the executor tolerates/drops the half pair). The
+      // phantom-requirement wording must not return in any casing or tense.
+      expect(doc).not.toMatch(/\brequire[sd]?\b/i);
+    }
+
+    // The tolerance the describes now document, proven live on the same
+    // schema — this is the acceptance face this change must NOT move: each
+    // half pair still parses green.
+    expect(NotifyConfigSchema.safeParse({ recipients: 'u1', title: 't', sourceObject: 'showcase_task' }).success).toBe(true);
+    expect(NotifyConfigSchema.safeParse({ recipients: 'u1', title: 't', sourceId: 'r1' }).success).toBe(true);
+  });
 });
 
 describe('HttpConfigSchema — strict as of #4001 批 9', () => {

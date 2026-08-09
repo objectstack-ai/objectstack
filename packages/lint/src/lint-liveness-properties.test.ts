@@ -421,29 +421,35 @@ describe('lintLivenessProperties', () => {
       }],
     });
 
-    it('warns on `colorVariant`, the key this repo\'s own system dashboard authors 7 times', () => {
+    // ── #6774: `colorVariant` went LIVE, so this lint must go quiet on it ─────
+    //
+    // Until 2026-08-09 this block's first assertion was the opposite — that
+    // authoring `colorVariant` produced a warning whose hint said "move it under
+    // `options`". That advisory was correct on the premise it rested on: no
+    // renderer read the top-level key. #5010 ruling B resolved the
+    // enforce-or-remove the other way (keep the declaration, objectui
+    // implements), and objectui#3359 / PR objectui#3799 landed the reader —
+    // absorbed here by the `.objectui-sha` pin `09987b68`. The ledger row is
+    // `live` now and carries no `authorWarn`, so the warning is gone and the
+    // hint would have been telling authors to relocate a key that works.
+    //
+    // Kept as a SILENCE pin rather than deleted, the disposition #4651's area
+    // gates reached above: a half-reverted flip (the ledger row restored to
+    // `dead`, or the pin rolled back under it) shows up right here.
+    it('no longer warns on `colorVariant` — the renderer reads it since objectui#3799 (#6774)', () => {
       const findings = lintLivenessProperties(dash({ colorVariant: 'teal' }));
-      const hit = findings.find((f) => f.message.includes('widgets.colorVariant'));
-      expect(hit).toBeDefined();
-      // The hint has to name the surviving home, or the author reads it as
-      // "widgets cannot be coloured".
-      expect(hit!.hint).toMatch(/options/);
+      expect(findings.map((f) => f.message).some((m) => m.includes('widgets.colorVariant'))).toBe(false);
     });
 
-    it('fans out over EVERY widget, not just the first', () => {
-      const findings = lintLivenessProperties({
-        dashboards: [{
-          name: 'ops',
-          widgets: [
-            { id: 'a', type: 'metric', dataset: 'd', values: ['v'] },
-            { id: 'b', type: 'metric', dataset: 'd', values: ['v'], colorVariant: 'teal' },
-          ],
-        }],
-      });
-      // The dead key is on the SECOND widget — a walk that only looked at
-      // `widgets[0]` would be silently half-blind on every real dashboard.
-      expect(findings.map((f) => f.message).some((m) => m.includes('widgets.colorVariant'))).toBe(true);
-    });
+    // ⚠️ What this flip COST, recorded so the next author does not read the
+    // absence as an oversight: `widgets.colorVariant` was the only warned entry
+    // in any ledger sitting under an array container, so it was the only subject
+    // `getNested`'s array fan-out ever had. The assertion that used to live here
+    // — "fans out over EVERY widget, not just the first" — cannot be written
+    // against a warn-map that is empty for `dashboard`, and no other type offers
+    // a dotted warned path today. The fan-out is now untested; filed as #7079
+    // rather than replaced with a test that would pass on a lint which never
+    // walks past `widgets[0]`.
 
     // ── #5010: four of these keys are RETIRED, so this lint must go quiet ─────
     //
@@ -465,21 +471,32 @@ describe('lintLivenessProperties', () => {
       },
     );
 
-    it('the retirement silenced only those four — `colorVariant` still warns beside them', () => {
-      // The negative control for the block above. Without it, a change that
-      // broke the dashboard walk entirely (or dropped `dashboard` from
-      // TYPE_COLLECTIONS again) would read as "the retirement worked".
-      const findings = lintLivenessProperties(dash({
-        actionUrl: '/apps/sales/orders',
-        actionType: 'url',
-        actionIcon: 'plus',
-        aria: { ariaLabel: 'Total pipeline' },
-        colorVariant: 'teal',
-      }));
+    // Anti-vacuity guard for every dashboard silence pin above — the shape
+    // #4651's area gates use, and the reason those pins are worth keeping at
+    // all. `lintLivenessProperties` returns [] when it cannot resolve the
+    // shipped ledgers, so "no dashboard findings" is also what a lint that had
+    // stopped reading ledgers returns; and since #6774 flipped `colorVariant`,
+    // `dashboard` is a registered type with an EMPTY warn map, so nothing inside
+    // the dashboard walk can tell a working walk from one that was dropped from
+    // TYPE_COLLECTIONS. This authors all five once-warned widget keys and a
+    // property that IS still `authorWarn` (`object.externalSharingModel`, the
+    // last one in tree) in the SAME call: same process, same ledger load, one
+    // warning and not six.
+    it('the dashboard silence is a real verdict, not a lint that stopped loading ledgers', () => {
+      const findings = lintLivenessProperties({
+        objects: [{ name: 'widget', externalSharingModel: 'read' }],
+        ...dash({
+          actionUrl: '/apps/sales/orders',
+          actionType: 'url',
+          actionIcon: 'plus',
+          aria: { ariaLabel: 'Total pipeline' },
+          colorVariant: 'teal',
+        }),
+      });
       const messages = findings.map((f) => f.message);
-      expect(messages.some((m) => m.includes('widgets.colorVariant'))).toBe(true);
-      for (const retired of ['actionUrl', 'actionType', 'actionIcon', 'aria']) {
-        expect(messages.some((m) => m.includes(`widgets.${retired}`))).toBe(false);
+      expect(messages.some((m) => m.includes('externalSharingModel'))).toBe(true);
+      for (const quiet of ['actionUrl', 'actionType', 'actionIcon', 'aria', 'colorVariant']) {
+        expect(messages.some((m) => m.includes(`widgets.${quiet}`))).toBe(false);
       }
     });
 
