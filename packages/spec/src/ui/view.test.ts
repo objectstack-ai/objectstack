@@ -1511,6 +1511,31 @@ describe('GroupingConfigSchema', () => {
 
     expect(() => GroupingConfigSchema.parse(grouping)).toThrow();
   });
+
+  it('fields .describe() states shape semantics without a fixed level cap (#7084)', () => {
+    const shape = (GroupingConfigSchema as unknown as { shape: Record<string, { description?: string }> }).shape;
+    const doc = shape.fields!.description ?? '';
+
+    // Non-empty arm FIRST — the negative arms below pass vacuously on '',
+    // so this arm is what makes them non-vacuous (the #6918 demonstration).
+    expect(doc.length, 'fields .describe() must not be empty').toBeGreaterThan(0);
+
+    // Substance, by idiom not verbatim: array order IS nesting order, and the
+    // gate's real lower bound (`.min(1)`) is stated.
+    expect(doc).toMatch(/nesting order/i);
+    expect(doc).toMatch(/outermost/i);
+    expect(doc).toMatch(/at least one/i);
+
+    // The #7084 defect must not return under a new number: the gate is
+    // `.min(1)` with NO upper bound, and nothing downstream enforces one
+    // either (objectui useGroupedData's buildLevel recurses over ALL
+    // configured levels — its only stop is `depth >= fields.length`). So any
+    // fixed-count support envelope here is prose the acceptance face does not
+    // have; house rule E17 says "up to N" is the same defect as "up to 3".
+    expect(doc).not.toMatch(/\bup to \d+\b/i);
+    expect(doc).not.toMatch(/\b\d+\s+levels?\b/i);
+    expect(doc).not.toMatch(/\bmax(?:imum)?(?:\s+of)?\s+\d+\b/i);
+  });
 });
 
 describe('GroupingFieldSchema', () => {
