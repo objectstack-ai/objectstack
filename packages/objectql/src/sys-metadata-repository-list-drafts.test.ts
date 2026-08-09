@@ -98,4 +98,86 @@ describe('SysMetadataRepository.listDrafts (ADR-0033)', () => {
       where: { organization_id: null, state: 'draft', type: 'object', package_id: 'app.edu' },
     });
   });
+
+  /**
+   * [#6599] The header projection is a DISCLOSURE BOUNDARY, not a payload-size
+   * optimization — and it is the ONLY thing standing between a draft row and an
+   * unmasked object schema on the wire.
+   *
+   * `GET /api/v1/meta/_drafts` (`packages/rest/src/rest-server.ts`) and
+   * `GET /metadata/_drafts` (`packages/runtime/src/domains/meta.ts`) both call
+   * `protocol.listDrafts()` and serve the result verbatim — no ADR-0106
+   * `applyObjectSchemaMask`, no capability gate, nothing beyond `requireAuth`.
+   * That is safe today for exactly one reason: this function reads six columns
+   * and never touches the row's stored body. #6599 was filed believing the body
+   * DID come through (`.item.fields.salary_grade`); it does not, and this case
+   * is what keeps that true.
+   *
+   * So the moment anyone "helpfully" widens the projection to carry the item —
+   * a Studio diff view wanting field-level detail is the obvious pull — both
+   * routes start serving full object schemas, `requiredPermissions`, picklist
+   * option values and `formula` business IP to any authenticated caller, and
+   * ADR-0106's mask is bypassed wholesale via a route it never covered. This
+   * test goes red at that instant. If you are here because it went red: the
+   * widening needs the ADR-0106 projection (or an authoring gate) on BOTH
+   * routes FIRST — see #6599 for the (a)/(b) fork.
+   */
+  it('projects headers ONLY — a draft row\'s stored body never reaches the caller (#6599)', async () => {
+    // A draft row carrying everything ADR-0106 names as leaking with a field:
+    // a sensitive picklist, the capability guarding it, and a formula.
+    const sensitive = {
+      name: 'account',
+      fields: {
+        salary_grade: {
+          type: 'select',
+          label: 'Salary Grade',
+          options: [{ value: 'band_a', label: 'Band A' }],
+          requiredPermissions: ['view_compensation'],
+        },
+        bonus_formula: { type: 'formula', formula: 'salary_grade == "band_a" ? 0.2 : 0.1' },
+      },
+    };
+    const rows = [
+      {
+        type: 'object',
+        name: 'account',
+        state: 'draft',
+        package_id: 'app.hr',
+        organization_id: null,
+        updated_at: 't1',
+        updated_by: 'ai',
+        // Both spellings the repository layer has used for the stored document.
+        body: JSON.stringify(sensitive),
+        metadata_json: JSON.stringify(sensitive),
+      },
+    ];
+    const { repo } = makeRepo(rows as any);
+    const out = await repo.listDrafts({ type: 'object' });
+
+    // Exactly the six header keys — no `item`, no `body`, no `fields`.
+    expect(Object.keys(out[0]).sort()).toEqual([
+      'name',
+      'organizationId',
+      'packageId',
+      'type',
+      'updatedAt',
+      'updatedBy',
+    ]);
+
+    // Whole-payload sweep: no residue of the schema anywhere in what is served.
+    // Asserting on the serialized form (rather than key-by-key) is deliberate —
+    // it catches a body smuggled in under ANY key name, which a key allowlist
+    // check alone would miss.
+    const wire = JSON.stringify(out);
+    for (const secret of [
+      'salary_grade',
+      'bonus_formula',
+      'view_compensation',
+      'band_a',
+      'formula',
+      'fields',
+    ]) {
+      expect(wire).not.toContain(secret);
+    }
+  });
 });
