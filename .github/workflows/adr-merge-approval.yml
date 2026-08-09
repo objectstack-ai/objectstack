@@ -1,0 +1,83 @@
+name: ADR Merge Approval
+
+# Machine enforcement of the #6741 ruling (maintainer, verbatim):
+# 「adr 只能由维护者自己确认,人工合并,ai 不得擅自合并。」
+#
+# A PR whose diff touches docs/adr/** must carry an APPROVED review from the
+# maintainer's OWN account before it is mergeable; approvals from the shared
+# bot/agent identities deliberately do not count. Prose enforcement was
+# measured insufficient the day the ruling landed — two different AI-operated
+# seats merged docs/adr/** PRs within the following hour (#6671, #6732; the
+# full record and both replays live in scripts/check-adr-merge-approval.mjs
+# and its --self-test). Drafting ADR PRs stays open to every seat; only the
+# merge is reserved, and the maintainer's own approval + merge is the intended
+# zero-extra-friction green path.
+#
+# Deliberately NO `paths` filter, on either trigger — the same choice
+# changeset-presence.yml made in objectui (#3769) and for the same reason
+# (objectui#3523): a path filter skips the WHOLE workflow, so the check
+# context is never CREATED on a non-matching PR, and a required context that
+# never reports leaves the PR pending in the merge queue until the ruleset's
+# 60-minute timeout. This gate reports on every PR instead: the script reads
+# the diff and decides, and a diff that does not touch docs/adr/** passes
+# with zero API lookups.
+#
+# This file is one of the enforcement surfaces .github/CODEOWNERS routes to
+# the maintainer: weakening or removing the gate is itself a governance
+# change and carries the same review requirement the gate enforces.
+
+on:
+  pull_request:
+    branches: [main]
+  # An approval does not fire `pull_request`, so without this trigger the
+  # failed check would sit red after the maintainer approves until someone
+  # re-ran it by hand. Subscribing to reviews makes the maintainer's approval
+  # itself re-run the gate — the zero-friction green path the card requires.
+  # (On non-ADR PRs a review re-runs the cheap clean path; harmless.)
+  pull_request_review:
+    types: [submitted, edited, dismissed]
+  # Merge queue (objectui#3523; see ci.yml's trigger block): a required
+  # context must report on queue builds or the queue stalls. On this event
+  # the script resolves the PR from the gh-readonly-queue ref (falling back
+  # to the head commit subject, then the commit's associated PRs) and fails
+  # loud if it cannot — never a silent skip.
+  merge_group:
+    types: [checks_requested]
+
+concurrency:
+  group: adr-merge-approval-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  # The gated path lists the PR's reviews via the REST API.
+  pull-requests: read
+
+jobs:
+  adr-merge-approval:
+    name: ADR maintainer approval
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          # The gate diffs against the merge base with the target branch (or
+          # the merge group's base); a depth-1 clone has no merge base, and an
+          # unresolvable base is a hard failure in the script, never a skip.
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      # A checkout, setup-node, and one `node` call over `git diff` — no
+      # install, no build. The self-test runs first (repo convention), then
+      # the gate. GITHUB_TOKEN is only read on the gated path (a docs/adr/**
+      # diff needs the PR's review list); the clean path does zero lookups.
+      - name: Require the maintainer's own approval on docs/adr/** diffs
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/check-adr-merge-approval.mjs --self-test && node scripts/check-adr-merge-approval.mjs
