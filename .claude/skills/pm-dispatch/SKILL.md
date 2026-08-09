@@ -118,7 +118,22 @@ done
 # routing labels exist only on the main backlog repo:
 gh label create repo:objectui -R objectstack-ai/objectstack -c fbca04 -d "Lands in objectui (frontend)" || true
 gh label create repo:cloud    -R objectstack-ai/objectstack -c c5def5 -d "Lands in cloud" || true
+# domain lanes — the roster under "Domain lanes"; ⛔ keep the two lists in sync:
+for D in engine-core metadata drivers services identity devx spec spec-surface cli spec-tooling; do
+  gh label create "domain:$D" -R objectstack-ai/objectstack -c bfd4f2 -d "Domain lane — seat card indexed by label:pm:seat" || true
+done
 ```
+
+⛔ **退役的 `domain:*`(`domain:engine`、`domain:ui`)不在上面那行里,也不要加回去**
+—— 重建一个退役标签,就是把一条无主车道放回 GitHub 的自动补全。
+
+⚠️ **为什么这一段以前不存在,以及为什么它不是可选的。** 本块此前**一个 `domain:*`
+都不创建**,只创建 `pm:*` / `finding` / `needs-user-decision` / `repo:*`;而同文的
+label discipline 又规定「未打标签的 issue 任何人都不得认领」,`domain:*` 是分诊座位
+**唯一生产的机器判据**。也就是说这套词表是**承重的,却没有任何一处可执行文本负责
+把它创建出来** —— 现存的域标签全部是历史上手工点出来的,词表与实际标签集之间没有
+任何机械对账,两边各自漂移(#5472 施工现场记录,归挂 #5469)。#5469 发现的两个
+未入表条目就是这个缺口的产物,不是谁一时疏忽。
 
 (Use the GitHub MCP tools instead of `gh` when the CLI is unavailable — the
 protocol is identical.)
@@ -767,6 +782,80 @@ updated **by PR** — the taxonomy evolves deliberately, never per-claim.
 本表只覆盖**本仓(objectstack)的包**。`objectui` / `cloud` 是**整仓座位**,
 routing 用 `repo:*` 表达(rule 4 的座位协议),不另打 `domain:*` —— 域车道是
 「同仓多 PM 并发」的切法,不是第二套仓库标签。
+
+### 词表 —— 在流通的 `domain:*` 标签与它们的座位贴
+
+上面那张表回答「**这个包归哪个域**」;本表回答「**有哪些域标签、谁在座**」。两个
+问题此前只有前者写了下来,后者靠各人记忆,结果是两个条目在表外自己长了四天
+(#5469:`domain:spec-tooling` 在用却不在表内、`domain:ui` 与 `repo:objectui` 重复)。
+⛔ **新增或退役一个 `domain:*`,必须同批改本表** —— 一个在流通、却不在本表的标签,
+就是一条**分诊在往里打、而没有任何座位的过滤器会返回它**的无主车道;反过来,一个
+本表有、实际已无人在座的标签,是两个座位都以为归自己的撞车面。
+
+| `domain:*` | 座位贴 | 上面的包家族表 |
+|:--|:--|:--|
+| `domain:engine-core` | #6019 | ✅ 有行 |
+| `domain:metadata` | #6367 | ✅ 有行 |
+| `domain:drivers` | #6020 | ✅ 有行 |
+| `domain:services` | #6021 | ✅ 有行 |
+| `domain:identity` | #6022 | ✅ 有行 |
+| `domain:devx` | #6023 | ✅ 有行 |
+| `domain:spec` | #6017 | ✅ 有行 |
+| `domain:spec-surface` | #6298 | ✅ 有行 |
+| `domain:cli` | #6024 | ✅ 有行 |
+| `domain:spec-tooling` | #6018 | ⚠️ **故意无行** —— 见下一段 |
+
+**已退役(⛔ 分诊不再打;见到就是误标,按 rule 4 的误标路径上报):**
+
+| 退役标签 | 处置 | 2026-08-09 实测 |
+|:--|:--|:--|
+| `domain:engine` | 已按 #5472 拆为 `engine-core` / `drivers` | 0 单;⚠️ 标签对象仍在 |
+| `domain:ui` | 维护者 2026-08-06 裁决退役 ⇒ 改用 `repo:objectui`,**不设别名** | 0 单(open + closed);⚠️ 标签对象仍在 |
+
+整仓座位是 `repo:*` 而非 `domain:*`:`repo:objectui` #6025、`repo:cloud` #6026。
+`domain:ui` 之所以值得在退役表里单独点名,是因为它正是上一段那条规则被绕过的
+**实例**:规则说 objectui 用 `repo:*` 表达,而标签集里当时已经长出了一个
+`domain:ui`。
+
+⚠️ **两条退役标签的存量都已清零,但两个标签对象都还在仓库标签集里**(2026-08-09
+实测),也就是说在 GitHub 的标签自动补全里仍然选得中。两条的退役指令都写明了删除
+(#5472 的迁移纪律原文「清零后删除旧标签」;`domain:ui` 的 2026-08-06 裁决「即日
+退役」),而两次都停在了「不再打」这一步 —— **清零 ≠ 退役,删除标签对象是单独的
+一步**。本表这两行是它们今天唯一的防线;**删除是 PM 的动作**(dev 侧无删除标签的
+工具),⛔ 删掉之前不要把它们当成不存在。
+
+### `domain:spec-tooling` —— 在册车道,包家族表故意不给它行(#5469 未闭)
+
+维护者 2026-08-06 裁决(#5469,原文引用、未翻译):
+
+> `domain:spec-tooling` 判为 **#5163 存续期的临时 program 车道**,不进 SKILL 包家族
+> 域表;其存量单由分诊按现行域表重标,重标完成后该标签退役
+
+⚠️ **该裁决所依据的前提(「临时、待退役」)在其后三天被反向的事实推翻,所以本节
+记录的是现状,不是那条裁决的执行结果**(2026-08-09 实测):
+
+- 裁决当天 15:03Z(裁决后约 9 小时)**新立了座位贴 #6018**,该席至今在任、经历
+  一次移交、一个任期内落了 9 个 PR;
+- **2026-08-07 维护者批准的 `spec` 拆分**(座位贴 #6298)在本文里写进了
+  `spec-surface` ↔ `spec-tooling` 的分界判据 —— 即维护者本人在裁决次日签发的
+  文本,把它当作活车道在用;
+- 标签仍在被分诊打:当前 **10 单 open**(#6833 / #6797 / #6751 / #6635 / #6350 /
+  #6232 / #6221 / #5828 / #5757 / #5163,其中 #6797、#6350 已 `pm:dispatched`),
+  67 单 closed,最近一次新打在 2026-08-08。
+
+⇒ 该标签是**在册车道,分诊照常打**。包家族表不给它行的原因**不是**「它不存在」,
+而是它与 `domain:devx` 的三处文件面重叠**至今未裁**;在未裁之前给它一行,会当场
+违反本节 anchoring rule 的那一句(每个包恰好属于一个 domain)。
+
+- **无争议、可直接路由的两处**:`packages/spec/scripts/**`、`packages/spec/docs/**`
+  ⇒ `domain:spec-tooling`。devx 从未声明这两处,依据是 #6018 座位贴的 Scope 段与
+  上面 2026-08-07 的 surface / tooling 分界(tooling 改「围着契约转的机器」)。
+- ⚠️ **未裁的三处**:`packages/lint`、`content/docs/**`、`scripts/` —— 座位贴 #6018
+  与 #6023 **同时声明**这三处。这不是纸面问题,2026-08-09 实测两侧都在落地:
+  `domain:spec-tooling` 的 #6778 整单落在 `packages/lint/src/`(PR #6831),而同期
+  `domain:devx` 的 #5957 / #5330 / #6381 也落在 `packages/lint`。
+- ⇒ **落在这三处的卡,分诊 FLAG 回 #5469,⛔ 不自行二选一。** 备选方案 A / B 写在
+  #5469 正文里,裁定权在维护者与两条车道的 PM,⛔ 不由分诊或 dev 代拍。
 
 **`engine` 一分为二(#5472,与 #5095 同批)。** 旧 `domain:engine` 同时覆盖
 objectql + metadata\* + platform-objects + core + formula + 全部 `driver-*`,
