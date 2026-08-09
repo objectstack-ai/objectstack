@@ -248,6 +248,128 @@ describe('probe-first partial index replacement (#6418)', () => {
         expect(indexDdl(PROBE)).toBeUndefined();
     });
 
+    /* ────────────────────────────────────────────────────────────────────── *
+     *  #6848 — the DIALECT arm walks `cause` to the same depth as the first
+     * ────────────────────────────────────────────────────────────────────── */
+
+    /** A neutral wrapper: matches NEITHER vocabulary, so it can only carry. */
+    const wrap = (cause: unknown): Error => Object.assign(new Error('pool query failed'), { cause });
+
+    /** `leaf` behind `depth` neutral wrappers (`depth: 0` is the leaf itself). */
+    const nest = (depth: number, leaf: unknown): unknown =>
+        depth === 0 ? leaf : wrap(nest(depth - 1, leaf));
+
+    it('grades a WRAPPED dialect refusal `unsupported`, not `failed` (#6848)', () => {
+        // The shape a pooled or query-builder layer produces: useless outer
+        // prose, the dialect's actual answer one step down `cause`. Before this
+        // the second arm stopped at the outer message and returned `failed` —
+        // which costs `overlay-index` its fallback lookup index, because that
+        // branch is reached on `unsupported` and nowhere else.
+        const wrapped = Object.assign(new Error('Write failed'), {
+            cause: new Error('near "WHERE": syntax error'),
+        });
+        expect(classifyIndexFailure(wrapped)).toBe('unsupported');
+        // The control: the outer prose alone is still, correctly, `failed`.
+        expect(classifyIndexFailure('Write failed')).toBe('failed');
+
+        // …and the same for the functional-key-parts refusal, one layer deeper
+        // and on a plain object rather than an Error.
+        expect(classifyIndexFailure({ message: 'Write failed', cause: { cause: { message: 'Functional index on a column is not supported' } } })).toBe(
+            'unsupported',
+        );
+    });
+
+    it('keeps the data verdict ahead of the dialect verdict ACROSS the chain (#6848)', () => {
+        // The inversion risk of widening the second arm: both arms now walk, so
+        // the ordering has to hold at every depth, not just at the top. Outer
+        // prose is a dialect refusal; the real condition is a conflict reported
+        // on `code` two levels down. `conflict` must still win.
+        const misleading = Object.assign(new Error('near "WHERE": syntax error'), {
+            cause: wrap(Object.assign(new Error('insert failed'), { code: '23505' })),
+        });
+        expect(classifyIndexFailure(misleading)).toBe('conflict');
+    });
+
+    it('reads the dialect arm to exactly the depth the conflict arm reads (#6848)', () => {
+        // The card's whole point, pinned as a PARITY rather than as a number:
+        // whatever depth `isUniqueViolationError` reaches, this module's dialect
+        // arm reaches the same one. Expressed this way the assertion survives a
+        // deliberate change to the shared bound and still goes red the moment
+        // the two arms drift apart again.
+        const DEPTHS = [0, 1, 2, 3, 4, 5, 6];
+        const dialectReach = DEPTHS.map(
+            (d) => classifyIndexFailure(nest(d, new Error('near "WHERE": syntax error'))) === 'unsupported',
+        );
+        const conflictReach = DEPTHS.map(
+            (d) =>
+                classifyIndexFailure(nest(d, Object.assign(new Error('insert failed'), { code: '23505' }))) ===
+                'conflict',
+        );
+
+        expect(dialectReach).toEqual(conflictReach);
+        // …and the shared profile is the predicate's `MAX_CAUSE_DEPTH` of 4
+        // counted from the thrown value, so the equality above cannot pass by
+        // both arms reaching nothing (or everything).
+        expect(dialectReach).toEqual([true, true, true, true, true, false, false]);
+    });
+
+    it('joins the chain with a newline, so no phrase is synthesised across a wrapper (#6848)', () => {
+        // Two of the dialect alternatives are multi-word. Neither message below
+        // is a refusal on its own, and joining them with a SPACE would forge
+        // `where clause` out of text no layer ever wrote.
+        const spliced = Object.assign(new Error('rebuild attempt landed where'), {
+            cause: new Error('clause parsing completed'),
+        });
+        expect(classifyIndexFailure('rebuild attempt landed where')).toBe('failed');
+        expect(classifyIndexFailure('clause parsing completed')).toBe('failed');
+        expect(classifyIndexFailure(spliced)).toBe('failed');
+    });
+
+    it('terminates on a `cause` chain that loops, exactly as the predicate does (#6848)', () => {
+        // `isUniqueViolationError` bounds rather than detects cycles — it keeps
+        // no visited set — so this walk must not either, and the bound has to be
+        // what stops both. A self-referential cause must return a verdict rather
+        // than exhaust the stack.
+        const loop = new Error('disk I/O error') as Error & { cause?: unknown };
+        loop.cause = loop;
+        expect(classifyIndexFailure(loop)).toBe('failed');
+
+        // …and a two-node cycle whose refusal is only on the INNER node is still
+        // found, because the bound is reached after the answer, not before it.
+        const outer = new Error('Write failed') as Error & { cause?: unknown };
+        const inner = new Error('near "WHERE": syntax error') as Error & { cause?: unknown };
+        outer.cause = inner;
+        inner.cause = outer;
+        expect(classifyIndexFailure(outer)).toBe('unsupported');
+    });
+
+    it('the probe classifies a wrapped refusal, and leaves `detail` the OUTER prose (#6848)', async () => {
+        // End-to-end through `probeThenReplaceIndex`: the verdict widens, the
+        // operator-facing text does not. `detail` stays the driver's own outer
+        // message, which is the contract `probeThenReplaceIndex` already had.
+        const wrapping: IndexExec = async (sql: string) => {
+            if (sql.startsWith('CREATE')) {
+                throw Object.assign(new Error('Write failed'), {
+                    cause: new Error('near "WHERE": syntax error'),
+                });
+            }
+            return db.exec(sql);
+        };
+
+        const outcome = await probeThenReplaceIndex(wrapping, {
+            indexName: REAL,
+            probeIndexName: PROBE,
+            buildSql,
+        });
+
+        expect(outcome.status).toBe('unsupported');
+        expect(outcome.failedAt).toBe('probe');
+        expect(outcome.detail).toBe('Write failed');
+        // The probe is what failed, so the previous index is untouched.
+        expect(indexDdl(REAL)).toEqual(EXISTING_DDL);
+        expect(indexDdl(PROBE)).toBeUndefined();
+    });
+
     it('logProblem prefers error(), falls back to warn(), and tolerates neither', () => {
         const full = { warn: vi.fn(), error: vi.fn() };
         logProblem(full, 'msg', 'detail');

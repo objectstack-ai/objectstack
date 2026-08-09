@@ -465,6 +465,32 @@ jobs:
       - name: Shard attestation gate
         run: pnpm check:shard-attestation
 
+      # Required-context name pin (#6865). A GitHub required status check is
+      # matched BY CHECK-RUN NAME, and a job's check-run name is its `name:`
+      # value — so eight job `name:` literals across this file and ci.yml are
+      # branch-protection contract, and until now nothing asserted them.
+      # Renaming one is a one-line edit whose consequence is silent and
+      # repo-wide: the old context never reports again (permanent pending, which
+      # wedges the PR and the queue), or it gets dropped from the settings to
+      # unwedge things and every gate that job carries degrades to advisory.
+      # That second shape is #5617 — PR #5584 merged with THIS job red for 19
+      # minutes, and four more merges repeated it the same night. ci.yml states
+      # the contract in prose in eight places and check:shard-attestation
+      # asserts the two aggregate gates' job IDS; neither pins a name literal,
+      # and this file had neither. The pin also holds each enrolled job to the
+      # shapes that let a bare name report at all (no matrix, no
+      # continue-on-error) and each enrolled workflow to the triggers a required
+      # context needs (`merge_group`, and a `pull_request` with no `paths:`) —
+      # the machine-readable form of #5617's audit exclusions. It deliberately
+      # does NOT judge job-level `if:`: four of the enrolled ci.yml jobs carry a
+      # filter-driven `if:` by design (#4928), and a skipped job still publishes
+      # a context. ⚠️ It cannot verify the required SET itself — Settings →
+      # Rulesets is unreadable from every agent seat (403) — so it asserts the
+      # repo-side half only, and the script's header says so at length.
+      # Reads two YAML files; sub-second.
+      - name: Required-context name pin
+        run: pnpm check:required-contexts
+
       # #4248 packaging-hygiene guard. Without a `files` whitelist npm packs the
       # whole package directory, and 20 of the 49 publishable packages declared
       # none — so consumers installed TypeScript sources, unit tests and build

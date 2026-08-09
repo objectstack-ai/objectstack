@@ -316,7 +316,7 @@
       ],
       "invariant": "ADR-0045 §3 (amended 2026-08-09, #4829) — POST /packages/:id/publish-drafts is the visibility flip: ONE publish verb serves both regimes, so after promoting drafts it clears `_unpublished` on every app bound to the package. It writes `_unpublished: false` rather than deleting the key, because ADR-0045 §3 makes publish/unpublish symmetric. It MUST NOT read or write `hidden`: that key is the author's navigation choice, and a flip keyed on it silently rewrote presentation as a side effect of publishing (#4829). The flip is a metadata WRITE riding on someone else's success, so its failure is reported at `error` level with consequence and fix, and the apps already flipped are reported (`unhiddenApps`) and announced even when the loop dies mid-way (#4754, #5242) — a partial flip that reports nothing leaves boot-cached consumers stale with no signal."
     },
-  {
+    {
       "file": "packages/metadata-protocol/src/migrations/overlay-index.ts",
       "adrs": [
         "ADR-0005"
@@ -329,6 +329,15 @@
         "ADR-0005"
       ],
       "invariant": "ADR-0005 overlay uniqueness (amended 2026-08-09, #6825) — the declared `idx_sys_metadata_overlay_active` on `(type, name, organization_id, package_id)` is the COARSE fallback a stack assembled without `metadata-protocol`'s runtime migration gets: unrestricted and NULL-distinct, so it also collides with archived/reset rows. That is deliberate, not an oversight to fix here — knex's `table.unique()`, which `SqlDriver.syncDeclaredIndexes` builds through, can express neither `WHERE state = 'active'` nor `COALESCE(package_id, '')`, which is why the runtime tier exists. Do NOT re-add a `partial:` key (retired at protocol 17, #5248 / #4943, ADR-0049 — no driver ever emitted the predicate) and do NOT put `environment_id` or `scope` back in the discriminator: `environment_id` is retired and NULL on new rows, `package_id` is in the key under ADR-0048 so two packages shipping the same (type, name) each keep their own overlay row."
+    },
+    {
+      "file": "packages/plugins/plugin-security/src/permission-set-projection.ts",
+      "adrs": [
+        "ADR-0094",
+        "ADR-0005",
+        "ADR-0086"
+      ],
+      "invariant": "This file IS ADR-0094's machinery (write-through + awaited projector + boot reconciliation), and since 2026-08-09 it is also the site of ADR-0094 D5-R. The 2026-07-14 direction confirmation that once sat in its header — package sets are customized through an ADR-0005 env overlay — is RETIRED: #6483 rolled `permission` back to `allowOrgOverride: false`, so a metadata write against a CODE-DECLARED (artifact-backed) set is refused 403 NOT_OVERRIDABLE, while a set whose definition lives only in `sys_metadata` rides `allowRuntimeCreate` and still works. Two rules follow and must not be quietly undone: (1) the refusal is LEFT TO THE PRODUCER — never re-derive artifact-backing here to pre-empt it, and never add a tolerant fallback (`??`, catch-and-continue) around the refused `saveMetaItem`; `isArtifactBacked` is the protocol's rule and the `managed_by` column is measurably not that fact; (2) the two write points that DO catch (the `restore` leg and the reconcile backfill) catch because the record already exists by then — they report on the durability channel (#4632) and must keep doing so rather than being 'fixed' into throwing. Restoring the overlay channel needs an ADR-0005 revision ratifying an admission pair, not an edit here or in the registry."
     }
   ]
 }
