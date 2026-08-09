@@ -3,10 +3,10 @@
 import { z } from 'zod';
 import { ProtectionSchema } from '../shared/protection.zod';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
-import { strictObject } from '../shared/strict-object';
+import { strictObject, strictObjectError } from '../shared/strict-object';
 import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
 import { ExpressionInputSchema } from '../shared/expression.zod';
-import { normalizeVisibleWhen, strictVisibilityError } from '../shared/visibility';
+import { normalizeVisibleWhen, VISIBILITY_STRICT_OPTIONS } from '../shared/visibility';
 import { I18nLabelSchema, AriaPropsSchema } from './i18n.zod';
 import { ChartTypeSchema } from './chart.zod';
 import { SharingConfigSchema } from './sharing.zod';
@@ -1310,27 +1310,46 @@ export const ListViewSchema = lazySchema(() => strictObject({
  * is the allocation `lazySchema` exists to defer.
  */
 /**
- * [#4001 批 18] Deliberately NOT converted to `strictObject` — and the ledger
- * row for this site is a measurement artifact, not open surface.
+ * [#4001 批 18] Deliberately still a BARE `z.object` — and the ledger row for
+ * this site is a measurement artifact, not open surface.
  *
- * Two independent reasons, both verified rather than assumed:
+ * Two reasons were recorded; #6619 retired one of them and left the other
+ * standing, which is why the posture here did not move with the fold:
  *
  * 1. **The posture here was never the live one.** This base is module-private
  *    and has exactly ONE consumer, {@link FormFieldSchema}, which applies
  *    `.strict()` after extending it (ADR-0089 D3a). An unknown form-field key
  *    is already rejected at the only door; the ledger reads `strip` because it
- *    counts the BASE, and the base is not a door.
- * 2. **It already carries a bespoke error map.** The `{ error:
- *    strictVisibilityError }` below is the ADR-0089 map that resolves the
- *    `visibleWhen` / `visibility` pair. Converting would mean re-expressing
- *    that map as `guidance` and re-proving the `.transform()` — a refactor of
- *    working, tested behaviour rather than a strictness change. Same call the
- *    note on {@link FormSectionSchema} records, for the same family of shape.
+ *    counts the BASE, and the base is not a door. Still true — and it is why
+ *    this site takes `strictObjectError` rather than `strictObject`: the fold
+ *    is a change to what the message can SAY, and closing this shape as a side
+ *    effect would have been an acceptance change smuggled in with it.
+ * 2. ~~It already carries a bespoke error map.~~ **Retired by #6619.** The
+ *    ADR-0089 map that resolves the `visibleWhen` / `visibility` pair is no
+ *    longer bespoke: it is `VISIBILITY_STRICT_OPTIONS`, a shared `strictObject`
+ *    options fragment whose prescription rides the template's set-keyed
+ *    `guidance` channel. `strictObjectError` builds exactly the map
+ *    `strictObject` would and registers the surface with
+ *    `alias-integrity.test.ts` — the audit this site used to sit outside — with
+ *    the shape left open for the extension to close.
+ *
+ * `extraKeys: ['fields']` is the base/extension boundary the helper documents:
+ * the candidate list is read from THIS shape, and `fields` is declared one
+ * level up by the extension that also closes it, so naming it here is what
+ * keeps `feilds` pointing at `fields` instead of at `field`.
+ *
+ * Spelled as a literal `z.object(shape, { error: strictObjectError(…) })`
+ * rather than through a wrapper on purpose: the strictness ledger's AST reader
+ * (`scripts/lib/strictness-ledger.ts`) recognises the `z.object(` idiom and
+ * counts this site's OPEN posture — the row `ui/view.zod.ts` carries as its
+ * one `authorable` strip site. A wrapper would hide the site from the
+ * instrument entirely, which is a gate going quiet, not a posture change.
  *
  * The nested `keyField` block below IS converted: strictness does not recurse,
  * so a closed parent said nothing about it.
  */
-const FormFieldBaseSchema = lazySchema(() => z.object({
+const FormFieldBaseSchema = lazySchema(() => {
+  const shape = {
   /** Field name (snake_case) */
   field: z.string().describe('Field name (snake_case)'),
   
@@ -1441,7 +1460,11 @@ const FormFieldBaseSchema = lazySchema(() => z.object({
   /** @deprecated ADR-0089 — use `visibleWhen`. Accepted and normalized to `visibleWhen` at parse. */
   visibleOn: ExpressionInputSchema.optional().describe('[DEPRECATED → `visibleWhen`] Visibility predicate (CEL). Normalized to `visibleWhen` at parse.'),
   disclosure: z.enum(['inline', 'popover']).optional().describe('Composite rendering: inline bordered box (default) or a summary line + gear popover (progressive disclosure).'),
-}, { error: strictVisibilityError }));
+  };
+  return z.object(shape, {
+    error: strictObjectError({ ...VISIBILITY_STRICT_OPTIONS, extraKeys: ['fields'] }, shape),
+  });
+});
 
 /**
  * A parsed form field — the TYPE half of {@link FormFieldSchema}.
@@ -1506,14 +1529,15 @@ export const FormFieldSchema: z.ZodType<FormField, FormFieldInput> = lazySchema(
 /**
  * Form Layout Section
  *
- * Deliberately NOT converted to `strictObject` by #4001: this shape already
- * closed under ADR-0089 D3a, with `strictVisibilityError` — the bespoke map that
- * resolves the `visibleWhen` / `visibility` pair — and a `.transform()` that
- * normalizes them. Converting would mean re-expressing that map as `guidance`
- * and re-proving the transform: a refactor of working, tested behaviour rather
- * than a strictness change. Same call as the widget map in `dashboard.zod.ts`.
+ * Closed under ADR-0089 D3a, and — since #6619 — closed with the SHARED
+ * template rather than a bespoke map. #4001 skipped this shape because
+ * converting it meant re-expressing `strictVisibilityError` as `guidance`, and
+ * `guidance` could not express a family of keys; #6619 gave the channel a
+ * set-keyed form and the conversion became the same one call every other closed
+ * shape in this package makes. The `.transform()` that folds
+ * `visibleOn` → `visibleWhen` is unchanged and still runs after the parse.
  */
-export const FormSectionSchema = lazySchema(() => z.object({
+export const FormSectionSchema = lazySchema(() => strictObject(VISIBILITY_STRICT_OPTIONS, {
   /**
    * Stable identifier for translation lookup. snake_case convention.
    * When provided, translation bundles can target this section's `label`
@@ -1560,7 +1584,7 @@ export const FormSectionSchema = lazySchema(() => z.object({
     z.string(), // Legacy: simple field name
     FormFieldSchema, // Enhanced: detailed field config
   ])),
-}, { error: strictVisibilityError }).strict().transform(normalizeVisibleWhen));
+}).transform(normalizeVisibleWhen));
 
 /**
  * A single form action button (submit / cancel / reset): visibility + label.

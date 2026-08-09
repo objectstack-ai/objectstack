@@ -151,11 +151,20 @@ const CAPABILITIES_RETIRED_KEY_GUIDANCE: Record<string, string> = {
 };
 
 /**
- * Custom zod `error` for the `.strict()` capabilities block (pattern of
- * `strictTenancyError` below): an unknown key — a retired `trash`/`mru` or a
- * typo like `feedEnabled` — is a loud, *fixable* parse error instead of a
- * silent strip (#1535), and a retired key's error carries its upgrade
- * prescription. Every other issue code defers to zod's default.
+ * Custom zod `error` for the `.strict()` capabilities block: an unknown key —
+ * a retired `trash`/`mru` or a typo like `feedEnabled` — is a loud, *fixable*
+ * parse error instead of a silent strip (#1535), and a retired key's error
+ * carries its upgrade prescription. Every other issue code defers to zod's
+ * default.
+ *
+ * The LAST hand-written `unrecognized_keys` map in this file — #6619 folded
+ * its sibling `strictTenancyError` into the shared `strictObject` template,
+ * and this one stayed out for a reason the template can measure: it emits NO
+ * trailing history sentence, and `strictUnknownKeyError` appends its `history`
+ * unconditionally. Fold it only when the template can express a
+ * history-less surface; `scripts/strictness-ledger.test.ts` uses the
+ * `ObjectCapabilities` site below as its `z.object(…).strict()` fixture, so
+ * move that fixture in the same change.
  */
 const strictCapabilitiesError: z.core.$ZodErrorMap = (issue) => {
   if (issue.code !== 'unrecognized_keys') return undefined;
@@ -415,44 +424,21 @@ const TENANCY_RETIRED_KEY_GUIDANCE: Record<string, string> = {
 };
 
 /**
- * Custom zod `error` for the `.strict()` tenancy block (#2763, pattern of
- * `strictVisibilityError` / ADR-0089 D3a): an unknown key — a retired
- * `strategy`/`crossTenantAccess` or a typo — is a loud, *fixable* parse error
- * instead of a silent strip (#1535), and a retired key's error carries its
- * upgrade prescription. Every other issue code defers to zod's default.
+ * The standing two-modes explainer, emitted LAST on every `tenancy` rejection.
  *
- * ## Message order: the fix comes before the explainer (#5955 / #6416)
- *
- * ```text
- * Unrecognized key(s) on `tenancy`: `k1`.       ← which key is wrong
- *   • {per-key tombstone / "not a `tenancy` key"} ← the fix
- * The two supported tenancy modes are: …        ← the standing explainer
- * ```
- *
- * Same emission order the shared `strictUnknownKeyError` template took in
- * #5955 — bullets first, the surface-level sentence appended to the last one.
- * A hand-written `$ZodErrorMap` is reachable by neither that fix nor #5593's
- * `strictObject` migration, so #6416 applies the ruling here directly. The
- * two-modes explainer used to sit between the key statement and the bullets,
- * which on the single-line renders several consumers use (`os validate`'s
- * `• where: message`, CI logs) buried each key's actual prescription behind
- * ~160 characters of standing background. Nothing is dropped: the explainer is
- * still emitted verbatim, just last.
+ * It occupies the template's `history` slot, which is the slot for exactly this
+ * — the one sentence of standing background that follows both fix channels
+ * (#5955 / #6416). It is background rather than history in the literal sense,
+ * and that is fine: the contract the slot encodes is *position*, and this
+ * sentence is the thing that must not sit in front of a key's own prescription.
+ * On the single-line renders several consumers use (`os validate`'s
+ * `• where: message`, CI logs) it used to bury each bullet behind ~160
+ * characters.
  */
-const strictTenancyError: z.core.$ZodErrorMap = (issue) => {
-  if (issue.code !== 'unrecognized_keys') return undefined;
-  const keys = (issue as { keys?: readonly string[] }).keys ?? [];
-  const lines = keys.map((key) =>
-    TENANCY_RETIRED_KEY_GUIDANCE[key] ?? `\`${key}\` is not a \`tenancy\` key.`,
-  );
-  return (
-    `Unrecognized key(s) on \`tenancy\`: ${keys.map((k) => `\`${k}\``).join(', ')}.\n` +
-    lines.map((l) => `  • ${l}`).join('\n') +
-    ' The two supported tenancy modes are: database-per-tenant = environment-level ' +
-    'deployment (no object config); row-level isolation = `tenancy.enabled` + ' +
-    '`tenancy.tenantField`.'
-  );
-};
+const TENANCY_MODES_EXPLAINER =
+  'The two supported tenancy modes are: database-per-tenant = environment-level '
+  + 'deployment (no object config); row-level isolation = `tenancy.enabled` + '
+  + '`tenancy.tenantField`.';
 
 /**
  * Multi-Tenancy Configuration Schema
@@ -464,6 +450,15 @@ const strictTenancyError: z.core.$ZodErrorMap = (issue) => {
  *
  * `.strict()`: unknown keys (incl. the retired `strategy` /
  * `crossTenantAccess`, #2763) are rejected with guidance, not stripped (#1535).
+ *
+ * Closed with the shared `strictObject` template since #6619. The tombstone
+ * bullets and the trailing explainer are byte-for-byte what the hand-written
+ * `strictTenancyError` emitted; what the fold changes is the *other* key — a
+ * near-miss like `tenantfield` now resolves to `tenantField` through the
+ * template's rename channel instead of being told only that it "is not a
+ * `tenancy` key", which named the problem and never the fix. Folding it in is
+ * also what puts this table under `alias-integrity.test.ts`, which no
+ * hand-rolled map has ever been judged by.
  *
  * `tenantField` carries **no default** (#5315). It used to default to
  * `'tenant_id'`, which no consumer could act on: the platform's tenant column
@@ -488,7 +483,11 @@ const strictTenancyError: z.core.$ZodErrorMap = (issue) => {
  *   tenantField: 'workspace_id'
  * }
  */
-export const TenancyConfigSchema = lazySchema(() => z.object({
+export const TenancyConfigSchema = lazySchema(() => strictObject({
+  surface: '`tenancy`',
+  history: TENANCY_MODES_EXPLAINER,
+  guidance: TENANCY_RETIRED_KEY_GUIDANCE,
+}, {
   enabled: z.boolean().describe('Enable multi-tenancy for this object'),
   tenantField: z.string().optional().describe(
     'Column this object is tenant-scoped by. Omit it unless the tenant column ' +
@@ -498,7 +497,7 @@ export const TenancyConfigSchema = lazySchema(() => z.object({
     'object really has that field — otherwise the same `organization_id` ' +
     'fallback applies. No default is materialized here on purpose (#5315).',
   ),
-}, { error: strictTenancyError }).strict());
+}));
 
 /**
  * [ADR-0066] Platform-global posture: `tenancy.enabled === false` explicitly
@@ -600,7 +599,8 @@ export type ObjectRequiredPermissions = z.input<typeof ObjectRequiredPermissions
  * Declares how long an object's data lives and how its space is reclaimed —
  * the axis validation/permissions never covered. Enforced at runtime by the
  * platform-owned LifecycleService (`@objectstack/objectql`): Reaper (TTL/age
- * batch delete), Rotator (time-shard + DROP oldest), Archiver (cold-store
+ * batch delete), Rotator (time-shard + DROP oldest on SQLite, an age-based
+ * reap of the same window elsewhere), Archiver (cold-store
  * copy then delete). A declared policy with no runtime consumer is a spec
  * defect (ADR-0049 enforce-or-remove); the liveness gate requires every
  * non-`record` class to declare `retention`, `ttl`, or rotation `storage`.
@@ -732,12 +732,17 @@ export const LifecycleSchema = lazySchema(() => strictObject({
     aliases: { count: 'shards', interval: 'unit', period: 'unit', granularity: 'unit' },
     guidance: {
       maxAge:
-        '`maxAge` is a `retention` key. Rotation does not reap by age — it retains ' +
-        '`shards` × `unit` of history and DROPs the oldest shard whole. Set the window ' +
+        '`maxAge` is a `retention` key. Rotation takes its window from `shards` × `unit`, ' +
+        'not from an age you name — reclaimed by DROPping the oldest shard whole on SQLite, ' +
+        'by an equivalent age-based reap elsewhere. Set the window ' +
         'with `shards`/`unit`, or use `retention` instead of rotation.',
     },
   }, {
-    strategy: z.literal('rotation').describe('Time-shard the table; rotate by DROPping the oldest shard (O(1) reclaim).'),
+    strategy: z.literal('rotation').describe(
+      'Time-shard the table. The retained window (`shards` × `unit`) is the same on every ' +
+      'dialect; the reclamation is not — SQLite DROPs the oldest shard whole (O(1) reclaim), ' +
+      'other dialects reap that same window by age from `created_at`.',
+    ),
     shards: z.number().int().min(2).describe('Number of shards retained; total window = shards × unit.'),
     unit: z.enum(['day', 'week', 'month']).describe('Time width of one shard.'),
   }).optional().describe('Physical storage strategy for high-frequency telemetry (LifecycleService Rotator).'),

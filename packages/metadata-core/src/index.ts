@@ -36,6 +36,15 @@ export * from './engine-update-dispatch.js';
 // reporting two.
 export * from './audit-field-governance.js';
 
+// [#6562] The injected-system-column DEFINITION table and the served-document
+// injection/strip pair built on it, sunk here by the same criterion and for the
+// same cycle as the governance table above. `resolveInjectedSystemColumns`
+// (spec, #5378) says WHICH columns an object carries; this says WHAT each one
+// looks like — the half that used to exist only inside `applySystemFields`, one
+// import away from every `/meta` read exit and unreachable from all of them.
+// `@objectstack/objectql` now reads this table instead of its own literals.
+export * from './injected-system-columns.js';
+
 // [ADR-0106 / #3682] The metadata-plane FLS projection — one masking function
 // and one fingerprint, shared by every object-schema exit in
 // `@objectstack/rest` and `@objectstack/runtime`. Sunk here by the same

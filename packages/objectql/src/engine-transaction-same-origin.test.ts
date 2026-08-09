@@ -159,8 +159,8 @@ async function splitEngine() {
   await engine.init();
   // `ledger` is an ordinary BUSINESS object that a mapping rule routes away.
   engine.setDatasourceMapping([{ objectPattern: 'ledger', datasource: 'ledger_db' }]);
-  engine.registry.registerObject({ name: 'thing', fields: { name: { type: 'text' } } } as any, '__test__');
-  engine.registry.registerObject({ name: 'ledger', fields: { name: { type: 'text' } } } as any, '__test__');
+  engine.registry.registerObject({ name: 'thing', fields: { name: { type: 'text' } } }, '__test__');
+  engine.registry.registerObject({ name: 'ledger', fields: { name: { type: 'text' } } }, '__test__');
   // The three append-only system ledgers, routed by lifecycle class alone.
   engine.registry.registerObject({
     name: 'sys_audit_log',
@@ -488,7 +488,7 @@ describe('a same-origin (single datasource) transaction is untouched (#5351 regr
     const primary = makeDriver('primary');
     engine.registerDriver(primary, true);
     await engine.init();
-    engine.registry.registerObject({ name: 'thing', fields: { name: { type: 'text' } } } as any, '__test__');
+    engine.registry.registerObject({ name: 'thing', fields: { name: { type: 'text' } } }, '__test__');
     // Audit-classed, but with NO telemetry datasource registered it resolves to
     // the default driver like everything else — ADR-0057 §3.6 is opt-in by the
     // datasource's existence. The carve-out must not fire on it.

@@ -33,10 +33,28 @@ interface FieldDef {
    * `SqlDriver.uniqueIndexesFromFields`.
    */
   unique?: boolean | 'global';
-  indexed?: boolean;
   required?: boolean;
   reference_to?: string;
   multiple?: boolean;
+}
+
+/**
+ * A declared object-level index — `IndexSchema` in @objectstack/spec, narrowed
+ * to what this driver materializes.
+ *
+ * [#6810] This is the ONE surface an index is declared on. The field-level
+ * `indexed` flag this driver used to read alongside it was never a
+ * `FieldSchema` key: #2377 / ADR-0049 removed it because a field-level index
+ * flag built no index, and `FieldSchema` — a `strictObject` — rejects it by
+ * name. The single producer still emitting it was the kernel's
+ * `organization_id` injection, which therefore stamped every registry-backed
+ * object with a document its own schema refused. That declaration moved to
+ * `indexes[]`; nothing else in the repo ever read the flag, so it is gone.
+ */
+interface IndexDef {
+  name?: string;
+  fields?: string[];
+  unique?: boolean | 'global' | 'organization';
 }
 
 /**
@@ -45,6 +63,7 @@ interface FieldDef {
 interface ObjectDef {
   name: string;
   fields?: Record<string, FieldDef>;
+  indexes?: IndexDef[];
 }
 
 /**
@@ -53,8 +72,9 @@ interface ObjectDef {
  * - Creates the collection if it doesn't exist
  * - Creates a unique index on `id`
  * - Creates indexes on `created_at` and `updated_at`
- * - Creates indexes for fields marked `unique` or `indexed`
+ * - Creates indexes for fields marked `unique`
  * - Creates indexes on lookup (reference) fields
+ * - Creates the object's DECLARED `indexes[]` (#6810)
  */
 export async function syncCollectionSchema(
   db: Db,
@@ -84,11 +104,6 @@ export async function syncCollectionSchema(
           spec: { [fieldName]: 1 },
           options: { unique: true, sparse: true, name: `idx_${fieldName}_unique` },
         });
-      } else if (field.indexed) {
-        indexOps.push({
-          spec: { [fieldName]: 1 },
-          options: { name: `idx_${fieldName}` },
-        });
       }
 
       // Lookup + user (a lookup specialized to sys_user) fields get an index for
@@ -104,6 +119,37 @@ export async function syncCollectionSchema(
         });
       }
     }
+  }
+
+  // Declared object-level indexes (#6810) — the surface `indexes[]`, which is
+  // where every other index in this system is declared and where the kernel now
+  // declares the tenant index on `organization_id`.
+  //
+  // The generated name is `idx_<fields>` / `idx_<fields>_unique`, matching the
+  // field-level convention above so the two routes converge on ONE index rather
+  // than racing to create two with different options on the same column set
+  // (Mongo index names are per-collection, so no table qualifier is needed —
+  // unlike `SqlDriver`'s `buildIndexName`, which is why neither driver takes a
+  // name from the declaration when the author left it out).
+  //
+  // Every `unique` scope materializes the columns VERBATIM, `'organization'`
+  // included. That is the same call `FieldDef.unique` documents above and for
+  // the same reason: this driver implements no row-level tenancy at all and
+  // refuses to boot into a multi-tenant deployment (#3724), so prepending a
+  // tenant key part would advertise an isolation it does not deliver.
+  for (const idx of schema.indexes ?? []) {
+    const fields = (idx.fields ?? []).filter((f) => typeof f === 'string' && f.length > 0);
+    if (fields.length === 0) continue;
+    const unique = Boolean(idx.unique);
+    const spec: Record<string, 1> = {};
+    for (const f of fields) spec[f] = 1;
+    indexOps.push({
+      spec: spec as IndexSpecification,
+      options: {
+        ...(unique ? { unique: true, sparse: true } : {}),
+        name: idx.name ?? `idx_${fields.join('_')}${unique ? '_unique' : ''}`,
+      },
+    });
   }
 
   // Create indexes (idempotent — MongoDB ignores duplicates)

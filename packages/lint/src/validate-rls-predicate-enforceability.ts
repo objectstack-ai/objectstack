@@ -72,7 +72,7 @@
  * supported, so the gate turns nothing red that works today. That corpus is
  * pinned in the tests rather than asserted here.
  *
- * ## The two ids, and why not one
+ * ## The three ids, and why not one
  *
  * The consequence is identical, the FIX is not, and allowlists / `--json`
  * consumers key on the id:
@@ -84,6 +84,48 @@
  *  - {@link RLS_PREDICATE_UNPARSEABLE} — it does not parse as CEL even after
  *    the legacy SQL bridge: SQL `AND` / `OR` / `LIKE`, a subquery, a stray
  *    operator. Fix = write CEL (`&&`, `||`), which is a different edit.
+ *  - {@link RLS_PREDICATE_OVER_BUDGET} — it is syntactically perfect CEL that
+ *    overruns a {@link DEFAULT_LIMITS} parse bound (`maxAstNodes` 256,
+ *    `maxDepth` 32, …). Fix = shrink or split the predicate; there is no
+ *    dialect error to correct.
+ *
+ * ## Why the third id (#6778), and why it is not a behaviour change
+ *
+ * The pushdown compiler collapses a bounds overrun into `reason: 'parse-error'`
+ * **on purpose** — `cel-to-filter.ts` says so at the call site: it is "the
+ * reason every consumer of this compiler already routes to its deny path", and
+ * a fourth reason would be a new branch none of them have. That is right for
+ * the RUNTIME, whose only decision is deny-or-not. It is wrong for an AUTHORING
+ * diagnostic, whose whole job is to name the edit: until #6778 an 80-term
+ * conjunction — valid, lowerable CEL that is merely too big — was reported
+ * under `rls-predicate-unparseable`, whose hint explains SQL-vs-CEL syntax
+ * confusion. The verdict was correct and the sign-post pointed at the wrong
+ * repair.
+ *
+ * So the split is made HERE, in the explanation, and never in the verdict. The
+ * red/green boundary is still exactly `isSupportedRlsExpression` — untouched —
+ * and this rule reaches for {@link parseCelToAstWithReason}, the same
+ * reason-carrying entrance `cel-to-filter.ts` itself parses through, only to
+ * ask which KIND of refusal the consumer just produced. Identical inputs are
+ * refused before and after; one class of them is told the truth about why.
+ *
+ * It is deliberately mode-agnostic with respect to `cel-pushdown-limits.ts`'s
+ * dated GA switch, and does not read it. During 17.0.0-rc.x an over-limit
+ * predicate is admitted by the grace window, so `isSupportedRlsExpression` is
+ * `true` and this rule never fires at all (measured: zero findings). At the v17
+ * GA flip the same predicate is refused and lands here. The one rc-grace case
+ * that DOES reach this branch — a bounds fault whose unbounded reparse also
+ * fails, so the grace window has no AST to admit — is a genuine bounds refusal
+ * and is correctly reported as one. Re-deriving the switch here instead would
+ * be modelling the consumer, which this file's whole construction refuses.
+ *
+ * `overrun.measured` is `null` on this path and that is by the producer's
+ * design, not an omission: `parseCelToAstWithReason` only measures when the
+ * caller passes `admitOverLimit`, "because measuring means re-parsing a source
+ * we have just decided is too big". That option is documented as the grace
+ * window's alone and as disappearing at GA, so a lint rule must not reach for
+ * it to decorate a message. The bound and its value — which is what "shrink it
+ * to fit" needs — are always present.
  *
  * Unlike the sharing-rule gate, syntax is reported HERE rather than deferred to
  * `validateStackExpressions`: that rule does not walk `rowLevelSecurity` at all,
@@ -109,12 +151,20 @@
  * moment nobody re-runs the linter.
  */
 
-import { isPushdownableCel, isSupportedRlsExpression, sqlPredicateToCel } from '@objectstack/formula';
+import {
+  isPushdownableCel,
+  isSupportedRlsExpression,
+  parseCelToAstWithReason,
+  sqlPredicateToCel,
+} from '@objectstack/formula';
+import type { CelBoundsOverrun } from '@objectstack/formula';
 
 /** A predicate outside the pushdown subset — the policy enforces nothing. */
 export const RLS_PREDICATE_UNENFORCEABLE = 'rls-predicate-unenforceable';
 /** A predicate that does not parse as CEL even after the legacy SQL bridge. */
 export const RLS_PREDICATE_UNPARSEABLE = 'rls-predicate-unparseable';
+/** Valid CEL that overruns a platform parse bound (`maxAstNodes`, `maxDepth`, …). */
+export const RLS_PREDICATE_OVER_BUDGET = 'rls-predicate-over-budget';
 
 export type RlsPredicateSeverity = 'error' | 'warning';
 
@@ -151,6 +201,37 @@ const PUSHDOWN_SUBSET =
   'The lowerable subset is: `==` `!=` `>` `<` `>=` `<=`, `in`, `&&` `||` `!`, `== null` / `!= null`, ' +
   'and the string methods `startsWith` / `endsWith` / `contains` — over SINGLE-column field paths ' +
   '(ADR-0058 D2), compared against a literal or a `current_user.*` value.';
+
+/**
+ * The overrun behind a `parse-error`, or `null` when the refusal was a genuine
+ * syntax fault.
+ *
+ * Asked of {@link parseCelToAstWithReason} — the SAME reason-carrying entrance
+ * `cel-to-filter.ts` parses through — on the SAME bridged source, so `bounds`
+ * here and the `bounds` that produced the consumer's refusal are one verdict on
+ * one input. It is graded by error class plus structured `code`, never prose
+ * (#6223), so a rephrasing upstream cannot silently re-route a diagnostic.
+ *
+ * Called only after {@link isSupportedRlsExpression} has already returned
+ * `false` AND the reason is `parse-error`: it never widens or narrows what is
+ * reported, it only decides which of two explanations a refusal gets.
+ */
+function boundsOverrunOf(bridged: string): CelBoundsOverrun | null {
+  // No `admitOverLimit`: that option is the rc-grace window's alone (and goes
+  // away with it), and buying `measured` costs an unbounded re-parse of a
+  // source already known to be too big.
+  const parsed = parseCelToAstWithReason(bridged);
+  return !parsed.ok && parsed.kind === 'bounds' ? parsed.overrun : null;
+}
+
+/**
+ * An over-budget predicate is by definition long, so the diagnostic quotes a
+ * bounded prefix rather than the whole source — the same 200-char courtesy
+ * `cel-to-filter.ts`'s grace WARN extends for the same reason.
+ */
+function quote(source: string): string {
+  return source.length > 200 ? `${source.slice(0, 197)}...` : source;
+}
 
 /** What the runtime does with a predicate it cannot compile, per clause. */
 function consequence(clause: 'using' | 'check'): string {
@@ -198,9 +279,14 @@ export function validateRlsPredicateEnforceability(stack: unknown): RlsPredicate
         // ── The explanation. Re-derived only to tell the author WHICH fix they
         // need; the red/green boundary above never consults it. (Both agree by
         // construction — pinned in both directions in this rule's tests.)
-        const why = isPushdownableCel(sqlPredicateToCel(source));
+        const bridged = sqlPredicateToCel(source);
+        const why = isPushdownableCel(bridged);
         const detail = why.ok ? '' : why.detail;
         const parseError = !why.ok && why.reason === 'parse-error';
+        // A bounds overrun and a syntax fault both arrive as `parse-error` (the
+        // runtime deliberately collapses them — see this file's docblock), so
+        // the two are separated here, and only here.
+        const overrun = parseError ? boundsOverrunOf(bridged) : null;
 
         const psName = str(ps.name) || String(psIndex);
         const policyName = str(policy.name) || String(pIndex);
@@ -208,6 +294,39 @@ export function validateRlsPredicateEnforceability(stack: unknown): RlsPredicate
         const where =
           `permission set "${psName}" policy "${policyName}"` + (object ? ` on object "${object}"` : '');
         const path = `permissions[${psIndex}].rowLevelSecurity[${pIndex}].${clause}`;
+
+        if (overrun) {
+          // `limit` is null only for a bounds fault this package cannot NAME
+          // (unreachable on cel-js 8.0.0). Degrade honestly rather than guess a
+          // key, which would send the author to shorten the wrong axis.
+          const bound = overrun.limit ?? 'an unnamed platform CEL bound';
+          const budget = overrun.limitValue !== null ? ` (platform limit ${overrun.limitValue})` : '';
+          const measured = overrun.measured !== null ? `, this predicate measures ${overrun.measured}` : '';
+          findings.push({
+            severity: 'error',
+            rule: RLS_PREDICATE_OVER_BUDGET,
+            where,
+            path,
+            message:
+              `RLS ${clause} \`${quote(source)}\` is syntactically valid, lowerable CEL but overruns the ` +
+              `platform parse bound ${bound}${budget}${measured} (${overrun.summary}), ` +
+              consequence(clause),
+            hint:
+              `There is no syntax or dialect error to correct here — the predicate is well-formed CEL and ` +
+              `is simply too large for ${bound}${budget}, so the fix is to make it smaller or to move the ` +
+              `work off the predicate. (1) Collapse a long \`field == a || field == b || …\` chain into a ` +
+              `single \`field in [a, b, …]\`, which is far fewer AST nodes (\`maxListElements\` is 64, so a ` +
+              `very large set needs option 2). (2) Pre-resolve the set into a membership key the runtime ` +
+              `exposes and test \`field in current_user.<key>\` (ADR-0105 D11) — one comparison whatever ` +
+              `the set size. (3) Denormalise a repeated sub-expression onto this object as a ` +
+              `formula/rollup field and test that single column. (4) Split a TOP-LEVEL \`||\` across ` +
+              `several \`rowLevelSecurity\` policies: applicable policies are OR-ed, so that is ` +
+              `equivalent — but never split a top-level \`&&\` this way, which would WIDEN access rather ` +
+              `than preserve it. Logic genuinely this large is not a row filter: move it to a hook or ` +
+              `action body (\`ScriptBody { language: 'js' }\`, the L2 sandboxed surface).`,
+          });
+          continue;
+        }
 
         if (parseError) {
           findings.push({

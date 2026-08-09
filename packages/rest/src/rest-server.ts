@@ -3232,9 +3232,24 @@ export class RestServer {
     }
     
     /**
-     * Get the full API base path
+     * The full API base path — THE base for this deployment's REST surface.
+     *
+     * [#6306] Public because it is the single source of truth, not merely a
+     * convenience: `rest-api-plugin.ts` threads this very value into the
+     * direct-mount registrars (`packages.*`, `datasources/:name/external/*`)
+     * so those nine routes mount under the same prefix as everything the
+     * RouteManager registers. It used to recompute `${basePath}/${version}`
+     * for itself, which silently dropped `apiPath` — the two expressions
+     * agree only while `apiPath` is unset, so a deployment that set it got
+     * two API prefixes at once: 83 routes under `{apiPath}` and 9 left behind
+     * at `/api/v1`, invisible to `{apiPath}/openapi.json` (whose section is
+     * filtered to this base) and to `/discovery`.
+     *
+     * The fix is the SHARING, not the expression: do not copy the `??` chain
+     * to a second site — copying it is precisely how the divergence happened.
+     * Call this.
      */
-    private getApiBasePath(): string {
+    getApiBasePath(): string {
         const { api } = this.config;
         return api.apiPath ?? `${api.basePath}/${api.version}`;
     }
@@ -3443,12 +3458,12 @@ export class RestServer {
                         // direct mounts (#5822): the advertised base is read off
                         // the very route arrays the registrars iterated to mount,
                         // so advertisement and mounting derive from one fact and
-                        // cannot drift. Today those registrars mount at the
-                        // plugin's `versionedBase` (`/api/v1`) — NOT at this
-                        // server's `getApiBasePath()` — and the advertisement
-                        // says so; when #6306 moves the mount base, the recorded
-                        // paths move and this advertisement follows by
-                        // construction, with no edit here.
+                        // cannot drift. Since #6306 those registrars mount at
+                        // this server's own `getApiBasePath()` — the single
+                        // base — so an `apiPath` deployment advertises
+                        // `{apiPath}/packages` and `{apiPath}/datasources`.
+                        // That move landed with NO edit in this block, which is
+                        // exactly the property #6633 was built to provide.
                         //
                         // A boot that mounted nothing (no `package` service ⇒
                         // the registrar was never called) advertises nothing:
@@ -9294,7 +9309,7 @@ export class RestServer {
      *
      * This is the load-bearing half of the mounted ⇒ advertised parity
      * (ADR-0076 D12): the registrars mount at whatever base the plugin threads
-     * in (`versionedBase` today; #6306 will move it), the recorder keeps the
+     * in (since #6306 that is `getApiBasePath()`), the recorder keeps the
      * very arrays they iterated to mount (#5822), and this method projects the
      * advertised `routes.packages` / `routes.datasources` out of those arrays.
      * One expression, two consumers — a future change that moves the mount

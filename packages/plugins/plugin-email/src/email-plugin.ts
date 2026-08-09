@@ -28,7 +28,11 @@ import {
   type EmailTransportProvider,
 } from './transports/index.js';
 import { BUILTIN_AUTH_TEMPLATES } from './templates/auth-templates.js';
-import type { EmailTemplateDefinition as EmailTemplate } from '@objectstack/spec/system';
+import type {
+  EmailTemplateDefinition as EmailTemplate,
+  SettingsChangeHandler,
+  SettingsUnsubscribe,
+} from '@objectstack/spec/system';
 import {
   bootstrapDeclaredEmailTemplates,
   upsertDeclaredEmailTemplate,
@@ -119,6 +123,43 @@ const QUEUE_DELIVERY_BACKOFF: QueueBackoffPolicy = {
   delayMs: 1000,
   maxDelayMs: 5 * 60_000,
 };
+
+/**
+ * The `settings` slot as THIS plugin consumes it.
+ *
+ * [#4251 B5] `service-settings` registers its `SettingsService` here and the
+ * slot carries no `packages/spec` contract, so the four members this plugin
+ * calls are declared structurally — plugin-email must not take a runtime
+ * dependency on service-settings, which is optional. Same shape and reasoning
+ * as plugin-auth's and rest's `SettingsReadSurface`; each consumer names the
+ * slice it uses, so omitting a member it calls is a compile error rather than
+ * silence. The change-bus types are the SPEC's, not re-declared here.
+ */
+interface MailSettingsSurface {
+  /**
+   * Capability probe only — never called. Its presence is what the call site
+   * reads as "this settings service can serve a live client", so it is typed
+   * as a member of unknown shape rather than given a fictional signature.
+   */
+  createClient?: unknown;
+  /** Resolve the whole `mail` namespace as `key → { value, source }`. */
+  getNamespace(
+    namespace: string,
+    ctx?: Record<string, unknown>,
+  ): Promise<{ values: Record<string, { value?: unknown; source?: string } | undefined> }>;
+  /** Rebuild the transport when the namespace changes. Optional: no change bus → the boot read stands. */
+  subscribe?(namespace: string | undefined, handler: SettingsChangeHandler): SettingsUnsubscribe;
+  /** Override service-settings' validate-only `mail/test` fallback with a real send. */
+  registerAction?(
+    namespace: string,
+    action: string,
+    handler: (input: {
+      values?: Record<string, unknown>;
+      payload?: Record<string, unknown>;
+      ctx?: { body?: Record<string, unknown> };
+    }) => Promise<unknown>,
+  ): void;
+}
 
 /**
  * Resolve a queue service that can actually carry a durable email job, or
@@ -302,7 +343,7 @@ export class EmailServicePlugin implements Plugin {
       // without restarting the process. Env-locked fields still win at
       // the resolver level, so config-via-env keeps its precedence.
       try {
-        const settings = ctx.getService<any>('settings');
+        const settings = ctx.getService<MailSettingsSurface>('settings');
         if (settings && typeof settings.createClient === 'function') {
           const applySettings = async (phase: 'boot' | 'saved' = 'boot') => {
             try {
@@ -625,7 +666,7 @@ export class EmailServicePlugin implements Plugin {
       // the true attempt count. One message is one row; `attempt_count`
       // accumulates on it across redeliveries.
       try {
-        const queue: any = ctx.getService<any>('queue');
+        const queue = ctx.getService<IQueueService>('queue');
         if (queue && typeof queue.subscribe === 'function' && this.service) {
           const svc = this.service;
           await queue.subscribe(EMAIL_SEND_QUEUE, async (msg: any) => {

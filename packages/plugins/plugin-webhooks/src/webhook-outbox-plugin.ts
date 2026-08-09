@@ -1,7 +1,12 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { Plugin, PluginContext } from '@objectstack/core';
-import type { IDataEngine, IRealtimeService } from '@objectstack/spec/contracts';
+import type {
+    IDataEngine,
+    II18nService,
+    IMetadataService,
+    IRealtimeService,
+} from '@objectstack/spec/contracts';
 import type { EnqueueHttpInput } from '@objectstack/service-messaging';
 import { AutoEnqueuer, type AutoEnqueuerOptions } from './auto-enqueuer.js';
 import { SysWebhook } from './sys-webhook.object.js';
@@ -116,7 +121,7 @@ export class WebhookOutboxPlugin implements Plugin {
         if (typeof (ctx as any).hook === 'function') {
             (ctx as any).hook('kernel:ready', async () => {
                 try {
-                    const i18n = ctx.getService<any>('i18n');
+                    const i18n = ctx.getService<II18nService>('i18n');
                     if (i18n && typeof i18n.loadTranslations === 'function') {
                         const { WebhooksTranslations } = await import('./translations/index.js');
                         for (const [locale, data] of Object.entries(WebhooksTranslations)) {
@@ -181,8 +186,8 @@ export class WebhookOutboxPlugin implements Plugin {
         // Bind the provenance stamp so an admin edit freezes a seeded row.
         this.boundEngine = engine;
         bindWebhookProvenanceStamp(engine as any, ctx.logger as any);
-        let metadataService: any;
-        try { metadataService = ctx.getService('metadata'); } catch { /* optional */ }
+        let metadataService: IMetadataService | undefined;
+        try { metadataService = ctx.getService<IMetadataService>('metadata'); } catch { /* optional */ }
         try {
             await bootstrapDeclaredWebhooks(engine, metadataService, ctx.logger as any);
         } catch (err: any) {

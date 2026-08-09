@@ -27,6 +27,13 @@ import {
  * - **`getPort()`**: used by boot code/tests to discover the OS-assigned
  *   port after `listen(0)`.
  *
+ * Since #6143 it also implements the contract's optional
+ * {@link NodeHttpServer.setFallbackHandler} — see the CONTRACT there. That is
+ * NOT a third soft extension: the member is part of `IHttpServer` and carries
+ * four testable guarantees, and this adapter has to satisfy them before the
+ * conformance suite can assert them CROSS-adapter. Asserting them against a
+ * single implementor would prove nothing about the port.
+ *
  * Deliberately NOT implemented (each one is a known escape hatch whose
  * consumers feature-detect and degrade):
  * - `getRawApp()` — Hono-specific; metadata HMR, cloud-connection routes and
@@ -103,6 +110,14 @@ export class NodeHttpServer implements IHttpServer {
     private middlewares: Middleware[] = [];
     private server: Server | undefined;
     private listeningPort: number | undefined;
+    /**
+     * The LAST-RESORT handler installed by {@link setFallbackHandler}, or
+     * `undefined` when no consumer installed one. Exactly ONE — installing
+     * again replaces it, per the contract. A field read per request (rather
+     * than a route pushed onto {@link routes}) is what makes the replacement
+     * semantics and the zero registration-order dependency structural here.
+     */
+    private fallbackHandler: RouteHandler | undefined;
 
     constructor(
         private port: number = 3000,
@@ -150,6 +165,79 @@ export class NodeHttpServer implements IHttpServer {
         return Array.from(methods).sort();
     }
 
+    /**
+     * Install the LAST-RESORT handler — see the CONTRACT on
+     * `IHttpServer.setFallbackHandler` in `@objectstack/spec/contracts`
+     * (#5040 §1-C). `node:http` ships no not-found hook to map onto, so this
+     * adapter builds the equivalent out of its own router (#6143). The four
+     * guarantees, and how each is honoured HERE:
+     *
+     *  1. **Only after every registered route has missed.** The handler is a
+     *     FIELD consulted in {@link handleRequest}'s route-miss branch — never
+     *     a route pushed onto {@link routes}. A `${prefix}/*` catch-all route
+     *     would be decided by this adapter's first-match-wins matching, i.e.
+     *     by registration order across plugin `start()` — the ADR-0076 D11
+     *     hazard "one route, one owner" exists to prevent. As a field it is
+     *     structurally incapable of shadowing a registered route, whenever it
+     *     was installed. A METHOD mismatch on an existing path is also a miss,
+     *     so the fallback sees those too (the primary adapter routes them into
+     *     the same `notFound` sink) — and declining leaves the 405 intact,
+     *     guarantee 4.
+     *  2. **`req.body` IS readable.** Nothing consumed the request stream — no
+     *     route handler ran — so the fallback branch parses it by content-type
+     *     through the SAME code a matched route goes through, rather than a
+     *     second request-builder that could drift from it. That is the whole
+     *     reason this seam exists and `use()` cannot serve: the middleware
+     *     contract explicitly does NOT populate `body`.
+     *  3. **Replacement, not a chain.** One field, assigned. Installing again
+     *     overwrites; nothing accumulates and nothing stacks.
+     *  4. **A handler that writes nothing leaves the standard answer.** The
+     *     branch falls through to {@link writeUnmatchedResponse} — the 404, or
+     *     the 405 + `Allow`, unchanged. Writing nothing is the documented way
+     *     to say "not mine".
+     *
+     * Locked cross-adapter by this package's own
+     * `fallback-seam.conformance.test.ts`, which runs the same cases against
+     * `HonoHttpServer`.
+     */
+    setFallbackHandler(handler: RouteHandler): void {
+        this.fallbackHandler = handler;
+    }
+
+    /**
+     * This adapter's standard answer for a request that matched no route — the
+     * `IHttpServer` unmatched-request CONTRACT (#3607 / ADR-0076 OQ#10): 405 +
+     * an accurate `Allow` when the path exists under another verb, otherwise
+     * the shared 404 body.
+     *
+     * Extracted from {@link handleRequest} by #6143 because it gained a second
+     * call site: the fall-through after an installed fallback declined to
+     * answer. Both paths must produce the byte-identical answer — a fallback
+     * that writes nothing may not cost a caller the `Allow` header.
+     */
+    private writeUnmatchedResponse(nodeRes: ServerResponse, method: string, path: string) {
+        // Distinguish "path exists under another verb" (405 + Allow) from a
+        // genuine 404 — same semantics as the primary adapter's notFound.
+        const allowed = this.allowedMethodsForPath(path);
+        if (allowed.length > 0 && !allowed.includes(method)) {
+            nodeRes.statusCode = 405;
+            nodeRes.setHeader('Allow', allowed.join(', '));
+            nodeRes.setHeader('Content-Type', 'application/json; charset=utf-8');
+            nodeRes.end(JSON.stringify({
+                error: 'Method Not Allowed',
+                code: 'METHOD_NOT_ALLOWED',
+                message: `${method} is not supported for ${path}. Allowed: ${allowed.join(', ')}.`,
+                method,
+                path,
+                allowed,
+            }));
+            return;
+        }
+        nodeRes.statusCode = 404;
+        nodeRes.setHeader('Content-Type', 'application/json; charset=utf-8');
+        nodeRes.end(JSON.stringify({ error: 'Not found' }));
+    }
+
     private match(method: string, path: string): { route: CompiledRoute; params: Record<string, string> } | undefined {
         const normalized = normalize(path);
         // HEAD is answered by GET handlers (body suppressed by node core for
@@ -177,27 +265,14 @@ export class NodeHttpServer implements IHttpServer {
         const path = url.pathname;
 
         const matched = this.match(method, path);
-        if (!matched) {
-            // Distinguish "path exists under another verb" (405 + Allow) from a
-            // genuine 404 — same semantics as the primary adapter's notFound.
-            const allowed = this.allowedMethodsForPath(path);
-            if (allowed.length > 0 && !allowed.includes(method)) {
-                nodeRes.statusCode = 405;
-                nodeRes.setHeader('Allow', allowed.join(', '));
-                nodeRes.setHeader('Content-Type', 'application/json; charset=utf-8');
-                nodeRes.end(JSON.stringify({
-                    error: 'Method Not Allowed',
-                    code: 'METHOD_NOT_ALLOWED',
-                    message: `${method} is not supported for ${path}. Allowed: ${allowed.join(', ')}.`,
-                    method,
-                    path,
-                    allowed,
-                }));
-                return;
-            }
-            nodeRes.statusCode = 404;
-            nodeRes.setHeader('Content-Type', 'application/json; charset=utf-8');
-            nodeRes.end(JSON.stringify({ error: 'Not found' }));
+        // The LAST-RESORT seam (#6143): consulted ONLY here, i.e. only once
+        // every explicitly registered route has missed — see the CONTRACT on
+        // {@link setFallbackHandler}. Resolved BEFORE the request body is read
+        // so an unmatched request on a server with NO fallback installed still
+        // costs exactly what it cost before this seam existed: nothing.
+        const fallback = matched ? undefined : this.fallbackHandler;
+        if (!matched && !fallback) {
+            this.writeUnmatchedResponse(nodeRes, method, path);
             return;
         }
 
@@ -243,7 +318,9 @@ export class NodeHttpServer implements IHttpServer {
         // included — no backfill needed (the Fetch-API Host backfill in the
         // Hono adapter is adapter-local, not a port requirement).
         const req: IHttpRequest = {
-            params: matched.params,
+            // No matched route means no path params — `{}`, exactly what the
+            // primary adapter hands its fallback (its `readRouteParams` guard).
+            params: matched?.params ?? {},
             query,
             body,
             headers: nodeReq.headers as Record<string, string | string[]>,
@@ -284,6 +361,37 @@ export class NodeHttpServer implements IHttpServer {
                 if (!nodeRes.writableEnded) nodeRes.end();
             },
         };
+
+        if (!matched) {
+            // ── The fallback seam ───────────────────────────────────────────
+            // Guaranteed installed: the no-fallback case returned above.
+            // Middlewares deliberately do NOT run here — they do not run for
+            // an unmatched request on this adapter today either, and changing
+            // that is a separate decision from installing this seam.
+            const handler = fallback as RouteHandler;
+            try {
+                await handler(req, res as IHttpResponse);
+            } catch {
+                // Prefer failing to falling back: a fallback that THREW is a
+                // broken consumer, and reporting its failure as this adapter's
+                // ordinary 404 would hide it behind the most unremarkable
+                // status on the wire. Same body as the primary adapter.
+                if (!nodeRes.writableEnded) {
+                    if (!nodeRes.headersSent) {
+                        nodeRes.statusCode = 500;
+                        nodeRes.setHeader('Content-Type', 'application/json; charset=utf-8');
+                    }
+                    nodeRes.end(JSON.stringify({ error: 'Fallback handler failed' }));
+                }
+                return;
+            }
+            // Answered (buffered or streamed) — that response stands.
+            if (nodeRes.writableEnded || streaming) return;
+            // Wrote nothing — the documented way to say "not mine". The
+            // adapter's own unmatched answer stands, unchanged (guarantee 4).
+            this.writeUnmatchedResponse(nodeRes, method, path);
+            return;
+        }
 
         try {
             for (const mw of this.middlewares) {
