@@ -346,11 +346,31 @@ describe('#5079 — list / get / dispatch agree immediately after deleteMeta', (
         expect((await surfaces('only_one')).listedNames).toEqual([]);
     });
 
+    afterEach(() => {
+        // The escape-hatch case below must not leak `action` writability into
+        // its neighbours — both memoised caches, or the next case lies.
+        delete process.env.OS_METADATA_WRITABLE;
+        (ObjectStackProtocolImplementation as any).resetEnvWritableCache();
+        resetEnvWritableMetadataTypes();
+    });
+
     it('an ARTIFACT-backed delete resets to the shipped value — it does not retire the name', async () => {
         // The boundary the #5079 fix must not cross. `removeRuntimeShadow`
         // still owns this case; `removeOverlayEntry` must never reach it, or a
         // "reset to artifact default" would delete the artifact instead of
         // revealing it.
+        //
+        // #6483 rolled `action`'s `allowOrgOverride` back to `false`
+        // (ADR-0005: page/app/action are ❌ in the amendment table), so
+        // overriding this PACKAGED action needs the one documented door that
+        // remains — the `OS_METADATA_WRITABLE` operator escape hatch, exactly
+        // as the sibling `#4521` case above does. (Every other case in this
+        // block writes brand-new names, which ride `allowRuntimeCreate`
+        // untouched, so only this one needs the hatch.)
+        process.env.OS_METADATA_WRITABLE = 'action';
+        (ObjectStackProtocolImplementation as any).resetEnvWritableCache();
+        resetEnvWritableMetadataTypes();
+
         registry.registerItem(
             'action',
             { name: 'shipped_probe', label: 'Shipped', type: 'script', target: 'showcase.shipped' },
