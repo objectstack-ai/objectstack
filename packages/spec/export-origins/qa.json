@@ -1,0 +1,22 @@
+{
+  "description": "Which SOURCE DECLARATION each name exported by one public entry point of @objectstack/spec resolves to, after its alias chain is unwound: `<src path>#<declared name> (<kind>)`. Two exports share an origin string iff they are the same declaration — so equal origins across two entries are a harmless re-export, and different origins under one name are the #4411 dual-source trap. Generated from src/ (no build needed) and read by the export-surface pin tests, which compare against it instead of each building their own ts.createProgram — that was ~55s of compilation per CI lap and a non-deterministic timeout that ejected unrelated PRs from the merge queue (#4796). Sharded by entry point (#5837) so two retirement PRs never share a file. Carries NO line numbers: the pins asserted the line as `\\d+`, and recording it would rewrite this artifact on every edit that shifts a line in any .zod.ts. Regenerate with `pnpm --filter @objectstack/spec gen:export-origins` and read the diff.",
+  "entry": "./qa",
+  "exports": {
+    "TestAction": "src/qa/testing.zod.ts#TestAction (type)",
+    "TestActionSchema": "src/qa/testing.zod.ts#TestActionSchema (const)",
+    "TestActionType": "src/qa/testing.zod.ts#TestActionType (type)",
+    "TestActionTypeSchema": "src/qa/testing.zod.ts#TestActionTypeSchema (const)",
+    "TestAssertion": "src/qa/testing.zod.ts#TestAssertion (type)",
+    "TestAssertionSchema": "src/qa/testing.zod.ts#TestAssertionSchema (const)",
+    "TestAssertionType": "src/qa/testing.zod.ts#TestAssertionType (type)",
+    "TestAssertionTypeSchema": "src/qa/testing.zod.ts#TestAssertionTypeSchema (const)",
+    "TestContext": "src/qa/testing.zod.ts#TestContext (type)",
+    "TestContextSchema": "src/qa/testing.zod.ts#TestContextSchema (const)",
+    "TestScenario": "src/qa/testing.zod.ts#TestScenario (type)",
+    "TestScenarioSchema": "src/qa/testing.zod.ts#TestScenarioSchema (const)",
+    "TestStep": "src/qa/testing.zod.ts#TestStep (type)",
+    "TestStepSchema": "src/qa/testing.zod.ts#TestStepSchema (const)",
+    "TestSuite": "src/qa/testing.zod.ts#TestSuite (type)",
+    "TestSuiteSchema": "src/qa/testing.zod.ts#TestSuiteSchema (const)"
+  }
+}

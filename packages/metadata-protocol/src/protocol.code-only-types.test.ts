@@ -342,13 +342,19 @@ describe('code-only metadata types are refused on every kernel (#5086)', () => {
             // means only `allowRuntimeCreate` is required. This is the case the
             // #5086 gate must NOT catch — it is the difference between "code-only"
             // and "packaged items are locked".
+            // [#6190] The per-kernel `organizationId` was incidental scenery —
+            // what this case measures is that the #5086 code-only gate does
+            // NOT catch a type that merely lacks `allowOrgOverride`. Since the
+            // #6190 ruling an org-scoped write of such a type is refused by a
+            // DIFFERENT gate, so passing one here would have measured that
+            // refusal instead of this one. The two-kernel matrix, which is the
+            // point, is untouched.
             for (const { environmentId } of KERNELS) {
                 const { protocol, rows } = makeProtocol(environmentId);
                 const result = await protocol.saveMetaItem({
                     type: 'hook',
                     name: 'rc3_probe_hook',
                     item: { name: 'rc3_probe_hook', object: 'task', events: ['beforeUpdate'] },
-                    ...(environmentId ? { organizationId: 'org_alpha' } : {}),
                 });
                 expect(result.success).toBe(true);
                 expect(metaRows(rows).length).toBe(1);
@@ -464,11 +470,14 @@ describe('code-only metadata types are refused on every kernel (#5086)', () => {
                 it(`answers a ${type} save with a repository receipt on a ${label}`, async () => {
                     const { protocol, writes } = makeProtocol(environmentId);
 
+                    // [#6190] Env-wide on both kernels — see the note on the
+                    // `hook` case above. The receipt SHAPE (seq / state /
+                    // history row) is what this matrix measures, and it does
+                    // not vary with the row's org scope.
                     const result = await protocol.saveMetaItem({
                         type,
                         name: 'rc3_receipt_view',
                         item,
-                        ...(environmentId ? { organizationId: 'org_alpha' } : {}),
                     });
 
                     expect(result.success).toBe(true);

@@ -135,6 +135,17 @@ function boot(opts: {
     recorder: rest,
     ctx: ctx as any,
     versionedBase: opts.versionedBase,
+    // [#7033 / #7023] The package routes now carry an authorization gate;
+    // production wires its caller resolver here (via
+    // `RestServer.resolvePackageRouteExecutionContext`). This parity test pins
+    // mounted ⇒ advertised route PLACEMENT, not authz, so it stubs a capable
+    // caller — the advertised `GET /packages` URL then ANSWERS 200 the way an
+    // authorized caller reaches it in production, keeping this test's subject
+    // (does the advertised URL resolve and answer in the mounted table) intact.
+    // The gate itself is pinned in `package-envelope.conformance.test.ts`.
+    resolveExecutionContext: async () => ({
+      userId: 'u_pkg', systemPermissions: ['manage_metadata', 'studio.access', 'setup.access'],
+    }),
     enableProjectScoping: opts.enableProjectScoping,
     projectResolution: opts.projectResolution,
   });

@@ -409,6 +409,9 @@ export function createRestApiPlugin(config: RestApiPluginConfig = {}): Plugin {
                     ctx,
                     versionedBase,
                     protocol,
+                    // [#7033 / #7023] The package routes' authorization gate reads
+                    // the SAME identity resolution the rest of the surface does.
+                    resolveExecutionContext: (req) => restServer.resolvePackageRouteExecutionContext(req),
                     enableProjectScoping,
                     projectResolution,
                 });

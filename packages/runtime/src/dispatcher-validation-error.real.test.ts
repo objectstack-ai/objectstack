@@ -62,7 +62,16 @@ async function publishDrafts(thrown: unknown) {
     const resolve = (name: string) =>
         name === 'protocol' ? protocol : name === 'objectql' ? objectql : undefined;
     const kernel: any = { getService: resolve, getServiceAsync: async (n: string) => resolve(n) };
-    const result: any = await new HttpDispatcher(kernel).dispatch(
+    const dispatcher = new HttpDispatcher(kernel);
+    // [#7033 / #7023] publish-drafts now demands `manage_metadata` on top of the
+    // anonymous floor. This suite pins the ERROR-MAPPING exit (a real
+    // ValidationError → 400 + fields[]), so the caller must clear the write gate;
+    // otherwise every case stops at the 401/403. Only the caller's capability is
+    // stubbed — the mapping under test is unchanged.
+    (dispatcher as any).timedResolveExecutionContext = async () => ({
+        userId: 'u1', systemPermissions: ['manage_metadata'],
+    });
+    const result: any = await dispatcher.dispatch(
         'POST', '/packages/demo/publish-drafts', {}, {}, {} as any,
     );
     return result.response;

@@ -94,6 +94,75 @@ describe('applyInMemoryAggregation', () => {
     expect(east!.owner_str).toBeNull();
   });
 
+  // #6815 — the per-aggregation `distinct` flag, retired under ADR-0049. This
+  // module was the ONLY reader of it in the repo: it deduplicated the values
+  // before applying the function while `driver-sql`, `driver-turso`,
+  // `driver-mongodb`, `driver-memory` and the service-analytics SQL builder
+  // all ignored the key. So the engine's choice of path — a driver without
+  // native aggregation, a non-UTC date bucket (#1982), a partial SQL driver —
+  // silently decided WHICH NUMBER a report showed, and both numbers looked
+  // right. `AggregationNodeSchema` tombstones the key, so a parsed query can
+  // no longer carry it; this pins the behaviour for the unparsed shapes that
+  // reach the fallback directly (an engine-options bag, a driver forwarding a
+  // raw body), which is where a resurrected dedupe limb would hide.
+  //
+  // The dedupe limb had NO test of its own before this one — the flag was
+  // honoured here for its whole life without a case pinning the divergence.
+  // The blast radius, measured rather than assumed — it is NARROWER than
+  // "every aggregation": `count` returned from its own branch before ever
+  // calling `collectValues`, so the flag never reached it; `count_distinct`
+  // fed the values into a `Set` (dedupe-then-Set is Set); and dedupe does not
+  // move `min`/`max`. Exactly TWO functions changed answer — `sum` and `avg` —
+  // and this dataset makes both of them move. The pin covers all six anyway:
+  // the guarantee is "no function reads the key", not "two functions stopped".
+  const DUPES = [
+    { region: 'East', amount: 100, owner: 'alice' },
+    { region: 'East', amount: 100, owner: 'alice' },
+    { region: 'East', amount: 400, owner: 'bob' },
+  ];
+
+  it('ignores a `distinct` flag on an aggregation — uniform with every SQL face', () => {
+    // Cast: `distinct` is exactly the key `AggregationNode` no longer has,
+    // which is what this test exists to pin.
+    const out = applyInMemoryAggregation(DUPES, {
+      groupBy: ['region'],
+      aggregations: [
+        { function: 'sum', field: 'amount', alias: 'total', distinct: true },
+        { function: 'avg', field: 'amount', alias: 'avg_amount', distinct: true },
+        { function: 'min', field: 'amount', alias: 'lo', distinct: true },
+        { function: 'max', field: 'amount', alias: 'hi', distinct: true },
+        { function: 'count', field: 'amount', alias: 'n', distinct: true },
+        { function: 'count_distinct', field: 'amount', alias: 'uniques', distinct: true },
+      ] as never,
+    });
+    const east = out.find((r) => r.region === 'East')!;
+    // The two that moved. `SUM(amount)` over 100/100/400 is 600 on every SQL
+    // face; the removed limb collapsed the pair and answered 500.
+    expect(east.total).toBe(600);
+    // `AVG(amount)` is 600/3 = 200; the removed limb answered 500/2 = 250.
+    expect(east.avg_amount).toBe(200);
+    // The four that never moved, pinned so a reader can see the real radius.
+    expect(east.lo).toBe(100);
+    expect(east.hi).toBe(400);
+    expect(east.n).toBe(3);
+    // …and the live deduplicating spelling still deduplicates, in its own arm,
+    // with or without the retired key present.
+    expect(east.uniques).toBe(2);
+  });
+
+  it('`count_distinct` is unaffected by the removal — dedupe lives in its own arm', () => {
+    const out = applyInMemoryAggregation(DUPES, {
+      groupBy: ['region'],
+      aggregations: [
+        { function: 'count_distinct', field: 'owner', alias: 'owners' },
+        { function: 'count_distinct', field: 'amount', alias: 'amounts' },
+      ],
+    });
+    const east = out.find((r) => r.region === 'East')!;
+    expect(east.owners).toBe(2);
+    expect(east.amounts).toBe(2);
+  });
+
   // #3839 — this used to be the literal string `'(null)'`, which the pushed-down
   // SQL path never produced (a NULL group column stays SQL NULL). The engine
   // picks between the two paths per query, so the bucket key's TYPE changed

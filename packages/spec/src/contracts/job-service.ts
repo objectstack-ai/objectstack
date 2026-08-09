@@ -45,9 +45,71 @@ export interface JobSchedule {
 }
 
 /**
- * Job handler function
+ * What a job handler reports about a run that finished without throwing —
+ * the OPTIONAL third state of {@link JobHandler} (#6617, the spec half of the
+ * #5548 B-minimal ruling).
+ *
+ * A handler that resolves this instead of `undefined` distinguishes *"ran and
+ * did the work"* from *"ran to completion but did not accomplish it"*. The
+ * motivating case is #5529's wait-wake handler: when its store is unavailable
+ * it fires the shot at nothing, completes normally, and today is recorded as
+ * indistinguishable from a wake that actually woke something.
+ *
+ * `reason` is a short operator-facing note (`'STORE_UNAVAILABLE'`, `'0 rows
+ * matched'`) — free text for an audit surface, never a machine-dispatched code.
  */
-export type JobHandler = (context: { jobId: string; data?: unknown }) => Promise<void>;
+export interface JobRunOutcome {
+    /**
+     * `'completed'` — the run did its work. Identical in meaning to resolving
+     * `undefined`; spell it out when a handler computes the verdict either way.
+     *
+     * `'degraded'` — the run finished, but its work did not happen. **This is
+     * not a failure** (see {@link JobHandler}).
+     */
+    outcome: 'completed' | 'degraded';
+    /** Why the run was degraded — short, human-readable, for the audit trail. */
+    reason?: string;
+}
+
+/**
+ * Job handler function.
+ *
+ * **Three outcomes, of which the third is optional and additive** (#6617):
+ *
+ * | The handler… | Means | Recorded as |
+ * |:---|:---|:---|
+ * | throws / rejects | the run **failed** | `failed` — and the retry policy applies |
+ * | resolves `undefined` (or `{ outcome: 'completed' }`) | the run **succeeded** | `success` |
+ * | resolves `{ outcome: 'degraded', reason? }` | ran to completion, **work did not happen** | a status distinct from `success` (#5548) |
+ *
+ * ⚠️ **`degraded` is NOT a failure and does NOT trigger a retry.** Retry and
+ * failure are driven exclusively by a *rejected* promise (`runWithPolicy`
+ * retries on throw), so a resolved outcome — whatever it says — never re-runs
+ * the job and never surfaces as an error. A handler that wants the run retried
+ * must throw, exactly as before. This separation is the whole point of the
+ * ruling: option A (make these handlers throw) was rejected precisely because
+ * it would change the failure semantics that third-party `IJobService`
+ * implementations already build retry behaviour on.
+ *
+ * **Additivity — the compatibility contract this type owes** (the ruling's
+ * 「可加性条款」, and the acceptance criterion of #6617):
+ *
+ * - An existing `Promise<void>` handler is **unchanged, byte for byte**. It
+ *   reports nothing, and reporting nothing is today's behaviour exactly:
+ *   *no throw ⇒ success*.
+ * - An existing `IJobService` implementation is **unchanged**. This is a
+ *   widened *return* type, not a new member on the handler context, so no
+ *   implementation has to grow anything — an adapter that simply ignores the
+ *   resolved value keeps its current semantics. (A `ctx.reportOutcome`
+ *   callback would have forced every implementation to construct a new context
+ *   member; that is why the return-value shape was chosen.)
+ *
+ * The reporting channel is deliberately opt-in on **both** ends. Consuming it
+ * — mapping `degraded` onto a `sys_job_run.status` distinct from `success` —
+ * is #5548's half and is **not yet wired**: the shipped adapters currently
+ * discard the resolved value, which is precisely why doing so is safe.
+ */
+export type JobHandler = (context: { jobId: string; data?: unknown }) => Promise<void | JobRunOutcome>;
 
 /**
  * Retry policy for a scheduled job (mirrors the authorable `RetryPolicySchema`,

@@ -3,12 +3,26 @@
 import { describe, it, expect } from 'vitest';
 import type {
   HierarchyScopeContext,
+  ISharingRuleService,
   ISharingService,
   RecordShareRecipientType,
+  SharingExecutionContext,
   SharingRuleRecipientType,
   SharingWriteVerdict,
 } from './sharing-service';
+import type { IApprovalService } from './approval-service';
+import type { IReportService } from './report-service';
+import type { ExecutionContext } from '../kernel/execution-context.zod';
 import { ShareRecipientType } from '../security/sharing.zod';
+
+/** Type-level identity: true iff A and B are the same type. */
+type Eq<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2)
+  ? true
+  : false;
+/** Compile error when the argument is not `true`. */
+type Assert<T extends true> = T;
+/** Compile error when the argument is not `false`. */
+type Refute<T extends false> = T;
 
 /**
  * [#4539] `RecordShareRecipientType` (né `ShareRecipientType`) pins.
@@ -479,5 +493,160 @@ describe('[#6428] ISharingService tri-state write verdict', () => {
     // filter, not a write verdict, and naming the write vocabulary there would
     // itself be drift.
     expect(docOf.get('buildReadFilter')).not.toContain('abstain');
+  });
+});
+
+/**
+ * [#6523 / #6206 ruling default] The shared enforcement context is the FULL
+ * envelope — the fourth and widest narrow twin, converged.
+ *
+ * ## What the ruling decided, and what this card applied it to
+ *
+ * #6206 (maintainer, 2026-08-07) set the governance default: enforcement
+ * converges on the complete `resolveAuthzContext` envelope and keeps NO
+ * per-site subset contracts. Its sweep reached one site — share-link (#6430 /
+ * PR #6511). `SharingExecutionContext` was the fourth and by far the widest
+ * twin: six declared fields serving **36 signatures across three contracts**
+ * (`ISharingService` + `ISharingRuleService` here, `IApprovalService`,
+ * `IReportService`), every one of them adjudicating access, with
+ * `accessible_org_ids` / `org_user_ids` / `posture` / `tabPermissions` absent.
+ *
+ * ## The MIRROR direction — why this twin cost something different
+ *
+ * At the share-link site the caller trimmed the VALUE before enforcement saw
+ * it. Here nothing was trimmed: `plugin-sharing`'s engine middleware hands the
+ * whole execution context down (`buildReadFilter(ctx.object, exec ?? {})`), so
+ * the values always arrived complete — it was the declared TYPE that was
+ * narrow, so an implementation could not read what it had been given without
+ * casting out of its own contract. The specimen on `main` when this card was
+ * written, in `plugin-approvals`' privileged-override gate:
+ *
+ *     const posture = (context as any).posture;   // isOverrideActor()
+ *
+ * ## What is pinned here, and what deliberately is NOT
+ *
+ * PINNED: (1) the context parameter of every adjudicating method across the
+ * three contracts is `ExecutionContext`, BY TYPE IDENTITY, so re-narrowing it
+ * to anything — the old type included — goes red; (2) the SHAPE WITNESS: an
+ * implementation typed by the contract reads `accessible_org_ids` / `posture`
+ * / `org_user_ids` / `tabPermissions` with **no `as any`**, which under the old
+ * signature was TS2339 on each field (TS2551 on `tabPermissions` — tsc
+ * suggests `permissions`, the very near-miss the narrow type invited) — that
+ * is this file's before-red direction, and it is the MIRROR of PR #6511's,
+ * which was TS2353 at a call site stating a trimmed envelope; (3) the narrow
+ * type survives UNCHANGED IN SHAPE, so the convergence cannot be undone by
+ * widening it back one field at a time.
+ *
+ * NOT PINNED, on purpose, and for exactly the reason PR #6511 recorded: there
+ * is no `@ts-expect-error` asserting that a `SharingExecutionContext` is
+ * REJECTED where an `ExecutionContext` is expected, because it is not.
+ * Structural subtyping accepts it — all six fields exist in the wider type
+ * with compatible types, and nothing there is required. A pin shaped like
+ * compiler enforcement where only a declaration exists would read as verified
+ * and be worse than saying so.
+ */
+describe('[#6523] sharing / approval / report enforcement takes the full ExecutionContext', () => {
+  it('declares the full envelope on every adjudicating signature, by type identity', () => {
+    // Type-level assertions are the substance of this case; the runtime
+    // expectation below only keeps vitest from reporting an empty test. tsc
+    // compiles this file (tsconfig.test.json, #5286), so these are checked.
+    type SharingCtx = Parameters<ISharingService['buildReadFilter']>[1];
+    type EditCtx = Parameters<ISharingService['checkEdit']>[2];
+    type GrantCtx = Parameters<ISharingService['grant']>[1];
+    type RuleCtx = Parameters<ISharingRuleService['evaluateRule']>[1];
+    type ApprovalCtx = Parameters<IApprovalService['decide']>[2];
+    type ReportCtx = Parameters<IReportService['run']>[1];
+
+    type _Pins = [
+      Assert<Eq<SharingCtx, ExecutionContext>>,
+      Assert<Eq<EditCtx, ExecutionContext>>,
+      Assert<Eq<GrantCtx, ExecutionContext>>,
+      Assert<Eq<RuleCtx, ExecutionContext>>,
+      Assert<Eq<ApprovalCtx, ExecutionContext>>,
+      Assert<Eq<ReportCtx, ExecutionContext>>,
+      // …and none of them is the six-field twin any more.
+      Refute<Eq<SharingCtx, SharingExecutionContext>>,
+      Refute<Eq<ApprovalCtx, SharingExecutionContext>>,
+      Refute<Eq<ReportCtx, SharingExecutionContext>>,
+    ];
+    const pinned: _Pins = [true, true, true, true, true, true, false, false, false];
+    expect(pinned).toHaveLength(9);
+  });
+
+  it('lets an implementation READ the envelope it is handed — no `as any` (shape witness)', async () => {
+    // The witness for the mirror direction. `context` is typed BY THE CONTRACT
+    // — `Parameters<ISharingService['buildReadFilter']>[1]`, not by a local
+    // annotation — so if the contract re-narrows, the four reads below stop
+    // compiling (TS2339: "Property 'accessible_org_ids' does not exist on type
+    // 'SharingExecutionContext'"). That is precisely the wall
+    // `plugin-approvals` climbed with `(context as any).posture`.
+    const seen: Array<Record<string, unknown>> = [];
+    const buildReadFilter: ISharingService['buildReadFilter'] = async (object, context) => {
+      seen.push({
+        object,
+        // ADR-0105 D2 — under the `group` posture this set IS the Layer 0 wall.
+        accessible_org_ids: context.accessible_org_ids,
+        // ADR-0095 D2 — resolved once upstream and carried, never re-derived here.
+        posture: context.posture,
+        org_user_ids: context.org_user_ids,
+        tabPermissions: context.tabPermissions,
+      });
+      return null;
+    };
+
+    // The call site, spelled the way `plugin-sharing`'s engine middleware
+    // spells it: the whole resolved envelope, resolved once and handed straight
+    // down as a VARIABLE — not as an inline literal. That is deliberate, and it
+    // is why reverting this card produces no TS2353 here: excess-property
+    // checking would fire only on an inline literal, and inline-literal damage
+    // is PR #6511's direction (a caller stating a trimmed envelope), not this
+    // one. Here the value was always whole and always assignable; only the
+    // READ above was blocked. Measured on the revert: 22 errors on this file,
+    // TS2339/TS2551 on the four reads and TS2344/TS2322 on the identity pins,
+    // and zero TS2353.
+    const envelope: ExecutionContext = {
+      userId: 'usr_1',
+      tenantId: 'org_plant_a',
+      positions: ['sales'],
+      permissions: ['standard_user'],
+      systemPermissions: ['manage_sharing'],
+      accessible_org_ids: ['org_plant_a', 'org_plant_b'],
+      org_user_ids: ['usr_1', 'usr_2'],
+      posture: 'MEMBER',
+      tabPermissions: { crm: 'visible' },
+    };
+    expect(await buildReadFilter('account', envelope)).toBeNull();
+
+    // Anti-vacuity: the values really travelled, and were really readable.
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toEqual({
+      object: 'account',
+      accessible_org_ids: ['org_plant_a', 'org_plant_b'],
+      posture: 'MEMBER',
+      org_user_ids: ['usr_1', 'usr_2'],
+      tabPermissions: { crm: 'visible' },
+    });
+  });
+
+  it('keeps the narrow twin unchanged in shape — it is residue, not a shortcut', () => {
+    // Widening `SharingExecutionContext` instead of replacing it would rebuild
+    // the per-site subset the ruling removed, one field at a time. PR #6511
+    // pinned the same refusal for the share-link twin.
+    type NarrowKeys = keyof SharingExecutionContext;
+    type _ShapeUnchanged = Assert<
+      Eq<NarrowKeys, 'userId' | 'tenantId' | 'positions' | 'permissions' | 'systemPermissions' | 'isSystem'>
+    >;
+    const shapeUnchanged: _ShapeUnchanged = true;
+
+    // The honest half, exactly as PR #6511 recorded it for its own twin: this
+    // assignment is LEGAL and compiles. Six optional fields, all present in the
+    // wider type — so the boundary is held by the declared parameter type and
+    // the caller's obligation, never by tsc. An `@ts-expect-error` here would
+    // be unsatisfied and fail the build.
+    const residue: SharingExecutionContext = { userId: 'usr_1', isSystem: false };
+    const widened: ExecutionContext = residue;
+    expect(shapeUnchanged).toBe(true);
+    expect(widened.userId).toBe('usr_1');
+    expect(widened.accessible_org_ids).toBeUndefined();
   });
 });

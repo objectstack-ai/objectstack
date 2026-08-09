@@ -910,12 +910,14 @@ export const DashboardSchema = lazySchema(() => strictObject({
   aria: retiredKey(
     '`dashboard.aria` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — no ' +
     'dashboard renderer ever applied it, so declared ARIA attributes silently did not reach ' +
-    'the DOM. Delete the key.',
+    'the DOM. Delete the key. ' +
+    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
   ),
   performance: retiredKey(
     '`dashboard.performance` was removed in @objectstack/spec 17.0.0 (#3896 audit ' +
     'close-out) — no renderer or runtime read it; dashboard performance tuning was never ' +
-    'implemented. Delete the key.',
+    'implemented. Delete the key. ' +
+    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
   ),
   /**
    * ADR-0010 §3.7 — Package-level protection envelope. Package

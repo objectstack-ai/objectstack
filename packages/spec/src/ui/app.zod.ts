@@ -1253,7 +1253,8 @@ export const AppSchema = lazySchema(() => strictObject(
   version: retiredKey(
     '`App.version` was removed in @objectstack/spec 17.0.0 (2026-06 liveness audit — ' +
     'no consumer in framework or objectui). An app is versioned by its owning package: ' +
-    'use `manifest.version`. Delete the key.',
+    'use `manifest.version`. Delete the key. ' +
+    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
   ),
 
   /** Description */
@@ -1394,7 +1395,8 @@ export const AppSchema = lazySchema(() => strictObject(
     '`App.objects` was removed in @objectstack/spec 17.0.0 (2026-06 liveness audit — ' +
     'never read; the spec itself labelled it "config file convenience"). Objects belong ' +
     'to the stack (`defineStack({ objects })`); an app reaches them through its ' +
-    'navigation items. Delete the key.',
+    'navigation items. Delete the key. ' +
+    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
   ),
   apis: retiredKey(
     '`App.apis` was removed in @objectstack/spec 17.0.0 (2026-06 liveness audit — ' +
@@ -1412,7 +1414,8 @@ export const AppSchema = lazySchema(() => strictObject(
     '`rateLimit: { enabled: true, windowMs, maxRequests }`. Read the ' +
     '`declarative-apis-endpoints-live` entry of the protocol upgrade guide first; it is a ' +
     'security review, not a rename. A route that genuinely needs handler CODE still ' +
-    'belongs in a plugin manifest `contributes.routes` entry.',
+    'belongs in a plugin manifest `contributes.routes` entry. ' +
+    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
   ),
 
   /**
@@ -1426,12 +1429,14 @@ export const AppSchema = lazySchema(() => strictObject(
     '`App.sharing` was removed in @objectstack/spec 17.0.0 (2026-06 liveness audit / ' +
     'ADR-0049 enforce-or-remove) — no public-app route ever read it, so it declared ' +
     'sharing that did not exist. Public access is granted per FORM VIEW ' +
-    '(`FormView.sharing`, the public-data-collection surface). Delete the key.',
+    '(`FormView.sharing`, the public-data-collection surface). Delete the key. ' +
+    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
   ),
   embed: retiredKey(
     '`App.embed` was removed in @objectstack/spec 17.0.0 (2026-06 liveness audit / ' +
     'ADR-0049) — no iframe route ever read it. Embedding is a per-form-view surface ' +
-    '(`FormView.sharing`), not an app-level switch. Delete the key.',
+    '(`FormView.sharing`), not an app-level switch. Delete the key. ' +
+    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
   ),
 
   /**
@@ -1443,7 +1448,8 @@ export const AppSchema = lazySchema(() => strictObject(
   mobileNavigation: retiredKey(
     '`App.mobileNavigation` was removed in @objectstack/spec 17.0.0 (2026-06 liveness ' +
     'audit — fully unimplemented; no renderer, including packages/mobile, ever read ' +
-    'it). Delete the key; the block returns if/when a real mobile navigation ships.',
+    'it). Delete the key; the block returns if/when a real mobile navigation ships. ' +
+    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
   ),
 
   /**
@@ -1482,7 +1488,8 @@ export const AppSchema = lazySchema(() => strictObject(
     '`App.aria` was removed in @objectstack/spec 17.0.0 (2026-06 liveness audit — no ' +
     'renderer read app-level ARIA attributes). Declare `aria` on the page component ' +
     'that renders the DOM node instead (`page.components[].aria`; `page.aria` and the ' +
-    'list view `aria` are live too). Delete the key.',
+    'list view `aria` are live too). Delete the key. ' +
+    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
   ),
 
   /**

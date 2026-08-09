@@ -7,6 +7,15 @@ import {
   Sha256DigestSchema,
 } from './environment-artifact.zod';
 
+import {
+  EXPORT_ENTRY_POINTS,
+  exportNamesOf,
+  holdersOf,
+  maybeOriginOf,
+  originFileOf,
+  originOf,
+  originsOf,
+} from '../../scripts/lib/export-origins-testkit';
 // ─── [#4740] `EnvironmentArtifact(Schema)` has ONE declaration — ./system ───
 //
 // `./cloud` and `./system` both exported `EnvironmentArtifact` /
@@ -51,63 +60,21 @@ const RETIRED_V0_FAMILY = [
 ] as const;
 
 describe('[#4740] `EnvironmentArtifact(Schema)` resolves to the ./system declaration everywhere', () => {
-  it('resolves the export surface: one declaration in ./system, ./cloud re-exports it, the v0 family is gone', async () => {
-    const ts = (await import('typescript')).default;
-    const { resolve, relative, dirname } = await import('node:path');
-    const { fileURLToPath } = await import('node:url');
-    const { readFileSync } = await import('node:fs');
-
-    const specDir = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
-    // Every public entry point, read from package.json's exports map so a
-    // future entry cannot silently escape the uniqueness pin below.
-    const pkg = JSON.parse(readFileSync(resolve(specDir, 'package.json'), 'utf8')) as {
-      exports: Record<string, unknown>;
-    };
-    const entries: Record<string, string> = {};
-    for (const sub of Object.keys(pkg.exports)) {
-      if (sub === '.') entries[sub] = resolve(specDir, 'src/index.ts');
-      else if (/^\.\/[a-z-]+$/.test(sub)) entries[sub] = resolve(specDir, `src/${sub.slice(2)}/index.ts`);
-      // './openapi.json' / './package.json' are not TypeScript entry points.
-    }
-    // Anti-vacuity: the enumeration must have found the real surface.
-    expect(Object.keys(entries)).toContain('./cloud');
-    expect(Object.keys(entries)).toContain('./system');
-    expect(Object.keys(entries).length).toBeGreaterThan(10);
-
-    const program = ts.createProgram(Object.values(entries), {
-      module: ts.ModuleKind.ESNext,
-      moduleResolution: ts.ModuleResolutionKind.Bundler,
-      skipLibCheck: true,
-      noEmit: true,
-    });
-    const checker = program.getTypeChecker();
-    const unalias = (s: import('typescript').Symbol) =>
-      s.getFlags() & ts.SymbolFlags.Alias ? checker.getAliasedSymbol(s) : s;
-
-    const exportsOf = (sub: string) => {
-      const sf = program.getSourceFile(entries[sub]);
-      const moduleSym = sf && checker.getSymbolAtLocation(sf);
-      // Without this guard a resolution failure would make every assertion
-      // below pass vacuously — the exact way a gate goes dormant (#4642).
-      expect(moduleSym, `${sub} module symbol must resolve`).toBeTruthy();
-      return checker.getExportsOfModule(moduleSym!);
-    };
-
-    const originOf = (sym: import('typescript').Symbol, label: string) => {
-      const decl = unalias(sym).declarations?.[0];
-      expect(decl, `${label} must have a declaration`).toBeTruthy();
-      const declFile = decl!.getSourceFile();
-      return `${relative(specDir, declFile.fileName)}:${
-        declFile.getLineAndCharacterOfPosition(decl!.getStart()).line + 1
-      }`;
-    };
+  it('resolves the export surface: one declaration in ./system, ./cloud re-exports it, the v0 family is gone', () => {
+    // Anti-vacuity: the baseline must cover the real surface. (This used to
+    // enumerate package.json's exports map and build its own `ts.createProgram`
+    // right here; `export-origins/` IS that resolution, computed once at build
+    // time and checked in — #4796.)
+    expect(EXPORT_ENTRY_POINTS).toContain('./cloud');
+    expect(EXPORT_ENTRY_POINTS).toContain('./system');
+    expect(EXPORT_ENTRY_POINTS.length).toBeGreaterThan(10);
 
     // 1. The surviving declaration: `./system` exports the envelope, declared
     //    in system/environment-artifact.zod.ts — and still exports a
     //    non-trivial surface, so the `not.toContain` checks below cannot pass
     //    by resolving nothing.
-    const systemExports = exportsOf('./system');
-    expect(systemExports.length, './system must export a non-trivial surface').toBeGreaterThan(100);
+    const systemNames = exportNamesOf('./system');
+    expect(systemNames.length, './system must export a non-trivial surface').toBeGreaterThan(100);
     // `EnvironmentArtifactInput` was retired by ADR-0122 phase 2 (#6083) — the
     // bare name IS the author state now, and the parsed state moved onto
     // `EnvironmentArtifactParsed`. The pin follows the surviving names: the
@@ -116,59 +83,44 @@ describe('[#4740] `EnvironmentArtifact(Schema)` resolves to the ./system declara
     const names = ['EnvironmentArtifact', 'EnvironmentArtifactParsed', 'EnvironmentArtifactSchema'] as const;
     const canonical: Record<string, string> = {};
     for (const name of names) {
-      const sym = systemExports.find((e) => e.getName() === name);
-      expect(sym, `./system must export \`${name}\``).toBeTruthy();
-      const origin = originOf(sym!, `./system ${name}`);
-      expect(origin).toMatch(/^src\/system\/environment-artifact\.zod\.ts:\d+$/);
-      canonical[name] = origin;
+      expect(maybeOriginOf('./system', name), `./system must export \`${name}\``).toBeDefined();
+      expect(originFileOf('./system', name)).toBe('src/system/environment-artifact.zod.ts');
+      canonical[name] = originOf('./system', name);
     }
 
     // 2. The re-exporting side: `./cloud` keeps every pre-#4740 name, but
     //    each resolves to the SAME ./system declaration — the sanctioned
     //    route A′. A fresh cloud-side declaration flips this red (S2).
-    const cloudExports = exportsOf('./cloud');
     for (const name of names) {
-      const sym = cloudExports.find((e) => e.getName() === name);
-      expect(sym, `./cloud must keep exporting \`${name}\``).toBeTruthy();
+      expect(maybeOriginOf('./cloud', name), `./cloud must keep exporting \`${name}\``).toBeDefined();
       expect(
-        originOf(sym!, `./cloud ${name}`),
+        originOf('./cloud', name),
         `./cloud must resolve \`${name}\` to the ./system declaration`,
       ).toBe(canonical[name]);
     }
     // `Sha256Digest(Schema)` moved with the declaration; ./cloud keeps it by
     // re-export too.
     for (const name of ['Sha256Digest', 'Sha256DigestSchema']) {
-      const sys = systemExports.find((e) => e.getName() === name);
-      const cld = cloudExports.find((e) => e.getName() === name);
-      expect(sys, `./system must export \`${name}\``).toBeTruthy();
-      expect(cld, `./cloud must keep exporting \`${name}\``).toBeTruthy();
-      expect(originOf(cld!, `./cloud ${name}`)).toBe(originOf(sys!, `./system ${name}`));
-      expect(originOf(sys!, `./system ${name}`)).toMatch(
-        /^src\/system\/environment-artifact\.zod\.ts:\d+$/,
-      );
+      expect(maybeOriginOf('./system', name), `./system must export \`${name}\``).toBeDefined();
+      expect(maybeOriginOf('./cloud', name), `./cloud must keep exporting \`${name}\``).toBeDefined();
+      expect(originOf('./cloud', name)).toBe(originOf('./system', name));
+      expect(originFileOf('./system', name)).toBe('src/system/environment-artifact.zod.ts');
     }
 
     // 3. Uniqueness — the dual-source pin proper: across EVERY public entry,
     //    an export named `EnvironmentArtifact(Parsed|Schema)` must resolve to
     //    the ONE ./system declaration. Re-adding a second declaration under
     //    any entry (S1/S2 sabotage) turns this red.
-    for (const sub of Object.keys(entries)) {
-      for (const name of names) {
-        for (const sym of exportsOf(sub).filter((e) => e.getName() === name)) {
-          expect(
-            originOf(sym, `${sub} ${name}`),
-            `${sub} must resolve \`${name}\` to the ./system declaration`,
-          ).toBe(canonical[name]);
-        }
-      }
+    for (const name of names) {
+      expect(
+        originsOf(name),
+        `every entry must resolve \`${name}\` to the ./system declaration`,
+      ).toEqual([canonical[name]]);
     }
 
     // 4. The retired v0 family exists in NO entry any more.
-    for (const sub of Object.keys(entries)) {
-      const subNames = exportsOf(sub).map((e) => e.getName());
-      for (const gone of RETIRED_V0_FAMILY) {
-        expect(subNames, `${sub} must not name ${gone}`).not.toContain(gone);
-      }
+    for (const gone of RETIRED_V0_FAMILY) {
+      expect(holdersOf(gone), `no entry may name ${gone}`).toEqual([]);
     }
   });
 

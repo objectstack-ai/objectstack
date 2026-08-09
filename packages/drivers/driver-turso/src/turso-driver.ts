@@ -20,6 +20,7 @@
  */
 
 import { SqlDriver, type SqlDriverConfig } from '@objectstack/driver-sql';
+import { StandardErrorCode } from '@objectstack/spec/api';
 import type { DriverQuery } from '@objectstack/spec/contracts';
 import type { DriverOptions } from '@objectstack/spec/data';
 import type { Client } from '@libsql/client';
@@ -124,6 +125,87 @@ export interface TursoDriverConfig {
    * Only effective in remote and replica modes.
    */
   client?: Client;
+}
+
+// ── Autonumber on the remote face ────────────────────────────────────────────
+
+/**
+ * [#6944] A record number this face cannot issue — refused, not written as NULL.
+ *
+ * # What was measured, and where the knowledge lives
+ *
+ * `TursoDriver` picks its transport from `url`. Local and embedded-replica
+ * inherit `SqlDriver.create`, which calls `fillAutoNumberFields` and issues the
+ * number from the persistent `_objectstack_sequences` table. Remote overrides
+ * the write path to `RemoteTransport`, which builds its own `INSERT` and never
+ * enters that method — so on this face `auto_number` was only a column mapped to
+ * `TEXT`, and the slot the engine deliberately left empty stayed empty. Measured
+ * on `main` @ `2f3e79351`, remote, `case_number: { type: 'autonumber' }`:
+ *
+ * ```
+ * create      -> RESOLVED case_number=null
+ * bulkCreate  -> RESOLVED [null, null]
+ * upsert      -> RESOLVED case_number=null
+ * LOCAL create-> RESOLVED case_number="CASE-00001"
+ * ```
+ *
+ * The engine cannot catch this for the caller: `supports.autonumber` is `true`
+ * here (inherited through `...super.supports`), so `engine.ts` defers generation
+ * to the driver entirely and never runs its own fallback — see the driver table
+ * in its `generateAutoNumbers` docblock, which already records `driver-turso` as
+ * "inherited, no fallback path". A declared capability that boots and quietly
+ * delivers nothing is the shape #3724 ruled on, and triage applied that ruling
+ * here (2026-08-09): **disposition B, explicit refusal**. Implementing autonumber
+ * on this transport (A) stays behind the appetite door for want of measured
+ * demand — it is deferred, not overlooked.
+ *
+ * ⚠️ The refusal is raised HERE, on the driver, and not inside
+ * `RemoteTransport`, because the transport cannot see what it would need to
+ * decide: `RemoteTransport.create(object, data)` takes no schema, caches none
+ * (`syncSchema` reads one and keeps nothing), and so cannot tell an
+ * `auto_number` column from any other `TEXT` one. The driver can:
+ * `registerRemoteFieldMetadata` → `SqlDriver.registerExternalObject` classifies
+ * every field at remote schema-sync time and keys `autoNumberFields` strictly by
+ * OBJECT name — measured populated in remote mode, tenant field and all. So the
+ * knowledge exists exactly one layer above the statement builder, and that is
+ * the layer that refuses.
+ *
+ * # Why NOT_IMPLEMENTED / 501 rather than 400
+ *
+ * The same two-class taxonomy this package already applies to aggregate
+ * functions (#5907) and date buckets (#6212), and ADR-0112 for the vocabulary:
+ * `autonumber` is a field type `@objectstack/spec` declares and this very
+ * driver's other faces generate, so the caller's object definition is spelled
+ * correctly and the request contains no mistake. The gap is the backend's.
+ *
+ * # What is deliberately NOT refused
+ *
+ * A record that ALREADY carries a value in the slot. `fillAutoNumberFields`
+ * skips exactly those (`undefined` / `null` / `''` is its own generate
+ * predicate, reused verbatim below rather than re-derived), and on this face
+ * they are written through unchanged and correctly — measured. That is the
+ * `isSystem` seed replay and the `preserveAudit` historical import, which
+ * `engine.ts` exempts from its strip on purpose (#5503); refusing them would
+ * break a path that works today and would take the two faces further apart, not
+ * closer (#6203).
+ */
+function refuseRemoteAutonumber(object: string, fields: string[], path: string): never {
+  const err = new Error(
+    `Object "${object}" declares auto_number field(s) [${fields.join(', ')}] left empty for this ` +
+    `${path}, and the Turso REMOTE transport does not generate record numbers. ` +
+    `Generated here: none — remote writes go through \`RemoteTransport\`, which builds its own ` +
+    `INSERT and never enters \`SqlDriver.fillAutoNumberFields\`, so on this face \`auto_number\` ` +
+    `is only a column mapped to TEXT. The object is spelled correctly and @objectstack/spec ` +
+    `declares \`autonumber\` as a field type this driver's local and embedded-replica faces do ` +
+    `generate — this is a capability gap in the remote transport, not a mistake in the request, ` +
+    `which is why it answers NOT_IMPLEMENTED/501 rather than a 400. Use the local or ` +
+    `embedded-replica transport for objects that carry record numbers, or supply the value ` +
+    `explicitly (a seed replay or \`preserveAudit\` import keeps its own numbers and is written ` +
+    `unchanged). Until this change the same call RESOLVED and wrote NULL into the slot (#6944).`,
+  ) as Error & { code?: string; status?: number };
+  err.code = StandardErrorCode.enum.NOT_IMPLEMENTED;
+  err.status = 501;
+  throw err;
 }
 
 // ── Turso Driver ─────────────────────────────────────────────────────────────
@@ -531,8 +613,51 @@ export class TursoDriver extends SqlDriver {
   // yielding — the opposite of the memory guarantee it was declared for. This
   // override went with the base method; page `find()` with `limit`/`offset`.
 
+  /**
+   * [#6944] Refuse a remote write that would need a record number this face
+   * cannot issue — see {@link refuseRemoteAutonumber} for the ruling and the
+   * measurements.
+   *
+   * Called BEFORE `toRemoteWriteForms` and before any statement is built, so a
+   * refused write costs no round trip — the rule every other refusal on this
+   * path already follows, and the one the refusal suites assert.
+   *
+   * The lookup is `autoNumberFields[object]` with no table-name fallback,
+   * unlike `fillAutoNumberFields`. That is not a shortcut: in remote mode the
+   * only writer of this registry is `registerRemoteFieldMetadata`, whose own
+   * docs record that it keys strictly by `object` ("never let a stray
+   * `schema.name` shadow it"), and the Knex path that produces the other key is
+   * unreachable here. A second lookup rule would be a second answer.
+   *
+   * A no-op for an object with no `auto_number` field, which is the overwhelming
+   * majority — one map read per remote write.
+   */
+  private refuseUngeneratableRemoteAutonumber(
+    object: string,
+    rows: Array<Record<string, any> | null | undefined>,
+    path: string,
+  ): void {
+    const cfgs = this.autoNumberFields[object];
+    if (!cfgs || cfgs.length === 0) return;
+    const empty = new Set<string>();
+    for (const row of rows) {
+      if (!row || typeof row !== 'object') continue;
+      for (const cfg of cfgs) {
+        // `fillAutoNumberFields`'s own generate predicate, verbatim: a slot
+        // holding undefined / null / '' is one the driver would have had to
+        // fill.
+        const held = row[cfg.name];
+        if (held === undefined || held === null || held === '') empty.add(cfg.name);
+      }
+    }
+    if (empty.size > 0) refuseRemoteAutonumber(object, [...empty], path);
+  }
+
   override async create(object: string, data: Record<string, any>, options?: DriverOptions): Promise<any> {
-    if (this.isRemote) return this.formatRemoteRow(object, await this.remoteTransport!.create(object, this.toRemoteWriteForms(object, data)));
+    if (this.isRemote) {
+      this.refuseUngeneratableRemoteAutonumber(object, [data], 'create');
+      return this.formatRemoteRow(object, await this.remoteTransport!.create(object, this.toRemoteWriteForms(object, data)));
+    }
     return super.create(object, data, options);
   }
 
@@ -542,7 +667,30 @@ export class TursoDriver extends SqlDriver {
   }
 
   override async upsert(object: string, data: Record<string, any>, conflictKeys?: string[], options?: DriverOptions): Promise<Record<string, any>> {
-    if (this.isRemote) return this.formatRemoteRow(object, await this.remoteTransport!.upsert(object, this.toRemoteWriteForms(object, data), conflictKeys));
+    if (this.isRemote) {
+      // [#6944] An upsert is insert-OR-merge, and only the merge leg is safe
+      // here: `RemoteTransport.upsert` emits
+      // `INSERT … ON CONFLICT(<keys>) DO UPDATE`, so a row that matches keeps
+      // the number already in its column and never needed one issued — measured
+      // (an `id`-bearing upsert onto an existing `CASE-00042` merged and kept
+      // it). Refusing that would break a path that works.
+      //
+      // The insert leg is refused where it is PROVABLE without a round trip: no
+      // `id`/`_id` and no explicit `conflictKeys` means the transport mints a
+      // fresh nanoid for the sole default merge key, so the statement can only
+      // insert — measured, two such upserts produced two rows with different
+      // ids. That is also the shape the engine sends for a new record.
+      //
+      // ⚠️ Residue, stated rather than papered over: an upsert that DOES carry
+      // an id or conflict keys but matches nothing still inserts, and on that
+      // leg the slot is still written NULL. Classifying it needs the round trip
+      // this refusal exists to avoid, so it is left as a known gap of the same
+      // deferred half (A) rather than answered with a probe query.
+      const mayMerge = data?.id !== undefined || data?._id !== undefined
+        || (Array.isArray(conflictKeys) && conflictKeys.length > 0);
+      if (!mayMerge) this.refuseUngeneratableRemoteAutonumber(object, [data], 'upsert');
+      return this.formatRemoteRow(object, await this.remoteTransport!.upsert(object, this.toRemoteWriteForms(object, data), conflictKeys));
+    }
     return super.upsert(object, data, conflictKeys, options);
   }
 
@@ -969,6 +1117,13 @@ export class TursoDriver extends SqlDriver {
 
   override async bulkCreate(object: string, data: any[], options?: DriverOptions): Promise<any> {
     if (this.isRemote) {
+      // [#6944] Same refusal as `create`, and it has to be stated here rather
+      // than inherited: `RemoteTransport.bulkCreate` loops its OWN `create`, not
+      // this class's, so nothing about the single-row override reaches this
+      // path. Refused for the whole batch before any row is written — the
+      // statement is all-or-nothing on this transport too, so a partial batch is
+      // not a state this can leave behind.
+      this.refuseUngeneratableRemoteAutonumber(object, Array.isArray(data) ? data : [], 'bulkCreate');
       const formatted = Array.isArray(data) ? data.map((d) => this.toRemoteWriteForms(object, d)) : data;
       return this.formatRemoteRows(object, await this.remoteTransport!.bulkCreate(object, formatted));
     }

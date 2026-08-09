@@ -14,6 +14,15 @@
 //   - STRICTNESS IS UNTOUCHED. `strict`, `noUnusedLocals`, `noImplicitReturns`
 //     and the rest are inherited from the root config. Nothing about this file
 //     may loosen a type rule; if a test does not compile, that is the finding.
+//   - `rootDir` widens to the PACKAGE, from the build config's `./src` (#4796).
+//     Under `noEmit` that setting carries no output meaning; all it does is
+//     constrain which files may enter the program, and this program genuinely
+//     spans both directories — `vitest.config.ts` runs `src/**/*.test.ts` AND
+//     `scripts/**/*.test.ts` as one suite, and a `src` test importing a
+//     `scripts/lib` helper was a TS6059 purely because the emitting config's
+//     root had been inherited into a non-emitting one. This is not a
+//     strictness change: nothing stops being checked, and `include` still
+//     stops at `src` so no scripts file is pulled in unless a test imports it.
 //
 // `include` deliberately stops at `src`, matching the build config's root.
 // `scripts/` — which vitest also runs, and which holds every generator and gate
@@ -27,6 +36,7 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "noEmit": true,
+    "rootDir": ".",
     "module": "esnext",
     "moduleResolution": "bundler",
     "lib": ["ES2022", "DOM", "DOM.Iterable"],

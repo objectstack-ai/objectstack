@@ -341,6 +341,18 @@ function shardTextsByCategory(
 }
 
 /**
+ * The JSON type of a parsed value, article included, for a message that has to
+ * tell an author what they actually wrote. `typeof` alone answers `"object"` for
+ * both `null` and `[]` — the two hand-edit accidents most worth telling apart.
+ */
+function jsonTypeLabel(value: unknown): string {
+  if (value === null) return 'null';
+  if (Array.isArray(value)) return 'an array';
+  const type = typeof value;
+  return `${/^[aeiou]/.test(type) ? 'an' : 'a'} ${type}`;
+}
+
+/**
  * Aggregate a category-sharded directory into one sorted array, validating that
  * each shard answers only for its own category.
  *
@@ -370,7 +382,23 @@ export function aggregateCategoryShards(
     if (!Array.isArray(list)) {
       throw new Error(`${dirName}/${shard.name}.json has no "${field}" array (#5837).`);
     }
-    for (const raw of list as string[]) {
+    // `Array.isArray` says the field IS an array and nothing about what is in
+    // it, so this is where untyped JSON stops being untyped. A hand-edited
+    // non-string entry used to reach `categoryOfDefKey`, whose parameter is
+    // declared `string`, and die there on `key.indexOf is not a function` —
+    // right exit code, but all three call sites print `error.message` alone, so
+    // the author was told neither the shard file nor the entry (#6751). Every
+    // other defect class this reader rejects names both; so does this one now.
+    // The check belongs here rather than in `categoryOfDefKey`: the helper's
+    // contract already says `string`, and only its caller knows the file name.
+    for (const [index, raw] of (list as readonly unknown[]).entries()) {
+      if (typeof raw !== 'string') {
+        throw new Error(
+          `${dirName}/${shard.name}.json ${field}[${index}] is ${jsonTypeLabel(raw)}, not a string ` +
+            `(#5837): ${JSON.stringify(raw)}. Every entry is a "<category>/<Def>[:<prop>]" key — ` +
+            `regenerate rather than reconcile by hand.`,
+        );
+      }
       if (categoryOfDefKey(raw) !== shard.name) {
         throw new Error(
           `${dirName}/${shard.name}.json carries "${raw}", which belongs to category ` +

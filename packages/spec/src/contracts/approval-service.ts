@@ -16,7 +16,14 @@
  * authoring type, submit, or step machinery anymore.
  */
 
-import type { SharingExecutionContext } from './sharing-service.js';
+// [#6523 / #6206 ruling default] Every method below ADJUDICATES access, so each
+// takes the complete `resolveAuthzContext` envelope rather than the six-field
+// `SharingExecutionContext` this contract used to borrow from `sharing-service`.
+// That narrow type omitted `accessible_org_ids` (the `group`-posture Layer 0
+// wall, ADR-0105 D2), `org_user_ids`, `posture` (ADR-0095 D2) and
+// `tabPermissions` — see `SharingExecutionContext` in `./sharing-service.js`
+// for the boundary and the measured consequence.
+import type { ExecutionContext } from '../kernel/execution-context.zod.js';
 
 /**
  * Lifecycle states of an approval request, in the order the
@@ -515,7 +522,7 @@ export interface IApprovalService {
       limit?: number;
       offset?: number;
     } | undefined,
-    context: SharingExecutionContext,
+    context: ExecutionContext,
   ): Promise<ApprovalRequestRow[]>;
 
   /**
@@ -524,17 +531,17 @@ export interface IApprovalService {
    */
   countRequests(
     filter: Parameters<IApprovalService['listRequests']>[0],
-    context: SharingExecutionContext,
+    context: ExecutionContext,
   ): Promise<number>;
 
-  getRequest(requestId: string, context: SharingExecutionContext): Promise<ApprovalRequestRow | null>;
+  getRequest(requestId: string, context: ExecutionContext): Promise<ApprovalRequestRow | null>;
 
   /**
    * Record a decision on a node-driven request. Honours the node's
    * `unanimous` behaviour, finalises the request when satisfied, and resumes
    * the owning flow run down the matching `approve` / `reject` edge.
    */
-  decide(requestId: string, input: ApprovalDecisionInput, context: SharingExecutionContext): Promise<ApprovalDecisionResult>;
+  decide(requestId: string, input: ApprovalDecisionInput, context: ExecutionContext): Promise<ApprovalDecisionResult>;
 
   /**
    * Withdraw a pending request. Only the submitter (or a system context) may
@@ -546,7 +553,7 @@ export interface IApprovalService {
    * request flips `returned → recalled` and the run resumes down `reject` the
    * same way.
    */
-  recall(requestId: string, input: ApprovalRecallInput, context: SharingExecutionContext): Promise<ApprovalRecallResult>;
+  recall(requestId: string, input: ApprovalRecallInput, context: ExecutionContext): Promise<ApprovalRecallResult>;
 
   /**
    * ADR-0044 send back for revision. Finalises the pending request as
@@ -559,7 +566,7 @@ export interface IApprovalService {
   sendBack(
     requestId: string,
     input: ApprovalSendBackInput,
-    context: SharingExecutionContext,
+    context: ExecutionContext,
   ): Promise<ApprovalSendBackResult>;
 
   /**
@@ -572,7 +579,7 @@ export interface IApprovalService {
   resubmit(
     requestId: string,
     input: ApprovalResubmitInput,
-    context: SharingExecutionContext,
+    context: ExecutionContext,
   ): Promise<ApprovalResubmitResult>;
 
   /**
@@ -584,7 +591,7 @@ export interface IApprovalService {
   reassign(
     requestId: string,
     input: { actorId: string; to: string; from?: string; comment?: string },
-    context: SharingExecutionContext,
+    context: ExecutionContext,
   ): Promise<{ request: ApprovalRequestRow }>;
 
   /**
@@ -595,7 +602,7 @@ export interface IApprovalService {
   remind(
     requestId: string,
     input: { actorId: string; comment?: string },
-    context: SharingExecutionContext,
+    context: ExecutionContext,
   ): Promise<{ request: ApprovalRequestRow; notified: number }>;
 
   /**
@@ -606,7 +613,7 @@ export interface IApprovalService {
   requestInfo(
     requestId: string,
     input: { actorId: string; comment: string },
-    context: SharingExecutionContext,
+    context: ExecutionContext,
   ): Promise<{ request: ApprovalRequestRow }>;
 
   /**
@@ -616,9 +623,9 @@ export interface IApprovalService {
   comment(
     requestId: string,
     input: { actorId: string; comment: string },
-    context: SharingExecutionContext,
+    context: ExecutionContext,
   ): Promise<{ request: ApprovalRequestRow }>;
 
   /** Audit trail for a request. */
-  listActions(requestId: string, context: SharingExecutionContext): Promise<ApprovalActionRow[]>;
+  listActions(requestId: string, context: ExecutionContext): Promise<ApprovalActionRow[]>;
 }

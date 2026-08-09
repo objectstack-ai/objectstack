@@ -37,7 +37,6 @@
     "src/data/query.test.ts": 25,
     "src/identity/scim.test.ts": 7,
     "src/integration/connector.test.ts": 7,
-    "src/kernel/activation-events-retirement.test.ts": 1,
     "src/kernel/cluster.test.ts": 2,
     "src/kernel/metadata-plugin.test.ts": 1,
     "src/kernel/public-auth-features.test.ts": 6,

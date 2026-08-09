@@ -52,6 +52,12 @@ export interface DirectMountComposition {
     versionedBase: string;
     /** The `protocol` slice the package routes read registry packages through. */
     protocol?: PackageRoutesOptions['protocol'];
+    /**
+     * [#7033 / #7023] Resolves the caller's execution context for the package
+     * routes' authorization gate — the `RestServer`'s own resolver, so the
+     * capability check reads the same identity the rest of the surface does.
+     */
+    resolveExecutionContext?: PackageRoutesOptions['resolveExecutionContext'];
     /** ADR-0006 project scoping — mirrors the package routes under the scoped base. */
     enableProjectScoping?: boolean;
     /** `'auto'` (both bases) or `'required'` (scoped only). */
@@ -63,7 +69,7 @@ export interface DirectMountComposition {
  * mounted on {@link DirectMountComposition.recorder}.
  */
 export function mountAndRecordDirectRoutes(composition: DirectMountComposition): void {
-    const { server, recorder, ctx, versionedBase, protocol } = composition;
+    const { server, recorder, ctx, versionedBase, protocol, resolveExecutionContext } = composition;
     const enableProjectScoping = composition.enableProjectScoping ?? false;
     const projectResolution = composition.projectResolution ?? 'auto';
 
@@ -80,7 +86,7 @@ export function mountAndRecordDirectRoutes(composition: DirectMountComposition):
                 : [versionedBase];
             for (const base of bases) {
                 recorder.recordDirectMountedRoutes(
-                    registerPackageRoutes(server, packageService, base, { protocol }),
+                    registerPackageRoutes(server, packageService, base, { protocol, resolveExecutionContext }),
                 );
             }
             ctx.logger.info('Package management routes registered');

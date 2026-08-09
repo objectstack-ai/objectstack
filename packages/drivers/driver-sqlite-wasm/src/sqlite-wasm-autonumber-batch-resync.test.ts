@@ -76,4 +76,16 @@ describe('[#6943] driver-sqlite-wasm inherits the batch/upsert autonumber re-see
     const upserted = await driver.upsert('crm_case', { organization_id: 'orgA', title: 'u1' });
     expect(upserted.case_number).toBe('CASE-00031');
   });
+
+  it('[#7011] a merge-path upsert keeps the existing autonumber on this transport too', async () => {
+    // Inherited from `SqlDriver.upsert` (no override) — pinned here because the
+    // exclusion is applied to the ON CONFLICT merge column list, and this
+    // driver swaps the transport under that statement.
+    const created = await driver.create('crm_case', { organization_id: 'orgA', title: 'original' });
+    expect(created.case_number).toBe('CASE-00001');
+
+    const merged = await driver.upsert('crm_case', { id: created.id, organization_id: 'orgA', title: 'edited' });
+    expect(merged.case_number).toBe('CASE-00001');
+    expect(merged.title).toBe('edited');
+  });
 });

@@ -891,6 +891,28 @@ jobs:
       - name: Check the protocol upgrade guide is regenerated with the ADR-0087 registries
         run: pnpm --filter @objectstack/spec check:upgrade-guide
 
+      # The #4796 declaration-origin baseline. `export-origins/` records which
+      # SOURCE DECLARATION every public entry point exports under every name, and
+      # seventeen export-surface pin tests compare against it instead of each
+      # building their own `ts.createProgram` inside a vitest case (~55s of
+      # compilation per CI lap, and a non-deterministic timeout that ejected six
+      # unrelated PRs from the merge queue in one night).
+      #
+      # A comparison is only as good as the thing compared, so THIS STEP IS WHAT
+      # THOSE PINS MEAN. Without it a hand-edited or stale artifact would let
+      # every one of them report success over a fiction — the dormant-gate shape
+      # #4642 named. It belongs in this job for the same reason `check:docs`
+      # does: no paths filter, required status check, so it cannot go dormant on
+      # exactly the spec-only PRs that move the export surface.
+      #
+      # Reads `src/` via tsx and needs no build, so it runs before the workspace
+      # build and fails in ~3s. The self-test in front of it pins the resolver's
+      # own two edges (a re-export must read as ONE declaration; two declarations
+      # sharing a name must NOT) — a broken resolver would otherwise write a
+      # confidently wrong baseline and this step would agree with it.
+      - name: Check the export-origins baseline resolves as recorded
+        run: pnpm --filter @objectstack/spec check:export-origins
+
       # The authorable KEY surface — what a metadata author may write, which for
       # this platform is the third-party API. `api-surface/` records exported
       # names and `api-surface-signatures.json` hashes factory types as TypeScript

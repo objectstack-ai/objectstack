@@ -226,15 +226,100 @@ export const SetOperatorSchema = lazySchema(() => z.object({
 }));
 
 /**
+ * The endpoint contract shared by both of `$between`'s bounds (#6571).
+ *
+ * Module-private on purpose, exactly like {@link ORDERING_COMPARAND_DESCRIPTION}:
+ * it is documentation attached to a slot, not an authorable surface of its own,
+ * so it stays out of the exported API surface. The reasoning behind every
+ * sentence is in {@link RangeOperatorSchema}'s docblock.
+ */
+const RANGE_ENDPOINT_DESCRIPTION =
+  'Closed interval [min, max]. Each endpoint is a number, a Date, a string, or '
+  + 'a { $field } reference — the SAME union the ordering comparisons take, '
+  + 'because a range IS its two ordering bounds. STRING is the form the '
+  + 'platform itself produces: the date-macro resolver walks INTO arrays, so '
+  + '{ $between: ["{current_year_start}", "{current_year_end}"] } resolves to '
+  + 'two strings. The guaranteed spellings are an ISO calendar day '
+  + '(YYYY-MM-DD), a UTC ISO-8601 instant, or a wall-clock time of day '
+  + '(HH:MM[:SS[.fff]]) for a Field.time column; those are ASCII and '
+  + 'fixed-width, so lexicographic order IS chronological order and every '
+  + 'backend agrees. The driver reconciles each endpoint with the column '
+  + 'independently (a bare calendar day used as the MAX becomes the half-open '
+  + 'next-day boundary). Ranging over NON-temporal text is permitted but NOT '
+  + 'promised: the order is the backend collation\'s, and those coincide only '
+  + 'for ASCII.';
+
+/**
  * Range operator for interval checks (closed interval).
  * SQL: BETWEEN ? AND ? | MongoDB: $gte AND $lte
+ *
+ * Supported endpoint types: **Number, Date, ISO/clock STRING, FieldReference**.
+ *
+ * ## Why `string` is in BOTH endpoint unions (#6571)
+ *
+ * This is the same contradiction {@link ComparisonOperatorSchema} carried until
+ * #5685, in the one slot where it bites hardest. Until this was written down
+ * both endpoints read `number | Date | FieldReference` — and the platform's own
+ * producers put a STRING in them:
+ *
+ * - **The date-macro resolver descends into arrays.** `resolveFilterTokens`
+ *   (`@objectstack/core`, `filter-tokens.ts`) evaluates the `{token}` grammar,
+ *   and its `walk` has an explicit array arm (`if (Array.isArray(node)) return
+ *   node.map(walk)`), so a tuple comparand is resolved member by member. Every
+ *   branch of that resolver returns a string — `asYmd(…)` for a calendar day,
+ *   `.toISOString()` for the sub-day tokens. So
+ *   `{ close_date: { $between: ['{current_year_start}', '{current_year_end}'] } }`
+ *   becomes `{ close_date: { $between: ['2026-01-01', '2026-12-31'] } }`, whose
+ *   two endpoints were **exactly the type this schema declared it refused**.
+ * - **This package's own conformance corpus spells it.**
+ *   `temporal-conformance.ts` — the shared cross-driver expectation table, in
+ *   `packages/spec` itself — states three `$between` cases with string
+ *   endpoints: `{ at: { $between: ['2026-04-29', '2026-07-28'] } }` with its
+ *   `{90_days_ago}`/`{today}` token twin, the degenerate single-day range, and
+ *   `{ at: { $between: ['08:00:00', '18:00:00'] } }` on a `Field.time` column.
+ *   A declaration contradicted by the conformance table one directory over is
+ *   not under-describing reality; it is disagreeing with it.
+ * - **The driver already normalises both ends per column type.**
+ *   `SqlDriver.coerceFilterValue` recurses through arrays member-wise
+ *   (`value.map(v => this.coerceFilterValue(table, field, v))`), and
+ *   `calendarDayBetweenRewrite` coerces the min and rewrites a bare-calendar-day
+ *   max into the half-open `< next-day(max)` bound — knex's `whereBetween` being
+ *   inclusive on both ends, it inherits the same rule `$lte` has (#3777).
+ *
+ * A closed interval is the natural spelling of a **date window**, which makes
+ * this the slot an author — an AI author in particular — is most likely to
+ * reach for with the resolver's own output in hand, and the old declaration
+ * told them that output was invalid.
+ *
+ * ## Why a BARE string, and not an ISO-shaped refinement (#6571 rider ①)
+ *
+ * Identical to {@link ComparisonOperatorSchema}'s finding, and re-measured for
+ * the tuple: this schema is field-**agnostic** (it never sees which column the
+ * range applies to), an ISO refinement would reject the `HH:MM[:SS[.fff]]` form
+ * `field-value.zod.ts`'s `CLOCK_TIME_TYPES` declares and the conformance case
+ * above exercises, and date-only vs full-timestamp is already reconciled
+ * downstream by `calendarDayBetweenRewrite`. Endpoint-vs-column correctness is
+ * a field-TYPED judgement that already has an owner; re-guessing it here would
+ * refuse working ranges.
+ *
+ * ## What widening ADMITS, stated plainly
+ *
+ * `string` also admits ranges over NON-temporal text (`{ code: { $between:
+ * ['A', 'M'] } }`). That is real SQL and every backend answers it — but **the
+ * ORDER is the backend's, not this contract's**: `driver-sql` emits
+ * `whereBetween`, decided by the dialect's collation, while the JS matchers use
+ * UTF-16 code-unit order. Those coincide for ASCII and diverge outside it.
+ * Nothing here promises the two endpoints are ordered relative to each other
+ * either — an inverted `[max, min]` range is a well-formed filter that matches
+ * nothing, at every backend.
  */
 export const RangeOperatorSchema = lazySchema(() => z.object({
   /** Between (inclusive) - takes [min, max] array */
   $between: z.tuple([
-    z.union([z.number(), z.date(), FieldReferenceSchema]),
-    z.union([z.number(), z.date(), FieldReferenceSchema])
-  ]).optional(),
+    z.union([z.number(), z.date(), z.string(), FieldReferenceSchema]),
+    z.union([z.number(), z.date(), z.string(), FieldReferenceSchema])
+  ]).optional()
+    .describe(`Between (inclusive). ${RANGE_ENDPOINT_DESCRIPTION}`),
 }));
 
 // ============================================================================
@@ -419,11 +504,20 @@ export const FieldOperatorsSchema = lazySchema(() => z.object({
   // Set & Range
   $in: z.array(z.any()).optional(),
   $nin: z.array(z.any()).optional(),
+  // Range. `string` is in BOTH endpoint unions for the reason
+  // {@link RangeOperatorSchema} gives at length (#6571): the date-macro resolver
+  // walks into arrays, so a token range resolves to two ISO/clock STRINGS, and
+  // this package's own `temporal-conformance.ts` corpus spells that shape. This
+  // copy is the ENFORCED one — `NormalizedFilterSchema` validates against it and
+  // the exported `FieldOperators` is inferred from it — so it must not drift
+  // from the documentation copy above. #5685 landed the sibling ordering slots
+  // in the documentation copy first and left the reachable surface still
+  // rejecting the platform's own output; both spellings move together.
   $between: z.tuple([
-    z.union([z.number(), z.date(), FieldReferenceSchema]),
-    z.union([z.number(), z.date(), FieldReferenceSchema])
+    z.union([z.number(), z.date(), z.string(), FieldReferenceSchema]),
+    z.union([z.number(), z.date(), z.string(), FieldReferenceSchema])
   ]).optional(),
-  
+
   // String-specific. Case-SENSITIVE, except `$icontains` which folds ASCII case
   // only — see {@link StringOperatorSchema} for the contract and its boundary.
   $contains: z.string().optional(),
@@ -627,7 +721,25 @@ export type Filter<T = any> = {
         $lte?: T[K] extends number ? number : T[K] extends Date | string ? T[K] | string : never;
         $in?: T[K][];
         $nin?: T[K][];
-        $between?: T[K] extends number | Date ? [T[K], T[K]] : never;
+        // Range (#6571). The TYPED half of what {@link RangeOperatorSchema}
+        // declares, and the exact mirror of the ordering guard above — a range
+        // IS its two ordering bounds, so the two must agree slot for slot:
+        //   - a `Date` field also takes the ISO STRINGS the date-macro resolver
+        //     produces for a token range (it walks into arrays), which the old
+        //     `T[K] extends number | Date ? [T[K], T[K]]` guard rejected outright;
+        //   - a `string` field (a `Field.time` `'08:00:00'`, an autonumber code)
+        //     is rangeable at every backend, where the old guard collapsed it to
+        //     `never` and made the operator unwritable — the very shape
+        //     `temporal-conformance.ts` pins for `Field.time`;
+        //   - a `number` field stays numbers-only — nothing here wants `['5','9']`.
+        // Each endpoint is widened independently, so a half-resolved range
+        // (`[new Date(...), '2026-12-31']`) type-checks, which is what a partial
+        // macro resolution actually hands the author.
+        $between?: T[K] extends number
+          ? [number, number]
+          : T[K] extends Date | string
+            ? [T[K] | string, T[K] | string]
+            : never;
         $contains?: T[K] extends string ? string : never;
         $notContains?: T[K] extends string ? string : never;
         $startsWith?: T[K] extends string ? string : never;
@@ -1302,15 +1414,23 @@ export interface RetiredFilterOperatorGuidance {
  * took that trade explicitly: the spec declares, the existing refusal sites
  * enforce.
  *
- * Those sites are the five that already refuse unknown operators today —
+ * Those sites are the five that refuse unknown operators —
  * `driver-sql`'s `default:` arm, `driver-turso`'s remote transport,
  * `driver-memory`'s `filter-refusal.ts`, `driver-mongodb`'s
  * `translateFieldOperators`, and `objectql`'s `having` — and the point of one
- * table is that they stop each writing their own sentence. Wiring them to it is
- * **#5702**, deliberately not this PR: `$regex` still has one live producer
- * (`plugin-auth`'s ObjectQL adapter, on the authentication path), so a refusal
- * landing before #5710 flips that producer would break sign-in. Hard order:
- * **#5710 flips the producer, then #5702 turns these strings into refusals.**
+ * table is that they stop each writing their own sentence. When this block was
+ * written, wiring them was deliberately deferred behind a hard order ("#5710
+ * flips the producer, then #5702 turns these strings into refusals"), because
+ * `$regex` still had one live producer on the authentication path. Both gates
+ * have fired since — #5710 flipped `plugin-auth`'s adapter to `$contains`,
+ * #5702 wired all five sites — so that ordering is shipped history, not
+ * pending advice. Census per face, by executing `{ $regex }` and a dangling
+ * `{ $options }` against each (re-verified 2026-08, #6993): all five print
+ * this table's `why` verbatim; the four driver faces throw it in the ADR-0112
+ * envelope (`INVALID_FILTER` / 400 — `driver-sqlite-wasm` and both turso
+ * transports inherit or mirror it), while `having`'s refusal is still a bare
+ * `Error` carrying the sentence without `code`/`status` — the one open half,
+ * tracked as #7047.
  *
  * ## Why `$regex` was retired rather than implemented (#4706)
  *
