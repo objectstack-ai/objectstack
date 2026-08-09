@@ -26,6 +26,14 @@
  * The gate also closes a hole that has nothing to do with masking: before it,
  * any authenticated session could clobber any metadata item.
  *
+ * ## Scope of what is pinned here
+ *
+ * THIS ROUTE ONLY. The same round trip is still reachable through the
+ * compound-name save `PUT /meta/:type/:section/:name` (measured) and the
+ * runtime dispatcher's own `/meta` PUT — filed as #7019, out of this change's
+ * region. A reader who takes this suite as proof that the defect is closed
+ * platform-wide has read more into it than it asserts.
+ *
  * ## Rejection cases assert the ENVELOPE (ADR-0112)
  *
  * Every refusal here asserts `code` AND `status`, never a bare "it threw" —
@@ -230,7 +238,13 @@ describe('#6603 — the gate itself', () => {
      * (`manage_metadata`) and the ADR-0106 D4 mask-exemption set
      * (`OBJECT_SCHEMA_MASK_EXEMPT_CAPABILITIES` = `studio.access`,
      * `setup.access`) are DIFFERENT SETS. So holding a D4 exemption is not by
-     * itself permission to write.
+     * itself permission to write — and, in the other direction, passing this
+     * gate is not by itself an exemption from the mask. What this route now
+     * enforces is "a writer holds `manage_metadata`", which is NOT the same
+     * sentence as the ruling's rationale, "a writer sees the whole schema";
+     * the two coincide only because `admin_full_access` happens to carry both.
+     * Recorded as #7020 — do not "fix" this matrix to match the rationale
+     * without a ruling.
      *
      * In the permission sets the platform ships this never separates on the
      * write side: `admin_full_access` carries `manage_metadata` AND
@@ -241,15 +255,15 @@ describe('#6603 — the gate itself', () => {
      * does not mutate shared metadata.
      */
     it.each([
-        ['no capabilities at all', [] as string[], 403],
-        ['`studio.access` alone — D4-exempt, but not an authoring capability', ['studio.access'], 403],
-        ['`setup.access` alone — likewise (this is `organization_admin`)', ['setup.access'], 403],
-        ['`manage_metadata` alone', ['manage_metadata'], 200],
-        ['the shipped `admin_full_access` shape', ['manage_metadata', 'studio.access', 'setup.access'], 200],
-    ])('%s → %i', async (_label, systemPermissions, expected) => {
+        { held: 'no capabilities at all', systemPermissions: [] as string[], status: 403 },
+        { held: '`studio.access` alone — D4-exempt, but not an authoring capability', systemPermissions: ['studio.access'], status: 403 },
+        { held: '`setup.access` alone — likewise; this is `organization_admin`', systemPermissions: ['setup.access'], status: 403 },
+        { held: '`manage_metadata` alone', systemPermissions: ['manage_metadata'], status: 200 },
+        { held: 'the shipped `admin_full_access` shape', systemPermissions: ['manage_metadata', 'studio.access', 'setup.access'], status: 200 },
+    ])('$held → $status', async ({ systemPermissions, status }) => {
         const stack = boot({ context: { userId: 'u1', systemPermissions } });
         const write = await stack.put({ name: 'account', label: 'Account', fields: {} });
-        expect(write.res.statusCode).toBe(expected);
+        expect(write.res.statusCode).toBe(status);
     });
 });
 
