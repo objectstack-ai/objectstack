@@ -27,25 +27,40 @@
  *
  * ── Reverse verification, direction predicted BEFORE running ───────────────
  *
- * Ordinary red, with a deliberately green control. Restoring the unconditional
- * threading (drop `organizationIdForMetaWrite` at both call sites and pass the
- * active org straight through) must turn the env-wide pins RED — the `flow`
- * row, the `object` row and the ADR-0045 `app` flip all come back
- * `organization_id: 'org_alpha'`, and the post-flip visibility read goes back
- * to reporting the app as unpublished. The `view` case must stay GREEN, and it
- * is the reason it is here: a "fix" that simply stopped threading the org
- * anywhere would pass every red case and fail there, silently retiring
- * ADR-0005 per-org overlays. Predicted 5 red / 3 green.
+ * Ordinary red, with deliberately green controls. Taking the fix back out
+ * (`git checkout origin/main -- src/domains/meta.ts src/domains/packages.ts`,
+ * restoring the unconditional threading) must turn the env-wide pins RED and
+ * leave the `view` controls GREEN — the latter is the reason they are here: a
+ * "fix" that simply stopped threading the org anywhere would pass every red
+ * case and fail there, silently retiring ADR-0005 per-org overlays.
  *
- * Measured (recorded in the PR body): 5 red / 3 green, and the reds fail in the
- * shape that names the defect —
+ * Predicted 4 red / 4 green; measured 4 red / 4 green, against the real stack:
  *
- *   AssertionError: expected 'org_alpha' to be null
+ *   with the fix          without it (origin/main)
+ *   ------------------    ---------------------------------------------------
+ *   flow    org = null    org = "org_alpha"                            → RED
+ *   object  org = null    org = "org_alpha"                            → RED
+ *   receipt  identical    "(org=org_alpha, …)" vs "(env-wide, …)"      → RED
+ *   app     1 row, null   TWO rows: env-wide `_unpublished:true` PLUS
+ *                         org-scoped `_unpublished:false`, and the
+ *                         env-wide list still answers `_unpublished:
+ *                         true` — the flip that reverts on restart    → RED
+ *   view    org = "org_alpha"  unchanged                             → GREEN
+ *   views   org = "org_alpha"  unchanged                             → GREEN
+ *   predicate (registry-derived)  unchanged                          → GREEN
+ *   flip logs no failure          unchanged                          → GREEN
  *
- * — the phantom row of #6190, reproduced on demand.
+ * The last green is NOT slack, and it is why the count is 4/4 rather than the
+ * 5/3 this file first predicted: that case asserts an ABSENCE of a degradation
+ * line, and the unfixed code satisfies it too — its flip succeeds, it just
+ * succeeds into the wrong partition. It guards the opposite regression (a
+ * future change that degrades the flip into warn-and-continue, which this route
+ * answers 200 through), so it is kept and its greenness stated rather than
+ * dressed up as a red.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
 import { HttpDispatcher } from './http-dispatcher.js';
@@ -115,6 +130,8 @@ function makeEngine() {
             getArtifactItem: () => undefined,
             getObject: () => undefined,
             getPackage: () => undefined,
+            isPackageDisabled: () => false,
+            applyNavContributions: (app: unknown) => app,
             registerItem: (type: string, name: string, item: unknown) => {
                 let byName = registryItems.get(type);
                 if (!byName) { byName = new Map(); registryItems.set(type, byName); }
@@ -134,14 +151,26 @@ function makeEngine() {
             tableOf(table).push(row);
             return row;
         },
+        // [#5619] Both write verbs open with the PRODUCER's own dispatch
+        // predicate, so this double cannot accept a call the real ObjectQL
+        // engine would refuse (`check:engine-double-contract`). Imported from
+        // `@objectstack/metadata-core`, never `@objectstack/objectql` — that
+        // reverse edge is a cycle turbo refuses.
         async update(table: string, data: Record<string, unknown>, opts?: { where?: Record<string, unknown> }) {
-            const target = tableOf(table).find((r) => matches(r, opts?.where));
+            const dispatch = assertEngineUpdateDispatch(data as any, opts as any);
+            const rows = tableOf(table);
+            const target = dispatch.kind === 'by-id'
+                ? rows.find((r) => r.id === dispatch.id)
+                : rows.find((r) => matches(r, opts?.where));
             if (target) Object.assign(target, data);
             return target ?? null;
         },
         async delete(table: string, opts?: { where?: Record<string, unknown> }) {
+            const dispatch = assertEngineDeleteDispatch(opts as any);
             const rows = tableOf(table);
-            const keep = rows.filter((r) => !matches(r, opts?.where));
+            const keep = dispatch.kind === 'by-id'
+                ? rows.filter((r) => r.id !== dispatch.id)
+                : rows.filter((r) => !matches(r, opts?.where));
             const deleted = rows.length - keep.length;
             tables.set(table, keep);
             return { deleted };
