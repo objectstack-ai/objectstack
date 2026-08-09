@@ -198,9 +198,41 @@ export const GroupByNodeSchema = lazySchema(() => z.union([
 ]));
 
 /**
+ * The prescription for the per-aggregation `distinct` flag removed in #6815.
+ *
+ * Not exported, unlike {@link QUERY_CURSOR_REMOVED} / {@link
+ * QUERY_DISTINCT_REMOVED}: those two are re-declared on
+ * `EngineQueryOptionsSchema` and `HttpFindQueryParamsSchema` and need one
+ * string at two rejection sites, while this key lives on exactly one schema —
+ * `AggregationNodeSchema`, which `QuerySchema.aggregations` and
+ * `EngineAggregateOptionsSchema.aggregations` both reuse by reference, so both
+ * inherit the tombstone without restating it.
+ *
+ * No `os migrate meta` step is named: `QueryAST` is a REQUEST surface (the
+ * client SDK builder's output and the `POST /data/:object/query` body), never
+ * stored in stack metadata, so there is no source for a conversion to rewrite
+ * — the #4286 disposition, verbatim. The ADR-0087 registration is the
+ * protocol-17 semantic migration `aggregation-node-distinct-retired`.
+ */
+const AGGREGATION_DISTINCT_REMOVED =
+  '`query.aggregations[].distinct` was removed in @objectstack/spec 17 (#6815, ADR-0049) — '
+  + 'exactly ONE of the six faces that read an aggregation honoured it. The objectql in-memory '
+  + 'fallback deduplicated the values before applying the function, while `driver-sql`, '
+  + '`driver-turso`, `driver-mongodb`, `driver-memory` and the service-analytics SQL builder '
+  + "all ignored it — so `{ function: 'sum', field: 'amount', distinct: true }` answered a "
+  + 'DEDUPLICATED sum when the engine fell back in memory and an ordinary sum on every SQL '
+  + 'datasource: one query, two numbers, chosen by which backend happened to serve it. Both '
+  + 'answers are plausible, so nothing surfaced the divergence. Delete the key. For a '
+  + 'deduplicated COUNT the live spelling is the `count_distinct` aggregation function, which '
+  + 'every SQL face compiles to `COUNT(DISTINCT field)` (#6409) and the in-memory fallback '
+  + 'computes identically. `SUM(DISTINCT …)` / `AVG(DISTINCT …)` get no replacement: no '
+  + 'backend ever computed them here, and a per-row measure that needs deduplicating is a '
+  + 'modelling problem to fix in the data, not a flag on the read.';
+
+/**
  * Aggregation Node
  * Represents an aggregated field with function.
- * 
+ *
  * Aggregations summarize data across groups of rows (GROUP BY).
  * Used with `groupBy` to create analytical queries.
  * 
@@ -231,7 +263,12 @@ export const AggregationNodeSchema = lazySchema(() => z.object({
   function: AggregationFunction.describe('Aggregation function'),
   field: z.string().optional().describe('Field to aggregate (optional for COUNT(*))'),
   alias: z.string().describe('Result column alias'),
-  distinct: z.boolean().optional().describe('Apply DISTINCT before aggregation'),
+  /**
+   * Per-aggregation DISTINCT — REMOVED (#6815, ADR-0049). One face honoured it
+   * and five ignored it; `count_distinct` is the one deduplicating spelling
+   * every face computes. See {@link AGGREGATION_DISTINCT_REMOVED}.
+   */
+  distinct: retiredKey(AGGREGATION_DISTINCT_REMOVED),
   filter: FilterConditionSchema.optional().describe('[EXPERIMENTAL — not enforced] Per-aggregation filter (SQL FILTER (WHERE …)). Neither the SQL builders nor the in-memory fallback applies it (#4286); filter the whole query with `where` instead.'),
 }));
 

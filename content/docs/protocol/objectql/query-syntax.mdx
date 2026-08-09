@@ -104,6 +104,19 @@ a `where` predicate on the sort key — §7), and `distinct` (unique values via
 effect was suppressing the REST list count, which is truthful again). **Enforced**:
 `having` (§5). The experimental flags above are tracked in the liveness ledger
 (`packages/spec/liveness/query.json`).
+
+One member of `AggregationNode` was settled separately, in #6815: the
+per-aggregation **`distinct`** flag is **removed** on the same terms. It escaped the
+#4286 sweep because that sweep asked which members no executor reads and this one had
+a reader — one out of six. The engine's in-memory fallback deduplicated before
+applying the function, while `driver-sql`, `driver-turso`, `driver-mongodb`,
+`driver-memory` and the analytics SQL builder all ignored it, so
+`{ function: 'sum', field: 'amount', distinct: true }` answered a deduplicated sum on
+the fallback path and an ordinary sum on every SQL datasource — one query, two
+plausible numbers, chosen by which backend served it. The live deduplicating spelling
+is the **`count_distinct` function** (`COUNT(DISTINCT field)` on both SQL faces since
+#6409); `SUM(DISTINCT …)` / `AVG(DISTINCT …)` have no replacement, because no backend
+ever computed them here.
 </Callout>
 
 ### Key Types
@@ -120,9 +133,9 @@ interface AggregationNode {
   function: 'count' | 'sum' | 'avg' | 'min' | 'max' | 'count_distinct';
   field?: string;        // optional for COUNT(*)
   alias: string;         // result column alias
-  distinct?: boolean;    // DISTINCT before aggregation — in-memory path only
   filter?: FilterCondition; // [EXPERIMENTAL — not enforced] FILTER WHERE clause — never applied
 }
+// `distinct?: boolean` was REMOVED in protocol 17 (#6815) — see the callout below.
 
 // FieldNode — one entry of the select list. A field name, optionally dotted to
 // reach through a relationship ('owner.name'). Related *records* come from
