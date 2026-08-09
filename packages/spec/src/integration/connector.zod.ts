@@ -60,7 +60,8 @@ import { retiredKey } from '../shared/retired-key';
  * (`data/mapping.zod.ts` — a string enum,
  * `none`/`constant`/`map`/`split`/`join`/`lookup`, with its settings in `params`),
  * applied row by row by the REST import path — or an ETL transformation step
- * (L2 above). Already authored the retired key? `os migrate meta --from 16` rewrites it.
+ * (L2 above). Already authored the retired key? `os migrate meta --from 16` rewrites
+ * existing sources automatically — the key itself is removed.
  *
  * ## Runtime contract — descriptor vs. registered connector (#2612)
  *
