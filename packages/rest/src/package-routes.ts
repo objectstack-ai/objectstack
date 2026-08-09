@@ -7,9 +7,6 @@ import { sendOk, sendError } from '@objectstack/types';
 import { mountDirectRoutes, type DirectMountedRoute } from './direct-mount.js';
 
 /**
- * Options for package route registration.
- */
-/**
  * The outcome of reading a query parameter that this API declares as
  * single-valued. `ok: false` carries the multiplicity so the refusal can say
  * what it saw rather than only that it refused.
@@ -70,6 +67,9 @@ function repeatedQueryParamMessage(name: string, count: number): string {
     + `this endpoint will not choose between conflicting values.`;
 }
 
+/**
+ * Options for package route registration.
+ */
 export interface PackageRoutesOptions {
   /**
    * Protocol service (ObjectStackProtocol) — provides access to in-memory
