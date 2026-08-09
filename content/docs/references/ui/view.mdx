@@ -734,7 +734,7 @@ End-user quick-filter configuration (Airtable "User filters" parity)
 | **fields** | `{ field: string; label?: string \| Record<string, string>; type?: Enum<'select' \| 'multi-select' \| 'boolean' \| 'date-range' \| 'text'>; options?: object[]; … }[]` | optional | Fields exposed as quick filters (dropdown/toggle elements) |
 | **tabs** | `{ name: string; label?: string \| Record<string, string>; icon?: string; view?: string; … }[]` | optional | Named filter presets rendered as tabs (tabs element). Reuses ViewTabSchema |
 | **showAllRecords** | `boolean` | optional | Show an "All records" tab before the presets (tabs element) |
-| **allowAddTab** | `boolean` | optional | Render an "add tab" affordance after the presets (tabs element). Page lists only — object views use `listViews` for named presets |
+| **allowAddTab** | `boolean` | optional | Let end users add their own tab after the presets (tabs element): the affordance asks for a name and snapshots the filters currently applied as a new tab. SESSION-SCOPED — an added tab lives only for the current mount, is never written back as metadata (ADR-0047), and carries a remove control the authored presets do not. Page lists only — object views use `listViews` for named presets |
 
 
 ---

@@ -11,6 +11,7 @@
 
 import { CoreServiceName } from '@objectstack/spec/system';
 import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
+import { organizationIdForMetaWrite } from '../meta-write-org-scope.js';
 import { setPackageDisabled } from '../package-state-store.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
@@ -227,7 +228,19 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                     // that cannot verify or update that consumer — would be a
                     // silent break of the exact kind #4829 is about. The rename
                     // rides the objectui follow-up card, together.
+                    //
+                    // [#7018 / the #6190 ruling, Option A] `app` declares
+                    // `allowOrgOverride: false`, so this flip does NOT carry the
+                    // session's active organization — it lands env-wide, on the
+                    // very row boot hydrates and the App Switcher reads. An
+                    // org-scoped flip was a phantom: the app looked published for
+                    // the life of the process and went back to `_unpublished:
+                    // true` on the next restart, because the env-wide row it left
+                    // untouched is the only one cold boot loads. The READ above is
+                    // left org-aware on purpose — a layered read is a superset,
+                    // never a loss.
                     const flipped: string[] = [];
+                    const flipOrganizationId = organizationIdForMetaWrite('app', organizationId);
                     try {
                         if (
                             typeof (protocol as any).getMetaItems === 'function' &&
@@ -254,7 +267,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                                         // app carries is copied through untouched.
                                         item: { ...app, _unpublished: false },
                                         packageId: id,
-                                        ...(organizationId ? { organizationId } : {}),
+                                        ...(flipOrganizationId ? { organizationId: flipOrganizationId } : {}),
                                         ...(body?.actor ? { actor: body.actor } : {}),
                                     });
                                     flipped.push(app.name);
