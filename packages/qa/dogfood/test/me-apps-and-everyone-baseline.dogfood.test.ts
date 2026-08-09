@@ -31,6 +31,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import showcaseStack from '@objectstack/example-showcase';
 import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { SecurityPlugin } from '@objectstack/plugin-security';
 
 const SYS = { isSystem: true } as const;
 
@@ -46,7 +47,16 @@ describe('ADR-0090 D5 closures: /me/apps + anchor-bindable baseline', () => {
     // THAT set to the `everyone` anchor. The #5491 consequence — the baseline no
     // longer grants objects — is handled where it bites, by declaring the probe's
     // create grant instead of inheriting it from a wildcard (see the delete case).
-    stack = await bootStack(showcaseStack);
+    //
+    // [#7001] SAID OUT LOUD, in the argument, because it is a real dependency of
+    // this file and not a background fact. It used to be silent: `bootStack`
+    // built a vanilla `new SecurityPlugin()` for everyone, so this suite got the
+    // platform baseline by DEFAULT while `objectstack dev` gave the same
+    // showcase its own declared `showcase_member_default` — the boot-path
+    // asymmetry #7001 closed. The harness now honours an app's declared default,
+    // so the file that genuinely wants the platform's own baseline asks for it.
+    // Nothing about the claim below changed; only who is saying it.
+    stack = await bootStack(showcaseStack, { security: new SecurityPlugin() });
     adminTok = await stack.signIn();
     memberTok = await stack.signUp('baseline-member@verify.test');
     ql = await stack.kernel.getServiceAsync('objectql');
