@@ -22,8 +22,8 @@
  *  4. Lock enforcement on scoped kernels is shadow-immune.
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
-import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { ObjectStackProtocolImplementation, resetEnvWritableMetadataTypes } from '@objectstack/metadata-protocol';
 import { ObjectQL } from './engine.js';
 import { SchemaRegistry } from './registry.js';
 import { assertEngineUpdateDispatch } from './engine-update-dispatch.js';
@@ -165,11 +165,33 @@ function findByName(items: any[], name: string): any {
     return (items as any[]).find((it) => it?.name === name);
 }
 
+// #6483 rolled `app`'s `allowOrgOverride` back to `false` (ADR-0005 — the
+// amendment table says ❌ for `page`/`app`/`action`), so overriding the
+// PACKAGED app these suites are built around now needs the ONE documented
+// door that remains: the `OS_METADATA_WRITABLE` operator escape hatch, which
+// both write gates consult. The machinery pinned here — envelope-preserving
+// hydration, shadow healing, lock-vs-shadow ordering — is exactly what an
+// operator who unlocked a type would exercise, so the cases run behind the
+// hatch rather than re-specimening to `view` and losing the app-switcher
+// narrative the assertions are written in.
+function unlockAppOverridesViaEnvHatch(): void {
+    process.env.OS_METADATA_WRITABLE = 'app';
+    (ObjectStackProtocolImplementation as any).resetEnvWritableCache();
+    resetEnvWritableMetadataTypes();
+}
+
+function resetEnvHatch(): void {
+    delete process.env.OS_METADATA_WRITABLE;
+    (ObjectStackProtocolImplementation as any).resetEnvWritableCache();
+    resetEnvWritableMetadataTypes();
+}
+
 describe('registry shadow — control-plane PUT → GET → DELETE keeps the artifact envelope', () => {
     let engine: ObjectQL;
     let protocol: ObjectStackProtocolImplementation;
 
     beforeEach(async () => {
+        unlockAppOverridesViaEnvHatch();
         engine = new ObjectQL();
         const { driver } = makeStubDriver();
         engine.registerDriver(driver, true);
@@ -182,6 +204,8 @@ describe('registry shadow — control-plane PUT → GET → DELETE keeps the art
         // into the process-wide registry.
         protocol = new ObjectStackProtocolImplementation(engine);
     });
+
+    afterEach(resetEnvHatch);
 
     it('GET list while the overlay row exists: overlay content wins, artifact envelope wins', async () => {
         await protocol.saveMetaItem({ type: 'app', name: 'setup', item: { ...overlayBody } });
@@ -247,6 +271,14 @@ describe('registry shadow — control-plane PUT → GET → DELETE keeps the art
 });
 
 describe('registry shadow — scoped-kernel lock enforcement is shadow-immune', () => {
+    // Same #6483 door as above: with `app` no longer allowOrgOverride, the
+    // save would 403 NOT_OVERRIDABLE at the type gate and never reach the
+    // L3 lock this case exists to prove is shadow-immune. Behind the hatch
+    // the type gate passes and the LOCK is what refuses — the ordering the
+    // assertion (`ITEM_LOCKED`, not `NOT_OVERRIDABLE`) pins.
+    beforeEach(unlockAppOverridesViaEnvHatch);
+    afterEach(resetEnvHatch);
+
     it('saveMetaItem still 403s on a full-locked artifact when a stripped shadow exists', async () => {
         const registry = new SchemaRegistry({ multiTenant: false });
         registry.registerItem('app', artifactApp(), 'name', PKG);

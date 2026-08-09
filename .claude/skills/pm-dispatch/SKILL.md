@@ -1073,10 +1073,24 @@ Prime Directive #10 是一个强力生产者,而循环原本只有「修掉」�
   (发布后修不回);④ 发布说明里需要为它道歉的(含「照文档抄即失败」的首小时
   体验)。改进型、优化、重构、观察类 finding、内部工具、纯展示瑕疵默认**不
   阻塞** —— 坐下一班车。
-- **生产者唯一 = 分诊座位**(与 `domain:*` 同款单一生产者纪律):step 0 分诊
-  defect 类新单时顺手判;执行座位不打不摘 `target:<major>`,误判走上报。存量
-  已于 2026-08-06 全量清过一次(309 条 → 46 条),此后只有增量,⛔ 永不再全量
-  重扫。
+- **每个 backlog 恰好一个生产者**(与 `domain:*` 同款单一生产者纪律,只是把
+  作用域切对 —— 一个生产者管一个 backlog,不是一个生产者管全部):
+  - **objectstack 主 backlog → 分诊座位**:step 0 分诊 defect 类新单时顺手判;
+  - **objectui 本地 backlog → objectui 整仓座位**(`/pm-dispatch
+    repo:objectstack-ai/objectui`):在它自己的本地 backlog 扫描时,用**同一条
+    二元判据 + 同四类阻塞**在 objectui 仓里打 `target:<major>`。
+  其余执行座位一律不打不摘 `target:<major>`,误判走上报 —— 单一生产者纪律没有
+  放松,放松的只是「一个座位扫得完所有 backlog」这个错误前提。⛔ 两个生产者
+  各扫各的 backlog,谁都不去扫对方的(step 0 的 repo-scoped 限定正为此,见
+  「析取 2 必须 repo-scoped」)。
+  为什么补这条(实测 2026-08-09):objectui 的 `target:v17` 只在 2026-08-06/07
+  那次审计用过 7 次且全部已闭,此后本地 backlog 长到 117 open / 48 `pm:queue`
+  (立单读数;本 PR 复测 119 / 52)而板上 open **0** 条 —— 「随 console bundle 入板」有消费方却**没有常设生产
+  者**,而控制台正是从这个 backlog 发出去的。
+- **存量清板姿态(一次性,每侧各一次)**:objectstack 已于 2026-08-06 全量清过
+  一次(309 条 → 46 条);objectui 的存量补一次等价的清板(#6904,判据与四类
+  阻塞照抄本节)。两侧各清完那一次之后**只有增量**,⛔ 永不再全量重扫 ——
+  全量重扫正是此前历次一次性标注腐烂的那步。
 - **消费者三处**(a label exists iff something reads it):维护者的发版清单 =
   `label:target:<major> is:open` 一条查询(与 `pm:seat` 状态板同构,标签即
   看板);step 3 批次选择板上项优先;step 9 轮次报告第四健康指标。
@@ -1084,8 +1098,12 @@ Prime Directive #10 是一个强力生产者,而循环原本只有「修掉」�
   已修/不成立的摘牌 + 一句评论(main 一天 ~18 合并,阻塞判断有半衰期)。
 - **发版时刻 = 清板,不是重扫**:板上每条三选一 —— 修掉 / 摘牌(不再成立)/
   **明示接受带病发布**(摘标签 + 一句 accepted-for-GA 评论留痕,进 release
-  notes 的 known issues)。姊妹仓同标签:objectui 随 console bundle 入板;
-  cloud 独立部署不入板,advisory 单列。
+  notes 的 known issues)。姊妹仓同标签:objectui **在自己仓里上板**,生产者是
+  objectui 整仓座位(见上),修复经 console bundle 随 pin bump 进这次发布;
+  cloud 独立部署不入板,advisory 单列。⇒ 发版时刻的清单因此是**两条查询**
+  (objectstack 与 objectui 各一条 `label:target:<major> is:open`),两张板都要
+  清到空;上面「消费者三处」仍写作一条查询,口径更新与发版前 console bump 的
+  衔接归 #6906,不在本次改动范围。
 
 ### 1. Fetch candidates
 

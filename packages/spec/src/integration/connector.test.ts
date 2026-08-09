@@ -40,7 +40,14 @@ import {
   type ConnectorFieldMapping,
   type DataSyncConfig,
   type WebhookConfig,
+
+  // The `/meta/connector/:name` door's schema (#6245) — `ConnectorSchema` plus
+  // the ADR-0097 cross-field rules. The envelope pins below drive BOTH, because
+  // this is the shape the round-trip actually goes through.
+  DeclarativeConnectorEntrySchema,
 } from './connector.zod';
+
+import { getMetadataTypeSchema } from '../kernel/metadata-type-schemas';
 
 // Import shared auth schemas from canonical source
 import {
@@ -1201,5 +1208,146 @@ describe('[#4703] FieldMapping no longer names three declarations', () => {
     // Empty, and it must stay empty. A failure here is a NEW dual-source name;
     // the fix is to converge or prefix it, never to allow-list it back in.
     expect(conflicts.sort()).toEqual([]);
+  });
+});
+
+// ============================================================================
+// ADR-0010 protection envelope — PRESERVED on round-trip, not merely tolerated
+// (#6362, split out of #6245)
+// ============================================================================
+
+/**
+ * The defect these pins hold shut is the QUIET half of the envelope-handling
+ * pair, and it is quiet in a way that reads as success.
+ *
+ * Both metadata load paths call `applyProtection` on EVERY type, so a
+ * package-loaded connector carries the seven `_`-prefixed envelope keys by the
+ * time anything re-parses it — and since #6245 bound
+ * `DeclarativeConnectorEntrySchema` to `PUT /api/v1/meta/connector/:name`,
+ * something does re-parse it on every write.
+ *
+ * `sharing_rule` is `.strict()`, so its undeclared envelope was REJECTED: a
+ * hard 422, loud, fixed in #6245. `ConnectorSchema` is a plain `z.object`, so
+ * it TOLERATED the same envelope and answered `success` — then stripped every
+ * key from the output. Tolerate is not preserve. Measured on `origin/main`
+ * before the `...MetadataProtectionFields` spread: a stamped catalog descriptor
+ * came back having lost all seven keys, with no error anywhere, so every
+ * downstream reader of `extractProtection` / `resolveLockState` saw an
+ * unlocked, unattributed, org-provenance item.
+ *
+ * ⚠️ Assert the VALUES, key by key — not `success`, and not "some `_` key
+ * survived". A presence-only or parses-only assertion is green on the very
+ * shape this issue is about: the unfixed schema parses that body perfectly
+ * well. The whole defect lives in the output, so the output is what gets
+ * asserted.
+ */
+const STAMPED_ENVELOPE = {
+  _lock: 'no-overlay',
+  _lockReason: 'Ships with the billing package.',
+  _lockSource: 'artifact',
+  _lockDocsUrl: 'https://docs.example.com/locked-connectors',
+  _provenance: 'package',
+  _packageId: 'com.acme.billing',
+  _packageVersion: '1.2.3',
+} as const;
+
+/**
+ * A catalog descriptor: no `provider`, so the ADR-0097 §3/§5 instance rules do
+ * not fire and the entry schema judges exactly what the base schema does. That
+ * keeps these pins about the envelope and nothing else.
+ */
+const STAMPED_CONNECTOR = {
+  name: 'billing_api',
+  label: 'Billing API',
+  type: 'api',
+  ...STAMPED_ENVELOPE,
+} as const;
+
+describe('ADR-0010 protection envelope (#6362)', () => {
+  it('ConnectorSchema PRESERVES every stamped envelope key through a parse', () => {
+    const parsed = ConnectorSchema.parse(STAMPED_CONNECTOR);
+
+    // The reverse-verification target: remove `...MetadataProtectionFields`
+    // from `ConnectorSchema` and this object is `{}` — every key stripped —
+    // while the parse above still succeeds.
+    expect({
+      _lock: parsed._lock,
+      _lockReason: parsed._lockReason,
+      _lockSource: parsed._lockSource,
+      _lockDocsUrl: parsed._lockDocsUrl,
+      _provenance: parsed._provenance,
+      _packageId: parsed._packageId,
+      _packageVersion: parsed._packageVersion,
+    }).toEqual(STAMPED_ENVELOPE);
+  });
+
+  it('the /meta write door (DeclarativeConnectorEntrySchema) preserves it too', () => {
+    // #6245 bound this shape, not the base, to `PUT /meta/connector/:name`.
+    // The base carrying the spread is only half an answer if the door's own
+    // schema drops it, so the door is pinned separately.
+    const parsed = DeclarativeConnectorEntrySchema.parse(STAMPED_CONNECTOR);
+    expect(parsed._packageId).toBe('com.acme.billing');
+    expect(parsed._provenance).toBe('package');
+    expect(parsed._lock).toBe('no-overlay');
+    expect(parsed._lockDocsUrl).toBe('https://docs.example.com/locked-connectors');
+  });
+
+  it('the schema the metadata registry resolves for `connector` preserves it', () => {
+    // The registry lookup is the real entry point — a future rebinding that
+    // pointed `connector` at some third shape would pass both pins above and
+    // still strip the envelope in production.
+    const schema = getMetadataTypeSchema('connector');
+    expect(schema, 'no schema bound for `connector`').toBeDefined();
+
+    const result = schema!.safeParse(STAMPED_CONNECTOR);
+    expect(result.success).toBe(true);
+
+    const out = result.success ? (result.data as Record<string, unknown>) : {};
+    const survived = Object.keys(STAMPED_ENVELOPE).filter((k) => k in out);
+    expect(survived.sort()).toEqual(Object.keys(STAMPED_ENVELOPE).sort());
+  });
+
+  it('a provider-bound instance keeps the envelope alongside the §3/§5 rules', () => {
+    // The envelope must not become a casualty of the cross-field rules: an
+    // instance declaration is package-loaded too, and it is the shape most
+    // likely to be locked.
+    const parsed = DeclarativeConnectorEntrySchema.parse({
+      name: 'billing_openapi',
+      label: 'Billing (OpenAPI)',
+      type: 'api',
+      provider: 'openapi',
+      providerConfig: { spec: './billing-openapi.json' },
+      auth: { type: 'bearer', credentialRef: 'BILLING_TOKEN' },
+      ...STAMPED_ENVELOPE,
+    });
+    expect(parsed._packageId).toBe('com.acme.billing');
+    expect(parsed._lockSource).toBe('artifact');
+  });
+
+  it('declaring the envelope did not open the schema to arbitrary `_` keys', () => {
+    // `ConnectorSchema` is deliberately non-strict (subtypes `.extend()` it),
+    // so an unknown key is stripped rather than refused. The point of this pin
+    // is the converse of the ones above: the spread adds SEVEN named keys, not
+    // a passthrough — an underscore key nobody declared still does not survive.
+    const parsed = ConnectorSchema.parse({
+      ...STAMPED_CONNECTOR,
+      _notAnEnvelopeKey: 'should not survive',
+    });
+    expect('_notAnEnvelopeKey' in parsed).toBe(false);
+    expect(parsed._packageId).toBe('com.acme.billing');
+  });
+
+  it('WebhookConfigSchema — the nested webhook — preserves it as well', () => {
+    // `WebhookConfigSchema` extends `WebhookSchema`, which has carried the
+    // spread since #4001 batch 11. Pinned here so the inherited behaviour
+    // cannot regress silently through a future `.extend()`/`.omit()` on the
+    // connector side.
+    const parsed = WebhookConfigSchema.parse({
+      name: 'billing_events',
+      url: 'https://example.com/hooks/billing',
+      ...STAMPED_ENVELOPE,
+    });
+    expect(parsed._packageId).toBe('com.acme.billing');
+    expect(parsed._provenance).toBe('package');
   });
 });

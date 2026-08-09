@@ -41,7 +41,7 @@
  * `protocol.lock-gate-fail-closed.test.ts`. The receipt is built INSIDE
  * `deleteMetaItem`, so a harness that mocks `deleteMetaItem` cannot see it.
  */
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 // [#5619] The producer's OWN write-verb dispatch decisions (#4550 delete /
 // #5480 update). Imported from `@objectstack/metadata-core`, never from
 // `@objectstack/objectql`: objectql DEPENDS ON this package, so that import
@@ -49,6 +49,7 @@ import { describe, expect, it } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
 import { ObjectStackProtocolImplementation } from './protocol.js';
+import { resetEnvWritableMetadataTypes } from './sys-metadata-repository.js';
 
 interface Row {
     id: string;
@@ -163,13 +164,18 @@ describe('#5927 — a delete receipt names what actually happened', () => {
         expect(entry('object')).toMatchObject({ allowRuntimeCreate: true, allowOrgOverride: false });
         expect(entry('view')).toMatchObject({ allowRuntimeCreate: true, allowOrgOverride: true });
         expect(entry('job')).toMatchObject({ allowRuntimeCreate: false, allowOrgOverride: false });
-        // #6283 — the overlay-less-yet-overridable specimen the last case in
-        // this file needs. It was `flow` until that issue rolled flow's
-        // `allowOrgOverride` back to `false` (ADR-0005:57); `action` is the
-        // surviving member of that pairing. If it ever leaves too, the case
-        // below must be re-read rather than repaired — there would be no type
-        // left that can be both overlay-less and per-org overridden.
-        expect(entry('action')).toMatchObject({ supportsOverlay: false, allowOrgOverride: true });
+        // #6283 → #6483 — the overlay-less-yet-overridable specimen the last
+        // case in this file needs. It was `flow` until #6283 rolled that
+        // flag back to `false` (ADR-0005:57), then `action` until #6483
+        // rolled back the remaining nine unratified `true` flags. The
+        // population is now EMPTY by ruling and pinned empty; the last case
+        // reaches the pairing through `OS_METADATA_WRITABLE` — the one
+        // documented door left. A future registry edit minting a new member
+        // turns this pin red instead of landing an untested pairing.
+        const overlaylessYetOverridable = DEFAULT_METADATA_TYPE_REGISTRY
+            .filter((e) => e.supportsOverlay === false && e.allowOrgOverride)
+            .map((e) => e.type);
+        expect(overlaylessYetOverridable).toEqual([]);
     });
 
     // ── repository path — sentence 2 (a row was deleted) ──────────────────
@@ -227,17 +233,18 @@ describe('#5927 — a delete receipt names what actually happened', () => {
         // backwards; one decided by artifact backing gets it right.
         //
         // The specimen was `flow` until #6283 rolled that type's
-        // `allowOrgOverride` back to `false` (ADR-0005:57 — automation carries
-        // execution side-effects, so a per-org variant is a deployment, not an
-        // overlay). This is a REPLACEMENT, not a re-spelling: after the
-        // rollback a packaged flow cannot be overridden at all, so the case
-        // would have gone green for the empty reason — `assertAllowed` refuses
-        // the write before any receipt is built, and there is no overlay left
-        // to lift. `action` is the surviving member of the same population
-        // (`supportsOverlay: false` + `allowOrgOverride: true`), so the
-        // distinction this case exists to prove is still exercised. The
-        // premise pin below reads that pairing from the registry rather than
-        // restating it, so a future flip of `action` lands here loudly.
+        // `allowOrgOverride` back to `false` (ADR-0005:57), then bare
+        // `action` until #6483 rolled back the remaining nine unratified
+        // flags — the premise pin above now holds the population EMPTY. The
+        // pairing stays reachable through `OS_METADATA_WRITABLE` (ADR-0005's
+        // documented operator escape hatch, consulted by both write gates),
+        // and an overlay row minted under the hatch — or under the old flag,
+        // pre-rollback — still exists at delete time, so the reset sentence
+        // this case pins is still a sentence real deployments will read.
+        process.env.OS_METADATA_WRITABLE = 'action';
+        ObjectStackProtocolImplementation.resetEnvWritableCache();
+        resetEnvWritableMetadataTypes();
+
         const { protocol } = tenantProtocol({
             rows: [overlayRow('action', 'rc9_escalate')],
             artifacts: [{ type: 'action', name: 'rc9_escalate' }],
@@ -248,6 +255,14 @@ describe('#5927 — a delete receipt names what actually happened', () => {
         expect(result.message).toBe(
             `Customization overlay deleted — action/rc9_escalate reset to artifact default. [seq=${result.seq}]`,
         );
+    });
+
+    afterEach(() => {
+        // The escape-hatch case must not leak `action` writability into its
+        // neighbours — both memoised caches, or the next case lies.
+        delete process.env.OS_METADATA_WRITABLE;
+        ObjectStackProtocolImplementation.resetEnvWritableCache();
+        resetEnvWritableMetadataTypes();
     });
 
     // ── repository path — sentence 1 (nothing was there) ──────────────────

@@ -87,6 +87,14 @@ import { resolveAllowDriverConnectFailure } from '@objectstack/types';
 // vocabulary of "benign driver error" is the exact debt that module exists to
 // retire, and `check:durability-log-level` exempts only this declared name.
 import { isMissingTableError } from '@objectstack/metadata/errors';
+// [#6806] The ONE shared "is this driver error a unique-constraint violation?"
+// predicate, and its narrower companion "which column conflicted" (#6250 /
+// #6544, both landed in `@objectstack/types`). The engine's autonumber
+// collision resync asks exactly the two questions those exports were named to
+// answer, so it asks THEM — hand-writing a fifth dialect word-list inside the
+// engine is the consumer-side tolerant parsing PD #12 forbids and precedent
+// #5841 retired.
+import { isUniqueViolationError, uniqueViolationColumn } from '@objectstack/types';
 
 /**
  * Per-row outcome of {@link ObjectQL.insertMany} (framework#3172). One entry
@@ -311,6 +319,76 @@ const ENGINE_AGGREGATE_OPTION_KEYS: ReadonlySet<string> = new Set([
  * scan and truncates the max.
  */
 const AUTONUMBER_SEED_PAGE_SIZE = 5000;
+
+/**
+ * How many times one insert may re-seed and re-issue after a unique-constraint
+ * collision on an engine-issued autonumber (#6806) before it refuses.
+ *
+ * Bounded on purpose. The FIRST re-issue is the one that matters: the collision
+ * proves the in-memory counter sits below the store's real max, and the re-seed
+ * that follows reads that max back, so attempt 2 is issued from the truth. A
+ * further collision means another writer took the number in between — real
+ * concurrency, which more spinning does not resolve (each attempt costs a full
+ * scope scan). Two spare attempts absorb a burst; past that the write fails
+ * loudly rather than looping against a live competitor.
+ */
+const AUTONUMBER_COLLISION_ATTEMPTS = 3;
+
+/**
+ * One autonumber the ENGINE issued on a row, paired with the counter it came
+ * from (#6806). Only engine-issued values are listed: a value an exempt writer
+ * supplied is the caller's, and a collision on it is the caller's to see.
+ */
+interface IssuedAutonumber {
+  /** Field the value was written to. */
+  readonly field: string;
+  /** `object.field.<scope>` key in {@link ObjectQL.autonumberCounters}. */
+  readonly counterKey: string;
+}
+
+/**
+ * Read the counter out of ONE stored autonumber value, under #6468's anchoring
+ * rules. Shared by the seeding scan and by the adopt-on-exempt-write resync
+ * (#6806) so both readings can never drift apart — a divergence here is a
+ * duplicate record number, which is the harm the whole family is about.
+ *
+ * `prefix` and `suffix` are `renderAutonumber`'s own declared output; this
+ * function derives no format understanding of its own (see `seedAutonumber`'s
+ * "Locating the counter inside a stored value" section for the full rationale):
+ *
+ *   - **Either one declared ⇒ the slot is ANCHORED**: the counter is the digit
+ *     run at the START of what follows the prefix, after removing the declared
+ *     suffix when this row carries it. The suffix is stripped when it matches,
+ *     never required to match — a dynamic suffix renders differently per row
+ *     while the counter scope is the rendered PREFIX, so those rows share this
+ *     counter and must still be read.
+ *   - **Neither declared ⇒ UNANCHORED**: the legacy reading — the LAST digit
+ *     run of the whole value.
+ *
+ * A value outside the scope (it does not carry the rendered prefix) reads as
+ * `undefined`: it belongs to another counter and must not lift this one.
+ *
+ * Both branches use linear `/\d+/` forms — a backtracking lookahead here is a
+ * polynomial-ReDoS sink on stored values full of zeros (CodeQL
+ * js/polynomial-redos).
+ */
+function readAutonumberCounter(value: string, prefix: string, suffix: string): number | undefined {
+  if (prefix && !value.startsWith(prefix)) return undefined;
+  const anchored = prefix !== '' || suffix !== '';
+  let digits: string | undefined;
+  if (anchored) {
+    let core = value.slice(prefix.length);
+    if (suffix && core.endsWith(suffix)) core = core.slice(0, core.length - suffix.length);
+    const head = core.match(/^\d+/);
+    digits = head ? head[0] : undefined;
+  } else {
+    const runs = value.match(/\d+/g);
+    digits = runs ? runs[runs.length - 1] : undefined;
+  }
+  if (!digits) return undefined;
+  const n = parseInt(digits, 10);
+  return Number.isFinite(n) ? n : undefined;
+}
 
 /** Tombstoned option keys: rejected with the spec's own removal notice. */
 const ENGINE_RETIRED_OPTION_MESSAGES: Record<string, string> = {
@@ -2343,29 +2421,68 @@ export class ObjectQL implements IObjectQLEngine {
    * interpolation (`{island_zone}{000}`) and per-scope reset behave identically
    * to the SQL driver's persistent sequence (#1603). NOTE: this in-memory seeding
    * is single-instance.
+   *
+   * # Keeping the seeded counter in sync (#6806)
+   *
+   * Seeding "once per counter key" is only the truth while the engine is the
+   * ONLY writer of the field. It is not: the `continue` below is reached by
+   * every exempt writer (`isSystem` seed replay, a `preserveAudit` historical
+   * import, a `beforeInsert` hook stamp), and each of those persists a record
+   * number the counter never saw. The counter then keeps issuing from where the
+   * one-time seed left it — below the store's real max — and every number it
+   * issues up to that max is a duplicate business identifier. Two resyncs
+   * close that, from opposite ends:
+   *
+   *   - **Adopt, here.** An exempt value passes through this very loop, so the
+   *     counter can be lifted from it for FREE — one string parse, no query.
+   *     {@link adoptExplicitAutonumber} does it, which makes the warm in-memory
+   *     counter converge on what a cold re-seed of the same store would answer.
+   *     This is the whole fix for in-process drift, and it costs nothing on the
+   *     generating path (a caller-supplied value never reaches this method
+   *     unless the writer is exempt).
+   *   - **Re-seed on collision**, at the write. Adoption cannot see a writer
+   *     outside this process (another instance, a direct driver write, a
+   *     restore). Those surface as a unique-constraint failure on the create,
+   *     and {@link createWithAutonumberResync} answers it by dropping the stale
+   *     counter, re-seeding from the store and re-issuing — bounded. It costs
+   *     nothing until a collision actually happens.
+   *
+   * Both are required and neither subsumes the other: adoption covers drift the
+   * engine can observe but the store cannot report, collision-resync covers
+   * drift the store reports but the engine could not observe.
+   *
+   * @returns the autonumbers this call ISSUED, in field order — the input
+   * {@link createWithAutonumberResync} needs to decide whether a unique
+   * violation is one of its own numbers. An adopted (caller-supplied) value is
+   * deliberately NOT listed: it is not the engine's to re-issue.
    */
   private async applyAutonumbers(
     object: string,
     record: Record<string, unknown>,
     execCtx?: ExecutionContext,
     driverOwnsAutonumber?: boolean,
-  ): Promise<void> {
-    if (driverOwnsAutonumber) return; // driver generates persistently in create()
+  ): Promise<IssuedAutonumber[]> {
+    if (driverOwnsAutonumber) return []; // driver generates persistently in create()
     const fields = (this.getSchema(object) as any)?.fields;
-    if (!fields || typeof fields !== 'object' || Array.isArray(fields)) return;
+    if (!fields || typeof fields !== 'object' || Array.isArray(fields)) return [];
     const now = new Date();
     const timezone = execCtx?.timezone;
+    const issued: IssuedAutonumber[] = [];
     for (const [name, def] of Object.entries(fields)) {
       if ((def as any)?.type !== 'autonumber') continue;
-      const current = record[name];
-      // Respect an explicit value — reachable only for an EXEMPT writer now
-      // (isSystem / preserveAudit / a hook stamp): #5503's strip removed every
-      // other caller's value before this method was called.
-      if (current != null && current !== '') continue;
       // Honor either the spec-canonical `autonumberFormat` or the shorthand
       // `format` (both appear in metadata; the driver reads both too) — #1603.
       const fmt = (def as any).autonumberFormat ?? (def as any).format;
       const tokens = parseAutonumberFormat(typeof fmt === 'string' ? fmt : '');
+      const current = record[name];
+      // Respect an explicit value — reachable only for an EXEMPT writer now
+      // (isSystem / preserveAudit / a hook stamp): #5503's strip removed every
+      // other caller's value before this method was called. Respecting it is
+      // unchanged; what is new is that the counter LEARNS from it (#6806).
+      if (current != null && current !== '') {
+        this.adoptExplicitAutonumber(object, name, tokens, record, String(current), now, timezone);
+        continue;
+      }
       // Refuse to generate when an interpolated `{field}` is empty — it would
       // render to an empty prefix and merge this record into the wrong counter
       // scope. Mirror the SQL driver so both paths fail identically (#1603).
@@ -2387,7 +2504,228 @@ export class ObjectQL implements IObjectQLEngine {
       next += 1;
       this.autonumberCounters.set(counterKey, next);
       record[name] = renderAutonumber({ tokens, seq: next, record, now, timezone }).value;
+      issued.push({ field: name, counterKey });
     }
+    return issued;
+  }
+
+  /**
+   * Lift the in-memory counter to a record number an EXEMPT writer supplied
+   * (#6806) — the free half of the resync, and the one that closes the shape
+   * #5495's PROBE1 measured on a warm database.
+   *
+   * The value is parsed with {@link readAutonumberCounter}, i.e. by exactly the
+   * anchoring rules #6468 gave the seeding scan, against the prefix/suffix this
+   * record's own format renders. So adopting is the same reading a cold re-seed
+   * would perform over the same row — which is the invariant to hold on to: a
+   * warm counter must answer what a restart would answer.
+   *
+   * Four deliberate refusals, each one a way this could do harm:
+   *
+   *   - **Never throws.** An exempt write is not the engine's to reject, and it
+   *     was not rejected before this method existed. A format whose `{field}`
+   *     interpolation is empty, or a value that parses to nothing, simply
+   *     teaches the counter nothing.
+   *   - **Only LIFTS a counter that is already seeded.** With no seed in hand,
+   *     writing this value in would SKIP the seeding scan and answer from one
+   *     row — below the real max whenever the store holds a higher number, i.e.
+   *     the duplicate-number defect itself. Doing nothing is correct: the row is
+   *     persisted, so the first generating insert's own scan reads it.
+   *   - **Never lowers.** A counter that has already issued numbers must not go
+   *     back over them; the max is a floor that only rises.
+   *   - **Only within this record's scope.** `readAutonumberCounter` returns
+   *     `undefined` for a value that does not carry the rendered prefix, so a
+   *     historical import into last month's date scope cannot lift THIS
+   *     month's counter. Its own scope's counter is left untouched, which is
+   *     harmless: a scope is derived from the write instant, so a past scope's
+   *     counter is not one a subsequent generating insert can reach.
+   *
+   * Adoption runs BEFORE the driver write, so an exempt insert that then fails
+   * leaves the counter lifted over a number nobody took — a gap. Gaps are
+   * already the documented cost of this path (a failed attempt consumes its
+   * value; the counter is "resilient to deletions"), and the direction is the
+   * safe one: a gap is a cosmetic surprise, a duplicate is a corrupted business
+   * identifier.
+   */
+  private adoptExplicitAutonumber(
+    object: string,
+    field: string,
+    tokens: ReturnType<typeof parseAutonumberFormat>,
+    record: Record<string, unknown>,
+    value: string,
+    now: Date,
+    timezone?: string,
+  ): void {
+    let probe: ReturnType<typeof renderAutonumber>;
+    try {
+      // An empty `{field}` would render an empty prefix and point at the wrong
+      // counter — the same hazard the generating branch throws on. Here it is a
+      // reason to learn nothing, never a reason to fail the caller's write.
+      if (missingFieldValues(tokens, record).length > 0) return;
+      probe = renderAutonumber({ tokens, seq: 0, record, now, timezone });
+    } catch {
+      return;
+    }
+    const counterKey = `${object}.${field}.${probe.scope}`;
+    const seeded = this.autonumberCounters.get(counterKey);
+    if (seeded == null) return; // not seeded yet — the first seed scan will read this row
+    const supplied = readAutonumberCounter(value, probe.prefix, probe.suffix);
+    if (supplied == null || supplied <= seeded) return;
+    this.autonumberCounters.set(counterKey, supplied);
+    this.logger.debug('Autonumber counter lifted to an externally supplied value', {
+      object, field, counterKey, from: seeded, to: supplied,
+    });
+  }
+
+  /**
+   * Create ONE record, re-seeding and re-issuing when the driver rejects an
+   * autonumber the engine itself issued as a duplicate (#6806).
+   *
+   * # What this is for
+   *
+   * A counter that sits below the store's real max — because a writer outside
+   * this process took numbers the engine could not observe — collides on every
+   * insert until it has walked past that max one number at a time. Before this,
+   * each of those inserts failed with the driver's raw error AND advanced the
+   * counter, so a warm-database storm burned a number per failed create and
+   * never converged on its own (#5495's PROBE3). Dropping the counter on the
+   * collision is what converges it: the re-seed reads the true max back, and
+   * the next attempt is issued from it.
+   *
+   * # Which failures qualify
+   *
+   *   - The engine must have ISSUED an autonumber on this row. A row whose
+   *     numbers all came from an exempt writer has nothing here to re-issue.
+   *   - The error must be a unique violation, per `isUniqueViolationError`
+   *     (#6250) — never a word-list of this method's own.
+   *   - When the dialect names the conflicting COLUMN (`uniqueViolationColumn`,
+   *     #6544), it must be one of the fields the engine issued. A conflict on
+   *     some other unique field is the caller's business error and is rethrown
+   *     untouched, exactly as #5495's disposition ruled («非本字段的冲突原样上抛»).
+   *     When the dialect names no determinable column the attribution falls back
+   *     to "the engine issued a number on this row, and the row was refused as a
+   *     duplicate" — deliberately, because `uniqueViolationColumn` answers
+   *     `undefined` for every index-named dialect, which includes MongoDB's
+   *     `E11000 ... index: doc_no_1`, i.e. the ONE fallback driver that can
+   *     raise this at all. Requiring a named column would make the resync
+   *     unreachable on exactly the driver that needs it. The cost of the
+   *     fallback is a wasted re-issue when an unrelated unique field is what
+   *     actually conflicted: the second attempt fails the same way, and the
+   *     original error is what the caller finally sees.
+   *
+   * # ⚠ The guarantee is STORAGE-DEPENDENT — say so, do not imply otherwise
+   *
+   * This whole branch is triggered by the storage layer REJECTING the duplicate,
+   * so it reaches only drivers that (1) take this fallback path at all and
+   * (2) enforce uniqueness. Measured across all five in-repo drivers:
+   *
+   * | driver | `supports.autonumber` | fallback path? | uniqueness on the column | a collision appears as |
+   * |:---|:---|:---|:---|:---|
+   * | driver-memory | `supports = {}` | **yes** | **none, ever** | **nothing** — a silent duplicate |
+   * | driver-mongodb | absent (`{ batchSchemaSync: true }`) | **yes** | single-field unique index when the field declares `unique` | `E11000 duplicate key` → re-seed + re-issue, here |
+   * | driver-sql | `autonumber: true` | no | — | — |
+   * | driver-sqlite-wasm | inherited (`extends SqlDriver`, no `supports` override) | no | — | — |
+   * | driver-turso | inherited (`...super.supports`) | no | — | — |
+   *
+   * So the retry protects essentially ONE backend: driver-mongodb with a
+   * `unique` autonumber field. That is not a new claim — it is the reading the
+   * repo already ruled and gates, in
+   * `scripts/driver-memory-census.ledger.json`'s disposition for
+   * `packages/runtime/src/autonumber-seed-cross-side-parity.integration.test.ts`
+   * (axis `ruled-permanent`, «#6664 A, maintainer 2026-08-08 — inherits #5704
+   * Q2 = B»), which states it as: "InMemoryDriver declares `supports = {}`, so
+   * the ENGINE's autonumber seeding owns the counter. No SQL backend can stand
+   * in — SqlDriver advertises the capability and its own sequence bootstrap
+   * answers instead". This comment cites that ruling rather than restating it:
+   * a second answer to "who owns the autonumber counter" is the same
+   * one-contract-two-numbers defect this lane keeps closing (#6832).
+   *
+   * `InMemoryDriver.create` is a `table.push()` and it stores no constraints of
+   * any kind — its own docstring says so since #4065, and calls itself a WEAK
+   * oracle for exactly this reason. So on driver-memory an out-of-process
+   * duplicate cannot raise anything for this method to catch, and the number
+   * lands twice in the rendered field with no error anywhere.
+   *
+   * That is stated rather than papered over (PD #10: never advertise a
+   * capability the runtime does not deliver). What covers driver-memory is the
+   * OTHER half of this resync — {@link adoptExplicitAutonumber} — which needs no
+   * constraint at all because it never waits for a rejection. Between them: drift
+   * the engine can observe is fixed on every driver; drift only the store can
+   * report is fixed wherever the store reports it.
+   *
+   * ⛔ The remedy for the silent-duplicate row is uniqueness enforcement in the
+   * driver, NOT a pre-issue existence probe here: a probe costs a query on every
+   * insert (the cost this resync was designed to avoid) and is still racy, so it
+   * would trade a silent duplicate for a rarer silent duplicate at double the
+   * read cost. `packages/drivers/**` is under the #5499 investment freeze, so
+   * that work is not this change's to do.
+   *
+   * # And when it does not converge
+   *
+   * After {@link AUTONUMBER_COLLISION_ATTEMPTS} the write fails with a named
+   * engine error (`code: 'ERR_AUTONUMBER_COLLISION'`) carrying the driver's
+   * error as `cause`. The raw driver error is deliberately NOT the contract
+   * here: "your record number collided three times after re-seeding" is an
+   * engine-level condition a caller can act on, and the driver's prose is
+   * preserved rather than replaced.
+   */
+  private async createWithAutonumberResync(
+    driver: any,
+    object: string,
+    row: Record<string, unknown>,
+    driverOptions: any,
+    issued: IssuedAutonumber[],
+    execCtx: ExecutionContext | undefined,
+    driverOwnsAutonumber: boolean,
+  ): Promise<any> {
+    let attempt = 1;
+    for (;;) {
+      try {
+        return await driver.create(object, row, driverOptions);
+      } catch (error) {
+        if (!this.isIssuedAutonumberCollision(error, issued)) throw error;
+        // Whatever happens next, the stale counter must not survive this call:
+        // leaving it in place is what turned one collision into a storm.
+        for (const one of issued) this.autonumberCounters.delete(one.counterKey);
+        if (attempt >= AUTONUMBER_COLLISION_ATTEMPTS) {
+          const fields = issued.map((one) => one.field).join(', ');
+          throw Object.assign(
+            new Error(
+              `Autonumber collision on '${object}' field(s) [${fields}]: the record number was ` +
+                `re-seeded from the store and re-issued ${AUTONUMBER_COLLISION_ATTEMPTS} times and the ` +
+                `driver rejected each one as a duplicate. No record was written.`,
+            ),
+            { code: 'ERR_AUTONUMBER_COLLISION', cause: error },
+          );
+        }
+        attempt += 1;
+        this.logger.warn('Autonumber collided — re-seeding the counter and re-issuing', {
+          object, fields: issued.map((one) => one.field), attempt,
+        });
+        // Clear the slots so `applyAutonumbers` treats them as empty again —
+        // leaving the burned value in place would read as an exempt writer's
+        // and be adopted rather than re-issued.
+        for (const one of issued) delete row[one.field];
+        issued = await this.applyAutonumbers(object, row, execCtx, driverOwnsAutonumber);
+        // Nothing left to re-issue (the field vanished from the schema
+        // mid-flight) — the next failure is the caller's to see.
+        if (issued.length === 0) return await driver.create(object, row, driverOptions);
+      }
+    }
+  }
+
+  /**
+   * Whether `error` is a unique violation attributable to one of the
+   * autonumbers this insert issued (#6806). See
+   * {@link createWithAutonumberResync} for why an unnamed column counts as
+   * attributable and a differently-named one does not.
+   */
+  private isIssuedAutonumberCollision(error: unknown, issued: IssuedAutonumber[]): boolean {
+    if (issued.length === 0) return false;
+    if (!isUniqueViolationError(error)) return false;
+    const column = uniqueViolationColumn(error);
+    if (column === undefined) return true;
+    return issued.some((one) => one.field === column);
   }
 
   /**
@@ -2416,6 +2754,10 @@ export class ObjectQL implements IObjectQLEngine {
    *     digit run of the whole value. A format with no `{0..0}` slot renders a
    *     bare trailing counter, and values predating any format have no anchor to
    *     read from, so this stays exactly as it was.
+   *
+   * That reading is {@link readAutonumberCounter}, module-level rather than
+   * inline, because #6806's resync must read an exempt writer's supplied value
+   * by exactly these rules.
    *
    * The suffix is *stripped when it matches*, never *required* to match: a
    * dynamic suffix renders differently per row (`{000}-{YYYY}` is `-2025` on
@@ -2487,29 +2829,17 @@ export class ObjectQL implements IObjectQLEngine {
         },
       );
       let max = 0;
-      // Anchored when the format declares text on EITHER side of the slot; see
-      // the "Locating the counter" section above.
-      const anchored = prefix !== '' || suffix !== '';
       for await (const page of walk.pages()) {
         for (const r of page) {
           const v = r?.[field];
           if (v == null) continue;
-          const s = String(v);
-          if (prefix && !s.startsWith(prefix)) continue;
-          // Both branches use the linear /\d+/ forms — a backtracking lookahead
-          // here is a polynomial-ReDoS sink on stored values full of zeros
-          // (CodeQL js/polynomial-redos).
-          let digits: string | undefined;
-          if (anchored) {
-            let core = s.slice(prefix.length);
-            if (suffix && core.endsWith(suffix)) core = core.slice(0, core.length - suffix.length);
-            const head = core.match(/^\d+/);
-            digits = head ? head[0] : undefined;
-          } else {
-            const runs = s.match(/\d+/g);
-            digits = runs ? runs[runs.length - 1] : undefined;
-          }
-          if (digits) max = Math.max(max, parseInt(digits, 10) || 0);
+          // The reading itself lives in `readAutonumberCounter` (the section
+          // above describes it) because #6806's adopt-on-exempt-write resync
+          // must read a supplied value by the SAME rules this scan reads a
+          // stored one — two copies of it would drift into two different
+          // answers for one row, which is a duplicate record number.
+          const counter = readAutonumberCounter(String(v), prefix, suffix);
+          if (counter != null) max = Math.max(max, counter);
         }
       }
       // The walk is unbounded (no `max`), so truncation here means the scan
@@ -6156,10 +6486,15 @@ export class ObjectQL implements IObjectQLEngine {
         // autonumber assigns nothing here — so no validation rule can depend on
         // the value, making this reorder safe. In partial mode dead rows are
         // skipped, so they never consume a sequence value either.
+        // [#6806] What each row's autonumbers were ISSUED from, so a
+        // unique-violation on the write below can be attributed to a counter
+        // and answered by re-seeding it. Empty for every row when the driver
+        // owns autonumber, and for any row the engine numbered nothing on.
+        const issuedPerRow: IssuedAutonumber[][] = new Array(rows.length).fill(null).map(() => []);
         for (let i = 0; i < rows.length; i++) {
           if (rowErrors[i] !== undefined) continue;
           try {
-            await this.applyAutonumbers(object, rows[i], opCtx.context, driverOwnsAutonumber);
+            issuedPerRow[i] = await this.applyAutonumbers(object, rows[i], opCtx.context, driverOwnsAutonumber);
           } catch (e) {
             if (!partialMode) throw e;
             rowErrors[i] = e;
@@ -6173,14 +6508,50 @@ export class ObjectQL implements IObjectQLEngine {
         if (isBatch) {
           if (liveRows.length === 0) {
                result = [];
-          } else if (driver.bulkCreate) {
-               result = await driver.bulkCreate(object, liveRows, driverOptions);
           } else {
-               // Fallback loop
-               result = await Promise.all(liveRows.map((item) => driver.create(object, item, driverOptions)));
+            // [#6806] A batch is re-seeded but never re-issued. `bulkCreate` may
+            // be partially applied by a driver without a transaction, so
+            // re-writing the batch could DUPLICATE the rows that did land —
+            // strictly worse than the collision. What must not survive is the
+            // stale counter: leaving it is what makes the very next insert
+            // collide too, one number at a time, which is the storm. So the
+            // counters this batch drew on are dropped and the driver's error is
+            // rethrown UNCHANGED (a batch caller — bulkWrite's per-row
+            // degradation — reads these errors, and this is not the place to
+            // change what it reads).
+            //
+            // What an author gets, stated plainly: `insert(object, rows[])` and
+            // `insertMany` both REJECT with the driver's own duplicate-key
+            // error — never `ERR_AUTONUMBER_COLLISION`, which is the
+            // single-row path's identity for "re-issued and still refused".
+            // Whether any row was written is the driver's answer, not this
+            // method's. The one thing the engine guarantees is that the NEXT
+            // write re-seeds instead of walking into the same collision, so a
+            // retry by the caller converges. Pinned in
+            // engine-autonumber-resync.test.ts.
+            try {
+              if (driver.bulkCreate) {
+                result = await driver.bulkCreate(object, liveRows, driverOptions);
+              } else {
+                // Fallback loop
+                result = await Promise.all(liveRows.map((item) => driver.create(object, item, driverOptions)));
+              }
+            } catch (error) {
+              const batchIssued = liveIndexes.flatMap((i) => issuedPerRow[i]);
+              if (this.isIssuedAutonumberCollision(error, batchIssued)) {
+                for (const one of batchIssued) this.autonumberCounters.delete(one.counterKey);
+                this.logger.warn('Autonumber collided in a batch insert — counter dropped, batch not re-issued', {
+                  object, fields: [...new Set(batchIssued.map((one) => one.field))],
+                });
+              }
+              throw error;
+            }
           }
         } else {
-          result = await driver.create(object, liveRows[0], driverOptions);
+          result = await this.createWithAutonumberResync(
+            driver, object, liveRows[0], driverOptions, issuedPerRow[liveIndexes[0]],
+            opCtx.context, driverOwnsAutonumber,
+          );
         }
 
         // Driver-result contract guard (framework#3151): a batch write must

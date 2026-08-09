@@ -5,6 +5,7 @@ import { CronExpressionInputSchema } from '../shared/expression.zod';
 import { WebhookSchema } from '../automation/webhook.zod';
 import { ConnectorAuthConfigSchema, ConnectorInstanceAuthSchema } from '../shared/connector-auth.zod';
 import { FieldMappingSchema as BaseFieldMappingSchema } from '../shared/mapping.zod';
+import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { retiredKey } from '../shared/retired-key';
 
 /**
@@ -846,6 +847,36 @@ export const ConnectorSchema = lazySchema(() => z.object({
    * Custom metadata
    */
   metadata: z.record(z.string(), z.unknown()).optional().describe('Custom connector metadata'),
+
+  // ADR-0010 — runtime protection envelope (internal — set by loader).
+  //
+  // [#6362, split out of #6245] Declared for the reason `webhook.zod.ts` and
+  // `sharing.zod.ts` state for their own spreads: BOTH metadata load paths call
+  // `applyProtection` on EVERY type, so a package-loaded connector already
+  // carries these keys by the time anything re-parses it — and `/meta/connector`
+  // has re-parsed them since #6245 bound `DeclarativeConnectorEntrySchema` to
+  // that door.
+  //
+  // The failure mode here is the QUIET half of the pair, which is exactly why
+  // it outlived its two siblings. `sharing_rule` is `.strict()`, so its
+  // undeclared envelope was REJECTED — a hard 422, fixed in #6245 the moment
+  // the door was bound. This shape is a plain (non-strict) `z.object`, so it
+  // TOLERATES the envelope and returns `success` — then strips it. Tolerate is
+  // not preserve: measured on `origin/main` before this spread, a stamped
+  // catalog descriptor round-tripping through the bound schema came back having
+  // lost all seven keys (`_lock`, `_lockReason`, `_lockSource`, `_provenance`,
+  // `_packageId`, `_packageVersion`, `_lockDocsUrl`), so every consumer of
+  // `extractProtection` / `resolveLockState` downstream of a parse saw an
+  // unlocked, unattributed, org-provenance item. No error anywhere.
+  //
+  // `webhook` was measured in the same pass and needs nothing: it has carried
+  // this spread since #4001 batch 11, and all seven keys survive its
+  // round-trip. See `connector.test.ts` → 'ADR-0010 protection envelope' for
+  // the pins that hold both readings.
+  //
+  // Pure-additive and internal: every key is `_`-prefixed and optional, so no
+  // author-facing field changes and nothing that parsed before stops parsing.
+  ...MetadataProtectionFields,
 }));
 
 export type Connector = z.input<typeof ConnectorSchema>;

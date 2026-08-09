@@ -43,8 +43,8 @@
  * removed the entry.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { ObjectStackProtocolImplementation, resetEnvWritableMetadataTypes } from '@objectstack/metadata-protocol';
 import { SchemaRegistry } from '@objectstack/objectql';
 import { resolveRouteActionDeclaration, type ActionExecutionDeps } from './action-execution.js';
 
@@ -199,6 +199,18 @@ describe('#4521 — read-your-writes between saveMeta and the dispatch path', ()
         // `<packageId>:<name>` key and the overlay is a plain-key shadow, which
         // `restoreArtifactRegistryView` removes on delete. Pinned here because
         // the write-through is what makes that separation load-bearing.
+        //
+        // #6483 rolled `action`'s `allowOrgOverride` back to `false`
+        // (ADR-0005: page/app/action are ❌ in the amendment table), so
+        // overriding this PACKAGED action needs the one documented door that
+        // remains — the `OS_METADATA_WRITABLE` operator escape hatch. The
+        // shadow/restore machinery pinned here is exactly what an operator
+        // behind the hatch exercises. (Every other case in this file writes
+        // brand-new names, which ride `allowRuntimeCreate` untouched.)
+        process.env.OS_METADATA_WRITABLE = 'action';
+        (ObjectStackProtocolImplementation as any).resetEnvWritableCache();
+        resetEnvWritableMetadataTypes();
+
         registry.registerItem('action', { name: 'shipped_probe', label: 'Shipped', type: 'script', target: 'showcase.shipped' }, 'name', 'showcase');
         expect((await resolve('shipped_probe')).action?.label).toBe('Shipped');
 
@@ -207,6 +219,14 @@ describe('#4521 — read-your-writes between saveMeta and the dispatch path', ()
 
         await protocol.deleteMetaItem({ type: 'action', name: 'shipped_probe' });
         expect((await resolve('shipped_probe')).action?.label).toBe('Shipped');
+    });
+
+    afterEach(() => {
+        // The escape-hatch case must not leak `action` writability into its
+        // neighbours — both memoised caches, or the next case lies.
+        delete process.env.OS_METADATA_WRITABLE;
+        (ObjectStackProtocolImplementation as any).resetEnvWritableCache();
+        resetEnvWritableMetadataTypes();
     });
 
     it('a DRAFT save is not dispatchable — drafts never leak into the live registry', async () => {
@@ -326,11 +346,31 @@ describe('#5079 — list / get / dispatch agree immediately after deleteMeta', (
         expect((await surfaces('only_one')).listedNames).toEqual([]);
     });
 
+    afterEach(() => {
+        // The escape-hatch case below must not leak `action` writability into
+        // its neighbours — both memoised caches, or the next case lies.
+        delete process.env.OS_METADATA_WRITABLE;
+        (ObjectStackProtocolImplementation as any).resetEnvWritableCache();
+        resetEnvWritableMetadataTypes();
+    });
+
     it('an ARTIFACT-backed delete resets to the shipped value — it does not retire the name', async () => {
         // The boundary the #5079 fix must not cross. `removeRuntimeShadow`
         // still owns this case; `removeOverlayEntry` must never reach it, or a
         // "reset to artifact default" would delete the artifact instead of
         // revealing it.
+        //
+        // #6483 rolled `action`'s `allowOrgOverride` back to `false`
+        // (ADR-0005: page/app/action are ❌ in the amendment table), so
+        // overriding this PACKAGED action needs the one documented door that
+        // remains — the `OS_METADATA_WRITABLE` operator escape hatch, exactly
+        // as the sibling `#4521` case above does. (Every other case in this
+        // block writes brand-new names, which ride `allowRuntimeCreate`
+        // untouched, so only this one needs the hatch.)
+        process.env.OS_METADATA_WRITABLE = 'action';
+        (ObjectStackProtocolImplementation as any).resetEnvWritableCache();
+        resetEnvWritableMetadataTypes();
+
         registry.registerItem(
             'action',
             { name: 'shipped_probe', label: 'Shipped', type: 'script', target: 'showcase.shipped' },

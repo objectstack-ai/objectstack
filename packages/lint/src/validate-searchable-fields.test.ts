@@ -213,6 +213,10 @@ describe('validateSearchableFields — dotted paths', () => {
     expect(findings).toHaveLength(1);
     expect(findings[0].path).toBe('objects[0].searchableFields[1]');
     expect(findings[0].hint).toContain("scans this object's own columns");
+    // The prescription must be a STORED field — a `formula` field is virtual
+    // (no driver materializes a column for it), so it can never be scanned.
+    expect(findings[0].hint).toContain('copy the value onto a stored text field');
+    expect(findings[0].hint).not.toContain('formula');
   });
 });
 
@@ -315,8 +319,11 @@ describe('validateSearchableFields — list views that narrow the set', () => {
     expect(findings[0].message).toContain("type 'lookup'");
     expect(findings[0].message).toContain('400 INVALID_FIELD');
     // The lookup-specific prescription: search cannot cross objects, so the
-    // related record's title must be mirrored onto a local text/formula field.
+    // related record's title must be mirrored onto a local STORED text field —
+    // never a `formula` field, which is virtual and materializes no column.
     expect(findings[0].hint).toContain('mirror');
+    expect(findings[0].hint).toContain('mirror it onto a stored text field');
+    expect(findings[0].hint).not.toContain('formula');
   });
 
   it('flags a real field outside the object\'s declared searchableFields', () => {
