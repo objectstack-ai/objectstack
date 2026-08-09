@@ -2931,8 +2931,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         options: {
           global: "Global",
           tenant: "Inquilino",
-          user: "Usuario",
-          runtime: "Tiempo de ejecución"
+          user: "Usuario"
         }
       },
       user_id: {

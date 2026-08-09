@@ -317,18 +317,24 @@ function checkChartDrillDown(
  * the schema the single source: the vocabulary, the refinement message and every
  * key's type arrive from `packages/spec` with nothing restated here.
  *
- * ## What this does NOT yet close, and why the pin test says so out loud
+ * ## The unknown-key half, closed at #5583
  *
- * ⚠️ `ChartAggregateSchema` is still a STRIP-posture `z.object()` (and
- * `ChartGroupBySchema`'s object arm with it), so an unknown key is *silently
- * dropped by the parse* rather than reported. Wiring the parse is a
- * precondition for closing that, not the closing itself: `.strict()` is a
- * property of a parse, and until this commit there was no parse to make strict.
- * The spec-side tightening is **#5583**, and
- * `validate-react-page-props.test.ts` pins today's tolerance explicitly so this
- * gate cannot be mistaken for one that already rejects `groupby` — a gate that
- * READS like it closes a hole while leaving it open is the #4583 shape this
- * campaign keeps paying for.
+ * Until #5583 `ChartAggregateSchema` was a STRIP-posture `z.object()` (and
+ * `ChartGroupBySchema`'s object arm with it), so an unknown key was *silently
+ * dropped by the parse* and this gate had nothing to report. Wiring the parse
+ * was the precondition, not the closing — `.strict()` is a property of a parse,
+ * and until #5020 there was no parse to make strict. Both are `strictObject`
+ * now, so `groupby` arrives here as an `unrecognized_keys` issue carrying the
+ * schema's own surface name and rename suggestion, and this rule forwards it
+ * verbatim rather than restating anything. The pin that used to record the
+ * tolerance in `validate-react-page-props.test.ts` inverted with it.
+ *
+ * ⚠️ **The rejection reaches the author only because `describeIssue` unpacks
+ * `invalid_union`.** An `unrecognized_keys` raised inside `groupBy`'s object arm
+ * never reaches `error.issues`; zod 4 collapses the union into one issue whose
+ * message is the bare string "Invalid input" (#5014). `zod-issue-format.ts` is
+ * what recovers the arm messages, which is why the lint side had to exist before
+ * the spec side closed.
  *
  * ## Severity is not uniform, and the split is measured
  *
@@ -336,12 +342,19 @@ function checkChartDrillDown(
  * renderer agree on gates at `error` (declared = enforced): `function` present
  * and in the enum, `field` a string, `aggregate` an object, and a non-`count`
  * function carrying a `field`. **An absent `groupBy` is a `warning`**, alone
- * among them: the schema and `react-blocks.ts` both declare it required, but the
- * renderer HONOURS its absence (`ObjectChart.tsx`: `schema.aggregate?.groupBy ||
- * schema.xAxisKey`) and this protocol's own `chartAggregateCategoryKey` documents
- * the ungrouped single-row result. Gating on it would break a working authoring
- * shape to enforce a declaration the platform does not itself keep; whether the
- * schema loosens or the renderer tightens is the product question on #5583.
+ * among them.
+ *
+ * #5583 ANSWERED the product question behind that split, and the answer was that
+ * an ungrouped single-value chart is **not** a supported `<ObjectChart>` shape:
+ * `groupBy` stays declared REQUIRED, because the single-value need is served by
+ * the separate `object-metric` block and the renderer's
+ * `schema.aggregate?.groupBy || schema.xAxisKey` reads are optional-chained on
+ * `aggregate` itself — they serve charts with no aggregate at all, not ungrouped
+ * ones. So the `warning` here is a TOLERANCE, not a blessing: it is deliberately
+ * not upgraded to `error` in the same change, because promoting a gate is a
+ * separate acceptance surface (every consumer's pages, not just the example
+ * corpus, which carries zero instances). The upgrade is the follow-up; what must
+ * not happen is this warning being read as "the platform supports this".
  */
 function checkChartAggregate(
   raw: unknown,
@@ -368,7 +381,8 @@ function checkChartAggregate(
       REACT_CHART_AGGREGATE_INVALID,
       'aggregate.groupBy is not set, so the aggregate returns ONE ungrouped row and the chart plots a single point.',
       'Add aggregate.groupBy (a field name, or { field, dateGranularity } to bucket dates) to give the chart a category axis. ' +
-        'Deliberate single-value charts are tolerated at warning level for now: ChartAggregateSchema declares groupBy required while ObjectChart honours its absence by falling back to xAxisKey — objectstack#5583 decides which of the two moves.',
+        'objectstack#5583 ruled that an ungrouped single-value chart is NOT a supported <ObjectChart> shape — groupBy stays required, and a single number belongs in an object-metric block instead. ' +
+        'This stays a warning rather than an error only because promoting it is its own step.',
     );
   }
 

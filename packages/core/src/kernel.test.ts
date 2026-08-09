@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { ObjectKernel } from './kernel';
 import { ServiceLifecycle, PluginMetadata } from './plugin-loader';
-import type { Plugin } from './types';
+import type { Plugin, PluginContext } from './types';
 
 describe('ObjectKernel', () => {
     let kernel: ObjectKernel;
@@ -868,6 +868,66 @@ describe('ObjectKernel', () => {
                 errorSpy.mockRestore();
             }
         }, 5000);
+
+        // #5282, the ObjectKernel half. `kernel:shutdown` has TWO dispatch
+        // paths with different flavours, and this pins the difference AS IT IS
+        // — the ruling that shared the dispatch loops (option B) explicitly did
+        // NOT flip either path:
+        //
+        //   - the kernel's own teardown dispatch (`performShutdown`) isolates:
+        //     a throwing handler is logged and everything queued behind it
+        //     still runs (#5274);
+        //   - a plugin calling `ctx.trigger('kernel:shutdown')` by hand goes
+        //     through `PluginContext.trigger`, which propagates — the throw
+        //     reaches that caller and the handlers behind it are skipped.
+        //
+        // Nothing in the repo triggers `kernel:shutdown` by hand today, so this
+        // is DORMANT, not a live defect. It is pinned so that if someone does
+        // reach for the manual trigger, the difference is a documented fact
+        // with a test naming it rather than a surprise found at teardown.
+        it('dispatches kernel:shutdown two ways: ctx.trigger propagates, the kernel teardown isolates (#5282)', async () => {
+            const exitSpy = spyOnExit();
+            const errorSpy = spyOnLog(kernel, 'error');
+            const reached: string[] = [];
+            let captured!: PluginContext;
+
+            const plugin: Plugin = {
+                name: 'dual-path-shutdown',
+                version: '1.0.0',
+                init: async (ctx: PluginContext) => {
+                    captured = ctx;
+                    ctx.hook('kernel:shutdown', async () => { throw new Error('manual boom'); });
+                    ctx.hook('kernel:shutdown', async () => { reached.push('later-shutdown'); });
+                },
+            };
+
+            try {
+                await kernel.use(plugin);
+                await kernel.bootstrap();
+
+                // Path 1 — manual trigger: PROPAGATING. The error reaches the
+                // caller unwrapped and the second handler never runs.
+                await expect(captured.trigger('kernel:shutdown')).rejects.toThrow('manual boom');
+                expect(reached).toEqual([]);
+                // …and this path logs nothing itself: reporting a propagated
+                // failure is the caller's job.
+                expect(errorSpy.mock.calls.map((c) => String(c[0]))).not.toContain(
+                    'Hook handler failed: kernel:shutdown',
+                );
+
+                // Path 2 — the kernel's own teardown: ISOLATING. Same handlers,
+                // same hook name, opposite treatment of the same throw.
+                await kernel.shutdown();
+                expect(reached).toEqual(['later-shutdown']);
+                expect(errorSpy.mock.calls.map((c) => String(c[0]))).toContain(
+                    'Hook handler failed: kernel:shutdown',
+                );
+                expect(exitSpy).not.toHaveBeenCalled();
+            } finally {
+                exitSpy.mockRestore();
+                errorSpy.mockRestore();
+            }
+        });
     });
 
     describe('Dependency Resolution', () => {

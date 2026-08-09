@@ -4,7 +4,6 @@ import { z } from 'zod';
 import { ProtectionSchema } from '../shared/protection.zod';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { ExpressionInputSchema } from '../shared/expression.zod';
-import { strictUnknownKeyError } from '../shared/suggestions.zod';
 
 /**
  * Flow Node Types — **built-in seed set** (ADR-0018).
@@ -51,6 +50,7 @@ export const FlowNodeAction = z.enum([
   'join_gateway',       // BPMN Join Gateway — AND-join (waits for all incoming branches to complete)
   'boundary_event',     // BPMN Boundary Event — attached to a host node for timer/error/signal interrupts
 ]);
+export type FlowNodeAction = z.input<typeof FlowNodeAction>;
 
 /**
  * The built-in node type ids as a plain string array — the seed set the
@@ -109,28 +109,24 @@ export const FLOW_STRUCTURAL_NODE_TYPES: readonly string[] = ['start', 'end'];
  * note).
  */
 
-/** Keys {@link FlowVariableSchema} declares (drift-guarded by flow.test.ts). */
-const FLOW_VARIABLE_KEYS = ['name', 'type', 'isInput', 'isOutput'] as const;
-
-const flowVariableUnknownKeyError = strictUnknownKeyError({
-  surface: 'this flow variable',
-  knownKeys: FLOW_VARIABLE_KEYS,
-  aliases: { input: 'isInput', output: 'isOutput' },
-  history:
-    'Until #4001 these were dropped silently — the variable still parsed, so a ' +
-    'mis-declared input/output contract shipped without a diagnostic.',
-});
-
 /**
  * Flow Variable Schema
  * Variables available within the flow execution context.
  */
-export const FlowVariableSchema = lazySchema(() => z.object({
+export const FlowVariableSchema = lazySchema(() => strictObject(
+  {
+    surface: 'this flow variable',
+    aliases: { input: 'isInput', output: 'isOutput' },
+    history:
+      'Until #4001 these were dropped silently — the variable still parsed, so a ' +
+      'mis-declared input/output contract shipped without a diagnostic.',
+  },
+  {
   name: z.string().describe('Variable name'),
   type: z.string().describe('Data type (text, number, boolean, object, list)'),
   isInput: z.boolean().default(false).describe('Is input parameter'),
   isOutput: z.boolean().default(false).describe('Is output parameter'),
-}, { error: flowVariableUnknownKeyError }).strict());
+}));
 
 /**
  * Flow Node Schema
@@ -153,33 +149,6 @@ export const FlowVariableSchema = lazySchema(() => z.object({
  *   position: { x: 300, y: 200 }
  * }
  */
-/** Keys {@link FlowNodeSchema} declares (drift-guarded by flow.test.ts). */
-const FLOW_NODE_KEYS = [
-  'id', 'type', 'label', 'config', 'connectorConfig', 'position', 'timeoutMs',
-  'inputSchema', 'outputSchema', 'waitEventConfig', 'boundaryConfig',
-] as const;
-
-const flowNodeUnknownKeyError = strictUnknownKeyError({
-  surface: 'this flow node',
-  knownKeys: FLOW_NODE_KEYS,
-  aliases: {
-    configuration: 'config',
-    settings: 'config',
-    properties: 'config',
-    options: 'config',
-    params: 'config',
-    parameters: 'config',
-  },
-  guidance: {
-    inputs:
-      '`inputs` is not a FlowNode key — a node\'s runtime inputs live under `config` ' +
-      '(e.g. `config.inputs` for script/function nodes); `inputSchema` declares their types.',
-  },
-  history:
-    'Until #4001 these were dropped silently — the node still parsed, so a mis-placed ' +
-    'config shipped as a step that quietly ignored it.',
-});
-
 /**
  * A flow node — **including** whatever ADR-0031 region its `config` holds (#4415).
  *
@@ -233,7 +202,27 @@ export const FlowNodeSchema = lazySchema(() => flowNodeObject().transform(parseF
  * the `lazySchema` factory runs at module-evaluation time, and a `const` arrow
  * declared after it would still be in its temporal dead zone.
  */
-function flowNodeObject() { return z.object({
+function flowNodeObject() { return strictObject(
+  {
+    surface: 'this flow node',
+    aliases: {
+      configuration: 'config',
+      settings: 'config',
+      properties: 'config',
+      options: 'config',
+      params: 'config',
+      parameters: 'config',
+    },
+    guidance: {
+      inputs:
+        '`inputs` is not a FlowNode key — a node\'s runtime inputs live under `config` ' +
+        '(e.g. `config.inputs` for script/function nodes); `inputSchema` declares their types.',
+    },
+    history:
+      'Until #4001 these were dropped silently — the node still parsed, so a mis-placed ' +
+      'config shipped as a step that quietly ignored it.',
+  },
+  {
   id: z.string().describe('Node unique ID'),
   type: z.string().min(1).describe(
     'Action type — a built-in FlowNodeAction id or a plugin-registered node type. ' +
@@ -364,8 +353,9 @@ function flowNodeObject() { return z.object({
       // helper once told an author to write something that gets rejected next.
       timeout:
         '`wait` has no timeout — nothing has ever failed or resumed a wait on a deadline ' +
-        '(#4158 retired the two keys that claimed one). Use `timerDuration`: it accepts a ' +
-        'bare number as milliseconds, so `timerDuration: 60000` is a 60s wait.',
+        '(#4158 retired the two keys that claimed one). Use `timerDuration`, and QUOTE the ' +
+        'number: the key is a string, and a bare numeric string is read as milliseconds, so ' +
+        "`timerDuration: '60000'` is a 60s wait (`timerDuration: 'PT1M'` says the same in ISO 8601).",
     },
     history:
       'Until #4001 these were dropped silently — the block still parsed, so a wait node ' +
@@ -381,14 +371,18 @@ function flowNodeObject() { return z.object({
 
     /**
      * `wait` never had a timeout. Both keys below described one and neither
-     * delivered it (#4158) — the pair is retired in 18 rather than left standing
-     * as a promise the runtime does not keep (PD #10).
+     * delivered it (#4158) — the pair is retired in 17 rather than left standing
+     * as a promise the runtime does not keep (PD #10). (Both tombstones below say
+     * 17 and the ADR-0087 conversion is `toMajor: 17`; this line said 18, the
+     * #4350 class — a tombstone naming a major that never shipped it.)
      *
      * `timeoutMs` said "maximum wait time" and its ONLY reader used it as the
      * timer *duration* when `timerDuration` was absent — so it did something, just
      * not what it said. `timerDuration` already expresses that (`parseIsoDuration`
-     * accepts a bare number as milliseconds), which is why the conversion can move
-     * it losslessly instead of dropping it.
+     * reads a bare numeric *string* as milliseconds — the number must be quoted,
+     * because `timerDuration` is `z.string()` and the schema is what the author
+     * meets), which is why the conversion can move it losslessly, stringifying on
+     * the way, instead of dropping it.
      *
      * `onTimeout` had ZERO readers anywhere. Setting it changed nothing, and the
      * showcase set it — a declared default (`'fail'`) stamped on every wait node
@@ -403,8 +397,10 @@ function flowNodeObject() { return z.object({
       '`waitEventConfig.timeoutMs` was removed in @objectstack/spec 17 (#4158). It documented a '
       + 'timeout guard that never existed: nothing ever failed or resumed a wait on a deadline. Its '
       + 'only reader treated it as the timer DURATION when `timerDuration` was absent, so use '
-      + '`timerDuration` — it accepts a bare number as milliseconds, making `timeoutMs: 60000` and '
-      + "`timerDuration: 60000` the same wait. Stored flows are converted automatically.",
+      + '`timerDuration` — but QUOTE the number: the key is a string, and a bare numeric string is '
+      + "read as milliseconds, making `timeoutMs: 60000` and `timerDuration: '60000'` the same wait "
+      + "(`timerDuration: 'PT1M'` is the ISO 8601 spelling of that same 60s). Stored flows are "
+      + 'converted automatically — the conversion does the quoting for you.',
     ),
     onTimeout: retiredKey(
       '`waitEventConfig.onTimeout` was removed in @objectstack/spec 17 (#4158). It had no readers at '
@@ -456,34 +452,30 @@ function flowNodeObject() { return z.object({
     /** Signal name — only for signal boundary events */
     signalName: z.string().optional().describe('Named signal to catch'),
   }).optional().describe('Configuration for boundary events attached to host nodes'),
-}, { error: flowNodeUnknownKeyError }).strict(); }
-
-/** Keys {@link FlowEdgeSchema} declares (drift-guarded by flow.test.ts). */
-const FLOW_EDGE_KEYS = ['id', 'source', 'target', 'condition', 'type', 'label', 'isDefault'] as const;
-
-const flowEdgeUnknownKeyError = strictUnknownKeyError({
-  surface: 'this flow edge',
-  knownKeys: FLOW_EDGE_KEYS,
-  aliases: {
-    // n8n / mermaid / BPMN-tool vocabulary an author (or AI) imports wholesale.
-    from: 'source',
-    to: 'target',
-    sourceid: 'source',
-    targetid: 'target',
-    expression: 'condition',
-    when: 'condition',
-    guard: 'condition',
-  },
-  history:
-    'Until #4001 these were dropped silently — the edge still parsed, so a branch ' +
-    'predicate or endpoint the author wrote was quietly ignored.',
-});
+}); }
 
 /**
  * Flow Edge Schema
  * Connections between nodes.
  */
-export const FlowEdgeSchema = lazySchema(() => z.object({
+export const FlowEdgeSchema = lazySchema(() => strictObject(
+  {
+    surface: 'this flow edge',
+    aliases: {
+      // n8n / mermaid / BPMN-tool vocabulary an author (or AI) imports wholesale.
+      from: 'source',
+      to: 'target',
+      sourceid: 'source',
+      targetid: 'target',
+      expression: 'condition',
+      when: 'condition',
+      guard: 'condition',
+    },
+    history:
+      'Until #4001 these were dropped silently — the edge still parsed, so a branch ' +
+      'predicate or endpoint the author wrote was quietly ignored.',
+  },
+  {
   id: z.string().describe('Edge unique ID'),
   source: z.string().describe('Source Node ID'),
   target: z.string().describe('Target Node ID'),
@@ -521,7 +513,7 @@ export const FlowEdgeSchema = lazySchema(() => z.object({
       'BPMN default flow: traverse this edge only when no sibling conditional edge of the same '
       + 'source node matched. Mutually exclusive with `condition`; at most one per source node.',
     ),
-}, { error: flowEdgeUnknownKeyError }).strict());
+}));
 
 /**
  * Flow Schema
@@ -549,46 +541,35 @@ export const FlowEdgeSchema = lazySchema(() => z.object({
  *   ]
  * }
  */
-/** Keys {@link FlowSchema} declares (drift-guarded by flow.test.ts). */
-const FLOW_KEYS = [
-  'name', 'label', 'description', 'successMessage', 'errorMessage', 'version',
-  'status', 'template', 'type', 'variables', 'nodes', 'edges', 'active', 'runAs',
-  'errorHandling', 'protection',
-  // ADR-0010 runtime protection envelope (MetadataProtectionFields spread).
-  '_lock', '_lockReason', '_lockSource', '_provenance', '_packageId',
-  '_packageVersion', '_lockDocsUrl',
-] as const;
-
-const flowUnknownKeyError = strictUnknownKeyError({
-  surface: 'this flow',
-  knownKeys: FLOW_KEYS,
-  aliases: {
-    steps: 'nodes',
-    connections: 'edges',
-    transitions: 'edges',
-    links: 'edges',
-    trigger: 'type',
-    triggertype: 'type',
-    title: 'label',
+export const FlowSchema = lazySchema(() => strictObject(
+  {
+    surface: 'this flow',
+    aliases: {
+      steps: 'nodes',
+      connections: 'edges',
+      transitions: 'edges',
+      links: 'edges',
+      trigger: 'type',
+      triggertype: 'type',
+      title: 'label',
+    },
+    guidance: {
+      object:
+        '`object` is not a Flow field — a record-change flow binds its object on the ' +
+        'START node\'s `config` (`{ objectName, triggerType, condition }`), not at the ' +
+        'flow top level.',
+      objectName:
+        '`objectName` is not a Flow field — it belongs on the START node\'s `config` ' +
+        '(`{ objectName, triggerType, condition }`), not at the flow top level.',
+      schedule:
+        '`schedule` is not a Flow field — a schedule flow declares its cron/interval as ' +
+        '`config.schedule` on the START node, not at the flow top level.',
+    },
+    history:
+      'Until #4001 these were dropped silently — the flow still parsed, so a trigger ' +
+      'binding or config the author wrote was quietly ignored.',
   },
-  guidance: {
-    object:
-      '`object` is not a Flow field — a record-change flow binds its object on the ' +
-      'START node\'s `config` (`{ objectName, triggerType, condition }`), not at the ' +
-      'flow top level.',
-    objectName:
-      '`objectName` is not a Flow field — it belongs on the START node\'s `config` ' +
-      '(`{ objectName, triggerType, condition }`), not at the flow top level.',
-    schedule:
-      '`schedule` is not a Flow field — a schedule flow declares its cron/interval as ' +
-      '`config.schedule` on the START node, not at the flow top level.',
-  },
-  history:
-    'Until #4001 these were dropped silently — the flow still parsed, so a trigger ' +
-    'binding or config the author wrote was quietly ignored.',
-});
-
-export const FlowSchema = lazySchema(() => z.object({
+  {
   /** Identity */
   name: z.string().regex(/^[a-z_][a-z0-9_]*$/).describe('Machine name'),
   label: z.string().describe('Flow label'),
@@ -663,13 +644,14 @@ export const FlowSchema = lazySchema(() => z.object({
    * Error Handling Strategy.
    *
    * The retry knobs are the converged `RetryPolicySchema` contract, shared with
-   * `job.retryPolicy`, a `try_catch` node's `retry` and an ETL pipeline's
-   * `retry` (#4661 + #4964 — see `shared/retry-policy.zod.ts`). Until 17 this
-   * block spelled the base delay `retryDelayMs` while the converged policy
-   * spelled it `backoffMs`, so an author who read the newer file and brought
-   * the word here had it silently stripped (pre-批 11) or rejected (post-批 11)
-   * — being punished for learning the canonical spelling. `strategy` stays
-   * here: it selects *whether* the policy runs, it is not part of the policy.
+   * `job.retryPolicy` and a `try_catch` node's `retry` (#4661 + #4964 — see
+   * `shared/retry-policy.zod.ts`; `ETLPipeline.retry` did the same until #6414
+   * retired the L2 ETL layer). Until 17 this block spelled the base delay
+   * `retryDelayMs` while the converged policy spelled it `backoffMs`, so an
+   * author who read the newer file and brought the word here had it silently
+   * stripped (pre-批 11) or rejected (post-批 11) — being punished for learning
+   * the canonical spelling. `strategy` stays here: it selects *whether* the
+   * policy runs, it is not part of the policy.
    *
    * **These defaults are the only defaults** (#4247). The engine reads the
    * parsed block field-by-field with no fallback of its own — `retryExecution`
@@ -743,14 +725,14 @@ export const FlowSchema = lazySchema(() => z.object({
     // is what made the divergence so durable: it looked reviewed.
     //
     // The spread is what keeps that from happening again. A key added to the
-    // policy lands on all four surfaces at once, instead of on the ones
+    // policy lands on all three surfaces at once, instead of on the ones
     // whoever added it happened to grep for.
     ...retryPolicyShape(),
 
     // The ONE site-specific override, and it is prose only — same type, same
     // bounds, same default, all still single-sourced above. `.describe()`
     // lands in `content/docs/references/`, and the flow surface has a reading
-    // the other three do not: the count is read only under `strategy:
+    // the other two do not: the count is read only under `strategy:
     // 'retry'`, where the `superRefine` below then requires >= 1 (#4247).
     // Default 0 = "no retries" is the right reading for the two strategies
     // that never retry; under `'retry'` it would mean "retry, zero times",
@@ -804,7 +786,7 @@ export const FlowSchema = lazySchema(() => z.object({
   // ADR-0010 — runtime protection envelope (internal — set by loader).
   ...MetadataProtectionFields,
 
-}, { error: flowUnknownKeyError }).strict());
+}));
 
 /**
  * Type-safe factory for creating flow definitions.

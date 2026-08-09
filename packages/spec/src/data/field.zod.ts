@@ -79,6 +79,25 @@ export const FieldType = z.enum([
 export type FieldType = z.input<typeof FieldType>;
 
 /**
+ * Field types whose stored value the RUNTIME owns outright — issued by the
+ * engine (or the driver's persistent sequence), never supplied by a caller on
+ * either write path. Today exactly `autonumber` (#5503).
+ *
+ * This is the PROTOCOL's statement of that ownership, so the consumers that act
+ * on it read one vocabulary instead of each carrying its own literal: objectql's
+ * write-path strips (`isRuntimeOwnedField` / `stripRuntimeOwnedFields`, which
+ * treat these types as implicitly read-only), and the DataProtocol create
+ * ingress, which defers to those strips rather than pre-empting them with its
+ * own narrower exemption set (`stripReadonlyForInsert`, #5628).
+ *
+ * Keep the set to types whose value is (a) persisted, (b) issued by the runtime,
+ * and (c) never legitimately supplied by a caller. `formula` and `summary` are
+ * deliberately NOT here: they are derived-on-read/roll-up, not stored values a
+ * caller could forge into a sequence.
+ */
+export const RUNTIME_OWNED_FIELD_TYPES: ReadonlySet<string> = new Set<string>(['autonumber']);
+
+/**
  * Select Option Schema
  * 
  * Defines option values for select/picklist fields.
@@ -243,7 +262,7 @@ export const AddressSchema = lazySchema(() => z.object({
  */
 /**
  * Prescriptive rejection for a mis-spelled `unique` scope (ADR-0120
- * §Terminology; pattern of `strictTenancyError`): the error must carry the
+ * §Terminology; pattern of `strictCapabilitiesError`): the error must carry the
  * vocabulary and, for the two predictable near-misses (`'tenant'`, `'org'`),
  * name `'organization'` explicitly — a typo must be a loud, fixable parse
  * error, never a silent scope change. Declared before `UniqueScopeSchema`
@@ -694,6 +713,21 @@ export const FieldSchema = lazySchema(() => strictObject({
   // addressFormat, color colorFormat/allowAlpha/presetColors, slider showValue/marks,
   // barcode/qr barcodeFormat/qrErrorCorrection/displayValue/allowScanning.
   language: z.string().optional().describe('Programming language for syntax highlighting (e.g., javascript, python, sql)'),
+  // `step` is the slider's **UI increment** and deliberately NOT a stored-value constraint —
+  // ADR-0049's "ledger" half, ruled 2026-08-08 (#6514). Note it is renderer-LIVE, not dead,
+  // which is why it is NOT in the pruned list above and never joins it: objectui's
+  // `packages/fields/src/widgets/SliderField.tsx:14` reads it (`field.step ?? 1`) and hands it
+  // to the Slider, and `packages/spec/liveness/field.json` ledgers it `live` on that evidence.
+  // What it does not do is BIND the written value: the numeric branch of
+  // `packages/objectql/src/validation/record-validator.ts` enforces `min`/`max` for `slider`
+  // and reads `step` nowhere. The settings-side ruling (#6199 / PR #6501, which DID enforce a
+  // grid) does not transfer: its hook was that schema's own "numeric bounds and step" comment
+  // grouping `step` with `min`/`max`, which this declaration does not share — and enforcing a
+  // grid here would make already-stored off-grid values start failing on their next edit,
+  // because record-validator judges updates to existing rows. Should grid enforcement ever
+  // gain real user pull it returns as a feature request in PR #6501's shape: anchor at
+  // `min + k * step` (falling back to 0 when no `min` is declared), epsilon-tolerant
+  // comparison. See docs/audits/2026-06-dead-surface-disposition-plan.md (P2 field prune).
   step: z.number().optional().describe('Step increment for slider (default: 1)'),
 
   // Currency field config
@@ -783,7 +817,7 @@ export const FieldSchema = lazySchema(() => strictObject({
 
   /** Security & Visibility */
   hidden: z.boolean().default(false).describe('Hidden from default UI'),
-  readonly: z.boolean().default(false).describe('Read-only — never editable in forms, AND server-enforced on BOTH write paths: a non-system write to this field is silently dropped from the payload on UPDATE (#2948/#3003) and on INSERT (#3043; a create can no longer directly seed e.g. `approval_status: "approved"`), symmetric with `readonlyWhen`. A stripped INSERT field still falls back to its `defaultValue`. Exempt from the strip: `isSystem` writes (seed replay, migration), and an opt-in "historical" import (`preserveAudit`, #3493) — which admits a whitelist (the audit/timestamp family plus author-declared business `readonly` fields). A normal (non-system) import is NOT system-context and still strips.'),
+  readonly: z.boolean().default(false).describe('Read-only — never editable in forms, AND server-enforced on BOTH write paths: a non-system write to this field is silently dropped from the payload on UPDATE (#2948/#3003) and on INSERT (#3043; a create can no longer directly seed e.g. `approval_status: "approved"`), symmetric with `readonlyWhen`. A stripped INSERT field still falls back to its `defaultValue`. Exempt from the strip on BOTH paths: `isSystem` writes (seed replay, migration). Exempt on the UPDATE path ONLY: an opt-in "historical" import (`preserveAudit`, #3493) — which admits a whitelist (the audit/timestamp family plus author-declared business `readonly` fields). On INSERT the exemption does NOT apply (#6640): a non-system create that requests `preserveAudit` still has its readonly fields stripped, and is warned loudly that the exemption is UPDATE-only — replaying archival readonly facts on create requires a system context. A normal (non-system) import is NOT system-context and still strips.'),
 
   /**
    * [ADR-0066 D3] Capabilities required to READ/EDIT this field. A field
@@ -910,7 +944,29 @@ export const Field = {
   avatar: (config: FieldInput = {}) => ({ type: 'avatar', ...config } as const),
   formula: (config: FieldInput = {}) => ({ type: 'formula', ...config } as const),
   summary: (config: FieldInput = {}) => ({ type: 'summary', ...config } as const),
-  autonumber: (config: FieldInput = {}) => ({ type: 'autonumber', ...config } as const),
+  /**
+   * Auto-number — a record number the RUNTIME issues from its sequence.
+   *
+   * The builder injects `readonly: true` (#5628). `readonly` is a TWO-part
+   * contract (see `FieldSchema.readonly`): "never editable in forms" AND
+   * server-enforced on both write paths. #5503 closed the server half for
+   * `autonumber` by type ({@link RUNTIME_OWNED_FIELD_TYPES}), but the FORM half
+   * is keyed on the flag — so without it a renderer drew an editable "record
+   * number" box whose value the server was already guaranteed to discard: the
+   * user types a number, the create succeeds, and the record comes back
+   * carrying a different one. Declaring the flag the builder's output already
+   * behaves like is the shortest "declared = enforced" path.
+   *
+   * The injection is UNCONDITIONAL — it is applied after `config`, so it cannot
+   * be spread away — and `readonly: false` is a compile error at the authoring
+   * site rather than a silent coercion: an autonumber field is runtime-owned by
+   * construction, so "editable record number" is not a state the author can
+   * ask for. Restating `readonly: true` is allowed (it is merely redundant).
+   * A hand-written `{ type: 'autonumber' }` literal is unaffected — it is
+   * covered by the by-TYPE server enforcement, which never depended on the flag.
+   */
+  autonumber: (config: FieldInput & { readonly?: true } = {}) =>
+    ({ type: 'autonumber', ...config, readonly: true } as const),
   markdown: (config: FieldInput = {}) => ({ type: 'markdown', ...config } as const),
   html: (config: FieldInput = {}) => ({ type: 'html', ...config } as const),
   password: (config: FieldInput = {}) => ({ type: 'password', ...config } as const),

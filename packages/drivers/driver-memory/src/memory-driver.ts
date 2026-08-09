@@ -312,7 +312,19 @@ export class InMemoryDriver implements IDataDriver {
     }
 
     // 4. Pagination (Limit)
-    if (query.limit) {
+    //
+    // PRESENCE, not truthiness (#6577). `limit: 0` means "return no records"
+    // (#6485), and `0` is falsy — so `if (query.limit)` dropped the slice and
+    // answered a request for NOTHING with the WHOLE table. Measured before this
+    // line changed, three rows seeded: `{ limit: 0 }` returned 3, and
+    // `{ limit: 0, offset: 1 }` returned 2 — the OFFSET applied and the LIMIT
+    // silently did not, which is why the shape survived every paging suite.
+    //
+    // `offset` above is deliberately left on truthiness: `slice(0)` IS the
+    // identity slice, so presence and truthiness cannot be told apart there —
+    // no behaviour to fix. The #5499 freeze exception granted here is the limit
+    // door only.
+    if (query.limit !== undefined) {
       results = results.slice(0, query.limit);
     }
 
@@ -1002,9 +1014,16 @@ export class InMemoryDriver implements IDataDriver {
           result[op] = store(val);
           break;
         // Evaluated by mingo under the same name. `$exists` is a presence
-        // predicate, `$regex`/`$options` a pattern and its flags — none of them
-        // is a comparand, so none takes the field's storage form (#4047).
-        case '$exists': case '$regex': case '$options':
+        // predicate, not a comparand, so it does not take the field's storage
+        // form (#4047).
+        //
+        // [#5702] `$regex` and `$options` were passed through here too, on the
+        // same line, for the same "not a comparand" reason. Both are RETIRED
+        // (#4706) and refused by the shape gate before this method runs, so the
+        // arm is gone rather than left as an unreachable third name — an
+        // evaluation arm for a refused operator is exactly what let this
+        // driver's two faces answer one `$regex` differently for so long.
+        case '$exists':
           result[op] = val;
           break;
         default:

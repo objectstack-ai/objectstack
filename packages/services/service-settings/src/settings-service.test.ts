@@ -8,6 +8,7 @@ import { mailSettingsManifest, mailTestActionHandler } from './manifests/mail.ma
 import { aiSettingsManifest } from './manifests/ai.manifest.js';
 import { authSettingsManifest } from './manifests/auth.manifest.js';
 import { localizationSettingsManifest } from './manifests/localization.manifest.js';
+import { companySettingsManifest } from './manifests/company.manifest.js';
 import { brandingSettingsManifest } from './manifests/branding.manifest.js';
 import { featureFlagsSettingsManifest } from './manifests/feature-flags.manifest.js';
 import { SettingsManifestSchema } from '@objectstack/spec/system';
@@ -1388,11 +1389,14 @@ describe('SettingsService — env overrides are checked against declared windows
  * for a renderer that does not exist. A declaration with no consumer at all is
  * the ADR-0049 hole, not a UI affordance.
  *
- * The consequence is real and was accepted at ruling time: `ai.temperature`
- * declares `min: 0, max: 2, step: 0.1`, and `0.15` — a perfectly sensible
- * temperature for the model behind it — is now refused. That is the manifest's
- * declaration binding as written; whether it SHOULD declare a 0.1 grid is the
- * manifest owner's question, not this gate's.
+ * The consequence was real and was accepted at ruling time: `ai.temperature`
+ * then declared `min: 0, max: 2, step: 0.1`, so `0.15` — a perfectly sensible
+ * temperature for the model behind it — was refused. The manifest owner's
+ * question that ruling left open was answered by #6550: the grid came OFF the
+ * ai manifest (temperature's true domain is continuous on [0, 2]), so the
+ * fixtures below are synthetic step-declaring specifiers. The machinery they
+ * pin is unchanged and still binds any key that declares `step`; the real ai
+ * manifest's post-#6550 behaviour is pinned in `manifests/ai.manifest.test.ts`.
  */
 describe('SettingsService — the declared step grid is enforced at save time (#6199)', () => {
   /**
@@ -1626,33 +1630,12 @@ describe('SettingsService — the declared step grid is enforced at save time (#
     expect(err.fields[0].constraint).toMatchObject({ step: 100, min: 0 });
   });
 
-  it('binds the real ai manifest — the consequence accepted at ruling time', async () => {
-    // The repo's ONLY `step` declaration: `ai.temperature`, `min: 0, max: 2,
-    // step: 0.1`. Under enforcement `0.15` is refused, and that is the
-    // declaration binding as written rather than a defect of this gate.
-    // `temperature` is `visible: "${data.provider !== 'memory'}"` and the
-    // default provider is `memory`, so the patch carries a real provider (and
-    // its required key) — otherwise the TOUCH/visible contract skips the
-    // specifier entirely, which would make this test green for the wrong reason.
-    const svc = new SettingsService({ env: {} });
-    svc.registerManifest(aiSettingsManifest);
-
-    await expect(
-      svc.setMany('ai', { provider: 'openai', openai_api_key: 'sk-test', temperature: 0.15 }),
-    ).rejects.toMatchObject({
-      code: 'SETTINGS_VALIDATION',
-      fields: [
-        { field: 'temperature', code: 'invalid_value', constraint: { step: 0.1, min: 0 }, value: 0.15 },
-      ],
-    });
-    // Nothing was stored — the whole batch is atomic.
-    expect((await svc.get('ai', 'provider')).value).toBe('memory');
-    // …and the on-grid values the slider actually emits still go through.
-    await expect(
-      svc.setMany('ai', { provider: 'openai', openai_api_key: 'sk-test', temperature: 0.7 }),
-    ).resolves.toBeDefined();
-    expect((await svc.get('ai', 'temperature')).value).toBe(0.7);
-  });
+  // Until #6550 this block also pinned the one real declaration the gate
+  // bound: `ai.temperature`'s `step: 0.1` refusing `0.15`. That ruling took
+  // the grid off the ai manifest (temperature's true domain is continuous),
+  // so the real-manifest pin MOVED with the declaration — both doors'
+  // post-#6550 behaviour is pinned in `manifests/ai.manifest.test.ts`, and
+  // the grid machinery keeps binding through the synthetic fixtures above.
 });
 
 /**
@@ -1661,19 +1644,37 @@ describe('SettingsService — the declared step grid is enforced at save time (#
  * comparison in two places is how the env half came to disagree with the save
  * half in the first place. `step` rides `DeclaredBounds` and
  * `firstRangeViolation`, so it reaches both doors by construction.
+ *
+ * The fixture is synthetic since #6550 took the grid off `ai.temperature`
+ * (this machinery needs a step-declaring key to bind, and the repo no longer
+ * ships one); it keeps the exact shape `ai.temperature` had at ruling time.
+ * The real ai manifest's env door is pinned in `manifests/ai.manifest.test.ts`.
  */
 describe('SettingsService — env overrides are checked against the declared step grid (#6199)', () => {
+  const gridEnvManifest = {
+    namespace: 'gridenv',
+    version: 1,
+    label: 'Grid env',
+    scope: 'global',
+    readPermission: 'setup.access',
+    writePermission: 'setup.access',
+    specifiers: [
+      { type: 'slider', key: 'temperature', label: 'Temperature', required: false,
+        default: 0.7, min: 0, max: 2, step: 0.1 },
+    ],
+  } as any;
+
   const spyLogger = () => {
     const errors: string[] = [];
     return { errors, logger: { error: (m: string) => void errors.push(m) } };
   };
 
-  it('ignores an off-grid OS_AI_TEMPERATURE and resolves the manifest default instead', async () => {
+  it('ignores an off-grid OS_GRIDENV_TEMPERATURE and resolves the manifest default instead', async () => {
     const { errors, logger } = spyLogger();
-    const svc = new SettingsService({ env: { OS_AI_TEMPERATURE: '0.15' }, logger });
-    svc.registerManifest(aiSettingsManifest);
+    const svc = new SettingsService({ env: { OS_GRIDENV_TEMPERATURE: '0.15' }, logger });
+    svc.registerManifest(gridEnvManifest);
 
-    const r = await svc.get('ai', 'temperature');
+    const r = await svc.get('gridenv', 'temperature');
     expect(r.value).toBe(0.7); // the manifest default, not 0.15
     expect(r.source).toBe('default');
     // Not in force, so it pins nothing either — read and write agree.
@@ -1681,7 +1682,7 @@ describe('SettingsService — env overrides are checked against the declared ste
     expect(r.cascadeChain?.some((e) => e.scope === 'env')).toBe(false);
 
     expect(errors).toHaveLength(1);
-    expect(errors[0]).toContain('OS_AI_TEMPERATURE');
+    expect(errors[0]).toContain('OS_GRIDENV_TEMPERATURE');
     // The grid breach gets its OWN sentence, not the window template: the value
     // sits squarely inside `min 0, max 2`, so "is outside the declared step"
     // would be a false description of what happened.
@@ -1696,10 +1697,10 @@ describe('SettingsService — env overrides are checked against the declared ste
     // "env never applies to a stepped key". `1.2` is another float trap:
     // `1.2 / 0.1` is `11.999999999999998`.
     const { errors, logger } = spyLogger();
-    const svc = new SettingsService({ env: { OS_AI_TEMPERATURE: '1.2' }, logger });
-    svc.registerManifest(aiSettingsManifest);
+    const svc = new SettingsService({ env: { OS_GRIDENV_TEMPERATURE: '1.2' }, logger });
+    svc.registerManifest(gridEnvManifest);
 
-    const r = await svc.get('ai', 'temperature');
+    const r = await svc.get('gridenv', 'temperature');
     expect(r.value).toBe(1.2);
     expect(r.source).toBe('env');
     expect(r.locked).toBe(true);
@@ -1708,12 +1709,12 @@ describe('SettingsService — env overrides are checked against the declared ste
 
   it('reports the misconfiguration at registration, and says it ONCE', async () => {
     const { errors, logger } = spyLogger();
-    const svc = new SettingsService({ env: { OS_AI_TEMPERATURE: '0.15' }, logger });
+    const svc = new SettingsService({ env: { OS_GRIDENV_TEMPERATURE: '0.15' }, logger });
     expect(errors).toHaveLength(0);
-    svc.registerManifest(aiSettingsManifest);
+    svc.registerManifest(gridEnvManifest);
     expect(errors).toHaveLength(1);
-    for (let i = 0; i < 5; i++) await svc.get('ai', 'temperature');
-    await svc.getNamespace('ai');
+    for (let i = 0; i < 5; i++) await svc.get('gridenv', 'temperature');
+    await svc.getNamespace('gridenv');
     expect(errors).toHaveLength(1);
   });
 
@@ -1723,16 +1724,14 @@ describe('SettingsService — env overrides are checked against the declared ste
     // nothing (env ignored, UI refused) would be a lockout only an env edit
     // could clear.
     const { logger } = spyLogger();
-    const svc = new SettingsService({ env: { OS_AI_TEMPERATURE: '0.15' }, logger });
-    svc.registerManifest(aiSettingsManifest);
+    const svc = new SettingsService({ env: { OS_GRIDENV_TEMPERATURE: '0.15' }, logger });
+    svc.registerManifest(gridEnvManifest);
 
-    expect((await svc.get('ai', 'temperature')).locked).toBe(false);
-    await expect(
-      svc.setMany('ai', { provider: 'openai', openai_api_key: 'sk-test', temperature: 0.9 }),
-    ).resolves.toBeDefined();
-    const after = await svc.get('ai', 'temperature');
+    expect((await svc.get('gridenv', 'temperature')).locked).toBe(false);
+    await expect(svc.setMany('gridenv', { temperature: 0.9 })).resolves.toBeDefined();
+    const after = await svc.get('gridenv', 'temperature');
     expect(after.value).toBe(0.9);
-    expect(after.source).toBe('global'); // the ai manifest is `scope: 'global'`
+    expect(after.source).toBe('global'); // the fixture is `scope: 'global'`
   });
 });
 
@@ -2284,6 +2283,98 @@ describe('SettingsService — env overrides are judged against the declared valu
     const ok = new SettingsService({ env: { OS_LOCALIZATION_DEFAULT_COUNTRY: 'CH' }, logger: okLogger });
     ok.registerManifest(localizationSettingsManifest);
     expect((await ok.get('localization', 'default_country')).value).toBe('CH');
+    expect(okErrors).toHaveLength(0);
+  });
+});
+
+/**
+ * #6579 — `company.country` adopts `iso_3166_alpha2`, the fourth case of the
+ * hole #5712 closed on localization: the description promised ISO 3166-1 all
+ * along while `^[A-Za-z]{2}$` constrained shape only, so `ZZ` (assigned to
+ * nobody) and `UK` (a CLDR alias, not an ISO 3166-1 code) passed the write
+ * door. Same enforcement machinery, same verdicts — these pins only cover the
+ * adoption, not the machinery (that lives in the #5712 blocks above).
+ */
+describe('SettingsService — company.country adopts iso_3166_alpha2 (#6579)', () => {
+  const companyService = () => {
+    const svc = new SettingsService({ env: {} });
+    svc.registerManifest(companySettingsManifest);
+    return svc;
+  };
+
+  it('write door: admits an assigned code, refuses ZZ/UK with the domain in the constraint', async () => {
+    const svc = companyService();
+    await expect(svc.setMany('company', { country: 'CH' })).resolves.toBeDefined();
+    expect((await svc.get('company', 'country')).value).toBe('CH');
+    for (const cc of ['ZZ', 'UK']) {
+      await expect(svc.setMany('company', { country: cc })).rejects.toMatchObject({
+        code: 'SETTINGS_VALIDATION',
+        fields: [
+          {
+            field: 'country',
+            code: 'invalid_value',
+            label: 'Country',
+            constraint: { valueDomain: 'iso_3166_alpha2' },
+            value: cc,
+          },
+        ],
+      });
+    }
+  });
+
+  it('shape breach still speaks first, in the pattern vocabulary', async () => {
+    // `pattern` stays on the specifier: shape and membership narrow
+    // independently, and the shape verdict is the coarser, more actionable
+    // fact (the same window-before-grid ordering argument as #5712).
+    const svc = companyService();
+    await expect(svc.setMany('company', { country: 'ZZZ' })).rejects.toMatchObject({
+      fields: [{ field: 'country', code: 'invalid_format' }],
+    });
+  });
+
+  it('pins the deliberate tightening: lowercase `us` moves from pattern-accept to domain-reject', async () => {
+    // Before the adoption `^[A-Za-z]{2}$` admitted `us`; domain membership is
+    // exact uppercase, as ISO 3166-1 spells its codes — the same tightening
+    // #5712 recorded for `localization.default_country`. No in-repo runtime
+    // reader consumes `company.country` today, so the risk grade matches.
+    const svc = companyService();
+    await expect(svc.setMany('company', { country: 'us' })).rejects.toMatchObject({
+      fields: [
+        { field: 'country', code: 'invalid_value', constraint: { valueDomain: 'iso_3166_alpha2' } },
+      ],
+    });
+  });
+
+  it('env door judges OS_COMPANY_COUNTRY against the domain too — both doors move together', async () => {
+    // Domain membership ONLY: the env door does not enforce `pattern` for
+    // company keys — that gap is #6580's card, deliberately untouched here.
+    const errors: string[] = [];
+    const svc = new SettingsService({
+      env: { OS_COMPANY_COUNTRY: 'ZZ' },
+      logger: { error: (m: string) => void errors.push(m) },
+    });
+    svc.registerManifest(companySettingsManifest);
+
+    const r = await svc.get('company', 'country');
+    // Not in force: `country` declares no default, so the read resolves to the
+    // empty default layer rather than the rejected override.
+    expect(r.source).toBe('default');
+    expect(r.value).toBeNull();
+    expect(r.locked).toBe(false);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain('OS_COMPANY_COUNTRY');
+    expect(errors[0]).toContain('ISO 3166-1');
+
+    // And a legal member is honored.
+    const okErrors: string[] = [];
+    const ok = new SettingsService({
+      env: { OS_COMPANY_COUNTRY: 'CH' },
+      logger: { error: (m: string) => void okErrors.push(m) },
+    });
+    ok.registerManifest(companySettingsManifest);
+    const okR = await ok.get('company', 'country');
+    expect(okR.value).toBe('CH');
+    expect(okR.source).toBe('env');
     expect(okErrors).toHaveLength(0);
   });
 });

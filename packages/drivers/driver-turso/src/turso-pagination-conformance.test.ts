@@ -31,6 +31,7 @@ import {
   PAGINATION_CASES,
   PAGINATION_ROWS,
   PAGINATION_UNORDERED_CASES,
+  PAGINATION_ZERO_LIMIT_CASES,
 } from '@objectstack/spec/data';
 import { TursoDriver } from './turso-driver.js';
 
@@ -127,5 +128,26 @@ describe('TursoDriver — paged reads are a partition of the result set (local m
       { bypassTenantAudit: true },
     );
     expect(rows.map((r) => String(r.id))).toEqual(PAGINATION_ROWS.map((r) => r.id));
+  });
+
+  /**
+   * `limit: 0` means "return no records" (#6485/#6577). The LOCAL transport
+   * inherits `SqlDriver.findRows()`, which compiles `limit` on presence; the
+   * REMOTE transport compiles its own LIMIT/OFFSET and is pinned by the twin of
+   * this block in `turso-remote-pagination-conformance.test.ts`. Both are
+   * asserted because this driver is dual-transport, and a contract only one
+   * half keeps is a contract this package does not keep.
+   */
+  describe('`limit: 0` returns no records', () => {
+    for (const testCase of PAGINATION_ZERO_LIMIT_CASES) {
+      it(testCase.name, async () => {
+        const rows: Array<Record<string, unknown>> = await driver.find(
+          'ticket',
+          { ...testCase.query },
+          { bypassTenantAudit: true },
+        );
+        expect(rows).toHaveLength(testCase.expectedRowCount);
+      });
+    }
   });
 });

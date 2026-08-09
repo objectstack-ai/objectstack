@@ -893,7 +893,9 @@ const step17: MigrationStep = {
     + 'an author could FAIL A BUILD because a control that cannot render pointed at an action '
     + 'that also did not. That widget branch is deleted with the keys. Lossless deletes in every '
     + 'case — the keys contributed nothing to any rendered output — and the shared `AriaProps` '
-    + 'shape is untouched, staying live on `app.aria` and `page.components[].aria`. Move a '
+    + 'shape is untouched, staying live on `page.aria` / `page.components[].aria` and the list '
+    + 'view `aria` — not on `app.aria`, which this same major retires (see '
+    + '`app-dead-authoring-keys-removed`, which strips it). Move a '
     + 'dashboard-wide affordance to `header.actions[]` (where `icon` is the header spelling of '
     + '`actionIcon`); for per-row click-through use a dataset-bound `table`/`pivot`, whose rows '
     + 'drill through the semantic layer already.\n\n'
@@ -1128,7 +1130,17 @@ const step17: MigrationStep = {
     + 'such a measure never produced a number. `QueryAST.aggregations[].function` is a request '
     + 'surface with no stored source — one semantic TODO below. The mongodb and in-memory '
     + 'backends that implemented these two are inside the #5499 freeze and are untouched; their '
-    + 'code is simply no longer reachable through a spec-valid request.',
+    + 'code is simply no longer reachable through a spec-valid request.\n\n'
+    + 'One entry in this step is not a removal at all but a SECURE-DEFAULT FLIP, the shape '
+    + "protocol 12 last used for `api.requireAuth`: an omitted `ActionDescriptor.resumeAuthority` "
+    + "resolves to `'service'` instead of `'any'`, so a pausing node type that never states who "
+    + 'may continue its pauses is refused on the generic resume route rather than open to it '
+    + '(#5561, ADR-0044\'s 2026-07-28 amendment). Nothing is removed and no metadata shape '
+    + 'changes — the field has been optional since step one of the same issue — so tsc reports '
+    + 'nothing and only the MEANING of silence moved. That is exactly why it needs a ledger '
+    + 'entry: a third-party plugin author has no compile error to discover it with, and the '
+    + 'one-line prescription (declare `resumeAuthority` on the descriptor) has to arrive before '
+    + 'a user meets a run that will not continue.',
   conversionIds: [
     'action-execute-to-target',
     'field-conditionalRequired-to-requiredWhen',
@@ -1179,6 +1191,7 @@ const step17: MigrationStep = {
     'record-picker-inert-keys-removed',
     'page-card-body-to-children',
     'dataset-measure-array-string-agg-removed',
+    'inline-action-api-params-to-body-extra',
   ],
   semantic: [
     {
@@ -2454,6 +2467,67 @@ const step17: MigrationStep = {
         + 'with INVALID_FILTER / 400.',
     },
     {
+      id: 'filter-regex-options-retired',
+      // No backticks in `surface` — see the note two entries above.
+      surface:
+        'data.filter $regex / $options — in a STORED filter (dashboard widget filter and '
+        + 'globalFilters, report runtimeFilter, page and component filter, solution-blueprint '
+        + 'filter), and equally in the where clause of a query request',
+      replacement:
+        '$icontains for the case-insensitive substring match this was almost always used '
+        + 'for, or $contains for a case-sensitive one — a pattern that genuinely needs a '
+        + 'regular expression has no filter-level replacement',
+      reason:
+        'Like `driver-aggregate-undeclared-key-aliases-removed` and '
+        + '`driver-sql-distinct-bare-filter-typed`, this entry records a LENIENCY being '
+        + 'withdrawn rather than a declared surface: `$regex` was never in `FILTER_OPERATORS` '
+        + 'and never a key on `StringOperatorSchema`. That is measured, not assumed — `git '
+        + 'log -S\'$regex\'` over `packages/spec/src` returns only doc comments describing how '
+        + '`$contains` LOWERS to MongoDB (`Contains substring - SQL: LIKE %?% | MongoDB: '
+        + '$regex`), plus #5701 itself, which added the name solely as `RETIRED_FILTER_OPERATORS` '
+        + 'prescription data. ⚠️ But it differs from those two in the one way that decides the '
+        + 'disposition, so a reader should not have to infer it: those were driver CALL '
+        + 'ARGUMENTS, code and never stack metadata, whereas a filter IS stored metadata. '
+        + '`FilterConditionSchema` is an OPEN RECORD (`z.record(z.string(), z.unknown())`) '
+        + 'because a filter key is a field name, so a stored `{ name: { $regex: \'acme.*\' } }` '
+        + 'parses GREEN and always will — a `retiredKey()` tombstone cannot exist on an open '
+        + 'map, which is exactly why the ledger has to carry this. What such a stack used to '
+        + 'get was four different answers from four backends: `driver-sql` and Turso\'s remote '
+        + 'transport compiled it to a LIKE-escaped SUBSTRING (so `a.b` matched only the literal '
+        + '`a.b` and the regex was silently never a regex), `driver-memory` and objectql\'s '
+        + '`having` ran it as a real `RegExp` (so the same filter also matched `axb`, and an '
+        + 'INVALID pattern was caught and answered `false` — zero rows, in silence), and '
+        + '`driver-mongodb` refused it with a bare `Error` carrying no `code` and no `status`. '
+        + 'It is now refused everywhere with INVALID_FILTER / 400 naming the replacement. '
+        + 'There is deliberately NO D2 conversion and this sits in `semantic` rather than among '
+        + 'the mechanical transforms: rewriting `$regex` to `$icontains` is NOT lossless in '
+        + 'either direction — a regex metacharacter becomes a literal — so an auto-applied '
+        + 'rewrite would silently change which rows a dashboard, report or permission filter '
+        + 'selects, a wrong number rather than a missing one. Choosing the substring the '
+        + 'pattern MEANT is a judgment about the query, not a transform. ⚠️ This entry covers '
+        + 'BOTH HALVES of the #4706 ruling (B), not just the driver one: the contract half '
+        + '(#5701 — the `$icontains` declaration, the `$contains` family pinned '
+        + 'case-sensitive, and the `RETIRED_FILTER_OPERATORS` prescriptions) landed before the '
+        + 'ADR-0087 disposition gate (#6148) existed and so was never asked for a ledger entry; '
+        + 'the driver half (#5702) is where the refusal became executable. One surface, one '
+        + 'entry, registered from the half that made it observable. ADR-0049 / ADR-0087, '
+        + '#4706 / #5701 / #5702.',
+      acceptanceCriteria:
+        'No stored filter and no request `where` spells `$regex` or `$options` — grep the '
+        + 'stack for both. Each one is rewritten by asking what the pattern MEANT, not by '
+        + 'transliterating it: a bare substring pattern becomes `$icontains` (or `$contains` '
+        + 'when the match must stay case-sensitive), and its metacharacters are dropped rather '
+        + 'than escaped, because they were never honoured as a regex on the SQL family in the '
+        + 'first place. ⚠️ Expect the answer to CHANGE on any stack that ran on '
+        + '`driver-memory`, `driver-mongodb` or objectql `having`, where the pattern really was '
+        + 'evaluated as a regular expression; on the SQL family the rewritten filter returns '
+        + 'what it always returned. A pattern that genuinely needs alternation, anchoring or '
+        + 'character classes has no filter-level replacement — move that predicate into a '
+        + 'formula field or a server-side view, or open an issue for it. Verify by loading the '
+        + 'stack: a surviving `$regex` or `$options` is answered INVALID_FILTER / 400 with a '
+        + 'message naming the replacement, on every backend.',
+    },
+    {
       id: 'http-server-runtime-vocabulary-retired',
       surface:
         'system.serverEvent / system.serverEventType / system.serverCapabilities / '
@@ -2617,6 +2691,121 @@ const step17: MigrationStep = {
         + 'table. The surviving layers still parse unchanged — a connector declaring '
         + '`syncConfig` and an import declaring `mapping.transform` both behave exactly as they '
         + 'did in 16.x.',
+    },
+    {
+      id: 'action-descriptor-resume-authority-default-flip',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code
+      // span AND a table cell (see the note on `spec-type-alias-input-suffix-retired`).
+      surface:
+        'automation.ActionDescriptor.resumeAuthority — an OMITTED value on a pausing '
+        + 'node descriptor (supportsPause: true, or any executor whose execute() returns '
+        + 'suspend: true)',
+      replacement:
+        "an explicit resumeAuthority: 'any' on the descriptor, for a pausing node whose "
+        + 'pauses really are meant to be continued through the generic resume route '
+        + '(POST /automation/:name/runs/:runId/resume) — a screen-style collected-input '
+        + "pause, or a signal wait an external producer resumes. Declare 'service' instead "
+        + 'if continuing is the tail of a decision your own service must authorize and '
+        + 'record first. Either value is a one-line addition; only the silence changed '
+        + 'meaning',
+      reason:
+        'A SECURE-DEFAULT FLIP with no metadata shape to rewrite — the same category as '
+        + "protocol 12's `rest-requireauth-default-flip`, and it is registered here for the "
+        + 'same reason: whether a given pause is genuinely open to the generic route is a '
+        + 'trust judgment no transform can make. The #3801 resume gate keys on the SUSPENDED '
+        + "NODE, and `ActionDescriptor.resumeAuthority` used to default to `'any'`, so a "
+        + 'pausing node type shipped raw-resumable unless its author remembered the field. '
+        + "It now resolves to `'service'` when absent: an unclaimed pause is refused on the "
+        + 'generic route with `PERMISSION_DENIED` / 403 until its descriptor states who may '
+        + 'continue it. #3823 is the incident that decided the direction — ADR-0044 pointed '
+        + "an approval's revise edge at a generic `wait`, `wait` is legitimately `'any'`, and "
+        + 'the pause standing in a service-owned position inherited a fail-open value nobody '
+        + 'chose; the demonstrated cost was an unaudited resubmit plus a destroyed remote '
+        + 'run. The two possible mistakes are asymmetric, which is the whole argument: '
+        + "guessing `'any'` walks past a decision nothing recorded and is silent, while "
+        + "guessing `'service'` returns a refusal naming the missing field. ⚠️ The surface "
+        + 'is a DESCRIPTOR FIELD set in plugin CODE, never stack metadata, so there is no '
+        + 'source for a D2 conversion to rewrite and deliberately no schema tombstone — the '
+        + 'disposition `data-driver-find-stream-retired` (#4484), `storage-service-list-retired` '
+        + '(#5540) and `actor-user-roles-to-positions` (#6011) already carry. It differs from '
+        + 'those in one way a reader should not have to infer: nothing is REMOVED, so tsc '
+        + 'reports nothing at all — the field was already optional after step one and an '
+        + 'omission still compiles. The enforced channels are all run-time: a registration '
+        + 'warning naming the node type (once per type per engine), the refusal message on '
+        + 'the resume itself, and `check:resume-authority-declared` for executors living in '
+        + 'this repo. For a third-party plugin the generated upgrade guide is the only '
+        + 'channel that arrives BEFORE a user hits a run that will not continue. In-tree the '
+        + 'flip moves nothing: all six shipped pausing types (screen, wait, subflow, map, '
+        + 'approval, approval_revise) declare their authority explicitly. ADR-0044 amendment '
+        + '(2026-07-28) and its 2026-08-08 landing section, ADR-0019 #3801 addendum, #5561.',
+      acceptanceCriteria:
+        'Every action descriptor your plugin registers for a node type that can suspend '
+        + 'declares `resumeAuthority`. Booting the stack logs no `declares supportsPause but '
+        + 'never declares resumeAuthority` warning naming one of your types, and a run parked '
+        + 'on each of your pausing nodes can still be continued the way you intend: a resume '
+        + "through the generic route succeeds for the ones you declared `'any'`, and answers "
+        + "403 (`PERMISSION_DENIED`) for the ones you declared `'service'`, which continue "
+        + 'through your own service API instead. ⚠️ `supportsPause` is a declaration nothing '
+        + 'enforces (#5703), so an executor whose `execute()` returns `suspend: true` while '
+        + 'leaving `supportsPause` false is warned about by NEITHER channel — check those by '
+        + 'hand against the same rule.',
+    },
+    {
+      id: 'export-field-meta-constraints-retired',
+      surface:
+        '@objectstack/rest: ExportFieldMeta.required / .system / .readonly / .hasDefault / '
+        + '.min / .max / .minLength / .maxLength (the map built by `buildFieldMetaMap`, '
+        + 'reached as `PreparedImport.metaMap` from `prepareImportRequest`)',
+      replacement:
+        'the object schema you already hold — read `fields[name].required` / `.system` / '
+        + '`.readonly` / `.defaultValue` / `.min` / `.max` / `.minLength` / `.maxLength` off '
+        + 'the same `ObjectSchema` you passed to `buildFieldMetaMap`, which is where the '
+        + 'ENGINE reads them and therefore the only copy that cannot drift',
+      reason:
+        'ADR-0049 enforce-or-remove. These eight were never a source of truth: '
+        + '`buildFieldMetaMap(schema)` DERIVED each one from the very `schema` its caller '
+        + 'passed in, so the map carried a second copy of facts the caller already held. '
+        + "They existed for exactly one consumer — the import dry run's hand-copied "
+        + 'pre-check mirror (`firstMissingRequiredField` / `firstConstraintViolation`, '
+        + 'framework#3956) — and #4633 ruling D retired that mirror (PR #6532): the dry run '
+        + "now asks `DataProtocol.validateData` for the engine's verdict, which reads the "
+        + "object's own schema. That left all eight computed on every import and read by "
+        + 'NOTHING, which is the declared-and-unread shape ADR-0049 exists for; a constraint '
+        + 'vocabulary standing next to the presentation one with no enforcer behind it is '
+        + 'precisely the thing an AI-authored consumer mistakes for a contract. Verified '
+        + 'zero-reader before removal, per key and by type, across this repo (`packages/rest` '
+        + 'itself, and all five in-repo dependents of `@objectstack/rest`: runtime, cli, '
+        + "verify, plugin-auth, plugin-dev) and the `objectui` sibling; plugin-auth's "
+        + 'identity import forwards `prepared.metaMap` into `runImport` but reads only the '
+        + 'presentation keys through `coerceRow`. '
+        + 'Why this needs a ledger entry despite that sweep: it is the `findStream` (#4484) / '
+        + '`IStorageService.list` (#5540) / `actor-user-roles-to-positions` (#6011) '
+        + 'disposition — a published TS surface with NO spec schema, so there is no '
+        + '`retiredKey()` tombstone and no parse rejection that could carry a prescription, '
+        + 'and the ledger is the only channel that reaches an upgrader. It is if anything '
+        + 'blinder than those three: the keys shipped in a FINAL release (`@objectstack/rest` '
+        + '14.5.0) and have been published in every release since, and because they were '
+        + 'OPTIONAL keys on an interface that itself survives, a JavaScript consumer reading '
+        + '`meta.required` after the upgrade gets `undefined` with no error at all — tsc '
+        + 'reports at the read site only for a typed consumer. '
+        + 'Why D3 semantic and not a D2 conversion: there is nothing to convert. No authored '
+        + 'or stored metadata changes shape — `required` / `min` / `maxLength` and the rest '
+        + 'remain fully authorable on a field definition and fully enforced by the engine, '
+        + 'which is where they always lived. The only place these eight are ever spelled is '
+        + "inside a consumer's own TypeScript, so no `objectstack migrate meta` transform can "
+        + 'reach them. ADR-0049 / ADR-0087, #6536 (the sweep PR #6532 deliberately deferred).',
+      acceptanceCriteria:
+        'No code of yours reads any of the eight off a `buildFieldMetaMap` / '
+        + '`prepareImportRequest` result. Grep your sources for `.required` / `.hasDefault` / '
+        + '`.minLength` / `.maxLength` / `.min` / `.max` / `.system` / `.readonly` on an '
+        + '`ExportFieldMeta`-typed value; each hit moves to the object schema you already '
+        + 'passed in. ⚠️ Prove it against a RUN, not against tsc: these were optional keys, '
+        + 'so an untyped or `any`-typed read compiles clean and silently becomes `undefined` '
+        + '— assert that the constraint your code acts on is still observed on a real import, '
+        + 'not merely that the build is green. Note `hasDefault` has no one-to-one '
+        + "replacement key: it was the derived predicate `defaultValue != null`, mirroring the "
+        + "engine's `applyFieldDefaults` gate, so read `fields[name].defaultValue` and apply "
+        + 'that same `!= null` test yourself.',
     },
   ],
 };

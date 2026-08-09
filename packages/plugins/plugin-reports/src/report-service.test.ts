@@ -443,6 +443,34 @@ describe('ReportService', () => {
       expect(all.length).toBe(2);
     });
 
+    it('unscheduleReport: a non-owner cannot delete another user\'s schedule', async () => {
+      const r = await svc.saveReport({ name: 'Mine', object: 'lead', query: {} }, CTX);
+      const s = await svc.scheduleReport({ reportId: r.id, recipients: ['x@t'] }, CTX);
+      // stranger is denied as not-found and the schedule survives untouched
+      await expect(svc.unscheduleReport(s.id, OTHER)).rejects.toThrow(/REPORT_NOT_FOUND/);
+      expect(engine._tables['sys_report_schedule'].length).toBe(1);
+      // owner can
+      await svc.unscheduleReport(s.id, CTX);
+      expect(engine._tables['sys_report_schedule'].length).toBe(0);
+    });
+
+    it('unscheduleReport: an unknown schedule id is idempotent, not a leak', async () => {
+      await expect(svc.unscheduleReport('rsch_nope', OTHER)).resolves.toBeUndefined();
+    });
+
+    it('listSchedules: a non-owner cannot see another user\'s schedules', async () => {
+      const r = await svc.saveReport({ name: 'Mine', object: 'lead', query: {} }, CTX);
+      await svc.scheduleReport({ reportId: r.id, recipients: ['x@t'] }, CTX);
+      expect((await svc.listSchedules({ reportId: r.id }, OTHER)).length).toBe(0); // stranger sees nothing
+      expect((await svc.listSchedules({ reportId: r.id }, CTX)).length).toBe(1);   // owner sees it
+    });
+
+    it('listSchedules: system context (dispatcher) still sees schedules', async () => {
+      const r = await svc.saveReport({ name: 'Mine', object: 'lead', query: {} }, CTX);
+      await svc.scheduleReport({ reportId: r.id, recipients: ['x@t'] }, CTX);
+      expect((await svc.listSchedules({ reportId: r.id }, { isSystem: true } as any)).length).toBe(1);
+    });
+
     it('dispatchDue: fails closed (no RLS bypass) when no owner resolver is configured', async () => {
       const noResolver = new ReportService({ engine: engine as any, email, clock: { now: () => now } });
       const r = await noResolver.saveReport({ name: 'A', object: 'lead', query: {} }, CTX);

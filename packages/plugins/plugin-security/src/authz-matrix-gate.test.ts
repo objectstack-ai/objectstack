@@ -35,9 +35,43 @@ import { describe, it, expect, vi } from 'vitest';
 import { derivePosture, POSTURE_RANK } from '@objectstack/core';
 import { SecurityPlugin, hasPlatformAdminCapability } from './security-plugin.js';
 import { PermissionEvaluator } from './permission-evaluator.js';
-import { defaultPermissionSets } from './objects/default-permission-sets.js';
+import { defaultPermissionSets, BETTER_AUTH_MANAGED_OBJECTS } from './objects/default-permission-sets.js';
 import { RLS_DENY_FILTER } from './rls-compiler.js';
 import type { PermissionSet } from '@objectstack/spec/security';
+
+// [#5491] The grant the platform baseline used to IMPLY, now declared.
+//
+// `member_default` no longer ships a `'*'` object grant: it union-merged into
+// every org member and erased app-side explicit-allow gates on create/read/edit,
+// so the maintainer narrowed the baseline to explicit-allow (2026-08-07). This
+// matrix is about the ROW-FILTER layers — Layer 0's tenant wall AND-composed
+// with Layer 1's business RLS — and a cell can only report a filter if the CRUD
+// gate ahead of it admits the operation at all. So the two member roles below
+// now carry this set, which re-declares the removed wildcard BYTE-FOR-BYTE,
+// identity-table carve-out included:
+//
+//   - a PLAIN wildcard, which (deliberately, ADR-0066 D2) still does not cover a
+//     `private` object — so `crm_secret`'s CRUD_DENY cells stay verbatim;
+//   - the better-auth managed-object write denies, which under the old seed came
+//     from the same set and are what make `sys_user`'s write cells CRUD_DENY.
+//
+// `member_default` still resolves additively for both roles and still
+// contributes the `owner_only_writes` / `owner_only_deletes` RLS the write cells
+// pin — only the OBJECT bits moved out of the seed and into a declaration.
+// Every expectation in EXPECTED_MATRIX is therefore unchanged.
+const memberBaseline: PermissionSet = {
+  name: 'member_baseline',
+  label: 'Member baseline (the object grant the seed used to imply)',
+  objects: {
+    '*': { allowRead: true, allowCreate: true, allowEdit: true },
+    ...Object.fromEntries(
+      BETTER_AUTH_MANAGED_OBJECTS.map((name) => [
+        name,
+        { allowRead: true, allowCreate: false, allowEdit: false, allowDelete: false },
+      ]),
+    ),
+  },
+} as any;
 
 // A permissive, admin-authored business RLS policy (ADR-0095 W1's worked
 // example): "everyone may read rows whose status is public". At the RLS layer
@@ -65,7 +99,7 @@ const invoiceAuditor: PermissionSet = {
   objects: { crm_secret: { allowRead: true, allowCreate: true, allowEdit: true, viewAllRecords: true, modifyAllRecords: true } },
 } as any;
 
-const ALL_SETS: PermissionSet[] = [...defaultPermissionSets, publicReader, invoiceAuditor];
+const ALL_SETS: PermissionSet[] = [...defaultPermissionSets, memberBaseline, publicReader, invoiceAuditor];
 const DENY = RLS_DENY_FILTER.id; // the fail-closed sentinel's marker value
 
 // ── Minimal middleware harness ──────────────────────────────────────────────
@@ -195,10 +229,12 @@ const ROLES = {
   platform_admin: { userId: 'padmin', tenantId: 'org-1', positions: ['platform_admin'], permissions: ['admin_full_access'] },
   // Org admin: holds organization_admin (also viewAll/modifyAll, but tenant-scoped by its RLS).
   org_admin: { userId: 'oadmin', tenantId: 'org-1', positions: ['org_admin'], permissions: ['organization_admin'] },
-  // Rank-and-file member: only the additive member_default baseline; org_member gates owner_only_*.
-  member: { userId: 'u1', tenantId: 'org-1', positions: ['org_member'], permissions: [] },
+  // Rank-and-file member: the additive member_default baseline (RLS: owner_only_*,
+  // gated by the org_member position) PLUS the declared object grant the baseline
+  // used to imply before #5491 — see `memberBaseline`.
+  member: { userId: 'u1', tenantId: 'org-1', positions: ['org_member'], permissions: ['member_baseline'] },
   // Authenticated user with NO active organization → tenant scoping cannot resolve → fail-closed.
-  no_org_member: { userId: 'u2', positions: ['org_member'], permissions: [] },
+  no_org_member: { userId: 'u2', positions: ['org_member'], permissions: ['member_baseline'] },
 };
 
 // The locked snapshot of POST-EXTRACTION behavior (Layer0 AND Layer1). Read the

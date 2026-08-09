@@ -2931,8 +2931,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         options: {
           global: "グローバル",
           tenant: "テナント",
-          user: "ユーザー",
-          runtime: "ランタイム"
+          user: "ユーザー"
         }
       },
       user_id: {

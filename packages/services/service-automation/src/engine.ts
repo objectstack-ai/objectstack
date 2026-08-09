@@ -176,7 +176,7 @@ const FLOW_NODE_UNKNOWN_KEY_GUIDANCE: Record<string, Record<string, string>> = {
     },
 };
 import { runIsUnscopedUserMode, flowTouchesData } from './runtime-identity.js';
-import { isGuardRefusal } from './guard-refusal.js';
+import { isGuardRefusal, refuseNode } from './guard-refusal.js';
 import { summarizeRun, formatRunSummaryLine } from './run-summary.js';
 // #5660 — the degrade registration reports a FOREIGN failure (a third-party
 // provider factory's text), so it renders it as structured `meta` rather than
@@ -931,7 +931,8 @@ export interface SuspendedRun {
      * Registry type of the node that produced the pause (`approval`, `screen`,
      * `wait`, …), captured at suspend time. Keys the resume gate (#3801): the
      * descriptor's `resumeAuthority` decides whether a raw
-     * {@link AutomationEngine.resume} is a legitimate continuation.
+     * {@link AutomationEngine.resume} is a legitimate continuation, and a type
+     * that declares none is refused rather than assumed open (#5561).
      *
      * Recorded on the suspension rather than re-derived from the live flow so
      * the gate reflects what actually paused the run — a flow republished
@@ -1438,10 +1439,19 @@ export class AutomationEngine implements IAutomationService {
      * exist: with `.default('any')` an omission parsed into a descriptor
      * byte-identical to an author's explicit `'any'`, so the fact was gone
      * before the engine ever saw the object. Absent now means absent, and a
-     * pausing type that leaves it absent is fail-open by omission rather than
-     * by decision — #3823 is what that costs (a revise pause standing in a
-     * service-owned position inherited `wait`'s legitimate `'any'`, and a raw
-     * resume walked past an unrecorded decision).
+     * pausing type that leaves it absent is judged by nobody's decision —
+     * #3823 is what that costs (a revise pause standing in a service-owned
+     * position inherited `wait`'s legitimate `'any'`, and a raw resume walked
+     * past an unrecorded decision).
+     *
+     * **Since #5561 step two this warning precedes a refusal, not a silence.**
+     * An omission used to resolve `'any'`, so the line was pure advice about a
+     * run-time behaviour that was already happening; it now resolves
+     * `'service'` ({@link RESUME_AUTHORITY_WHEN_UNDECLARED}), so every pause the
+     * named type creates will be refused on the generic resume route. The line
+     * says so, and says the one-line fix, because registration is the earliest
+     * moment the author can hear it — the alternative is hearing it from a user
+     * whose run will not continue.
      *
      * **What it asserts, and why that is safe here.** Only the static fact that
      * THIS descriptor omits the key — a property of the object being registered,
@@ -1449,17 +1459,18 @@ export class AutomationEngine implements IAutomationService {
      * reads no registry and draws no conclusion from anything being absent from
      * one, so it is not the shape AGENTS.md "Startup registry reads" forbids and
      * needs no seal flag (contrast {@link warnIfNodeTypeVocabularyNeverSealed},
-     * which reports a missing CALL for the same reason). Whether the omission
-     * *matters* at run time is deliberately not judged: the engine still
-     * resolves absent to `'any'` ({@link resolveResumeAuthority}), so nothing
-     * about today's behaviour changes.
+     * which reports a missing CALL for the same reason).
      *
-     * **Blind spot, stated up front:** the trigger is `supportsPause`, itself a
-     * declaration no execution path enforces (#5703) — a run pauses because
-     * `execute()` returned `suspend: true`. An executor that suspends while
-     * leaving `supportsPause` false is therefore fail-open AND silent here.
-     * `check:resume-authority-declared` catches this repo's own executors at
-     * authoring time; #5703 tracks the runtime half.
+     * **Scope, stated up front:** the trigger is `supportsPause`, so a descriptor
+     * that leaves it false is not asked this question at all. That used to be a
+     * blind spot — the executor could suspend anyway and nothing said a word
+     * (#5703) — and it is now closed at the other end instead of here:
+     * {@link refuseUndeclaredSuspension} refuses the suspension itself at the
+     * engine boundary (#6667), so the mismatch fails the run that produced it
+     * rather than parking a continuation this gate never got to warn about.
+     * A type that suspends therefore reaches this warning by the only route
+     * left — declaring `supportsPause: true`, which is when the question about
+     * `resumeAuthority` is worth asking.
      */
     private warnIfResumeAuthorityUndeclared(descriptor: ActionDescriptor): void {
         if (descriptor.supportsPause !== true) return;
@@ -1468,13 +1479,13 @@ export class AutomationEngine implements IAutomationService {
         this.resumeAuthorityOmissionWarned.add(descriptor.type);
         this.logger.warn(
             `[automation] node type '${descriptor.type}' declares supportsPause but never declares ` +
-            `resumeAuthority, so the #3801 resume gate treats every pause it creates as raw-resumable ` +
-            `through the generic route (POST /automation/:name/runs/:runId/resume) — fail-open by omission ` +
-            `rather than by decision, which is how #3823 walked past an unrecorded approval decision. ` +
+            `resumeAuthority, so the #3801 resume gate REFUSES every pause it creates on the generic route ` +
+            `(POST /automation/:name/runs/:runId/resume) — an unclaimed pause is fail-closed since #5561, ` +
+            `because the opposite guess is how #3823 walked past an unrecorded approval decision. ` +
             `Declare it on the descriptor: 'any' if that route IS the intended door (a screen's collected ` +
             `inputs, a signal wait's external producer), or 'service' if resuming is the tail of a decision ` +
-            `some service must authorize and record first. Declaring 'any' explicitly silences this and ` +
-            `changes no behaviour. Reported once per node type per engine.`,
+            `some service must authorize and record first. Declaring 'any' is what RESTORES the generic ` +
+            `route for this type. Reported once per node type per engine.`,
         );
     }
 
@@ -1721,15 +1732,34 @@ export class AutomationEngine implements IAutomationService {
         try {
             // A trigger-fired run's result must not vanish (2026-07-17 eval:
             // a failing record-change flow produced zero output — the failure
-            // lived only in the run-history row). Log failures at ERROR: stderr
-            // survives the CLI's boot-quiet stdout window, and a fired-but-failed
-            // automation is an operational fault. Condition-skipped runs stay
+            // lived only in the run-history row). Condition-skipped runs stay
             // quiet (execute() already debug-logs them — they are high-frequency).
+            //
+            // #6587 — `result.error` is the envelope field that carries a
+            // failing node's / driver's text VERBATIM (#5912 left it that way
+            // on purpose), so foreign newlines reach this message second-hand;
+            // it goes to the structured slot — the identical class as
+            // `bubbleToParent`'s envelope branch, on the fired-run path. See
+            // `forgetSuspendedRun`'s catch for the full mechanism (#6299).
+            //
+            // #4632 verdict: stays `error`, on its own reasoning rather than
+            // inertia. This is the fire-and-forget path: NO caller holds this
+            // result envelope, so after the failure the system looks normal
+            // from the outside — the triggering event was handled and nothing
+            // retries the run — while the flow's declared effects never
+            // landed; the only other trace is the passive run-history row.
+            // That stderr also survives the CLI's boot-quiet stdout window is
+            // stream mechanics, not the verdict.
             trigger.start(resolved.binding, (ctx: AutomationContext) =>
                 this.execute(flowName, ctx).then((result) => {
                     if (!result.success) {
                         this.logger.error(
-                            `Trigger-fired run of flow '${flowName}' failed: ${result.error ?? 'unknown error'}`,
+                            `Trigger-fired run of flow '${flowName}' failed (trigger '${resolved.triggerType}') — ` +
+                                `no caller holds this result and nothing retries the run; the terminal failure ` +
+                                `is recorded in the flow's run history, and the run's failure envelope is in ` +
+                                `this record's meta.`,
+                            undefined,
+                            { error: result.error ?? 'unknown error' },
                         );
                     }
                 }),
@@ -2715,9 +2745,17 @@ export class AutomationEngine implements IAutomationService {
         const guardRecordId = (context?.record as { id?: unknown } | undefined)?.id;
         const reentryKey = guardRecordId != null ? `${flowName}::${String(guardRecordId)}` : undefined;
         if (reentryKey && this.activeRecordFlows.has(reentryKey)) {
+            // #6654 — the record id is CALLER data (nothing schema-constrains
+            // it against newlines), so it rides the logger's structured slot,
+            // never the message; see `forgetSuspendedRun`'s catch for the full
+            // mechanism (#6299). #4632: FUNCTIONAL — stays `warn` (the run is
+            // deliberately skipped and the caller reads the skip envelope).
             this.logger.warn(
-                `[automation] flow '${flowName}' re-entered for the same record '${String(guardRecordId)}' while still running — breaking self-trigger loop. ` +
-                `Its start condition did not suppress the re-fire; if it guards on a boolean field (e.g. \`is_escalated != true\`), note booleans persist as 0/1 on SQLite/libsql and CEL \`1 != true\` is true.`,
+                `[automation] flow '${flowName}' re-entered for the same record while still running — breaking ` +
+                    `self-trigger loop; the triggering record's id is in this record's meta. Its start condition ` +
+                    `did not suppress the re-fire; if it guards on a boolean field (e.g. \`is_escalated != true\`), ` +
+                    `note booleans persist as 0/1 on SQLite/libsql and CEL \`1 != true\` is true.`,
+                { recordId: String(guardRecordId) },
             );
             return { success: true, output: { skipped: true, reason: 'reentrancy_loop_guard' } };
         }
@@ -2948,7 +2986,8 @@ export class AutomationEngine implements IAutomationService {
      * **Authorization (#3801).** This is the public door — the generic REST
      * resume route and the SDK land here — so it is gated on WHAT THE RUN IS
      * PARKED ON before any state is touched: a suspension whose node declares
-     * `resumeAuthority: 'service'` is refused unless the signal carries
+     * `resumeAuthority: 'service'` — or declares no `resumeAuthority` at all,
+     * fail-closed since #5561 — is refused unless the signal carries
      * {@link RESUME_AUTHORITY_SERVICE}. The engine's own continuations
      * (subflow delegation / up-bubble, `map` re-entry, wait-timer wake) go
      * through {@link resumeInternal} and are not re-gated — they continue work
@@ -2973,10 +3012,22 @@ export class AutomationEngine implements IAutomationService {
      * Resolves the EFFECTIVE suspension first: a run parked on a `subflow` or
      * `map` node is really waiting on a CHILD run, so the gate follows that
      * chain and judges the node the signal lands on (subflow) or would advance
-     * past (map) — see {@link LINKED_RUN_PREFIXES}. Anything it cannot resolve
-     * (unknown run, missing flow, unregistered node type) is left to
+     * past (map) — see {@link LINKED_RUN_PREFIXES}. A run it cannot resolve at
+     * all (unknown run id, nothing suspended, no resolvable node type) is left to
      * `resumeInternal`, which reports the machine-state error — the gate only
      * ever speaks to authorization.
+     *
+     * **An UNDECLARED node type is refused, not deferred** (#5561 step two). It
+     * used to be let through on the schema default's inherited `'any'`; a pause
+     * whose type never stated who may continue it is now closed until its author
+     * states it. The refusal says WHICH of the two reasons applies, because they
+     * ask opposite things of the reader: a declared `'service'` node is working
+     * exactly as designed and the caller must go through the owning service,
+     * while an undeclared one is a missing one-line declaration on a descriptor
+     * and the fix belongs to whoever registered it. Emitting the `'service'`
+     * wording for both would tell an author their node declares something it
+     * never declared — the failure mode this whole issue is about, restated as a
+     * log line.
      */
     private async refuseGatedResume(runId: string, signal?: ResumeSignal): Promise<AutomationResult | null> {
         const run = await this.resolveEffectiveSuspension(runId);
@@ -2989,27 +3040,45 @@ export class AutomationEngine implements IAutomationService {
         // decision's tail, not a way around it.
         if (signal?.[RESUME_AUTHORITY_SERVICE]) return null;
 
+        // Refusing. Which of the two reasons? A second registry walk, on the
+        // refusal path only, so the message can tell a node that deliberately
+        // declared `'service'` from one that declared nothing at all.
+        const declared = this.resolveDeclaredResumeAuthority(nodeType);
         const direct = run.runId === runId;
         const at = direct ? `'${run.nodeId}'` : `'${run.nodeId}' (linked run '${run.runId}')`;
-        this.logger.warn(
-            `[automation] refused resume of run '${runId}': parked on ${nodeType} node ${at}, which is resumable ` +
-                `only through its owning service (resumeAuthority: 'service')`,
-        );
+        const why = declared === 'service'
+            ? `which is resumable only through its owning service (resumeAuthority: 'service')`
+            : `whose type never declares resumeAuthority, so it is closed to the generic route until it does ` +
+              `(#5561) — declare resumeAuthority: 'any' on its descriptor if this route IS the intended door`;
+        this.logger.warn(`[automation] refused resume of run '${runId}': parked on ${nodeType} node ${at}, ${why}`);
+
+        // The fix, identical in both the direct and the linked-run phrasing —
+        // what has to change is a descriptor, not the call that just failed.
+        const undeclaredFix =
+            `and that node type never declares resumeAuthority, so the generic resume route is closed to the ` +
+            `pauses it creates (#5561). If that route IS the intended door — a screen's collected inputs, a ` +
+            `signal wait's external producer — declare resumeAuthority: 'any' on its action descriptor; declare ` +
+            `'service' if resuming is the tail of a decision some service must authorize and record first`;
         return {
             success: false,
             code: 'PERMISSION_DENIED',
-            error: direct
-                ? `Run '${runId}' is paused at a '${nodeType}' node, which only its owning service may resume — ` +
-                  `drive it through that service's API (e.g. an approval decision), not a raw resume`
-                : `Run '${runId}' is waiting on run '${run.runId}', which is paused at a '${nodeType}' node that ` +
-                  `only its owning service may resume — resuming here would continue past a decision that has not ` +
-                  `been made; drive it through that service's API instead`,
+            error: declared === 'service'
+                ? direct
+                    ? `Run '${runId}' is paused at a '${nodeType}' node, which only its owning service may resume — ` +
+                      `drive it through that service's API (e.g. an approval decision), not a raw resume`
+                    : `Run '${runId}' is waiting on run '${run.runId}', which is paused at a '${nodeType}' node that ` +
+                      `only its owning service may resume — resuming here would continue past a decision that has not ` +
+                      `been made; drive it through that service's API instead`
+                : direct
+                    ? `Run '${runId}' is paused at a '${nodeType}' node, ${undeclaredFix}`
+                    : `Run '${runId}' is waiting on run '${run.runId}', which is paused at a '${nodeType}' node, ` +
+                      `${undeclaredFix}`,
         };
     }
 
     /**
-     * The `resumeAuthority` in force for a node type, following a deprecated
-     * ADR-0018 alias to its canonical type.
+     * The authority a node type **declared**, following a deprecated ADR-0018
+     * alias to its canonical type — `undefined` when nothing declared one.
      *
      * An alias's descriptor is synthesized by {@link registerNodeAlias} and does
      * NOT copy the canonical's capabilities, so reading it directly would hand
@@ -3019,23 +3088,155 @@ export class AutomationEngine implements IAutomationService {
      * order the two register in. No alias of a pausing type exists today; this
      * keeps it from becoming a hole the day one does.
      *
-     * The `?? 'any'` is load-bearing in a second way since #5561: with no schema
-     * default on `resumeAuthority`, an undeclared descriptor arrives with the key
-     * absent and this is the one place that resolves it. It resolves fail-OPEN,
-     * exactly as the removed default did — step one of #5561 changed nothing
-     * here, it only made the omission audible at registration. Flipping this
-     * fallback to `'service'` is the breaking half still tracked on #5561, and
-     * it is this single expression.
+     * Split out from {@link resolveResumeAuthority} because since #5561 step two
+     * the two facts differ: a type that declared `'service'` and a type that
+     * declared nothing are both refused, but for opposite reasons, and the
+     * refusal has to say which (one is working as designed, the other is a
+     * missing one-line declaration). One walk, so the alias hop can never be
+     * implemented twice and drift.
      */
-    private resolveResumeAuthority(nodeType: string): NonNullable<ActionDescriptor['resumeAuthority']> {
+    private resolveDeclaredResumeAuthority(nodeType: string): ActionDescriptor['resumeAuthority'] {
+        return this.resolveCanonicalDescriptor(nodeType)?.resumeAuthority;
+    }
+
+    /**
+     * The descriptor whose CAPABILITY declarations govern a node type: the one
+     * registered under that type, or — when that one is a deprecated ADR-0018
+     * alias — the canonical descriptor it forwards to.
+     *
+     * The alias hop is the whole reason this is a function rather than a map
+     * lookup, and the reasoning is {@link registerNodeAlias}'s: an alias's
+     * descriptor is SYNTHESIZED, so it carries the schema defaults for every
+     * capability (`supportsPause: false`, `resumeAuthority` absent) rather than
+     * the canonical's real values. Reading it directly would make each capability
+     * gate answer "no" for the old type name — one rename away from either a hole
+     * (#5561's, if the gate fails open) or a false refusal (#6667's, if it fails
+     * closed). Resolving live rather than snapshotting at alias-registration time
+     * also keeps the answer right whichever order the two register in. No alias
+     * of a pausing type exists today; this keeps it from becoming a defect the
+     * day one does.
+     *
+     * Extracted at #6667 so the two capability gates that need the hop —
+     * {@link resolveDeclaredResumeAuthority} (who may resume) and
+     * {@link refuseUndeclaredSuspension} (may this type pause at all) — share
+     * ONE walk. Two copies of a four-line loop is exactly how one of them
+     * acquires a bound the other lacks.
+     */
+    private resolveCanonicalDescriptor(nodeType: string): ActionDescriptor | undefined {
         let descriptor = this.actionDescriptors.get(nodeType);
         for (let hop = 0; descriptor?.aliasOf && hop < AutomationEngine.MAX_ALIAS_HOPS; hop++) {
             const canonical = this.actionDescriptors.get(descriptor.aliasOf);
             if (!canonical || canonical === descriptor) break;
             descriptor = canonical;
         }
-        return descriptor?.resumeAuthority ?? 'any';
+        return descriptor;
     }
+
+    /**
+     * Refuse a suspension the node type never declared it could produce — the
+     * runtime half of `supportsPause` (#6667, from #5703).
+     *
+     * Returns a guard refusal when the node type publishes a descriptor whose
+     * (alias-resolved) `supportsPause` is not `true` and its executor just
+     * returned `suspend: true`; `null` when there is nothing to refuse.
+     *
+     * ## Why refuse rather than pause-and-log
+     *
+     * Honouring the pause and logging `error` was the alternative, and it loses
+     * on consequence. A type that leaves `supportsPause` false is, in the same
+     * breath, a type `check:resume-authority-declared` does not gate and
+     * {@link warnIfResumeAuthorityUndeclared} does not warn about — both key on
+     * `supportsPause: true` — so it almost certainly declares no
+     * `resumeAuthority` either, and since #5561 step two an undeclared authority
+     * resolves to `'service'`: the generic resume route REFUSES every pause it
+     * creates. Honouring the suspension therefore writes a durable continuation
+     * for a run that nothing can continue, and the `error` line is printed in the
+     * process that paused — hours or a restart before anyone tries to resume and
+     * gets a `PERMISSION_DENIED` that names `resumeAuthority`, not the
+     * `supportsPause` that actually caused it. That is Prime Directive #10
+     * exactly: advertising a capability (a resumable pause) the runtime does not
+     * deliver, discovered by someone who cannot connect it back.
+     *
+     * Refusing fails the run at the moment of the mistake, in the process that
+     * made it, with the failure handed to the run's own caller and NOTHING
+     * durable written — and the message names the one-line fix. It is the same
+     * direction #5561 chose for the neighbouring guess: the loud mistake is
+     * discoverable by the person who made it; the silent one is not.
+     *
+     * No log line is emitted here, deliberately. This is AGENTS.md's third legal
+     * answer under "Degradation log levels" — a failure handed to the CALLER is
+     * not a degradation, and the run's own `failed` history row already carries
+     * the message. A `logger.error` on top would fire once per execution of a
+     * mis-declared node, which is what makes `error` unreadable.
+     *
+     * ## What it does NOT judge
+     *
+     *  - **The inverse.** `supportsPause: true` on a type that never suspends is
+     *    not a mismatch: the declaration is a capability, not an obligation, and
+     *    `wait` legitimately returns without suspending when its condition is
+     *    already met.
+     *  - **Silence.** A node type that publishes NO descriptor declares nothing —
+     *    not even `false` — so there is no declaration for this gate to enforce,
+     *    and `NodeExecutor.descriptor` is optional by contract. Its pauses are
+     *    already fail-closed at the other end (#5561: an absent descriptor means
+     *    an absent `resumeAuthority`, so the generic route refuses them and says
+     *    so). Refusing here as well would delete that behaviour, which
+     *    `resume-authority-gate.test.ts`'s `bare_pause` case pins on purpose.
+     */
+    private refuseUndeclaredSuspension(nodeType: string): NodeExecutionResult | null {
+        const descriptor = this.resolveCanonicalDescriptor(nodeType);
+        // No descriptor ⇒ no declaration ⇒ nothing to enforce (see above).
+        if (!descriptor) return null;
+        if (descriptor.supportsPause === true) return null;
+        return refuseNode(
+            `node type '${nodeType}' suspended the run but its action descriptor declares ` +
+            `supportsPause: false, so the pause is refused — a run that paused here could not be ` +
+            `continued on the generic resume route anyway: a type that declares no pause declares no ` +
+            `resumeAuthority either, and an unclaimed pause is fail-closed since #5561. Declare ` +
+            `supportsPause: true on the descriptor together with the resumeAuthority the pauses need ` +
+            `('any' if POST /automation/:name/runs/:runId/resume is the intended door, 'service' if ` +
+            `resuming is the tail of a decision some service must authorize and record first) — or stop ` +
+            `returning suspend: true from execute(). This is a metadata defect, not a runtime one, so a ` +
+            `fault edge does not route it.`,
+        );
+    }
+
+    /**
+     * The `resumeAuthority` in force for a node type: what it declared, or
+     * {@link RESUME_AUTHORITY_WHEN_UNDECLARED} when it declared nothing.
+     *
+     * **The fallback is the whole of #5561 step two.** With no schema default on
+     * `resumeAuthority` (step one), an undeclared descriptor arrives with the key
+     * absent and this is the ONE place that resolves it — so this single
+     * expression is where "a pause nobody claimed" is either open to the world or
+     * closed to everyone. It used to resolve `'any'`, inherited from the schema
+     * default step one removed; it now resolves `'service'`, and a pause whose
+     * node type never stated who may continue it is refused on the generic route
+     * until its author says otherwise.
+     *
+     * That is the direction #3823 was decided in: ADR-0044 pointed a revise edge
+     * at a generic `wait`, `wait` is legitimately `'any'`, and the pause standing
+     * in a service-owned position inherited a fail-open value nobody chose. The
+     * cost of guessing wrong is asymmetric — guessing `'any'` walks past a
+     * decision nothing recorded, guessing `'service'` returns a refusal that names
+     * the one-line fix — so the guess is made in the direction that is loud
+     * instead of the direction that is silent.
+     */
+    private resolveResumeAuthority(nodeType: string): NonNullable<ActionDescriptor['resumeAuthority']> {
+        return this.resolveDeclaredResumeAuthority(nodeType) ?? AutomationEngine.RESUME_AUTHORITY_WHEN_UNDECLARED;
+    }
+
+    /**
+     * What an UNDECLARED `resumeAuthority` resolves to (#5561 step two).
+     *
+     * The single source of truth for the fail-closed default — the registration
+     * warning, the refusal message and {@link resolveResumeAuthority} all speak
+     * about the same constant rather than three copies of a string literal.
+     * `ActionDescriptorSchema.resumeAuthority` deliberately carries no Zod
+     * `.default()` (that is what makes an omission observable at all), so this is
+     * the default in every sense that matters at run time.
+     */
+    private static readonly RESUME_AUTHORITY_WHEN_UNDECLARED = 'service' as const;
 
     /** Depth bound for the subflow chain walk — a corrupt correlation cycle
      *  must not spin the gate. Far above any real nesting. */
@@ -3360,9 +3561,18 @@ export class AutomationEngine implements IAutomationService {
             const variables = new Map<string, unknown>(Object.entries(run.variables));
             const rejected = applyResumeSignal(variables, signal, run.nodeId);
             if (rejected.length) {
+                // #6654 — the rejected names are the CALLER's resume-signal
+                // keys (nothing constrains them against newlines), so they
+                // ride the structured slot, never the message; see
+                // `forgetSuspendedRun`'s catch for the full mechanism (#6299).
+                // The returned INVALID_SIGNAL envelope below is caller-facing
+                // refusal text, not a log record — it keeps naming the
+                // variables (the envelope class is ruled elsewhere).
+                // #4632: FUNCTIONAL — stays `warn`.
                 this.logger.warn(
                     `[automation] refused resume of run '${runId}': signal writes engine-internal ` +
-                        `variable(s) ${rejected.join(', ')}`,
+                        `variable(s) — the rejected names are in this record's meta.`,
+                    { rejected },
                 );
                 return {
                     success: false,
@@ -3593,9 +3803,19 @@ export class AutomationEngine implements IAutomationService {
 
         const declared = declaredScreenFieldNames(fields);
         const summary = issues.map((i) => i.message).join('; ');
+        // #6654 — the issue messages embed USER-SUBMITTED keys
+        // (`validateScreenInputs`' `Unknown screen field "…"`,
+        // screen-input-contract.ts), which nothing constrains against
+        // newlines, so the findings ride the structured slot, never the
+        // message; see `forgetSuspendedRun`'s catch for the full mechanism
+        // (#6299). The returned INVALID_SCREEN_INPUT envelope below is
+        // caller-facing refusal text, not a log record — it keeps the summary
+        // (the envelope class is ruled elsewhere). #4632: FUNCTIONAL — stays
+        // `warn`.
         this.logger.warn(
             `[automation] refused resume of run '${runId}': screen '${run.nodeId}' input violates its declared ` +
-                `field contract — ${summary}`,
+                `field contract — ${issues.length} issue(s); the field-level findings are in this record's meta.`,
+            { issues },
         );
         return {
             success: false,
@@ -4204,11 +4424,19 @@ export class AutomationEngine implements IAutomationService {
 
     /** One warning per flow, shared by the boot audit and the post-seal path. */
     private warnUnknownNodeTypes(entry: UnknownNodeTypeAuditEntry): void {
+        // #6654 — the unknown type names are FLOW-AUTHOR metadata and the
+        // registered vocabulary is plugin-supplied (neither is
+        // schema-constrained against newlines), so both lists ride the
+        // structured slot, never the message; see `forgetSuspendedRun`'s
+        // catch for the full mechanism (#6299). The "no registered executor
+        // or descriptor" phrase is load-bearing — tests and log filters count
+        // per-flow findings by it. #4632: FUNCTIONAL — stays `warn`.
         this.logger.warn(
-            `Flow '${entry.flowName}' references node type(s) with no registered executor or descriptor: ` +
-            `${entry.unknownTypes.join(', ')}. Every plugin has started, so nothing will register them now — ` +
-            `these nodes fail at execution time with NO_EXECUTOR. Install/enable the plugin that contributes them. ` +
-            `Registered types: ${entry.knownTypes.join(', ') || '(none)'}`,
+            `Flow '${entry.flowName}' references node type(s) with no registered executor or descriptor — ` +
+                `the unknown type names and the registered vocabulary are in this record's meta. Every plugin ` +
+                `has started, so nothing will register them now — these nodes fail at execution time with ` +
+                `NO_EXECUTOR. Install/enable the plugin that contributes them.`,
+            { unknownTypes: entry.unknownTypes, knownTypes: entry.knownTypes },
         );
     }
 
@@ -4732,6 +4960,27 @@ export class AutomationEngine implements IAutomationService {
                 throw execErr;
             }
 
+            // #6667 — declared = enforced for `supportsPause`, at the ONE seam
+            // every suspension passes through.
+            //
+            // Placed here rather than beside the `throw new FlowSuspendSignal`
+            // below on purpose: converting the mismatch into an ordinary guard
+            // refusal *before* the success bookkeeping means the run records a
+            // `failure` step for the offending node (not a `success` step
+            // followed by an unexplained failed run), sets `$error` like any
+            // other refusal, and inherits #3863's un-routability — a `fault`
+            // edge must not be able to swallow a declaration defect, since
+            // re-running the flow unchanged can never fix one.
+            //
+            // Exactly once, and nothing bypasses it: this is the only call site
+            // of any `executor.execute()` that the engine acts on — the ADR-0018
+            // alias path delegates and RETURNS its target's result here rather
+            // than suspending on its own, `resume()` re-enters through
+            // {@link executeNode}, and region bodies ({@link runRegion}) do too.
+            if (result.success && result.suspend === true) {
+                result = this.refuseUndeclaredSuspension(node.type) ?? result;
+            }
+
             if (!result.success) {
                 const errMsg = result.error ?? 'Unknown error';
                 steps.push({
@@ -4891,17 +5140,25 @@ export class AutomationEngine implements IAutomationService {
                 // #4414 — do not fall back silently. The node computed a branch
                 // and no out-edge claims it, so every out-edge is about to be
                 // considered: the guard the author wrote is not guarding.
-                const declared = allOutEdges
-                    .map(e => (e.label ? `'${e.label}'` : `(unlabelled ${e.id})`))
-                    .join(', ');
+                //
+                // #6654 — the computed branch label is potentially
+                // RECORD-DERIVED and the edge labels are FLOW-AUTHOR metadata
+                // (neither is schema-constrained against newlines), so both
+                // ride the structured slot, never the message; see
+                // `forgetSuspendedRun`'s catch for the full mechanism (#6299).
+                // #4632: FUNCTIONAL — stays `warn`.
                 this.logger.warn(
                     // `flow.name` is absent on the synthetic view `runRegion` builds.
-                    `Flow '${flow.name ?? '(region)'}' node '${node.id}' (${node.type}) selected branch ` +
-                    `'${branchLabel}', but no out-edge carries that label — out-edge labels are ` +
-                    `[${declared || 'none'}]. The branch selection is IGNORED and every out-edge is ` +
+                    `Flow '${flow.name ?? '(region)'}' node '${node.id}' (${node.type}) selected a branch, ` +
+                    `but no out-edge carries that label — the computed branch and the out-edge labels are ` +
+                    `in this record's meta. The branch selection is IGNORED and every out-edge is ` +
                     `evaluated instead, so unconditional siblings run regardless of the decision. ` +
                     `Make an out-edge's \`label\` match the branch, or mark the fallback edge ` +
                     `\`isDefault: true\`. (#4414)`,
+                    {
+                        branchLabel,
+                        outEdges: allOutEdges.map(e => ({ id: e.id, label: e.label ?? null })),
+                    },
                 );
             }
         }

@@ -82,7 +82,7 @@ describe('engine ambient transaction (ADR-0034)', () => {
     seen = d.seen;
     engine.registerDriver(d.driver, true);
     await engine.init();
-    engine.registry.registerObject({ name: 'thing', fields: { name: { type: 'text' } } } as any);
+    engine.registry.registerObject({ name: 'thing', fields: { name: { type: 'text' } } });
   });
 
   it('threads the active transaction into writes given NO explicit context', async () => {
@@ -243,7 +243,7 @@ describe('ScopedContext.transaction joins the ambient transaction (ADR-0067 D2, 
     committedNames = d.committedNames;
     engine.registerDriver(d.driver, true);
     await engine.init();
-    engine.registry.registerObject({ name: 'thing', fields: { name: { type: 'text' } } } as any);
+    engine.registry.registerObject({ name: 'thing', fields: { name: { type: 'text' } } });
   });
 
   /**
@@ -373,7 +373,7 @@ describe('ScopedContext.transaction joins the ambient transaction (ADR-0067 D2, 
     const oneConn = new ObjectQL();
     oneConn.registerDriver(d.driver, true);
     await oneConn.init();
-    oneConn.registry.registerObject({ name: 'thing', fields: { name: { type: 'text' } } } as any);
+    oneConn.registry.registerObject({ name: 'thing', fields: { name: { type: 'text' } } });
     (oneConn as any).registerHook(
       'afterInsert',
       async (ctx: any) => {
@@ -401,5 +401,189 @@ describe('ScopedContext.transaction joins the ambient transaction (ADR-0067 D2, 
 
     expect(owned).toBe(true);
     expect(seen.begins).toHaveLength(2); // the outer one, then a fresh one
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #6406 — the THIRD implementation of the same primitive joins too
+// ---------------------------------------------------------------------------
+//
+// The discrete `beginTransaction` / `commitTransaction` / `rollbackTransaction`
+// trio is the face the QuickJS sandbox drives: a VM body's
+// `ctx.api.transaction(fn)` is sugar over three host leaves, precisely because
+// the body runs across many host event-loop turns with no closure spanning
+// begin→commit. #6168 fixed the callback face and could not reach this one, so
+// the ADR-0067 D2 violation stayed open here: inside a host
+// `engine.transaction()` the trio opened a SECOND driver transaction, committed
+// it itself, and its writes survived the outer rollback.
+//
+// These cases exercise the trio directly, which IS its contract (a caller holds
+// the handle and closes it later). The end-to-end path through a real QuickJS
+// body lives in @objectstack/runtime's
+// `sandbox/transaction-ambient-join.integration.test.ts`, where the real caller
+// is the real sandbox runner.
+describe('ScopedContext trio joins the ambient transaction (ADR-0067 D2, #6406)', () => {
+  let engine: ObjectQL;
+  let seen: ReturnType<typeof makeRollbackHonestDriver>['seen'];
+  let committedNames: ReturnType<typeof makeRollbackHonestDriver>['committedNames'];
+
+  beforeEach(async () => {
+    engine = new ObjectQL();
+    const d = makeRollbackHonestDriver();
+    seen = d.seen;
+    committedNames = d.committedNames;
+    engine.registerDriver(d.driver, true);
+    await engine.init();
+    engine.registry.registerObject({ name: 'thing', fields: { name: { type: 'text' } } }, 'test');
+  });
+
+  const scoped = () => (engine as any).createContext({ userId: 'u1' }) as ScopedContext;
+
+  it('joins the outer transaction — same handle, owned: false, no second begin', async () => {
+    let begun: any;
+    let outerHandle: unknown;
+
+    await engine.transaction(async (ctx: any) => {
+      outerHandle = ctx.transaction;
+      begun = await scoped().beginTransaction();
+    });
+
+    expect(begun.owned).toBe(false);
+    expect(begun.handle).toBe(outerHandle);
+    expect(begun.ctx.transactionHandle).toBe(outerHandle);
+    // The whole point of D2: ONE begin, so ONE connection.
+    expect(seen.begins).toHaveLength(1);
+  });
+
+  it('commit ABSTAINS for a joined handle — the outer owner commits, once', async () => {
+    let commitsSeenInside = -1;
+
+    await engine.transaction(async () => {
+      const s = scoped();
+      const begun = (await s.beginTransaction())!;
+      await begun.ctx.object('thing').insert({ name: 'inner' });
+      await s.commitTransaction(begun.handle);
+      // Before #6406 this committed the OUTER transaction from the inside: the
+      // inner writes landed early and the outer caller had nothing left to own.
+      commitsSeenInside = seen.commits.length;
+    });
+
+    expect(commitsSeenInside).toBe(0);
+    expect(seen.commits).toHaveLength(1); // the outer one, after its callback returned
+    expect(committedNames('thing')).toEqual(['inner']);
+  });
+
+  it('rollback ABSTAINS for a joined handle — mirroring the callback faces', async () => {
+    let rollbacksSeenInside = -1;
+
+    await engine.transaction(async () => {
+      const s = scoped();
+      const begun = (await s.beginTransaction())!;
+      await begun.ctx.object('thing').insert({ name: 'inner' });
+      // An explicit rollback of a transaction this call JOINED. The callback
+      // faces have no rollback of their own on the joined branch — a throw
+      // propagates and the OUTER owner rolls the whole unit back — and this is
+      // the same answer in the shape the trio can express it: no driver
+      // rollback here, the outcome stays the outer caller's to decide.
+      await s.rollbackTransaction(begun.handle);
+      rollbacksSeenInside = seen.rollbacks.length;
+    });
+
+    expect(rollbacksSeenInside).toBe(0);
+    expect(seen.rollbacks).toHaveLength(0);
+    // The outer succeeded, so its unit of work — including the inner write —
+    // commits. Exactly what a joined callback that swallowed its own error gets.
+    expect(seen.commits).toHaveLength(1);
+    expect(committedNames('thing')).toEqual(['inner']);
+  });
+
+  it('the joined write is UNDONE by the outer rollback — the durability pin', async () => {
+    await expect(
+      engine.transaction(async () => {
+        await engine.insert('thing', { name: 'outer' });
+        const s = scoped();
+        const begun = (await s.beginTransaction())!;
+        await begun.ctx.object('thing').insert({ name: 'inner' });
+        await s.commitTransaction(begun.handle);
+        throw new Error('outer boom');
+      }),
+    ).rejects.toThrow('outer boom');
+
+    // Before #6406 the trio committed its own transaction, so 'inner' was still
+    // here after the outer rollback: a write the caller was told had been undone
+    // and had not been. Nothing failed, nothing was logged.
+    expect(committedNames('thing')).toEqual([]);
+    expect(seen.commits).toHaveLength(0);
+    expect(seen.rollbacks).toHaveLength(1);
+    // Both writes rode the ONE handle the outer call owns.
+    expect(seen.creates).toHaveLength(2);
+    expect(seen.creates[1].transaction).toBe(seen.creates[0].transaction);
+  });
+
+  it('with NO ambient transaction the trio still OPENS one — owned: true, commit lands', async () => {
+    const s = scoped();
+    const begun = (await s.beginTransaction())!;
+
+    expect(begun.owned).toBe(true);
+    await begun.ctx.object('thing').insert({ name: 'standalone' });
+    await s.commitTransaction(begun.handle);
+
+    expect(seen.begins).toHaveLength(1);
+    expect(seen.commits).toHaveLength(1);
+    expect(committedNames('thing')).toEqual(['standalone']);
+  });
+
+  it('with NO ambient transaction an explicit rollback still DISCARDS — owned, unchanged', async () => {
+    const s = scoped();
+    const begun = (await s.beginTransaction())!;
+
+    await begun.ctx.object('thing').insert({ name: 'discarded' });
+    await s.rollbackTransaction(begun.handle);
+
+    expect(seen.rollbacks).toHaveLength(1);
+    expect(committedNames('thing')).toEqual([]);
+  });
+
+  it('does not join a transaction that has already closed — the store does not leak', async () => {
+    await engine.transaction(async () => {
+      await engine.insert('thing', { name: 'covered' });
+    });
+
+    const begun = (await scoped().beginTransaction())!;
+    expect(begun.owned).toBe(true);
+    expect(seen.begins).toHaveLength(2); // the outer one, then a fresh one
+  });
+
+  /**
+   * The OTHER half of D2's rationale — see the #6168 block above for why a
+   * refusing pool of size 1 stands in for the hang a real one would produce.
+   */
+  it('never asks for a second connection — a single-connection pool survives the trio begin', async () => {
+    let checkedOut = false;
+    const checkouts: number[] = [];
+    const d = makeRollbackHonestDriver();
+    d.driver.beginTransaction = async () => {
+      if (checkedOut) throw new Error('pool exhausted: no connection available (max=1)');
+      checkedOut = true;
+      checkouts.push(checkouts.length + 1);
+      return { __trx: 'only' };
+    };
+    d.driver.commit = async () => { checkedOut = false; };
+    d.driver.rollback = async () => { checkedOut = false; };
+
+    const oneConn = new ObjectQL();
+    oneConn.registerDriver(d.driver, true);
+    await oneConn.init();
+    oneConn.registry.registerObject({ name: 'thing', fields: { name: { type: 'text' } } }, 'test');
+
+    await expect(
+      oneConn.transaction(async () => {
+        const s = (oneConn as any).createContext({ userId: 'u1' }) as ScopedContext;
+        const begun = (await s.beginTransaction())!;
+        await s.commitTransaction(begun.handle);
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(checkouts).toHaveLength(1);
   });
 });

@@ -1,6 +1,8 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, onTestFinished } from 'vitest';
 import { ObjectQL } from './engine';
+import { ExpressionEngine } from '@objectstack/formula';
 import { SchemaRegistry } from './registry';
+import { HookTargetRebindError, HOOK_TARGET_REBIND_ERROR_CODE } from './hook-target-rebind-errors';
 import type { IDataDriver } from '@objectstack/spec/contracts';
 
 // Mock the SchemaRegistry to avoid side effects between tests.
@@ -1086,19 +1088,43 @@ describe('ObjectQL Engine', () => {
             expect(ast.where).toEqual({ $and: [{ id: { $in: ['a', 'b'] } }, { owner_id: 'u1' }] });
         });
 
-        it('fails CLOSED (throws) if a hook clears the target id so the multi branch runs without a seeded ast', async () => {
-            // The only way to reach the multi branch with no seeded ast is a
-            // beforeUpdate hook clearing input.id after a truthy-id seed skip.
-            // The old `?? { object, where }` fallback would have silently
-            // rebuilt an UNSCOPED predicate; we now refuse it.
+        it('REFUSES a hook that clears the target id — the reroute lever is retired (#5574)', async () => {
+            // ⚠️ This case is the successor of "fails CLOSED (throws) if a hook
+            // clears the target id so the multi branch runs without a seeded
+            // ast". Clearing `input.id` in a `beforeUpdate` handler used to
+            // CONVERT a by-id update into a predicate update over the caller's
+            // `where` — the engine re-read `hookContext.input.id` to pick the
+            // branch — and the only thing standing between that and an
+            // UNSCOPED bulk write was #2982's fail-closed AST assertion, which
+            // fired because the by-id path had skipped the seed.
+            //
+            // ADR-0058 Addendum II resolves the dispatch ladder BEFORE the
+            // before phase (it has to: a per-row `before*` context is built
+            // from the matched row set), so there is no branch left to
+            // re-enter. The lever is refused by name rather than caught one
+            // layer down by a security backstop that was never about it.
             engine.registerHook('beforeUpdate', async (ctx: any) => {
-                ctx.input.id = undefined; // force the multi branch, no seeded ast
+                ctx.input.id = undefined;
             });
 
-            await expect(
-                engine.update('task', { id: 't1', status: 'done' }, { multi: true } as any),
-            ).rejects.toThrow(/row-scoping AST was not seeded/);
+            const err = await engine
+                .update('task', { id: 't1', status: 'done' }, { multi: true } as any)
+                .then(() => null, (e) => e);
+
+            expect(err).toBeInstanceOf(HookTargetRebindError);
+            expect(err.code).toBe(HOOK_TARGET_REBIND_ERROR_CODE);
+            expect(err.path).toBe('by-id');
+            expect(err.event).toBe('beforeUpdate');
+            expect(err.expectedId).toBe('t1');
+            expect(err.observedId).toBeUndefined();
+            // The retired capability is NAMED, so an author whose handler
+            // stopped working learns what changed instead of guessing.
+            expect(err.message).toContain('CLEARED');
+            expect(err.message).toContain('RETIRED');
+            expect(err.message).toContain('PREDICATE write');
+            // Nothing was written, on either branch.
             expect((mockDriver as any).updateMany).not.toHaveBeenCalled();
+            expect(mockDriver.update).not.toHaveBeenCalled();
         });
     });
 
@@ -1929,6 +1955,19 @@ describe('ObjectQL Engine', () => {
         });
 
         it('pins `now` once per find so every row sees the same instant (#1979)', async () => {
+            // Asserted by CONSTRUCTION rather than by value (#5896). The regression
+            // this guards is a per-evaluation `new Date()`, and two such reads
+            // inside the same millisecond are equal in value while being distinct
+            // objects — so a value comparison only fails when the three
+            // evaluations happen to straddle a millisecond boundary. Measured
+            // against that exact regression, the value form passed through it in
+            // 3 of 10 full-file runs (and in 145 of 200 finds within one warm
+            // process): it reported by luck. Spying on the eval context pins the
+            // mechanism instead — ONE clock read, handed to every evaluation by
+            // identity — which fails whatever the millisecond happens to be.
+            const evaluate = vi.spyOn(ExpressionEngine, 'evaluate');
+            onTestFinished(() => { evaluate.mockRestore(); });
+
             vi.mocked(SchemaRegistry.getObject).mockReturnValue({
                 name: 'ping',
                 fields: {
@@ -1946,8 +1985,17 @@ describe('ObjectQL Engine', () => {
 
             const result = await engine.find('ping', { fields: ['id', 'ts'] } as any);
 
-            // Determinism: a single operation snapshots one `now`, shared across
-            // every row — not a fresh wall-clock read per evaluation.
+            // 1 formula field × 3 rows: the evaluations the identity claim is over.
+            // Without this count the claim below could pass vacuously on an empty
+            // call list.
+            expect(evaluate).toHaveBeenCalledTimes(3);
+            const nows = (evaluate.mock.calls as unknown as Array<[unknown, { now?: Date }]>)
+                .map(([, ctx]) => ctx.now);
+            expect(nows[0]).toBeInstanceOf(Date);
+            expect(nows.every((n) => n === nows[0])).toBe(true);
+
+            // …and the consequence a caller can see. Kept as the caller-visible
+            // symptom, but it is no longer what makes this test report.
             expect(result[0].ts).toEqual(result[1].ts);
             expect(result[1].ts).toEqual(result[2].ts);
         });

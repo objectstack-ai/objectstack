@@ -343,7 +343,8 @@ export const ActionDescriptorSchema = lazySchema(() => z.object({
    *
    *  - `'any'` — the caller supplies the continuation and the route is the
    *    intended door: a `screen` node's collected inputs, a `wait` node's
-   *    external signal.
+   *    external signal. **A pausing node must opt into this explicitly**; see
+   *    the omission semantics below.
    *  - `'service'` — resuming is a SIDE EFFECT of a decision some service must
    *    authorize and record first, so only that service may drive it. An
    *    `approval` node declares this: `ApprovalService.decide` enforces the
@@ -356,28 +357,39 @@ export const ActionDescriptorSchema = lazySchema(() => z.object({
    * unless the signal carries the in-process `RESUME_AUTHORITY_SERVICE`
    * marker — a symbol, so a JSON body can never carry it.
    *
-   * **Carrying no `.default()` is the point** (#5561). A default would make
-   * "the author decided `'any'`" and "the author never considered it" the same
-   * value by the time any consumer sees the descriptor: Zod fills the key
-   * inside {@link defineActionDescriptor}, so the omission becomes
-   * unrecoverable one function call after it happens — measured, not assumed
-   * (the two parses are byte-identical). That erasure is how #3823 shipped:
-   * ADR-0044 pointed a revise edge at a generic `wait`, `wait` is legitimately
-   * `'any'`, and a pause standing in a service-owned position inherited a
-   * fail-open value nobody had chosen. Absent therefore means absent, and two
-   * seams read it: `AutomationEngine.registerNodeExecutor` warns once per node
-   * type when a `supportsPause` descriptor omits it, and
-   * `check:resume-authority-declared` fails CI on an omission in this repo's
-   * own executors.
+   * **Omitting it means `'service'` — fail-closed, not `'any'`** (ADR-0044's
+   * 2026-07-28 amendment, landed in two steps on #5561). A pausing node type
+   * that never states who may continue its pauses is closed to the generic
+   * resume route until its author states it: `AutomationEngine` resolves an
+   * absent value to `'service'` (`resolveResumeAuthority`), so a raw resume of
+   * such a pause answers `PERMISSION_DENIED` with a message naming the
+   * one-line fix. **Registering a pausing node whose pause really is open to
+   * the route? Declare `resumeAuthority: 'any'` — it is an opt-in now, not an
+   * inheritance.**
    *
-   * Runtime semantics are unchanged by that: the engine still resolves an
-   * absent value to `'any'` (`resolveResumeAuthority`), so omitting it is
-   * fail-open exactly as before — loudly now instead of silently. Flipping
-   * that fallback to `'service'` (fail-closed by omission) is the breaking
-   * half, still tracked on #5561 for a version window that allows it.
+   * The field carries no Zod `.default()`, and that is what makes the rule
+   * expressible at all (step one, #5561). A default would make "the author
+   * decided `'any'`" and "the author never considered it" the same value by the
+   * time any consumer sees the descriptor: Zod fills the key inside
+   * {@link defineActionDescriptor}, so the omission became unrecoverable one
+   * function call after it happened — measured, not assumed (the two parses
+   * were byte-identical). That erasure is how #3823 shipped: ADR-0044 pointed a
+   * revise edge at a generic `wait`, `wait` is legitimately `'any'`, and a
+   * pause standing in a service-owned position inherited a fail-open value
+   * nobody had chosen. Absent now means absent, and three seams read it —
+   * `AutomationEngine.registerNodeExecutor` warns once per node type when a
+   * `supportsPause` descriptor omits it, the resume gate refuses the pauses it
+   * produces, and `check:resume-authority-declared` fails CI on an omission in
+   * this repo's own executors.
+   *
+   * The guess is made in the loud direction on purpose. Guessing `'any'` for an
+   * unclaimed pause continues a run past a decision nothing recorded and says
+   * nothing; guessing `'service'` refuses a resume and hands back the
+   * declaration that fixes it. Only one of those two mistakes is discoverable
+   * by the person who made it.
    */
   resumeAuthority: z.enum(['any', 'service']).optional()
-    .describe("Who may resume a run this node suspended: 'any' (the generic resume route) or 'service' (only the owning service, e.g. approvals). Deliberately has no default — an omission is a distinct, reportable fact, and a pausing node type that omits it is warned about at registration (#5561)"),
+    .describe("Who may resume a run this node suspended: 'any' (the generic resume route) or 'service' (only the owning service, e.g. approvals). Carries no schema default so an omission stays observable — and an omission is fail-CLOSED at run time, equivalent to 'service': a pausing node whose pause is open to the generic route must declare 'any' explicitly (#5561)"),
 
   /**
    * Runtime maturity of the capability behind this descriptor (ADR-0041 §4).

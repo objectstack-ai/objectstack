@@ -76,9 +76,41 @@ describe('matchesHaving — the unknown-operator refusal', () => {
       .toThrow(/Unsupported operator '\$nand'/);
   });
 
-  it('accepts $regex with $options as its sibling, not an operator', () => {
-    expect(matchesHaving({ k: 'Alpha' }, { k: { $regex: '^alp', $options: 'i' } })).toBe(true);
-  });
+  /**
+   * [#5702] REPLACED. This case read `accepts $regex with $options as its
+   * sibling, not an operator` and asserted `matchesHaving({ k: 'Alpha' },
+   * { k: { $regex: '^alp', $options: 'i' } }) === true` — HAVING running a real
+   * `RegExp`, with `$options` skipped as its flags.
+   *
+   * #4706 retired both spellings and #5710 flipped their last producer, so
+   * there is no true/false answer left to assert: HAVING is the fifth of the
+   * five refusal sites `RETIRED_FILTER_OPERATORS` names, and it now refuses.
+   * The old arm also answered an ILLEGAL pattern with `return false` — "this
+   * row does not match" for a filter that could not run at all — which is the
+   * silent wrong answer the retirement is about, on the one evaluation face no
+   * conformance table drives.
+   */
+  for (const [label, condition, mustMention] of [
+    ['a bare $regex', { k: { $regex: '^alp' } }, ["'$regex'", '$icontains']],
+    ['a bare $options', { k: { $options: 'i' } }, ["'$options'", '$icontains']],
+    [
+      '$regex with $options — one mistake, one fix',
+      { k: { $regex: '^alp', $options: 'i' } },
+      ["'$regex'", "'$options'", '$icontains'],
+    ],
+  ] as const) {
+    it(`REFUSES the retired ${label}, naming the replacement`, () => {
+      let err: Error | undefined;
+      try {
+        matchesHaving({ k: 'Alpha' }, condition);
+      } catch (e) {
+        err = e as Error;
+      }
+      expect(err, 'expected `having` to refuse a retired operator').toBeInstanceOf(Error);
+      expect(err!.message).toContain('RETIRED');
+      for (const mention of mustMention) expect(err!.message).toContain(mention);
+    });
+  }
 });
 
 /**
@@ -175,6 +207,34 @@ describe('no-value rows and the negation-carrying operators (#5905 / #5298 optio
       expect(matchesHaving(NULLED, { tag: { $ne: 'alpha' } })).toBe(true);
       expect(matchesHaving(MISSING, { tag: { $ne: 'alpha' } })).toBe(true);
       expect(matchesHaving(VALUED_IN, { tag: { $ne: 'alpha' } })).toBe(false);
+    });
+  });
+
+  /**
+   * [#6518] The `$contains` family is case-SENSITIVE by contract (#4706 Q2 = A).
+   *
+   * This face already was, by the same mechanism `formula`'s evaluator is —
+   * `String.prototype.includes` / `startsWith` / `endsWith` compare exactly — so
+   * #6518, which moved the SQL family onto that answer, changed nothing here.
+   * It is pinned for the reason #5905 gave for pinning this file at all:
+   * `having` is the one text-operator face with NO conformance-table coverage
+   * (`check-driver-conformance` scopes itself to `packages/drivers/*`, and
+   * `packages/objectql` imports no case-set), so a fold added here to make some
+   * backend agree would go red nowhere.
+   */
+  describe('[#6518] the $contains family is case-SENSITIVE', () => {
+    it('$contains, $startsWith and $endsWith do not fold case', () => {
+      expect(matchesHaving(VALUED_IN, { tag: { $contains: 'LPH' } })).toBe(false);
+      expect(matchesHaving(VALUED_IN, { tag: { $contains: 'lph' } })).toBe(true);
+      expect(matchesHaving(VALUED_IN, { tag: { $startsWith: 'ALP' } })).toBe(false);
+      expect(matchesHaving(VALUED_IN, { tag: { $startsWith: 'alp' } })).toBe(true);
+      expect(matchesHaving(VALUED_IN, { tag: { $endsWith: 'HA' } })).toBe(false);
+      expect(matchesHaving(VALUED_IN, { tag: { $endsWith: 'ha' } })).toBe(true);
+    });
+
+    it('$notContains carries the mirror: a case-only difference SATISFIES it', () => {
+      expect(matchesHaving(VALUED_IN, { tag: { $notContains: 'LPH' } })).toBe(true);
+      expect(matchesHaving(VALUED_IN, { tag: { $notContains: 'lph' } })).toBe(false);
     });
   });
 

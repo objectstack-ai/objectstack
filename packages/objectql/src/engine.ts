@@ -25,6 +25,10 @@ import { parseAutonumberFormat, renderAutonumber, missingFieldValues, isTenancyD
 // [#5158] Door 2's lowering sink — the SAME pair the protocol face (Door 1)
 // runs, so `FilterArray` has exactly one lowering in the product.
 import { isFilterAST, parseFilterAST, VALID_AST_OPERATORS } from '@objectstack/spec/data';
+// [#5574] D6, executable. The ceiling and the refusal message live in
+// `packages/spec/src/data/bulk-write-hook-conformance.ts` so BOTH phases and
+// both verbs enforce one definition; the engine raises, the contract decides.
+import { MAX_BULK_PER_ROW_HOOK_ROWS, resolveBulkPerRowHookBudget } from '@objectstack/spec/data';
 import { assertListComparandShapes } from './filter-comparand-shape.js';
 // Seek pagination for the walks that must read EVERY row — the autonumber seed
 // scan is one (#6249). Shared with `summary-backfill` rather than re-rolled:
@@ -63,6 +67,7 @@ import {
   type SummaryDescriptor,
 } from './summary-aggregate.js';
 import { ReadonlyFieldRejectedError } from './readonly-strict-errors.js';
+import { HookTargetRebindError } from './hook-target-rebind-errors.js';
 import {
   DriverConnectError,
   DatasourceUnavailableError,
@@ -120,6 +125,10 @@ import { validateRecord, normalizeMultiValueFields, coerceBooleanFields, Validat
 import type { AdmittedValueShapeViolation, AdmittedValueShapeViolationSink } from './validation/record-validator.js';
 import { evaluateValidationRules, needsPriorRecord, stripReadonlyWhenFields, stripReadonlyWhenFieldsMulti, hasReadonlyWhenInPayload, hasParentScopedReadonlyWhenInPayload, hasParentScopedRequiredWhen, stripReadonlyFields, stripRuntimeOwnedFields } from './validation/rule-validator.js';
 import { resolveMasterDetailRelation } from './master-detail.js';
+// [#6457] The master-detail header a `parent`-scoped predicate reads is made
+// total over the MASTER's declared fields before it leaves this engine — the
+// same helper every other server seam materialises with (#1871/#4649/#4953).
+import { materializeDeclaredFields } from './declared-fields.js';
 import { applyInMemoryAggregation } from './in-memory-aggregation.js';
 import {
   resolveEngineDeleteDispatch,
@@ -1135,9 +1144,11 @@ export class ObjectQL implements IObjectQLEngine {
      * happens to it: a business write is refused, a system ledger is carved out.
      *
      * Absent on the sandbox runner's explicitly-threaded handles (the
-     * `beginTransaction`/`commit`/`rollback` trio does not use this store at
-     * all) and on any store entry an outside caller populated, so every reader
-     * must treat it as optional.
+     * `beginTransaction`/`commit`/`rollback` trio never POPULATES this store —
+     * since #6406 it reads it, to join an ambient transaction, but a
+     * transaction the trio opens still cannot be published: there is no closure
+     * spanning begin→commit to hand `run`) and on any store entry an outside
+     * caller populated, so every reader must treat it as optional.
      */
     scope?: TransactionScope;
   }>();
@@ -1662,35 +1673,133 @@ export class ObjectQL implements IObjectQLEngine {
   }
 
   /**
-   * [#5038] Ceiling on the matched-row set a predicate write fires per-row
-   * after-hooks over.
+   * [#5574] The per-row `before*` dispatch of a predicate (`multi: true`)
+   * write — ADR-0058 Addendum II, clauses D1–D4.
    *
-   * The consequence ADR-0058's addendum told this implementation to price: an
-   * after-hook that used to run once per batch now runs once per row, so a
+   * ## D1/D2 — one dispatch per matched row, on the SINGLE-RECORD shape
+   *
+   * `input.id` names the row, `previous` is that row's pre-image, and
+   * `input.options` is still the CALLER's bag (the PHASE rule in `hook.zod.ts`
+   * is unchanged: the `before*` phase reads the pre-merge view, `where` and
+   * `multi` visible). `result` stays ABSENT — the before phase has no
+   * post-state, and a value assigned to `ctx.result` here is overwritten by the
+   * write's own result before any `after*` handler could see it.
+   *
+   * Zero matched rows is zero dispatches, and `[]` is meaningful: a batch that
+   * changed nothing is not a record change. The caller checks that BEFORE
+   * calling in, so an empty row set never reaches this loop.
+   *
+   * ## D3 — the payload is BATCH-scoped, and that IS the merge rule
+   *
+   * Every per-row context carries THE payload, not a copy — deliberately
+   * unlike {@link buildPerRowAfterContexts}, which copies because an
+   * after-handler's mutation has nowhere legitimate to go. There is exactly one
+   * payload for a predicate update (`driver.updateMany` takes one SET clause
+   * for N rows), so:
+   *
+   *  - a rewrite takes effect on the WHOLE batch, whichever row's dispatch made
+   *    it, and rewrites ACCUMULATE across the N dispatches in dispatch order;
+   *  - N post-hook payloads cannot diverge, so nothing is reconciled, no
+   *    payload is discarded, and no predicate write is ever split into N
+   *    single-row writes.
+   *
+   * Two ways a handler can write the payload and both must accumulate: mutating
+   * it in place (`ctx.input.data.x = 1`) needs no help, while REPLACING it
+   * (`ctx.input.data = {…}`) would otherwise be lost with the row context that
+   * held it. So each row reads the batch payload fresh and writes it back after
+   * its dispatch — that write-back is what makes "accumulate in dispatch order"
+   * true for both spellings rather than only the first.
+   *
+   * A rewrite CONDITIONED on the row (`ctx.previous`, `ctx.input.id`) is
+   * outside the contract: it does not scope itself to the row it was decided
+   * on, it widens to every matched row. Per-row `previous` is supplied so a
+   * guard can REFUSE the write (throw), not so a rewrite can be aimed. That is
+   * a contract statement, not an enforcement — no static rule can decide
+   * whether a rewrite is row-invariant — and the ADR names it as such rather
+   * than hiding it.
+   *
+   * ## D4 — `input.id` is not a reroute lever here
+   *
+   * On the old batch dispatch it was: `input.id` was present-but-`undefined`,
+   * and binding it moved the write onto the single-id branch. A per-row context
+   * arrives with `id` already bound and the dispatch already decided, so
+   * rebinding retargets nothing — and is refused rather than ignored.
+   */
+  private async dispatchPerRowBeforeHooks(
+    object: string,
+    event: 'beforeUpdate' | 'beforeDelete',
+    rows: Record<string, unknown>[],
+    batchCtx: HookContext,
+  ): Promise<void> {
+    const schema = this._registry.getObject(object);
+    const carriesPayload = event === 'beforeUpdate';
+    for (const row of rows) {
+      const rowId = (row as { id?: unknown }).id;
+      const options = (batchCtx.input as { options?: unknown }).options;
+      const rowCtx = {
+        ...batchCtx,
+        event,
+        // D3: THE payload, read fresh so a previous row's REPLACEMENT is what
+        // this row sees. Never a copy.
+        input: carriesPayload
+          ? { id: rowId, data: (batchCtx.input as { data?: unknown }).data, options }
+          : { id: rowId, options },
+        previous: coerceBooleanFields(schema as any, row as any),
+        // D2: no post-state in the before phase.
+        result: undefined,
+      } as unknown as HookContext;
+
+      await this.triggerHooks(event, rowCtx);
+
+      // D3, the accumulate half — see the class doc above.
+      if (carriesPayload) {
+        (batchCtx.input as { data?: unknown }).data = (rowCtx.input as { data?: unknown }).data;
+      }
+      // D4.
+      const observed = (rowCtx.input as { id?: unknown }).id;
+      if (observed !== rowId) {
+        throw new HookTargetRebindError({
+          object, event, path: 'per-row', expectedId: rowId, observedId: observed,
+        });
+      }
+    }
+  }
+
+  /**
+   * [#5038, one ceiling for both phases since #5574] Ceiling on the matched-row
+   * set a predicate write fires per-row hooks over.
+   *
+   * The consequence ADR-0058's addendum told this implementation to price: a
+   * hook that used to run once per batch now runs once per row, so a
    * notification hook sends N messages and a cache-invalidation hook runs N
    * times. Unbounded, a single `multi: true` update matching a whole table
    * turns into an unbounded fan-out of handler executions inside one write.
    *
-   * Exceeding it REJECTS the write, before `updateMany`/`deleteMany` runs, so
-   * nothing is written. The alternative — quietly falling back to firing once
-   * for the batch — is the silent degradation this whole family exists to
-   * abolish (#4649/#4775): the hooks would not fire for N-1 rows and nothing
-   * would say so. The rejection names the count, the ceiling and both routes
-   * out (narrow the predicate, or drop the after-hook).
+   * Exceeding it REJECTS the write, before the FIRST per-row dispatch and
+   * before `updateMany`/`deleteMany` runs, so nothing is written and no handler
+   * ran for a batch that was going to be refused anyway. The alternative —
+   * quietly falling back to firing once for the batch — is the silent
+   * degradation this whole family exists to abolish (#4649/#4775): the hooks
+   * would not fire for N-1 rows and nothing would say so.
+   *
+   * [#5574] The rule itself is `resolveBulkPerRowHookBudget` in
+   * `packages/spec/src/data/bulk-write-hook-conformance.ts` (D6), not a copy
+   * kept in step by a pin. This method is the RAISING half only: the contract
+   * is pure and total (no clock, no I/O, no throw), the engine turns a
+   * `refused` verdict into the thrown error. Splitting it that way is what lets
+   * `before*` and `after*`, update and delete, share one ceiling and one
+   * message with nothing to keep synchronised.
    */
   private assertBulkPerRowHookBudget(object: string, event: string, matched: number): void {
-    if (matched <= ObjectQL.MAX_BULK_PER_ROW_HOOK_ROWS) return;
-    throw Object.assign(
-      new Error(
-        `Refusing the bulk write on '${object}': it matches ${matched} rows, and '${event}' hooks are ` +
-          `contracted to fire PER ROW on a predicate write (ADR-0058, bulk-write addendum), which is ` +
-          `over the ${ObjectQL.MAX_BULK_PER_ROW_HOOK_ROWS}-row ceiling for one write. Nothing was written. ` +
-          `Narrow the predicate so the batch matches fewer rows (paginate the write), or remove the ` +
-          `'${event}' hook from this object. The write is NOT silently downgraded to one hook call for ` +
-          `the batch — that would skip the hook for ${matched - 1} rows without saying so.`,
-      ),
-      { code: 'ERR_BULK_PER_ROW_HOOK_LIMIT', object, event, matched, limit: ObjectQL.MAX_BULK_PER_ROW_HOOK_ROWS },
-    );
+    const verdict = resolveBulkPerRowHookBudget({ object, event, matched });
+    if (verdict.kind === 'ok') return;
+    throw Object.assign(new Error(verdict.message), {
+      code: verdict.code,
+      object: verdict.object,
+      event: verdict.event,
+      matched: verdict.matched,
+      limit: verdict.limit,
+    });
   }
 
   // ========================================
@@ -2483,10 +2592,15 @@ export class ObjectQL implements IObjectQLEngine {
              }
           } else {
              this.logger.debug('Registering objects from manifest (Map)', { id, objectCount: Object.keys(manifest.objects).length });
-             for (const [name, objDef] of Object.entries(manifest.objects)) {
+             // `manifest` is `any` (a raw authored manifest), so the map branch
+             // widens its values to `unknown`. State the contract once, on the
+             // entries, rather than casting the argument at the call: the map
+             // values ARE authored `ServiceObject`s — the INPUT shape, which is
+             // what `registerObject` takes since ADR-0122 phase 2 (#6083).
+             for (const [name, objDef] of Object.entries(manifest.objects) as [string, ServiceObject][]) {
                 // Ensure name in definition matches key
-                (objDef as any).name = name;
-                const fqn = this._registry.registerObject(objDef as any, id, namespace, 'own');
+                objDef.name = name;
+                const fqn = this._registry.registerObject(objDef, id, namespace, 'own');
                 this.logger.debug('Registered Object', { fqn, from: id });
              }
           }
@@ -2509,7 +2623,7 @@ export class ObjectQL implements IObjectQLEngine {
                   indexes: ext.indexes,
               };
               // Register as extension (namespace is undefined since we're targeting by FQN)
-              this._registry.registerObject(extDef as any, id, undefined, 'extend', priority);
+              this._registry.registerObject(extDef, id, undefined, 'extend', priority);
               this.logger.debug('Registered Object Extension', { target: targetFqn, priority, from: id });
           }
       }
@@ -2704,11 +2818,13 @@ export class ObjectQL implements IObjectQLEngine {
                       this.logger.debug('Registered Object', { fqn, from: pluginName });
                   }
               } else {
-                  const entries = Object.entries(plugin.objects);
+                  // Same contract statement as the manifest map branch above —
+                  // authored `ServiceObject`s (INPUT shape, ADR-0122 phase 2).
+                  const entries = Object.entries(plugin.objects) as [string, ServiceObject][];
                   this.logger.debug('Registering plugin objects (Map)', { pluginName, count: entries.length });
                   for (const [name, objDef] of entries) {
-                      (objDef as any).name = name;
-                      const fqn = this._registry.registerObject(objDef as any, ownerId, pluginNamespace, 'own');
+                      objDef.name = name;
+                      const fqn = this._registry.registerObject(objDef, ownerId, pluginNamespace, 'own');
                       this.logger.debug('Registered Object', { fqn, from: pluginName });
                   }
               }
@@ -3313,6 +3429,10 @@ export class ObjectQL implements IObjectQLEngine {
    * `null` on any failure — no relation, no id, header gone, read threw. It is
    * NOT read as "unlocked": an unresolved binding leaves `parent` unbound, and
    * `isReadonlyWhenLocked` treats a predicate that needs it as LOCKED.
+   *
+   * [#6457] A header that IS resolved is handed over TOTAL over the MASTER
+   * object's declared fields — see {@link materializeParentHeader} for why that
+   * had to happen here and nowhere else, and for the verdict table it moves.
    */
   private async resolveMasterDetailParent(
     schema: any,
@@ -3325,7 +3445,9 @@ export class ObjectQL implements IObjectQLEngine {
     if (parentId == null) return null;
     try {
       const row = await this.findOne(rel.master, { where: { id: parentId }, context: { isSystem: true } } as any);
-      return (row as Record<string, unknown>) ?? null;
+      // `null` stays `null` — the fail-CLOSED signal (#4889) is the ABSENCE of
+      // the binding, and materialising a row we do not have would destroy it.
+      return row == null ? null : this.materializeParentHeader(rel.master, row as Record<string, unknown>);
     } catch (err) {
       this.logger?.warn?.('readonlyWhen parent lookup failed — parent stays unbound', {
         object: rel.master, id: parentId, error: err,
@@ -3346,6 +3468,11 @@ export class ObjectQL implements IObjectQLEngine {
    * passed as `null` and each inserted row supplies its own FK, so
    * `masterIdOf(fk, null, row)` reads `row[fk]` and the batch costs one header
    * read for the whole `insert()` call.
+   *
+   * [#6457] Every header this resolves is materialised over the MASTER's
+   * declared fields, exactly as the single-id twin does — the declared-field
+   * table is read ONCE for the batch, not per row. A row this map has no entry
+   * for still answers `null` (unbound, fail-CLOSED for `readonlyWhen`).
    */
   private async resolveMasterDetailParents(
     schema: any,
@@ -3367,8 +3494,13 @@ export class ObjectQL implements IObjectQLEngine {
         where: { id: { $in: [...ids] } },
         context: { isSystem: true },
       } as any) as Array<Record<string, unknown>>;
+      // [#6457] One declared-field lookup for the whole batch, then one shallow
+      // copy per header. A master the registry does not know leaves `fields`
+      // undefined and every header passes through untouched — see
+      // {@link materializeParentHeader}.
+      const masterFields = this.masterDeclaredFields(rel.master);
       for (const row of Array.isArray(rows) ? rows : []) {
-        if (row?.id != null) byId.set(String(row.id), row);
+        if (row?.id != null) byId.set(String(row.id), materializeDeclaredFields({ ...row }, masterFields));
       }
     } catch (err) {
       this.logger?.warn?.('readonlyWhen parent lookup failed — parent stays unbound', {
@@ -3380,6 +3512,73 @@ export class ObjectQL implements IObjectQLEngine {
       const id = masterIdOf(rel.fk, data, row);
       return id == null ? null : (byId.get(String(id)) ?? null);
     };
+  }
+
+  /**
+   * [#6457] Make a resolved master-detail header TOTAL over the MASTER
+   * object's declared fields, so a `parent.<field>` predicate is evaluable
+   * whatever subset of columns the driver echoed back.
+   *
+   * ## The hole this closes
+   *
+   * #4953 made the `record` / `previous` roots total at every server seam
+   * ({@link ./declared-fields.js#materializeDeclaredFields}); the 2026-08-06
+   * ruling deliberately left `parent` out, because `parent` is a row of ANOTHER
+   * object and its ABSENCE is #4889's fail-closed signal. What that left behind
+   * is the same trap one root over — visible as a THREE-row table, of which
+   * only the middle row moves here:
+   *
+   * | header state | `readonlyWhen: parent.status == null` | before | now |
+   * |---|---|---|---|
+   * | carries `status` | evaluates | locks per verdict | unchanged |
+   * | resolved, no `status` key | `No such key: status` — `parent` IS bound, so `unknownVariableOf` does not match ⇒ ordinary fail-OPEN | **declared lock let through** | evaluates (`status` reads `null`) |
+   * | unresolvable (`null`) | `Unknown variable: parent` | LOCKED (#4889) | LOCKED — unchanged |
+   *
+   * The middle row is the bug: whether a declared lock enforced depended on
+   * which columns a driver happened to return, which is not something an author
+   * can see or control. `requiredWhen` (#4977) shares the binding and had the
+   * mirror of it — fail-open there means the requirement is simply not
+   * enforced. One materialisation serves both consumers.
+   *
+   * ## Why HERE, and not in the strip / the evaluator
+   *
+   * `stripReadonlyWhenFields*` and `evaluateValidationRules` are pure functions
+   * over what they are handed; they hold the DETAIL object's field table and
+   * have no way to reach the MASTER's — threading a second field table through
+   * their signatures would put the master's schema in four call sites' hands to
+   * serve one binding. The engine already holds both the registry and the
+   * just-read header at these two seams, so the header arrives at those
+   * functions already total and their signatures do not move.
+   *
+   * ## The fail-CLOSED line is preserved EXACTLY (#4889)
+   *
+   * This function is only ever reached with a row IN HAND — the persisted-state
+   * precondition `declared-fields.ts` states. An UNRESOLVABLE header still
+   * returns `null` from the resolvers above, still leaves `parent` unbound,
+   * still faults as `Unknown variable: parent`, and is still read as LOCKED. The
+   * two cases stay distinguishable by construction: absence is decided before
+   * this function is called, materialisation only ever applies to a row that
+   * exists.
+   *
+   * A master the registry cannot resolve yields no field table, and the header
+   * passes through unchanged — sparse, i.e. exactly the pre-#6457 behaviour.
+   * That is the honest answer: without the declared shape we cannot know which
+   * absent keys are fields and which would be fabrication.
+   *
+   * COPIED before materialising, like every other caller: the row is what
+   * `findOne`/`find` returned and may be observed elsewhere; it must not gain
+   * materialised nulls behind its reader's back.
+   */
+  private materializeParentHeader(master: string, row: Record<string, unknown>): Record<string, unknown> {
+    return materializeDeclaredFields({ ...row }, this.masterDeclaredFields(master));
+  }
+
+  /** The MASTER object's declared-field table, or `undefined` when the registry
+   *  does not know it (see {@link materializeParentHeader}). */
+  private masterDeclaredFields(master: string): Record<string, unknown> | undefined {
+    const schema = this._registry.getObject(master) as { fields?: Record<string, unknown> } | undefined;
+    const fields = schema?.fields;
+    return fields && typeof fields === 'object' ? fields : undefined;
   }
 
   /**
@@ -4538,11 +4737,17 @@ export class ObjectQL implements IObjectQLEngine {
   private static readonly MAX_EXPAND_DEPTH = 3;
   private static readonly MAX_CASCADE_DEPTH = 10;
   /**
-   * [#5038] Most rows one predicate write may fire per-row after-hooks over.
+   * [#5038] Most rows one predicate write may fire per-row hooks over — in
+   * BOTH phases since #5574 (ADR-0058 Addendum II, D6).
+   *
    * Public so a test — and an operator reading a rejection — can name the same
-   * number the engine enforces. See `assertBulkPerRowHookBudget`.
+   * number the engine enforces. It is now a RE-EXPORT of the spec contract's
+   * `MAX_BULK_PER_ROW_HOOK_ROWS`, not a second literal: until #5574's engine
+   * half the same number was written down twice and only a pin in
+   * `bulk-write-hook-conformance.test.ts` kept the two agreeing. See
+   * `assertBulkPerRowHookBudget`.
    */
-  public static readonly MAX_BULK_PER_ROW_HOOK_ROWS = 10_000;
+  public static readonly MAX_BULK_PER_ROW_HOOK_ROWS = MAX_BULK_PER_ROW_HOOK_ROWS;
   /** In-memory next-value cache per `object.field` for autonumber generation,
    *  lazily seeded from the current max in the store. */
   private readonly autonumberCounters = new Map<string, number>();
@@ -5732,6 +5937,35 @@ export class ObjectQL implements IObjectQLEngine {
       // untouched, hooks run after and may override.
       const nowSnap = new Date();
       const isBatch = Array.isArray(opCtx.data);
+      // [#4441] The RAW caller payload per row — before `applyFieldDefaults`
+      // resolves any `defaultValue` / `current_user` token and before the
+      // beforeInsert hooks stamp `owner_id` / `organization_id` /
+      // `created_by`. The reference check consults it to decide WHAT THE
+      // CALLER ACTUALLY SENT, so neither a platform stamp nor a backfilled
+      // default is ever reported as the caller's bad reference.
+      //
+      // [#6339] It carries the caller's VALUES, and it is taken HERE — ahead of
+      // the hooks — as an explicit shallow COPY. Both halves are load-bearing:
+      //  - VALUES, because the runtime-owned strip below runs AFTER
+      //    `beforeInsert`, so "the caller named this key" and "this key still
+      //    holds the caller's value" are different facts, and only the second
+      //    one licenses a delete (see `stripRuntimeOwnedFields`).
+      //  - a COPY, taken ahead of the hooks, because `rows[i]` is a different
+      //    object from `opCtx.data` only by the grace of two upstream helpers:
+      //    `applyFieldDefaults` returns `{ ...record }` — except on its
+      //    `!fields` early return, which hands the SAME reference back — and
+      //    `initializeSummaryFields` copies only when it actually seeds. Hooks
+      //    mutate `ctx.input.data` IN PLACE, so an aliased snapshot would
+      //    answer "what did the caller send?" with the post-hook payload.
+      //    Measured on `origin/main`: not aliased today, because that early
+      //    return lines up with the strip's own `!fields` bail — a coincidence
+      //    of three call sites, which the copy turns into an invariant of this
+      //    one. Same spread, same reason, as the update path's `suppliedValues`
+      //    (#5591).
+      const suppliedPerRow: Array<Record<string, unknown>> =
+        (isBatch ? (opCtx.data as any[]) : [opCtx.data]).map(
+          (row) => ({ ...((row ?? {}) as Record<string, unknown>) }),
+        );
       const defaultedData = isBatch
         ? (opCtx.data as any[]).map((row) =>
             this.initializeSummaryFields(
@@ -5814,16 +6048,6 @@ export class ObjectQL implements IObjectQLEngine {
         // Locale + translation hooks for the rejection messages (#3957) —
         // resolved once for the batch, identical for every row.
         const msgCtx = this.validationMessageContext(object, opCtx.context);
-        // [#4441] The RAW caller payload per row — before `applyFieldDefaults`
-        // resolved any `defaultValue` / `current_user` token and before the
-        // beforeInsert hooks stamped `owner_id` / `organization_id` /
-        // `created_by`. The reference check consults it to decide WHAT THE
-        // CALLER ACTUALLY SENT, so neither a platform stamp nor a backfilled
-        // default is ever reported as the caller's bad reference.
-        const suppliedPerRow: Array<Record<string, unknown>> =
-          (isBatch ? (opCtx.data as any[]) : [opCtx.data]).map(
-            (row) => (row ?? {}) as Record<string, unknown>,
-          );
         // [#5503] `autonumber` is RUNTIME-owned: the engine (or the driver's
         // persistent sequence) issues the value, so a non-system caller does not
         // get to supply or rewrite it. Until now nothing enforced that — a POST
@@ -5842,14 +6066,21 @@ export class ObjectQL implements IObjectQLEngine {
         // path's, unchanged: `isSystem` (seed replay, migration) skips the whole
         // pass, and `preserveAudit` (#3493) lets a historical import reinstate
         // legacy record numbers.
+        //
+        // [#6339] `suppliedPerRow[i]` is handed over WHOLE — values included —
+        // rather than reduced to its key set. This pass runs after the
+        // beforeInsert hooks, so a key set could only say "the caller named
+        // this", and `delete` then took whatever value was standing there: a
+        // hook that RE-ISSUES the record number lost its write to any caller
+        // that had also submitted the key, while the same hook's write survived
+        // on a caller that had not. The update path's twin (#5591).
         const autonumberDropped: string[] = [];
         if (!opCtx.context?.isSystem) {
           const preserveAudit = opCtx.context?.preserveAudit === true;
           for (let i = 0; i < rows.length; i++) {
             if (rowErrors[i] !== undefined) continue;
-            const supplied = new Set(Object.keys(suppliedPerRow[i] ?? {}));
             const stripped = stripRuntimeOwnedFields(
-              schemaForValidation as any, rows[i], supplied, this.logger, { preserveAudit },
+              schemaForValidation as any, rows[i], suppliedPerRow[i] ?? {}, this.logger, { preserveAudit },
             ) as Record<string, unknown>;
             if (stripped === rows[i]) continue;
             for (const k of Object.keys(rows[i])) {
@@ -6252,7 +6483,166 @@ export class ObjectQL implements IObjectQLEngine {
           transaction: opCtx.context?.transaction,
           ql: this
        };
-       await this.triggerHooks('beforeUpdate', hookContext);
+
+       // ────────────────────────────────────────────────────────────────────
+       // [#5574 / #5846] The dispatch ladder is resolved BEFORE the before
+       // phase, and the before phase is dispatched PER MATCHED ROW.
+       //
+       // ADR-0058 Addendum II (ruling B, 2026-08-06) is what forces the
+       // reorder rather than merely permitting it: a per-row `before*` context
+       // is BUILT from the matched row set, so the row set has to be in hand
+       // before the first dispatch, so the branch that decides whether there IS
+       // a row set has to be decided before that. #5846's (a) direction lands
+       // in the same edit — the by-id path reads its prior row ahead of the
+       // dispatch and binds `previous` there, exactly as `delete()` has since
+       // #5272 — because the before phase becomes a real reader of that read on
+       // BOTH paths, which is the one thing #5284's gate comment said it was
+       // not.
+       //
+       // The lever that reorder retires is named and refused rather than
+       // silently dropped: see `HookTargetRebindError`.
+       //
+       // Keyed on the SAME falsy-`id` test the #2982 AST seed above uses, so
+       // seed, ladder and branch cannot disagree.
+       const isByIdWrite = Boolean(id);
+       const isPredicatePath = !isByIdWrite && Boolean(options?.multi) && typeof driver.updateMany === 'function';
+       if (!isByIdWrite && !isPredicatePath) {
+           // [#5480] The `reject` verdict of resolveEngineUpdateDispatch. It
+           // used to be re-asked AFTER the before phase, because a hook could
+           // still bind the id and convert the call into a by-id write; with
+           // the ladder resolved first there is no such conversion, so the
+           // refusal lands where it costs least — before any handler runs and
+           // before anything is read.
+           throw new Error(ENGINE_UPDATE_REJECT_MESSAGE);
+       }
+
+       const updateSchema = this._registry.getObject(object);
+       // Pre-update snapshot. Exposed to hooks via `hookContext.previous` in
+       // BOTH phases now (the HookContext contract documents `previous` for
+       // update/delete) and reused for object-level validation rules and the
+       // roll-up recompute. Fetched once, only for single-id updates, and only
+       // when something on THIS object actually consumes it — see
+       // `wantsPriorRecord` below.
+       let priorRecord: Record<string, unknown> | null = null;
+       // [#5038] The matched rows a PREDICATE write fires its per-row
+       // `afterUpdate` contexts over. `[]` is meaningful and distinct from
+       // `null`: zero matched rows is zero record changes, hence zero hook
+       // calls.
+       let bulkPerRowRows: Record<string, unknown>[] | null = null;
+
+       if (isByIdWrite) {
+           // [#5284] Demand-driven, and the demand is asked PER OBJECT — see
+           // the long-form reasoning at the by-id branch below, which still
+           // holds for every term. What changed with #5574/#5846 is the one
+           // term that comment singled out as deliberately ABSENT:
+           // `beforeUpdate` is now a real reader of this read, because the
+           // read happens before the dispatch and binds `previous` for it. So
+           // it joins the gate, and the gate stops being narrower than
+           // `delete()`'s twin (#5272) for no reason anyone could state.
+           //
+           // This is not a NEW read where a kernel is concerned — it is the
+           // same one, moved and deduplicated. `sys_fetch_previous_update`
+           // (`plugin.ts`, `object: '*'`, priority 5) used to make its own
+           // `ql.findOne` on every by-id update to bind exactly this value;
+           // #5846 retires it, because the engine now binds `previous` before
+           // any authored before-hook runs.
+           const wantsPriorRecord =
+             needsPriorRecord(updateSchema as any) ||
+             this.hasHooksFor('beforeUpdate', object) ||
+             this.hasHooksFor('afterUpdate', object) ||
+             this.getSummaryDescriptors(object).length > 0;
+           if (wantsPriorRecord) {
+               // `buildDriverOptions` is what carries the open transaction and
+               // the tenant scope onto a raw driver read — the same bag the
+               // post-phase write uses, built here because the write's own
+               // merge has not happened yet. `delete()`'s pre-image read does
+               // the same for the same reason.
+               const priorAst: QueryAST = { object, where: { id }, limit: 1 };
+               const preOpts = this.buildDriverOptions(object, opCtx.context, hookContext.input.options as any);
+               priorRecord = await driver.findOne(object, priorAst, preOpts);
+               // Never fabricate: a row that is not there leaves `previous`
+               // UNBOUND rather than `{}`/`null`, so a condition reading it
+               // faults loudly instead of answering for a record nobody read
+               // (#4649/#4775) — `delete()`'s `bindPreImage` rule, verbatim.
+               if (priorRecord) hookContext.previous = coerceBooleanFields(updateSchema as any, priorRecord as any) as any;
+           }
+           await this.triggerHooks('beforeUpdate', hookContext);
+           // The retired lever, refused. Everything above — `previous`, and
+           // below it the `readonlyWhen` strip and every validation rule — was
+           // computed against the row the ladder chose.
+           if (hookContext.input.id !== id) {
+               throw new HookTargetRebindError({
+                   object, event: 'beforeUpdate', path: 'by-id',
+                   expectedId: id, observedId: hookContext.input.id,
+               });
+           }
+       }
+
+       // [#3106/#3042/#5038/#5574] D7 — ONE read of the matched row set per
+       // predicate write, serving four consumers: per-row validation rules,
+       // the `readonlyWhen` strip, the per-row `before*` dispatch and the
+       // per-row `after*` dispatch. The ruling forbids a second fetch in as
+       // many words, so the read is a MEMO rather than a call at each
+       // consumer's site: the before phase needs it earliest (its contexts are
+       // built from it), the strip gate can only be asked of the POST-hook
+       // payload, and a memo is what lets both be true without the read
+       // happening twice or being hoisted past the gate that decides it is
+       // needed at all.
+       let priorRows: Record<string, unknown>[] | null = null;
+       let priorRowsRead = false;
+       let readPriorRows: () => Promise<Record<string, unknown>[] | null> = async () => null;
+
+       if (isPredicatePath) {
+           // [#2982] Consume the middleware-composed AST seeded above, so the
+           // injected row-scoping (RLS write filter, sharing's editable-rows
+           // filter) actually binds every read and write on this path — the
+           // per-row hook dispatch included, which is why the check moved here
+           // from the driver call. Fail CLOSED if it is somehow absent:
+           // rebuilding `{ object, where }` would silently drop every composed
+           // filter and reopen the unscoped-bulk-write hole this fix closed
+           // (AGENTS.md PD #12).
+           const ast = opCtx.ast;
+           if (!ast) {
+               throw new Error(
+                 `[Security] Refusing bulk update on '${object}': row-scoping AST was not seeded ` +
+                   `(the predicate branch was reached without the #2982 seed).`,
+               );
+           }
+           const preOpts = this.buildDriverOptions(object, opCtx.context, hookContext.input.options as any);
+           readPriorRows = async () => {
+               if (!priorRowsRead) {
+                   priorRowsRead = true;
+                   priorRows = (await driver.find(object, ast, preOpts) as Record<string, unknown>[]) ?? [];
+               }
+               return priorRows;
+           };
+
+           // The demand is uniform across hooks and asked PER OBJECT: it is
+           // NOT keyed on whether any condition mentions `previous`, which the
+           // ruling rejected explicitly as a hidden rule that makes a hook's
+           // firing count depend on its condition text.
+           const perRowBeforeHooks = this.hasHooksFor('beforeUpdate', object);
+           const perRowAfterHooks = this.hasHooksFor('afterUpdate', object);
+           if (perRowBeforeHooks || perRowAfterHooks) {
+               const rows = (await readPriorRows()) ?? [];
+               // [D6] ONE ceiling for BOTH phases, checked BEFORE the first
+               // per-row dispatch and before the driver call — so an
+               // over-ceiling batch runs zero handlers and writes nothing,
+               // rather than running 10 001 of them and then throwing. Named
+               // for the phase that will dispatch first, so the operator is
+               // told which hook to narrow or drop.
+               this.assertBulkPerRowHookBudget(
+                 object, perRowBeforeHooks ? 'beforeUpdate' : 'afterUpdate', rows.length,
+               );
+               if (perRowAfterHooks) bulkPerRowRows = rows;
+               // [D1] Zero matched rows is zero dispatches — a batch that
+               // changed nothing is not a record change.
+               if (perRowBeforeHooks && rows.length > 0) {
+                   await this.dispatchPerRowBeforeHooks(object, 'beforeUpdate', rows, hookContext);
+               }
+           }
+       }
+
        hookContext.input.options = this.buildDriverOptions(object, opCtx.context, hookContext.input.options as any);
 
        try {
@@ -6265,41 +6655,18 @@ export class ObjectQL implements IObjectQLEngine {
            // driver returning a row from `updateMany` would silently reroute a
            // bulk write onto the per-record contract if we inferred it.
            let isPredicateWrite = false;
-           // Pre-update snapshot. Exposed to after-hooks via `hookContext.previous`
-           // (the HookContext contract documents `previous` for update/delete) and
-           // reused for object-level validation rules and the roll-up recompute.
-           // Fetched once, only for single-id updates, and only when something on
-           // THIS object actually consumes it — see `wantsPriorRecord` below.
-           // Binding `previous` is what makes record-change flow triggers work:
-           // their start-condition gate reads `previous.*` (e.g. `status == "done"
-           // && previous.status != "done"`), which fails when `previous` is absent.
-           //
-           // [#4784] It is ALSO what supplies the `previous` binding to a
-           // declarative hook `condition` (`hook-wrappers.ts`), which is how a
-           // TRANSITION is expressed there: `previous.done != true &&
-           // record.done == true`. That needs NO second demand-driven fetch: the
-           // gate fetches whenever this object has an afterUpdate hook, and
-           // afterUpdate is the event whose context carries `previous`. Adding a
-           // "does the condition reference `previous`?" analysis on top would
-           // still be dead code — the demand is uniform across after-hooks, which
-           // #5038 records as a ruling (a hook's cost must not depend on its
-           // condition text).
-           let priorRecord: Record<string, unknown> | null = null;
-           // [#5038] The matched rows a PREDICATE write fires its per-row
-           // `afterUpdate` contexts over — set only when this object actually
-           // has `afterUpdate` hooks, so a bulk write with none pays for no
-           // read and keeps its single (no-op) batch dispatch. `[]` is
-           // meaningful and distinct from `null`: zero matched rows is zero
-           // record changes, hence zero hook calls.
-           let bulkPerRowRows: Record<string, unknown>[] | null = null;
-           const updateSchema = this._registry.getObject(object);
            const mediaValueShapeStrict = await this.mediaValueShapeStrictFor(updateSchema);
            const valueShapeStrict = await this.valueShapeStrictFor(updateSchema);
            const updateMsgCtx = this.validationMessageContext(object, opCtx.context);
            // [#4769] See the insert path — an update admits values on the same
            // terms, so it owes the same counterexample.
            const onAdmittedValueShapeViolation = this.admittedViolationSink(object);
-           if (hookContext.input.id) {
+           // [#5574] Branch on the LADDER, not on `hookContext.input.id`. The
+           // two used to be the same question asked twice, which is exactly
+           // what made the id slot a reroute lever; the ladder was resolved
+           // before the before phase above and a handler's attempt to move it
+           // has already been refused.
+           if (isByIdWrite) {
                // [#6435] The by-id half of #6262's strip — same defect, other
                // arm. Reaching this branch means the dispatch found a truthy
                // scalar id, but NOT necessarily in the payload: when `data.id`
@@ -6422,36 +6789,26 @@ export class ObjectQL implements IObjectQLEngine {
                //     a repointed child is only saved by some other object having
                //     an afterUpdate hook.
                //
-               // `beforeUpdate` is deliberately NOT counted, and that is the one
-               // place this gate does NOT mirror `delete()`'s (#5272). The two
-               // paths order the read differently: `delete()` reads the pre-image
-               // BEFORE dispatching `beforeDelete` and binds it there, so a
-               // before-phase hook is a real reader of THAT read. `update()`
-               // dispatches `beforeUpdate` first (it may still rewrite the very
-               // payload this read would be compared against) and binds
-               // `hookContext.previous` only after the write — so no
-               // `beforeUpdate` hook can observe this row however the gate is
-               // written, and counting the event here would buy a read with no
-               // reader.
+               // [#5574 / #5846] `beforeUpdate` USED to be deliberately absent
+               // from this gate, and that was the one place it did not mirror
+               // `delete()`'s twin (#5272). The reason given was ordering: this
+               // path dispatched `beforeUpdate` first and bound
+               // `hookContext.previous` only after the write, so no
+               // `beforeUpdate` hook could observe this row however the gate was
+               // written, and counting the event would have bought a read with
+               // no reader. ADR-0058 Addendum II reversed the ordering, so the
+               // reader now exists — the read and the binding happen ABOVE, in
+               // the pre-phase, and `wantsPriorRecord` there counts
+               // `beforeUpdate` alongside `afterUpdate`.
                //
-               // What a kernel-hosted `beforeUpdate` hook DOES see comes from a
-               // different producer entirely: the `sys_fetch_previous_update`
-               // builtin (`plugin.ts`, `object: '*'`, priority 5) makes its own
-               // `findOne` and assigns `hookContext.previous` before any authored
-               // before-hook runs. That read is untouched by this gate — and it
-               // is why narrowing here cannot take a binding away from the before
-               // phase. It is also a duplicate of this one (plugin-audit's
-               // `captureBefore` makes a third): three reads of one row, filed
-               // as #5846 with the delete-side time-ordering (#5272) as the fix
-               // shape — not something to paper over by widening this gate.
-               const wantsPriorRecord =
-                 needsPriorRecord(updateSchema as any) ||
-                 this.hasHooksFor('afterUpdate', object) ||
-                 this.getSummaryDescriptors(object).length > 0;
-               if (wantsPriorRecord) {
-                   const priorAst: QueryAST = { object, where: { id: hookContext.input.id }, limit: 1 };
-                   priorRecord = await driver.findOne(object, priorAst, hookContext.input.options as any);
-               }
+               // What that also retired: the `sys_fetch_previous_update`
+               // builtin (`plugin.ts`, `object: '*'`, priority 5) used to be the
+               // only producer of `previous` for the before phase, making its
+               // own `ql.findOne` on every by-id update. With the engine binding
+               // it first the builtin's `!ctx.previous` guard is permanently
+               // short-circuited, so #5846 removes it rather than leaving a
+               // second read behind a guard that can no longer be false.
+               //
                // B2: drop writes to fields locked by a TRUE `readonlyWhen` — the
                // field is read-only for this record's state, so the incoming
                // change is ignored (the persisted value is kept).
@@ -6518,7 +6875,7 @@ export class ObjectQL implements IObjectQLEngine {
                  opCtx.data as Record<string, unknown>, opCtx.context, updateMsgCtx,
                );
                result = await driver.update(object, hookContext.input.id as string, hookContext.input.data as Record<string, unknown>, hookContext.input.options as any);
-           } else if (options?.multi && driver.updateMany) {
+           } else {
                // [#6262] A bulk SET clause must not carry `id`. Reaching this
                // branch AT ALL means `resolveEngineUpdateDispatch` returned
                // `multi`, i.e. it found no scalar truthy id in EITHER source —
@@ -6573,20 +6930,11 @@ export class ObjectQL implements IObjectQLEngine {
                await this.encryptSecretFields(object, hookContext.input.data as Record<string, unknown>, opCtx.context, hookContext.input.options);
                normalizeMultiValueFields(updateSchema, hookContext.input.data as Record<string, unknown>);
                validateRecord(updateSchema, hookContext.input.data as Record<string, unknown>, 'update', { mediaValueShapeStrict, valueShapeStrict, messages: updateMsgCtx, onAdmittedValueShapeViolation });
-               // [#2982] Consume the middleware-composed AST seeded above, so
-               // the injected row-scoping (RLS write filter, sharing's
-               // editable-rows filter) actually binds the driver operation. Fail
-               // CLOSED if it is somehow absent — rebuilding `{ object, where }`
-               // here would silently drop every composed filter and reopen the
-               // unscoped-bulk-write hole this fix closes (AGENTS.md PD #12: no
-               // lenient fallback that tolerates the broken invariant).
-               const ast = opCtx.ast;
-               if (!ast) {
-                   throw new Error(
-                     `[Security] Refusing bulk update on '${object}': row-scoping AST was not seeded ` +
-                       `(a hook cleared the target id after the security filter was composed).`,
-                   );
-               }
+               // [#2982] The middleware-composed AST — asserted present and
+               // bound to the memoized row read in the pre-phase above, so the
+               // injected row-scoping (RLS write filter, sharing's
+               // editable-rows filter) binds every read AND the write.
+               const ast = opCtx.ast!;
                // [#3106] Validation rules, `requiredWhen` and per-option
                // `visibleWhen` are PER ROW on a bulk update, exactly like the
                // `readonlyWhen` strip below: one payload, N prior states. Read
@@ -6597,27 +6945,18 @@ export class ObjectQL implements IObjectQLEngine {
                // it), so a rule-free schema still pays nothing here.
                const rulesNeedRows = needsPriorRecord(updateSchema as any);
                const payloadHasReadonlyWhen = hasReadonlyWhenInPayload(updateSchema as any, hookContext.input.data as Record<string, unknown>);
-               // [#5038] The THIRD demand on that same read: after-hooks are
-               // contracted to fire PER ROW on a predicate write (ADR-0058,
-               // bulk-write addendum), and a per-row context needs the row's
-               // pre-image for `previous`. Folded into the existing gate on
-               // purpose — one `driver.find` serves validation, the
-               // `readonlyWhen` strip AND the hook dispatch, which is the
-               // issue's performance guardrail ("行集读取一次完成,求值批内复用")
-               // stated as code. The demand is uniform across after-hooks: it
-               // is NOT keyed on whether any condition mentions `previous`,
-               // which the ruling rejected explicitly as a hidden rule that
-               // makes a hook's firing count depend on its condition text.
-               const perRowAfterHooks = this.hasHooksFor('afterUpdate', object);
-               let priorRows: Record<string, unknown>[] | null = null;
-               if (rulesNeedRows || payloadHasReadonlyWhen || perRowAfterHooks) {
-                   priorRows = await driver.find(object, ast, hookContext.input.options as any) as Record<string, unknown>[];
-               }
-               if (perRowAfterHooks) {
-                   // Refuse an unbounded fan-out BEFORE the write, so a batch
-                   // over the ceiling changes nothing at all.
-                   this.assertBulkPerRowHookBudget(object, 'afterUpdate', priorRows?.length ?? 0);
-                   bulkPerRowRows = priorRows ?? [];
+               // [#5038/#5574] The hook phases are the third and fourth demands
+               // on that same read, and they were already resolved in the
+               // pre-phase above (they have to be — a per-row `before*` context
+               // is built from these very rows). What is left here is the
+               // strip's and the rules' own demand, asked of the POST-hook
+               // payload, which is why this call site survives at all. It is
+               // the SAME read: `readPriorRows` is a memo, so one `driver.find`
+               // serves validation, the `readonlyWhen` strip and BOTH hook
+               // phases — D7's one-read rule, and the issue's performance
+               // guardrail ("行集读取一次完成,求值批内复用"), stated as code.
+               if (rulesNeedRows || payloadHasReadonlyWhen) {
+                   priorRows = await readPriorRows();
                }
                // [#3042] Enforce conditional `readonlyWhen` on the bulk path too.
                // Unlike static `readonly` (below), a `readonlyWhen` lock is PER
@@ -6710,15 +7049,9 @@ export class ObjectQL implements IObjectQLEngine {
                  updateSchema, hookContext.input.data as Record<string, unknown>,
                  opCtx.data as Record<string, unknown>, opCtx.context, updateMsgCtx,
                );
-               result = await driver.updateMany(object, ast, hookContext.input.data as Record<string, unknown>, hookContext.input.options as any);
+               // `updateMany` presence is part of the ladder verdict resolved above.
+               result = await driver.updateMany!(object, ast, hookContext.input.data as Record<string, unknown>, hookContext.input.options as any);
                isPredicateWrite = true;
-           } else {
-               // [#5480] The `reject` verdict of resolveEngineUpdateDispatch,
-               // re-asked here because a beforeUpdate hook may have cleared the
-               // id since — the same shape delete()'s branch below carries, and
-               // the reason the wording lives in one exported constant either
-               // way.
-               throw new Error(ENGINE_UPDATE_REJECT_MESSAGE);
            }
 
            hookContext.event = 'afterUpdate';
@@ -7029,6 +7362,53 @@ export class ObjectQL implements IObjectQLEngine {
       // one that has nothing else to look at (its `input` carries an id and
       // no data), and the pre-image has to be taken before the row is gone
       // either way, so a single read serves both phases.
+      //
+      // [#5574] The same read now serves the PER-ROW `beforeDelete` dispatch on
+      // the predicate path — see the pre-phase below. `delete()` was already
+      // the right shape here; what changed is that the predicate branch grew
+      // the same discipline the by-id branch has had since #5272.
+      //
+      // [#5929] The gate's THREE terms, unchanged by that card and enumerated
+      // here because it had to enumerate them to answer it:
+      //   1. `hasHooksFor('beforeDelete', object)`
+      //   2. `hasHooksFor('afterDelete', object)`
+      //   3. `getSummaryDescriptors(object).length > 0`
+      // No validation term, deliberately — see `needsPriorRecord` above.
+      //
+      // What #5929 changed is not this expression but what term 1 MEANS. Until
+      // then, objectql's own `ObjectQLPlugin` registered a builtin
+      // `sys_fetch_previous_delete` on `beforeDelete` with `object: '*'`, so on
+      // every kernel-hosted engine term 1 was true for every object and the
+      // per-object skip this gate exists to perform could never happen. The
+      // builtin's only remaining effect WAS holding this gate open: the read
+      // below binds `previous` before `beforeDelete` dispatches, so its own
+      // `!ctx.previous` guard was already unreachable. Retiring it (plugin.ts,
+      // ADR-0049 enforce-or-remove) makes term 1 an honest question.
+      //
+      // ⚠️ Honest is not the same as usually-false, and the difference is worth
+      // knowing before anyone reads a skip into a production trace. Every
+      // delete-phase hook below registers with NO `object` — global — so each
+      // holds term 1 or term 2 open for every object on a kernel that loads it:
+      //
+      //   * `plugin-auth`   identity-write-guard  beforeDelete  (filters by
+      //                     `isManaged(ctx.object)` inside the handler)
+      //   * `plugin-sharing` record-share-cascade  before+afterDelete (filters
+      //                     by `targets(objectName)` inside the handler)
+      //   * `service-storage` file-reference-lifecycle before+afterDelete
+      //                     (filters by `activeFileFields(object)` inside)
+      //   * `plugin-audit`  captureBefore / writeAudit before+afterDelete,
+      //                     global MINUS `excludeObjects: AUDIT_EXCLUDED_OBJECTS`
+      //                     (#5860) — the one that narrows at the ENGINE face,
+      //                     so `hookMatchesObject` can subtract it and an
+      //                     excluded object really does skip this read.
+      //
+      // The first three are real handlers with real work, merely deciding their
+      // own applicability at dispatch time rather than at registration time;
+      // this gate answering "yes" for them is the gate WORKING, not a second
+      // instance of the #5929 defect. Narrowing any of them to the objects it
+      // actually serves — plugin-audit's `excludeObjects` face is the worked
+      // example — is what would convert them into skips, and that is each
+      // package's own card, not this one's.
       const deleteSchema = this._registry.getObject(object);
       const wantsPreImage =
         this.hasHooksFor('beforeDelete', object) ||
@@ -7050,24 +7430,95 @@ export class ObjectQL implements IObjectQLEngine {
         hookContext.previous = row ? (coerceBooleanFields(deleteSchema as any, row as any) as any) : undefined;
       };
       let priorRecord: Record<string, unknown> | null = null;
-      if (id && wantsPreImage) {
-        priorRecord = await readPreImage(id);
-        bindPreImage(priorRecord);
+      // [#5038] Matched rows for the per-row `afterDelete` dispatch — see the
+      // twin in update(). A bulk delete is N record changes too, so a
+      // `record-after-delete` flow must see each deleted row rather than one
+      // context that names none of them.
+      let bulkPerRowRows: Record<string, unknown>[] | null = null;
+
+      // [#5574] The dispatch ladder, resolved BEFORE the before phase — see
+      // update()'s twin for the full reasoning. Keyed on the SAME falsy-`id`
+      // test the #2982 AST seed above uses.
+      const isByIdDelete = Boolean(id);
+      const isPredicatePath = !isByIdDelete && Boolean(options?.multi) && typeof driver.deleteMany === 'function';
+      if (!isByIdDelete && !isPredicatePath) {
+        // [#4550] The `reject` verdict of resolveEngineDeleteDispatch. It used
+        // to be re-asked after the before phase because a hook could still bind
+        // the id; with the ladder resolved first there is no such conversion.
+        throw new Error(ENGINE_DELETE_REJECT_MESSAGE);
       }
 
-      await this.triggerHooks('beforeDelete', hookContext);
-
-      // A `beforeDelete` hook may repoint the target id, or clear it (which
-      // #4550's re-asked dispatch verdict below already accounts for). The
-      // pre-image bound above describes the OLD id, so it must not ride into
-      // `afterDelete` — or into the summary recompute — as though it
-      // described the new target. A cleared id falls through to the predicate
-      // branch, whose batch-scoped dispatch must carry no single row's
-      // pre-image at all (`hook-wrappers` diagnoses that dispatch by the
-      // absence of both).
-      if (wantsPreImage && hookContext.input.id !== id) {
-        priorRecord = hookContext.input.id ? await readPreImage(hookContext.input.id) : null;
-        bindPreImage(priorRecord);
+      if (isByIdDelete) {
+        if (wantsPreImage) {
+          priorRecord = await readPreImage(id);
+          bindPreImage(priorRecord);
+        }
+        await this.triggerHooks('beforeDelete', hookContext);
+        // A `beforeDelete` hook may still REPOINT the target id, and #5272's
+        // answer to that is unchanged: the pre-image bound above describes the
+        // OLD id, so it must not ride into `afterDelete` — or into the summary
+        // recompute — as though it described the new target. Re-read it.
+        //
+        // [#5574] What this PR does NOT do, deliberately: retire the repoint.
+        // The `update()` twin below refuses a rebind, and the asymmetry is
+        // principled rather than an oversight — `delete()` has a working
+        // RE-RESOLUTION for the new target (this block, delivered by #5272 with
+        // its own pins), so nothing stale reaches a consumer, while `update()`
+        // has none and would have to grow one. Building that is exactly the
+        // "silently pick re-resolution instead" the ruling forbids, so the two
+        // paths answer differently until the repoint itself is ruled on. Filed
+        // as #6752; do not fold it in as a rider here.
+        if (wantsPreImage && hookContext.input.id !== id && hookContext.input.id) {
+          priorRecord = await readPreImage(hookContext.input.id);
+          bindPreImage(priorRecord);
+        }
+        // CLEARING the id is a different question and this PR does settle it,
+        // because the ladder reorder leaves it no answer of its own: it used to
+        // convert the write into a PREDICATE delete over the caller's `where`
+        // by falling through to the branch below, and the ladder is now decided
+        // before any handler runs (a per-row `before*` context is built from the
+        // matched row set, so it must be). Ignoring it would delete the
+        // ORIGINAL row while the handler believes it cancelled the targeting;
+        // honouring it has nothing left to honour. Refused by name — ADR-0058
+        // Amendment II.1, the capability the ruling names.
+        if (!hookContext.input.id) {
+          throw new HookTargetRebindError({
+            object, event: 'beforeDelete', path: 'by-id',
+            expectedId: id, observedId: hookContext.input.id,
+          });
+        }
+      } else {
+        // [#2982] Consume the middleware-composed AST seeded above so the
+        // injected row-scoping binds every read AND the delete. Fail CLOSED if
+        // it is absent rather than rebuilding an unscoped `{ object, where }`
+        // (AGENTS.md PD #12).
+        const ast = opCtx.ast;
+        if (!ast) {
+          throw new Error(
+            `[Security] Refusing bulk delete on '${object}': row-scoping AST was not seeded ` +
+              `(the predicate branch was reached without the #2982 seed).`,
+          );
+        }
+        // [#5038/#5574] Read the doomed rows ONCE, before they are gone — the
+        // only moment their pre-image exists — and serve BOTH phases from it
+        // (D7). Gated on this object actually having delete-side hooks, so a
+        // bulk delete with none pays for no read.
+        const perRowBeforeHooks = this.hasHooksFor('beforeDelete', object);
+        const perRowAfterHooks = this.hasHooksFor('afterDelete', object);
+        if (perRowBeforeHooks || perRowAfterHooks) {
+          const preOpts = this.buildDriverOptions(object, opCtx.context, hookContext.input.options as any);
+          const doomed = (await driver.find(object, ast, preOpts) as Record<string, unknown>[]) ?? [];
+          // [D6] One ceiling, both phases, BEFORE the first per-row dispatch
+          // and before the driver call.
+          this.assertBulkPerRowHookBudget(
+            object, perRowBeforeHooks ? 'beforeDelete' : 'afterDelete', doomed.length,
+          );
+          if (perRowAfterHooks) bulkPerRowRows = doomed;
+          // [D1] Zero matched rows is zero dispatches.
+          if (perRowBeforeHooks && doomed.length > 0) {
+            await this.dispatchPerRowBeforeHooks(object, 'beforeDelete', doomed, hookContext);
+          }
+        }
       }
 
       hookContext.input.options = this.buildDriverOptions(object, opCtx.context, hookContext.input.options as any);
@@ -7077,44 +7528,17 @@ export class ObjectQL implements IObjectQLEngine {
           // [#4639] See update()'s twin: recorded at the branch that chose the
           // driver call, not inferred later from a missing id.
           let isPredicateWrite = false;
-          // [#5038] Matched rows for the per-row `afterDelete` dispatch — see
-          // the twin in update(). A bulk delete is N record changes too, so a
-          // `record-after-delete` flow must see each deleted row rather than
-          // one context that names none of them.
-          let bulkPerRowRows: Record<string, unknown>[] | null = null;
-          if (hookContext.input.id) {
+          if (isByIdDelete) {
               // Honor referential delete behavior (cascade/set_null/restrict)
               // for relations pointing at this record before removing it.
               await this.cascadeDeleteRelations(object, hookContext.input.id as string | number, opCtx.context);
               result = await driver.delete(object, hookContext.input.id as string, hookContext.input.options as any);
-          } else if (options?.multi && driver.deleteMany) {
-               // [#2982] Consume the middleware-composed AST seeded above so the
-               // injected row-scoping binds the bulk delete. Fail CLOSED if it
-               // is absent rather than rebuilding an unscoped `{ object, where }`
-               // (AGENTS.md PD #12).
-               const ast = opCtx.ast;
-               if (!ast) {
-                   throw new Error(
-                     `[Security] Refusing bulk delete on '${object}': row-scoping AST was not seeded ` +
-                       `(a hook cleared the target id after the security filter was composed).`,
-                   );
-               }
-               // [#5038] Read the doomed rows ONCE, before they are gone —
-               // the only moment their pre-image exists. Gated on this object
-               // actually having `afterDelete` hooks, so a bulk delete with
-               // none pays for no read (this path did no read at all before).
-               if (this.hasHooksFor('afterDelete', object)) {
-                   const doomed = await driver.find(object, ast, hookContext.input.options as any) as Record<string, unknown>[];
-                   this.assertBulkPerRowHookBudget(object, 'afterDelete', doomed?.length ?? 0);
-                   bulkPerRowRows = doomed ?? [];
-               }
-               result = await driver.deleteMany(object, ast, hookContext.input.options as any);
-               isPredicateWrite = true;
           } else {
-               // The `reject` verdict of resolveEngineDeleteDispatch, re-asked
-               // here because a beforeDelete hook may have cleared the id since
-               // (#4550 keeps the wording in one place either way).
-               throw new Error(ENGINE_DELETE_REJECT_MESSAGE);
+               // [#2982] The AST asserted present and already used for the
+               // pre-phase row read above.
+               // `deleteMany` presence is part of the ladder verdict resolved above.
+               result = await driver.deleteMany!(object, opCtx.ast!, hookContext.input.options as any);
+               isPredicateWrite = true;
           }
 
           hookContext.event = 'afterDelete';
@@ -8156,9 +8580,12 @@ export class ScopedContext implements IScopedContext {
    * trio-held handle is invisible here and is NOT joined — which is what keeps
    * this branch from mistaking an explicitly-threaded handle for an ambient
    * one. The QuickJS sandbox drives `ctx.api.transaction(fn)` through that trio
-   * rather than through this method, so a VM-side body is outside this join;
-   * unattributable handles are the same surface #6167 tracks, and closing that
-   * needs handle ownership to become discoverable on `IDataDriver`.
+   * rather than through this method, so a VM-side body is outside THIS join —
+   * it gets its own, on the trio's `beginTransaction` since #6406, with the
+   * same semantics: same handle, `owned: false`, and commit/rollback abstaining
+   * in favour of the outer owner. Unattributable handles are the same surface
+   * #6167 tracks, and closing that needs handle ownership to become
+   * discoverable on `IDataDriver`.
    */
   async transaction(
     callback: (trxCtx: ScopedContext, info: EngineTransactionInfo) => Promise<any>,
@@ -8250,6 +8677,45 @@ export class ScopedContext implements IScopedContext {
   }
 
   /**
+   * Handles this context JOINED (ADR-0067 D2) rather than opened, recorded by
+   * {@link beginTransaction} and consumed by {@link releaseJoinedHandle}.
+   *
+   * A joined handle belongs to an OUTER owner, so this context must not commit
+   * or roll it back. Keying by the handle object is what makes the abstention
+   * exact — a context that later opens one of its own gets a different handle
+   * and closes it normally. Entries are removed by the first commit/rollback
+   * that names them, so the set holds at most the transactions currently open
+   * through this (per-dispatch, short-lived) context.
+   */
+  private readonly joinedHandles = new Set<unknown>();
+
+  /**
+   * Was `handle` JOINED by this context rather than opened by it? Consumes the
+   * record, so the trio's terminal call is also what forgets the handle.
+   *
+   * Two independent signals, because the trio's callers are exactly the ones
+   * that cannot keep a closure on the stack and may not close on the same
+   * object they opened on:
+   *
+   *   1. this context's own {@link joinedHandles} record, and
+   *   2. identity with the CURRENT ambient handle — a handle the engine is
+   *      holding open right now is, by construction, not one the trio opened
+   *      (the trio never publishes into `txStore`, so a trio-owned handle is
+   *      never the ambient one).
+   *
+   * Both point the same way and both fail SAFE: the ambiguous answer is
+   * "abstain", never "commit a transaction we do not own".
+   */
+  private releaseJoinedHandle(handle: unknown): boolean {
+    if (this.joinedHandles.delete(handle)) return true;
+    if (handle == null) return false;
+    const ambient = (this.engine as any)?.txStore?.getStore?.() as
+      | { transaction?: unknown }
+      | undefined;
+    return ambient?.transaction === handle;
+  }
+
+  /**
    * Resolve the default driver, if it exposes transaction primitives.
    * Shared by {@link transaction} and the discrete begin/commit/rollback trio.
    */
@@ -8268,19 +8734,73 @@ export class ScopedContext implements IScopedContext {
    * This trio exists for callers that cannot keep a JS closure on the stack for
    * the lifetime of the transaction — chiefly the sandbox runner, where the
    * hook/action body's `ctx.api.transaction(fn)` is driven across many host
-   * event-loop turns via deferred promises. Across those `setImmediate`
-   * boundaries the engine's ambient `txStore` (AsyncLocalStorage) does NOT
-   * survive, so the transaction handle is threaded **explicitly**: `begin`
-   * returns a child ScopedContext carrying `transaction: trx` in its execution
-   * context, and `resolveTx` honors that explicit handle ahead of the ambient
-   * store. Every `object(...)` op on the returned context therefore reuses the
-   * one connection without relying on ALS.
+   * event-loop turns via deferred promises. With no closure spanning
+   * begin→commit there is nothing to hand `txStore.run`, so a transaction this
+   * trio opens can never be PUBLISHED into the engine's ambient store; the
+   * handle is threaded **explicitly** instead: `begin` returns a child
+   * ScopedContext carrying `transaction: trx` in its execution context, and
+   * `resolveTx` honors that explicit handle ahead of the ambient store. Every
+   * `object(...)` op on the returned context therefore reuses the one
+   * connection without relying on ALS — which is also what keeps it working
+   * across `setImmediate` boundaries an outside caller may schedule the
+   * commit from.
    *
    * Returns `null` when the driver has no transaction support — the caller then
    * runs non-transactionally against `this` (same graceful degrade as
    * {@link transaction}).
+   *
+   * ## ADR-0067 D2 join (#6406) — the third face of one primitive
+   *
+   * `begin` JOINS an already-open ambient transaction instead of opening a
+   * nested driver one, exactly as `ObjectQL.transaction` always did and as
+   * {@link transaction} does since #6168. Without it, a QuickJS body's
+   * `ctx.api.transaction(fn)` — which reaches this trio, not {@link transaction}
+   * — opened a SECOND driver transaction inside a host `engine.transaction()`:
+   * a second connection (the deadlock D2 exists to avoid on a single-connection
+   * pool) whose `__txCommit` made its writes SURVIVE the outer rollback, with
+   * no error and no log.
+   *
+   * `owned` in the result is #5696's signal, in the shape this face can carry
+   * it: `false` says this call joined and the OUTER caller owns the one and
+   * only commit/rollback. Commit and rollback abstain for such a handle
+   * ({@link releaseJoinedHandle}) — the guarantee lives HERE rather than in
+   * each caller, so a caller that ignores the bit still cannot close a
+   * transaction it does not own. An explicit rollback of a joined handle
+   * therefore performs NO driver rollback here; it is the same answer the
+   * callback faces give, where the joined branch has no rollback of its own and
+   * a throw propagates to the outer owner, which rolls the whole unit back.
+   *
+   * DECLARED LIMIT, measured rather than assumed (#6406): the join reads the
+   * engine's ambient `txStore` at BEGIN time. On the sandbox path that store IS
+   * readable there — the leaf runs on a chain awaited down from the host's
+   * `txStore.run`, so the AsyncLocalStorage context is still current — which is
+   * why no separate capture mechanism is needed. What the trio still cannot do
+   * is PUBLISH: it has no closure spanning begin→commit to wrap in
+   * `txStore.run`, which is why its own handle is threaded explicitly and stays
+   * invisible to the ambient readers. A caller whose `begin` is scheduled from
+   * OUTSIDE the transaction's async context sees no ambient and opens its own,
+   * exactly as before — join is best-effort on visibility, on this face and on
+   * both callback faces alike.
    */
-  async beginTransaction(): Promise<{ ctx: ScopedContext; handle: unknown } | null> {
+  async beginTransaction(): Promise<{ ctx: ScopedContext; handle: unknown; owned: boolean } | null> {
+    // ADR-0067 D2 — JOIN before the driver lookup, the same first move and the
+    // same position as both callback faces (#6168 / #6406). An ambient
+    // transaction IS a transaction, so there is nothing to look a driver up for.
+    const ambient = (this.engine as any)?.txStore?.getStore?.() as
+      | { transaction?: unknown }
+      | undefined;
+    if (ambient?.transaction) {
+      // Threaded explicitly into the child context, identity-equal to the
+      // store's handle — so `buildDriverOptions` binds every op on it to the
+      // outer connection and `transactionCoversDriverFor` still attributes the
+      // handle to the OUTER owner (#5351 unchanged).
+      const ctx = new ScopedContext(
+        { ...this.executionContext, transaction: ambient.transaction },
+        this.engine
+      );
+      this.joinedHandles.add(ambient.transaction);
+      return { ctx, handle: ambient.transaction, owned: false };
+    }
     const driver = this.txDriver();
     if (!driver) return null;
     const trx = await driver.beginTransaction();
@@ -8288,19 +8808,35 @@ export class ScopedContext implements IScopedContext {
       { ...this.executionContext, transaction: trx },
       this.engine
     );
-    return { ctx, handle: trx };
+    return { ctx, handle: trx, owned: true };
   }
 
-  /** Commit a handle obtained from {@link beginTransaction}. */
+  /**
+   * Commit a handle obtained from {@link beginTransaction}.
+   *
+   * ABSTAINS for a JOINED handle (#6406): committing a transaction this context
+   * did not open would land the inner writes early and take the outcome away
+   * from the outer owner — the durability half of the D2 defect.
+   */
   async commitTransaction(handle: unknown): Promise<void> {
+    if (this.releaseJoinedHandle(handle)) return;
     const driver = this.txDriver();
     if (!driver) return;
     if (driver.commit) await driver.commit(handle);
     else if (driver.commitTransaction) await driver.commitTransaction(handle);
   }
 
-  /** Roll back a handle obtained from {@link beginTransaction}. */
+  /**
+   * Roll back a handle obtained from {@link beginTransaction}.
+   *
+   * ABSTAINS for a JOINED handle (#6406), mirroring the callback faces: their
+   * joined branch issues no rollback either, and a throw inside it propagates
+   * to the outer owner, which rolls back the whole unit of work. Rolling the
+   * outer transaction back from here would be the mirror-image error — an inner
+   * failure silently discarding writes the outer caller has not finished with.
+   */
   async rollbackTransaction(handle: unknown): Promise<void> {
+    if (this.releaseJoinedHandle(handle)) return;
     const driver = this.txDriver();
     if (!driver) return;
     if (driver.rollback) await driver.rollback(handle);

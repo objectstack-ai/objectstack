@@ -233,7 +233,19 @@ describe('[#5234] SqlDriver refuses the two comparand shapes that compiled to a 
       expect(err.message).toContain('StringOperatorSchema');
     });
 
-    for (const op of ['$contains', '$notContains', '$startsWith', '$endsWith', '$regex'] as const) {
+    // [#5702] This list IS `TEXT_PATTERN_OPERATORS` — the operators whose
+    // comparand becomes the TEXT of a LIKE pattern — so it follows that set's
+    // membership. `$regex` left it (retired, #4706) and `$icontains` joined it.
+    //
+    // Re-spelled rather than merely dropped, because the row was pinning a real
+    // condition and the new member needs it more, not less: `$icontains` is the
+    // one text operator whose comparand is ALSO gated on the validating walk,
+    // so without a row here nothing would notice if the two gates ever
+    // disagreed about an object. (Which one fires is deliberately not asserted —
+    // both answer `INVALID_FILTER` / 400 naming the operator, which is the
+    // contract; the walk simply runs first.) The retired spelling's own refusal
+    // is pinned in `sql-driver-icontains-and-retired-operators.test.ts`.
+    for (const op of ['$contains', '$notContains', '$startsWith', '$endsWith', '$icontains'] as const) {
       it(`\`${op}\` refuses an object comparand`, async () => {
         const err = await refusalOf(() => find({ name: { [op]: { foo: 1 } } }));
         expect(err.code, op).toBe('INVALID_FILTER');

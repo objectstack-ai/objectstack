@@ -1,11 +1,81 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
+/**
+ * `os login --json` is NDJSON — the CLI's ONE declared exception (#6531).
+ *
+ * ## What was broken
+ *
+ * Everywhere else in this CLI `--json` means "stdout is exactly one JSON
+ * document" (#6217). The device-flow path could not honour that and did not
+ * try: it wrote the RFC 8628 device-authorization payload compact, and then,
+ * after the token poll succeeded, the result payload 2-space indented. Measured
+ * against a live device endpoint, stdout came out as
+ *
+ * ```
+ * {"device_code":"…","user_code":"…","verification_uri":"…","expires_in":600}
+ * {
+ *   "success": true,
+ *   …
+ * }
+ * ```
+ *
+ * — which `JSON.parse` rejects (`Unexpected non-whitespace character after JSON
+ * at position 200`) *and* which is not NDJSON either, because the second
+ * document spans five lines: 5 of its 6 lines fail an independent parse. A
+ * consumer had no shape to read it in at all. The same two-document stream
+ * appeared on the failure path too — device record, then an indented error
+ * payload when the poll timed out or was denied.
+ *
+ * ## Why a stream rather than one document
+ *
+ * Maintainer ruling, 2026-08-08 (#6531): this flow genuinely IS two events at
+ * two points in time, and emitting the verification URL **before** the user
+ * authorizes is the entire value of device flow in automation. Buffering both
+ * halves into one trailing document would make stdout parseable by destroying
+ * the thing the output exists for; putting the early record on stderr would
+ * abuse the diagnostic stream for non-diagnostic content. So `os login --json`
+ * is declared a newline-delimited stream, and — the ruling's binding condition
+ * — declared *explicitly*: in this command's `--help` text and in the command
+ * documentation (`content/docs/deployment/cli.mdx`, and the device-flow section
+ * of `content/docs/permissions/authentication.mdx`). An undocumented exception
+ * does the same harm to a consumer as the bug it replaces.
+ *
+ * ## Why EVERY write, not just the device flow's two
+ *
+ * The contract belongs to the command, not to one of its paths. If the
+ * `--email`/`--password` result or the error payload stayed indented, a
+ * consumer that read this command line-by-line — exactly what the docs now
+ * tell it to do — would break on the first run that took another path, and the
+ * failure path is reachable *after* the device record has already been written.
+ * So every `--json` write goes through {@link emitRecord}, which is the only
+ * emitter in this file; that makes "one compact document per line" a property
+ * of the command instead of four call sites that each have to remember an
+ * option. `packages/cli/test/login-json-ndjson.e2e.test.ts` holds both halves:
+ * the stream contract, driven through a real child process against a real
+ * device endpoint, and the source pin that keeps a future write from bypassing
+ * the helper.
+ */
+
 import { Command, Flags } from '@oclif/core';
+import type { CliExitCode } from '../utils/format.js';
 import { printHeader, printSuccess, printError, printKV, emitJson } from '../utils/format.js';
 import { writeAuthConfig, readAuthConfig } from '../utils/auth-config.js';
 import { ObjectStackClient } from '@objectstack/client';
 import * as readline from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
+
+/**
+ * Emit ONE NDJSON record on stdout — the only `--json` writer in this command.
+ *
+ * Compact is not a formatting preference here, it is the contract: a record
+ * that wrapped onto a second line would silently break every consumer reading
+ * this command's stdout a line at a time. Routing all four call sites through
+ * one helper is what makes that structural — see the file header for why the
+ * whole command, and not only the device flow's two writes, has to hold it.
+ */
+async function emitRecord(payload: unknown, exitCode: CliExitCode = 0): Promise<void> {
+  await emitJson(payload, exitCode, { compact: true });
+}
 
 /**
  * Prompt for a password with masked input (shows * per character).
@@ -108,7 +178,8 @@ export default class AuthLogin extends Command {
       default: false,
     }),
     json: Flags.boolean({
-      description: 'Output as JSON',
+      description:
+        'Machine-readable output as NDJSON — one compact JSON document per line. Unlike every other ObjectStack command, whose --json stdout is a single document, this one is a stream: the device flow reports the verification URL as its own record BEFORE you authorize, then the result as a second record. Parse stdout line by line.',
     }),
   };
 
@@ -122,7 +193,7 @@ export default class AuthLogin extends Command {
           const existing = await readAuthConfig();
           if (existing?.token) {
             if (flags.json) {
-              await emitJson({ success: false, error: 'Already logged in', email: existing.email }, 0, { compact: true });
+              await emitRecord({ success: false, error: 'Already logged in', email: existing.email });
             } else {
               printSuccess(`Already logged in as ${existing.email || existing.userId}`);
               console.log('');
@@ -171,7 +242,11 @@ export default class AuthLogin extends Command {
       await this.loginWithPassword(client, flags.url, email, password, flags.json);
     } catch (error: any) {
       if (flags.json) {
-        await emitJson({ success: false, error: error.message });
+        // Reachable AFTER the device-authorization record has already been
+        // written (an expired code, a denied approval, a poll failure), so an
+        // indented payload here recreated the exact two-document stream #6531
+        // is about — on the path a consumer is least able to recover from.
+        await emitRecord({ success: false, error: error.message });
         this.exit(1);
       }
       printError(error.message || String(error));
@@ -206,7 +281,7 @@ export default class AuthLogin extends Command {
     });
 
     if (jsonOutput) {
-      await emitJson({ success: true, email: user?.email || email, userId: user?.id });
+      await emitRecord({ success: true, email: user?.email || email, userId: user?.id });
     } else {
       printSuccess('Authentication successful');
       printKV('Email', user?.email || email);
@@ -252,7 +327,10 @@ export default class AuthLogin extends Command {
     const verificationUrl = verification_uri_complete || `${verification_uri}?user_code=${encodeURIComponent(user_code)}`;
 
     if (jsonOutput) {
-      await emitJson({ device_code, user_code, verification_uri, verification_uri_complete, expires_in }, 0, { compact: true });
+      // Record 1 of 2, and deliberately written BEFORE the poll loop: an
+      // automation consumer needs the verification URL while it can still act
+      // on it, which is the reason this command is a stream at all.
+      await emitRecord({ device_code, user_code, verification_uri, verification_uri_complete, expires_in });
     } else {
       console.log('  To authorize this CLI, visit:');
       console.log('');
@@ -318,7 +396,8 @@ export default class AuthLogin extends Command {
         });
 
         if (jsonOutput) {
-          await emitJson({ success: true, email: user?.email, userId: user?.id });
+          // Record 2 of 2 — same line-per-document shape as record 1.
+          await emitRecord({ success: true, email: user?.email, userId: user?.id });
         } else {
           printSuccess('Authentication successful');
           if (user?.email) printKV('Email', user.email);

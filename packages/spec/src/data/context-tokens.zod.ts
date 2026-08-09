@@ -100,8 +100,50 @@ export function isContextToken(token: string): boolean {
  * Match the **wrapped** form a filter author actually writes —
  * `{current_user_id}` or `${current_user_id}`. Shares the date-macro
  * grammar so a single walk over a filter tree can classify both.
+ *
+ * This is the **well-formed token NAME** grammar: what a spelling has to look
+ * like before it can be a member of either vocabulary. It is deliberately NOT
+ * the grammar that decides whether a value is a placeholder *attempt* — see
+ * {@link FILTER_TOKEN_WRAPPED_RE}.
  */
 export const CONTEXT_TOKEN_WRAPPED_RE = DATE_MACRO_WRAPPED_RE;
+
+/**
+ * Match a filter value that is a placeholder **by intent**: entirely wrapped
+ * in one pair of braces, whatever the characters inside (#5586).
+ *
+ * # Why this is wider than {@link CONTEXT_TOKEN_WRAPPED_RE}
+ *
+ * Recognition and vocabulary are two different questions, and conflating them
+ * left the diagnostic with a hole exactly where authors fall in. While
+ * recognition used the token-NAME grammar (`[a-zA-Z0-9_]+`), any placeholder
+ * carrying a non-word character — `{TODAY()}`, `{current-user-id}`,
+ * `{30 days ago}`, `{user.id}` — was not classified as a token at all. It was
+ * therefore handed to the driver verbatim and compared as a **literal string**:
+ * the silent-wrong-result mode this vocabulary exists to abolish. The failure
+ * was inverted against the author, too — misspelling `{today}` as `{TODAY}`
+ * produced a loud `UnknownFilterTokenError`, while misspelling it as
+ * `{TODAY()}` produced *rows*, and on a string comparison the wrong ones
+ * (`'2026-…' < '{'` in lexicographic order, so a `<` window silently gained
+ * every future-dated row).
+ *
+ * The shapes that leaked are precisely the ones an author migrating from
+ * another system's macro syntax writes first: `TODAY()` (Salesforce/Excel-style
+ * call syntax), kebab-case, natural language, dotted paths.
+ *
+ * So: wide in, strict out. Anything fully brace-wrapped is read as "the author
+ * meant a placeholder", and the *vocabulary* check then either resolves it or
+ * refuses it by name. No author writes a filter comparand whose intended
+ * literal value is the six characters `{foo}`; a value that merely CONTAINS
+ * braces (`'acme {x} deal'`) is untouched, as are `{a}{b}` and `{{x}}`, which
+ * are not one wrapped token.
+ *
+ * The flow template engine's filter position already used exactly this shape
+ * (`interpolateFilter` in `@objectstack/service-automation`, #3810) to decide
+ * "is this string one whole token?" before consulting the vocabulary — this
+ * aligns the platform diagnostic with the recognition rule that surface had.
+ */
+export const FILTER_TOKEN_WRAPPED_RE = /^\$?\{([^{}]+)\}$/;
 
 /** Strict zod schema for the **token name** (the bit inside `{}`). */
 export const ContextTokenSchema = z
@@ -124,6 +166,7 @@ export const ContextTokenPlaceholderSchema = z
     },
     { message: 'Not a recognised {context-token} placeholder' },
   );
+export type ContextTokenPlaceholder = z.input<typeof ContextTokenPlaceholderSchema>;
 
 /**
  * Description table — feeds skill / docs generation. Pure data,
@@ -184,6 +227,14 @@ export function isKnownFilterToken(token: string): boolean {
  *
  * Distinguishing `unknown` from "not a placeholder" is what lets lint stay
  * quiet about ordinary values while still catching `{current_user}`.
+ *
+ * Recognition is {@link FILTER_TOKEN_WRAPPED_RE} — placeholder by INTENT, not
+ * by well-formedness (#5586). A fully brace-wrapped value whose inside is not
+ * a legal token name (`{TODAY()}`, `{user.id}`, `{30 days ago}`) is `unknown`,
+ * NOT `null`: `null` would send it to the data engine to be compared as a
+ * literal string, which is the silent-wrong-rows outcome this classification
+ * exists to prevent. The token reported is the raw text between the braces, so
+ * the caller's error names exactly what the author wrote.
  */
 export function classifyFilterToken(
   value: unknown,
@@ -193,7 +244,7 @@ export function classifyFilterToken(
   | { kind: 'unknown'; token: string; suggestion?: ContextToken }
   | null {
   if (typeof value !== 'string') return null;
-  const m = value.match(CONTEXT_TOKEN_WRAPPED_RE);
+  const m = value.match(FILTER_TOKEN_WRAPPED_RE);
   if (!m) return null;
   const token = m[1];
   if (isContextToken(token)) return { kind: 'context', token: token as ContextToken };

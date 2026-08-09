@@ -162,11 +162,33 @@ describe('posture reading, with a red control for each', () => {
   });
 
   it('reads the OLDER z.object(…).strict() spelling as strict too', () => {
-    // The reading the `strictObject(`-only count could not make. These four are
-    // why `security/` is done and `automation/` is not zero.
+    // The reading the `strictObject(`-only count could not make.
+    //
+    // The fixture used to be `security/permission.zod.ts`, whose four sites
+    // were the campaign's canonical `z.object(shape, { error }).strict()`
+    // wiring; #5593 migrated all four to `strictObject`, so the file no longer
+    // exercised the branch under test, and the fixture moved to
+    // `TenancyConfigSchema` — until #6619 folded ITS hand-written map into the
+    // shared template (the set-keyed `guidance` form gave the template the
+    // vocabulary #6416 had recorded as out of reach) and the site became
+    // `strictObject` like the rest. `ObjectCapabilities`, same file, is the
+    // spelling's remaining deliberate carrier: its map
+    // (`strictCapabilitiesError`) emits NO trailing history sentence, which
+    // the shared template still cannot express. If it is ever converted, move
+    // this fixture rather than deleting the assertion — the AST reader still
+    // has to make the reading, and `packages/spec` is not the only tree it
+    // reads.
+    const objectSites = analyzeSites(at('data/object.zod.ts'));
+    const capabilities = objectSites.find((s) => s.name === 'ObjectCapabilities');
+    expect(capabilities?.posture, 'a plain `.strict()` chain is still strict').toBe('strict');
+    expect(capabilities?.idiom).toBe('z.object');
+
+    // The permission file's four are now the helper, and still strict — the
+    // control that keeps this test a statement about the READER rather than
+    // about one file.
     const perm = analyzeSites(at('security/permission.zod.ts'));
     expect(perm.filter((s) => s.posture === 'strict')).toHaveLength(4);
-    expect(perm.find((s) => s.name === 'PermissionSetSchema')?.idiom).toBe('z.object');
+    expect(perm.find((s) => s.name === 'PermissionSetSchema')?.idiom).toBe('strictObject');
     expect(countStripSites(at('security/permission.zod.ts'))).toBe(0);
   });
 

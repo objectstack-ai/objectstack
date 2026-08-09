@@ -1394,6 +1394,9 @@ importers:
         specifier: workspace:*
         version: link:../../spec
     devDependencies:
+      '@objectstack/objectql':
+        specifier: workspace:*
+        version: link:../../objectql
       '@types/node':
         specifier: ^26.1.2
         version: 26.1.2
@@ -1443,9 +1446,6 @@ importers:
         specifier: ^6.2.5
         version: 6.2.7
     devDependencies:
-      '@objectstack/driver-memory':
-        specifier: workspace:*
-        version: link:../../drivers/driver-memory
       '@objectstack/driver-sql':
         specifier: workspace:*
         version: link:../../drivers/driver-sql
@@ -1859,6 +1859,9 @@ importers:
       '@objectstack/core':
         specifier: workspace:*
         version: link:../core
+      '@objectstack/metadata-core':
+        specifier: workspace:*
+        version: link:../metadata-core
       '@objectstack/observability':
         specifier: workspace:*
         version: link:../observability
@@ -1975,6 +1978,9 @@ importers:
       '@objectstack/plugin-hono-server':
         specifier: workspace:*
         version: link:../plugins/plugin-hono-server
+      '@objectstack/plugin-sharing':
+        specifier: workspace:*
+        version: link:../plugins/plugin-sharing
       '@objectstack/service-analytics':
         specifier: workspace:*
         version: link:../services/service-analytics
@@ -2249,6 +2255,9 @@ importers:
       '@objectstack/spec':
         specifier: workspace:*
         version: link:../../spec
+      '@objectstack/types':
+        specifier: workspace:*
+        version: link:../../types
     devDependencies:
       '@objectstack/metadata-core':
         specifier: workspace:*

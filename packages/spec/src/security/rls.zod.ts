@@ -2,7 +2,7 @@
 
 import { z } from 'zod';
 import { retiredKey } from '../shared/retired-key';
-import { strictUnknownKeyError } from '../shared/suggestions.zod';
+import { strictObject } from '../shared/strict-object';
 
 /**
  * # Row-Level Security (RLS) Protocol
@@ -212,37 +212,31 @@ export type RLSOperation = z.input<typeof RLSOperation>;
  * }
  * ```
  */
-/**
- * Keys {@link RowLevelSecurityPolicySchema} declares (drift-guarded by
- * rls.test.ts). `priority` is deliberately absent: it is a {@link retiredKey}
- * tombstone in the shape — declared so its rejection carries the prescription,
- * but never a suggestion target.
- */
-const RLS_POLICY_KEYS = [
-  'name', 'label', 'description', 'object', 'operation', 'using', 'check',
-  'positions', 'enabled', 'tags',
-] as const;
-
-const rlsPolicyUnknownKeyError = strictUnknownKeyError({
-  surface: 'this RLS policy',
-  knownKeys: RLS_POLICY_KEYS,
-  aliases: {
-    // ADR-0090 D3 renamed the pre-D3 `roles` vocabulary to `positions`.
-    roles: 'positions',
-    role: 'positions',
-    // PostgreSQL spells the write-side clause `WITH CHECK`.
-    withcheck: 'check',
-    // The read-side clause under other names an author reaches for first.
-    condition: 'using',
-    filter: 'using',
-    where: 'using',
+export const RowLevelSecurityPolicySchema = lazySchema(() => strictObject(
+  {
+    surface: 'this RLS policy',
+    // The suggestion pool is `Object.keys(shape)` minus anything that accepts
+    // nothing (#5593). `priority` is exactly that case and the exclusion is
+    // deliberate: it is a {@link retiredKey} tombstone, declared so its
+    // rejection carries the upgrade prescription, never offered as a rename
+    // target. The hand-transcribed list this replaced had to state the same
+    // exclusion in prose and be trusted to keep it.
+    aliases: {
+      // ADR-0090 D3 renamed the pre-D3 `roles` vocabulary to `positions`.
+      roles: 'positions',
+      role: 'positions',
+      // PostgreSQL spells the write-side clause `WITH CHECK`.
+      withcheck: 'check',
+      // The read-side clause under other names an author reaches for first.
+      condition: 'using',
+      filter: 'using',
+      where: 'using',
+    },
+    history:
+      'Until #4001 these were dropped silently — the policy still parsed, so a ' +
+      'row-level restriction the author wrote was never compiled into the filter.',
   },
-  history:
-    'Until #4001 these were dropped silently — the policy still parsed, so a ' +
-    'row-level restriction the author wrote was never compiled into the filter.',
-});
-
-export const RowLevelSecurityPolicySchema = lazySchema(() => z.object({
+  {
   /**
    * Unique identifier for this policy.
    * Must be unique within the object.
@@ -380,7 +374,7 @@ export const RowLevelSecurityPolicySchema = lazySchema(() => z.object({
    * - Restrict certain operations (e.g., only allow creating "draft" status)
    * 
    * @example "organization_id = current_user.organization_id"
-   * @example "status IN ('draft', 'pending')" - Only allow certain statuses
+   * @example "status in ['draft', 'pending']" - Only allow certain statuses
    * @example "created_by = current_user.id" - Must be the creator
    */
   check: z.string()
@@ -445,7 +439,7 @@ export const RowLevelSecurityPolicySchema = lazySchema(() => z.object({
   tags: z.array(z.string())
     .optional()
     .describe('Policy categorization tags'),
-}, { error: rlsPolicyUnknownKeyError }).strict().superRefine((data, ctx) => {
+}).superRefine((data, ctx) => {
   // Ensure at least one of USING or CHECK is provided
   if (!data.using && !data.check) {
     ctx.addIssue({

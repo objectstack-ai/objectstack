@@ -30,11 +30,17 @@ import {
 // so the engine and this driver can never disagree about what may become a
 // physical column DEFAULT.
 import { isNowDefaultToken, isRuntimeDefaultToken } from '@objectstack/spec/data';
+// [#5702] The retired filter operators and the prescription each refusal
+// prints. Read from the spec rather than restated here for the reason the
+// #5701 table itself gives: five refusal sites that each write their own
+// sentence about `$regex` are five sentences that drift apart. This driver
+// prints `why` VERBATIM.
+import { RETIRED_FILTER_OPERATORS } from '@objectstack/spec/data';
 import type { DriverQuery, IDataDriver } from '@objectstack/spec/contracts';
 import { StandardErrorCode } from '@objectstack/spec/api';
 import { StorageNameMapping } from '@objectstack/spec/system';
 import { ExternalSchemaModeViolationError } from '@objectstack/spec/shared';
-import { resolveTenancyPosture } from '@objectstack/types';
+import { isUniqueViolationError, resolveTenancyPosture } from '@objectstack/types';
 import { postureEnforcesWall } from '@objectstack/spec/security';
 import { nextUtcCalendarDay } from '@objectstack/core';
 import {
@@ -501,8 +507,31 @@ function unsupportedFilterError(message: string): Error {
 }
 
 /**
- * [#5907] The aggregate functions this driver LOWERS into SQL, and the SQL
- * function each becomes.
+ * [#6409] How one declared aggregate function lowers into SQL.
+ *
+ * `sql` is the function NAME; `distinct` decides whether the argument list
+ * carries the `DISTINCT` keyword. Two fields rather than one string because
+ * `count_distinct` is the first entry in the vocabulary whose lowering is not a
+ * function name at all — `COUNT(DISTINCT x)` puts a keyword INSIDE the argument
+ * list, so a table of bare names has nowhere to say it. Encoding it as a
+ * template (`'count(distinct %s)'`) was the alternative and was rejected: the
+ * emitter binds the column as a knex identifier (`??`), and a template would
+ * have moved that binding into data.
+ *
+ * `distinct` also decides whether a FIELD is mandatory, which is why there is no
+ * third flag saying so: `COUNT(*)` is the spelling `AggregationNodeSchema`
+ * explicitly allows by making `field` optional, and `COUNT(DISTINCT *)` is a
+ * syntax error in every dialect this driver targets — there is nothing to
+ * deduplicate without a column. See {@link refuseDistinctAggregateWithoutField}.
+ */
+interface SqlAggregateLowering {
+  readonly sql: string;
+  readonly distinct: boolean;
+}
+
+/**
+ * [#5907] The aggregate functions this driver LOWERS into SQL, and what each
+ * becomes.
  *
  * The refusals below read their "compiled here" list off THIS table instead of
  * repeating it. A hand-written copy agrees with the compiler on the day it is
@@ -511,13 +540,24 @@ function unsupportedFilterError(message: string): Error {
  *
  * A `Map` rather than a plain object on purpose: a caller-supplied name is
  * looked up here, and `{}['constructor']` answers with a function.
+ *
+ * [#6409] `count_distinct` joined the table, and with it the table gained the
+ * `distinct` column. It is the ENFORCE leg of #6188's split ruling
+ * (2026-08-07): `array_agg`/`string_agg` left `AggregationFunction` because no
+ * SQL backend compiled them and none had one portable shape to compile TO,
+ * while `count_distinct` has exactly one — `COUNT(DISTINCT x)`, already the
+ * lowering `service-analytics`'s `AGGREGATE_SQL` uses for the Cube face — and
+ * stayed declared on the strength of it. With this entry the declared
+ * vocabulary and this driver's compiled vocabulary are the SAME SET; the values
+ * are pinned against the remote face by `AGGREGATION_CASES`.
  */
-const SQL_AGGREGATE_FUNCTIONS: ReadonlyMap<string, string> = new Map([
-  ['count', 'count'],
-  ['sum', 'sum'],
-  ['avg', 'avg'],
-  ['min', 'min'],
-  ['max', 'max'],
+const SQL_AGGREGATE_FUNCTIONS: ReadonlyMap<string, SqlAggregateLowering> = new Map([
+  ['count', { sql: 'count', distinct: false }],
+  ['sum', { sql: 'sum', distinct: false }],
+  ['avg', { sql: 'avg', distinct: false }],
+  ['min', { sql: 'min', distinct: false }],
+  ['max', { sql: 'max', distinct: false }],
+  ['count_distinct', { sql: 'count', distinct: true }],
 ]);
 
 /**
@@ -590,9 +630,27 @@ function undeclaredAggregateFunctionError(func: string): Error {
  * no SQL backend), so they now fall to class 1 and answer 400: the protocol no
  * longer has those names, which is a different fact from "this backend cannot
  * lower them" and deserves the different answer. `count_distinct` was
- * deliberately kept and takes the enforce leg instead — lowering it here to
- * `COUNT(DISTINCT x)` is its own card, and until that lands it is the only
- * inhabitant of this class.
+ * deliberately kept and took the enforce leg instead.
+ *
+ * ⚠️ [#6409] **This class is now EMPTY, and the producer is kept deliberately.**
+ * `count_distinct` was its last inhabitant; with its lowering landed,
+ * `SQL_AGGREGATE_FUNCTIONS` covers every member of `AggregationFunction` and
+ * nothing reaches this branch — pinned as a positive assertion by
+ * `sql-driver-out-of-contract-aggregate-function.test.ts` ("the
+ * declared-but-uncompiled set is empty"), not left to be rediscovered.
+ *
+ * Deleting it as dead code was considered and rejected. The branch is not an
+ * unenforced DECLARATION — the ADR-0049 shape — it is the classifier that
+ * decides which of two truths a future name gets told. Removing it does not
+ * remove the condition; it makes {@link refuseAggregateFunction} answer 400 for
+ * the FIRST function a later spec bump adds, telling the author of a
+ * correctly-spelled `median` that the protocol has no such function. That is
+ * precisely the misreport #5907 exists to prevent, and it would land in the
+ * window between a spec change and a driver change — the window this repo
+ * opens on purpose whenever it takes ADR-0049's enforce leg, as #6188 just did
+ * for this very name. The cost of keeping it is one unreachable branch; the
+ * cost of dropping it is a wrong answer at exactly the moment the vocabulary
+ * grows.
  *
  * `NOT_IMPLEMENTED` / 501 is the answer, from the ADR-0112 STANDARD catalog
  * ("Feature not yet implemented"), whose own `HttpStatusErrorCodeMap` pairs it
@@ -621,11 +679,42 @@ function uncompilableAggregateFunctionError(func: string): Error {
     `correctly and @objectstack/spec AggregationFunction declares it — this is a capability gap ` +
     `in the backend, not a mistake in the query, which is why it answers NOT_IMPLEMENTED/501 ` +
     `rather than a 400. Aggregate with a function this backend compiles; whether the declaration ` +
-    `itself should stand is #6188 (ADR-0049 enforce-or-remove) (#5907).`,
+    `itself should stand is ADR-0049's enforce-or-remove question (#5907).`,
   ) as Error & { code?: string; status?: number };
   err.code = StandardErrorCode.enum.NOT_IMPLEMENTED;
   err.status = 501;
   return err;
+}
+
+/**
+ * [#6409] `count_distinct` written with no `field` — nothing to deduplicate.
+ *
+ * `AggregationNodeSchema` makes `field` optional because `COUNT(*)` is a real
+ * spelling, and the schema has no way to say "optional for this function,
+ * required for that one". So the aggregation parses, reaches this driver, and
+ * asks for `COUNT(DISTINCT *)` — which no dialect this driver targets accepts.
+ *
+ * Refused HERE rather than emitted and left to the database, for the reason
+ * #5907 gives at length one function up: a syntax error raised by SQLite or
+ * Postgres arrives with the driver's SQL in it and no `code`/`status`, so
+ * `mapDataError` serves an opaque 500 for what is a completely legible mistake
+ * in the request. The class is 1, not 2 — `INVALID_QUERY` / 400: the FUNCTION
+ * is compiled here, it is this aggregation node that is malformed, and the
+ * remedy is a key the caller can add.
+ *
+ * The twin lives in `driver-turso`'s `remote-transport.ts`, first sentence for
+ * first sentence (#5240 — one condition, one wording), and the two are compared
+ * as runtime messages by `remote-transport-aggregate-function-refusal.test.ts`.
+ */
+function refuseDistinctAggregateWithoutField(func: string): never {
+  const err = new Error(
+    `Aggregate function "${func}" needs a "field" — there is nothing to deduplicate. ` +
+    `COUNT(*) counts rows and is the spelling that takes no field; a distinct count has to name ` +
+    `the column whose values are deduplicated. Add "field" to the aggregations[] entry (#6409).`,
+  ) as Error & { code?: string; status?: number };
+  err.code = StandardErrorCode.enum.INVALID_QUERY;
+  err.status = 400;
+  throw err;
 }
 
 /**
@@ -712,6 +801,67 @@ function filterArrayReachedDriverError(filters: unknown[]): Error {
     `second compiler for it — call through ObjectQL, or lower the value yourself with ` +
     `parseFilterAST(). Note the INFIX join form ([condA, "or", condB]) has no lowering at ` +
     `all: write the prefix form ["or", condA, condB].`,
+  );
+}
+
+/**
+ * [#5702] A RETIRED filter operator reached the compiler.
+ *
+ * Separate from {@link unknownFieldOperatorMessage}'s "this name is not in the
+ * vocabulary" on purpose: `$regex` and `$options` were not typos, they were
+ * spellings this driver ANSWERED until #4706 retired them, and the author who
+ * wrote one needs the replacement rather than a list to search. The
+ * prescription is `RETIRED_FILTER_OPERATORS[op].why`, printed verbatim — the
+ * spec table exists so that the five refusal sites stop each composing their
+ * own sentence about the same retirement.
+ *
+ * `siblings` are the other keys of the SAME field constraint, and every retired
+ * one among them is named too. `{ $regex: '^acme', $options: 'i' }` is ONE
+ * mistake with ONE fix (write `$icontains`), so a message naming only the key
+ * the loop happened to reach first would send its author back for a second
+ * round-trip on the other one.
+ *
+ * Returns `null` when `op` is not retired, so the caller can fall through to
+ * the ordinary unknown-operator refusal with one expression.
+ */
+function retiredFilterOperatorError(op: string, field: string, siblings: readonly string[] = []): Error | null {
+  const guidance = RETIRED_FILTER_OPERATORS[op];
+  if (!guidance) return null;
+  const replacement = guidance.to ? ` Write "${guidance.to}" instead.` : '';
+  const alsoRetired = siblings.filter((key) => key !== op && RETIRED_FILTER_OPERATORS[key]);
+  const also = alsoRetired.length
+    ? ` The same field constraint also carries the retired ` +
+      `${alsoRetired.map((key) => `"${key}"`).join(', ')} — one "${guidance.to}" replaces the whole ` +
+      `shape, so this is ONE mistake with ONE fix, not one per key.`
+    : '';
+  return unsupportedFilterError(
+    `Filter operator "${op}" on field "${field}" is RETIRED and is no longer evaluated by this ` +
+      `driver.${replacement} ${guidance.why}${also}`,
+  );
+}
+
+/**
+ * [#5702] `$icontains` received a comparand that is not a non-empty string.
+ *
+ * Two rejections, one constructor, because they are one mistake at the
+ * comparand position and the repair is the same sentence:
+ *
+ * - **non-string** — `StringOperatorSchema` declares `$icontains: z.string()`.
+ *   Coercing `42` to `"42"` answers a query nobody wrote (the reading
+ *   `applyLike`'s `String(value)` would otherwise give it).
+ * - **empty string** — every row contains the empty substring, so the predicate
+ *   constrains nothing. A dropped predicate WIDENS a result set, and on an RLS
+ *   read scope that is a permission bypass rather than a degraded filter
+ *   (#3948) — the same reason #5240 refused `{ field: {} }` one level up.
+ */
+function icontainsComparandError(field: string, value: unknown, path: string): Error {
+  const shown = typeof value === 'string' ? `""` : JSON.stringify(value) ?? String(value);
+  return unsupportedFilterError(
+    `Operator "$icontains" on field "${field}" at ${path} requires a NON-EMPTY string comparand, ` +
+      `received ${shown}. "$icontains" is a case-insensitive LITERAL substring search, so its ` +
+      `comparand is the text to look for — an empty one matches every row (a predicate that ` +
+      `constrains nothing), and a non-string one would have to be coerced into text this query ` +
+      `never asked for.`,
   );
 }
 
@@ -812,7 +962,7 @@ function isBindableComparand(value: unknown): boolean {
  * object.
  */
 const TEXT_PATTERN_OPERATORS: ReadonlySet<string> = new Set([
-  '$contains', '$notContains', '$startsWith', '$endsWith', '$regex',
+  '$contains', '$notContains', '$startsWith', '$endsWith', '$icontains',
 ]);
 
 /**
@@ -1003,6 +1153,200 @@ function safeShapePreview(value: unknown): string {
   } catch {
     return typeof value;
   }
+}
+
+/**
+ * Where the wildcard sits relative to the comparand. Named exactly as
+ * `service-analytics`'s `LikeShape` names its own, so the twin implementations
+ * read alike: `contains` → `%v%`, `starts` → `v%`, `ends` → `%v`.
+ */
+type TextMatchShape = 'contains' | 'starts' | 'ends';
+
+/**
+ * The ASCII case map, written out as data.
+ *
+ * [#6518] Spelled as two 26-character constants rather than reached through a
+ * locale-aware `LOWER()` because "ASCII only" is the CONTRACT (#4706 Q1 = A),
+ * and a locale can be configured to fold more. Measured on a live Postgres 16
+ * (both a `C.utf8` database and an ICU one): `lower('CAFÉ')` is `café` — the
+ * over-fold — while `translate('CAFÉ', <upper>, <lower>)` is `cafÉ`. The
+ * mapping being visible in the emitted SQL is the point: a reviewer can see
+ * that exactly 26 characters fold, without knowing the server's locale.
+ */
+const ASCII_UPPER_LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+const ASCII_LOWER_LETTERS = 'abcdefghijklmnopqrstuvwxyz';
+
+/** The character bound into every `ESCAPE` clause this driver emits. */
+const LIKE_ESCAPE_CHARACTER = '\\';
+
+/**
+ * Escape the LIKE metacharacters (`%`, `_`) and the escape character itself
+ * (`\`) so a comparand matches literally.
+ *
+ * This is the expression `service-analytics`'s `escapeLikePattern` is held to
+ * character for character by its `like-metacharacter-escape.test.ts`. Changing
+ * it here without changing it there forks one `$contains` into two.
+ */
+function escapeLikeComparand(value: unknown): string {
+  return String(value).replace(/[\\%_]/g, '\\$&');
+}
+
+/**
+ * [#6518] Escape the GLOB metacharacters (`*`, `?`, `[`) so a comparand matches
+ * literally, using GLOB's ONLY escape mechanism: a single-character class.
+ *
+ * GLOB has no `ESCAPE` clause — SQLite's grammar simply does not have one for
+ * it — so `[*]`, `[?]` and `[[]` are how a literal metacharacter is spelled.
+ * `]` needs no escape and deliberately gets none: every `[` this function sees
+ * is turned into a class that closes itself, so no unclosed class can survive
+ * for a later `]` to terminate. `%` and `_` are ordinary characters to GLOB and
+ * are likewise left alone — the escaped class here is NOT the LIKE one, and
+ * writing the two as one shared regex is the mistake to refuse.
+ *
+ * Measured before it was written (better-sqlite3 3.53.4, the nine-row
+ * `FILTER_TEXT_ROWS` fixture plus `a*b` / `a?b` / `a[b`): the unescaped pattern
+ * `*a*b*` returned six rows where `*a[*]b*` returns the one. An unescaped `*`
+ * is the same filter bypass an unescaped `%` is under LIKE, which is why this
+ * function exists at the same level as its LIKE sibling rather than inline.
+ */
+function escapeGlobComparand(value: unknown): string {
+  return String(value).replace(/[*?[]/g, '[$&]');
+}
+
+/** Wrap an already-escaped comparand in the wildcards `shape` calls for. */
+function wrapTextMatchShape(escaped: string, shape: TextMatchShape, wildcard: string): string {
+  if (shape === 'starts') return `${escaped}${wildcard}`;
+  if (shape === 'ends') return `${wildcard}${escaped}`;
+  return `${wildcard}${escaped}${wildcard}`;
+}
+
+/**
+ * [#6518] MySQL's ASCII-only case fold: 26 `REPLACE`s over the BINARY rendering
+ * of an expression.
+ *
+ * Ugly, and the alternatives are all wrong rather than merely uglier — that is
+ * the whole justification, so it is written down:
+ *
+ *   - `LOWER(x)` folds the full Unicode range (the defect this closes).
+ *   - `LOWER(x)` on a binary string is documented as INEFFECTIVE, so casting
+ *     first and folding after simply does not fold.
+ *   - `CONVERT(x USING ascii)` maps every non-ASCII character to `?`, which
+ *     COLLIDES `café` with `cafÉ` — strictly worse than over-folding.
+ *   - No MySQL collation is case-insensitive for ASCII and exact elsewhere.
+ *
+ * Operating on `CAST(x AS BINARY)` rather than on the text is what makes it
+ * provable without a live server: in binary space `REPLACE` matches bytes, so
+ * no collation participates, and UTF-8 is self-synchronising — a byte in
+ * `0x41..0x5A` can only ever be a real ASCII `A`..`Z`, never part of a
+ * multi-byte character. Byte-wise ASCII lowering therefore IS the ruled fold.
+ */
+function mysqlAsciiLowerBinary(expr: string): string {
+  let out = `CAST(${expr} AS BINARY)`;
+  for (let i = 0; i < ASCII_UPPER_LETTERS.length; i++) {
+    out = `REPLACE(${out}, '${ASCII_UPPER_LETTERS[i]}', '${ASCII_LOWER_LETTERS[i]}')`;
+  }
+  return out;
+}
+
+/**
+ * [#6518] The one place a text predicate becomes SQL — `{sql, bindings}` for
+ * knex's `whereRaw`, with `??` the column and `?` the pattern.
+ *
+ * # The defect this closes
+ *
+ * Before this, every dialect got `col LIKE ? ESCAPE ?` (and `LOWER()` on both
+ * sides for `$icontains`), which made case sensitivity the DIALECT's answer
+ * where #4706 rules it the CONTRACT's. Both halves over-matched — they returned
+ * rows the filter excludes, which on an RLS read scope is over-reach (#3948),
+ * not a loose filter:
+ *
+ * | | `$contains` family (must be case-SENSITIVE, Q2=A) | `$icontains` (folds ASCII ONLY, Q1=A) |
+ * |---|---|---|
+ * | SQLite | ✗ `LIKE` folds ASCII | ✓ `lower()` is ASCII-only |
+ * | Postgres | ✓ `LIKE` is case-exact | ✗ `LOWER()` folds all of Unicode |
+ * | MySQL | ✗ follows the collation | ✗ `LOWER()` folds all of Unicode |
+ *
+ * # What is emitted now, and why each cell
+ *
+ * - **SQLite → `GLOB`.** `LIKE`'s ASCII fold cannot be turned off per-statement;
+ *   `PRAGMA case_sensitive_like` is a CONNECTION-global switch, so one query
+ *   would change every other query's meaning. Of the operand-level tricks,
+ *   `CAST(col AS BLOB) LIKE ?` was measured to return NOTHING at all (SQLite's
+ *   LIKE is false for a BLOB operand), so the operator has to change. `GLOB` is
+ *   case-exact by definition and carries its own escape mechanism
+ *   ({@link escapeGlobComparand}). `lower()` in front of it is still the
+ *   `$icontains` fold, and still ASCII-only: measured, `lower('CAFÉ')` is
+ *   `'cafÉ'`, so `lower(name) GLOB '*café*'` answers row 4 and `'*cafÉ*'`
+ *   answers row 3 — the Q1 = A boundary, executed rather than argued.
+ * - **Postgres → `LIKE`, unchanged**, because `LIKE` there is already exact.
+ *   Only the fold moves, from `LOWER()` to {@link ASCII_UPPER_LETTERS}-driven
+ *   `translate()`. Measured live (PG 16, ICU database): `LOWER(name) LIKE
+ *   LOWER('%café%')` returned rows 3 AND 4; the `translate()` form returns row
+ *   4, and its `'%CAFÉ%'` mirror returns row 3.
+ * - **MySQL → `LIKE` over `CAST(… AS BINARY)`**, which is byte-wise and
+ *   therefore case-exact whatever the column's collation says. The fold adds
+ *   {@link mysqlAsciiLowerBinary} on top. NOT executed here: no MySQL server was
+ *   provisionable in the container that wrote this, so the mysql cell is a
+ *   declared skip in the live matrix rather than a claimed pass, and the
+ *   reasoning is written out on that helper instead.
+ * - **`'unknown'` → the pre-#6518 `LIKE`/`LOWER()` shape.** `dialectName` is
+ *   `'unknown'` for a knex client this driver does not model (mssql, oracle),
+ *   where `GLOB` is a syntax error and `CAST(… AS BINARY)` means something
+ *   else. Emitting the old shape is not an endorsement of it — it is the only
+ *   answer that still RUNS, and it is the residue the conformance ledger names.
+ *
+ * # Why one function and not four emitters
+ *
+ * The escaping is the P0 (#5567: an unescaped `%` matches every row), the fold
+ * is the contract, and the two interact — the SQLite arm needs a DIFFERENT
+ * escaped character class from the other three, which is exactly the kind of
+ * divergence a second emitter drops on the floor. Every arm below therefore
+ * builds its pattern from one of two named escape functions and one shared
+ * {@link wrapTextMatchShape}, so "which characters are literal" is answered per
+ * dialect in one readable place and can never be answered by accident.
+ */
+function textMatchPredicate(
+  dialect: SqlDialectName,
+  field: string,
+  value: unknown,
+  shape: TextMatchShape,
+  negate: boolean,
+  fold: boolean,
+): { sql: string; bindings: unknown[] } {
+  if (dialect === 'sqlite') {
+    // GLOB takes no ESCAPE clause, so this arm binds two values, not three.
+    const pattern = wrapTextMatchShape(escapeGlobComparand(value), shape, '*');
+    const column = fold ? 'lower(??)' : '??';
+    const comparand = fold ? 'lower(?)' : '?';
+    return {
+      sql: `${column} ${negate ? 'NOT GLOB' : 'GLOB'} ${comparand}`,
+      bindings: [field, pattern],
+    };
+  }
+
+  const pattern = wrapTextMatchShape(escapeLikeComparand(value), shape, '%');
+  const keyword = negate ? 'NOT LIKE' : 'LIKE';
+  // The `ESCAPE` character is BOUND, never written as a literal: MySQL applies C
+  // escape syntax inside string literals, so `'\'` and `'\\'` are the same
+  // backslash spelled two ways per dialect, while a bound value has one
+  // spelling everywhere (#5567).
+  const bindings = [field, pattern, LIKE_ESCAPE_CHARACTER];
+
+  if (dialect === 'postgres') {
+    const asciiLower = (expr: string) =>
+      fold ? `translate(${expr}, '${ASCII_UPPER_LETTERS}', '${ASCII_LOWER_LETTERS}')` : expr;
+    return { sql: `${asciiLower('??')} ${keyword} ${asciiLower('?')} ESCAPE ?`, bindings };
+  }
+
+  if (dialect === 'mysql') {
+    const caseExact = (expr: string) =>
+      fold ? mysqlAsciiLowerBinary(expr) : `CAST(${expr} AS BINARY)`;
+    return { sql: `${caseExact('??')} ${keyword} ${caseExact('?')} ESCAPE ?`, bindings };
+  }
+
+  const column = fold ? 'LOWER(??)' : '??';
+  const comparand = fold ? 'LOWER(?)' : '?';
+  return { sql: `${column} ${keyword} ${comparand} ESCAPE ?`, bindings };
 }
 
 /**
@@ -1504,6 +1848,20 @@ function classifyFilterKey(key: string, value: unknown, here: string): FilterVer
     typeof value.$exists !== 'boolean'
   ) {
     throw nonBooleanExistsComparandError(key, value.$exists, `${here}.$exists`);
+  }
+
+  // [#5702] `$icontains`'s comparand is a NON-EMPTY string by declaration,
+  // refused on this walk for the same evaluation-order reason as the two gates
+  // above: an empty comparand makes the predicate match every row, and a gate
+  // the emitter carries alone is skipped wholesale whenever a boolean identity
+  // settles the enclosing node — so `{ $or: [ {}, { name: { $icontains: '' } } ] }`
+  // would be refused or silently widened depending on its SIBLINGS.
+  if (
+    isFilterNode(value) &&
+    Object.prototype.hasOwnProperty.call(value, '$icontains') &&
+    (typeof value.$icontains !== 'string' || value.$icontains === '')
+  ) {
+    throw icontainsComparandError(key, value.$icontains, `${here}.$icontains`);
   }
 
   // A field key always contributes a predicate.
@@ -3796,14 +4154,24 @@ export class SqlDriver implements IDataDriver {
     if (aggregates) {
       for (const agg of aggregates) {
         const funcName = agg.function;
-        const rawFunc = this.mapAggregateFunc(funcName);
+        const lowering = this.mapAggregateFunc(funcName);
         // Spec: `field` is optional for COUNT (means COUNT(*)).
         const fieldExpr = agg.field ?? '*';
+        // [#6409] `count_distinct` lowers to `count(distinct ??)`. The keyword
+        // goes in the SQL FRAGMENT, never in a binding: `??` still binds the
+        // column as a knex identifier exactly as it did for the other five, so
+        // the caller's field name has no path into the statement text. And
+        // `COUNT(DISTINCT *)` is not valid SQL anywhere — a distinct aggregate
+        // with no field is refused rather than emitted, so the caller reads
+        // their own mistake instead of a dialect's syntax error wrapped in a
+        // 500 (see {@link refuseDistinctAggregateWithoutField}).
+        if (lowering.distinct && fieldExpr === '*') refuseDistinctAggregateWithoutField(funcName);
+        const rawFunc = lowering.distinct ? `${lowering.sql}(distinct ??)` : `${lowering.sql}(??)`;
         if (agg.alias) {
           if (fieldExpr === '*') {
-            builder.select(this.knex.raw(`${rawFunc}(*) as ??`, [agg.alias]));
+            builder.select(this.knex.raw(`${lowering.sql}(*) as ??`, [agg.alias]));
           } else {
-            builder.select(this.knex.raw(`${rawFunc}(??) as ??`, [fieldExpr, agg.alias]));
+            builder.select(this.knex.raw(`${rawFunc} as ??`, [fieldExpr, agg.alias]));
           }
           // `min`/`max` are the only supported functions that hand back a value
           // OF the column rather than a count/total derived from it, so they are
@@ -3818,9 +4186,9 @@ export class SqlDriver implements IDataDriver {
           }
         } else {
           if (fieldExpr === '*') {
-            builder.select(this.knex.raw(`${rawFunc}(*)`));
+            builder.select(this.knex.raw(`${lowering.sql}(*)`));
           } else {
-            builder.select(this.knex.raw(`${rawFunc}(??)`, [fieldExpr]));
+            builder.select(this.knex.raw(rawFunc, [fieldExpr]));
           }
         }
       }
@@ -3919,8 +4287,14 @@ export class SqlDriver implements IDataDriver {
       }
     }
 
-    if (query.limit) builder.limit(query.limit);
-    if (query.offset) builder.offset(query.offset);
+    // PRESENCE, not truthiness — the same test `findRows()` makes (#6577).
+    // `limit: 0` means "return no records" (#6485), and `0` is falsy, so
+    // `if (query.limit)` dropped the clause and answered a request for NOTHING
+    // with the WHOLE table. Measured on `main` before this line changed: three
+    // rows seeded, `{ limit: 0 }` returned 3 here and 0 through `find()` — one
+    // driver, two answers to one `QueryAST`.
+    if (query.limit !== undefined) builder.limit(query.limit);
+    if (query.offset !== undefined) builder.offset(query.offset);
 
     return await builder;
   }
@@ -3959,8 +4333,15 @@ export class SqlDriver implements IDataDriver {
       }
     }
 
-    if (query.limit) builder.limit(query.limit);
-    if (query.offset) builder.offset(query.offset);
+    // PRESENCE, not truthiness — see `findWithWindowFunctions()` above (#6577).
+    // The stake is different here and no smaller: this door returns a PLAN, and
+    // a plan is only worth reading if it explains the statement `find()` would
+    // actually run. Measured on `main` before this line changed: `{ limit: 0 }`
+    // compiled to `select * from `orders`` while `find()` sent
+    // `select * from `orders` order by `id` asc limit ?` — an EXPLAIN for a
+    // different query, which is the one thing an EXPLAIN must never be.
+    if (query.limit !== undefined) builder.limit(query.limit);
+    if (query.offset !== undefined) builder.offset(query.offset);
 
     const sql = builder.toSQL();
     const client = (this.config as any).client;
@@ -6060,7 +6441,17 @@ export class SqlDriver implements IDataDriver {
         // different name can race us here — both are benign for our intent
         // (the index exists). Anything else is a real failure.
         if (/already exists|duplicate key name|exists/i.test(msg)) continue;
-        if (nullSafe.size > 0 && /unique constraint failed|duplicate entry|duplicate key value/i.test(msg)) {
+        // The ERROR OBJECT, not `msg` (#6543). This used to be a private
+        // inline regex over the message alone, which is the only channel the
+        // SQLite family reliably fills — but Postgres answers this exact
+        // failure with `could not create unique index "…"` and puts the
+        // verdict on `code` (SQLSTATE 23505) instead, so a message-only read
+        // missed the dialect entirely and took the boot down on the very case
+        // the branch below exists to absorb. The shared predicate reads
+        // `code` / `errno` / `message` / `cause`; see
+        // `@objectstack/types`' `unique-violation.ts` for why it is the one
+        // name for this question.
+        if (nullSafe.size > 0 && isUniqueViolationError(e)) {
           // Existing rows violate the NULL-safe unique — the #5030 defect made
           // visible. Do not take the boot down: the declared constraint is not
           // enforced yet, say so at `error` (from the outside everything looks
@@ -6110,8 +6501,16 @@ export class SqlDriver implements IDataDriver {
       await this.knex.raw(sql);
     } catch (e: any) {
       const msg = String(e?.message ?? e);
+      // The positive limb is this site's own question — "does this server
+      // reject functional key parts?" — and stays a message test, because
+      // that is the only channel the answer is on. The NEGATIVE limb was a
+      // seventh spelling of the unique-violation vocabulary (`/duplicate/i`)
+      // and is now the shared predicate (#6543): a conflict must never be
+      // read as a syntax rejection and silently degraded to the bare
+      // composite, and on the `errno`-only shape mysql2 can hand back, a
+      // message-only exclusion did not fire.
       const functionalUnsupported =
-        this.isMysql && /syntax|functional|not supported|near '\(/i.test(msg) && !/duplicate/i.test(msg);
+        this.isMysql && /syntax|functional|not supported|near '\(/i.test(msg) && !isUniqueViolationError(e);
       if (!functionalUnsupported) throw e;
       (this.logger.error ?? this.logger.warn)(
         `[sql-driver] this MySQL/MariaDB server rejects functional key parts — created '${name}' on ` +
@@ -7093,23 +7492,31 @@ export class SqlDriver implements IDataDriver {
   }
 
   /**
-   * Parameterized `LIKE`/`NOT LIKE` match with the LIKE metacharacters `%` / `_`
-   * (and the escape char `\`) escaped in the user value so they match literally
-   * — otherwise a value of `%` matches every row (a filter-bypass, P0). Binds an
-   * explicit `ESCAPE '\'` because SQLite does not honour a default escape
-   * character (MySQL/Postgres do, but the explicit clause is correct for all
-   * three). `shape` positions the wildcard: `contains` → `%v%`, `starts` → `v%`,
-   * `ends` → `%v`.
+   * Parameterized text match for the `$contains` family and `$icontains`, with
+   * the comparand's metacharacters escaped so it matches LITERALLY — otherwise
+   * a value of `%` matches every row (a filter-bypass, P0). `shape` positions
+   * the wildcard: `contains` → `%v%`, `starts` → `v%`, `ends` → `%v`.
+   *
+   * **[#6518] The construct is chosen by DIALECT, and that is the whole point
+   * of this method's existence.** Everything about which SQL is emitted lives in
+   * {@link textMatchPredicate}; this method only picks `whereRaw` vs
+   * `orWhereRaw`. See that function for the per-dialect table and the measured
+   * evidence behind each cell — in one sentence: case sensitivity used to be
+   * the DIALECT's answer (SQLite's `LIKE` folds ASCII, Postgres's does not,
+   * MySQL's follows its collation) where #4706 Q2 = A says it is the
+   * CONTRACT's, and `LOWER()` folds the whole Unicode range on Postgres/MySQL
+   * where #4706 Q1 = A says `$icontains` folds ASCII only.
    *
    * **Second implementation, deliberately** (#5567):
    * `packages/services/service-analytics/src/like-pattern.ts` carries the same
-   * transform — same escaped character class, same three shapes, same bound
+   * LIKE transform — same escaped character class, same three shapes, same bound
    * `ESCAPE` — because `service-analytics` depends on no driver and this is a
    * private method taking a knex builder, so there is nothing for it to import.
-   * That file's header explains the choice; it is held to THIS expression, character
-   * for character, by `service-analytics`'s `like-metacharacter-escape.test.ts`.
-   * A third hand-copy is the thing to refuse: import from one of the two, or add
-   * a consumer to that test.
+   * That file's header explains the choice; it is held to the LIKE arm of
+   * {@link textMatchPredicate}, character for character, by
+   * `service-analytics`'s `like-metacharacter-escape.test.ts`. A third hand-copy
+   * is the thing to refuse: import from one of the two, or add a consumer to
+   * that test.
    *
    * **[#5234] `String(value)` is safe here because nothing unrenderable reaches
    * it.** {@link assertCompilableComparand} refuses an object comparand on this
@@ -7126,14 +7533,13 @@ export class SqlDriver implements IDataDriver {
     method: string,
     field: string,
     value: unknown,
-    shape: 'contains' | 'starts' | 'ends',
+    shape: TextMatchShape,
     negate = false,
+    fold = false,
   ): void {
-    const escaped = String(value).replace(/[\\%_]/g, '\\$&');
-    const pattern = shape === 'starts' ? `${escaped}%` : shape === 'ends' ? `%${escaped}` : `%${escaped}%`;
-    const keyword = negate ? 'NOT LIKE' : 'LIKE';
     const rawMethod = method.startsWith('or') ? 'orWhereRaw' : 'whereRaw';
-    builder[rawMethod](`?? ${keyword} ? ESCAPE ?`, [field, pattern, '\\']);
+    const { sql, bindings } = textMatchPredicate(this.dialectName, field, value, shape, negate, fold);
+    builder[rawMethod](sql, bindings);
   }
 
   /**
@@ -7361,13 +7767,16 @@ export class SqlDriver implements IDataDriver {
               break;
             }
             case '$contains':
-            // `$regex` reaches SQL only via the better-auth adapter, which emits
-            // it for a `contains` search (a plain substring, not a real regex).
-            // SQL has no portable regex, so compile the intended substring LIKE
-            // — correct for that producer and safe (the value is LIKE-escaped),
-            // where the old equality default silently made it an exact match.
-            case '$regex':
               this.applyContainsLike(builder, method, field, opValue);
+              break;
+            // [#5702] The case-INSENSITIVE twin of `$contains`, and the
+            // replacement `RETIRED_FILTER_OPERATORS` prescribes for `$regex`.
+            // Same `applyLike` — same escaped character class, same bound
+            // `ESCAPE` — with the fold applied to BOTH sides, because folding
+            // only the comparand compares a folded needle against a raw column
+            // and matches just the rows that were already lower-case.
+            case '$icontains':
+              this.applyLike(builder, method, field, opValue, 'contains', false, true);
               break;
             case '$notContains':
               // [#5298] NULL-safe: `NOT LIKE` is UNKNOWN for a NULL column, and
@@ -7413,12 +7822,18 @@ export class SqlDriver implements IDataDriver {
                 ? (logicalOp === 'or' ? 'orWhereNull' : 'whereNull')
                 : (logicalOp === 'or' ? 'orWhereNotNull' : 'whereNotNull')](field);
               break;
-            default:
+            default: {
+              // [#5702] A RETIRED spelling gets the prescription, not the
+              // vocabulary list: the author who wrote `$regex` needs
+              // `$icontains`, and a list of fifteen names does not say so.
+              const retired = retiredFilterOperatorError(op, field, Object.keys(value as object));
+              if (retired) throw retired;
               throw unsupportedFilterError(
                 `Unsupported filter operator "${op}" on field "${field}". Supported operators: ` +
                   `$eq, $ne, $gt, $gte, $lt, $lte, $in, $nin, $between, $contains, $notContains, ` +
-                  `$startsWith, $endsWith, $regex, $null, $exists.`,
+                  `$startsWith, $endsWith, $icontains, $null, $exists.`,
               );
+            }
           }
         }
       } else {
@@ -7600,8 +8015,8 @@ export class SqlDriver implements IDataDriver {
   }
 
   /**
-   * The SQL function a declared aggregation lowers to, or a refusal that says
-   * which KIND of "no" this is (#5907).
+   * How a declared aggregation lowers into SQL, or a refusal that says which
+   * KIND of "no" this is (#5907).
    *
    * The `switch` this replaced answered both conditions with one bare `Error`
    * carrying no `code` and no `status`, so `mapDataError` fell to its default
@@ -7609,10 +8024,17 @@ export class SqlDriver implements IDataDriver {
    * #1117 gap, at the aggregate door. The lowering table is now the single
    * source of what this face compiles, and {@link refuseAggregateFunction}
    * decides between the two refusals.
+   *
+   * [#6409] Returns the {@link SqlAggregateLowering} RECORD rather than the bare
+   * SQL function name it used to. `count_distinct` lowers to
+   * `COUNT(DISTINCT x)` — a keyword inside the argument list, not a different
+   * function name — so a caller of this method needs both halves to emit the
+   * call. Every entry answering `{ sql, distinct: false }` compiles to exactly
+   * the text the previous `string` return produced.
    */
-  protected mapAggregateFunc(func: string): string {
-    const sql = SQL_AGGREGATE_FUNCTIONS.get(func);
-    if (sql !== undefined) return sql;
+  protected mapAggregateFunc(func: string): SqlAggregateLowering {
+    const lowering = SQL_AGGREGATE_FUNCTIONS.get(func);
+    if (lowering !== undefined) return lowering;
     refuseAggregateFunction(func);
   }
 

@@ -21,13 +21,19 @@
  *      that read was only incidental: a deployment with no `afterUpdate` hook
  *      anywhere left the old parent silently stale.
  *
- * And the absent one: `beforeUpdate`. Unlike `delete()` (#5272), which reads the
- * pre-image BEFORE dispatching `beforeDelete` and binds it there, `update()`
- * dispatches `beforeUpdate` first and binds `hookContext.previous` only after
- * the write — so a `beforeUpdate` hook observes `previous === undefined`
- * whatever this gate decides. Two cases below measure that directly, so the
- * "count before-hooks too" reflex is answered with evidence rather than
- * symmetry.
+ *   4. [#5574 / #5846] a `beforeUpdate` hook on THIS object. This term was
+ *      deliberately ABSENT until ADR-0058 Addendum II, and the reason it was
+ *      absent is worth keeping: `update()` used to dispatch `beforeUpdate`
+ *      FIRST and bind `hookContext.previous` only after the write, so a
+ *      before-hook observed `previous === undefined` whatever this gate
+ *      decided, and counting the event would have bought a read with no
+ *      reader. The ruling reversed that ordering — the before phase is now a
+ *      per-row reader of this very row set — so the reader exists and the term
+ *      joins the gate. `update()` and `delete()` (#5272) finally agree.
+ *
+ * The cases below that used to measure the ABSENCE now measure the presence,
+ * and say so in place: the "count before-hooks too" reflex was answered with
+ * evidence before, and is answered with evidence now that the evidence changed.
  */
 
 import { describe, it, expect, vi } from 'vitest';
@@ -173,7 +179,7 @@ async function boot(hooks: Hook[] = [], objects: unknown[] = [taskA, taskB]) {
   const stub = makeCountingDriver();
   engine.registerDriver(stub.driver, true);
   await engine.init();
-  for (const o of objects) engine.registry.registerObject(o as any);
+  for (const o of objects) engine.registry.registerObject(o);
   const warn = vi.fn();
   if (hooks.length > 0) {
     bindHooksToEngine(engine, hooks, {
@@ -284,28 +290,31 @@ describe('[#5284] the prior-row demand is asked per object', () => {
  *
  * `new ObjectQL()` carries no `ObjectQLPlugin` builtins, so the only producer
  * of `hookContext.previous` here is `update()` itself. That is exactly the
- * subject: whether THIS gate's read can ever reach the before phase.
+ * subject: whether THIS gate's read reaches the before phase.
  *
- * A kernel-hosted engine has a second producer — `sys_fetch_previous_update`
- * (`plugin.ts`, `object: '*'`, priority 5) makes its own `findOne` and assigns
- * `previous` before any authored before-hook runs — so a `beforeUpdate`
- * condition reading `previous` DOES evaluate there. That producer is untouched
- * by this gate, which is why narrowing takes no binding away from anyone; the
- * last case below drives its shape to show the two do not interfere. (That it
- * is a duplicate read of the same row — a third one comes from plugin-audit's
- * `captureBefore` — is filed as #5846, not fixed here.)
+ * ⚠️ This block asserted the INVERSE until #5574 — it was titled "`beforeUpdate`
+ * is not a reader of THIS read" and measured a before-hook seeing
+ * `previous === undefined` even with the row in hand. What made that true was
+ * dispatch ORDER, not any property of the gate, and ADR-0058 Addendum II
+ * reversed the order. The cases are kept in place, inverted, rather than
+ * deleted: the old readings are the receipts for why the gate was narrower than
+ * `delete()`'s for as long as it was (Prime Directive #13 — a reversed decision
+ * is a record).
+ *
+ * A kernel-hosted engine used to have a SECOND producer,
+ * `sys_fetch_previous_update` (`plugin.ts`, `object: '*'`, priority 5), which
+ * made its own `findOne` before any authored before-hook ran. #5846 retired it:
+ * with the engine binding `previous` first, its `!ctx.previous` guard can no
+ * longer be true. The last case below drives that exact shape and pins the
+ * consequence — the hook-supplied fetch is now the redundant one.
  */
-describe('[#5284] `beforeUpdate` is not a reader of THIS read', () => {
-  it('observes nothing from the engine read even when the row IS in hand', async () => {
-    // Measured, not assumed: this object has an afterUpdate hook, so the prior
-    // row is fetched — and the beforeUpdate hook still sees nothing, because
-    // `update()` dispatches it BEFORE the read (it may still rewrite the very
-    // payload the read would be compared against) and binds
-    // `hookContext.previous` only after the write.
-    //
-    // This is why the gate does NOT count `beforeUpdate`: it would buy a read
-    // with no reader. `delete()` (#5272) counts `beforeDelete` because there
-    // the read genuinely precedes the dispatch and binds it.
+describe('[#5284, inverted by #5574] `beforeUpdate` IS a reader of THIS read', () => {
+  it('observes the engine read — the row IS in hand, and now the before phase sees it', async () => {
+    // Measured, not assumed. This used to read `expect(beforeSeen).toEqual(
+    // [undefined])`: the prior row was fetched (this object has an afterUpdate
+    // hook) and the before-hook still saw nothing, because the dispatch
+    // preceded the read. Both phases now see the same pre-image from the same
+    // single read.
     const beforeSeen: Array<unknown> = [];
     const afterSeen: Array<unknown> = [];
     const { engine } = await boot([
@@ -316,42 +325,50 @@ describe('[#5284] `beforeUpdate` is not a reader of THIS read', () => {
     const row: any = await engine.insert('scope_task_a', { title: 'A', status: 'todo', done: false });
     await engine.update('scope_task_a', { status: 'in_progress' }, { where: { id: row.id } } as any);
 
-    expect(beforeSeen).toEqual([undefined]);
-    expect(afterSeen).toEqual([{ id: row.id, title: 'A', status: 'todo', done: false }]);
+    const stored = { id: row.id, title: 'A', status: 'todo', done: false };
+    expect(beforeSeen).toEqual([stored]);
+    expect(afterSeen).toEqual([stored]);
   });
 
-  it('rejects a `previous.*` beforeUpdate condition whether or not the prior row was read', async () => {
-    // Both configurations reject identically, which is the point: on an engine
-    // with no other producer of `previous`, the verdict is decided by the update
-    // path's dispatch ORDER, not by this gate. So narrowing the gate creates no
-    // new rejection. (Under a kernel the builtin binds `previous` first and the
-    // same condition evaluates — see the block comment above.)
-    const withRead = await boot([
+  it('EVALUATES a `previous.*` beforeUpdate condition instead of rejecting it', async () => {
+    // The inverse of what this case pinned before, and the measured harm #5574
+    // is about, one path over: a legal, contract-shaped transition condition on
+    // a `beforeUpdate` hook used to REJECT the write (unevaluable ⇒ abort,
+    // #4775) on a bare engine, because nothing bound `previous` in the before
+    // phase. The gate now counts the event, so the read happens for the
+    // condition's sake and the condition evaluates as authored.
+    const withAfterHook = await boot([
       { name: 'pre_cond', object: 'scope_task_a', events: ['beforeUpdate'], priority: 90,
         condition: 'previous.done != true && record.done == true', handler: () => {} } as unknown as Hook,
-      observer('post', 'scope_task_a', 'afterUpdate', []), // forces the prior read
+      observer('post', 'scope_task_a', 'afterUpdate', []),
     ]);
-    const rowA: any = await withRead.engine.insert('scope_task_a', { title: 'A', status: 'todo', done: false });
+    const rowA: any = await withAfterHook.engine.insert('scope_task_a', { title: 'A', status: 'todo', done: false });
     await expect(
-      withRead.engine.update('scope_task_a', { done: true }, { where: { id: rowA.id } } as any),
-    ).rejects.toThrow(/previous/);
+      withAfterHook.engine.update('scope_task_a', { done: true }, { where: { id: rowA.id } } as any),
+    ).resolves.toBeDefined();
 
-    const withoutRead = await boot([
+    // …and with NO after-hook anywhere, so the before-hook is the sole term
+    // holding the gate open. Same verdict — which is the whole point of adding
+    // the term rather than relying on some neighbouring consumer.
+    const beforeHookOnly = await boot([
       { name: 'pre_cond', object: 'scope_task_a', events: ['beforeUpdate'], priority: 90,
         condition: 'previous.done != true && record.done == true', handler: () => {} } as unknown as Hook,
     ]);
-    const rowB: any = await withoutRead.engine.insert('scope_task_a', { title: 'A', status: 'todo', done: false });
+    const rowB: any = await beforeHookOnly.engine.insert('scope_task_a', { title: 'A', status: 'todo', done: false });
     await expect(
-      withoutRead.engine.update('scope_task_a', { done: true }, { where: { id: rowB.id } } as any),
-    ).rejects.toThrow(/previous/);
+      beforeHookOnly.engine.update('scope_task_a', { done: true }, { where: { id: rowB.id } } as any),
+    ).resolves.toBeDefined();
   });
 
-  it('leaves a `previous` supplied by an earlier before-hook alone — and still reads nothing', async () => {
-    // The kernel's `sys_fetch_previous_update` shape: a low-priority (= earlier)
-    // `beforeUpdate` hook that fetches the row itself and assigns
-    // `ctx.previous`. The narrowed gate must not fight it — neither by clobber-
-    // ing the binding (`priorRecord` is null, and the post-write assignment is
-    // guarded on it) nor by re-reading a row someone already has.
+  it('makes the retired builtin\'s own fetch the redundant one (#5846)', async () => {
+    // The kernel's `sys_fetch_previous_update` shape, replayed as an authored
+    // hook: a low-priority (= earlier) `beforeUpdate` hook that fetches the row
+    // itself behind `if (input.id && !ctx.previous)`. The engine now binds
+    // `previous` BEFORE any before-hook runs, so that guard is false and the
+    // hook's `findOne` never happens — which is exactly the argument for
+    // deleting the builtin rather than leaving it behind a guard that can no
+    // longer be true. Measured here as a read count, because "the guard is
+    // false now" is the kind of claim that rots silently.
     const supplied: Array<unknown> = [];
     const { engine, reads } = await boot([
       { name: 'fetch_previous', object: 'scope_task_a', events: ['beforeUpdate'], priority: 5,
@@ -374,9 +391,11 @@ describe('[#5284] `beforeUpdate` is not a reader of THIS read', () => {
     const before = reads.findOne;
     await engine.update('scope_task_a', { done: true }, { where: { id: row.id } } as any);
 
-    // The condition evaluated (the handler ran) against the hook-supplied row…
+    // The condition evaluated (the handler ran) against the ENGINE-supplied row…
     expect(supplied).toEqual([{ id: row.id, title: 'A', status: 'todo', done: false }]);
-    // …and the engine added no read of its own: exactly the ONE the hook made.
+    // …and there was exactly ONE read for it: the engine's. The builtin-shaped
+    // hook's guard short-circuited, so it issued none — where before this
+    // change the count was one EACH.
     expect(reads.findOne - before).toBe(1);
   });
 });

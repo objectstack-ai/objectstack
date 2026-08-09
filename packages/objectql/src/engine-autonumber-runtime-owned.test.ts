@@ -156,7 +156,7 @@ async function makeEngine(opts: { nativeAutonumber?: boolean } = {}) {
   const rig = makeStubDriver(opts);
   engine.registerDriver(rig.driver, true);
   await engine.init();
-  engine.registry.registerObject(ACCOUNT as any);
+  engine.registry.registerObject(ACCOUNT);
   const protocol = new ObjectStackProtocolImplementation(engine);
   return { engine, protocol, ...rig };
 }
@@ -535,5 +535,115 @@ describe('#5503 — autonumber is runtime-owned: UPDATE', () => {
     }, { object: 'an_account' });
     const res = await rig.engine.update('an_account', { id, name: 'x' }, { where: { id } } as any);
     expect(res.account_number).toBe('HOOK-0002');
+  });
+});
+
+/**
+ * #5628 — the FLAGGED autonumber field: `Field.autonumber` now injects
+ * `readonly: true` so the form half of the `readonly` contract ("never editable
+ * in forms") holds for a record number the server was already guaranteed to
+ * discard. Every case above uses an UNflagged `type: 'autonumber'`, so none of
+ * them sees what that flag changes on the way in.
+ *
+ * What it changes is WHICH strip gets to the field first. A `readonly` field is
+ * also stripped at the DataProtocol create INGRESS (`stripReadonlyForInsert`,
+ * #3043) — a seam that knows only the `isSystem` exemption, while the engine's
+ * runtime-owned strip also honours `preserveAudit` (#3493: a historical import
+ * reinstating legacy record numbers). Left alone, the flag would therefore have
+ * SILENTLY narrowed a documented exemption: the ingress would delete the legacy
+ * number before the engine could keep it, with no test anywhere going red,
+ * because every existing preserveAudit pin calls `engine.insert` directly.
+ *
+ * So the ingress skips runtime-owned types outright (they are covered by the
+ * engine strip on EVERY insert path, including the direct `engine.insert`
+ * callers the ingress never sees) and these cases pin both halves of that: the
+ * ordinary caller is still stripped, and the historical import still keeps its
+ * value — flagged or not, the verdicts are identical.
+ */
+describe('#5628 — a `readonly: true` autonumber keeps the #5503 exemption set', () => {
+  // What `Field.autonumber({ label: 'Invoice No.' })` produces since #5628.
+  const INVOICE = {
+    name: 'an_invoice',
+    label: 'Invoice',
+    fields: {
+      id: { name: 'id', label: 'ID', type: 'text' as const, primaryKey: true },
+      name: { name: 'name', label: 'Name', type: 'text' as const },
+      invoice_number: {
+        name: 'invoice_number',
+        label: 'Invoice No.',
+        type: 'autonumber' as const,
+        readonly: true,
+        autonumberFormat: 'INV-{0000}',
+      },
+    },
+  };
+
+  let rig: Awaited<ReturnType<typeof makeEngine>>;
+  beforeEach(async () => {
+    rig = await makeEngine();
+    rig.engine.registry.registerObject(INVOICE, 'test');
+  });
+
+  it('still strips an ordinary caller-supplied number and issues the sequence value', async () => {
+    const created = await rig.protocol.createData({
+      object: 'an_invoice',
+      data: { name: 'forge', invoice_number: 'INV-9999' },
+    });
+    expect(created.record.invoice_number).toBe('INV-0001');
+    expect(rig.createdRows[rig.createdRows.length - 1]?.invoice_number).toBe('INV-0001');
+  });
+
+  it('still REPORTS the strip to the caller (#3407 / #3431)', async () => {
+    const created = await rig.protocol.createData({
+      object: 'an_invoice',
+      data: { name: 'forge', invoice_number: 'INV-9999' },
+    });
+    const dropped = (created as { droppedFields?: DroppedFieldsEvent[] }).droppedFields ?? [];
+    expect(dropped.flatMap((e) => e.fields)).toContain('invoice_number');
+  });
+
+  it('keeps a legacy number for a `preserveAudit` historical import THROUGH THE INGRESS (#3493)', async () => {
+    // The regression this whole describe exists for: the ingress strip has no
+    // `preserveAudit` exemption, so if it acted on the flag the value would be
+    // gone before the engine's whitelist ran.
+    const created = await rig.protocol.createData({
+      object: 'an_invoice',
+      data: { name: 'legacy', invoice_number: 'LEGACY-0007' },
+      context: { preserveAudit: true },
+    });
+    expect(created.record.invoice_number).toBe('LEGACY-0007');
+  });
+
+  it('keeps an explicit number for a system write through the ingress', async () => {
+    const created = await rig.protocol.createData({
+      object: 'an_invoice',
+      data: { name: 'seeded', invoice_number: 'INV-000042' },
+      context: { isSystem: true },
+    });
+    expect(created.record.invoice_number).toBe('INV-000042');
+  });
+
+  it('an author-declared `readonly` field of an ORDINARY type is still stripped at the ingress', async () => {
+    // The #3043 strip keeps its full width — only runtime-owned types moved.
+    rig.engine.registry.registerObject({
+      name: 'an_case',
+      label: 'Case',
+      fields: {
+        id: { name: 'id', label: 'ID', type: 'text' as const, primaryKey: true },
+        title: { name: 'title', label: 'Title', type: 'text' as const },
+        approval_status: {
+          name: 'approval_status',
+          label: 'Approval',
+          type: 'text' as const,
+          readonly: true,
+          defaultValue: 'draft',
+        },
+      },
+    } as any, 'test');
+    const created = await rig.protocol.createData({
+      object: 'an_case',
+      data: { title: 'forged', approval_status: 'approved' },
+    });
+    expect(created.record.approval_status).toBe('draft');
   });
 });

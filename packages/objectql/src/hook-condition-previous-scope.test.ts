@@ -193,28 +193,36 @@ describe('[#4784] hook condition binds `previous` alongside `record`', () => {
     expect(conditionWarnings()).toEqual([]);
   });
 
-  it('fabricates nothing on the BATCH dispatch of a bulk update — `previous` stays unbound', async () => {
+  it('fabricates nothing when `previous` is unbound — it stays unbound and the write aborts', async () => {
     const calls: string[] = [];
     const { logger } = captureLogger();
-    // The `beforeUpdate` of a `multi: true` update fires ONCE for N matched
-    // rows; there is no single prior record. Binding `{}` or `null` would make
-    // `previous.done != true` answer for rows nobody read. #4775/B1: it stays
-    // unbound AND the write is rejected — with a diagnosis, not `No such key`.
+    // The invariant, unchanged: an absent `previous` is never bound to `{}` or
+    // `null`, because `previous.done != true` would then answer for a record
+    // nobody read. #4775: unevaluable ABORTS, so the fabrication is refused
+    // loudly rather than papered over.
     //
-    // [#5038] The AFTER dispatch of that same write is per row and DOES bind
-    // `previous` — the case below.
+    // ⚠️ What changed with #5574 is only which contexts can BE like this. This
+    // shape — no id, `multi: true`, no `previous` — was the batch dispatch of a
+    // predicate write, and the engine does not build one any more: it
+    // dispatches `before*` per matched row with the row's `previous` bound
+    // (ADR-0058 Addendum II), which is what makes the batch diagnosis this case
+    // used to match (`/PREDICATE bulk write/`) unreachable and retired. The
+    // per-row shape is the case below, and it now covers BOTH phases.
     const wrapped = wrapDeclarativeHook(
       makeHook(TRANSITION, ['beforeUpdate']),
       (async () => { calls.push('ran'); }) as any,
       { logger },
     );
 
-    await expect(wrapped(makeCtx({
+    const err = await wrapped(makeCtx({
       event: 'beforeUpdate',
       previous: undefined,
       input: { data: { done: true }, options: { multi: true } },
-    } as any))).rejects.toThrow(/PREDICATE bulk write/);
+    } as any)).then(() => null, (e) => e);
 
+    expect(err).toBeInstanceOf(Error);
+    expect(err.reason).toBe('unevaluable');
+    expect(err.message).not.toContain('PREDICATE bulk write');
     expect(calls).toEqual([]);
   });
 
@@ -359,7 +367,7 @@ describe('[#4784] transition condition over a real engine', () => {
     reads = stub.reads;
     engine.registerDriver(stub.driver, true);
     await engine.init();
-    engine.registry.registerObject(taskObject as any);
+    engine.registry.registerObject(taskObject);
 
     audited = [];
     warn = vi.fn();
@@ -445,18 +453,24 @@ describe('[#4784] a condition that never mentions `previous` costs zero extra fe
    * true — and #5284 has since narrowed it, from "ANY object has an afterUpdate
    * hook" to "THIS object does (or its schema needs a prior row, or a roll-up
    * aggregates it)". Both pins still hold, and the first one carries more
-   * weight than it did: the object it drives has a `beforeUpdate` hook, which
-   * the narrowed gate deliberately does not count (a `beforeUpdate` hook is
-   * dispatched before the read and observes no `previous` on this path, so
-   * counting it would buy a read with no reader — see
-   * `engine-update-prior-read-scope.test.ts`, which measures exactly that).
+   * weight than it did.
+   *
+   * ⚠️ #5574 added a FOURTH term to that gate — a `beforeUpdate` hook on this
+   * object — because the before phase became a real reader of the prior row
+   * (it is now dispatched after the read, with `previous` bound). So the first
+   * pin below moved with it: an object whose only hook is a `beforeUpdate`
+   * DOES pay the read now. What the pin was actually protecting is untouched
+   * and is the second one: the cost never depends on the condition TEXT. A
+   * hook's firing count and a hook's read cost must both be inferable from its
+   * declaration, and "does the expression mention `previous`?" is not part of
+   * any declaration an author can see.
    */
   async function bootWith(hooks: Hook[]) {
     const engine = new ObjectQL();
     const stub = makeStubDriver();
     engine.registerDriver(stub.driver, true);
     await engine.init();
-    engine.registry.registerObject(taskObject as any);
+    engine.registry.registerObject(taskObject);
     bindHooksToEngine(engine, hooks, {
       packageId: 'app:pin',
       logger: { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} },
@@ -464,7 +478,16 @@ describe('[#4784] a condition that never mentions `previous` costs zero extra fe
     return { engine, reads: stub.reads };
   }
 
-  it('reads no prior row at all for a before-hook condition over `record` only', async () => {
+  it('reads ONE prior row for a before-hook, whatever its condition says (#5574)', async () => {
+    // ⚠️ This pinned `0` until #5574 — a `beforeUpdate` hook bought no read,
+    // because the dispatch preceded the read and no before-handler could
+    // observe the row. ADR-0058 Addendum II reversed that ordering, so the
+    // event joined the gate and the cost is now ONE read, not zero.
+    //
+    // The number that matters is `1`, not `0`: the read is what binds
+    // `previous` for the before phase, and this is the same read the after
+    // phase and the validation rules use. A `2` here would mean the
+    // deduplication #5846 (a) is about had regressed.
     const { engine, reads } = await bootWith([{
       name: 'record_only_guard',
       object: 'hook_task',
@@ -478,8 +501,28 @@ describe('[#4784] a condition that never mentions `previous` costs zero extra fe
     const before = reads.findOne;
     await engine.update('hook_task', { status: 'in_progress' }, { where: { id: row.id } } as any);
 
-    // No afterUpdate hook, no prior-needing validation rule → nothing to fetch.
-    expect(reads.findOne - before).toBe(0);
+    expect(reads.findOne - before).toBe(1);
+  });
+
+  it('costs the SAME for a before-hook whose condition DOES read `previous`', async () => {
+    // The invariant the case above used to carry, restated where it still
+    // holds: the cost is a property of the DECLARATION (this object has a
+    // `beforeUpdate` hook), never of the condition text. The ruling rejected
+    // keying the read on "does the condition mention `previous`?" explicitly.
+    const { engine, reads } = await bootWith([{
+      name: 'transition_guard',
+      object: 'hook_task',
+      events: ['beforeUpdate'],
+      priority: 100,
+      condition: TRANSITION,
+      handler: () => {},
+    } as unknown as Hook]);
+
+    const row: any = await engine.insert('hook_task', { title: 'A', status: 'todo', done: false });
+    const before = reads.findOne;
+    await engine.update('hook_task', { done: true }, { where: { id: row.id } } as any);
+
+    expect(reads.findOne - before).toBe(1);
   });
 
   it('reads the SAME number of rows whether or not the condition mentions `previous`', async () => {
@@ -528,7 +571,7 @@ describe('[#5272] a single-record delete binds `previous` through the real engin
     const stub = makeStubDriver();
     engine.registerDriver(stub.driver, true);
     await engine.init();
-    engine.registry.registerObject(taskObject as any);
+    engine.registry.registerObject(taskObject);
     const warn = vi.fn();
     bindHooksToEngine(engine, hooks, {
       packageId: 'app:showcase',

@@ -419,11 +419,13 @@ export const ADR_0087_SCAFFOLD =
  * `/\*\*BREAKING/` matches it. Reading the artifact closes that by construction
  * instead of by agreement between two predicates.
  *
- * Why the gate's own function is not imported: that module's CLI dispatch runs
- * at TOP LEVEL (it has no `import.meta.url === argv[1]` guard), so importing it
- * would execute the gate; and it would put the release-critical bump path one
- * rename away from failing. The agreement is pinned in the self-test instead,
- * which runs the real gate as a child process over a real temp repository.
+ * Why the gate's own function is not imported: it would put the release-critical
+ * bump path one rename away from failing, and the claim being pinned is about
+ * ANOTHER script's verdict -- only that script's own run settles it. (The gate's
+ * former top-level CLI dispatch, which made any import execute the gate, was
+ * entry-guarded in #6566; the coupling reason stands on its own.) The agreement
+ * is pinned in the self-test instead, which runs the real gate as a child
+ * process over a real temp repository.
  *
  * @param {{ bump: string, body: string }} artifact
  */

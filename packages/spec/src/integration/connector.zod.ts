@@ -661,6 +661,7 @@ export const ConnectorActionSchema = lazySchema(() => z.object({
    */
   effect: ConnectorActionEffectSchema.optional(),
 }));
+export type ConnectorAction = z.input<typeof ConnectorActionSchema>;
 
 /**
  * Connector Trigger Definition
@@ -678,6 +679,7 @@ export const ConnectorTriggerSchema = lazySchema(() => z.object({
   type: z.enum(['polling', 'webhook']).describe('Trigger type'),
   interval: z.number().optional().describe('Polling interval in seconds'),
 }));
+export type ConnectorTrigger = z.input<typeof ConnectorTriggerSchema>;
 
 /**
  * Base Connector Schema
@@ -934,4 +936,15 @@ export {
   ConnectorInstanceAPIKeyAuthSchema,
   ConnectorInstanceBasicAuthSchema,
 } from '../shared/connector-auth.zod';
-export type { ConnectorInstanceAuth, ResolvedConnectorAuth } from '../shared/connector-auth.zod';
+export type {
+  ConnectorInstanceAuth,
+  ResolvedConnectorAuth,
+  // The four member aliases travel with the four schema consts above: each is a
+  // documented JSON Schema whose reference page lives under `integration/`, so
+  // the type has to reach the same entry point or the page's `import type` line
+  // has nothing to name (#4593).
+  ConnectorInstanceNoAuth,
+  ConnectorInstanceBearerAuth,
+  ConnectorInstanceAPIKeyAuth,
+  ConnectorInstanceBasicAuth,
+} from '../shared/connector-auth.zod';

@@ -22,18 +22,25 @@
  * exactly that dispatch, and its message no longer promises an expiry it would
  * now be breaking.
  *
- *   a. batch (`before*`) dispatch + a condition reading `previous` → the named
- *      `limitation`, the phase as the reason, and the after-type event as the
- *      first route out;
+ *   a. RETIRED (#5574): the batch dispatch itself, and with it the whole
+ *      diagnostic. A `previous`-reading `beforeUpdate` condition on a bulk
+ *      write now evaluates PER ROW as authored, so the write succeeds; the
+ *      `limitation` discriminator and the `predicateBulkWrite` flag are gone
+ *      from `HookConditionError` under ADR-0049, and the pin that matters is
+ *      that no dispatch lacking `previous` is produced at all;
  *   b. the SAME hook on a single-record write → completely unchanged;
- *   c. a batch dispatch whose condition does NOT read `previous` → unchanged,
- *      including the plain typo report;
- *   d. the generic `No such key` / `Unknown variable` riddle is never the WHOLE
- *      story for (a) — including when the fault names some other key the same
- *      condition reads, which is what AST-based detection
- *      (`collectCelRootIdentifiers`) buys over reading cel-js's prose;
- *   e. RETIRED: the same condition on an `afterUpdate` hook, through the real
- *      engine, now evaluates per row and the bulk write SUCCEEDS.
+ *   c. a condition that does NOT read `previous` → unchanged, including the
+ *      plain typo report;
+ *   d. RETIRED with (a): the AST-based `previous` detection that decided WHICH
+ *      limitation to name;
+ *   e. RETIRED by #5038: the same condition on an `afterUpdate` hook, through
+ *      the real engine, evaluates per row and the bulk write SUCCEEDS.
+ *
+ * ⚠️ (a) and (d) are kept as inverted/annotated blocks rather than deleted:
+ * a reversed decision is a record (Prime Directive #13), and the diagnostic's
+ * two-year arc — #5037 stopgap, #5038 half-retirement, #5574 full — is the
+ * clearest available argument for fixing a producer instead of documenting a
+ * limitation.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -93,130 +100,113 @@ function singleCtx(data: Record<string, unknown>): HookContext {
 }
 
 /* ────────────────────────────────────────────────────────────────────────────
- * a. The batch (`before*`) dispatch reading `previous` keeps the named limitation
+ * a. RETIRED — the batch dispatch, and the whole diagnostic that described it
  * ──────────────────────────────────────────────────────────────────────────── */
 
-describe('[#5038] the batch dispatch of a bulk write, whose condition reads `previous`', () => {
+describe('[#5574] the batch dispatch is GONE, and so is its diagnostic', () => {
   const TRANSITION = 'previous.done != true && record.done == true';
 
-  it('rejects with a machine-readable `limitation`, not just prose', async () => {
-    const ran: string[] = [];
-    const wrapped = wrapDeclarativeHook(
-      makeHook(TRANSITION), (async () => { ran.push('audited'); }) as any, { logger: silentLogger },
-    );
-
-    const err = await wrapped(batchCtx({ done: true })).then(() => null, (e) => e);
-
-    expect(err).toBeInstanceOf(HookConditionError);
-    // The discriminator a caller branches on. Deliberately NOT `code`: ADR-0112
-    // makes `error.code` a closed wire vocabulary and `rest-server.ts` promotes
-    // a thrown error's `.code` onto the envelope, so a `.code` here would mint
-    // an unregistered wire code by side effect.
-    expect(err.limitation).toBe('bulk_write_previous_unbound');
-    expect((err as any).code).toBeUndefined();
-    expect(err.predicateBulkWrite).toBe(true);
-    expect(err.reason).toBe('unevaluable');
-    expect(err.hook).toBe('audit_task_completion');
-    expect(err.condition).toBe(TRANSITION);
-    // …and the handler never ran (the gate is before it).
-    expect(ran).toEqual([]);
-  });
-
-  it('names the batch, the missing binding, and the PHASE as the reason', async () => {
-    const wrapped = wrapDeclarativeHook(
-      makeHook(TRANSITION), (async () => {}) as any, { logger: silentLogger },
-    );
-    const err = await wrapped(batchCtx({ done: true })).then(() => null, (e) => e);
-
-    expect(err.message).toContain("Hook 'audit_task_completion'");
-    expect(err.message).toContain('PREDICATE bulk write (multi: true)');
-    expect(err.message).toContain('no single prior record to bind');
-    expect(err.message).toContain("'beforeUpdate'");
-    // The reason is now the phase, not a missing release. A `before*` hook may
-    // still rewrite the shared payload, so it cannot be per-row.
-    expect(err.message).toContain('before any row is written');
-    expect(err.message).toContain('ADR-0058');
-  });
-
-  it('no longer promises an expiry that has already happened', async () => {
-    // #5037's message said "this rejection retires when #5038 lands". It has
-    // landed. Repeating that sentence would be a promise the platform is now
-    // breaking — an author would wait for a release that already shipped.
-    const wrapped = wrapDeclarativeHook(
-      makeHook(TRANSITION), (async () => {}) as any, { logger: silentLogger },
-    );
-    const err = await wrapped(batchCtx({ done: true })).then(() => null, (e) => e);
-
-    expect(err.message).not.toContain('CURRENT-VERSION limitation');
-    expect(err.message).not.toMatch(/retires when/);
-  });
-
-  it('leads with the after-type event — the route the contract just made real', async () => {
-    const wrapped = wrapDeclarativeHook(
-      makeHook(TRANSITION), (async () => {}) as any, { logger: silentLogger },
-    );
-    const err = await wrapped(batchCtx({ done: true })).then(() => null, (e) => e);
-
-    // The first route out is the one per-row dispatch created: the same
-    // condition on the matching after-type event evaluates as authored.
-    expect(err.message).toContain("'afterUpdate'");
-    expect(err.message).toContain('PER MATCHED ROW');
-    // Single-record targeting still works and is still named.
-    expect(err.message).toContain('one record (update by id)');
-    // Dropping `previous` is not free and the message must not present it as
-    // the fix: a transition silently becomes a state test.
-    expect(err.message).toContain('becomes a state test');
-  });
-
-  it('now DOES name the record-change flow trigger — the fact it was refused over changed', async () => {
-    // #5037 deliberately refused this route on measured evidence: the trigger
-    // subscribes to these same lifecycle hooks, so on a bulk write it fired once
-    // with the same unbound `previous` (#4862). #5038 fixed it at the producer,
-    // so an after-type record-change trigger rides the per-row dispatch. The
-    // message follows the fact rather than the other way round.
-    const wrapped = wrapDeclarativeHook(
-      makeHook(TRANSITION), (async () => {}) as any, { logger: silentLogger },
-    );
-    const err = await wrapped(batchCtx({ done: true })).then(() => null, (e) => e);
-
-    expect(err.message).toContain('record-change flow trigger');
-    expect(err.message).not.toContain('A record-change flow trigger is NOT a way around this');
-  });
-
-  it('names `beforeDelete` for a delete-shaped batch dispatch', async () => {
-    const wrapped = wrapDeclarativeHook(
-      makeHook('previous.done != true', { events: ['beforeDelete'] } as any),
-      (async () => {}) as any, { logger: silentLogger },
-    );
-    const ctx = {
-      object: 'hook_task', event: 'beforeDelete',
-      input: { options: { multi: true } }, previous: undefined, ql: qlStub,
-    } as unknown as HookContext;
-
-    const err = await wrapped(ctx).then(() => null, (e) => e);
-    expect(err.limitation).toBe('bulk_write_previous_unbound');
-    expect(err.message).toContain("'afterDelete'");
-  });
-
-  it('still ABORTS the write — the rescoping is not an exemption', async () => {
+  it('the bulk write #5037 and #5038 both rejected now SUCCEEDS, firing per row', async () => {
+    // ⚠️ The inverse of what this block asserted until #5574. It used to pin
+    // "rejects with a machine-readable `limitation`" — a legal, contract-shaped
+    // transition condition on a `beforeUpdate` hook aborted every bulk write,
+    // and the diagnostic's job was to explain that the platform, not the
+    // author, was at fault.
+    //
+    // ADR-0058 Addendum II removed the fault instead of explaining it: a
+    // predicate write dispatches `beforeUpdate` once per matched row, each
+    // carrying that row's `previous`, so the condition evaluates as authored.
+    const audited: string[] = [];
     const engine = await bootEngine([{
       name: 'audit_task_completion', object: 'hook_task', events: ['beforeUpdate'], priority: 90,
       condition: TRANSITION,
-      handler: () => {},
+      handler: (ctx: any) => { audited.push(String(ctx.input.id)); },
     } as unknown as Hook]);
 
     await engine.insert('hook_task', { title: 'A', status: 'todo', done: false });
     await engine.insert('hook_task', { title: 'B', status: 'todo', done: false });
 
-    const err = await engine
-      .update('hook_task', { done: true }, { multi: true, where: { status: 'todo' } } as any)
-      .then(() => null, (e) => e);
+    await expect(
+      engine.update('hook_task', { done: true }, { multi: true, where: { status: 'todo' } } as any),
+    ).resolves.toBeDefined();
+
+    // Per row, each naming its own row — the transition held for both.
+    expect(audited).toHaveLength(2);
+    expect(new Set(audited).size).toBe(2);
+    // And the write landed: fail-loud took no exception before, and there is
+    // nothing left to take an exception to now.
+    const rows: any[] = await engine.find('hook_task', {} as any);
+    expect(rows.every((r) => r.done === true)).toBe(true);
+  });
+
+  it('does not fire for rows the transition did not happen on', async () => {
+    // The other half of "evaluates as authored": a transition is a transition,
+    // per row. Under the batch dispatch this distinction could not exist —
+    // there was one call and no row to judge.
+    const audited: string[] = [];
+    const engine = await bootEngine([{
+      name: 'audit_task_completion', object: 'hook_task', events: ['beforeUpdate'], priority: 90,
+      condition: TRANSITION,
+      handler: (ctx: any) => { audited.push(String((ctx.previous as any).title)); },
+    } as unknown as Hook]);
+
+    await engine.insert('hook_task', { title: 'A', status: 'todo', done: false });
+    await engine.insert('hook_task', { title: 'already', status: 'todo', done: true });
+
+    await engine.update('hook_task', { done: true }, { multi: true, where: { status: 'todo' } } as any);
+
+    expect(audited).toEqual(['A']);
+  });
+
+  it('never dispatches a context that lacks `previous` — the producer is gone, not just the message', async () => {
+    // The load-bearing pin of the retirement. `HookConditionLimitation` was
+    // removed under ADR-0049 because it had no producer; that claim is only
+    // worth as much as this measurement. Every `beforeUpdate` context the
+    // engine dispatches on a predicate write must carry both `input.id` and
+    // `previous` — the two facts whose ABSENCE `isPredicateBulkWrite` used to
+    // key on.
+    const seen: HookContext[] = [];
+    const engine = await bootEngine([{
+      name: 'observer', object: 'hook_task', events: ['beforeUpdate'], priority: 90,
+      handler: (ctx: any) => { seen.push({ id: ctx.input.id, previous: ctx.previous } as any); },
+    } as unknown as Hook]);
+
+    await engine.insert('hook_task', { title: 'A', status: 'todo', done: false });
+    await engine.insert('hook_task', { title: 'B', status: 'todo', done: false });
+
+    await engine.update('hook_task', { done: true }, { multi: true, where: { status: 'todo' } } as any);
+
+    expect(seen).toHaveLength(2);
+    for (const ctx of seen) {
+      expect((ctx as any).id).toBeDefined();
+      expect(ctx.previous).toBeDefined();
+    }
+  });
+
+  it('carries NO `limitation` / `predicateBulkWrite` even on a hand-fabricated batch context', async () => {
+    // The engine cannot build this context any more — but a stale double, a
+    // test helper or a future refactor could. If one ever does, the author gets
+    // the plain diagnosis, not a resurrected discriminator: the fields are gone
+    // from `HookConditionError` entirely, so reintroducing the branch means
+    // reintroducing the type, which is a visible edit rather than a quiet one.
+    const wrapped = wrapDeclarativeHook(
+      makeHook(TRANSITION), (async () => {}) as any, { logger: silentLogger },
+    );
+
+    const err = await wrapped(batchCtx({ done: true })).then(() => null, (e) => e);
 
     expect(err).toBeInstanceOf(HookConditionError);
-    expect(err.limitation).toBe('bulk_write_previous_unbound');
-    // Fail loud takes no exception: nothing was written.
-    const rows: any[] = await engine.find('hook_task', {} as any);
-    expect(rows.every((r) => r.done === false)).toBe(true);
+    expect((err as any).limitation).toBeUndefined();
+    expect((err as any).predicateBulkWrite).toBeUndefined();
+    // Still no `.code`: ADR-0112 keeps `error.code` a closed wire vocabulary,
+    // and `rest-server.ts` promotes a thrown error's `.code` onto the envelope.
+    expect((err as any).code).toBeUndefined();
+    // Fail-loud is untouched — an unevaluable condition still aborts (#4775).
+    expect(err.reason).toBe('unevaluable');
+    expect(err.hook).toBe('audit_task_completion');
+    // And the message is the plain one, with no batch prose left to maintain.
+    expect(err.message).not.toContain('PREDICATE bulk write');
+    expect(err.message).not.toContain('PER MATCHED ROW');
   });
 });
 
@@ -310,106 +300,32 @@ describe('[#5038] a batch dispatch with no `previous` in the condition is unaffe
     expect(err.message).not.toContain('PREDICATE bulk write');
   });
 
-  it('keeps the DECLARED-but-unset field diagnosis on its own limitation name', async () => {
-    // Same root cause (no stored row in hand), different remedy, so it carries
-    // its own machine-readable name rather than being folded into `previous`.
+  it('a DECLARED-but-unset field reads as the ordinary unevaluable case now', async () => {
+    // ⚠️ This used to pin the SECOND limitation member,
+    // `bulk_write_stored_state_unavailable`: on a batch dispatch `record` was
+    // the bare payload, so a condition naming a declared field this write does
+    // not set was unevaluable through no fault of the author's, and the message
+    // said so. Retired with its twin (#5574) — a per-row `beforeUpdate` context
+    // merges the row's stored state into `record`, so the case it described no
+    // longer arises from a bulk write. What remains is the plain diagnosis,
+    // which is the right one for any OTHER way of reaching it.
     const wrapped = wrapDeclarativeHook(
       makeHook('record.archived == true'), (async () => {}) as any, { logger: silentLogger },
     );
 
     const err = await wrapped(batchCtx({ status: 'x' })).then(() => null, (e) => e);
 
-    expect(err.limitation).toBe('bulk_write_stored_state_unavailable');
-    expect(err.predicateBulkWrite).toBe(true);
-    expect(err.message).toContain("'archived' IS declared on this object");
-    // Same rescoping: the after-type event is where `record` holds the row's
-    // real state, so it is named here too.
-    expect(err.message).toContain("'afterUpdate'");
-  });
-});
-
-/* ────────────────────────────────────────────────────────────────────────────
- * d. The riddle is never the whole story for the `previous` case
- * ──────────────────────────────────────────────────────────────────────────── */
-
-describe('[#5038] the generic CEL fault is never the whole story on this path', () => {
-  it('does not leave the author with the bare `No such key` / unbound-root sentence', async () => {
-    const wrapped = wrapDeclarativeHook(
-      makeHook('previous.done != true && record.done == true'),
-      (async () => {}) as any, { logger: silentLogger },
-    );
-
-    const err = await wrapped(batchCtx({ done: true })).then(() => null, (e) => e);
-
-    // `describeCelFault`'s generic sentences — both of which read as "you wrote
-    // it wrong" — must not be what this author is left holding.
-    expect(err.message).not.toMatch(/which this object does not declare/);
-    expect(err.message).not.toMatch(/which is not bound for this operation/);
-    // The raw fault still travels as a FACT (`fault`, and the head's summary),
-    // it is simply no longer the diagnosis.
-    expect(err.fault).toMatch(/Unknown variable: previous|No such key: previous/);
-  });
-
-  it('names `previous` for a condition that also reads a declared-but-unset field', async () => {
-    // Both halves are unevaluable on a batch dispatch, for the same reason. The
-    // `previous` half is the one the author cannot work around by writing the
-    // condition differently, so it is the one the message leads with — reading
-    // the answer off the parsed AST rather than off whichever fault the
-    // evaluator happened to raise first is what keeps that true.
-    const wrapped = wrapDeclarativeHook(
-      makeHook('record.archived == true && previous.done != true'),
-      (async () => {}) as any, { logger: silentLogger },
-    );
-
-    const err = await wrapped(batchCtx({ status: 'x' })).then(() => null, (e) => e);
-
-    expect(err.limitation).toBe('bulk_write_previous_unbound');
-    expect(err.message).toContain("The condition reads 'previous'");
-  });
-
-  it('does NOT mistake a declared field spelled like the root for a `previous` reference', async () => {
-    // The AST reports ROOT identifiers; `previous_status` is a member name
-    // under `record`, so the root set is `{record}` and this write gets the
-    // declared-field diagnosis (whose remedy — reference only what this write
-    // sets — is the correct one here). A detector matching the source TEXT
-    // would answer `bulk_write_previous_unbound` and send the author looking
-    // for a `previous` reference that is not there.
-    const wrapped = wrapDeclarativeHook(
-      makeHook('record.previous_status == "todo"'),
-      (async () => {}) as any, { logger: silentLogger },
-    );
-
-    const err = await wrapped(batchCtx({ status: 'x' })).then(() => null, (e) => e);
-
-    expect(err.limitation).toBe('bulk_write_stored_state_unavailable');
-    expect(err.message).toContain("'previous_status' IS declared on this object");
-    expect(err.message).not.toContain("The condition reads 'previous'");
-  });
-
-  it('keeps the typo sentence when the condition BOTH misspells a key and reads `previous`', async () => {
-    // The two halves have different owners: the typo is the author's, the batch
-    // limitation is the platform's. Reporting only one would send them back for
-    // a second round.
-    const wrapped = wrapDeclarativeHook(
-      makeHook('record.stauts == "x" && previous.done != true'),
-      (async () => {}) as any, { logger: silentLogger },
-    );
-
-    const err = await wrapped(batchCtx({ status: 'x' })).then(() => null, (e) => e);
-
-    expect(err.limitation).toBe('bulk_write_previous_unbound');
-    if (err.missingKey === 'stauts') {
-      // The evaluator surfaced the typo → the author is told about BOTH.
-      expect(err.message).toContain("reads 'stauts', which this object does not declare");
-    }
-    expect(err.message).toContain('PREDICATE bulk write (multi: true)');
+    expect((err as any).limitation).toBeUndefined();
+    expect((err as any).predicateBulkWrite).toBeUndefined();
+    expect(err.reason).toBe('unevaluable');
   });
 
   it('is inert for a comprehension variable that happens to be named `previous`', async () => {
-    // `collectCelRootIdentifiers` reports comprehension bind variables as roots
-    // (its documented caveat), so this condition "reads previous" by that
-    // measure. It is a non-event: the expression binds its own variable and
-    // evaluates, so the answer is never consulted.
+    // Kept from the retired section (d): this case never depended on the
+    // batch-dispatch branch. `collectCelRootIdentifiers` reports comprehension
+    // bind variables as roots (its documented caveat), so this condition "reads
+    // previous" by that measure — and it is a non-event, because the expression
+    // binds its own variable and evaluates.
     const ran: string[] = [];
     const wrapped = wrapDeclarativeHook(
       makeHook('[1, 2].exists(previous, previous > 1)'),
@@ -421,6 +337,31 @@ describe('[#5038] the generic CEL fault is never the whole story on this path', 
     expect(ran).toEqual(['ran']);
   });
 });
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * d. RETIRED with the branch it measured — the AST-based `previous` detection
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * ⛔ Six cases stood here until #5574 and are gone with their subject. They
+ * measured how the batch-dispatch diagnosis decided WHICH limitation to name:
+ * off the parsed CEL AST (`collectCelRootIdentifiers`) rather than off cel-js's
+ * fault prose, so a reworded upstream message could not silently turn the
+ * diagnosis back into a riddle — including the case where the fault named some
+ * OTHER key the same condition also read, and the deliberate non-match of
+ * `record.previous_status` (a member name, not the root).
+ *
+ * That detection was consulted ONLY on the error path of a batch dispatch. With
+ * no batch dispatch, there is no error path and nothing to decide, so keeping
+ * the cases would have meant keeping `conditionReadsPrevious` alive to be
+ * tested — a helper whose only caller was removed. The reasoning is preserved
+ * where a future diagnosis would look for it (`hook-wrappers.ts`, the retirement
+ * note), not here.
+ *
+ * One case did NOT depend on the branch and is kept, in section (c) above: a
+ * condition that reads a comprehension bind variable named `previous`
+ * evaluates fine and runs its handler.
+ */
 
 /* ────────────────────────────────────────────────────────────────────────────
  * e. RETIRED — the after-type dispatch of the very same write now succeeds
@@ -536,7 +477,7 @@ async function bootEngine(hooks: Hook[]): Promise<ObjectQL> {
   const engine = new ObjectQL();
   engine.registerDriver(makeStubDriver(), true);
   await engine.init();
-  engine.registry.registerObject(taskObject as any);
+  engine.registry.registerObject(taskObject);
   bindHooksToEngine(engine, hooks, { packageId: 'app:test', logger: silentLogger });
   return engine;
 }

@@ -353,22 +353,6 @@ describe('unknown keys are rejected, not stripped (#4001)', () => {
       expect(unknownKeyIssue(ApprovalNodeConfigSchema, { ...minimalConfig, quorum: 2 })!.message)
         .toContain('`quorum` → `minApprovals`');
     });
-
-    it('accepts every key the schema declares (guards APPROVAL_NODE_CONFIG_KEYS drift)', () => {
-      const probes: Record<string, unknown> = {
-        behavior: 'quorum', minApprovals: 2, lockRecord: false,
-        approvalStatusField: 'approval_status', onEmptyApprovers: 'fail',
-        decisionOutputs: ['next_approver', { key: 'picked', type: 'user' }],
-        escalation: { enabled: true, timeoutHours: 4 }, maxRevisions: 1,
-      };
-      for (const [key, value] of Object.entries(probes)) {
-        const result = ApprovalNodeConfigSchema.safeParse({ ...minimalConfig, [key]: value });
-        const unknown = result.success
-          ? undefined
-          : result.error.issues.find((i) => i.code === 'unrecognized_keys');
-        expect(unknown, `\`${key}\` should be a declared config key`).toBeUndefined();
-      }
-    });
   });
 
   describe('ApprovalNodeApproverSchema', () => {

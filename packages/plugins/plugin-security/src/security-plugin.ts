@@ -44,6 +44,7 @@ import { bootstrapDeclaredCapabilities } from './bootstrap-declared-capabilities
 import { RLSCompiler, RLS_DENY_FILTER } from './rls-compiler.js';
 import { computeTenantLayer0Filter, andComposeLayers } from './tenant-layer.js';
 import { isPlatformTenantPolicy, isAuthoredTenantPolicy } from './platform-tenant-policies.js';
+import { isPlatformOwnershipFloorPolicy } from './platform-ownership-policies.js';
 import {
   normalizeTenancyPosture,
   postureEnforcesWall,
@@ -54,6 +55,9 @@ import {
   RESERVED_RLS_MEMBERSHIP_KEYS,
   type IRlsMembershipResolver,
   type ISecurityService,
+  type SharingWriteVerdict,
+  type AuthoredRowWriteVerdict,
+  type AuthoredRowWriteOperation,
 } from '@objectstack/spec/contracts';
 import { matchesFilterCondition } from '@objectstack/formula';
 import { FieldMasker } from './field-masker.js';
@@ -169,6 +173,30 @@ interface ObjectSecurityMeta {
 const EMPTY_REQUIRED_PERMISSIONS: NormalizedRequiredPermissions = Object.freeze({
   all: [], read: [], create: [], update: [], delete: [],
 }) as NormalizedRequiredPermissions;
+
+/**
+ * [#5492] Knobs on the layered RLS computation. Exactly one today, and it is a
+ * COMPOSITION instruction rather than a policy switch: the caller has already
+ * consulted the authority that owns the write-widening mechanisms and is telling
+ * this layer whose answer wins.
+ */
+interface RlsFilterOptions {
+  /**
+   * Drop the PLATFORM's own row-level write ownership floor
+   * (`owner_only_writes` / `owner_only_deletes` — see
+   * `platform-ownership-policies.ts`) from Layer 1.
+   *
+   * Set ONLY by the by-id write pre-image gate, and only when
+   * `ISharingService.checkEdit` / `checkDelete` answered `allow` — a positive
+   * basis (ownership at write DEPTH, an `edit`-level `sys_record_share`, or the
+   * `modifyAllRecords` bypass). `abstain` and `deny` both leave it in place, so
+   * a row record sharing does not enforce on keeps the floor as its only
+   * row-level write gate.
+   *
+   * Never affects Layer 0 (the tenant wall) or any app-authored policy.
+   */
+  dropPlatformOwnershipFloor?: boolean;
+}
 
 /**
  * [ADR-0066 / #2918] Provenance spec for the platform/application asset objects
@@ -710,6 +738,20 @@ export class SecurityPlugin implements Plugin {
             return 'own';
           }
         },
+        // [#5493 / ADR-0105 D3] Authored-row-write evidence: does an
+        // APP-AUTHORED (non-floor) RLS policy admit this row for this write,
+        // with the platform's `created_by` ownership floor taken out by
+        // provenance? The composed RLS answer cannot stand in for it — the
+        // floor admits every row's CREATOR, so a caller deferring to "composed
+        // RLS admits" hands transferred records back to their former creators
+        // (#5493 probe E-A). Verdict-shaped and fail-closed to `abstain`; see
+        // the method for why a null Layer 1 is an abstention.
+        checkAuthoredRowWrite: (
+          object: string,
+          recordId: string,
+          operation: AuthoredRowWriteOperation,
+          context?: any,
+        ) => this.checkAuthoredRowWrite(object, recordId, operation, context),
         // [ADR-0046 §6.7] Effective permission-set NAMES for a caller — the
         // primitive the REST read layer needs to evaluate a permission-set-
         // gated book/doc audience ({ permissionSet: '…' }). Same resolution
@@ -758,8 +800,19 @@ export class SecurityPlugin implements Plugin {
         dismissAudienceBindingSuggestion: (callerContext: any, id: string) =>
           dismissAudienceBindingSuggestion(suggestionDeps, callerContext, id),
       };
-      ctx.registerService('security', securityService);
-      ctx.logger.info('[security] registered "security" service (getReadFilter, getReadableFields, canExport, explain, audience-binding suggestions) — ADR-0021 D-C / ADR-0090 D5/D6/D9 / #3544 / #3547');
+      // [ADR-0106 D7] The metadata-plane readable-field query, registered as an
+      // EXTENSION of the published contract rather than inside the typed
+      // literal above: `ISecurityService` lives in `packages/spec`, and the
+      // seat for this method there is a separate change (consumers already
+      // feature-detect, which is exactly why a partial surface degrades instead
+      // of lying). `Object.assign` keeps the literal type-checked against the
+      // contract while the extension stays visible as an extension.
+      const registeredSecurityService = Object.assign(securityService, {
+        getMetadataReadableFields: (object: string, context?: any) =>
+          this.getMetadataReadableFields(object, context),
+      });
+      ctx.registerService('security', registeredSecurityService);
+      ctx.logger.info('[security] registered "security" service (getReadFilter, getReadableFields, getMetadataReadableFields, canExport, checkAuthoredRowWrite, explain, audience-binding suggestions) — ADR-0021 D-C / ADR-0090 D5/D6/D9 / ADR-0106 D7 / #3544 / #3547 / #5493');
     } catch (e) {
       ctx.logger.warn?.('[security] failed to register "security" service', {
         error: (e as Error).message,
@@ -1140,6 +1193,46 @@ export class SecurityPlugin implements Plugin {
       // RLS-hidden → deny. When `computeRlsFilter` returns `null` (no policy
       // applies — e.g. an admin set with no RLS, or `modifyAllRecords`) the
       // check is skipped and behaviour is unchanged.
+      //
+      // [#5492] The filter is composed BY PROVENANCE. Two of the policies that
+      // can land in it are the platform's OWN ownership floor
+      // (`owner_only_writes` / `owner_only_deletes`, `created_by ==
+      // current_user.id` — see `platform-ownership-policies.ts`), and that floor
+      // is a SECOND implementation of ownership: the one blind to every widening
+      // mechanism the platform also declares (write DEPTH, an `edit`-level
+      // `sys_record_share`, the `modifyAllRecords` bypass). Running it as an
+      // unconditional AND made all three inert — a manager holding Modify All
+      // Data and a share target holding `access_level: 'edit'` both got 403 on
+      // every row they did not personally create.
+      //
+      // So the floor now DEFERS to the authority that owns those wideners:
+      // `ISharingService`'s tri-state write verdict (#6428).
+      //
+      //   allow   → the declared authority REPLACES the floor (it has a positive
+      //             basis: ownership at DEPTH, an `edit` share, or the bypass).
+      //   abstain → record sharing does not enforce on this row at all (public
+      //             object, no owner field, platform internal). The floor is the
+      //             ONLY row-level write gate such objects have, so it STAYS —
+      //             #5492's E2 experiment measured what collapsing this into
+      //             "permitted" costs: a member's cross-creator UPDATE on an
+      //             `owner_id`-less object turned 403 into 200.
+      //   deny    → the floor stays. The refusal itself belongs to the sharing
+      //             middleware that produced the verdict; re-raising it here
+      //             would be the duplicate implementation this composition
+      //             exists to remove, and could only ever narrow a surface the
+      //             ruling says may not shrink.
+      //
+      // Layer 0 (the tenant wall) and every APP-AUTHORED policy are untouched by
+      // the replacement — a declared security property stays declared (ADR-0049).
+      // Note what this is NOT: `modifyAllRecords` still does not bypass
+      // write-side RLS on an ordinary business posture (ADR-0066 ① is intact).
+      // The platform's own floor defers to the platform's own ownership
+      // authority; app-authored policies keep refusing exactly as before.
+      //
+      // The verb boundary is INHERITED, not restated (ADR-0111 D3): the same
+      // `rlsOperation` mapping picks `checkEdit` for the update class and
+      // `checkDelete` for the delete class, so an `edit` share widens update and
+      // still leaves delete denied without this file knowing why.
       if (
         // update/delete today; transfer/restore/purge are pre-wired (#1883) so
         // the M2 ops inherit the pre-image check the moment they dispatch —
@@ -1159,11 +1252,39 @@ export class SecurityPlugin implements Plugin {
             opCtx.operation === 'purge' ? 'delete'
             : opCtx.operation === 'transfer' || opCtx.operation === 'restore' ? 'update'
             : opCtx.operation;
+          // [#5492] Ask the write authority ONLY when the platform floor is
+          // actually in play for this (principal, object, operation) — no floor,
+          // nothing to replace, and no reason to spend a sharing probe.
+          //
+          // [ADR-0090 D10] The on-behalf-of path is deliberately EXCLUDED. The
+          // bypass predicate the verdict folds through already fails closed for a
+          // delegated context (`hasWriteBypass`: "no D10 delegator intersection
+          // on this path", ADR-0111 D2), so composing here could only produce a
+          // verdict resolved against the wrong identity. The delegated write
+          // keeps both principals' floors, exactly as before.
+          const floorApplies =
+            !delegatorSets &&
+            this.collectRLSPolicies(
+              permissionSets,
+              opCtx.object,
+              rlsOperation,
+              (opCtx.context?.positions ?? []) as string[],
+            ).some(isPlatformOwnershipFloorPolicy);
+          const dropPlatformOwnershipFloor = floorApplies
+            ? (await this.resolveSharingWriteVerdict(
+                rlsOperation,
+                opCtx.object,
+                String(targetId),
+                opCtx.context,
+                permissionSets,
+              )) === 'allow'
+            : false;
           const writeFilter = await this.computeRlsFilter(
             permissionSets,
             opCtx.object,
             rlsOperation,
             opCtx.context,
+            { dropPlatformOwnershipFloor },
           );
           // [ADR-0090 D10] The target row must satisfy BOTH principals' write
           // RLS — a by-id write on behalf of a user may only touch rows that
@@ -2372,27 +2493,7 @@ export class SecurityPlugin implements Plugin {
       | { canEdit?: (o: string, id: string, c: any) => Promise<boolean> }
       | undefined;
     if (!sharing || typeof sharing.canEdit !== 'function') return true;
-    // ADR-0057 D1 depth stash, resolved for THIS object — the context may still
-    // carry the DETAIL's `__writeScope` from the middleware, and the master's
-    // own grant is what widens the master's owner-match. Always written (even as
-    // undefined) so the detail's value can never leak in through the spread.
-    let writeScope: string | undefined;
-    try {
-      const permissionSets = resolvedSets ?? (await this.resolvePermissionSetsForContext(context));
-      if (permissionSets.length > 0) {
-        const meta = await this.getObjectSecurityMeta(object);
-        writeScope = this.permissionEvaluator.getEffectiveScope(
-          'write',
-          object,
-          permissionSets,
-          { isPrivate: meta.isPrivate },
-        );
-      }
-    } catch {
-      // Depth is a WIDENING input: unresolved leaves the owner-match at its
-      // narrowest ('own'), the safe direction. The gate below still runs.
-      writeScope = undefined;
-    }
+    const writeScope = await this.resolveWriteScopeForSharing(object, context, resolvedSets);
     try {
       return (
         (await sharing.canEdit(object, recordId, { ...context, __writeScope: writeScope })) === true
@@ -2405,6 +2506,209 @@ export class SecurityPlugin implements Plugin {
         e instanceof Error ? e : new Error(String(e)),
       );
       return false;
+    }
+  }
+
+  /**
+   * [ADR-0057 D1] The write-DEPTH stash both sharing write probes hand the
+   * service, resolved for THIS object.
+   *
+   * The context may still carry another object's `__writeScope` from the
+   * middleware (the DETAIL's, when the caller is deriving a verdict about the
+   * MASTER), and it is the probed object's own grant that widens the probed
+   * object's owner-match. Always returned (even as `undefined`) so the caller
+   * can write the key unconditionally and a stale value can never leak in
+   * through a spread.
+   *
+   * Depth is a WIDENING input, so an unresolved one leaves the owner-match at
+   * its narrowest (`own`) — the safe direction — and the gate still runs.
+   *
+   * Extracted so {@link resolveSharingCanEdit} and
+   * {@link resolveSharingWriteVerdict} cannot drift on it: they are two forms of
+   * one question and must feed the service the same depth.
+   */
+  private async resolveWriteScopeForSharing(
+    object: string,
+    context: any,
+    resolvedSets?: PermissionSet[],
+  ): Promise<string | undefined> {
+    try {
+      const permissionSets = resolvedSets ?? (await this.resolvePermissionSetsForContext(context));
+      if (permissionSets.length === 0) return undefined;
+      const meta = await this.getObjectSecurityMeta(object);
+      return this.permissionEvaluator.getEffectiveScope(
+        'write',
+        object,
+        permissionSets,
+        { isPrivate: meta.isPrivate },
+      );
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * [#5492 / #6428] The TRI-STATE write verdict for a single row — the form the
+   * by-id write pre-image gate composes with, and the reason it does not need a
+   * second implementation of ownership.
+   *
+   * `ISharingService` is the one authority that reads all three declared
+   * write-widening mechanisms (ownership at write DEPTH, an `edit`-level
+   * `sys_record_share`, the `modifyAllRecords` bypass). Asking it here — rather
+   * than recomputing owner / depth / share / bypass on this side — is what keeps
+   * the ADR-0111 D3 verb boundary INHERITED: `update` asks `checkEdit`, `delete`
+   * asks `checkDelete`, and the fact that an `edit` share widens update but not
+   * delete lives in exactly one place.
+   *
+   * Why the tri-state and not `canEdit()`'s boolean: that projection collapses
+   * `allow` and `abstain` into one `true`, which is correct for a caller that
+   * only ADDS a gate and a **measured fail-open** for one that lets the answer
+   * override another authority's floor — #5492's E2 experiment turned an
+   * ordinary member's cross-creator UPDATE on an `owner_id`-less object from 403
+   * into 200 that way.
+   *
+   * Fail-closed shape:
+   *  - no plugin-sharing / no tri-state method → `abstain`. Nothing has been
+   *    consulted, so nothing may replace the floor; behaviour is unchanged from
+   *    a deployment without the sharing plugin.
+   *  - an unrecognised answer (an older two-state implementation registered
+   *    under this name) → `abstain`, for the same reason.
+   *  - a probe that THROWS → `deny` (logged). The service itself already denies
+   *    on an unresolvable lookup (#6428); this covers the call failing outright.
+   *    Both leave the floor standing, which is the non-widening direction.
+   */
+  private async resolveSharingWriteVerdict(
+    rlsOperation: string,
+    object: string,
+    recordId: string,
+    context: any,
+    resolvedSets?: PermissionSet[],
+  ): Promise<SharingWriteVerdict> {
+    const method = rlsOperation === 'delete' ? 'checkDelete' : 'checkEdit';
+    const sharing = this.resolveKernelService?.('sharing') as
+      | Record<string, ((o: string, id: string, c: any) => Promise<SharingWriteVerdict>) | undefined>
+      | undefined;
+    const probe = sharing?.[method];
+    if (typeof probe !== 'function') return 'abstain';
+    const writeScope = await this.resolveWriteScopeForSharing(object, context, resolvedSets);
+    try {
+      const verdict = await probe.call(sharing, object, recordId, {
+        ...context,
+        __writeScope: writeScope,
+      });
+      return verdict === 'allow' || verdict === 'deny' ? verdict : 'abstain';
+    } catch (e) {
+      this.logger.error?.(
+        `[security] the row-level write gate could not resolve the sharing (${method}) verdict ` +
+          `for '${object}' record '${recordId}' (user ${context?.userId ?? 'unknown'}) — keeping ` +
+          `the platform ownership floor (fail-closed, #5492)`,
+        e instanceof Error ? e : new Error(String(e)),
+      );
+      return 'deny';
+    }
+  }
+
+  /**
+   * [#5493 / ADR-0105 D3] `ISecurityService.checkAuthoredRowWrite` — does an
+   * APP-AUTHORED row-level policy admit this row for this write operation, on
+   * its own, with the platform's ownership floor taken out?
+   *
+   * The question exists because the composed RLS answer cannot stand in for it.
+   * `member_default` — the additive baseline every authenticated member
+   * resolves — ships `owner_only_writes` / `owner_only_deletes`
+   * (`created_by == current_user.id`, see `platform-ownership-policies.ts`), so
+   * "the composed RLS admits this row" is true for the row's CREATOR whether or
+   * not any app policy mentions it. #5493's probe E-A measured the gap: a
+   * creator who is no longer the owner (a record transferred away) is admitted
+   * by the floor and refused by sharing with a byte-identical envelope, so a
+   * deferral keyed on the composed answer would hand transferred records back
+   * to their former creators. Provenance is the only thing that separates the
+   * two, and it is private to this package by design.
+   *
+   * **No second RLS evaluator.** The verdict is read off the SAME
+   * {@link computeLayeredRlsFilter} the middleware enforces with, driven by the
+   * SAME `dropPlatformOwnershipFloor` knob #6684 landed for the by-id write
+   * pre-image gate — the floor is removed by provenance, everything else
+   * compiles exactly as it would on the enforcement path. Two consequences
+   * worth naming, because both are load-bearing:
+   *
+   *  - `layer1 == null` is read as `abstain`, never as "admitted". Layer 1 is
+   *    null precisely when no authored predicate is actually gating this write:
+   *    the applicable set was empty, or the ADR-0066 ① posture-gated superuser
+   *    short-circuit skipped business RLS wholesale. A superuser bypass is not
+   *    an authored admission, and reporting it as one would re-open E-A from
+   *    the other side. (The field-existence net's deny sentinel is NOT null, so
+   *    it flows through the probe and matches nothing — also `abstain`.)
+   *  - Layer 0 (the tenant wall) stays AND-ed in. A row in another tenant is
+   *    admitted by nothing, and dropping the wall here would make this the one
+   *    surface in the plugin that answers across it.
+   *
+   * **Fail-closed in the `abstain` direction** — the caller uses `admit` to
+   * WIDEN, so every failure must be the answer that changes nothing. No throw
+   * ever escapes: a principal-less context, an on-behalf-of context (ADR-0090
+   * D10 — the delegator intersection is not computed on this path, exactly as
+   * {@link hasWriteBypass} and {@link resolveWriteScope} fail closed on it), an
+   * unresolvable probe and a thrown lookup all return `abstain`.
+   *
+   * The pre-image read is the same `findOne` shape the by-id write gate uses,
+   * with the caller's own context — so a row the caller cannot READ is not
+   * "admitted by declaration" here either, which is the non-widening direction
+   * and matches what the enforcement path already does with the same read.
+   */
+  async checkAuthoredRowWrite(
+    object: string,
+    recordId: string,
+    operation: AuthoredRowWriteOperation,
+    context?: any,
+  ): Promise<AuthoredRowWriteVerdict> {
+    try {
+      if (!object || recordId == null || recordId === '') return 'abstain';
+      if (operation !== 'update' && operation !== 'delete') return 'abstain';
+      if (!this.ql) return 'abstain';
+      // No principal, or a delegated identity this path cannot intersect —
+      // both are "cannot measure", which is `abstain` (never `admit`).
+      if (!context?.userId) return 'abstain';
+      if (context?.onBehalfOf?.userId) return 'abstain';
+
+      const permissionSets = await this.resolvePermissionSetsForContext(context);
+      if (permissionSets.length === 0) return 'abstain';
+
+      // Cheap provenance pre-check: if the caller holds NO app-authored policy
+      // applicable to (object, operation), there is nothing that could admit by
+      // declaration — answer without spending a database round-trip. This is
+      // the same collection the compiler consumes, filtered by the same
+      // provenance predicate, so the two cannot disagree about what "authored"
+      // means.
+      const authored = this.collectRLSPolicies(
+        permissionSets,
+        object,
+        operation,
+        (context?.positions ?? []) as string[],
+      ).filter((p) => !isPlatformOwnershipFloorPolicy(p));
+      if (authored.length === 0) return 'abstain';
+
+      const { layer0, layer1 } = await this.computeLayeredRlsFilter(
+        permissionSets,
+        object,
+        operation,
+        context,
+        { dropPlatformOwnershipFloor: true },
+      );
+      // See the doc above: a null Layer 1 means no authored predicate is
+      // gating this write, which is an abstention and not an admission.
+      if (layer1 == null) return 'abstain';
+
+      const parts = [{ id: recordId }, ...(layer0 ? [layer0] : []), layer1];
+      const row = await this.ql.findOne(object, { where: { $and: parts }, context });
+      return row ? 'admit' : 'abstain';
+    } catch (e) {
+      this.logger.warn?.(
+        `[security] checkAuthoredRowWrite could not resolve an authored-policy verdict for ` +
+          `'${object}' record '${recordId}' (${operation}, user ${context?.userId ?? 'unknown'}) — ` +
+          `abstaining (fail-closed, #5493)`,
+        e instanceof Error ? e : new Error(String(e)),
+      );
+      return 'abstain';
     }
   }
 
@@ -2548,6 +2852,40 @@ export class SecurityPlugin implements Plugin {
    * `isSystem` skip.
    */
   async getReadableFields(object: string, context?: any): Promise<string[] | undefined> {
+    return this.computeReadableFields(object, context, { fallbackOnEmptySets: false });
+  }
+
+  /**
+   * [ADR-0106 D7] The METADATA-PLANE variant of {@link getReadableFields}.
+   *
+   * Identical in every respect but one: a caller that resolves to **zero**
+   * permission sets goes through the same fallback-set resolution
+   * `/auth/me/permissions` uses ({@link fallbackPermissionSet}, default
+   * `member_default`) instead of falling open to the full field set.
+   *
+   * Why the two differ rather than converge. `getReadableFields` mirrors the
+   * engine middleware, which skips its whole gate for a caller with no
+   * permission sets — reporting a narrowing the data path would not enforce is
+   * its own kind of drift, so on the DATA plane falling open is the correct,
+   * drift-free answer. The metadata plane has no such symmetry to preserve: the
+   * question there is disclosure, and ADR-0106 D7 rules that a public/guest
+   * deployment's schema exposure must be a deliberate permission-set decision
+   * rather than an accidental everything-default. Anonymous callers on a
+   * `requireAuth` deployment are blocked before any of this.
+   *
+   * Still falls open when the fallback set itself resolves to nothing (no
+   * `member_default` in the deployment at all) — that is the "no FLS posture
+   * here" tier, not a restricted caller.
+   */
+  async getMetadataReadableFields(object: string, context?: any): Promise<string[] | undefined> {
+    return this.computeReadableFields(object, context, { fallbackOnEmptySets: true });
+  }
+
+  private async computeReadableFields(
+    object: string,
+    context: any,
+    options: { fallbackOnEmptySets: boolean },
+  ): Promise<string[] | undefined> {
     const objectName = String(object ?? '');
     if (!objectName) return undefined;
     // The field universe — the SAME source the RLS field pass uses (ObjectQL's
@@ -2559,7 +2897,14 @@ export class SecurityPlugin implements Plugin {
     // System operations bypass FLS (mirrors the middleware's isSystem skip).
     if (context?.isSystem) return allFields;
 
-    const permissionSets = await this.resolvePermissionSetsForContext(context);
+    let permissionSets = await this.resolvePermissionSetsForContext(context);
+    if (permissionSets.length === 0 && options.fallbackOnEmptySets) {
+      // [ADR-0106 D7] `resolvePermissionSetsForContext` applies the baseline
+      // only for a caller carrying `userId`, so a guest/anonymous caller lands
+      // here with nothing. Resolve the configured fallback set explicitly —
+      // the same two-step `/auth/me/permissions` performs.
+      permissionSets = await this.resolveFallbackPermissionSets();
+    }
     // No sets resolved (e.g. unauthenticated) → no field mask applies, exactly
     // as the middleware (getFieldPermissions([]) === {} → nothing deleted).
     if (permissionSets.length === 0) return allFields;
@@ -2713,6 +3058,32 @@ export class SecurityPlugin implements Plugin {
       );
     }
     return permissionSets;
+  }
+
+  /**
+   * [ADR-0106 D7] Resolve the configured fallback permission set on its own —
+   * the second step `/auth/me/permissions` takes when a caller's own names
+   * resolve to nothing (`resolved.length === 0 && fallbackName`).
+   *
+   * Distinct from the post-resolution fallback inside
+   * {@link resolvePermissionSetsForContext}, which is gated on `context.userId`
+   * (it exists to close an RLS fail-open for AUTHENTICATED callers whose
+   * positions map to no set). D7 needs the same resolution for a caller with no
+   * principal at all, so that a guest-facing deployment's metadata exposure is
+   * a permission-set decision rather than an accidental everything-default.
+   *
+   * Returns `[]` when no fallback set is configured or it does not resolve.
+   */
+  private async resolveFallbackPermissionSets(): Promise<PermissionSet[]> {
+    const fallback = this.fallbackPermissionSet;
+    if (!fallback) return [];
+    return this.permissionEvaluator.resolvePermissionSets(
+      [fallback],
+      this.metadata,
+      this.bootstrapPermissionSets,
+      this.dbLoader,
+      { logger: this.logger },
+    );
   }
 
   /**
@@ -3044,8 +3415,9 @@ export class SecurityPlugin implements Plugin {
     object: string,
     operation: string,
     context: any,
+    opts?: RlsFilterOptions,
   ): Promise<Record<string, unknown> | null> {
-    const { layer0, layer1 } = await this.computeLayeredRlsFilter(permissionSets, object, operation, context);
+    const { layer0, layer1 } = await this.computeLayeredRlsFilter(permissionSets, object, operation, context, opts);
     return andComposeLayers(layer0, layer1);
   }
 
@@ -3074,6 +3446,7 @@ export class SecurityPlugin implements Plugin {
     object: string,
     operation: string,
     context: any,
+    opts?: RlsFilterOptions,
   ): Promise<{ layer0: Record<string, unknown> | null; layer1: Record<string, unknown> | null }> {
     // [ADR-0095 D1] Effective filter = Layer0(tenant) AND Layer1(business RLS).
     // The two are computed independently and never share a compiler, a merge
@@ -3137,7 +3510,18 @@ export class SecurityPlugin implements Plugin {
     // longer skip the tenant wall (that is Layer 0's own exemption, below).
     let layer1: Record<string, unknown> | null = null;
     if (!(posturePermits && superuserBypass)) {
-      const allRlsPolicies = this.collectRLSPolicies(permissionSets, object, operation, (context?.positions ?? []) as string[]);
+      const collected = this.collectRLSPolicies(permissionSets, object, operation, (context?.positions ?? []) as string[]);
+      // [#5492] Provenance composition: the caller (the by-id write pre-image
+      // gate) has already asked the declared write authority — `ISharingService`
+      // — and received a positive `allow`. Its answer REPLACES the platform's own
+      // ownership floor, which is the widener-blind second implementation of the
+      // same "ownership" contract. Only the PLATFORM's floor is replaceable; an
+      // app-authored policy — even one spelling the identical predicate under a
+      // different name — reaches the compiler untouched (ADR-0049, and the
+      // ADR-0105 F1 lesson that a token match swallows authored policies).
+      const allRlsPolicies = opts?.dropPlatformOwnershipFloor
+        ? collected.filter((p) => !isPlatformOwnershipFloorPolicy(p))
+        : collected;
       if (allRlsPolicies.length > 0) {
         // Field-existence safety: a wildcard policy targeting a column the object
         // lacks is a *deny* contribution (fail-closed), unless the object opted

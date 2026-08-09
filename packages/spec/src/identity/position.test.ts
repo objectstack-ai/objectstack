@@ -261,17 +261,4 @@ describe('unknown keys are rejected, not stripped (#4001)', () => {
     expect(parsed._packageId).toBe('com.showcase');
     expect(parsed._lock).toBe('full');
   });
-
-  it('accepts every key the schema declares (guards POSITION_KEYS drift)', () => {
-    const probes: Record<string, unknown> = {
-      description: 'd', delegatable: true, protection: { lock: 'none' },
-    };
-    for (const [key, value] of Object.entries(probes)) {
-      const result = PositionSchema.safeParse({ name: 'p', label: 'P', [key]: value });
-      const unknown = result.success
-        ? undefined
-        : result.error.issues.find((i) => i.code === 'unrecognized_keys');
-      expect(unknown, `\`${key}\` should be a declared Position key`).toBeUndefined();
-    }
-  });
 });

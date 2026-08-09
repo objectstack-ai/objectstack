@@ -13,7 +13,7 @@
  *    third-party plugins can't ship runaway predicates.
  */
 
-import { Environment, ParseError, serialize } from '@marcbachmann/cel-js';
+import { Environment, EvaluationError, ParseError, serialize } from '@marcbachmann/cel-js';
 import type { ASTNode } from '@marcbachmann/cel-js';
 import type { Expression } from '@objectstack/spec';
 
@@ -50,8 +50,28 @@ function buildEnv(now: () => Date, timezone = 'UTC'): Environment {
  * an *undeclared* top-level identifier, i.e. a bare field reference. Generous on
  * purpose: an unknown root is a missed catch, a missing root is a false positive
  * that would break the build, so we err toward declaring more.
+ *
+ * ## Why this list is PUBLISHED (#6713)
+ *
+ * Exported for the same reason as {@link collectCelRootIdentifiers} and
+ * {@link firstUndeclaredReference}: a surface that binds a CLOSED set of roots
+ * has to name the roots it does NOT bind, and that complement is
+ * `SCOPE_ROOTS` minus its own allowlist. `@objectstack/lint`'s field-level
+ * `*When` gate is exactly such a surface — it binds `record` / `previous` /
+ * `parent` and nothing else — and it used to carry a hand-written DENYLIST of
+ * three roots instead. A denylist structurally cannot track this list: every
+ * root added here (`current_user` arrived in #6290) is silently unreported at
+ * that surface until somebody remembers to copy it over, and #6713 measured 21
+ * roots sitting in that gap.
+ *
+ * Consuming the list is NOT the same as consuming {@link firstUndeclaredReference}
+ * and the difference is load-bearing. The strict env also declares CEL's own
+ * TYPE names (`int`, `string`, `bool`, `type`, `map`, …), so
+ * `type(record.x) == string` reports `string` as a root that "resolves" —
+ * legitimate CEL a declaredness oracle cannot tell apart from an unbound
+ * namespace. Membership of THIS list can.
  */
-const SCOPE_ROOTS = [
+export const SCOPE_ROOTS = [
   'record', 'previous', 'input', 'output', 'os', 'vars', 'variables',
   'automation', 'context', 'args', 'item', 'env', 'user', 'step', 'result',
   'trigger', 'event', 'payload', 'data', 'params', 'config', 'settings',
@@ -271,14 +291,243 @@ let canonicalParseEnv: Environment | undefined;
  * asymmetry so neither side drifts.
  */
 export function parseCelToAst(source: string): CelAstNode | null {
-  if (typeof source !== 'string' || !source.trim()) return null;
+  const parsed = parseCelToAstWithReason(source);
+  return parsed.ok ? parsed.ast : null;
+}
+
+// ---------------------------------------------------------------------------
+// The reason-carrying sister entrance (#6132)
+// ---------------------------------------------------------------------------
+
+/** A key of {@link DEFAULT_LIMITS} — the platform bounds a source can overrun. */
+export type CelLimitKey = keyof typeof DEFAULT_LIMITS;
+
+const CEL_LIMIT_KEYS = Object.keys(DEFAULT_LIMITS) as readonly CelLimitKey[];
+
+/** How far past a {@link DEFAULT_LIMITS} bound a source actually reaches. */
+export interface CelBoundsOverrun {
+  /**
+   * WHICH bound was exceeded — `maxAstNodes` / `maxDepth` / `maxListElements` / …
+   * `null` only if cel-js reports a limit fault this package cannot name (see
+   * {@link limitKeyOf}); a guessed key would send the author to shorten the
+   * wrong axis, so the honest answer is "we know it was a bound, not which".
+   */
+  limit: CelLimitKey | null;
+  /** The platform's value for that bound, i.e. what the source had to stay under. */
+  limitValue: number | null;
+  /**
+   * What the source itself measures on that axis: the smallest value of
+   * `limits[limit]` under which it parses, every OTHER bound lifted, so the
+   * number is cel-js's own accounting rather than a second implementation of
+   * it. `null` when the measurement was capped (see {@link CEL_BOUNDS_MEASURE_CAP_FACTOR})
+   * or is not being taken — a bounds *refusal* never measures, because
+   * measuring means re-parsing a source we have just decided is too big.
+   */
+  measured: number | null;
+  /**
+   * cel-js's own one-line summary — `Exceeded maxAstNodes (256)`. Taken from
+   * `ParseError#summary`, NOT `#message`: the latter is
+   * `formatErrorWithHighlight`'s rendering, which interpolates the author's own
+   * source line (the #6223 hazard).
+   */
+  summary: string;
+}
+
+/**
+ * The verdict {@link parseCelToAstWithReason} returns — the same three-way
+ * answer {@link classifyCelFault} already grades a thrown fault into, made
+ * available to a caller that has to ACT differently on `bounds` than on
+ * `parse`, rather than collapsing both to `null`.
+ */
+export type CelParseResult =
+  | { ok: true; ast: CelAstNode }
+  /** Empty / whitespace-only source. Not a fault — "no expression". */
+  | { ok: false; kind: 'empty'; message: string }
+  /** A syntax fault. `message` is cel-js's rendered message, verbatim. */
+  | { ok: false; kind: 'parse'; message: string }
+  | {
+      ok: false;
+      kind: 'bounds';
+      /** cel-js's rendered message, verbatim — same string `parse` carries. */
+      message: string;
+      /** WHICH bound, and by how much. */
+      overrun: CelBoundsOverrun;
+      /**
+       * The AST an otherwise-identical but **unbounded** parse yields, when the
+       * caller asked for it (`{ admitOverLimit: true }`) — the 17.0.0-rc.x
+       * grace window's input, and nothing else's. `null` otherwise.
+       */
+      unboundedAst: CelAstNode | null;
+    };
+
+export interface ParseCelToAstOptions {
+  /**
+   * Also perform the unbounded parse and hand back its AST + the measured
+   * overrun. **Only** the 17.0.0-rc.x pushdown grace window sets this (see
+   * `cel-pushdown-limits.ts`); it is what lets that window keep compiling a
+   * predicate the platform's bounds refuse, while still naming the bound. It
+   * disappears with the grace window at v17 GA.
+   *
+   * Off by default, deliberately: an unbounded parse of a source we have just
+   * measured as over-budget is work proportional to the source, so a caller
+   * that only wants the verdict must not pay for it.
+   */
+  admitOverLimit?: boolean;
+}
+
+/**
+ * How far above the exceeded bound {@link measureOverrun} will search before it
+ * gives up and reports `measured: null`. Bounds the diagnostic's own cost:
+ * without a cap, describing a pathological source means parsing it at whatever
+ * size it happens to be.
+ */
+export const CEL_BOUNDS_MEASURE_CAP_FACTOR = 64;
+
+/**
+ * The canonical env with ONE bound lifted, used only to measure an overrun.
+ * Configured identically to {@link canonicalParseEnv} in every other respect —
+ * same stdlib, same `unlistedVariablesAreDyn`, same `enableOptionalTypes` — so
+ * "the smallest bound this source parses under" is a fact about the source and
+ * not about a second, differently-shaped front end.
+ */
+function buildProbeEnv(limits: Record<string, number>): Environment {
+  const env = new Environment({
+    unlistedVariablesAreDyn: true,
+    enableOptionalTypes: true,
+    limits: limits as unknown as typeof DEFAULT_LIMITS,
+  });
+  return registerNumericCoercions(registerStdLib(env, () => new Date(0), 'UTC'));
+}
+
+/** Every bound lifted out of the way except `key`, which is set to `value`. */
+function probeLimits(key: CelLimitKey, value: number): Record<string, number> {
+  const limits: Record<string, number> = {};
+  for (const k of CEL_LIMIT_KEYS) limits[k] = Number.MAX_SAFE_INTEGER;
+  limits[key] = value;
+  return limits;
+}
+
+function parsesUnder(source: string, key: CelLimitKey, value: number): boolean {
+  try {
+    buildProbeEnv(probeLimits(key, value)).parse(source);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The smallest `limits[key]` under which `source` parses — i.e. what the source
+ * measures on that axis, in cel-js's own units.
+ *
+ * Measured rather than computed. cel-js decrements each counter at its own call
+ * sites (`Parser#node` for `maxAstNodes`, three separate recursion points for
+ * `maxDepth`, …), and `maxDepth` in particular counts parenthesised recursion
+ * that leaves no AST node behind — so a node-walk over the parsed tree would
+ * report `3` for a 60-deep parenthesis nest. Asking the parser is the only way
+ * the number in the WARN means what it says.
+ *
+ * Exponential probe from the exceeded bound, then binary search: `O(log n)`
+ * parses, capped at {@link CEL_BOUNDS_MEASURE_CAP_FACTOR}× the bound.
+ */
+function measureOverrun(source: string, key: CelLimitKey, limitValue: number): number | null {
+  const cap = limitValue * CEL_BOUNDS_MEASURE_CAP_FACTOR;
+  let hi = limitValue * 2;
+  while (hi <= cap && !parsesUnder(source, key, hi)) hi *= 2;
+  if (hi > cap) return null;
+  // It parses at `hi` and (by construction) not at `lo`. Narrow to the boundary.
+  let lo = hi / 2;
+  while (hi - lo > 1) {
+    const mid = Math.floor((lo + hi) / 2);
+    if (parsesUnder(source, key, mid)) hi = mid;
+    else lo = mid;
+  }
+  return hi;
+}
+
+/** Read the exceeded bound's key out of cel-js's structured limit fault. */
+function limitKeyOf(err: ParseError): CelLimitKey | null {
+  // `summary` is `Exceeded ${limitKey} (${limit})`, built by `Parser#limitExceeded`
+  // from a fixed set of keys — the author's source never reaches it (that is
+  // `message`, via `formatErrorWithHighlight`). We still validate the capture
+  // against `DEFAULT_LIMITS` rather than trusting the shape, so a cel-js that
+  // rephrases the sentence degrades to "we know it was a bounds fault, not which
+  // bound" instead of inventing a limit name.
+  const key = /^Exceeded (\w+) /.exec(err.summary ?? '')?.[1];
+  return key && (CEL_LIMIT_KEYS as readonly string[]).includes(key) ? (key as CelLimitKey) : null;
+}
+
+/**
+ * {@link parseCelToAst}, but it says WHY it refused (#6132).
+ *
+ * `parseCelToAst` collapses "this is not valid CEL" and "this is valid CEL that
+ * is over the platform's budget" into the same `null`, which is right for a
+ * caller whose job is not to adjudicate syntax. It is wrong for a caller whose
+ * job is to *report* the refusal: the RLS / sharing pushdown path fails closed
+ * on a refusal, and "your policy was rejected: parse error" for a predicate
+ * that is perfectly well-formed but 431 AST nodes long sends the author
+ * hunting for a typo that does not exist. This entrance names the bound
+ * (`maxAstNodes` / `maxDepth` / `maxListElements` / …), the platform's value
+ * for it, and what their source actually measures.
+ *
+ * The verdict is graded by the SAME {@link classifyCelFault} the engine's
+ * `compile` / `evaluate` use — error class plus structured `code`, never prose
+ * (#6223). A `bounds` verdict here and a `bounds` verdict from
+ * `celEngine.compile()` are therefore the same judgement of the same fault,
+ * which is the property `cel-parse-reason.test.ts` pins.
+ */
+export function parseCelToAstWithReason(
+  source: string,
+  opts: ParseCelToAstOptions = {},
+): CelParseResult {
+  if (typeof source !== 'string' || !source.trim()) {
+    return { ok: false, kind: 'empty', message: 'empty expression' };
+  }
+  // The #3306 rewrite is part of the canonical front end, so it happens before
+  // the parse whose verdict we are reporting — and the measurement below probes
+  // the SAME rewritten source, so the number describes what actually parsed.
+  const rewritten = rewriteNullableTernary(source);
   try {
     // A wall-clock-free `now()` — the stdlib is registered for parse-time shape
     // only and is never called on this path.
     canonicalParseEnv ??= buildEnv(() => new Date(0));
-    return canonicalParseEnv.parse(rewriteNullableTernary(source)).ast;
-  } catch {
-    return null;
+    return { ok: true, ast: canonicalParseEnv.parse(rewritten).ast };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (classifyCelFault(err) !== 'bounds') return { ok: false, kind: 'parse', message };
+    const parseErr = err as ParseError;
+    const limit = limitKeyOf(parseErr);
+    const summary = parseErr.summary ?? message.split('\n')[0];
+    if (!limit) {
+      // A bounds fault we cannot NAME — unreachable on cel-js 8.0.0, where
+      // `Parser#limitExceeded` always phrases it `Exceeded <key> (<n>)`, but a
+      // rephrasing upstream has to degrade honestly. Still reported as `bounds`
+      // (the class is not in doubt) and never as a syntax fault, which is the
+      // exact mislabel this entrance exists to stop — but with `limit: null`
+      // rather than a guessed key, and with no AST to admit, so the pushdown
+      // path fails closed on it in either position of the switch.
+      return {
+        ok: false,
+        kind: 'bounds',
+        message,
+        overrun: { limit: null, limitValue: null, measured: null, summary },
+        unboundedAst: null,
+      };
+    }
+    const limitValue = DEFAULT_LIMITS[limit];
+    let unboundedAst: CelAstNode | null = null;
+    let measured: number | null = null;
+    if (opts.admitOverLimit) {
+      try {
+        unboundedAst = buildProbeEnv(probeLimits(limit, Number.MAX_SAFE_INTEGER)).parse(rewritten).ast;
+        measured = measureOverrun(rewritten, limit, limitValue);
+      } catch {
+        // Unbounded still refuses ⇒ a second, non-`limit` bound or a fault the
+        // bounded parse never got far enough to raise. No AST to admit.
+        unboundedAst = null;
+      }
+    }
+    return { ok: false, kind: 'bounds', message, overrun: { limit, limitValue, measured, summary }, unboundedAst };
   }
 }
 
@@ -842,53 +1091,117 @@ function hydrateOverloadStrings(value: unknown): unknown {
 const CEL_LIMIT_EXCEEDED_CODE = 'limit_exceeded';
 
 /**
- * Grade a cel-js fault off the error **class** the parser threw, not off its
- * prose. Returns `undefined` for anything that is not a cel-js error, so the
- * caller can fall back to the legacy keyword table.
+ * The evaluate-time cel-js codes that describe the EXPRESSION rather than the
+ * DATA, and therefore stay `type` instead of falling to `runtime`.
  *
- * Why the class and not the message (#6133): `classifyError` used to decide
- * between `parse` / `type` / `runtime` by regex-matching the error text, and
- * cel-js has ~19 distinct parse-time wordings of which only three contain
- * `parse` / `unexpected` / `syntax`. Everything else — `Expected RPAREN, got
- * EOF` (unbalanced parens), `Expected RBRACKET, got EOF`, `Unterminated
- * string`, `Reserved identifier: package`, the seven escape-sequence faults —
- * fell through to the default `runtime`, and `kind` is not an internal field:
- * it is interpolated verbatim into the author-facing rejection text
- * (`objectql`'s `rule-validator` / `cel-fault`) and into the REST `reason`.
- * An author who forgot a closing paren was told their *data* was at fault.
+ * The membership test is "would this fault reproduce on every input?". At
+ * evaluate time cel-js runs its checker with `isEvaluating: true`
+ * (`Environment#evaluate` → `#evalTypeChecker`, built as
+ * `new TypeChecker(opts, true)`), so *every* fault — including the ones the
+ * checker raises — arrives as an {@link EvaluationError}. The phase therefore
+ * cannot separate the two, and the code has to.
  *
- * Topping the keyword list up cannot fix this, because cel-js embeds the
- * **author's own source line** in `message` (see `formatErrorWithHighlight` in
- * `lib/errors.js`), so the author controls the text being matched. Measured on
- * cel-js 8.0.0: `((record.type_id)` — a plain unbalanced paren — classified as
- * `type`, purely because the echoed source contains the substring "type".
- * Classifying on prose is not a table with holes in it; it is the hole.
+ * Exactly one code qualifies on cel-js 8.0.0, measured per code (#6223):
+ * `unknown_variable` means the ROOT identifier the expression names is not
+ * bound in this scope at all — a property of the expression against the call
+ * site's contract, not of any row. `@objectstack/objectql`'s `cel-fault`
+ * already gives it its own author advice ("the field is fine; the thing you
+ * hung it off isn't available here").
  *
- * Scope note, deliberate: only the ParseError arm is structural here. cel-js's
- * `TypeChecker` picks its error class **by phase**, not by fault
- * (`this.createError = isEvaluating ? evaluationError : typeError`), so the same
- * `unknown_variable` fault is a `TypeError` at check time and an
- * `EvaluationError` at evaluate time. Routing `EvaluationError` → `runtime`
- * wholesale would therefore silently re-grade faults the keyword table gets
- * right today (`Unknown variable: x` → `type`). Those arms stay on the keyword
- * table until that mapping is measured per code — see #6133 for the audit.
+ * Deliberately NOT here, each with the reason:
+ *  - `no_such_key` — a record may carry a key on one row and not the next, so
+ *    it is a fact about the data. `cel-fault` gives it its own sentence too.
+ *  - `no_such_overload` — this is ADR-0032 §1c, the string-serialized numeric /
+ *    date field (`record.rating >= 4` where `rating` is `"5.0"`). Data.
+ *  - `int_conversion_error` / `uint_conversion_error` /
+ *    `double_conversion_error` — cel-js phrases these as `int() type error: …`,
+ *    which is what put them on `type` before #6223. Converting a value that
+ *    cannot convert is a data fault; the word "type" in the prose was the only
+ *    reason they were graded otherwise.
+ *  - `no_matching_overload` — genuinely ambiguous: it covers both an unknown
+ *    function (`PRIOR(x)`) and a known one called with the wrong runtime types
+ *    (`size(record.x)` on a scalar). Under `unlistedVariablesAreDyn` the second
+ *    is data-dependent, so it stays `runtime` — which is also its verdict
+ *    before #6223, i.e. this is not a re-grade. The unknown-function case is
+ *    already caught earlier and louder: {@link celEngine.compile} reads
+ *    `check()`'s `{ valid: false }` and answers `type` at build time (#1877).
+ *  - `heterogeneous_list_element`, `invalid_index_type`,
+ *    `invalid_comprehension_range`, `invalid_condition_type`,
+ *    `invalid_logical_operand` — all "this VALUE has the wrong type", decided
+ *    against the row, not against the source.
  */
-function classifyCelParseFault(err: unknown): 'parse' | 'bounds' | undefined {
-  if (!(err instanceof ParseError)) return undefined;
-  return err.code === CEL_LIMIT_EXCEEDED_CODE ? 'bounds' : 'parse';
+const CEL_DECLARATION_CODES: ReadonlySet<string> = new Set(['unknown_variable']);
+
+/**
+ * Grade a cel-js fault off the error **class** it was thrown as and its
+ * structured `code` — never off its prose. Returns `undefined` for anything
+ * that is not a cel-js error.
+ *
+ * Why not the message (#6133, #6223): `classifyError` used to decide between
+ * `parse` / `type` / `runtime` / `bounds` by regex-matching the error text, and
+ * cel-js embeds the **author's own source line** in `message` (see
+ * `formatErrorWithHighlight` in `lib/errors.js`). The text being matched is
+ * therefore text the author writes. `kind` is not an internal field — it is
+ * interpolated verbatim into the author-facing rejection text (`objectql`'s
+ * `rule-validator` / `cel-fault`) and into the REST error body's `reason` — so
+ * the author is told which of *their* mistakes this was, by a rule their own
+ * field names can flip. Measured on cel-js 8.0.0, one `no such overload`
+ * evaluation fault, four field names, one wrong answer per polluted name:
+ *
+ * ```text
+ * record.status        > 1  ->  runtime   (right)
+ * record.parse_status  > 1  ->  parse     (wrong — "your expression is broken")
+ * record.syntax_mode   > 1  ->  parse     (wrong)
+ * record.type_code     > 1  ->  type      (wrong)
+ * ```
+ *
+ * #6133 / PR #6202 closed the ParseError arm this way and left `type` /
+ * `runtime` on the keyword table pending a per-code audit. #6223 is that audit,
+ * and it deletes the table outright: see {@link CEL_DECLARATION_CODES} for the
+ * evaluate-time verdicts and {@link classifyError} for why nothing is left for
+ * a keyword to decide.
+ *
+ * There is deliberately no `TypeError` arm. cel-js's `TypeError` is raised only
+ * by the non-evaluating `TypeChecker` (`createError = isEvaluating ?
+ * evaluationError : typeError`), which runs only inside `Environment#check` —
+ * and that method catches it and *returns* `{ valid: false, error }` rather
+ * than throwing. So a cel-js `TypeError` can never reach a `catch` block here;
+ * an arm for it would be dead code. The check-time `TypeError → type` mapping
+ * does exist, in {@link celEngine.compile}, where that returned object is read.
+ */
+function classifyCelFault(err: unknown): 'parse' | 'bounds' | 'type' | 'runtime' | undefined {
+  if (err instanceof ParseError) {
+    return err.code === CEL_LIMIT_EXCEEDED_CODE ? 'bounds' : 'parse';
+  }
+  if (err instanceof EvaluationError) {
+    return CEL_DECLARATION_CODES.has(err.code) ? 'type' : 'runtime';
+  }
+  return undefined;
 }
 
+/**
+ * Resolve a thrown fault into the {@link EvalError} the caller reports.
+ *
+ * Everything that is not a cel-js error faulted *while evaluating* and carries
+ * no structured contract at all — our own stdlib bindings, a caller-supplied
+ * `os.*` API, a native JS throw — so `runtime` is the honest answer and the
+ * only one. It is not a fallback worth "improving" with a keyword table: the
+ * residual arm was never dormant, and its prose is author- and *data*-
+ * controlled through our own `matches()` binding, which hands cel-js a native
+ * `SyntaxError` whose message echoes the pattern (measured, #6223):
+ *
+ * ```text
+ * matches(record.name, "type(")                  ->  type    (was)
+ * matches(record.name, "Exceeded maxAstNodes(")  ->  bounds  (was)
+ * matches(record.name, "unexpected(")            ->  parse   (was)
+ * matches(record.name, record.re)                ->  type    (was) — from a ROW
+ * ```
+ *
+ * All four are one native regex-compilation failure, i.e. `runtime`.
+ */
 function classifyError(err: unknown): EvalResult<never> {
   const message = err instanceof Error ? err.message : String(err);
-  let kind: 'parse' | 'type' | 'runtime' | 'bounds' | undefined = classifyCelParseFault(err);
-  if (kind === undefined) {
-    // Legacy keyword table — the residual path for faults that carry no
-    // structured contract at all (our own stdlib, a native JS throw).
-    kind = 'runtime';
-    if (/Exceeded max/i.test(message)) kind = 'bounds';
-    else if (/parse|unexpected|syntax/i.test(message)) kind = 'parse';
-    else if (/type|unknown variable|undeclared/i.test(message)) kind = 'type';
-  }
+  const kind = classifyCelFault(err) ?? 'runtime';
   return { ok: false, error: { kind, message } };
 }
 

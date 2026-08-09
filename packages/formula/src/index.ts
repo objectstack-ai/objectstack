@@ -25,12 +25,34 @@ export { collectCelRootIdentifiers } from './cel-engine';
 // #4812 removed from that very package. One oracle, one answer to "what
 // resolves", whichever surface is asking.
 export { firstUndeclaredReference } from './cel-engine';
+// #6713 — the namespace-root baseline itself. A surface binding a CLOSED set of
+// roots must name the ones it does NOT bind, and that complement is this list
+// minus the surface's own allowlist; a hand-copied denylist in the consumer
+// cannot track additions here (21 roots were sitting in that gap when
+// `@objectstack/lint`'s field-level `*When` gate was measured). Note the
+// declaredness oracle above cannot substitute: it also declares CEL's TYPE
+// names, so `type(record.x) == string` resolves `string` — legal CEL that
+// membership of this list separates from an unbound namespace and the oracle
+// does not.
+export { SCOPE_ROOTS } from './cel-engine';
 // #4812 — the canonical parse-to-AST entry. Any consumer that needs the AST of
 // an authored CEL source takes it from here, so "what parses" has exactly ONE
 // answer across build, lint and runtime. Building a private `new Environment()`
 // instead silently opts out of the platform's rewrite AND its bounds.
 export { parseCelToAst } from './cel-engine';
 export type { CelAstNode } from './cel-engine';
+// #6132 — the reason-carrying sister entrance. Same front end, same verdict,
+// but it says WHICH of the platform's bounds a source blew instead of
+// collapsing "over budget" and "not valid CEL" into the same `null`. A caller
+// that REFUSES on a refusal (the RLS/sharing pushdown path does, fail-closed)
+// needs the difference to tell the author what to fix.
+export { parseCelToAstWithReason } from './cel-engine';
+export type {
+  CelBoundsOverrun,
+  CelLimitKey,
+  CelParseResult,
+  ParseCelToAstOptions,
+} from './cel-engine';
 export { cronEngine } from './cron-engine';
 export { templateEngine, TEMPLATE_FORMATTERS, formatValue } from './template-engine';
 export { registerStdLib, buildScope } from './stdlib';
@@ -41,6 +63,13 @@ export { normalizeExpression, normalizeExpressionTree } from './normalize';
 // and plugin-sharing; honours ADR-0055 (no subquery / no cross-object traversal).
 export { compileCelToFilter, isPushdownableCel, lowerCelAst } from './cel-to-filter';
 export type { CelFilterCompileResult, CelFilterCompileOptions, CelFilterFailReason } from './cel-to-filter';
+// #6132 — the dated switch governing what the pushdown path does with a
+// predicate that overruns `DEFAULT_LIMITS`: compile-and-WARN during 17.0.0-rc.x,
+// refuse (⇒ `RLS_DENY_FILTER`) from v17 GA. See `cel-pushdown-limits.ts` for the
+// one line that moves at GA.
+export { CEL_PUSHDOWN_LIMITS_MODE, celPushdownLimitsMode, setCelPushdownLimitsModeForTests } from './cel-pushdown-limits';
+export type { CelPushdownLimitsMode } from './cel-pushdown-limits';
+export { __resetPushdownLimitWarnings } from './cel-to-filter';
 // ADR-0056 D4 / ADR-0058 D1 — the RLS predicate shape gate and its legacy
 // SQL→CEL bridge. Hoisted out of plugin-security in #4983 so the runtime that
 // enforces the predicate and the authoring gate that rejects it share ONE

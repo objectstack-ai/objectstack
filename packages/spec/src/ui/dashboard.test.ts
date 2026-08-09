@@ -11,6 +11,8 @@ import {
   WidgetActionTypeSchema,
   GlobalFilterSchema,
   GlobalFilterOptionsFromSchema,
+  DATE_RANGE_PRESETS,
+  DATE_RANGE_DEFAULT_RANGES,
 } from './dashboard.zod';
 
 /**
@@ -126,22 +128,29 @@ describe('DashboardWidgetSchema (dataset-bound)', () => {
 });
 
 /**
- * Message ORDER on `strictWidgetAnalyticsError` (#6416, applying #5955's ruling).
+ * Message ORDER on the widget unknown-key rejection (#6416, applying #5955's
+ * ruling; #6619 folded the map into the shared template).
  *
- * This map is a hand-written `$ZodErrorMap`, so neither #5955 (which moved the
- * history sentence to the end inside the shared `strictUnknownKeyError`) nor
- * #5593 (which migrates the direct call sites to `strictObject`) reached it. It
- * carried the same defect: a ~150-char history sentence sitting BETWEEN the
- * offending key and whichever of the three prescription branches fixes it —
- * the ADR-0021 dataset migration, the objectui `component`/`data` quarantine,
- * and the #5022 drill near-key answer — pushing all three past the front of the
- * single-line renders several consumers use.
+ * Written against `strictWidgetAnalyticsError`, the hand-written `$ZodErrorMap`
+ * that neither #5955 nor #5593 could reach; #6416 direction 1 reordered it in
+ * place with these pins as the acceptance criteria, and #6619 folded the three
+ * prescription branches into `strictObject` `guidanceSets`
+ * ({@link WIDGET_GUIDANCE_SETS} in `dashboard.zod.ts`). The pins migrated with
+ * the code: the ORDER contract (front matter → fix channels → history last)
+ * is now the template's own. Two byte-level changes rode the fold, each pinned
+ * below where it lands:
  *
- * ORDER pins, not presence checks: the reorder deletes nothing, so every
+ * - prescriptions render as the template's `\n  • ` bullets instead of joined
+ *   inline with a space;
+ * - keys with no family and no prescription now get the template's
+ *   edit-distance rename (`titel` → `title`), which the hand-written map had
+ *   no channel for.
+ *
+ * ORDER pins, not presence checks: the fold deletes nothing, so every
  * `toContain` in the block above stays green either way. An edit that folds the
  * sentence back into the middle passes all of them and fails here.
  */
-describe('strictWidgetAnalyticsError message order — fix before history (#6416)', () => {
+describe('widget unknown-key message order — fix before history (#6416 / #6619)', () => {
   const HISTORY =
     'Undeclared top-level keys were dropped silently before strict validation, ' +
     'shipping inert metadata; a stale or mis-layered key is now a loud parse error.';
@@ -198,14 +207,53 @@ describe('strictWidgetAnalyticsError message order — fix before history (#6416
       .toBeLessThan(m.indexOf(HISTORY));
   });
 
-  it('is unchanged in SHAPE when no branch matches — full-message pin', () => {
-    expect(messageFor({ colourVariant: 'blue' }))
-      .toBe(`Unrecognized key(s) on this dashboard widget: \`colourVariant\`. ${HISTORY}`);
+  it('is unchanged in SHAPE when no fix matches — full-message pin', () => {
+    // A key with no family, no guidance and no near-declared-key: the history
+    // follows the key statement directly. Any stray separator fails here.
+    expect(messageFor({ zzWrongKey: 'blue' }))
+      .toBe(`Unrecognized key(s) on this dashboard widget: \`zzWrongKey\`. ${HISTORY}`);
+  });
+
+  it('a near-miss of a DECLARED key now gets the rename the bespoke map never offered (#6619)', () => {
+    // `colourVariant` was this block's no-fix fixture while the map was
+    // hand-written: it answered with nothing but the history, leaving the
+    // author to find `colorVariant` alone. Folding onto the shared template
+    // brought the edit-distance channel with it — a deliberate byte change,
+    // in the fix-before-history order the block pins.
+    const m = messageFor({ colourVariant: 'blue' });
+    expect(m).toBe(
+      'Unrecognized key(s) on this dashboard widget: `colourVariant`. '
+      + `Did you mean \`colourVariant\` → \`colorVariant\`? ${HISTORY}`,
+    );
   });
 
   it('emits the history exactly once, whatever the key count', () => {
     const m = messageFor({ categoryField: 'stage', alsoWrong: 1, andThis: 2 });
     expect(m.split(HISTORY)).toHaveLength(2);
+    expect(m.endsWith(` ${HISTORY}`)).toBe(true);
+  });
+
+  it('keys from TWO families now surface BOTH prescriptions, in declaration order (#6619)', () => {
+    // The one deliberate behaviour change in the fold. The hand-written map
+    // was an if/else chain: a widget carrying `categoryField` AND `component`
+    // got only the legacy-analytics answer, and the quarantine verdict was
+    // silently dropped. Sets answer independently — one bullet each, ordered
+    // as declared — and each family speaks exactly once however many of its
+    // members were written.
+    const m = messageFor({ categoryField: 'stage', component: {} });
+    const legacy = 'The pre-ADR-0021 inline analytics shape';
+    const quarantine = '`component` and inline `data` are objectui-internal renderer capabilities';
+    expect(m).toContain(legacy);
+    expect(m).toContain(quarantine);
+    expect(m.indexOf(legacy)).toBeLessThan(m.indexOf(quarantine));
+    expect(m.endsWith(` ${HISTORY}`)).toBe(true);
+    // Once per family, not once per member.
+    expect(m.split(legacy)).toHaveLength(2);
+  });
+
+  it('a set answers once however many of its members are written (#6619)', () => {
+    const m = messageFor({ categoryField: 'stage', valueField: 'amount', aggregate: 'sum' });
+    expect(m.split('The pre-ADR-0021 inline analytics shape')).toHaveLength(2);
     expect(m.endsWith(` ${HISTORY}`)).toBe(true);
   });
 });
@@ -290,6 +338,124 @@ describe('Dashboard presentation sub-schemas', () => {
       id: 'w_bad', type: 'metric', dataset: 'sales', values: ['revenue'],
       filterBindings: { region: true },
     })).toThrow();
+  });
+});
+
+/**
+ * #4614 — the date-range preset vocabulary, and the `defaultValue` check it
+ * makes possible.
+ *
+ * Before this, `dateRange.defaultRange` was an enum (a typo there was already an
+ * author-time error) while a `globalFilters` entry of `type: 'date'` accepted
+ * any `string | number | boolean` unchecked. A misspelled preset therefore
+ * failed silently and late — the renderer cannot lift it to a range, falls
+ * through to "a bare string means equality on that day", and emits a condition
+ * no row matches. The dashboard reads 0 everywhere and looks deliberately empty.
+ */
+describe('date-range preset vocabulary (#4614)', () => {
+  const dateFilter = (defaultValue: unknown) =>
+    GlobalFilterSchema.parse({ field: 'created_at', type: 'date', defaultValue });
+
+  it('is a closed vocabulary — counts pinned so a silent add/drop is loud', () => {
+    // ADR-0122 receipt convention: assert the count, not just membership, so a
+    // name appearing or vanishing cannot ride in under a passing test.
+    expect(DATE_RANGE_PRESETS).toHaveLength(13);
+    expect(DATE_RANGE_DEFAULT_RANGES).toHaveLength(14);
+
+    // `custom` names no window — it is a `defaultRange` sentinel only.
+    expect(DATE_RANGE_PRESETS).not.toContain('custom');
+    expect(DATE_RANGE_DEFAULT_RANGES).toContain('custom');
+    expect(new Set(DATE_RANGE_PRESETS).size).toBe(DATE_RANGE_PRESETS.length);
+  });
+
+  it('`dateRange.defaultRange` accepts exactly what it accepted before the extraction', () => {
+    // The vocabulary moved out of this enum into a shared constant; this is the
+    // assertion that the move was value-preserving.
+    for (const range of DATE_RANGE_DEFAULT_RANGES) {
+      const d = DashboardSchema.parse({
+        name: 'dash_x', label: 'D', dateRange: { field: 'created_at', defaultRange: range },
+        widgets: [{ id: 'wid_x', type: 'metric', dataset: 'sales', values: ['revenue'] }],
+      });
+      expect(d.dateRange?.defaultRange).toBe(range);
+    }
+    expect(() => DashboardSchema.parse({
+      name: 'dash_x', label: 'D', dateRange: { defaultRange: 'last_7_dayz' },
+      widgets: [{ id: 'wid_x', type: 'metric', dataset: 'sales', values: ['revenue'] }],
+    })).toThrow();
+  });
+
+  it('accepts every preset name as a date filter default', () => {
+    for (const preset of DATE_RANGE_PRESETS) {
+      expect(dateFilter(preset).defaultValue).toBe(preset);
+    }
+  });
+
+  it('accepts an ISO date — day, or day with an instant', () => {
+    expect(dateFilter('2026-01-15').defaultValue).toBe('2026-01-15');
+    expect(dateFilter('2026-01-15T08:30:00Z').defaultValue).toBe('2026-01-15T08:30:00Z');
+  });
+
+  it('accepts a KNOWN date-macro token, wrapped either way', () => {
+    expect(dateFilter('{today}').defaultValue).toBe('{today}');
+    expect(dateFilter('${30_days_ago}').defaultValue).toBe('${30_days_ago}');
+    // The macro vocabulary is asked, not restated — an unknown token is exactly
+    // the typo this guard exists to catch.
+    expect(() => dateFilter('{yesteryear}')).toThrow();
+  });
+
+  it('REJECTS a misspelled preset name', () => {
+    // The regression this issue is about. `last_7_dayz` reaches a query as
+    // `created_at = 'last_7_dayz'` and the backend answers 200 OK with a zero.
+    expect(() => dateFilter('last_7_dayz')).toThrow();
+    expect(() => dateFilter('last-7-days')).toThrow();
+    expect(() => dateFilter('Last 7 Days')).toThrow();
+    expect(() => dateFilter('lastweek')).toThrow();
+  });
+
+  it('REJECTS `custom` — a sentinel with no bounds of its own', () => {
+    // Legal as `dateRange.defaultRange`, meaningless as a bare filter value:
+    // there is no from/to for it to hand over.
+    expect(() => dateFilter('custom')).toThrow();
+  });
+
+  it('REJECTS a non-string default on a date filter', () => {
+    expect(() => dateFilter(0)).toThrow();
+    expect(() => dateFilter(true)).toThrow();
+  });
+
+  it('names the offending value and all three legal spellings', () => {
+    // House rule: a strict gate ships with text an author can act on. Without
+    // the value quoted back, a dashboard with several date filters gives no clue
+    // WHICH one is wrong.
+    let message = '';
+    try { dateFilter('last_7_dayz'); } catch (e) { message = String(e); }
+
+    expect(message).toContain('last_7_dayz');
+    expect(message).toContain('last_7_days');       // the preset list, i.e. the fix
+    expect(message).toContain('2026-01-15');        // the ISO form
+    expect(message).toContain('{30_days_ago}');     // the macro form
+  });
+
+  it('leaves every OTHER filter type untouched', () => {
+    // A `select` filter's options are the author's own vocabulary — a value that
+    // happens to look like a preset name is none of this check's business.
+    expect(GlobalFilterSchema.parse({
+      field: 'time_period', type: 'select', defaultValue: 'this_quarter',
+    }).defaultValue).toBe('this_quarter');
+    expect(GlobalFilterSchema.parse({
+      field: 'period', type: 'select', defaultValue: 'last_7_dayz',
+    }).defaultValue).toBe('last_7_dayz');
+    expect(GlobalFilterSchema.parse({ field: 'q', type: 'text', defaultValue: 'today' }).defaultValue).toBe('today');
+    expect(GlobalFilterSchema.parse({ field: 'n', type: 'number', defaultValue: 7 }).defaultValue).toBe(7);
+    // A date filter with no default is still perfectly legal.
+    expect(GlobalFilterSchema.parse({ field: 'created_at', type: 'date' }).defaultValue).toBeUndefined();
+  });
+
+  it('does not break the shipped System Overview dashboard', () => {
+    // packages/platform-objects/.../system_overview.dashboard.ts — the only
+    // date-filter default in the tree, and a legal one. Pinned here so the
+    // strictness cannot regress a real, shipped declaration.
+    expect(dateFilter('last_7_days').defaultValue).toBe('last_7_days');
   });
 });
 
@@ -419,8 +585,16 @@ describe('[#5010] DashboardWidgetSchema — retired action trio + `aria`', () =>
     expect(message).toMatch(/Delete the key/);
     // The shared shape survives elsewhere. Without this, the message reads as
     // "AriaProps is gone", which would send an author deleting live metadata.
-    expect(message).toMatch(/app\.aria/);
+    //
+    // ⚠️ This assertion used to require `/app\.aria/` — and `App.aria` is a
+    // `retiredKey()` tombstone removed in this same 17.0.0, so the pin was
+    // holding the prescription ON a dead surface (#6756). Re-aimed at the
+    // surfaces that really do still declare `aria: AriaPropsSchema` and are
+    // graded `live` in the liveness ledger. The full both-directions
+    // enumeration pin lives in `aria-carrier-tombstones.test.ts`.
+    expect(message).toMatch(/page\.aria/);
     expect(message).toMatch(/page\.components\[\]\.aria/);
+    expect(message).not.toMatch(/app\.aria/i);
     expect(message).not.toMatch(/Unrecognized key/);
   });
 

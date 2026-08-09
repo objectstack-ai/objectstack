@@ -153,8 +153,8 @@
 // `pnpm install` -- the same constraint its neighbours in the Check Changeset job
 // carry.
 
-import { execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -2032,6 +2032,79 @@ function selfTest() {
   assert(!breakingDeclaration(parseChangeset(CS({ bumps: [['a', 'patch']], body: 'plain\n' }))).breaking, 'P7: a plain patch is not');
   assert(extractIds("  id: 'object-titleFormat-to-nameField',\n").length === 1, 'P8: an id with a capital letter must be extracted');
 
+  // ---- I1 (#6566): a bare `import` of this module must NOT run the gate -----
+  // The CLI dispatch at the bottom of this file is entry-guarded; importing the
+  // module for its pure exports (readDisposition, extractIds, ...) must be
+  // side-effect-free. The fixture is a RED-verdict repo (a declared-breaking
+  // changeset, no marker) holding a copy of this very script, and the importer
+  // is a child process whose only code borrows one pure function. Delete the
+  // entry guard and all three assertions go red: the imported copy judges the
+  // fixture repo, prints its verdict, `process.exit(1)`s, and the importer's
+  // own line never runs -- the behaviour measured in #6566, which forced
+  // PR #6556 into a subprocess fixture instead of an import.
+  {
+    const { dir, base } = mk({
+      files: { '.changeset/unanswered-breaking.md': CS({ body: '**BREAKING** x\n\nno marker here\n' }) },
+    });
+    // Park `main` back at BASE with the breaking changeset ahead of it on `work`:
+    // an unguarded import default-resolves base to `main` and must judge the
+    // changeset RED -- the caller-killing shape #6566 measured. With both commits
+    // on `main` the ablated gate would see an empty diff and merely print a green
+    // verdict, pinning the output leak but not the exit(1).
+    git(['checkout', '-q', '-b', 'work'], dir);
+    git(['branch', '-f', 'main', base], dir);
+    const w = (rel, text) => {
+      mkdirSync(dirname(join(dir, rel)), { recursive: true });
+      writeFileSync(join(dir, rel), text);
+    };
+    const copy = 'scripts/check-adr-0087-registration.mjs';
+    w(copy, readFileSync(fileURLToPath(import.meta.url), 'utf8'));
+    w(
+      'importer.mjs',
+      "import { readDisposition } from './scripts/check-adr-0087-registration.mjs';\n" +
+        "console.log('IMPORTER_OWN_LINE', JSON.stringify(readDisposition('nothing here')));\n",
+    );
+    const r = spawnSync(process.execPath, [join(dir, 'importer.mjs')], { cwd: dir, encoding: 'utf8' });
+    const all = `${r.stdout}\n${r.stderr}`;
+    assert(r.status === 0, `I1: a bare import must not adopt the gate's exit code (got ${r.status})\n${all}`);
+    assert(
+      r.stdout.includes('IMPORTER_OWN_LINE {"ok":false'),
+      `I1: the importer's own code must run and receive the export\n${all}`,
+    );
+    assert(!all.includes('check-adr-0087-registration:'), `I1: importing must not print a gate verdict\n${all}`);
+
+    // ---- I2 (#6566): the SAME file, run as the entry point, still dispatches --
+    // I1 alone is satisfied by deleting the CLI block outright -- it only ever
+    // asserts that nothing happens. I2 is its other half over the very same
+    // fixture: the guard must let the entry point through, on both a branch that
+    // exits non-zero and one that does not. Measured both ways: restore the
+    // top-level dispatch and I1's three go red with I2 untouched; strip the CLI
+    // block from the copied script and three of I2's four go red with I1
+    // untouched.
+    //
+    // Why each exit-code assertion is PAIRED with an output one: the fourth,
+    // `--list` exiting 0, stayed green under that second ablation -- a script
+    // with no CLI at all also exits 0. An exit code cannot distinguish "the
+    // branch ran and succeeded" from "nothing ran"; only the printed table can.
+    const cli = (...args) => spawnSync(process.execPath, [join(dir, copy), ...args], { cwd: dir, encoding: 'utf8' });
+
+    const gate = cli();
+    assert(gate.status === 1, `I2: the entry point must still run the gate and exit 1 on red (got ${gate.status})\n${gate.stdout}\n${gate.stderr}`);
+    assert(
+      gate.stderr.includes('unanswered-breaking.md') && gate.stderr.includes('no `adr-0087:` disposition marker'),
+      // The EXACT verdict, not merely "it is red": an entry point that died for
+      // an unrelated reason also exits 1, and would pin nothing about dispatch.
+      `I2: the entry point must report the real verdict\n${gate.stdout}\n${gate.stderr}`,
+    );
+
+    const listed = cli('--list');
+    assert(listed.status === 0, `I2: --list must still dispatch and exit 0 (got ${listed.status})\n${listed.stdout}\n${listed.stderr}`);
+    assert(
+      listed.stdout.includes('declared-breaking changeset(s) in stock'),
+      `I2: --list must still print its table\n${listed.stdout}\n${listed.stderr}`,
+    );
+  }
+
   for (const d of cleanup) rmSync(d, { recursive: true, force: true });
 
   if (failures.length) {
@@ -2045,72 +2118,84 @@ function selfTest() {
 // ---------------------------------------------------------------------------
 // CLI
 // ---------------------------------------------------------------------------
+//
+// Entry-guarded (#6566): the dispatch below runs ONLY when this file is the
+// process entry point (the `objectui-changeset-digest.mjs` pattern). No branch
+// is a no-op and four of them `process.exit(1)` on red, so an unguarded top
+// level made `import` mean "run the gate against the IMPORTER's repo and adopt
+// its verdict as my exit code" -- PR #6556 paid a ~40-line subprocess fixture
+// to avoid exactly that. The exported pure functions (readDisposition,
+// extractIds, ...) are the module's import surface; the CLI is this block, and
+// the I1/I2 self-test assertions pin BOTH halves of the separation -- silent as
+// an import, unchanged as an entry point.
 
-const argv = process.argv.slice(2);
-const readFlag = (name) => {
-  const i = argv.indexOf(name);
-  return i >= 0 ? argv[i + 1] : undefined;
-};
+if (resolve(process.argv[1] ?? '') === resolve(fileURLToPath(import.meta.url))) {
+  const argv = process.argv.slice(2);
+  const readFlag = (name) => {
+    const i = argv.indexOf(name);
+    return i >= 0 ? argv[i + 1] : undefined;
+  };
 
-if (argv.includes('--self-test')) {
-  selfTest();
-} else if (argv.includes('--list')) {
-  list(REPO_ROOT, 'HEAD');
-} else if (argv.includes('--audit-stock')) {
-  auditStock(REPO_ROOT, readFlag('--head') ?? 'HEAD');
-} else {
-  const head = readFlag('--head') ?? 'HEAD';
-  const requested = readFlag('--base');
-  let base = requested;
-  if (base) {
-    if (!resolveCommit(base, REPO_ROOT)) {
-      console.error(`⛔ check-adr-0087-registration: --base '${base}' does not resolve to a commit.`);
-      console.error('   A base that cannot be resolved is a failure, never a pass (#4690).');
+  if (argv.includes('--self-test')) {
+    selfTest();
+  } else if (argv.includes('--list')) {
+    list(REPO_ROOT, 'HEAD');
+  } else if (argv.includes('--audit-stock')) {
+    auditStock(REPO_ROOT, readFlag('--head') ?? 'HEAD');
+  } else {
+    const head = readFlag('--head') ?? 'HEAD';
+    const requested = readFlag('--base');
+    let base = requested;
+    if (base) {
+      if (!resolveCommit(base, REPO_ROOT)) {
+        console.error(`⛔ check-adr-0087-registration: --base '${base}' does not resolve to a commit.`);
+        console.error('   A base that cannot be resolved is a failure, never a pass (#4690).');
+        process.exit(1);
+      }
+    } else {
+      base = ['origin/main', 'main'].find((r) => resolveCommit(r, REPO_ROOT));
+      if (!base) {
+        console.error('⛔ check-adr-0087-registration: neither origin/main nor main resolves in this checkout.');
+        console.error('   Pass one explicitly: --base <ref-or-sha>. Missing input is a failure, never a pass (#4690).');
+        process.exit(1);
+      }
+    }
+
+    const inputProblems = assertInputs({ cwd: REPO_ROOT, head });
+    if (inputProblems.length > 0) {
+      console.error(`\n✗ check-adr-0087-registration: ${inputProblems.length} input problem(s) -- refusing to report a verdict.\n`);
+      for (const p of inputProblems) console.error(`  • ${p}\n`);
+      console.error('  A gate that cannot find its input and exits 0 is worse than no gate (#4690).');
       process.exit(1);
     }
-  } else {
-    base = ['origin/main', 'main'].find((r) => resolveCommit(r, REPO_ROOT));
-    if (!base) {
-      console.error('⛔ check-adr-0087-registration: neither origin/main nor main resolves in this checkout.');
-      console.error('   Pass one explicitly: --base <ref-or-sha>. Missing input is a failure, never a pass (#4690).');
+
+    let result;
+    try {
+      result = scan({ cwd: REPO_ROOT, base, head });
+    } catch (e) {
+      console.error(`⛔ check-adr-0087-registration: ${e.message}`);
       process.exit(1);
     }
-  }
 
-  const inputProblems = assertInputs({ cwd: REPO_ROOT, head });
-  if (inputProblems.length > 0) {
-    console.error(`\n✗ check-adr-0087-registration: ${inputProblems.length} input problem(s) -- refusing to report a verdict.\n`);
-    for (const p of inputProblems) console.error(`  • ${p}\n`);
-    console.error('  A gate that cannot find its input and exits 0 is worse than no gate (#4690).');
-    process.exit(1);
-  }
+    if (result.problems.length > 0) {
+      report(result.problems);
+      process.exit(1);
+    }
 
-  let result;
-  try {
-    result = scan({ cwd: REPO_ROOT, base, head });
-  } catch (e) {
-    console.error(`⛔ check-adr-0087-registration: ${e.message}`);
-    process.exit(1);
-  }
-
-  if (result.problems.length > 0) {
-    report(result.problems);
-    process.exit(1);
-  }
-
-  const n = result.judged.length;
-  if (n === 0) {
-    console.log(`✓ check-adr-0087-registration: this PR adds no declared-breaking changeset (${result.skipped.length} non-breaking changeset(s) seen).`);
-  } else {
-    console.log(`✓ check-adr-0087-registration: ${n} declared-breaking changeset(s), each carrying an ADR-0087 disposition.`);
-    for (const j of result.judged) {
-      const what = j.verdict === 'registered' ? `registered ${j.ids.join(', ')} (new here: ${j.fresh.join(', ')})` : `not-required (${j.category})`;
-      console.log(`    ${j.file}  [${j.signals.join('+')}]  ${what}`);
-      if (j.why) {
-        // Every exemption is printed AND annotated, on every run: an exemption
-        // nobody re-reads is the allow-list failure mode this gate exists to avoid.
-        console.log(`        reason: ${j.why}`);
-        console.log(`::notice file=${j.file}::ADR-0087 exemption (${j.category}): ${j.why}`);
+    const n = result.judged.length;
+    if (n === 0) {
+      console.log(`✓ check-adr-0087-registration: this PR adds no declared-breaking changeset (${result.skipped.length} non-breaking changeset(s) seen).`);
+    } else {
+      console.log(`✓ check-adr-0087-registration: ${n} declared-breaking changeset(s), each carrying an ADR-0087 disposition.`);
+      for (const j of result.judged) {
+        const what = j.verdict === 'registered' ? `registered ${j.ids.join(', ')} (new here: ${j.fresh.join(', ')})` : `not-required (${j.category})`;
+        console.log(`    ${j.file}  [${j.signals.join('+')}]  ${what}`);
+        if (j.why) {
+          // Every exemption is printed AND annotated, on every run: an exemption
+          // nobody re-reads is the allow-list failure mode this gate exists to avoid.
+          console.log(`        reason: ${j.why}`);
+          console.log(`::notice file=${j.file}::ADR-0087 exemption (${j.category}): ${j.why}`);
+        }
       }
     }
   }

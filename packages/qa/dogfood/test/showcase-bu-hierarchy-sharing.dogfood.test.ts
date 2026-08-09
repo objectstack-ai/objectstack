@@ -13,6 +13,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import showcaseStack from '@objectstack/example-showcase';
 import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { showcaseAppDefaultSecurity } from './showcase-security.js';
 
 const OBJ = '/data/showcase_private_note';
 const SYS = { isSystem: true } as const;
@@ -24,7 +25,11 @@ describe('showcase: business-unit hierarchy sharing rule (ADR-0057 D6 / #2077)',
   let noteId: string;
 
   beforeAll(async () => {
-    stack = await bootStack(showcaseStack);
+    // [#5491] The platform baseline no longer ships a `'*'` object grant, so a
+    // grant-less sign-up can no longer create the private note this fixture
+    // shares. Boot the showcase the way the CLI does — under its OWN declared
+    // default profile, which grants `showcase_private_note` create/read/edit.
+    stack = await bootStack(showcaseStack, { security: showcaseAppDefaultSecurity() });
     await stack.signIn();
     ownerTok = await stack.signUp('bu-owner@verify.test');
     mgrTok = await stack.signUp('bu-mgr@verify.test');       // parent BU

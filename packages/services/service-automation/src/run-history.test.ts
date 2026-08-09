@@ -12,6 +12,19 @@ import type { StepLogEntry, NodeExecutor } from './engine.js';
 import { registerLoopNode } from './builtin/loop-node.js';
 import { InMemorySuspendedRunStore } from './suspended-run-store.js';
 import type { AutomationContext } from '@objectstack/spec/contracts';
+import { defineActionDescriptor } from '@objectstack/spec/automation';
+
+/**
+ * `resumeAuthority: 'any'` is required of a pausing fixture since #5561: these
+ * tests continue their pause through the public `resume` door, which a node type
+ * now opts into rather than inherits. Nothing here is about the resume gate
+ * (`resume-authority-gate.test.ts` owns that), so the fixture states the posture
+ * it relies on — the same declaration the pausing built-ins carry.
+ */
+const HOLD_DESCRIPTOR = defineActionDescriptor({
+    type: 'hold', version: '1.0.0', name: 'Hold',
+    supportsPause: true, resumeAuthority: 'any',
+});
 
 const silent = { info() {}, warn() {}, error() {}, debug() {} } as never;
 
@@ -145,6 +158,7 @@ describe('automation run history (durable observability)', () => {
 
         const holdExecutor = {
             type: 'hold',
+            descriptor: HOLD_DESCRIPTOR,
             async execute() { return { success: true, suspend: true, correlation: 'held' }; },
         } as never;
 

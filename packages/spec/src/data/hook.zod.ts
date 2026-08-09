@@ -9,7 +9,7 @@ import { ExpressionInputSchema } from '../shared/expression.zod';
  */
 import { lazySchema } from '../shared/lazy-schema';
 import { retiredKey } from '../shared/retired-key';
-import { strictUnknownKeyError } from '../shared/suggestions.zod';
+import { strictObject } from '../shared/strict-object';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { HookBodySchema } from './hook-body.zod';
 // Type-only, and it must stay that way: `contracts/` already imports `data/`
@@ -68,63 +68,6 @@ const hookTargetError =
   + "`object: 'account'` or `object: ['account', 'contact']` — or, if firing on "
   + "every object really is the intent, write the wildcard explicitly: `object: '*'`.";
 
-/** Keys {@link HookSchema} declares (drift-guarded by hook.test.ts). */
-const HOOK_KEYS = [
-  'name', 'label', 'object', 'events', 'handler', 'body', 'priority',
-  'async', 'condition', 'description', 'retryPolicy', 'timeout', 'onError',
-] as const;
-
-/** Keys the hook `retryPolicy` block declares (drift-guarded by hook.test.ts). */
-const HOOK_RETRY_POLICY_KEYS = ['maxRetries', 'backoffMs'] as const;
-
-const hookUnknownKeyError = strictUnknownKeyError({
-  surface: 'this hook',
-  knownKeys: HOOK_KEYS,
-  aliases: {
-    hookname: 'name',
-    objectname: 'object',
-    objects: 'object',
-    event: 'events',
-    fn: 'handler',
-    callback: 'handler',
-    order: 'priority',
-    sequence: 'priority',
-    background: 'async',
-    isasync: 'async',
-    when: 'condition',
-    predicate: 'condition',
-    retry: 'retryPolicy',
-    timeoutms: 'timeout',
-    errorpolicy: 'onError',
-    onfailure: 'onError',
-  },
-  guidance: {
-    enabled:
-      '`enabled` is not a hook key — a hook has no on/off switch. Gate it with `condition` '
-      + '(the hook is skipped when the predicate is false), or remove the hook.',
-    active:
-      '`active` is not a hook key — a hook has no on/off switch. Gate it with `condition`, '
-      + 'or remove the hook.',
-  },
-  history: 'Until #4001 these were dropped silently — the hook still registered and ran.',
-});
-
-const hookRetryPolicyUnknownKeyError = strictUnknownKeyError({
-  surface: "this hook's retryPolicy",
-  knownKeys: HOOK_RETRY_POLICY_KEYS,
-  aliases: {
-    retries: 'maxRetries',
-    attempts: 'maxRetries',
-    basedelayms: 'backoffMs',
-    backoff: 'backoffMs',
-    delayms: 'backoffMs',
-  },
-  history:
-    'Until #4001 these were dropped silently — the hook retried on the defaults rather '
-    + 'than the policy that was written. Note a datasource retryPolicy spells its delay '
-    + '`baseDelayMs`; a hook spells it `backoffMs`.',
-});
-
 export const HookEvent = z.enum([
   // Read — one event per read, regardless of shape. `beforeFind`/`afterFind`
   // fire for BOTH `find` and `findOne` (the event attaches to record
@@ -165,7 +108,38 @@ export const HookEvent = z.enum([
  * - Side Effects (Sending emails, Syncing to external systems)
  * - Security (Filtering data based on context)
  */
-export const HookSchema = lazySchema(() => z.object({
+export const HookSchema = lazySchema(() => strictObject(
+  {
+    surface: 'this hook',
+    aliases: {
+      hookname: 'name',
+      objectname: 'object',
+      objects: 'object',
+      event: 'events',
+      fn: 'handler',
+      callback: 'handler',
+      order: 'priority',
+      sequence: 'priority',
+      background: 'async',
+      isasync: 'async',
+      when: 'condition',
+      predicate: 'condition',
+      retry: 'retryPolicy',
+      timeoutms: 'timeout',
+      errorpolicy: 'onError',
+      onfailure: 'onError',
+    },
+    guidance: {
+      enabled:
+        '`enabled` is not a hook key — a hook has no on/off switch. Gate it with `condition` '
+        + '(the hook is skipped when the predicate is false), or remove the hook.',
+      active:
+        '`active` is not a hook key — a hook has no on/off switch. Gate it with `condition`, '
+        + 'or remove the hook.',
+    },
+    history: 'Until #4001 these were dropped silently — the hook still registered and ran.',
+  },
+  {
   /**
    * Unique identifier for the hook
    * Required for debugging and overriding.
@@ -185,8 +159,8 @@ export const HookSchema = lazySchema(() => z.object({
    * - Wildcard: "*" (All objects)
    *
    * Must name at least one object. An empty target (`''`, `[]`, `['']`) is
-   * refused rather than widened to the wildcard — see the note above
-   * {@link HOOK_KEYS}.
+   * refused rather than widened to the wildcard — see {@link hookTargetError},
+   * which carries the rejection text and the reason.
    */
   object: z.union([z.string(), z.array(z.string())])
     .refine(
@@ -271,10 +245,25 @@ export const HookSchema = lazySchema(() => z.object({
   /**
    * Retry Policy
    */
-  retryPolicy: z.object({
+  retryPolicy: strictObject(
+  {
+    surface: "this hook's retryPolicy",
+    aliases: {
+      retries: 'maxRetries',
+      attempts: 'maxRetries',
+      basedelayms: 'backoffMs',
+      backoff: 'backoffMs',
+      delayms: 'backoffMs',
+    },
+    history:
+      'Until #4001 these were dropped silently — the hook retried on the defaults rather '
+      + 'than the policy that was written. Note a datasource retryPolicy spells its delay '
+      + '`baseDelayMs`; a hook spells it `backoffMs`.',
+  },
+  {
     maxRetries: z.number().default(3).describe('Maximum retry attempts on failure'),
     backoffMs: z.number().default(1000).describe('Backoff delay between retries in milliseconds'),
-  }, { error: hookRetryPolicyUnknownKeyError }).strict().optional().describe('Retry policy for failed hook executions'),
+  }).optional().describe('Retry policy for failed hook executions'),
 
   /**
    * Execution Timeout
@@ -296,7 +285,7 @@ export const HookSchema = lazySchema(() => z.object({
   // REJECTED here — the same live 422 that `permission` hit on the ADR-0094
   // overlay path before Tier-A declared them (#4001 findings log, entries 2/8).
   ...MetadataProtectionFields,
-}, { error: hookUnknownKeyError }).strict());
+}));
 
 /**
  * Hook Runtime Context
@@ -335,10 +324,10 @@ export const HookContextSchema = lazySchema(() => z.object({
    * - find (also fires for findOne): { ast: QueryAST, options: see PHASE below }
    * - insert (one context per row, batch inserts included): { data: Record, options: see PHASE below }
    * - update (single id): { id: ID, data: Record, options: see PHASE below }
-   * - update (bulk, multi:true) — before: { id: undefined, data: Record, options: EngineUpdateOptions }
+   * - update (bulk, multi:true) — before, PER MATCHED ROW: { id: ID, data: Record, options: EngineUpdateOptions }
    * - update (bulk, multi:true) — after, PER MATCHED ROW: { id: ID, data: Record, options: DriverOptions }
    * - delete (single id): { id: ID, options: see PHASE below }
-   * - delete (bulk, multi:true) — before: { id: undefined, options: EngineDeleteOptions }
+   * - delete (bulk, multi:true) — before, PER MATCHED ROW: { id: ID, options: EngineDeleteOptions }
    * - delete (bulk, multi:true) — after, PER MATCHED ROW: { id: ID, options: DriverOptions }
    *
    * PHASE — `input.options` is the one slot whose TYPE depends on when you read
@@ -357,24 +346,36 @@ export const HookContextSchema = lazySchema(() => z.object({
    * Measured and pinned in the same contract test as the rest of this table.
    *
    * A bulk (`multi: true`) update/delete fires the SAME `beforeUpdate`/
-   * `beforeDelete` events as a single-id write, ONCE for the whole batch;
-   * there is no separate `*Many` event. `input.id` is present but `undefined`
-   * there — binding it is precisely the test the engine dispatches on, so a
-   * `before*` handler that sets it REROUTES the write onto the single-id path.
+   * `beforeDelete` events as a single-id write; there is no separate `*Many`
+   * event. Since #5574's engine half it fires them once PER MATCHED ROW, each
+   * on a single-record-shaped context carrying that row's `id` and `previous`
+   * — the same move #5038 made for the `after*` phase, held to the same
+   * yardstick. Zero matched rows is zero dispatches. The full clause set
+   * (D1–D7) with its budget ceiling is `data/bulk-write-hook-conformance.ts`
+   * (ADR-0058 Addendum II).
    *
-   * ⚠️ CONTRACTED TO CHANGE — the two `before` rows above and the paragraph
-   * just above them describe the engine as it is TODAY, which is what this
-   * table is for. #5574's maintainer ruling (2026-08-06, option B) extends the
-   * per-row bulk-write contract from the `after*` phase to the `before*` phase:
-   * a predicate write will dispatch `beforeUpdate`/`beforeDelete` once per
-   * matched row, each carrying that row's `previous` and `id`, over a payload
-   * that stays BATCH-scoped. The contract is stated — with its budget ceiling
-   * and its `delivered` flags — in `data/bulk-write-hook-conformance.ts`
-   * (ADR-0058 Addendum II); the engine half is #5574's engine card, and it
-   * moves these rows in the same PR that makes them false. Until then, a
-   * `before*` handler on a bulk write has NO `previous`: a guard written as
-   * `previous?.x` passes silently on every batch, which is the measured harm
-   * the ruling is about.
+   * Two things a reader of the rows above still has to know:
+   *
+   *  - The PAYLOAD stays BATCH-scoped (D3). Every per-row `beforeUpdate`
+   *    context carries THE one payload, not a copy — `driver.updateMany` takes
+   *    one SET clause for N rows — so a rewrite applies to the whole batch
+   *    whichever row's dispatch made it, and rewrites accumulate in dispatch
+   *    order. A rewrite CONDITIONED on the row is therefore out of contract:
+   *    it widens to every matched row instead of scoping itself. Per-row
+   *    `previous` is supplied so a guard can REFUSE (throw), not so a rewrite
+   *    can be aimed.
+   *  - `input.id` is NOT a reroute lever (D4). It used to be: on the batch
+   *    dispatch `input.id` was present-but-`undefined`, and binding it moved
+   *    the write onto the single-id path. A per-row context arrives with `id`
+   *    already bound and the dispatch already decided, so rebinding retargets
+   *    nothing — and objectql REFUSES it (`HookTargetRebindError`) rather than
+   *    ignoring it, on the by-id path too. A silent no-op is the failure this
+   *    family exists to abolish.
+   *
+   * What the change fixed, recorded because the failure direction is the
+   * dangerous one: a `before*` handler on a bulk write used to have NO
+   * `previous`, so a guard written as `previous?.x` passed silently on every
+   * batch — fail-OPEN, and invisible.
    *
    * The row-scoping predicate a bulk write EXECUTES is not reachable from
    * `input` at all. It is the composed `ast`, which lives on the
@@ -389,20 +390,22 @@ export const HookContextSchema = lazySchema(() => z.object({
    * approximation. That is the safe direction for a fail-closed guard (it may
    * refuse a write that would have touched fewer rows; it can never miss one
    * that touches more) and the wrong direction for anything that needs the
-   * effective set exactly, which should work per row on the `after*` events
-   * below instead. Both of `plugin-auth`'s break-glass last-admin guards
-   * (#5892 ban half, #5941 delete half) are built on that upper bound, and
-   * objectql's own `isPredicateBulkWrite` (`hook-wrappers.ts`, #5038/#4775)
-   * reads `input.options.multi` from the same slot to tell a batch dispatch
-   * from a per-row one. Do not narrow `input.options` on the `before*` paths
-   * without re-reading all three.
+   * effective set exactly, which should work per row instead — on the
+   * `before*` events too, since #5574. Both of `plugin-auth`'s break-glass
+   * last-admin guards (#5892 ban half, #5941 delete half) are built on that
+   * upper bound, so do not narrow `input.options` on the `before*` paths
+   * without re-reading both. (objectql's `isPredicateBulkWrite` read the same
+   * slot to tell a batch dispatch from a per-row one; it is retired with the
+   * batch dispatch — `hook-wrappers.ts` records why.)
    *
    * Since #5038 (ADR-0058's bulk-write addendum) the `after*` events on a bulk
    * write dispatch ONCE PER MATCHED ROW, each on a single-record-shaped
    * context — `input.id` names that row, `previous` is its pre-image and
    * `result` its post-state — so a handler written for a single-id write needs
-   * no bulk-aware branch of its own. The batch-level context keeps the
-   * affected COUNT as `result` and is what the call itself resolves (#4639).
+   * no bulk-aware branch of its own. The `before*` events joined them in #5574,
+   * with `result` absent — the before phase has no post-state. The batch-level
+   * context keeps the affected COUNT as `result` and is what the call itself
+   * resolves (#4639); no handler is dispatched on it any more.
    */
   input: z.record(z.string(), z.unknown()).describe('Mutable input parameters'),
 

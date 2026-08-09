@@ -311,85 +311,31 @@ describe('[#4775] a condition fault never enters `onError`', () => {
 });
 
 /* ────────────────────────────────────────────────────────────────────────────
- * 5. The predicate bulk write gets a DIAGNOSIS, not `No such key` (#4800 / B1)
+ * 5. RETIRED (#5574) — the predicate bulk write no longer NEEDS a diagnosis
  * ──────────────────────────────────────────────────────────────────────────── */
 
-describe('[#4775 / #4800 B1, rescoped by #5038] the BATCH dispatch of a predicate write gets its own diagnosis', () => {
-  // [#5038] The batch dispatch is now the `before*` phase only: after-hooks on
-  // a predicate write are dispatched once per matched row, on a
-  // single-record-shaped context, so they never land here. A `beforeUpdate`
-  // still fires ONCE for the whole batch — it may rewrite the shared payload,
-  // and there is one payload — so this diagnosis is its standing answer.
-  const bulkCtx = (data: Record<string, unknown>) => makeCtx({
-    event: 'beforeUpdate',
-    previous: undefined,
-    input: { data, options: { multi: true } },
-  } as any);
+describe('[#4800 B1 → #5038 → #5574] the batch-dispatch diagnosis is retired at the producer', () => {
+  // ⚠️ Six cases stood here and asserted the diagnosis's wording: that a
+  // `previous`-reading condition on a batch dispatch named the BATCH rather
+  // than saying "No such key", pointed at the after-type event and at a
+  // record-change flow trigger, and carried `predicateBulkWrite: true`.
+  //
+  // The arc is worth stating once, because it is the argument for fixing
+  // producers rather than writing better messages about them. #4800/B1 asked
+  // for a diagnosis instead of a riddle. #5037 shipped it with a machine-
+  // readable `limitation`, expiring when the contract landed. #5038 landed the
+  // per-row contract for `after*` and retired half of it. #5574 (ADR-0058
+  // Addendum II) landed it for `before*` — and at that point there was no
+  // dispatch left without a bound `previous`, so the condition being diagnosed
+  // stopped existing and the diagnosis went with it under ADR-0049.
+  //
+  // What is pinned instead is the outcome: the write that used to fail now
+  // succeeds, per row, as authored. The full retirement pins (including that no
+  // dispatch lacking `previous` is produced at all) live in
+  // `hook-condition-bulk-previous.test.ts` §a.
 
-  it('`previous` on a batch dispatch names the batch instead of saying "No such key"', async () => {
-    const wrapped = wrapDeclarativeHook(
-      makeHook('previous.done != true && record.done == true'),
-      (async () => {}) as any, { logger: silentLogger },
-    );
-
-    const err = await wrapped(bulkCtx({ done: true })).then(() => null, (e) => e);
-
-    expect(err).toBeInstanceOf(HookConditionError);
-    expect(err.predicateBulkWrite).toBe(true);
-    expect(err.message).toContain("Hook 'audit_hook'");
-    expect(err.message).toContain('PREDICATE bulk write (multi: true)');
-    expect(err.message).toContain('no single prior record to bind');
-    expect(err.message).toContain('one record (update by id)');
-    // The default riddle must NOT be the whole story the author gets.
-    expect(err.message).not.toMatch(/which this object does not declare/);
-  });
-
-  it('DOES point at the after-type event, and at a record-change flow trigger', async () => {
-    // #5037 refused both on measured evidence: the record-change trigger rides
-    // these same lifecycle hooks, so on a `multi: true` update it fired ONCE
-    // with `ctx.previous` undefined (#4862) — naming it would have made that
-    // message the next `declared ≠ delivered`. #5038 fixed it at the PRODUCER,
-    // so the per-row dispatch reaches the trigger and the route became real.
-    // The message follows the fact.
-    const wrapped = wrapDeclarativeHook(
-      makeHook('previous.done != true'), (async () => {}) as any, { logger: silentLogger },
-    );
-    const err = await wrapped(bulkCtx({ done: true })).then(() => null, (e) => e);
-    expect(err.message).toContain("'afterUpdate'");
-    expect(err.message).toContain('record-change flow trigger');
-    expect(err.message).not.toContain('A record-change flow trigger is NOT a way around this');
-  });
-
-  it('a DECLARED field the bulk payload does not set gets the batch diagnosis too', async () => {
-    // Same root cause: no prior row in hand, so `record` is the bare payload
-    // and cannot be made total. `No such key: budget` alone reads as a typo,
-    // which would send the author to fix a field that is spelled correctly.
-    const wrapped = wrapDeclarativeHook(
-      makeHook('record.archived == true'), (async () => {}) as any, { logger: silentLogger },
-    );
-    const err = await wrapped(bulkCtx({ status: 'x' })).then(() => null, (e) => e);
-
-    expect(err.predicateBulkWrite).toBe(true);
-    expect(err.message).toContain("'archived' IS declared on this object");
-    expect(err.message).toContain('PREDICATE bulk write (multi: true)');
-  });
-
-  it('an UNDECLARED key on a bulk write is still reported as a TYPO, not as the batch', async () => {
-    // The batch diagnosis would be actively wrong here — this one really is a
-    // misspelling, and it is misspelled on a single-record write too.
-    const wrapped = wrapDeclarativeHook(
-      makeHook('record.stauts == "x"'), (async () => {}) as any, { logger: silentLogger },
-    );
-    const err = await wrapped(bulkCtx({ status: 'x' })).then(() => null, (e) => e);
-
-    expect(err.message).toContain("reads 'stauts', which this object does not declare");
-    expect(err.message).not.toContain('PREDICATE bulk write');
-  });
-
-  it('fail loud takes NO exception for the batch — the bulk write still fails', async () => {
-    // [#5038] On a `beforeUpdate` hook, which is the dispatch that is still
-    // batch-scoped. The same condition on `afterUpdate` now evaluates per row
-    // and the write SUCCEEDS — pinned in `hook-condition-bulk-previous.test.ts`.
+  it('the bulk write this section existed to explain now SUCCEEDS', async () => {
+    // Verbatim the "fail loud takes NO exception for the batch" case, inverted.
     const engine = await bootEngine([{
       name: 'bulk_breaker', object: 'hook_task', events: ['beforeUpdate'], priority: 90,
       condition: 'previous.done != true && record.done == true',
@@ -401,7 +347,29 @@ describe('[#4775 / #4800 B1, rescoped by #5038] the BATCH dispatch of a predicat
 
     await expect(
       engine.update('hook_task', { done: true }, { multi: true, where: { status: 'todo' } } as any),
-    ).rejects.toThrow(/PREDICATE bulk write/);
+    ).resolves.toBeDefined();
+  });
+
+  it('an UNDECLARED key on a bulk write is STILL reported as the typo it is', async () => {
+    // The half that was always the author's, and the half fail-loud is about.
+    // Retiring the platform-limitation branch must not soften this one — a
+    // misspelled key is misspelled on a bulk write exactly as on a single-row
+    // one, and it still ABORTS.
+    const engine = await bootEngine([{
+      name: 'typo_hook', object: 'hook_task', events: ['beforeUpdate'], priority: 90,
+      condition: 'record.stauts == "x"',
+      handler: () => {},
+    } as unknown as Hook]);
+
+    await engine.insert('hook_task', { title: 'A', status: 'todo', done: false });
+
+    const err = await engine
+      .update('hook_task', { done: true }, { multi: true, where: { status: 'todo' } } as any)
+      .then(() => null, (e) => e);
+
+    expect(err).toBeInstanceOf(HookConditionError);
+    expect(err.message).toContain("reads 'stauts', which this object does not declare");
+    expect(err.message).not.toContain('PREDICATE bulk write');
   });
 
   it('a single-record write of the SAME hook still succeeds', async () => {
@@ -510,7 +478,7 @@ async function bootEngine(hooks: Hook[]): Promise<ObjectQL> {
   const engine = new ObjectQL();
   engine.registerDriver(makeStubDriver(), true);
   await engine.init();
-  engine.registry.registerObject(taskObject as any);
+  engine.registry.registerObject(taskObject);
   bindHooksToEngine(engine, hooks, { packageId: 'app:test', logger: silentLogger });
   return engine;
 }
