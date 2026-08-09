@@ -6,6 +6,8 @@
 
 refactor(spec)!: retire `ActionDescriptor.isAsync` — a second spelling of `supportsPause` that nothing ever read (#6748, ADR-0049)
 
+<!-- adr-0087: registered action-descriptor-is-async-retired -->
+
 **FROM → TO:** `isAsync: true` → delete the key; declare `supportsPause: true` (plus the
 `resumeAuthority` its pauses need) and return `suspend: true` from `execute()`.
 `isAsync: false` → delete the key; there was never anything to preserve.
