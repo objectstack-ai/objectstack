@@ -558,6 +558,36 @@ describe('Data actions, email, dataset query, external datasources (#3587 gap cl
         await client.datasources.external.validate('pg_main');
         expect(String(fetchMock.mock.calls[5][0])).toBe(`${base}/validate`);
     });
+
+    // [#6714] Face 1: `email.send` joins `getRoute()`. Case A is the pin test
+    // above ('email.send pins POST /email/send') — unconnected ⇒ the
+    // `/api/v1/email/send` convention, byte-identical to the pre-#6714
+    // hardcode. B and C cover the discovery-following half.
+    it('[#6714] discovery WITHOUT an email key leaves the convention untouched (case B)', async () => {
+        const { client, fetchMock } = createMockClient({ status: 'sent' });
+        // A server rebased to /backend/api/v9 that does not advertise the
+        // email key — exactly what a pre-#6714 rest surface answers.
+        (client as any)['discoveryInfo'] = {
+            routes: { data: '/backend/api/v9/data', metadata: '/backend/api/v9/meta' },
+        };
+        await client.email.send({ to: 'a@example.com', subject: 'Hello', text: 'hi' });
+        expect(String(fetchMock.mock.calls[0][0])).toBe('http://localhost:3000/api/v1/email/send');
+    });
+
+    it('[#6714] email.send follows the advertised rebased routes.email (case C)', async () => {
+        const { client, fetchMock } = createMockClient({ status: 'sent' });
+        (client as any)['discoveryInfo'] = {
+            routes: {
+                data: '/backend/api/v9/data',
+                metadata: '/backend/api/v9/meta',
+                email: '/backend/api/v9/email',
+            },
+        };
+        await client.email.send({ to: 'a@example.com', subject: 'Hello', text: 'hi' });
+        const [url, init] = fetchMock.mock.calls[0];
+        expect(String(url)).toBe('http://localhost:3000/backend/api/v9/email/send');
+        expect(init.method).toBe('POST');
+    });
 });
 
 describe('Approvals namespace (ADR-0019)', () => {
@@ -1607,6 +1637,106 @@ describe('ScopedProjectClient', () => {
         const client = new ObjectStackClient({ baseUrl: 'http://localhost:3000' });
         const scoped = client.project('00000000-0000-0000-0000-000000000001');
         expect(scoped.getProjectId()).toBe('00000000-0000-0000-0000-000000000001');
+    });
+
+    // [#6714 face 3] The scoped prefix derives from the advertised
+    // `routes.data` base (the `scoping` block carries posture only — no path
+    // — so `routes.data` is the one derivable source). Case A = the pin tests
+    // above: unconnected ⇒ byte-identical `/api/v1/environments/...`. B and C
+    // below cover the derivation half.
+    it('[#6714] scoped prefix follows the advertised base of routes.data (case C) — every namespace', async () => {
+        const { client, fetchMock } = createMockClient({ ok: true, types: [] });
+        (client as any)['discoveryInfo'] = {
+            routes: { data: '/backend/api/v9/data', metadata: '/backend/api/v9/meta' },
+        };
+        const scoped = client.project('proj-123');
+        const base = 'http://localhost:3000/backend/api/v9/environments/proj-123';
+
+        // All namespaces build off ONE scope() — drive one method from each so
+        // a half-fix (some namespaces re-hardcoding the prefix) cannot stay
+        // green.
+        await scoped.meta.getTypes();
+        expect(String(fetchMock.mock.calls[0][0])).toBe(`${base}/meta`);
+        await scoped.data.get('task', 't1');
+        expect(String(fetchMock.mock.calls[1][0])).toBe(`${base}/data/task/t1`);
+        await scoped.packages.list();
+        expect(String(fetchMock.mock.calls[2][0])).toBe(`${base}/packages`);
+        await scoped.automation.getFlow('flow-1');
+        expect(String(fetchMock.mock.calls[3][0])).toBe(`${base}/automation/flow-1`);
+        await scoped.data.batchTransaction([{ operation: 'create', object: 'task', data: {} } as any]);
+        expect(String(fetchMock.mock.calls[4][0])).toBe(`${base}/batch`);
+    });
+
+    it('[#6714] a custom dataPrefix makes the base underivable — the convention holds, byte-identical (case B)', async () => {
+        const { client, fetchMock } = createMockClient({ types: [] });
+        // routes.data does not end with the conventional `/data`, so the base
+        // cannot be derived honestly; the client must NOT guess (contract-first
+        // — no lenient re-parsing) and falls back to the convention,
+        // byte-identical to the pre-#6714 behavior.
+        (client as any)['discoveryInfo'] = {
+            routes: { data: '/backend/api/v9/records', metadata: '/backend/api/v9/meta' },
+        };
+        await client.project('proj-123').meta.getTypes();
+        expect(String(fetchMock.mock.calls[0][0])).toBe(
+            'http://localhost:3000/api/v1/environments/proj-123/meta',
+        );
+    });
+
+    it('[#6714] a scoped discovery response strips its OWN /environments/{id} segment before re-scoping', async () => {
+        const { client, fetchMock } = createMockClient({ types: [] });
+        // Discovery answered from the environment-scoped mount: routes.data is
+        // `{base}/environments/{served-id}/data` and scoping says so. The
+        // derived base must be the UNSCOPED one, so a scoped client for a
+        // DIFFERENT environment does not stack two scope segments.
+        (client as any)['discoveryInfo'] = {
+            routes: {
+                data: '/backend/api/v9/environments/env-served/data',
+                metadata: '/backend/api/v9/environments/env-served/meta',
+            },
+            scoping: { enabled: true, resolution: 'auto', scoped: true, environmentId: 'env-served' },
+        };
+        await client.project('proj-other').meta.getTypes();
+        expect(String(fetchMock.mock.calls[0][0])).toBe(
+            'http://localhost:3000/backend/api/v9/environments/proj-other/meta',
+        );
+    });
+
+    it('[#6714] a scoped response whose environmentId the host never resolved still strips ONE scope segment', async () => {
+        const { client, fetchMock } = createMockClient({ types: [] });
+        // `rest-server.ts` advertises `scoping.environmentId` as
+        // `req.params?.environmentId` — a host that did not populate the route
+        // param answers `scoped: true` with NO id, and `routes.data` keeps the
+        // literal `:environmentId`. Stripping on the strength of `scoped` alone
+        // is sound (a scoped base ends with that segment by construction) and
+        // is what keeps `scope()` from stacking two scope segments.
+        (client as any)['discoveryInfo'] = {
+            routes: {
+                data: '/backend/api/v9/environments/:environmentId/data',
+                metadata: '/backend/api/v9/environments/:environmentId/meta',
+            },
+            scoping: { enabled: true, resolution: 'auto', scoped: true },
+        };
+        await client.project('proj-other').meta.getTypes();
+        expect(String(fetchMock.mock.calls[0][0])).toBe(
+            'http://localhost:3000/backend/api/v9/environments/proj-other/meta',
+        );
+    });
+
+    it('[#6714] scoped:true with no recognisable scope segment DECLINES — convention, never a doubled prefix', async () => {
+        const { client, fetchMock } = createMockClient({ types: [] });
+        // A base the derivation does not understand: `scoped` claims the
+        // response came off the scoped mount, but `routes.data` carries no
+        // `/environments/{seg}` to remove. Returning it unchanged would build
+        // `…/tenants/t1/environments/proj-other/meta` — a URL neither mount
+        // serves, i.e. strictly worse than the hardcode. Decline instead.
+        (client as any)['discoveryInfo'] = {
+            routes: { data: '/backend/api/v9/tenants/t1/data' },
+            scoping: { enabled: true, resolution: 'auto', scoped: true },
+        };
+        await client.project('proj-other').meta.getTypes();
+        expect(String(fetchMock.mock.calls[0][0])).toBe(
+            'http://localhost:3000/api/v1/environments/proj-other/meta',
+        );
     });
 
     it('prefixes the screen-flow automation.resume / getScreen calls', async () => {

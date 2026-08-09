@@ -9,6 +9,7 @@ import {
   FLOW_TRIGGER_UNKNOWN_EVENT,
   FLOW_TIME_RELATIVE_DESCRIPTOR_INVALID,
   FLOW_TIME_RELATIVE_DESCRIPTOR_UNROUTABLE,
+  FLOW_TRIGGER_UNROUTABLE,
 } from './validate-flow-trigger-readiness.js';
 
 function recordFlow(overrides: Record<string, unknown> = {}) {
@@ -720,6 +721,198 @@ describe('validateFlowTriggerReadiness', () => {
     expect(findings.some((f) => f.rule === FLOW_TRIGGER_UNKNOWN_EVENT)).toBe(false);
   });
 
+  // ── #6637 — a record_change flow the engine routes NOWHERE ───────────────
+  //
+  // The quietest member of the never-fire family. Every case below is built on
+  // `unroutable()`, which differs from `recordFlow()` in exactly the two ways
+  // the criterion cares about: `type: 'record_change'` (the declared intent) and
+  // a start-node `triggerType` outside the `record-` prefix (the contradiction).
+  //
+  // The "does NOT flag" block is the load-bearing half. A criterion phrased on
+  // "resolves to no binding" alone would flag every manual and screen flow in
+  // the world, so each guard below is a shape the rule must stay silent about,
+  // paired — per the same fixture — with the one-key mutation that makes it
+  // speak. A guard whose green could also be produced by a rule that never runs
+  // is not a guard.
+  describe('record_change flow with an unroutable triggerType (#6637)', () => {
+    /** A `type: 'record_change'` flow whose start node carries `config`. */
+    const unroutable = (config: Record<string, unknown>, flowOverrides: Record<string, unknown> = {}) => ({
+      objects: [candidateObject],
+      flows: [
+        {
+          name: 'candidate_hired',
+          type: 'record_change',
+          status: 'active',
+          nodes: [
+            { id: 'start', type: 'start', config: { objectName: 'app_candidate', ...config } },
+            { id: 'end', type: 'end' },
+          ],
+          edges: [{ id: 'e1', source: 'start', target: 'end' }],
+          ...flowOverrides,
+        },
+      ],
+    });
+
+    it("flags the issue's specimen — triggerType 'onCreate' on a record_change flow", () => {
+      const findings = validateFlowTriggerReadiness(unroutable({ triggerType: 'onCreate' }));
+      expect(findings.map((f) => f.rule)).toEqual([FLOW_TRIGGER_UNROUTABLE]);
+      expect(findings[0].severity).toBe('error');
+      expect(findings[0].message).toContain("'onCreate'");
+      expect(findings[0].path).toBe('flows[0].nodes[0].config.triggerType');
+    });
+
+    it('describes the MEASURED failure, not just "never fires"', () => {
+      // The three engine facts the message is built on — a message that only
+      // said "never fires" would be indistinguishable from `…-unknown-event`,
+      // whose flow DOES bind and DOES get a bind-time warn. The distinguishing
+      // claim is that nothing names this one, and the rule has to make it.
+      const [f] = validateFlowTriggerReadiness(unroutable({ triggerType: 'onCreate' }));
+      expect(f.message).toMatch(/record_change/);
+      expect(f.message).toMatch(/never fires/i);
+      expect(f.message).toMatch(/audit/i);
+      // …and it must NOT overclaim: the flow count line does move, so the
+      // message says "nothing NAMES it" rather than "no signal anywhere".
+      expect(f.message).toMatch(/count/i);
+      expect(f.hint).toMatch(/record-\{before,after\}/);
+      expect(f.hint).toMatch(/autolaunched/);
+    });
+
+    it('flags the other unroutable spellings an author reaches for', () => {
+      for (const tt of ['on_create', 'onUpdate', 'create', 'record_change', 'after_insert', '']) {
+        const findings = validateFlowTriggerReadiness(unroutable({ triggerType: tt }));
+        expect(findings.map((f) => f.rule), `triggerType ${JSON.stringify(tt)}`).toEqual([
+          FLOW_TRIGGER_UNROUTABLE,
+        ]);
+      }
+    });
+
+    it('flags a non-record ARRAY on a record_change flow — 1d deliberately does not claim it', () => {
+      // `['onCreate']` has no `record-` element, so `flow-trigger-unknown-event`
+      // (1d) stays silent by design and pins that silence in its own test. On an
+      // `autolaunched` flow that silence is correct; on a `record_change` flow it
+      // left the loudest possible contradiction unreported. The token is rendered
+      // as JSON so the author sees the shape they wrote.
+      const findings = validateFlowTriggerReadiness(unroutable({ triggerType: ['onCreate'] }));
+      expect(findings.map((f) => f.rule)).toEqual([FLOW_TRIGGER_UNROUTABLE]);
+      expect(findings[0].message).toContain('["onCreate"]');
+      expect(findings.some((f) => f.rule === FLOW_TRIGGER_UNKNOWN_EVENT)).toBe(false);
+    });
+
+    describe('does NOT flag (each paired with the mutation that makes it fire)', () => {
+      it('a canonical record-* token — the whole point of declaring record_change', () => {
+        expect(validateFlowTriggerReadiness(unroutable({ triggerType: 'record-after-update' }))).toEqual([]);
+        // Planted bad value on the SAME fixture: the green above is the rule
+        // judging a good token, not the rule failing to run.
+        expect(
+          validateFlowTriggerReadiness(unroutable({ triggerType: 'record_after_update' })).map((f) => f.rule),
+        ).toEqual([FLOW_TRIGGER_UNROUTABLE]);
+      });
+
+      it('an off-grammar record-* token — that is 1c\'s finding, and only 1c\'s', () => {
+        // The two ids partition the dead tokens on whether the engine routes the
+        // value, so exactly one of them can ever speak about a given token.
+        const findings = validateFlowTriggerReadiness(unroutable({ triggerType: 'record-after-updated' }));
+        expect(findings.map((f) => f.rule)).toEqual([FLOW_TRIGGER_UNKNOWN_EVENT]);
+        expect(findings.some((f) => f.rule === FLOW_TRIGGER_UNROUTABLE)).toBe(false);
+      });
+
+      it('a genuinely manual flow — autolaunched/screen, the types this rule cannot reach', () => {
+        // The recorded counter-argument to the whole rule (#6637): the
+        // fall-through to "no binding" is ALSO how a flow legitimately is
+        // manual. Declaring `record_change` is what separates the two, so these
+        // must stay silent no matter how unroutable the token is.
+        for (const type of ['autolaunched', 'screen']) {
+          expect(
+            validateFlowTriggerReadiness(unroutable({ triggerType: 'onCreate' }, { type })).map((f) => f.rule),
+            type,
+          ).not.toContain(FLOW_TRIGGER_UNROUTABLE);
+        }
+        // Same fixture, one key changed back: `record_change` and it fires.
+        expect(
+          validateFlowTriggerReadiness(unroutable({ triggerType: 'onCreate' }, { type: 'record_change' })).map(
+            (f) => f.rule,
+          ),
+        ).toContain(FLOW_TRIGGER_UNROUTABLE);
+      });
+
+      it('a record_change flow that ALSO declares a trigger the engine DOES route', () => {
+        // These bind and fire — on the wrong trigger's terms. A real defect, a
+        // different one, and not this rule's to name (see 1f). Pinned so the
+        // criterion is not quietly widened into a second verdict.
+        for (const extra of [
+          { schedule: { type: 'interval', intervalMs: 60000 } },
+          { timeRelative: { object: 'app_candidate', dateField: 'due_at', withinDays: 7 } },
+        ]) {
+          expect(
+            validateFlowTriggerReadiness(unroutable({ triggerType: 'onCreate', ...extra })).map((f) => f.rule),
+            JSON.stringify(extra),
+          ).not.toContain(FLOW_TRIGGER_UNROUTABLE);
+        }
+        // `triggerType: 'api'` routes on its own — the engine tests the token
+        // itself, so there is nothing to add to the fixture.
+        expect(
+          validateFlowTriggerReadiness(unroutable({ triggerType: 'api' })).map((f) => f.rule),
+        ).not.toContain(FLOW_TRIGGER_UNROUTABLE);
+        // Drop the routed sibling and the same flow is dead again.
+        expect(
+          validateFlowTriggerReadiness(unroutable({ triggerType: 'onCreate' })).map((f) => f.rule),
+        ).toEqual([FLOW_TRIGGER_UNROUTABLE]);
+      });
+
+      it('an ABSENT triggerType — dead too, deliberately deferred (#6637 corpus)', () => {
+        // Scope boundary, pinned rather than left to memory. A `record_change`
+        // flow with no triggerType at all resolves to no binding by the same
+        // fall-through and is just as dead — but it is an omission rather than a
+        // contradiction, and the corpus measurement found a LIVE instance of it
+        // in `examples/app-todo` (`TaskCompletionFlow`, #6882). Covering it here
+        // would gate a shipped example app on a guess about that app's
+        // semantics, so the criterion requires the key to be PRESENT and the
+        // omission case is filed separately. Widening this is then a deliberate
+        // edit that has to delete this test, not a side effect of touching the
+        // predicate.
+        expect(
+          validateFlowTriggerReadiness(unroutable({})).map((f) => f.rule),
+        ).not.toContain(FLOW_TRIGGER_UNROUTABLE);
+        // Non-vacuous: add the key back, and the same fixture fires.
+        expect(
+          validateFlowTriggerReadiness(unroutable({ triggerType: 'onCreate' })).map((f) => f.rule),
+        ).toEqual([FLOW_TRIGGER_UNROUTABLE]);
+      });
+
+      it('a flow with no start node at all', () => {
+        expect(
+          validateFlowTriggerReadiness({
+            objects: [candidateObject],
+            flows: [{ name: 'no_start', type: 'record_change', status: 'active', nodes: [{ id: 'end', type: 'end' }] }],
+          }),
+        ).toEqual([]);
+      });
+    });
+
+    it('co-fires with the timeRelative scalar rule — two keys, two facts', () => {
+      // `{ triggerType: 'onCreate', timeRelative: 'daily' }` is wrong twice over,
+      // at two different paths. The file's stated doctrine is two facts rather
+      // than one fact twice, so both are reported — and 1e's own consequence
+      // clause stays true, because nothing on this start node routes either.
+      const findings = validateFlowTriggerReadiness(
+        unroutable({ triggerType: 'onCreate', timeRelative: 'daily' }),
+      );
+      expect(findings.map((f) => f.rule).sort()).toEqual(
+        [FLOW_TIME_RELATIVE_DESCRIPTOR_UNROUTABLE, FLOW_TRIGGER_UNROUTABLE].sort(),
+      );
+      expect(new Set(findings.map((f) => f.path)).size).toBe(2);
+      expect(
+        findings.find((f) => f.rule === FLOW_TIME_RELATIVE_DESCRIPTOR_UNROUTABLE)!.message,
+      ).toMatch(/binds to NOTHING/);
+    });
+
+    it('the id is the published slug and is distinct from the routed-token id', () => {
+      expect(FLOW_TRIGGER_UNROUTABLE).toBe('flow-trigger-unroutable');
+      expect(FLOW_TRIGGER_UNROUTABLE).not.toBe(FLOW_TRIGGER_UNKNOWN_EVENT);
+      expect(FLOW_TRIGGER_UNROUTABLE).not.toBe(FLOW_TIME_RELATIVE_DESCRIPTOR_UNROUTABLE);
+    });
+  });
+
   // ── #5762 — the family's severity map ────────────────────────────────────
   //
   // The rules in this file were reviewed as ONE family and split on a single
@@ -787,6 +980,27 @@ describe('validateFlowTriggerReadiness', () => {
                   id: 'start',
                   type: 'start',
                   config: { objectName: 'app_candidate', triggerType: 'record-after-updated' },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+      [
+        FLOW_TRIGGER_UNROUTABLE,
+        'error',
+        {
+          objects: [candidateObject],
+          flows: [
+            {
+              name: 'declared_dead',
+              type: 'record_change',
+              status: 'active',
+              nodes: [
+                {
+                  id: 'start',
+                  type: 'start',
+                  config: { objectName: 'app_candidate', triggerType: 'onCreate' },
                 },
               ],
             },

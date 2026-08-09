@@ -233,7 +233,9 @@ one of two doors, each writing only what it owns:
   **overlay** — the record projects the effective body while the package keeps
   owning the row, and "delete" resets to the shipped declaration. System /
   boot writes carry `isSystem` and bypass it, so the seeder and materializer
-  are never self-blocked.
+  are never self-blocked. That bypass is not local to this gate — the full set
+  of behaviours the flag changes is catalogued in
+  [System Context (`isSystem`)](/docs/permissions/system-context).
 
 ## Lifecycle coverage (five stages)
 
