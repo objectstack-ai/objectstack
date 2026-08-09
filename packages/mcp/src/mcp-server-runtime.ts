@@ -157,15 +157,34 @@ async function diagnosedGet(
  * `object_schema` resource, whose resolver is `getObject(name)`.
  *
  * Deliberately a **verdict-only probe run after the empty answer**, rather than
- * swapping `getObject` out for `getDiagnosed('object', name)`. `getObject` is
- * its own member of `IMetadataService` with no documented equivalence to
- * `get('object', name)`, and the equivalence does not hold in general:
- * `MetadataManager.getObject` delegates to `get('object', name)`, but
- * `MetadataFacade.getObject` (objectql) returns `registry.getObject(name)` — a
- * different shape from its own `get()`. Presuming the equivalence at a consumer
- * is exactly the private dialect Prime Directive #12 forbids, so the resolver
- * is left untouched and only the *question* "could this answer be trusted as
- * complete?" is asked of the contract member that is declared to answer it.
+ * swapping `getObject` out for `getDiagnosed('object', name)`. The ground is
+ * the *contract*, not the runtime: `getObject` is its own member of
+ * `IMetadataService`, and at the time of #6055 that member carried **no
+ * documented equivalence** to `get('object', name)`. Presuming an undocumented
+ * equivalence at a consumer is exactly the private dialect Prime Directive #12
+ * forbids, so the resolver is left untouched and only the *question* "could
+ * this answer be trusted as complete?" is asked of the contract member that is
+ * declared to answer it.
+ *
+ * [#6724] This TSDoc used to offer a second, factual ground — that the
+ * equivalence "does not hold in general", `MetadataFacade.getObject` (objectql)
+ * returning "a different shape from its own `get()`". That claim is **false**,
+ * and it was asserted rather than measured. `SchemaRegistry.getItem`
+ * special-cases `'object'`/`'objects'` straight back to `getObject`, so the
+ * facade's `get('object', n)` resolves through the very same lookup, and the
+ * `item?.content ?? item` unwrap that follows is a no-op — a merged
+ * `ServiceObject` has no `content` key. Measured: the two members hand back the
+ * **identical object reference** on a hit, and both answer `undefined` on a
+ * miss. All three shipped implementations are pinned that way by
+ * `packages/objectql/src/metadata-service-getobject-equivalence.test.ts`
+ * (PR #6839 for #6745), and `IMetadataService.getObject` has documented the
+ * equivalence since PR #6723 (#6505) — so the "no documented equivalence" half
+ * above is a fact about #6055's repo, not today's.
+ *
+ * Correcting the record does not decide the design question, and this note
+ * deliberately does not make that call: whether the resolver should become
+ * `getDiagnosed('object', name)` and shed the extra miss-path read is a
+ * separate judgement, to be made on its own merits by whoever takes it up.
  *
  * Consequences of that choice, both acceptable and both deliberate:
  * - one extra read on the MISS path only (never on a hit, never on success);
