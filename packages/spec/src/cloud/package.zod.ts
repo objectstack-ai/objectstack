@@ -167,6 +167,35 @@ export const PackageSchema = lazySchema(() => z.object({
     .regex(/^[a-z][a-z0-9-]*(\.[a-z][a-z0-9-]*)+$/)
     .describe('Globally unique reverse-domain package identifier (e.g. com.acme.crm)'),
 
+  /**
+   * Metadata namespace the artifact installs under — the mandatory prefix of
+   * every object name it ships (`crm` → `crm_account`). Mirrors
+   * `manifest.namespace` (`packages/spec/src/kernel/manifest.zod.ts`) and is
+   * carried here so the namespace leaves the artifact at publish time.
+   *
+   * ADR-0048 addendum §A.2 (Phase A1): the publish-time namespace exclusivity
+   * gate is keyed on the **bare namespace** (D1) and can check nothing unless
+   * the namespace travels on the publish payload. This field is that input.
+   *
+   * **Optional, deliberately.** `manifest.namespace` is itself optional today,
+   * and §A.2's algorithm opens with `if (namespace is absent) -> allow`. A
+   * package that declares no namespace makes no reservation and is not gated.
+   *
+   * The value is written from the compiled artifact's manifest by
+   * `objectstack package publish` — it is never authored separately, because a
+   * reservation is only meaningful if it names the prefix the package really
+   * ships.
+   */
+  namespace: z
+    .string()
+    // Kept byte-identical to `ManifestSchema.shape.namespace`'s pattern; the
+    // two are pinned against each other by `package-namespace.test.ts` so the
+    // publish payload and the manifest cannot drift into disagreeing about
+    // what a namespace is (addendum §A.7 "two gates, one vocabulary").
+    .regex(/^[a-z][a-z0-9_]{1,19}$/, 'Namespace must be 2-20 chars, lowercase alphanumeric + underscore')
+    .optional()
+    .describe('Metadata namespace claimed by the package (mirrors manifest.namespace; e.g. "crm" → object names "crm_account")'),
+
   /** Organization that owns and publishes this package. */
   ownerOrgId: z.string().describe('Organization ID of the package owner/publisher'),
 
@@ -251,6 +280,12 @@ export type PackageParsed = z.infer<typeof PackageSchema>;
  */
 export const CreatePackageRequestSchema = lazySchema(() => z.object({
   manifestId: PackageSchema.shape.manifestId,
+  // ADR-0048 addendum §A.2 Phase A1 — the namespace travels with the publish
+  // payload, or the publish-time exclusivity gate (A2) has nothing to check.
+  // Optional, matching `manifest.namespace` and the algorithm's first line
+  // (`if (namespace is absent) -> allow`). Sent by `objectstack package
+  // publish`, read off the compiled artifact's manifest.
+  namespace: PackageSchema.shape.namespace,
   ownerOrgId: z.string().describe('Owner organization ID'),
   displayName: PackageSchema.shape.displayName,
   description: PackageSchema.shape.description,

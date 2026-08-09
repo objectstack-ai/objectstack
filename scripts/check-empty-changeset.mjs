@@ -820,6 +820,62 @@ function selfTest() {
         `consumer: every changeset-verdict step must honour the fast-path read too (${halfGuarded.length} do not) -- dropping it makes an already-labelled PR pay a whole job (#5580)`,
       );
 
+      // ── The same race, one label along (#5620) ───────────────────────────────
+      //
+      // `allow-major` is the launch-window guard's escape hatch, and it was read
+      // from `github.event.pull_request.labels` for exactly as long as the
+      // `skip-changeset` half was: same frozen snapshot, same permanent red under
+      // `rerun_failed_jobs`, which replays the payload. It is pinned HERE, beside
+      // the skip-changeset reads, because it is the same defect in the same job
+      // and a second home for it would be one more thing to remember.
+      //
+      // Two properties of this one make the pin worth more than usual, not less.
+      // It is DORMANT -- check-changeset-no-major.mjs stands aside for the whole
+      // pre-release window -- so no CI run can currently exercise the live read
+      // and a revert to the payload would be invisible until `changeset pre exit`
+      // re-arms the guard, which is the day whole-stack majors are being argued
+      // about. And it has no settling read to fall back on, by the argument in
+      // the workflow; the position of the read is doing that work instead.
+      //
+      // What is pinned is the SHAPE OF THE EXEMPTION, never its permissiveness:
+      // no payload read anywhere, exactly one live read, the guard consuming that
+      // read, and an input that could not be read still RUNNING the guard.
+      assert(
+        !/contains\(github\.event\.pull_request\.labels\.\*\.name, 'allow-major'\)/.test(yaml),
+        "consumer: the allow-major exemption must never be read from `github.event.pull_request.labels` -- that snapshot is frozen when the event fires and `rerun_failed_jobs` replays it, so the red it produces cannot be re-run green (#5620)",
+      );
+      const allowMajorReads = [...yaml.matchAll(/grep -qxF 'allow-major'/g)];
+      assert(
+        allowMajorReads.length === 1,
+        `consumer: exactly one live \`grep -qxF 'allow-major'\` read is expected in the workflow; found ${allowMajorReads.length}. The matcher is whole-line and fixed for the same two reasons as the skip-changeset reads: \`contains(<array>, ...)\` matched an array ELEMENT, so a substring match would newly exempt an \`allow-major-audit\` label, and a piped \`grep -q\` can take SIGPIPE under pipefail.`,
+      );
+      const namedSteps = jobText
+        .split(/\n(?=      - name: )/)
+        .map((c) => c.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n'));
+      const majorGuard = namedSteps.find((c) => /- name: Guard against accidental major bumps/.test(c));
+      assert(
+        majorGuard !== undefined && /steps\.allow_major\.outputs\.allow != 'true'/.test(majorGuard),
+        'consumer: the launch-window major guard must take its exemption from the LIVE allow-major read (`steps.allow_major.outputs.allow`) -- reading the event payload there is #5620 itself',
+      );
+      const allowMajorStep = namedSteps.find((c) => /grep -qxF 'allow-major'/.test(c));
+      assert(
+        allowMajorStep !== undefined
+          && /steps\.labels\.outputs\.skip != 'true'/.test(allowMajorStep)
+          && /steps\.labels_settled\.outputs\.skip != 'true'/.test(allowMajorStep),
+        'consumer: the live allow-major read must honour both skip-changeset reads -- a PR the changeset gate exempts must not buy an API call for a guard that will not run',
+      );
+      // The tolerance direction, pinned by POSITION rather than by counting the
+      // enforcing branches: `allow=true` may be written once, and only downstream
+      // of the grep that actually observed the label. Every other exit -- no PR
+      // number, an unreadable label list -- reaches the guard (#4690).
+      const allowLines = (allowMajorStep ?? '').split('\n');
+      const grepAt = allowLines.findIndex((l) => /grep -qxF 'allow-major'/.test(l));
+      const allowTrueAt = allowLines.map((l, i) => (/allow=true/.test(l) ? i : -1)).filter((i) => i >= 0);
+      assert(
+        grepAt >= 0 && allowTrueAt.length === 1 && allowTrueAt[0] > grepAt,
+        `consumer: the live allow-major read must write \`allow=true\` exactly once and only after the label was really observed (found ${allowTrueAt.length} at ${JSON.stringify(allowTrueAt)}, grep at ${grepAt}) -- an exemption handed out because the label list could not be read is the #4690 anti-pattern, and here it would wave a whole-stack major through`,
+      );
+
       // The hard constraint of #6378, stated as structure: none of this may have
       // made the gate softer. A PR with no changeset and no label still has to
       // hit a real non-zero exit, and no step of this job may be excused from
