@@ -300,15 +300,27 @@ describe('[#5860] a SKIP_OBJECTS object no longer forces the prior-row read', ()
 // ---------------------------------------------------------------------------
 
 describe('[#5860] an audited object keeps its read and its ledger row', () => {
-  it('the gate stays open for a business object', async () => {
+  it('the gate stays open for a business object — on the AFTER terms (#6656)', async () => {
     const { engine } = await boot();
     installAuditWriters(engine);
 
     expect(gateOpen(engine, 'afterUpdate', 'biz_task')).toBe(true);
     expect(gateOpen(engine, 'afterInsert', 'biz_task')).toBe(true);
     expect(gateOpen(engine, 'afterDelete', 'biz_task')).toBe(true);
-    expect(gateOpen(engine, 'beforeUpdate', 'biz_task')).toBe(true);
-    expect(gateOpen(engine, 'beforeDelete', 'biz_task')).toBe(true);
+
+    // [#6656] These two were `true` when this case was written, because
+    // `captureBefore` was registered on them. It is retired, so plugin-audit
+    // now declares NO before-phase hook for any object.
+    //
+    // That is deliberately not a weakening of #5860: both demand gates are
+    // `hasHooksFor(before*) || hasHooksFor(after*) || getSummaryDescriptors()`
+    // (`engine.ts:6992` for update, `:7857` for delete), so the AFTER terms
+    // asserted above hold them open and the engine still buys the one
+    // pre-image read `writeAudit` consumes. The case below measures exactly
+    // that, which is what keeps this pair of expectations from silently
+    // meaning "audit stopped seeing the prior row".
+    expect(gateOpen(engine, 'beforeUpdate', 'biz_task')).toBe(false);
+    expect(gateOpen(engine, 'beforeDelete', 'biz_task')).toBe(false);
   });
 
   it('single-id update() on `biz_task` still reads the prior row and audits the diff', async () => {
@@ -397,11 +409,39 @@ function makeRecordingEngine() {
   return { engine, registrations, created, api };
 }
 
-/** The five writer registrations: global minus the skip list. */
-const AUDIT_WRITER_EVENTS = ['beforeUpdate', 'beforeDelete', 'afterInsert', 'afterUpdate', 'afterDelete'];
+/**
+ * The writer registrations: global minus the skip list.
+ *
+ * [#6656] Was five. `captureBefore`'s `beforeUpdate` / `beforeDelete` pair is
+ * retired — the engine binds `previous` before every `before*` dispatch — so
+ * three remain. #5860's property is unchanged and is what this case still
+ * measures: every registration the plugin DOES declare carries the exclusion
+ * on its registration face, and none of them narrows the allow half.
+ */
+const AUDIT_WRITER_EVENTS = ['afterInsert', 'afterUpdate', 'afterDelete'];
 
 describe('[#5860] the skip list is declared on the registration face', () => {
-  it('all five writer registrations carry `excludeObjects` and stay global otherwise', () => {
+  it('plugin-audit declares NO `beforeUpdate` / `beforeDelete` hook (#6656)', () => {
+    const { engine, registrations } = makeRecordingEngine();
+    installAuditWriters(engine);
+
+    // The retirement, asserted on the declaration itself rather than inferred
+    // from a read count — this is the face `hasHooksFor` reads, so it is what
+    // decides whether the engine's per-row bulk dispatch runs at all.
+    //
+    // Scoped to the two events `captureBefore` held. The plugin's OTHER
+    // before-phase registrations are unrelated capability gates on a single
+    // named object each (`beforeInsert` on `sys_comment` for `enable.feeds`,
+    // on `sys_attachment` for `enable.files`); they read no prior row, and
+    // asserting "no before-phase hook at all" would fail on them while
+    // measuring nothing about this card.
+    const preImageEvents = registrations
+      .map((r) => r.event)
+      .filter((e) => e === 'beforeUpdate' || e === 'beforeDelete');
+    expect(preImageEvents).toEqual([]);
+  });
+
+  it('all writer registrations carry `excludeObjects` and stay global otherwise', () => {
     const { engine, registrations } = makeRecordingEngine();
     installAuditWriters(engine);
 

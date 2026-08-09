@@ -1387,6 +1387,9 @@ importers:
       '@objectstack/core':
         specifier: workspace:*
         version: link:../../core
+      '@objectstack/objectql':
+        specifier: workspace:*
+        version: link:../../objectql
       '@objectstack/platform-objects':
         specifier: workspace:*
         version: link:../../platform-objects
@@ -1394,9 +1397,6 @@ importers:
         specifier: workspace:*
         version: link:../../spec
     devDependencies:
-      '@objectstack/objectql':
-        specifier: workspace:*
-        version: link:../../objectql
       '@types/node':
         specifier: ^26.1.2
         version: 26.1.2

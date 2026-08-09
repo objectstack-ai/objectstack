@@ -2,6 +2,16 @@
 
 import type { HookContext } from '@objectstack/spec/data';
 import type { IDataEngine } from '@objectstack/spec/contracts';
+// [#6656] The read-mask CONTRACT, imported rather than re-typed. `SECRET_MASK`
+// is the exact string the engine's read path substitutes and
+// `collectMaskedReadFields` is the exact predicate that picks the fields
+// (`secret` always; `password` unless the object is `managedBy: 'better-auth'`
+// — ADR-0100). A hand-copied `'••••••••'` or a re-typed "is it secret?" test
+// here would be a second de-facto contract that drifts from the engine's by one
+// character and leaks on the day it does; `secret-fields.ts` makes the same
+// argument for its own single definition. The `/core` subpath is the
+// engine-free surface of the same package.
+import { SECRET_MASK, collectMaskedReadFields } from '@objectstack/objectql/core';
 
 /**
  * Minimal structural view of `NotificationService.emit` (ADR-0030). Declared
@@ -216,6 +226,13 @@ function recordLabel(record: any, id: string): string {
  * exclusion is kept on its own merit — the derived-is-implied reason above —
  * and it is keyed on the field TYPE from `fieldDefs`, never on a key being
  * missing, which is why the fix one layer down did not disturb it.
+ *
+ * [#6656] Since the pre-image became the engine's raw row, `before` no longer
+ * carries formula keys at all while `after` still does (#5504's write-path
+ * hydration) — so the asymmetry is back on the SNAPSHOT faces, which this set
+ * never reached. `ledgerView(..., { dropComputed: true })` now applies the same
+ * rule to create `new_value` and delete `old_value`; this set is the single
+ * definition both faces read.
  */
 const COMPUTED_FIELD_TYPES = new Set<string>(['formula', 'summary', 'rollup', 'autonumber', 'auto_number']);
 
@@ -532,46 +549,128 @@ export function installAuditWriters(
   };
 
   /**
-   * beforeUpdate / beforeDelete: capture "previous" snapshot via api.sudo()
-   * so we can compute the diff in the afterXxx hook. We attach the snapshot
-   * to the context (`(ctx as any).__previous`) since `HookContext.previous`
-   * is officially typed but not always populated by the engine itself.
+   * [#6656, Option A+] The view the ledger records for one record.
+   *
+   * Retiring `captureBefore` (below) makes both sides of every diff come from
+   * the SAME pipeline — the raw driver row — where before they came from two:
+   * `before` through the engine's read path (masked, formula-hydrated,
+   * file-references resolved) and `after` from the raw write result. That
+   * asymmetry, not the redundant read, was the root cause of the phantom diff
+   * rows. Same-source is therefore delivered by the retirement itself; this
+   * function delivers the second half — same *view* — so levelling the two
+   * sides levels them UPWARD rather than down to the raw store contents.
+   *
+   * Two limbs, and only two, because only two field classes still differ once
+   * both sides are raw (each measured, not assumed):
+   *
+   *  1. **credential fields** (`secret`, and `password` off better-auth
+   *     objects). The raw value is a `secret:` ref, or — for `password`, which
+   *     ADR-0100 stores PLAINTEXT at rest — the cleartext itself. Masked here
+   *     to exactly what the read path substitutes, on BOTH sides. This is the
+   *     compliance face the #6656 ruling protects: single-id delete
+   *     `old_value` keeps reading `••••••••`, byte-identical to before this
+   *     change, and the ref/cleartext that today reaches `new_value` on every
+   *     create and update stops doing so.
+   *  2. **computed fields** (`COMPUTED_FIELD_TYPES`) — dropped from FULL
+   *     SNAPSHOTS only. `diff()` has always skipped them, so this merely
+   *     extends one existing rule to the create/delete faces, which never got
+   *     it. Without it the two snapshot faces would disagree with each other
+   *     and with the diff: `ctx.result` carries hydrated formulas (#5504) so
+   *     `new_value` had them, the raw pre-image has no such column so
+   *     `old_value` would not — a fresh asymmetry introduced by the very
+   *     change removing the old one. Bulk delete already wrote snapshots
+   *     without them.
+   *
+   * **File-reference fields need no limb, and that is a measurement rather
+   * than an omission.** They are named in the ruling because today's `before`
+   * carries the resolved `{id, name, size, url}` object against a raw id on
+   * the `after` side. Once the pre-image is the engine's, both sides hold the
+   * stored id token and agree by construction. Writing an "if it looks
+   * resolved, take `.id`" limb would be a consumer-side tolerance for a
+   * producer that no longer exists (PD #12) — and it could never be shown to
+   * go red, because no path reaches it.
+   *
+   * Non-mutating on purpose: `ctx.previous` and `ctx.result` are the engine's
+   * own objects — `result` is the record the caller gets back — and some
+   * drivers hand out live store references. Masking in place would rewrite the
+   * record, and on such a driver the store itself. (That aliasing is real: it
+   * contaminated the first probe run on this card, making the two views look
+   * identical.)
+   *
+   * @param dropComputed pass `true` for full snapshots (create `new_value`,
+   *   delete `old_value`); `false` for diff output, which `diff()` has already
+   *   filtered, and for the label source, where a formula `name` is the point.
    */
-  const captureBefore = async (ctx: HookContext) => {
-    if (SKIP_OBJECTS.has(ctx.object)) return;
-    const id = (ctx.input as any)?.id;
-    if (!id) return; // bulk update/delete — too costly to snapshot every row here
-    try {
-      // Use the engine directly (not api.sudo) so we can thread the
-      // active transaction through. On drivers with single-connection
-      // pools (e.g. SQLite via knex) a sudo() findOne that does NOT
-      // carry the open transaction will deadlock for the full
-      // acquireConnectionTimeout (~60s) because the outer transaction
-      // holds the only connection.
-      const trx = (ctx as any).transaction;
-      const ql = (ctx as any).ql ?? (ctx as any).api?.engine;
-      if (ql?.findOne) {
-        const prev = await ql.findOne(ctx.object, {
-          where: { id },
-          context: { isSystem: true, ...(trx ? { transaction: trx } : {}) },
-        });
-        if (prev) (ctx as any).__previous = prev;
-        return;
-      }
-      const api: any = (ctx as any).api;
-      if (!api?.sudo) return;
-      const prev = await api.sudo().object(ctx.object).findOne({ where: { id } });
-      if (prev) (ctx as any).__previous = prev;
-    } catch {
-      /* ignore — best-effort */
+  const ledgerView = (
+    objectName: string,
+    record: any,
+    { dropComputed }: { dropComputed: boolean },
+  ): Record<string, any> | null => {
+    if (!record || typeof record !== 'object') return null;
+    const out: Record<string, any> = { ...record };
+    for (const field of collectMaskedReadFields(getObjectDef(objectName))) {
+      // `field in out` and the null-preserving branch both mirror
+      // `maskSecretFields` exactly: an unset credential stays `null` (so "no
+      // secret" and "a secret is set" remain distinguishable), and a field the
+      // row does not carry is never invented.
+      if (!(field in out)) continue;
+      out[field] = out[field] == null ? null : SECRET_MASK;
     }
+    if (dropComputed) {
+      const defs = getFieldDefs(objectName);
+      for (const key of Object.keys(out)) {
+        const type = defs?.[key]?.type;
+        if (typeof type === 'string' && COMPUTED_FIELD_TYPES.has(type)) delete out[key];
+      }
+    }
+    return out;
   };
 
-  // [#5860] Global MINUS the skip list — see `AUDIT_EXCLUDED_OBJECTS`. The
-  // handler's own `SKIP_OBJECTS` early return is kept (defence in depth), so
-  // what changes here is only what the ENGINE can see about the scope.
-  engine.registerHook('beforeUpdate', captureBefore, { excludeObjects: AUDIT_EXCLUDED_OBJECTS, packageId });
-  engine.registerHook('beforeDelete', captureBefore, { excludeObjects: AUDIT_EXCLUDED_OBJECTS, packageId });
+  /**
+   * ⛔ RETIRED — `captureBefore` on `beforeUpdate` / `beforeDelete` (#6656,
+   * ADR-0049 enforce-or-remove). Do not reintroduce it.
+   *
+   * It existed because `HookContext.previous` was "officially typed but not
+   * always populated by the engine itself". That is no longer true on any
+   * path this plugin registers for, and it was verified in code rather than
+   * taken from the card (re-measured on `97b079896`; the anchors below moved
+   * from the ones #5846 recorded, so they are restated, not copied):
+   *
+   *   single-id update  `engine.ts:7012` dispatch, bound `:7010` under the
+   *                     `wantsPriorRecord` gate at `:6992`
+   *   single-id delete  `:7899` dispatch, bound `:7896`/`:7897`
+   *                     (`readPreImage` → `bindPreImage`) under `:7857`
+   *   predicate update  `:7084` → `dispatchPerRowBeforeHooks`, bound per row `:1825`
+   *   predicate delete  `:7962` → `dispatchPerRowBeforeHooks`, bound per row `:1825`
+   *
+   * and the after phase is bound too — `buildPerRowAfterContexts` (`:1746`)
+   * binds `previous` on every per-row `afterUpdate` / `afterDelete` context,
+   * which is the one `writeAudit` actually reads.
+   *
+   * Each demand gate is the SAME predicate as its dispatch gate
+   * (`hasHooksFor(before*) || hasHooksFor(after*) || getSummaryDescriptors()`),
+   * so there is no path on which an audit hook runs with `previous` unbound.
+   * `writeAudit` stays registered on `afterUpdate`/`afterDelete`, so the gates
+   * stay open on the after-hook term and the engine still buys the one read.
+   *
+   * What the retirement removes, measured with a counting driver on this
+   * branch point (`driver.findOne` on the audited object, per write):
+   *
+   *   single-id update  2 → 1      single-id delete  2 → 1
+   *   predicate update  3 → 0      predicate delete  3 → 0   (3 matched rows)
+   *
+   * The predicate column is the larger half and it was pure waste: #5574 binds
+   * `input.id` on every per-row *before* context, which defeated the
+   * `if (!id) return` bulk guard this handler opened with, so it read every
+   * row — and every result was discarded, because `__previous` landed on the
+   * per-row *before* context while the per-row *after* contexts never saw it.
+   *
+   * Retired rather than left as a no-op registration: a hook whose only
+   * remaining effect is holding a demand gate open is exactly what
+   * `sys_fetch_previous_delete` had become when #5929 removed it from
+   * objectql's own plugin — reproducing that shape here, one package over,
+   * would re-create the defect the engine lane just closed.
+   */
 
   /**
    * afterInsert / afterUpdate / afterDelete: write audit_log + activity rows.
@@ -586,8 +685,20 @@ export function installAuditWriters(
     const api: any = (ctx as any).api;
     if (!api?.sudo) return;
 
+    // [#6656] Both sides, RAW — the engine's write result and the engine's
+    // bound pre-image, now one pipeline. These two are what CHANGE DETECTION
+    // reads (`diff`, `matchMilestone`); what the ledger RECORDS is their
+    // `ledgerView`. Keeping those roles apart is what lets a credential
+    // rotation still produce a row — the values compare unequal while both
+    // render as the mask — instead of masking first and thereby deleting the
+    // audit trail of every secret change along with the phantom ones.
+    //
+    // ⛔ Read `previous` unconditionally. It is a contract value; do NOT gate
+    // it on `ctx.input.options.multi` or otherwise re-derive the engine's
+    // dispatch ladder here (`asScalarId` is unexported for exactly this
+    // reason — #4434 / #4550, restated in the #6656 ruling).
     const after: any = ctx.result;
-    const before: any = (ctx as any).__previous ?? (ctx as any).previous ?? null;
+    const before: any = (ctx as any).previous ?? null;
 
     // Resolve record id from after (insert/update) or before (delete) or input.
     let recordId: string | undefined =
@@ -639,22 +750,25 @@ export function installAuditWriters(
     // though writes succeed.
     const recordOrgId: string | undefined =
       (typeof (ctx.result as any)?.organization_id === 'string' && (ctx.result as any).organization_id) ||
-      (typeof ((ctx as any).__previous as any)?.organization_id === 'string' && ((ctx as any).__previous as any).organization_id) ||
+      (typeof before?.organization_id === 'string' && before.organization_id) ||
       undefined;
     const tenantId: string | undefined = sess.tenantId ?? recordOrgId;
 
     let oldValue: Record<string, any> | null = null;
     let newValue: Record<string, any> | null = null;
     if (action === 'create') {
-      newValue = (after && typeof after === 'object') ? { ...after } : null;
+      newValue = ledgerView(ctx.object, after, { dropComputed: true });
     } else if (action === 'update') {
+      // Detect on the raw values, record the masked ones — see the note on
+      // `before`/`after` above. `diff` has already dropped computed fields, so
+      // its output needs no second pass for them.
       const d = diff(before || {}, after || {}, getFieldDefs(ctx.object));
-      oldValue = d.old;
-      newValue = d.next;
       // If nothing meaningfully changed, skip the audit row to avoid noise.
-      if (Object.keys(newValue).length === 0) return;
+      if (Object.keys(d.next).length === 0) return;
+      oldValue = ledgerView(ctx.object, d.old, { dropComputed: false });
+      newValue = ledgerView(ctx.object, d.next, { dropComputed: false });
     } else if (action === 'delete') {
-      oldValue = before && typeof before === 'object' ? { ...before } : null;
+      oldValue = ledgerView(ctx.object, before, { dropComputed: true });
     }
 
     const auditRow: Record<string, any> = {
@@ -685,7 +799,16 @@ export function installAuditWriters(
       auditRow.actor = actorLabel;
     }
 
-    const label = recordLabel(after ?? before, recordId ?? '');
+    // [#6656] Masked, but computed fields KEPT: `recordLabel` reads
+    // `name`/`title`/… and an object whose label field is a formula would
+    // otherwise degrade to the bare id (#5504 names that exact symptom). The
+    // mask still applies, so no credential value can reach a user-facing
+    // activity summary through the label.
+    const label = recordLabel(
+      ledgerView(ctx.object, after, { dropComputed: false }) ??
+        ledgerView(ctx.object, before, { dropComputed: false }),
+      recordId ?? '',
+    );
     // Summaries are user-facing (the record Discussion feed and Setup
     // dashboards render them verbatim), so name the object by its display
     // label ("Semantic Zoo"), not its API name ("showcase_semantic_zoo"), and
@@ -709,7 +832,20 @@ export function installAuditWriters(
       // ADR-0052 §5b — declarative activity, precedence: a configured semantic
       // milestone (§5b.2) wins; else a tracked field-change diff ("Stage:
       // Proposal → Closed Won", §5b.1); else the generic fallback.
-      const milestone = matchMilestone(getObjectDef(ctx.object), getFieldDefs(ctx.object), before, after);
+      // [#6656] Masked views, not the raw pair. `matchMilestone` interpolates
+      // `{field}` from the after-row straight into a summary the record feed
+      // and Setup dashboards render verbatim, so it must never see a raw
+      // credential value. Computed fields are kept (a milestone may key on a
+      // formula); detection is unaffected for every other class, since the
+      // mask touches credential fields only — and a milestone whose declared
+      // `value` is a secret's plaintext would be a leak in the metadata
+      // itself, not a case worth preserving.
+      const milestone = matchMilestone(
+        getObjectDef(ctx.object),
+        getFieldDefs(ctx.object),
+        ledgerView(ctx.object, before, { dropComputed: false }),
+        ledgerView(ctx.object, after, { dropComputed: false }),
+      );
       if (milestone) {
         summary = milestone.summary;
         if (milestone.type) activityType = milestone.type;
