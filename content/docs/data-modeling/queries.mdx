@@ -590,6 +590,17 @@ const ranked = await sqlDriver.findWithWindowFunctions('employee', {
 });
 ```
 
+<Callout type="warn">
+**Pass `options.tenantId` on a multi-tenant deployment.** Like `find()`, this door is
+tenant-scoped only when the caller supplies it — the example above omits it, so it reads
+across every tenant. That is the driver layer's documented contract (seed scripts and
+cross-org tooling depend on the unscoped path), but it is a decision to make deliberately.
+
+Until #6792 the door ignored `options.tenantId` even when you *did* pass it and returned
+every tenant's rows regardless. It now routes through the driver's `applyTenantScope`
+chokepoint like every other read.
+</Callout>
+
 For request-level analytics, use `aggregations` + `groupBy`, or model rankings in
 report/dashboard metadata.
 

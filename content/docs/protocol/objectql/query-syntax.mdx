@@ -826,6 +826,12 @@ from presentation; Postgres and MySQL hand back their own native temporal value)
 then re-deduplicates the presented values, because SQL `DISTINCT` compares the *stored*
 form.
 
+It is tenant-scoped on the same terms as `find()` — the `organization_id` predicate is
+applied when the call carries `options.tenantId` (the fourth argument), and the example
+above omits it, so it returns the column's values across every tenant. Until #6792 the
+predicate was dropped even when `tenantId` *was* supplied, which made a scoped call
+disclose every other tenant's values for that column.
+
 ### Full-Text Search
 
 The `search` parameter does **not** reach a full-text index. The engine expands it into
@@ -958,6 +964,13 @@ That method always selects `*` plus the window columns — it does not honor a `
 projection, and niladic rendering means argument-taking functions (`LAG(field)`)
 emit without their argument. For request-level analytics use `aggregations` +
 `groupBy` (§5).
+
+Tenancy works exactly as it does on `find()`: the driver applies its
+`organization_id` predicate only when the call carries `options.tenantId`. The example
+above omits it and therefore reads across every tenant — the intended unscoped/admin
+path, but a deliberate choice rather than a default to inherit. (Until #6792 this door
+dropped `options.tenantId` even when it was supplied, so a scoped call still returned
+every tenant's rows.)
 
 ---
 
