@@ -561,9 +561,15 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   // to enforce declarations the platform does not keep. The error upgrade is a
   // separate step, once the warning-period inventory is empty.
   //
-  // #5775 has since settled its half: `displayField` is retired in favour of the
-  // `labelField` the renderer actually reads, and the rest of the keys the
-  // renderers honour are declared. #5728 and two page rewrites are what remain.
+  // #5775 settled the record picker's half: `displayField` is retired in favour
+  // of the `labelField` the renderer actually reads. Its claim that "the rest of
+  // the keys the renderers honour are declared" did NOT hold — #6776 found five
+  // more (`page:header` `recordChrome`/`showStar`/`showCopyId`,
+  // `page:accordion.variant`, and the tab strip's visual style, whose declared
+  // spelling `page:tabs.type` collided with the component node's own dispatch
+  // key and so was unauthorable in the flat and JSX carriers). All five are
+  // declared as of #6776, the last as the renamed `tabStyle`. What remains
+  // before the error upgrade is #5728 and two page rewrites.
   {
     name: 'validateComponentProps',
     tier: 'advisory',

@@ -4252,6 +4252,18 @@ export class SqlDriver implements IDataDriver {
    */
   async distinct(object: string, field: string, filters?: FilterCondition, options?: DriverOptions): Promise<any[]> {
     const builder = this.getBuilder(object, options);
+    // The third read door that skipped the chokepoint, and the one #6792 does
+    // NOT name — the card asserts the opposite ("called at 13 sites — …,
+    // `count`, `distinct`, …"). It is not among them; the 13th read site is
+    // `aggregate()`. Found by the gate this change ships, not by the card.
+    //
+    // VALUES rather than rows, which lowers the volume and not the class:
+    // measured on `main` at `6595262`, `distinct(account, 'name', undefined,
+    // { tenantId: 'org_a' })` returned `[A1, A2, B1, B2, P1]` — every other
+    // tenant's values for the named column. Documented with a runnable example
+    // (`content/docs/protocol/objectql/query-syntax.mdx`), so it is exposed the
+    // same way the window door is.
+    this.applyTenantScope(builder, object, options);
 
     if (filters) {
       this.applyFilters(builder, filters);
@@ -4286,6 +4298,20 @@ export class SqlDriver implements IDataDriver {
    */
   async findWithWindowFunctions(object: string, query: SqlWindowFunctionQuery, options?: DriverOptions): Promise<any[]> {
     const builder = this.getBuilder(object, options);
+    // ROWS, so this is the read-side wall itself — not a consistency tidy-up
+    // (#6792). This door returned every tenant's rows to a caller that passed
+    // `options.tenantId`, because it built through `getBuilder` and then simply
+    // never reached the chokepoint all thirteen other doors route through.
+    // Measured on `main` at `6595262` with two tenants seeded: `tenantId:
+    // 'org_a'` returned `[a1, a2, b1, b2, p1]` here and `[a1, a2, p1]` through
+    // `find()` — org_b's rows, handed to org_a, at the driver layer.
+    //
+    // Placed BESIDE `getBuilder` and above the caller's `where`, which is the
+    // position `findRows()` uses: the predicate has to be on the builder before
+    // anything reads it, and `applyTenantScope` is what owns the NULL-org
+    // platform-row and ADR-0105 D2 union semantics. Re-deriving either here
+    // would be a second, worse copy of the wall.
+    this.applyTenantScope(builder, object, options);
 
     builder.select('*');
 
@@ -4335,6 +4361,19 @@ export class SqlDriver implements IDataDriver {
    */
   async analyzeQuery(object: string, query: DriverQuery, options?: DriverOptions): Promise<any> {
     const builder = this.getBuilder(object, options);
+    // A PLAN, not rows — so this is a smaller fix than the one above, and it is
+    // made on its own merits rather than riding in on that one (#6792). It is
+    // the SAME defect #6577 fixed on this method one builder line lower: a plan
+    // is only worth reading if it explains the statement `find()` would
+    // actually run, and a missing tenant predicate is not a cosmetic
+    // difference — it changes selectivity and therefore which index the planner
+    // picks, so the EXPLAIN answers for a query nobody will execute.
+    // Measured on `main` at `6595262`, `tenantId: 'org_a'`:
+    //   analyze -> select * from `os6792_account`
+    //   find    -> select * from `os6792_account`
+    //              where (`organization_id` = ? or `organization_id` is null)
+    //              order by `id` asc
+    this.applyTenantScope(builder, object, options);
 
     if (query.fields) {
       builder.select(query.fields);
@@ -6677,8 +6716,32 @@ export class SqlDriver implements IDataDriver {
    *
    * Without a tenantId the call is treated as an unscoped/admin path —
    * keeps legacy callers, seed scripts, and cross-org tooling working.
-   * This is the single chokepoint for read-side tenant isolation in the
-   * SQL driver; every CRUD method routes through it.
+   *
+   * This is the single chokepoint for read-side tenant isolation in the SQL
+   * driver, and every read door routes through it — `findRows()` (what
+   * `find()`/`findOne()` use), `count()`, `aggregate()`, `distinct()`,
+   * `findWithWindowFunctions()`, `analyzeQuery()`/`explain()`, and the
+   * update/delete predicates and their readbacks. Write-side tenancy is a
+   * different mechanism and deliberately not this one: inserts stamp the
+   * column via {@link injectTenantOnInsert}, so the three `insert` builders
+   * (create / upsert / bulkCreate) reach `getBuilder` without coming here.
+   *
+   * ⚠️ That sentence used to be written as a claim — "every CRUD method routes
+   * through it" — and it was FALSE for as long as it had existed (#6792).
+   * Three doors built through `getBuilder` and never arrived:
+   * `findWithWindowFunctions` (ROWS — a caller passing `tenantId` got every
+   * tenant's rows), `analyzeQuery`/`explain` (a PLAN for a statement `find()`
+   * would not run), and `distinct` (every tenant's values for one column). The
+   * first two were filed; the third was found only because the invariant was
+   * finally MEASURED. Nothing had ever checked it, which is exactly how a
+   * docstring becomes the last place a wrong fact survives.
+   *
+   * So it is no longer a claim. `scripts/check-tenant-chokepoint.mjs`
+   * (`pnpm check:tenant-chokepoint`, wired into `.github/workflows/lint.yml`)
+   * re-derives it from the AST on every run: a method that builds through
+   * `getBuilder(object, options)` and lets that builder escape as a read must
+   * call this, or carry a written exemption. Edit this list and the gate will
+   * disagree with you — that is the point.
    */
   protected applyTenantScope(
     builder: Knex.QueryBuilder,

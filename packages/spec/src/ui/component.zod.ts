@@ -227,12 +227,85 @@ export const PageHeaderProps = z.object({
   icon: z.string().optional().describe('Icon name'),
   breadcrumb: z.boolean().default(true).describe('Show breadcrumb'),
   actions: z.array(z.string()).optional().describe('Action IDs to show in header'),
+  /**
+   * Which of the two page-header layouts the renderer builds (#6776).
+   *
+   * ON (the default) the header carries the **record chrome**: the title
+   * renders as a record chip with the follow star and the copy-record-id
+   * button beside it. OFF it falls back to a bare heading — one title line and
+   * nothing record-shaped — which is what a dashboard or a landing page wants,
+   * since there is no record for the chip to describe.
+   *
+   * Declared here because the renderer has always read it and the schema had
+   * not caught up: `containers.tsx:979` resolves
+   * `schema?.recordChrome === false || schema?.properties?.recordChrome === false`
+   * and `:1453` branches the whole header on it, while objectui's own console
+   * preview sample authors `recordChrome: false` on a non-record page. Until
+   * this declaration that page was legal per objectui's published manifest and
+   * `warning: undeclared` per `validateComponentProps` (#5068) — two platform
+   * authorities disagreeing about one key (#5435).
+   */
+  recordChrome: z.boolean().default(true).describe(
+    'Render the record chrome — the title as a record chip with its follow star and copy-id button. Set false on a non-record page (dashboard, landing) to fall back to the bare heading layout.',
+  ),
+  /**
+   * Follow (favourite) star beside the record title — `RecordTitleChip
+   * showStar` (#6776). Part of the record chrome, so it has no effect when
+   * `recordChrome` is false. Read at `containers.tsx:980`, consumed at `:1531`.
+   */
+  showStar: z.boolean().default(true).describe(
+    'Show the follow (favourite) star beside the record title. Part of the record chrome — no effect when `recordChrome` is false.',
+  ),
+  /**
+   * Copy-record-id button beside the record title — `RecordTitleChip
+   * showCopyId` (#6776). Same record-chrome scoping as `showStar`. Read at
+   * `containers.tsx:981`, consumed at `:1532`.
+   */
+  showCopyId: z.boolean().default(true).describe(
+    'Show the copy-record-id button beside the record title. Part of the record chrome — no effect when `recordChrome` is false.',
+  ),
   /** ARIA accessibility */
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
 });
 
 export const PageTabsProps = z.object({
-  type: z.enum(['line', 'card', 'pill']).default('line'),
+  /**
+   * Tab-strip visual style. **Renamed from `type` at protocol 17 (#6776,
+   * ADR-0087 D2)** — the same concept, the same three values, a spelling an
+   * author can actually write.
+   *
+   * A props key named `type` collides with the component node's own dispatch
+   * key, and the collision is structural rather than cosmetic:
+   *
+   *   - objectui's `SchemaRenderer` hoists `properties` onto the node but
+   *     deliberately skips `type` and `id`, or the inner value would shadow
+   *     which renderer to dispatch to — its comment names this exact case
+   *     ("tab visual style: 'line' | 'card' | 'pill'").
+   *   - `sdui-parser`'s `BASE_PROPS` contains `'type'`, so a manifest input by
+   *     that name is skipped as a base prop and never validated at all.
+   *   - In the flat and JSX carriers a node reads `{ type: 'page:tabs', … }`,
+   *     so `type` is the tag name and this prop has no spelling left.
+   *
+   * `tabStyle` is what objectui's registry publishes and what the renderer
+   * reads in every carrier (`containers.tsx:381`), so the contract converges on
+   * the spelling that works rather than the one that reads well — the #5775
+   * `displayField` → `labelField` shape, and one spelling rather than two
+   * (Prime Directive #12).
+   */
+  tabStyle: z.enum(['line', 'card', 'pill']).default('line')
+    .describe("Tab-strip visual style: 'line' underlines the active tab, 'card' frames each tab, 'pill' renders rounded pills"),
+  /**
+   * REMOVED (#6776). The declared spelling of `tabStyle`, unauthorable in any
+   * flat or JSX carrier because a page component's own dispatch key is also
+   * called `type`. The live mechanism is `tabStyle`.
+   */
+  type: retiredKey(
+    '`page:tabs` property `type` was removed in @objectstack/spec 17.0.0 (#6776, ADR-0087 D2) — '
+    + 'a props key named `type` collides with the page component\'s own dispatch key, so it is '
+    + 'unauthorable in the flat and JSX carriers and was never validated in them. Rename the key '
+    + 'to `tabStyle`; the value (`line` | `card` | `pill`) is unchanged. '
+    + 'Run `os migrate meta --from 16` to rewrite it automatically.',
+  ),
   position: z.enum(['top', 'left']).default('top'),
   items: z.array(z.object({
     label: I18nLabelSchema,
@@ -516,6 +589,20 @@ export const PageAccordionProps = z.object({
     children: z.array(z.unknown()).describe('Child components'),
   })),
   allowMultiple: z.boolean().default(false).describe('Allow multiple panels to be expanded simultaneously'),
+  /**
+   * Panel framing (#6776). `flush` is the renderer's own default and draws the
+   * divider itself (`border-b last:border-b-0` on every panel but the last);
+   * `card` hands the border to whatever each panel contains, so a panel holding
+   * a `page:card` does not get a second frame around the first.
+   *
+   * Declared here because the renderer has always read it — `containers.tsx:734`
+   * resolves `schema?.variant ?? schema?.properties?.variant ?? 'flush'`, and
+   * its own comment invites authors in ("Authors opt in by setting
+   * `variant: 'card'`"). The difference is visible on screen, so this was an
+   * author-facing option that `PageAccordionProps` simply never declared.
+   */
+  variant: z.enum(['flush', 'card']).default('flush')
+    .describe("Panel framing: 'flush' draws a divider under each panel; 'card' leaves the border to each panel's own content"),
   /** ARIA accessibility */
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
 });

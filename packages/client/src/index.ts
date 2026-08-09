@@ -1046,7 +1046,15 @@ export class ObjectStackClient {
         sentBy?: string;
         [k: string]: any;
     }): Promise<any> => {
-        const res = await this.fetch(`${this.baseUrl}/api/v1/email/send`, {
+        // [#6714] The base comes from `getRoute('email')`: a connected client
+        // follows the server's advertised `routes.email` (the REST discovery
+        // endpoint projects it from its recorded route registrations — the
+        // mount follows `apiPath`, so the old hard-coded `/api/v1` was a live
+        // 404 on any `apiPath` deployment); an unconnected client — or one
+        // talking to a server that advertises no `email` key — falls back to
+        // the `/api/v1/email` convention, byte-identical to the old hardcode.
+        const route = this.getRoute('email');
+        const res = await this.fetch(`${this.baseUrl}${route}/send`, {
             method: 'POST',
             body: JSON.stringify(message),
         });
@@ -1732,6 +1740,59 @@ export class ObjectStackClient {
   _unwrap<T>(res: Response): Promise<T> { return this.unwrapResponse<T>(res); }
   /** @internal */
   _isFilterAST(v: unknown): boolean { return this.isFilterAST(v); }
+
+  /**
+   * @internal The unscoped API base this client's server actually serves,
+   * derived from the advertised routes (#6714 face 3).
+   *
+   * There is no discovery key that carries the raw API base itself, and the
+   * `scoping` block carries posture only (`enabled` / `resolution` / `scoped`
+   * / `environmentId` — no path), so the one derivable source is
+   * `routes.data`: the REST discovery endpoint advertises it as
+   * `{realBase}{dataPrefix}` with `dataPrefix` defaulting to `/data`. This
+   * derivation strips that conventional suffix; when the deployment customises
+   * `dataPrefix` away from `/data` the derivation declines and the caller
+   * falls back to the `/api/v1` convention — exactly today's behavior, so the
+   * change is strictly "follow the advertised base when it is derivable".
+   *
+   * When the discovery response was served from the environment-scoped mount
+   * (`scoping.scoped`), `routes.data` is `{base}/environments/{id}/data`; the
+   * scope segment must come off so the returned base is the UNSCOPED one (the
+   * scoped client re-appends its own environment id, which need not be the one
+   * discovery resolved). `scoping.environmentId` names that segment when the
+   * server resolved one — but rest advertises it as `req.params?.environmentId`,
+   * so a host that did not populate the route param answers `scoped: true` with
+   * NO id and a `routes.data` still carrying the literal `:environmentId`. That
+   * case strips one trailing `/environments/{segment}` on the strength of
+   * `scoped` alone, which is sound because a scoped response's base ends with
+   * that segment by construction. If NEITHER shape is present the advertised
+   * base is not one this derivation understands, so it declines rather than
+   * return a base of unknown shape — handing back a still-scoped base would make
+   * `scope()` build a doubled `/environments/…/environments/…` URL, i.e.
+   * strictly WORSE than the hardcode this replaces. Declining is always
+   * byte-identical to today.
+   */
+  _apiBase(): string {
+    const data = this.discoveryInfo?.routes?.data;
+    if (typeof data === 'string' && data.endsWith('/data')) {
+      let base = data.slice(0, -'/data'.length);
+      const scoping = this.discoveryInfo?.scoping;
+      if (scoping?.scoped) {
+        const advertised = typeof scoping.environmentId === 'string' && scoping.environmentId
+          ? `/environments/${scoping.environmentId}`
+          : undefined;
+        if (advertised && base.endsWith(advertised)) {
+          base = base.slice(0, -advertised.length);
+        } else {
+          const stripped = base.replace(/\/environments\/[^/]+$/, '');
+          if (stripped === base) return '/api/v1';
+          base = stripped;
+        }
+      }
+      if (base) return base;
+    }
+    return '/api/v1';
+  }
 
   /**
    * Organization Services
@@ -4818,8 +4879,16 @@ export class ObjectStackClient {
       // hardcode — the fallback agrees with the mount instead of competing
       // with it.
       datasources: '/api/v1/datasources',
+      // [#6714] `email` became a declared `ApiRoutes` key (the base under
+      // which `POST {email}/send` is mounted), and this map is TOTAL over
+      // declared keys by design. `/api/v1/email` is not a guess: it is where
+      // `@objectstack/rest` mounts the surface on a default-base boot, so an
+      // unconnected client builds byte-identical URLs to the pre-#6714
+      // hardcode — the fallback agrees with the mount instead of competing
+      // with it.
+      email: '/api/v1/email',
     };
-    
+
     return routeMap[type] || `/api/v1/${type}`;
   }
 }
@@ -4849,8 +4918,19 @@ export class ScopedProjectClient {
   /** The environmentId this client is scoped to. */
   getProjectId(): string { return this.environmentId; }
 
-  /** Prefix segment inserted between the baseUrl and the resource path. */
-  private scope(): string { return `/api/v1/environments/${encodeURIComponent(this.environmentId)}`; }
+  /**
+   * Prefix segment inserted between the baseUrl and the resource path.
+   *
+   * [#6714 face 3] The API base comes from the parent's discovery-derived
+   * `_apiBase()` rather than a hard-coded `/api/v1`: the server's scoped
+   * mount point is `getScopedBasePath(getApiBasePath())`, which follows
+   * `apiPath`, so a scoped client talking to an `apiPath` deployment built
+   * 404 URLs for every `meta` / `data` / `batch` / `packages` / `automation`
+   * call. An unconnected parent — or one whose advertised routes the base
+   * cannot be derived from — keeps building byte-identical
+   * `/api/v1/environments/...` URLs.
+   */
+  private scope(): string { return `${this.parent._apiBase()}/environments/${encodeURIComponent(this.environmentId)}`; }
 
   private url(suffix: string): string {
     return `${this.parent._baseUrl()}${this.scope()}${suffix}`;

@@ -99,6 +99,8 @@ function boot(opts: {
   withPackageService?: boolean;
   enableProjectScoping?: boolean;
   projectResolution?: string;
+  /** [#6714] Rebase the RestServer's OWN mounts (`getApiBasePath()`). */
+  apiPath?: string;
 }) {
   const { server, table } = createRecordingServer();
   const engine = {
@@ -110,6 +112,7 @@ function boot(opts: {
   const protocol = new ObjectStackProtocolImplementation(engine as any, () => services);
   const config: any = {
     api: {
+      ...(opts.apiPath ? { apiPath: opts.apiPath } : {}),
       ...(opts.enableProjectScoping
         ? { enableProjectScoping: true, projectResolution: opts.projectResolution ?? 'auto' }
         : {}),
@@ -154,6 +157,15 @@ describe('[#6633] /discovery advertises the direct-mount surfaces where they are
     expect(discovery.routes.packages).toBe('/api/v1/packages');
     expect(discovery.routes.datasources).toBe('/api/v1/datasources');
 
+    // [#6714] …and the email surface, projected from the RouteManager's
+    // recorded registrations rather than the direct-mount arrays: advertised
+    // base + `/send` must be a mounted POST route in the SAME table.
+    expect(discovery.routes.email).toBe('/api/v1/email');
+    expect(
+      resolveRoute(table, 'POST', `${discovery.routes.email}/send`),
+      'advertised routes.email must be the base of the mounted send route',
+    ).toBeDefined();
+
     // …and the advertised URLs answer through the SAME mounted table.
     const pkg = resolveRoute(table, 'GET', discovery.routes.packages);
     expect(pkg, 'advertised routes.packages must be a mounted GET route').toBeDefined();
@@ -191,6 +203,14 @@ describe('[#6633] /discovery advertises the direct-mount surfaces where they are
     // would have been the lie the projection exists to prevent.
     expect(resolveRoute(table, 'GET', '/api/v1/packages')).toBeUndefined();
     expect(resolveRoute(table, 'GET', '/api/v1/datasources/pg_main/external/tables')).toBeUndefined();
+
+    // [#6714] The email surface is NOT a direct mount — it registers at the
+    // RestServer's OWN base, which this boot leaves at the default. The two
+    // families genuinely diverge on this boot, and each advertisement tells
+    // its own mount's truth: per-face keys projected per-face, never one
+    // shared "known base" assumption (the scheme the #6714 ruling rejected).
+    expect(discovery.routes.email).toBe('/api/v1/email');
+    expect(resolveRoute(table, 'POST', '/api/v1/email/send')).toBeDefined();
   });
 
   it('not mounted ⇒ not advertised: a boot without the package service advertises no routes.packages', async () => {
@@ -208,6 +228,32 @@ describe('[#6633] /discovery advertises the direct-mount surfaces where they are
     // it IS advertised on the same boot.
     expect(discovery.routes.datasources).toBe('/api/v1/datasources');
     expect(resolveRoute(table, 'GET', '/api/v1/datasources/pg_main/external/tables')).toBeDefined();
+
+    // [#6714] Same for the email surface: `registerEmailEndpoints` mounts
+    // unconditionally (501-degrading when no email service is configured), so
+    // it is advertised on every boot — mounted is the fact, not configured.
+    expect(discovery.routes.email).toBe('/api/v1/email');
+    expect(resolveRoute(table, 'POST', '/api/v1/email/send')).toBeDefined();
+  });
+
+  it('[#6714] routes.email follows apiPath — the mount moved, the advertisement moved with it, and the old convention path is GONE', async () => {
+    // THE live-404 case from the card: `registerEmailEndpoints` mounts under
+    // `getApiBasePath()`, which follows `apiPath`. The pre-#6714 client
+    // hard-coded `POST {baseUrl}/api/v1/email/send`, so on this boot it hit a
+    // path that resolves to NOTHING in the mounted table — a live 404 today,
+    // not a latent gap. The advertisement is a projection of the recorded
+    // RouteManager rows, so it moves with the mount by construction.
+    const { table } = boot({ versionedBase: '/backend/api/v9', apiPath: '/backend/api/v9' });
+    const discovery = await readDiscovery(table, '/backend/api/v9');
+
+    expect(discovery.routes.email).toBe('/backend/api/v9/email');
+    expect(
+      resolveRoute(table, 'POST', `${discovery.routes.email}/send`),
+      'advertised routes.email must answer where the surface is actually mounted',
+    ).toBeDefined();
+
+    // The pre-#6714 client URL — the measured live 404.
+    expect(resolveRoute(table, 'POST', '/api/v1/email/send')).toBeUndefined();
   });
 
   it('scoped discovery advertises the scoped packages mount with the environment id substituted', async () => {
@@ -223,8 +269,16 @@ describe('[#6633] /discovery advertises the direct-mount surfaces where they are
     // truth, and the scoped response says so rather than inventing one.
     expect(discovery.routes.datasources).toBe('/api/v1/datasources');
 
+    // [#6714] The email surface DOES have a scoped variant (`registerForBase`
+    // runs the email registrar under both bases in `auto`), and the scoped
+    // response advertises it with the environment id substituted — resolving
+    // against the genuinely mounted `:environmentId` pattern.
+    expect(discovery.routes.email).toBe('/api/v1/environments/env_alpha/email');
+    expect(resolveRoute(table, 'POST', '/api/v1/environments/env_alpha/email/send')).toBeDefined();
+
     // The unscoped response keeps the unscoped mount.
     const unscoped = await readDiscovery(table);
     expect(unscoped.routes.packages).toBe('/api/v1/packages');
+    expect(unscoped.routes.email).toBe('/api/v1/email');
   });
 });

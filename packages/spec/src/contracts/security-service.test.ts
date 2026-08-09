@@ -98,6 +98,63 @@ describe('Security Service Contract', () => {
       .resolves.toEqual(['id', 'name']);
   });
 
+  it('[ADR-0106 D7] getMetadataReadableFields is OPTIONAL — absence degrades to getReadableFields', async () => {
+    // THE structural pin behind "a deployment whose security service predates
+    // ADR-0106 keeps its pre-ADR behaviour". Optional is what makes that a
+    // property of the TYPE: such a service still satisfies the contract, and a
+    // consumer cannot reach the metadata-plane answer without first handling
+    // the absent case.
+    const withoutIt: ISecurityService = makeService({ getReadableFields: async () => ['id', 'name'] });
+    expect(typeof withoutIt.getMetadataReadableFields).toBe('undefined');
+
+    // The unguarded call does not compile. Never invoked — its only job is to
+    // make the COMPILER prove the point (invoking it would merely prove that
+    // JavaScript throws on `undefined()`, which is the runtime symptom this
+    // declaration exists to prevent).
+    const mustNotCompileWithoutAGuard = () =>
+      // @ts-expect-error possibly undefined — a consumer must feature-detect first
+      withoutIt.getMetadataReadableFields('deal', { userId: 'u1' });
+    expect(typeof mustNotCompileWithoutAGuard).toBe('function');
+
+    // The shape consumers actually write (`metadata-core`'s object-schema mask
+    // resolver): prefer the metadata-plane answer, fall back to the data-plane
+    // one. The fallback is never NARROWER than the metadata-plane answer, which
+    // is why degrading here cannot hide columns a caller may see.
+    const ask = typeof withoutIt.getMetadataReadableFields === 'function'
+      ? withoutIt.getMetadataReadableFields.bind(withoutIt)
+      : withoutIt.getReadableFields.bind(withoutIt);
+    await expect(ask('deal', { userId: 'u1' })).resolves.toEqual(['id', 'name']);
+  });
+
+  it('[ADR-0106 D7] the metadata plane narrows where the data plane falls open', async () => {
+    // The one respect in which the two methods differ, and the reason a second
+    // method exists at all: a caller resolving to ZERO permission sets falls
+    // OPEN on the data plane (mirroring the middleware, which skips its field
+    // gate entirely) and resolves the fallback set on the metadata plane, so a
+    // guest deployment's schema exposure is a deliberate permission-set
+    // decision rather than an accidental everything-default.
+    const service = makeService({
+      getReadableFields: async () => ['id', 'name', 'secret'],
+      getMetadataReadableFields: async (_object, context) =>
+        context?.isSystem ? ['id', 'name', 'secret'] : ['id'],
+    });
+
+    await expect(service.getReadableFields('deal', {})).resolves.toEqual(['id', 'name', 'secret']);
+    await expect(service.getMetadataReadableFields?.('deal', {})).resolves.toEqual(['id']);
+
+    // A system context bypasses on BOTH planes.
+    await expect(service.getMetadataReadableFields?.('deal', { isSystem: true }))
+      .resolves.toEqual(['id', 'name', 'secret']);
+
+    // …and it inherits getReadableFields' two distinct empty answers, unchanged:
+    // `undefined` = no answer (fall back to your own projection), `[]` = the real
+    // answer that no field may be disclosed.
+    const noAnswer = makeService({ getMetadataReadableFields: async () => undefined });
+    await expect(noAnswer.getMetadataReadableFields?.('deal', { userId: 'u1' })).resolves.toBeUndefined();
+    const nothingDisclosable = makeService({ getMetadataReadableFields: async () => [] });
+    await expect(nothingDisclosable.getMetadataReadableFields?.('deal', { userId: 'u1' })).resolves.toEqual([]);
+  });
+
   it('a partial implementation is feature-detectable rather than wrong', () => {
     // Consumers probe (`typeof svc.getReadableFields === 'function'`) so an
     // implementation may omit a method it cannot honour and still be usable.

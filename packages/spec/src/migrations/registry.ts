@@ -1102,6 +1102,22 @@ const step17: MigrationStep = {
     + 'is implemented (#5021 / #4988). Not in scope, and deliberately: `page:card.visible` is a '
     + 'component-level visibility predicate written into `properties` and hoisted by the '
     + 'renderer — a page to rewrite onto the ADR-0089 `visibleWhen`, not a key to declare.\n\n'
+    + 'That count turned out to be incomplete, and #6776 finishes it: five more keys the '
+    + 'renderers read were still undeclared. Four are plain additions with no behaviour change '
+    + '(`page:header` `recordChrome`/`showStar`/`showCopyId`, which select between the '
+    + 'record-chip header and the bare heading a dashboard wants, and `page:accordion.variant`, '
+    + 'which decides whether the accordion draws its own dividers or leaves the border to each '
+    + 'panel). The fifth is a rename, and the only one in the family whose defect is structural '
+    + 'rather than an oversight: the tab strip\'s visual style was declared as '
+    + '`page:tabs.type`, which collides with the page component\'s OWN dispatch key. objectui\'s '
+    + '`SchemaRenderer` refuses to hoist `properties.type` for exactly that reason, '
+    + '`sdui-parser`\'s `BASE_PROPS` contains `type` and skips it before any validation runs, '
+    + 'and in a flat or JSX carrier the node reads `{ type: \'page:tabs\', … }` so the name is '
+    + 'already taken. The key was therefore unauthorable in every carrier but the nested '
+    + '`properties` object, and unvalidated even there. It becomes `tabStyle` — the spelling '
+    + 'objectui publishes and the renderer already reads first in the flat carriers — which is '
+    + '`displayField` → `labelField` again: converge on the spelling that works, not the one '
+    + 'that declares well, and keep one spelling rather than two (Prime Directive #12).\n\n'
     + 'Finally it narrows the aggregation vocabulary: `array_agg` and `string_agg` leave '
     + '`AggregationFunction` (#6188, ADR-0049). The enum declared eight functions and the SQL '
     + 'family compiles five — `SqlDriver.mapAggregateFunc` and the Turso '
@@ -1206,6 +1222,7 @@ const step17: MigrationStep = {
     'page-card-body-to-children',
     'dataset-measure-array-string-agg-removed',
     'inline-action-api-params-to-body-extra',
+    'page-tabs-type-to-tab-style',
   ],
   semantic: [
     {
@@ -2288,8 +2305,10 @@ const step17: MigrationStep = {
       id: 'storage-service-list-retired',
       surface: 'contracts.IStorageService.list',
       replacement:
-        'no replacement — track the keys you wrote (sys_file / file-reference records, '
-        + 'queryable through ObjectQL with real pagination) instead of enumerating the bucket',
+        'track the keys you wrote (sys_file / file-reference records, queryable through '
+        + 'ObjectQL with real pagination) instead of enumerating the bucket — and where no '
+        + 'such record exists, the cursor-shaped `list(prefix, { cursor, limit })` this '
+        + 'entry reserved, restored in #6781',
       reason:
         '`list(prefix)` was an OPTIONAL contract method documented as "List files in a '
         + 'directory/prefix", and the two shipped adapters answered the same call with two '
@@ -2333,7 +2352,19 @@ const step17: MigrationStep = {
         + 'contract, so deleting it is cleanup that can follow. The break is on the CALLER '
         + 'side: `storage.list(...)` no longer type-checks, and a PROXY typed against '
         + '`IStorageService` that forwards to `inner.list` is exactly such a caller — the '
-        + 'one in `@objectstack/service-storage` goes with the adapters (#5541).',
+        + 'one in `@objectstack/service-storage` goes with the adapters (#5541). '
+        + '⚠️ AMENDED 2026-08-09 (#6781, maintainer ruling on cloud#1203, option B): the '
+        + 'RESERVED route in the paragraph above was taken. `list` exists again on the '
+        + 'contract, cursor-shaped — `list(prefix, { cursor, limit })` returning '
+        + '`{ items, nextCursor }` — because cloud had two first-party callers this repo '
+        + 'could not see when the measurement said "nothing calls it" (tenant attachment '
+        + 'reclamation, marketplace snapshot GC). This does NOT un-retire anything and the '
+        + 'acceptance criterion above is unchanged for what it actually governs: the '
+        + 'single-argument `list(prefix): StorageFileInfo[]` is gone for good, a call written '
+        + 'against it still fails to compile, and the two dialects it had are now pinned '
+        + 'against each other in `storage-adapter-list.conformance.test.ts` rather than left '
+        + 'to diverge. What changed for an upgrader is only the destination: prefer the '
+        + 'records you wrote, and reach for the restored member when there are none.',
     },
     {
       id: 'driver-aggregate-undeclared-key-aliases-removed',
@@ -3076,6 +3107,12 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     'ui/ElementRecordPickerProps:multiple',
     'ui/ElementRecordPickerProps:searchFields',
     'ui/PageCardProps:body',
+    // #6776 — #5775's count was incomplete. The tab strip's visual style is the
+    // one prop whose declared spelling collides with the page component's own
+    // dispatch key, so `type` could never be authored in a flat or JSX carrier
+    // and was skipped unvalidated by `sdui-parser`'s `BASE_PROPS`. Renamed to
+    // the `tabStyle` every carrier can express and the renderer already reads.
+    'ui/PageTabsProps:type',
     // #6748 — ADR-0049 enforce-or-remove on the action-descriptor capability
     // block. `isAsync` was a second spelling of `supportsPause` with ZERO
     // readers on a fresh three-repo measurement; its sibling took the enforce
