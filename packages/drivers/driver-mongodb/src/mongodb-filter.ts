@@ -40,6 +40,11 @@ import {
 // prints, read from the spec so this driver's sentence about `$regex` cannot
 // drift from the four other refusal sites' (#5701).
 import { RETIRED_FILTER_OPERATORS } from '@objectstack/spec/data';
+// [#6520] `$icontains`' ASCII-only fold, defined once in the spec. This driver
+// hands a PATTERN to MongoDB rather than comparing strings, so the fold has to
+// live in the pattern source — see its docblock for why `$options: 'i'` is the
+// wrong tool.
+import { asciiCaseInsensitiveRegexSource } from '@objectstack/spec/data';
 import {
   coerceTemporalValue,
   type TemporalFieldKind,
@@ -228,6 +233,22 @@ function classifyFilterKey(key: string, value: unknown, here: string): FilterVer
     throw nonBooleanNullComparandError(key, value.$null, `${here}.$null`);
   }
 
+  // [#6520] `$icontains`' comparand is a NON-EMPTY string, gated on the WALK for
+  // the same reason `$null` is one paragraph up: a gate in the emitter fires or
+  // not depending on whether a boolean identity settled the enclosing node
+  // first, so `{ $or: [ {}, { name: { $icontains: '' } } ] }` would refuse or
+  // not depending on its siblings. The condition and the message are
+  // `driver-sql`'s `icontainsComparandError`, word for word — an empty
+  // comparand matches every row, and a predicate that constrains nothing WIDENS
+  // (#3948).
+  if (
+    isFilterNode(value) &&
+    Object.prototype.hasOwnProperty.call(value, '$icontains') &&
+    (typeof value.$icontains !== 'string' || value.$icontains === '')
+  ) {
+    throw icontainsComparandError(key, value.$icontains, `${here}.$icontains`);
+  }
+
   // A field key always contributes a predicate. This stays `'clause'` even for
   // `{ field: {} }` (a field constrained by zero operators), which this
   // translator emits as `{ field: {} }` — an exact-match on an empty document.
@@ -307,6 +328,28 @@ function nonBooleanNullComparandError(field: string, value: unknown, path: strin
       `compiled IS NOT NULL (anything but true), and driver-memory's matcher dropped the ` +
       `constraint entirely. Note "false" the STRING is truthy, so it landed on the side opposite ` +
       `the false it was written to mean (#5347).`,
+  );
+}
+
+/**
+ * [#6520] `$icontains` received a comparand that is not a non-empty string.
+ *
+ * The twin of `driver-sql`'s and `driver-memory`'s constructor of the same name,
+ * word for word: #3948 made the backends agree that an uncompilable filter is a
+ * loud refusal rather than a silent match-everything, and a suite that swaps one
+ * driver for another has to read one sentence in one envelope. Two rejections in
+ * one constructor because they are one mistake at one position — a non-string
+ * would have to be coerced into text the query never asked for, and an empty one
+ * matches every row.
+ */
+function icontainsComparandError(field: string, value: unknown, path: string): Error {
+  const shown = typeof value === 'string' ? `""` : JSON.stringify(value) ?? String(value);
+  return unsupportedFilterError(
+    `Operator "$icontains" on field "${field}" at ${path} requires a NON-EMPTY string comparand, ` +
+      `received ${shown}. "$icontains" is a case-insensitive LITERAL substring search, so its ` +
+      `comparand is the text to look for — an empty one matches every row (a predicate that ` +
+      `constrains nothing), and a non-string one would have to be coerced into text this query ` +
+      `never asked for.`,
   );
 }
 
@@ -544,6 +587,23 @@ function translateFieldOperators(
       case '$endsWith':
         result.$regex = `${escapeRegex(String(value))}$`;
         result.$options = 'i';
+        break;
+
+      // [#6520] `$icontains` — case-insensitive over ASCII and nothing else.
+      //
+      // The one arm in this family that does NOT set `$options: 'i'`, and the
+      // omission is the whole implementation. Mongo's `i` flag folds the full
+      // Unicode range, so it would match `CAFÉ` against `café` — the answer
+      // SQLite cannot give and therefore the one the protocol forbids (#4706
+      // Q1 = A). The fold lives in the pattern instead, one `[Aa]` class per
+      // ASCII letter, from the spec's shared `asciiCaseInsensitiveRegexSource`
+      // — the same source `driver-memory`'s mingo path binds.
+      //
+      // Its four neighbours above ARE `$options: 'i'`, and that is not a
+      // precedent to copy: it is them folding Unicode for the case-SENSITIVE
+      // `$contains` family, the open defect #6682 tracks on this driver.
+      case '$icontains':
+        result.$regex = asciiCaseInsensitiveRegexSource(String(value));
         break;
 
       // Range operator → $gte + upper bound (half-open on a bare-day max,

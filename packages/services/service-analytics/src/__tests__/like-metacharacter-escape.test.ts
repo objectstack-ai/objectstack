@@ -591,20 +591,53 @@ describe('[#5567] analytics LIKE compilers escape their comparand', () => {
     });
 
     /**
-     * `$icontains` is UNIMPLEMENTED here, and fail-closed at both doors — the
-     * state #6518 leaves it in deliberately, because adding it belongs with
-     * #6520 (the vocabulary, driver-memory and analytics together) rather than
-     * to a driver-lane case-folding fix. Pinned so "unimplemented" cannot
-     * quietly become "dropped": a dropped predicate WIDENS.
+     * [#6520] This case used to pin `$icontains` as REFUSED at both doors — the
+     * state #6518 deliberately left it in, because implementing it belonged with
+     * the vocabulary admission rather than with a driver-lane case-folding fix.
+     * #6520 did that, so the case is REPLACED rather than re-spelled: an
+     * assertion that the operator throws would now be pinning a refusal that no
+     * longer exists, and it would keep passing for the wrong reason if the arm
+     * were deleted in one compiler but not the other.
+     *
+     * What it pins instead is the property the refusal was standing in for —
+     * that the predicate is EMITTED, folded on BOTH sides, and folded with the
+     * construct the ruling names.
      */
-    it('$icontains is REFUSED, not silently dropped, at both doors', async () => {
-      expect(() =>
-        compileScopedFilterToSql({ name: { $icontains: 'admin' } } as FilterCondition, 'person'),
-      ).toThrow(/\$icontains/);
+    it('$icontains compiles at both doors, folding ASCII on both sides', async () => {
+      const scoped = compileScopedFilterToSql(
+        { name: { $icontains: 'admin' } } as FilterCondition, 'person',
+      );
+      const native = await new NativeSQLStrategy().generateSql(
+        query({ name: { $icontains: 'admin' } }), nativeCtx,
+      );
 
-      await expect(
-        new NativeSQLStrategy().generateSql(query({ name: { $icontains: 'admin' } }), nativeCtx),
-      ).rejects.toThrow(/\$icontains/);
+      for (const [label, sql] of [['scoped', scoped.sql], ['native', native.sql]] as const) {
+        // BOTH sides: folding only the comparand matches just the rows that were
+        // already lower-case — a wrong row set that looks like a working filter.
+        expect(sql.match(/translate\(/g) ?? [], label).toHaveLength(2);
+        expect(sql, label).toContain('LIKE');
+        expect(sql, label).toContain("'ABCDEFGHIJKLMNOPQRSTUVWXYZ'");
+        // NOT `LOWER()`: Postgres folds Unicode with it, and the contract is
+        // ASCII-only (#4706 Q1 = A). This is the same assertion the neighbouring
+        // Postgres-shape case makes, aimed at the one operator that folds.
+        expect(sql, label).not.toMatch(/LOWER\s*\(|ILIKE/i);
+      }
+      // The comparand is still ESCAPED and its ESCAPE character still bound —
+      // the fold rides ON TOP of the literal-comparand rule, it does not replace
+      // it (this file's whole subject).
+      expect(scoped.params).toEqual(['%admin%', '\\']);
+      expect(native.params).toEqual(['%admin%', '\\']);
+    });
+
+    /**
+     * [#6520] The comparand rule survives the new arm: `$icontains` is a
+     * LITERAL substring search, so a `%` in the comparand is a percent sign.
+     */
+    it('$icontains escapes LIKE metacharacters like its case-exact twin', () => {
+      const { params } = compileScopedFilterToSql(
+        { name: { $icontains: '100%' } } as FilterCondition, 'person',
+      );
+      expect(params).toEqual(['%100\\%%', '\\']);
     });
   });
 });

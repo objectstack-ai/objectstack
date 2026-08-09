@@ -291,15 +291,23 @@ not `LIKE` wildcards, and `.` / `*` / `+` are ordinary characters, not regex
 metacharacters — `{ name: { $icontains: 'a.b' } }` matches `a.b` and not `axb`.
 
 <Callout type="info">
-  **Status:** the case rules above are the protocol's declaration as of
-  `@objectstack/spec` 18. The backend lowerings that deliver them — making SQLite's
-  and turso's `LIKE` case-exact, dropping MongoDB's hardcoded `$options: 'i'`, and
-  implementing `$icontains` everywhere — are tracked by
-  [#5702](https://github.com/objectstack-ai/objectstack/issues/5702). Until it
-  lands, a backend that has not been aligned refuses `$icontains` outright rather
-  than answering it approximately, and `$contains` still follows its dialect. The
-  shared standard both halves are measured against is `FILTER_TEXT_CASES`
-  (`@objectstack/spec/data`).
+  **Status:** `$icontains` is implemented on **every** backend and every evaluation
+  face, and folds the same ASCII domain on all of them —
+  [#5702](https://github.com/objectstack-ai/objectstack/issues/5702) did the SQL
+  family and [#6520](https://github.com/objectstack-ai/objectstack/issues/6520) did
+  the rest (the in-memory driver's query, matcher and analytics faces, MongoDB,
+  ObjectQL's `having`, the RLS write-side `check`, and the analytics SQL
+  compilers). A filter using it means the same thing whether your tests run on the
+  in-memory double or your production runs SQL.
+
+  One half of the case rules above is still landing: `$contains` /
+  `$startsWith` / `$endsWith` / `$notContains` are case-**sensitive** by ruling and
+  are so on the SQL family, but the in-memory driver's query path and MongoDB still
+  fold them over the whole Unicode range —
+  [#6682](https://github.com/objectstack-ai/objectstack/issues/6682). Until that
+  lands, prefer `$icontains` when you *want* a fold rather than relying on
+  `$contains` being loose on those two backends. The shared standard both halves
+  are measured against is `FILTER_TEXT_CASES` (`@objectstack/spec/data`).
 </Callout>
 
 ### `$regex` — removed

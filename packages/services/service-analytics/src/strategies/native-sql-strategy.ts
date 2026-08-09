@@ -12,7 +12,7 @@ import {
 } from './filter-normalizer.js';
 import { compileScopedFilterToSql } from '../read-scope-sql.js';
 import { datasetInvalidError, invalidMemberError } from '../dataset-refusal.js';
-import { likePattern, LIKE_ESCAPE_CHAR, type LikeShape } from '../like-pattern.js';
+import { likePattern, LIKE_ESCAPE_CHAR, asciiLowerSqlExpr, type LikeShape } from '../like-pattern.js';
 import { nextUtcCalendarDay } from '@objectstack/core';
 
 /**
@@ -717,6 +717,9 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
       equals: '=', notEquals: '!=', gt: '>', gte: '>=', lt: '<', lte: '<=',
       contains: 'LIKE', notContains: 'NOT LIKE',
       startsWith: 'LIKE', endsWith: 'LIKE',
+      // [#6520] `$icontains` — `LIKE` like its neighbours; what separates it is
+      // the ASCII fold applied below, not the keyword.
+      icontains: 'LIKE',
     };
     /**
      * Where each string operator puts the wildcard. [#5567] The pattern itself is
@@ -729,6 +732,9 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     const likeShape: Record<string, LikeShape> = {
       contains: 'contains', notContains: 'contains',
       startsWith: 'starts', endsWith: 'ends',
+      // [#6520] Same wildcard placement as `contains`; the case fold is what
+      // differs, and it is applied to both sides of the comparison below.
+      icontains: 'contains',
     };
 
     // Null predicates and the LIKE family read the column as stored — the former
@@ -759,6 +765,13 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
       params.push(likePattern(shape, values[0]));
       const patternRef = `$${params.length}`;
       params.push(LIKE_ESCAPE_CHAR);
+      // [#6520] `$icontains` folds ASCII case on BOTH sides. Only this operator
+      // folds: the rest of the family is case-EXACT by ruling (#4706 Q2 = A),
+      // and `objectql-strategy.ts`'s echo of this statement carries the same
+      // `fold` flag on the same single row so the two keep describing one query.
+      if (operator === 'icontains') {
+        return `${asciiLowerSqlExpr(rawCol)} ${sqlOp} ${asciiLowerSqlExpr(patternRef)} ESCAPE $${params.length}`;
+      }
       return `${rawCol} ${sqlOp} ${patternRef} ESCAPE $${params.length}`;
     }
 
