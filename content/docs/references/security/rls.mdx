@@ -76,7 +76,7 @@ Salesforce:
 - Manual Sharing: Individual record sharing
 
 ObjectStack RLS:
-- A small, fixed expression grammar (equality, set-membership, always-true)
+- A constrained CEL predicate grammar: comparisons and set-membership against literals or `current_user.*` values, composable with `&&` / `||`; anything that does not lower to a filter fails closed
 - Subquery-shaped needs are pre-resolved by the runtime (§7.3.1)
 - Multiple policies OR-combine for union (any-match-allows) semantics
 
