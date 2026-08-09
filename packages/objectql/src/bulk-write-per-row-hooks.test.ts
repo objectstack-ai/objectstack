@@ -1000,6 +1000,41 @@ describe('[#6966] every dispatched context carries the marker, on all four write
     await engine.insert('task', { title: 'solo' } as any);
     expect(batch.map((d) => [d.mode, d.index])).toEqual([['record', 0]]);
   });
+
+  it('NO handler is ever dispatched on a context without the marker', async () => {
+    // The contract the JSDoc states, pinned as an invariant rather than
+    // path-by-path. It is what makes `ctx.dispatch?.mode` safe to read without
+    // a "what if the engine did not bind it" branch — and it covers the one
+    // context a reader might worry about: `update()`/`delete()` keep a
+    // BATCH-scoped `hookContext` on the predicate path, and the claim is that
+    // no handler ever sees it (the per-row loop runs whenever `hasHooksFor` is
+    // true, and when it is false no handler runs at all).
+    const unmarked: string[] = [];
+    const events = [
+      'beforeInsert', 'afterInsert',
+      'beforeUpdate', 'afterUpdate',
+      'beforeDelete', 'afterDelete',
+    ];
+    const { engine } = await boot(events.map((e) => hook(`probe_${e}`, e, (ctx) => {
+      const d = (ctx as any).dispatch;
+      if (!d || (d.mode !== 'record' && d.mode !== 'per-row') || typeof d.index !== 'number' || !d.scope) {
+        unmarked.push(`${e}:${JSON.stringify(d)}`);
+      }
+    })));
+
+    // Every write shape this engine can take, in one pass.
+    await engine.insert('task', { title: 'solo', status: 'todo' } as any);
+    const batch: any = await engine.insert('task', [
+      { title: 'a', status: 'todo' },
+      { title: 'b', status: 'todo' },
+    ] as any);
+    await engine.update('task', { status: 'mid' }, { where: { id: batch[0].id } });
+    await engine.update('task', { status: 'done' }, { multi: true, where: { status: 'todo' } });
+    await engine.delete('task', { where: { id: batch[0].id } } as any);
+    await engine.delete('task', { multi: true, where: { status: 'done' } } as any);
+
+    expect(unmarked).toEqual([]);
+  });
 });
 
 describe('[#6966] `scope` is one object per WRITE, spanning both phases', () => {
