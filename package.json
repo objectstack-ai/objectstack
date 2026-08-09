@@ -80,6 +80,7 @@
     "check:engine-double-contract": "node scripts/check-engine-double-contract.mjs --self-test && node scripts/check-engine-double-contract.mjs",
     "check:resume-authority-declared": "node scripts/check-resume-authority-declared.mjs --self-test && node scripts/check-resume-authority-declared.mjs",
     "check:spec-parsed-alias": "node scripts/check-spec-parsed-alias.mjs --self-test && node scripts/check-spec-parsed-alias.mjs",
+    "check:tenant-chokepoint": "node scripts/check-tenant-chokepoint.mjs --self-test && node scripts/check-tenant-chokepoint.mjs",
     "check:stall-guard": "node scripts/run-with-stall-guard.mjs --self-test"
   },
   "keywords": [

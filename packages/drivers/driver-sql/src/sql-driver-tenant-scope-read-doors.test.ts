@@ -7,7 +7,7 @@
  *
  * `applyTenantScope()` says of itself that it is "the single chokepoint for
  * read-side tenant isolation in the SQL driver; every CRUD method routes
- * through it". Two methods did not:
+ * through it". THREE methods did not:
  *
  *   - `findWithWindowFunctions()` — the live window-function read door (#4286).
  *     It returns ROWS. With `options.tenantId` set on an object that has a
@@ -19,21 +19,26 @@
  *     predicate has different selectivity and picks different indexes. This is
  *     the same failure #6577 fixed on these two methods for `limit`, one
  *     builder line higher.
+ *   - `distinct()` — returns one column's VALUES for every tenant. Named in no
+ *     card; #6792 says the OPPOSITE, listing `distinct` among the 13 scoped
+ *     sites (the 13th read site is `aggregate()`). Found by running the gate
+ *     this change ships, which is the argument for having one.
  *
- * Both built through `this.getBuilder(object, options)` and neither followed it
- * with `applyTenantScope`, which is what all thirteen other call sites do.
+ * All three built through `this.getBuilder(object, options)` and none followed
+ * it with `applyTenantScope`, which is what every other read site does.
  *
- * Measured on `main` at `6595262`, before either line was added, against the
+ * Measured on `main` at `6595262`, before any line was added, against the
  * fixture below (`org_a` owns a1/a2, `org_b` owns b1/b2, p1 is a NULL-org
  * platform row):
  *
  * ```
- * find    {} tenantId=org_a -> 3 rows  (a1, a2, p1)
- * window  {} tenantId=org_a -> 5 rows  (a1, a2, b1, b2, p1)   <- org_b's rows
- * analyze {} tenantId=org_a -> select * from `os6792_account`  <- no predicate
- * find    {} tenantId=org_a -> select * from `os6792_account`
- *                              where (`organization_id` = ? or `organization_id`
- *                              is null) order by `id` asc
+ * find     {} tenantId=org_a -> 3 rows  (a1, a2, p1)
+ * window   {} tenantId=org_a -> 5 rows  (a1, a2, b1, b2, p1)  <- org_b's rows
+ * distinct 'name' tenantId=org_a -> [A1, A2, B1, B2, P1]      <- org_b's values
+ * analyze  {} tenantId=org_a -> select * from `os6792_account` <- no predicate
+ * find     {} tenantId=org_a -> select * from `os6792_account`
+ *                               where (`organization_id` = ? or `organization_id`
+ *                               is null) order by `id` asc
  * ```
  *
  * # Why the plan half asserts against a captured statement
@@ -164,7 +169,7 @@ describe('driver-sql — every read door routes through applyTenantScope (#6792)
 
     it('agrees with `find()` on the same read — one driver, one answer', async () => {
       const viaWindow = await driver.findWithWindowFunctions(TABLE, { ...WINDOW } as any, { tenantId: 'org_a' } as any);
-      const viaFind = await driver.find(TABLE, {}, { tenantId: 'org_a' } as any);
+      const viaFind = await driver.find(TABLE, {}, { tenantId: 'org_a' });
       expect(ids(viaWindow)).toEqual(ids(viaFind));
     });
 
@@ -193,7 +198,10 @@ describe('driver-sql — every read door routes through applyTenantScope (#6792)
         { ...WINDOW, where: { balance: { $gte: 20 } } } as any,
         { tenantId: 'org_a' } as any,
       );
-      expect(ids(rows)).toEqual(['a2']);
+      // `p1` (balance 50) is the NULL-org platform row and is legitimately
+      // visible to org_a — it passes the filter AND the chokepoint. b1/b2
+      // (30/40) pass the filter and must not survive the tenant predicate.
+      expect(ids(rows)).toEqual(['a2', 'p1']);
     });
 
     it('still computes the window function itself', async () => {
@@ -216,10 +224,64 @@ describe('driver-sql — every read door routes through applyTenantScope (#6792)
     });
   });
 
+  /**
+   * NOT one of the two doors #6792 names. Found by the gate this card ships,
+   * while checking what it would be red on — and the card's own enumeration
+   * says the opposite ("It is called at 13 sites — `findRows` …, `count`,
+   * `distinct`, the write paths"). `distinct` is not among them; the 13th read
+   * site is `aggregate`. Triage repeated the count without re-deriving which
+   * methods it covered, and both PM measurements inherited that.
+   *
+   * It returns column VALUES rather than whole rows, which lowers the volume
+   * and not the class: one call hands back every OTHER tenant's values for the
+   * named column. The door is documented with a runnable example
+   * (`content/docs/protocol/objectql/query-syntax.mdx:819`,
+   * `const industries = await driver.distinct('account', 'industry')`), so it
+   * is exposed the same way `findWithWindowFunctions` is.
+   *
+   * (Unrelated to the v17 note that "`aggregate()` / `distinct()` leaked" —
+   * that one is raw epoch storage reaching presentation, #3839/#3849.)
+   */
+  describe('distinct — the third read door, found by the gate rather than by the card', () => {
+    it('does not return another tenant\'s values', async () => {
+      const values = await driver.distinct(TABLE, 'name', undefined, { tenantId: 'org_a' } as any);
+      expect(values.sort()).toEqual(['A1', 'A2', 'P1']);
+      expect(values).not.toContain('B1');
+      expect(values).not.toContain('B2');
+    });
+
+    it('agrees with `find()` about which rows it may see', async () => {
+      const values = await driver.distinct(TABLE, 'name', undefined, { tenantId: 'org_b' } as any);
+      const rows = await driver.find(TABLE, {}, { tenantId: 'org_b' });
+      expect(values.sort()).toEqual(rows.map((r: any) => r.name).sort());
+    });
+
+    it('still narrows by the caller\'s own filter beside the tenant predicate', async () => {
+      const values = await driver.distinct(TABLE, 'name', { balance: { $gte: 20 } } as any, {
+        tenantId: 'org_a',
+      } as any);
+      // `P1` is the NULL-org platform row (balance 50) — see the window-door
+      // case above. `B1`/`B2` also pass the filter and must not survive.
+      expect(values.sort()).toEqual(['A2', 'P1']);
+    });
+
+    it('is UNSCOPED with no tenantId — the admin / seed path stays open', async () => {
+      const values = await driver.distinct(TABLE, 'name');
+      expect(values.sort()).toEqual(['A1', 'A2', 'B1', 'B2', 'P1']);
+    });
+
+    it('is unaffected on an object with no tenant field', async () => {
+      const values = await driver.distinct(UNSCOPED_TABLE, 'name', undefined, {
+        tenantId: 'org_a',
+      } as any);
+      expect(values.sort()).toEqual(['L1', 'L2']);
+    });
+  });
+
   describe('analyzeQuery / explain — the PLAN door', () => {
     it('carries the tenant predicate `find()` actually emitted', async () => {
       const emitted = await driver.statementFor(TABLE, () =>
-        driver.find(TABLE, {}, { tenantId: 'org_a' } as any),
+        driver.find(TABLE, {}, { tenantId: 'org_a' }),
       );
       const analyzed = await driver.analyzeQuery(TABLE, {} as any, { tenantId: 'org_a' } as any);
 
