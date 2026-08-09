@@ -65,11 +65,11 @@ Turso / libSQL Connection Configuration
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **url** | `string` | ✅ | libSQL endpoint or local file (libsql://…, https://…, file:…, :memory:) |
+| **url** | `string` | ✅ | libSQL endpoint or local file: a remote libsql/https Turso URL, a file path, or :memory: |
 | **authToken** | `string` | optional | JWT auth token for a remote libSQL database (prefer external.credentialsRef) |
 | **encryptionKey** | `string` | optional | AES-256 encryption key for the local database file (local/replica modes) |
 | **concurrency** | `integer` | optional | Maximum concurrent requests to the remote database |
-| **syncUrl** | `string` | optional | Remote sync URL for embedded-replica mode (libsql:// or https://) |
+| **syncUrl** | `string` | optional | Remote sync URL for embedded-replica mode: a libsql or https Turso endpoint |
 | **sync** | `{ intervalSeconds?: integer; onConnect?: boolean }` | optional | Embedded-replica sync configuration (requires `syncUrl`) |
 | **timeout** | `integer` | optional | Operation timeout in milliseconds for remote operations |
 | **mode** | `Enum<'local' \| 'replica' \| 'remote'>` | optional | Force a transport mode instead of inferring it from `url` |

@@ -61,6 +61,7 @@
     "CryptoContext (interface)",
     "CryptoHandle (interface)",
     "CubeMeta (interface)",
+    "DEFAULT_STORAGE_LIST_LIMIT (const)",
     "DatasetCompareTo (interface)",
     "DatasetSelection (interface)",
     "DefineSharingRuleInput (interface)",
@@ -271,6 +272,8 @@
     "StartupOptions (type)",
     "StartupOptionsParsed (type)",
     "StorageFileInfo (interface)",
+    "StorageListOptions (interface)",
+    "StorageListPage (interface)",
     "StorageUploadOptions (interface)",
     "StrategyContext (interface)",
     "SubscribeOptions (interface)",
@@ -287,6 +290,9 @@
     "UploadArtifactResult (interface)",
     "UserModelMessage (type)",
     "ValidationResult (type)",
-    "WriteObservabilityOptions (interface)"
+    "WriteObservabilityOptions (interface)",
+    "decodeStorageListCursor (function)",
+    "encodeStorageListCursor (function)",
+    "resolveStorageListLimit (function)"
   ]
 }

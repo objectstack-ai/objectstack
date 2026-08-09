@@ -57,12 +57,30 @@ import {
 export const TursoTransportModeSchema = z.enum(['local', 'replica', 'remote'])
   .describe('Force a transport mode instead of inferring it from `url`');
 
-/** Post-parse shape of {@link TursoTransportModeSchema}. */
-export type TursoTransportMode = z.infer<typeof TursoTransportModeSchema>;
+/**
+ * Author-facing shape of {@link TursoTransportModeSchema} (ADR-0122: the bare
+ * name is the AUTHOR state).
+ *
+ * No `TursoTransportModeParsed` beside it, deliberately: this is a plain
+ * `z.enum` with no `.default()`, no `.transform()` and no coercion, so
+ * `z.input` and `z.infer` are the same three literals. A second alias for an
+ * identical type would be a declaration that distinguishes nothing — the same
+ * call as leaving `contractId` off the driver vocabulary table. The two sibling
+ * enums in this directory settle it the same way: `SqliteWasmPersistMode` and
+ * `DriverSslToggle` are both bare `z.input` with no parsed twin.
+ */
+export type TursoTransportMode = z.input<typeof TursoTransportModeSchema>;
 
 export const TursoConfigSchema = lazySchema(() => strictObject(
   {
     surface: "this turso datasource's config",
+    // Semantic near-misses only — the spellings edit distance cannot reach.
+    // Case and underscore variants of a DECLARED key (`auth_token`,
+    // `encryption_key`, `sync_url`) are deliberately absent: the unknown-key
+    // probe already normalizes those onto the declared name, so entries for
+    // them would be alias rows that never fire, and two of them collided with
+    // each other on one probe (`auth_token`/`authtoken`,
+    // `sync_interval`/`syncinterval`) — caught by `alias-integrity.test.ts`.
     aliases: {
       uri: 'url',
       connectionstring: 'url',
@@ -70,13 +88,8 @@ export const TursoConfigSchema = lazySchema(() => strictObject(
       database: 'url',
       databaseurl: 'url',
       token: 'authToken',
-      auth_token: 'authToken',
-      authtoken: 'authToken',
       jwt: 'authToken',
-      encryption_key: 'encryptionKey',
-      sync_url: 'syncUrl',
       syncinterval: 'sync',
-      sync_interval: 'sync',
     },
     guidance: {
       pool:
@@ -101,7 +114,16 @@ export const TursoConfigSchema = lazySchema(() => strictObject(
      * and the reason both boot hosts refuse a driver selection with no URL
      * rather than guessing one (#6345 fork 2).
      */
-    url: z.string().min(1).describe('libSQL endpoint or local file (libsql://…, https://…, file:…, :memory:)')
+    // The description names the SHAPES in words rather than pasting URL
+    // prefixes, matching how the postgres/mysql/mongo `url` keys describe
+    // themselves. Not only house style: a `.describe()` is rendered verbatim
+    // into `content/docs/references/`, and a scheme prefix pasted there ahead
+    // of an ellipsis puts a literal U+2026 where a host belongs — which the
+    // docs link checker resolves as an internationalised domain name, and
+    // fails on (caught by CI on this very key). Concrete example URLs belong
+    // in the TSDoc above the key, which the reference tables do not inline.
+    url: z.string().min(1)
+      .describe('libSQL endpoint or local file: a remote libsql/https Turso URL, a file path, or :memory:')
       .meta({ title: 'Database URL' }),
 
     /**
@@ -125,7 +147,7 @@ export const TursoConfigSchema = lazySchema(() => strictObject(
 
     /** Remote sync endpoint that turns a local file into an embedded replica. */
     syncUrl: z.string().optional()
-      .describe('Remote sync URL for embedded-replica mode (libsql:// or https://)')
+      .describe('Remote sync URL for embedded-replica mode: a libsql or https Turso endpoint')
       .meta({ title: 'Sync URL' }),
 
     /**
