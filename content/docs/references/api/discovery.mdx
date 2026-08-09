@@ -47,6 +47,7 @@ const result = ApiRoutesSchema.parse(data);
 | **analytics** | `string` | optional | e.g. /api/v1/analytics |
 | **packages** | `string` | optional | e.g. /api/v1/packages |
 | **datasources** | `string` | optional | e.g. /api/v1/datasources — base for the datasources/:name/external/* federation-admin family; absent when no host mounts it |
+| **email** | `string` | optional | e.g. /api/v1/email — base for the email/send endpoint; absent when no host mounts it |
 | **approvals** | `string` | optional | e.g. /api/v1/approvals |
 | **realtime** | `string` | optional | e.g. /api/v1/realtime |
 | **notifications** | `string` | optional | e.g. /api/v1/notifications |
