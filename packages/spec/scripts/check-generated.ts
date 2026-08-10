@@ -154,6 +154,17 @@ const NO_GENERATOR: ReadonlyArray<{ check: string; why: string }> = [
   { check: 'check:liveness', why: 'audits whether declared spec properties have a reader — no artifact' },
   { check: 'check:empty-state', why: 'audits empty-state coverage — no artifact' },
   { check: 'check:skill-examples', why: 'validates skill examples parse — no artifact' },
+  // #7319. Reads `src/` and the shipped template trees and writes nothing: a
+  // failure is either a manifest to fix or a schema to fix, never a `gen:` to
+  // run. It audits the inverse direction from everything in GATED — those
+  // compare an artifact this package GENERATES against its source, this one
+  // compares a file another package SHIPS against the schema that claims to
+  // describe it. Two drifts had already accumulated in that blind spot (#6861's
+  // stripped `namespace`, #7319's required-but-absent `manifestId`).
+  {
+    check: 'check:template-manifests',
+    why: 'parses every shipped objectstack.manifest.json against TemplateManifestSchema — no artifact',
+  },
   // Landed in #4177 while this ledger landed in #4183 — neither PR could see the
   // other, so `main` carried an unclassified script and this reconciliation was
   // failing on `main` itself. The doc it checks against is hand-written, so there

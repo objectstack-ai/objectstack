@@ -1053,6 +1053,20 @@ jobs:
       - name: Check the react-blocks contract is in sync with the spec
         run: pnpm --filter @objectstack/spec check:react-blocks
 
+      # The shipped `objectstack.manifest.json` files declare TemplateManifestSchema
+      # as their `$schema`, and until #7319 nothing read that claim: both consumers
+      # take the file as raw JSON (create-objectstack does not depend on the spec at
+      # all), so the schema and the artifact drifted twice without a red build —
+      # #6861's silently stripped `namespace`, then a required `manifestId` the blank
+      # template has never carried. One parse per shipped manifest closes the class.
+      #
+      # Reads `src/` and the template trees, so it needs no build and belongs in this
+      # pre-build group with the other source audits. No paths filter and required,
+      # for the standard reason: a filter on packages/create-objectstack/** would go
+      # dormant on exactly the PR that tightens the schema instead.
+      - name: Check every shipped template manifest satisfies TemplateManifestSchema
+        run: pnpm --filter @objectstack/spec check:template-manifests
+
       # Example apps are AI-authoring reference templates; a red typecheck is a
       # bad signal to copy from. tsup transpiles them without a full typecheck,
       # so build alone will not catch type drift — typecheck them explicitly.
