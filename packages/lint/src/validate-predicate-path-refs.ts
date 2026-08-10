@@ -121,6 +121,7 @@ import { parseCelToAst } from '@objectstack/formula';
 import { getMetadataTypeSchema } from '@objectstack/spec/kernel';
 import { findClosestMatches, formatSuggestion } from '@objectstack/spec';
 
+import { collectionEntries } from './collection-entries.js';
 import { formViewSites } from './view-walk.js';
 
 export const PREDICATE_PATH_UNRESOLVED = 'predicate-path-unresolved';
@@ -436,29 +437,6 @@ function predicateSource(v: unknown): string | undefined {
 
 function isRec(v: unknown): v is AnyRec {
   return !!v && typeof v === 'object' && !Array.isArray(v);
-}
-
-/**
- * Records in a collection authored either as an array or as a name-keyed map,
- * each with its config PATH. Local rather than shared because the two other
- * copies in this package are being consolidated under #7186 — this one folds
- * into that helper when it lands, and duplicating it now is cheaper than
- * colliding with an in-flight refactor of `view-walk.ts`.
- */
-function collectionEntries(v: unknown, base: string): Array<{ rec: AnyRec; path: string }> {
-  if (Array.isArray(v)) {
-    const out: Array<{ rec: AnyRec; path: string }> = [];
-    for (let i = 0; i < v.length; i++) {
-      if (isRec(v[i])) out.push({ rec: v[i] as AnyRec, path: `${base}[${i}]` });
-    }
-    return out;
-  }
-  if (isRec(v)) {
-    return Object.entries(v)
-      .filter(([, def]) => isRec(def))
-      .map(([name, def]) => ({ rec: { name, ...(def as AnyRec) }, path: `${base}.${name}` }));
-  }
-  return [];
 }
 
 /**
