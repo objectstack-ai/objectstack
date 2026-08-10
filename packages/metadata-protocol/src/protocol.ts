@@ -4944,16 +4944,37 @@ export class ObjectStackProtocolImplementation implements
      * member of the family with no door — which is why a `formula` field
      * reached a driver that has no column for it.
      *
-     * SCOPE, stated because it is a real limit and not an oversight: this is an
-     * INGRESS gate, so it covers what reaches {@link findData} — the REST list
-     * route, `POST /data/:object/query`, the export route (which funnels its
-     * `$orderby` through here) and the RPC dispatcher. An internal caller that
-     * reaches `engine.find()` directly — hooks, flows, reports, expand
-     * sub-reads — still gets the silent drop, exactly as the projection and
-     * search axes note for themselves. Closing that half means deciding whether
-     * `engine.find` REFUSES or keeps its deliberate internal-caller tolerance,
-     * which is an engine-core contract decision rather than a gate fix; it is
-     * tracked separately.
+     * SCOPE: this is an INGRESS gate, so it covers what reaches {@link findData}
+     * — the REST list route, `POST /data/:object/query`, the export route (which
+     * funnels its `$orderby` through here) and the RPC dispatcher.
+     *
+     * [#7095] It is no longer the ONLY door for this verdict, and the half it
+     * cannot reach is now closed rather than merely noted. A caller reaching
+     * `engine.find()` / `engine.findOne()` directly — hooks, flows, reports,
+     * expand sub-reads — used to get the silent drop;
+     * `assertOrderByIsMaterializable` (`@objectstack/objectql`, `engine.ts`)
+     * refuses it there with the SAME `400 INVALID_SORT` and the same remedy
+     * sentence this gate emits, ruled on #7095 (an ORDER BY the engine cannot
+     * apply is a refusal with guidance prose, never a silent drop). What made
+     * leaving it at ingress untenable is that the direct path is AUTHOR-
+     * reachable, not merely internal: a saved report's `query.orderBy` is
+     * forwarded verbatim into `engine.find` (`plugin-reports`), and it never
+     * passes through here.
+     *
+     * ONE EDGE, measured and deliberately left: a nested `expand` sort is also
+     * forwarded into the expansion sub-read (`expandRelatedRecords`), and the
+     * engine door does fire there — but that sub-read sits inside a pre-existing
+     * graceful-degradation `catch` that swallows EVERY expand failure and
+     * retains the raw foreign keys. So that one path improves from silent to
+     * OBSERVABLE (a warning carrying the field and the remedy) rather than
+     * becoming a refusal. Reversing that backstop is the #3821-family swallow —
+     * a separate decision on all expand failure modes, not a rider on this one.
+     *
+     * This gate is UNCHANGED and still the first door: it keeps the `param` name
+     * in the message (which the engine cannot know) and the `unknown` >
+     * `dotted` > unmaterializable precedence. The engine door deliberately
+     * judges only the third verdict — see its docblock for why it does not
+     * inherit the other two.
      */
     private assertSortFieldsExist(object: string, orderBy: ReadonlyArray<{ field: string }>, param: string): void {
         if (orderBy.length === 0) return;
@@ -5071,9 +5092,24 @@ export class ObjectStackProtocolImplementation implements
      * `?status=<typo>` is a 400 and `?select=<typo>` is not, on one endpoint,
      * about the same field map.
      *
-     * The engine's tolerance is untouched: it guards INTERNAL callers (hooks,
-     * flows, expand sub-reads, registry-less hosts) that never pass through
-     * this ingress, exactly like the object-existence gate above.
+     * The engine's tolerance on THIS axis is untouched: it guards INTERNAL
+     * callers (hooks, flows, expand sub-reads, registry-less hosts) that never
+     * pass through this ingress, exactly like the object-existence gate above.
+     * An unknown projection name is dropped and the projection falls back to
+     * `*`, so the engine still over-returns rather than throwing.
+     *
+     * [#7095] That tolerance is PER-AXIS, and this docblock used to be read as
+     * a statement about the engine in general — it is not one any more, so the
+     * limit is written here rather than left to be inferred. On the SORT axis
+     * the engine now REFUSES an ORDER BY it cannot materialise
+     * (`assertOrderByIsMaterializable`, `@objectstack/objectql`), because the
+     * two axes fail differently: a dropped projection name returns MORE than
+     * asked (every column, inspectable in the response), while a dropped sort
+     * returns the right rows in an order the response cannot be distinguished
+     * from a satisfied one — and with `limit`, an arbitrary page of them. The
+     * #7095 sweep found no in-tree internal caller relying on the sort drop, so
+     * narrowing it cost no caller anything; nothing equivalent has been measured
+     * for the projection axis, and this sentence is not a licence to assume it.
      *
      * [#4196] It also owns the projection's SHAPE, which is a different
      * question from its names and is answered first — see below.
