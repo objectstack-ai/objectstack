@@ -263,7 +263,6 @@
     "ShareLinkExecutionContext (interface)",
     "ShareLinkPermission (type)",
     "ShareSource (type)",
-    "SharingExecutionContext (interface)",
     "SharingRuleEvaluationResult (interface)",
     "SharingRuleRecipientType (type)",
     "SharingRuleRow (interface)",

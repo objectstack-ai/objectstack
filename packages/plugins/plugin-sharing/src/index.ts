@@ -104,7 +104,6 @@ export type {
   IBusinessUnitGraphService,
   RecordShare,
   GrantShareInput,
-  SharingExecutionContext,
   ShareAccessLevel,
   RecordShareRecipientType,
   ShareSource,

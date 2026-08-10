@@ -18,11 +18,12 @@
 
 // [#6523 / #6206 ruling default] Every method below ADJUDICATES access, so each
 // takes the complete `resolveAuthzContext` envelope rather than the six-field
-// `SharingExecutionContext` this contract used to borrow from `sharing-service`.
-// That narrow type omitted `accessible_org_ids` (the `group`-posture Layer 0
-// wall, ADR-0105 D2), `org_user_ids`, `posture` (ADR-0095 D2) and
-// `tabPermissions` — see `SharingExecutionContext` in `./sharing-service.js`
-// for the boundary and the measured consequence.
+// context shape this contract used to borrow from `sharing-service`
+// (`SharingExecutionContext`, retired in #7218 once every implementation had
+// been re-annotated). That narrow type omitted `accessible_org_ids` (the
+// `group`-posture Layer 0 wall, ADR-0105 D2), `org_user_ids`, `posture`
+// (ADR-0095 D2) and `tabPermissions` — see item 3 of the module doc in
+// `./sharing-service.js` for the boundary and the measured consequence.
 import type { ExecutionContext } from '../kernel/execution-context.zod.js';
 
 /**

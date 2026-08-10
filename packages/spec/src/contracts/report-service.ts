@@ -16,8 +16,9 @@
 // [#6523 / #6206 ruling default] Reports are read UNDER the caller's context —
 // row visibility, the saved-report gate and the schedule owner check all read
 // it — so every method takes the complete `resolveAuthzContext` envelope rather
-// than the six-field `SharingExecutionContext` this contract used to borrow
-// from `sharing-service`. See `SharingExecutionContext` in
+// than the six-field context shape this contract used to borrow from
+// `sharing-service` (`SharingExecutionContext`, retired in #7218 once every
+// implementation had been re-annotated). See item 3 of the module doc in
 // `./sharing-service.js` for the boundary.
 import type { ExecutionContext } from '../kernel/execution-context.zod.js';
 

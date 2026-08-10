@@ -263,7 +263,6 @@
     "ShareLinkExecutionContext": "src/contracts/share-link-service.ts#ShareLinkExecutionContext (interface)",
     "ShareLinkPermission": "src/contracts/share-link-service.ts#ShareLinkPermission (type)",
     "ShareSource": "src/contracts/sharing-service.ts#ShareSource (type)",
-    "SharingExecutionContext": "src/contracts/sharing-service.ts#SharingExecutionContext (interface)",
     "SharingRuleEvaluationResult": "src/contracts/sharing-service.ts#SharingRuleEvaluationResult (interface)",
     "SharingRuleRecipientType": "src/contracts/sharing-service.ts#SharingRuleRecipientType (type)",
     "SharingRuleRow": "src/contracts/sharing-service.ts#SharingRuleRow (interface)",

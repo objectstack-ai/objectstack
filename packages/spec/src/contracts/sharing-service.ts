@@ -38,9 +38,25 @@
  *      interfaces below adjudicates access, so each takes a complete
  *      {@link ExecutionContext} — the whole `resolveAuthzContext` result,
  *      threaded through unchanged — rather than a per-site subset (#6523,
- *      applying the #6206 ruling). {@link SharingExecutionContext}, the
- *      six-field shape those parameters used to name, carries the boundary
- *      and the measured consequence of the narrow spelling.
+ *      applying the #6206 ruling). The six-field shape those parameters used
+ *      to name (`SharingExecutionContext`, exported from here until #7218
+ *      retired it) omitted `accessible_org_ids` (under the `group` tenancy
+ *      posture this IS the Layer 0 wall, ADR-0105 D2), `org_user_ids`,
+ *      `posture` (ADR-0095 D2) and `tabPermissions` — so an implementation
+ *      could not READ what it had been handed without casting out of its own
+ *      contract (the measured specimen: `const posture = (context as
+ *      any).posture` in `plugin-approvals`' privileged-override gate).
+ *
+ *      ⛔ **tsc cannot police this, and no pin should pretend otherwise.**
+ *      Structural subtyping makes a six-field context assignable to
+ *      {@link ExecutionContext} — every field exists there with a compatible
+ *      type and nothing in the wider type is required — so re-narrowing a
+ *      parameter still COMPILES, and an `@ts-expect-error` asserting the
+ *      reverse would be unsatisfied and fail the build. What holds the line is
+ *      the declared parameter type here (any narrowing becomes visible AT THE
+ *      CALL SITE) plus the type-identity pins in
+ *      `sharing-service.test.ts` and the three `exec-context-annotation.pin.ts`
+ *      files in `plugin-sharing` / `plugin-approvals` / `plugin-reports`.
  *
  * Manual share CRUD is exposed via `grant()`, `revoke()`, and
  * `listShares()`. The REST layer wires these to
@@ -57,7 +73,7 @@ import type { TenancyPosture } from '../security/tenancy-posture';
 // Type-only: the full `resolveAuthzContext` envelope. Every enforcement method
 // on {@link ISharingService} and {@link ISharingRuleService} declares its
 // context parameter as this type (#6523, applying the #6206 ruling default —
-// no per-site subset contracts). See {@link SharingExecutionContext} for the
+// no per-site subset contracts). See item 3 of the module doc above for the
 // boundary that draws and why.
 import type { ExecutionContext } from '../kernel/execution-context.zod.js';
 
@@ -125,82 +141,6 @@ export interface GrantShareInput {
   source?: ShareSource;
   sourceId?: string;
   reason?: string;
-}
-
-/**
- * ⛔ NOT an enforcement context type (#6523, applying the #6206 ruling of
- * 2026-08-07: converge on the full envelope, keep no per-site subset).
- *
- * ## What this used to be, and what it cost
- *
- * This was the declared context parameter of **36 signatures across three
- * contracts** — `ISharingService` / `ISharingRuleService` here,
- * `IApprovalService` (12) and `IReportService` (9) — every one of which
- * ADJUDICATES access. It names six of the `resolveAuthzContext` envelope's
- * fields and drops the four the ruling called out by name:
- * `accessible_org_ids` (under the `group` tenancy posture this IS the Layer 0
- * wall, ADR-0105 D2), `org_user_ids`, `posture` (ADR-0095 D2: resolved once,
- * carried, never re-derived at the enforcement site) and `tabPermissions`.
- *
- * The damage ran in the MIRROR direction of the share-link case (#6206 /
- * #6430), and that direction is worth stating precisely because it is the one
- * a reviewer does not expect. Nothing here trimmed a value: the engine
- * middleware passes its whole execution context down
- * (`plugin-sharing/src/sharing-plugin.ts` — `buildReadFilter(ctx.object, exec
- * ?? {})`), so the VALUES arrived complete. It was the declared TYPE that was
- * narrow, so the receiving implementation could not READ what it had been
- * handed without casting its way out of its own contract. The measured
- * specimen, on `main` at the time of writing:
- *
- * ```
- * // plugin-approvals/src/approval-service.ts — isOverrideActor()
- * const posture = (context as any).posture;
- * ```
- *
- * — a privileged-override gate reaching for ADR-0095's resolved posture
- * through `as any`, because the contract said the field was not there. An
- * `as any` on an enforcement input is not a style blemish: it turns off
- * checking for the whole expression, so the next field read through it is
- * unverified too, and it makes the honest reading ("this gate consults the
- * posture") indistinguishable from a typo.
- *
- * ## What it is now
- *
- * Nothing in `packages/spec/src/contracts` takes this type any more. It stays
- * EXPORTED and UNCHANGED IN SHAPE for one reason: the three implementations
- * (`plugin-sharing`, `plugin-approvals`, `plugin-reports`) still annotate
- * their own method parameters with it, and re-typing them is the consumer
- * half of this convergence — a separate change with its own review, exactly as
- * #6430's contract half and its plugin half were separated. It is therefore
- * MIGRATION RESIDUE, not a vocabulary to reach for. ⛔ Do not add a new use;
- * ⛔ do not widen it field-by-field, which would rebuild the per-site subset
- * the ruling removed, one field at a time.
- *
- * ## What holds the line (and what cannot)
- *
- * TypeScript cannot police this. Structural subtyping makes a value of this
- * type assignable to {@link ExecutionContext} — all six fields exist there
- * with compatible types and nothing in the wider type is required — so passing
- * a narrowed context into an enforcement path still COMPILES, and an
- * `@ts-expect-error` asserting otherwise would be unsatisfied and fail the
- * build. What the contract can do, and now does, is declare the enforcement
- * parameter as the full envelope so that any narrowing is visible AT THE CALL
- * SITE, and so that an implementation may read the whole envelope it is
- * already being handed — without `as any`.
- */
-export interface SharingExecutionContext {
-  userId?: string;
-  tenantId?: string;
-  positions?: string[];
-  permissions?: string[];
-  /**
-   * [ADR-0111] Capability names the caller holds (`manage_sharing`, …) —
-   * resolved by `resolveAuthzContext` alongside `permissions` (which carries
-   * permission-set NAMES, not capabilities). Consulted by the sharing-rule
-   * management gate; absent → the caller holds no capabilities (fail closed).
-   */
-  systemPermissions?: string[];
-  isSystem?: boolean;
 }
 
 /**

@@ -6,7 +6,6 @@ import type {
   ISharingRuleService,
   ISharingService,
   RecordShareRecipientType,
-  SharingExecutionContext,
   SharingRuleRecipientType,
   SharingWriteVerdict,
 } from './sharing-service';
@@ -157,7 +156,7 @@ describe('[#5125] ISharingService write-gate bypass documentation parity', () =>
  *
  * The interface declared `organizationId?` and `tenantId?` side by side with no
  * doc saying which one carries the caller's active organization. The single
- * in-repo producer filled `organizationId` from a `SharingExecutionContext`
+ * in-repo producer filled `organizationId` from a six-field sharing context
  * that only has `tenantId`, so the read was structurally always `null`; the
  * real consumer (cloud `security-enterprise`) reads `organizationId`, saw
  * `null`, and skipped tenant isolation. Both ends were "contract-compliant" and
@@ -505,7 +504,8 @@ describe('[#6428] ISharingService tri-state write verdict', () => {
  * #6206 (maintainer, 2026-08-07) set the governance default: enforcement
  * converges on the complete `resolveAuthzContext` envelope and keeps NO
  * per-site subset contracts. Its sweep reached one site — share-link (#6430 /
- * PR #6511). `SharingExecutionContext` was the fourth and by far the widest
+ * PR #6511). `SharingExecutionContext` (exported from `sharing-service.ts`
+ * until #7218 retired it) was the fourth and by far the widest
  * twin: six declared fields serving **36 signatures across three contracts**
  * (`ISharingService` + `ISharingRuleService` here, `IApprovalService`,
  * `IReportService`), every one of them adjudicating access, with
@@ -533,18 +533,44 @@ describe('[#6428] ISharingService tri-state write verdict', () => {
  * signature was TS2339 on each field (TS2551 on `tabPermissions` — tsc
  * suggests `permissions`, the very near-miss the narrow type invited) — that
  * is this file's before-red direction, and it is the MIRROR of PR #6511's,
- * which was TS2353 at a call site stating a trimmed envelope; (3) the narrow
- * type survives UNCHANGED IN SHAPE, so the convergence cannot be undone by
- * widening it back one field at a time.
+ * which was TS2353 at a call site stating a trimmed envelope; (3) that the
+ * narrow shape stays RETIRED — #7218 deleted the exported type once every
+ * implementation had been re-annotated, and the specimen below keeps the
+ * refusal enforceable so the convergence cannot be undone by re-declaring the
+ * six-field subset under any name.
  *
  * NOT PINNED, on purpose, and for exactly the reason PR #6511 recorded: there
- * is no `@ts-expect-error` asserting that a `SharingExecutionContext` is
- * REJECTED where an `ExecutionContext` is expected, because it is not.
+ * is no `@ts-expect-error` asserting that a six-field context is REJECTED
+ * where an `ExecutionContext` is expected, because it is not.
  * Structural subtyping accepts it — all six fields exist in the wider type
  * with compatible types, and nothing there is required. A pin shaped like
  * compiler enforcement where only a declaration exists would read as verified
  * and be worse than saying so.
  */
+/**
+ * [#7218] The RETIRED six-field shape, kept HERE as a SPECIMEN.
+ *
+ * `SharingExecutionContext` was exported from `./sharing-service.ts` until
+ * #7218 deleted it. This local declaration is a deliberate COPY, not an import
+ * — nothing may depend on the retired export again, and copying is what makes
+ * the deletion permanent while the pins below stay meaningful. Without it the
+ * `Refute` assertions in the first case would have had nothing to refute and
+ * would have been dropped, which is the quiet way a convergence gets undone:
+ * re-declaring these six fields under a new name is exactly the per-site
+ * subset the #6206 ruling removed, and this type is what makes that re-narrowing
+ * red instead of invisible.
+ *
+ * ⛔ Not a vocabulary to reach for, and not to be exported from this file.
+ */
+type RetiredSharingContextSpecimen = {
+  userId?: string;
+  tenantId?: string;
+  positions?: string[];
+  permissions?: string[];
+  systemPermissions?: string[];
+  isSystem?: boolean;
+};
+
 describe('[#6523] sharing / approval / report enforcement takes the full ExecutionContext', () => {
   it('declares the full envelope on every adjudicating signature, by type identity', () => {
     // Type-level assertions are the substance of this case; the runtime
@@ -564,10 +590,13 @@ describe('[#6523] sharing / approval / report enforcement takes the full Executi
       Assert<Eq<RuleCtx, ExecutionContext>>,
       Assert<Eq<ApprovalCtx, ExecutionContext>>,
       Assert<Eq<ReportCtx, ExecutionContext>>,
-      // …and none of them is the six-field twin any more.
-      Refute<Eq<SharingCtx, SharingExecutionContext>>,
-      Refute<Eq<ApprovalCtx, SharingExecutionContext>>,
-      Refute<Eq<ReportCtx, SharingExecutionContext>>,
+      // …and none of them is the six-field twin any more — measured against
+      // the retired shape itself (the specimen above), so re-declaring that
+      // subset under a fresh name is caught, not just re-importing the name
+      // #7218 deleted.
+      Refute<Eq<SharingCtx, RetiredSharingContextSpecimen>>,
+      Refute<Eq<ApprovalCtx, RetiredSharingContextSpecimen>>,
+      Refute<Eq<ReportCtx, RetiredSharingContextSpecimen>>,
     ];
     const pinned: _Pins = [true, true, true, true, true, true, false, false, false];
     expect(pinned).toHaveLength(9);
@@ -578,7 +607,7 @@ describe('[#6523] sharing / approval / report enforcement takes the full Executi
     // — `Parameters<ISharingService['buildReadFilter']>[1]`, not by a local
     // annotation — so if the contract re-narrows, the four reads below stop
     // compiling (TS2339: "Property 'accessible_org_ids' does not exist on type
-    // 'SharingExecutionContext'"). That is precisely the wall
+    // '…'", as measured against the six-field shape). That is precisely the wall
     // `plugin-approvals` climbed with `(context as any).posture`.
     const seen: Array<Record<string, unknown>> = [];
     const buildReadFilter: ISharingService['buildReadFilter'] = async (object, context) => {
@@ -628,13 +657,17 @@ describe('[#6523] sharing / approval / report enforcement takes the full Executi
     });
   });
 
-  it('keeps the narrow twin unchanged in shape — it is residue, not a shortcut', () => {
-    // Widening `SharingExecutionContext` instead of replacing it would rebuild
-    // the per-site subset the ruling removed, one field at a time. PR #6511
-    // pinned the same refusal for the share-link twin.
-    type NarrowKeys = keyof SharingExecutionContext;
+  it('keeps the narrow twin RETIRED — and states why tsc cannot be the wall', () => {
+    // [#7218] The twin is gone from the contract surface: nothing in
+    // `packages/spec` declares it and `@objectstack/plugin-sharing` no longer
+    // re-exports it. What survives is the specimen above, and it exists to keep
+    // this refusal enforceable — re-narrowing an enforcement parameter to these
+    // six fields (under ANY name) turns the `Refute` pins in the first case
+    // red. Widening the specimen field by field instead would rebuild the
+    // per-site subset the ruling removed, so its shape is pinned too.
+    type SpecimenKeys = keyof RetiredSharingContextSpecimen;
     type _ShapeUnchanged = Assert<
-      Eq<NarrowKeys, 'userId' | 'tenantId' | 'positions' | 'permissions' | 'systemPermissions' | 'isSystem'>
+      Eq<SpecimenKeys, 'userId' | 'tenantId' | 'positions' | 'permissions' | 'systemPermissions' | 'isSystem'>
     >;
     const shapeUnchanged: _ShapeUnchanged = true;
 
@@ -642,8 +675,10 @@ describe('[#6523] sharing / approval / report enforcement takes the full Executi
     // assignment is LEGAL and compiles. Six optional fields, all present in the
     // wider type — so the boundary is held by the declared parameter type and
     // the caller's obligation, never by tsc. An `@ts-expect-error` here would
-    // be unsatisfied and fail the build.
-    const residue: SharingExecutionContext = { userId: 'usr_1', isSystem: false };
+    // be unsatisfied and fail the build. Deleting the exported type changed
+    // nothing about that: retirement removes the READY-MADE narrow spelling,
+    // it does not make narrowing a compile error.
+    const residue: RetiredSharingContextSpecimen = { userId: 'usr_1', isSystem: false };
     const widened: ExecutionContext = residue;
     expect(shapeUnchanged).toBe(true);
     expect(widened.userId).toBe('usr_1');

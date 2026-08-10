@@ -17,14 +17,26 @@
  * in this package. Nothing would notice. This module is the one thing that
  * does — every declaration below is red exactly when a parameter narrows back.
  *
- * HOW IT BITES: TypeScript's excess-property check on a FRESH object literal.
- * `posture` (ADR-0095 D2), `accessible_org_ids` (ADR-0105 D2) and
+ * HOW IT BITES, part 1: TypeScript's excess-property check on a FRESH object
+ * literal. `posture` (ADR-0095 D2), `accessible_org_ids` (ADR-0105 D2) and
  * `org_user_ids` are fields of the envelope that the retired six-field shape
  * did not carry, so a literal naming them is rejected the moment the parameter
  * is annotated with anything that lacks them. Note this is the ONLY direction
  * that works: a `@ts-expect-error` asserting the reverse would be unsatisfied
  * and fail the build, because a narrow context IS assignable to a wide
- * parameter — the boundary the retired type's own doc block records.
+ * parameter — see item 3 of the module doc on
+ * `@objectstack/spec/contracts/sharing-service` for that boundary.
+ *
+ * HOW IT BITES, part 2 (#7218): type IDENTITY against the retired shape itself.
+ * #7135's failure story was "the parameter narrows back to the six-field
+ * `SharingExecutionContext`" — a type that no longer exists, since #7218
+ * deleted it from the contract surface once all three implementations had been
+ * re-annotated. Deleting the type does NOT delete the failure mode: the six
+ * fields can be re-declared here under any name, and the literal checks above
+ * only fire on the fields a given literal happens to spell. So the retired
+ * shape is kept below as a local SPECIMEN and each parameter is refuted
+ * against it. A re-narrowing is then red twice over, and neither check depends
+ * on the retired export coming back.
  *
  * WHY A `.pin.ts` AND NOT A `*.test.ts`: unlike its sibling packages,
  * `packages/plugins/plugin-reports/tsconfig.json` does NOT exclude
@@ -54,6 +66,48 @@ type ListSchedulesContext = Parameters<ReportService['listSchedules']>[1];
 type ResolvedOwnerContext = NonNullable<Awaited<ReturnType<OwnerContextResolver>>>;
 
 /**
+ * [#7218] The RETIRED six-field shape, kept here as a SPECIMEN — a deliberate
+ * COPY of the type `@objectstack/spec` exported as `SharingExecutionContext`
+ * until #7218 deleted it. Copied rather than imported on purpose: nothing may
+ * depend on the retired name again, and a local copy is what lets this pin keep
+ * naming the shape it refuses after the export is gone.
+ *
+ * ⛔ Not a vocabulary to reach for, and not exported.
+ */
+type RetiredSharingContextSpecimen = {
+  userId?: string;
+  tenantId?: string;
+  positions?: string[];
+  permissions?: string[];
+  systemPermissions?: string[];
+  isSystem?: boolean;
+};
+
+/** Type-level identity: true iff A and B are the same type. */
+type Eq<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2)
+  ? true
+  : false;
+/** Compile error when the argument is not `false`. */
+type Refute<T extends false> = T;
+
+/**
+ * NEGATIVE, at the type level: neither the method parameters nor what the owner
+ * resolver hands back IS the retired shape. Red the moment one is re-annotated
+ * with those six fields under any spelling — the failure #7135's pin told as
+ * "narrows back to `SharingExecutionContext`", restated so it no longer needs
+ * the deleted name to be checkable. `ResolvedOwnerContext` is included because a
+ * scheduled run adjudicates on whatever the resolver's RETURN type says it has.
+ */
+type _NotTheRetiredShape = [
+  Refute<Eq<SaveReportContext, RetiredSharingContextSpecimen>>,
+  Refute<Eq<RunContext, RetiredSharingContextSpecimen>>,
+  Refute<Eq<GetReportContext, RetiredSharingContextSpecimen>>,
+  Refute<Eq<ScheduleReportContext, RetiredSharingContextSpecimen>>,
+  Refute<Eq<ListSchedulesContext, RetiredSharingContextSpecimen>>,
+  Refute<Eq<ResolvedOwnerContext, RetiredSharingContextSpecimen>>,
+];
+
+/**
  * Never called — every line below is a type-level assertion evaluated by
  * `tsc --noEmit`. The parameters are taken as arguments rather than read off a
  * live service so the pin needs no instance and no import cycle.
@@ -78,6 +132,13 @@ export function __pinReportsTakesTheFullEnvelope(
   // whole envelope or it is not running as the owner at all.
   const posture: ResolvedOwnerContext['posture'] = ownerContext.posture;
   void posture;
+
+  // ── NEGATIVE: none of these types IS the retired six-field shape. ────────
+  // The tuple is all-`false` exactly when every `Refute` above holds; a
+  // parameter (or the resolver's return type) re-narrowed to the specimen makes
+  // its slot `true` and this assignment stops compiling.
+  const notTheRetiredShape: _NotTheRetiredShape = [false, false, false, false, false, false];
+  void notTheRetiredShape;
 
   // ── NEGATIVE: widening must not have degenerated into `any`. ─────────────
   // A parameter erased to `any` would swallow every positive above just as
