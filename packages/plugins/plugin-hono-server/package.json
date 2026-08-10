@@ -11,12 +11,12 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@hono/node-server": "^2.0.12",
+    "@hono/node-server": "^2.1.0",
     "@objectstack/core": "workspace:*",
     "@objectstack/observability": "workspace:*",
     "@objectstack/spec": "workspace:*",
     "@objectstack/types": "workspace:*",
-    "hono": "^4.12.34"
+    "hono": "^4.13.1"
   },
   "devDependencies": {
     "@types/node": "^26.1.2",

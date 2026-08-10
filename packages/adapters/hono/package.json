@@ -26,7 +26,7 @@
   },
   "devDependencies": {
     "@objectstack/runtime": "workspace:*",
-    "hono": "^4.12.34",
+    "hono": "^4.13.1",
     "typescript": "^6.0.3",
     "vitest": "^4.1.10"
   },
