@@ -126,9 +126,11 @@ for R in objectstack-ai/objectstack objectstack-ai/objectui objectstack-ai/cloud
   gh label create finding             -R "$R" -c c2e0c6 -d "Recorded observation — held, not dispatchable until the findings triage round grades it" || true
   gh label create pm:epic             -R "$R" -c 5319e7 -d "Parent delegated to a dedicated epic PM (session + territory in the parent's own body) — other PMs never dispatch into its subtree" || true
 done
-# routing labels exist only on the main backlog repo:
-gh label create repo:objectui -R objectstack-ai/objectstack -c fbca04 -d "Lands in objectui (frontend)" || true
-gh label create repo:cloud    -R objectstack-ai/objectstack -c c5def5 -d "Lands in cloud" || true
+# routing labels exist only on the main backlog repo — and since the 2026-08-10
+# file-at-destination ruling (#7165, multi-repo rule 1) they mark SEAM cards only;
+# pure sibling-repo fixes are filed in (or transferred to) the target repo instead:
+gh label create repo:objectui -R objectstack-ai/objectstack -c fbca04 -d "Seam card: cross-repo ordering with objectui is the substance (pure objectui fixes live in objectui — rule 1)" || true
+gh label create repo:cloud    -R objectstack-ai/objectstack -c c5def5 -d "Seam card: cross-repo ordering with cloud is the substance (pure cloud fixes live in cloud — rule 1)" || true
 # domain lanes — the roster under "Domain lanes"; ⛔ keep the two lists in sync:
 for D in engine-core metadata drivers services identity devx spec spec-surface cli spec-tooling; do
   gh label create "domain:$D" -R objectstack-ai/objectstack -c bfd4f2 -d "Domain lane — seat card indexed by label:pm:seat" || true
@@ -526,15 +528,39 @@ The product spans three repos with a fixed dependency direction:
 `objectui` (frontend; its build flows back via `pnpm objectui:refresh`) and
 `cloud`. The loop coordinates them with five rules:
 
-**1. One main backlog.** Feature-level issues live in `objectstack`,
-whatever repo the code lands in. A `repo:objectui` / `repo:cloud` label
-routes the dev agent's working repo; no routing label = backend. **分诊座位
-applies these labels itself at triage (round loop step 2)** — the maintainer
-just files the task and is never expected to pre-route it. The dev
-still branches/pushes/PRs **in the target repo** (its own worktree there —
-one worktree per repo, as always). Repo-local trivia may still be filed in
-the sibling repos directly; to drain such a local queue, run
-`/pm-dispatch repo:objectstack-ai/objectui` (the pm labels exist there too).
+**1. Issues live where the fix lands**(维护者 2026-08-10 裁决,#7165;取代原
+「One main backlog」条款). An execution card is filed in — and lives in — the
+repo whose code the fix changes. `objectui` / `cloud` each run their own
+backlog under their own whole-repo seat (rule 4), with the same pm labels and
+the same one-producer-per-backlog discipline(发版板一节,#6903). Two
+deviations, both deliberate:
+
+- **Exception A — the maintainer's inbox stays `objectstack`.** The
+  maintainer keeps filing everything into `objectstack` without pre-routing;
+  the 分诊座位 routes at triage (round loop step 2), and for a card that
+  lands in a sibling repo routing now means **transferring the issue to that
+  repo** — GitHub issue transfer preserves the thread and redirects the old
+  URL. When transfer is unavailable to the session's credential (fine-grained
+  / app tokens cannot call it — #7167 实测 404), recreate at the destination
+  with a provenance header, rewrite bare `#N` references to full
+  `owner/repo#N` form, and close the source as moved(#7167 的迁移形状).
+- **Exception B — seam cards stay in `objectstack`.** A card whose content
+  IS the cross-repo ordering — a contract-first chain per rule 2 (spec
+  change with downstream adaptation), a console-bump linkage chore (rule 3),
+  anything whose `Blocked-by:` line against an objectstack artifact is the
+  substance — stays in the main backlog and carries the `repo:*` label.
+  Test: would the body still make sense if objectstack did not exist?
+  Yes ⇒ file at destination; no ⇒ seam card. In-flight (`pm:dispatched`)
+  cards are never transferred mid-dispatch — they exit via their PR.
+
+The `repo:objectui` / `repo:cloud` labels are thereby narrowed to seam cards
+(⛔ do not delete the labels; their descriptions carry the new meaning). The
+dev still branches/pushes/PRs **in the target repo** (its own worktree there
+— one worktree per repo, as always). To drain a sibling backlog, run
+`/pm-dispatch repo:objectstack-ai/objectui` — the pm labels exist there, and
+since this ruling that queue is not "trivia": it is that repo's primary
+backlog. The historical `repo:*` transfer-card stock was migrated one-time
+under #7167 (2026-08-10); only seam and in-flight cards remained.
 
 **2. Contract-first splitting.** A cross-repo feature is never one dispatch.
 Split it: a parent issue plus one sub-issue per repo (native GitHub
@@ -589,7 +615,9 @@ issues that collide on shared files — and「谁来分诊」原本是每个 PM 
 所有权是**双射**:
 
 - **分诊 PM(全仓唯一)** — 只扫、只分类、只打标签(`domain:*` / `pm:queue` /
-  `finding` / `needs-user-decision` / `repo:*`)、只拆跨域 issue、只查重。
+  `finding` / `needs-user-decision` / `repo:*`)、只拆跨域 issue、只查重、
+  **只转仓**(落点在姊妹仓的非缝卡按 rule 1 例外 A 转移过去 —— 转移是路由动作
+  的一种,不是越界)。
   ⛔ **永不认领、永不派发、永不写代码。** 它是 `domain:*` 的**唯一生产者**,
   于是「未打标签的 issue 谁都不得认领」这条纪律第一次有机械保障:标签只有一个
   产出者,缺标签就意味着分诊还没走到它,而不是某个 PM 可以自己判一下。
@@ -607,7 +635,13 @@ issues that collide on shared files — and「谁来分诊」原本是每个 PM 
   变成要翻评论才知道的事实 —— 那正是本次改版要消灭的成本。
 - **姊妹仓仍是整仓座位。** `repo:objectui` / `repo:cloud` 各占一行,同一套双射
   与登记规则,接管方式不变(`/pm-dispatch repo:objectstack-ai/objectui`);域车道
-  是「同仓多 PM 并发」的切法,不是第二套仓库标签。
+  是「同仓多 PM 并发」的切法,不是第二套仓库标签。自 rule 1 的 file-at-destination
+  裁决起,姊妹仓座位是**本仓 backlog 的唯一分诊/定级生产者**(含 `target:<major>`,
+  见发版板一节),其收件箱包括按例外 A 转移进来的卡。
+- **维护者直派通道(2026-08-10 常设授权)。** 维护者当面指挥的 PM 会话在立卡/
+  裁卡时**直接路由**(打 `domain:*`,或按 rule 1 例外 A 直接转仓),审计评论逐字
+  引用授权指令(「以后你应该直接路由」)。这不是第二个自然生产者:它只对维护者
+  明示指挥下经手的卡成立;自然增量的扫描分诊仍是分诊座位的单通道。
 - **分诊座位空缺时**:欠账由任一**会话型**执行 PM **代扫** —— 只做分诊动作
   (标签、拆分、查重、审计评论),⛔ 代扫不解除双射,仍不得跨车道认领 —— 并在
   自己座位贴「说明」段写明处于代扫状态。座位有主后代扫立即停止。
@@ -792,8 +826,9 @@ updated **by PR** — the taxonomy evolves deliberately, never per-claim.
   `check-objectui-pin-fresh.mjs`),归 `scripts/`(门禁类)那一行。
 
 本表只覆盖**本仓(objectstack)的包**。`objectui` / `cloud` 是**整仓座位**,
-routing 用 `repo:*` 表达(rule 4 的座位协议),不另打 `domain:*` —— 域车道是
-「同仓多 PM 并发」的切法,不是第二套仓库标签。
+各管自己仓里的 backlog(多仓协调 rule 1:issue 住在修复落地的仓);本仓里仅剩的
+`repo:*` 卡是缝卡(rule 1 例外 B),不另打 `domain:*` —— 域车道是「同仓多 PM
+并发」的切法,不是第二套仓库标签。
 
 ### 词表 —— 在流通的 `domain:*` 标签与它们的座位贴
 
@@ -1019,7 +1054,7 @@ sub-issue(递归)。**每轮重新读子树,不缓存清单** —— 这一条�
 | 类型 | 判据 | 去向 | 谁派发 |
 |:--|:--|:--|:--|
 | in-scope 衍生 | 不修则 epic 验收不过 | 挂为父单 sub-issue(原生) | epic PM,下轮自动入队 |
-| 顺带发现 | 与 epic 验收无关,只是路过看见 | 独立立单进主 backlog(查重先行,`finding` 分诊纪律照旧) | 分诊座位定级 → 域座位派发;epic 不吸收 |
+| 顺带发现 | 与 epic 验收无关,只是路过看见 | 独立立单进**修复落地仓**的 backlog(多仓 rule 1;查重先行,`finding` 分诊纪律照旧) | 该仓的分诊/整仓座位定级 → 对应座位派发;epic 不吸收 |
 | 触 spec / 公共契约 | 无论是否阻塞 epic | 按跨座位转移协议转 `domain:spec` 座位队列,epic 侧 sub-issue 写 `Blocked-by:` | spec 座位 |
 
 第一行防「衍生项没人管、epic 烂尾」;第二行防「epic 无限膨胀吞掉整个仓」;
@@ -2946,7 +2981,8 @@ close, re-scope, or re-file the issue — never as a failed dispatch.
 entry becomes input to a `[决策]` issue. `out_of_scope_findings` should already
 be filed as unassigned issues by the dev per the filing discipline in the
 os-dev definition (search-first, sub-issue attachment, `finding` labeling —
-objectstack#4949). The PM verifies they exist **and cross-checks the round's
+objectstack#4949; and since the file-at-destination ruling, filed **in the
+repo where the fix lands** with a backlink — multi-repo rule 1). The PM verifies they exist **and cross-checks the round's
 parallel reports against each other**: two devs auditing adjacent code file
 twins within the hour (cloud#1054 duplicated cloud#1031 same-day), and only
 the PM sees both reports.
