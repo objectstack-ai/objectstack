@@ -451,7 +451,7 @@ A write-path strip event: caller-supplied fields legally dropped from the payloa
 | :--- | :--- | :--- | :--- |
 | **object** | `string` | ✅ | Object the write targeted (resolved object name) |
 | **fields** | `string[]` | ✅ | Caller-supplied field names the engine removed from the write payload |
-| **reason** | `Enum<'readonly' \| 'readonly_when'>` | ✅ | Why the fields were dropped: static readonly (#2948) or a TRUE readonlyWhen predicate (#3042) |
+| **reason** | `Enum<'readonly' \| 'readonly_when' \| 'primary_key'>` | ✅ | Why the fields were dropped: static readonly (#2948), a TRUE readonlyWhen predicate (#3042), or the primary-key strip of a payload id the engine ruled is not an identifier (#6437) |
 
 
 ---
@@ -467,7 +467,7 @@ QueryAST-aligned options for DataEngine.aggregate operations
 | **context** | `{ userId?: string; actor?: string; attributedUserId?: string; email?: string; … }` | optional |  |
 | **where** | `Record<string, any> \| any` | optional |  |
 | **groupBy** | `string[]` | optional |  |
-| **aggregations** | `{ function: Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct'>; field?: string; alias: string; distinct?: boolean; … }[]` | optional |  |
+| **aggregations** | `{ function: Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct'>; field?: string; alias: string; filter?: any }[]` | optional |  |
 | **having** | `any` | optional | HAVING — filter over the aggregated rows (aggregation aliases + groupBy projections); applied engine-side after aggregation |
 | **timezone** | `string` | optional |  |
 

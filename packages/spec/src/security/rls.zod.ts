@@ -432,7 +432,8 @@ export const RowLevelSecurityPolicySchema = lazySchema(() => strictObject(
   priority: retiredKey(
     '`rowLevelSecurity[].priority` was removed in @objectstack/spec 17.0.0 (#3896 security audit). ' +
     'It never had an effect and could not: applicable policies OR-combine (most permissive wins), ' +
-    'so there is no conflict to order. Delete the key — policy outcomes are unchanged.',
+    'so there is no conflict to order. Delete the key — policy outcomes are unchanged. ' +
+    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
   ),
 
   /**

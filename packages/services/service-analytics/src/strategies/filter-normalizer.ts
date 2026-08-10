@@ -414,6 +414,10 @@ const MONGO_TO_CUBE_OP: Record<string, string> = {
   $notContains: 'notContains',
   $startsWith: 'startsWith',
   $endsWith: 'endsWith',
+  // [#6520] The case-INSENSITIVE twin, ASCII fold only. A separate cube operator
+  // rather than a flag on `contains`, because the two compile to different SQL
+  // and one name would make the renderers guess which was meant.
+  $icontains: 'icontains',
 };
 
 /**

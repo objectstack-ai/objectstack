@@ -1,6 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import { NotificationChannelSchema } from './notification.zod';
 
+import {
+  EXPORT_ENTRY_POINTS,
+  exportNamesOf,
+  originFile,
+  holderOriginsOf,
+} from '../../scripts/lib/export-origins-testkit';
 describe('NotificationChannelSchema', () => {
   it('should accept all valid channels', () => {
     const validChannels = [
@@ -69,75 +75,22 @@ describe('[#4616] notification-template orphan removal', () => {
     'NotificationConfig',
   ];
 
-  it('resolves the export surface: no removed name survives on any entry, and the survivors keep their owners', async () => {
-    const ts = (await import('typescript')).default;
-    const { resolve, relative, dirname } = await import('node:path');
-    const { fileURLToPath } = await import('node:url');
-    const { readFileSync } = await import('node:fs');
-
-    const specDir = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
-    // Every public entry point, read from package.json's exports map so a
-    // future entry cannot silently escape the assertions below.
-    const pkg = JSON.parse(readFileSync(resolve(specDir, 'package.json'), 'utf8')) as {
-      exports: Record<string, unknown>;
-    };
-    const entries: Record<string, string> = {};
-    for (const sub of Object.keys(pkg.exports)) {
-      if (sub === '.') entries[sub] = resolve(specDir, 'src/index.ts');
-      else if (/^\.\/[a-z-]+$/.test(sub)) entries[sub] = resolve(specDir, `src/${sub.slice(2)}/index.ts`);
-      // './openapi.json' / './package.json' are not TypeScript entry points.
-    }
-    // Anti-vacuity: the enumeration must have found the real surface, including
-    // every entry these names could plausibly be re-exported from.
+  it('resolves the export surface: no removed name survives on any entry, and the survivors keep their owners', () => {
+    // Anti-vacuity: the baseline must cover the real surface, including every
+    // entry these names could plausibly be re-exported from. (This used to
+    // enumerate package.json's exports map and build its own `ts.createProgram`
+    // right here; `export-origins/` IS that resolution, computed once at build
+    // time and checked in — #4796.)
     for (const needed of ['.', './system', './ui', './contracts', './api']) {
-      expect(Object.keys(entries), `exports map must include ${needed}`).toContain(needed);
+      expect(EXPORT_ENTRY_POINTS, `exports map must include ${needed}`).toContain(needed);
     }
-    expect(Object.keys(entries).length).toBeGreaterThan(10);
-
-    const program = ts.createProgram(Object.values(entries), {
-      module: ts.ModuleKind.ESNext,
-      moduleResolution: ts.ModuleResolutionKind.Bundler,
-      skipLibCheck: true,
-      noEmit: true,
-    });
-    const checker = program.getTypeChecker();
-    const unalias = (s: import('typescript').Symbol) =>
-      s.getFlags() & ts.SymbolFlags.Alias ? checker.getAliasedSymbol(s) : s;
-
-    const exportsOf = (sub: string) => {
-      const sf = program.getSourceFile(entries[sub]);
-      const moduleSym = sf && checker.getSymbolAtLocation(sf);
-      // Without this guard a resolution failure would make every `not.toContain`
-      // below pass vacuously — the exact way a gate goes dormant (#4642).
-      expect(moduleSym, `${sub} module symbol must resolve`).toBeTruthy();
-      return checker.getExportsOfModule(moduleSym!);
-    };
-
-    const originOf = (sym: import('typescript').Symbol, label: string) => {
-      const decl = unalias(sym).declarations?.[0];
-      expect(decl, `${label} must have a declaration`).toBeTruthy();
-      const declFile = decl!.getSourceFile();
-      return `${relative(specDir, declFile.fileName)}:${
-        declFile.getLineAndCharacterOfPosition(decl!.getStart()).line + 1
-      }`;
-    };
-
-    /** Every entry that exports `name`, with each occurrence's declaration origin. */
-    const holdersOf = (name: string) => {
-      const out: Array<{ sub: string; origin: string }> = [];
-      for (const sub of Object.keys(entries)) {
-        for (const sym of exportsOf(sub).filter((e) => e.getName() === name)) {
-          out.push({ sub, origin: originOf(sym, `${sub} ${name}`) });
-        }
-      }
-      return out.sort((a, b) => a.sub.localeCompare(b.sub));
-    };
+    expect(EXPORT_ENTRY_POINTS.length).toBeGreaterThan(10);
 
     // Anti-vacuity: the entries we are about to prove things ABSENT from must
     // each resolve a large, real surface first.
-    expect(exportsOf('./system').length, './system must export a non-trivial surface').toBeGreaterThan(400);
-    expect(exportsOf('./ui').length, './ui must export a non-trivial surface').toBeGreaterThan(200);
-    expect(exportsOf('./contracts').length, './contracts must export a non-trivial surface').toBeGreaterThan(100);
+    expect(exportNamesOf('./system').length, './system must export a non-trivial surface').toBeGreaterThan(400);
+    expect(exportNamesOf('./ui').length, './ui must export a non-trivial surface').toBeGreaterThan(200);
+    expect(exportNamesOf('./contracts').length, './contracts must export a non-trivial surface').toBeGreaterThan(100);
 
     // 1. Every removed name is absent from EVERY entry — not merely from
     //    ./system. A re-export elsewhere under the bare name would keep the
@@ -145,20 +98,20 @@ describe('[#4616] notification-template orphan removal', () => {
     //    declaration (the C14/C15/C17 lesson: a re-export can lie about the
     //    domain even when the symbol is honest).
     for (const name of REMOVED) {
-      expect(holdersOf(name), `${name} must not be exported by any entry point`).toEqual([]);
+      expect(holderOriginsOf(name), `${name} must not be exported by any entry point`).toEqual([]);
     }
 
     // 2. The survivor in this module: `NotificationChannel(Schema)` is live —
     //    `./contracts` re-exports the TYPE and service-messaging consumes it —
     //    so both holders must resolve to the ONE declaration in this file.
-    const channelSchema = holdersOf('NotificationChannelSchema');
+    const channelSchema = holderOriginsOf('NotificationChannelSchema');
     expect(channelSchema.map((h) => h.sub)).toEqual(['./system']);
-    expect(channelSchema[0].origin).toMatch(/^src\/system\/notification\.zod\.ts:\d+$/);
-    const channelType = holdersOf('NotificationChannel');
+    expect(originFile(channelSchema[0].origin)).toBe('src/system/notification.zod.ts');
+    const channelType = holderOriginsOf('NotificationChannel');
     expect(channelType.map((h) => h.sub)).toEqual(['./contracts', './system']);
     for (const h of channelType) {
-      expect(h.origin, 'both holders must share one declaration').toMatch(
-        /^src\/system\/notification\.zod\.ts:\d+$/,
+      expect(originFile(h.origin), 'both holders must share one declaration').toBe(
+        'src/system/notification.zod.ts',
       );
     }
 
@@ -166,9 +119,9 @@ describe('[#4616] notification-template orphan removal', () => {
     //    the removed `EmailTemplateSchema`. `BUILTIN_METADATA_TYPE_SCHEMAS`
     //    resolves the `email_template` kind to this one; spec 7.1.0 already
     //    demoted the legacy shape here, and #4616 finished the job.
-    const definition = holdersOf('EmailTemplateDefinitionSchema');
+    const definition = holderOriginsOf('EmailTemplateDefinitionSchema');
     expect(definition.map((h) => h.sub)).toEqual(['./system']);
-    expect(definition[0].origin).toMatch(/^src\/system\/email-template\.zod\.ts:\d+$/);
+    expect(originFile(definition[0].origin)).toBe('src/system/email-template.zod.ts');
 
     // 4. REFUTED SIBLING — #4616's issue body proposed retiring `./ui`'s
     //    `NotificationSeveritySchema` in the same sweep on the premise that
@@ -181,9 +134,9 @@ describe('[#4616] notification-template orphan removal', () => {
     //    live and ./ui-owned; this assertion exists so the claim is not
     //    re-litigated from the issue text.
     for (const name of ['NotificationSeveritySchema', 'NotificationSeverity']) {
-      const holders = holdersOf(name);
+      const holders = holderOriginsOf(name);
       expect(holders.map((h) => h.sub), `${name} is LIVE in objectui — must stay ./ui-owned`).toEqual(['./ui']);
-      expect(holders[0].origin).toMatch(/^src\/ui\/notification\.zod\.ts:\d+$/);
+      expect(originFile(holders[0].origin)).toBe('src/ui/notification.zod.ts');
     }
   });
 

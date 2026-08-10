@@ -123,35 +123,18 @@ const BUILTIN_METADATA_CREATE_SEEDS: Partial<Record<MetadataType, unknown>> = {
     // a skill bundles tools; an empty list is a valid starting point.
     tools: [],
   },
-  // [#5271] Declarative HTTP endpoint (ADR-0121). Seeded rather than left to
-  // the create form because the two mistakes an author (very often an AI one —
-  // ADR-0033) makes here are both structural, and both are fixed by starting
-  // from a complete shape:
-  //
-  //  1. THE PATH CARVE-OUT. `ApiEndpointSchema.path` only requires a leading
-  //     slash, but ADR-0121 D1 confines a declared path to
-  //     `/api/v1/apps/<manifest.namespace>/<subpath>` and publish rejects
-  //     anything else. The namespace segment is DERIVED from stack identity
-  //     (D2), so no static literal can be right — `example_namespace` is a
-  //     deliberate placeholder the author replaces, and its shape is the part
-  //     that teaches. A blank form invites `/api/v1/customers`, which parses
-  //     and is then refused.
-  //  2. THE TARGET HALVES. `type: 'object_operation'` needs BOTH
-  //     `objectParams.object` and `objectParams.operation` or the publish gate
-  //     refuses it as unservable; seeding the pair means a create round-trips.
-  //
-  // `authRequired` is deliberately omitted: it DEFAULTS to `true`, and letting
-  // the default do the work is what makes the safe shape the effortless one
-  // (the seed must never be the thing that teaches `authRequired: false`,
-  // which ADR-0121 D6 pairs with a mandatory armed `rateLimit`).
-  api: {
-    name: 'new_api_endpoint',
-    path: '/api/v1/apps/example_namespace/new-endpoint',
-    method: 'GET',
-    type: 'object_operation',
-    target: PLACEHOLDER_OBJECT,
-    objectParams: { object: PLACEHOLDER_OBJECT, operation: 'find' },
-  },
+  // [#5488] `api` HAD a create seed here (#5271). It was REMOVED when `api`
+  // became code-only (`allowRuntimeCreate: false` + `allowOrgOverride: false`,
+  // maintainer ruling 2026-08-07T16:59Z): a create seed exists to make a
+  // runtime CREATE round-trip, and there is no longer a runtime create surface
+  // for it to seed — the #5086 inlet refuses `PUT /api/v1/meta/api/:name` with
+  // 403 `NOT_CREATABLE` before any body is validated. Keeping it would have
+  // handed the Studio designer a pre-filled "New API Endpoint" form whose save
+  // can only 403, which is the UI half of the same false compliance ADR-0049
+  // made this change to remove. `api` is on `KNOWN_UNSEEDED` in the test for
+  // `capability`'s reason (ADR-0066 D1 / #5961), not as deferred work.
+  // Endpoints are authored in the stack artifact (`**/*.api.ts`, or
+  // `defineStack({ apis })`) and shipped through `publishPackage`.
   email_template: {
     name: 'new_email_template',
     label: 'New Email Template',

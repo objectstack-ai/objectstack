@@ -303,6 +303,44 @@ describe('sys_metadata overlay uniqueness (#6418)', () => {
     });
 
     /**
+     * #6848 — the same MariaDB refusal, behind a pooled wrapper.
+     *
+     * This is the consequence the classifier's wrap-depth actually decides, and
+     * the reason the dialect arm was given the `cause` walk rather than a doc
+     * comment. The fallback lookup index is built on the `unsupported` branch
+     * and on no other, so while the second arm stopped at the outer message this
+     * case graded `failed` and the degradation target was never attempted — the
+     * dialect's answer was present, one step down, and unread.
+     */
+    it('a POOLED wrapper around the dialect refusal still reaches the fallback index (#6848)', async () => {
+        const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+        const pooled: IndexExec = async (sql: string) => {
+            if (/where/i.test(sql)) {
+                throw Object.assign(new Error('Write failed'), {
+                    cause: new Error(
+                        "You have an error in your SQL syntax; check the manual … near 'WHERE state = 'active''",
+                    ),
+                });
+            }
+            return db.exec(sql);
+        };
+
+        const result = await ensureOverlayStateIndex(pooled, 'active', logger);
+
+        expect(result.status).toBe('unsupported');
+        // The whole point: `not-attempted` here would mean the dialect that
+        // cannot take the partial form silently got no lookup index either.
+        expect(result.fallback).toBe('ensured');
+        // `detail` stays the operator-facing OUTER prose, unchanged.
+        expect(result.detail).toBe('Write failed');
+        // Nothing was downgraded — the declared UNIQUE index is byte-for-byte there.
+        expect(indexDdl(OVERLAY_INDEX_NAMES.active)).toEqual(DECLARED_ACTIVE_INDEX_DDL);
+        expect(insert('w1', 'view', 'lead.w', 'org1', 'pkg1', 'active').ok).toBe(true);
+        expect(insert('w2', 'view', 'lead.w', 'org1', 'pkg1', 'active').ok).toBe(false);
+        expect(String(logger.error.mock.calls[0]![0])).toContain('NOT enforced as specified on this dialect');
+    });
+
+    /**
      * MySQL proper, where the old code was safe only by ACCIDENT: it has
      * neither `DROP INDEX IF EXISTS` nor `CREATE INDEX IF NOT EXISTS`, so every
      * statement this migration issues is refused. Nothing may be touched, and

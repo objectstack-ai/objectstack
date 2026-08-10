@@ -100,6 +100,17 @@ function candidateTokens(): string[] {
  * today that is `turso` with no URL, which throws `UnsupportedDriverError`. A URL
  * is supplied so it resolves normally; the catch is kept so the derivation
  * survives another kind growing the same "recognized but unusable" shape.
+ *
+ * `err.recognized` is what keeps that catch honest (#6345). The resolver now
+ * ALSO throws `UnsupportedDriverError` for a spelling nothing claims — the CLI
+ * half of "both hosts refuse the same input", which replaced a silent fall-through
+ * to the dev SQLite default. Reading `driverType` off that error would report the
+ * operator's raw token as a driver kind, and since the candidate net below is a
+ * deliberately over-broad scan of every lowercase literal in `storage-driver.ts`,
+ * the derived set would have grown `safe`, `on-disconnect`, `factory`, `string`
+ * and the rest — a set that no allowlist could ever equal. The distinction is
+ * carried on the error rather than re-derived here, so this file keeps asking the
+ * RESOLVER what a token means instead of growing its own opinion.
  */
 function canonicalDriverIdOf(token: string): string | null {
   try {
@@ -109,7 +120,7 @@ function canonicalDriverIdOf(token: string): string | null {
     });
     return resolution?.driverId ?? null;
   } catch (err) {
-    if (err instanceof UnsupportedDriverError) return err.driverType;
+    if (err instanceof UnsupportedDriverError) return err.recognized ? err.driverType : null;
     throw err;
   }
 }

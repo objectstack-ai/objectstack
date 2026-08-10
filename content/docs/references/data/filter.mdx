@@ -147,7 +147,7 @@ Type: `[FilterArray](#filterarray)[]`
 | **$notContains** | `string` | optional |  |
 | **$startsWith** | `string` | optional |  |
 | **$endsWith** | `string` | optional |  |
-| **$icontains** | `string` | optional | Contains substring, ignoring case — but ONLY ASCII case (A-Z against a-z). Every other character compares literally, so "café" does NOT match "CAFÉ" and "москва" does not match "МОСКВА". The domain is ASCII because that is the one fold all five backends can deliver: SQLite (and therefore turso and sqlite-wasm) folds ASCII only, so a Unicode promise here would be a guarantee three of the five could not keep. The comparand is matched LITERALLY — "%", "_" and regex metacharacters are ordinary characters, not wildcards. Case-SENSITIVE containment is $contains. [#5701: declared by the protocol; the driver lowerings land with #5702.] |
+| **$icontains** | `string` | optional | Contains substring, ignoring case — but ONLY ASCII case (A-Z against a-z). Every other character compares literally, so "café" does NOT match "CAFÉ" and "москва" does not match "МОСКВА". The domain is ASCII because that is the one fold all five backends can deliver: SQLite (and therefore turso and sqlite-wasm) folds ASCII only, so a Unicode promise here would be a guarantee three of the five could not keep. The comparand is matched LITERALLY — "%", "_" and regex metacharacters are ordinary characters, not wildcards. Case-SENSITIVE containment is $contains. [#5701 declared it; #5702 lowered it on the SQL family (driver-sql, driver-sqlite-wasm, driver-turso on both transports); #6520 lowered it on every JS evaluation face, so it is portable across every backend the platform ships.] |
 
 
 ---

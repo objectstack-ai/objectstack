@@ -19,7 +19,10 @@
 // [#5659] The Filter Protocol's boolean identity reduction, shared with
 // driver-sql, driver-mongodb and the flow linter. See `evaluate` for why a
 // record-at-a-time matcher consults a record-INDEPENDENT verdict first.
-import { reduceFilterVerdict } from '@objectstack/spec/data';
+// [#6520] `$icontains`' ASCII-only fold, defined once in the spec and shared by
+// every JS evaluation face — see `foldAsciiCase`'s docblock for why it is not
+// re-implemented per package.
+import { reduceFilterVerdict, asciiCaseInsensitiveContains } from '@objectstack/spec/data';
 
 import { assertFilterConditionShape } from './filter-refusal.js';
 
@@ -218,8 +221,20 @@ function checkCondition(value: any, condition: any): boolean {
             case '$startsWith': 
                 if (typeof value !== 'string' || !value.startsWith(target)) return false; 
                 break;
-            case '$endsWith': 
-                if (typeof value !== 'string' || !value.endsWith(target)) return false; 
+            case '$endsWith':
+                if (typeof value !== 'string' || !value.endsWith(target)) return false;
+                break;
+            // [#6520] The case-INSENSITIVE twin of `$contains`. ASCII case only,
+            // and the fold runs on BOTH sides — `asciiCaseInsensitiveContains`
+            // is the spec's own function, shared with the five other JS faces so
+            // the fold cannot drift per package.
+            //
+            // NOT `toLowerCase()`: that folds the whole Unicode range, so `CAFÉ`
+            // would match `café` on this face and not on the SQL family, which is
+            // the divergence #6520 closed rather than a nicety (#4706 Q1 = A).
+            case '$icontains':
+                if (typeof value !== 'string' || typeof target !== 'string'
+                    || !asciiCaseInsensitiveContains(value, target)) return false;
                 break;
             case '$null':
                 // $null: true → value must be null/undefined; $null: false → value must not be null/undefined

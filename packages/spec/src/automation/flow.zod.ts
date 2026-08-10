@@ -112,11 +112,42 @@ export const FLOW_STRUCTURAL_NODE_TYPES: readonly string[] = ['start', 'end'];
 /**
  * Flow Variable Schema
  * Variables available within the flow execution context.
+ *
+ * `defaultValue` is what makes **declared mean bound** (#4697). Without it a
+ * declaration is documentation only: the engine binds an `isInput` variable
+ * just when `params[name] !== undefined`, so every path that omits the
+ * parameter leaves the name *unbound* — and conditions are strict CEL, where
+ * reading an unbound name aborts the whole predicate rather than yielding
+ * `false`. Measured on 17.0.0-rc.1 and re-measured on this shape:
+ *
+ * | expression      | X unbound                 | X = null | X = {f:1} |
+ * | --------------- | ------------------------- | -------- | --------- |
+ * | `X.f == 1`      | ABORT `Unknown variable`  | ABORT    | `true`    |
+ * | `has(X.f)`      | ABORT `Unknown variable`  | `false`  | `true`    |
+ * | `has(vars.X)`   | `false`                   | `true`   | `true`    |
+ *
+ * i.e. the guard an author reaches for first — `has(X.f)` — does not survive
+ * the very case it is written for; only the `vars.`-scoped `has(vars.X)` tests
+ * bindedness. That is why the answer here is a declared default rather than a
+ * guard: a guard encodes "unanswered means no" into the predicate and leaves
+ * the graph defect in place, while a default removes the unbound state.
+ *
+ * Reported from HotCRM (hotcrm#643): a screen collects a checkbox into
+ * `createOpportunity`, the runner returns only the fields the user touched, and
+ * the untouched path aborted the outgoing edge — a lead conversion that
+ * persisted nothing. The workaround was an `assignment` node before every
+ * screen, mirroring the screen field's own `defaultValue`.
+ *
+ * The value is **not** cross-checked against `type` — same posture as every
+ * other `defaultValue` on the authoring surface (`mapping`, an action param, a
+ * page state slot, a screen field): the declared `type` is itself an open
+ * `string`, so there is no closed vocabulary to check against, and inventing
+ * one here would be a new validation surface rather than this additive key.
  */
 export const FlowVariableSchema = lazySchema(() => strictObject(
   {
     surface: 'this flow variable',
-    aliases: { input: 'isInput', output: 'isOutput' },
+    aliases: { input: 'isInput', output: 'isOutput', default: 'defaultValue', initialValue: 'defaultValue' },
     history:
       'Until #4001 these were dropped silently — the variable still parsed, so a ' +
       'mis-declared input/output contract shipped without a diagnostic.',
@@ -126,6 +157,12 @@ export const FlowVariableSchema = lazySchema(() => strictObject(
   type: z.string().describe('Data type (text, number, boolean, object, list)'),
   isInput: z.boolean().default(false).describe('Is input parameter'),
   isOutput: z.boolean().default(false).describe('Is output parameter'),
+  defaultValue: z.unknown().optional()
+    .describe(
+      'Value bound at run start when no parameter supplies one — this is what makes a ' +
+      'declared variable always bound. An explicitly supplied param wins, including ' +
+      '`false` and `null`; the boundary is `params[name] !== undefined`.',
+    ),
 }));
 
 /**
@@ -328,7 +365,8 @@ function flowNodeObject() { return strictObject(
     '`flow.nodes[].outputSchema` was removed in @objectstack/spec 17.0.0 (#3896 audit ' +
     'close-out) — it was never validated: the engine does not check node outputs against ' +
     'it, so it documented a contract nothing enforced. Delete the key. Downstream nodes ' +
-    "read prior outputs via expressions ({{nodeId.field}}) regardless of any declaration.",
+    "read prior outputs via expressions ({{nodeId.field}}) regardless of any declaration. " +
+    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
   ),
 
   /**
@@ -400,13 +438,15 @@ function flowNodeObject() { return strictObject(
       + '`timerDuration` — but QUOTE the number: the key is a string, and a bare numeric string is '
       + "read as milliseconds, making `timeoutMs: 60000` and `timerDuration: '60000'` the same wait "
       + "(`timerDuration: 'PT1M'` is the ISO 8601 spelling of that same 60s). Stored flows are "
-      + 'converted automatically — the conversion does the quoting for you.',
+      + 'converted automatically — the conversion does the quoting for you. '
+      + 'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
     ),
     onTimeout: retiredKey(
       '`waitEventConfig.onTimeout` was removed in @objectstack/spec 17 (#4158). It had no readers at '
       + 'all — no code path ever inspected it, so neither `fail` nor `continue` ever happened. Delete '
       + 'the key. There is no replacement: `wait` has no timeout, and a wait node resumes only when '
-      + 'its timer elapses or its signal arrives.',
+      + 'its timer elapses or its signal arrives. '
+      + 'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
     ),
   }).optional().describe('Configuration for wait node event resumption'),
 
@@ -593,7 +633,8 @@ export const FlowSchema = lazySchema(() => strictObject(
     '`flow.template` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — ' +
     'no designer or engine path ever read it, so flagging a flow as a template/subflow did ' +
     'nothing. Delete the key. Shared logic is invoked via a subflow NODE referencing the ' +
-    'flow by name.',
+    'flow by name. ' +
+    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
   ),
 
   /** Trigger Type */
@@ -616,7 +657,8 @@ export const FlowSchema = lazySchema(() => strictObject(
     'never had an effect: the engine arms flows from `status`, and `active: false` did NOT ' +
     'stop a flow (worse, the default read as disabled while the engine treated unset as ' +
     "enabled). Delete the key. Use `status: 'obsolete'` (or 'invalid') to unbind and " +
-    "disable a flow, `status: 'active'` to arm it.",
+    "disable a flow, `status: 'active'` to arm it. " +
+    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
   ),
   // ADR-0049 / #1888 — ENFORCED. The service-automation engine establishes the
   // declared identity for the run's data operations and restores the caller's
@@ -750,7 +792,8 @@ export const FlowSchema = lazySchema(() => strictObject(
       'audit close-out) — the engine routes unrecoverable node errors via per-node fault ' +
       "edges (an edge with type: 'fault'), and never read this key: a fallback " +
       'configured here silently did not exist. Delete the key and draw a fault edge from ' +
-      'the failing node to the handler node instead.',
+      'the failing node to the handler node instead. ' +
+      'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
     ),
   }).superRefine((eh, ctx) => {
     // `strategy: 'retry'` with 0 attempts is `strategy: 'fail'` wearing a

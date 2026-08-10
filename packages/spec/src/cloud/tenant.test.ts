@@ -3,6 +3,15 @@
 import { describe, it, expect } from 'vitest';
 import { TenantPlanSchema } from './tenant.zod';
 
+import {
+  EXPORT_ENTRY_POINTS,
+  exportNamesOf,
+  holdersOf,
+  maybeOriginOf,
+  originFileOf,
+  originOf,
+  originsOf,
+} from '../../scripts/lib/export-origins-testkit';
 // ─── [#4739] `TenantPlan(Schema)` has ONE declaration — ./cloud ──────────────
 //
 // `./cloud` and `./system` both exported a `TenantPlan` + `TenantPlanSchema`,
@@ -34,65 +43,22 @@ import { TenantPlanSchema } from './tenant.zod';
 // `typecheck`), so the load-bearing pin is the compiler-API test below, with
 // anti-vacuity guards; sabotage-verified in the PR.
 describe('[#4739] `TenantPlan(Schema)` resolves to the ./cloud declaration everywhere', () => {
-  it('resolves the export surface: only ./cloud declares `TenantPlan(Schema)`; the provisioning family is gone', async () => {
-    const ts = (await import('typescript')).default;
-    const { resolve, relative, dirname } = await import('node:path');
-    const { fileURLToPath } = await import('node:url');
-    const { readFileSync } = await import('node:fs');
-
-    const specDir = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
-    // Every public entry point, read from package.json's exports map so a
-    // future entry cannot silently escape the uniqueness pin below.
-    const pkg = JSON.parse(readFileSync(resolve(specDir, 'package.json'), 'utf8')) as {
-      exports: Record<string, unknown>;
-    };
-    const entries: Record<string, string> = {};
-    for (const sub of Object.keys(pkg.exports)) {
-      if (sub === '.') entries[sub] = resolve(specDir, 'src/index.ts');
-      else if (/^\.\/[a-z-]+$/.test(sub)) entries[sub] = resolve(specDir, `src/${sub.slice(2)}/index.ts`);
-      // './openapi.json' / './package.json' are not TypeScript entry points.
-    }
-    // Anti-vacuity: the enumeration must have found the real surface.
-    expect(Object.keys(entries)).toContain('./cloud');
-    expect(Object.keys(entries)).toContain('./system');
-    expect(Object.keys(entries)).toContain('./contracts');
-    expect(Object.keys(entries).length).toBeGreaterThan(10);
-
-    const program = ts.createProgram(Object.values(entries), {
-      module: ts.ModuleKind.ESNext,
-      moduleResolution: ts.ModuleResolutionKind.Bundler,
-      skipLibCheck: true,
-      noEmit: true,
-    });
-    const checker = program.getTypeChecker();
-    const unalias = (s: import('typescript').Symbol) =>
-      s.getFlags() & ts.SymbolFlags.Alias ? checker.getAliasedSymbol(s) : s;
-
-    const exportsOf = (sub: string) => {
-      const sf = program.getSourceFile(entries[sub]);
-      const moduleSym = sf && checker.getSymbolAtLocation(sf);
-      // Without this guard a resolution failure would make every assertion
-      // below pass vacuously — the exact way a gate goes dormant (#4642).
-      expect(moduleSym, `${sub} module symbol must resolve`).toBeTruthy();
-      return checker.getExportsOfModule(moduleSym!);
-    };
-
-    const originOf = (sym: import('typescript').Symbol, label: string) => {
-      const decl = unalias(sym).declarations?.[0];
-      expect(decl, `${label} must have a declaration`).toBeTruthy();
-      const declFile = decl!.getSourceFile();
-      return `${relative(specDir, declFile.fileName)}:${
-        declFile.getLineAndCharacterOfPosition(decl!.getStart()).line + 1
-      }`;
-    };
+  it('resolves the export surface: only ./cloud declares `TenantPlan(Schema)`; the provisioning family is gone', () => {
+    // Anti-vacuity: the baseline must cover the real surface. (This used to
+    // enumerate package.json's exports map and build its own `ts.createProgram`
+    // right here; `export-origins/` IS that resolution, computed once at build
+    // time and checked in — #4796.)
+    expect(EXPORT_ENTRY_POINTS).toContain('./cloud');
+    expect(EXPORT_ENTRY_POINTS).toContain('./system');
+    expect(EXPORT_ENTRY_POINTS).toContain('./contracts');
+    expect(EXPORT_ENTRY_POINTS.length).toBeGreaterThan(10);
 
     // 1. The removed side: `./system` still has a non-trivial surface — so
     //    the `not.toContain` cannot pass by resolving nothing — and no longer
     //    names any of the provisioning family, while its surviving
     //    multi-tenant neighbours stand.
-    const systemExports = exportsOf('./system');
-    expect(systemExports.length, './system must export a non-trivial surface').toBeGreaterThan(100);
-    const systemNames = systemExports.map((e) => e.getName());
+    const systemNames = exportNamesOf('./system');
+    expect(systemNames.length, './system must export a non-trivial surface').toBeGreaterThan(100);
     for (const gone of [
       'TenantPlan', 'TenantPlanSchema',
       'TenantRegion', 'TenantRegionSchema',
@@ -108,9 +74,8 @@ describe('[#4739] `TenantPlan(Schema)` resolves to the ./cloud declaration every
 
     // 2. The removed contracts: `./contracts` keeps its surface but the
     //    declared-only provisioning pair is gone.
-    const contractsExports = exportsOf('./contracts');
-    expect(contractsExports.length, './contracts must export a non-trivial surface').toBeGreaterThan(50);
-    const contractsNames = contractsExports.map((e) => e.getName());
+    const contractsNames = exportNamesOf('./contracts');
+    expect(contractsNames.length, './contracts must export a non-trivial surface').toBeGreaterThan(50);
     for (const gone of ['IProvisioningService', 'ITenantRouter', 'ResolvedTenantContext']) {
       expect(contractsNames, `./contracts must not name ${gone}`).not.toContain(gone);
     }
@@ -118,48 +83,28 @@ describe('[#4739] `TenantPlan(Schema)` resolves to the ./cloud declaration every
 
     // 3. The surviving side: `./cloud` exports the const and its inferred
     //    type, declared in cloud/tenant.zod.ts.
-    const cloudExports = exportsOf('./cloud');
-    const cloudConst = cloudExports.find((e) => e.getName() === 'TenantPlanSchema');
-    const cloudType = cloudExports.find((e) => e.getName() === 'TenantPlan');
-    expect(cloudConst, './cloud must export `TenantPlanSchema`').toBeTruthy();
-    expect(cloudType, './cloud must export `TenantPlan`').toBeTruthy();
-    const constOrigin = originOf(cloudConst!, './cloud TenantPlanSchema');
-    const typeOrigin = originOf(cloudType!, './cloud TenantPlan');
-    expect(constOrigin).toMatch(/^src\/cloud\/tenant\.zod\.ts:\d+$/);
-    expect(typeOrigin).toMatch(/^src\/cloud\/tenant\.zod\.ts:\d+$/);
+    expect(maybeOriginOf('./cloud', 'TenantPlanSchema'), './cloud must export `TenantPlanSchema`').toBeDefined();
+    expect(maybeOriginOf('./cloud', 'TenantPlan'), './cloud must export `TenantPlan`').toBeDefined();
+    expect(originFileOf('./cloud', 'TenantPlanSchema')).toBe('src/cloud/tenant.zod.ts');
+    expect(originFileOf('./cloud', 'TenantPlan')).toBe('src/cloud/tenant.zod.ts');
 
     // 4. Uniqueness — the dual-source pin proper: across EVERY public entry,
     //    an export named `TenantPlan` / `TenantPlanSchema` must resolve to
     //    that ONE cloud declaration — and `./system` must not be a holder at
     //    all, so even a same-symbol re-export (invisible to the dual-source
     //    gate) violates the ruling and turns this red.
-    const holders: Record<string, string[]> = { TenantPlan: [], TenantPlanSchema: [] };
-    const canonical: Record<string, string> = {
-      TenantPlan: typeOrigin,
-      TenantPlanSchema: constOrigin,
-    };
-    for (const sub of Object.keys(entries)) {
-      for (const name of Object.keys(holders)) {
-        for (const sym of exportsOf(sub).filter((e) => e.getName() === name)) {
-          holders[name].push(sub);
-          expect(
-            originOf(sym, `${sub} ${name}`),
-            `${sub} must resolve \`${name}\` to the cloud declaration`,
-          ).toBe(canonical[name]);
-        }
-      }
+    for (const name of ['TenantPlan', 'TenantPlanSchema'] as const) {
+      expect(
+        originsOf(name),
+        `every entry must resolve \`${name}\` to the cloud declaration`,
+      ).toEqual([originOf('./cloud', name)]);
+      expect(holdersOf(name)).toContain('./cloud');
+      expect(holdersOf(name)).not.toContain('./system');
     }
-    expect(holders.TenantPlanSchema).toContain('./cloud');
-    expect(holders.TenantPlanSchema).not.toContain('./system');
-    expect(holders.TenantPlan).toContain('./cloud');
-    expect(holders.TenantPlan).not.toContain('./system');
 
     // 5. The retired contract interfaces exist in NO entry any more.
-    for (const sub of Object.keys(entries)) {
-      const names = exportsOf(sub).map((e) => e.getName());
-      for (const gone of ['IProvisioningService', 'ITenantRouter', 'ResolvedTenantContext']) {
-        expect(names, `${sub} must not name ${gone}`).not.toContain(gone);
-      }
+    for (const gone of ['IProvisioningService', 'ITenantRouter', 'ResolvedTenantContext']) {
+      expect(holdersOf(gone), `no entry may name ${gone}`).toEqual([]);
     }
   });
 

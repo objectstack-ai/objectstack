@@ -32,8 +32,8 @@ describe('[#5240] driver-sqlite-wasm inherits the zero-operator field-constraint
     await driver.initObjects([
       { name: 'deal', fields: { stage: { type: 'string' }, owner: { type: 'string' } } },
     ]);
-    await driver.create('deal', { id: '1', stage: 'won', owner: 'u1' }, { bypassTenantAudit: true } as any);
-    await driver.create('deal', { id: '2', stage: 'lost', owner: 'u2' }, { bypassTenantAudit: true } as any);
+    await driver.create('deal', { id: '1', stage: 'won', owner: 'u1' }, { bypassTenantAudit: true });
+    await driver.create('deal', { id: '2', stage: 'lost', owner: 'u2' }, { bypassTenantAudit: true });
   });
 
   afterAll(async () => {
@@ -44,7 +44,7 @@ describe('[#5240] driver-sqlite-wasm inherits the zero-operator field-constraint
     const rows = await driver.find(
       'deal',
       { object: 'deal', fields: ['id'], where } as any,
-      { bypassTenantAudit: true } as any,
+      { bypassTenantAudit: true },
     );
     return (rows as any[]).map((r) => String(r.id)).sort();
   };

@@ -80,6 +80,10 @@ jobs:
           # freeze those 8 on a shrink-only baseline and fail on a NEW one --
           # something neither `exclude` nor `.lycheeignore` can express, because
           # neither ever tells you an entry stopped being needed.
+          # `ARCHITECTURE.md` joined this glob in #6867: unlike `docs/adr/**`, it
+          # carried no pre-existing rot once its 10 dead links + 2 stale path
+          # references were fixed in the same PR, so -- unlike the ADR directory
+          # above -- it needs no KNOWN_DEAD_TARGETS-style baseline to land clean.
           args: >-
             --offline
             --root-dir ${{ github.workspace }}/content
@@ -88,5 +92,6 @@ jobs:
             'content/**/*.md'
             'content/**/*.mdx'
             'README.md'
+            'ARCHITECTURE.md'
           # Fail the job if broken links are found
           fail: true

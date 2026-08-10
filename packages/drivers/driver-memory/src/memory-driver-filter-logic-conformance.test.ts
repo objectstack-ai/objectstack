@@ -587,6 +587,12 @@ const DECLARED_OPERATOR_PROBES: Record<string, FilterCondition> = {
   $nin: { code: { $nin: ['100'] } } as FilterCondition,
   $contains: { name: { $contains: 'et' } } as FilterCondition,
   $notContains: { name: { $notContains: 'et' } } as FilterCondition,
+  // [#6520] The comparand is deliberately UPPER-case against a lower-case
+  // fixture (`beta`), so the probe only selects row 2 once the ASCII fold
+  // actually runs. `'et'` would have been discriminating too, and would have
+  // agreed for free on a face that never folded — which is the certification
+  // this block's own header warns against.
+  $icontains: { name: { $icontains: 'BET' } } as FilterCondition,
   $exists: { closed_at: { $exists: false } } as FilterCondition,
 };
 

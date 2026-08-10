@@ -3,6 +3,12 @@
 import { z } from 'zod';
 import { retiredKey } from '../shared/retired-key';
 import { FieldType } from '../data/field.zod';
+// #6970 — the authoring gate on `defaultValue` runs the SAME value contract the
+// dispatcher runs at submit. Imported file-directly (never via a barrel):
+// `field-value.zod` reaches only `shared/` + `data/`, and `action-params.zod`
+// only `data/` + `api/` + `shared/`, so neither can close a cycle back to `ui/`.
+import { MULTI_CAPABLE_TYPES, isMultiValueField, valueSchemaFor } from '../data/field-value.zod';
+import { isActionParamValuePresent } from './action-params.zod';
 import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
 import { ExpressionInputSchema } from '../shared/expression.zod';
 import { I18nLabelSchema, AriaPropsSchema } from './i18n.zod';
@@ -316,7 +322,19 @@ export const ActionParamSchema = lazySchema(() => strictObject(
   placeholder: z.string().optional(),
   /** Help/description override. */
   helpText: z.string().optional(),
-  /** Default value for the dialog input. */
+  /**
+   * Default value for the dialog input — prefilled into the control when the
+   * dialog opens, and SUBMITTED VERBATIM if the user does not touch the field
+   * (objectui `ActionParamDialog` seeds its state with `p.defaultValue` and
+   * resolves no tokens against it).
+   *
+   * Because it is submitted verbatim it must satisfy this param's own value
+   * contract — the shape checked below through the SAME `valueSchemaFor` the
+   * dispatcher runs at submit. This is a LITERAL, not an expression surface:
+   * unlike a FIELD's `defaultValue`, which the ObjectQL engine resolves for
+   * runtime tokens (`current_user`, CEL `today()`; ROADMAP §M9.9b), nothing on
+   * the action-param path interprets this value.
+   */
   defaultValue: z.unknown().optional(),
   /**
    * Widget config for inline params (field-backed params inherit these from
@@ -383,7 +401,62 @@ export const ActionParamSchema = lazySchema(() => strictObject(
     message:
       'ActionParam with type "lookup"/"master_detail" requires "reference" (the target object) when declared inline — without it the param dialog degrades to a raw record-id text input. Set `reference: \'<object>\'`, or use a field-backed param (`{ field: \'<lookup_field>\' }`) to inherit it.',
   },
-).transform((p, ctx) => lowerRequiresFeature(p, ctx)));
+).superRefine((p, ctx) => {
+  // #6970 — an authored `defaultValue` is checked against the param's OWN
+  // declared value contract, through the SAME `valueSchemaFor` the dispatcher
+  // runs at submit (ADR-0104 D2, `validateActionParams`). One rule set, two
+  // moments: whatever the dispatcher would refuse from a user is refused from
+  // an AUTHOR, at the moment it is written.
+  //
+  // The gap this closes: `defaultValue` was `z.unknown()`, so a default that
+  // can never satisfy its own param parsed clean, prefilled the control, and
+  // 400'd at submit on a field the user never touched — with a message naming
+  // the param but not the author's default as the cause. `datetime` is the
+  // loudest instance (a human-readable wall clock, `2026-08-10T15:00`, which
+  // `datetime-local` happily displays and `InstantValueSchema` refuses) but the
+  // hole was every type: `number` + `'abc'`, `select` + a non-member, a
+  // `multiple` param + a scalar. That is the "AI writes it wrong in bulk and
+  // nothing says so" shape ADR-0078 / ADR-0049 exist to prevent.
+  //
+  // Checked ONLY where the declaration can answer the question — see the two
+  // skips below. An authoring gate that guessed at what a field-backed param
+  // inherits would reject valid metadata, which is worse than the silence it
+  // replaces.
+  if (!isActionParamValuePresent(p.defaultValue)) return;
+  // `type` is the param's own override; absent it is inherited from the
+  // referenced field at runtime and is not visible here (the same "leaves the
+  // value shape open" default `validateActionParams` applies to an
+  // unresolvable type).
+  if (!p.type) return;
+
+  const def = { type: p.type, multiple: p.multiple, options: p.options };
+  const result = valueSchemaFor(def, 'stored').safeParse(p.defaultValue);
+  if (result.success) return;
+
+  // ARITY is knowable only when the param states it. A field-backed param
+  // inherits `multiple` from its field, so `{ field: 'owners', type: 'user',
+  // defaultValue: ['a','b'] }` is a legal declaration whose array default this
+  // gate must not call wrong. When the param is field-backed AND silent on
+  // `multiple` AND the type is one whose arity `multiple` decides, accept
+  // either arity and check only the ELEMENT shape.
+  if (p.field && p.multiple === undefined && MULTI_CAPABLE_TYPES.has(p.type)) {
+    const flipped = valueSchemaFor({ ...def, multiple: !isMultiValueField(def) }, 'stored');
+    if (flipped.safeParse(p.defaultValue).success) return;
+  }
+
+  const detail = result.error.issues[0]?.message ?? 'invalid value';
+  const key = p.name ?? p.field ?? '<unnamed>';
+  ctx.addIssue({
+    code: 'custom',
+    path: ['defaultValue'],
+    message:
+      `Action param "${key}" (${p.type}): the default ${JSON.stringify(p.defaultValue)} cannot `
+      + `satisfy this param's own value contract — ${detail}. The dialog would PREFILL this value `
+      + 'and the submit would then be refused with that same message (ADR-0104 D2), for a field the '
+      + 'user never touched — so the 400 names the param but not this default, which is the real '
+      + "cause. Write the default in the param's declared value shape, or drop `defaultValue`.",
+  });
+}).transform((p, ctx) => lowerRequiresFeature(p, ctx)));
 
 /**
  * Action type enum values.
@@ -808,7 +881,7 @@ const actionObject = () => strictObject({
   execute: retiredKey(
     '`execute` was removed in @objectstack/spec 17 (#3855) — use `target`. ' +
     'Rename the key; the value (a handler / flow / URL ref) is unchanged. ' +
-    'Run `os migrate meta --from 16` to rewrite it automatically.',
+    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
   ),
   
   /**
@@ -994,13 +1067,15 @@ const actionObject = () => strictObject({
     'it never triggered anything: no keydown listener feeds ActionEngine.getShortcuts(), and ' +
     "objectui's keyboard stack (useKeyboardShortcuts) is hand-registered and never consults " +
     'action metadata. Delete the key. For a real shortcut, register the key in the Console ' +
-    'keyboard stack and have its handler invoke the action by name.',
+    'keyboard stack and have its handler invoke the action by name. ' +
+    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
   ),
   bulkEnabled: retiredKey(
     '`action.bulkEnabled` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — ' +
     'the multi-select toolbar is driven by the LIST VIEW\'s `bulkActions` / `bulkActionDefs`, ' +
     'never by this flag, so setting it changed nothing. Delete the key and declare the action ' +
-    "in the view's `bulkActions` instead.",
+    "in the view's `bulkActions` instead. " +
+    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
   ),
 
   /**

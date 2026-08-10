@@ -106,6 +106,20 @@ export const AUTHZ_CONFORMANCE: AuthzPrimitive[] = [
     proof: 'showcase-anonymous-deny-surfaces.dogfood.test.ts',
     covers: ['automation:domains/automation.ts:anonymous-gate'],
     note: 'Ungated, an anonymous caller could start real flow runs (`POST /:name/trigger`), read the full flow inventory (`GET /automation`), and DEREGISTER a registered flow (`DELETE /:name` → `{deleted:true}`) — the destructive one, which #5519 did not originally record. Gating the DOMAIN rather than each route is what keeps a newly added automation route from arriving ungated. Engine-internal triggers (record-change, schedule) never speak HTTP and are untouched.' },
+  // #7033 / #7023 — the SIXTH dispatcher domain to join the baseline. `/packages`
+  // was the last routed domain with ZERO authorization predicates: a survey drove
+  // a guest-principal caller to a 200 on the DESTRUCTIVE `discard-drafts` and the
+  // whole-package `export`. Unlike `/meta` (two separate handler bodies — REST +
+  // dispatcher — which is why #6603's gate had to be re-added by #7019), every
+  // `/packages` transport (the dispatcher-plugin explicit mounts, the hono
+  // catch-all, and the legacy `HttpDispatcher.handlePackages` method) converges on
+  // ONE handler body, `handlePackagesRequest`, so a single domain-wide gate there
+  // covers them all.
+  { id: 'anonymous-deny-packages', summary: 'anonymous-deny on the package-management surface (#7033 / #7023)', state: 'enforced',
+    enforcement: 'runtime/domains/packages.ts handlePackagesRequest — shouldDenyAnonymous DOMAIN-WIDE as the handler\'s FIRST statement, ahead of the ObjectQL registry probe so the 401-vs-503 difference cannot fingerprint whether the package service is mounted; per-route capability predicates run after this floor — `manage_metadata` for every state-changing route (install / enable / disable / publish / publish-drafts / discard-drafts / commit-revert / rollback / revert / adopt-orphans / duplicate / manifest-PATCH / DELETE), and the ADR-0106 D4 read set (`studio.access` / `setup.access`) for every read (list / detail / commits / export)',
+    proof: 'showcase-anonymous-deny-surfaces.dogfood.test.ts',
+    covers: ['packages:domains/packages.ts:anonymous-gate'],
+    note: 'Ungated, a guest-principal caller reached the whole domain: `GET /packages` (the id ENUMERATION face — first step of the chain), `GET /packages/:id/export` (27 metadata types read whole), and — destructively — `POST /packages/:id/discard-drafts` (drop every pending draft) and `POST /packages/:id/publish-drafts` (promote every draft to active + load seed rows + flip ADR-0045 visibility). Gating the DOMAIN rather than each route keeps a newly added package route from arriving ungated. Engine-internal / SDK internal calls never enter this HTTP handler. The per-route capability gates are unit-pinned in runtime/domains/packages-capability-gate.test.ts.' },
 
   // ── #2992 / ADR-0096 D4 — latent execution surfaces (pre-wiring identity
   // admission). Neither surface is reachable by a client today; these rows

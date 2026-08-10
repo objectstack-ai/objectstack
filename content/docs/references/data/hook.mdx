@@ -36,6 +36,7 @@ const result = HookContextSchema.parse(data);
 | **input** | `Record<string, any>` | ✅ | Mutable input parameters |
 | **result** | `any` | optional | Operation result (After hooks only) |
 | **previous** | `Record<string, any>` | optional | Record state before operation |
+| **dispatch** | `{ mode: Enum<'record' \| 'per-row'>; index: integer; scope: Record<string, any> }` | optional | How this hook call relates to the caller's write (engine-produced; #6966) |
 | **session** | `{ userId?: string; actor?: string; organizationId?: string; accessToken?: string; … }` | optional | Current session context |
 | **provenance** | `{ flowRunId?: string; attributedUserId?: string }` | optional | Server-stamped write provenance (never client-supplied, never an authorization input) |
 | **transaction** | `any` | optional | Database transaction handle |

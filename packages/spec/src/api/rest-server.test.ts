@@ -17,6 +17,11 @@ import {
   type MetadataEndpointsConfig,
 } from './rest-server.zod';
 
+import {
+  EXPORT_ENTRY_POINTS,
+  exportNamesOf,
+  holdersOf,
+} from '../../scripts/lib/export-origins-testkit';
 describe('RestApiConfigSchema', () => {
   it('should accept minimal config with defaults', () => {
     const config = RestApiConfigSchema.parse({});
@@ -758,56 +763,23 @@ describe('[#4579] the OpenApi31 block schemas are not exported from any entry po
     'OpenApiWebhookEvent',
   ] as const;
 
-  it('resolves the export surface: no public entry names any of the six', async () => {
-    const ts = (await import('typescript')).default;
-    const { resolve, dirname } = await import('node:path');
-    const { fileURLToPath } = await import('node:url');
-    const { readFileSync } = await import('node:fs');
-
-    const specDir = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
-    // Every public entry point, read from package.json's exports map so a
-    // future entry cannot silently escape the pin below.
-    const pkg = JSON.parse(readFileSync(resolve(specDir, 'package.json'), 'utf8')) as {
-      exports: Record<string, unknown>;
-    };
-    const entries: Record<string, string> = {};
-    for (const sub of Object.keys(pkg.exports)) {
-      if (sub === '.') entries[sub] = resolve(specDir, 'src/index.ts');
-      else if (/^\.\/[a-z-]+$/.test(sub)) entries[sub] = resolve(specDir, `src/${sub.slice(2)}/index.ts`);
-      // './openapi.json' / './package.json' are not TypeScript entry points.
-    }
-    // Anti-vacuity: the enumeration must have found the real surface.
-    expect(Object.keys(entries)).toContain('./api');
-    expect(Object.keys(entries).length).toBeGreaterThan(10);
-
-    const program = ts.createProgram(Object.values(entries), {
-      module: ts.ModuleKind.ESNext,
-      moduleResolution: ts.ModuleResolutionKind.Bundler,
-      skipLibCheck: true,
-      noEmit: true,
-    });
-    const checker = program.getTypeChecker();
-    const exportsOf = (sub: string) => {
-      const sf = program.getSourceFile(entries[sub]);
-      const moduleSym = sf && checker.getSymbolAtLocation(sf);
-      // Without this guard a resolution failure would make every assertion
-      // below pass vacuously — the exact way a gate goes dormant (#4642).
-      expect(moduleSym, `${sub} module symbol must resolve`).toBeTruthy();
-      return checker.getExportsOfModule(moduleSym!);
-    };
+  it('resolves the export surface: no public entry names any of the six', () => {
+    // Anti-vacuity: the baseline must cover the real surface. (This used to
+    // enumerate package.json's exports map and build its own `ts.createProgram`
+    // right here; `export-origins/` IS that resolution, computed once at build
+    // time and checked in — #4796.)
+    expect(EXPORT_ENTRY_POINTS).toContain('./api');
+    expect(EXPORT_ENTRY_POINTS.length).toBeGreaterThan(10);
 
     // The surface stays non-trivial (the `not.toContain` cannot pass by
     // resolving nothing) and the surviving neighbours stand.
-    const apiNames = exportsOf('./api').map((e) => e.getName());
+    const apiNames = exportNamesOf('./api');
     expect(apiNames.length, './api must export a non-trivial surface').toBeGreaterThan(50);
     expect(apiNames).toContain('RestServerConfigSchema');
     expect(apiNames).toContain('RestApiConfigSchema');
 
-    for (const sub of Object.keys(entries)) {
-      const names = exportsOf(sub).map((e) => e.getName());
-      for (const removed of REMOVED_NAMES) {
-        expect(names, `${sub} must not export ${removed} (#4579)`).not.toContain(removed);
-      }
+    for (const removed of REMOVED_NAMES) {
+      expect(holdersOf(removed), `no entry may export ${removed} (#4579)`).toEqual([]);
     }
   });
 

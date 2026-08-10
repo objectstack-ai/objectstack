@@ -58,7 +58,7 @@ export const MarketplaceInstalledPage = {
                     properties: {
                         title: 'Installed Apps',
                         subtitle: 'Marketplace packages currently installed into this runtime\'s kernel.',
-                        icon: 'package-check',
+                        // `icon` removed here (#6946): `page:header` never drew one — retired from the spec.
                     },
                 },
             ],

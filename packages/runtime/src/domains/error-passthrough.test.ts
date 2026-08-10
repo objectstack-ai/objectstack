@@ -71,7 +71,22 @@ async function dispatchWith(method: string, path: string, err: unknown, body: an
         getService: resolve,
         getServiceAsync: async (name: string) => resolve(name),
     };
-    const result: any = await new HttpDispatcher(kernel).dispatch(method, path, body, {}, {} as any);
+    const dispatcher = new HttpDispatcher(kernel);
+    // [#7033 / #7023] `/packages` now carries per-route capability predicates on
+    // top of the anonymous floor: `manage_metadata` for the PATCH write path and
+    // the `studio.access` / `setup.access` read set for the GET commits path.
+    // These cases are about ERROR MAPPING (does a domain 404 / a ValidationError
+    // 400 / an ordinary 500 survive), so the caller must clear the gate to reach
+    // the error path each one pins. `dispatch()` re-resolves the context from the
+    // auth / objectql services and this stub has no objectql, so the resolved
+    // caller would hold no capabilities and be refused with a 403 before ever
+    // reaching the mapping under test. Only the caller's capabilities are stubbed;
+    // every mechanism and expected status below is unchanged. (The /meta and /ui
+    // routes in the loop need no capability, and holding extra ones never rejects.)
+    (dispatcher as any).timedResolveExecutionContext = async () => ({
+        userId: 'u1', systemPermissions: ['manage_metadata', 'studio.access', 'setup.access'],
+    });
+    const result: any = await dispatcher.dispatch(method, path, body, {}, {} as any);
     return result.response;
 }
 
@@ -141,7 +156,18 @@ describe('#3918 follow-up — deliberate per-route fallbacks are preserved', () 
             getService: resolve,
             getServiceAsync: async (name: string) => resolve(name),
         };
-        const result: any = await new HttpDispatcher(kernel).dispatch(
+        const dispatcher = new HttpDispatcher(kernel);
+        // [#7019] The `/meta` PUT now demands the `manage_metadata` capability —
+        // an authoring capability, not just a session. `dispatch()` re-resolves
+        // the execution context from the auth / objectql services, and this stub
+        // has no objectql, so the resolved caller would hold no capabilities and
+        // be refused with a 403 before ever reaching the 501/400 fallback branch
+        // this test pins. Only the caller's capability is stubbed; the fallback
+        // mechanism and its expected statuses are unchanged.
+        (dispatcher as any).timedResolveExecutionContext = async () => ({
+            userId: 'u1', systemPermissions: ['manage_metadata'],
+        });
+        const result: any = await dispatcher.dispatch(
             'PUT', '/meta/object/widget', { name: 'widget' }, {}, {} as any,
         );
         return result.response;

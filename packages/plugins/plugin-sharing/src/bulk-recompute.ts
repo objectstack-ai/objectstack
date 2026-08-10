@@ -13,7 +13,12 @@
  * if (!id) return;                       // ← every predicate write, silently
  * ```
  *
- * and `ObjectQL.update()` only populates `input.id` for a scalar `where.id`.
+ * and `ObjectQL.update()` — AT THE TIME — only populated `input.id` for a
+ * scalar `where.id`. ([#6966] That is no longer how a predicate write is
+ * dispatched: since #5038/#5574 both phases fire once per matched row with
+ * `input.id` bound, so the guard above would now pass per row rather than skip.
+ * The defect it caused is unchanged history; the mechanism sentence is not
+ * current, and is kept only to explain what was fixed.)
  * A predicate (`multi: true`) update therefore recomputed NOTHING: an admin
  * could bulk-move a thousand records out of a sharing rule's criteria and
  * every `sys_record_share` row the rule had issued stayed in the table,
@@ -202,9 +207,6 @@ export async function resolveAffectedRows(
  * a rule's criteria makes them unfindable by the write's own predicate the
  * instant it lands, and a delete removes them outright — so `afterUpdate` /
  * `afterDelete` are structurally too late to ask "which rows was this?".
- * `ObjectQL.update()` / `.delete()` reuse ONE `HookContext` instance across
- * each before/after pair (they mutate `ctx.event` in place), which is the same
- * seam `primary-bu-projection.ts`'s `__primaryBuUserId` rides on.
  *
  * [#5103] Lives HERE, next to the resolver, rather than in `rule-hooks.ts`
  * where it started: two independent hook packages now need the same answer for
@@ -212,8 +214,48 @@ export async function resolveAffectedRows(
  * and each resolving it separately would double the predicate query on every
  * bulk write for no gain — the row set is a property of the WRITE, not of
  * either subscriber.
+ *
+ * ## [#6966] Where the stash actually lives, and why that had to change
+ *
+ * This used to say: "`ObjectQL.update()` / `.delete()` reuse ONE `HookContext`
+ * instance across each before/after pair (they mutate `ctx.event` in place)."
+ * That stopped being true for a predicate (`multi: true`) write when #5574
+ * made the `before*` phase dispatch PER ROW — each row gets a freshly built
+ * context, so a stash written on it died with that row and the `after*` phase
+ * found nothing. `readAffectedRows` then answered `unbounded/resolve-failed`,
+ * and both subscribers took their safe branch: every bulk update or delete on
+ * a ruled object revoked ALL of that object's rule grants and queued a full
+ * asynchronous re-grant — once per matched row. Safe (the ruling's
+ * "over-granting is an incident, under-granting is a wobble" direction), but
+ * a large and silent behaviour change nobody asked for.
+ *
+ * The seam is now the engine's own: `HookContext.dispatch.scope` is one object
+ * shared by every dispatch of one caller write, across both phases. See
+ * {@link stashHost} for the fallback that keeps hand-built contexts working.
  */
 export const AFFECTED_ROWS_STASH_KEY = '__sharingAffectedRows';
+
+/**
+ * [#6966] Accumulator for the per-row dispatch: the ids handed over one at a
+ * time by the engine's per-row `before*` fan-out. A SET, not an array, because
+ * two independent subscribers ({@link stashAffectedRows} is registered by both
+ * `rule-hooks` and `record-share-cascade`) each run on every row — appending
+ * would double every id.
+ */
+const AFFECTED_ROW_IDS_KEY = '__sharingAffectedRowIds';
+
+/**
+ * Where a before→after stash for ONE write lives.
+ *
+ * The engine's per-write scratch when the marker is present; the context
+ * itself otherwise. The fallback is not legacy tolerance — a `HookContext`
+ * built by hand (tests, an embedding that calls a handler directly) carries no
+ * `dispatch`, and for a single-id write the context IS shared across the pair,
+ * so stashing on it remains correct there.
+ */
+function stashHost(hookCtx: any): any {
+  return hookCtx?.dispatch?.scope ?? hookCtx;
+}
 
 /**
  * Resolve (or reuse) the row set a `before` hook's write is about to change and
@@ -227,6 +269,16 @@ export const AFFECTED_ROWS_STASH_KEY = '__sharingAffectedRows';
  * Never throws: `resolveAffectedRows` already fails safe to `unbounded`, and
  * this adds the belt for a genuinely unexpected throw. "Unknown" must never
  * degrade to "no rows" — that is the direction that silently skips cleanup.
+ *
+ * ## [#6966] The per-row dispatch does not resolve at all — it accumulates
+ *
+ * On a predicate write the engine has ALREADY matched the rows and dispatches
+ * this hook once per row with `input.id` bound, so re-asking the predicate
+ * would be both wasteful and wrong: `resolveAffectedRows` short-circuits on a
+ * bound `input.id` (step 1), so the "reuse" branch above would have frozen the
+ * whole batch's answer to the FIRST row's id — under-revoking every other row,
+ * which is the fail-OPEN direction this module exists to avoid. Rows are
+ * therefore unioned as they arrive, and the cap is applied to the union.
  */
 export async function stashAffectedRows(
   engine: RecomputeEngine | { find?: RecomputeEngine['find'] },
@@ -234,7 +286,14 @@ export async function stashAffectedRows(
   hookCtx: any,
   logger?: MinimalLogger,
 ): Promise<AffectedRows> {
-  const already = hookCtx?.[AFFECTED_ROWS_STASH_KEY] as AffectedRows | undefined;
+  const host = stashHost(hookCtx);
+  if (hookCtx?.dispatch?.mode === 'per-row') {
+    const rowId = hookCtx?.input?.id;
+    const seen: Set<string> = host[AFFECTED_ROW_IDS_KEY] ?? (host[AFFECTED_ROW_IDS_KEY] = new Set<string>());
+    if (rowId != null) seen.add(String(rowId));
+    return readAffectedRows(hookCtx);
+  }
+  const already = host?.[AFFECTED_ROWS_STASH_KEY] as AffectedRows | undefined;
   if (already) return already;
   let resolved: AffectedRows;
   try {
@@ -244,7 +303,7 @@ export async function stashAffectedRows(
   } catch (err: any) {
     resolved = { kind: 'unbounded', reason: 'resolve-failed', detail: err?.message };
   }
-  if (hookCtx && typeof hookCtx === 'object') hookCtx[AFFECTED_ROWS_STASH_KEY] = resolved;
+  if (host && typeof host === 'object') host[AFFECTED_ROWS_STASH_KEY] = resolved;
   return resolved;
 }
 
@@ -252,9 +311,31 @@ export async function stashAffectedRows(
  * What an `after` hook should act on. A missing stash means no `before` hook of
  * ours ran for this write, which is not "nothing changed" — it is "we do not
  * know", and it reads as `unbounded` so the caller takes its safe branch.
+ *
+ * [#6966] The per-row union is materialised HERE rather than on every `before`
+ * dispatch, so N rows × 2 subscribers cost N set inserts instead of 2N array
+ * copies. The cap is re-applied to the union: a batch the engine's own ceiling
+ * lets through can still exceed what a per-row recompute is willing to do, and
+ * that verdict must be the same `over-cap` the predicate resolver returns.
  */
 export function readAffectedRows(hookCtx: any): AffectedRows {
-  return (hookCtx?.[AFFECTED_ROWS_STASH_KEY] as AffectedRows | undefined)
+  const host = stashHost(hookCtx);
+  const seen = host?.[AFFECTED_ROW_IDS_KEY] as Set<string> | undefined;
+  if (seen) {
+    if (seen.size === 0) {
+      // Dispatched per row and yet nothing was learned — the accumulator only
+      // exists because a `before*` dispatch created it, so every id it was
+      // handed was null. That is "we do not know", NOT "no rows changed", and
+      // this module's rule is that the two must never be confused: reading it
+      // as an empty row set would silently skip the cleanup entirely, which is
+      // the direction #4757 was filed for.
+      return { kind: 'unbounded', reason: 'resolve-failed', detail: 'per-row dispatch bound no ids' };
+    }
+    return seen.size > RULE_RECOMPUTE_ROW_CAP
+      ? { kind: 'unbounded', reason: 'over-cap' }
+      : { kind: 'rows', ids: [...seen] };
+  }
+  return (host?.[AFFECTED_ROWS_STASH_KEY] as AffectedRows | undefined)
     ?? { kind: 'unbounded', reason: 'resolve-failed', detail: 'no before-hook stash' };
 }
 

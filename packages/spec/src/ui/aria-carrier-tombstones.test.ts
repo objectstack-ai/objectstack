@@ -95,10 +95,16 @@ describe('the `aria` tombstones name only live `AriaProps` carriers (#6756)', ()
 
     // None of the above may be bought by weakening the prescription itself.
     expect(message).toContain('author a `title`');
-    // The conversion STRIPS this key (`stripKeys(..., [... 'aria'])`); it does
-    // not relocate it. The verb has to say so.
+    // The conversion STRIPS this key (`stripKeys(..., [... 'aria'])`). The
+    // key's fate is the body's job ("Delete the key."), asserted above; the
+    // `os migrate meta` sentence states what the TOOL does and is the house
+    // sentence (#6856 route D — superseding the #6854 `to remove it` pin,
+    // an accepted cost of that ruling). Class-wide shape enforcement lives in
+    // `shared/retired-key-migrate-sentence.test.ts`; this pin holds the one
+    // site that already flipped once.
+    expect(message).toContain('Delete the key.');
     expect(message).toContain('os migrate meta --from 16');
-    expect(message).toMatch(/to remove it/);
+    expect(message).toMatch(/to rewrite existing sources automatically\.$/);
   });
 
   it('the App.aria tombstone points at a page component, not at the retired widget surface', () => {

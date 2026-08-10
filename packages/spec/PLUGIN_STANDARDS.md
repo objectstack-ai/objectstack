@@ -123,38 +123,57 @@ export const LeadObject = ...
 
 The microkernel architecture provides the following runtime capabilities for plugins. The Zod schemas governing each capability live in `src/kernel/`.
 
-### 5.1 Hot Reload (`plugin-loading.zod.ts` → `PluginHotReloadSchema`)
+### 5.1 Hot Reload — ~~`plugin-loading.zod.ts` → `PluginHotReloadSchema`~~ RETIRED in v17; one vocabulary survives
 
-Hot reload supports **development, staging, and production** environments. The `environment` field controls the safety level:
+`PluginHotReloadSchema` was removed in v17 (#4914, ADR-0049 enforce-or-remove),
+with the rest of the `manifest.loading` block (§5.2). It was the **dead one of
+two** hot-reload vocabularies, and this page used to point at exactly that one:
+an author following it configured `environment`, `productionSafety`, health
+validation, auto-rollback, connection draining and `maxConcurrentReloads` — and
+none of it was read by anything.
 
-| Environment | Behavior |
-| :--- | :--- |
-| `development` | Fast reload with file watchers, no health validation required |
-| `staging` | Production-like reload with validation but relaxed rollback |
-| `production` | Full safety: health validation, auto-rollback, connection draining |
+**The surviving vocabulary** is `plugin-lifecycle-advanced.zod.ts` →
+`HotReloadConfigSchema`, carried on `AdvancedPluginLifecycleConfig.hotReload`.
+That is the one with an implementation body behind it: `HotReloadManager` in
+`packages/core/src/hot-reload.ts` reads it.
 
-Production safety features (`productionSafety`):
-- **Health validation** — run health checks after reload before accepting traffic
-- **Rollback on failure** — auto-rollback if reloaded plugin fails health check
-- **Connection draining** — gracefully drain active requests before reloading
-- **Concurrency control** — limit concurrent reloads (`maxConcurrentReloads`)
-- **Reload cooldown** — minimum interval between reloads of the same plugin (≥1s)
+⚠️ **Status, stated honestly: a foundation, not a shipped capability.**
+`HotReloadManager` exists and is unit-tested, but **no runtime composes one** —
+the only constructions are its own test and
+`packages/core/examples/phase2-integration.ts`. So configuring
+`AdvancedPluginLifecycleConfig.hotReload` today does not give a running system
+hot reload either. It is kept, unenforced, as the starting point if hot reload is
+ever built for real; making it enforced is a separate decision (ADR-0049's
+enforce leg) and deliberately **not** part of the #4914 retirement. Treat this
+section as "one honest pointer", not as a feature you can turn on.
 
-### 5.2 Plugin Isolation (`plugin-loading.zod.ts` → `PluginSandboxingSchema`)
+### 5.2 Plugin Isolation — ~~`plugin-loading.zod.ts` → `PluginSandboxingSchema`~~ REMOVED in v17
 
-Sandboxing supports configurable **scope** and **isolation level**:
+`PluginSandboxingSchema` — and the whole `manifest.loading` block that carried it
+— was removed in v17 (#4914, ADR-0049 enforce-or-remove, maintainer ruling
+2026-08-04). `Manifest.loading` is now a `retiredKey()` tombstone: authoring it
+is a `tsc` error and a parse error carrying the fix.
 
-| Scope | Description |
-| :--- | :--- |
-| `automation-only` | Sandbox automation/scripting plugins only (default) |
-| `untrusted-only` | Sandbox plugins below a trust threshold |
-| `all-plugins` | Sandbox all plugins for maximum isolation |
+It declared configurable sandbox **scope** (`automation-only` / `untrusted-only`
+/ `all-plugins`), **isolation levels** (`none` / `process` / `vm` / `iframe` /
+`web-worker`), IPC transports (`message-port` / `unix-socket` / `tcp` /
+`memory`) and a service ACL (`allowedServices`) — and **none of it was ever
+read**. A bare-name scan of objectstack, cloud and objectui (each with a control
+probe) found every reference inside `packages/spec` itself: the declaration, its
+own unit tests, the `Manifest.loading` embed and generated artifacts.
 
-Isolation levels: `none`, `process`, `vm`, `iframe`, `web-worker`.
+**Why this one was urgent rather than untidy.** An inert *security* control is
+worse than an absent one, because it is believed. An author — very often an AI
+(ADR-0033) — read this vocabulary as proof the platform isolates plugins, wrote
+`loading: { sandboxing: { isolationLevel: 'process' } }`, got a clean parse, and
+had **no isolation whatsoever**: no process, vm, iframe or web-worker boundary,
+and `allowedServices` gating no call. That is ADR-0049 false compliance at its
+sharpest, and it is why the ruling chose REMOVE over an `experimental` marker.
 
-**Inter-Plugin Communication (IPC):** Isolated plugins communicate with the kernel and other plugins via configurable IPC:
-- Transports: `message-port`, `unix-socket`, `tcp`, `memory`
-- Configurable message size limit, timeout, and service ACL (`allowedServices`)
+**What is real:** the plugin trust tier (`manifest.runtime`, ADR-0025 §3.6) and
+the manifest permission declarations. If plugin isolation is ever built, it
+returns via the enforce route of ADR-0049 through a new ADR — mechanism first,
+vocabulary second.
 
 ### 5.3 Dynamic Loading — ~~`plugin-runtime.zod.ts`~~ REMOVED in v17
 
@@ -184,8 +203,8 @@ through a new ADR — loader first, vocabulary second.
 | Lifecycle Hooks | ✅ | `plugin.zod.ts` — `init()` → `start()` → `healthCheck()` → `destroy()` |
 | Service Registry | ✅ | `service-registry.zod.ts` — 17 services across 13 plugins via `ctx.registerService()` |
 | Event Bus | ✅ | `events.zod.ts` — Pub/sub with pattern matching |
-| Dependency Resolution | ✅ | `plugin-loading.zod.ts` — Declared dependencies with conflict resolution |
+| Dependency Resolution | ✅ | `manifest.zod.ts` (`dependencies`) + `packages/core/src/plugin-order.ts` — `resolvePluginOrder` topologically orders plugins from each composed plugin's `dependencies` / `optionalDependencies`, erroring on a cycle or a missing hard dependency. (The `PluginDependencyResolution` *config* schema this row used to cite was inert and went with the `loading` block in #4914 — the capability is real, the configuration surface was not) |
 | Health Checks | ✅ | `plugin-lifecycle-advanced.zod.ts` — Per-plugin health + system aggregation |
-| Hot Reload | ✅ | `plugin-loading.zod.ts` — Dev + production-safe with rollback and draining |
-| Plugin Isolation | ✅ | `plugin-loading.zod.ts` — Configurable scope + IPC for process boundaries |
+| Hot Reload | ⚠️ | **Foundation only, not enforced.** `plugin-lifecycle-advanced.zod.ts` → `HotReloadConfigSchema` is the surviving vocabulary and `HotReloadManager` (`packages/core/src/hot-reload.ts`) reads it — but no runtime composes one, so configuring it changes nothing today. The rival `PluginHotReloadSchema` was removed in v17 (#4914, ADR-0049): it had no reader at all. See §5.1 |
+| Plugin Isolation | ❌ | **Not built.** The `PluginSandboxingSchema` vocabulary that declared it (scope, `process`/`vm`/`iframe`/`web-worker` isolation, IPC, `allowedServices` ACL) was removed in v17 (#4914, ADR-0049) — it had no runtime reader, so it isolated nothing while appearing to. Trust tiers (`manifest.runtime`) and permission declarations are the real surfaces. See §5.2 |
 | Dynamic Loading | ❌ | **Not built.** The `plugin-runtime.zod.ts` vocabulary that declared it was removed in v17 (#4834, ADR-0049) — it had no runtime reader in any repo. Plugins are composed at boot; the set is fixed until restart |

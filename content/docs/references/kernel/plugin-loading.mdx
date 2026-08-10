@@ -7,19 +7,14 @@ description: Plugin Loading protocol schemas
 
 # Plugin Loading Protocol
 
-Defines the enhanced plugin loading mechanism for the microkernel architecture.
-Inspired by industry best practices from:
-- Kubernetes CRDs and Operators
-- OSGi Dynamic Module System
-- Eclipse Plugin Framework
-- Webpack Module Federation
+What remains of this module is the **observational** half: the lifecycle
+event a loader would emit (`PluginLoadingEventSchema`) and the per-plugin
+state it would track (`PluginLoadingStateSchema`).
 
-This protocol enables:
-- Lazy loading and code splitting
-- Dynamic imports and parallel initialization
-- Capability-based discovery
-- Hot reload in development
-- Advanced caching strategies
+The **configuration** half — `PluginLoadingConfigSchema` and the ten member
+schemas it combined, reached from authored metadata as `manifest.loading` —
+was REMOVED in v17 per ADR-0049 enforce-or-remove (#4914). See the block
+below.
 
 <Callout type="info">
 **Source:** `packages/spec/src/kernel/plugin-loading.zod.ts`
@@ -28,146 +23,12 @@ This protocol enables:
 ## TypeScript Usage
 
 ```typescript
-import { PluginCachingSchema, PluginCodeSplittingSchema, PluginDependencyResolutionSchema, PluginDynamicImportSchema, PluginHotReloadSchema, PluginInitializationSchema, PluginLoadingConfigSchema, PluginLoadingEventSchema, PluginLoadingStateSchema, PluginLoadingStrategySchema, PluginPerformanceMonitoringSchema, PluginPreloadConfigSchema, PluginSandboxingSchema } from '@objectstack/spec/kernel';
-import type { PluginCaching, PluginCodeSplitting, PluginDependencyResolution, PluginDynamicImport, PluginHotReload, PluginInitialization, PluginLoadingConfig, PluginLoadingEvent, PluginLoadingState, PluginLoadingStrategy, PluginPerformanceMonitoring, PluginPreloadConfig, PluginSandboxing } from '@objectstack/spec/kernel';
+import { PluginLoadingEventSchema, PluginLoadingStateSchema } from '@objectstack/spec/kernel';
+import type { PluginLoadingEvent, PluginLoadingState } from '@objectstack/spec/kernel';
 
 // Validate data
-const result = PluginCachingSchema.parse(data);
+const result = PluginLoadingEventSchema.parse(data);
 ```
-
----
-
-## PluginCaching
-
-Plugin caching configuration
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **enabled** | `boolean` | ✅ |  |
-| **storage** | `Enum<'memory' \| 'disk' \| 'indexeddb' \| 'hybrid'>` | ✅ |  |
-| **keyStrategy** | `Enum<'version' \| 'hash' \| 'timestamp'>` | ✅ |  |
-| **ttl** | `integer` | optional | Time to live in seconds (0 = infinite) |
-| **maxSize** | `integer` | optional | Max cache size in MB |
-| **invalidateOn** | `Enum<'version-change' \| 'dependency-change' \| 'manual' \| 'error'>[]` | optional |  |
-| **compression** | `{ enabled: boolean; algorithm: Enum<'gzip' \| 'brotli' \| 'deflate'> }` | optional |  |
-
-
----
-
-## PluginCodeSplitting
-
-Plugin code splitting configuration
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **enabled** | `boolean` | ✅ |  |
-| **strategy** | `Enum<'route' \| 'feature' \| 'size' \| 'custom'>` | ✅ |  |
-| **chunkNaming** | `Enum<'hashed' \| 'named' \| 'sequential'>` | ✅ |  |
-| **maxChunkSize** | `integer` | optional | Max chunk size in KB |
-| **sharedDependencies** | `{ enabled: boolean; minChunks: integer }` | optional |  |
-
-
----
-
-## PluginDependencyResolution
-
-Plugin dependency resolution configuration
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **strategy** | `Enum<'strict' \| 'compatible' \| 'latest' \| 'pinned'>` | ✅ |  |
-| **peerDependencies** | `{ resolve: boolean; onMissing: Enum<'error' \| 'warn' \| 'ignore'>; onMismatch: Enum<'error' \| 'warn' \| 'ignore'> }` | optional |  |
-| **optionalDependencies** | `{ load: boolean; onFailure: Enum<'warn' \| 'ignore'> }` | optional |  |
-| **conflictResolution** | `Enum<'fail' \| 'latest' \| 'oldest' \| 'manual'>` | ✅ |  |
-| **circularDependencies** | `Enum<'error' \| 'warn' \| 'allow'>` | ✅ |  |
-
-
----
-
-## PluginDynamicImport
-
-Plugin dynamic import configuration
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **enabled** | `boolean` | ✅ |  |
-| **mode** | `Enum<'async' \| 'sync' \| 'eager' \| 'lazy'>` | ✅ |  |
-| **prefetch** | `boolean` | ✅ | Prefetch module in idle time |
-| **preload** | `boolean` | ✅ | Preload module in parallel with parent |
-| **webpackChunkName** | `string` | optional | Custom chunk name for webpack |
-| **timeout** | `integer` | ✅ | Dynamic import timeout (ms) |
-| **retry** | `{ enabled: boolean; maxAttempts: integer; backoffMs: integer }` | optional |  |
-
-
----
-
-## PluginHotReload
-
-Plugin hot reload configuration
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **enabled** | `boolean` | ✅ |  |
-| **environment** | `Enum<'development' \| 'staging' \| 'production'>` | ✅ | Target environment controlling safety level |
-| **strategy** | `Enum<'full' \| 'partial' \| 'state-preserve'>` | ✅ |  |
-| **watchPatterns** | `string[]` | optional | Glob patterns for files to watch |
-| **ignorePatterns** | `string[]` | optional | Glob patterns for files to ignore |
-| **debounceMs** | `integer` | ✅ |  |
-| **preserveState** | `boolean` | ✅ |  |
-| **stateSerialization** | `{ enabled: boolean; handler?: string }` | optional |  |
-| **hooks** | `{ beforeReload?: string; afterReload?: string; onError?: string }` | optional |  |
-| **productionSafety** | `{ healthValidation: boolean; rollbackOnFailure: boolean; healthTimeout: integer; drainConnections: boolean; … }` | optional |  |
-
-
----
-
-## PluginInitialization
-
-Plugin initialization configuration
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **mode** | `Enum<'sync' \| 'async' \| 'parallel' \| 'sequential'>` | ✅ |  |
-| **timeout** | `integer` | ✅ |  |
-| **priority** | `integer` | ✅ |  |
-| **critical** | `boolean` | ✅ | If true, kernel bootstrap fails if plugin fails |
-| **retry** | `{ enabled: boolean; maxAttempts: integer; backoffMs: integer }` | optional |  |
-| **healthCheckInterval** | `integer` | optional | Health check interval in ms (0 = disabled) |
-
-
----
-
-## PluginLoadingConfig
-
-Complete plugin loading configuration
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **strategy** | `Enum<'eager' \| 'lazy' \| 'parallel' \| 'deferred' \| 'on-demand'>` | ✅ | Plugin loading strategy |
-| **preload** | `{ enabled: boolean; priority: integer; resources?: Enum<'metadata' \| 'dependencies' \| 'assets' \| 'code' \| 'services'>[]; conditions?: object }` | optional | Plugin preloading configuration |
-| **codeSplitting** | `{ enabled: boolean; strategy: Enum<'route' \| 'feature' \| 'size' \| 'custom'>; chunkNaming: Enum<'hashed' \| 'named' \| 'sequential'>; maxChunkSize?: integer; … }` | optional | Plugin code splitting configuration |
-| **dynamicImport** | `{ enabled: boolean; mode: Enum<'async' \| 'sync' \| 'eager' \| 'lazy'>; prefetch: boolean; preload: boolean; … }` | optional | Plugin dynamic import configuration |
-| **initialization** | `{ mode: Enum<'sync' \| 'async' \| 'parallel' \| 'sequential'>; timeout: integer; priority: integer; critical: boolean; … }` | optional | Plugin initialization configuration |
-| **dependencyResolution** | `{ strategy: Enum<'strict' \| 'compatible' \| 'latest' \| 'pinned'>; peerDependencies?: object; optionalDependencies?: object; conflictResolution: Enum<'fail' \| 'latest' \| 'oldest' \| 'manual'>; … }` | optional | Plugin dependency resolution configuration |
-| **hotReload** | `{ enabled: boolean; environment: Enum<'development' \| 'staging' \| 'production'>; strategy: Enum<'full' \| 'partial' \| 'state-preserve'>; watchPatterns?: string[]; … }` | optional | Plugin hot reload configuration |
-| **caching** | `{ enabled: boolean; storage: Enum<'memory' \| 'disk' \| 'indexeddb' \| 'hybrid'>; keyStrategy: Enum<'version' \| 'hash' \| 'timestamp'>; ttl?: integer; … }` | optional | Plugin caching configuration |
-| **sandboxing** | `{ enabled: boolean; scope: Enum<'automation-only' \| 'untrusted-only' \| 'all-plugins'>; isolationLevel: Enum<'none' \| 'process' \| 'vm' \| 'iframe' \| 'web-worker'>; allowedCapabilities?: string[]; … }` | optional | Plugin sandboxing configuration |
-| **monitoring** | `{ enabled: boolean; metrics?: Enum<'load-time' \| 'init-time' \| 'memory-usage' \| 'cpu-usage' \| 'api-calls' \| … +2 more>[]; samplingRate: number; reportingInterval: integer; … }` | optional | Plugin performance monitoring configuration |
-
 
 ---
 
@@ -221,74 +82,6 @@ Plugin loading state
 | **completedAt** | `integer` | optional |  |
 | **lastError** | `string` | optional |  |
 | **retryCount** | `integer` | ✅ |  |
-
-
----
-
-## PluginLoadingStrategy
-
-Plugin loading strategy
-
-### Allowed Values
-
-* `eager`
-* `lazy`
-* `parallel`
-* `deferred`
-* `on-demand`
-
-
----
-
-## PluginPerformanceMonitoring
-
-Plugin performance monitoring configuration
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **enabled** | `boolean` | ✅ |  |
-| **metrics** | `Enum<'load-time' \| 'init-time' \| 'memory-usage' \| 'cpu-usage' \| 'api-calls' \| 'error-rate' \| 'cache-hit-rate'>[]` | optional |  |
-| **samplingRate** | `number` | ✅ |  |
-| **reportingInterval** | `integer` | ✅ |  |
-| **budgets** | `{ maxLoadTimeMs?: integer; maxInitTimeMs?: integer; maxMemoryMB?: integer }` | optional |  |
-| **onBudgetViolation** | `Enum<'warn' \| 'error' \| 'ignore'>` | ✅ |  |
-
-
----
-
-## PluginPreloadConfig
-
-Plugin preloading configuration
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **enabled** | `boolean` | ✅ |  |
-| **priority** | `integer` | ✅ |  |
-| **resources** | `Enum<'metadata' \| 'dependencies' \| 'assets' \| 'code' \| 'services'>[]` | optional |  |
-| **conditions** | `{ routes?: string[]; roles?: string[]; deviceType?: Enum<'desktop' \| 'mobile' \| 'tablet'>[]; minNetworkSpeed?: Enum<'slow-2g' \| '2g' \| '3g' \| '4g'> }` | optional |  |
-
-
----
-
-## PluginSandboxing
-
-Plugin sandboxing configuration
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **enabled** | `boolean` | ✅ |  |
-| **scope** | `Enum<'automation-only' \| 'untrusted-only' \| 'all-plugins'>` | ✅ | Which plugins are subject to isolation |
-| **isolationLevel** | `Enum<'none' \| 'process' \| 'vm' \| 'iframe' \| 'web-worker'>` | ✅ |  |
-| **allowedCapabilities** | `string[]` | optional | List of allowed capability IDs |
-| **resourceQuotas** | `{ maxMemoryMB?: integer; maxCpuTimeMs?: integer; maxFileDescriptors?: integer; maxNetworkKBps?: integer }` | optional |  |
-| **permissions** | `{ allowedAPIs?: string[]; allowedPaths?: string[]; allowedEndpoints?: string[]; allowedEnvVars?: string[] }` | optional |  |
-| **ipc** | `{ enabled: boolean; transport: Enum<'message-port' \| 'unix-socket' \| 'tcp' \| 'memory'>; maxMessageSize: integer; timeout: integer; … }` | optional |  |
 
 
 ---

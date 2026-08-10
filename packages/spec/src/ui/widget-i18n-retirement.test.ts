@@ -2,6 +2,11 @@
 
 import { describe, it, expect } from 'vitest';
 
+import {
+  EXPORT_ENTRY_POINTS,
+  exportNamesOf,
+  holdersOf,
+} from '../../scripts/lib/export-origins-testkit';
 // ─── [#5055] the widget-registration and locale vocabularies are RETIRED ────
 //
 // ADR-0049 enforce-or-remove, maintainer ruling 2026-08-06 (window moved from
@@ -108,61 +113,29 @@ describe('[#5055] ui/ widget + i18n family retirement', () => {
     'PageComponentSchema',
   ] as const;
 
-  it('every retired name has ZERO holders on any public entry; the survivors still stand on ./ui', async () => {
-    const ts = (await import('typescript')).default;
-    const { resolve, dirname } = await import('node:path');
-    const { fileURLToPath } = await import('node:url');
-    const { readFileSync } = await import('node:fs');
-
-    const specDir = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
-    // Read the entry list from package.json's exports map so a future entry
-    // cannot silently escape the absence assertions below (the PR #5300 form).
-    const pkg = JSON.parse(readFileSync(resolve(specDir, 'package.json'), 'utf8')) as {
-      exports: Record<string, unknown>;
-    };
-    const entries: Record<string, string> = {};
-    for (const sub of Object.keys(pkg.exports)) {
-      if (sub === '.') entries[sub] = resolve(specDir, 'src/index.ts');
-      else if (/^\.\/[a-z-]+$/.test(sub)) entries[sub] = resolve(specDir, `src/${sub.slice(2)}/index.ts`);
-    }
-    // Anti-vacuity: the enumeration must have found the real surface.
+  it('every retired name has ZERO holders on any public entry; the survivors still stand on ./ui', () => {
+    // Anti-vacuity: the baseline must cover the real surface. (This used to
+    // enumerate package.json's exports map and build its own `ts.createProgram`
+    // right here; `export-origins/` IS that resolution, computed once at build
+    // time and checked in — #4796. `holdersOf` is now the baseline's query, and
+    // `export-origins.test.ts` pins that it discriminates.)
     for (const needed of ['.', './ui', './system', './data', './api']) {
-      expect(Object.keys(entries), `exports map must include ${needed}`).toContain(needed);
+      expect(EXPORT_ENTRY_POINTS, `exports map must include ${needed}`).toContain(needed);
     }
-    expect(Object.keys(entries).length).toBeGreaterThan(10);
-
-    const program = ts.createProgram(Object.values(entries), {
-      module: ts.ModuleKind.ESNext,
-      moduleResolution: ts.ModuleResolutionKind.Bundler,
-      skipLibCheck: true,
-      noEmit: true,
-    });
-    const checker = program.getTypeChecker();
-
-    const exportNamesOf = (sub: string) => {
-      const sf = program.getSourceFile(entries[sub]);
-      const moduleSym = sf && checker.getSymbolAtLocation(sf);
-      // Without this guard a resolution failure makes every absence assertion
-      // pass vacuously — exactly how a gate goes dormant (#4642).
-      expect(moduleSym, `${sub} module symbol must resolve`).toBeTruthy();
-      return checker.getExportsOfModule(moduleSym!).map((s) => s.getName());
-    };
-
-    const byEntry = new Map<string, string[]>();
-    for (const sub of Object.keys(entries)) byEntry.set(sub, exportNamesOf(sub));
+    expect(EXPORT_ENTRY_POINTS.length).toBeGreaterThan(10);
 
     // Anti-vacuity: `./ui` is a large, real surface — so `not.toContain` on it
     // means something.
-    expect(byEntry.get('./ui')!.length, './ui must export a non-trivial surface').toBeGreaterThan(100);
+    expect(exportNamesOf('./ui').length, './ui must export a non-trivial surface').toBeGreaterThan(100);
 
     // ── ABSENCE (every entry, not just ./ui) ──────────────────────────────
     for (const name of [...RETIRED_NAMES, ...RETIRED_PARSED_ALIASES]) {
-      const holders = [...byEntry.entries()].filter(([, names]) => names.includes(name)).map(([sub]) => sub);
+      const holders = holdersOf(name);
       expect(holders, `${name} must have zero holders after #5055`).toEqual([]);
     }
 
     // ── SURVIVAL (on ./ui, where they live) ───────────────────────────────
-    const uiNames = byEntry.get('./ui')!;
+    const uiNames = exportNamesOf('./ui');
     for (const name of MUST_SURVIVE) {
       expect(uiNames, `${name} must SURVIVE this retirement`).toContain(name);
     }

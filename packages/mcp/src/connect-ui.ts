@@ -37,7 +37,7 @@ export const CONNECT_AGENT_PAGE = {
             subtitle:
               'Give any MCP-capable AI client governed access to this environment — ' +
               'every call runs under the caller\'s own permissions and row-level security.',
-            icon: 'bot',
+            // `icon` removed here (#6946): `page:header` never drew one — retired from the spec.
           },
         },
       ],

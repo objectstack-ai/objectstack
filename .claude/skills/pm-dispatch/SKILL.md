@@ -89,6 +89,17 @@ write state only through these signals:
   absent from the issue. Finish the pair or revert the half before you stop;
   the next reader (possibly your own post-compact self) has only GitHub to
   read.
+- **代执行他人指令的关闭/作废,评论里必须带指令出处。** 上面几条管「状态与它的
+  记录成对」;这一条管**理由**:关闭是一次状态变更,而它的**依据**无法从状态机里
+  读回来。并发多席位下,一个没有出处的关闭与一次误操作**在证据上不可区分** ——
+  PR #6668(一份 draft、全绿的 ADR 草案 —— 因未合并,它提案的那个编号从未签发)
+  被兄弟席位无说明关闭,本席读作误扫,重开
+  并发跨席询问;维护者随后说明那是**他本人的指令**,遂按原话重新关闭并把出处附在
+  PR 上。写那行出处要 20 秒,查「这是不是误操作」要一个跨席往返。⇒ 代执行(维护者
+  口头指令、别的座位的裁决、聊天里的一句话)一律留出处三件:**谁的指令、原话、
+  在哪说的**;同理适用于作废、摘标签、回收认领这类**不可从标签反推理由**的动作。
+  (同一个 PR 的另一半沿革 —— 维护者以「没人要这个能力」结案 —— 在 Guardrails 的
+  ADR 条款里,那条讲的是**决定**,本条讲的是**执行记录**。)
 - **写后回读。** PR/issue 正文、评论、标签的写操作**发出后回读校验** —— 一班实测
   四次「写成功但内容不对」全靠回读才抓到:两次裸 ESC 字节被实体化、两次 GitHub
   sanitizer 吞内容(#5885);Auto Label bot 的整组 PUT 还会**冲掉刚打的手工标签**
@@ -118,7 +129,22 @@ done
 # routing labels exist only on the main backlog repo:
 gh label create repo:objectui -R objectstack-ai/objectstack -c fbca04 -d "Lands in objectui (frontend)" || true
 gh label create repo:cloud    -R objectstack-ai/objectstack -c c5def5 -d "Lands in cloud" || true
+# domain lanes — the roster under "Domain lanes"; ⛔ keep the two lists in sync:
+for D in engine-core metadata drivers services identity devx spec spec-surface cli spec-tooling; do
+  gh label create "domain:$D" -R objectstack-ai/objectstack -c bfd4f2 -d "Domain lane — seat card indexed by label:pm:seat" || true
+done
 ```
+
+⛔ **退役的 `domain:*`(`domain:engine`、`domain:ui`)不在上面那行里,也不要加回去**
+—— 重建一个退役标签,就是把一条无主车道放回 GitHub 的自动补全。
+
+⚠️ **为什么这一段以前不存在,以及为什么它不是可选的。** 本块此前**一个 `domain:*`
+都不创建**,只创建 `pm:*` / `finding` / `needs-user-decision` / `repo:*`;而同文的
+label discipline 又规定「未打标签的 issue 任何人都不得认领」,`domain:*` 是分诊座位
+**唯一生产的机器判据**。也就是说这套词表是**承重的,却没有任何一处可执行文本负责
+把它创建出来** —— 现存的域标签全部是历史上手工点出来的,词表与实际标签集之间没有
+任何机械对账,两边各自漂移(#5472 施工现场记录,归挂 #5469)。#5469 发现的两个
+未入表条目就是这个缺口的产物,不是谁一时疏忽。
 
 (Use the GitHub MCP tools instead of `gh` when the CLI is unavailable — the
 protocol is identical.)
@@ -740,9 +766,10 @@ file the fix touches, you have not triaged it yet, and it is not labelable.
 | `domain:drivers` | `packages/drivers/driver-*`(`driver-memory` / `driver-mongodb` / `driver-sql` / `driver-sqlite-wasm`) |
 | `domain:services` | `packages/services/*`、`packages/connectors/*`、`packages/triggers/*`(flow 触发器)、`packages/plugins/plugin-approvals`、`plugin-webhooks`、`plugin-email`、`plugin-reports`、`embedder-openai`、`knowledge-memory`、`knowledge-ragflow` |
 | `domain:identity` | `packages/plugins/plugin-auth`、`plugin-security`、`plugin-sharing`、`plugin-audit` |
-| `domain:devx` | `packages/lint`、`packages/sdui-parser`(仅 lint 消费)、`skills/**`、`content/docs/**`、`apps/docs`、`scripts/`(门禁类) |
+| `domain:devx` | `packages/lint`、`packages/sdui-parser`(仅 lint 消费)、`skills/**`、`content/docs/**`、`apps/docs`、`scripts/`(门禁类)—— 其中 `packages/lint` / `content/docs/**` / `scripts/` 与 `domain:spec-tooling` 按「是否围着 spec 契约转」切分,见 `spec-tooling` 行 |
 | `domain:spec` | `packages/spec` 的**语义面**:schema 形状、`contracts/**`、退役的行为半边、strictness 台账 —— 判据是**接受面变化**,见下「`spec` 一分为二」 |
 | `domain:spec-surface` | `packages/spec` 的**文本面**:describe/JSDoc/墓碑迁移散文/错误 guidance 与 alias 表 —— 校验不变量卡,changeset 恒 patch,见下「`spec` 一分为二」 |
+| `domain:spec-tooling` | `packages/spec` 的**机器面**:`packages/spec/scripts/**`、`packages/spec/docs/**`(契约门禁/生成器);与 `devx` 相交的 `packages/lint` / `scripts/` / `content/docs/**` 三面按判据切分 —— **围着 spec 契约转的工具链**(契约门禁/生成器/lint 规则/报错散文/references 管线)归本域,一般开发工具面留 `devx`(维护者 2026-08-09 裁决,#5469)。⛔ 不碰 `packages/spec/src/**/*.zod.ts` 与 strictness 台账;程序卡 #5163、座位贴 #6018,见下「`spec` 一分为二」 |
 | `domain:cli` | `packages/cli`、`runtime`、`verify`、`qa`、`types`、`packages/rest`、`packages/mcp`、`packages/observability`、`packages/client`、`packages/client-react`(REST 线协议 SDK)、`packages/cloud-connection`、`packages/create-objectstack`、`packages/adapters/*`、`packages/plugins/plugin-hono-server`、`plugin-dev` |
 | (无固定归属,按落点分诊) | `packages/apps/*`(`setup` / `studio` / `account`)、`packages/console`、`examples/*` —— 见下,**这一行是显式点名,不是遗漏** |
 
@@ -768,6 +795,89 @@ updated **by PR** — the taxonomy evolves deliberately, never per-claim.
 routing 用 `repo:*` 表达(rule 4 的座位协议),不另打 `domain:*` —— 域车道是
 「同仓多 PM 并发」的切法,不是第二套仓库标签。
 
+### 词表 —— 在流通的 `domain:*` 标签与它们的座位贴
+
+上面那张表回答「**这个包归哪个域**」;本表回答「**有哪些域标签、谁在座**」。两个
+问题此前只有前者写了下来,后者靠各人记忆,结果是两个条目在表外自己长了四天
+(#5469:`domain:spec-tooling` 在用却不在表内、`domain:ui` 与 `repo:objectui` 重复)。
+⛔ **新增或退役一个 `domain:*`,必须同批改本表** —— 一个在流通、却不在本表的标签,
+就是一条**分诊在往里打、而没有任何座位的过滤器会返回它**的无主车道;反过来,一个
+本表有、实际已无人在座的标签,是两个座位都以为归自己的撞车面。
+
+| `domain:*` | 座位贴 | 上面的包家族表 |
+|:--|:--|:--|
+| `domain:engine-core` | #6019 | ✅ 有行 |
+| `domain:metadata` | #6367 | ✅ 有行 |
+| `domain:drivers` | #6020 | ✅ 有行 |
+| `domain:services` | #6021 | ✅ 有行 |
+| `domain:identity` | #6022 | ✅ 有行 |
+| `domain:devx` | #6023 | ✅ 有行 |
+| `domain:spec` | #6017 | ✅ 有行 |
+| `domain:spec-surface` | #6298 | ✅ 有行 |
+| `domain:cli` | #6024 | ✅ 有行 |
+| `domain:spec-tooling` | #6018 | ✅ 有行(2026-08-09 裁决后补,见下一段) |
+
+**已退役(⛔ 分诊不再打;见到就是误标,按 rule 4 的误标路径上报):**
+
+| 退役标签 | 处置 | 2026-08-09 实测 |
+|:--|:--|:--|
+| `domain:engine` | 已按 #5472 拆为 `engine-core` / `drivers` | 0 单;⚠️ 标签对象仍在 |
+| `domain:ui` | 维护者 2026-08-06 裁决退役 ⇒ 改用 `repo:objectui`,**不设别名** | 0 单(open + closed);⚠️ 标签对象仍在 |
+
+整仓座位是 `repo:*` 而非 `domain:*`:`repo:objectui` #6025、`repo:cloud` #6026。
+`domain:ui` 之所以值得在退役表里单独点名,是因为它正是上一段那条规则被绕过的
+**实例**:规则说 objectui 用 `repo:*` 表达,而标签集里当时已经长出了一个
+`domain:ui`。
+
+⚠️ **两条退役标签的存量都已清零,但两个标签对象都还在仓库标签集里**(2026-08-09
+实测),也就是说在 GitHub 的标签自动补全里仍然选得中。两条的退役指令都写明了删除
+(#5472 的迁移纪律原文「清零后删除旧标签」;`domain:ui` 的 2026-08-06 裁决「即日
+退役」),而两次都停在了「不再打」这一步 —— **清零 ≠ 退役,删除标签对象是单独的
+一步**。本表这两行是它们今天唯一的防线;**删除是 PM 的动作**(dev 侧无删除标签的
+工具),⛔ 删掉之前不要把它们当成不存在。
+
+### `domain:spec-tooling` —— 在册车道,三处争议面已按判据裁定(#5469)
+
+**⚠️ 读法**:本节是**沿革**,不是待办。生效的路由规则在上面的包家族表
+`spec-tooling` / `devx` 两行;本节解释那两行为什么长成那样,以及两条**已被
+事实推翻的旧裁决**为什么不能照抄执行。
+
+维护者 2026-08-06 裁决(#5469,原文引用、未翻译):
+
+> `domain:spec-tooling` 判为 **#5163 存续期的临时 program 车道**,不进 SKILL 包家族
+> 域表;其存量单由分诊按现行域表重标,重标完成后该标签退役
+
+⚠️ **该裁决所依据的前提(「临时、待退役」)在其后三天被反向的事实推翻,所以本节
+记录的是现状,不是那条裁决的执行结果**(2026-08-09 实测):
+
+- 裁决当天 15:03Z(裁决后约 9 小时)**新立了座位贴 #6018**,该席至今在任、经历
+  一次移交、一个任期内落了 9 个 PR;
+- **2026-08-07 维护者批准的 `spec` 拆分**(座位贴 #6298)在本文里写进了
+  `spec-surface` ↔ `spec-tooling` 的分界判据 —— 即维护者本人在裁决次日签发的
+  文本,把它当作活车道在用;
+- 标签仍在被分诊打:当前 **10 单 open**(#6833 / #6797 / #6751 / #6635 / #6350 /
+  #6232 / #6221 / #5828 / #5757 / #5163,其中 #6797、#6350 已 `pm:dispatched`),
+  67 单 closed,最近一次新打在 2026-08-08。
+
+⇒ 该标签是**在册车道,分诊照常打**。
+
+**维护者 2026-08-09 裁决(#5469,取代上面 2026-08-06 那条):判据切分,给行。**
+拖住补行的从来不是「它是否存在」,而是它与 `domain:devx` 的三处文件面重叠未裁 ——
+裁完即补,包家族表的 `spec-tooling` 行就是该裁决的登记:
+
+- **无争议、可直接路由的两处**:`packages/spec/scripts/**`、`packages/spec/docs/**`
+  ⇒ `domain:spec-tooling`。devx 从未声明这两处,依据是 #6018 座位贴的 Scope 段与
+  上面 2026-08-07 的 surface / tooling 分界(tooling 改「围着契约转的机器」)。
+- **曾争议的三处**:`packages/lint`、`content/docs/**`、`scripts/` —— 座位贴 #6018
+  与 #6023 **同时声明**这三处。这不是纸面问题,2026-08-09 实测两侧都在落地:
+  `domain:spec-tooling` 的 #6778 整单落在 `packages/lint/src/`(PR #6831),而同期
+  `domain:devx` 的 #5957 / #5330 / #6381 也落在 `packages/lint`。
+- ⇒ **按「是否围着 spec 契约转」逐卡判**:契约门禁/生成器/lint 规则/报错散文/
+  references 管线 ⇒ `spec-tooling`;一般开发工具面 ⇒ `devx`。这是 anchoring rule
+  在 `packages/spec` 内那条显式例外的**延伸,不是第二套规则** —— 2026-08-07 拆分
+  已写下判据的前半(「tooling 改围着契约转的机器」),本裁决把同一句话铺到这三处。
+  拿不准的按 rule 4 误标路径 FLAG 回分诊,⛔ 不由 dev 代拍。
+
 **`engine` 一分为二(#5472,与 #5095 同批)。** 旧 `domain:engine` 同时覆盖
 objectql + metadata\* + platform-objects + core + formula + 全部 `driver-*`,
 在双射之下**一个 PM 吃不下**(它是全仓最大的一块,且 driver 族的落地节律与
@@ -787,7 +897,8 @@ objectql + metadata\* + platform-objects + core + formula + 全部 `driver-*`,
 文本债持续积压(truth-sweep 审计开采一天可灌 5-10 张)。切分纪律:
 
 - **判据是接受面,不是包、不是 diff 大小。** 这是 anchoring rule 在
-  `packages/spec` 内的**显式例外**:一包两席,按「合法元数据集合变没变」分派 ——
+  `packages/spec` 内的**显式例外**:一包三席(语义 / 文本 / 工具面,工具面
+  判据见下条与表行),前两席按「合法元数据集合变没变」分派 ——
   改动前能过校验的输入,改动后逐字节仍然同判 ⇒ `spec-surface`;否则 `spec`。
   该判据与包归属同样机械(分诊读 diff 落点:语义行 vs 纯文本行)。反向红线:
   **任何改变接受/拒绝行为的卡,不论多小,归 `domain:spec`**(#6245 size S,
@@ -797,7 +908,10 @@ objectql + metadata\* + platform-objects + core + formula + 全部 `driver-*`,
   机器」(门禁/生成器/lint 与 docs 手写页;其席位范围 ⛔ 不碰
   `packages/spec/src/**/*.zod.ts`,与 surface 天然无交集)。同一缺陷两半分治的
   先例:#6146(文档教了一个求值面从未绑定的根 —— surface)与 #6290(lint 一边
-  宣告该根合法一边拒收、还附错误修法 —— tooling 面)。
+  宣告该根合法一边拒收、还附错误修法 —— tooling 面)。与 `devx` 相争的三面
+  (`packages/lint` / `scripts/` / `content/docs/**`)按同一「是否围着 spec
+  契约转」判据切分 —— 维护者 2026-08-09 裁决(#5469),上表 `spec-tooling`
+  行即其登记。
 - **产物随源走**:describe/JSDoc 改动会重生成 `content/docs/references/**` 与
   manifest 的 description 字段 —— 产物变更归触发它的**源 PR**(`check:generated`
   重生成提交,⛔ 手改);同一生成树在飞重生成 >1 张时按 #4675 四步序串行
@@ -1073,6 +1187,16 @@ Prime Directive #10 是一个强力生产者,而循环原本只有「修掉」�
   (发布后修不回);④ 发布说明里需要为它道歉的(含「照文档抄即失败」的首小时
   体验)。改进型、优化、重构、观察类 finding、内部工具、纯展示瑕疵默认**不
   阻塞** —— 坐下一班车。
+- **拆分 / 分票时 `target:*` 随工作走,不随票号留 —— 对每一半重跑一遍上面那条
+  二元判据。** #6806 是 `target:v17` 的 #5495 拆出的引擎侧残余:拆分把**工作**移了
+  出去,发版目标却留在原地,于是板上同时有**一张不会动的卡**(父单的剩余范围已被
+  裁定 parked)和**一张看不见的卡**(真正在兑现 v17 义务的那一半)。查
+  `label:target:v17` 的人两头都读错,而两个错误方向相反、互相掩盖。默认是**继承**
+  (义务跟着工作走);判定某一半不该继承时,**把理由按上面四类阻塞写在那张卡上**
+  (可证伪),⛔ 不默认不带。#6806 正是两面的标本:它正文里写过「why `pm:queue`
+  without `target:v17`」的理由,该理由后来被重判、标签补上,两张卡今天都带
+  `target:v17` —— 写下的理由会被复核,不写的默认不会。生产者不变(分诊座位 /
+  objectui 整仓座位),拆分本来就是它做的,本条只是给它加一个必答项。
 - **每个 backlog 恰好一个生产者**(与 `domain:*` 同款单一生产者纪律,只是把
   作用域切对 —— 一个生产者管一个 backlog,不是一个生产者管全部):
   - **objectstack 主 backlog → 分诊座位**:step 0 分诊 defect 类新单时顺手判;
@@ -1224,6 +1348,22 @@ looking dispatchable to every sweep, including another PM's; whatever you
 learned about it is worthless until it is on the issue. Rule: when step 3 pushes
 an issue to a later round, record the known trap on it before the round ends.
 
+**维护者豁免同文件串行时,替代纪律是四条,⛔ 不是「放开」。** 上一段的默认是硬串
+行;豁免只在维护者明示时发生,而被豁免掉的是**排队**,不是防撞 —— 少了替代纪律,
+豁免就是把批次独立性直接删掉。2026-08-08/09 单班实测:#5543 / #6457 / #5929 三张卡
+同时改 `packages/objectql/src/engine.ts`,下面四条换来**三卡零冲突**:
+
+1. **互斥区域申报** —— 每张卡的认领评论把文件面写到**区域**级(函数 / 段落),
+   不止文件名。与座位贴「热文件串行队」的区域列是同一份判据,两处分工不同:那里
+   记的是**跨轮常设**的排队顺序,这里记的是**本轮**的不相交证明;
+2. **开 PR 前合一次 `main`**;
+3. **兄弟卡落地后再合一次** —— 三卡的第二次合并各自发生在对方合入之后;
+4. **冲突交由合并队列仲裁,⛔ PM 不手动排序** —— 队列本来就按合并后的树重算,
+   手排是拿一次人工猜测换掉一次机械判定。
+
+⛔ 豁免不外溢:认领协议、门禁、批次独立性的其余判据一条不减;没有维护者明示豁免
+时,默认仍是上一段的「不同轮次,无例外」。
+
 **阻塞解除后要给延后的那一单重新定价 —— 放回队列不等于原价放回。** 上一段管
 「延后当轮就把坑记到被延后的 issue 上」;这一段管**前一单合入之后**:后一单的成本
 模型已经变了,而且方向不止一个。两个动作配对:
@@ -1320,7 +1460,12 @@ execute as **one atomic pair**, in order:
    > Worktree: `<repo>-issue-<n>`
    > Domain: `domain:<x>`
    > File surface: `<directories you expect to touch>` (stop on breach; explain in the report)
+   > Container & model: `<S 级机械卡 / M / L>`, `mode:subagent | mode:cloud`, `model: sonnet | opus`
    > Serial constraints cleared: `<name the same-file/same-package predecessor PRs and in-flight claims; "none" if none>`
+
+   「Container & model」行的判读规则见「Resource limits」的容器判定条与 step 5 的
+   「Model tiering」—— 尺寸与档位是同一次判读的两个输出,写在一行里,⛔ 不要
+   只写其中一个。
 
    最后一行是 services 车道一班 28 PR 零合并冲突的机制(#5885):把「查过串行
    约束」从内心活动变成落在评论里的读数,竞态复读与串行判断都成了 30 秒的事 ——
@@ -1386,26 +1531,108 @@ commits.
 
 One `Agent` call per issue, `subagent_type: "os-dev"` (fall back to
 `general-purpose` with the same prompt if the custom agent isn't loaded), run
-in parallel in the background. **Model split (maintainer policy): pass
-`model: "opus"` on every dev dispatch.** The PM session itself stays on the
-stronger orchestration model — triage, review, and decision framing are where
-its judgment pays; implementation goes to Opus. Prompt template — fill every placeholder, paste
-the full issue body, never a summary:
+in parallel in the background.
+
+#### Model tiering(维护者 2026-08-09 批准 —— 取代旧的「一律 opus」)
+
+⚠️ **这条改写了一条旧的绝对规则,读到这里请以本节为准。** 本节此前写的是
+「**Model split (maintainer policy): pass `model: "opus"` on every dev dispatch**」,
+2026-08-08 的交接又把它复述成「所有派发至少 opus」。**那个绝对形式已废止** ——
+凡在别处(旧交接笔记、座位贴、他人转述)读到「所有派发一律/至少 opus」,一律以
+本节覆盖它,⛔ 不要两条并存着理解成「opus 是下限、sonnet 是违规」。授权出处是
+维护者 2026-08-09 的在席批准(原话引用见 #6863 正文与本卡 PR)。
+
+**新政策:按卡的类别分档,`model` 逐次派发显式传参,永不省略。**
+
+- **S 级机械卡 ⇒ `model: "sonnet"`。** 判据是「正确性由门禁农场机械判定」而非
+  「改动小」:单文件散文 / 注释修正、一处新增(one-spread additions)、死词表行
+  删除、alias / tombstone 台账维护。这类卡的失败模式是漏跑门,不是判断失误 ——
+  而漏跑门是 CI 抓的,不是模型档位抓的。
+- **M / L 卡、裁决实施卡、多面语义卡,以及任何带设计判断的卡 ⇒ `model: "opus"`。**
+  边界情况上抬不下压:**拿不准就派 opus**。一次错派 sonnet 的返工,贵过它省下的
+  那点额度。
+- PM 座位自己留在更强的编排档:分诊、复核、决策成框才是它的判断付费的地方。
+
+**档位必须显式传参,不能靠定义里的 pin 兜底。** 实测的解析顺序有四级(2026-08-09
+对照 Claude Code subagent 文档核过):`CLAUDE_CODE_SUBAGENT_MODEL` 环境变量 →
+**逐次派发的 `model` 参数** → agent 定义的 `model:` frontmatter → 主会话模型。
+两个方向的后果都要记住:
+
+- `.claude/agents/os-dev.md` 的 `model: opus`(#6686 / PR #6688,由 #6836 的
+  `check:agent-model-declared` 守着)**不会**否决你传的 `model: "sonnet"` ——
+  参数在 frontmatter 之上,本节的分档因此确实生效,不是一纸空文。
+- 反过来,那条 pin 只管**你什么都不传**的情形。省略 `model` 不等于「按 os-dev 的
+  opus 走」这句话今天恰好成立,但它成立的理由是那行 pin,而 pin 的历史正是被删过
+  一次(#6686:四个 dev 连坐同一堵额度墙,三个留下未验证的 worktree)。所以
+  **每次派发都显式写 `model`**,让档位是这次派发的属性,而不是某个文件此刻的状态。
+- ⚠️ `CLAUDE_CODE_SUBAGENT_MODEL` 压在两者之上。本容器当前**未设置**(2026-08-09
+  实测),但它一旦被设,会静默盖掉你所有的分档决定且仓内无任何显示。另有一条静默
+  降级:传入的档位若被组织的 `availableModels` 白名单挡下,回退的是**继承的模型**,
+  不是 frontmatter 的 pin。
+
+**分档写进认领评论**(step 4 的容器判定行已经在给尺寸分级,顺手带上档位),这样
+选择可审计、交接会话不用重判。
+
+#### Prompt template
+
+Fill every placeholder. **默认 ⛔ 不再整段粘贴 issue 正文** —— 派发词让 dev 自己去
+GitHub 读全文与全部评论(premise-first 本来就强制它读一遍),正文只粘那些「GitHub
+上读不到、或读到了也会被读错」的部分:
+
+- **裁决原文逐字引用**(中文不翻译);
+- **「裁决 / PM 机制假设 / PM 建议的路线」三分区**(下面那一段说明了为什么这个
+  分区不能省,以及第三块是怎么补上的);
+- **卡特定条款**与**同日变更**(same-day churn)行。
+
+⚠️ **代价与缓解:notes 12 的读取截断。** 长正文经工具读取可能被静默截断,粘贴时
+这个风险由 PM 承担,改为自读后落到 dev 身上 —— 所以派发词**必须**要求 dev 自查
+正文完整性(读到疑似截断就二次读取确认),这一条不是可选的礼貌话。先例:#6776
+的派发即按此形运行并成功。
+
+⛔ **标准非协商条款不再逐条抄进派发词。** worktree / 分支纪律、build-first、
+filter 方向、ADR-0112 拒收断言、authorable-surface 锚点与 `gen:schema` MERGE 态禁令、
+foreground 姿态、英文政策、报告契约 —— 这些已**一次性下沉进
+`.claude/agents/os-dev.md`**(生产者侧修复,正是本文自己引用的 PD#12 直觉)。派发词
+只带**增量**。下面模板里保留的每一条,要么是逐卡可变的,要么是评审侧对账时点名要
+看的:
 
 ```
 Your task is issue {backlog_repo}#{n}. The code lands in {target_repo}
 (from the issue's repo:* routing label; same repo when unlabeled).
 
 ISSUE TITLE: {title}
-ISSUE BODY:
-{body}
+
+⛔ READ THE ISSUE YOURSELF — this prompt does NOT contain the body.
+Read {backlog_repo}#{n}'s full body AND all of its comments on GitHub before
+your first edit (premise-first already requires that read; this just makes it
+the only source). Then VERIFY YOU GOT THE WHOLE BODY: long bodies can be
+silently truncated by the read tool, and a truncated body reads exactly like a
+short one. If the text ends mid-sentence, mid-list, or mid-code-fence, or a
+section the title implies is simply absent — read it a second time before
+acting on it. Report the truncation if it persists; ⛔ never implement from a
+body you are not sure is complete.
 
 {on rework rounds only:}
 PREVIOUS ATTEMPT REVIEW — fix all of these before returning:
 {feedback}
 
-Follow your operating procedure (you are the os-dev agent). Non-negotiables:
-- The ISSUE BODY above is a LEAD, not a spec: verify its premise against
+裁决(不可重裁 —— 执行,不重开):
+{ruling quotes, verbatim, Chinese untranslated}
+
+PM 机制假设(须实测,鼓励证伪):
+{the PM's own guesses about how the code works}
+
+PM 建议的路线(可选 —— 实测优先,拒绝它不需要理由之外的许可):
+{any implementation option / assertion shape / exclusion the PM merely suggests}
+
+Card-specific clauses:
+{only the conditional standard clauses whose 适用判据 this card hits, plus any
+same-day-churn line — see the paragraphs below this template}
+
+Follow your operating procedure (you are the os-dev agent) — its standard
+non-negotiables are binding whether or not they appear above. Deltas for this
+card:
+- The ISSUE BODY is a LEAD, not a spec: verify its premise against
   origin/main BEFORE implementing. If the premise no longer holds (already
   fixed, wrong attribution, capability already exists), return
   premise_still_valid: false with evidence and NO PR — that is a successful
@@ -1413,46 +1640,54 @@ Follow your operating procedure (you are the os-dev agent). Non-negotiables:
 - Work in {target_repo}: branch claude/issue-{n}-{slug} off origin/main,
   in a DEDICATED worktree of that repo.
 - The issue is already claimed; do not touch its assignee.
-- Deliver: implementation + tests + changeset, pushed, as a DRAFT PR in
-  {target_repo} whose body starts with "Fixes {backlog_repo}#{n}".
-  Never merge anything. 如果你只实现了这张卡的一半(另一半 needs_decision 待裁,
-  或按范围被有意排除),首行改写成 "Part of {backlog_repo}#{n}" 并在正文说明留下
-  的是哪一半 —— ⛔ 不要用 `Fixes` 关掉一张还在决策箱里的卡。
-- If the issue underspecifies a decision that changes the public contract
-  (spec schema, API shape, naming), STOP and return status "needs_decision"
-  with your open questions — do not guess.
-- Any NEW fake engine your tests introduce must open its `delete()` with
-  `assertEngineDeleteDispatch(options)` from `@objectstack/objectql`, never a
-  hand-mirrored `if (!where?.id && !multi)` — `check:engine-double-contract`
-  went red on four dev agents' new tests in two days (#5173 / #5191 / #5192 /
-  #5584), one CI lap each. Copy a pinned fake, don't write the guard.
-- Before opening the PR, run the gate list ENUMERATED FROM
-  `.github/workflows/lint.yml` (and the workflow files it names) — every
-  `check:*` step, one by one. ⛔ 禁止凭记忆挑门:#5738 的首轮 CI 红就是本地跑了
-  六个门却漏掉不在记忆清单里的 `check:engine-double-contract`;改为「从 lint.yml
-  逐个列门跑全」后被后续四个 dev 继承,再无门红。门禁族跑在 ESLint / TypeScript
-  Type Check 两个 job 里(Operational notes 10)。
-- 新 worktree 里的**第一条验证命令是 build,不是 typecheck / test**:`pnpm install`
-  之后先把被改包的**依赖闭包**建起来(`pnpm --filter '@objectstack/你的包^...' build`,
-  后缀 `^...` = 它依赖的包)。跳过这步,tsc 读到的是别人留下的陈旧 `dist/*.d.ts`,
-  假红假绿两个方向都会骗人(#6371)。
-- 「消费半径清扫」的过滤器**方向是前缀**:`pnpm --filter '...@objectstack/你的包'`
-  才是**下游消费者**;`'@objectstack/你的包...'`(后缀)扫的是上游依赖,方向反了。
-  签名收窄 / 导出类型变更 / 契约收紧打到的永远是下游。报告里写「N 个包全绿」时
-  **必须同时写清用的哪个方向**,否则这句话无法复核(#6218)。
-- 跨包类型改动(签名收窄、导出类型变更)光贴一个绿**不构成**清扫证据:附一次
-  反向验证 —— 临时塞一个新类型不认的键、确认它会红、再还原 —— 证明你确实读到了
-  新的 `.d.ts`。
-- If your change touches `packages/spec`: spec build(`gen:schema`)会**重写锚点**
-  `authorable-surface.base.json` —— 那是预期产物,⛔ 不要 revert、不要手改;
-  何时写/往哪写见 #5358/#5370,字节门见 #4650。
-- Everything you post to GitHub — the PR title and body, and any issues you
-  file for out-of-scope findings — is written in ENGLISH (maintainer policy,
-  2026-08-06). Quote existing Chinese rulings verbatim without translating.
+- Local gates for this card: {name the gate families this card's surface
+  touches, e.g. check:engine-double-contract for a new fake engine}. Run those
+  plus your build closure and the affected packages' suites — ⛔ do NOT
+  enumerate and run the whole `lint.yml` farm locally; CI runs it once, and you
+  wait for CI to converge before reporting either way.
 Return ONLY the JSON report defined in your agent definition.
 ```
 
-**上面三条验证条款治的是同一个病:验证动作看起来做了,实际对被测风险失明。**
+**「读 GitHub」比「粘正文」多担一个风险,少担两个 —— 这笔交换是有方向的。**
+粘贴正文时 PM 替 dev 读了一遍,截断风险归 PM(notes 12);改为自读之后,截断风险
+归 dev,所以模板里那段自查是**风险转移的对价**,⛔ 不是可以省的客套。换来的是:
+派发词不再随卡的长度线性膨胀,而且 dev 读到的是**当下**的 issue —— 包括派发之后
+才追加的评论和维护者补充,那正是粘贴式派发永远看不见的一面。
+
+**卡特定条款 = 有「适用判据」的那几条。** 下面几段里带「适用判据」的标准条款
+(多面组件的共享一致性覆盖、拒收类用例的 `code`+`status`、过滤 / 谓词语义的编译面
+清单)**仍然逐卡判定、命中才抄进派发词** —— 它们是条件性的,不是通用的,所以没有
+下沉进 os-dev 定义。真正下沉的是**无条件那一批**(worktree、build-first、filter
+方向、锚点与 `gen:schema`、英文政策、报告契约),它们对每张卡都成立,重复抄写只是
+在为同一句话反复付费。
+
+**派发令里的清单、路径、行号,一律在派发那一刻从树上取 —— ⛔ 不从卡片、上一次
+派发或记忆里抄。** 模板里那行「Local gates for this card」要 PM 点名门禁族,而门禁清单
+是**当天就会过期**的东西:2026-08-08/09 单班之内它长了两次 —— #6672 加
+`check:kernel-hook-pairs`、#6661 加 `check:app-nav-i18n`(两条今天都在 `lint.yml`
+里)。所以派发流程里写**取数命令**,不写清单本身:
+
+```bash
+grep -rn 'pnpm.*check:' .github/workflows/*.yml   # 门禁清单当场取数
+```
+
+⛔ **取数的是 PM,不是 dev** —— 产出是「本卡该跑的**那几族**」,填进模板那一行。
+本条 ⛔ 不是让 dev 去本地枚举全 farm:那条(#5738 era)已被 #6871 的「Local
+verification scope」收窄否掉,farm 归 CI 跑一次。两条合起来才成立 —— dev 只跑被
+点名的几族,所以**点名的准确性从此是 PM 独担的**,凭记忆点名等于把那一族漏进 CI。
+
+⚠️ 连「门禁清单 = `lint.yml`」这句本身都是记忆形状的断言:本卡实测 61 条
+`pnpm check:*` 在 `lint.yml`,另有 7 条散在 `ci.yml` / `spec-liveness-check.yml` /
+`validate-deps.yml` / `release.yml` / `showcase-smoke.yml`。同形错误刚在 #6865 上
+发生过 —— 转述进派发令的六个 required-context 名里,**四个其实住在 `ci.yml`**。
+⇒ **卡片或分诊评论里的行级断言,转述进派发令之前必须自己重验一遍**:#6673 的
+「第三处提示串在 `protocol.ts:4780`」实测落在另一个函数、另一条轴上。这与 step 3
+「解锁那一刻」的 #6413(15 分钟前贴出的行号只匹配合并前的父提交)、「入队与落地 A」
+的 #6492(一份清单的第二份拷贝)、编译面清单那句「⚠️ 派发前复核一遍再抄」是**同
+一条纪律的四个位置**;派发令是它最后一道出口,漏在这里就直接变成 dev 的一轮返工。
+
+**下沉进 os-dev 定义的那三条验证条款(build-first、filter 方向、跨包反向验证)治
+的是同一个病:验证动作看起来做了,实际对被测风险失明。**
 两种失明,成因不同、处方不同,一个 PR 可以同时踩中(#6210 就是),而且叠加之后
 症状互相掩盖 —— 方向扫反 + 产物陈旧,得到的「25 个包全绿」既不相关也不新鲜:
 
@@ -1471,6 +1706,11 @@ Return ONLY the JSON report defined in your agent definition.
   「25 个包全绿」,CI 全仓 typecheck 随即红在 `@objectstack/dogfood`(120 个任务
   118 绿)—— 那句「全绿」在方法论上与被测风险完全无关,却读起来像一次充分的清扫。
 
+⛔ **这两段解释留在 PM 侧,条款正文不在这里。** 三条条款的可执行措辞已住进
+`.claude/agents/os-dev.md`(「Standard clauses live HERE」一节),派发词⛔ 不再抄;
+留在本文的是**为什么**,因为它是 PM 复核侧的判据来源 —— step 7 那条「N 个包全绿,
+问清方向与时序」要问得出口,PM 得先认识这个病。
+
 **破坏性 / 契约收紧类改动以全仓门禁为准**;局部闭包只能用来加速迭代,⛔ 不能
 用来下结论。这一族的第三个成员是拒收用例的恒绿(#6142,见 step 7 复核清单)——
 三者的共同形状是「绿色输出 ≠ 该绿证明了被测风险」。
@@ -1483,10 +1723,39 @@ dev 都用实测顶回并保住了裁决意图 —— 因为派发令把两类�
 
 - **「裁决(不可重裁)」**:维护者/PM 已拍板的方向与语义 —— dev 执行,不重开;
 - **「PM 机制假设(须实测,鼓励证伪)」**:PM 对代码机制的判断 —— dev 动手前
-  验证,证伪了照实报告并按裁决意图换实现路径,⛔ 不许为了顺从假设硬做。
+  验证,证伪了照实报告并按裁决意图换实现路径,⛔ 不许为了顺从假设硬做;
+- **「PM 建议的路线(可选,实测优先)」**:PM 顺手给的实现选项、断言写法、排除面
+  —— dev 有更好的就换,⛔ 不得因为「派发令写了」而照做。
 
 不分区块的派发令里,机制假设穿着裁决的衣服,dev 要么盲从错误假设、要么连裁决
 一起重开 —— 两个方向都是返工。
+
+**第三块是 2026-08-09 单班补的:前两块漏掉了最便宜的那一类 —— PM 顺口给的一个
+「看起来无害」的选项。** 同一班被证伪两次,两次 dev 拒绝都是对的:#6865 的卡自带
+一条「断言 job 上没有 `if:`」的验收写法,照做会把**四个正确的 job** 判红;#6893 的
+派发令把「把 `content/docs/releases/**` 排除出审计范围」写成「亦可辩护」的选项,
+而那正是 #4920 明确否决的 option A —— `scripts/docs-audit/check-audit-scope.mjs`
+在该目录**离开审计范围时直接 `process.exit(1)`**,脚本注释逐字点了 #4920 与 #6893。
+⇒ **把一个便宜选项写成已裁定,恰好招来相反的结果**:dev 要么照做产出一个红,要么
+为了顶回来花掉一轮往返。裁决那一块只写真裁决,凡是「我觉得可以这样」的一律降到
+第三块 —— 措辞的成本是零,读错的成本是一轮。
+
+**文件面要写「预期落点 + 生产者在别包时怎么办」,⛔ 不能只写一个路径名。** 这是
+第二块最常见、也最贵的一个实例。#5586 的派发令把文件面锚在**消费者**
+`packages/core/src/utils/filter-tokens.ts`,而那条文法的**生产者**在
+`packages/spec/src/data/context-tokens.zod.ts`;dev 在生产者侧修是对的(os-dev 的
+contract-first 条款本来就要求它这么做),因而突破了申报的文件面。**只写一个路径名
+的派发令,是在要求 dev 在「守约」与「修对」之间二选一** —— 而按它自己的定义,那
+两条本该是同一条。所以文件面写成两句:
+
+> 预期落点是 `<X>`;若实测表明真正的生产者在别包,**报备后按生产者侧修**(落点与
+> 理由写进报告和 PR 正文),⛔ 不在消费者侧打补丁。
+
+PM 侧的对价是**事后补声明**:#5586 那次判偏离成立,按 #6532 先例补了跨席声明
+(#6017)。要一起记住的机械事实是**跨包常常等于跨车道** —— 这一例的消费者在
+`domain:engine-core`、生产者在 `packages/spec`(「shared contract surfaces have one
+owner」恒归 spec 座位),所以补的是**跨座位**声明,而不是随手越界;走的路径是
+rule 4 的跨域例外与「跨座位转移协议」,本条不另造机制。
 
 **Same-day churn on the issue's files goes INTO the prompt.** Step 1's
 stale-premise check protects against issues that aged; the same-day variant is
@@ -1703,8 +1972,13 @@ PM 先给每张候选卡判定验证重量,命中任一判据即**单独派一�
   ~10 分钟的验证管线。
 - **轻卡不升舱**:S/M 级(文档、JSDoc、单文件面)留 `mode:subagent` 共享容器
   —— 为轻卡单开容器是纯开销,规则的两个方向同等硬。
-- **判定写进认领评论**(「容器判定:S 级,`mode:subagent` 共享容器」/「L 级,
-  `mode:cloud` 单容器」),台账可审计,交接会话不用重判。
+- **判定写进认领评论,并带上模型档位**(step 5「Model tiering」)。这一行现在同时
+  承载两个决定 —— 尺寸/容器 与 档位 —— 因为两者用的是同一次判读,分开写只会漂移:
+  「容器判定:S 级机械卡,`mode:subagent` 共享容器,`model: sonnet`」/
+  「L 级,`mode:cloud` 单容器,`model: opus`」。台账可审计:事后复盘一张卡为什么
+  跑成那样,读认领评论就够,不必去猜当时传了什么参数。**S 级但不机械**(判断面在
+  设计上,不在门禁上)照样写 `model: opus` —— 尺寸不是档位的充分判据,别让这一行
+  的「S 级」自动推出 sonnet。
 - 实测背景(2026-08-06/07 夜班):9 dev 共享一容器,重验证在 flock 后串行,
   一张重卡(#5837 级,数十分钟级验证管线)拖长**整批**墙钟;把它单容器化,
   批内轻卡不再排它的队,重卡自己也不用和八个邻居分内存。
@@ -1935,6 +2209,14 @@ statement that no live subtask remains. Four agents stalled 6 times across the
   immediately with that posture line attached; ⛔ do not wait out any silence
   threshold (the cloud-mode ~2 h below): a threshold is for *no* answer, not for
   an answer that says the agent stopped.
+- **每一次复位比上一次更具体 —— 原样重发同一句话不算一次复位。** 2026-08-09 单班
+  三个 dev 各自以「等我挂的后台定时器唤醒」结束回合(**自己挂的定时器不会唤醒
+  自己**:完成通知本身就是「没有活的子任务了」这句声明)。两个在**点名该机制**的
+  第一枪探针后恢复;第三个**在被告知之后立刻重复了同一个停摆**,直到第三枪
+  **点名下一个该发的工具调用**、并**明令禁止任何后台等待**才恢复。所以复位有梯度:
+  ① 复述执行姿态 → ② 点名下一个工具调用 + 明令禁止后台等待 → ③ 判 unreliable
+  (下一条)。把 ① 原样再发一遍只是把同一个失败重放一次,却会把三次停摆的计数
+  用掉一次 —— 梯度不是礼貌,是让第三次真的携带新信息。
 - **A third stall means unreliable** — re-dispatch a fresh agent onto that
   branch under "Handing off an interrupted dev" in step 5 (worktree already exists,
   read every existing commit first, re-run the verification in full, claim and
@@ -1998,6 +2280,18 @@ Routine 的取舍是:凡验证管线可能超过一个 fire 的活,**一开始�
 (2026-08-05 的 #5550/#5556 即此路径落地并合并)。顺序保护:agent 可能还
 活着时**先探活、后翻 ready** —— 抢先翻会与它的收尾推送竞态。
 
+**死因可以是舰队级的,那一格里探活半边同时不可用。** 2026-08-08/09 单班两次
+**全账号 token 断粮**(~11:0x–12:10Z、~16:0x–17:1x),每次一口气打死四个在飞
+dev —— 没有可探的对面,也没有可发的探针,三条件里能取的读数只剩 (a) 与 (c)。四张卡
+**零信息损失**的唯一原因是**分支已推、draft PR 已开、且 PR 正文自带验证证据** ——
+PM 走本条直接验收照常收口(报告丢了,PR body 就是报告)。⇒「推分支 → 开 draft PR
+→ 再等 CI 收敛」这个顺序是**保险,不是效率优化**:agent 的死亡是常态而非异常,
+而它可以在任意时刻、成批地发生。⛔ 但这**不**推出「把该顺序抄进派发令」:它是
+无条件条款,已住在 `.claude/agents/os-dev.md` 的 Definition of done
+(push → draft PR → 等 CI 收敛 → 交报告),按 step 5 的下沉纪律派发令只带增量;
+本条是它在 PM 侧的**读法** —— 知道为什么那个顺序值钱,才不会在 dev 报告缺席时
+误判为「要重派」。
+
 ### 7. Review each report
 
 You are the reviewer of record. For each report, verify against GitHub — not
@@ -2017,6 +2311,11 @@ against the report's own claims:
   notes 10)。dev 可能在自己的 ESLint 还没出结论时就交了「本地绿」的报告 ——
   #5584 的 advisory 红就是这样漏过复核、红着合并进 main 的;os-dev 定义侧已要求
   「PR 开出后等 CI 收敛再交报告」,本条是它在复核侧的对账。
+  ⚠️ **本地门禁改为按面收窄之后(step 5 / os-dev「Local verification scope」),这条
+  从「双保险的第二道」变成了唯一的一道** —— dev 不再在本地跑全 farm,所以「一个不
+  显眼的门在 CI 转红」现在是**预期内**的形态,而不是异常。⛔ 因此不要因为报告写了
+  「本地全绿」就跳过亲核 job 结论:那句话现在覆盖的面本来就比以前小。多花的那一
+  个 push-fix 回合是这笔交换**已经付过**的价钱,不是 REWORK 的理由;红着合并才是。
 - The diff plausibly satisfies the issue's acceptance criteria.
 - **收益穿过它必经的那道边界之后还在吗?** 判据(不是每单都做):这批工作的价值主张
   是否**依赖某个下游组件如实转发** —— HTTP 错误信封、序列化、日志汇聚、跨进程传输。
@@ -2276,7 +2575,12 @@ PM 看到 —— 感知通道缺口实测)。四条边界:
 - ⛔ 不订阅 dev 交报告前的 PR —— 报告前是 dev 的领地,双驾驶员互踩;
 - 订阅是**感知补充**,不替代 flip 定点(上一段一字不变:CI success webhook
   依旧不可靠,转 ready 仍由定点驱动);
-- MERGED / 关闭即退订(`unsubscribe_pr_activity`);
+- **MERGED / 关闭即退订(`unsubscribe_pr_activity`),同刻把 `mode:cloud` 派出的
+  那个会话 `archive_session`。** 归档是 ACCEPT 收尾的**固定动作序列**的一环,与
+  「flip / 跟到 MERGED」同级,不是可选的清理:触发条件是**卡的终局**(PR MERGED
+  或卡作废),不是「dev 交了报告」。实测代价:维护者问起「派出的云卡片合并以后
+  是否应该关闭」时,一个座位已累积 **11 个**已完成但未归档的空转容器 —— 它们不
+  报错、不占队列、在任何看板上都不显示,所以只会被问出来,不会被发现;
 - 仅会话型座位可用 —— webhook 投进订阅它的那个会话,Routine 座位每 fire 新
   会话、收不到,维持轮询姿态。暂停/交接时清点在挂的订阅并写进座位贴,⛔ 不留
   孤儿订阅。
@@ -2504,6 +2808,30 @@ area; that is the loop working, not failing):
 - **release blockers** — open `target:<major>` count and trend(归零 = 可发版;
   清板协议见「发版板」)。
 
+**波次收工点 —— 会话型座位的压缩节奏(维护者 2026-08-09 裁定,#6902 评论)。**
+班内节奏是「一波任务处理完 → 收工存档 → `/compact` → 再继续」,⛔ 不是一直跑到
+被自动压缩。成本依据(#6806 云卡在飞约 2 小时的读数):`cache_read` **10.18M**,
+未命中 input 仅 **6.9K** —— 边际每轮成本 ∝ 已积累上下文长度,随班龄单调增长;而
+**「不压缩」并不保全上下文**:自动压缩是一次**计划外的、由机器在任意时点执行的
+自我交班**,时点不可选、裁剪者不知道哪些判断链重要。计划内压缩在两个维度上严格
+占优(时点取在飞归零,裁剪者是知道轻重的在任 PM)。四步,顺序有含义:
+
+1. **收工点 = 在飞归零** —— 上一张 MERGED + 云卡 `archive_session` + 退订、决策箱
+   清空。⛔ 不在 step 7 复核中途压缩;
+2. **收工存档 = 把任何只存在于上下文里的判断 flush 到 GitHub**(座位贴终检到现值)。
+   这本来就是「状态变更不过夜」的既有义务,此处只是清欠账,边际成本 ≈ 0;
+3. **`/compact` 由维护者执行** —— agent 无法自压,这是机制现实,不是分工偏好;
+4. **压缩后再派下一波第一张,⛔ 不抢派** —— 派发令、认领、竞态复读产生的上下文
+   属于新一波,不该生出来就立刻被摘要掉。
+
+**换人轮换降级为班末动作**(换视角带来的免费证伪 —— step 5「dev 证伪 PM」那条的
+PM 侧对偶),不再是班内节奏:同席压缩与换人的 token 账等价,但压缩**保全会话
+绑定** —— PR 订阅、`send_later` 自绑定定时器、座位贴登记的会话 ID、对云卡的父子
+关系全部不动,三处同笔的接管协议也免了。**Routine 座位不适用**:它每 fire 一个
+新会话,本来就是从 GitHub 重建(见「座位 Routine 化」)。本条唯一的前提是本文
+开篇那条不变量 —— **GitHub 恒为唯一权威,上下文只是工作缓存**;它失守时,压缩就
+从「丢缓存」退化为「丢判断」。
+
 **座位 Routine 没有交互通道。** fresh-session fire 没有对话对面的人,轮次报告
 因此走 Routine 的**完成通知**(`notifications`,fresh-session Routine 专有;
 座位 Routine 创建时就该开)。需要留档的结论 —— 裁决、否决窗口项、分诊理由 ——
@@ -2585,7 +2913,8 @@ Stop the loop and report when any of these hits:
 - Every dev agent works in its **own worktree per repo** (enforced by
   `guard-main-checkout.sh`; the os-dev definition repeats it).
 - Parallelism is capped by `batch`. Dev agents for one batch must be
-  file-disjoint by construction (step 3).
+  file-disjoint by construction (step 3) —— 唯一的松动是**维护者明示豁免**同文件
+  串行时的替代四条(step 3),那条路径要求申报降到**区域**级,不是取消不相交。
 - **分诊座位永不认领、永不派发、永不写代码** —— 它的产出只有标签、拆分、审计
   评论(rule 4)。**执行座位只在自己那一个 `domain:*` 车道里认领**,唯一例外是
   分诊座位指定的跨域例外单(且必须申报文件面 + 跑定向在飞检查)。

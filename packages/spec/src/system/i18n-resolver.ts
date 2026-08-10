@@ -1815,6 +1815,19 @@ export function resolveMetadataFormLabels<T extends Record<string, any>>(
     next.sections = form.sections.map(translateSection);
   }
   // Legacy alias — some forms use `groups` instead of `sections`.
+  //
+  // KEPT after #6926 folded `groups` onto `sections` at the producer, and the
+  // measurement is why. This helper takes ANY form-shaped object (`T extends
+  // Record<string, any>`), and it is exported: its one in-repo caller
+  // (`rest-server.ts` translating `getMetaTypes()` entries) now feeds it
+  // post-parse forms from `METADATA_FORM_REGISTRY`, all of them `defineForm`
+  // outputs, so for THAT caller the branch is unreachable — but a stored
+  // `sys_metadata` body still carries the authored key (`saveMetaItem` keeps
+  // the body verbatim and the read replays the ADR-0087 conversion chain, not
+  // a zod parse), so a caller handing this a pre-parse form is not a
+  // hypothetical. Deleting the branch would silently drop translations for
+  // exactly those forms — the same "measured one consumer, missed the other"
+  // mistake #6926 was filed for. It retires when the stored shape folds too.
   if (Array.isArray(form.groups)) {
     next.groups = form.groups.map(translateSection);
   }

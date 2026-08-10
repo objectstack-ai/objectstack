@@ -48,8 +48,16 @@
  *   • CREATING A BRAND-NEW ITEM (`allowRuntimeCreate`) — still open for all
  *     nine, deliberately: no code-shipped artifact is being shadowed. The
  *     Studio "save a new view of the world" flows keep working.
- *   • The env-var escape hatch (`OS_METADATA_WRITABLE`) — untouched; an
- *     operator can still opt a type back in at runtime, per ADR-0005.
+ *     [#6190, 2026-08-09] Narrowed by one dimension since: still open, but
+ *     ENV-WIDE only. An org-scoped brand-new item of these nine is refused,
+ *     because `loadMetaFromDb` can never read such a row back — the write
+ *     succeeded and the item vanished at the next restart. See the paired
+ *     cases below and `protocol.org-scoped-write-refused.test.ts`.
+ *   • The env-var escape hatch (`OS_METADATA_WRITABLE`) — untouched for the
+ *     overlay dimension; an operator can still opt a type back in at runtime,
+ *     per ADR-0005. [#6190] It does NOT unlock the ORG dimension: the hatch
+ *     unlocks the write, not the read, so honouring it there would re-open the
+ *     phantom in the deployments most likely to have one.
  *
  * Known write-side consumers, verified while landing this:
  *   • `OVERLAY_ALLOWED_TYPES` (protocol.ts) and the repository's
@@ -264,20 +272,59 @@ describe('#6483 — the nine ADR-0005 divergences: allowOrgOverride rolled back 
 
     // ── the half that stays open, deliberately ────────────────────────────
 
-    it.each(ROLLED_BACK)('a BRAND-NEW org %s still saves — allowRuntimeCreate is a different tier', async (type) => {
+    it.each(ROLLED_BACK)('a BRAND-NEW ENV-WIDE %s still saves — allowRuntimeCreate is a different tier', async (type) => {
         // Covers the two production write paths verified above: ADR-0045's
         // publish visibility flip (`app` rows materialized into sys_metadata)
         // and ADR-0094's write-through for runtime-created permission sets.
+        //
+        // [#6190, 2026-08-09] This case used to pass `organizationId:
+        // 'org_alpha'`. The 2026-08-08 ruling on #6190 refuses an org-scoped
+        // write of any type the registry declares non-org-overridable — these
+        // nine among them — so the case now pins the half that survives, and
+        // the sibling below pins the half that closed. Re-measured against the
+        // two production paths named above rather than assumed:
+        //
+        //   • ADR-0094's permission write-through
+        //     (`plugin-security/src/permission-set-projection.ts`) passes NO
+        //     `organizationId` on any of its four `saveMetaItem` call sites —
+        //     it is env-scoped by design ("its update/delete translate into
+        //     env-scope overlay operations"). Unaffected, and this case is its
+        //     accurate pin.
+        //   • ADR-0045's visibility flip (`runtime/src/domains/packages.ts`)
+        //     DOES thread the session's active org into
+        //     `saveMetaItem({ type: 'app' })`. That path is the open question
+        //     #6190's report escalates: it is refused now, and the row it used
+        //     to write was itself a phantom (the unhide landed in an org row
+        //     boot never reads, so the app went back to hidden on restart).
+        //     Not papered over here — pinning a green org-scoped `app` write
+        //     would be pinning that phantom.
         const { protocol } = makeProtocol([], 'env_prod');
 
         const result = await protocol.saveMetaItem({
             type,
             name: 'probe_item',
             item: BODIES[type],
-            organizationId: 'org_alpha',
         });
 
         expect(result.success).toBe(true);
+    });
+
+    it.each(ROLLED_BACK)('[#6190] a BRAND-NEW ORG-SCOPED %s is refused — no per-org channel exists', async (type) => {
+        // The scope half of the same declaration. `allowRuntimeCreate` grants
+        // authoring; it never granted the row an org partition the loader
+        // cannot read back. All nine rolled-back types inherit this the day
+        // their flag rolled back, because the predicate is the registry.
+        const { protocol, rows } = makeProtocol([], 'env_prod');
+
+        await expect(
+            protocol.saveMetaItem({
+                type,
+                name: 'probe_item',
+                item: BODIES[type],
+                organizationId: 'org_alpha',
+            }),
+        ).rejects.toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
+        expect(rows.size).toBe(0);
     });
 
     // ── the control that makes the red half mean something ────────────────

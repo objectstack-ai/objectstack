@@ -28,7 +28,6 @@ describe('PageHeaderProps', () => {
     expect(result.title).toBe('My Page');
     expect(result.breadcrumb).toBe(true);
     expect(result.subtitle).toBeUndefined();
-    expect(result.icon).toBeUndefined();
     expect(result.actions).toBeUndefined();
   });
 
@@ -36,7 +35,6 @@ describe('PageHeaderProps', () => {
     const header = {
       title: 'Dashboard',
       subtitle: 'Overview',
-      icon: 'home',
       breadcrumb: false,
       actions: ['action-1', 'action-2'],
     };
@@ -82,6 +80,29 @@ describe('PageHeaderProps recordChrome / showStar / showCopyId (#6776)', () => {
   it('rejects a non-boolean rather than silently stripping it', () => {
     expect(() => PageHeaderProps.parse({ title: 'Lead', recordChrome: 'false' })).toThrow();
     expect(() => PageHeaderProps.parse({ title: 'Lead', showStar: 'no' })).toThrow();
+  });
+});
+
+// #6946 — the header icon, retired by maintainer ruling 2026-08-09
+// (objectui#3829 route (c)). objectui resolves `icon` only per header ACTION;
+// the header's own bag is never asked for one, and the registration publishes
+// no `icon` input. Four in-repo pages authored it and none ever drew it.
+describe('PageHeaderProps icon is retired (#6946)', () => {
+  it('rejects the retired `icon` with its prescription', () => {
+    expect(() => PageHeaderProps.parse({ title: 'Connect an Agent', icon: 'bot' }))
+      .toThrow(/`icon`.*removed.*`recordChrome`/s);
+  });
+
+  it('does not materialize the retired `icon` on a clean parse', () => {
+    expect(PageHeaderProps.parse({ title: 'Connect an Agent' })).not.toHaveProperty('icon');
+  });
+
+  // The live half of the same key name, one component over: `page:header`
+  // DOES read `actions` off its props bag and keeps it. A strip scoped by key
+  // name rather than by component type would have taken this with it.
+  it('keeps `actions`, which the header renderer does read', () => {
+    expect(PageHeaderProps.parse({ title: 'Lead', actions: ['convert_lead'] }).actions)
+      .toEqual(['convert_lead']);
   });
 });
 
@@ -256,7 +277,6 @@ describe('PageCardProps', () => {
     const card = {
       title: 'Info Card',
       bordered: false,
-      actions: ['edit', 'delete'],
       children: ['component1'],
       footer: ['footer-component'],
     };
@@ -285,6 +305,20 @@ describe('PageCardProps', () => {
 
   it('does not materialize the retired `body` on a clean parse', () => {
     expect(PageCardProps.parse({ children: [] })).not.toHaveProperty('body');
+  });
+
+  // #6946 — the card's action list, retired by maintainer ruling 2026-08-09
+  // (objectui#3829 route (c)). `PageCardRenderer` builds its `<Card>` from
+  // title/bordered/children/footer and has no actions area; the objectui
+  // registration publishes no `actions` input either. The prescription points
+  // at composition, which is what actually renders.
+  it('rejects the retired `actions` with the composition prescription', () => {
+    expect(() => PageCardProps.parse({ title: 'Shortcuts', actions: ['new_task'] }))
+      .toThrow(/`actions`.*removed.*`children`.*`footer`/s);
+  });
+
+  it('does not materialize the retired `actions` on a clean parse', () => {
+    expect(PageCardProps.parse({ title: 'Shortcuts', children: [] })).not.toHaveProperty('actions');
   });
 });
 
@@ -318,7 +352,6 @@ describe('RecordDetailsProps', () => {
   it('should accept empty with defaults', () => {
     const result = RecordDetailsProps.parse({});
     expect(result.columns).toBe('2');
-    expect(result.layout).toBe('auto');
     expect(result.sections).toBeUndefined();
   });
 
@@ -334,7 +367,6 @@ describe('RecordDetailsProps', () => {
   // `hideFields` key was silently stripped.
   it('accepts the showcase section shape verbatim (project-detail.page.ts:49)', () => {
     const details = {
-      layout: 'custom' as const,
       sections: [
         { label: 'Overview', columns: 2, fields: ['name', 'account', 'owner', 'status'] },
         { label: 'Financials', columns: 2, fields: ['budget', 'spent'] },
@@ -381,7 +413,7 @@ describe('RecordDetailsProps', () => {
   });
 
   it('rejects the retired ID-list form rather than silently half-reading it', () => {
-    const r = RecordDetailsProps.safeParse({ layout: 'custom', sections: ['overview'] });
+    const r = RecordDetailsProps.safeParse({ sections: ['overview'] });
     expect(r.success).toBe(false);
     expect(r.success === false && r.error.issues[0].code).toBe('invalid_type');
     expect(r.success === false && r.error.issues[0].path).toEqual(['sections', 0]);
@@ -403,6 +435,31 @@ describe('RecordDetailsProps', () => {
       sections: [{ label: 'Audit', fields: ['created_at', 'updated_at'] }],
     });
     expect(result.hideFields).toEqual(hideFields);
+  });
+
+  // #6946 — the mode selector whose two declared modes were never implemented,
+  // retired by maintainer ruling 2026-08-09 (objectui#3818). Unlike the other
+  // two keys in that ruling this one WAS read — against `inline`/`compact`,
+  // values this enum never permitted — so both legal values took the same
+  // branch and the key selected nothing.
+  it('rejects the retired `layout` with its prescription', () => {
+    expect(() => RecordDetailsProps.parse({ layout: 'custom' }))
+      .toThrow(/`layout`.*removed.*`sections`.*`highlightFields`/s);
+    // The declared default is refused too — `auto` was never distinguishable
+    // from `custom` or from omitting the key.
+    expect(() => RecordDetailsProps.parse({ layout: 'auto' }))
+      .toThrow(/`layout`.*removed/s);
+  });
+
+  it('does not materialize the retired `layout` on a clean parse', () => {
+    expect(RecordDetailsProps.parse({ sections: [{ label: 'Overview', fields: ['name'] }] }))
+      .not.toHaveProperty('layout');
+  });
+
+  // The live half of the same key name, one component over.
+  it('leaves `record:highlights` layout alone — a different, honoured key', () => {
+    expect(RecordHighlightsProps.parse({ fields: ['status'], layout: 'horizontal' }).layout)
+      .toBe('horizontal');
   });
 });
 
