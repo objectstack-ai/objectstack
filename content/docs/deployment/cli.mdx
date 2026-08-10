@@ -455,7 +455,7 @@ os validate path/to/config   # Validate specific file
 name/action/filter references, page sources, approval approvers, security
 posture, the autonumber and view-reference lints. All of them come from one
 registry, so the list is the same on `os build` and `os lint`; see
-[The one gate, three entry points](/docs/deployment/validating-metadata#the-one-gate-three-entry-points)
+[The one gate, four doors](/docs/deployment/validating-metadata#the-one-gate-four-doors)
 for the full matrix. Every failing rule is reported in a single run rather than
 stopping at the first, so one pass shows the whole hole.
 
@@ -469,8 +469,7 @@ stopping at the first, so one pass shows the whole hole.
 - No objects defined
 - No apps or plugins defined
 - Every advisory the rule registry raised (dangling `stageField` /
-  `highlightFields` pointers, replay-unsafe seeds, ambiguous flow status,
-  deprecated visibility aliases, …)
+  `highlightFields` pointers, replay-unsafe seeds, ambiguous flow status, …)
 
 <Callout type="tip">
 `os validate`, `os build` and `os lint` share one rule registry, so a config that
