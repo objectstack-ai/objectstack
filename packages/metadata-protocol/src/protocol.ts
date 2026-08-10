@@ -3280,7 +3280,34 @@ export class ObjectStackProtocolImplementation implements
         };
     }
 
-    async getMetaTypes() {
+    /**
+     * [#6992] The LIVE metadata-type set of this kernel: every type either
+     * registry has heard of, whether or not `DEFAULT_METADATA_TYPE_REGISTRY`
+     * declares it. Spellings are returned as each source stores them
+     * (singular or plural) — callers normalise through
+     * {@link PLURAL_TO_SINGULAR}, as they already did inline.
+     *
+     * Two sources, and both are needed:
+     *
+     *  - `engine.registry.getRegisteredTypes()` — the SchemaRegistry. This is
+     *    the one that actually carries the plugin-registered family: manifests
+     *    register through the `manifest` service during kernel Phase 1
+     *    (`ql.registerApp`), so by Phase 2 it holds `theme`, `connector`,
+     *    `webhook`, `sharing_rule`, `analytics_cube`, … — none of which have a
+     *    registry entry.
+     *  - the `metadata` service's `getRegisteredTypes()` — types the
+     *    MetadataManager knows. Its `typeRegistry` is seeded with
+     *    `DEFAULT_METADATA_TYPE_REGISTRY` in the manager's constructor, so
+     *    early in boot this source contributes only declared types; it grows
+     *    later (artifact load, `additionalTypes`) and is read for the types
+     *    the SchemaRegistry has not been told about.
+     *
+     * Extracted from {@link getMetaTypes} rather than copied: the listing and
+     * {@link reportUnhydratableOrgScopedRows} must answer "which types exist
+     * here" identically, or the audit accuses a type the listing does not
+     * admit exists (and vice versa). One accessor, no second vocabulary.
+     */
+    private async listLiveMetadataTypes(): Promise<string[]> {
         const schemaTypes = this.engine.registry.getRegisteredTypes();
 
         // Also include types from MetadataService (runtime-registered: agent, tool, etc.)
@@ -3295,7 +3322,11 @@ export class ObjectStackProtocolImplementation implements
             // MetadataService not available
         }
 
-        const allTypes = Array.from(new Set([...schemaTypes, ...runtimeTypes]));
+        return Array.from(new Set([...schemaTypes, ...runtimeTypes]));
+    }
+
+    async getMetaTypes() {
+        const allTypes = await this.listLiveMetadataTypes();
 
         // Phase 3a-1: enrich response with per-type registry metadata so admin
         // UI can render directory pages, filter by domain, decide which types
@@ -12209,6 +12240,38 @@ export class ObjectStackProtocolImplementation implements
      *    hatch only unlocks the WRITE — an env-unlocked type's org rows are
      *    hydrated no more than any other's, so silencing the line on that
      *    flag would hide exactly the deployment most likely to have these rows.
+     *  - **[#6992] …plus every LIVE type the registry does not declare at
+     *    all.** {@link listLiveMetadataTypes} — the same accessor
+     *    {@link getMetaTypes} lists from. A plugin-registered type (`theme`,
+     *    `connector`, `webhook`, `sharing_rule`, `analytics_cube`, …) has no
+     *    registry entry, so the loop above could not reach it, yet
+     *    `loadMetaFromDb`'s filter is type-BLIND and skips its org-scoped rows
+     *    exactly like a `flow`'s. That family was the one getting neither the
+     *    refusal nor the warning. It has no declaration to consult, and
+     *    `getMetaTypes()` synthesises `allowOrgOverride: false` for it, so
+     *    "not per-org overridable" is its correct reading here.
+     *
+     *    ── THE DIVERGENCE FROM THE REFUSAL IS DELIBERATE ──
+     *
+     *    {@link orgScopedWriteRefusal} keys off the STATIC registry and
+     *    returns `null` for exactly this family (its "Statically-declared
+     *    types only" bullet); this audit keys off the LIVE set and reports it.
+     *    The two sets are meant to differ, and a future reader should not
+     *    "fix" one to match the other. The asymmetry is this file's own stated
+     *    posture, three bullets up in that method: *warning is free and should
+     *    be maximal; refusing removes a capability*. Widening the refusal
+     *    would extend the 2026-08-08 ruling — reasoned over the 27 declared
+     *    entries — onto a surface nobody measured; widening the warning costs
+     *    an operator one more segment on a line that already exists. Same
+     *    reasoning by which this method ignores `OS_METADATA_WRITABLE` while
+     *    the refusal honours it. Ruled on #6992, scoped to the diagnostic.
+     *
+     *    Measured, not assumed (#6992): at the instant this method runs — in
+     *    `ObjectQLPlugin.start()` Phase 2, after every plugin's `init` — a
+     *    real `app-showcase` boot has 7 live types with no registry entry
+     *    (`analytics_cube`, `connector`, `data`, `package`, `sharing_rule`,
+     *    `theme`, `webhook`), all of them from the SchemaRegistry. The
+     *    widening is therefore live and not defeated by boot order.
      *  - **Two predicates, both narrowing.** `organization_id IS NOT NULL`
      *    plus the type list keeps the query empty-by-default: a healthy
      *    deployment reads nothing and prints nothing. A driver that drops
@@ -12227,15 +12290,42 @@ export class ObjectStackProtocolImplementation implements
         const SAMPLE_PER_TYPE = 5;
         try {
             const orgOverridable = new Set<string>();
+            /** Types `DEFAULT_METADATA_TYPE_REGISTRY` declares, whatever their flags. */
+            const declaredTypes = new Set<string>();
+            /** [#6992] Live types with NO registry entry — reported, never refused. */
+            const undeclaredTypes = new Set<string>();
             const scannedTypes: string[] = [];
+            const scan = (singular: string): void => {
+                scannedTypes.push(singular);
+                // Both spellings: `sys_metadata.type` may hold the legacy
+                // plural, exactly as the hydration loop above assumes.
+                const plural = SINGULAR_TO_PLURAL[singular];
+                if (plural) scannedTypes.push(plural);
+            };
             for (const entry of DEFAULT_METADATA_TYPE_REGISTRY) {
+                declaredTypes.add(entry.type);
                 if (entry.allowOrgOverride) {
                     orgOverridable.add(entry.type);
                     continue;
                 }
-                scannedTypes.push(entry.type);
-                const plural = SINGULAR_TO_PLURAL[entry.type];
-                if (plural) scannedTypes.push(plural);
+                scan(entry.type);
+            }
+            // [#6992] Widen to the live registry — see the TSDoc's "…plus every
+            // LIVE type the registry does not declare at all" bullet. Best
+            // effort like the rest of this method: a kernel whose accessors
+            // throw degrades to the declared scan it had before, never to a
+            // failed boot.
+            let liveTypes: string[] = [];
+            try {
+                liveTypes = await this.listLiveMetadataTypes();
+            } catch {
+                liveTypes = [];
+            }
+            for (const liveType of liveTypes) {
+                const singular = PLURAL_TO_SINGULAR[liveType] ?? liveType;
+                if (declaredTypes.has(singular) || undeclaredTypes.has(singular)) continue;
+                undeclaredTypes.add(singular);
+                scan(singular);
             }
             if (scannedTypes.length === 0) return;
 
@@ -12253,12 +12343,26 @@ export class ObjectStackProtocolImplementation implements
             // false accusation.
             const counts = new Map<string, number>();
             const samples = new Map<string, string[]>();
+            const scannedSingulars = new Set<string>(
+                scannedTypes.map((t) => PLURAL_TO_SINGULAR[t] ?? t),
+            );
             let total = 0;
             for (const row of rows) {
                 const org = (row as { organization_id?: string | null }).organization_id;
                 if (org === null || org === undefined || org === '') continue;
                 const singular = PLURAL_TO_SINGULAR[String(row.type)] ?? String(row.type);
                 if (orgOverridable.has(singular)) continue;
+                // [#6992] Re-check the TYPE predicate too, which is what the
+                // TSDoc above has always promised ("the JS filter re-checks
+                // both"). Before the live widening, `orgOverridable` was that
+                // re-check: within the declared registry, "not org-overridable"
+                // and "in the scanned list" were the same statement. They are
+                // not any more — a row of a type that is neither declared NOR
+                // live (a plugin uninstalled since the row was written) is
+                // absent from the list, so only this line keeps a driver that
+                // cannot lower `$in` from turning a superset into a line about
+                // a type this kernel never scanned.
+                if (!scannedSingulars.has(singular)) continue;
                 total++;
                 counts.set(singular, (counts.get(singular) ?? 0) + 1);
                 const names = samples.get(singular) ?? [];
@@ -12267,20 +12371,36 @@ export class ObjectStackProtocolImplementation implements
             }
             if (total === 0) return;
 
+            let reportedUndeclared = false;
             const detail = Array.from(counts.entries())
                 .map(([type, count]) => {
                     const names = samples.get(type) ?? [];
                     const more = count > names.length ? `, +${count - names.length} more` : '';
-                    return `${type}×${count} (${names.join(', ')}${more})`;
+                    // [#6992] Mark the plugin-registered family. Not decoration:
+                    // the operator's next step differs between the two: a
+                    // DECLARED type's org-scoped write is refused from now on
+                    // (#6190), so the listed rows are historical residue and
+                    // cannot grow; an UNDECLARED type's write is not refused,
+                    // so the same names come back after every restart until the
+                    // author stops writing them org-scoped.
+                    const mark = undeclaredTypes.has(type) ? ' [plugin-registered]' : '';
+                    if (mark) reportedUndeclared = true;
+                    return `${type}×${count}${mark} (${names.join(', ')}${more})`;
                 })
                 .join('; ');
             console.warn(
                 `[Protocol] [metadata_org_scoped_unhydrated] ${total} active sys_metadata row(s) are ` +
-                `org-scoped on types the registry declares NOT per-org overridable, so boot hydration ` +
-                `skipped them and they are absent from the process-wide registry: ${detail}. ` +
+                `org-scoped on types with NO per-org channel (the registry declares allowOrgOverride=false, ` +
+                `or does not declare the type at all), so boot hydration skipped them and they are absent ` +
+                `from the process-wide registry: ${detail}. ` +
                 `A 'flow' listed here will NOT bind its triggers in this process (the kernel:ready binder ` +
                 `reads flows env-wide) — it fired until the last restart and stops now. ` +
-                `Re-save the item env-wide (no active organization), or delete the row. See #6190 / ADR-0005.`,
+                (reportedUndeclared
+                    ? `Types marked [plugin-registered] have no metadata-type registry entry, so the #6190 `
+                    + `org-scope write refusal does NOT cover them: rows of those types can still be written `
+                    + `org-scoped, and will be listed here again after every restart until the author stops. `
+                    : '') +
+                `Re-save the item env-wide (no active organization), or delete the row. See #6190 / #6992 / ADR-0005.`,
             );
         } catch {
             // Diagnostics never break boot — see the TSDoc. Deliberately not
