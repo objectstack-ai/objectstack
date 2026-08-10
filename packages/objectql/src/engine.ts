@@ -8897,34 +8897,37 @@ export class ObjectQL implements IObjectQLEngine {
           bindPreImage(priorRecord);
         }
         await this.triggerHooks('beforeDelete', hookContext);
-        // A `beforeDelete` hook may still REPOINT the target id, and #5272's
-        // answer to that is unchanged: the pre-image bound above describes the
-        // OLD id, so it must not ride into `afterDelete` — or into the summary
-        // recompute — as though it described the new target. Re-read it.
+        // [#6752] The retired lever, refused — the `update()` twin's check,
+        // verbatim, because the rule is now ONE rule: a by-id target is
+        // immutable in a `before*` handler.
         //
-        // [#5574] What this PR does NOT do, deliberately: retire the repoint.
-        // The `update()` twin below refuses a rebind, and the asymmetry is
-        // principled rather than an oversight — `delete()` has a working
-        // RE-RESOLUTION for the new target (this block, delivered by #5272 with
-        // its own pins), so nothing stale reaches a consumer, while `update()`
-        // has none and would have to grow one. Building that is exactly the
-        // "silently pick re-resolution instead" the ruling forbids, so the two
-        // paths answer differently until the repoint itself is ruled on. Filed
-        // as #6752; do not fold it in as a rider here.
-        if (wantsPreImage && hookContext.input.id !== id && hookContext.input.id) {
-          priorRecord = await readPreImage(hookContext.input.id);
-          bindPreImage(priorRecord);
-        }
-        // CLEARING the id is a different question and this PR does settle it,
-        // because the ladder reorder leaves it no answer of its own: it used to
-        // convert the write into a PREDICATE delete over the caller's `where`
-        // by falling through to the branch below, and the ladder is now decided
-        // before any handler runs (a per-row `before*` context is built from the
-        // matched row set, so it must be). Ignoring it would delete the
-        // ORIGINAL row while the handler believes it cancelled the targeting;
-        // honouring it has nothing left to honour. Refused by name — ADR-0058
-        // Amendment II.1, the capability the ruling names.
-        if (!hookContext.input.id) {
+        // Both halves of it used to be answered separately here. CLEARING the
+        // id was already refused (ADR-0058 Amendment II.1): it worked by
+        // falling through to the predicate branch, and the ladder is now
+        // resolved before any handler runs, so there is no ladder left to
+        // re-enter. REBINDING to another id was still HONOURED, by re-reading
+        // the new target's pre-image and rebinding `previous` (#5272) so
+        // nothing stale reached `afterDelete` or the summary recompute.
+        //
+        // The 2026-08-09 ruling on #6752 retires that second half. #5272's
+        // mechanism was internally correct — that is not what was weighed. What
+        // was weighed: the measured compatibility cost is zero (no consumer in
+        // the repository repoints), one rule across both verbs beats two
+        // individually-correct rules an author has to memorize, and a hook that
+        // silently redirects WHICH ROW GETS DELETED is a top-grade footgun for
+        // authored — especially AI-authored — handlers. Correctness of the
+        // mechanism does not justify the surface.
+        //
+        // ⛔ Route 3 (growing the same re-resolution for `update()`) stays
+        // excluded by #5574's ruling: "do not silently pick re-resolution
+        // instead". The alignment goes the other way, and this is that edit.
+        //
+        // The re-read that used to sit here is GONE, not merely bypassed: its
+        // guard was `input.id !== id && input.id`, which is exactly the case
+        // this refusal now throws on, so it became unreachable. `readPreImage`
+        // survives for the pre-dispatch read above — the only read left. A
+        // handler writing back the SAME id is untouched, as on `update()`.
+        if (hookContext.input.id !== id) {
           throw new HookTargetRebindError({
             object, event: 'beforeDelete', path: 'by-id',
             expectedId: id, observedId: hookContext.input.id,

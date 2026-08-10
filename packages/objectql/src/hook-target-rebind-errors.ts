@@ -42,26 +42,45 @@
  * with `id` ALREADY bound to its row, and rebinding it retargets nothing — so
  * one error serves both paths.
  *
- * ## What this error does NOT cover: `delete()`'s by-id REPOINT
+ * ## What this error covers: every cell, on both verbs
  *
- * The two verbs answer a rebind differently on the by-id path, and the
- * asymmetry is a scope decision rather than an oversight — read it before
- * "fixing" it either way.
+ * There is no longer an exception to remember. A `before*` handler may not move
+ * `ctx.input.id` — cleared or rebound, by-id or per-row, `update()` or
+ * `delete()` — and each of the four cells answers with this error:
  *
- * `delete()` has had a working RE-RESOLUTION for a repointed target since
- * #5272: when a `beforeDelete` handler moves `input.id`, the engine re-reads
- * that row's pre-image and rebinds `previous`, so nothing stale reaches
- * `afterDelete` or the summary recompute. The second bullet above simply is not
- * true there. `update()` has no such mechanism, and building one would be the
- * "silently pick re-resolution instead" the ruling forbids — so `update()`
- * refuses a rebind and `delete()` keeps honouring one, until the repoint itself
- * is ruled on as its own question (#6752).
+ * | | CLEARED id | REBOUND to another id |
+ * |---|---|---|
+ * | `update()` by-id | refused | refused |
+ * | `delete()` by-id | refused | refused (#6752) |
+ * | either, per-row | refused (D4) | refused (D4) |
  *
- * A CLEARED id is a different question and both verbs answer it the same way,
- * because the ladder reorder leaves it no answer of its own: clearing used to
- * convert the write into a PREDICATE write over the caller's `where`, and the
- * ladder is now resolved before any handler runs. That is the capability the
- * ruling names, and it is what this error is for on the `delete()` path.
+ * The last cell to arrive was `delete()`'s by-id REPOINT, and it is worth
+ * knowing why it arrived LATE rather than with the rest — the record matters
+ * more than the outcome here, because the mechanism it removed was not broken.
+ *
+ * `delete()` had a working RE-RESOLUTION for a repointed target from #5272
+ * until #6752: when a `beforeDelete` handler moved `input.id`, the engine
+ * re-read that row's pre-image and rebound `previous`, so nothing stale reached
+ * `afterDelete` or the summary recompute. The second bullet above — the write
+ * landing on a row nothing was computed against — was simply not true there, so
+ * `delete()` kept honouring a rebind while `update()` refused one, and #5574's
+ * engine half (PR #6697) deliberately left the asymmetry standing rather than
+ * folding a behaviour removal into an ordering change.
+ *
+ * The 2026-08-09 ruling on #6752 closed it, and NOT by finding a defect: the
+ * measured compatibility cost was zero (no consumer in the repository
+ * repointed), one rule across both verbs beats two individually-correct rules
+ * an author must memorize, and a hook that silently redirects which row gets
+ * deleted is a top-grade footgun for authored handlers. Correctness of the
+ * mechanism did not justify the surface. ⛔ The symmetric alternative —
+ * building `update()` the same re-resolution — stays excluded by #5574's own
+ * ruling ("do not silently pick re-resolution instead"); the alignment was
+ * always going to run this direction.
+ *
+ * A CLEARED id never had a verb-specific answer, because the ladder reorder
+ * leaves it none of its own: clearing used to convert the write into a
+ * PREDICATE write over the caller's `where`, and the ladder is now resolved
+ * before any handler runs.
  *
  * ## Why `code` is an `ERR_`-prefixed operational code, not a wire code
  *
@@ -141,9 +160,11 @@ function buildMessage(info: {
           `predicate path has to read its matched rows first, to build one context per row — so there ` +
           `is no ladder left to re-enter.`
         : ` The capability this used to have is RETIRED: rebinding 'input.id' in a '${event}' handler ` +
-          `moved the write to another row. The engine now reads that row's pre-image, evaluates its ` +
-          `'readonlyWhen' locks and runs its validation rules BEFORE dispatching, so honouring a ` +
-          `rebind would write a row that none of those checks ever saw.`
+          `moved the write to another row. The engine now resolves the target BEFORE the before phase ` +
+          `and computes the whole write against it — the pre-image, the 'readonlyWhen' locks, the ` +
+          `validation rules — so a by-id target is immutable once a handler runs, on BOTH verbs. ` +
+          `'delete()' honoured a rebind until #6752 by re-resolving the new target; that is retired ` +
+          `too, so one rule now covers both.`
       : ` On a predicate write a '${event}' context arrives with 'id' ALREADY bound to its row and the ` +
         `dispatch decided, so rebinding it retargets nothing (ADR-0058 Addendum II, D4). It is refused ` +
         `rather than ignored, because a silent no-op is the failure this contract exists to abolish.`;

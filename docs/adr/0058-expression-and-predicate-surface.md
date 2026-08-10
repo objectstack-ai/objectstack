@@ -332,12 +332,13 @@
 > NAMES the retired capability, so an author whose handler stopped working
 > learns what changed instead of watching a write land somewhere unexpected.
 >
-> **Scope, stated precisely, because the two verbs do NOT answer alike.**
+> **Scope, stated precisely. Both verbs now answer alike** — see Amendment II.2,
+> which closed the one cell this amendment left open.
 >
 > | | CLEARED id | REBOUND to another id |
 > |---|---|---|
 > | `update()` by-id | refused | refused |
-> | `delete()` by-id | refused | **honoured** (#5272's re-read, unchanged) |
+> | `delete()` by-id | refused | refused (#6752 — was **honoured** as delivered here) |
 > | either, per-row | refused (D4) | refused (D4) |
 >
 > The CLEARED column is uniform because the ladder reorder leaves it no answer
@@ -345,17 +346,18 @@
 > that branch is chosen before any handler runs. That is the capability this
 > amendment retires, and it is the one the ruling names.
 >
-> The REBOUND column is not uniform, and the asymmetry is principled rather
-> than an oversight. The case against honouring a rebind is that the write would
-> land on a row whose pre-image, `readonlyWhen` locks and validation rules were
-> never evaluated — and on `delete()` that is simply not true: #5272 already
-> RE-RESOLVES the new target, re-reading its pre-image and rebinding `previous`
-> before `afterDelete` or the summary recompute can see it. `update()` has no
-> such mechanism and would have to grow one, which is the "silently pick
-> re-resolution instead" this ruling forbids. So `update()` refuses and
-> `delete()` keeps honouring, until the delete-side repoint is ruled on as its
-> own question (#6752) — deliberately NOT folded in here as a rider on an
-> ordering change.
+> The REBOUND column was **not** uniform as this amendment shipped, and the
+> asymmetry was principled rather than an oversight. The case against honouring
+> a rebind is that the write would land on a row whose pre-image, `readonlyWhen`
+> locks and validation rules were never evaluated — and on `delete()` that was
+> simply not true: #5272 RE-RESOLVED the new target, re-reading its pre-image
+> and rebinding `previous` before `afterDelete` or the summary recompute could
+> see it. `update()` has no such mechanism and would have to grow one, which is
+> the "silently pick re-resolution instead" this ruling forbids. So `update()`
+> refused and `delete()` kept honouring, with the delete-side repoint carved out
+> to be ruled on as its own question (#6752) — deliberately NOT folded in here
+> as a rider on an ordering change. **→ Ruled on, and retired, in Amendment II.2
+> below.**
 >
 > Premise for the retirement, checked against `origin/main`: the only
 > `ctx.input.id` assignment in the whole repository was one engine test forcing
@@ -372,6 +374,68 @@
 > handler binding `input.id` could convert a rejecting call into a by-id write.
 > That is the same lever pointed the other way; with the ladder resolved first
 > the refusal lands before any handler runs and before anything is read.
+
+---
+
+> **Amendment II.2 (2026-08, #6752 maintainer ruling) — `delete()`'s by-id
+> REPOINT is RETIRED too. The REBOUND column is now uniform.**
+> _Settles the one cell Amendment II.1 carved out by name. The rule across both
+> verbs is now sayable in one line: **a by-id target is immutable in a `before*`
+> handler.**_
+>
+> **What changes.** A `beforeDelete` handler that assigns `ctx.input.id` a
+> DIFFERENT id no longer moves the delete to that row. It is refused with the
+> same `HookTargetRebindError` / `ERR_HOOK_TARGET_REBIND` the `update()` twin
+> and both per-row paths (D4) already raise, with `path: 'by-id'` and
+> `expectedId` / `observedId` naming both ends of the move. Nothing is deleted;
+> `afterDelete` and the summary recompute never run. Writing back the SAME id is
+> untouched and still legal — the refusal is `input.id !== id`, the `update()`
+> check verbatim, so a handler that reads the id or assigns it to itself is not
+> caught.
+>
+> **This is a behaviour REMOVAL of a mechanism that worked, and the reasoning
+> has to be read that way.** #5272's re-resolution was internally correct: it
+> re-read the new target's pre-image and rebound `previous`, so nothing stale
+> ever reached `afterDelete` or the roll-up. No defect was found in it, and the
+> second bullet of the three-options paragraph above genuinely did not apply to
+> it. It is retired on three measured axes instead:
+>
+> - **Compatibility cost, measured: zero.** A repository-wide grep for
+>   assignments into a hook's `input.id` — re-run against the base of the
+>   implementing PR, not inherited from the card — finds six sites, all of them
+>   tests in `packages/objectql/src/`: four are this family's OWN pins (the
+>   per-row rebind refusal, both by-id CLEARED refusals, the same-id negative
+>   control), one is the repoint pin being flipped here, and the sixth
+>   (`engine.test.ts`) clears the id to force the #2982 fail-closed assertion.
+>   **No consumer anywhere repoints** — not in the framework, not in the
+>   plugins, not in the examples, not in the docs. The removal cannot break code
+>   that does not exist.
+> - **One rule beats two correct rules.** Two verbs answering the same slot
+>   differently is a thing every hook author must hold in memory, and the
+>   justification for the split ("`delete()` re-resolves, `update()` cannot")
+>   lives in an ADR, not at the call site where a handler is written.
+> - **The surface is a footgun independent of the mechanism.** "A hook silently
+>   redirects which row gets deleted" is a top-grade hazard for authored — and
+>   especially AI-authored — handlers. Correctness of a mechanism does not
+>   justify the surface it exposes.
+>
+> ⛔ **Route 3 stays excluded.** Aligning the other way — growing `update()` the
+> same re-resolution — remains forbidden by #5574's recorded ruling ("do not
+> silently pick re-resolution instead"), and this amendment does not reopen it.
+> The alignment was only ever going to run in this direction; the open question
+> was whether to align at all.
+>
+> **What replaces it.** Exactly what replaced the CLEARED lever, and for the
+> same reasons: to delete a DIFFERENT row, call `ctx.api` / `ctx.ql` for that row
+> explicitly; to delete MANY rows, have the caller pass `{ multi: true, where: … }`;
+> to stop this delete, throw from the handler.
+>
+> **The mechanism removed with it.** The re-read block in `delete()`'s by-id
+> branch is DELETED, not merely bypassed — its guard was `input.id !== id &&
+> input.id`, precisely the case the refusal now throws on, so it became
+> unreachable code the moment the refusal landed. The single pre-dispatch
+> pre-image read that binds `previous` for `beforeDelete` (#5846 (a) / #6697) is
+> a different read and is untouched.
 
 ---
 

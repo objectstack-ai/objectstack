@@ -727,19 +727,27 @@ describe('[#5574 / D4] `input.id` is not a reroute lever, and is refused loudly'
     expect(await engine.count('task', {})).toBe(1);
   });
 
-  it('still HONOURS a by-id `beforeDelete` REPOINT — deliberately not retired here', async () => {
-    // ⚠️ The one place the two verbs answer a rebind differently, pinned so the
-    // asymmetry is a decision on the record rather than something a later
-    // reader "tidies up" in either direction.
+  it('REFUSES a by-id `beforeDelete` REPOINT — the last cell, retired by #6752', async () => {
+    // ⚠️ FLIPPED, deliberately, not deleted. This case used to assert the exact
+    // opposite — `still HONOURS a by-id beforeDelete REPOINT` — and pinned the
+    // ONE place the two verbs answered a rebind differently. Read the flip as
+    // the record of a ruling, not as a bug being fixed:
     //
-    // The case against honouring a rebind is that the write lands on a row
-    // whose pre-image and rules were never evaluated. On `delete()` that is not
-    // true: #5272 RE-RESOLVES the new target — re-reads its pre-image and
-    // rebinds `previous` — before `afterDelete` or the summary recompute can
-    // see it. `update()` has no such mechanism and refusing there is what keeps
-    // this PR from inventing one (the ruling forbids picking re-resolution
-    // silently). Retiring the delete-side repoint is its own question, filed as
-    // #6752.
+    //   * The honoured behaviour was CORRECT. #5272 RE-RESOLVED the new target,
+    //     re-reading its pre-image and rebinding `previous`, so `afterDelete`
+    //     and the summary recompute saw the row actually deleted. Nothing stale
+    //     ever leaked. No defect was found in it.
+    //   * It is retired anyway (maintainer ruling on #6752, 2026-08-09) on three
+    //     measured axes: compatibility cost zero (no consumer in the repository
+    //     repoints), one rule across both verbs beats two individually-correct
+    //     rules an author must memorize, and "a hook silently redirects which
+    //     row gets deleted" is a top-grade footgun regardless of how correctly
+    //     the redirect is implemented.
+    //   * ⛔ The other alignment — building `update()` the same re-resolution —
+    //     stays excluded by #5574's ruling. Do not "restore symmetry" that way.
+    //
+    // ADR-0058 Amendment II.2. The rule is now one line: a by-id target is
+    // immutable in a `before*` handler.
     const seen: unknown[] = [];
     const { engine } = await boot([
       hook('repoint', 'beforeDelete', (ctx) => {
@@ -750,14 +758,53 @@ describe('[#5574 / D4] `input.id` is not a reroute lever, and is refused loudly'
     const decoy: any = await engine.insert('task', { title: 'decoy', status: 'todo' });
     const target: any = await engine.insert('task', { title: 'target', status: 'todo' });
 
-    await engine.delete('task', { where: { id: decoy.id } });
+    const err = await engine
+      .delete('task', { where: { id: decoy.id } })
+      .then(() => null, (e) => e);
 
-    // The REPOINTED row is the one that went…
+    // The refusal, and its full envelope — the same one the `update()` twin and
+    // the per-row paths raise. `expectedId`/`observedId` name BOTH ends of the
+    // attempted move, which is what tells an author which handler did it.
+    expect(err).toBeInstanceOf(HookTargetRebindError);
+    expect(err.code).toBe(HOOK_TARGET_REBIND_ERROR_CODE);
+    expect(err.name).toBe('HookTargetRebindError');
+    expect(err.object).toBe('task');
+    expect(err.event).toBe('beforeDelete');
+    expect(err.path).toBe('by-id');
+    expect(err.expectedId).toBe(decoy.id);
+    expect(err.observedId).toBe(String(target.id));
+    expect(err.message).toContain('RETIRED');
+    expect(err.message).toContain('REBOUND');
+
+    // Refused means NOTHING was deleted — not the row the caller named, and not
+    // the row the handler aimed at. Both are still there.
     const left: any[] = await engine.find('task', {});
-    expect(left.map((r) => r.title)).toEqual(['decoy']);
-    // …and `previous` was re-read for it, so the after phase describes the row
-    // actually deleted rather than the one the caller named.
-    expect(seen).toEqual(['target']);
+    expect(left.map((r) => r.title).sort()).toEqual(['decoy', 'target']);
+    // And the after phase never ran at all: there is no delete to describe.
+    expect(seen).toEqual([]);
+  });
+
+  it('leaves a by-id `beforeDelete` that rewrites the SAME id alone', async () => {
+    // The negative control for the flip above, and the measurement it rests on:
+    // the refusal is `input.id !== id` — the `update()` check verbatim — so a
+    // handler that assigns the id back to itself is NOT caught. This was legal
+    // before #6752 and stays legal after; what is retired is the REPOINT, not
+    // touching the slot.
+    const seen: unknown[] = [];
+    const { engine } = await boot([
+      hook('rewrite', 'beforeDelete', (ctx) => {
+        (ctx.input as any).id = (ctx.input as any).id;
+      }),
+      hook('observe', 'afterDelete', (ctx) => { seen.push((ctx.previous as any)?.title); }, undefined, 'task', { priority: 200 }),
+    ]);
+    const row: any = await engine.insert('task', { title: 'a', status: 'todo' });
+
+    await engine.delete('task', { where: { id: row.id } });
+
+    // The addressed row went, and `afterDelete` describes THAT row — the
+    // originally-addressed one, which is now the only row it can ever describe.
+    expect(await engine.count('task', {})).toBe(0);
+    expect(seen).toEqual(['a']);
   });
 
   it('leaves an untouched `input.id` alone — the refusal is not a trap', async () => {
