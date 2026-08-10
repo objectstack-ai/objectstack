@@ -2026,7 +2026,16 @@ export const FormViewSchema = lazySchema(() => strictObject({
   /**
    * What happens after a successful submit.
    *
-   * - `thank-you` (default) — show a confirmation panel
+   * The default when this is omitted is **mode-aware**, not a single fixed
+   * kind (ruled 2026-08-10 on #7245): the public `/console/f/:slug` path
+   * defaults to `thank-you` — there is no record an anonymous submitter is
+   * allowed to read back, so a confirmation panel is all there is to show.
+   * The internal `/console/forms/:name` path — where `type: 'form'` actions
+   * send operators — defaults to redirecting to the record that was just
+   * created, since an operator who just created a record belongs on that
+   * record. An explicit `submitBehavior` always wins, in either mode.
+   *
+   * - `thank-you` — show a confirmation panel
    * - `redirect` — send the browser to a URL
    * - `continue` — reset the form so another response can be entered
    * - `next-record` — advance to the next record (internal queues only)
