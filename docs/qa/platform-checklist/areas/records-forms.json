@@ -1362,7 +1362,7 @@
       "title": "Action buttons surface at exactly their declared locations — list toolbar, list row, record header/more/related/section — and each dispatches for real",
       "since": "v15",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -1371,7 +1371,7 @@
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "the per-location action fleet on showcase_task (examples/app-showcase/src/ui/actions/index.ts): showcase_bulk_reassign (list_item+list_toolbar, flow), showcase_quick_view (list_item, modal), showcase_mark_done (list_item+record_header+record_section, script, visible '!record.done'), showcase_log_time (record_header+record_related+record_section, form), showcase_open_docs (record_more, url), showcase_recalc_selection (record_more, api — deliberately kept OFF the toolbar, objectui#3142)",
+          "the per-location action fleet on showcase_task (examples/app-showcase/src/ui/actions/index.ts): showcase_bulk_reassign (list_item+list_toolbar, flow), showcase_quick_view (list_item, modal), showcase_mark_done (list_item+record_header+record_section, script, visible '!record.done'), showcase_log_time (record_header+record_related+record_section, form), showcase_open_docs (record_more, url), showcase_recalc_selection (record_more, api — declares record_more ONLY, which is what keeps it off the toolbar; objectui#3142), showcase_new_task (locations: [] — the fleet's headless specimen, read by the empty-locations probe)",
           "seeded tasks in both done and not-done states for the CEL visibility both-sides check"
         ]
       },
@@ -1382,7 +1382,7 @@
         "record_more — showcase_open_docs / showcase_recalc_selection under the ⋯ overflow",
         "record_related — showcase_log_time on the related-list section",
         "record_section — showcase_mark_done / showcase_log_time in the Task Detail quick-actions bar (record:quick_actions resolves through the location filter)",
-        "empty-locations semantics probe — a locations-less action lands on EVERY location including the toolbar (objectui action-bar.tsx documented behavior; the reason recalc_selection must declare record_more)"
+        "empty-locations semantics probe — an action with NO locations key renders on NO surface, and `locations: []` likewise (objectui#3142 collapsed the renderers onto one membership predicate, `actionRendersAt`; placement is a declaration, which is why recalc_selection has to name record_more)"
       ],
       "steps": [
         "boot the showcase isolated; sign in as admin; open the showcase_task list view",
@@ -1391,7 +1391,7 @@
         "dispatch one action per location with a ref-targeted click: bulk_reassign (screen-flow wizard opens), quick_view (modal opens), mark_done (script executes), log_time (form dialog opens on showcase_task.edit), open_docs (url navigation), recalc_selection from the ⋯ menu (api POST); capture each network trace",
         "verify the state-changing dispatches server-side: mark_done flips the task's done flag (API re-read), recalc_selection's per-record branch recomputes the estimate",
         "CEL visibility both sides: locate a done task and a not-done task; read the row menu and record header of each for showcase_mark_done",
-        "empty-locations probe: in a scratch/writable package author a copy of an api action with NO locations key; reload and record every surface it appears on (including the toolbar), then delete the probe"
+        "empty-locations probe, both halves: (a) in a scratch/writable package author a copy of an api action with NO locations key; reload and sweep all six surfaces (list toolbar, row menu, record header, ⋯ overflow, related-list section, quick-actions bar) recording every surface it appears on — the expected list is EMPTY — then delete the probe; (b) sweep the same six surfaces for showcase_new_task, the fixture fleet's headless `locations: []` declaration, and record that its list is empty too"
       ],
       "acceptance": [
         {
@@ -1419,14 +1419,14 @@
           "evidence": "the four reads + screenshots"
         },
         {
-          "clause": "empty/missing locations means EVERY location — the probe action appears on all surfaced slots including the list toolbar (the objectui#3142 semantics that forces recalc_selection to declare record_more, because a toolbar dispatch has no selection and the endpoint rejects it)",
+          "clause": "empty/missing locations means NO location — the probe action with no `locations` key renders on none of the six surfaces, and the headless `locations: []` declaration (showcase_new_task) renders on none either. Placement is a declaration, not a default: objectui#3142 collapsed four disagreeing renderers onto the single `actionRendersAt` predicate, a plain membership test, so an undeclared or empty list matches nothing. recalc_selection names record_more for that reason — an explicit single-record placement that also keeps it off the toolbar, where a dispatch would carry no selection and the endpoint would reject it — NOT to opt out of an everywhere-default",
           "oracle": "dom",
-          "verify": "the locations-less probe's placement list covers all applicable surfaces; recalc_selection itself stays OFF the toolbar",
-          "evidence": "probe placement list + toolbar DOM read"
+          "verify": "both six-surface DOM sweeps (the locations-less probe, and showcase_new_task) come back with an empty placement list; recalc_selection is present under ⋯ and absent from the toolbar",
+          "evidence": "the two empty placement lists + the toolbar DOM read"
         }
       ],
       "negative": [
-        "any action rendering at a location it did not declare (and did not inherit via the empty-locations rule) is a FAIL — placement is a contract, not a hint",
+        "any action rendering at a location it did not declare is a FAIL — placement is a contract, not a hint, and since objectui#3142 there is no everywhere-default left to inherit",
         "showcase_recalc_selection appearing on the list toolbar is the objectui#3142 regression shape — FAIL even though clicking it would merely error",
         "a dispatch that opens the wrong target (e.g. log_time opening a list view instead of the showcase_task.edit form — the #2554 build-gate class) is a FAIL of the dispatch clause, not a cosmetic note"
       ],
@@ -1441,8 +1441,9 @@
       },
       "source": [
         "packages/spec/src/ui/action.zod.ts:565 (ACTION_LOCATIONS — the canonical 6-value enum, single source of truth; `global_nav` was the 7th until #6888 retired it — no product surface rendered it)",
-        "examples/app-showcase/src/ui/actions/index.ts (per-location fixture fleet + the record:quick_actions filter note + the objectui#3142 empty-locations commentary)",
-        "objectui: packages/.../action-bar.tsx (missing/empty locations → every location)",
+        "examples/app-showcase/src/ui/actions/index.ts (per-location fixture fleet + the record:quick_actions filter note + the two headless `locations: []` declarations). NOTE: RecalcSelectionAction's TSDoc there still narrates the pre-objectui#3142 'missing/empty locations → every location' rule — stale prose, filed separately; the declaration it explains (record_more) is correct either way",
+        "packages/lint/src/validate-action-locations.ts (the `action-no-placement` rule — this repo's codification of the current contract: an action with no `locations` renders nowhere and is therefore inert, while `locations: []` is the deliberate headless declaration and is NOT flagged)",
+        "objectui: packages/types/src/ui-action.ts `actionRendersAt` (the single placement predicate — a membership test, so an undeclared or empty `locations` matches nothing) + packages/.../action-bar.tsx, its consumer since objectui#3142",
         "cross-ref: bulk dispatch-count semantics live in records-forms.list-view-capabilities (bulk-actions variant); param dialogs in records-forms.action-param-widgets"
       ],
       "history": [
@@ -1463,6 +1464,12 @@
           "date": "2026-08-10",
           "change": "dropped the global_nav variant — the vocabulary lost that member (#6888). The variant was UNRUNNABLE as written, not merely obsolete: its step 'new_task from the palette' could never pass, because the console ⌘K palette builds its groups from nav items, objects, dashboards, pages, reports, recent items and record search and reads no action metadata at all. The fixture fleet loses showcase_new_task with it (now headless, locations: []); the dispatch step drops from seven traces to six; enumSource.expect 7 → 6",
           "ref": "claude/issue-6888-retire-global-nav"
+        },
+        {
+          "revision": 4,
+          "date": "2026-08-10",
+          "change": "inverted the empty-locations probe to the post-objectui#3142 contract (#7323). The variant, its step and its acceptance clause all asserted that a locations-less action lands on EVERY location; objectui#3142 collapsed four disagreeing renderers onto one membership predicate (actionRendersAt), so such an action now lands on NONE. The probe was therefore grading correct behavior as a FAIL, and contradicted this same item's negative list, which already encoded the post-#3142 contract. The probe is kept rather than deleted — both halves stay observable end-to-end: no `locations` key → nowhere (the inert shape packages/lint's action-no-placement warns about), and `locations: []` → nowhere deliberately (read off the fleet's showcase_new_task, which revision 3 made headless). Re-anchored the recalc_selection note — record_more is an explicit placement, not an opt-out of an everywhere-default — reworded the objectui source line to name the predicate, and added the in-repo codification as a source",
+          "ref": "claude/issue-7323-action-location-matrix-probe"
         }
       ],
       "enumSource": {
