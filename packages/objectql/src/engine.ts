@@ -5028,6 +5028,16 @@ export class ObjectQL implements IObjectQLEngine {
   private readonly retractedCreationAttestations = new Set<string>();
   /** Serializes retraction writes so concurrent violations issue one update. */
   private creationAttestationRetraction: Promise<void> = Promise.resolve();
+  /**
+   * Ids whose deviation marker this process has already written (#4797).
+   * Reset by {@link invalidateDataMigrationFlags}, which is what a host calls
+   * after running a migration in-process — a re-earned certificate opens a
+   * fresh witness window, and without the reset the next admitted value in the
+   * same process would be silently unrecorded.
+   */
+  private readonly recordedDeviations = new Set<string>();
+  /** Serializes deviation writes so concurrent violations issue one update. */
+  private deviationRecording: Promise<void> = Promise.resolve();
 
   /**
    * The sink `validateRecord` reports admitted violations to. Built per write
@@ -5049,7 +5059,124 @@ export class ObjectQL implements IObjectQLEngine {
         first: { object, field: violation.field, type: violation.type, detail: violation.detail },
       });
     }
+    // Two consumers of the same counterexample, answering different questions.
+    // The deviation marker goes first because it is the one that applies to
+    // EVERY verified deployment (#4797); the retraction below applies only to
+    // the narrow fresh-datastore case (#4769) and closes the gate outright
+    // there. Each is the other's backstop if one write fails.
+    this.recordObservedDeviation(migrationId);
     this.retractCreationAttestation(migrationId);
+  }
+
+  /**
+   * Record that this deployment has ADMITTED a value its own verified contract
+   * rejects (#4797) — without touching `verified_at`.
+   *
+   * ## The window
+   *
+   * Once a certificate holds, the write path is strict and a non-conforming
+   * value cannot land, so the certificate cannot go stale on its own. The
+   * operator escape hatches are the exception, and they exist *precisely* to
+   * relax a deployment that has already verified: with
+   * `OS_ALLOW_LAX_MEDIA_VALUES` / `OS_ALLOW_LAX_VALUE_SHAPES` on, the value is
+   * admitted and persisted while `sys_migration` still reads `verified_at`
+   * non-null, `blocking: 0`. Turn the switch off — or let any other process or
+   * machine run without it — and strict returns to reject the very data this
+   * deployment stored. Meanwhile the `adr-0104-file-references` gate, which
+   * also governs reclamation of released field files, keeps deleting bytes on
+   * the strength of a certificate that is now false.
+   *
+   * ## Why a marker rather than a revocation
+   *
+   * {@link retractCreationAttestation} clears `verified_at`, and is right to:
+   * its target is a certificate issued on the inference "created empty, so
+   * clean", which a single counterexample fully disproves. A certificate
+   * earned by `os migrate … --apply` is a walk of the whole store, and one
+   * admitted write is not evidence of that order — overturning it would make a
+   * deliberately temporary switch into a one-way door, forcing a full
+   * re-migration on anyone who used the escape hatch once.
+   *
+   * So the authority is withdrawn in proportion to reversibility. The marker
+   * leaves every recoverable behaviour running (strict enforcement once the
+   * switch is off, tombstoning, throttling — a rejected write is retried, a
+   * tombstone is lifted on re-attach) and stops only what cannot be undone:
+   * `authorisesIrreversibleAction` is false while it stands, so the reap
+   * guard's byte delete refuses. A real apply-mode run clears it.
+   *
+   * ## Cost
+   *
+   * At most one ledger read+update per migration id per process, never awaited
+   * by the write that triggered it, and skipped entirely once the marker is
+   * standing. A lax write is therefore not a ledger round-trip; the FIRST lax
+   * write of each class is, and only while the row is still verified.
+   *
+   * Deliberately never inserts. No row means nothing was certified, so there
+   * is no authority to withdraw — and inserting one would fabricate a run that
+   * never happened.
+   */
+  private recordObservedDeviation(migrationId: string): void {
+    if (this.recordedDeviations.has(migrationId)) return;
+    if (!this._registry.getObject(DATA_MIGRATION_FLAG_OBJECT)) return;
+    this.recordedDeviations.add(migrationId);
+    this.deviationRecording = this.deviationRecording
+      .then(async () => {
+        const rows = await this.find(DATA_MIGRATION_FLAG_OBJECT, {
+          where: { id: migrationId },
+          limit: 1,
+          context: { isSystem: true } as ExecutionContext,
+        });
+        const row: any = rows?.[0];
+        if (!row || row.id !== migrationId) return; // nothing certified — no authority to withdraw
+        if (row.deviation_observed_at != null && String(row.deviation_observed_at) !== '') return; // already standing
+        // Only a row that currently authorises something can have authority
+        // withdrawn. An unverified row already denies both halves, so marking
+        // it would add a diagnostic nobody gates on — and the next apply run
+        // would clear it before anything read it.
+        const verified = isDataMigrationFlagVerified({
+          id: migrationId,
+          last_run_at: String(row.last_run_at ?? ''),
+          verified_at: row.verified_at == null ? null : String(row.verified_at),
+          blocking: typeof row.blocking === 'number' ? row.blocking : Number(row.blocking ?? Number.NaN),
+        });
+        if (!verified) return;
+        const tally = this.admittedValueShapeViolations.get(migrationId);
+        const now = new Date().toISOString();
+        await this.update(
+          DATA_MIGRATION_FLAG_OBJECT,
+          {
+            id: migrationId,
+            deviation_observed_at: now,
+            deviation_detail: JSON.stringify({
+              observed: 'lax-admitted-violating-value',
+              ...(tally?.first ?? {}),
+            }),
+            updated_at: now,
+          },
+          { context: { isSystem: true } as ExecutionContext },
+        );
+        this.logger.warn(
+          `[value-shape] '${migrationId}': this deployment is recorded as verified, but an ` +
+            'escape hatch (OS_ALLOW_LAX_MEDIA_VALUES / OS_ALLOW_LAX_VALUE_SHAPES) just admitted a ' +
+            `value that contract rejects (${tally?.first.object}.${tally?.first.field}: ` +
+            `${tally?.first.detail}). The certificate stands for everything recoverable, but ` +
+            'irreversible actions are withheld — released field files are no longer collected, so ' +
+            'no byte is deleted on evidence this deployment has contradicted. Fix the data and run ' +
+            '`os migrate ' +
+            (migrationId === FILE_REFERENCES_MIGRATION_ID ? 'files-to-references' : 'value-shapes') +
+            ' --apply` to clear it (ADR-0104 / #4797).',
+        );
+      })
+      .catch((err: any) => {
+        // Bookkeeping must never surface as a write failure. Failing to record
+        // is the dangerous direction — it leaves the reclamation gate open on
+        // a certificate we now know is stale — so say so loudly.
+        this.logger.warn(
+          `[value-shape] could not record the observed deviation for '${migrationId}' ` +
+            `(${err?.message ?? err}) — the ledger still authorises irreversible collection while ` +
+            'this deployment holds a value its own contract rejects; run the migration to ' +
+            're-derive the gate (#4797)',
+        );
+      });
   }
 
   /**
@@ -5157,11 +5284,19 @@ export class ObjectQL implements IObjectQLEngine {
    * Drop the memoized deployment migration flags so the next write re-reads
    * them. For a host that runs a data migration in-process and wants its
    * effect without a restart.
+   *
+   * Also reopens the deviation witness window (#4797). The run that prompted
+   * this call cleared any standing marker, so the "already recorded, don't
+   * write again" guard would otherwise silence the next admitted value for the
+   * life of the process — a deployment could re-earn its certificate and then
+   * deviate again with nothing noticing. Costs at most one further ledger
+   * write per migration id per re-run.
    */
   invalidateDataMigrationFlags(): void {
     this.fileReferencesMigrationVerified = null;
     this.valueShapesMigrationVerified = null;
     this.migrationGatesAnnounced = false;
+    this.recordedDeviations.clear();
   }
 
   /**

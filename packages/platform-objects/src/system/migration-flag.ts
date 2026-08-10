@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import {
+  authorisesIrreversibleAction,
   CREATION_ATTESTED_MIGRATION_IDS,
   DATA_MIGRATION_FLAG_OBJECT,
   FILE_REFERENCES_MIGRATION_ID,
@@ -80,6 +81,14 @@ export async function readDataMigrationFlag(
       blocking: typeof row.blocking === 'number' ? row.blocking : Number(row.blocking ?? Number.NaN),
       advisory: typeof row.advisory === 'number' ? row.advisory : undefined,
       details: typeof row.details === 'string' ? row.details : undefined,
+      // [#4797] Absent on a row written before this column existed, which
+      // reads as "no deviation observed" — the same answer as an unmarked new
+      // row, and the right one: nothing recorded a deviation because nothing
+      // was watching for one. Such a row is no more authorised than it was
+      // before, since the irreversible gate still requires `verified_at`.
+      deviation_observed_at:
+        row.deviation_observed_at == null ? null : String(row.deviation_observed_at),
+      deviation_detail: typeof row.deviation_detail === 'string' ? row.deviation_detail : undefined,
     };
   } catch {
     return null;
@@ -96,6 +105,28 @@ export async function isDataMigrationVerified(
   migrationId: string,
 ): Promise<boolean> {
   return isDataMigrationFlagVerified(await readDataMigrationFlag(engine, migrationId));
+}
+
+/**
+ * May `migrationId`'s certificate authorise an IRREVERSIBLE action here — one
+ * whose effect cannot be undone if the certificate turns out to be stale
+ * (#4797)?
+ *
+ * Strictly stronger than {@link isDataMigrationVerified}: everything that one
+ * requires, plus no deviation observed since the certificate was earned. Read
+ * this at the moment of irreversibility and nowhere else; a caller about to do
+ * something recoverable should keep asking the weaker question, because
+ * withdrawing recoverable authority on one admitted write is exactly the
+ * one-way door the ruling rejected.
+ *
+ * Fails toward retention through the same funnel as its sibling — an
+ * unreadable row answers `null`, which answers `false`.
+ */
+export async function mayActIrreversibly(
+  engine: MigrationFlagEngine,
+  migrationId: string,
+): Promise<boolean> {
+  return authorisesIrreversibleAction(await readDataMigrationFlag(engine, migrationId));
 }
 
 /** Outcome of one gated (apply-mode) migration run. */
@@ -119,6 +150,24 @@ export interface DataMigrationRunOutcome {
  * regressed since it last verified closes its own gate. Dry runs must not
  * call this: recording is what distinguishes a gated migration from a script
  * whose output can be ignored.
+ *
+ * A run also CLEARS any deviation marker (#4797). The marker records that one
+ * admitted write contradicted the certificate; a run is a fresh walk of the
+ * whole store, which is evidence of the same order as the certificate itself
+ * and therefore supersedes it in both directions. That is what keeps the
+ * escape hatch from becoming a one-way door: `os migrate … --apply` is the
+ * documented way back to full authority, and it must actually restore it.
+ *
+ * Cleared on a FAILING run too, deliberately. A failing run sets
+ * `verified_at: null`, which already closes both gates, so leaving the marker
+ * behind would only strand a stale diagnostic on a row whose verdict has been
+ * replaced wholesale.
+ *
+ * The one race worth naming: a lax write admitted *while* the scan is running
+ * can set the marker just before this clears it, and its counterexample is
+ * then only visible in the scan's own findings. Turn the `OS_ALLOW_LAX_*`
+ * switches off before re-running — which is what the operator is doing anyway
+ * when they run the migration to re-earn the gate.
  */
 export async function recordDataMigrationRun(
   engine: MigrationFlagEngine,
@@ -134,6 +183,8 @@ export async function recordDataMigrationRun(
     blocking: outcome.blocking,
     advisory: outcome.advisory,
     details: outcome.details === undefined ? undefined : JSON.stringify(outcome.details),
+    deviation_observed_at: null,
+    deviation_detail: null,
   };
 
   const row: Record<string, unknown> = {

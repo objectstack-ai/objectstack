@@ -296,6 +296,8 @@
     "system/DataMigrationFlag:applied_at",
     "system/DataMigrationFlag:blocking",
     "system/DataMigrationFlag:details",
+    "system/DataMigrationFlag:deviation_detail",
+    "system/DataMigrationFlag:deviation_observed_at",
     "system/DataMigrationFlag:id",
     "system/DataMigrationFlag:last_run_at",
     "system/DataMigrationFlag:verified_at",

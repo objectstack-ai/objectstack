@@ -13,16 +13,24 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  * from the installed version — it is evidence each deployment produces by
  * running `os migrate <migration>` against its own database.
  *
- * Consumers that would act irreversibly on migrated data gate on
- * `isDataMigrationFlagVerified` (verified_at set AND blocking = 0) — e.g. the
- * ADR-0104 file-as-reference row (`adr-0104-file-references`) gates released-
- * file collection (#3459 PR-5b) and the strict media value-shape default
- * (#3438). No row / failed self-check → consumers stay in their safe legacy
- * posture: files are retained forever, lax values keep warning. Fail toward
- * retention, per deployment.
+ * Consumers gate on the row rather than the version, and WHICH predicate they
+ * gate on depends on what they are about to do (#4797):
+ *
+ *  - recoverable behaviour — the strict media value-shape default (#3438),
+ *    tombstoning a released file into its grace window (#3459 PR-5b) — reads
+ *    `isDataMigrationFlagVerified` (verified_at set AND blocking = 0);
+ *  - irreversible behaviour — the reap guard's byte delete — reads
+ *    `authorisesIrreversibleAction`, which additionally requires that no
+ *    deviation has been observed since the certificate was earned.
+ *
+ * No row / failed self-check → consumers stay in their safe legacy posture:
+ * files are retained forever, lax values keep warning. Fail toward retention,
+ * per deployment.
  *
  * Writes flow through `recordDataMigrationRun` (system context, from the
- * migration commands) — the API surface is read-only diagnostics.
+ * migration commands) — the API surface is read-only diagnostics. The one
+ * other writer is the engine's admit path, which sets `deviation_observed_at`
+ * and nothing else (#4797).
  *
  * Registered by `PlatformObjectsPlugin` (`./plugin.ts`) — the ledger is
  * platform infrastructure, present on every kernel that composes the platform
@@ -95,6 +103,24 @@ export const SysMigration = ObjectSchema.create({
       label: 'Details (JSON)',
       readonly: true,
       description: 'JSON-encoded counts from the last run, for diagnostics.',
+    }),
+
+    deviation_observed_at: Field.datetime({
+      label: 'Deviation Observed At',
+      readonly: true,
+      description:
+        'When this deployment last ADMITTED a value its own verified contract rejects, through an ' +
+        'OS_ALLOW_LAX_* escape hatch. Deliberately does NOT clear verified_at: it withdraws only the ' +
+        'irreversible half of what the certificate authorises — byte deletion stops, validation and ' +
+        'tombstoning continue. Cleared by the next apply-mode run.',
+    }),
+
+    deviation_detail: Field.text({
+      label: 'Deviation Detail (JSON)',
+      readonly: true,
+      description:
+        'JSON-encoded first counterexample behind deviation_observed_at (object, field, type, parse ' +
+        'issue), so an operator can find the value that closed the irreversible gate.',
     }),
 
     created_at: Field.datetime({
