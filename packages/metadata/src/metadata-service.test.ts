@@ -129,13 +129,13 @@ describe('MetadataManager — IMetadataService Contract', () => {
   });
 
   describe('getObject / listObjects', () => {
-    it('getObject should be shorthand for get("object", name)', async () => {
+    it('getObject returns the registered document', async () => {
       await manager.register('object', 'account', { name: 'account', label: 'Account' });
       const result = await manager.getObject('account');
       expect(result).toEqual({ name: 'account', label: 'Account' });
     });
 
-    it('listObjects should be shorthand for list("object")', async () => {
+    it('listObjects returns the registered documents', async () => {
       await manager.register('object', 'account', { name: 'account' });
       await manager.register('object', 'contact', { name: 'contact' });
       const items = await manager.listObjects();
