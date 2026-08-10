@@ -5223,7 +5223,23 @@ export class RestServer {
                     }
                     const p = await this.resolveProtocol(environmentId, req);
                     if (!p.saveMetaItem) {
-                        res.status(501).json({ error: 'Save operation not supported by protocol implementation', code: 'NOT_IMPLEMENTED' });
+                        // [#7035] ADR-0112 envelope: the semantic code lives at
+                        // `error.code`, NOT as a sibling of `error`. This site
+                        // used to answer `{ error: '<msg>', code: 'NOT_IMPLEMENTED' }`
+                        // while `POST /meta/_migrate-stored` a few hundred lines
+                        // up answered the nested shape for the same condition,
+                        // so a client reading `err.error.code` got `undefined`
+                        // here — and `undefined` takes the "no code" branch, not
+                        // an error branch. `NOT_IMPLEMENTED` is unchanged: it is
+                        // already the standard-catalog code ADR-0112 maps 501 to
+                        // (`spec/src/api/errors.zod.ts` — the catalog member and
+                        // `standardErrorCodeForHttpStatus(501)`).
+                        res.status(501).json({
+                            error: {
+                                code: 'NOT_IMPLEMENTED',
+                                message: 'Save operation not supported by protocol implementation',
+                            },
+                        });
                         return;
                     }
 
@@ -5335,8 +5351,17 @@ export class RestServer {
                     }
                     const p = await this.resolveProtocol(environmentId, req);
                     if (!(p as any).deleteMetaItem) {
+                        // [#7035] ADR-0112 envelope. This site was the worst of
+                        // the three shapes: a BARE STRING `error`, with no code
+                        // at all — so neither `err.error.code` nor `err.code`
+                        // resolved, and `err.error.message` read `undefined`
+                        // too. `NOT_IMPLEMENTED` is the standard-catalog code
+                        // for 501 (ADR-0112; `standardErrorCodeForHttpStatus`).
                         res.status(501).json({
-                            error: 'Reset operation not supported by protocol implementation',
+                            error: {
+                                code: 'NOT_IMPLEMENTED',
+                                message: 'Reset operation not supported by protocol implementation',
+                            },
                         });
                         return;
                     }
@@ -5697,7 +5722,20 @@ export class RestServer {
                     }
                     const p = await this.resolveProtocol(environmentId, req);
                     if (!p.saveMetaItem) {
-                        res.status(501).json({ error: 'Save operation not supported by protocol implementation', code: 'NOT_IMPLEMENTED' });
+                        // [#7035] ADR-0112 envelope. Converged together with the
+                        // single-segment `PUT /meta/:type/:name` above, because
+                        // the two refusals were BYTE-IDENTICAL (see the comment
+                        // block on the gate: "WORD FOR WORD the same mechanism").
+                        // Fixing one and leaving its literal twin would leave the
+                        // wrong template in the file next to the right one, which
+                        // is the harm #7035 is about — a copier copies whichever
+                        // line they scrolled to.
+                        res.status(501).json({
+                            error: {
+                                code: 'NOT_IMPLEMENTED',
+                                message: 'Save operation not supported by protocol implementation',
+                            },
+                        });
                         return;
                     }
 
