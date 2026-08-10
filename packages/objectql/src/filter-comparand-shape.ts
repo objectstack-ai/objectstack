@@ -143,8 +143,21 @@ function shapePreview(value: unknown): string {
   return text.length > 60 ? `${text.slice(0, 59)}…` : text;
 }
 
-/** The wire envelope every filter refusal in the platform already uses. */
-function invalidFilterError(message: string): Error {
+/**
+ * The wire envelope every filter refusal in the platform already uses.
+ *
+ * [#7047] EXPORTED, because this package has a second filter-refusal site and a
+ * private second copy of these four lines is how the platform's refusal faces
+ * drifted in the first place. `having-filter.ts` threw a bare `new Error` for a
+ * retired or unknown operator — `code` and `status` both `undefined` — so a
+ * 400-class author error reached the client 500-shaped, on the ONE refusal face
+ * of five that no conformance table drove. It calls this now, so the two
+ * objectql refusal sites cannot answer one mistake with two envelopes.
+ *
+ * The twin outside this package is `driver-memory`'s `unsupportedFilterError`
+ * (`filter-refusal.ts`), which carries the cross-driver rationale.
+ */
+export function invalidFilterError(message: string): Error {
   const err = new Error(message) as Error & { code?: string; status?: number };
   err.code = StandardErrorCode.enum.INVALID_FILTER;
   err.status = 400;

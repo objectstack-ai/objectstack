@@ -403,7 +403,17 @@ export function scan({ cwd, base, head = 'HEAD' }) {
 
     // `A` means the path is not at the branch point at all, so there is nothing
     // to read and nothing it could already have declared.
-    const baseText = status === 'A' ? null : showOrNull(from, basePath, cwd);
+    //
+    // ...and for `M`/`R` the base side is read ONLY when that path was itself a
+    // changeset. Git pairs renames by CONTENT, not by name, so under this
+    // pathspec an `R` row can legitimately arrive as
+    // `.changeset/README.md -> .changeset/anything.md` (measured, git 2.43.0).
+    // README is documentation and declares nothing BY DEFINITION — so any major
+    // it appears to declare is a phantom, and subtracting it here would report a
+    // genuinely NEW major as exempt, which is this gate's expensive direction.
+    // For `M` the guard is a no-op, because `basePath` is the path already
+    // accepted above. Same guard, same reason, as the two siblings (#7106).
+    const baseText = status === 'A' || !isChangesetFile(basePath) ? null : showOrNull(from, basePath, cwd);
     const already = baseText === null ? [] : majorPackagesIn(baseText);
     // Per PACKAGE, not per file: adding a second `major` entry to a changeset
     // that already declared one is still introducing that second one.
@@ -984,6 +994,16 @@ function selfTest() {
     git(['commit', '-q', '-m', 'head', '--allow-empty', '--no-gpg-sign'], dir);
     return { dir, base };
   };
+  /**
+   * The `R` row for `old -> new` in this repo's diff, or null. Both paths are
+   * regex source, so a caller escapes its dots. Matching the WHOLE row (rather
+   * than `/^R\d/` on the output) is what makes an `R` control specific: it pins
+   * which two paths git paired, not merely that something was scored a rename.
+   */
+  const renameRow = (dir, base, oldPath, newPath) =>
+    git(['diff', '--name-status', base, 'HEAD', '--', '.changeset/*.md'], dir)
+      .split('\n')
+      .find((l) => new RegExp(`^R\\d+\t${oldPath}\t${newPath}$`).test(l)) ?? null;
 
   try {
     // A stock of pending majors on the base commit, the shape of the real tree
@@ -1092,6 +1112,50 @@ function selfTest() {
         scan({ cwd: control.dir, base: control.base }).introduced.map((o) => o.file).join() === '.changeset/mine.md',
         'control: the identical diff with the major in a NON-README file is caught, so the row above is about the filename and not about an empty diff',
       );
+    }
+
+    // ── #7107: an `R` row whose BASE side is README.md subtracts NOTHING ──────
+    //
+    // The row above pins README at the HEAD side. This one is the same fact at
+    // the BASE side, which is a different code path: `basePath` is read to work
+    // out what the file "already declared" at the branch point, and git pairs
+    // renames by CONTENT rather than by name — so under the `.changeset/*.md`
+    // pathspec an `R` row can legitimately arrive as
+    // `.changeset/README.md -> .changeset/x.md` (measured, git 2.43.0; the two
+    // siblings pin the same shape as RED 5 / R16 since #7106).
+    //
+    // Both sides are byte-identical here, which is exactly what makes the case
+    // sharp: the head file is a brand-new changeset declaring a major, and the
+    // only thing that could excuse it is a major read off README. Delete the
+    // `isChangesetFile(basePath)` guard in the scan and `already` becomes
+    // `['@objectstack/spec']`, `added` empties, and this row flips from
+    // `introduced` to `exempt` — a whole-stack major reported as inherited.
+    //
+    // DORMANT, said plainly: the real `.changeset/README.md` is boilerplate with
+    // no frontmatter fence, so `majorPackagesIn` returns `[]` on it and nothing
+    // is subtracted today. The fixture therefore has to COMMIT a major-shaped
+    // README to reach the path at all — without that, the case would pass with
+    // or without the guard and would certify the hole instead of closing it.
+    {
+      const long = '\n\nbody long enough for git to score this as a rename rather than an add plus a delete\n';
+      const majorReadme = '---\n"@objectstack/spec": major\n---' + long;
+      const { dir, base } = makeRepo(
+        { '.changeset/README.md': majorReadme },
+        { '.changeset/README.md': null, '.changeset/was-the-readme.md': majorReadme },
+      );
+      assert(
+        renameRow(dir, base, '\\.changeset/README\\.md', '\\.changeset/was-the-readme\\.md') !== null,
+        `#7107 control: git must really pair the new changeset with README.md, or this case is an ordinary \`A\` and says nothing about the base side — got ${JSON.stringify(git(['diff', '--name-status', base, 'HEAD', '--', '.changeset/*.md'], dir))}`,
+      );
+      const { introduced, exempt } = scan({ cwd: dir, base });
+      assert(
+        introduced.length === 1 &&
+          introduced[0].file === '.changeset/was-the-readme.md' &&
+          introduced[0].majors.join() === '@objectstack/spec',
+        `#7107: a changeset paired with a major-shaped README.md by rename detection inherits NOTHING — got ${JSON.stringify(introduced)}`,
+      );
+      assert(exempt.length === 0, `#7107: ... and it is certainly not exempt — got ${JSON.stringify(exempt)}`);
+      assert(judge({ introduced, pre: { mode: 'exit' } }).verdict === 'enforce', '#7107: ... so with pre-mode exited that PR is RED');
     }
 
     // ── #6129 proper: main drift must not move the verdict ───────────────────
