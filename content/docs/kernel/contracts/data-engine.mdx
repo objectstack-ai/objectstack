@@ -110,7 +110,9 @@ interface EngineQueryOptions {
   limit?: number;                            // LIMIT
   offset?: number;                           // OFFSET
   top?: number;                              // Alias for limit (OData compat)
-  search?: FullTextSearch;                   // Full-text search
+  search?: string | FullTextSearch;          // Full-text search — the bare query text
+                                             // is canonical (ADR-0061 D1); the object
+                                             // form carries the Tier-2 knobs (#7178)
   expand?: Record<string, QueryAST>;         // Recursive relation loading
   context?: ExecutionContext;            // Identity, tenant, transaction — any subset
 }
