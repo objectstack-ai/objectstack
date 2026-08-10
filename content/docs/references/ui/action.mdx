@@ -64,7 +64,7 @@ const result = ActionSchema.parse(data);
 | **label** | `string \| Record<string, string>` | ✅ | Display label |
 | **objectName** | `string` | optional | Target object this action belongs to. When set, the action is auto-merged into the object's actions array by defineStack(). |
 | **icon** | `string` | optional | Icon name |
-| **locations** | `Enum<'list_toolbar' \| 'list_item' \| 'record_header' \| 'record_more' \| 'record_related' \| 'record_section' \| 'global_nav'>[]` | optional | Locations where this action is visible |
+| **locations** | `Enum<'list_toolbar' \| 'list_item' \| 'record_header' \| 'record_more' \| 'record_related' \| 'record_section'>[]` | optional | Locations where this action is visible |
 | **component** | `Enum<'action:button' \| 'action:icon' \| 'action:menu' \| 'action:group'>` | optional | Visual component override |
 | **type** | `Enum<'script' \| 'url' \| 'modal' \| 'flow' \| 'api' \| 'form'>` | optional | Action functionality type |
 | **target** | `string` | optional | URL, Script Name, Flow ID, or API Endpoint. Supports $`{param.X}` and $`{ctx.X}` interpolation. |
@@ -149,7 +149,6 @@ const result = ActionSchema.parse(data);
 * `record_more`
 * `record_related`
 * `record_section`
-* `global_nav`
 
 
 ---

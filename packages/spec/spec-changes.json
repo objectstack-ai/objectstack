@@ -397,6 +397,12 @@
         "to": "stored app publish gate 'hidden' → '_unpublished' (#4829, ADR-0045 amended — `hidden` carried BOTH the publish gate and 'keep out of the App Switcher', so the built-in Account app was withheld from every non-builder; the gate is now the machine-managed `_unpublished`, and `hidden` is navigation presentation only, never an access gate. Stored rows only — an authored `hidden: true` is left untouched)",
         "conversionId": "app-hidden-to-unpublished",
         "toMajor": 17
+      },
+      {
+        "surface": "action.locations[]",
+        "to": "action location 'global_nav' removed (#6888 — no running-app surface rendered it; the ⌘K palette reads no action metadata, while the Studio designer previewed a command-palette frame for it. The value is stripped and the key kept, so an action left with no location becomes the documented headless shape `locations: []`)",
+        "conversionId": "action-global-nav-location-removed",
+        "toMajor": 17
       }
     ],
     "migrated": [
@@ -1316,6 +1322,12 @@
           "surface": "app.hidden",
           "to": "stored app publish gate 'hidden' → '_unpublished' (#4829, ADR-0045 amended — `hidden` carried BOTH the publish gate and 'keep out of the App Switcher', so the built-in Account app was withheld from every non-builder; the gate is now the machine-managed `_unpublished`, and `hidden` is navigation presentation only, never an access gate. Stored rows only — an authored `hidden: true` is left untouched)",
           "conversionId": "app-hidden-to-unpublished",
+          "toMajor": 17
+        },
+        {
+          "surface": "action.locations[]",
+          "to": "action location 'global_nav' removed (#6888 — no running-app surface rendered it; the ⌘K palette reads no action metadata, while the Studio designer previewed a command-palette frame for it. The value is stripped and the key kept, so an action left with no location becomes the documented headless shape `locations: []`)",
+          "conversionId": "action-global-nav-location-removed",
           "toMajor": 17
         }
       ],
