@@ -4,6 +4,11 @@ import { defineStack } from '@objectstack/spec';
 
 // ─── Barrel Imports (one per metadata type) ─────────────────────────
 import * as objects from './src/objects/index.js';
+// [#7036] Lifecycle hooks are NOT collected from the objects barrel — the
+// runtime reads them from `defineStack({ hooks })` only (`collectBundleHooks`).
+// An unregistered `*.hook.ts` file is dead metadata: it type-checks, it reads
+// as wired, and it never runs.
+import taskHook from './src/objects/task.hook.js';
 import * as actions from './src/actions/index.js';
 import * as dashboards from './src/dashboards/index.js';
 import * as datasets from './src/datasets/index.js';
@@ -44,6 +49,9 @@ export default defineStack({
 
   // Seed Data (top-level, registered as metadata)
   data: TodoSeedData,
+
+  // Object Lifecycle Hooks (same shape as app-crm / app-showcase)
+  hooks: [taskHook],
 
   // Auto-collected from barrel index files via Object.values()
   objects: Object.values(objects),

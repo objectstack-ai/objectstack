@@ -31,12 +31,20 @@ interface ActionContext {
   params?: Record<string, unknown>;
 }
 
-/** Mark a single task as complete */
+/**
+ * Mark a single task as complete.
+ *
+ * [#7036] `status` only. `completed_date` is `readonly` — server-owned — so a
+ * caller's write to it is stripped from the payload before the record is
+ * validated, and sending it here made this action refuse itself against
+ * `todo_task`'s `completed_date_required` rule. The stamp belongs to the
+ * `beforeUpdate` leg of `src/objects/task.hook.ts`, which runs on the
+ * transition and whose write the strip lets through.
+ */
 export async function completeTask(ctx: ActionContext): Promise<void> {
   const { record, engine } = ctx;
   await engine.update('todo_task', record.id as string, {
     status: 'completed',
-    completed_date: new Date().toISOString(),
   });
 }
 
@@ -59,15 +67,13 @@ export async function cloneTask(ctx: ActionContext): Promise<{ id: string }> {
   });
 }
 
-/** Mark all selected tasks as complete (bulk) */
+/** Mark all selected tasks as complete (bulk) — same `status`-only rule as {@link completeTask} (#7036) */
 export async function massCompleteTasks(ctx: ActionContext): Promise<void> {
   const { params, engine } = ctx;
   const ids = (params?.selectedIds ?? []) as string[];
-  const now = new Date().toISOString();
   for (const id of ids) {
     await engine.update('todo_task', id, {
       status: 'completed',
-      completed_date: now,
     });
   }
 }
