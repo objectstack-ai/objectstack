@@ -58,7 +58,8 @@ const EVENT_POLL_MS = 50;
  * event-loop starvation heavy enough to push delivery to 32-36s, a 4s window
  * is no longer a window at all and the emptiness below becomes a false pass.
  * The case's *positive* control underneath is what still has teeth there, and
- * it is now deadline-driven (`waitForEvent`) rather than fixed-budget.
+ * it is now deadline-driven (`waitForEvent`) rather than fixed-budget. Making
+ * this half sound needs a different shape than a longer number — see #7408.
  */
 const QUIET_WINDOW_MS = 4_000;
 
