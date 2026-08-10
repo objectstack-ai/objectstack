@@ -21,10 +21,10 @@
 
 import { CoreServiceName } from '@objectstack/spec/system';
 import { MarkNotificationsReadRequestSchema } from '@objectstack/spec/api';
-import type { FieldErrorCode } from '@objectstack/spec/api';
 import type { INotificationService } from '@objectstack/spec/contracts';
 import { isServiceServeable } from '../service-serveable.js';
 import { validationFailure, fieldsFromZodIssues } from '../validation-failure.js';
+import { parseBooleanParam, parseIntegerParam, parseStringParam } from '../query-param.js';
 import { capabilityUnavailable } from './unavailable.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
@@ -43,104 +43,49 @@ import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.
 //   ?read=1     →  false       →  the UNREAD half, silently
 //   ?type=a&type=b → 'a,b'     →  a topic nothing matches, silently
 //
-// What follows refuses those, in the house refusal shape this file already uses
-// for the mark-read body: `validationFailure` — the duck-typed
-// `{ code: 'VALIDATION_FAILED', fields[] }` that BOTH dispatcher error exits map
-// to 400 with `details.fields[]` (#3918). No new error channel, and no new spec
-// spelling: ADR-0112's registered `VALIDATION_FAILED` and ADR-0114's closed
-// field-level catalog (`FieldErrorCode`) already say all of this.
-
-/**
- * Render a rejected query value for a human, without echoing an unbounded
- * caller-supplied string into the response body.
- */
-function describeQueryValue(raw: unknown): string {
-    if (typeof raw === 'string') {
-        return JSON.stringify(raw.length > 40 ? `${raw.slice(0, 40)}…` : raw);
-    }
-    if (Array.isArray(raw)) return `a repeated parameter (${raw.length} values)`;
-    if (raw !== null && typeof raw === 'object') return 'a structured value';
-    return String(raw);
-}
-
-/** One malformed query parameter, refused. `code` is an ADR-0114 catalog member. */
-function invalidQueryParam(param: string, code: FieldErrorCode, expected: string, raw: unknown): Error {
-    const message =
-        `Invalid \`${param}\` query parameter — expected ${expected}, received ${describeQueryValue(raw)}`;
-    return validationFailure(message, [{ field: param, code, message }]);
-}
+// [#7300] The parsers that refuse those used to live right here, module-local,
+// because one consumer did not justify a shared module. `GET /automation/:name
+// /runs` turned out to carry character-for-character the same `Number(...)`
+// coercion, so they moved to `../query-param.ts` — unchanged in behaviour, and
+// consumed from both routes rather than copied into the second one. Each
+// parser's docblock over there says what it refuses and, the half that matters
+// more, what it deliberately still accepts unchanged; the route-specific
+// mechanism stays below, at the call site.
 
 /**
  * `read` — a TRI-state filter: absent means both halves of the inbox, so
  * `undefined` has to stay reachable and must never collapse into `false`.
- *
- * Was `String(query.read) === 'true'`, which answered `false` for every spelling
- * that was not exactly `true`. `?read=1`, `?read=TRUE` and `?read=` therefore
- * served the UNREAD half to a caller who had asked for the read half — or for
- * nothing in particular — and said so to nobody. The wire contract declares
- * `z.boolean()`; its two spellings are `true` and `false`, and a third spelling
- * is now refused rather than guessed.
- *
- * PRESERVED EXACTLY: absent → `undefined`; `'true'` → `true`; `'false'` → `false`;
- * a real boolean (what the in-process `dispatch()` delegation can hand over) →
- * itself. Those are every input that already had a defensible answer.
+ * `String(query.read) === 'true'` answered `false` for every spelling that was
+ * not exactly `true`, so `?read=1` served the UNREAD half to a caller who had
+ * asked for the read half.
  */
-function parseReadFilter(raw: unknown): boolean | undefined {
-    if (raw === undefined) return undefined;
-    if (typeof raw === 'boolean') return raw;
-    if (raw === 'true') return true;
-    if (raw === 'false') return false;
-    throw invalidQueryParam('read', 'invalid_boolean', '`true` or `false`', raw);
-}
+const parseReadFilter = (raw: unknown): boolean | undefined => parseBooleanParam('read', raw);
 
 /**
- * `limit` — the window size, and the defect #6928 was filed for.
+ * `limit` — the window size, and the defect #6928 was filed for. `NaN` survived
+ * `MessagingService.listInbox`'s clamp (`Math.min(Math.max(NaN ?? 50, 1), 200)`
+ * — `??` does not catch NaN and neither bound rejects it) and reached the driver
+ * as `data.find({ limit: NaN })`.
  *
- * `Number(query.limit)` answered `NaN` for `?limit=abc`, and NaN then survives
- * every guard downstream: `MessagingService.listInbox` computes
- * `Math.min(Math.max(limit ?? 50, 1), 200)`, where `??` does not catch NaN and
- * neither `min` nor `max` rejects it, so `data.find({ limit: NaN })` reached the
- * driver and behaved however that driver behaves. Never a 400.
- *
- * Refused: values that are not a whole number at all — `abc`, `1.5`, `Infinity`,
- * a repeated `?limit=1&limit=2`.
- *
- * NOT refused — and this is deliberate, not an omission: an out-of-RANGE number.
- * The clamp is the DECLARED contract, not a workaround
- * (`ListNotificationsRequestSchema.limit`: the platform inbox "clamps any
- * requested value into 1..200 rather than refusing it"), so `?limit=1000` still
- * answers 200 rows and `?limit=-5` still answers 1. This gate adds a refusal for
- * values that were never numbers; it changes the answer for no value that was.
+ * The out-of-RANGE number stays accepted on purpose: the clamp is the DECLARED
+ * contract (`ListNotificationsRequestSchema.limit` — the platform inbox "clamps
+ * any requested value into 1..200 rather than refusing it"), so `?limit=1000`
+ * still answers 200 rows and `?limit=-5` still answers 1.
  */
-function parseLimitWindow(raw: unknown): number | undefined {
-    // The falsy gate is preserved verbatim from `query?.limit ? … : undefined`,
-    // so every input that already meant "no limit" — absent, `null`, `''`, `0` —
-    // keeps meaning that and keeps its old answer instead of becoming a new 400.
-    if (!raw) return undefined;
-    const parsed = Number(raw);
-    if (!Number.isInteger(parsed)) {
-        throw invalidQueryParam('limit', 'invalid_number', 'a whole number', raw);
-    }
-    return parsed;
-}
+const parseLimitWindow = (raw: unknown): number | undefined => parseIntegerParam('limit', raw);
 
 /**
- * `type` — the topic filter, declared `z.string()`.
+ * `type` — the topic filter, declared `z.string()`. A repeated `?type=a&type=b`
+ * arrives as an ARRAY and `String(...)` made it the single topic `'a,b'` — an
+ * empty inbox, served as a 200.
  *
- * `String(query.type)` turned any non-string into a filter that matches nothing:
- * a repeated `?type=a&type=b` arrives as an ARRAY from every query parser this
- * route runs behind and became the single topic `'a,b'`, so the caller got an
- * empty inbox and a 200. A string — any string — is still passed through
- * untouched, including one that names no live topic: "no notifications of that
- * type" is a legitimate empty answer, unlike "no notifications of a type you did
- * not ask for".
+ * The falsy gate is this route's own, preserved verbatim from
+ * `query?.type ? String(query.type) : undefined`: an empty `?type=` has always
+ * meant "no topic filter" here and must not become a new 400.
  */
 function parseTypeFilter(raw: unknown): string | undefined {
-    if (!raw) return undefined; // preserves `query?.type ? … : undefined`
-    if (typeof raw !== 'string') {
-        throw invalidQueryParam('type', 'invalid_type', 'a single string', raw);
-    }
-    return raw;
+    if (!raw) return undefined;
+    return parseStringParam('type', raw);
 }
 
 export function createNotificationsDomain(deps: DomainHandlerDeps): DomainRoute {
