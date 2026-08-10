@@ -306,9 +306,18 @@ export function createSysFileReapGuard(
       // Not a state this guard reaps — veto (fail toward retention).
     }
     if (keptGateClosed > 0) {
+      // The guard is handed a boolean, so it cannot name WHICH of the two
+      // closed the gate — and naming only the first was wrong once #4797
+      // added the second: a deployment whose `verified_at` is plainly set
+      // would be told its migration "is not verified" and sent hunting. Both
+      // causes are stated, and they share one remedy, so the instruction is
+      // unambiguous either way. `sys_migration` has the answer.
       logger.info(
         `[storage] reap guard: kept ${keptGateClosed} released field file(s) — this deployment's ` +
-          `file-as-reference migration is not verified (run \`os migrate files-to-references --apply\`)`,
+          `file-as-reference migration is not verified, or a deviation has been observed since it ` +
+          `was (a value an OS_ALLOW_LAX_* escape hatch admitted against the migration's own ` +
+          `contract). Either way: fix the data, then run \`os migrate files-to-references --apply\`. ` +
+          `See sys_migration.verified_at / deviation_observed_at (ADR-0104 / #4797)`,
       );
     }
     return confirmed;
