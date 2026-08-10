@@ -110,6 +110,37 @@ const IMPORT_RUN_AUTOMATIONS_REASON =
   + 'server would have applied anyway. Maintainer ruling 2026-08-09 (#6704, disposition '
   + 'A: the spec follows the runtime).';
 
+const AUTONUMBER_FORMAT_DEFAULT_REASON =
+  'A format-less `autonumber` field never had ONE rendering to rely on, so this row '
+  + 'declares an answer where the contract previously declared none — it does not '
+  + 'replace a default anyone could read off the schema. What the two generators did '
+  + 'instead, each with its own hand-written fallback, disagreed: `driver-sql` '
+  + "substituted `'{0000}'` and issued `0001`, `0002`, …, while the ObjectQL engine's "
+  + 'in-memory fallback path (taken whenever a driver does not advertise '
+  + '`supports.autonumber`) parsed the empty string and rendered a bare `1`, `2`, …. '
+  + 'One metadata document therefore minted differently-shaped numbers depending on '
+  + 'which driver served it. The counter VALUE always agreed on both sides — #6468 '
+  + 'pinned that — so what forked was width alone. '
+  + 'The maintainer ruling (2026-08-08, #6555, route 3) fixes the default at `{0000}` '
+  + 'and moves it into the contract: `DEFAULT_AUTONUMBER_FORMAT` and '
+  + '`resolveAutonumberFormat` in `@objectstack/spec/data` are the one place it is '
+  + 'written down, and both generators will read it instead of substituting their own. '
+  + '`{0000}` was chosen because it is the shape SQL deployments have already stored: '
+  + 'choosing it keeps stored driver-sql data undisturbed; engine-fallback deployments '
+  + 'flip from bare 1 to 0001 for newly issued numbers. Counter continuity itself is '
+  + 'unaffected (#6468 pinned it). '
+  + 'To keep the bare counter a memory-driver deployment was issuing, write a format '
+  + "with no sequence slot — `autonumberFormat: ''` is NOT that spelling, since an "
+  + "empty string resolves to the default too (`driver-sql`'s long-standing truthiness "
+  + 'rule); a slot-less literal format such as `PRE-` renders `PRE-1`. To keep the '
+  + '`0001` shape SQL already gives you, change nothing. '
+  + 'This is a JSON-Schema annotation, NOT a Zod `.default()`: `autonumberFormat` is '
+  + 'flat on `FieldSchema` and shared by every field type, so a parse-time default '
+  + "would materialise `'{0000}'` on every `text`, `number` and `lookup` field parsed "
+  + 'anywhere. Parse output is unchanged for every type, `autonumber` included — a '
+  + 'consumer reading `FieldParsed.autonumberFormat` still sees `undefined` when the '
+  + 'author omitted it, and asks `resolveAutonumberFormat` what that means.';
+
 export const DEFAULT_CHANGES_BY_MAJOR: Readonly<Record<number, readonly DeclaredDefaultChange[]>> = {
   17: [
     {
@@ -152,6 +183,12 @@ export const DEFAULT_CHANGES_BY_MAJOR: Readonly<Record<number, readonly Declared
       from: 'false',
       to: 'true',
       reason: IMPORT_RUN_AUTOMATIONS_REASON,
+    },
+    {
+      key: 'data/Field:autonumberFormat',
+      from: '(none)',
+      to: '"{0000}"',
+      reason: AUTONUMBER_FORMAT_DEFAULT_REASON,
     },
   ],
 };

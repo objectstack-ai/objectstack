@@ -128,7 +128,7 @@ const result = AddressSchema.parse(data);
 | **system** | `boolean` | optional | Auto-injected system/audit field (e.g. created_at, updated_by, organization_id). Tools that surface system fields separately from author-declared business fields should branch on this flag. |
 | **sortable** | `boolean` | optional | Whether field is sortable in list views |
 | **inlineHelpText** | `string` | optional | Help text displayed below the field in forms |
-| **autonumberFormat** | `string` | optional | Auto-number format: literal text + `{0000}` counter, `{YYYY}`/`{MM}`/`{DD}`/`{YYYYMMDD}` date tokens (business tz), and `{field_name}` interpolation. Counter resets per rendered prefix (e.g. AD`{YYYYMMDD}``{0000}` resets daily). |
+| **autonumberFormat** | `string` | optional | Auto-number format: literal text + `{0000}` counter, `{YYYY}`/`{MM}`/`{DD}`/`{YYYYMMDD}` date tokens (business tz), and `{field_name}` interpolation. Counter resets per rendered prefix (e.g. AD`{YYYYMMDD}``{0000}` resets daily). Omitted on an `autonumber` field ⇒ the contract default `{0000}` (#6555). |
 | **externalId** | `boolean` | optional | Is external ID for upsert operations |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |

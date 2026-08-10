@@ -8,6 +8,7 @@ import { SystemIdentifierSchema } from '../shared/identifiers.zod';
 import { ExpressionInputSchema } from '../shared/expression.zod';
 import { FilterConditionSchema } from './filter.zod';
 import { FIELD_KEY_GUIDANCE } from './authoring-key-lint';
+import { DEFAULT_AUTONUMBER_FORMAT } from './autonumber-format';
 
 /**
  * Field Type Enum
@@ -879,8 +880,30 @@ export const FieldSchema = lazySchema(() => strictObject({
    * collapse the number into the wrong counter scope, so generation throws
    * instead; `objectstack compile` lints this (unknown field → build error,
    * optional field → warning).
+   *
+   * ## Omitting it — the contract default (#6555)
+   *
+   * The key stays optional, and a field that omits it renders with
+   * {@link DEFAULT_AUTONUMBER_FORMAT} — `{0000}`, i.e. `0001`, `0002`, … The
+   * default belongs to the CONTRACT, not to whoever happens to be generating
+   * the number: every consumer resolves it through
+   * {@link resolveAutonumberFormat} rather than substituting its own. That is
+   * the whole point of the maintainer's 2026-08-08 ruling — the two hand-written
+   * fallbacks it replaces disagreed (the SQL driver substituted `{0000}` while
+   * the engine's in-memory fallback emitted a bare `1`), so one metadata
+   * document minted differently-shaped numbers depending on the driver behind it.
+   *
+   * Declared here as a JSON-Schema `default` annotation rather than a Zod
+   * `.default()`: this key is flat on `FieldSchema`, shared by all ~49 field
+   * types, so a parse-time default would materialize `autonumberFormat:
+   * '{0000}'` on every `text`, `number` and `lookup` field ever parsed — a
+   * format on a field that has no counter. The annotation states the default
+   * to schema consumers and AI metadata authors without touching parse output.
    */
-  autonumberFormat: z.string().optional().describe('Auto-number format: literal text + {0000} counter, {YYYY}/{MM}/{DD}/{YYYYMMDD} date tokens (business tz), and {field_name} interpolation. Counter resets per rendered prefix (e.g. AD{YYYYMMDD}{0000} resets daily).'),
+  autonumberFormat: z.string().optional().meta({
+    description: 'Auto-number format: literal text + {0000} counter, {YYYY}/{MM}/{DD}/{YYYYMMDD} date tokens (business tz), and {field_name} interpolation. Counter resets per rendered prefix (e.g. AD{YYYYMMDD}{0000} resets daily). Omitted on an `autonumber` field ⇒ the contract default `{0000}` (#6555).',
+    default: DEFAULT_AUTONUMBER_FORMAT,
+  }),
   // `index` (field-level bool) removed in the 16.x line (#2377, ADR-0049): the
   // driver builds indexes from the object's `indexes[]` array; a field-level
   // `index: true` created no index. Declare the index in object `indexes[]`.
