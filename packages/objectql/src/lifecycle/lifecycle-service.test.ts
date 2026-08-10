@@ -1063,6 +1063,27 @@ describe('LifecycleService.sweep — governance (P4)', () => {
     expect(deletes).toHaveLength(2);
   });
 
+  // [#6231] `count()` takes the object name as argument ONE; the query AST is
+  // `DriverQuery` (`Omit<QueryAST, 'object'>`) and must not restate it. The
+  // governance counter used to pass `{ object: obj.name }` — carried not by a
+  // cast but by a hand-written driver shape whose `query` was
+  // `Record<string, unknown>`, which would equally have accepted a `where` the
+  // filter dialect does not have.
+  it('counts by argument one only — the query never restates the object name', async () => {
+    const count = vi.fn(async (_object: string, _query?: unknown) => 5);
+    const driver = { name: 'default', count };
+    const { engine } = captureEngine([TELEMETRY_OBJ], { driver });
+    const settings = fakeSettings({ quotas: { sys_job_run: 1 } });
+
+    await service(engine, { getSettings: () => settings }).sweep();
+
+    expect(count).toHaveBeenCalled();
+    for (const [object, query] of count.mock.calls) {
+      expect(object).toBe('sys_job_run');
+      expect(query ?? {}).not.toHaveProperty('object');
+    }
+  });
+
   it('quota defaults by class apply when no per-object quota is set', async () => {
     const driver = { name: 'default', count: async () => 50 };
     const { engine } = captureEngine([TELEMETRY_OBJ], { driver });

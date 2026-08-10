@@ -8,11 +8,18 @@
  * path: `ObjectQL.registerApp()` decomposes a manifest's metadata arrays and
  * calls `SchemaRegistry.registerItem(type, item, 'name', packageId)`, which runs
  * `applyProtection(item, { packageId })` and stamps `_packageId` /
- * `_provenance`. The key list that drives that decomposition
- * (`metadataArrayKeys`, twice in `engine.ts`: the manifest seam and the nested
- * `registerPlugin` seam) carried every other Security-Protocol collection —
- * `permissions`, `sharingRules`, `roles`, `profiles`, `policies` — but not
- * `capabilities`.
+ * `_provenance`. The key list that drives that decomposition — at the time,
+ * `metadataArrayKeys`, declared TWICE in `engine.ts`, once per seam: the
+ * manifest seam and the nested `registerPlugin` seam — carried every other
+ * Security-Protocol collection — `permissions`, `sharingRules`, `roles`,
+ * `profiles`, `policies` — but not `capabilities`.
+ *
+ * The two copies are one `METADATA_ARRAY_KEYS` since #7049, which found four
+ * MORE collections (`jobs`, `emailTemplates`, `tools`, `skills`) that this
+ * fix's one-name-at-a-time shape had left diverged. The seams' agreement is
+ * pinned as a property in `engine-nested-plugin-collections.test.ts`; the
+ * nested-seam case below stays because `capabilities` is the collection whose
+ * absence had a NAMED downstream consequence.
  *
  * Consequence before the fix: `plugin-security`'s `bootstrapDeclaredCapabilities`
  * resolves the owner as `cap._packageId ?? cap.packageId` and reads its input
@@ -110,10 +117,13 @@ describe('registerApp — declared capabilities carry registry provenance (#5870
   });
 
   it('stamps capabilities declared by a NESTED plugin too (the second seam)', () => {
-    // `engine.ts` carries `metadataArrayKeys` twice — the manifest seam and the
-    // `registerPlugin` seam reached via `manifest.plugins[]`. A fix applied to
-    // only one leaves a package's nested plugin declaring capabilities that
-    // still never get stamped, which is the same defect one level down.
+    // `engine.ts` reaches this seam from two entry points — the manifest seam
+    // and the `registerPlugin` seam reached via `manifest.plugins[]`. A fix
+    // applied to only one leaves a package's nested plugin declaring
+    // capabilities that still never get stamped, which is the same defect one
+    // level down. (Since #7049 both entry points read ONE collection list, so
+    // this can no longer be half-fixed; the assertion stays as the regression
+    // pin for the collection that first exposed it.)
     const engine = new ObjectQL();
     engine.registerApp({
       id: PKG,

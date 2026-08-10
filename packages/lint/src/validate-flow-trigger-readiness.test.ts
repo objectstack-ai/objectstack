@@ -863,11 +863,17 @@ describe('validateFlowTriggerReadiness', () => {
         // Scope boundary, pinned rather than left to memory. A `record_change`
         // flow with no triggerType at all resolves to no binding by the same
         // fall-through and is just as dead — but it is an omission rather than a
-        // contradiction, and the corpus measurement found a LIVE instance of it
-        // in `examples/app-todo` (`TaskCompletionFlow`, #6882). Covering it here
-        // would gate a shipped example app on a guess about that app's
-        // semantics, so the criterion requires the key to be PRESENT and the
-        // omission case is filed separately. Widening this is then a deliberate
+        // contradiction, and at the time this criterion was cut (#6637) the
+        // corpus measurement found a LIVE instance of it in `examples/app-todo`
+        // (`TaskCompletionFlow`, tracked as #6882). Covering it then would have
+        // gated a shipped example app on a guess about that app's semantics, so
+        // the criterion requires the key to be PRESENT and the omission case was
+        // filed separately. That instance has since been repaired by #7039 —
+        // `TaskCompletionFlow` now declares `triggerType: 'record-after-update'`
+        // and routes correctly, so there is no live instance in the tree as of
+        // this writing. Whether the omission shape should now be covered too is
+        // a separate, undecided question (#7041 item 2) — this test still pins
+        // the deliberate non-coverage of it. Widening this is then a deliberate
         // edit that has to delete this test, not a side effect of touching the
         // predicate.
         expect(

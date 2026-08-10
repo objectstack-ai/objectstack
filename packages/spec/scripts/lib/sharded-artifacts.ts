@@ -353,6 +353,34 @@ function jsonTypeLabel(value: unknown): string {
 }
 
 /**
+ * The middle of the "this entry is not a string" message — field, entry index,
+ * what was found instead, and the offending value — or null when every entry in
+ * `list` is a string (#7076).
+ *
+ * It is the SKELETON only, deliberately: each reader prefixes its own source
+ * locator (a shard file in the working tree, a path at a revision) and appends
+ * its own remedy, because those two differ per site while the diagnosis does
+ * not. `aggregateCategoryShards` above spells the same middle inline — the fix
+ * that established this shape (#6751) landed before there was a second caller,
+ * and rewriting a landed message to route it through here would churn a pinned
+ * contract for no reader's benefit. The pin tests assert the shared substring on
+ * all three sites, so a divergence is caught rather than trusted.
+ */
+function nonStringEntryDetail(
+  field: string,
+  list: readonly unknown[],
+): { index: number; detail: string } | null {
+  const index = list.findIndex((entry) => typeof entry !== 'string');
+  if (index === -1) return null;
+  return {
+    index,
+    detail:
+      `${field}[${index}] is ${jsonTypeLabel(list[index])}, not a string (#5837): ` +
+      `${JSON.stringify(list[index])}`,
+  };
+}
+
+/**
  * Aggregate a category-sharded directory into one sorted array, validating that
  * each shard answers only for its own category.
  *
@@ -429,6 +457,27 @@ export function aggregateApiSurfaceShards(
     if (!Array.isArray(shard.doc.exports)) {
       throw new Error(`${API_SURFACE_DIR_NAME}/${shard.name}.json has no "exports" array (#5837).`);
     }
+    // `ApiSurfaceShard.exports` is DECLARED `string[]`, and `readShards` gets
+    // there by a `JSON.parse` cast — so the declaration is a claim about the
+    // file, not a fact the type checker verified. `Array.isArray` above answers
+    // for the container and says nothing about the entries, exactly the gap
+    // #6751 closed one function up; this is the fourth sharded artifact, which
+    // that fix could not reach because it is not routed by `categoryOfDefKey`.
+    // Unchecked, a hand-edited non-string row travels into `surface` as a
+    // `string` and lands in the breadth diff in `build-api-surface.ts`: it is in
+    // the snapshot and not in the built surface, so it is counted as a REMOVED
+    // export and the run ends on "a REMOVED export … is a BREAKING change for
+    // third parties — bump @objectstack/spec to a new major (or restore it)".
+    // Red either way, but that sentence sends the author after an export that
+    // never existed instead of the shard row they broke (#7076).
+    const rows = shard.doc.exports as readonly unknown[];
+    const bad = nonStringEntryDetail('exports', rows);
+    if (bad) {
+      throw new Error(
+        `${API_SURFACE_DIR_NAME}/${shard.name}.json ${bad.detail}. Every entry is an ` +
+          `"<Name> (<kind>)" export row — regenerate rather than reconcile by hand.`,
+      );
+    }
     surface[shard.doc.entry] = shard.doc.exports;
   }
   return { surface, shards };
@@ -496,6 +545,15 @@ export function readShardedKeysAtRev(
       }
       const list = doc[field];
       if (!Array.isArray(list)) return { error: `${file} at ${rev.slice(0, 12)} has no "${field}" array` };
+      // The entry check the container check cannot do (#7076). Carried as
+      // `{ error }` rather than thrown because that is this reader's contract —
+      // `readSurfaceKeysAtRev` in `build-schemas.ts` prints the string under the
+      // gate's own name and exits, and a throw from here would escape that
+      // framing and print a baseline problem as a problem with the commit under
+      // test. See the same check below for the legacy layout, and the note there
+      // on why a bad entry costs more here than a bad container.
+      const bad = nonStringEntryDetail(field, list as readonly unknown[]);
+      if (bad) return { error: `${file} at ${rev.slice(0, 12)} ${bad.detail}` };
       entries.push(...(list as string[]));
     }
     return { entries: entries.sort(), layout: 'sharded' };
@@ -520,5 +578,27 @@ export function readShardedKeysAtRev(
   }
   const list = doc[field];
   if (!Array.isArray(list)) return { error: `${legacyName} at ${rev.slice(0, 12)} has no "${field}" array` };
+  // Why a non-string entry is worth its own verdict here, when the container
+  // check already exists: a missing array stops the read, but a bad ENTRY used
+  // to be forwarded into the baseline SET, and the three gates that consume it
+  // fail three different ways, none of them naming this file (#7076):
+  //
+  //   - the authorable-surface deletion gate maps every base entry through
+  //     `entry.replace(RETIRED_MARK, '')` and dies on `replace is not a
+  //     function` — the bare-JS-error shape #6751 removed one function up;
+  //   - the json-schema.manifest removal check keeps the entry (it is in
+  //     neither `generatedKeys` nor `RENAMED_DEFS`), reports it as a schema
+  //     that left the published set, and demands a `RETIRED_DEFS_BY_MAJOR`
+  //     registration for a def that never existed;
+  //   - `compareAnchorKeys` reports it as a line the committed
+  //     `authorable-surface.base.json` is missing, i.e. blames the anchor for
+  //     not mirroring a baseline it mirrors correctly.
+  //
+  // All three are loud, so this is diagnostic quality and not a bypass — but a
+  // baseline read from an already-merged commit is exactly where "the artifact
+  // is corrupt" must be said by the reader, since no downstream gate can see
+  // which file the value came from.
+  const bad = nonStringEntryDetail(field, list as readonly unknown[]);
+  if (bad) return { error: `${legacyName} at ${rev.slice(0, 12)} ${bad.detail}` };
   return { entries: [...(list as string[])].sort(), layout: 'legacy' };
 }
