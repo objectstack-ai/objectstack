@@ -55,6 +55,7 @@ import { SHARE_LINK_SERVICE } from '@objectstack/spec/contracts';
 import { PermissionDeniedError, SecurityPlugin } from '@objectstack/plugin-security';
 import { ShareLinkService } from '@objectstack/plugin-sharing';
 import { ApiErrorSchema, BaseResponseSchema, envelopeViolations } from '@objectstack/spec/api';
+import { BUILTIN_OPERATION_MESSAGES } from '@objectstack/spec/system';
 import { apiErrorResponse } from '../error-envelope.js';
 import { handleShareLinksRequest } from './share-links.js';
 import { HttpDispatcher } from '../http-dispatcher.js';
@@ -605,7 +606,17 @@ describe('[#6649] a security-middleware refusal keeps its own status through the
         // message trips no clause of `looksLikeInternalErrorLeak` anyway). It
         // pins the refusal's own reason against a FUTURE widening of that
         // heuristic swallowing an authorization answer.
-        expect(res.body.error.message).toContain('Access denied');
+        //
+        // [#7414] Re-spelled, not weakened. This used to read
+        // `toContain('Access denied')`, which was the CRUD gate's developer
+        // sentence; that sentence is now `developerMessage` (logged, not
+        // shipped) and `message` is the user-facing catalog entry rendered in
+        // `ExecutionContext.locale` — `en` here, since this caller declares no
+        // locale. Asserted against the catalog constant rather than a literal so
+        // a future copy edit does not need to re-spell this file, and still
+        // proves the same thing: an authorization answer reached the client
+        // instead of being swallowed into the generic internal-error string.
+        expect(res.body.error.message).toBe(BUILTIN_OPERATION_MESSAGES.en.permission_denied);
     }, 30_000);
 
     it('group posture: the same denial, the same envelope — the defect was never posture-specific', async () => {
