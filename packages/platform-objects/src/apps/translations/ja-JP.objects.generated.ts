@@ -2343,7 +2343,8 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
           success: "成功",
           failed: "失敗",
           timeout: "タイムアウト",
-          running: "実行中"
+          running: "実行中",
+          degraded: "縮退"
         }
       },
       last_error: {
@@ -2380,7 +2381,8 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
           running: "実行中",
           success: "成功",
           failed: "失敗",
-          timeout: "タイムアウト"
+          timeout: "タイムアウト",
+          degraded: "縮退"
         }
       },
       started_at: {

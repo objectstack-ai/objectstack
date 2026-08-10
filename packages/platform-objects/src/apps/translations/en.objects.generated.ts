@@ -2343,7 +2343,8 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
           success: "success",
           failed: "failed",
           timeout: "timeout",
-          running: "running"
+          running: "running",
+          degraded: "degraded"
         }
       },
       last_error: {
@@ -2380,7 +2381,8 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
           running: "running",
           success: "success",
           failed: "failed",
-          timeout: "timeout"
+          timeout: "timeout",
+          degraded: "degraded"
         }
       },
       started_at: {

@@ -83,7 +83,7 @@ const result = CronScheduleSchema.parse(data);
 | **jobId** | `string` | ✅ | Job identifier |
 | **startedAt** | `string` | ✅ | ISO 8601 datetime when execution started |
 | **completedAt** | `string` | optional | ISO 8601 datetime when execution completed |
-| **status** | `Enum<'running' \| 'success' \| 'failed' \| 'timeout'>` | ✅ | Execution status |
+| **status** | `Enum<'running' \| 'success' \| 'failed' \| 'timeout' \| 'degraded'>` | ✅ | Execution status |
 | **error** | `string` | optional | Error message if failed |
 | **durationMs** | `integer` | optional | Execution duration in milliseconds |
 
@@ -98,6 +98,7 @@ const result = CronScheduleSchema.parse(data);
 * `success`
 * `failed`
 * `timeout`
+* `degraded`
 
 
 ---

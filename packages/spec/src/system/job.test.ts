@@ -400,12 +400,36 @@ describe('JobExecutionStatus', () => {
     expect(() => JobExecutionStatus.parse('success')).not.toThrow();
     expect(() => JobExecutionStatus.parse('failed')).not.toThrow();
     expect(() => JobExecutionStatus.parse('timeout')).not.toThrow();
+    // [#7072] The fifth value, per #5548's ruling: "completed without
+    // accomplishing the work". Not a failure, never retried.
+    expect(() => JobExecutionStatus.parse('degraded')).not.toThrow();
   });
 
   it('should reject invalid execution statuses', () => {
     expect(() => JobExecutionStatus.parse('pending')).toThrow();
     expect(() => JobExecutionStatus.parse('cancelled')).toThrow();
     expect(() => JobExecutionStatus.parse('')).toThrow();
+    // [#7072] The ruling closes the vocabulary at five: "⛔ Do not open an enum
+    // family; a second key would need its own pull." These are the near-misses a
+    // future adapter is most likely to reach for; they stay refused.
+    expect(() => JobExecutionStatus.parse('partial')).toThrow();
+    expect(() => JobExecutionStatus.parse('skipped')).toThrow();
+    expect(() => JobExecutionStatus.parse('Degraded')).toThrow();
+  });
+
+  it('should carry exactly the five ruled values, in declaration order', () => {
+    // [#7072] Pins the vocabulary itself, not just membership: the two
+    // `platform-objects` selects (`sys_job_run.status`, `sys_job.last_status`)
+    // are *enforced* by ObjectQL's record validator, so this enum growing a
+    // value they do not carry is a silently swallowed write rather than a type
+    // error. Any change here needs the same change there.
+    expect(JobExecutionStatus.options).toEqual([
+      'running',
+      'success',
+      'failed',
+      'timeout',
+      'degraded',
+    ]);
   });
 });
 
@@ -463,8 +487,27 @@ describe('JobExecutionSchema', () => {
     expect(parsed.status).toBe('timeout');
   });
 
+  it('should accept degraded execution', () => {
+    // [#7072] A degraded run's `reason` rides the existing `error` field — the
+    // ruling's minimal vocabulary applies to columns too, so no `reason` member
+    // was added. Note the cost this pins: `error` carries a non-error operator
+    // note whenever the status is `degraded`.
+    const execution = {
+      jobId: 'job-321',
+      startedAt: '2024-01-15T13:00:00Z',
+      completedAt: '2024-01-15T13:00:02Z',
+      status: 'degraded',
+      error: 'STORE_UNAVAILABLE',
+      durationMs: 2000,
+    };
+
+    const parsed = JobExecutionSchema.parse(execution);
+    expect(parsed.status).toBe('degraded');
+    expect(parsed.error).toBe('STORE_UNAVAILABLE');
+  });
+
   it('should accept all execution statuses', () => {
-    const statuses: Array<JobExecution['status']> = ['running', 'success', 'failed', 'timeout'];
+    const statuses: Array<JobExecution['status']> = ['running', 'success', 'failed', 'timeout', 'degraded'];
 
     statuses.forEach(status => {
       const execution = {
