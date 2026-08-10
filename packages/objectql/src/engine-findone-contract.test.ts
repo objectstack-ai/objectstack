@@ -141,13 +141,13 @@ describe('findOne executes what it declares and refuses an empty predicate (#441
     // ── (1) `search` is a predicate on findOne, not a dropped key ────────
 
     it('findOne({search}) matches the searched record, not the first row', async () => {
-        const row = await engine.findOne('crm_account', { search: 'Two' } as any);
+        const row = await engine.findOne('crm_account', { search: 'Two' });
         expect(row?.name).toBe('Two');
         expect(row?.id).not.toBe(one.id);
     });
 
     it('the search term reaches the driver as a $contains predicate — `search` never does', async () => {
-        await engine.findOne('crm_account', { search: 'Two' } as any);
+        await engine.findOne('crm_account', { search: 'Two' });
         const { ast } = lastRead();
         expect(ast.where).toBeTruthy();
         expect(JSON.stringify(ast.where)).toContain('$contains');
@@ -160,13 +160,13 @@ describe('findOne executes what it declares and refuses an empty predicate (#441
         // `industry`, only the latter can hit — and a narrowed miss must be a
         // miss, not a fall-back to an unpredicated read.
         const narrowed = { searchFields: ['industry'] };
-        expect(await engine.findOne('crm_account', { search: 'Two', ...narrowed } as any)).toBeNull();
-        expect((await engine.findOne('crm_account', { search: 'Metals', ...narrowed } as any))?.id)
+        expect(await engine.findOne('crm_account', { search: 'Two', ...narrowed })).toBeNull();
+        expect((await engine.findOne('crm_account', { search: 'Metals', ...narrowed }))?.id)
             .toBe(two.id);
     });
 
     it('find({search}) is unchanged — the expansion moved, it did not fork', async () => {
-        const rows = await engine.find('crm_account', { search: 'Two' } as any);
+        const rows = await engine.find('crm_account', { search: 'Two' });
         expect(rows.map((r: any) => r.name)).toEqual(['Two']);
     });
 
@@ -176,7 +176,7 @@ describe('findOne executes what it declares and refuses an empty predicate (#441
         // "predicate resolved to empty" shape the issue names. Before #4419 the
         // forced `limit: 1` turned it into the object's first row.
         for (const term of ['', '   ']) {
-            await expect(engine.findOne('crm_account', { search: term } as any))
+            await expect(engine.findOne('crm_account', { search: term }))
                 .rejects.toThrow(/selects no particular record/);
         }
         expect(reads).toHaveLength(0);
@@ -293,7 +293,7 @@ describe('findOne executes what it declares and refuses an empty predicate (#441
 
     it('a miss is still null — the guard did not turn "not found" into an error', async () => {
         expect(await engine.findOne('crm_account', { where: { id: 'nope' } } as any)).toBeNull();
-        expect(await engine.findOne('crm_account', { search: 'nope' } as any)).toBeNull();
+        expect(await engine.findOne('crm_account', { search: 'nope' })).toBeNull();
     });
 
     // ── (3) drift pin: every declared findOne option is executed ────────
