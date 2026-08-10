@@ -225,6 +225,26 @@ function git(cwd, args, { captureStderr = false } = {}) {
  * "release-nothing" and drops the commit from the digest entirely — which is
  * #4731's harm exactly, arrived at through the parser instead of a type filter.
  *
+ * WHERE THE FENCE MAY START (#7044). The entry regex was aligned in #7004; the
+ * OTHER row of the same dialect table was not. This parser required the opening
+ * fence on line 1 (`lines[0]?.trim() === '---'`) long after #6923 taught the
+ * three gates to skip leading blank lines first — so a changeset opening with a
+ * single blank line declared, here, nothing at all. Measured with
+ * `@changesets/parse@0.4.3` on 2026-08-10, the version this repo resolves:
+ *
+ *   input                                  | @changesets/parse | this file (before)
+ *   ---------------------------------------|-------------------|-------------------
+ *   `---\n"@object-ui/layout": major\n---`  | major             | major
+ *   one leading blank line, then the same   | major             | NOTHING
+ *   two leading blank lines                 | major             | NOTHING
+ *   a leading whitespace-only line          | major             | NOTHING
+ *
+ * changesets honours the bump; this file dropped the commit out of the digest
+ * and, worse, handed the raw frontmatter text back as the `summary`. So it now
+ * carries the same preamble the three gates carry, byte for byte —
+ * `check-empty-changeset.mjs`'s self-test asserts that agreement across all four
+ * on this row too, which is what stops the fourth carrier drifting again.
+ *
  * @param {string} text
  * @returns {{ packages: Record<string, string>, summary: string, body: string }}
  */
@@ -233,8 +253,9 @@ export function parseChangeset(text) {
   /** @type {Record<string, string>} */
   const packages = {};
   let i = 0;
-  if (lines[0]?.trim() === '---') {
-    i = 1;
+  while (i < lines.length && lines[i].trim() === '') i++; // tolerate leading blank lines
+  if (lines[i]?.trim() === '---') {
+    i++;
     for (; i < lines.length; i++) {
       if (lines[i].trim() === '---') {
         i++;
@@ -1981,6 +2002,52 @@ function selfTest() {
       '#7004 C7 control — the same shape with an unknown bump word still declares nothing, so C1-C6 are about the entry regex and not about LEVEL_RANK being bypassed',
       pkgsOf('"@object-ui/layout": enormous # keep') === '{}',
       pkgsOf('"@object-ui/layout": enormous # keep'),
+    );
+
+    // ---- #7044: WHERE the fence is allowed to start ------------------------
+    //
+    // The other row of the same dialect table. #6923 taught the three gates to
+    // skip leading blank lines before the fence; this fourth carrier kept
+    // requiring it on line 1, and #7004's alignment pass did not touch the row.
+    // Same consequence as the block above and by the same mechanism — a silent
+    // DROP — but reached without any entry being malformed at all: the entries
+    // are perfect, the parser simply never enters the block.
+    //
+    // Measured with @changesets/parse@0.4.3 (the version this repo resolves) on
+    // 2026-08-10: every D-fixture below is read by changesets as a real `major`.
+    // So a miss here is a breaking change vanishing from the release record —
+    // #4731's stated "single class that must never vanish".
+    //
+    // Predicted direction on reverse verification: restoring `lines[0]?.trim()
+    // === '---'` (with `i = 1`) turns D1-D4 red with `packages` going `{}`, and
+    // turns D5 red in the other direction — the raw frontmatter comes back as
+    // the summary text. D6/D7 are the controls and stay green in both worlds,
+    // which is what makes D1-D5 statements about the preamble rather than about
+    // a fixture that parses as nothing either way.
+    const CS_MAJOR = '---\n"@object-ui/layout": major\n---\n\nDrop PageNodeRenderer.\n';
+    const parsedPkgs = (text) => JSON.stringify(parseChangeset(text).packages);
+    check('#7044 D1 one leading blank line before the fence', parsedPkgs('\n' + CS_MAJOR) === '{"@object-ui/layout":"major"}', parsedPkgs('\n' + CS_MAJOR));
+    check('#7044 D2 two leading blank lines', parsedPkgs('\n\n' + CS_MAJOR) === '{"@object-ui/layout":"major"}', parsedPkgs('\n\n' + CS_MAJOR));
+    check('#7044 D3 a leading WHITESPACE-ONLY line (the preamble trims, it does not test for empty)', parsedPkgs('   \n' + CS_MAJOR) === '{"@object-ui/layout":"major"}', parsedPkgs('   \n' + CS_MAJOR));
+    check(
+      '#7044 D4 a leading blank line with CRLF endings — the two dialect rows compose',
+      parsedPkgs('\r\n---\r\n"@object-ui/layout": major # keep\r\n---\r\n\r\nbody\r\n') === '{"@object-ui/layout":"major"}',
+      parsedPkgs('\r\n---\r\n"@object-ui/layout": major # keep\r\n---\r\n\r\nbody\r\n'),
+    );
+    check(
+      '#7044 D5 the SUMMARY is the body, not the frontmatter — the old anchor handed back the raw fence text',
+      parseChangeset('\n' + CS_MAJOR).summary === 'Drop PageNodeRenderer.',
+      JSON.stringify(parseChangeset('\n' + CS_MAJOR).summary),
+    );
+    check(
+      '#7044 D6 control — the identical text WITHOUT the leading blank line parses the same, so D1-D5 are about the blank line and nothing else',
+      parsedPkgs(CS_MAJOR) === '{"@object-ui/layout":"major"}' && parseChangeset(CS_MAJOR).summary === 'Drop PageNodeRenderer.',
+      `${parsedPkgs(CS_MAJOR)} / ${JSON.stringify(parseChangeset(CS_MAJOR).summary)}`,
+    );
+    check(
+      '#7044 D7 control — skipping blanks did NOT make the parser fence-less: a leading blank line over an UNFENCED file still declares nothing, and its body survives whole',
+      parsedPkgs('\n"@object-ui/layout": major\n') === '{}' && parseChangeset('\n"@object-ui/layout": major\n').body === '"@object-ui/layout": major',
+      `${parsedPkgs('\n"@object-ui/layout": major\n')} / ${JSON.stringify(parseChangeset('\n"@object-ui/layout": major\n').body)}`,
     );
   } finally {
     rmSync(tmp, { recursive: true, force: true });
