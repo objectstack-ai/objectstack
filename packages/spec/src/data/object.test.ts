@@ -7,6 +7,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 // only became visible when tsconfig.test.json put these files in front of tsc
 // (#5286).
 import { ObjectSchema, ObjectCapabilities, IndexSchema, ObjectFieldGroupSchema, ObjectExternalBindingSchema, ObjectAccessConfigSchema, LifecycleSchema, TenancyConfigSchema, isTenancyDisabled, resolveCrudAffordances, type ServiceObject } from './object.zod';
+import { resolveInjectedSystemColumns } from './injected-system-columns';
 import type { StateMachineValidation } from './validation.zod';
 
 describe('ObjectCapabilities', () => {
@@ -960,7 +961,7 @@ describe('ObjectSchema.create()', () => {
   // together.
   describe('ownership record-model field (#3175)', () => {
     it('accepts the record-ownership opt-out values the registry reads', () => {
-      for (const ownership of ['user', 'org', 'none'] as const) {
+      for (const ownership of ['user', 'business_unit', 'org', 'none'] as const) {
         const obj = ObjectSchema.create({ name: 'catalog', ownership, fields: { title: { type: 'text' } } });
         expect(obj.ownership).toBe(ownership);
       }
@@ -980,64 +981,81 @@ describe('ObjectSchema.create()', () => {
       })).toThrow(/record-ownership model|registerObject/);
     });
 
-    // [#4611 / ADR-0117] DELIBERATE REJECTION — do not "complete" this enum.
+    // [#4611 → #5678 / ADR-0117 D1] The REWRITTEN #4611 pin — direction flipped.
     //
-    // ADR-0117 (Accepted, D1/D3 scoped) reserves a fourth tier,
-    // `ownership: 'business_unit'`, whose contract is: NO `owner_id`, and a
-    // kernel-stamped `owning_business_unit_id` instead (D1's table). The
-    // protocol name is registered (`SystemFieldName.OWNING_BUSINESS_UNIT_ID`)
-    // and, since #5677, open-core INJECTS the column — but the enum VALUE is
-    // still not added here.
+    // History, because the flip is the point and a reader who only sees the
+    // current assertions will re-derive the wrong rule. #4611 pinned the
+    // OPPOSITE: `ownership: 'business_unit'` REJECTED, and the rejection message
+    // enumerating exactly three legal values. That pin was correct for its
+    // window and it named its own expiry — "when #5678 arrives, this test
+    // failing is the intended signal to REWRITE it (not to delete the guard)".
+    // This is that rewrite.
     //
-    // ⚠️ The ORIGINAL reason recorded here has EXPIRED, and the pin outlived it.
-    // It read: `applySystemFields` decides owner injection with a DENY-list
-    // (`wantOwner = ownership !== 'org' && ownership !== 'none' && …`), so a
-    // fourth value would fall through and be stamped with `owner_id` — the exact
-    // INVERSE of what D1 declares. #5677 flipped that judgement to an ALLOW-list
-    // (`packages/objectql/src/registry.ts`, and the shared derivation
-    // `resolveInjectedSystemColumns` in `./injected-system-columns.ts`), so the
-    // engine now implements D1's `business_unit` row correctly and the inverse-
-    // stamping hazard is gone. Do NOT re-derive the old argument from this pin.
+    // The ordering the two pins encode, end to end:
+    //   #4611  — enum has 3 values; `applySystemFields` used a DENY-list
+    //            (`ownership !== 'org' && ownership !== 'none'`), so a fourth
+    //            value would have been stamped `owner_id` — the exact INVERSE of
+    //            D1's table. Rejecting it was the honest answer.
+    //   #5677  — flipped the judgement to an ALLOW-list in
+    //            `packages/objectql/src/registry.ts` and the shared derivation
+    //            `resolveInjectedSystemColumns` (`./injected-system-columns.ts`).
+    //            The engine now implements D1's `business_unit` row correctly.
+    //   #5678  — THIS change: the acceptance surface catches up. Strictly after
+    //            #5677, never before — a tier the schema emits before the engine
+    //            honours it gets the inverse result on its first appearance.
     //
-    // What survives is the plain sequencing fact: extending the acceptance
-    // surface is its own change, tracked as #5678 (protocol seat). Until it
-    // lands, the value is rejected, and the rejection is the honest answer — a
-    // tier an author cannot write is not a tier the schema should advertise.
+    // What this pin now guards, and why each half is here:
+    //   • the fourth value is ACCEPTED — the D1 declaration surface exists;
+    //   • it resolves to D1's row (`owner_id` ❌ / `owning_business_unit_id` ✅)
+    //     asserted against the injection AUTHORITY, not against prose, so the
+    //     enum member cannot drift away from what the engine does with it;
+    //   • a FIFTH value is still rejected, and the rejection enumerates all four
+    //     legal values — that enumeration is what tells an author (or an AI)
+    //     what to write instead, and it is the half that silently rots when a
+    //     later tier is added to the enum without updating the message.
     //
-    // When #5678 arrives, this test failing is the intended signal to REWRITE it
-    // (not to delete the guard) — assert the fourth value is accepted and that a
-    // fifth is still rejected naming four legal values. Co-update targets in the
-    // same PR, both of which currently state "still rejected" in prose:
-    //   • `packages/spec/src/system/constants/system-names.ts` — the
-    //     `OWNING_BUSINESS_UNIT_ID` JSDoc (its "not authorable yet" paragraph);
-    //   • the `systemFields` JSDoc in this directory's `object.zod.ts`.
-    //
-    // NOTE the direction: 'business_unit' was ALREADY rejected before #4611 —
-    // this test does not change behaviour, it PINS the pre-existing rejection
-    // so a later "obvious" enum completion cannot pass unnoticed. It also
-    // asserts the message still enumerates the three legal values, since that
-    // enumeration is what tells an author (or an AI) what to write instead.
-    it('rejects `business_unit` until ADR-0117 D1 injection lands, naming the three legal values (#4611)', () => {
+    // Still deliberately ABSENT: anything about the D2 stamping policy, the D4
+    // transfer guard, D5 legal-entity resolution or the D8 enablement gate.
+    // Those four remain undecided in ADR-0117 (Accepted D1/D3 scoped only); the
+    // column stays provisioned-but-inert, so an object declaring this tier gets
+    // the COLUMN today and no value in it. Do not read acceptance here as a
+    // decision on any of them.
+    it('accepts `business_unit` and resolves it to D1s row — owner_id withheld, unit anchor injected (#4611 → #5678)', () => {
+      const obj = ObjectSchema.create({
+        name: 'inventory_item',
+        ownership: 'business_unit',
+        fields: { sku: { type: 'text' } },
+      });
+      expect(obj.ownership).toBe('business_unit');
+
+      // The declaration must mean what D1's table says it means. Asserted
+      // against `resolveInjectedSystemColumns` — the single derivation both
+      // `applySystemFields` and author-time lint consume.
+      const plan = resolveInjectedSystemColumns(obj);
+      expect(plan.owner, 'business_unit is owned by a UNIT, not a person').toBe(false);
+      expect(plan.owningBusinessUnit).toBe(true);
+      expect(plan.names.has('owner_id')).toBe(false);
+      expect(plan.names.has('owning_business_unit_id')).toBe(true);
+    });
+
+    it('still rejects a fifth value, and the rejection enumerates all four legal values (#4611 → #5678)', () => {
       let message = '';
       try {
         ObjectSchema.create({
           name: 'inventory_item',
-          // @ts-expect-error — reserved by ADR-0117; not a legal value until the injection lands
-          ownership: 'business_unit',
+          // @ts-expect-error — 'team' is not an ADR-0117 tier; the enum has exactly four members
+          ownership: 'team',
           fields: { sku: { type: 'text' } },
         });
-        throw new Error('expected ObjectSchema.create to reject ownership: business_unit');
+        throw new Error('expected ObjectSchema.create to reject ownership: team');
       } catch (e) {
         message = e instanceof Error ? e.message : String(e);
       }
 
       expect(message).not.toContain('expected ObjectSchema.create to reject');
-      // The rejection must keep listing what IS legal — an author pointed at
-      // ADR-0117 needs to land on 'user' today, not guess.
-      for (const legal of ['user', 'org', 'none']) {
+      for (const legal of ['user', 'business_unit', 'org', 'none']) {
         expect(message, `rejection should enumerate the legal value '${legal}'`).toContain(legal);
       }
-      // And it must not have silently become legal.
       expect(message).not.toBe('');
     });
   });

@@ -17,7 +17,14 @@
  * This validator detects that specific mistake and returns the exact fix.
  */
 
-import { celEngine, firstUndeclaredReference, firstTypeMismatch, inferCelType, type FieldCelType } from './cel-engine';
+import {
+  celEngine,
+  firstUndeclaredReference,
+  firstTypeMismatch,
+  inferCelType,
+  parseCelToAstWithReason,
+  type FieldCelType,
+} from './cel-engine';
 import { templateEngine } from './template-engine';
 
 export type FieldRole = 'predicate' | 'value' | 'template';
@@ -195,6 +202,58 @@ function bracesHint(source: string): string | null {
   );
 }
 
+/**
+ * The prescription for a **bounds** refusal — an expression that is perfectly
+ * good CEL and merely too big for the platform's parse budget (#7073).
+ *
+ * Until #7073 every `celEngine.compile` refusal got the same dialect trailer
+ * ("`predicate`s are bare CEL (e.g. `record.rating >= 4`)"), byte for byte,
+ * including this class. That sentence is actively wrong here: the source is
+ * already bare CEL, so an author who obeys the last sentence they were given —
+ * an LLM author above all — rewrites the dialect, learns nothing, and comes
+ * back with the same 80-clause conjunction. The front half of the message
+ * (cel-js's own `Exceeded maxAstNodes (256)`) was right all along; only the
+ * prescription lied.
+ *
+ * The class comes from `celEngine.compile`'s own `kind: 'bounds'`; WHICH bound
+ * and its value come from {@link parseCelToAstWithReason}, the same
+ * reason-carrying entrance `@objectstack/lint`'s RLS gate reads (#6778 /
+ * PR #6831 — the consumer-side instance of this same defect family). Called
+ * WITHOUT `admitOverLimit`, so it takes neither the unbounded parse nor the
+ * overrun measurement: this path needs only the bound's NAME, and a refusal
+ * must not pay to re-parse a source it has just judged too large.
+ *
+ * ### Why the remedies are generic
+ *
+ * `validateExpression` is ADR-0032's shared validator: one message serves all
+ * ~10 expression slots (flow/automation conditions, `Field.formula`, validation
+ * rules, `visibleWhen`, `sharingRules[].condition`, the `validate_expression`
+ * tool …). Their COMBINATION semantics differ, so PR #6831's RLS-specific
+ * sentence ("splitting the top-level `&&` widens the grant") is not portable —
+ * it is true for a security predicate and false, or merely meaningless, for a
+ * formula value. Shrinking and denormalising are safe everywhere; splitting is
+ * offered only with the caveat that the site decides what splitting means.
+ */
+function boundsHint(source: string): string | null {
+  const parsed = parseCelToAstWithReason(source);
+  // `celEngine.compile` said `bounds`, and both verdicts are graded by the same
+  // `classifyCelFault`, so this holds — but a narrowing that ever stopped
+  // holding must degrade to the old trailer, never to a wrong bound name.
+  if (parsed.ok || parsed.kind !== 'bounds') return null;
+  const { limit, limitValue } = parsed.overrun;
+  const bound =
+    limit && limitValue != null
+      ? `the \`${limit}\` budget (limit ${limitValue})`
+      : "one of the platform's parse budgets";
+  return (
+    `this is valid CEL that exceeds ${bound} — a SIZE fault, not a dialect mistake, so ` +
+    `re-spelling the expression will not fix it. Shrink it (fewer clauses, shallower nesting, ` +
+    `fewer list elements), or precompute the heavy part into a stored field and reference that ` +
+    `field instead. Splitting it into several expressions changes how they combine at this ` +
+    `authoring site, so check that site's semantics before doing that.`
+  );
+}
+
 function checkFieldExistence(source: string, schema: ExprSchemaHint | undefined, errors: ExprValidationError[]): void {
   if (!schema?.fields || schema.fields.length === 0) return;
   const known = new Set(schema.fields);
@@ -339,7 +398,11 @@ export function validateExpression(
   }
   const compiled = celEngine.compile(source);
   if (!compiled.ok) {
-    const hint = bracesHint(source);
+    // #7073 — a bounds refusal gets the SIZE prescription, never the dialect
+    // trailer: the source is already bare CEL, so "write bare CEL" is advice
+    // that cannot succeed. Checked first because the class is certain (it comes
+    // from the engine's own verdict) while the braces hint is a heuristic.
+    const hint = (compiled.error.kind === 'bounds' ? boundsHint(source) : null) ?? bracesHint(source);
     errors.push({
       source,
       message:

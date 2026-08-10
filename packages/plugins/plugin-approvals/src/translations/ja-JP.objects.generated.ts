@@ -87,7 +87,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
     },
     _views: {
       my_pending: {
-        label: "自分の保留中",
+        label: "承認待ち",
         emptyState: {
           title: "承認待ちはありません",
           message: "すべて処理済みです。あなたの承認を待つリクエストはありません。"

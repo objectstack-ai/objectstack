@@ -120,6 +120,7 @@ import { validateFormLayout } from './validate-form-layout.js';
 import { validateSeedReplaySafety } from './validate-seed-replay-safety.js';
 import { validateSeedStateMachine } from './validate-seed-state-machine.js';
 import { validateVisibilityPredicates } from './validate-visibility-predicates.js';
+import { validatePredicatePathRefs } from './validate-predicate-path-refs.js';
 import { validateSecurityPosture } from './validate-security-posture.js';
 import { validateOrgAxisRedLines } from './validate-org-axis-red-lines.js';
 import { validateSharingRuleEnforceability } from './validate-sharing-rule-enforceability.js';
@@ -350,6 +351,32 @@ const RUNTIME_HEAVY_SOURCE_PARSE =
  * wrong 422 there is the whole product, so P1 does not gate them — the issue's
  * own worked example, and every acceptance criterion on it, is a flow.
  */
+/**
+ * The rule judges a `views[]` conditional-visibility predicate — and every OTHER
+ * rule on that surface (the three ADR-0089 D3b rules in
+ * `validate-visibility-predicates.ts`) is CLI-only.
+ *
+ * This reason is deliberately NOT one of the three above: none of them is true
+ * here. `validatePredicatePathRefs` needs nothing but the written item — its
+ * oracle is the static `getMetadataTypeSchema` registry, not the tenant's other
+ * metadata — so the per-write snapshot IS enough, `stackKeyForType('view')`
+ * already exists, and wiring it would work today.
+ *
+ * It is not wired because a HALF-wired wall is worse than an unwired one. A
+ * Studio `view` write would then be refused for an unresolvable predicate PATH
+ * while a predicate that does not parse at all (`visibility-predicate-syntax`)
+ * and one with no root at all (`visibility-bare-identifier`) walked straight
+ * through the same door — three sibling verdicts about one predicate, one of
+ * them enforced, and no author able to predict which. The surface should move to
+ * `runtime-publish` as a FAMILY, in one measured edit, which is a decision about
+ * `views` writes rather than a rider on #7010's corpus-counted gate.
+ */
+const RUNTIME_VISIBILITY_FAMILY_IS_CLI_ONLY =
+  'Deliberate, and not a snapshot limitation: this rule needs only the written item, but every other '
+  + 'rule on the `views[]` visibility-predicate surface (validate-visibility-predicates.ts) is CLI-only. '
+  + 'Gating one of three sibling verdicts about the same predicate at the Studio door is less '
+  + 'predictable than gating none; move the family together, as one measured edit.';
+
 const RUNTIME_OBJECT_WRITES_P2 =
   'P2 (#4463): judges an object/field declaration. Object writes are the hottest metadata path in ' +
   'the product, so P1 gates `flow` first and widens once the gate has real traffic behind it.';
@@ -823,6 +850,30 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     surfaces: CLI_ONLY,
     surfaceReason: RUNTIME_NEEDS_FULL_SNAPSHOT,
     run: (stack) => validateVisibilityPredicates(stack),
+  },
+  // #7010 — the same predicate surface, one question further in. The three
+  // ADR-0089 D3b rules above judge a predicate's SHAPE (does it parse, is it
+  // rooted, is the root right for the layer) and never open the target schema,
+  // so `data.tpye == 'formula'` passes all three and still resolves to nothing.
+  // This rule resolves the PATH against the schema the form edits — the closed
+  // `getMetadataTypeSchema` key set — and is therefore immune to the CEL
+  // type-name blind spot that made #6248's gate structurally unable to catch
+  // #6254's 16 bare `type ==` predicates.
+  //
+  // Scoped to schema-bound forms (`data: { provider: 'schema', schemaId }`);
+  // the `record.*` layer is deliberately out of scope because an ObjectQL
+  // object's addressable path set is NOT closed (lookup traversal, system
+  // columns, formula outputs), and an `error` gate over an open set generates
+  // false build errors. See the rule's module note.
+  {
+    name: 'validatePredicatePathRefs',
+    tier: 'gating',
+    input: 'normalized',
+    commands: ALL,
+    source: 'packages/lint/src/validate-predicate-path-refs.ts',
+    surfaces: CLI_ONLY,
+    surfaceReason: RUNTIME_VISIBILITY_FAMILY_IS_CLI_ONLY,
+    run: (stack) => validatePredicatePathRefs(stack),
   },
   // #1874 — flow authoring anti-patterns. Advisory by default; a finding marked
   // `error` gates. Three do today: `flow-runas-unscoped` (#3760 — metadata the

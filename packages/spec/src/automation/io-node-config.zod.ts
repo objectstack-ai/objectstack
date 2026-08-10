@@ -127,9 +127,14 @@ const NOTIFY_KEY_GUIDANCE: Readonly<Record<string, string>> = {
  *    without them). The descriptor's form deliberately publishes no `required`
  *    array — see the comment on the `configSchema` literal — so requiredness
  *    lives here and in the execute-time guard, not in the form.
- *  - Every string-ish value except `channels` passes through `interpolate()`,
- *    so `{record.x}` templates are legal anywhere they are; `channels` is read
- *    raw (channel ids are static routing, not per-record data).
+ *  - `recipients`, `title`, `message`, `actionUrl` and `payload` pass through
+ *    `interpolate()`, so `{record.x}` templates are legal in them. `channels`,
+ *    `topic` and `severity` are read RAW — a `{token}` in those three is
+ *    forwarded verbatim, never resolved (channel ids are static routing and
+ *    `severity` is a closed vocabulary, not per-record data). Re-measured
+ *    against `notify-node.ts` for #7086: the previous wording ("every
+ *    string-ish value except `channels`") was stale for `topic` and `severity`,
+ *    and it is what makes closing the `severity` gate below safe.
  *  - `sourceObject`/`sourceId` only take effect as a PAIR — a half-specified
  *    click-through target is dropped so the inbox never renders a dead link.
  *    The schema keeps both optional rather than refining, because the executor
@@ -156,8 +161,25 @@ export const NotifyConfigSchema = lazySchema(() => strictObject({
     .describe('Channels to fan out to (default: inbox)'),
   /** Event topic handed to the messaging service (default: "notify"). */
   topic: z.string().optional().describe('Event topic (default: "notify")'),
-  /** Severity forwarded to the messaging service. */
-  severity: z.string().optional().describe('info | warning | critical'),
+  /**
+   * Severity forwarded to the messaging service — a CLOSED vocabulary (#7086).
+   *
+   * Was a bare `z.string()` whose `.describe()` read `'info | warning | critical'`,
+   * so the enumeration existed only in the sentence: `'urgent'`, `'INFO'` and `''`
+   * all parsed green, then rode the dispatcher's blind cast
+   * (`severity: (p.severity as Notification['severity']) ?? 'info'`) into
+   * `sys_inbox_message.severity` under a TypeScript union that says those values
+   * cannot exist — every downstream `switch` on the three names fell through.
+   * The gate is the last surface that was open: the describe, the
+   * `Notification['severity']` type, and the `sys_inbox_message.severity` select
+   * field all already declared exactly these three.
+   *
+   * Safe to close because the executor reads this key RAW — see the
+   * interpolation note above — so a `{token}` template here never resolved and
+   * a rejection removes no working authoring shape.
+   */
+  severity: z.enum(['info', 'warning', 'critical']).optional()
+    .describe('Severity forwarded to the messaging service'),
   /** Click-through target object — only effective together with `sourceId` (#2675). */
   sourceObject: z.string().optional()
     .describe('Object name of the record the notification links to (writes sys_notification.source_object). Only takes effect together with sourceId — a half-specified click-through target is dropped at execute time, so the inbox never renders a dead link.'),

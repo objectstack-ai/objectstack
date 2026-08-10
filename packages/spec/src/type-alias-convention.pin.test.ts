@@ -265,7 +265,7 @@ import type * as M167 from './ui/view.zod.js';
 import type * as M170 from './ui/component.zod.js';
 
 // ---------------------------------------------------------------------------
-// 823 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
+// 824 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
 //
 // That number is machine-checked, not hand-kept. The runtime companion at the
 // bottom of this file recomputes the pin count from the source and asserts that
@@ -1512,6 +1512,7 @@ export type Iso805 = Assert<Eq< z.input< typeof M119.PanelLocationSchema >, z.in
 export type Iso806 = Assert<Eq< z.input< typeof M124.KernelServiceMapSchema >, z.infer< typeof M124.KernelServiceMapSchema > >>;
 export type Iso807 = Assert<Eq< z.input< typeof M124.ServiceConfigSchema >, z.infer< typeof M124.ServiceConfigSchema > >>;
 export type Iso808 = Assert<Eq< z.input< typeof M124.ServiceCriticalitySchema >, z.infer< typeof M124.ServiceCriticalitySchema > >>;
+export type Iso835 = Assert<Eq< z.input< typeof M124.KernelServiceStatusSchema >, z.infer< typeof M124.KernelServiceStatusSchema > >>;
 
 // system/metadata-persistence.zod.ts
 export type Iso809 = Assert<Eq< z.input< typeof M138.MetadataStateSchema >, z.infer< typeof M138.MetadataStateSchema > >>;
@@ -1622,7 +1623,7 @@ describe('ADR-0122 type-alias convention', () => {
   // this title and the section header above the pin list — are now asserted
   // against the recomputed count below, so neither can go stale without a red
   // test naming it.
-  it('still declares all 823 isomorphic pins', () => {
+  it('still declares all 824 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -1765,9 +1766,28 @@ describe('ADR-0122 type-alias convention', () => {
     // A DECREASE, and the first here — the id is retired in place rather than
     // renumbered, because the ids are claims about pins and not positions
     // (`Iso824` remains the highest, and the next author still takes 825).
+    //
+    // 823 -> 824 is #6604 — the `-1` in #4593's arithmetic above, collected.
+    // That subtraction was not a measurement but an OPEN QUESTION: the alias
+    // for `system/ServiceStatus` was withheld because declaring it would have
+    // minted the #4411 dual-source trap against `./api`'s discovery health
+    // enum, and which of the two names was wrong is a rename decision. The
+    // maintainer made it on 2026-08-08 (Option B): the kernel side is now
+    // `KernelServiceStatusSchema`, matching its `KernelServiceMapSchema`
+    // sibling two lines up in the pin list, and the name it vacated stays
+    // `./api`'s alone. So the alias the -1 deferred exists at last, under a
+    // different name than the one it was deferred under — and `Iso835`, not
+    // `Iso809`, is its id, because the ids are claims about pins and not
+    // positions (same rule the #4914 decrease above records). Isomorphism
+    // MEASURED the same way as its 73 siblings: the tree is one enum, one
+    // boolean, one inline `z.enum` and three optional strings/arrays — no
+    // `.default()`, `.transform()`, `.catch()` or `.pipe()` anywhere — so the
+    // two shapes coincide and ADR-0122 gives it a pin rather than an
+    // `XParsed`. The rename itself contributes 0: renaming a schema const
+    // moves no shape, and this file counts pins, not names.
     const self = readFileSync(fileURLToPath(import.meta.url), 'utf8');
     const pins = self.match(/^export type Iso\d+ = Assert</gm) ?? [];
-    expect(pins).toHaveLength(823);
+    expect(pins).toHaveLength(824);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until #6605 nothing read either

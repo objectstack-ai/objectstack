@@ -4,12 +4,18 @@ import { defineStack } from '@objectstack/spec';
 
 // ─── Barrel Imports (one per metadata type) ─────────────────────────
 import * as objects from './src/objects/index.js';
+// [#7036] Lifecycle hooks are NOT collected from the objects barrel — the
+// runtime reads them from `defineStack({ hooks })` only (`collectBundleHooks`).
+// An unregistered `*.hook.ts` file is dead metadata: it type-checks, it reads
+// as wired, and it never runs.
+import taskHook from './src/objects/task.hook.js';
 import * as actions from './src/actions/index.js';
 import * as dashboards from './src/dashboards/index.js';
 import * as datasets from './src/datasets/index.js';
 import * as reports from './src/reports/index.js';
 import * as views from './src/views/index.js';
 import { allFlows } from './src/flows/index.js';
+import { todoFunctions } from './src/functions/index.js';
 import * as apps from './src/apps/index.js';
 import { TodoSeedData } from './src/data/index.js';
 import * as translations from './src/translations/index.js';
@@ -45,6 +51,9 @@ export default defineStack({
   // Seed Data (top-level, registered as metadata)
   data: TodoSeedData,
 
+  // Object Lifecycle Hooks (same shape as app-crm / app-showcase)
+  hooks: [taskHook],
+
   // Auto-collected from barrel index files via Object.values()
   objects: Object.values(objects),
   views: Object.values(views),
@@ -53,6 +62,18 @@ export default defineStack({
   datasets: Object.values(datasets),
   reports: Object.values(reports),
   flows: allFlows,
+
+  // Named callables a `script` flow node invokes (#1870) — the automation
+  // plugin bridges this map to `AutomationEngine.resolveFunction`, so a node's
+  // `config.function` resolves by name at run time. A flow function is PURE: it
+  // takes `input`, RETURNS a value, and a later declarative node persists it
+  // (#4396), which is why none of these declares an `effect`.
+  //
+  // `computeNextTaskDueDate` is what makes `task_completion`'s recurrence branch
+  // work: no flow node evaluates a value-producing expression, so the next due
+  // date has to be computed before `create_next_task` runs (#7037).
+  functions: todoFunctions,
+
   apps: Object.values(apps),
 
   // I18n Configuration — per-locale file organization

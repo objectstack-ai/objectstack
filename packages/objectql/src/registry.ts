@@ -361,26 +361,31 @@ export function applySystemFields(
   // per-record owner is meaningless: any platform-managed table (`managedBy`
   // is set — config/append-only/system/platform; `better-auth` already
   // returned above), the `sys_*` namespace, or an explicit opt-out via
-  // `ownership: 'org' | 'none'` on the schema (Dataverse-style — catalog /
-  // junction tables). Note this is the SAFE default direction: forgetting the
+  // `ownership: 'business_unit' | 'org' | 'none'` on the schema (Dataverse-style
+  // — catalog / junction tables, plus D1's unit-owned tier, which takes the BU
+  // anchor instead). Note this is the SAFE default direction: forgetting the
   // opt-out leaves a harmless spare column, whereas the old opt-IN model let
   // authors silently ship objects with no working ownership at all.
   // `ownership` is a declared ObjectSchema field (record-ownership model), read
   // off the typed schema by the plan — no `as any` (#3175).
   //
   // [ADR-0117 D1 / #5677] The plan treats the value as a `string`, not the
-  // enum, on purpose. The spec enum is `'user' | 'org' | 'none'` TODAY; D1's
-  // fourth tier `'business_unit'` lands in #5678 — the engine must recognise the
-  // tier BEFORE the schema can emit it, or the tier's first appearance would be
-  // judged by a no-overlap literal test and get the INVERSE of what D1 declares.
+  // enum, on purpose: it is also called on pre-parse input. That widening is
+  // what let the engine recognise D1's fourth tier `'business_unit'` BEFORE the
+  // schema could emit it — the ordering #5677 → #5678 exists to guarantee, since
+  // a tier the schema emits first would be judged by a no-overlap literal test
+  // and get the INVERSE of what D1 declares. As of #5678 the spec enum reads
+  // `'user' | 'business_unit' | 'org' | 'none'` and the tier is authorable.
   //
   // [ADR-0117 D1 / #5677] The ownership decision is a POSITIVE LIST, deliberately
   // — it used to read `ownership !== 'org' && ownership !== 'none'`, i.e. a
   // DENY-list, so ANY value outside the two exclusions fell through to "inject
-  // `owner_id`". That default is safe only while the enum has exactly three
+  // `owner_id`". That default was safe only while the enum had exactly three
   // members: D1's `business_unit` tier means "owned by a UNIT, not a person"
   // (`owner_id` ❌, `owning_business_unit_id` ✅), and under the deny-list it
-  // would have been stamped with `owner_id` — the exact inverse.
+  // would have been stamped with `owner_id` — the exact inverse. The same
+  // argument applies to any FIFTH tier a later ADR adds, which is why the list
+  // stays positive rather than being "completed" to the current enum.
   //
   // The `sys_*` / `managedBy` ineligibility and the per-tier table
   //

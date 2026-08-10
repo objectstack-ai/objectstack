@@ -173,7 +173,7 @@ export const SystemFieldName = {
   UPDATED_AT: 'updated_at',
   /** User who last modified the record (lookup to user). INJECTED (audit provenance). */
   UPDATED_BY: 'updated_by',
-  /** Record owner (lookup to user). INJECTED unless `ownership: 'org' | 'none'`. */
+  /** Record owner (lookup to user). INJECTED unless `ownership: 'business_unit' | 'org' | 'none'`. */
   OWNER_ID: 'owner_id',
   /**
    * Record-level business-unit ownership — the middle tier between
@@ -182,25 +182,25 @@ export const SystemFieldName = {
    * / legal entity does this row belong to*. A lookup to `sys_business_unit`.
    *
    * **INJECTED** (ADR-0117 D1, landed in #5677) — `applySystemFields` provisions
-   * the column on every ownership-eligible object, i.e. wherever
-   * {@link SystemFieldName.OWNER_ID} is injected. Withheld on `managedBy` /
-   * `sys_*` tables and under `ownership: 'org' | 'none'`, exactly like
-   * `owner_id`. The per-object derivation both the engine and author-time lint
-   * read is `resolveInjectedSystemColumns` (`@objectstack/spec/data`) — its
-   * table, not this sentence, is the authority on the per-tier answer.
+   * the column on every ownership-eligible object. Withheld on `managedBy` /
+   * `sys_*` tables and under `ownership: 'org' | 'none'`. Note its reach is
+   * WIDER than {@link SystemFieldName.OWNER_ID}'s rather than identical to it:
+   * it also covers `ownership: 'business_unit'`, the tier that carries this
+   * anchor and deliberately no owning person. The per-object derivation both the
+   * engine and author-time lint read is `resolveInjectedSystemColumns`
+   * (`@objectstack/spec/data`) — its table, not this sentence, is the authority
+   * on the per-tier answer.
    *
-   * ⚠️ Injected — but the unit-owned TIER is **not authorable yet**, and the two
-   * facts must be read together. D1's table adds `ownership: 'business_unit'`
-   * (an owning unit, deliberately no owning person) and `applySystemFields`
-   * already implements that row, yet the `ownership` enum in
-   * `packages/spec/src/data/object.zod.ts` is still `'user' | 'org' | 'none'`:
-   * `ownership: 'business_unit'` is therefore still deliberately REJECTED by
-   * `ObjectSchema` (pinned in `packages/spec/src/data/object.test.ts`; the enum
-   * member is #5678). Today the column reaches objects through the DEFAULT
-   * (`ownership` omitted) and `'user'` tiers only. Do not read "INJECTED" as
-   * "the business-unit tier is available".
+   * The unit-owned TIER is **authorable** as of #5678: `ObjectSchema`'s
+   * `ownership` enum reads `'user' | 'business_unit' | 'org' | 'none'`, so an
+   * author can declare `ownership: 'business_unit'` and get this column with no
+   * `owner_id` — D1's row, end to end. It was deliberately REJECTED until then,
+   * and the ordering mattered: #5677 had to flip the injection judgement to an
+   * allow-list FIRST, or the tier's first appearance would have been stamped
+   * `owner_id` — the inverse of what it means. Both directions of that sequence
+   * are pinned in `packages/spec/src/data/object.test.ts`.
    *
-   * The column is also provisioned but **inert**: it is shaped after
+   * The column is still provisioned but **inert**: it is shaped after
    * `organization_id` (`readonly`, `hidden`), not after `owner_id`, because it
    * is a server-stamped scope anchor — and the stamping middleware (ADR-0117
    * D2/D4) has not landed, so nothing writes a value yet. See

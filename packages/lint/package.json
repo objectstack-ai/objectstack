@@ -36,7 +36,8 @@
   },
   "devDependencies": {
     "@types/node": "^26.1.2",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.10",
+    "zod": "^4.4.3"
   },
   "keywords": [
     "objectstack",

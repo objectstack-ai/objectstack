@@ -43,6 +43,8 @@ import { RecordChangeTriggerPlugin } from '@objectstack/trigger-record-change';
 
 import { allFlows, TaskCompletionFlow } from '../src/flows/index.js';
 import { Task } from '../src/objects/task.object.js';
+import taskHook from '../src/objects/task.hook.js';
+import TodoApp from '../objectstack.config.js';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -81,6 +83,13 @@ async function bootTodoKernel(): Promise<{
   openDrivers.push(driver);
   objectql.registry.registerObject(Task, 'todo', 'todo');
   await objectql.syncSchemas();
+
+  // [#7036] The app's lifecycle hook, bound the way `AppPlugin` binds it from
+  // `defineStack({ hooks })`. This kernel is assembled by hand (no AppPlugin),
+  // so without this line the completion stamp would not exist here and every
+  // completion below would be refused — which is exactly the bug, and exactly
+  // why the old version of this file seeded `completed_date` on CREATE.
+  objectql.bindHooks([taskHook], { packageId: 'app:com.example.todo' });
 
   for (const flow of allFlows) automation.registerFlow(flow.name, flow);
   return { automation, data };
@@ -170,15 +179,15 @@ describe('#6882 — app-todo `task_completion` is armed, not dead', () => {
     const ctx = { context: { userId: 'u_todo' } };
     const runCount = async () => (await automation.listRuns('task_completion')).length;
 
-    // `completed_date` is seeded on CREATE (the engine allows a read-only field
-    // to be seeded by an insert, and the object's `completed_date_required`
-    // rule refuses the completion write otherwise — see the note on that rule).
+    // [#7036] No `completed_date` seed. The CREATE-seed workaround this test
+    // used to carry existed only because the completion UPDATE was impossible;
+    // the task is created exactly as a user creates one, and the transition
+    // below is a real user-context write.
     const created = await data.insert('todo_task', {
       subject: 'Water the plants',
       status: 'not_started',
       priority: 'normal',
       is_recurring: false,
-      completed_date: '2026-08-09T10:00:00.000Z',
     }, ctx);
     const id = Array.isArray(created) ? created[0].id : created.id;
     await sleep(150);
@@ -204,4 +213,165 @@ describe('#6882 — app-todo `task_completion` is armed, not dead', () => {
     await sleep(300);
     expect(await runCount(), 're-saving a completed task must not re-fire it').toBe(1);
   }, 30000);
+});
+
+/**
+ * [#7036] An ordinary user can complete a task.
+ *
+ * The defect was a pair of metadata declarations that could not both hold on
+ * the update path: `completed_date` is `readonly` (a non-system caller's write
+ * is stripped) and `completed_date_required` then refused the write for
+ * missing the value that had just been stripped. Measured before the fix, with
+ * the app's real object on a real kernel:
+ *
+ *   update status+completed_date (user ctx): REJECTED -> Completed date is required when status is Completed
+ *   update status only           (user ctx): REJECTED -> Completed date is required when status is Completed
+ *   update status+completed_date (isSystem): OK
+ *   insert already-completed:                OK
+ *
+ * — i.e. every escape was a NON-user path, and `completeTask` always failed.
+ *
+ * The repair is the server owning the column: `task.hook.ts` stamps it on the
+ * transition, and the strip lets a hook's write through because it only
+ * deletes a key that still holds the *caller's own* value (#2948/#5591). The
+ * assertions below are written against that seam rather than against the
+ * message, so they stay meaningful if the wording changes.
+ */
+describe('#7036 — completing a task is possible for a normal user', () => {
+  const ctx = { context: { userId: 'u_todo' } };
+
+  const newTask = async (data: any, extra: Record<string, unknown> = {}) => {
+    const created = await data.insert('todo_task', {
+      subject: 'Water the plants',
+      status: 'not_started',
+      priority: 'normal',
+      is_recurring: false,
+      ...extra,
+    }, ctx);
+    return Array.isArray(created) ? created[0].id : created.id;
+  };
+  const read = async (data: any, id: string) =>
+    await data.findOne('todo_task', { where: { id }, ...ctx });
+
+  it('THE CASE: a status-only user update completes the task and stamps the date', async () => {
+    const { data } = await bootTodoKernel();
+    const id = await newTask(data);
+
+    // Exactly what `completeTask` now sends — one key, no `completed_date`.
+    await data.update('todo_task', { status: 'completed' }, { where: { id }, ...ctx });
+
+    const row = await read(data, id);
+    expect(row.status).toBe('completed');
+    // The stamp is PRESENT and is a real timestamp, not an empty string that
+    // would merely satisfy `isBlank`.
+    expect(row.completed_date).toBeTruthy();
+    expect(Number.isNaN(Date.parse(String(row.completed_date)))).toBe(false);
+  }, 30000);
+
+  it('a caller that still sends `completed_date` is not punished for it — the hook value wins', async () => {
+    // The #5591 direction: the caller echoes the key back (a form PUT of the
+    // whole record does this). The strip must not delete the hook's stamp just
+    // because the caller also named the column, and the caller's value must
+    // not be what lands.
+    const { data } = await bootTodoKernel();
+    const id = await newTask(data);
+    const forged = '1999-01-01T00:00:00.000Z';
+
+    await data.update(
+      'todo_task',
+      { status: 'completed', completed_date: forged },
+      { where: { id }, ...ctx },
+    );
+
+    const row = await read(data, id);
+    expect(row.status).toBe('completed');
+    expect(row.completed_date).toBeTruthy();
+    expect(row.completed_date).not.toBe(forged);
+  }, 30000);
+
+  it('leaving `completed` clears the stamp; an unrelated edit does not', async () => {
+    const { data } = await bootTodoKernel();
+    const id = await newTask(data);
+
+    await data.update('todo_task', { status: 'completed' }, { where: { id }, ...ctx });
+    const stamped = (await read(data, id)).completed_date;
+    expect(stamped).toBeTruthy();
+
+    // An edit that carries no `status` must not be read as a reopen.
+    await data.update('todo_task', { progress_percent: 100 }, { where: { id }, ...ctx });
+    expect((await read(data, id)).completed_date).toBe(stamped);
+
+    // A real reopen clears it — the documented choice (see `task.hook.ts`).
+    await data.update('todo_task', { status: 'in_progress' }, { where: { id }, ...ctx });
+    const reopened = await read(data, id);
+    expect(reopened.status).toBe('in_progress');
+    expect(reopened.completed_date == null).toBe(true);
+  }, 30000);
+
+  it('UNCHANGED: a forged `completed_date` outside a transition is still stripped', async () => {
+    // The hook's existence is not a blanket exemption for the column. No
+    // status change means no stamp, so the caller's value is the value on the
+    // key — and #2948 deletes it.
+    const { data } = await bootTodoKernel();
+    const id = await newTask(data);
+
+    await data.update(
+      'todo_task',
+      { subject: 'Water the plants twice', completed_date: '1999-01-01T00:00:00.000Z' },
+      { where: { id }, ...ctx },
+    );
+
+    const row = await read(data, id);
+    expect(row.subject).toBe('Water the plants twice');
+    expect(row.completed_date == null).toBe(true);
+  }, 30000);
+
+  it('REVERSE: without the hook bound, the same user write is refused', async () => {
+    // The deleted-limb direction, and it is RED-on-restore rather than merely
+    // "the stamp is missing": the object's own `completed_date_required` rule
+    // turns an unstamped completion into a refused write. This is the
+    // pre-#7036 behaviour, rebuilt by withholding exactly one thing — the hook
+    // binding — from an otherwise identical kernel.
+    const kernel = new ObjectKernel({ logger: { level: 'silent' } } as any);
+    await kernel.use(new ObjectQLPlugin());
+    await kernel.bootstrap();
+    const objectql: any = kernel.getService('objectql');
+    const data: any = kernel.getService('data');
+    const driver: any = new SqliteWasmDriver({ filename: ':memory:' });
+    await driver.connect();
+    objectql.registerDriver(driver, true);
+    openDrivers.push(driver);
+    objectql.registry.registerObject(Task, 'todo', 'todo');
+    await objectql.syncSchemas();
+    // NB: no `bindHooks` — that is the whole fixture.
+
+    const id = await newTask(data);
+
+    await expect(
+      data.update('todo_task', { status: 'completed' }, { where: { id }, ...ctx }),
+    ).rejects.toThrow(/Completed date is required/);
+
+    // ...and supplying the value by hand does not rescue it, which is what
+    // made the pair unsatisfiable rather than merely inconvenient.
+    await expect(
+      data.update(
+        'todo_task',
+        { status: 'completed', completed_date: '2026-08-09T10:00:00.000Z' },
+        { where: { id }, ...ctx },
+      ),
+    ).rejects.toThrow(/Completed date is required/);
+  }, 30000);
+
+  it('the hook is registered on the app bundle — an unregistered hook never runs', async () => {
+    // The behavioural tests above bind the hook themselves (this file builds
+    // its kernel by hand). This one pins the wiring the RUNTIME reads:
+    // `collectBundleHooks` walks `defineStack({ hooks })` and nothing else, so
+    // a hook missing from that array is dead metadata no matter how correct
+    // the hook file is. `task.hook.ts` shipped for exactly that long.
+    const hooks = (TodoApp as { hooks?: Array<{ name?: string; object?: string; events?: string[] }> }).hooks ?? [];
+    const registered = hooks.find((h) => h.name === 'task_logic');
+    expect(registered, '`task_logic` must be in defineStack({ hooks })').toBeDefined();
+    expect(registered!.object).toBe('todo_task');
+    expect(registered!.events).toContain('beforeUpdate');
+  });
 });

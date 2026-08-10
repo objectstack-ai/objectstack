@@ -434,8 +434,12 @@ export class FileSystemRepository implements MetadataRepository {
   }
 
   private startWatcher(): void {
-    const w = chokidar.watch(this.layout.root, {
-      ignored: [/(^|[\\/])\../], // skip dotfiles incl. .objectstack
+    const root = this.layout.root;
+    const w = chokidar.watch(root, {
+      // Skip dotfiles under the root — including the repository's own
+      // `.objectstack/` bookkeeping subtree — matched on the path RELATIVE
+      // to the watch root (#7150). See `isIgnoredWatchPath`.
+      ignored: (p: string) => isIgnoredWatchPath(root, p),
       ignoreInitial: true,
       depth: 2,
       awaitWriteFinish: { stabilityThreshold: 50, pollInterval: 20 },
@@ -506,6 +510,43 @@ export class FileSystemRepository implements MetadataRepository {
 }
 
 // ── Utilities ─────────────────────────────────────────────────────────
+
+/**
+ * Watcher ignore matcher — "everything under the root, except the
+ * repository's own bookkeeping" (#7150).
+ *
+ * chokidar hands its matcher **absolute** paths, and applies it to the
+ * watched root itself as well as to entries discovered underneath it. The
+ * previous matcher was a bare dotfile regex (`/(^|[\\/])\../`), which
+ * therefore matched the `.objectstack` segment of the root path the plugin
+ * actually uses (`<project>/.objectstack/metadata`, `REPO_SUBDIR` in
+ * `packages/metadata/src/plugin.ts`) and ignored the whole watch. Measured on
+ * chokidar 5 with this repository's own options, two identical trees
+ * differing only in whether the root sits under a dot-directory:
+ *
+ *   plain root      getWatched: ['<root>', 'view']   events: add+change
+ *   dot-rooted      getWatched: []                   events: none
+ *
+ * So the intent is kept and only the *frame of reference* is fixed: judge the
+ * path relative to the root, so dot segments belonging to the root itself are
+ * never considered.
+ *
+ * Why not drop the matcher entirely and lean on `parseItemPath`, which already
+ * rejects `.objectstack`? Measured: `parseItemPath` rejects that ONE name, so
+ * a dot-directory at the type level leaks — `<root>/.cache/x.json` parses as
+ * type `.cache`, and `<root>/view/.scratch.json` as an item named `.scratch`.
+ * Both would be published as `MetadataEvent`s while `scanHeads` skips every
+ * dot entry on boot, leaving the boot scan and the watcher disagreeing about
+ * what the repository contains. Dropping it also puts `.objectstack/.log/` in
+ * the poll set, so every one of the repository's own log appends wakes
+ * `handleFsChange` only to be discarded.
+ */
+function isIgnoredWatchPath(root: string, absPath: string): boolean {
+  const rel = path.relative(root, absPath);
+  // The watched root itself, and anything outside it, are not ours to judge.
+  if (rel === '' || rel.startsWith('..')) return false;
+  return rel.split(/[\\/]/).some((segment) => segment.startsWith('.'));
+}
 
 async function readJson(file: string): Promise<unknown | null> {
   try {

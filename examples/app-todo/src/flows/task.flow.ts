@@ -143,6 +143,11 @@ export const TaskCompletionFlow: Flow = {
     // in the corpus addresses it, so the declaration is gone rather than
     // re-plumbed — declared means bound.
     { name: 'completedTask', type: 'record', isInput: false, isOutput: false },
+    // #7037 — the next due date, computed by the `compute_next_due_date` script
+    // node below and persisted by `create_next_task`. Declared for the same
+    // reason `showcase_task_completed` declares its `summary`: a script node's
+    // `outputVariable` is the flow's contract with the node after it.
+    { name: 'nextDueDate', type: 'date', isInput: false, isOutput: false },
   ],
 
   nodes: [
@@ -188,6 +193,45 @@ export const TaskCompletionFlow: Flow = {
     // on a `start` node and inert everywhere else, so it was a third copy of the
     // same predicate, doing nothing (#4414).
     { id: 'check_recurring', type: 'decision', label: 'Is Recurring Task?' },
+    // #7037 — the date arithmetic the recurrence needs, on the one surface that
+    // actually evaluates anything.
+    //
+    // `due_date` below used to read
+    // `DATEADD({completedTask.due_date}, {completedTask.recurrence_interval}, "…")`.
+    // Two independent faults: `DATEADD` exists nowhere in the platform (not a
+    // CEL builtin, not registered by `packages/formula` under any casing), and a
+    // `create_record` node's `fields` are TEMPLATE-interpolated rather than
+    // evaluated — the `{…}` holes are filled and the surrounding text passed
+    // through verbatim. So the driver received the literal string
+    // `DATEADD(2026-08-10, 1, "daily")` and refused the write with `Due Date
+    // must be a valid date (ISO-8601)`, failing the whole run. Dead while the
+    // flow was unbound; live on every recurring completion once #6882 armed it.
+    //
+    // Computing it here is not a stylistic preference — no flow node evaluates a
+    // value-producing expression. The builtin vocabulary's only expression slots
+    // are PREDICATES (`config.condition`, `edge.condition`,
+    // `decision.conditions[].expression`, `screen.fields[].visibleWhen`) and
+    // `flow-template` REFERENCES (`loop.collection`, `map.collection`) — the
+    // ledger is `FLOW_NODE_EXPRESSION_PATHS` in `@objectstack/spec/automation`,
+    // and an `assignment` node interpolates rather than evaluates. A `script`
+    // node calling a registered function is the shipped way to compute a value
+    // mid-flow (#1870), and the pure-function shape — takes `input`, RETURNS a
+    // value, a later declarative node persists it (#4396) — is the one
+    // `showcase_task_completed` already uses.
+    {
+      id: 'compute_next_due_date', type: 'script', label: 'Compute Next Due Date',
+      config: {
+        // Registered in `defineStack({ functions })` — see objectstack.config.ts
+        // and src/functions/task.functions.ts.
+        function: 'computeNextTaskDueDate',
+        inputs: {
+          dueDate: '{completedTask.due_date}',
+          recurrenceType: '{completedTask.recurrence_type}',
+          interval: '{completedTask.recurrence_interval}',
+        },
+        outputVariable: 'nextDueDate',
+      },
+    },
     {
       id: 'create_next_task', type: 'create_record', label: 'Create Next Recurring Task',
       config: {
@@ -198,7 +242,9 @@ export const TaskCompletionFlow: Flow = {
           owner: '{completedTask.owner}', is_recurring: true,
           recurrence_type: '{completedTask.recurrence_type}',
           recurrence_interval: '{completedTask.recurrence_interval}',
-          due_date: 'DATEADD({completedTask.due_date}, {completedTask.recurrence_interval}, "{completedTask.recurrence_type}")',
+          // A whole-string token, so `interpolate()` hands the create the RAW
+          // value the script node returned instead of a stringified copy.
+          due_date: '{nextDueDate}',
           status: 'not_started', is_completed: false,
         },
         outputVariable: 'newTaskId',
@@ -210,9 +256,13 @@ export const TaskCompletionFlow: Flow = {
   edges: [
     { id: 'e1', source: 'start', target: 'get_task', type: 'default' },
     { id: 'e2', source: 'get_task', target: 'check_recurring', type: 'default' },
-    { id: 'e3', source: 'check_recurring', target: 'create_next_task', type: 'default', condition: 'vars.completedTask.is_recurring == true', label: 'Yes' },
+    // The recurring branch now runs `compute_next_due_date` first (#7037); the
+    // gate itself is unchanged, so the non-recurring path still routes straight
+    // to `end` and skips both nodes.
+    { id: 'e3', source: 'check_recurring', target: 'compute_next_due_date', type: 'default', condition: 'vars.completedTask.is_recurring == true', label: 'Yes' },
     { id: 'e4', source: 'check_recurring', target: 'end', type: 'default', condition: 'vars.completedTask.is_recurring != true', label: 'No' },
     { id: 'e5', source: 'create_next_task', target: 'end', type: 'default' },
+    { id: 'e6', source: 'compute_next_due_date', target: 'create_next_task', type: 'default' },
   ],
 };
 
