@@ -9,6 +9,19 @@ import { ExpressionInputSchema } from '../shared/expression.zod';
 import { FilterConditionSchema } from './filter.zod';
 import { FIELD_KEY_GUIDANCE } from './authoring-key-lint';
 import { DEFAULT_AUTONUMBER_FORMAT } from './autonumber-format';
+// #7127 — the `defaultValue` authoring gate: shape discrimination (literal /
+// runtime token / CEL envelope), the per-token × per-type table, and the
+// shared literal-vs-stored-contract check. `default-value-shape` reaches
+// `field-value.zod`, whose only import back into THIS file is the type-only
+// `FieldType` (erased at runtime) — `AddressSchema` moved there (see its
+// re-export below), so the edge is one-way and no runtime ESM cycle closes.
+import {
+  checkLiteralDefaultValue,
+  defaultValueTokenIssue,
+  discriminateDefaultValueShape,
+  suggestDefaultValueToken,
+} from './default-value-shape';
+import { AddressSchema } from './field-value.zod';
 
 /**
  * Field Type Enum
@@ -220,18 +233,17 @@ export const CurrencyValueSchema = lazySchema(() => z.object({
 }));
 
 /**
- * Address Schema
- * Structured address for address field type
+ * Address Schema — structured address for the `address` field type.
+ *
+ * DECLARED in `./field-value.zod` since #7127 (it IS the enforced address
+ * VALUE contract, ADR-0104 D1) and re-exported here for compatibility. The
+ * move is what lets THIS file import the value-contract module for its
+ * `defaultValue` gate without closing a runtime ESM cycle: `field-value.zod`
+ * dereferenced `AddressSchema` at module-eval time, and that top-level read
+ * was the one runtime edge back into this file (its remaining `FieldType`
+ * import is type-only, erased at runtime).
  */
-export const AddressSchema = lazySchema(() => z.object({
-  street: z.string().optional().describe('Street address'),
-  city: z.string().optional().describe('City name'),
-  state: z.string().optional().describe('State/Province'),
-  postalCode: z.string().optional().describe('Postal/ZIP code'),
-  country: z.string().optional().describe('Country name or code'),
-  countryCode: z.string().optional().describe('ISO country code (e.g., US, GB)'),
-  formatted: z.string().optional().describe('Formatted address string'),
-}));
+export { AddressSchema };
 
 /**
  * Field Schema - Best Practice Enterprise Pattern
@@ -511,7 +523,7 @@ export const FieldSchema = lazySchema(() => strictObject({
   // `(tenantField, field)` index); `'global'` = platform-wide single-column
   // unique. See {@link UniqueScopeSchema} for the scope vocabulary (ADR-0120).
   unique: UniqueScopeSchema.default(false).describe("Unique constraint and its scope (ADR-0120). 'organization' = one holder per organization (NULL-safe composite with the organization key part on organization-scoped objects) — prefer this explicit spelling in new code; true = same per-organization scope (positional synonym, stays valid); 'global' = one holder across the whole installation. 'tenant'/'org' are rejected — the word is 'organization'"),
-  defaultValue: z.unknown().optional().describe('Default value'),
+  defaultValue: z.unknown().optional().describe('Default applied on INSERT when the field is omitted or null (`\'\'` is a real value, not absence). Three legal shapes (#7127), discriminated in the engine\'s own order: a CEL Expression envelope `{ dialect: \'cel\', source: \'today()\' }` (accepted structurally; result type is a runtime concern); a runtime TOKEN — `NOW()` on `datetime`/`date`/`time` only, `current_user` on `user` or `lookup` with `reference: \'sys_user\'` only, neither on a multi-value field; or a LITERAL, which must satisfy this field\'s own stored value contract (ADR-0104 D1 `valueSchemaFor`). Anything else is refused at parse time with a prescriptive message.'),
   
   /** Text/String Constraints */
   maxLength: z.number().optional().describe('Max character length'),
@@ -931,6 +943,60 @@ export const FieldSchema = lazySchema(() => strictObject({
         'condition is false the write contract permits null, but the column would refuse ' +
         'it. Use `required: true` + `storage.notNull` for an unconditional constraint, or ' +
         '`requiredWhen` alone for a conditional write contract (the column stays nullable).',
+    });
+  }
+
+  // #7127: an authored `defaultValue` must be one of the key's three legal
+  // shapes — CEL envelope / runtime token / literal — and legal for THIS
+  // field. The shapes are told apart FIRST (`default-value-shape.ts`, the
+  // engine's own discrimination order): running the value contract over the
+  // whole key would judge a token's spelling as data, which is right only by
+  // accident. Then each branch gets its own verdict:
+  //   envelope → structural acceptance ONLY (a CEL result type is unknowable
+  //              at parse time; a wrong one is an ADR-0032 runtime concern);
+  //   token    → the per-token × per-type table (`defaultValueTokenIssue`);
+  //   literal  → the field's own stored value contract, through the SAME
+  //              shared core the #6970 action-param gate runs.
+  //
+  // Presence is the ENGINE's rule (`applyFieldDefaults`): `null`/`undefined`
+  // mean "no default", while `''` is a real default — deliberately NOT the
+  // action-param rule, whose dispatcher treats blank as absent.
+  const dv = field.defaultValue;
+  if (dv == null) return;
+  const dvText = JSON.stringify(dv) ?? String(dv);
+  const shape = discriminateDefaultValueShape(dv);
+  if (shape === 'expression') return;
+  if (shape === 'token') {
+    const message = defaultValueTokenIssue(
+      { type: field.type, multiple: field.multiple, options: field.options, name: field.name, reference: field.reference },
+      dv,
+    );
+    if (message !== null) {
+      ctx.addIssue({ code: 'custom', path: ['defaultValue'], message });
+    }
+    return;
+  }
+  const verdict = checkLiteralDefaultValue(
+    { type: field.type, multiple: field.multiple, options: field.options },
+    dv,
+  );
+  if (!verdict.ok) {
+    const suggestion = suggestDefaultValueToken(dv);
+    const suggestionText = suggestion === undefined
+      ? ''
+      : ` Did you mean the runtime token \`${suggestion}\`? Near-miss spellings are never accepted as tokens `
+        + '(a genuinely-intended literal must stay storable) — write the exact token, or a valid literal.';
+    ctx.addIssue({
+      code: 'custom',
+      path: ['defaultValue'],
+      message:
+        `Field "${field.name ?? '<unnamed>'}" (${field.type}): the default ${dvText} cannot satisfy this `
+        + `field's own stored value contract — ${verdict.detail ?? 'invalid value'}. The engine stores a `
+        + 'literal default VERBATIM at insert (applyFieldDefaults), so this would seed data the field type '
+        + "cannot hold, surfacing far from the cause. Write the default in the field's stored value shape, "
+        + 'or use one of the other legal shapes: a runtime token (`NOW()` on `datetime`/`date`/`time`; '
+        + "`current_user` on `user` or `lookup` with `reference: 'sys_user'`) or a CEL Expression envelope "
+        + `({ dialect: 'cel', source: '…' }).${suggestionText}`,
     });
   }
 }));

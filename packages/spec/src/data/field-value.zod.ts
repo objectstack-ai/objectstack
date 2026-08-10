@@ -34,7 +34,6 @@ import { z } from 'zod';
 import { lazySchema } from '../shared/lazy-schema';
 import { SystemObjectName } from '../system/constants/system-names';
 import type { FieldType } from './field.zod';
-import { AddressSchema } from './field.zod';
 
 /* ────────────────────────────────────────────────────────────────────────────
  * Semantic type classes
@@ -256,6 +255,28 @@ export const LocationValueSchema = lazySchema(() => z.object({
   accuracy: z.number().optional().describe('Accuracy in meters'),
 }));
 export type LocationValue = z.input<typeof LocationValueSchema>;
+
+/**
+ * Address Schema — structured address for the `address` field type.
+ *
+ * DECLARED here since #7127 (previously in `./field.zod`, which re-exports it
+ * for compatibility): it is the enforced address VALUE contract, so this
+ * module is its true home — and the old `field.zod` declaration was the ONE
+ * runtime edge back into that file. `field.zod` now consumes this module's
+ * value contract for its `defaultValue` gate, and a runtime edge in each
+ * direction is an ESM evaluation cycle whose order-dependent TDZ crash this
+ * move retires structurally (the remaining `FieldType` import above is
+ * type-only and erased at runtime).
+ */
+export const AddressSchema = lazySchema(() => z.object({
+  street: z.string().optional().describe('Street address'),
+  city: z.string().optional().describe('City name'),
+  state: z.string().optional().describe('State/Province'),
+  postalCode: z.string().optional().describe('Postal/ZIP code'),
+  country: z.string().optional().describe('Country name or code'),
+  countryCode: z.string().optional().describe('ISO country code (e.g., US, GB)'),
+  formatted: z.string().optional().describe('Formatted address string'),
+}));
 
 /** Structured address value — adopts the (previously unconsumed) `AddressSchema` as the enforced contract. */
 export const AddressValueSchema = AddressSchema;

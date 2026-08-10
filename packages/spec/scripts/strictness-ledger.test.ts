@@ -123,8 +123,11 @@ describe('site counting reads the AST, not the source text', () => {
   });
 
   it('knows every object idiom, including z.looseObject(', () => {
+    // 2 → 3 at #7127, which MOVED `AddressSchema` (a plain z.object site) in
+    // from `field.zod.ts`. As with the chart count above, the number is
+    // incidental — the assertion that carries the meaning is the idiom read.
     const fv = analyzeSites(at('data/field-value.zod.ts'));
-    expect(fv).toHaveLength(2);
+    expect(fv).toHaveLength(3);
     expect(fv.find((s) => s.name === 'FileValueSchema')?.idiom).toBe('z.looseObject');
   });
 });

@@ -29,8 +29,8 @@ Remaining strip sites by class:
 
 | Bucket | Sites |
 |---|---|
-| authorable — the ruling's forced scope | 41 |
-| unresolved — needs a per-schema verdict | 33 |
+| authorable — the ruling's forced scope | 40 |
+| unresolved — needs a per-schema verdict | 34 |
 | wire / open — out of forced scope | 105 |
 | no door — no carrier, ADR-0049 territory | 1 |
 | no gate — carrier live, no parse | 0 |
@@ -98,8 +98,8 @@ classify and is not listed (it becomes reportable the day it grows its first sit
 | `driver/turso.zod.ts` | 2 |
 | `external-catalog.zod.ts` | 4 |
 | `external-lookup.zod.ts` | 12 |
-| `field-value.zod.ts` | 2 |
-| `field.zod.ts` | 11 |
+| `field-value.zod.ts` | 3 |
+| `field.zod.ts` | 10 |
 | `filter.zod.ts` | 11 |
 | `hook-body.zod.ts` | 2 |
 | `hook.zod.ts` | 7 |
@@ -192,8 +192,8 @@ over it is here.
 | `driver/memory.zod.ts` | 5 | 6 |
 | `external-catalog.zod.ts` | 4 | 4 |
 | `external-lookup.zod.ts` | 12 | 12 |
-| `field-value.zod.ts` | 1 | 2 |
-| `field.zod.ts` | 3 | 11 |
+| `field-value.zod.ts` | 2 | 3 |
+| `field.zod.ts` | 2 | 10 |
 | `filter.zod.ts` | 11 | 11 |
 | `hook.zod.ts` | 5 | 7 |
 | `object.zod.ts` | 1 | 20 |
@@ -203,8 +203,8 @@ over it is here.
 
 | Bucket | Sites |
 |---|---|
-| authorable — the ruling's forced scope | 9 |
-| unresolved — needs a per-schema verdict | 33 |
+| authorable — the ruling's forced scope | 8 |
+| unresolved — needs a per-schema verdict | 34 |
 | wire / open — out of forced scope | 66 |
 | no door — no carrier, ADR-0049 territory | 0 |
 | no gate — carrier live, no parse | 0 |

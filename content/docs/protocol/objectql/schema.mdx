@@ -382,7 +382,7 @@ revenue:
   label: Annual Revenue
   scale: 2
   precision: 18
-  defaultValue: { value: 0, currency: 'USD' }
+  defaultValue: 0 # a currency VALUE is a bare number (ADR-0104 D1); the currency code is field config, not part of the value
 ```
 
 #### Date/Time Fields
@@ -396,7 +396,10 @@ start_date:
 due_datetime:
   type: datetime
   label: Due Date & Time
-  defaultValue: "daysFromNow(7)"  # 7 days from now (CEL)
+  # 7 days from now — CEL defaults use the Expression ENVELOPE. A bare source
+  # string is not recognised as an expression: it would be stored verbatim as
+  # the literal `daysFromNow(7)` (and refused at parse time since #7127).
+  defaultValue: { dialect: cel, source: "daysFromNow(7)" }
 ```
 
 #### Boolean Fields

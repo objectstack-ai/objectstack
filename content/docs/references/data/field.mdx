@@ -14,29 +14,12 @@ Field Type Enum
 ## TypeScript Usage
 
 ```typescript
-import { AddressSchema, CurrencyConfigSchema, CurrencyValueSchema, FieldSchema, FieldType, LocationCoordinatesSchema, SelectOptionSchema, UniqueScopeSchema } from '@objectstack/spec/data';
-import type { Address, CurrencyConfig, CurrencyValue, Field, FieldType, LocationCoordinates, SelectOption, UniqueScope } from '@objectstack/spec/data';
+import { CurrencyConfigSchema, CurrencyValueSchema, FieldSchema, FieldType, LocationCoordinatesSchema, SelectOptionSchema, UniqueScopeSchema } from '@objectstack/spec/data';
+import type { CurrencyConfig, CurrencyValue, Field, FieldType, LocationCoordinates, SelectOption, UniqueScope } from '@objectstack/spec/data';
 
 // Validate data
-const result = AddressSchema.parse(data);
+const result = CurrencyConfigSchema.parse(data);
 ```
-
----
-
-## Address
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **street** | `string` | optional | Street address |
-| **city** | `string` | optional | City name |
-| **state** | `string` | optional | State/Province |
-| **postalCode** | `string` | optional | Postal/ZIP code |
-| **country** | `string` | optional | Country name or code |
-| **countryCode** | `string` | optional | ISO country code (e.g., US, GB) |
-| **formatted** | `string` | optional | Formatted address string |
-
 
 ---
 
@@ -81,7 +64,7 @@ const result = AddressSchema.parse(data);
 | **searchable** | `boolean` | optional | Is searchable |
 | **multiple** | `boolean` | optional | Allow multiple values (Stores as Array/JSON). Applicable for select, lookup, file, image. |
 | **unique** | `boolean \| 'global' \| 'organization'` | optional | Unique constraint and its scope (ADR-0120). 'organization' = one holder per organization (NULL-safe composite with the organization key part on organization-scoped objects) — prefer this explicit spelling in new code; true = same per-organization scope (positional synonym, stays valid); 'global' = one holder across the whole installation. 'tenant'/'org' are rejected — the word is 'organization' |
-| **defaultValue** | `any` | optional | Default value |
+| **defaultValue** | `any` | optional | Default applied on INSERT when the field is omitted or null (`''` is a real value, not absence). Three legal shapes (#7127), discriminated in the engine's own order: a CEL Expression envelope `{ dialect: 'cel', source: 'today()' }` (accepted structurally; result type is a runtime concern); a runtime TOKEN — `NOW()` on `datetime`/`date`/`time` only, `current_user` on `user` or `lookup` with `reference: 'sys_user'` only, neither on a multi-value field; or a LITERAL, which must satisfy this field's own stored value contract (ADR-0104 D1 `valueSchemaFor`). Anything else is refused at parse time with a prescriptive message. |
 | **maxLength** | `number` | optional | Max character length |
 | **minLength** | `number` | optional | Min character length |
 | **precision** | `number` | optional | Total digits |

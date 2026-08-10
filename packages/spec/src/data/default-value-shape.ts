@@ -48,8 +48,15 @@
  * for one of them, so each consumer applies its own BEFORE discriminating.
  */
 
-import { isRuntimeDefaultToken } from './default-value-tokens';
-import { valueSchemaFor, type ValueShapeFieldDef } from './field-value.zod';
+import {
+  DEFAULT_VALUE_TOKEN_CURRENT_USER,
+  DEFAULT_VALUE_TOKEN_NOW,
+  type DefaultValueToken,
+  isNowDefaultToken,
+  isRuntimeDefaultToken,
+} from './default-value-tokens';
+import { isMultiValueField, valueSchemaFor, type ValueShapeFieldDef } from './field-value.zod';
+import { SystemObjectName } from '../system/constants/system-names';
 
 /** The three legal shapes of a PRESENT `defaultValue`. */
 export type DefaultValueShape = 'expression' | 'token' | 'literal';
@@ -111,4 +118,135 @@ export function checkLiteralDefaultValue(def: ValueShapeFieldDef, dv: unknown): 
   const result = valueSchemaFor(def, 'stored').safeParse(dv);
   if (result.success) return { ok: true };
   return { ok: false, detail: result.error.issues[0]?.message ?? 'invalid value' };
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * Per-token × per-type gating (#7127 — the FieldSchema consumer's table)
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * Field types `'NOW()'` may legally default.
+ *
+ * Exactly the three types BOTH resolvers already branch on: the engine's
+ * `resolveNowDefault` produces the per-type stored form for `date` / `time` /
+ * instant, and the SQL driver's `nowColumnDefault` emits a dialect-correct
+ * physical DEFAULT for the same three. The docs promise the same set
+ * (`content/docs/protocol/objectql/types.mdx`: "for `date`, `datetime`, and
+ * `time` alike"). This codifies what the platform DOES — not narrowed to what
+ * happens to be authored today (the shipped census is 131 × `datetime`, 0 ×
+ * `date`/`time`; an artifact of authorship, not of support).
+ */
+export const NOW_DEFAULT_LEGAL_TYPES: ReadonlySet<string> = new Set(['datetime', 'date', 'time']);
+
+/**
+ * The refusal for a runtime-token default on a field it cannot legally
+ * default, or `null` when the token is legal there. Returns message TEXT so
+ * the consuming schema owns issue assembly; the text follows the
+ * self-prescribing house style — it names the field, its type, the offending
+ * token verbatim, why it cannot hold, and the legal alternatives.
+ *
+ * The table (#7127, decided on the issue):
+ *
+ * | token | legal on | why |
+ * |---|---|---|
+ * | `NOW()` | `datetime`, `date`, `time` | {@link NOW_DEFAULT_LEGAL_TYPES} |
+ * | `current_user` | `user`; `lookup` with `reference: 'sys_user'` | the engine writes `String(execCtx.userId)` — a `sys_user.id`; #4560 records that id landing anywhere else |
+ *
+ * Both tokens resolve to a single SCALAR (`applyFieldDefaults` assigns one
+ * string; a physical column DEFAULT is one value), so a multi-value field —
+ * an inherently-multi type, or a multi-capable type flagged `multiple: true`
+ * — refuses EVERY token before the per-token rules are consulted.
+ */
+export function defaultValueTokenIssue(
+  def: ValueShapeFieldDef & { name?: string; reference?: string },
+  dv: unknown,
+): string | null {
+  if (!isRuntimeDefaultToken(dv)) return null;
+  const token: DefaultValueToken = isNowDefaultToken(dv)
+    ? DEFAULT_VALUE_TOKEN_NOW
+    : DEFAULT_VALUE_TOKEN_CURRENT_USER;
+  const name = def.name ?? '<unnamed>';
+
+  if (isMultiValueField(def)) {
+    return (
+      `Field "${name}" (${def.type}, multi-value): the default ${JSON.stringify(dv)} is the runtime token `
+      + `\`${token}\`, which resolves to a single scalar — the engine's insert-time resolution assigns one `
+      + 'value (applyFieldDefaults) and a physical column DEFAULT is one value; neither produces the array a '
+      + 'multi-value field stores. Make the field single-valued, or write a literal array default.'
+    );
+  }
+
+  if (token === DEFAULT_VALUE_TOKEN_NOW) {
+    if (NOW_DEFAULT_LEGAL_TYPES.has(def.type)) return null;
+    return (
+      `Field "${name}" (${def.type}): the default ${JSON.stringify(dv)} is the runtime token \`NOW()\` — `
+      + 'the insert-time clock, resolved by the engine and by the SQL column DEFAULT into a temporal stored '
+      + `form — and a \`${def.type}\` field has no such form. It is legal only on \`datetime\`, \`date\`, or `
+      + '`time`. Use one of those temporal types, or write a literal value this field can store. (Before this '
+      + 'gate the engine silently intercepted the token even here and stored an ISO instant — an interception '
+      + 'nobody chose; it is refused instead.)'
+    );
+  }
+
+  // current_user — legal on `user`, and on a `lookup` targeting the user table.
+  if (def.type === 'user') return null;
+  if (def.type === 'lookup' && def.reference === SystemObjectName.USER) return null;
+  const lookupAside = def.type === 'lookup'
+    ? ` (this lookup targets ${def.reference ? `\`${def.reference}\`` : 'no declared object'}, not \`sys_user\`)`
+    : '';
+  return (
+    `Field "${name}" (${def.type}): the default ${JSON.stringify(dv)} is the runtime token \`current_user\` — `
+    + `resolved by the engine to the acting user's \`sys_user.id\` at insert time — and a \`${def.type}\` field `
+    + `cannot hold one${lookupAside}. It is legal only on a \`user\` field or a \`lookup\` with `
+    + "`reference: 'sys_user'` (#4560 records what happens when that id lands anywhere else). Use one of "
+    + 'those, or write a literal record id.'
+  );
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * Near-miss token spellings (#7127 Q5) — suggested, never accepted
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * Predictable near-miss spellings of the runtime tokens, mapped to the token
+ * the author probably meant — the `CONTEXT_TOKEN_SUGGESTIONS` pattern
+ * (`./context-tokens.zod.ts`) applied to this vocabulary. Keyed on the
+ * trimmed, lowercased spelling. The braced forms are the documented overlap
+ * with the FILTER placeholder vocabulary (`{current_user_id}`), which does
+ * not resolve in a `defaultValue`.
+ *
+ * Suggestions surface ONLY inside a refusal already happening on the literal
+ * branch. They are deliberately never accepted as tokens, and a near-miss
+ * that is a VALID literal for its field stays accepted in silence: widening
+ * the token match would make a genuinely-intended literal unstorable
+ * (`./default-value-tokens.ts` records that refusal; lint owns the catch).
+ */
+export const DEFAULT_VALUE_TOKEN_SUGGESTIONS: Readonly<Record<string, DefaultValueToken>> = {
+  currentuser: DEFAULT_VALUE_TOKEN_CURRENT_USER,
+  'current-user': DEFAULT_VALUE_TOKEN_CURRENT_USER,
+  'current user': DEFAULT_VALUE_TOKEN_CURRENT_USER,
+  '{current_user}': DEFAULT_VALUE_TOKEN_CURRENT_USER,
+  current_user_id: DEFAULT_VALUE_TOKEN_CURRENT_USER,
+  '{current_user_id}': DEFAULT_VALUE_TOKEN_CURRENT_USER,
+  now: DEFAULT_VALUE_TOKEN_NOW,
+  '{now}': DEFAULT_VALUE_TOKEN_NOW,
+  current_datetime: DEFAULT_VALUE_TOKEN_NOW,
+  current_time: DEFAULT_VALUE_TOKEN_NOW,
+} as const;
+
+/**
+ * The runtime token a refused literal was probably reaching for, or
+ * `undefined` when it resembles none. Exact token spellings never land here:
+ * discrimination sends them down the token branch first, and this function
+ * additionally refuses to answer for them so a direct caller cannot turn a
+ * token into a "suggestion" of itself.
+ */
+export function suggestDefaultValueToken(dv: unknown): DefaultValueToken | undefined {
+  if (typeof dv !== 'string') return undefined;
+  // Key first: `isRuntimeDefaultToken` is a `v is string` guard, so its
+  // negation narrows a `string` operand to `never` — dereferencing after the
+  // guard is a type error, not just awkward.
+  const key = dv.trim().toLowerCase();
+  if (isRuntimeDefaultToken(dv)) return undefined;
+  return DEFAULT_VALUE_TOKEN_SUGGESTIONS[key];
 }
