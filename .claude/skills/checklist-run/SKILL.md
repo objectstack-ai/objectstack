@@ -83,7 +83,8 @@ Build once, up front, for the whole run.
 - Execute each item's `steps` faithfully; judge each `acceptance` clause and each
   `negative` against its declared `oracle`, capturing the `evidence` the clause names.
   **Server truth outranks pixels; DOM only after a screenshot confirms render; a `fail`
-  needs reproduction ×2 + the automation self-check + a filed issue** (RUNNER §rules).
+  needs reproduction ×2 + the automation self-check + a reproduction rule in the run
+  issue** (RUNNER §rules).
 
 ## 3. When the run teaches you something about the ITEM
 
@@ -94,15 +95,36 @@ a `history` entry, keep `node scripts/check-platform-checklist.mjs` green, and l
 task branch. Product defects found while running go to `FOLLOW-UPS.md` (or a filed issue)
 as expected-fail probes — never tick a clause green over a real defect.
 
-## 4. The run record — results do NOT go in the repo
+## 4. The result issue — one GitHub issue per run, text only
 
-Write one JSON per run in the shape RUNNER.md defines (env with framework sha +
-`.objectui-sha` + port + db; per-clause verdicts each naming its evidence; derived item
-verdict; issues). **`runs/` is git-ignored** — the record and its screenshots stay in the
-executing environment / the tracking issue / an external QA store, never committed. The
-committed source is the checklist under `areas/`; a run is a dated assertion about one
-build and belongs with that build's artifacts. Report the per-clause verdict table + the
-evidence paths + the env-setup-vs-test time split back to the maintainer.
+Every completed run — **pass or fail alike** — files exactly one GitHub issue as its
+durable record. Nothing about a run enters the repo tree: not the JSON, not screenshots.
+The JSON run record (RUNNER.md shape) is scratch in the executing environment; `runs/`
+stays git-ignored. The issue is the report.
+
+**The issue is pure text — no images, ever.** Screenshots exist only to let you and your
+subagents reach a verdict *live*; they are a judgment aid, discarded with the run
+environment. The durable report needs the **reproduction rule, not the picture**.
+
+File it with `issue_write` (github MCP):
+
+- **Title** — `QA run · <selector> · <framework-sha[:8]> · <date>`
+- **Labels** — `qa-run` always; add `bug` (and `regression` for a P0/P1) whenever any
+  clause failed, so a real defect is triageable straight from the run issue without a
+  second one.
+- **Body**, in this order:
+  - **Env fingerprint** — framework sha, `.objectui-sha`, port, db, seed, timestamp.
+  - **Scope** — the selector + the `revision` each item ran against.
+  - **Per-clause verdict table** — item · clause · verdict · one line of **text** oracle
+    evidence (the API/network/build/test result — server truth, never a pixel).
+  - **For every `fail`, a reproduction rule** — the exact ordered steps / the API calls
+    (method · path · body) / the ref-targeted selector path to re-hit it on a fresh boot,
+    plus expected-vs-actual from the oracle. Enough for a human or a fresh agent to
+    reproduce it with no screenshot from you.
+  - Derived item verdicts + any fixture-gap list.
+
+Report the same per-clause table + the env-setup-vs-test time split back to the maintainer
+in chat, and link the filed issue.
 
 ## Guardrails
 
@@ -110,5 +132,5 @@ evidence paths + the env-setup-vs-test time split back to the maintainer.
   console → build it or record `blocked(environment)`; a half-proven item is `partial`,
   not `pass`. A blocked verdict WITH evidence is a successful run; a faked pass is not.
 - **Don't run blocked items as if runnable** — the resolver hides them for this reason.
-- **One selector, one run record.** For a release sweep, run `since:vN` and `priority:P0`
-  as separate records rather than smearing them together.
+- **One selector, one run, one issue.** For a release sweep, run `since:vN` and
+  `priority:P0` as separate runs → separate issues, rather than smearing them together.

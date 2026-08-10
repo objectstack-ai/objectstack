@@ -8,22 +8,25 @@ land in the repo (`.gitignore` here tracks only this README). The durable source
 the checklist itself under `../areas/`; a run is a snapshot that goes stale the moment
 the build moves.
 
-**Where results go instead — the canonical home is one tracking issue per release
-sweep** (a `[sweep] vN release test sweep` issue, successor to the #3358 model):
+**Where results go instead — every completed run files one `qa-run` GitHub issue** as its
+durable, **text-only** report (pass or fail alike):
 
-- the issue **body** hosts the human-readable summary — the per-item verdict table
-  (pass / partial / fail / blocked) and the filter that selected them (`since:vN` ∪ all
-  `P0` ∪ items whose `source` cites a release PR);
-- the machine **run-record JSON(s)** (shape below) attach to that issue — pasted in a
-  comment or linked as a CI artifact from the sweep job;
-- every `fail` becomes its **own linked issue** (RUNNER.md makes a filed issue part of a
-  completed `fail` verdict), cross-referenced from the sweep issue.
+- the issue **body** hosts the per-clause verdict table (pass / partial / fail / blocked)
+  and the scope — the selector that chose the items + the `revision` each ran against;
+- **every `fail` carries a reproduction rule** in that same issue — ordered steps / API
+  calls (method · path · body) / the ref-targeted selector path + expected-vs-actual —
+  and the issue gains the `bug` label (a real regression may additionally get its own
+  linked issue) so it triages straight from the run;
+- **screenshots are never part of the report** — they are live judgment aids that die
+  with the run environment, described in one line of text, never attached or linked.
 
-A raw CI artifact or an external QA store is a fine substitute where one exists, but the
-per-release tracking issue is the default so a sweep is never lost. What NEVER lands in
-the repo is the record itself — only the durable ledger under `../areas/` accumulates
-here, through each item's `revision`/`history`. A verdict is interpretable only next to
-the `revision` it names, so the run record stays with its build's artifacts, not in git.
+For a release sweep, the per-run issues roll up under the sweep's `[sweep] vN release test
+sweep` tracking issue (successor to the #3358 model) so a sweep is never lost. The machine
+run-record JSON (shape below) is optional scratch in the executing environment (the
+runner's workspace or a CI artifact) and is git-ignored — **do not commit it.** What NEVER
+lands in the repo is the record itself; only the durable ledger under `../areas/`
+accumulates here, through each item's `revision`/`history`, and a verdict is interpretable
+only next to the `revision` it names.
 
 ## Record shape (write to `YYYY-MM-DD-<slug>.json`, kept out of git)
 
@@ -44,7 +47,7 @@ are only meaningful next to the item `revision` they ran against.
       "id": "approvals.per-group-signoff",
       "revision": 1,                     // ← the revision this verdict is valid for
       "verdict": "pass",                 // derived: pass | partial | fail | blocked | not-run
-      "clauses": [ { "clause": 0, "verdict": "pass", "evidence": "…what was captured, where…" } ],
+      "clauses": [ { "clause": 0, "verdict": "pass", "evidence": "…text: what the oracle returned — no image links…" } ],
       "issues": [],
       "notes": "…"
     }

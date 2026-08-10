@@ -206,11 +206,12 @@ ever matters more than PR independence, re-adding the one-line CI step
 A release no longer gets a hand-written checklist. The sweep for `vN` is a **filter
 over this ledger**: `since == vN` (the new capabilities) ∪ all `P0` (the standing
 smoke) ∪ any item whose `source` cites a PR in the release. The tracking issue for the
-sweep links here and hosts discussion; results live as a run record kept OUT of the
-repo (in the CI artifact / tracking issue / QA store — `runs/` is git-ignored), plus
-findings filed as issues, one per failure. Item text, fixtures learned, and new
-traps discovered flow **back into the ledger** as revisions — that is the accumulation
-the one-off checklists never had.
+sweep links here and hosts discussion; results stay OUT of the repo — every run files
+one `qa-run` GitHub issue as its record (text only: the verdict table + a reproduction
+rule per failure, never screenshots; `runs/` is git-ignored), and a run that finds a real
+regression carries the `bug` label so it triages straight from that issue. Item text,
+fixtures learned, and new traps discovered flow **back into the ledger** as revisions —
+that is the accumulation the one-off checklists never had.
 
 ## Relationship to what already exists
 
