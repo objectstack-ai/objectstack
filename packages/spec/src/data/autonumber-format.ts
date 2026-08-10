@@ -336,6 +336,57 @@ export function renderAutonumber(input: RenderAutonumberInput): RenderedAutonumb
  * Hoisting either one here would make this contract claim an agreement that does
  * not exist. Each side documents its own fallback at its own call site.
  *
+ * # The declared boundary: mixed-content unanchored values are OUT OF CONTRACT (#7287)
+ *
+ * That refusal is not a gap waiting to be filled — as of the maintainer's ruling
+ * on #7287 (2026-08-10, 「宣告边界」, treatment (2)) it IS the contract:
+ *
+ * > **On an UNANCHORED format (`prefix === '' && suffix === ''`), a stored value
+ * > carrying any non-digit content is out of contract for counter readback.**
+ * > `undefined` is this function's answer for that slot, permanently.
+ *
+ * Why declare it rather than pick a reading. The two consumers have read such a
+ * value differently since before this helper existed, and both readings are
+ * pinned by their own tests:
+ *
+ *   - the engine's `readStoredAutonumberCounter`
+ *     (`packages/objectql/src/engine.ts`) takes the **last digit run** —
+ *     `'SO-2024-0007'` → `7`;
+ *   - the SQL driver's `scanMaxNumericTail`
+ *     (`packages/drivers/driver-sql/src/sql-driver.ts`) **concatenates every
+ *     digit** — the same value → `20240007`.
+ *
+ * Ruling either one to be the contract would move live behavior on the other
+ * side, over stored business identifiers that are not reclaimable once issued —
+ * which is why #7247 refused the hoist as a rider, and why #7287 rejects it
+ * outright rather than picking a side. Declaring the input out of contract costs
+ * nothing that was ever promised: no reading was ever specified for it.
+ *
+ * The boundary is drawn by CONTENT, and deliberately wider than the observed
+ * divergence. A **pure-digit** value — which is exactly what `renderAutonumber`
+ * emits for an unanchored format — is inside the contract, and both sides answer
+ * the same number for it: `'0007'` reads as `7` either way. Everything else is
+ * outside, including mixed-content values the two readings happen to agree on
+ * (`'CASE-12'` is `12` both ways: divergence needs TWO digit runs, and that one
+ * has one). Narrowing the boundary to "values the sides actually disagree on"
+ * would make it undecidable from the value alone — a caller would have to know
+ * which consumer is running to know whether its input is in contract, which is
+ * the very "same metadata, different driver, different number" property this
+ * boundary exists to bound. So the out-of-contract face is simply
+ * legacy/migrated data: a dash-separated string in a column later declared
+ * autonumber.
+ *
+ * Reachability, and why the boundary is worth stating now: #6555's Route-3
+ * ruling (PR #7265) made `{0000}` the declared default for format-less
+ * autonumber fields, and `{0000}` renders neither prefix nor suffix — so the
+ * DEFAULT authoring shape resolves to this unanchored slot on both sides.
+ *
+ * Consequence for the consumers, also recorded by the ruling: neither moves.
+ * Each keeps its current unanchored reading as **implementation detail outside
+ * this boundary**, not as a contract this file underwrites. See the pins in
+ * `autonumber-unanchored-boundary.test.ts`, and the ruling itself at
+ * https://github.com/objectstack-ai/objectstack/issues/7287#issuecomment-5238560707.
+ *
  * The digit match is the linear `/^\d+/` — a backtracking lookahead here is a
  * polynomial-ReDoS sink on stored values full of zeros (CodeQL
  * js/polynomial-redos).

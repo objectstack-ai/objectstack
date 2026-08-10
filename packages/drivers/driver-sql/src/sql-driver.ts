@@ -3629,6 +3629,28 @@ export class SqlDriver implements IDataDriver {
    *     the last digit run), so there is nothing shared to hoist — spec answers
    *     `undefined` for an unanchored slot rather than pick one of the two.
    *
+   * ## The unanchored arm is IMPLEMENTATION DETAIL, outside the declared contract (#7287)
+   *
+   * That refusal is now a DECLARED boundary, not merely an absent agreement: the
+   * #7287 ruling (2026-08-10, 「宣告边界」) states that a stored value carrying
+   * non-digit content on an unanchored format is out of contract for counter
+   * readback, and that `readAutonumberCounter`'s `undefined` for that slot is the
+   * contract rather than a gap. The boundary and its rationale live in that
+   * function's TSDoc in `packages/spec/src/data/autonumber-format.ts`; the pins
+   * are `packages/spec/src/data/autonumber-unanchored-boundary.test.ts`.
+   *
+   * So the concatenate-every-digit reading below is THIS DRIVER'S behavior, not a
+   * promise the platform makes. On the inputs the contract admits — pure-digit
+   * values, which is what `renderAutonumber` emits for an unanchored format — it
+   * answers the same number the engine does. On mixed-content values it may
+   * answer differently (`'SO-2024-0007'` → `20240007` here, `7` in the engine's
+   * `readStoredAutonumberCounter`), and that difference is out of contract on
+   * both sides, not a defect on either.
+   *
+   * Consequently the ruling moves nothing here: neither this reading nor the
+   * engine's was hoisted into the shared helper, precisely because doing so would
+   * move live behavior on the other side over record numbers already issued.
+   *
    * ## Why the suffix is NOT pushed into the LIKE
    *
    * `like 'prefix%suffix'` looks tempting and is wrong: the counter scope is the

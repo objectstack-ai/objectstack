@@ -372,6 +372,27 @@ interface IssuedAutonumber {
  *     concatenates every digit), which is exactly why spec refuses to answer for
  *     an unanchored slot instead of picking one of the two.
  *
+ * # The unanchored arm is IMPLEMENTATION DETAIL, outside the declared contract (#7287)
+ *
+ * Spec's refusal above is no longer just an absence of agreement: the #7287
+ * ruling (2026-08-10, 「宣告边界」) DECLARES that a stored value carrying
+ * non-digit content on an unanchored format is out of contract for counter
+ * readback, and that `readAutonumberCounter`'s `undefined` for that slot is the
+ * contract rather than a gap. The boundary and its rationale live in that
+ * function's TSDoc in `packages/spec/src/data/autonumber-format.ts`; the pins
+ * are `packages/spec/src/data/autonumber-unanchored-boundary.test.ts`.
+ *
+ * So the last-digit-run reading below is THIS ENGINE'S behavior, not a promise
+ * the platform makes. On the inputs the contract admits — pure-digit values,
+ * which is what `renderAutonumber` emits for an unanchored format — it answers
+ * the same number the SQL driver does. On mixed-content values it may answer
+ * differently (`'SO-2024-0007'` → `7` here, `20240007` there), and that
+ * difference is out of contract on both sides, not a defect on either.
+ *
+ * Consequently the ruling moves nothing here: neither this reading nor the
+ * driver's was hoisted into the shared helper, precisely because doing so would
+ * move live behavior on the other side over record numbers already issued.
+ *
  * The unanchored branch uses the linear `/\d+/g` — a backtracking lookahead here
  * is a polynomial-ReDoS sink on stored values full of zeros (CodeQL
  * js/polynomial-redos).
