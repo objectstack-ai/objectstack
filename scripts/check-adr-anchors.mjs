@@ -96,11 +96,18 @@
 //     the `.vN` version rule above and unlike an allowlist — an author who cites
 //     a sibling repo has a spelling that is both correct to a reader and clean
 //     to the gate. Bare `ADR-0001`, meaning ours, still fails.
-//   - **A record that was withdrawn or deleted, cited as history.** ADR-0107 was
-//     withdrawn before it landed (#3735) and is cited by the changeset that
-//     withdrew it. Those numbers sit on `UNRESOLVED_ADR_CITATIONS` below — an
-//     explicit, shrink-only allowlist, audited in both directions like the
-//     collision list.
+//   - **A record that was withdrawn or deleted, cited as history.** ADR-0001's
+//     record was deleted in the 2026-02-11 permission-protocol rewrite and is
+//     cited as history by ADR-0002. Those numbers sit on
+//     `UNRESOLVED_ADR_CITATIONS` below — an explicit, shrink-only allowlist,
+//     audited in both directions like the collision list.
+//
+//     It is the WEAKER of the two remedies, and the list says so: preferred is
+//     to give the number a record, even when the record is a tombstone. ADR-0107
+//     left this list that way (#6676) — withdrawn nine hours after it landed
+//     (#3735), it now has `docs/adr/0107-withdrawn-*.md` saying so, which both
+//     resolves the historical citations and makes re-use collide loudly under
+//     the number-uniqueness audit instead of merely going stale here.
 //
 // ## Where the registry lives (#6957)
 //
@@ -222,14 +229,15 @@ const UNRESOLVED_ADR_CITATIONS = [
     // 404. This entry never blessed that link and does not bless any future one.
     why: 'record deleted 2026-02-11 (9da8e3e72); cited as history by ADR-0002',
   },
-  {
-    number: '0107',
-    // Withdrawn before it landed: #3700 was closed as not planned and 3bb382b67
-    // (#3735) deleted the record. Cited by the changeset that withdrew it, by
-    // the audit whose D4 it recorded, and by this file's own comment above —
-    // all three discussing the withdrawal itself.
-    why: 'record withdrawn 2026-07-28 (#3735, 3bb382b67); cited by the withdrawal changeset and audit',
-  },
+  // 0107 was the second entry until #6676. It is gone from this list because the
+  // number gained a record — `docs/adr/0107-withdrawn-hook-body-write-set-static-
+  // gap.md`, a tombstone. That is the (a) remedy the dangling-citation message
+  // recommends over this list, and it is strictly stronger here: an allowlist
+  // entry survives only as long as something still cites the number (the
+  // direction-B staleness rule below), and 0107's citations are a changeset
+  // awaiting release plus an audit, so the grandfather clause would have expired
+  // on its own and quietly re-freed the number. A record does not expire, and a
+  // re-use now collides in `auditAdrDirectory` — loud, and about the right fact.
 ];
 
 /**
@@ -588,8 +596,16 @@ for (const entry of anchors) {
       errors.push(`${shard}: "${adr}" is not an ADR id (expected e.g. ADR-0090).`);
       continue;
     }
-    // Anchoring a withdrawn or never-written record sends the next author to a
-    // dead end (cf. ADR-0107, withdrawn before it landed).
+    // Anchoring a never-written or deleted record sends the next author to a
+    // dead end (cf. ADR-0001, whose record was deleted in the 2026-02-11
+    // permission-protocol rewrite and never restored).
+    //
+    // ⚠️ This resolves against the FILENAME only, so a tombstone — a record whose
+    // whole content is "this number is withdrawn, do not reuse" — reads here as a
+    // decision that exists (#6676 added the first, ADR-0107). Anchoring code to
+    // one is not caught mechanically; what catches it is the `invariant` field,
+    // which has to state what the ADR decided and cannot be written truthfully
+    // for a number that decided nothing.
     if (!records.has(m[1])) {
       errors.push(`${shard}: ${adr} has no record under ${ADR_DIR}/ — anchor a decision that exists.`);
       continue;
