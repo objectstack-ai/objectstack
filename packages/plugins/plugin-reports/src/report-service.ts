@@ -174,6 +174,51 @@ function renderSubject(template: string | undefined, vars: Record<string, string
   return tpl.replace(/\{\{\s*(\w+)\s*\}\}/g, (_m, k) => vars[String(k)] ?? '');
 }
 
+// ─── Caller envelope ──────────────────────────────────────────────
+
+/**
+ * Keys plugin-security's middleware STAMPS onto the operation context, resolved
+ * for the object of the operation in flight.
+ *
+ * They are middleware-private vocabulary, not fields of `ExecutionContext`, and
+ * every one of them is read as a WIDENING input: the ADR-0057 D1 access DEPTH
+ * the sharing owner-match expands to (`__readScope` / `__writeScope`, plus the
+ * ADR-0090 D10 delegator halves, stamped in place by `security-plugin.ts` —
+ * `sc.__readScope = …`), and the engine's internal privilege markers on the
+ * same channel (`__expandRead` waives the object-level CRUD check for a lookup
+ * expansion, `__referentialFieldClear` the referential-clear write).
+ *
+ * A report read asks about `report.object_name`, which is not necessarily the
+ * object the caller's envelope last carried a depth for — a REST request that
+ * touched another object before reaching `/reports/:id/run` hands over an
+ * envelope the middleware has already written into, and plugin-security only
+ * OVERWRITES `__readScope` when it resolves permission sets for the new object
+ * (`if (permissionSets.length > 0)`). A stale depth therefore survives into a
+ * question it was never resolved for. Dropped by PREFIX rather than by a name
+ * list: the `__` convention is what marks a key as belonging to the operation
+ * in flight, and a list would go stale the day the middleware stamps another
+ * one. Same shape as `plugin-audit`'s and `service-storage`'s kits (#7141 /
+ * #7145).
+ */
+const OPERATION_PRIVATE_KEY_PREFIX = '__';
+
+/**
+ * The caller's execution envelope, minus the operation-private keys above.
+ *
+ * A FRESH object every time, in both directions: the engine's middleware
+ * stamps `__readScope` for `report.object_name` onto whatever it is handed, so
+ * forwarding the caller's own envelope by reference would write that depth
+ * back into the REQUEST context the route goes on using.
+ */
+function withoutOperationPrivateKeys(exec: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(exec)) {
+    if (key.startsWith(OPERATION_PRIVATE_KEY_PREFIX)) continue;
+    out[key] = value;
+  }
+  return out;
+}
+
 // ─── Service ──────────────────────────────────────────────────────
 
 /**
@@ -458,9 +503,35 @@ export class ReportService implements IReportService {
       // Reports execute with the caller's identity so sharing rules
       // (if installed) apply. Falls back to system bypass only when
       // the report definition was created by a system writer.
+      //
+      // [#7204] The WHOLE envelope, not a rebuilt subset of it — the #6206
+      // ruling (#6523): a read that adjudicates on the caller's identity
+      // adjudicates on the whole `resolveAuthzContext` envelope. The
+      // five-field projection this replaced (`userId` / `tenantId` /
+      // `positions` / `permissions` / `isSystem`) was doing two jobs, and
+      // only one of them was correct:
+      //
+      //  - dropping the middleware-private keys — CORRECT, and preserved
+      //    above by {@link withoutOperationPrivateKeys};
+      //  - dropping the PRINCIPAL fields — the defect. `accessible_org_ids`
+      //    (ADR-0105 D2) is the one that changes rows: `buildDriverOptions`
+      //    reads it BY NAME to widen the driver's native tenant scope to the
+      //    caller's membership union under the `group` posture, and an absent
+      //    set makes drivers "fall back to equality: fail toward isolation".
+      //    So the same query returned the union in an interactive list view
+      //    and collapsed to active-org equality inside a saved or scheduled
+      //    report — silently short rows, no error. `timezone` is read two
+      //    lines up in the same engine method (`hasTz`) and again by
+      //    `applyFormulaPlan` for read-time formula fields, and `posture`,
+      //    `org_user_ids`, `systemPermissions` and `onBehalfOf` went the same
+      //    way; they are forwarded now for the same reason — the envelope is
+      //    the contract's unit.
+      //
+      // The three defaults below are byte-for-byte what the projection
+      // produced for an envelope that omits them, and are kept so this change
+      // adds fields without changing any that were already there.
       context: {
-        userId: context.userId,
-        tenantId: context.tenantId,
+        ...withoutOperationPrivateKeys(context as unknown as Record<string, unknown>),
         positions: context.positions ?? [],
         permissions: context.permissions ?? [],
         isSystem: context.isSystem ?? false,
