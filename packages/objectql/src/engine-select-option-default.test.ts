@@ -94,7 +94,7 @@ describe('[#7246] the option marked `default: true` is the field default', () =>
     engine = new ObjectQL();
     engine.registerDriver(makeStubDriver().driver, true);
     await engine.init();
-    engine.registry.registerObject(task);
+    engine.registry.registerObject(task, 'test.issue7246');
   });
 
   it('fills an OMITTED field with the marked option — the issue repro', async () => {
@@ -128,7 +128,7 @@ describe('[#7246] the option marked `default: true` is the field default', () =>
           options: [{ label: 'Backlog', value: 'backlog' }, { label: 'Active', value: 'active' }],
         },
       },
-    } as any);
+    } as any, 'test.issue7246');
     const row: any = await engine.insert('opt_unmarked', { title: 'D' }, sys);
     expect(row.status).toBeUndefined();
   });
@@ -159,7 +159,7 @@ describe('[#7246] precedence — `defaultValue` beats the option flag', () => {
     engine = new ObjectQL();
     engine.registerDriver(makeStubDriver().driver, true);
     await engine.init();
-    engine.registry.registerObject(both);
+    engine.registry.registerObject(both, 'test.issue7246');
   });
 
   it('PIN: the field-level `defaultValue` wins — the more specific declaration', async () => {
@@ -191,7 +191,7 @@ describe('[#7246] precedence — `defaultValue` beats the option flag', () => {
         ...both.fields,
         status: { ...both.fields.status, type: 'text' as const, defaultValue: '' },
       },
-    } as any);
+    } as any, 'test.issue7246');
     const row: any = await engine.insert('opt_empty', { title: 'B' }, sys);
     expect(row.status).toBe('');
   });
@@ -209,7 +209,7 @@ describe('[#7246] precedence — `defaultValue` beats the option flag', () => {
         ...both.fields,
         status: { ...both.fields.status, defaultValue: { dialect: 'cel', source: "'approved'" } },
       },
-    } as any);
+    } as any, 'test.issue7246');
     const row: any = await engine.insert('opt_expr', { title: 'C' }, sys);
     expect(row.status).toBe('approved');
     expect(row.status).not.toBe('draft');
@@ -245,7 +245,7 @@ describe('[#7246] an option value is a LITERAL, never a runtime token', () => {
           ],
         },
       },
-    } as any);
+    } as any, 'test.issue7246');
     const row: any = await engine.insert('opt_tokenish', {}, { context: { userId: 'usr_7' } } as any);
     expect(row.assignee_kind).toBe(DEFAULT_VALUE_TOKEN_CURRENT_USER);
     expect(row.assignee_kind).not.toBe('usr_7');
@@ -275,7 +275,7 @@ describe('[#7246] the default follows the FIELD shape, not the option count', ()
       { label: 'Important', value: 'important', default: true },
       { label: 'Quick', value: 'quick' },
       { label: 'Review', value: 'review', default: true },
-    ], { multiple: true }) as any);
+    ], { multiple: true }) as any, 'test.issue7246');
     const row: any = await engine.insert('opt_multi', {}, sys);
     expect(row.tags).toEqual(['important', 'review']);
   });
@@ -289,7 +289,7 @@ describe('[#7246] the default follows the FIELD shape, not the option count', ()
     engine.registry.registerObject(multi('opt_multi_one', [
       { label: 'Important', value: 'important', default: true },
       { label: 'Quick', value: 'quick' },
-    ], { multiple: true }) as any);
+    ], { multiple: true }) as any, 'test.issue7246');
     const row: any = await engine.insert('opt_multi_one', {}, sys);
     expect(row.tags).toEqual(['important']);
   });
@@ -301,7 +301,7 @@ describe('[#7246] the default follows the FIELD shape, not the option count', ()
     engine.registry.registerObject(multi('opt_multi_marked', [
       { label: 'Important', value: 'important', default: true },
       { label: 'Review', value: 'review', default: true },
-    ]) as any);
+    ]) as any, 'test.issue7246');
     const row: any = await engine.insert('opt_multi_marked', {}, sys);
     expect(row.tags).toBe('important');
   });
@@ -310,7 +310,7 @@ describe('[#7246] the default follows the FIELD shape, not the option count', ()
     engine.registry.registerObject(multi('opt_valueless', [
       { label: 'Broken', default: true },
       { label: 'Quick', value: 'quick' },
-    ]) as any);
+    ]) as any, 'test.issue7246');
     const row: any = await engine.insert('opt_valueless', {}, sys);
     expect(row.tags).toBeUndefined();
     expect(row.tags).not.toBeNull();
@@ -341,7 +341,7 @@ describe('[#7246] the lint heuristic and the engine agree BY CONSTRUCTION', () =
           options: [{ label: 'Email', value: 'email', default: true }, { label: 'SMS', value: 'sms' }],
         },
       },
-    } as any);
+    } as any, 'test.issue7246');
     const row: any = await engine.insert('opt_untyped', {}, sys);
     expect(row.channel).toBe('email');
   });
@@ -362,7 +362,7 @@ describe('[#7246] the lint heuristic and the engine agree BY CONSTRUCTION', () =
           options: [{ label: 'Draft', value: 'draft', isDefault: true }, { label: 'Done', value: 'done' }],
         },
       },
-    } as any);
+    } as any, 'test.issue7246');
     const row: any = await engine.insert('opt_alias', {}, sys);
     expect(row.status).toBeUndefined();
   });

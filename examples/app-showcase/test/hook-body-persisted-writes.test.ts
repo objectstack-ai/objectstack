@@ -205,7 +205,17 @@ describe('#7258 — app-showcase sandboxed `body` hooks reach the persisted row'
 
     const stored = await readBack(engine, 'showcase_inquiry', String(created.id));
     // The record's own fields are what a body enumerates...
-    expect(stored.company).toBe('KEYS[email,message,name] hasData=undefined');
+    //
+    // `status` is in that list without any hook having run, and is not the
+    // caller's (#7246): `applyFieldDefaults` runs at the TOP of the insert
+    // middleware, so engine-resolved defaults are already on the record before
+    // the first `beforeInsert` body sees it. `showcase_inquiry.status` marks
+    // `{ value: 'new', default: true }`, and the engine now honours that option
+    // flag exactly as it has always honoured a `defaultValue`. The priority-10
+    // ordering this case is really about is unaffected — `source` is absent
+    // here precisely because it is stamped by `StampInquiryDefaultsHook` at
+    // priority 50, which still has not run.
+    expect(stored.company).toBe('KEYS[email,message,name,status] hasData=undefined');
     // ...and the write the probe made through that flat view landed in the row,
     // which is the second half of `installFlatInput`'s contract.
     expect(stored.status).toBe('new');
@@ -223,8 +233,23 @@ describe('#7258 — app-showcase sandboxed `body` hooks reach the persisted row'
       ctx as never,
     );
     const storedInquiry = await readBack(engine, 'showcase_inquiry', String(inquiry.id));
-    expect(storedInquiry.status == null).toBe(true);
+    // `source` is the whole vacuity witness for this hook now (#7246).
+    //
+    // It used to be that BOTH of the hook's stamps came back null with the hook
+    // unbound. `status` no longer does, and not because a hook ran: the field
+    // declares `{ value: 'new', default: true }`, and the ENGINE now applies
+    // that option default on insert. So `status` can no longer discriminate
+    // "the hook ran" from "the hook did not" — it reads `'new'` either way, and
+    // asserting `'new'` here would make this half of the reverse check assert
+    // the same fact as the forward case, i.e. nothing.
+    //
+    // `source` still can: `showcase_inquiry.source` is a plain `Field.text`
+    // with no options and no `defaultValue`, so `'web'` has exactly one
+    // producer — `StampInquiryDefaultsHook`. The pin therefore moves onto it
+    // rather than being softened, and the engine-owned value is asserted
+    // separately for what it now is.
     expect(storedInquiry.source == null).toBe(true);
+    expect(storedInquiry.status).toBe('new'); // engine option default, NOT the hook
 
     const account: any = await engine.insert(
       'showcase_account', { name: 'Initech', status: 'active' }, ctx as never,
