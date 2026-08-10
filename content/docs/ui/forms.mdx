@@ -17,7 +17,7 @@ Both modes:
 - Use the same `FormView` Zod schema (`@objectstack/spec/ui`)
 - Render through the same `FormPage` renderer shipped by the ObjectUI console (a separate package/repo)
 - Honor `?prefill_<field>=<value>` URL params
-- Honor `submitBehavior` (thank-you / redirect / continue / next-record)
+- Honor `submitBehavior` (thank-you / redirect / continue / next-record) — with **mode-aware defaults** when it is omitted (see [§8](#8-submitbehavior--what-happens-after-submit))
 
 A **public form** is the Salesforce *Web-to-Lead* style embeddable form — declare a `FormView` with `sharing.allowAnonymous: true`, give it a `publicLink`, and the framework wires the anonymous REST endpoints automatically.
 
@@ -341,14 +341,27 @@ formViews: {
 
 | `kind` | Renderer behavior |
 |---|---|
-| `thank-you` *(default)* | Replace the form with a confirmation panel (`title`, `message`). |
+| `thank-you` | Replace the form with a confirmation panel (`title`, `message`). |
 | `redirect` | `window.location.assign(url)` after `delayMs` (defaults to 0). |
 | `continue` | Re-read prefill values and reset state — user can submit another response without reload. |
 | `next-record` | Stub for queue contexts; falls back to thank-you when no queue is wired. |
 
+### The default is mode-aware
+
+`submitBehavior` is optional, and **what you get for omitting it depends on the mode** — a public collection form and an authed create have different right answers (ruled 2026-08-10 on [#7245](https://github.com/objectstack-ai/objectstack/issues/7245)):
+
+| Mode | Default when `submitBehavior` is omitted | Why |
+|---|---|---|
+| **Public** (`/console/f/:slug`) | `{ kind: 'thank-you' }` — the confirmation panel | The anonymous submitter may not read the record back, so a receipt is all there is to show. |
+| **Internal** (`/console/forms/:name`) | Redirect to the **created record** | An operator who just created a record belongs on that record, not on a "submission received" receipt. |
+
+An explicit `submitBehavior` overrides the default in either mode, so nothing here removes an option — it only changes what an author gets for declaring nothing.
+
+> **Current renderer status (2026-08-10).** The console shipping at the pinned `.objectui-sha` still applies `thank-you` as the default in **both** modes. The table above is the contract; the renderer half is tracked in ObjectUI and linked from the [#7245 thread](https://github.com/objectstack-ai/objectstack/issues/7245). Until it lands, declare `submitBehavior` explicitly on an internal FormView that must land somewhere specific.
+
 ## 9. `type: 'form'` action — declarative form launchers
 
-App actions can declare `type: 'form'` to open a FormView without resorting to free-form URLs. The `target` is the FormView name; the runtime navigates to `/console/forms/:name`.
+App actions can declare `type: 'form'` to open a FormView without resorting to free-form URLs. The `target` is the FormView name; the runtime navigates to `/console/forms/:name` **inside the console shell** — the operator keeps the sidebar, navigation and breadcrumb, and a successful submit lands on the created record per the mode-aware default above. The full contract is stated on the [Action Protocol page](/docs/protocol/objectui/actions#what-type-form-promises).
 
 {/* os:check */}
 ```ts

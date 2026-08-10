@@ -34,6 +34,8 @@ formViews: {
 }
 ```
 
+The `submitBehavior` above sets the **copy**, not the behavior: `thank-you` is already the default on the public path, because an anonymous submitter may not read the record back. The internal path defaults the other way — a `type: 'form'` action lands the operator on the record it just created — so do not carry a public form's confirmation panel over to an internal one by habit. See [`submitBehavior` is mode-aware](/docs/ui/forms#the-default-is-mode-aware).
+
 That `sharing` block wires the anonymous endpoints automatically:
 
 ```

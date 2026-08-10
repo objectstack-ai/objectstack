@@ -21,7 +21,7 @@ The types you'll actually use:
 | `url` | Navigate / open a link | `target` is the URL (`${ctx.record.id}` interpolation supported) |
 | `modal` | Open a modal page — client-side only, no server dispatch | `target` names the modal page (to collect input *and* run logic, use `script` + `params`) |
 | `api` | Call an HTTP endpoint directly | `target` is the endpoint; `method` / `bodyShape` / `bodyExtra` shape the request |
-| `form` | Open a form view, prefilled with the current record | `target` names the FormView; routed to `/forms/:target?recordId=…` |
+| `form` | Open a form view, prefilled with the current record — in-shell, and the submit lands on the created record ([contract](/docs/protocol/objectui/actions#what-type-form-promises)) | `target` names the FormView; routed to `/forms/:target?recordId=…` |
 
 <Callout type="warn">
 Prefer `confirmText`/`params` over the two action properties that are **not
