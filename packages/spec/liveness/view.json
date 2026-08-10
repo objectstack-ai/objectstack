@@ -119,7 +119,10 @@
         },
         "sharing": {
           "status": "live",
-          "note": "objectui: ListView sharing tooltip incl. lockedBy (ListView.test.tsx:2276 'should display lockedBy in sharing tooltip when set'). Supersedes the audit's 'sharing.lockedBy dead' line."
+          "verifiedAt": "2026-08-10",
+          "evidenceScope": "cross-repo",
+          "evidence": "objectui: packages/plugin-list/src/ListView.tsx:2544 gates the toolbar sharing badge on schema.sharing.type, :2549 renders its tooltip from the same value and :2573 counts it when laying out the toolbar's left side; objectui: packages/plugin-list/src/__tests__/ListView.test.tsx:2428 pins the lockedBy tooltip — measured objectui @11c1e71e",
+          "note": "RE-CITED 2026-08-10 (#7133/#7142): the old citation was the TEST ALONE, at ListView.test.tsx:2276. The test survives with its content intact — it is now packages/plugin-list/src/__tests__/ListView.test.tsx:2428, 'should display lockedBy in sharing tooltip when set' — so this was line drift, not deletion. A test is the weaker half of a liveness claim, so the production reader is cited first and the test kept as the pin. Verdict unchanged: LIVE. Supersedes the 2026-06 audit's 'sharing.lockedBy dead' line."
         },
         "rowHeight": {
           "status": "live",
@@ -135,11 +138,17 @@
         },
         "hiddenFields": {
           "status": "live",
-          "note": "objectui: ObjectGrid.tsx (audit L15)."
+          "verifiedAt": "2026-08-10",
+          "evidenceScope": "cross-repo",
+          "evidence": "objectui: packages/react/src/spec-bridge/bridges/list-view.ts:123 copies the authored key onto the list node; objectui: packages/plugin-list/src/ListView.tsx:763 seeds the hidden-field set from schema.hiddenFields and :1491-1494 filters those names out of the effective column set, with :1509 listing it as a memo dependency — measured objectui @11c1e71e",
+          "note": "RE-CITED 2026-08-10 (#7132/#7142): the previous citation was 'ObjectGrid.tsx (audit L15)', which has ZERO occurrences of hiddenFields at objectui @11c1e71e. The zero belongs to the key, not the scanner — the same substring instrument returns 2-31 hits for the nine sibling keys still cited to that file. The applying reader is ListView's effective-fields memo: the grid is handed an already-filtered `columns` array and never sees the key."
         },
         "fieldOrder": {
           "status": "live",
-          "note": "objectui: ObjectGrid.tsx (audit L15)."
+          "verifiedAt": "2026-08-10",
+          "evidenceScope": "cross-repo",
+          "evidence": "objectui: packages/react/src/spec-bridge/bridges/list-view.ts:124 copies the authored key onto the list node; objectui: packages/plugin-list/src/ListView.tsx:1499-1500 builds an order map from schema.fieldOrder and reorders the effective column set by it, with :1509 listing it as a memo dependency — measured objectui @11c1e71e",
+          "note": "RE-CITED 2026-08-10 (#7132/#7142): the previous 'ObjectGrid.tsx (audit L15)' citation greps to zero at objectui @11c1e71e. Column ordering is applied in the same ListView effective-fields memo as hiddenFields, before the grid is handed its `columns` array."
         },
         "rowActions": {
           "status": "live",
@@ -164,7 +173,10 @@
         },
         "inlineEdit": {
           "status": "live",
-          "note": "objectui: ObjectGrid.tsx (audit L15)."
+          "verifiedAt": "2026-08-10",
+          "evidenceScope": "cross-repo",
+          "evidence": "objectui: packages/plugin-list/src/ListView.tsx:791-794 seeds inline-edit state from schema.inlineEdit and :1559 forwards it to the grid node under the renamed key `editable`; objectui: packages/plugin-grid/src/ObjectGrid.tsx:2197 passes editable down to the data-table and :2204 mounts renderCellEditor only when it is set, with :2194 gating the save/cancel action column — measured objectui @11c1e71e",
+          "note": "RE-CITED 2026-08-10 (#7132/#7142): the previous 'ObjectGrid.tsx (audit L15)' citation greps to zero because of a ONE-HOP RENAME, not because the key is inert — ObjectGrid never spells `inlineEdit`, it reads `editable`, which is what ListView renames the key to at :1559. The value is applied (no cell editor is mounted without it); only the spelling changes at the boundary. That rename is exactly the instrument blindness that made the old citation read as dead."
         },
         "exportOptions": {
           "status": "live",
@@ -300,7 +312,10 @@
         },
         "subforms": {
           "status": "live",
-          "note": "objectui: deriveMasterDetail.ts:338, LineItemsPanel.tsx:45 — master-detail fully wired (audit L17)."
+          "verifiedAt": "2026-08-10",
+          "evidenceScope": "cross-repo",
+          "evidence": "objectui: packages/plugin-form/src/ObjectForm.tsx:175 branches on schema.subforms and :197 hands it to MasterDetailForm as `details`; objectui: packages/plugin-form/src/MasterDetailForm.tsx:315 reads schema.details and :240 renders one panel per entry, with :227 summing their amount fields; objectui: packages/plugin-form/src/ModalForm.tsx:736 and packages/plugin-form/src/DrawerForm.tsx:558 take the same key through their own envelopes (ModalForm applies at :756/:786, DrawerForm at :570) — measured objectui @11c1e71e",
+          "note": "RE-CITED 2026-08-10 (#7133/#7142): the old citation named deriveMasterDetail.ts:338 and LineItemsPanel.tsx:45, and neither file mentions `subforms` at objectui @11c1e71e. deriveMasterDetail DERIVES master-detail panels from relationship metadata — its output is merged with the authored key one level up, in app-shell MetadataProvider.tsx:304-307 — and LineItemsPanel.tsx:41-55 is the per-panel schema, one hop past the rename to `details`. The form renderers are the readers that branch on the authored key. Verdict unchanged: LIVE, master-detail fully wired (audit L17)."
         },
         "sharing": {
           "status": "live",
