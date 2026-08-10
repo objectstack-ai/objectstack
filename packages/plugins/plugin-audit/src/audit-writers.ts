@@ -12,6 +12,14 @@ import type { IDataEngine } from '@objectstack/spec/contracts';
 // argument for its own single definition. The `/core` subpath is the
 // engine-free surface of the same package.
 import { SECRET_MASK, collectMaskedReadFields } from '@objectstack/objectql/core';
+// [#7230] ADR-0079's record display-name contract, imported rather than
+// re-derived. `resolveDisplayField` IS the definition of "which field is this
+// object's human title" (`nameField` → deprecated `displayNameField` alias →
+// deterministic derivation). A local "try name, then title, then subject"
+// heuristic here would be a second de-facto contract that disagrees with the
+// picker, the search companion and the approval inbox the day an author sets
+// `nameField` — the same argument the SECRET_MASK import above makes.
+import { resolveDisplayField } from '@objectstack/spec/data';
 
 /**
  * Minimal structural view of `NotificationService.emit` (ADR-0030). Declared
@@ -302,11 +310,67 @@ function safeStringify(v: any): string {
 }
 
 /**
- * Resolve a field value to its display string, preferring a select/picklist
- * option label over the raw stored value. Empty/missing → "∅".
+ * [#7230] Field types whose stored value is a FOREIGN RECORD ID rather than
+ * something a human can read. `user` is on the list because it is "a lookup
+ * specialized to the `sys_user` system object — stored IDENTICALLY (FK string
+ * column → sys_user.id)" (`field.zod.ts`), which is exactly the field class the
+ * measured symptom came from (`Rating Owner: ∅ → oBK25…`). `tree` is NOT on the
+ * list: it carries no `reference`, so there is no target object to read.
+ *
+ * The same three types, for the same reason, are what `plugin-approvals`
+ * resolves for its inbox display (`resolveLookupFields`) — one vocabulary for
+ * "this value is a reference", not two.
  */
-function displayFieldValue(field: any, value: any): string {
+const REFERENCE_FIELD_TYPES: ReadonlySet<string> = new Set(['lookup', 'master_detail', 'user']);
+
+/**
+ * [#7230] The referenced record ids carried by one lookup-field value.
+ *
+ * A single-value lookup stores one id; a `multiple: true` one stores an ARRAY
+ * (`field.zod.ts`: "Stores as Array/JSON"). Only the in-memory array shape is
+ * unpacked — a driver that hands the column back as an unparsed JSON string is
+ * left to the raw fallback rather than guessed at here, since parsing it would
+ * be this file inventing a storage contract it does not own.
+ *
+ * Objects are deliberately skipped: since #6656 both sides of the diff are raw
+ * driver rows, so an already-expanded `{id, name}` cannot reach here, and
+ * writing a limb for it would be consumer-side tolerance for a producer that
+ * does not exist (PD #12).
+ */
+function referenceIdsOf(value: any): string[] {
+  const one = (v: any): string | null => {
+    if (v === null || v === undefined || v === '') return null;
+    if (typeof v === 'string') return v.trim() ? v : null;
+    if (typeof v === 'number' || typeof v === 'bigint') return String(v);
+    return null;
+  };
+  if (Array.isArray(value)) return value.map(one).filter((v): v is string => v !== null);
+  const single = one(value);
+  return single === null ? [] : [single];
+}
+
+/**
+ * Resolve a field value to its display string, preferring a select/picklist
+ * option label — or, for a reference field, the referenced record's title —
+ * over the raw stored value. Empty/missing → "∅".
+ *
+ * [#7230] `titlesFor` is the pre-resolved id → title map for THIS field's
+ * target object (see `resolveTrackedLookupTitles`). It is a lookup into an
+ * already-batched result, never a read: this function stays synchronous, and
+ * the callers that have no reference to resolve (`matchMilestone`'s `{token}`
+ * interpolation) pass nothing and keep today's behaviour exactly.
+ *
+ * An id with no entry in the map — record deleted, object unregistered, title
+ * field unresolvable — falls back to the raw id, which is what this function
+ * returned before the branch existed. The change is therefore restore-invariant:
+ * it can only replace an id with a title, never a title with an id.
+ */
+function displayFieldValue(field: any, value: any, titlesFor?: Map<string, string>): string {
   if (value === null || value === undefined || value === '') return '∅';
+  if (titlesFor && typeof field?.type === 'string' && REFERENCE_FIELD_TYPES.has(field.type)) {
+    const ids = referenceIdsOf(value);
+    if (ids.length > 0) return ids.map((id) => titlesFor.get(id) ?? id).join(', ');
+  }
   const options = field?.options;
   if (Array.isArray(options)) {
     for (const o of options) {
@@ -321,25 +385,76 @@ function displayFieldValue(field: any, value: any): string {
 }
 
 /**
- * ADR-0052 §5b — declarative activity. For fields declared `trackHistory: true`,
- * render the diff the writer already captured as a human-readable timeline
- * summary ("Stage: Proposal → Closed Won"; multiple changes joined by "; "),
- * using the field label and select option labels. Returns null when no tracked
- * field changed, so the caller falls back to the generic "Updated <object>".
+ * [#7230] Every tracked-change field of `fields` that is a reference, grouped
+ * by TARGET OBJECT — the read plan for {@link resolveTrackedLookupTitles}.
+ *
+ * Grouping by target object (not by field, and emphatically not by row) is what
+ * keeps this off the write hot path: N tracked reference fields pointing at one
+ * object cost ONE read, and a write that changes no tracked reference field
+ * produces an empty plan and therefore no read at all.
  */
-function renderTrackedChangeSummary(
+function planTrackedLookupReads(
   fields: Record<string, any> | undefined | null,
   oldVals: Record<string, any> | null,
   newVals: Record<string, any> | null,
+): Map<string, Set<string>> {
+  const byObject = new Map<string, Set<string>>();
+  if (!fields || !newVals) return byObject;
+  for (const key of Object.keys(newVals)) {
+    const field = fields[key];
+    if (!field || field.trackHistory !== true) continue;
+    if (typeof field.type !== 'string' || !REFERENCE_FIELD_TYPES.has(field.type)) continue;
+    const reference = typeof field.reference === 'string' ? field.reference.trim() : '';
+    if (!reference) continue;
+    for (const raw of [oldVals ? oldVals[key] : undefined, newVals[key]]) {
+      for (const id of referenceIdsOf(raw)) {
+        let set = byObject.get(reference);
+        if (!set) { set = new Set<string>(); byObject.set(reference, set); }
+        set.add(id);
+      }
+    }
+  }
+  return byObject;
+}
+
+/**
+ * ADR-0052 §5b — declarative activity. For fields declared `trackHistory: true`,
+ * render the diff the writer already captured as a human-readable timeline
+ * summary ("Stage: Proposal → Closed Won"; multiple changes joined by "; "),
+ * using the field label, select option labels and referenced record titles.
+ * Returns null when no tracked field changed, so the caller falls back to the
+ * generic "Updated <object>".
+ *
+ * [#7230] `translate` is the SAME locale-bound translator the three sibling
+ * summary branches already resolve through (`messages.activityCreated` /
+ * `messages.activityDeleted` / `messages.activityUpdated`, and `displayLabelFor`
+ * for the object name). This branch was the one never handed it, so a
+ * fully-localized page ended with an English field label — ADR-0053 /
+ * framework#3039 write-time localization, applied where it was missed. The key
+ * shape is the bundle's own (`objects.<object>.fields.<field>.label`), and a
+ * miss returns `undefined` so the authored def label, then the machine key,
+ * still answer exactly as before.
+ */
+function renderTrackedChangeSummary(
+  objectName: string,
+  fields: Record<string, any> | undefined | null,
+  oldVals: Record<string, any> | null,
+  newVals: Record<string, any> | null,
+  translate: (key: string, params?: Record<string, unknown>) => string | undefined,
+  lookupTitles?: Map<string, Map<string, string>>,
 ): string | null {
   if (!fields || !newVals) return null;
   const parts: string[] = [];
   for (const key of Object.keys(newVals)) {
     const field = fields[key];
     if (!field || field.trackHistory !== true) continue;
-    const label = (typeof field.label === 'string' && field.label) || key;
-    const from = displayFieldValue(field, oldVals ? oldVals[key] : undefined);
-    const to = displayFieldValue(field, newVals[key]);
+    const label =
+      translate(`objects.${objectName}.fields.${key}.label`) ??
+      (typeof field.label === 'string' && field.label.length > 0 ? field.label : key);
+    const reference = typeof field.reference === 'string' ? field.reference : undefined;
+    const titlesFor = reference ? lookupTitles?.get(reference) : undefined;
+    const from = displayFieldValue(field, oldVals ? oldVals[key] : undefined, titlesFor);
+    const to = displayFieldValue(field, newVals[key], titlesFor);
     parts.push(`${label}: ${from} → ${to}`);
   }
   return parts.length > 0 ? parts.join('; ') : null;
@@ -575,6 +690,91 @@ export function installAuditWriters(
       translate(`objects.${objectName}.label`) ??
       (typeof def?.label === 'string' && def.label.length > 0 ? def.label : objectName)
     );
+  };
+
+  /**
+   * [#7230] Referenced record TITLES for the tracked-change summary — id →
+   * title, per target object.
+   *
+   * ## Why this is shaped as a plan + one read per target object
+   *
+   * `sys_activity.summary` is composed at WRITE time, so anything this function
+   * does lands on the write hot path. One day before this change, #6656 / PR
+   * #6977 retired `captureBefore`'s redundant pre-image read from this exact
+   * path under maintainer ruling Option A+ — measured 2 → 1 reads per single-id
+   * write and 3 → 0 per predicate write. A per-row (or worse, per-value) title
+   * read here would hand that saving straight back, in the same file. So:
+   *
+   *  - **Zero reads is the default.** `planTrackedLookupReads` produces an empty
+   *    plan unless a field that is BOTH `trackHistory: true` AND a reference
+   *    type actually changed in this write. Every other write — the overwhelming
+   *    majority, including every create and delete — pays nothing, and
+   *    `#6977`'s counts are untouched. Pinned in `audit-lookup-summary.test.ts`.
+   *  - **One read per distinct target object**, never per field and never per
+   *    value: N tracked reference fields pointing at one object are answered by
+   *    a single `id: { $in: [...] }`. Same batching shape `plugin-approvals`
+   *    uses for its inbox display enrichment.
+   *  - **Only the id and the title column are selected**, so resolving a title
+   *    cannot drag a wide row (or a blob) through the write path.
+   *
+   * What it cannot batch away: `writeAudit` is dispatched PER ROW, so a
+   * predicate update over N rows that changes a tracked reference field on each
+   * pays N reads (one per row per distinct target object). That is inherent to
+   * per-row summary composition, not to this batching — and it is bounded by
+   * "the object declares a tracked reference field", which the audited-object
+   * pre-image read #6977 removed was not.
+   *
+   * ## Masking (#6656 non-regression)
+   *
+   * An explicit `nameField` pointer is honoured by `resolveDisplayField` even
+   * when it points at a title-INELIGIBLE type, so an object could in principle
+   * designate a credential field as its title. The read is skipped in that case
+   * rather than trusted to mask downstream: `collectMaskedReadFields` is the
+   * same contract predicate `ledgerView` masks with, so "no credential value
+   * reaches a user-facing activity summary" holds on this path by the same
+   * definition, not by a second one.
+   *
+   * Best-effort throughout: an unregistered object, an unreadable row or a
+   * failing driver leaves the id unresolved, and `displayFieldValue` renders the
+   * raw id exactly as it did before this branch existed.
+   */
+  const resolveTrackedLookupTitles = async (
+    api: any,
+    fields: Record<string, any> | null,
+    oldVals: Record<string, any> | null,
+    newVals: Record<string, any> | null,
+  ): Promise<Map<string, Map<string, string>> | undefined> => {
+    const plan = planTrackedLookupReads(fields, oldVals, newVals);
+    if (plan.size === 0) return undefined;
+    const sys = api.sudo();
+    const out = new Map<string, Map<string, string>>();
+    for (const [objectName, idSet] of plan) {
+      const def = getObjectDef(objectName);
+      const titleField = resolveDisplayField(def as any);
+      if (!titleField || titleField === 'id') continue;
+      if (collectMaskedReadFields(def).includes(titleField)) continue;
+      const ids = Array.from(idSet);
+      try {
+        const rows: any[] = await sys.object(objectName).find({
+          where: { id: { $in: ids } },
+          fields: ['id', titleField],
+          limit: ids.length,
+        });
+        const titles = new Map<string, string>();
+        for (const row of rows ?? []) {
+          const id = row?.id;
+          const title = row?.[titleField];
+          if (id === null || id === undefined) continue;
+          if (title === null || title === undefined) continue;
+          const text = String(title).trim();
+          if (text) titles.set(String(id), text);
+        }
+        if (titles.size > 0) out.set(objectName, titles);
+      } catch {
+        /* best-effort — an unresolvable reference renders as its raw id */
+      }
+    }
+    return out.size > 0 ? out : undefined;
   };
 
   /**
@@ -878,8 +1078,20 @@ export function installAuditWriters(
         summary = milestone.summary;
         if (milestone.type) activityType = milestone.type;
       } else {
+        // [#7230] The read plan is built from the SAME masked views the summary
+        // renders, and only reached once a milestone has declined — a write
+        // that changes no tracked reference field issues no read at all.
+        const trackedFields = getFieldDefs(ctx.object);
+        const lookupTitles = await resolveTrackedLookupTitles(api, trackedFields, oldValue, newValue);
         summary =
-          renderTrackedChangeSummary(getFieldDefs(ctx.object), oldValue, newValue) ??
+          renderTrackedChangeSummary(
+            ctx.object,
+            trackedFields,
+            oldValue,
+            newValue,
+            translate,
+            lookupTitles,
+          ) ??
           translate('messages.activityUpdated', { object: objectDisplay, label }) ??
           `Updated ${objectDisplay} "${label}"`;
       }
