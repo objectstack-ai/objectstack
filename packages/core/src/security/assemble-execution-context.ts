@@ -57,7 +57,6 @@
  */
 
 import type { ExecutionContext } from '@objectstack/spec/kernel';
-import { scopesToAgentPermissionSets, MCP_OAUTH_SCOPE_ACTIONS } from '@objectstack/spec/ai';
 
 import type { ResolvedAuthzContext } from './resolve-authz-context.js';
 
@@ -158,7 +157,7 @@ void _ENTRY_FIELDS_EXHAUSTIVE;
 export interface OAuthTokenProvenance {
   /** The human `sub` the token was issued for. */
   userId: string;
-  /** Granted scopes — the agent's own permission CEILING. */
+  /** Granted scopes, surfaced on the envelope so MCP can narrow tool families. */
   scopes: string[];
   /**
    * The authorized client (`azp`). Present ⇒ this is an AI AGENT acting on
@@ -166,6 +165,27 @@ export interface OAuthTokenProvenance {
    * principal stays human (the scopes are still surfaced).
    */
   clientId?: string;
+  /**
+   * The agent's OWN permission CEILING, derived from {@link scopes} by the door
+   * that speaks the OAuth scope vocabulary
+   * (`scopesToAgentPermissionSets`, `@objectstack/spec/ai`).
+   *
+   * Interpreted THERE and not here on purpose: the scope vocabulary is
+   * MCP-domain knowledge and `@objectstack/core` is the microkernel — it should
+   * not acquire a dependency on the AI subdomain (concretely, every package
+   * whose test config aliases `@objectstack/core` to its source would then have
+   * to resolve `@objectstack/spec/ai` too, down to `driver-memory`). What the
+   * ceiling REPLACES on the envelope is decided below, once, for every face —
+   * and that is the part that drifted.
+   */
+  scopePermissions: string[];
+  /**
+   * Whether the token carries the user's consent to let this agent invoke
+   * actions on their behalf — the `actions:execute` scope
+   * (`MCP_OAUTH_SCOPE_ACTIONS`), evaluated at the same door for the same
+   * reason.
+   */
+  delegatesActions: boolean;
 }
 
 /** Reference localization for an authenticated principal (@see resolveLocalizationContext). */
@@ -256,7 +276,7 @@ function entryFields(
     // calls that construct bare contexts never pass through here, so the
     // security plugin's empty-context skip path keeps its meaning.
     positions: agent ? [] : anonymous ? ['guest'] : authz.positions,
-    permissions: agent ? scopesToAgentPermissionSets(agent.scopes) : authz.permissions,
+    permissions: agent ? agent.scopePermissions : authz.permissions,
     // [ADR-0090 D10] System capabilities on the agent principal gate business
     // ACTION invocation (`actionPermissionError` reads `ctx.systemPermissions`)
     // — a door SEPARATE from the object CRUD/FLS/RLS intersection, which is
@@ -265,7 +285,7 @@ function entryFields(
     // `actions:execute` scope IS the user's consent to let this agent invoke
     // actions on their behalf; without it the agent holds none.
     systemPermissions: agent
-      ? agent.scopes?.includes(MCP_OAUTH_SCOPE_ACTIONS)
+      ? agent.delegatesActions
         ? (authz.systemPermissions ?? [])
         : []
       : authz.systemPermissions,

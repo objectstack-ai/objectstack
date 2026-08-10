@@ -21,6 +21,7 @@
 
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { ServiceSlotContract, ServiceSlotContracts } from '@objectstack/spec/contracts';
+import { scopesToAgentPermissionSets, MCP_OAUTH_SCOPE_ACTIONS } from '@objectstack/spec/ai';
 import { preferredLocaleFromHeader } from '@objectstack/spec/system';
 
 import {
@@ -192,7 +193,21 @@ export async function resolveExecutionContext(opts: ResolveOptions): Promise<Exe
 
   return assembleExecutionContextOrGuest({
     authz,
-    oauth: oauthPrincipal,
+    // The OAuth SCOPE VOCABULARY is interpreted here, at the only door that
+    // speaks it (`acceptOAuthAccessToken` is set solely by the `/mcp` path
+    // match), and the shared assembler receives the already-derived grant. It
+    // decides what that ceiling REPLACES on the envelope — the part that
+    // drifted — without `@objectstack/core` taking a dependency on the AI
+    // subdomain. See `OAuthTokenProvenance`.
+    oauth: oauthPrincipal && {
+      ...oauthPrincipal,
+      // [ADR-0090 D10] `data:read` → read-only, `data:write` → CRUD, neither →
+      // no data access. The agent's OWN grants, never the user's.
+      scopePermissions: scopesToAgentPermissionSets(oauthPrincipal.scopes),
+      // The `actions:execute` scope IS the user's consent to let this agent
+      // invoke actions on their behalf; without it the agent holds none.
+      delegatesActions: oauthPrincipal.scopes?.includes(MCP_OAUTH_SCOPE_ACTIONS) ?? false,
+    },
     localization,
     // [#3957] The request's OWN language preference wins over the workspace
     // default — `ExecutionContext.locale` drives the write path's message

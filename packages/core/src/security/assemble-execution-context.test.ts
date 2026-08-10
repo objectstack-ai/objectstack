@@ -20,7 +20,6 @@
 
 import { describe, it, expect } from 'vitest';
 import { ExecutionContextSchema } from '@objectstack/spec/kernel';
-import { scopesToAgentPermissionSets, MCP_OAUTH_SCOPE_ACTIONS } from '@objectstack/spec/ai';
 
 import {
   assembleExecutionContext,
@@ -50,9 +49,16 @@ function legacyDispatcherAssembly(
     if (oauthPrincipal?.clientId) {
       ctx.principalKind = 'agent';
       ctx.onBehalfOf = { userId: authz.userId, principalKind: 'human' };
-      ctx.permissions = scopesToAgentPermissionSets(oauthPrincipal.scopes);
+      // Pre-#6216 these two read `scopesToAgentPermissionSets(oauthPrincipal.scopes)`
+      // and `oauthPrincipal.scopes?.includes(MCP_OAUTH_SCOPE_ACTIONS)` inline.
+      // Both are now interpreted at the `/mcp` door and arrive pre-derived; the
+      // scope→ceiling mapping itself is pinned end-to-end through the real
+      // resolver in `packages/runtime/src/security/resolve-execution-context.test.ts`
+      // ("ADR-0090 D10 agent principal"). What THIS pin freezes is unchanged:
+      // which envelope fields the ceiling replaces.
+      ctx.permissions = oauthPrincipal.scopePermissions;
       ctx.positions = [];
-      ctx.systemPermissions = oauthPrincipal.scopes?.includes(MCP_OAUTH_SCOPE_ACTIONS)
+      ctx.systemPermissions = oauthPrincipal.delegatesActions
         ? (authz.systemPermissions ?? [])
         : [];
     } else {
@@ -184,14 +190,30 @@ describe('#6216 — runtime/dispatcher face: byte-for-byte parity with the pre-#
 
   const OAUTH_SHAPES: Array<[string, OAuthTokenProvenance | undefined]> = [
     ['no oauth', undefined],
-    ['agent, data:read', { userId: 'u1', scopes: ['data:read'], clientId: 'cli1' }],
-    ['agent, data:write', { userId: 'u1', scopes: ['data:write'], clientId: 'cli1' }],
-    [
-      'agent, data:read + actions:execute',
-      { userId: 'u1', scopes: ['data:read', MCP_OAUTH_SCOPE_ACTIONS], clientId: 'cli1' },
-    ],
-    ['bearer WITHOUT a client (azp) — still human', { userId: 'u1', scopes: ['data:read'] }],
-    ['bearer for a DIFFERENT user — scopes withheld', { userId: 'other', scopes: ['data:read'] }],
+    ['agent, read-only ceiling', {
+      userId: 'u1', scopes: ['data:read'], clientId: 'cli1',
+      scopePermissions: ['agent_data_read'], delegatesActions: false,
+    }],
+    ['agent, read+write ceiling', {
+      userId: 'u1', scopes: ['data:write'], clientId: 'cli1',
+      scopePermissions: ['agent_data_read', 'agent_data_write'], delegatesActions: false,
+    }],
+    ['agent delegating actions', {
+      userId: 'u1', scopes: ['data:read', 'actions:execute'], clientId: 'cli1',
+      scopePermissions: ['agent_data_read'], delegatesActions: true,
+    }],
+    ['agent with an EMPTY ceiling (no data scope)', {
+      userId: 'u1', scopes: ['actions:execute'], clientId: 'cli1',
+      scopePermissions: [], delegatesActions: true,
+    }],
+    ['bearer WITHOUT a client (azp) — still human', {
+      userId: 'u1', scopes: ['data:read'],
+      scopePermissions: ['agent_data_read'], delegatesActions: false,
+    }],
+    ['bearer for a DIFFERENT user — scopes withheld', {
+      userId: 'other', scopes: ['data:read'],
+      scopePermissions: ['agent_data_read'], delegatesActions: false,
+    }],
   ];
 
   for (const [authzName, authz] of AUTHZ_SHAPES) {
@@ -371,7 +393,10 @@ describe('#6216 — the field set is CLOSED', () => {
   it('every assembled key belongs to the closed set — nothing leaks in', () => {
     const ctx = assembleExecutionContextOrGuest({
       authz: HUMAN_FULL,
-      oauth: { userId: 'u1', scopes: ['data:write', MCP_OAUTH_SCOPE_ACTIONS], clientId: 'cli1' },
+      oauth: {
+        userId: 'u1', scopes: ['data:write', 'actions:execute'], clientId: 'cli1',
+        scopePermissions: ['agent_data_read', 'agent_data_write'], delegatesActions: true,
+      },
       localization: { timezone: 'Asia/Shanghai', locale: 'zh-CN', currency: 'CNY' },
       requestLocale: 'en-US',
       accessToken: 'sess_token_abc',
