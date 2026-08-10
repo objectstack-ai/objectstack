@@ -42,12 +42,21 @@
  * A REMOVED export or a CHANGED factory signature is breaking (bump major). An
  * ADDED export still requires regenerating, so every change is deliberate. Reads
  * the built dist — run after `pnpm --filter @objectstack/spec build`.
+ *
+ * That last sentence is a PRECONDITION, and since #7122 it is enforced rather
+ * than merely documented: both modes refuse to read a dist that is missing or
+ * older than `src/`. On a stale dist this script does not fail, it writes a
+ * baseline missing every export added since the build — and `--check` then
+ * agrees with it against the same stale dist, so the phantom breaking removal is
+ * green at every step. See lib/dist-freshness.ts for the mechanism and for why
+ * the mtime rule, not `dist/.build-input-hash`, is the primitive that covers it.
  */
 import ts from 'typescript';
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { inspectDistFreshness } from './lib/dist-freshness';
 import {
   API_SURFACE_DIR_NAME,
   aggregateApiSurfaceShards,
@@ -59,6 +68,16 @@ const PKG_DIR = resolve(fileURLToPath(new URL('.', import.meta.url)), '..');
 const SURFACE_DIR = resolve(PKG_DIR, API_SURFACE_DIR_NAME);
 const SIG_SNAPSHOT = resolve(PKG_DIR, 'api-surface-signatures.json');
 const CHECK = process.argv.includes('--check');
+
+// BEFORE a single `.d.ts` is read (#7122). Order is the whole point: once
+// `ts.createProgram` has run over a stale dist, every answer below it is
+// confidently wrong, and both writing it and checking against it are worse than
+// stopping here.
+const freshness = inspectDistFreshness(PKG_DIR, CHECK ? 'check' : 'generate');
+if (!freshness.fresh) {
+  console.error(freshness.message);
+  process.exit(1);
+}
 
 /** Public entry points → their built CJS `.d.ts`, read from the exports map. */
 function collectEntries(): Record<string, string> {

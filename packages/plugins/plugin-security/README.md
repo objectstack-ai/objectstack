@@ -46,10 +46,10 @@ await kernel.use(new OrgScopingPlugin());  // MUST be BEFORE SecurityPlugin
 await kernel.use(new SecurityPlugin());
 ```
 
-SecurityPlugin probes `getService('org-scoping')` at start time:
+SecurityPlugin resolves the tenancy **posture** (`single` | `group` | `isolated`) once at start time — preferring the `tenancy` service, and falling back to probing `getService('org-scoping')` (present ⇒ the historical `isolated` posture). Two consequences:
 
-- **Service present** → keeps the wildcard `tenant_isolation` RLS policy (`organization_id = current_user.organization_id`) shipped with the default `member_default` / `viewer_readonly` permission sets.
-- **Service absent** → strips those wildcard policies so single-tenant deployments aren't filtered to zero rows.
+- **Tenant isolation is not an RLS policy.** Since ADR-0095 D1 the organization wall is **Layer 0** (`tenant-layer.ts`): an independent filter AND-composed ahead of business RLS, so a business-RLS change can never weaken it (W1) and the `viewAllRecords` / `modifyAllRecords` superuser bypass can never cross it (W2 — crossing takes a true `PLATFORM_ADMIN`). Under the `single` posture Layer 0 is inert. Accordingly the default `member_default` / `viewer_readonly` sets ship **no** wildcard `tenant_isolation` policy: `member_default` carries the owner-scoped `owner_only_writes` / `owner_only_deletes` plus per-object `_self` carve-outs on the better-auth identity tables, and `viewer_readonly` carries the `_self` carve-outs only.
+- **The platform's own tenant-scoped RLS policies are still stripped when no wall is enforced** (`single`), so single-tenant deployments aren't filtered to zero rows and don't pay the field-existence safety net on every find — e.g. `organization_admin`'s `sys_member_org` / `sys_invitation_org` / `sys_team_org`, and the `sys_organization_self` carve-out. The strip is by **provenance**, not by pattern-matching the predicate: an app-authored tenant policy is never stripped — it reaches the compiler and fails closed there, with a one-time operator warning (ADR-0105 D3).
 
 `organization_id` auto-injection on insert is provided by OrgScopingPlugin; `owner_id` auto-injection always runs in SecurityPlugin regardless.
 

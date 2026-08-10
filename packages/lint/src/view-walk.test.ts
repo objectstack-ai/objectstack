@@ -2,10 +2,11 @@
 
 import { describe, it, expect } from 'vitest';
 
-import { viewContainerSites, formViewSites } from './view-walk.js';
+import { viewContainerSites, formViewSites, viewObjectName } from './view-walk.js';
 import { validateVisibilityPredicates } from './validate-visibility-predicates.js';
 import { validateFormLayout } from './validate-form-layout.js';
 import { validateTranslatableSections } from './validate-translatable-sections.js';
+import { validateTranslationReferences } from './validate-translation-references.js';
 
 type AnyRec = Record<string, unknown>;
 
@@ -173,6 +174,167 @@ describe('one ladder, three consumers (#6381)', () => {
     };
     expect(validateTranslatableSections(stack).map((f) => f.path)).toEqual([
       'objects[0].listViews.compact.sections[0]',
+    ]);
+  });
+});
+
+/**
+ * The base binding ladder (#6662).
+ *
+ * `objectName` → `object` → `data.object`, in that order, on ONE record. It had
+ * three byte-identical copies under two names — `boundObject`
+ * (`validate-form-layout`) and `viewObjectName` (`validate-translatable-sections`,
+ * `validate-translation-references`) — which is the same copy count, on the same
+ * rules, that made the case for `view-walk.ts` itself.
+ *
+ * What is pinned here is the base rung ONLY. Each rule's own fallback
+ * composition is asserted by that rule's own suite, and is deliberately not
+ * folded in (see the module docblock).
+ */
+describe('viewObjectName — the base binding ladder (#6662)', () => {
+  it('reads `objectName` first', () => {
+    expect(viewObjectName({ objectName: 'a', object: 'b', data: { object: 'c' } })).toBe('a');
+  });
+
+  it('falls to `object` when `objectName` is absent', () => {
+    expect(viewObjectName({ object: 'b', data: { object: 'c' } })).toBe('b');
+  });
+
+  it('falls to `data.object` last — the canonical container shape', () => {
+    // On the shape real apps ship, the binding lives INSIDE the sub-container
+    // (`form.data.object`), so dropping this rung resolves nothing for them.
+    expect(viewObjectName({ data: { provider: 'object', object: 'c' } })).toBe('c');
+  });
+
+  it('skips a rung authored as an empty string', () => {
+    // `strName` — an empty name is not a name, and binding to `''` would look
+    // up an object nobody declared instead of falling through.
+    expect(viewObjectName({ objectName: '', object: 'b' })).toBe('b');
+    expect(viewObjectName({ objectName: '', object: '', data: { object: 'c' } })).toBe('c');
+  });
+
+  it('skips a rung authored with the wrong type', () => {
+    expect(viewObjectName({ objectName: 42, object: 'b' })).toBe('b');
+    expect(viewObjectName({ object: { nested: true }, data: { object: 'c' } })).toBe('c');
+  });
+
+  it('reads `data.object` only when `data` is a record', () => {
+    expect(viewObjectName({ data: 'crm_case' })).toBeUndefined();
+    expect(viewObjectName({ data: [{ object: 'crm_case' }] })).toBeUndefined();
+  });
+
+  it('does NOT read `name` — a form view names itself, not its object', () => {
+    // `contract_form`, not `contract`. Reading it here would bind the wrong
+    // object and report every field on the form as unknown.
+    expect(viewObjectName({ name: 'contract_form' })).toBeUndefined();
+  });
+
+  it('resolves to nothing when the record binds nothing', () => {
+    expect(viewObjectName({})).toBeUndefined();
+  });
+});
+
+/**
+ * The property this convergence buys: ONE base ladder, THREE binding consumers.
+ *
+ * The stack below binds its view through the DEEPEST rung only
+ * (`data.object`) — the rung a hand-written ladder is likeliest to drop, and the
+ * one the canonical container shape actually uses. All three rules must resolve
+ * `crm_case` from it, and each is asserted through an observable that only
+ * exists when the binding resolved:
+ *
+ *  - `validate-form-layout` reference-checks fields ONLY when the binding
+ *    resolves, so the unknown-field finding is proof it did;
+ *  - `validate-translatable-sections` reports a section only when its bound
+ *    object is translated, and prints that object in `where`;
+ *  - `validate-translation-references` files the form's section names under the
+ *    bound object, so a bundle translating one is accepted rather than reported
+ *    as naming a section nothing declares.
+ *
+ * The negative half is asserted too: strip the binding and all three fall
+ * silent — without it, "the finding fired" would pass just as well for a rule
+ * that resolved the wrong object, or none.
+ */
+describe('one base ladder, three binding consumers (#6662)', () => {
+  const objects = [{ name: 'crm_case', fields: { subject: { type: 'text' } } }];
+
+  /** A container whose ONLY binding is the deepest rung, on the container itself. */
+  const container = (data: unknown) => ({
+    name: 'case_views',
+    ...(data === undefined ? {} : { data }),
+    formViews: {
+      edit: {
+        sections: [
+          { name: 'basics', label: 'Basics', fields: ['ghost_field'] },
+        ],
+      },
+    },
+  });
+
+  const translations = [
+    {
+      en: {
+        objects: {
+          crm_case: { label: 'Case', _sections: { basics: { label: 'Basics' } } },
+        },
+      },
+    },
+  ];
+
+  const bound = { objects, views: [container({ provider: 'object', object: 'crm_case' })], translations };
+  const unbound = { objects, views: [container(undefined)], translations };
+
+  it('validate-form-layout resolves it — and reference-checks against it', () => {
+    const findings = validateFormLayout(bound);
+    expect(findings.map((f) => f.path)).toEqual([
+      'views[0].formViews.edit.sections[0].fields[0]',
+    ]);
+    expect(findings[0].message).toContain('crm_case');
+
+    // Negative half: no binding, no reference check, no finding.
+    expect(validateFormLayout(unbound)).toEqual([]);
+  });
+
+  it('validate-translatable-sections resolves it — and names it in `where`', () => {
+    // The section is named AND translated, so the rule is silent on the bound
+    // stack; the unbound one cannot resolve an object to check against either.
+    // What is asserted is the resolution itself, through the labelled-but-
+    // nameless section the rule does report.
+    const nameless = {
+      objects,
+      views: [
+        {
+          name: 'case_views',
+          data: { provider: 'object', object: 'crm_case' },
+          formViews: { edit: { sections: [{ label: 'Basics' }] } },
+        },
+      ],
+      translations,
+    };
+    const findings = validateTranslatableSections(nameless);
+    expect(findings.map((f) => f.path)).toEqual(['views[0].formViews.edit.sections[0]']);
+    expect(findings[0].where).toContain('object "crm_case"');
+
+    // Negative half: strip the binding and the rule has no object to judge
+    // against, so it reports nothing at all.
+    const stripped = {
+      ...nameless,
+      views: [{ name: 'case_views', formViews: { edit: { sections: [{ label: 'Basics' }] } } }],
+    };
+    expect(validateTranslatableSections(stripped)).toEqual([]);
+  });
+
+  it('validate-translation-references resolves it — and files sections under it', () => {
+    // Accepted: `basics` is declared on a form bound to `crm_case` by the
+    // deepest rung, so the bundle translating it names something that renders.
+    expect(validateTranslationReferences(bound)).toEqual([]);
+
+    // Negative half: with the binding gone the section is filed under no
+    // object, and the same bundle is reported as naming a section nothing
+    // declares.
+    const findings = validateTranslationReferences(unbound);
+    expect(findings.map((f) => f.path)).toEqual([
+      'translations[0].en.objects.crm_case._sections.basics',
     ]);
   });
 });

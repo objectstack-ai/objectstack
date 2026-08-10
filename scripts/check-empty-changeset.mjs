@@ -1223,6 +1223,16 @@ function selfTest() {
     assert(isEmptyDeclaration('---\n---\n\nbody\n'), 'parser: the canonical empty shape is empty');
     assert(isEmptyDeclaration('\n---\n\n---\n\nbody\n'), 'parser: blank lines around/inside the fence stay empty');
     assert(!isEmptyDeclaration(DECLARING), 'parser: a declaring changeset is not empty');
+    // The row above is EMPTY either way — with or without the leading-blank-line
+    // skip (#6923) an unread fence yields no packages — so it cannot fail on
+    // that skip's removal. This is the direction that can: a DECLARING file
+    // opening with a blank line, which @changesets/parse@0.4.3 reads as a real
+    // release. Deleting the preamble turns exactly this one red (the gate then
+    // rejects a valid changeset as empty-frontmatter), and it is the behavioural
+    // half of the family's fence-preamble agreement asserted further down
+    // (#7044).
+    assert(!isEmptyDeclaration('\n' + DECLARING), 'parser: a DECLARING changeset opening with a blank line is not empty (#6923/#7044)');
+    assert(!isEmptyDeclaration('\n\n' + DECLARING), 'parser: two leading blank lines do not hide a declaration (#6923/#7044)');
     assert(
       !isEmptyDeclaration("---\n'@objectstack/cli': patch\n---\n\nbody\n"),
       'parser: single-quoted package names count as a declaration',
@@ -1339,6 +1349,71 @@ function selfTest() {
           `family: ${rel} must skip whole-line YAML comments — without it a colon-bearing comment parses as a package named \`# note\` (#7004)`,
         );
       }
+
+      // ── … and they agree on WHERE that block may START (#7044) ────────────
+      //
+      // The second row of the same dialect table, and the standing proof that a
+      // ONE-ROW agreement check is not a family agreement check. #6923 taught
+      // three of these four to skip leading blank lines before the fence; the
+      // fourth (`objectui-changeset-digest.mjs`) still required the fence on
+      // line 1 when #7004 came through and aligned the entry regex — so a
+      // changeset opening with a single blank line read as release-nothing
+      // there and dropped out of the release digest, while
+      // @changesets/parse@0.4.3 honoured its `major`. That is #4731's harm
+      // (a breaking change vanishing from the record) reached through the one
+      // row nothing mechanical was holding. Three alignment passes went over
+      // this family and none of them could see it. This block is the mechanism
+      // that was missing.
+      //
+      // The four cannot share the fence TEST itself, and that is by design: the
+      // three gates return early on an unfenced file, while the digest falls
+      // through and treats the whole text as body. What they must share is the
+      // CURSOR — a skip that advances `i`, then a fence tested at `lines[i]`.
+      // Both halves are asserted per file, because a preamble sitting dead
+      // beside a surviving `lines[0]` test is #7044 again with the fix already
+      // in the file.
+      const preambles = new Map();
+      for (const rel of FAMILY) {
+        const src = existsSync(join(REPO_ROOT, rel)) ? readFileSync(join(REPO_ROOT, rel), 'utf8') : '';
+        // Comment lines are blanked (not dropped — indices stay meaningful):
+        // two of these files QUOTE the old `lines[0]` spelling in their headers
+        // while explaining why it was wrong, and a scan that reads prose finds
+        // the defect it is hunting inside the account of its own fix.
+        const srcLines = src.split('\n').map((l) => (/^\s*(?:\/\/|\/?\*)/.test(l) ? '' : l));
+        const fenceAt = srcLines.findIndex((l) => /lines\[[^\]]+\]\?\.trim\(\) [!=]== '---'/.test(l));
+        // Anti-vacuous-green (#6983), same discipline as the entry regex above:
+        // an extraction that finds nothing must fail here rather than hand the
+        // two assertions below an empty set to agree about.
+        assert(
+          fenceAt > 0,
+          `family: an opening-fence test must be extractable from ${rel} — found none, so the extraction went stale and the preamble agreement below would judge nothing`,
+        );
+        if (fenceAt <= 0) continue;
+        assert(
+          /lines\[i\]\?\.trim\(\) [!=]== '---'/.test(srcLines[fenceAt]),
+          `family: ${rel} must test the opening fence at the cursor the blank-line skip advanced, never at a literal line index — \`lines[0]\` IS #7044: the changeset opens with one blank line, the fence is on line 2, and the entire block reads as absent (found: ${JSON.stringify(srcLines[fenceAt].trim())})`,
+        );
+        // The statement immediately above it, extracted by POSITION rather than
+        // by content — so the agreement asserted next is a real comparison and
+        // not a regex agreeing with itself.
+        const above = [...srcLines.slice(0, fenceAt)].reverse().find((l) => l.trim() !== '') ?? '';
+        preambles.set(rel, above.trim());
+      }
+      assert(
+        preambles.size === FAMILY.length,
+        `family: a fence preamble had to be extracted from all ${FAMILY.length} parsers — got ${preambles.size}`,
+      );
+      const distinctPreambles = new Set(preambles.values());
+      assert(
+        distinctPreambles.size === 1,
+        `family: all four parsers must carry a byte-identical leading-blank-line preamble immediately before their fence test — found ${distinctPreambles.size} distinct spellings: ${JSON.stringify([...preambles])}`,
+      );
+      // And the shared statement must be the SKIP, so this cannot go green on
+      // four identical copies of something else sitting in that position.
+      assert(
+        [...distinctPreambles][0] === "while (i < lines.length && lines[i].trim() === '') i++; // tolerate leading blank lines",
+        `family: the shared statement before the fence test must be the leading-blank-line skip itself (#6923) — found ${JSON.stringify([...distinctPreambles][0])}`,
+      );
     }
 
     // ── Missing input is a failure, never a pass (#4690) ─────────────────────

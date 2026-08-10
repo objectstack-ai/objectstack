@@ -29,7 +29,8 @@
  * never guesses at an arbitrary component's object binding.
  */
 
-import { formViewSites } from './view-walk.js';
+import { collectionEntries } from './collection-entries.js';
+import { formViewSites, viewObjectName } from './view-walk.js';
 
 export const FORM_FIELD_UNKNOWN = 'form-field-unknown';
 export const FORM_COLSPAN_ABSOLUTE = 'absolute-colspan-discouraged';
@@ -71,30 +72,6 @@ function strName(v: unknown): string | undefined {
 }
 
 /**
- * Every record in a collection authored either as an array or as a name-keyed
- * map, each with its config PATH — `views[2]` for the array shape,
- * `views.contact_views` for the map. Findings here are consumed as edit targets
- * (`os lint --json`, Studio's finding renderer), so a map-shaped collection must
- * not report a synthetic index nobody can look up. Same helper, same reasoning
- * as `validate-visibility-predicates.ts` and `validate-translatable-sections.ts`.
- */
-function collectionEntries(v: unknown, base: string): Array<{ rec: AnyRec; path: string }> {
-  if (Array.isArray(v)) {
-    const out: Array<{ rec: AnyRec; path: string }> = [];
-    for (let i = 0; i < v.length; i++) {
-      if (isRec(v[i])) out.push({ rec: v[i] as AnyRec, path: `${base}[${i}]` });
-    }
-    return out;
-  }
-  if (isRec(v)) {
-    return Object.entries(v)
-      .filter(([, def]) => isRec(def))
-      .map(([name, def]) => ({ rec: { name, ...(def as AnyRec) }, path: `${base}.${name}` }));
-  }
-  return [];
-}
-
-/**
  * The bare-form site (the `views[]` entry itself) is NOT a phantom check, and
  * the distinction is worth keeping straight where this rule reads it: strict
  * `ViewSchema` refuses a `views[]` entry carrying root `sections` — measured,
@@ -122,32 +99,6 @@ function fieldNameOf(entry: unknown): string | null {
 }
 
 /**
- * The object a view — or one of its sub-containers — binds to, across the shapes
- * it is authored in.
- *
- * The ladder is `objectName` → `object` → `data.object`, identical to
- * `validate-translation-references.ts` and `validate-translatable-sections.ts`'s
- * `viewObjectName` (and to the CLI i18n walker's), so all of them agree on which
- * object a form belongs to. On the canonical container shape the binding lives
- * INSIDE the sub-container (`form.data.object`) while the container itself
- * carries `object`, which is why the caller resolves the site first and falls
- * back to the container — a record-level lookup alone resolves to nothing on the
- * shape real apps ship.
- *
- * `name` is deliberately NOT a rung. A stack-level container's `name` may be the
- * object name (`view.zod.ts` says so for object-scoped containers), but a form
- * view's `name` is its own — `contract_form`, not `contract` — and reading it
- * here would bind the wrong object and report every field on the form as unknown.
- */
-function boundObject(view: AnyRec): string | undefined {
-  return (
-    strName(view.objectName) ??
-    strName(view.object) ??
-    (isRec(view.data) ? strName(view.data.object) : undefined)
-  );
-}
-
-/**
  * Validate authored form-view layout. Returns findings (empty = clean).
  * Advisory only — the caller must never fail the build on these alone.
  */
@@ -169,16 +120,17 @@ export function validateFormLayout(stack: AnyRec): FormLayoutFinding[] {
     // A container names itself with `name`, or binds with `object` — and an
     // artifact-emitted one may carry neither, so the path is the last resort.
     const viewName = strName(view.name) ?? strName(view.object) ?? viewPath;
-    const containerObject = boundObject(view);
+    const containerObject = viewObjectName(view);
 
     for (const site of formViewSites(view, viewPath)) {
       // A sub-container declares its own binding (`form.data.object`) and
       // otherwise inherits the container's — the resolution order every other
-      // view-walking rule in this package uses. Deliberately NOT folded into
-      // the shared walker: the three consumers compose this ladder differently
-      // (see `view-walk.ts`), and a refactor that changes a verdict is a failed
+      // view-walking rule in this package uses. The base rung is the shared
+      // `viewObjectName` (#6662); this FALLBACK is deliberately NOT folded into
+      // the shared walker, because the consumers compose it differently (see
+      // `view-walk.ts`) and a refactor that changes a verdict is a failed
       // refactor.
-      const objName = boundObject(site.view) ?? containerObject;
+      const objName = viewObjectName(site.view) ?? containerObject;
       // Only reference-check when the bound object resolves; otherwise we can't.
       const known = objName ? objectFields.get(objName) : undefined;
       const where = site.surface ? `view "${viewName}" · ${site.surface}` : `view "${viewName}"`;
