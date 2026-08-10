@@ -32,6 +32,30 @@ import { MetadataManager } from './metadata-manager.js';
 const ref = (name: string): MetaRef => ({ org: 'system', type: 'view' as never, name });
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
+/**
+ * Deadline for the positive assertion below — the longest this case waits for
+ * an event it expects to arrive. The loop exits as soon as the event lands, so
+ * a healthy run costs about one poll interval and the number is only paid on
+ * the way to a failure.
+ *
+ * Sized for the merge queue, not for a quiet laptop, and matching the
+ * `EVENT_WAIT_MS` in `metadata-fs`'s three watcher files. The queue runs the
+ * FULL suite (PR-side CI runs only the affected subset) while the repository
+ * underneath rides `usePolling: 1000ms` plus an `awaitWriteFinish` stability
+ * window — wall-clock timers that stretch under a saturated runner without
+ * changing anything the assertions look at. PR #7208 was ejected from the
+ * queue twice on that mechanism, from `metadata-fs`'s side of this same
+ * watcher; this consumer-side wait is the same shape and is widened with them.
+ */
+const EVENT_WAIT_MS = 25_000;
+
+/**
+ * Per-case ceiling. Must clear a full `EVENT_WAIT_MS` plus repository and
+ * manager setup, or the case dies on the vitest timeout before reaching its
+ * own deadline — reporting as a timeout instead of as the missing event.
+ */
+const CASE_TIMEOUT_MS = 60_000;
+
 describe('MetadataManager ← FileSystemRepository under `.objectstack/metadata` (#7150)', () => {
   it('an out-of-process write reaches subscribe() in the dot-rooted layout', async () => {
     const base = await fs.mkdtemp(path.join(os.tmpdir(), 'objectstack-md7150-'));
@@ -63,7 +87,7 @@ describe('MetadataManager ← FileSystemRepository under `.objectstack/metadata`
         JSON.stringify({ name: 'case_grid', label: 'Cases (edited on disk)' }, null, 2),
       );
 
-      const deadline = Date.now() + 15_000;
+      const deadline = Date.now() + EVENT_WAIT_MS;
       while (seen.length === before && Date.now() < deadline) await sleep(100);
 
       const fresh = seen.slice(before);
@@ -76,5 +100,5 @@ describe('MetadataManager ← FileSystemRepository under `.objectstack/metadata`
       await repo.close().catch(() => undefined);
       await fs.rm(base, { recursive: true, force: true });
     }
-  }, 40_000);
+  }, CASE_TIMEOUT_MS);
 });
