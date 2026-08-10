@@ -32,8 +32,14 @@ import type {
   ApprovalResubmitInput,
   ApprovalResubmitResult,
   ApprovalStatus,
-  SharingExecutionContext,
 } from '@objectstack/spec/contracts';
+// [#7135] The full `resolveAuthzContext` envelope — what `IApprovalService`
+// declares for every one of these context parameters since #6523 (the #6206
+// ruling: enforcement adjudicates on the whole envelope, never a per-site
+// subset). Annotating the implementation with the retired six-field shape is
+// what forced this file to cast its way out of its own contract to read
+// fields the caller had already supplied.
+import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { RESUME_AUTHORITY_SERVICE } from '@objectstack/spec/contracts';
 import { isFileIdToken } from '@objectstack/spec/data';
 import { isGrantActive } from '@objectstack/core';
@@ -213,7 +219,17 @@ export type ActionTokenOutcome =
   | { ok: true; action: 'approve' | 'reject'; request: ApprovalRequestRow; approverId: string }
   | { ok: false; reason: 'invalid' | 'expired' | 'consumed' | 'not_pending' | 'not_approver'; request?: ApprovalRequestRow };
 
-const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as const;
+/**
+ * System-elevated context for this service's own metadata reads and writes.
+ *
+ * [#7135] Typed as the full envelope so it is passed AS ITSELF. It used to be
+ * declared `as const` and forced through `as unknown as
+ * SharingExecutionContext` at the three sites that handed it to a CONTRACT
+ * method — a double cast on an enforcement input, which switches checking off
+ * for the whole argument rather than for the readonly-array mismatch that
+ * provoked it.
+ */
+const SYSTEM_CTX: ExecutionContext = { isSystem: true, positions: [], permissions: [] };
 
 /**
  * Who is acting, for the purpose of a data write made on their behalf (#3783).
@@ -237,8 +253,8 @@ const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as const;
  * `null` for a machine caller (the SLA sweep passes {@link SYSTEM_CTX}), so a
  * reserved sentinel like {@link SLA_ACTOR_ID} can never surface as a `userId`.
  */
-function actingUserId(context: SharingExecutionContext | undefined): string | null {
-  const userId = (context as { userId?: unknown } | undefined)?.userId;
+function actingUserId(context: ExecutionContext | undefined): string | null {
+  const userId = context?.userId;
   return typeof userId === 'string' && userId ? userId : null;
 }
 
@@ -653,12 +669,19 @@ export class ApprovalService implements IApprovalService {
    * the derived `posture`, ADR-0095) so any transport that resolves through the
    * shared authz resolver lights this up without extra wiring.
    */
-  private isOverrideActor(context: SharingExecutionContext, requestOrg?: string | null): boolean {
+  private isOverrideActor(context: ExecutionContext, requestOrg?: string | null): boolean {
     if (!context) return false;
     if (context.isSystem) return true;
     const perms = Array.isArray(context.permissions) ? context.permissions : [];
     const positions = Array.isArray(context.positions) ? context.positions : [];
-    const posture = (context as any).posture;
+    // [#7135] A DECLARED read. `posture` (ADR-0095 D2) is resolved by
+    // `resolveAuthzContext` and is a field of the envelope the contract has
+    // named here since #6523 — the doc block above already says it is the
+    // intended signal. Until this parameter widened, reading it meant an
+    // unchecked `as any` on an enforcement input: a typo (`postures`,
+    // `'PLATFORM-ADMIN'`) would have compiled and silently denied every
+    // override, leaving a stuck approval with no in-product recovery.
+    const posture = context.posture;
     const isPlatformAdmin = posture === 'PLATFORM_ADMIN'
       || perms.includes(ADMIN_FULL_ACCESS)
       || positions.includes(BUILTIN_IDENTITY_PLATFORM_ADMIN);
@@ -670,7 +693,13 @@ export class ApprovalService implements IApprovalService {
     if (!isTenantAdmin) return false;
     // A tenant admin's authority stops at their own org; a null-org request is
     // global and any admin may release it.
-    const actorTenant = (context as any).tenantId ?? (context as any).organizationId ?? null;
+    // Only the `tenantId` half of this read lost its cast: `tenantId` is a
+    // declared field of the envelope, `organizationId` is not a field of it at
+    // ALL. That spelling has its own history (#5858 / `check:org-identifier`)
+    // and was explicitly held out of this change (#7070) — so it stays cast,
+    // and the asymmetry is now the visible marker of which of the two names
+    // the contract actually knows.
+    const actorTenant = context.tenantId ?? (context as any).organizationId ?? null;
     return requestOrg == null || (actorTenant != null && String(requestOrg) === String(actorTenant));
   }
 
@@ -707,7 +736,7 @@ export class ApprovalService implements IApprovalService {
    */
   private async resolveActor(
     actorId: string | undefined,
-    context: SharingExecutionContext,
+    context: ExecutionContext,
   ): Promise<string> {
     // The machine callers — their actor is server-minted, not caller-supplied.
     if (context?.isSystem) {
@@ -1447,7 +1476,7 @@ export class ApprovalService implements IApprovalService {
        */
       variables?: Record<string, unknown> | null;
     },
-    context: SharingExecutionContext,
+    context: ExecutionContext,
   ): Promise<ApprovalRequestRow | ApprovalNodeAutoOutcome> {
     if (!input.object) throw new Error('VALIDATION_FAILED: object is required');
     if (!input.recordId) throw new Error('VALIDATION_FAILED: recordId is required');
@@ -1462,7 +1491,8 @@ export class ApprovalService implements IApprovalService {
       throw new Error(`DUPLICATE_REQUEST: a pending approval already exists for ${input.object}/${input.recordId}`);
     }
 
-    const ctxOrg = (context as any)?.organizationId ?? (context as any)?.tenantId ?? input.organizationId ?? null;
+    // `organizationId` is not on the envelope — see isOverrideActor().
+    const ctxOrg = (context as any)?.organizationId ?? context?.tenantId ?? input.organizationId ?? null;
     const nowDate = this.clock.now();
     // OOO auto-skip (#1322 M1): reroute individually-routed approvers who are
     // out of office. Collected hops drive the audit + notification below (M4).
@@ -1681,7 +1711,7 @@ export class ApprovalService implements IApprovalService {
   async decideNode(
     requestId: string,
     input: { decision: 'approve' | 'reject'; actorId: string; comment?: string; attachments?: string[]; outputs?: Record<string, unknown> },
-    context: SharingExecutionContext,
+    context: ExecutionContext,
   ): Promise<{ request: ApprovalRequestRow; runId: string | null; nodeId: string | null; finalized: boolean; decision: 'approve' | 'reject'; outputs?: Record<string, unknown> }> {
     if (!requestId) throw new Error('VALIDATION_FAILED: requestId is required');
     const actorId = await this.resolveActor(input?.actorId, context);
@@ -2084,7 +2114,7 @@ export class ApprovalService implements IApprovalService {
   async decide(
     requestId: string,
     input: ApprovalDecisionInput,
-    context: SharingExecutionContext,
+    context: ExecutionContext,
   ): Promise<ApprovalDecisionResult> {
     const result = await this.decideNode(requestId, input, context);
 
@@ -2140,7 +2170,7 @@ export class ApprovalService implements IApprovalService {
   async recall(
     requestId: string,
     input: ApprovalRecallInput,
-    context: SharingExecutionContext,
+    context: ExecutionContext,
   ): Promise<ApprovalRecallResult> {
     if (!requestId) throw new Error('VALIDATION_FAILED: requestId is required');
     const actorId = await this.resolveActor(input?.actorId, context);
@@ -2249,7 +2279,7 @@ export class ApprovalService implements IApprovalService {
   async sendBack(
     requestId: string,
     input: ApprovalSendBackInput,
-    context: SharingExecutionContext,
+    context: ExecutionContext,
   ): Promise<ApprovalSendBackResult> {
     const actorId = await this.resolveActor(input?.actorId, context);
     const raw = await this.loadPendingRow(requestId);
@@ -2389,7 +2419,7 @@ export class ApprovalService implements IApprovalService {
   async resubmit(
     requestId: string,
     input: ApprovalResubmitInput,
-    context: SharingExecutionContext,
+    context: ExecutionContext,
   ): Promise<ApprovalResubmitResult> {
     const actorId = await this.resolveActor(input?.actorId, context);
     const rawRows = await this.engine.find('sys_approval_request', {
@@ -2545,7 +2575,7 @@ export class ApprovalService implements IApprovalService {
   async reassign(
     requestId: string,
     input: { actorId: string; to: string; from?: string; comment?: string },
-    context: SharingExecutionContext,
+    context: ExecutionContext,
   ): Promise<{ request: ApprovalRequestRow }> {
     const actorId = await this.resolveActor(input?.actorId, context);
     const to = String(input?.to ?? '').trim();
@@ -2634,7 +2664,7 @@ export class ApprovalService implements IApprovalService {
   async remind(
     requestId: string,
     input: { actorId: string; comment?: string },
-    context: SharingExecutionContext,
+    context: ExecutionContext,
   ): Promise<{ request: ApprovalRequestRow; notified: number }> {
     const actorId = await this.resolveActor(input?.actorId, context);
     const raw = await this.loadPendingRow(requestId);
@@ -2770,7 +2800,7 @@ export class ApprovalService implements IApprovalService {
     if (Date.parse(token.expires_at) < this.clock.now().getTime()) {
       return { ok: false, reason: 'expired' };
     }
-    const request = await this.getRequest(token.request_id, SYSTEM_CTX as unknown as SharingExecutionContext);
+    const request = await this.getRequest(token.request_id, SYSTEM_CTX);
     if (!request || request.status !== 'pending') {
       return { ok: false, reason: 'not_pending', request: request ?? undefined };
     }
@@ -2810,7 +2840,7 @@ export class ApprovalService implements IApprovalService {
       // context, so the status mirror and every flow it cascades into are
       // attributed exactly like a decision made through the UI. Elevation is
       // unchanged: `isSystem` still stands in for the missing session.
-    }, { ...SYSTEM_CTX, userId: res.token.approver_id } as unknown as SharingExecutionContext);
+    }, { ...SYSTEM_CTX, userId: res.token.approver_id });
     return { ok: true, action: res.token.action, request: out.request, approverId: res.token.approver_id };
   }
 
@@ -2821,7 +2851,7 @@ export class ApprovalService implements IApprovalService {
   async requestInfo(
     requestId: string,
     input: { actorId: string; comment: string },
-    context: SharingExecutionContext,
+    context: ExecutionContext,
   ): Promise<{ request: ApprovalRequestRow }> {
     const actorId = await this.resolveActor(input?.actorId, context);
     if (!input?.comment?.trim()) throw new Error('VALIDATION_FAILED: comment is required');
@@ -2860,7 +2890,7 @@ export class ApprovalService implements IApprovalService {
   async comment(
     requestId: string,
     input: { actorId: string; comment: string; attachments?: string[] },
-    context: SharingExecutionContext,
+    context: ExecutionContext,
   ): Promise<{ request: ApprovalRequestRow }> {
     const actorId = await this.resolveActor(input?.actorId, context);
     if (!input?.comment?.trim()) throw new Error('VALIDATION_FAILED: comment is required');
@@ -3256,7 +3286,7 @@ export class ApprovalService implements IApprovalService {
         decision: action === 'auto_approve' ? 'approve' : 'reject',
         actorId: SLA_ACTOR_ID,
         comment: 'SLA escalation',
-      }, SYSTEM_CTX as unknown as SharingExecutionContext);
+      }, SYSTEM_CTX);
     } else {
       // 'notify' (and the reassign-without-target fallback)
       await this.notify({
@@ -3634,7 +3664,7 @@ export class ApprovalService implements IApprovalService {
       submitterId?: string;
       q?: string;
     } | undefined,
-    context: SharingExecutionContext,
+    context: ExecutionContext,
   ): { where: any; tenantOrg: string | null } {
     const f: any = {};
     if (filter?.object) f.object_name = filter.object;
@@ -3646,7 +3676,8 @@ export class ApprovalService implements IApprovalService {
     // from leaking other-tenant rows since we deliberately query with
     // SYSTEM_CTX to bypass RLS on the engine (the approver-visibility rule
     // spans three identity forms, which RLS can't model cleanly).
-    const tenantOrg = (context as any)?.organizationId ?? (context as any)?.tenantId ?? null;
+    // `organizationId` is not on the envelope — see isOverrideActor().
+    const tenantOrg = (context as any)?.organizationId ?? context?.tenantId ?? null;
     if (tenantOrg) f.organization_id = tenantOrg;
     // Free-text search, pushed down: `payload_json` carries the record
     // snapshot, so record titles match without any join. `$contains` is the
@@ -3730,11 +3761,11 @@ export class ApprovalService implements IApprovalService {
    * request from someone who could actually act on it.
    */
   private async visibleRequestIds(
-    context: SharingExecutionContext,
+    context: ExecutionContext,
     tenantOrg: string | null,
   ): Promise<Set<string> | null> {
     if (this.isOverrideActor(context, tenantOrg)) return null;
-    const uid = (context as any)?.userId != null ? String((context as any).userId) : '';
+    const uid = context?.userId != null ? String(context.userId) : '';
     // A tokenless/anonymous caller participates in nothing. Fail closed.
     if (!uid) return new Set<string>();
 
@@ -3809,7 +3840,7 @@ export class ApprovalService implements IApprovalService {
       limit?: number;
       offset?: number;
     } | undefined,
-    context: SharingExecutionContext,
+    context: ExecutionContext,
   ): Promise<ApprovalRequestRow[]> {
     const { where, tenantOrg } = this.buildRequestWhere(filter, context);
     const approverTargets = (Array.isArray(filter?.approverId) ? filter!.approverId : filter?.approverId ? [filter.approverId] : [])
@@ -3852,7 +3883,7 @@ export class ApprovalService implements IApprovalService {
 
   async countRequests(
     filter: Parameters<IApprovalService['listRequests']>[0],
-    context: SharingExecutionContext,
+    context: ExecutionContext,
   ): Promise<number> {
     const { where, tenantOrg } = this.buildRequestWhere(filter, context);
     const approverTargets = (Array.isArray(filter?.approverId) ? filter!.approverId : filter?.approverId ? [filter.approverId] : [])
@@ -3897,23 +3928,24 @@ export class ApprovalService implements IApprovalService {
    */
   private async readBackRequest(
     requestId: string,
-    context: SharingExecutionContext,
+    context: ExecutionContext,
   ): Promise<ApprovalRequestRow | null> {
     return this.loadRequest(requestId, context, false);
   }
 
-  async getRequest(requestId: string, context: SharingExecutionContext): Promise<ApprovalRequestRow | null> {
+  async getRequest(requestId: string, context: ExecutionContext): Promise<ApprovalRequestRow | null> {
     return this.loadRequest(requestId, context, true);
   }
 
   private async loadRequest(
     requestId: string,
-    context: SharingExecutionContext,
+    context: ExecutionContext,
     enforceVisibility: boolean,
   ): Promise<ApprovalRequestRow | null> {
     if (!requestId) return null;
     const where: any = { id: requestId };
-    const tenantOrg = (context as any)?.organizationId ?? (context as any)?.tenantId;
+    // `organizationId` is not on the envelope — see isOverrideActor().
+    const tenantOrg = (context as any)?.organizationId ?? context?.tenantId;
     if (tenantOrg) where.organization_id = tenantOrg;
     const rows = await this.engine.find('sys_approval_request', {
       where, limit: 1, context: SYSTEM_CTX,
@@ -4009,8 +4041,8 @@ export class ApprovalService implements IApprovalService {
    * `can_act`/`is_submitter` block (system gets `can_override` too — it may act
    * on anything). Cheap + synchronous — safe on list reads.
    */
-  private attachViewers(rows: ApprovalRequestRow[], context: SharingExecutionContext): void {
-    const uid = (context as any)?.userId != null ? String((context as any).userId) : null;
+  private attachViewers(rows: ApprovalRequestRow[], context: ExecutionContext): void {
+    const uid = context?.userId != null ? String(context.userId) : null;
     for (const row of rows) {
       const pending = row.pending_approvers ?? [];
       (row as any).viewer = {
@@ -4062,7 +4094,7 @@ export class ApprovalService implements IApprovalService {
     } catch { /* display-only — never fail the read */ }
   }
 
-  async listActions(requestId: string, context: SharingExecutionContext): Promise<ApprovalActionRow[]> {
+  async listActions(requestId: string, context: ExecutionContext): Promise<ApprovalActionRow[]> {
     if (!requestId) return [];
     // Tenant gate: ensure the caller can see the parent request before
     // returning its action history. Skipping this would leak history rows
@@ -4110,7 +4142,7 @@ export class ApprovalService implements IApprovalService {
    * exactly, rather than inventing a second, looser rule for the bytes. Fails
    * closed on any error.
    */
-  async authorizeFileRead(actionId: string, context: SharingExecutionContext): Promise<boolean> {
+  async authorizeFileRead(actionId: string, context: ExecutionContext): Promise<boolean> {
     if (!actionId) return false;
     try {
       const rows = await this.engine.find('sys_approval_action', {
