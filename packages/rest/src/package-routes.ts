@@ -6,6 +6,7 @@ import type { PackageService } from '@objectstack/service-package';
 // The declared envelope is written in ONE place for the whole platform (#3973).
 import { sendOk, sendError } from '@objectstack/types';
 import { mountDirectRoutes, type DirectMountedRoute } from './direct-mount.js';
+import { readSingleQueryValue, repeatedQueryParamMessage } from './query-multiplicity.js';
 
 /**
  * [#7033 / #7023] The authorization gate for the REST package transport.
@@ -73,65 +74,14 @@ async function refusePackageRequest(
 }
 
 /**
- * The outcome of reading a query parameter that this API declares as
- * single-valued. `ok: false` carries the multiplicity so the refusal can say
- * what it saw rather than only that it refused.
+ * The `?version=` multiplicity rule (#6307), now shared (#6877).
+ *
+ * Both helpers moved to `query-multiplicity.ts` when the same rule was applied
+ * to `rest-server.ts`'s read points — ONE rule and one refusal message across
+ * the package, rather than a second implementation free to drift. Behaviour
+ * here is unchanged; only the definitions' home moved. The module's header
+ * carries the full argument for why repetition is refused rather than resolved.
  */
-type SingleQueryRead =
-  | { readonly ok: true; readonly value: string | undefined }
-  | { readonly ok: false; readonly count: number };
-
-/**
- * Read a query parameter the route declares single-valued out of the shape the
- * transport contract actually declares (#6307).
- *
- * `IHttpRequest.query` is `Record<string, string | string[]>` — a repeated
- * parameter is an ARRAY, and that is not a hypothetical arm of the union: the
- * `node:http` adapter (`@objectstack/http-conformance`'s `NodeHttpServer`)
- * hands `?version=a&version=b` through as `['a','b']`, measured over a socket.
- * The Hono adapter happens to collapse it to the first value before a handler
- * ever sees it, so the two adapters answer one contract-legal request
- * differently — which is precisely why the CONSUMER has to handle the shape it
- * was told to expect rather than lean on whichever server booted.
- *
- * ## Why repetition is refused rather than resolved
- *
- * `?version=1.0.0&version=2.0.0` is a well-formed request carrying two
- * conflicting intents. Picking one silently is a wrong answer delivered as a
- * success, and on `DELETE` it silently changes the OPERATION'S SCOPE: any
- * truthy `version` skips the `protocol.deletePackage` full-uninstall branch, so
- * a repeated parameter degraded a full uninstall into a narrow version-delete
- * and answered `200`. The server does not get to choose which of a caller's two
- * versions it meant; it says so.
- *
- * The rule is deliberately about MULTIPLICITY, not about shape: the parameter
- * may be supplied at most once. A one-element array is one occurrence encoded
- * differently by an adapter and is accepted; an empty array is no occurrence.
- * Two identical values (`?version=1.0.0&version=1.0.0`) are still two
- * occurrences and are still refused — "at most one *distinct* value" would be a
- * de-duplication rule no caller can predict, while "supply it at most once" is
- * checkable client-side without knowing anything about our semantics.
- *
- * This is NOT tolerance for off-spec input: the contract already declares the
- * array. It is the consumer finally handling a declared shape.
- */
-function readSingleQueryValue(raw: string | string[] | undefined): SingleQueryRead {
-  if (Array.isArray(raw)) {
-    // length 0 → the parameter was not supplied; length 1 → supplied once.
-    return raw.length > 1 ? { ok: false, count: raw.length } : { ok: true, value: raw[0] };
-  }
-  return { ok: true, value: raw };
-}
-
-/**
- * The one refusal message for a repeated single-valued parameter, so `GET` and
- * `DELETE` answer the SAME rule identically — two different answers for one
- * parameter would just be a new inconsistency.
- */
-function repeatedQueryParamMessage(name: string, count: number): string {
-  return `The "${name}" query parameter was supplied ${count} times. Supply it at most once — `
-    + `this endpoint will not choose between conflicting values.`;
-}
 
 /**
  * Options for package route registration.

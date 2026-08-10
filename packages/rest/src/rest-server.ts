@@ -33,6 +33,13 @@ import {
     type ObjectSchemaMaskPosture,
 } from '@objectstack/metadata-core';
 import { RouteManager, type RouteEntry } from './route-manager.js';
+// [#6877] Query-parameter multiplicity. `IHttpRequest.query` declares
+// `string | string[]`; the array arm is real (`NodeHttpServer` produces it,
+// measured over a socket on #6878) and this file used it as a string at ~50
+// read points. Each handler below declares WHICH of its parameters are
+// single-valued; genuinely multi-valued ones (`select`, `expand`, `objects`,
+// `fields`, `searchFields`, `approverId`) are deliberately never listed.
+import { refuseRepeatedQueryParams } from './query-multiplicity.js';
 import type { DirectMountedRoute, MountedRouteSource } from './direct-mount.js';
 import { RestServerConfig, RestApiConfig, CrudEndpointsConfig, MetadataEndpointsConfig, BatchEndpointsConfig, RouteGenerationConfig } from '@objectstack/spec/api';
 import { DataProtocol, MetadataProtocol } from '@objectstack/spec/api';
@@ -2880,6 +2887,13 @@ export class RestServer {
         // same way, so a message and the labels around it can't disagree (#3957).
         const preferred = preferredLocaleFromHeader(header);
         if (preferred) return preferred;
+        // [#6877] One of the read points that was ALREADY safe: the `typeof`
+        // guard sends a repeated `?locale=` to the i18n default rather than
+        // into the array arm. Left as a guard rather than converted to the
+        // refusal gate because this helper is shared by ~10 routes and has no
+        // `res` — refusing here would need every caller to thread one through,
+        // for a parameter whose worst case is falling back to the default
+        // locale. Recorded so the asymmetry reads as a decision.
         const queryLocale = req?.query?.locale;
         if (typeof queryLocale === 'string' && queryLocale.length > 0) return queryLocale;
         if (i18n && typeof i18n.getDefaultLocale === 'function') {
@@ -2986,6 +3000,12 @@ export class RestServer {
         // ADR-0048 — thread `?package=` so the layered (Studio editor) view is
         // package-scoped; the editor passes the edited item's owning package,
         // not the studio app's.
+        //
+        // [#6877] ONE owning package, so repetition is refused rather than
+        // resolved: `?package=a&package=b` used to reach
+        // `getMetaItemLayered({ packageId: ['a','b'] })`. Gated in the helper,
+        // not in its two callers, so both entry points answer identically.
+        if (refuseRepeatedQueryParams(req, res, ['package'])) return;
         const layeredPackageId = req.query?.package || undefined;
         const layered = await p.getMetaItemLayered({
             type: req.params.type,
@@ -4021,6 +4041,10 @@ export class RestServer {
                             });
                             return;
                         }
+                        // [#6877] All three narrow the diagnostics query to ONE
+                        // value each; the `as string` casts are exactly the
+                        // laundering that kept `tsc` silent about the array arm.
+                        if (refuseRepeatedQueryParams(req, res, ['severity', 'type', 'package'])) return;
                         const severityParam = (req.query?.severity as string | undefined) ?? 'error';
                         const severity = severityParam === 'warning' ? 'warning' : 'error';
                         const result = await (p as any).getMetaDiagnostics({
@@ -4063,6 +4087,9 @@ export class RestServer {
                             });
                             return;
                         }
+                        // [#6877] Both narrow the draft list to one package /
+                        // one type; an array reached `listDrafts` untouched.
+                        if (refuseRepeatedQueryParams(req, res, ['packageId', 'type'])) return;
                         const result = await (p as any).listDrafts({
                             packageId: (req.query?.packageId as string | undefined) || undefined,
                             type: (req.query?.type as string | undefined) || undefined,
@@ -4169,6 +4196,17 @@ export class RestServer {
                 path: `${metaPath}/:type`,
                 handler: async (req: any, res: any) => {
                     try {
+                        // [#6877] Four single-valued parameters on this list
+                        // route, declared together at the top so the gate cannot
+                        // be missed by whichever branch reads its parameter
+                        // several hundred lines down: `?object=` (the view
+                        // switcher's `String(req.query.object)`, which turned
+                        // `['a','b']` into the object name `'a,b'` — a name no
+                        // view has, so the switcher silently emptied) and
+                        // `?include=` (repeated, it stopped equalling
+                        // `'content'`, so a caller who asked for doc bodies got
+                        // the slimmed list back with a 200).
+                        if (refuseRepeatedQueryParams(req, res, ['package', 'preview', 'object', 'include'])) return;
                         const packageId = req.query?.package || undefined;
                         const environmentId = isScoped ? req.params?.environmentId : undefined;
                         const p = await this.resolveProtocol(environmentId, req);
@@ -4596,6 +4634,8 @@ export class RestServer {
                         const environmentId = isScoped ? req.params?.environmentId : undefined;
                         const prot = await this.resolveProtocol(environmentId, req);
                         const locale = this.extractLocale(req);
+                        // [#6877] One package scopes the book lookup.
+                        if (refuseRepeatedQueryParams(req, res, ['package'])) return;
                         const packageId = req.query?.package || undefined;
                         const { resolveBookTree, deriveImplicitPackageBook, audienceAllows, resolveDocAudiences, docAudienceAllows, resolveDocLocale } =
                             await import('@objectstack/spec/system');
@@ -4685,6 +4725,13 @@ export class RestServer {
                 path: `${metaPath}/:type/:name`,
                 handler: async (req: any, res: any) => {
                     try {
+                        // [#6877] Declared at the top for the same reason #3984
+                        // normalizes `:type` here: this handler reads its query
+                        // parameters from four different branches hundreds of
+                        // lines apart (`?layers=`, `?state=`, `?preview=`,
+                        // `?package=`), and a per-branch gate is one a new branch
+                        // inherits by accident rather than by construction.
+                        if (refuseRepeatedQueryParams(req, res, ['layers', 'state', 'preview', 'package'])) return;
                         const environmentId = isScoped ? req.params?.environmentId : undefined;
                         const p = await this.resolveProtocol(environmentId, req);
 
@@ -5255,6 +5302,14 @@ export class RestServer {
                     // Phase 3a-destructive: `?force=true` opts past the
                     // destructive-change safety check. Accept any truthy
                     // string ('true', '1', 'yes') for resilience.
+                    //
+                    // [#6877] THE sharp one on this surface. The `typeof` ternary
+                    // below falls to `!!forceRaw` for anything that is not a
+                    // string, and a non-empty array is truthy — so
+                    // `?force=false&force=false`, a caller repeating an explicit
+                    // OPT-OUT, turned the destructive-change guard ON. An
+                    // inversion, on a destructive verb, reported as 200.
+                    if (refuseRepeatedQueryParams(req, res, ['force', 'package', 'mode'])) return;
                     const forceRaw = req.query?.force;
                     const force = typeof forceRaw === 'string'
                         ? ['true', '1', 'yes', 'on'].includes(forceRaw.toLowerCase())
@@ -5364,6 +5419,12 @@ export class RestServer {
                         ?? req.user?.id ?? req.userId;
                     const actor = typeof actorHeader === 'string' ? actorHeader : undefined;
 
+                    // [#6877] `?state=` and the destructive `?dropStorage=`
+                    // both fail SAFE on an array today (the comparisons stop
+                    // matching), but "the wrong answer happens to be the
+                    // conservative one" is not a rule a caller can rely on and
+                    // is not what the request asked for.
+                    if (refuseRepeatedQueryParams(req, res, ['state', 'dropStorage'])) return;
                     const stateParam = typeof req.query?.state === 'string'
                         && req.query.state.toLowerCase() === 'draft'
                         ? 'draft' as const
@@ -5414,6 +5475,11 @@ export class RestServer {
                         });
                         return;
                     }
+                    // [#6877] `Number(['1','2'])` is `NaN`, which the
+                    // `Number.isFinite` spreads below drop — so a repeated
+                    // `?limit=` silently returned the UNLIMITED history instead
+                    // of the page the caller asked for.
+                    if (refuseRepeatedQueryParams(req, res, ['sinceSeq', 'limit'])) return;
                     const sinceSeq = req.query?.sinceSeq !== undefined
                         ? Number(req.query.sinceSeq)
                         : undefined;
@@ -5456,6 +5522,9 @@ export class RestServer {
                         res.json({ events: [] });
                         return;
                     }
+                    // [#6877] Same `Number(...)` → `NaN` → dropped-limit shape as
+                    // the history twin above.
+                    if (refuseRepeatedQueryParams(req, res, ['limit'])) return;
                     const limit = req.query?.limit !== undefined
                         ? Number(req.query.limit)
                         : undefined;
@@ -5529,6 +5598,12 @@ export class RestServer {
                         });
                         return;
                     }
+                    // [#6877] The `Number(...)` below already refuses an array
+                    // — but as `INVALID_REQUEST` "'toVersion' (positive integer)
+                    // is required", which tells a caller who supplied two valid
+                    // integers that they supplied none. Refusing the multiplicity
+                    // by name says what actually happened.
+                    if (refuseRepeatedQueryParams(req, res, ['toVersion'])) return;
                     const body = (req.body && typeof req.body === 'object') ? req.body : {};
                     const toVersionRaw = body.toVersion ?? body.version ?? req.query?.toVersion;
                     const toVersion = Number(toVersionRaw);
@@ -5582,6 +5657,11 @@ export class RestServer {
                         const n = Number(raw);
                         return Number.isFinite(n) ? n : undefined;
                     };
+                    // [#6877] `parseV` returns `undefined` for `NaN`, and the
+                    // spreads below then omit the bound entirely — so a repeated
+                    // `?from=` quietly diffed a different pair of versions and
+                    // answered 200.
+                    if (refuseRepeatedQueryParams(req, res, ['from', 'fromVersion', 'to', 'toVersion'])) return;
                     const fromVersion = parseV(req.query?.from ?? req.query?.fromVersion);
                     const toVersion = parseV(req.query?.to ?? req.query?.toVersion);
                     const result = await (p as any).diffMetaItem({
@@ -5615,6 +5695,9 @@ export class RestServer {
                         const environmentId = isScoped ? req.params?.environmentId : undefined;
                         const p = await this.resolveProtocol(environmentId, req);
                         const compoundName = `${req.params.section}/${req.params.name}`;
+                        // [#6877] Same single owning package as the single-segment
+                        // read this route mirrors.
+                        if (refuseRepeatedQueryParams(req, res, ['package'])) return;
                         const packageId = req.query?.package || undefined;
                         const envelope = await p.getMetaItem({
                             type: req.params.type,
@@ -5734,6 +5817,11 @@ export class RestServer {
                         ?? req.user?.id ?? req.userId;
                     const actor = typeof actorHeader === 'string' ? actorHeader : undefined;
 
+                    // [#6877] The `typeof` guard below dropped a repeated
+                    // `?package=` to `undefined`, i.e. wrote the row as an
+                    // env-local overlay instead of into the package the caller
+                    // named — a silent change of where the save LANDS.
+                    if (refuseRepeatedQueryParams(req, res, ['package'])) return;
                     const packageRaw = req.query?.package;
                     const packageId = typeof packageRaw === 'string' && packageRaw && packageRaw !== 'all'
                         ? packageRaw
@@ -5818,6 +5906,14 @@ export class RestServer {
                         const context = await this.resolveExecCtx(environmentId, req);
                         if (this.enforceAuth(req, res, context)) return;
                         if (await this.enforceApiAccess(req, res, p, environmentId, 'list')) return;
+                        // [#6877] Deliberately NOT gated here. This route hands
+                        // the WHOLE query record to `findData`, whose normalizer
+                        // (`metadata-protocol`) owns every parameter's arity — the
+                        // `$`-alias table, the implicit field-equality bucket, and
+                        // the `$select`/`$expand`/`$searchFields` params that are
+                        // legitimately multi-valued. Declaring an arity list here
+                        // would be this file guessing at another package's
+                        // contract. Filed separately; see the report on #6877.
                         const result = await p.findData({
                             object: req.params.object,
                             query: req.query,
@@ -5847,6 +5943,17 @@ export class RestServer {
                     try {
                         const environmentId = isScoped ? req.params?.environmentId : undefined;
                         const p = await this.resolveProtocol(environmentId, req);
+                        // [#6877] NOT gated, and this is a measured verdict
+                        // rather than a name-based one: `GetDataRequest.select` /
+                        // `.expand` are declared `z.array(z.string())`, and the
+                        // consumer signature is
+                        // `getData({ …, expand?: string | string[], select?: string | string[] })`
+                        // — it splits the comma form itself and passes an array
+                        // straight through. `?select=a&select=b` is therefore
+                        // ALREADY correct end to end, and refusing it (or
+                        // flattening it) would be the regression. The card listed
+                        // this line under "array flows downstream"; measurement
+                        // says the downstream was built for it.
                         const { select, expand } = req.query || {};
                         const context = await this.resolveExecCtx(environmentId, req);
                         if (this.enforceAuth(req, res, context)) return;
@@ -6083,6 +6190,11 @@ export class RestServer {
                         // header or `expectedVersion` query string). DELETE
                         // has no JSON body, so we only accept the header
                         // and a query parameter.
+                        // [#6877] `String(['1','2'])` is `'1,2'` — an OCC token
+                        // no row carries, so a repeated `?expectedVersion=` turned
+                        // an optimistic-concurrency check into a guaranteed
+                        // conflict on a DESTRUCTIVE verb.
+                        if (refuseRepeatedQueryParams(req, res, ['expectedVersion'])) return;
                         const ifMatchHeader = req.headers?.['if-match'] ?? req.headers?.['If-Match'];
                         const queryVersion = (req.query && typeof req.query === 'object')
                             ? (req.query as any).expectedVersion
@@ -6615,6 +6727,11 @@ export class RestServer {
                     const p = await this.resolveProtocol(environmentId, req);
                     const context = await this.resolveExecCtx(environmentId, req);
                     if (this.enforceAuth(req, res, context)) return;
+                    // [#6877] `?status=queued&status=running` dropped the filter
+                    // entirely (the `typeof` guard), and a repeated `?limit=`
+                    // fell back to the default page — both answered 200 with a
+                    // row set the caller did not ask for.
+                    if (refuseRepeatedQueryParams(req, res, ['object', 'status', 'limit', 'offset'])) return;
                     const q = req.query ?? {};
                     const filter: Record<string, any> = {};
                     if (typeof q.object === 'string' && q.object) filter.object_name = q.object;
@@ -6691,6 +6808,18 @@ export class RestServer {
                     // [#3544] …then the USER-level one. The object may expose
                     // export while THIS caller's permission sets deny it.
                     if (await this.enforceExportPermission(req, res, environmentId, objectName, context)) return;
+                    // [#6877] The worst measured outcome on this surface:
+                    // `?limit=1&limit=2` → `Number([...])` is `NaN` → `NaN || 0`
+                    // is `0` → `Math.max(1, 0)` is `1`, so the caller downloaded
+                    // a ONE-ROW export with a 200 and no indication. `?filter=`
+                    // was the second: an array passes `typeof … === 'object'`,
+                    // so `['{…}','{…}']` was handed to `findData` as the filter.
+                    //
+                    // `fields` and `searchFields` are NOT listed — both already
+                    // read the array arm on purpose (`Array.isArray(q.fields)`
+                    // a few lines down), and columns are genuinely a list.
+                    if (refuseRepeatedQueryParams(req, res,
+                        ['format', 'header', 'limit', 'page', 'filter', 'search', 'orderby'])) return;
                     const q = req.query ?? {};
                     const fmtRaw = String(q.format ?? 'csv').toLowerCase();
                     const format: 'csv' | 'json' | 'xlsx' =
@@ -7058,6 +7187,11 @@ export class RestServer {
                         res.status(501).json({ code: 'NOT_IMPLEMENTED', message: 'Search not supported by this protocol' });
                         return;
                     }
+                    // [#6877] `String(['a','b'])` searched for the literal
+                    // term `'a,b'`. `objects` is NOT listed: the next line reads
+                    // its array arm deliberately — a cross-object search over a
+                    // LIST of objects is the whole point of the parameter.
+                    if (refuseRepeatedQueryParams(req, res, ['q', 'query', 'limit', 'perObject'])) return;
                     const q = String(req.query?.q ?? req.query?.query ?? '');
                     const objectsParam = req.query?.objects;
                     const objects = typeof objectsParam === 'string'
@@ -7656,6 +7790,9 @@ export class RestServer {
                         : ['name'];
                     const hardCap = 50;
                     const maxResults = Math.min(Math.max(1, Number(picker.maxResults) || 20), hardCap);
+                    // [#6877] Same `String(array)` join as `/search`: the
+                    // picker searched for `'a,b'` and showed an empty list.
+                    if (refuseRepeatedQueryParams(req, res, ['q'])) return;
                     const q = String(req.query?.q ?? '').trim().slice(0, 100);
 
                     // Compose filters: form-defined static filter first,
@@ -7798,6 +7935,10 @@ export class RestServer {
                     // pages pass the flag so (a) the dataset lookup sees
                     // draft-overlaid definitions and (b) the selection runs
                     // over the pending seed draft's rows when one exists.
+                    // [#6877] A repeated `?preview=draft&preview=draft` stopped
+                    // equalling `'draft'`, so the Studio preview silently ran
+                    // over PUBLISHED rows and looked like the draft had no data.
+                    if (refuseRepeatedQueryParams(req, res, ['preview'])) return;
                     const previewDrafts = body.previewDrafts === true || req.query?.preview === 'draft';
 
                     // Resolve the dataset definition: inline draft (Studio
@@ -8043,6 +8184,13 @@ export class RestServer {
 
                 // GET reads the request from the query string, POST from the
                 // body — one contract (ExplainRequestSchema), two transports.
+                //
+                // [#6877] The other read point that was already safe, and for the
+                // structural reason rather than by luck: every field goes through
+                // `ExplainRequestSchema.safeParse` below, whose members are
+                // `z.string()`, so an array is refused as `400 VALIDATION_FAILED`
+                // by the schema itself. A schema at the boundary is the shape the
+                // refusal gate is imitating, so there is nothing to add here.
                 const src = req.method === 'GET' ? (req.query ?? {}) : (req.body ?? {});
                 const { ExplainRequestSchema } = await import('@objectstack/spec/security');
                 const parsed = (ExplainRequestSchema as any).safeParse({
@@ -8330,6 +8478,10 @@ export class RestServer {
                     if (this.enforceAuth(req, res, context)) return;
                     const svc = await resolveService(environmentId);
                     if (!svc) return respond501(res);
+                    // [#6877] `object` reached `listRules` as an array; a
+                    // repeated `?activeOnly=true` stopped matching and listed the
+                    // INACTIVE rules too.
+                    if (refuseRepeatedQueryParams(req, res, ['object', 'activeOnly'])) return;
                     const rows = await svc.listRules({
                         object: req.query?.object,
                         activeOnly: req.query?.activeOnly === 'true' || req.query?.activeOnly === true,
@@ -8487,6 +8639,9 @@ export class RestServer {
                     if (this.enforceAuth(req, res, context)) return;
                     const svc = await resolveService(environmentId);
                     if (!svc) return respond501(res);
+                    // [#6877] Both are `String(array)` joins — `?status=a&status=b`
+                    // filtered on the single status `'a,b'` and returned nothing.
+                    if (refuseRepeatedQueryParams(req, res, ['status', 'packageId'])) return;
                     const result = await svc.listAudienceBindingSuggestions(context ?? {}, {
                         status: req.query?.status ? String(req.query.status) : undefined,
                         packageId: req.query?.packageId ? String(req.query.packageId) : undefined,
@@ -8599,6 +8754,9 @@ export class RestServer {
                     if (this.enforceAuth(req, res, context)) return;
                     const svc = await resolveService(environmentId);
                     if (!svc) return respond501(res);
+                    // [#6877] Straight passthrough — both reached `listReports`
+                    // as arrays.
+                    if (refuseRepeatedQueryParams(req, res, ['object', 'ownerId'])) return;
                     const q = req.query ?? {};
                     const rows = await svc.listReports({ object: q.object, ownerId: q.ownerId }, context ?? {});
                     res.json({ data: rows });
@@ -8869,6 +9027,15 @@ export class RestServer {
                         res.json({ data: [] });
                         return;
                     }
+                    // [#6877] `approverId` / `approver_id` are the model case
+                    // for the multi-valued side and are therefore NOT listed:
+                    // the block immediately below reads their array arm ON
+                    // PURPOSE. Everything else here narrows the list to one
+                    // value and is declared single-valued.
+                    if (refuseRepeatedQueryParams(req, res, [
+                        'object', 'recordId', 'record_id', 'status',
+                        'submitterId', 'submitter_id', 'q', 'limit', 'offset',
+                    ])) return;
                     const q = req.query ?? {};
                     // `approverId` accepts a single id, a comma-separated
                     // list, or the param repeated (→ array). Normalise all
