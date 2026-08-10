@@ -21,7 +21,7 @@
     "description": {
       "status": "dead",
       "evidence": "no reader either layer",
-      "note": "KEPT deliberately (2026-07-30 sweep): docs-shaped, not capability-shaped — an annotation field documents intent for the next reader (per ADR-0033, often a model) even without a runtime consumer. Exempt from enforce-or-remove; do not re-litigate."
+      "note": "KEPT deliberately (2026-07-30 sweep): docs-shaped, not capability-shaped — an annotation field documents intent for the next reader (per ADR-0033, often a model) even without a runtime consumer. Exempt from enforce-or-remove; do not re-litigate. PREVIEW LOOKUP RECORDED 2026-08-10 (#7427): 'no reader either layer' is a cross-repo absence claim, so the previews ruling (#7131; README, 'Designer previews count as consumers') was applied to it mechanically. At objectui @e9ab52f9 FlowPreview IS registered (previews/index.ts:58) and reachable (ResourceEditPage.tsx:949), and it does NOT read the flow description — the only `description` token in the file is a TypeScript interface member at FlowPreview.tsx:64, not a draft read; the preview keys off `d.name`, the node graph and the edges. The claim survives the look; the verdict is unchanged and this note re-litigates nothing."
     },
     "version": {
       "status": "live",

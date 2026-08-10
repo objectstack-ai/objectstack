@@ -182,7 +182,7 @@
         "description": {
           "status": "dead",
           "verifiedAt": "2026-08-01",
-          "note": "display annotation no surface renders. Benign — docs-shaped, kept, not warned (hook.label precedent)."
+          "note": "display annotation no surface renders. Benign — docs-shaped, kept, not warned (hook.label precedent). VERDICT RE-TESTED AND UPHELD 2026-08-10 (#7427) under the previews ruling (#7131; README, 'Designer previews count as consumers'): 'no surface renders' is exactly the claim that ruling put back on the table for display keys, so it was measured instead of trusted. At objectui @e9ab52f9 AppPreview IS registered (previews/index.ts:40) and reachable (ResourceEditPage.tsx:949), and it contains ZERO occurrences of `areas` — it reads the app label at AppPreview.tsx:193 and walks `navigation` items, never the area collection. The area-level description reaches no human there."
         },
         "navigation": {
           "status": "live",

@@ -10,13 +10,15 @@
     },
     "label": {
       "status": "dead",
-      "verifiedAt": "2026-08-01",
-      "note": "governance/editor metadata, declared deliberately (the schema header says so): surfaced in rule listings, never evaluated on the write path. Docs-shaped, KEPT, not authorWarn'd — the hook.label precedent."
+      "evidenceScope": "cross-repo",
+      "verifiedAt": "2026-08-10",
+      "note": "governance/editor metadata, declared deliberately (the schema header says so): surfaced in rule listings, never evaluated on the write path. Docs-shaped, KEPT, not authorWarn'd — the hook.label precedent. VERDICT RE-TESTED AND UPHELD 2026-08-10 (#7427) under the maintainer ruling that a designer preview rendering a key to a human is a runtime consumer (2026-08-10, #7131; README, 'Designer previews count as consumers'). This is the sweep's sharpest case and the reason the README's REACHABILITY clause is not decoration: the render is real and the read point is unreachable on the governed path. THE MEASUREMENT, at objectui @e9ab52f9: ValidationPreview exists, is registered for `validation` (previews/index.ts:45), reads this key at ValidationPreview.tsx:101 with the rule `name` as fallback and renders it as the preview card's title at ValidationPreview.tsx:131. Under the ruling that would settle a display key — except that the type that resolves the preview no longer exists here. The STANDALONE `validation` kind was retired 2026-08-02 (#4509, ADR-0088), as this file's own `_note` records at length; it is absent from both METADATA_TYPE_SCHEMAS and UNREGISTERED_KIND_SCHEMAS in packages/spec/src/kernel/metadata-type-schemas.ts. Rules live where they are evaluated, embedded as `object.validations`, and objectui routes an embedded item to EmbeddedItemEditor (anchors.ts:79 `editAs: 'validation'`, MetadataDetailDrawer.tsx:129), which renders a SchemaForm — an authoring form, never ResourceEditPage's preview tab. So on the ONE path the framework evaluates, this preview is never handed a draft. objectui does still register a standalone `validation` resource with a create affordance (anchors.ts:347-366) whose route WOULD mount the preview, but granting `live` on the strength of a door ADR-0088 closed is the 'shipped false signpost' this ledger exists to catch — the same reasoning that deleted the readReplicas pill. Filed as objectui#4132; if that lands as 'wire ValidationPreview into the embedded editor', this row re-grades to live and should."
     },
     "description": {
       "status": "dead",
-      "verifiedAt": "2026-08-01",
-      "note": "same as `label` — governance annotation, deliberately kept."
+      "evidenceScope": "cross-repo",
+      "verifiedAt": "2026-08-10",
+      "note": "same as `label` — governance annotation, deliberately kept. Re-tested and upheld with `label` 2026-08-10 (#7427): at objectui @e9ab52f9 ValidationPreview.tsx:102 reads it and :136 renders it beneath the title, but the read point is unreachable on the governed (embedded) path — see `label` for the full closure and objectui#4132."
     },
     "active": {
       "status": "live",
@@ -38,8 +40,9 @@
     },
     "tags": {
       "status": "dead",
-      "verifiedAt": "2026-08-01",
-      "note": "categorization for reporting/management — governance metadata like label/description, deliberately kept."
+      "evidenceScope": "cross-repo",
+      "verifiedAt": "2026-08-10",
+      "note": "categorization for reporting/management — governance metadata like label/description, deliberately kept. Re-tested and upheld with `label` 2026-08-10 (#7427): at objectui @e9ab52f9 ValidationPreview.tsx:110 reads the array and :167-175 renders one chip per tag, so unlike `permission.rowLevelSecurity.tags` (which the permission preview only COUNTS) the values do reach a rendering — but through the same unreachable read point as `label`, so the verdict does not move. Note also that the declared effect here is annotation, not filtering: the describe is 'Categorization tags' and the schema header calls all three keys 'governance / editor metadata … they carry authoring intent, not enforcement'. That matters, because a tags key whose describe PROMISES filtering is behavioural and a chip render would not settle it either way — `qa.scenarios.tags` is that other case, and it is not this one."
     },
     "severity": {
       "status": "live",

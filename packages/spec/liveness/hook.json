@@ -1,6 +1,6 @@
 {
   "type": "hook",
-  "_note": "HookSchema. Seeded from docs/audits/2026-06-hookschema-property-liveness.md — a model-healthy schema (near-total liveness). Consumers: objectql hook-binder/engine + runtime sandbox.",
+  "_note": "HookSchema. Seeded from docs/audits/2026-06-hookschema-property-liveness.md — a model-healthy schema (near-total liveness). Consumers: objectql hook-binder/engine + runtime sandbox. PREVIEW LOOKUP RECORDED 2026-08-10 (#7427): the two `dead` rows here (`label`, `description`) are the docs-shaped precedent the rest of this ledger cites, so the maintainer's 2026-08-10 previews ruling (#7131 — see README, 'Designer previews count as consumers') was applied to them mechanically, and the answer is an ABSENCE. There is NO registered metadata-admin preview for `hook` at objectui @e9ab52f9: packages/app-shell/src/views/metadata-admin/previews/index.ts registers 22 types and `hook` is not among them. Recorded rather than skipped, because 'the type has no registered preview' is the sentence the README asks for and the one `translation.label`'s superseded note was missing. Both verdicts stand unchanged; the ruling gives them nothing to re-litigate.",
   "props": {
     "name": {
       "status": "live",
