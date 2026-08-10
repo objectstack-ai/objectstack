@@ -2101,6 +2101,9 @@ importers:
       '@objectstack/plugin-security':
         specifier: workspace:*
         version: link:../../plugins/plugin-security
+      '@objectstack/service-job':
+        specifier: workspace:*
+        version: link:../service-job
       '@types/node':
         specifier: ^26.1.2
         version: 26.1.2

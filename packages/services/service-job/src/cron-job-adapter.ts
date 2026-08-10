@@ -155,8 +155,16 @@ export class CronJobAdapter implements IJobService {
     };
     const startMs = Date.now();
     try {
-      await runWithPolicy(record.name, () => record.handler({ jobId: record.name, data }), record.options);
-      execution.status = 'success';
+      const outcome = await runWithPolicy(record.name, () => record.handler({ jobId: record.name, data }), record.options);
+      // #5548 — same mapping as `IntervalJobAdapter.executeJob`, deliberately
+      // one shape and not two spellings: a resolved `degraded` outcome is a
+      // completed run whose work did not happen, never a `success`.
+      if (outcome && outcome.outcome === 'degraded') {
+        execution.status = 'degraded';
+        execution.error = outcome.reason;
+      } else {
+        execution.status = 'success';
+      }
     } catch (err) {
       execution.status = err instanceof JobTimeoutError ? 'timeout' : 'failed';
       execution.error = err instanceof Error ? err.message : String(err);

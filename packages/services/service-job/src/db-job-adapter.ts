@@ -124,8 +124,16 @@ export class DbJobAdapter implements IJobService {
     const runId = await this.startRun(name, 'replay');
     try {
       await this.inner.trigger(name, data);
-      // The wrap already recorded a run; mark our synthetic run as success.
-      await this.finishRun(runId, 'success');
+      // The wrap already recorded a run; settle our synthetic row the same way
+      // it settled that one. `IJobService.trigger` resolves `void` by contract,
+      // so the outcome cannot come back through it — it is read off the
+      // execution the inner adapter just recorded (#5548). Without this, a
+      // replayed degraded run would land TWO rows disagreeing with each other,
+      // one `degraded` and one `success`, which is the very defect this card
+      // fixes wearing a `trigger: 'replay'` tag.
+      const [last] = await this.inner.getExecutions(name, 1);
+      if (last?.status === 'degraded') await this.finishRun(runId, 'degraded', last.error);
+      else await this.finishRun(runId, 'success');
     } catch (err) {
       await this.finishRun(runId, 'failed', err instanceof Error ? err.message : String(err));
       throw err;
@@ -158,14 +166,51 @@ export class DbJobAdapter implements IJobService {
 
   // ── Internals ────────────────────────────────────────────────────
 
+  /**
+   * Wrap a handler so every execution lands a `sys_job_run` row and updates
+   * the `sys_job` summary.
+   *
+   * **How the run's status is decided** (#5548, executing the 2026-08-08
+   * maintainer ruling — B-minimal — on the three-outcome {@link JobHandler}
+   * table #6617 shipped):
+   *
+   * | The handler… | `sys_job_run.status` | `sys_job.last_status` | retried? |
+   * |:---|:---|:---|:---|
+   * | throws | `failed` (message in `error`) | `failed`, `failure_count` +1 | yes, by the retry policy |
+   * | resolves `undefined` | `success` | `success` | no |
+   * | resolves `{ outcome: 'completed' }` | `success` | `success` | no |
+   * | resolves `{ outcome: 'degraded', reason? }` | `degraded` (reason in `error`) | `degraded`, `failure_count` **flat** | no |
+   *
+   * Until this wiring, "the handler did not throw" WAS the success criterion,
+   * so a handler that degraded internally — #5529's wait-wake shot into an
+   * unreachable store is the live specimen — was recorded as indistinguishable
+   * from one that did its work.
+   *
+   * **Additive by construction**: the third state is read off the RESOLVED
+   * VALUE, and a handler that resolves `undefined` (i.e. every handler written
+   * before #6617, byte for byte) takes the `success` branch exactly as before.
+   * Retry is untouched — it keys on a *rejected* promise only, so a `degraded`
+   * run never re-runs (`spec/contracts/job-service.ts`, the JobHandler TSDoc).
+   */
   private wrap(name: string, handler: JobHandler, defaultTrigger: 'schedule' | 'manual' | 'replay'): JobHandler {
     return async (ctx) => {
       const runId = this.recordRuns ? await this.startRun(name, defaultTrigger) : undefined;
       const startMs = Date.now();
       try {
-        await handler(ctx);
+        const outcome = await handler(ctx);
+        if (outcome && outcome.outcome === 'degraded') {
+          // Not a failure: the reason rides the existing `error` column and
+          // `failure_count` stays flat (decided on #7072, recorded in the
+          // `JobExecutionStatus` TSDoc). A reader must gate on `status`
+          // before reading that column as a failure.
+          const reason = outcome.reason;
+          if (runId) await this.finishRun(runId, 'degraded', reason, Date.now() - startMs);
+          await this.bumpJob(name, 'degraded', reason);
+          return outcome;
+        }
         if (runId) await this.finishRun(runId, 'success', undefined, Date.now() - startMs);
         await this.bumpJob(name, 'success');
+        return outcome;
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         if (runId) await this.finishRun(runId, 'failed', msg, Date.now() - startMs);
@@ -274,7 +319,24 @@ export class DbJobAdapter implements IJobService {
     }
   }
 
-  private async bumpJob(name: string, last_status: 'success' | 'failed', last_error?: string): Promise<void> {
+  /**
+   * Mirror a finished run onto the `sys_job` summary row.
+   *
+   * `degraded` (#5548) is mirrored here for the same reason it is written to
+   * `sys_job_run`: the summary row is what an operator reads first, and a job
+   * whose last shot accomplished nothing must not read `success` there either.
+   * Two things it deliberately does NOT do, both direct consequences of
+   * "`degraded` is not a failure" (`spec/contracts/job-service.ts`):
+   *
+   *  - `failure_count` stays flat — it is the failure signal that feeds
+   *    alerting, and a degraded run is not a failure;
+   *  - nothing about retry changes — retry keys on a thrown handler only.
+   *
+   * `last_error` carries the degraded `reason`, per the column decision
+   * recorded in the `JobExecutionStatus` TSDoc (#7072): no new column, and the
+   * "Error" label only reads correctly alongside `last_status`.
+   */
+  private async bumpJob(name: string, last_status: 'success' | 'failed' | 'degraded', last_error?: string): Promise<void> {
     try {
       const existing = await this.engine.find(JOB_TABLE, {
         where: { name },
@@ -288,7 +350,7 @@ export class DbJobAdapter implements IJobService {
         id: row.id,
         last_run_at: now,
         last_status,
-        last_error: last_status === 'failed' ? (last_error ?? null) : null,
+        last_error: last_status === 'success' ? null : (last_error ?? null),
         run_count: (row.run_count ?? 0) + 1,
         failure_count: (row.failure_count ?? 0) + (last_status === 'failed' ? 1 : 0),
         updated_at: now,
