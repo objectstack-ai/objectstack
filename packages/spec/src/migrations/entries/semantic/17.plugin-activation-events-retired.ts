@@ -38,7 +38,7 @@ export const entry: SemanticMigration = {
     + 'strictly stronger than the tombstone, not weaker: there is no longer a '
     + '`DynamicLoadRequest` to author the key INTO, so the prescription an author needs '
     + 'is no longer "delete this key" but "this request shape does not exist" (see '
-    + '`plugin-runtime-family-retired` below). The studio half of this entry is '
+    + '`plugin-runtime-family-retired`). The studio half of this entry is '
     + 'unaffected and still enforced by the strict manifest parse.',
   acceptanceCriteria:
     'No `defineStudioPlugin` input authors `activationEvents` — authoring it is an '

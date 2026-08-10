@@ -6,12 +6,13 @@
 // `QuerySchema.aggregations` and `EngineAggregateOptionsSchema.
 // aggregations` are both `z.array(AggregationNodeSchema)`, so the walked
 // shape has a single `data/AggregationNode` def and the baseline marks one
-// line `[RETIRED]`. Contrast the `shared/FieldMapping:transform` trio at
-// the top of this list, where two `.extend()`s copied the property into
-// three walked shapes and each needed its own registration.
+// line `[RETIRED]`. Contrast the `shared/FieldMapping:transform` trio in
+// this same table, where two `.extend()`s copied the property into three
+// walked shapes and each needed its own registration.
 //
 // Registered here but NOT in `src/conversions/registry.ts`, for the same
-// reason as the notification pair above: `QueryAST` is a REQUEST surface —
+// reason as the `api/ListNotifications{Request,Response}:cursor` pair:
+// `QueryAST` is a REQUEST surface —
 // the client SDK builder's output and the `POST /data/:object/query` body
 // — never stored in stack metadata, so there is no authored source or
 // `sys_metadata` row for a D2 conversion to rewrite. The prescription

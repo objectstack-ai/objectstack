@@ -5,7 +5,7 @@ import type { SemanticMigration } from '../../types.js';
 export const entry: SemanticMigration = {
   id: 'view-filter-rule-value-shaped-by-operator',
   // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
-  // code span (see the note on the entry above).
+  // code span already, and a nested backtick would close it.
   surface:
     'ui.ViewFilterRule value — the third key of a view filter rule, on every carrier of '
     + 'ViewFilterRuleSchema: ListView.filter, a list view tab filter, Page.filterBy, a '

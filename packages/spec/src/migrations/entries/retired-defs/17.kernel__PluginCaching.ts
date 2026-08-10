@@ -3,8 +3,8 @@
 // #4914 — the plugin manifest's `loading` block (ADR-0049 enforce-or-remove,
 // maintainer ruling 2026-08-04). `PluginLoadingConfig` was reachable from
 // authored metadata ONLY through `Manifest.loading`, and the ten members
-// below were embedded only by it, so retiring the carrier key unpublishes
-// the whole closure. The carrier itself is a `retiredKey()` tombstone
+// registered with it were embedded only by it, so retiring the carrier key
+// unpublishes the whole closure. The carrier itself is a `retiredKey()` tombstone
 // registered one level up in `RETIRED_KEYS_BY_MAJOR`.
 //
 // ⚠️ `kernel/PluginLoadingEvent` and `kernel/PluginLoadingState` are

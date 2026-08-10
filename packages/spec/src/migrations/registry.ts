@@ -1513,7 +1513,7 @@ const step17: MigrationStep = {
       surface: 'ui.actionSession.roles',
       replacement: 'ui.actionSession.positions (an action body reads `ctx.session.positions`)',
       reason:
-        'The MIRROR-IMAGE neighbour of the entry above, and the reason both are in this '
+        'The MIRROR-IMAGE sibling of `actor-user-roles-to-positions`, and the reason both are in this '
         + 'step: the hook `ctx.session` carried `roles` declared-and-never-produced (removed '
         + 'outright, #5050), while the ACTION body\'s `ctx.session` carries it '
         + 'produced-and-really-populated. `buildActionSession()` '
@@ -1578,7 +1578,7 @@ const step17: MigrationStep = {
         + 'published straight into author-written code. The maintainer ruled it closed IMMEDIATELY '
         + '(2026-08-06 14:49Z, #6011): no deprecation window, no dual-emit, the alias simply gone '
         + 'in 17 (PR #6048). '
-        + '⚠️ Do not read this entry across to its neighbour above: '
+        + '⚠️ Do not read this entry across to its sibling `action-session-roles-to-positions`: '
         + '`action-session-roles-to-positions` governs `ctx.session`, a DIFFERENT object reached '
         + 'through the same `ctx`, and that one KEEPS its one-window dual-emit (#5613). Same word, '
         + 'same dispatch, two faces, two schedules — `ctx.user.roles` is absent in 17 while '
@@ -1934,7 +1934,8 @@ const step17: MigrationStep = {
         + 'trimmed to producers that exist, #3196) — so there is no source for the chain to '
         + 'rewrite, and deliberately no schema tombstone: a removed ENUM MEMBER cannot carry a '
         + 'retiredKey() fix-it error the way an authorable object key can (the same limit the '
-        + 'sharing-rule `full` retirement hit above). The enforced channels are tsc, which '
+        + 'sharing-rule `full` retirement `owd-full-alias-removed` hit). The enforced channels are tsc, '
+        + 'which '
         + 'fails any consumer still naming the value in a `DataEventType` position, and the '
         + 'enum parse, which now rejects the name instead of accepting an event that never '
         + 'arrives. A genuine per-field stream, if one is ever wanted, gets its own honest '
@@ -2114,7 +2115,8 @@ const step17: MigrationStep = {
     },
     {
       id: 'driver-sql-distinct-bare-filter-typed',
-      // No backticks in `surface` — see the note on the entry above.
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
+      // code span already, and a nested backtick would close it.
       surface: 'SqlDriver.distinct() third argument — any value',
       replacement:
         'a bare FilterCondition (@objectstack/spec/data) — the same value find() carries '
@@ -2361,7 +2363,8 @@ const step17: MigrationStep = {
     },
     {
       id: 'filter-regex-options-retired',
-      // No backticks in `surface` — see the note two entries above.
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
+      // code span already, and a nested backtick would close it.
       surface:
         'data.filter $regex / $options — in a STORED filter (dashboard widget filter and '
         + 'globalFilters, report runtimeFilter, page and component filter, solution-blueprint '
@@ -2420,8 +2423,8 @@ const step17: MigrationStep = {
         + 'stack: a surviving `$regex` or `$options` is answered INVALID_FILTER / 400 with a '
         + 'message naming the replacement, on every backend.',
     },
-    // `etl-retry-converged-onto-retry-policy` (#4962) stood here and was
-    // ABSORBED by `etl-pipeline-layer-retired` below (#6414), the §0 same-major
+    // `etl-retry-converged-onto-retry-policy` (#4962) was registered in this step and
+    // ABSORBED by `etl-pipeline-layer-retired` (#6414), the §0 same-major
     // rule: both land in the unreleased protocol 17, and composed, the rename
     // `ETLPipeline.retry.maxAttempts` -> `maxRetries` has no observable effect
     // because the shape carrying it does not survive the major. Leaving both
@@ -2780,7 +2783,7 @@ const step17: MigrationStep = {
         + 'strictly stronger than the tombstone, not weaker: there is no longer a '
         + '`DynamicLoadRequest` to author the key INTO, so the prescription an author needs '
         + 'is no longer "delete this key" but "this request shape does not exist" (see '
-        + '`plugin-runtime-family-retired` below). The studio half of this entry is '
+        + '`plugin-runtime-family-retired`). The studio half of this entry is '
         + 'unaffected and still enforced by the strict manifest parse.',
       acceptanceCriteria:
         'No `defineStudioPlugin` input authors `activationEvents` — authoring it is an '
@@ -3459,7 +3462,7 @@ const step17: MigrationStep = {
     {
       id: 'view-filter-rule-value-shaped-by-operator',
       // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
-      // code span (see the note on the entry above).
+      // code span already, and a nested backtick would close it.
       surface:
         'ui.ViewFilterRule value — the third key of a view filter rule, on every carrier of '
         + 'ViewFilterRuleSchema: ListView.filter, a list view tab filter, Page.filterBy, a '
@@ -3753,12 +3756,13 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // `QuerySchema.aggregations` and `EngineAggregateOptionsSchema.
     // aggregations` are both `z.array(AggregationNodeSchema)`, so the walked
     // shape has a single `data/AggregationNode` def and the baseline marks one
-    // line `[RETIRED]`. Contrast the `shared/FieldMapping:transform` trio at
-    // the top of this list, where two `.extend()`s copied the property into
-    // three walked shapes and each needed its own registration.
+    // line `[RETIRED]`. Contrast the `shared/FieldMapping:transform` trio in
+    // this same table, where two `.extend()`s copied the property into three
+    // walked shapes and each needed its own registration.
     //
     // Registered here but NOT in `src/conversions/registry.ts`, for the same
-    // reason as the notification pair above: `QueryAST` is a REQUEST surface —
+    // reason as the `api/ListNotifications{Request,Response}:cursor` pair:
+    // `QueryAST` is a REQUEST surface —
     // the client SDK builder's output and the `POST /data/:object/query` body
     // — never stored in stack metadata, so there is no authored source or
     // `sys_metadata` row for a D2 conversion to rewrite. The prescription
@@ -3778,7 +3782,7 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // `RETIRED_DEFS_BY_MAJOR` below, not as ~27 individual key entries.
     //
     // Registered here but NOT in `src/conversions/registry.ts`, for the reason
-    // `automation/ActionDescriptor:isAsync` above gives: the conversion chain
+    // `automation/ActionDescriptor:isAsync` gives: the conversion chain
     // walks a normalized STACK (`mapCollection(stack, 'objects' | 'views' | …)`)
     // and `applyConversionsToStoredItem` maps a metadata type onto one of those
     // collections. A package manifest is neither — there is no `packages` /
@@ -3965,8 +3969,8 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // #4914 — the plugin manifest's `loading` block (ADR-0049 enforce-or-remove,
     // maintainer ruling 2026-08-04). `PluginLoadingConfig` was reachable from
     // authored metadata ONLY through `Manifest.loading`, and the ten members
-    // below were embedded only by it, so retiring the carrier key unpublishes
-    // the whole closure. The carrier itself is a `retiredKey()` tombstone
+    // registered with it were embedded only by it, so retiring the carrier key
+    // unpublishes the whole closure. The carrier itself is a `retiredKey()` tombstone
     // registered one level up in `RETIRED_KEYS_BY_MAJOR`.
     //
     // ⚠️ `kernel/PluginLoadingEvent` and `kernel/PluginLoadingState` are

@@ -19,7 +19,7 @@ export const entry: SemanticMigration = {
     + 'published straight into author-written code. The maintainer ruled it closed IMMEDIATELY '
     + '(2026-08-06 14:49Z, #6011): no deprecation window, no dual-emit, the alias simply gone '
     + 'in 17 (PR #6048). '
-    + '⚠️ Do not read this entry across to its neighbour above: '
+    + '⚠️ Do not read this entry across to its sibling `action-session-roles-to-positions`: '
     + '`action-session-roles-to-positions` governs `ctx.session`, a DIFFERENT object reached '
     + 'through the same `ctx`, and that one KEEPS its one-window dual-emit (#5613). Same word, '
     + 'same dispatch, two faces, two schedules — `ctx.user.roles` is absent in 17 while '

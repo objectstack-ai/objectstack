@@ -4,7 +4,8 @@ import type { SemanticMigration } from '../../types.js';
 
 export const entry: SemanticMigration = {
   id: 'driver-sql-distinct-bare-filter-typed',
-  // No backticks in `surface` — see the note on the entry above.
+  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
+  // code span already, and a nested backtick would close it.
   surface: 'SqlDriver.distinct() third argument — any value',
   replacement:
     'a bare FilterCondition (@objectstack/spec/data) — the same value find() carries '

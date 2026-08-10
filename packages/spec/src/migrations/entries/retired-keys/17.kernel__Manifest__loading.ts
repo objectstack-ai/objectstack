@@ -8,7 +8,7 @@
 // `RETIRED_DEFS_BY_MAJOR` below, not as ~27 individual key entries.
 //
 // Registered here but NOT in `src/conversions/registry.ts`, for the reason
-// `automation/ActionDescriptor:isAsync` above gives: the conversion chain
+// `automation/ActionDescriptor:isAsync` gives: the conversion chain
 // walks a normalized STACK (`mapCollection(stack, 'objects' | 'views' | …)`)
 // and `applyConversionsToStoredItem` maps a metadata type onto one of those
 // collections. A package manifest is neither — there is no `packages` /

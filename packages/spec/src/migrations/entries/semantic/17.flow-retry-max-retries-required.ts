@@ -2,8 +2,8 @@
 
 import type { SemanticMigration } from '../../types.js';
 
-// `etl-retry-converged-onto-retry-policy` (#4962) stood here and was
-// ABSORBED by `etl-pipeline-layer-retired` below (#6414), the §0 same-major
+// `etl-retry-converged-onto-retry-policy` (#4962) was registered in this step and
+// ABSORBED by `etl-pipeline-layer-retired` (#6414), the §0 same-major
 // rule: both land in the unreleased protocol 17, and composed, the rename
 // `ETLPipeline.retry.maxAttempts` -> `maxRetries` has no observable effect
 // because the shape carrying it does not survive the major. Leaving both

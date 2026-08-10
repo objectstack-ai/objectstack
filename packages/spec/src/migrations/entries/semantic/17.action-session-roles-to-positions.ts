@@ -7,7 +7,7 @@ export const entry: SemanticMigration = {
   surface: 'ui.actionSession.roles',
   replacement: 'ui.actionSession.positions (an action body reads `ctx.session.positions`)',
   reason:
-    'The MIRROR-IMAGE neighbour of the entry above, and the reason both are in this '
+    'The MIRROR-IMAGE sibling of `actor-user-roles-to-positions`, and the reason both are in this '
     + 'step: the hook `ctx.session` carried `roles` declared-and-never-produced (removed '
     + 'outright, #5050), while the ACTION body\'s `ctx.session` carries it '
     + 'produced-and-really-populated. `buildActionSession()` '
