@@ -17,7 +17,17 @@
  * The two cases below are the two halves of the watcher's promise, which the
  * fix has to satisfy together: **see everything under the root** (case 1) and
  * **ignore the repository's own bookkeeping** (case 2). A fix that only
- * widened the matcher would pass case 1 and fail case 2.
+ * widened the matcher would pass case 1 and fail case 2 — measured, and still
+ * true of the current shape: with `isIgnoredWatchPath` reduced to `return
+ * false` at the source, case 1 stays green and only case 2 goes red.
+ *
+ * Case 2 proves a NEGATIVE, and #7408 is what that costs if you try to prove
+ * it by waiting. It does not wait: it **brackets** the noise between an opener
+ * (an edit that must be delivered, proving the watcher is awake BEFORE the
+ * noise exists) and two closers (new entries placed so that the same directory
+ * read which discovers each one must also enumerate one of the leaks). Both
+ * ends of the bracket are events the case actually observes, so nothing about
+ * it is a function of how fast the runner happens to be.
  *
  * Sibling pin: `no-root-on-attach.test.ts` deliberately uses a root that is
  * NOT under a dot-directory, because it measures watcher *arming* (#7000).
@@ -43,39 +53,58 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 const TEARDOWN_RESERVE_MS = 5_000;
 
 /**
- * Poll interval for `waitForEvent`. A healthy run leaves the wait on the first
+ * Poll interval for the waits below. A healthy run leaves the wait on the first
  * turn after delivery, so this is what a passing case pays, not the ceiling.
  */
 const EVENT_POLL_MS = 50;
 
-/**
- * Quiet window for the **negative** assertion below. ⛔ Never shorten this: a
- * too-short quiet window cannot fail, it can only produce a FALSE PASS on an
- * empty-array assertion.
+/*
+ * ⛔ There is deliberately no `QUIET_WINDOW_MS` here any more, and nothing of
+ * that shape may come back (#7408).
  *
- * This one budget stays wall-clock, because you cannot wait for an absence —
- * and that is a real limit, not a solved problem. Measured for #7369: under
- * event-loop starvation heavy enough to push delivery to 32-36s, a 4s window
- * is no longer a window at all and the emptiness below becomes a false pass.
- * The case's *positive* control underneath is what still has teeth there, and
- * it is now deadline-driven (`waitForEvent`) rather than fixed-budget. Making
- * this half sound needs a different shape than a longer number — see #7408.
+ * The negative half of case 2 used to be `sleep(4_000)` followed by
+ * `expect(sink.events).toEqual([])`. Measured for #7369: under event-loop
+ * starvation heavy enough to push delivery of a single external edit to
+ * 24-36s, that window is shorter than the watcher's own latency, so the array
+ * is empty because nothing has arrived yet — not because the noise was
+ * ignored. The assertion passes *more* reliably the more loaded the runner is,
+ * which is the one correlation a guard must never have.
+ *
+ * ⛔ A bigger number is not the fix. Any shape that waits a fixed span of wall
+ * clock and then asserts emptiness has the same defect at some load level, and
+ * #7369 already measured what moving one fixed budget buys: with the case
+ * budget fixed, vitest's 10s `hookTimeout` immediately became the next binding
+ * one and both cases failed while their assertions were satisfied.
+ *
+ * You cannot wait for an absence. What case 2 does instead is **bracket** the
+ * noise between two deliveries it can actually observe — see the case below.
  */
-const QUIET_WINDOW_MS = 4_000;
 
 /**
- * Per-case ceiling — and, since #7369, the **source** of every positive wait's
- * budget: `waitForEvent` waits until `caseDeadline()`, which is this value
- * measured from the case's own start minus `TEARDOWN_RESERVE_MS`. There is no
- * second, smaller wall-clock budget left in the file to expire first.
+ * Per-case ceiling — and, since #7369, the **source** of every wait's budget:
+ * `waitForEvents` / `waitForNames` wait until `caseDeadline()`, which is this
+ * value measured from the case's own start minus `TEARDOWN_RESERVE_MS`. There
+ * is no second, smaller wall-clock budget left in the file to expire first.
  *
- * Sized from measurement, not taste. Under in-process event-loop starvation
- * (the loop blocked ~99.75% of the time) delivery of a single external edit
- * was measured at 24-36s while still arriving every time; the quiet window and
- * repository setup ahead of it stretch too. 120s clears that with margin, and
- * a healthy run pays none of it — every wait exits on delivery.
+ * Sized from measurement, not taste. #7369 measured delivery of a single
+ * external edit at 24-36s under in-process event-loop starvation (the loop
+ * blocked ~99.75% of the time) and set 120s against it.
+ *
+ * Raised to 180s for #7408, because case 2 no longer makes ONE delivery: the
+ * bracket costs an opener plus two closers, three sequential deliveries where
+ * the ceiling had been sized for one. Re-measured at BLOCK=4000/GAP=5 (~99.9%
+ * starvation, heavier than any row #7369 ran), n=5: case 1 took 28-32s and
+ * case 2 40-44s, all green. The old 120s would have held — 44s against a 115s
+ * effective deadline — but at 2.6x margin instead of the ~3.3x #7369 chose,
+ * and the same runs took up to 72s when the matcher was broken at the source
+ * and two extra events had to be carried. 180s restores the margin on both.
+ *
+ * A healthy run pays none of it: every wait exits on delivery, and case 2
+ * measures 2.1s unloaded (it was 5.5s with the 4s quiet window). What the
+ * ceiling costs is the reporting latency of a genuinely dead watcher — the
+ * never-arrives mode, which is #7282's defect and was fixed at the source.
  */
-const CASE_TIMEOUT_MS = 120_000;
+const CASE_TIMEOUT_MS = 180_000;
 
 /**
  * Budget for `beforeEach` / `afterEach`, which vitest times SEPARATELY from the
@@ -95,7 +124,8 @@ const HOOK_TIMEOUT_MS = 30_000;
 const caseDeadline = (): number => Date.now() + CASE_TIMEOUT_MS - TEARDOWN_RESERVE_MS;
 
 /**
- * Wait until the sink has delivered at least one event, or until `deadline`.
+ * Wait until the sink has delivered at least `count` events, or until
+ * `deadline`.
  *
  * ⛔ Never put a *fixed* wall-clock budget back here. The shape this replaced
  * was `Promise.race([sink.first, sleep(EVENT_WAIT_MS)])` with a hard-coded
@@ -126,11 +156,35 @@ const caseDeadline = (): number => Date.now() + CASE_TIMEOUT_MS - TEARDOWN_RESER
  * bottom row was whether the test was still listening, which is why the budget
  * now comes from `CASE_TIMEOUT_MS` instead of a number chosen in advance.
  */
-async function waitForEvent(
+async function waitForEvents(
   sink: { events: MetadataEvent[] },
   deadline: number,
+  count = 1,
 ): Promise<void> {
-  while (sink.events.length === 0 && Date.now() < deadline) await sleep(EVENT_POLL_MS);
+  while (sink.events.length < count && Date.now() < deadline) await sleep(EVENT_POLL_MS);
+}
+
+/**
+ * Wait until every `type/name` in `names` has been delivered, or until
+ * `deadline`.
+ *
+ * ⚠️ Case 2's bracket closes on the closers' *identity*, never on an event
+ * count. Measured for #7408: with a count, a leaked event satisfies the count
+ * itself and the bracket closes EARLY — the run that should have been the
+ * loudest failure is the one that stops listening soonest, and any second leak
+ * still in flight escapes. Waiting by name makes the bracket span exactly what
+ * it claims to span, whatever else shows up inside it.
+ */
+async function waitForNames(
+  sink: { events: MetadataEvent[] },
+  deadline: number,
+  names: readonly string[],
+): Promise<void> {
+  while (Date.now() < deadline) {
+    const have = new Set(sink.events.map((e) => `${e.ref.type}/${e.ref.name}`));
+    if (names.every((n) => have.has(n))) return;
+    await sleep(EVENT_POLL_MS);
+  }
 }
 
 describe('FileSystemRepository watcher — dot-rooted watch root (#7150)', () => {
@@ -197,7 +251,7 @@ describe('FileSystemRepository watcher — dot-rooted watch root (#7150)', () =>
       JSON.stringify({ label: 'externally edited' }, null, 2),
     );
 
-    await waitForEvent(sink, deadline);
+    await waitForEvents(sink, deadline);
     await sink.stop();
 
     // ⚠️ The exact count is a GUARD, not evidence of de-duplication: a second
@@ -224,14 +278,39 @@ describe('FileSystemRepository watcher — dot-rooted watch root (#7150)', () =>
     await repo.put(ref('seed'), { label: 'seed' }, { parentVersion: null, actor: 'tester' });
 
     const sink = collectEvents(repo);
+    // Past the 200ms self-write suppression window of the put above.
     await sleep(400);
 
-    // Noise that must stay invisible. `.cache/x.json` and `view/.scratch.json`
-    // are the measured leaks of "drop the matcher and let `parseItemPath`
-    // decide": that guard rejects the single name `.objectstack`, so these two
-    // parse as type `.cache` and as an item named `.scratch` respectively —
-    // while `scanHeads` skips every dot entry on boot. `.objectstack/.log/`
-    // is the repository's own change log.
+    // ── Open the bracket ──────────────────────────────────────────────
+    // An external edit that MUST be delivered. Waiting for *its* arrival is
+    // the positive, event-driven evidence that the watcher is armed and
+    // delivering BEFORE any noise exists on disk. Without it the case cannot
+    // tell "the noise was ignored" from "the watcher armed late and swallowed
+    // the noise into its own baseline" — chokidar's initial scan reports
+    // nothing (`ignoreInitial`), so a late-armed watcher produces exactly the
+    // empty array a correct one does.
+    await fs.writeFile(
+      path.join(root, 'view', 'seed.json'),
+      JSON.stringify({ label: 'armed' }, null, 2),
+    );
+    await waitForEvents(sink, deadline, 1);
+    expect(sink.events.map((e) => `${e.ref.type}/${e.ref.name}`)).toEqual(['view/seed']);
+
+    // ── The noise that must stay invisible ────────────────────────────
+    // `.cache/x.json` and `view/.scratch.json` are the measured leaks of
+    // "drop the matcher and let `parseItemPath` decide": that guard rejects
+    // the single name `.objectstack`, so these two parse as type `.cache` and
+    // as an item named `.scratch` respectively — while `scanHeads` skips every
+    // dot entry on boot. Those two are what the assertion at the bottom has
+    // teeth against.
+    //
+    // ⚠️ The `.objectstack/.log/` append is a GUARD, not evidence: it is the
+    // repository's own change log, and `parseItemPath` rejects the
+    // `.objectstack` prefix outright, so it cannot become a `MetadataEvent`
+    // even with the watcher matcher removed entirely (measured — see the
+    // reverse verification on #7408). It stays because it is the traffic the
+    // matcher exists to keep out of the poll set at all, and because a future
+    // change to `parseItemPath` is exactly what would make it matter.
     await fs.mkdir(path.join(root, '.cache'), { recursive: true });
     await fs.writeFile(path.join(root, '.cache', 'x.json'), '{"junk":true}');
     await fs.writeFile(path.join(root, 'view', '.scratch.json'), '{"junk":true}');
@@ -240,21 +319,73 @@ describe('FileSystemRepository watcher — dot-rooted watch root (#7150)', () =>
       '{"not":"an event"}\n',
     );
 
-    // Give the 1s poll several turns to deliver anything it was going to.
-    await sleep(QUIET_WINDOW_MS);
-    expect(sink.events).toEqual([]);
-
-    // Control: the watcher is genuinely alive, so the emptiness above is the
-    // interesting kind and not a watcher that never armed.
+    // ── Close the bracket ─────────────────────────────────────────────
+    // Two closers, each a NEW entry placed so that the very same directory
+    // read which discovers it must also enumerate one of the leaks above.
+    // That is what converts "we waited long enough" (unprovable) into "the
+    // watcher demonstrably looked": chokidar polls, so it learns about a new
+    // entry only by re-reading its parent directory, and a leak written
+    // BEFORE the closer is already sitting in that directory when the read
+    // happens.
+    //
+    //   view/closer.json      — same `view/` read that finds it enumerates
+    //                           `view/.scratch.json`.
+    //   dashboard/closer.json — a new type directory, so the same ROOT read
+    //                           that finds it enumerates `.cache/`, and both
+    //                           are descended into in the same pass.
+    //
+    // The bracket closes when both closers have ARRIVED — by name, not by
+    // count (see `waitForNames`). Sized against the case ceiling like every
+    // other wait in this file — never against a fixed budget.
+    await fs.mkdir(path.join(root, 'dashboard'), { recursive: true });
     await fs.writeFile(
-      path.join(root, 'view', 'seed.json'),
-      JSON.stringify({ label: 'really edited' }, null, 2),
+      path.join(root, 'dashboard', 'closer.json'),
+      JSON.stringify({ label: 'closer' }, null, 2),
     );
-    await waitForEvent(sink, deadline);
+    await fs.writeFile(
+      path.join(root, 'view', 'closer.json'),
+      JSON.stringify({ label: 'closer' }, null, 2),
+    );
+    await waitForNames(sink, deadline, ['dashboard/closer', 'view/closer']);
     await sink.stop();
 
-    expect(sink.events).toHaveLength(1);
-    expect(sink.events[0]!.ref.name).toBe('seed');
+    // A leak lands inside the bracket and shows up here as a fourth event.
+    //
+    // How tight that is differs by scope, and #7408 measured both under
+    // in-process event-loop starvation with the matcher removed at the source:
+    //
+    //   view/.scratch.json  — EXACT. The one `view/` read that discovers
+    //                         `view/closer.json` enumerates `.scratch.json` in
+    //                         the same call, so the leak cannot be delivered
+    //                         after the closer. Caught 11/11.
+    //   .cache/x.json       — TIGHT, not exact. The root read that discovers
+    //                         `dashboard/` enumerates `.cache/` in the same
+    //                         call, but each is then descended into by its own
+    //                         async read, and those two can finish in either
+    //                         order. Caught 28/29 across both starvation
+    //                         levels (9/9 at 2000/5, 19/20 at 4000/5 — heavier
+    //                         than any row #7369 measured). The single escape
+    //                         was a late delivery, not a lost one: draining 30s
+    //                         past the bracket found the event 6/6.
+    //
+    // For comparison, on the same defect and the same load, the shape this
+    // replaced — `sleep(4_000)` then `expect(sink.events).toEqual([])` — passed
+    // with the defect live in 9 of 13 loaded runs, and in 5 of 5 when the
+    // `.cache` leak was the only noise present.
+    //
+    // ⛔ Do not "fix" the residual with a sleep. The gap it leaves is one
+    // chokidar fan-out ordering at a starvation level past anything this repo
+    // has measured; a wall-clock pad would reintroduce exactly the defect this
+    // case was rewritten to remove, and buy less than the bracket already has.
+    // The direction that would close it is another event-driven round (a second
+    // root-scope closer, whose discovery read is strictly later than the first
+    // one's), traded against one more delivery inside the case ceiling.
+    const seen = sink.events.map((e) => `${e.ref.type}/${e.ref.name}`);
+    expect(seen).toHaveLength(3);
+    expect(seen[0]).toBe('view/seed');
+    // The two closers race each other — different directories, independent
+    // polls — so only the set is asserted, not their order.
+    expect(seen.slice(1).sort()).toEqual(['dashboard/closer', 'view/closer']);
     expect(sink.events[0]!.op).toBe('update');
   }, CASE_TIMEOUT_MS);
 });
