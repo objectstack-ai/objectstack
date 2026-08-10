@@ -45,6 +45,10 @@ export * from './context-tokens.zod';
 // insert-time default resolution and every driver's DDL agree on which
 // `defaultValue`s may become a physical column DEFAULT (#4560).
 export * from './default-value-tokens';
+// The shape discriminator over that vocabulary (#7127): literal vs runtime
+// token vs Expression envelope, plus the shared literal-vs-value-contract
+// check both `defaultValue` authoring gates run (FieldSchema + ActionParam).
+export * from './default-value-shape';
 export * from './object.zod';
 // API-method derivation — the single source of truth turning an object's
 // `enable.apiMethods` whitelist into its effective operation set (#3391).

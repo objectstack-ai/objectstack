@@ -4,10 +4,14 @@ import { z } from 'zod';
 import { retiredKey } from '../shared/retired-key';
 import { FieldType } from '../data/field.zod';
 // #6970 — the authoring gate on `defaultValue` runs the SAME value contract the
-// dispatcher runs at submit. Imported file-directly (never via a barrel):
-// `field-value.zod` reaches only `shared/` + `data/`, and `action-params.zod`
-// only `data/` + `api/` + `shared/`, so neither can close a cycle back to `ui/`.
-import { MULTI_CAPABLE_TYPES, isMultiValueField, valueSchemaFor } from '../data/field-value.zod';
+// dispatcher runs at submit, through the shared `defaultValue` discriminator
+// module (#7127 — one module, two consumers; the literal-check core lives
+// there). Imported file-directly (never via a barrel): `default-value-shape`
+// and `field-value.zod` reach only `shared/` + `data/` + `system/`, and
+// `action-params.zod` only `data/` + `api/` + `shared/`, so none can close a
+// cycle back to `ui/`.
+import { MULTI_CAPABLE_TYPES, isMultiValueField } from '../data/field-value.zod';
+import { checkLiteralDefaultValue } from '../data/default-value-shape';
 import { isActionParamValuePresent } from './action-params.zod';
 import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
 import { ExpressionInputSchema } from '../shared/expression.zod';
@@ -429,9 +433,16 @@ export const ActionParamSchema = lazySchema(() => strictObject(
   // unresolvable type).
   if (!p.type) return;
 
+  // The whole present value goes down the LITERAL branch — deliberately no
+  // `discriminateDefaultValueShape` here. An action param's default is a pure
+  // literal (the dialog seeds it verbatim; `serializeParamValues` resolves
+  // nothing), so a runtime-token or envelope SPELLING is judged as the literal
+  // it would be at submit — the parity pin at the bottom of
+  // `action-param-default-value.test.ts` is the contract. The stance is
+  // recorded in `default-value-shape.ts`'s module note (#7127).
   const def = { type: p.type, multiple: p.multiple, options: p.options };
-  const result = valueSchemaFor(def, 'stored').safeParse(p.defaultValue);
-  if (result.success) return;
+  const verdict = checkLiteralDefaultValue(def, p.defaultValue);
+  if (verdict.ok) return;
 
   // ARITY is knowable only when the param states it. A field-backed param
   // inherits `multiple` from its field, so `{ field: 'owners', type: 'user',
@@ -440,11 +451,10 @@ export const ActionParamSchema = lazySchema(() => strictObject(
   // `multiple` AND the type is one whose arity `multiple` decides, accept
   // either arity and check only the ELEMENT shape.
   if (p.field && p.multiple === undefined && MULTI_CAPABLE_TYPES.has(p.type)) {
-    const flipped = valueSchemaFor({ ...def, multiple: !isMultiValueField(def) }, 'stored');
-    if (flipped.safeParse(p.defaultValue).success) return;
+    if (checkLiteralDefaultValue({ ...def, multiple: !isMultiValueField(def) }, p.defaultValue).ok) return;
   }
 
-  const detail = result.error.issues[0]?.message ?? 'invalid value';
+  const detail = verdict.detail ?? 'invalid value';
   const key = p.name ?? p.field ?? '<unnamed>';
   ctx.addIssue({
     code: 'custom',
