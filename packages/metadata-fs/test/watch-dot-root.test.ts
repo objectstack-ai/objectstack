@@ -77,6 +77,17 @@ const QUIET_WINDOW_MS = 4_000;
 const CASE_TIMEOUT_MS = 120_000;
 
 /**
+ * Budget for `beforeEach` / `afterEach`, which vitest times SEPARATELY from the
+ * case: `hookTimeout` defaults to 10s and the per-case ceiling does not cover
+ * it. Measured for #7369 — with the case budget fixed and nothing else changed,
+ * this became the next fixed wall-clock budget to expire first, and both cases
+ * failed with "Hook timed out in 10000ms" while their assertions were still
+ * satisfied. `repo.close()` stops a polling chokidar watcher and `fs.rm` walks
+ * a temp tree; both stretch with runner load exactly like the waits above do.
+ */
+const HOOK_TIMEOUT_MS = 30_000;
+
+/**
  * The budget every positive wait in this file spends, measured from the start
  * of the case that calls it. Call it as the case's first statement.
  */
@@ -131,13 +142,13 @@ describe('FileSystemRepository watcher — dot-rooted watch root (#7150)', () =>
   beforeEach(async () => {
     base = await fs.mkdtemp(path.join(os.tmpdir(), 'objectstack-fs7150-'));
     root = path.join(base, '.objectstack', 'metadata');
-  });
+  }, HOOK_TIMEOUT_MS);
 
   afterEach(async () => {
     if (repo) await repo.close().catch(() => undefined);
     repo = undefined;
     await fs.rm(base, { recursive: true, force: true });
-  });
+  }, HOOK_TIMEOUT_MS);
 
   /**
    * Drain `repo.watch()` into an array for the life of the case. `since: 999`
