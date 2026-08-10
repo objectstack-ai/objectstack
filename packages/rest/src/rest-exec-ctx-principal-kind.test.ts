@@ -72,6 +72,11 @@ const makeQl = () => ({
 
 /** A fake auth service whose session is keyed off the request's `cookie` header. */
 const makeAuth = () => ({
+    // [#7280] The ADR-0069 gate feature is ON, so `computeExecCtx` takes its
+    // gate branch for every authenticated request. A session with no
+    // `user.authGate` still yields no gate — which is what keeps the golden key
+    // set below unchanged, and makes the gated cases genuinely opt-in.
+    isAuthGateActive: () => true,
     api: {
         getSession: async ({ headers }: { headers: any }) => {
             const cookie = headers?.get?.('cookie');
@@ -82,6 +87,20 @@ const makeAuth = () => ({
             // `resolveAuthzContext` rather than an absent value.
             if (cookie === 'member-tok') {
                 return { user: { id: 'member1' }, session: { token: 'sess_tok_rest' } };
+            }
+            // [#7280] A session blocked by an authentication policy…
+            if (cookie === 'member-gated') {
+                return {
+                    user: {
+                        id: 'member1',
+                        authGate: { code: 'PASSWORD_EXPIRED', message: 'Your password has expired.' },
+                    },
+                };
+            }
+            // …and one whose gate names a code but no usable message, the shape
+            // `normalizeAuthGate` exists to complete.
+            if (cookie === 'member-gated-bare') {
+                return { user: { id: 'member1', authGate: { code: 'MFA_REQUIRED' } } };
             }
             return undefined;
         },
@@ -131,8 +150,30 @@ function boot() {
 async function request(headers: Record<string, string>) {
     const { route, seen, protocol } = boot();
     const out = makeRes();
-    await route!.handler({ method: 'GET', params: { object: 'task' }, query: {}, headers } as any, out.res);
+    await route!.handler({
+        method: 'GET',
+        // [#7280] A real adapter always sets `path`, and `enforceAuth`'s
+        // ADR-0069 branch reads it — `isAuthGateAllowlisted(undefined)` returns
+        // TRUE, so a request without one is treated as allow-listed and the gate
+        // never fires. Spelling it here keeps the wire fixture honest.
+        path: '/api/v1/data/task',
+        params: { object: 'task' }, query: {}, headers,
+    } as any, out.res);
     return { ctx: seen[0], out, protocol };
+}
+
+/**
+ * [#7280] The envelope `computeExecCtx` actually produces, read directly.
+ *
+ * Needed because a GATED session never reaches `findData`: `enforceAuth` answers
+ * 403 first, which is the whole point of the gate — so the wire-capture helper
+ * above cannot observe the envelope for exactly the case under test.
+ */
+async function execCtx(headers: Record<string, string>) {
+    const { rest } = boot();
+    return await (rest as any).computeExecCtx(undefined, {
+        method: 'GET', params: { object: 'task' }, query: {}, headers,
+    });
 }
 
 describe('#6071 — REST-face ExecutionContext carries the ADR-0090 D9/D10 principal taxonomy', () => {
@@ -246,8 +287,11 @@ describe('#6216 — the REST face assembles through the SHARED assembler, output
             'positions', 'permissions', 'systemPermissions', 'isSystem', 'principalKind',
             'userId', 'email', 'posture', 'org_user_ids', 'accessible_org_ids',
             'timezone', 'locale',
-            // Not ExecutionContext fields — the REST face still adds these
-            // itself, after assembly (ADR-0069 gate posture / ADR-0057 D10).
+            // Not an ExecutionContext field — the REST face still adds this one
+            // itself, after assembly (the resolved kernel, ADR-0057 D10). The
+            // ADR-0069 gate posture used to sit beside it here; #7280 declared
+            // it, so it is an assembled field now and absent for the same reason
+            // every other unset field is: this session carries no gate.
             '__kernel',
         ]));
     });
@@ -265,5 +309,64 @@ describe('#6216 — the REST face assembles through the SHARED assembler, output
         expect(ctx?.userId).toBe('member1');
         expect(Object.keys(ctx)).not.toContain('accessToken');
         expect(ctx.accessToken).toBeUndefined();
+    });
+});
+
+describe('#7280 — the ADR-0069 gate posture is an ASSEMBLED field on this face', () => {
+    // Before #7280 the gate reached the envelope through
+    // `...(authGate ? { authGate } : {})` spread on AFTER assembly, behind an
+    // `as any` — outside the closed entry field set (#6216) by construction.
+    // It is an assembler input now. These pins are on the WIRE, through the real
+    // `computeExecCtx` pipeline: `rest-auth-gate.test.ts` hand-builds a context
+    // and so proves only that `enforceAuth` reads the key, never that this face
+    // still puts it there.
+
+    it('a gated session reaches enforcement with the gate on the envelope', async () => {
+        const ctx = await execCtx({ cookie: 'member-gated' });
+
+        expect(ctx?.userId).toBe('member1');
+        expect(Object.keys(ctx)).toContain('authGate');
+        expect(ctx.authGate).toEqual({
+            code: 'PASSWORD_EXPIRED',
+            message: 'Your password has expired.',
+        });
+    });
+
+    it('an ungated session emits NO authGate key — not a key spelled undefined', async () => {
+        const ctx = await execCtx({ cookie: 'member' });
+
+        expect(Object.keys(ctx)).not.toContain('authGate');
+        expect('authGate' in ctx).toBe(false);
+    });
+
+    it('completes a gate that names a code but no message, so a 403 body is never blank', async () => {
+        // The declaration requires `message`; the session user crosses an
+        // external boundary as `any` and may carry none. `normalizeAuthGate`
+        // fills it at this producer rather than letting `message: undefined`
+        // ride into the response body.
+        const ctx = await execCtx({ cookie: 'member-gated-bare' });
+
+        expect(ctx.authGate.code).toBe('MFA_REQUIRED');
+        expect(typeof ctx.authGate.message).toBe('string');
+        expect(ctx.authGate.message.length).toBeGreaterThan(0);
+    });
+
+    it('end to end: a gated session is refused on a protected data route with the gate code', async () => {
+        // The full chain in one assertion — computeExecCtx resolves the gate,
+        // the shared assembler carries it, `enforceAuth` reads it off the
+        // envelope and refuses. Nothing pinned this seam end to end before.
+        const { out, protocol } = await request({ cookie: 'member-gated' });
+
+        expect(out.getStatus()).toBe(403);
+        expect(out.getJson()?.error?.code).toBe('PASSWORD_EXPIRED');
+        expect(out.getJson()?.error?.message).toBe('Your password has expired.');
+        expect(protocol.findData).not.toHaveBeenCalled();
+    });
+
+    it('an ungated session on the same route is unaffected', async () => {
+        const { out, protocol } = await request({ cookie: 'member' });
+
+        expect(out.getStatus()).toBe(200);
+        expect(protocol.findData).toHaveBeenCalled();
     });
 });

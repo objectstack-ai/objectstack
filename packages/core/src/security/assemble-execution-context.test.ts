@@ -89,8 +89,13 @@ function legacyDispatcherAssembly(
 
 /**
  * REST `computeExecCtx` assembly, verbatim, pre-#6216. FROZEN — see header.
- * `authGate` / `__kernel` are deliberately outside: neither is an
- * `ExecutionContext` field, and the REST face still adds them after assembly.
+ * `authGate` / `__kernel` are outside: at the time this was frozen neither was
+ * an `ExecutionContext` field, and the REST face added both after assembly.
+ *
+ * `authGate` has since been DECLARED and joined the closed entry set (#7280),
+ * so the parity probes below pass `authGate: undefined` — the value that keeps
+ * them comparable with this frozen transcription. The gate's own carriage is
+ * pinned separately (see "#7280 — the ADR-0069 gate is an ENTRY-decided field").
  */
 function legacyRestAssembly(
   authz: ResolvedAuthzContext,
@@ -227,6 +232,7 @@ describe('#6216 — runtime/dispatcher face: byte-for-byte parity with the pre-#
               localization,
               requestLocale,
               accessToken: authz.accessToken,
+              authGate: undefined,
             });
             const before = legacyDispatcherAssembly(authz, oauth, localization, requestLocale);
             expect(observable(now)).toEqual(observable(before));
@@ -256,6 +262,7 @@ describe('#6216 — REST face: byte-for-byte parity with the pre-#6216 assembly'
             // The named per-face divergence: REST has never carried the
             // session bearer, and #6216 preserves that.
             accessToken: undefined,
+            authGate: undefined,
           });
           const before = legacyRestAssembly(authz, localization ?? {}, requestLocale);
           if (before === undefined) {
@@ -279,6 +286,7 @@ describe('#6216 — the anonymous face, in BOTH directions', () => {
         localization: { timezone: 'Asia/Shanghai', locale: 'zh-CN', currency: 'CNY' },
         requestLocale: 'en-US',
         accessToken: 'sess_token_abc',
+        authGate: undefined,
       }),
     ).toBeUndefined();
   });
@@ -290,6 +298,7 @@ describe('#6216 — the anonymous face, in BOTH directions', () => {
       localization: undefined,
       requestLocale: undefined,
       accessToken: undefined,
+      authGate: undefined,
     });
     // The exact envelope, key set included — `explain-engine.ts` reads
     // `principalKind === 'guest'` for its EXTERNAL posture floor, and the
@@ -314,6 +323,7 @@ describe('#6216 — the anonymous face, in BOTH directions', () => {
       localization: { timezone: 'Asia/Shanghai', locale: 'zh-CN' },
       requestLocale: undefined,
       accessToken: HUMAN_FULL.accessToken,
+      authGate: undefined,
     } as const;
     expect(assembleExecutionContextOrGuest(input)).toEqual(assembleExecutionContext(input));
   });
@@ -327,6 +337,7 @@ describe('#6216 — the named per-face divergences are values, not switches', ()
       localization: undefined,
       requestLocale: undefined,
       accessToken: undefined,
+      authGate: undefined,
     })!;
     expect(Object.keys(ctx)).not.toContain('accessToken');
   });
@@ -338,6 +349,7 @@ describe('#6216 — the named per-face divergences are values, not switches', ()
       localization: undefined,
       requestLocale: undefined,
       accessToken: HUMAN_FULL.accessToken,
+      authGate: undefined,
     })!;
     expect(ctx.accessToken).toBe('sess_token_abc');
   });
@@ -349,10 +361,63 @@ describe('#6216 — the named per-face divergences are values, not switches', ()
       localization: undefined,
       requestLocale: undefined,
       accessToken: undefined,
+      authGate: undefined,
     })!;
     expect(ctx.principalKind).toBe('human');
     expect(Object.keys(ctx)).not.toContain('onBehalfOf');
     expect(Object.keys(ctx)).not.toContain('oauthScopes');
+  });
+});
+
+describe('#7280 — the ADR-0069 gate is an ENTRY-decided field', () => {
+  const GATE = { code: 'PASSWORD_EXPIRED', message: 'Your password has expired.' };
+
+  it('a face that resolves a gate carries it on the envelope verbatim', () => {
+    const ctx = assembleExecutionContext({
+      authz: HUMAN_FULL,
+      oauth: undefined,
+      localization: undefined,
+      requestLocale: undefined,
+      accessToken: undefined,
+      authGate: GATE,
+    })!;
+    expect(ctx.authGate).toEqual(GATE);
+  });
+
+  it('a face that resolves none emits NO authGate key — not a key spelled undefined', () => {
+    const ctx = assembleExecutionContext({
+      authz: HUMAN_FULL,
+      oauth: undefined,
+      localization: undefined,
+      requestLocale: undefined,
+      accessToken: undefined,
+      authGate: undefined,
+    })!;
+    // Behaviour preserved: the pre-#7280 REST face spread
+    // `...(authGate ? { authGate } : {})` AFTER assembly, so the key was absent
+    // for exactly these inputs too. Only the declaration moved.
+    expect(Object.keys(ctx)).not.toContain('authGate');
+    expect('authGate' in ctx).toBe(false);
+  });
+
+  it('a GUEST principal never carries a gate, even when a face passes one', () => {
+    const ctx = assembleExecutionContextOrGuest({
+      authz: ANONYMOUS,
+      oauth: undefined,
+      localization: undefined,
+      requestLocale: undefined,
+      accessToken: undefined,
+      authGate: GATE,
+    });
+    // An anonymous request has no authenticated session for an
+    // authentication-policy gate to attach to, so "gated guest" is not a state
+    // this entry can emit.
+    expect(ctx.principalKind).toBe('guest');
+    expect(Object.keys(ctx)).not.toContain('authGate');
+  });
+
+  it('the gate rides the SAME closed set as every other entry field', () => {
+    expect(ENTRY_EXECUTION_CONTEXT_FIELDS).toContain('authGate');
   });
 });
 
@@ -400,6 +465,7 @@ describe('#6216 — the field set is CLOSED', () => {
       localization: { timezone: 'Asia/Shanghai', locale: 'zh-CN', currency: 'CNY' },
       requestLocale: 'en-US',
       accessToken: 'sess_token_abc',
+      authGate: undefined,
     });
     for (const key of Object.keys(ctx)) {
       expect(ENTRY_EXECUTION_CONTEXT_FIELDS).toContain(key);
@@ -423,6 +489,7 @@ describe('#6216 — the measured residual: keys that were present-with-undefined
       localization: undefined,
       requestLocale: undefined,
       accessToken: undefined,
+      authGate: undefined,
     } as const;
     const before = legacyDispatcherAssembly(HUMAN_MINIMAL, undefined, undefined, undefined);
     const now = assembleExecutionContextOrGuest(input);
@@ -444,6 +511,7 @@ describe('#6216 — the measured residual: keys that were present-with-undefined
       localization: {},
       requestLocale: undefined,
       accessToken: undefined,
+      authGate: undefined,
     })!;
 
     expect(Object.keys(before)).toContain('tenantId');

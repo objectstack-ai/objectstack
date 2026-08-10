@@ -16,11 +16,44 @@
  * drift on what is blocked.
  */
 
-export interface AuthGate {
-  /** Stable machine code, e.g. `PASSWORD_EXPIRED` / `MFA_REQUIRED`. */
-  code: string;
-  /** Human-facing message. */
-  message: string;
+import type { ExecutionContext } from '@objectstack/spec/kernel';
+
+/**
+ * The gate posture, DERIVED from its declaration on `ExecutionContextSchema`
+ * (`packages/spec/src/kernel/execution-context.zod.ts`) rather than restated
+ * here (#7280).
+ *
+ * It was a hand-written interface while the envelope field was undeclared, so
+ * the two could have drifted with nothing to catch it — the exact class of
+ * defect the closed entry field set (#6216) exists to make unrepresentable.
+ * One declaration, one type.
+ */
+export type AuthGate = NonNullable<ExecutionContext['authGate']>;
+
+/** Message used when a session's gate names a `code` but no usable `message`. */
+const DEFAULT_AUTH_GATE_MESSAGE = 'Access is blocked by an authentication policy.';
+
+/**
+ * Normalize the `authGate` a better-auth session user carries into the shape
+ * `ExecutionContextSchema` declares — or `null` when there is no gate.
+ *
+ * The session user crosses an external boundary as `any`, so this is where the
+ * declared contract is actually met: a gate naming no string `code` is not a
+ * gate, and a missing/blank `message` is filled with the default rather than
+ * riding onto the envelope (and into a `403` body) as `undefined`. Both
+ * consumers normalize HERE, at the one producer, instead of tolerating a loose
+ * shape downstream: {@link evaluateAuthGate} for the seams that decide per
+ * path, and REST's `computeExecCtx` for the seam that lifts the posture onto
+ * the execution context.
+ */
+export function normalizeAuthGate(sessionUser: any): AuthGate | null {
+  const gate = sessionUser?.authGate;
+  if (!gate || typeof gate.code !== 'string') return null;
+  return {
+    code: gate.code,
+    message:
+      typeof gate.message === 'string' && gate.message ? gate.message : DEFAULT_AUTH_GATE_MESSAGE,
+  };
 }
 
 // Endpoints a gated user MUST still reach to remediate or bootstrap the
@@ -56,14 +89,8 @@ export function isAuthGateAllowlisted(rawPath: string | undefined | null): boole
  * allow-listed paths always pass.
  */
 export function evaluateAuthGate(sessionUser: any, path: string): AuthGate | null {
-  const gate = sessionUser?.authGate;
-  if (!gate || typeof gate.code !== 'string') return null;
+  const gate = normalizeAuthGate(sessionUser);
+  if (!gate) return null;
   if (isAuthGateAllowlisted(path)) return null;
-  return {
-    code: gate.code,
-    message:
-      typeof gate.message === 'string' && gate.message
-        ? gate.message
-        : 'Access is blocked by an authentication policy.',
-  };
+  return gate;
 }

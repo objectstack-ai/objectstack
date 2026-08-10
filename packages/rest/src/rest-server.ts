@@ -2,7 +2,7 @@
 
 import {
     IHttpServer, resolveAuthzContext, resolveLocalizationContext, isAuthGateAllowlisted,
-    assembleExecutionContext,
+    assembleExecutionContext, normalizeAuthGate, type AuthGate,
     shouldDenyAnonymous, ANONYMOUS_DENY_BODY, ANONYMOUS_DENY_STATUS,
 } from '@objectstack/core';
 import {
@@ -2585,11 +2585,18 @@ export class RestServer {
             // feature is active (cheap sync check) do we re-read the session for
             // its `user.authGate` (computed in customSession). enforceAuth() then
             // blocks protected resources for a gated user. Zero cost when off.
-            let authGate: any;
+            //
+            // [#7280] Normalized through the shared `normalizeAuthGate` instead
+            // of copied verbatim: the session user crosses an external boundary
+            // as `any`, and `ExecutionContext.authGate` now DECLARES the shape
+            // (`{ code, message }`), so this is where the declaration is met —
+            // a gate with a blank message no longer rides into a 403 body as
+            // `undefined`.
+            let authGate: AuthGate | undefined;
             try {
                 if (typeof authService.isAuthGateActive === 'function' && authService.isAuthGateActive()) {
                     const gatedSession: any = await getSession(headers).catch(() => undefined);
-                    if (gatedSession?.user?.authGate) authGate = gatedSession.user.authGate;
+                    authGate = normalizeAuthGate(gatedSession?.user) ?? undefined;
                 }
             } catch { /* gate is best-effort — never break context resolution */ }
 
@@ -2627,6 +2634,12 @@ export class RestServer {
                 // Widening it to a second transport is a product decision, not
                 // a refactor — so REST withholds it on the record.
                 accessToken: undefined,
+                // [ADR-0069 / #7280] This face DOES carry the gate: its consumer
+                // is ten lines up (`enforceAuth` → 403 `{ code, message }`). It
+                // used to be spread on AFTER assembly behind an `as any`, which
+                // is precisely how it stayed outside the closed field set; it is
+                // a declared `ExecutionContext` field and an assembler input now.
+                authGate,
             });
             // Unreachable: the anonymous early-return above already took this
             // branch. Kept because the shared entry — not this method — is the
@@ -2635,10 +2648,11 @@ export class RestServer {
 
             const execCtx = {
                 ...base,
-                ...(authGate ? { authGate } : {}),
                 // Internal: resolved kernel so the nav-serving path can probe
                 // requiresService capability gates (ADR-0057 D10). NOT an
-                // authorization input — never read by RLS/permission logic.
+                // authorization input — never read by RLS/permission logic, and
+                // NOT an `ExecutionContext` field — hence the cast, which now
+                // covers this key alone.
                 __kernel: kernel,
             } as any;
 

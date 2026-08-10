@@ -58,6 +58,7 @@
 
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 
+import type { AuthGate } from './auth-gate.js';
 import type { ResolvedAuthzContext } from './resolve-authz-context.js';
 
 /**
@@ -127,6 +128,7 @@ export const ENTRY_EXECUTION_CONTEXT_FIELDS = [
   'accessToken',
   'tabPermissions',
   'posture',
+  'authGate',
   'org_user_ids',
   'accessible_org_ids',
   'oauthScopes',
@@ -235,6 +237,27 @@ export interface ExecutionContextAssemblyInput {
    * instead of being an omission nobody can see.
    */
   accessToken: string | undefined;
+  /**
+   * [ADR-0069] The AUTHENTICATION-policy gate posture resolved for this
+   * request's session (expired password / enforced MFA), or `undefined` when
+   * the face resolves none — normalize a session user through
+   * `normalizeAuthGate` rather than copying its `authGate` verbatim.
+   *
+   * A NAMED per-face divergence, on the same footing as {@link accessToken}
+   * (#7280):
+   *
+   *  - the **REST** face lifts it onto the envelope, because that is where its
+   *    consumer reads it (`RestServer.enforceAuth` → `403 { code, message }`);
+   *  - the **runtime / MCP dispatcher** passes `undefined`, because it enforces
+   *    the same ADR-0069 gate at its OWN seam (`HttpDispatcher.enforceAuthGate`
+   *    re-reads the session and calls `evaluateAuthGate` there) and never reads
+   *    `context.authGate` — carrying it would be a second, unread copy.
+   *
+   * Until #7280 declared it, this posture reached the envelope through an
+   * `as any` spread AFTER assembly, which put it outside this closed set
+   * entirely — the blind spot the set exists to remove.
+   */
+  authGate: AuthGate | undefined;
 }
 
 /** Drop `undefined`-valued keys, emitting in the closed set's declared order. */
@@ -256,7 +279,7 @@ function entryFields(
   input: ExecutionContextAssemblyInput,
   anonymous: boolean,
 ): ExecutionContextEntryFields {
-  const { authz, oauth, localization, requestLocale, accessToken } = input;
+  const { authz, oauth, localization, requestLocale, accessToken, authGate } = input;
 
   // [ADR-0090 D10 — agent principal] An OAuth access token naming an authorized
   // client (`azp`) is an AI agent acting ON BEHALF OF the human `sub`. The
@@ -307,6 +330,12 @@ function entryFields(
     // transport presents enforcement the SAME value. Present only for an
     // authenticated principal (guest → absent).
     posture: authz.posture,
+    // [ADR-0069 / #7280] The AUTHENTICATION-policy gate, carried for the seam
+    // that reads it off the envelope (REST's `enforceAuth`). Anonymous → never:
+    // a guest has no authenticated session for a policy gate to attach to, so
+    // "gated guest" is not a state this entry can emit even if a face passed
+    // one.
+    authGate: anonymous ? undefined : authGate,
     /** Fellow-org user IDs for RLS scoping of identity tables. */
     org_user_ids: authz.org_user_ids,
     // [ADR-0105 D2] The caller's org access set — the `group` posture's Layer 0

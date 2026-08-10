@@ -220,6 +220,16 @@ export async function resolveExecutionContext(opts: ResolveOptions): Promise<Exe
     // bearer down to hooks (`session.accessToken`); the REST face never has.
     // Both are preserved — see the assembler's `accessToken` doc.
     accessToken: authz.accessToken,
+    // [ADR-0069 / #7280] WITHHELD, on the record. This face enforces the same
+    // authentication-policy gate at its OWN seam: `HttpDispatcher.enforceAuthGate`
+    // re-reads the session and calls `evaluateAuthGate(session.user, path)`
+    // there, and nothing on this path ever reads `context.authGate`. Putting the
+    // posture on the envelope here would add a second copy that no consumer
+    // reads — the shape that drifts. Converging the dispatcher onto the envelope
+    // (so the gate is resolved once per request like every other identity fact)
+    // is a real option, but it is a behaviour-bearing change to a security seam,
+    // not a declaration's rider.
+    authGate: undefined,
   });
 }
 

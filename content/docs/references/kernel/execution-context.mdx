@@ -53,6 +53,7 @@ const result = ExecutionContextSchema.parse(data);
 | **principalKind** | `Enum<'human' \| 'agent' \| 'service' \| 'guest' \| 'system'>` | optional |  |
 | **audience** | `Enum<'internal' \| 'external'>` | optional |  |
 | **posture** | `Enum<'PLATFORM_ADMIN' \| 'TENANT_ADMIN' \| 'MEMBER' \| 'EXTERNAL'>` | optional | ADR-0095 D2 posture rung — PLATFORM_ADMIN crosses the tenant wall where object posture permits; TENANT_ADMIN sees all rows in the org; MEMBER gets business RLS; EXTERNAL sees only explicitly shared rows. |
+| **authGate** | `{ code: string; message: string }` | optional | ADR-0069 authentication-policy gate: present only while the principal is blocked from protected resources until they remediate (expired password, enforced MFA), absent for every healthy session. `code` is the stable machine code the client branches on (PASSWORD_EXPIRED / MFA_REQUIRED) and `message` is what the blocked user reads; both are required because the transport seam renders them as the 403 body. AUTHENTICATION, not authorization — it suspends access entirely rather than narrowing it, and nothing in the permission/RLS path reads it, while the allow-listed remediation endpoints stay reachable. Server-constructed only, never client-supplied; a guest/anonymous principal never carries one. |
 | **onBehalfOf** | `{ userId: string; principalKind?: Enum<'human' \| 'agent' \| 'service' \| 'guest' \| 'system'> }` | optional |  |
 | **permissions** | `string[]` | ✅ |  |
 | **systemPermissions** | `string[]` | optional |  |

@@ -117,7 +117,12 @@ export {
   type LadderRow,
   type LadderPrincipal,
 } from './posture-ladder.js';
-export { isAuthGateAllowlisted, evaluateAuthGate, type AuthGate } from './auth-gate.js';
+export {
+  isAuthGateAllowlisted,
+  evaluateAuthGate,
+  normalizeAuthGate,
+  type AuthGate,
+} from './auth-gate.js';
 
 // #2567 — the single anonymous-deny decision shared by every HTTP seam.
 export {

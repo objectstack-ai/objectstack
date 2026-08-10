@@ -191,6 +191,7 @@
     "kernel/ExecutionContext:actor",
     "kernel/ExecutionContext:attributedUserId",
     "kernel/ExecutionContext:audience",
+    "kernel/ExecutionContext:authGate",
     "kernel/ExecutionContext:currency",
     "kernel/ExecutionContext:email",
     "kernel/ExecutionContext:flowRunId",
