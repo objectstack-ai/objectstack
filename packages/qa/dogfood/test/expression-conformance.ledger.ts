@@ -15,13 +15,24 @@ import type { ConformanceRow } from '@objectstack/verify';
 // the celEngine). There is NO silent fallback from compile to interpret.
 //
 // The companion test (`expression-conformance.test.ts`) RE-DISCOVERS every
-// `ExpressionInputSchema` field declaration in `packages/spec/src` (plus the RLS
+// expression-declaring field in `packages/spec/src` (plus the RLS
 // `using`/`check` string predicates) and asserts each is `covers`-ed by exactly
 // one row. A NEW expression surface that nobody classified — the #1887 class of
-// "declared-but-unwired predicate" — breaks the build.
+// "declared-but-unwired predicate" — breaks the build. Discovery is by SCHEMA
+// NAME (`EXPRESSION_INPUT_SCHEMAS` in that file), so a slot narrowed onto its
+// own schema must register that schema there or it drops out of the scan.
 
 export type ExprMode = 'compile' | 'interpret';
-export type ExprDialect = 'cel' | 'cron' | 'template' | 'js';
+/**
+ * What a surface is ACTUALLY evaluated as — deliberately not the spec's
+ * `ExpressionDialect` enum. `js` outlives its retirement from that enum
+ * (#3278), and `settings-visibility` never was in it: the settings manifest
+ * `visible` slots carry a closed hand-rolled grammar with its own evaluator
+ * (#7169 / #7327). A ledger that could only spell the three declared dialects
+ * would have to record the settings slot as `cel`, which is the exact
+ * misclassification it exists to surface.
+ */
+export type ExprDialect = 'cel' | 'cron' | 'template' | 'js' | 'settings-visibility';
 export type ExprState = 'enforced' | 'experimental' | 'removed';
 /** ADR-0058 D5 fail-policy tiers. */
 export type FailPolicy = 'compile-error' | 'fail-closed' | 'fail-soft-log' | 'throw';
@@ -143,8 +154,33 @@ export const EXPRESSION_SURFACE: ExprSurface[] = [
       // this new surface). Interpreted by the objectui page:tabs renderer to
       // omit the whole tab (header + panel) when FALSE.
       'ui/component.zod.ts:visibleWhen',
-      'system/settings-manifest.zod.ts:visible',
+      // `system/settings-manifest.zod.ts:visible` used to sit here. It never
+      // belonged: this row's dialect is `cel` and its enforcement is the
+      // SchemaRenderer + celEngine, and the settings slot is evaluated by
+      // neither. Split out as `settings-visibility` in #7327.
     ],
+  },
+  {
+    id: 'settings-visibility',
+    summary: 'settings-manifest `visible` — specifier + whole-manifest gating (a closed non-CEL grammar)',
+    // The one row in this ledger whose dialect is NOT one of the spec's three.
+    // That is the finding, not an oversight: the slot was typed
+    // `ExpressionInputSchema` — which labels its contents CEL — while its only
+    // two evaluators read a small hand-rolled grammar. Measured in #7169 over
+    // the 94 bundled predicates: routing them through CEL breaks 93 (`===` and
+    // `!==` are not CEL operators at all), so the maintainer's 2026-08-10
+    // ruling moved the DECLARATION rather than the evaluator. Classifying this
+    // `cel` under `cel-ui` would restate here the exact claim #7327 removed
+    // from the schema.
+    dialect: 'settings-visibility', mode: 'interpret', state: 'enforced', failPolicy: 'fail-closed',
+    enforcement:
+      'service-settings `evaluateVisibility` (visibility-eval.ts), called from `SettingsService.validatePatch` — a closed grammar: single root `data`, one-level member access, `|| && !`, `=== !== == != >= <= > <`, parens, and string/number/bool/null literals, optionally `${…}`-wrapped, as a bare string or a `{dialect, source}` envelope. Fail-closed since #7310: a predicate outside the grammar REFUSES the save (SettingsValidationError, HTTP 400) instead of skipping the specifier — `visible` gates every other check on the key (`required`, `options`, `pattern`, `valueDomain`, the value window), so skipping it switched all of them off at once. The console evaluates the same string client-side through `new Function(...)`. Since #7327 the spec DECLARES that same grammar (`SettingsVisibilityInputSchema`), so it is refused at publish/parse too',
+    covers: ['system/settings-manifest.zod.ts:visible'],
+    // Proof is the producer/consumer pin rather than a runtime fixture: the
+    // failure mode this surface actually has is the two sides disagreeing about
+    // what parses, which is what that file measures — over the real bundled
+    // corpus and an in/out-of-grammar table.
+    proof: 'packages/services/service-settings/src/settings-visibility-declaration.pin.test.ts',
   },
   {
     id: 'cel-action-param-option-visible',
