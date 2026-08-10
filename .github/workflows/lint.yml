@@ -150,6 +150,17 @@ jobs:
       - name: Stack-collection enumerations answerable to stack.zod.ts
         run: pnpm check:stack-collection-maps
 
+      # pm-dispatch SKILL.md line ratchet (#7341 / #5925 item 7): the PM skill
+      # is read in full by every seat session and every Routine fire, so its
+      # size is a per-round tax on the whole fleet. The #7341 extraction moved
+      # long incident narratives to .claude/skills/pm-dispatch/references/
+      # (append-only case law, loaded on demand); this shrink-only ceiling
+      # keeps them from growing back. Ceiling discipline — lower freely, raise
+      # only with a maintainer ruling quoted in the raising PR — is stated in
+      # the script's header, which is authoritative.
+      - name: PM skill line ratchet
+        run: pnpm check:pm-skill-ratchet
+
       # Docs/skills authoring guard (#2035 / ADR-0059): TS code blocks in
       # Markdown/MDX are not type-checked or ESLinted, so skills/ and
       # content/docs/ can drift back to teaching the bare `: Page = {}` literal

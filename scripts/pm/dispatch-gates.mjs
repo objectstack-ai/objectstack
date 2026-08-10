@@ -1,0 +1,263 @@
+#!/usr/bin/env node
+// Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+
+/**
+ * dispatch-gates (#7341 item 4) — map a card's file surface to the `check:*`
+ * gate families that watch it, derived from the tree AT RUNTIME.
+ *
+ *   node scripts/pm/dispatch-gates.mjs <path> [<path> ...]   # e.g. packages/spec/src/data/filter.zod.ts
+ *   node scripts/pm/dispatch-gates.mjs --self-test
+ *
+ * ## Why derived, never listed
+ *
+ * The step-5 dispatch template's "Local gates for this card" line is filled by
+ * the PM, and the gate inventory is a thing that expires SAME-DAY: it grew
+ * twice in one 2026-08-08/09 shift (#6672 added `check:kernel-hook-pairs`,
+ * #6661 added `check:app-nav-i18n`), and even "the farm lives in lint.yml" is
+ * a memory-shaped claim — measured on #7341's own dispatch-time survey, checks
+ * also live in ci.yml / spec-liveness-check.yml / validate-deps.yml /
+ * release.yml / showcase-smoke.yml. #6492 is the canonical incident for a
+ * second copy of a list rotting inside prose (three mutually-contradicting
+ * counts, drifting within one hour), and #6865 for relaying remembered
+ * workflow facts into a dispatch prompt (four of six required-context names
+ * lived in a different file than claimed). So this script embeds NO list of
+ * checks and NO map from paths to checks: every run re-reads
+ * `.github/workflows/*.yml`, resolves each `check:*` script through
+ * package.json, and scans the check scripts' own sources for the path
+ * literals they operate on. When the farm grows, the next run sees it.
+ *
+ * ## What the output means (and what it cannot promise)
+ *
+ * For each input path, checks are matched by the path literals discoverable in
+ * their sources ("watch hints"). That derivation is honest but heuristic:
+ *
+ *   - a MATCHED check is one whose own source names a directory/file that
+ *     covers the input path — high-signal, paste it into the dispatch prompt;
+ *   - a check with NO discoverable path hints is listed once in the
+ *     "repo-wide / undetermined" bucket. It is NOT known to be irrelevant —
+ *     many gates read the whole tree (check:nul-bytes) or a convention rather
+ *     than a path. The PM's judgment call stays a judgment call; what this
+ *     script removes is the memory-shaped half (which named checks exist and
+ *     where they live).
+ *
+ * The output is print-only and exits 0 on a completed derivation; a run that
+ * cannot read the workflows or package.json exits non-zero (#4690: unreadable
+ * input must never look like an empty answer).
+ */
+
+import { readFileSync, readdirSync, existsSync } from 'node:fs';
+import { join } from 'node:path';
+import process from 'node:process';
+
+const ROOT = new URL('../..', import.meta.url).pathname;
+
+// ---------------------------------------------------------------------------
+// Extraction — pure functions over file contents, self-testable offline.
+// ---------------------------------------------------------------------------
+
+/**
+ * Pull every `check:*` invocation out of a workflow file's `run:` lines,
+ * with the pnpm --filter package (if any) and the workflow's file name.
+ */
+export function extractCheckInvocations(workflowText, workflowFile) {
+  const out = [];
+  const runRe = /^\s*run:\s*(.+)$/gm;
+  for (const [, cmd] of workflowText.matchAll(runRe)) {
+    for (const m of cmd.matchAll(/pnpm\s+(?:--filter\s+(\S+)\s+)?(?:run\s+)?(check:[\w:-]+)/g)) {
+      out.push({ check: m[2], filter: m[1] ?? null, workflow: workflowFile });
+    }
+    for (const m of cmd.matchAll(/node\s+(scripts\/[\w./-]*check-[\w.-]+\.mjs)/g)) {
+      out.push({ check: m[1], filter: null, workflow: workflowFile, direct: true });
+    }
+  }
+  return out;
+}
+
+/** Resolve a `check:x` script name to the script files it runs, via a package.json `scripts` map. */
+export function resolveCheckToFiles(checkName, scriptsMap) {
+  const cmd = scriptsMap[checkName];
+  if (!cmd) return [];
+  // The conventional script shape names its file twice (`--self-test && run`) — dedupe.
+  return [...new Set([...cmd.matchAll(/(scripts\/[\w./-]+\.(?:mjs|cjs|js|sh))/g)].map((m) => m[1]))];
+}
+
+/**
+ * Scan a check script's source for the path-ish string literals it operates
+ * on. A hint is a quoted string that contains a `/` (or names a top-level
+ * dotted dir) and looks like a repo path rather than a URL or a regex.
+ */
+export function extractWatchHints(scriptSource) {
+  const hints = new Set();
+  for (const m of scriptSource.matchAll(/['"`]([^'"`\n]{2,120})['"`]/g)) {
+    const s = m[1];
+    if (/^(https?:|[A-Z_]+=|-{1,2}\w)/.test(s)) continue;
+    if (!/^[\w.@][\w.@/*-]*$/.test(s)) continue;
+    const looksPathy = s.includes('/') || /^\.(claude|changeset|github|gitattributes)\b/.test(s);
+    if (!looksPathy) continue;
+    hints.add(s.replace(/\/+$/, ''));
+  }
+  return [...hints];
+}
+
+/**
+ * Does a watch hint cover an input path? Prefix either way, with globs
+ * collapsed. A hint that collapses to a bare top-level directory name
+ * (`packages`, `scripts` — no slash, not a dotted dir) is rejected as too
+ * generic: it would match every file under the tree's biggest directories and
+ * drown the signal the matched-via column exists to carry.
+ */
+export function hintCovers(hint, inputPath) {
+  const plain = hint.replace(/\*\*?/g, '').replace(/\/+$/, '').replace(/\/$/, '');
+  if (plain.length < 2) return false;
+  if (!plain.includes('/') && !plain.startsWith('.')) return false;
+  return inputPath.startsWith(plain) || plain.startsWith(inputPath);
+}
+
+// ---------------------------------------------------------------------------
+// Live derivation
+// ---------------------------------------------------------------------------
+
+function derive(paths) {
+  const wfDir = join(ROOT, '.github/workflows');
+  const workflows = readdirSync(wfDir).filter((f) => /\.ya?ml$/.test(f));
+  if (workflows.length === 0) throw new Error('no workflow files found under .github/workflows');
+  const rootScripts = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).scripts ?? {};
+
+  const invocations = [];
+  for (const wf of workflows) {
+    invocations.push(...extractCheckInvocations(readFileSync(join(wfDir, wf), 'utf8'), wf));
+  }
+  if (invocations.length === 0) throw new Error('no check:* invocations found in any workflow');
+
+  // Dedupe by (check, workflow); resolve each to script files + watch hints.
+  const byCheck = new Map();
+  for (const inv of invocations) {
+    const key = inv.check;
+    if (!byCheck.has(key)) byCheck.set(key, { ...inv, workflows: new Set(), files: [], hints: [] });
+    byCheck.get(key).workflows.add(inv.workflow);
+  }
+  for (const entry of byCheck.values()) {
+    let files = entry.direct ? [entry.check] : resolveCheckToFiles(entry.check, rootScripts);
+    if (entry.filter) {
+      // package-scoped check: resolve through that package's manifest when findable
+      const pkgDirGuess = entry.filter.replace(/^@objectstack\//, '');
+      for (const base of ['packages', 'packages/plugins', 'packages/drivers', 'packages/services']) {
+        const p = join(ROOT, base, pkgDirGuess, 'package.json');
+        if (existsSync(p)) {
+          const pkgScripts = JSON.parse(readFileSync(p, 'utf8')).scripts ?? {};
+          files = files.concat(
+            resolveCheckToFiles(entry.check, pkgScripts).map((f) => join(base, pkgDirGuess, f)),
+          );
+        }
+      }
+    }
+    entry.files = files;
+    for (const f of files) {
+      const abs = join(ROOT, f);
+      if (existsSync(abs)) entry.hints.push(...extractWatchHints(readFileSync(abs, 'utf8')));
+    }
+  }
+
+  const matched = new Map();
+  const undetermined = [];
+  for (const [check, entry] of byCheck) {
+    const hits = [];
+    for (const p of paths) {
+      const hint = entry.hints.find((h) => hintCovers(h, p));
+      if (hint) hits.push({ path: p, hint });
+    }
+    if (hits.length) matched.set(check, { entry, hits });
+    else if (entry.hints.length === 0) undetermined.push(check);
+  }
+
+  console.log(`dispatch-gates: ${byCheck.size} check famil(ies) discovered across ${workflows.length} workflow file(s) — derived at runtime, nothing listed in this script.\n`);
+  if (matched.size) {
+    console.log('Local gates for this card (paste into the dispatch prompt):');
+    for (const [check, { entry, hits }] of [...matched].sort()) {
+      const via = hits.map((h) => `${h.path} ⇢ '${h.hint}'`).join('; ');
+      console.log(`  - ${check}   [${[...entry.workflows].join(', ')}]   matched via ${via}`);
+    }
+  } else {
+    console.log('No check family names the given paths in its own source.');
+  }
+  console.log(
+    `\nRepo-wide / undetermined (no path literals discoverable — not known irrelevant): ${undetermined.length} famil(ies).` +
+      '\nJudgment stays with the PM: convention-scoped gates (new fake engine ⇒ check:engine-double-contract, new error code ⇒ check:error-code-casing, any edit ⇒ check:nul-bytes) match by what the change IS, not where it lives.',
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Self-test — extraction + matching over fixtures; no filesystem beyond this file.
+// ---------------------------------------------------------------------------
+
+function selfTest() {
+  const cases = [];
+  const t = (name, cond) => cases.push([name, cond]);
+
+  const wf = [
+    'jobs:',
+    '  lint:',
+    '    steps:',
+    '      - name: A',
+    '        run: pnpm check:engine-double-contract',
+    '      - name: B',
+    '        run: pnpm --filter @objectstack/spec check:authorable-surface',
+    '      - name: C',
+    '        run: node scripts/check-nul-bytes.mjs',
+    '      - name: not-a-check',
+    '        run: pnpm build',
+  ].join('\n');
+  const invs = extractCheckInvocations(wf, 'lint.yml');
+  t('extracts plain pnpm check', invs.some((i) => i.check === 'check:engine-double-contract' && i.filter === null));
+  t('extracts filtered check with its package', invs.some((i) => i.check === 'check:authorable-surface' && i.filter === '@objectstack/spec'));
+  t('extracts direct node scripts/check-*.mjs', invs.some((i) => i.check === 'scripts/check-nul-bytes.mjs' && i.direct));
+  t('ignores non-check runs', !invs.some((i) => String(i.check).includes('build')));
+
+  const scripts = { 'check:foo': 'node scripts/check-foo.mjs --self-test && node scripts/check-foo.mjs' };
+  t('resolves script file from package.json', resolveCheckToFiles('check:foo', scripts).join() === 'scripts/check-foo.mjs');
+  t('unknown check resolves to nothing', resolveCheckToFiles('check:bar', scripts).length === 0);
+
+  const src = [
+    "const DIR = '.claude/agents';",
+    "const GLOB = 'packages/spec/src/**/*.zod.ts';",
+    "const URL2 = 'https://example.com/x';",
+    "const FLAG = '--self-test';",
+    "const WORD = 'hello';",
+  ].join('\n');
+  const hints = extractWatchHints(src);
+  t('finds dotted-dir hint', hints.includes('.claude/agents'));
+  t('finds glob hint', hints.some((h) => h.startsWith('packages/spec/src')));
+  t('skips urls', !hints.some((h) => h.includes('example.com')));
+  t('skips flags and bare words', !hints.includes('--self-test') && !hints.includes('hello'));
+
+  t('hint covers deeper path', hintCovers('.claude/agents', '.claude/agents/os-dev.md'));
+  t('collapsed glob prefix covers', hintCovers('packages/spec/src/**', 'packages/spec/src/data/filter.zod.ts'));
+  t('input dir covers hint below it', hintCovers('packages/spec/scripts/check-x.mjs', 'packages/spec'));
+  t('unrelated path does not match', !hintCovers('.claude/agents', 'packages/rest/src/server.ts'));
+
+  let failed = 0;
+  for (const [name, cond] of cases) {
+    if (!cond) failed++;
+    console.log(`  ${cond ? '✓' : '✗'} ${name}`);
+  }
+  if (failed) {
+    console.error(`✗ dispatch-gates self-test: ${failed} of ${cases.length} case(s) failed.`);
+    process.exit(1);
+  }
+  console.log(`✓ dispatch-gates self-test: ${cases.length} cases pass.`);
+}
+
+const argvPaths = process.argv.slice(2).filter((a) => a !== '--self-test');
+if (process.argv.includes('--self-test')) {
+  selfTest();
+} else if (argvPaths.length === 0) {
+  console.error('usage: node scripts/pm/dispatch-gates.mjs <path> [<path> ...] | --self-test');
+  process.exit(2);
+} else {
+  try {
+    derive(argvPaths.map((p) => p.replace(/^\.\//, '')));
+  } catch (err) {
+    console.error(`dispatch-gates: derivation failed — ${err.message}`);
+    process.exit(2);
+  }
+}

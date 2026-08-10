@@ -1727,7 +1727,8 @@ an issue comment with the os-dev-report marker, then as your final message.
 里)。所以派发流程里写**取数命令**,不写清单本身:
 
 ```bash
-grep -rn 'pnpm.*check:' .github/workflows/*.yml   # 门禁清单当场取数
+grep -rn 'pnpm.*check:' .github/workflows/*.yml            # 门禁清单当场取数
+node scripts/pm/dispatch-gates.mjs <改动路径> [<路径>…]     # 文件面 → 该跑的门禁族,现场推导可贴
 ```
 
 ⛔ **取数的是 PM,不是 dev** —— 产出是「本卡该跑的**那几族**」,填进模板那一行。
@@ -2904,6 +2905,10 @@ Stop the loop and report when any of these hits:
 3. 在飞/已入队 PR 跟到 MERGED(入队与落地 B 的车道半边);
 4. 决策箱提醒 —— 仅在轮次报告中列出待决清单,⛔ 不 nag 维护者;
 5. 跨车道备忘跟进(转席单、`Blocked-by:` 链的对侧动静)。
+
+半状态巡查的机械辅助:`node scripts/pm/check-half-states.mjs` —— report-only 枚举
+label/assignee 半状态(H1–H5,清单在脚本头),任何座位手动跑;⛔ 不是门禁,产出是
+巡查输入。
 
 退场只有两个入口:维护者的交接令(走座位贴协议的交接收尾清单),或座位被
 惰性回收。
