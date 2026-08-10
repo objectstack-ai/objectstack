@@ -4132,7 +4132,7 @@ export class ObjectQL implements IObjectQLEngine {
       throw new Error('Cannot resolve secret: no CryptoProvider is registered (fail-closed).');
     }
     const secretDriver = this.getDriver('sys_secret');
-    const found = await secretDriver.find('sys_secret', { object: 'sys_secret', where: { id } } as QueryAST);
+    const found = await secretDriver.find('sys_secret', { where: { id } });
     const secret: any = Array.isArray(found) ? found[0] : found;
     if (!secret) {
       throw new Error(`Cannot resolve secret: sys_secret row "${id}" not found (fail-closed).`);

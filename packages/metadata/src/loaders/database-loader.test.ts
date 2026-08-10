@@ -179,6 +179,49 @@ describe('DatabaseLoader', () => {
     });
   });
 
+  // [#6231] The driver takes the object name as argument ONE, and `DriverQuery`
+  // is `Omit<QueryAST, 'object'>` — so the AST must never restate it. These
+  // three read helpers used to spell `{ object: table, ...query } as any`, and
+  // that cast did more than tolerate the redundant key: it switched off
+  // checking for `where` / `orderBy` / `fields` as well, which is the account
+  // #5181's changeset opened (cloud#1030's `$like` reached runtime through
+  // exactly this hole). The redundant key is inert — no driver reads it — so
+  // the pin is on the SHAPE the driver is handed, which is what a future
+  // re-add would change.
+  describe('driver query shape (#6231)', () => {
+    it('never restates the object name inside the query AST', async () => {
+      const seen: Array<{ method: string; table: unknown; query: unknown }> = [];
+      for (const method of ['find', 'findOne', 'count'] as const) {
+        const real = (mockDriver[method] as (...a: unknown[]) => unknown).bind(mockDriver);
+        (mockDriver as unknown as Record<string, unknown>)[method] = (
+          table: unknown,
+          query: unknown,
+          ...rest: unknown[]
+        ) => {
+          seen.push({ method, table, query });
+          return real(table, query, ...rest);
+        };
+      }
+
+      // Every read path the loader owns: findOne (load/stat), find (loadMany/
+      // list) and count (exists).
+      await loader.save('object', 'account', { name: 'account' });
+      await loader.load('object', 'account');
+      await loader.loadMany('object');
+      await loader.exists('object', 'account');
+      await loader.list('object');
+      await loader.stat('object', 'account');
+
+      expect(seen.length).toBeGreaterThan(0);
+      for (const call of seen) {
+        // The object name travels as argument one…
+        expect(typeof call.table).toBe('string');
+        // …and only there.
+        expect(call.query ?? {}).not.toHaveProperty('object');
+      }
+    });
+  });
+
   describe('schema bootstrapping', () => {
     it('should call syncSchema with SysMetadataObject on first operation', async () => {
       await loader.list('object');

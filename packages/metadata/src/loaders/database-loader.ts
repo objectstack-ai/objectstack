@@ -22,7 +22,7 @@ import type {
 import { SysMetadataObject, SysMetadataHistoryObject } from '@objectstack/metadata-core';
 import { applyConversionsToStoredItem } from '@objectstack/spec';
 import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
-import type { IDataDriver, IDataEngine } from '@objectstack/spec/contracts';
+import type { IDataDriver, IDataEngine, DriverQuery } from '@objectstack/spec/contracts';
 import type { MetadataLoader } from './loader-interface.js';
 import { calculateChecksum } from '../utils/metadata-history-utils.js';
 import { LRUCache } from '../utils/lru-cache.js';
@@ -225,25 +225,36 @@ export class DatabaseLoader implements MetadataLoader {
   // Internal CRUD helpers (driver vs engine)
   // ==========================================
 
-  private async _find(table: string, query: Record<string, unknown>): Promise<Record<string, unknown>[]> {
+  // NOTE (#6231): the DRIVER branch below takes `query` unchanged and uncast —
+  // `DriverQuery` is `Omit<QueryAST, 'object'>`, so the object name travels as
+  // argument one only. The ENGINE branch still carries `as any`, and that cast
+  // is NOT vestigial: `EngineQueryOptionsSchema.search` admits only the
+  // structured `FullTextSearchSchema`, while `QueryAST.search` (hence
+  // `DriverQuery`) also admits the bare query string that ADR-0061 D1 calls the
+  // canonical Tier-1 spelling and that the engine actually serves. Until those
+  // two schemas agree, `DriverQuery` is not assignable to
+  // `EngineQueryOptionsParsed`. Filed as the follow-up named in the PR body; do
+  // not "fix" it by narrowing the cast.
+
+  private async _find(table: string, query: DriverQuery): Promise<Record<string, unknown>[]> {
     if (this.engine) {
       return this.engine.find(table, query as any);
     }
-    return this.driver!.find(table, { object: table, ...query } as any);
+    return this.driver!.find(table, query);
   }
 
-  private async _findOne(table: string, query: Record<string, unknown>): Promise<Record<string, unknown> | null> {
+  private async _findOne(table: string, query: DriverQuery): Promise<Record<string, unknown> | null> {
     if (this.engine) {
       return this.engine.findOne(table, query as any);
     }
-    return this.driver!.findOne(table, { object: table, ...query } as any);
+    return this.driver!.findOne(table, query);
   }
 
-  private async _count(table: string, query: Record<string, unknown>): Promise<number> {
+  private async _count(table: string, query: DriverQuery): Promise<number> {
     if (this.engine) {
       return this.engine.count(table, query as any);
     }
-    return this.driver!.count(table, { object: table, ...query } as any);
+    return this.driver!.count(table, query);
   }
 
   private async _create(table: string, data: Record<string, unknown>): Promise<Record<string, unknown>> {
