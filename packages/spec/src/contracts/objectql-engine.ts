@@ -184,10 +184,37 @@ export interface IObjectQLEngine extends IDataEngine {
     executeAction(objectName: string, actionName: string, ctx: any): Promise<any>;
 
     // ── Hook / middleware seams ──────────────────────────────────────────
+    /**
+     * Register a code-path hook.
+     *
+     * `object` is an ALLOW list (absent = global, `'*'` = every object);
+     * `excludeObjects` subtracts from whatever that admits, so the scope a
+     * registration expresses is
+     * `matches(entry, X) = allowMatches(entry, X) && !excludeMatches(entry, X)`.
+     *
+     * The subtraction half exists because an allow list cannot express "global,
+     * except these" over an OPEN universe (#5928): `/meta` PUT registers new
+     * objects into a live engine, so a registrant that enumerated the complement
+     * of its skip list would silently stop covering every object created after
+     * boot — the compliance-relevant direction of that failure is what ruled the
+     * enumerate-the-complement option out. Declared here rather than left to a
+     * predicate callback so the scope stays static, printable in the
+     * registration log, and introspectable.
+     *
+     * NOT mirrored onto the authorable `HookSchema` (`data/hook.zod.ts`): the
+     * consumer is plugin code, and no metadata author needs "global minus a
+     * list" today.
+     */
     registerHook(
         event: string,
         handler: (context: any) => Promise<void> | void,
-        options?: { object?: string | string[]; priority?: number; packageId?: string },
+        options?: {
+            object?: string | string[];
+            /** Object name(s) subtracted from `object`'s admitted set (#5928). */
+            excludeObjects?: string | string[];
+            priority?: number;
+            packageId?: string;
+        },
     ): void;
     unregisterHooksByPackage(packageId: string): number;
     /**

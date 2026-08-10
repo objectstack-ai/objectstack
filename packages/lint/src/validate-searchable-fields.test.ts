@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
+import { resolveSearchFields } from '@objectstack/spec/data';
 import {
   validateSearchableFields,
   SEARCHABLE_FIELD_UNKNOWN,
@@ -212,6 +213,10 @@ describe('validateSearchableFields — dotted paths', () => {
     expect(findings).toHaveLength(1);
     expect(findings[0].path).toBe('objects[0].searchableFields[1]');
     expect(findings[0].hint).toContain("scans this object's own columns");
+    // The prescription must be a STORED field — a `formula` field is virtual
+    // (no driver materializes a column for it), so it can never be scanned.
+    expect(findings[0].hint).toContain('copy the value onto a stored text field');
+    expect(findings[0].hint).not.toContain('formula');
   });
 });
 
@@ -314,8 +319,11 @@ describe('validateSearchableFields — list views that narrow the set', () => {
     expect(findings[0].message).toContain("type 'lookup'");
     expect(findings[0].message).toContain('400 INVALID_FIELD');
     // The lookup-specific prescription: search cannot cross objects, so the
-    // related record's title must be mirrored onto a local text/formula field.
+    // related record's title must be mirrored onto a local STORED text field —
+    // never a `formula` field, which is virtual and materializes no column.
     expect(findings[0].hint).toContain('mirror');
+    expect(findings[0].hint).toContain('mirror it onto a stored text field');
+    expect(findings[0].hint).not.toContain('formula');
   });
 
   it('flags a real field outside the object\'s declared searchableFields', () => {
@@ -473,5 +481,279 @@ describe('validateSearchableFields — list views that narrow the set', () => {
     });
 
     expect(findings).toEqual([]);
+  });
+});
+
+/**
+ * [#6675] Skill-parity — `skills/objectstack-ui/SKILL.md` › "Toolbar Search
+ * (`searchableFields`, ADR-0061)" quotes this rule's two diagnostics verbatim
+ * and states three boundaries as fact. The skill ships to third parties via
+ * `npx skills add`, so a reader who follows it is following THIS code; if the
+ * wording or a verdict moves and nobody re-reads the skill, the published text
+ * teaches a rule the platform no longer has.
+ *
+ * The same reason `validate-rls-predicate-enforceability.test.ts` pins the RLS
+ * predicates the data skill prints. Change any assertion here and the skill
+ * section is what needs editing, not the assertion.
+ */
+describe('validateSearchableFields — objectstack-ui SKILL.md parity (#6675)', () => {
+  /** The object the skill's examples and quoted error texts are written against. */
+  const supportCase = {
+    name: 'support_case',
+    nameField: 'subject',
+    searchableFields: ['subject', 'case_number', 'description'],
+    fields: {
+      subject: { type: 'text' },
+      case_number: { type: 'autonumber' },
+      description: { type: 'textarea' },
+      status: { type: 'select' },
+      account_id: { type: 'lookup', reference: 'crm_account' },
+      account_name: { type: 'text' },
+    },
+  };
+
+  /** A `defineView` container whose `triage` list narrows the object's set. */
+  const viewStack = (searchableFields: unknown, objectOverrides: Record<string, unknown> = {}) => ({
+    objects: [{ ...supportCase, ...objectOverrides }],
+    views: [
+      {
+        name: 'support_case',
+        objectName: 'support_case',
+        list: {
+          label: 'All Cases',
+          type: 'grid',
+          data: { provider: 'object', object: 'support_case' },
+          columns: ['subject', 'status'],
+        },
+        listViews: {
+          triage: {
+            label: 'Triage',
+            type: 'grid',
+            data: { provider: 'object', object: 'support_case' },
+            columns: ['case_number', 'subject', 'status'],
+            ...(searchableFields === undefined ? {} : { searchableFields }),
+          },
+        },
+      },
+    ],
+  });
+
+  it('the skill\'s `os:check` example lints clean — a subset of the allowed set', () => {
+    // SKILL.md: `listViews.triage.searchableFields: ['case_number', 'subject']`.
+    expect(validateSearchableFields(viewStack(['case_number', 'subject']))).toEqual([]);
+  });
+
+  it('omitting the key lints clean (row 2 of the skill\'s boundary table)', () => {
+    expect(validateSearchableFields(viewStack(undefined))).toEqual([]);
+  });
+
+  /**
+   * The skill states an empty array is identical to omitting the key — the
+   * claim an author most needs, because the spelling suggests the opposite.
+   *
+   * The lint half of it is deliberately NOT the assertion that carries this
+   * test. `checkSearchableFieldList` returns early on a zero-length array, and
+   * even without that early return the entry loop has nothing to iterate — so
+   * "lints clean" is green because nothing was produced, not because the
+   * verdict is right, and it cannot go red on a regression. It is asserted
+   * below only to pin that no finding appears; the load-bearing assertion is
+   * the next one.
+   *
+   * `resolveSearchFields` is where `[]` acquires meaning: it is the ONE
+   * resolution the ingress gate (`assertSearchFieldsAreSearchable`) and the
+   * engine (`expandSearchToFilter`) share, so an empty request resolving to
+   * the full allowed set IS the runtime behaviour the skill describes. Narrow
+   * the fall-through and this goes red.
+   */
+  it('`searchableFields: []` is ABSENT, not "search off" — it resolves to the FULL allowed set', () => {
+    expect(validateSearchableFields(viewStack([]))).toEqual([]);
+
+    const resolutionArgs = {
+      fields: supportCase.fields,
+      searchableFields: supportCase.searchableFields,
+      displayField: supportCase.nameField,
+    };
+    // An empty narrowing scans every column the object allows …
+    expect(resolveSearchFields({ ...resolutionArgs, requestedFields: [] }))
+      .toEqual(['subject', 'case_number', 'description']);
+    // … which is exactly what omitting the key does …
+    expect(resolveSearchFields(resolutionArgs))
+      .toEqual(['subject', 'case_number', 'description']);
+    // … and strictly MORE than a one-entry narrowing, the inversion the skill
+    // calls out: `[]` searches wider than `['subject']`.
+    expect(resolveSearchFields({ ...resolutionArgs, requestedFields: ['subject'] }))
+      .toEqual(['subject']);
+  });
+
+  it('quotes the dotted-path diagnostic exactly as the skill prints it', () => {
+    const findings = validateSearchableFields(viewStack(['subject', 'account_id.name']));
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(SEARCHABLE_FIELD_UNKNOWN);
+    expect(findings[0].severity).toBe('error');
+    expect(findings[0].message).toBe(
+      'list-view searchableFields entry "account_id.name" is not a field on object '
+      + '"support_case". The declaration is stale: searching it can never match, and the '
+      + 'engine silently drops it — leaving a narrower search than declared, or the '
+      + 'auto-default set once every entry is dropped.',
+    );
+  });
+
+  it('quotes the outside-the-declared-set diagnostic exactly as the skill prints it', () => {
+    const findings = validateSearchableFields(viewStack(['subject', 'status']));
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(SEARCHABLE_FIELD_UNSEARCHABLE);
+    expect(findings[0].severity).toBe('error');
+    expect(findings[0].message).toBe(
+      'list-view searchableFields entry "status" is outside object "support_case"\'s '
+      + 'declared searchableFields (subject, case_number, description) — the set \'search\' '
+      + 'scans. Clients echo this declaration verbatim as the \'$searchFields\' override, '
+      + 'and the runtime refuses an entry outside the allowed set: every toolbar search on '
+      + 'this list returns 400 INVALID_FIELD (#4254).',
+    );
+  });
+
+  /**
+   * The correction the skill makes to a type-first reading: on an object that
+   * DECLARES its set, the declaration is the boundary and the field's type is
+   * not consulted — a lookup inside it is scanned, a text column outside it is
+   * refused. Both directions, because either alone reads as a coincidence.
+   */
+  it('a lookup INSIDE the object\'s declared set is accepted; a text column OUTSIDE it is not', () => {
+    const declaresLookup = { searchableFields: ['subject', 'account_id'] };
+
+    expect(validateSearchableFields(viewStack(['account_id'], declaresLookup))).toEqual([]);
+
+    const refused = validateSearchableFields(viewStack(['account_name'], declaresLookup));
+    expect(refused).toHaveLength(1);
+    expect(refused[0].rule).toBe(SEARCHABLE_FIELD_UNSEARCHABLE);
+    expect(refused[0].message).toContain('"account_name"');
+  });
+
+  /**
+   * …and the mirror image: with NO declaration on the object, the auto-default
+   * is the boundary, so type is exactly what decides. `select` is in the
+   * text-like set the skill lists; `lookup` is not.
+   */
+  it('with no object declaration, the auto-default type list decides', () => {
+    const noDeclaration = { searchableFields: undefined };
+
+    expect(validateSearchableFields(viewStack(['subject', 'status'], noDeclaration))).toEqual([]);
+
+    const refused = validateSearchableFields(viewStack(['account_id'], noDeclaration));
+    expect(refused).toHaveLength(1);
+    expect(refused[0].rule).toBe(SEARCHABLE_FIELD_UNSEARCHABLE);
+    expect(refused[0].message).toContain("of type 'lookup', which 'search' cannot scan");
+  });
+});
+
+/**
+ * [#6674] A virtual `formula` entry — the one check that runs on the object's
+ * OWN set as well as on a view's narrowing.
+ *
+ * The card's shape: the entry names a real field, so the existence check passes
+ * it; the runtime's declared branch admitted it verbatim; and the search then
+ * matched nothing, because a formula value is computed on read and no driver
+ * materializes a column for it (0 rows on driver-memory, 0 rows WITH NO ERROR on
+ * driver-sql). Declared coverage, zero delivery — the fail-open #4254 closed on
+ * the unknown-name axis, surviving on the known-but-virtual one.
+ */
+describe('[#6674] validateSearchableFields — a virtual formula entry', () => {
+  const accountFields = {
+    name: { type: 'text' },
+    billing_email: { type: 'email' },
+    payload: { type: 'json' },
+    account_id: { type: 'lookup', reference: 'crm_account' },
+    display_label: { type: 'formula', expression: "record.name + ' · x'" },
+  };
+
+  it("flags it on the OBJECT's own searchableFields — previously clean", () => {
+    const findings = validateSearchableFields({
+      objects: [
+        {
+          name: 'crm_account',
+          fields: accountFields,
+          searchableFields: ['name', 'display_label'],
+        },
+      ],
+    });
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(SEARCHABLE_FIELD_UNSEARCHABLE);
+    expect(findings[0].severity).toBe('error');
+    expect(findings[0].path).toBe('objects[0].searchableFields[1]');
+    expect(findings[0].where).toBe('object "crm_account"');
+    expect(findings[0].message).toContain("is a virtual 'formula' field");
+    expect(findings[0].message).toContain('computed on read and never stored');
+    // The fix is a STORED mirror — the same prescription #6673 put on the
+    // neighbouring hints, and the only one that can work here.
+    expect(findings[0].hint).toContain('stored text field');
+    expect(findings[0].hint).toContain('400 INVALID_FIELD');
+  });
+
+  it('flags it on a list view narrowing too', () => {
+    const findings = validateSearchableFields({
+      objects: [
+        {
+          name: 'crm_account',
+          fields: accountFields,
+          listViews: { all: { type: 'grid', searchableFields: ['name', 'display_label'] } },
+        },
+      ],
+    });
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(SEARCHABLE_FIELD_UNSEARCHABLE);
+    expect(findings[0].path).toBe('objects[0].listViews.all.searchableFields[1]');
+    expect(findings[0].message).toContain("is a virtual 'formula' field");
+  });
+
+  it('CONTROL — a json or lookup entry on the OBJECT\'s own set stays clean', () => {
+    // The carve-out #4830 wrote down, deliberately preserved: the runtime's
+    // declared branch executes those (a `$contains` over the stored JSON text /
+    // the stored foreign key). Narrow and rarely useful, but a scan that CAN
+    // match — flagging it would reject metadata the runtime accepts (ADR-0072
+    // D1). If this control ever goes red, #6674 has quietly become "the declared
+    // branch is type-filtered", which it is not.
+    expect(
+      validateSearchableFields({
+        objects: [
+          {
+            name: 'crm_account',
+            fields: accountFields,
+            searchableFields: ['name', 'payload', 'account_id'],
+          },
+        ],
+      }),
+    ).toEqual([]);
+  });
+
+  it('CONTROL — a stale entry on the object\'s own set keeps the #4254 message', () => {
+    const findings = validateSearchableFields({
+      objects: [
+        { name: 'crm_account', fields: accountFields, searchableFields: ['name', 'gone'] },
+      ],
+    });
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(SEARCHABLE_FIELD_UNKNOWN);
+    expect(findings[0].message).toContain('is not a field on object');
+  });
+
+  it('an ALL-virtual declaration is reported, not silently swapped for the auto-default', () => {
+    // The degenerate case: at runtime the declaration filters to empty and
+    // resolution falls through to the auto-default, so the object silently
+    // searches a set the author never wrote. The build error is what stops that
+    // being invisible.
+    const findings = validateSearchableFields({
+      objects: [
+        { name: 'crm_account', fields: accountFields, searchableFields: ['display_label'] },
+      ],
+    });
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0].path).toBe('objects[0].searchableFields[0]');
+    expect(findings[0].message).toContain("is a virtual 'formula' field");
   });
 });

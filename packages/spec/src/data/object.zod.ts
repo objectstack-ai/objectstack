@@ -12,7 +12,6 @@ import { ObjectListViewSchema } from '../ui/view.zod';
 import { ExpressionInputSchema, TemplateExpressionInputSchema, type Expression, type ExpressionInput } from '../shared/expression.zod';
 import { lazySchema } from '../shared/lazy-schema';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
-import { strictUnknownKeyError } from '../shared/suggestions.zod';
 import { strictObject } from '../shared/strict-object';
 import { ProtectionSchema } from '../shared/protection.zod';
 import { retiredKey } from '../shared/retired-key';
@@ -142,33 +141,54 @@ const CAPABILITIES_RETIRED_KEY_GUIDANCE: Record<string, string> = {
     'soft-delete that never ran). Delete the key. For recoverability use per-field ' +
     '`trackHistory` (audit trail) or a `lifecycle` policy; soft delete is parked at ' +
     '#3146 and, if built, returns as a live enforced flag (ADR-0049 prune-or-build). ' +
-    'Run `os migrate meta --from 16` to rewrite it automatically.',
+    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
   mru:
     '`enable.mru` was removed from @objectstack/spec in the 16.x line (#2377/#3207, ' +
     'ADR-0049) — Most-Recently-Used tracking was never implemented; no reader ' +
     'existed, so the flag changed nothing. Delete the key. If MRU tracking is ' +
     'built it returns as a live enforced flag (ADR-0049 prune-or-build). ' +
-    'Run `os migrate meta --from 16` to rewrite it automatically.',
+    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
 };
 
 /**
- * Custom zod `error` for the `.strict()` capabilities block (pattern of
- * `strictTenancyError` below): an unknown key — a retired `trash`/`mru` or a
- * typo like `feedEnabled` — is a loud, *fixable* parse error instead of a
- * silent strip (#1535), and a retired key's error carries its upgrade
- * prescription. Every other issue code defers to zod's default.
+ * The standing history sentence for the `enable` block, emitted LAST on every
+ * rejection — the shared template's `history` slot.
+ *
+ * ## Why the slot, and why the fold waited for it (#6805)
+ *
+ * This block was the LAST hand-written `unrecognized_keys` map in this file.
+ * #6619 folded its sibling `strictTenancyError` into the shared `strictObject`
+ * template and left this one out for a reason it stated precisely: the map
+ * emitted NO trailing sentence while `strictUnknownKeyError` appends its
+ * `history` unconditionally (`${message} ${history}`). Measured again at #6805,
+ * that is a statement about the TEXT and not about the template — `enable` has
+ * a real history, it had simply never been written down. Writing it is the
+ * whole of what the fold needed.
+ *
+ * The reading of the slot is #6619's, unchanged: what it encodes is *position*
+ * — the one standing sentence that follows both fix channels (#5955 / #6416) —
+ * so the surface decides what belongs there, and background is as legitimate as
+ * literal history.
+ *
+ * The rejection itself is unchanged in kind: an unknown key — a retired
+ * `trash`/`mru` or a typo like `feedEnabled` — is a loud, *fixable* parse error
+ * instead of a silent strip (#1535), a retired key's error carries its upgrade
+ * prescription, and every other issue code defers to zod's default. What the
+ * fold changes is the *other* key: `searchible` now resolves to `searchable`
+ * through the template's rename channel instead of being told only that it "is
+ * not an `enable` capability flag", which named the problem and never the fix.
+ * And it is what puts this table under `alias-integrity.test.ts`, which no
+ * hand-rolled map has ever been judged by.
+ *
+ * ⚠️ `scripts/strictness-ledger.test.ts` used the `ObjectCapabilities` site
+ * below as its `z.object(…).strict()` fixture. #6805 moved it to
+ * `PerOperationRequiredPermissionsSchema` in this same file rather than
+ * deleting the assertion, exactly as that test's own note instructs.
  */
-const strictCapabilitiesError: z.core.$ZodErrorMap = (issue) => {
-  if (issue.code !== 'unrecognized_keys') return undefined;
-  const keys = (issue as { keys?: readonly string[] }).keys ?? [];
-  const lines = keys.map((key) =>
-    CAPABILITIES_RETIRED_KEY_GUIDANCE[key] ?? `\`${key}\` is not an \`enable\` capability flag.`,
-  );
-  return (
-    `Unrecognized key(s) on \`enable\`: ${keys.map((k) => `\`${k}\``).join(', ')}.\n` +
-    lines.map((l) => `  • ${l}`).join('\n')
-  );
-};
+const CAPABILITIES_HISTORY =
+  'Until this shape was closed an unknown flag was dropped without a word — the object '
+  + 'shipped as if the author had never written it (#1535); `enable` is a closed vocabulary '
+  + 'in which every flag carries an enforcement contract (#2707).';
 
 /**
  * Capability Flags
@@ -187,6 +207,20 @@ const strictCapabilitiesError: z.core.$ZodErrorMap = (issue) => {
  * `.strict()`: unknown keys (incl. the retired `trash` / `mru`, #2377) are
  * rejected with guidance, not stripped (#1535).
  *
+ * Closed with the shared `strictObject` template since #6805 — see
+ * {@link CAPABILITIES_HISTORY} for why the fold waited on one sentence, and
+ * what changes (and does not) about the message.
+ *
+ * ⚠️ ORDER IS LOAD-BEARING here for the same reason it is at
+ * `ObjectSchemaBase` (#5593, ~1000 lines below): `strictObject` evaluates its
+ * options object at CONSTRUCTION — that is what lets `alias-integrity.test.ts`
+ * judge the table against the real `.shape` — so both
+ * `CAPABILITIES_RETIRED_KEY_GUIDANCE` and `CAPABILITIES_HISTORY` must be
+ * declared ABOVE this site. Moving either below it reintroduces the temporal
+ * dead zone as a module-init crash under `OS_EAGER_SCHEMAS=1` (how
+ * `build-schemas.ts` runs), which the test suite does not reach because tests
+ * import lazily.
+ *
  * @example
  * {
  *   trackHistory: true,
@@ -195,7 +229,11 @@ const strictCapabilitiesError: z.core.$ZodErrorMap = (issue) => {
  *   activities: false
  * }
  */
-export const ObjectCapabilities = z.object({
+export const ObjectCapabilities = strictObject({
+  surface: '`enable`',
+  history: CAPABILITIES_HISTORY,
+  guidance: CAPABILITIES_RETIRED_KEY_GUIDANCE,
+}, {
   /**
    * History tracking (Audit Trail) master switch — opt-in.
    *
@@ -263,7 +301,7 @@ export const ObjectCapabilities = z.object({
 
   /** Allow cloning records */
   clone: z.boolean().default(true).describe('Allow record deep cloning'),
-}, { error: strictCapabilitiesError }).strict();
+});
 
 /**
  * Schema for database indexes.
@@ -379,7 +417,7 @@ export const IndexSchema = lazySchema(() => z.object({
     'output. Delete the key. The index method is the driver/dialect\'s decision (Postgres ' +
     'defaults to B-tree; `gin`/`gist`/`fulltext` are dialect-specific and are chosen by a ' +
     'database-layer migration when a workload actually needs one). ' +
-    'Run `os migrate meta --from 16` to rewrite it automatically.',
+    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
   ),
   partial: retiredKey(
     '`indexes[].partial` was removed in @objectstack/spec 17.0.0 (#5248, #4943, ADR-0049) — no ' +
@@ -389,7 +427,7 @@ export const IndexSchema = lazySchema(() => z.object({
     'WHERE <predicate>` from a runtime migration (this is what `metadata-protocol`\'s ' +
     '`ensureOverlayIndex` already does for `sys_metadata`). Drift detection is unaffected — it ' +
     'reads partiality back from the database\'s own DDL, never from this key. ' +
-    'Run `os migrate meta --from 16` to rewrite it automatically.',
+    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
   ),
 }));
 
@@ -416,44 +454,21 @@ const TENANCY_RETIRED_KEY_GUIDANCE: Record<string, string> = {
 };
 
 /**
- * Custom zod `error` for the `.strict()` tenancy block (#2763, pattern of
- * `strictVisibilityError` / ADR-0089 D3a): an unknown key — a retired
- * `strategy`/`crossTenantAccess` or a typo — is a loud, *fixable* parse error
- * instead of a silent strip (#1535), and a retired key's error carries its
- * upgrade prescription. Every other issue code defers to zod's default.
+ * The standing two-modes explainer, emitted LAST on every `tenancy` rejection.
  *
- * ## Message order: the fix comes before the explainer (#5955 / #6416)
- *
- * ```text
- * Unrecognized key(s) on `tenancy`: `k1`.       ← which key is wrong
- *   • {per-key tombstone / "not a `tenancy` key"} ← the fix
- * The two supported tenancy modes are: …        ← the standing explainer
- * ```
- *
- * Same emission order the shared `strictUnknownKeyError` template took in
- * #5955 — bullets first, the surface-level sentence appended to the last one.
- * A hand-written `$ZodErrorMap` is reachable by neither that fix nor #5593's
- * `strictObject` migration, so #6416 applies the ruling here directly. The
- * two-modes explainer used to sit between the key statement and the bullets,
- * which on the single-line renders several consumers use (`os validate`'s
- * `• where: message`, CI logs) buried each key's actual prescription behind
- * ~160 characters of standing background. Nothing is dropped: the explainer is
- * still emitted verbatim, just last.
+ * It occupies the template's `history` slot, which is the slot for exactly this
+ * — the one sentence of standing background that follows both fix channels
+ * (#5955 / #6416). It is background rather than history in the literal sense,
+ * and that is fine: the contract the slot encodes is *position*, and this
+ * sentence is the thing that must not sit in front of a key's own prescription.
+ * On the single-line renders several consumers use (`os validate`'s
+ * `• where: message`, CI logs) it used to bury each bullet behind ~160
+ * characters.
  */
-const strictTenancyError: z.core.$ZodErrorMap = (issue) => {
-  if (issue.code !== 'unrecognized_keys') return undefined;
-  const keys = (issue as { keys?: readonly string[] }).keys ?? [];
-  const lines = keys.map((key) =>
-    TENANCY_RETIRED_KEY_GUIDANCE[key] ?? `\`${key}\` is not a \`tenancy\` key.`,
-  );
-  return (
-    `Unrecognized key(s) on \`tenancy\`: ${keys.map((k) => `\`${k}\``).join(', ')}.\n` +
-    lines.map((l) => `  • ${l}`).join('\n') +
-    ' The two supported tenancy modes are: database-per-tenant = environment-level ' +
-    'deployment (no object config); row-level isolation = `tenancy.enabled` + ' +
-    '`tenancy.tenantField`.'
-  );
-};
+const TENANCY_MODES_EXPLAINER =
+  'The two supported tenancy modes are: database-per-tenant = environment-level '
+  + 'deployment (no object config); row-level isolation = `tenancy.enabled` + '
+  + '`tenancy.tenantField`.';
 
 /**
  * Multi-Tenancy Configuration Schema
@@ -465,6 +480,15 @@ const strictTenancyError: z.core.$ZodErrorMap = (issue) => {
  *
  * `.strict()`: unknown keys (incl. the retired `strategy` /
  * `crossTenantAccess`, #2763) are rejected with guidance, not stripped (#1535).
+ *
+ * Closed with the shared `strictObject` template since #6619. The tombstone
+ * bullets and the trailing explainer are byte-for-byte what the hand-written
+ * `strictTenancyError` emitted; what the fold changes is the *other* key — a
+ * near-miss like `tenantfield` now resolves to `tenantField` through the
+ * template's rename channel instead of being told only that it "is not a
+ * `tenancy` key", which named the problem and never the fix. Folding it in is
+ * also what puts this table under `alias-integrity.test.ts`, which no
+ * hand-rolled map has ever been judged by.
  *
  * `tenantField` carries **no default** (#5315). It used to default to
  * `'tenant_id'`, which no consumer could act on: the platform's tenant column
@@ -489,7 +513,11 @@ const strictTenancyError: z.core.$ZodErrorMap = (issue) => {
  *   tenantField: 'workspace_id'
  * }
  */
-export const TenancyConfigSchema = lazySchema(() => z.object({
+export const TenancyConfigSchema = lazySchema(() => strictObject({
+  surface: '`tenancy`',
+  history: TENANCY_MODES_EXPLAINER,
+  guidance: TENANCY_RETIRED_KEY_GUIDANCE,
+}, {
   enabled: z.boolean().describe('Enable multi-tenancy for this object'),
   tenantField: z.string().optional().describe(
     'Column this object is tenant-scoped by. Omit it unless the tenant column ' +
@@ -499,7 +527,7 @@ export const TenancyConfigSchema = lazySchema(() => z.object({
     'object really has that field — otherwise the same `organization_id` ' +
     'fallback applies. No default is materialized here on purpose (#5315).',
   ),
-}, { error: strictTenancyError }).strict());
+}));
 
 /**
  * [ADR-0066] Platform-global posture: `tenancy.enabled === false` explicitly
@@ -575,6 +603,14 @@ export const ObjectAccessConfigSchema = lazySchema(() => strictObject({
  * Operation→class mapping mirrors the CRUD permission bits: `transfer`/`restore`
  * fold into `update`, `purge` into `delete`. `.strict()` so a mistyped key
  * (e.g. `reads`) is rejected at author time rather than silently ignored.
+ *
+ * ⚠️ This site is `scripts/strictness-ledger.test.ts`'s fixture for the OLDER
+ * `z.object(…).strict()` spelling — the reading the ledger's AST walker has to
+ * keep making, and `packages/spec` is not the only tree it reads. The fixture
+ * has moved twice as the campaign converted its predecessors
+ * (`security/permission.zod.ts` → `TenancyConfigSchema` at #5593 →
+ * `ObjectCapabilities` at #6619 → here at #6805). If THIS one is ever
+ * converted, move the fixture again rather than deleting the assertion.
  */
 export const PerOperationRequiredPermissionsSchema = z.object({
   read: z.array(z.string()).optional().describe('Capabilities required to read (find/findOne/count/aggregate).'),
@@ -601,7 +637,8 @@ export type ObjectRequiredPermissions = z.input<typeof ObjectRequiredPermissions
  * Declares how long an object's data lives and how its space is reclaimed —
  * the axis validation/permissions never covered. Enforced at runtime by the
  * platform-owned LifecycleService (`@objectstack/objectql`): Reaper (TTL/age
- * batch delete), Rotator (time-shard + DROP oldest), Archiver (cold-store
+ * batch delete), Rotator (time-shard + DROP oldest on SQLite, an age-based
+ * reap of the same window elsewhere), Archiver (cold-store
  * copy then delete). A declared policy with no runtime consumer is a spec
  * defect (ADR-0049 enforce-or-remove); the liveness gate requires every
  * non-`record` class to declare `retention`, `ttl`, or rotation `storage`.
@@ -733,12 +770,17 @@ export const LifecycleSchema = lazySchema(() => strictObject({
     aliases: { count: 'shards', interval: 'unit', period: 'unit', granularity: 'unit' },
     guidance: {
       maxAge:
-        '`maxAge` is a `retention` key. Rotation does not reap by age — it retains ' +
-        '`shards` × `unit` of history and DROPs the oldest shard whole. Set the window ' +
+        '`maxAge` is a `retention` key. Rotation takes its window from `shards` × `unit`, ' +
+        'not from an age you name — reclaimed by DROPping the oldest shard whole on SQLite, ' +
+        'by an equivalent age-based reap elsewhere. Set the window ' +
         'with `shards`/`unit`, or use `retention` instead of rotation.',
     },
   }, {
-    strategy: z.literal('rotation').describe('Time-shard the table; rotate by DROPping the oldest shard (O(1) reclaim).'),
+    strategy: z.literal('rotation').describe(
+      'Time-shard the table. The retained window (`shards` × `unit`) is the same on every ' +
+      'dialect; the reclamation is not — SQLite DROPs the oldest shard whole (O(1) reclaim), ' +
+      'other dialects reap that same window by age from `created_at`.',
+    ),
     shards: z.number().int().min(2).describe('Number of shards retained; total window = shards × unit.'),
     unit: z.enum(['day', 'week', 'month']).describe('Time width of one shard.'),
   }).optional().describe('Physical storage strategy for high-frequency telemetry (LifecycleService Rotator).'),
@@ -1045,34 +1087,6 @@ export type RowCrudActionOverride = z.input<typeof RowCrudActionOverrideSchema>;
 /** Post-parse shape of {@link RowCrudActionOverride} — defaults applied, transforms run (ADR-0122). */
 export type RowCrudActionOverrideParsed = z.infer<typeof RowCrudActionOverrideSchema>;
 
-/**
- * Unknown-key error for {@link ObjectSchemaBase}, built on FIRST USE.
- *
- * Deferred because the pieces it needs — `UNKNOWN_KEY_GUIDANCE` and the shape's
- * own key list — are declared *below* this schema, and `ObjectSchemaBase` is a
- * plain `z.object` evaluated at module load. An error map only runs at parse
- * time, so resolving them then sidesteps the temporal dead zone without moving
- * several hundred lines around. `knownKeys` reads the shape rather than a
- * transcription, for the reason `strictObject` exists.
- */
-let objectUnknownKeyErrorImpl: z.core.$ZodErrorMap | undefined;
-const objectUnknownKeyError: z.core.$ZodErrorMap = (issue) =>
-  (objectUnknownKeyErrorImpl ??= strictUnknownKeyError({
-    surface: 'this object',
-    knownKeys: Object.keys(ObjectSchemaBase.shape),
-    // The same semantic renames the WARNING layer already knew
-    // (`OBJECT_KEY_GUIDANCE`). Graduating a surface from warn to reject must
-    // not cost the author a prescription: `capabilities` → `enable` is a
-    // different word for the same intent, so edit distance cannot reach it and
-    // only an explicit entry can.
-    aliases: { capabilities: 'enable', features: 'enable' },
-    guidance: UNKNOWN_KEY_GUIDANCE,
-    history:
-      'Until #4001 closed this shape these were dropped silently on the PARSE path — '
-      + '`ObjectSchema.create()` has rejected them since #1535, but `defineStack({ objects })`, '
-      + '`/api/v1/meta/types/object` and the Studio form all go through `parse()`, which did not.',
-  }))(issue);
-
 /*
  * ── Unknown-key strictness (#4001 registered-types line) ────────────────────
  *
@@ -1124,9 +1138,135 @@ const MANAGED_BY_SYSTEM_RETIRED =
   + 'and can be deleted; keep it only to NARROW. CSV `import` is deliberately NOT in that '
   + 'default (#4671): it stays opt-in per object via `userActions: { import: true }`, which '
   + 'is what a v16 `system` object already resolved to. Run `os migrate meta --from 16` to '
-  + 'rewrite it automatically.';
+  + 'rewrite existing sources automatically.';
 
-const ObjectSchemaBase = z.object({
+/**
+ * Known-confusable schema keys → precise authoring guidance.
+ *
+ * ADR-0032's "no silent failure" principle applied to metadata *shape*: an
+ * unknown top-level key on `ObjectSchema.create()` used to be discarded by
+ * Zod's default `.strip()`, so a misauthored schema key vanished with no
+ * error, no warning, and a green `tsc` — shipping dead metadata the author
+ * believed they had wired up (issue #1535, object-level `workflows: [...]`).
+ *
+ * These entries turn the most likely mistakes into a fixable error that points
+ * at the *supported* mechanism rather than a generic "unknown key".
+ */
+const UNKNOWN_KEY_GUIDANCE: Record<string, string> = {
+  workflows:
+    '`workflows` is not an ObjectSchema field. Object-level, record-triggered ' +
+    'automation is authored as a lifecycle hook (`src/objects/<name>.hook.ts`, ' +
+    'wrapped in `defineHook()` from `@objectstack/spec/data`) or as a top-level ' +
+    '`record_change` flow — not as `workflows[]` on the object schema.',
+  workflow:
+    '`workflow` is not an ObjectSchema field. Record-triggered automation is ' +
+    'authored as a lifecycle hook (`src/objects/<name>.hook.ts`) or a top-level ' +
+    '`record_change` flow.',
+  hooks:
+    '`hooks` is not an ObjectSchema field. Lifecycle hooks live in their own ' +
+    '`src/objects/<name>.hook.ts` module, wrapped in `defineHook()` from ' +
+    '`@objectstack/spec/data`.',
+  triggers:
+    '`triggers` is not an ObjectSchema field. Use a lifecycle hook ' +
+    '(`src/objects/<name>.hook.ts`) or a top-level `record_change` flow.',
+
+  // ── Tombstones for RETIRED keys (upgrade prescriptions) ────────────────
+  // A retired key's error must carry the fix: the compile/validation error is
+  // the one upgrade channel every consumer is guaranteed to hit — an agent
+  // bumping @objectstack/spec sees THIS message, not our docs site. Each entry
+  // names what replaced the key and the version/decision that removed it.
+  // Tombstones age out too: drop an entry ~two majors after the removal
+  // (by then it's archaeology, not an upgrade; see CHANGELOG.md for history).
+  namespace:
+    '`namespace` was retired in ADR-0006 D4 — the object `name` IS the canonical id ' +
+    'everywhere (API, ObjectQL, REST, SDK, DB table), so there is no separate namespace ' +
+    'to declare. Embed the module prefix in the name instead: `namespace: "sys", ' +
+    'name: "user"` becomes `name: "sys_user"`. Until #4001 closed this shape on the ' +
+    'parse path it was stripped in silence, so an object declaring one shipped under ' +
+    'the unprefixed name its author did not intend.',
+  compactLayout:
+    '`compactLayout` was renamed to `highlightFields` in @objectstack/spec 11.7.0 ' +
+    '(ADR-0085 semantic roles) and the alias was retired in 11.9.1 (#2536). ' +
+    'Rename the key — the value shape (ordered field-name list) is unchanged.',
+  detail:
+    'The `detail` UI-hints block was removed by ADR-0085 (spec 11.7.0). Its ' +
+    'jobs moved to top-level semantic roles: `detail.stageField` → `stageField` ' +
+    '(string | false), `detail.highlightFields` → `highlightFields`, section ' +
+    'layout → `fieldGroups` + `Field.group`. Whole-page customization is done ' +
+    'by assigning a custom Page schema instead of per-page hint keys.',
+  views:
+    '`views` is not an ObjectSchema field: the object-level `views.form/*` and ' +
+    '`views.detail/*` UI-hint dialect was never part of the spec and its ' +
+    'renderer support was removed (ADR-0085). Use the semantic roles ' +
+    '(`highlightFields`, `stageField`, `fieldGroups`) for hints and `listViews` ' +
+    'for named list views.',
+  defaultDetailForm:
+    '`defaultDetailForm` was never implemented and was removed from the spec ' +
+    '(#2402). Curate the record page by assigning a custom Page schema; form ' +
+    'layout derives from `fieldGroups` + `Field.group`.',
+  softDelete:
+    '`softDelete` was removed from the spec in 16.0 (#2377, ADR-0049 ' +
+    'enforce-or-remove) — there is no soft-delete/recycle-bin runtime, so it ' +
+    'stored nothing and implied restore semantics that do not exist. Deletes ' +
+    'are hard deletes; remove the key.',
+  versioning:
+    '`versioning` was removed from the spec in 16.0 (#2377, ADR-0049) — no ' +
+    'record-versioning engine ever read it (it snapshotted no history). Use ' +
+    'per-field `Field.trackHistory` for field-level history, or a data ' +
+    'lifecycle policy (`lifecycle`) for retention.',
+  search:
+    '`search` (the SearchConfig block) was removed from the spec in 16.0 ' +
+    '(#2377, ADR-0049) — no search-engine config was consumed. Declare the ' +
+    'indexed fields with `searchableFields` (ADR-0061); records stay queryable ' +
+    'via the normal data API regardless.',
+  recordName:
+    '`recordName` was removed from the spec in 16.0 (#2377, ADR-0049) — it was ' +
+    'never read. Auto-naming is modelled as a `Field` of type \'autonumber\' ' +
+    '(with `autonumberFormat`) designated as the object\'s `nameField`.',
+  keyPrefix:
+    '`keyPrefix` was removed from the spec in 16.0 (#2377, ADR-0049) — record ' +
+    'ids are not prefixed from it (no Salesforce-style key-prefix runtime). ' +
+    'Remove the key; it had no effect.',
+  tags:
+    '`tags` (object-level categorization) was removed from the spec (#2377, ' +
+    'ADR-0049) — it had no runtime reader. Remove the key; use `managedBy` for ' +
+    'lifecycle bucketing or a real field for per-record tagging.',
+  active:
+    '`active` was removed from the spec (#2377, ADR-0049) — no runtime reader ' +
+    'gated on it, so an "inactive" object was still fully queryable and usable. ' +
+    'Remove the key; gate availability with permissions/sharing instead.',
+  abstract:
+    '`abstract` was removed from the spec (#2377, ADR-0049) — object ' +
+    'inheritance/abstraction is not implemented, so an abstract object still ' +
+    'got a table and was instantiable. Remove the key.',
+};
+
+// ⚠️ ORDER IS LOAD-BEARING (#5593). This map used to live ~700 lines BELOW
+// `ObjectSchemaBase`, and the error map that reads it was built lazily
+// (`objectUnknownKeyErrorImpl ??= …`) purely to step around the temporal dead
+// zone that created. `strictObject` evaluates its options object at
+// CONSTRUCTION — that is what lets the audit in `alias-integrity.test.ts` judge
+// the table against the real `.shape` — so the deferral had to go, and the
+// declaration order is what replaces it. Keep this block above
+// `ObjectSchemaBase`; moving it back reintroduces the TDZ as a module-init
+// crash under `OS_EAGER_SCHEMAS=1` (how `build-schemas.ts` runs), which the
+// test suite does not reach because tests import lazily.
+const ObjectSchemaBase = strictObject(
+  {
+    surface: 'this object',
+    // The same semantic renames the WARNING layer already knew
+    // (`OBJECT_KEY_GUIDANCE`). Graduating a surface from warn to reject must
+    // not cost the author a prescription: `capabilities` → `enable` is a
+    // different word for the same intent, so edit distance cannot reach it and
+    // only an explicit entry can.
+    aliases: { capabilities: 'enable', features: 'enable' },
+    guidance: UNKNOWN_KEY_GUIDANCE,
+    history:
+      'Until #4001 closed this shape these were dropped silently on the PARSE path — '
+      + '`ObjectSchema.create()` has rejected them since #1535, but `defineStack({ objects })`, '
+      + '`/api/v1/meta/types/object` and the Studio form all go through `parse()`, which did not.',
+  },
+  {
   /**
    * Identity & Metadata
    */
@@ -1240,22 +1380,31 @@ const ObjectSchemaBase = z.object({
    *
    *   - `user` (default) — per-record owner: injects the reassignable `owner_id`
    *     lookup, engaging owner-scoped RLS, "My" views, owner reports and
-   *     first-admin bootstrap.
-   *   - `org` / `none` — no per-record owner (Dataverse-style catalog / junction
-   *     tables); `owner_id` is NOT injected. (Platform-managed tables — `managedBy`
-   *     set, or the `sys_` namespace — skip owner injection regardless.)
+   *     first-admin bootstrap. Also carries `owning_business_unit_id`.
+   *   - `business_unit` — owned by an org UNIT, not by a person (inventory,
+   *     equipment ledgers, departmental budgets): `owner_id` is NOT injected,
+   *     `owning_business_unit_id` IS. [ADR-0117 D1]
+   *   - `org` / `none` — no per-record owner of EITHER kind (Dataverse-style
+   *     catalog / junction tables); neither anchor is injected. (Platform-managed
+   *     tables — `managedBy` set, or the `sys_` namespace — skip ownership
+   *     injection regardless.)
+   *
+   * The per-tier authority is `resolveInjectedSystemColumns`
+   * (`@objectstack/spec/data`) — its table, not this prose, is what
+   * `applySystemFields` and author-time lint both read.
    *
    * NOTE: this is the RECORD-ownership model, DISTINCT from the package
-   * *contribution* kind (`own` | `extend`, {@link ObjectOwnershipEnum}) that lives
-   * on the registry's contributor record and is set via `registerObject` — do not
-   * conflate the two despite the shared word.
+   * *contribution* kind (`own` | `extend` | `overlay`,
+   * {@link ObjectOwnershipEnum}) that lives on the registry's contributor
+   * record and is set via `registerObject` — do not conflate the two despite
+   * the shared word.
    */
-  ownership: z.enum(['user', 'org', 'none'], {
+  ownership: z.enum(['user', 'business_unit', 'org', 'none'], {
     error:
-      "`ownership` is the record-ownership model — one of 'user' (default) | 'org' | 'none'. " +
+      "`ownership` is the record-ownership model — one of 'user' (default) | 'business_unit' | 'org' | 'none'. " +
       "The package-contribution kind 'own'/'extend' is set via registerObject, not on the object schema.",
   }).optional().describe(
-    "Record-ownership model: user (default — injects reassignable owner_id) | org | none (no per-record owner, skips owner_id). Distinct from the package own/extend contribution kind.",
+    "Record-ownership model: user (default — injects reassignable owner_id plus owning_business_unit_id) | business_unit (unit-owned: owning_business_unit_id only, no owner_id) | org | none (no per-record owner, neither anchor). Distinct from the package own/extend contribution kind.",
   ),
 
   /**
@@ -1348,24 +1497,21 @@ const ObjectSchemaBase = z.object({
    *   - `owner_id` — `lookup → sys_user`, auto-provisioned on user-authored
    *     business objects (auto-stamped to the creating user on insert;
    *     reassignable). Governed by the object-level `ownership` property
-   *     (`'user' | 'org' | 'none'`), NOT by `owner` below.
+   *     (`'user' | 'business_unit' | 'org' | 'none'`), NOT by `owner` below.
+   *     Injected under `'user'` and when `ownership` is omitted; withheld under
+   *     `'business_unit' | 'org' | 'none'`.
    *   - `owning_business_unit_id` — `lookup → sys_business_unit`, the
    *     record-level ORG-UNIT ownership tier between `owner_id` (a person) and
    *     `organization_id` (the tenant wall). [ADR-0117 D1, landed in #5677]
-   *     Governed by the same `ownership` property, on the same objects
-   *     `owner_id` is: injected under `'user'` and when `ownership` is omitted,
-   *     withheld under `'org' | 'none'`. Shaped after `organization_id`
-   *     (`readonly` + `hidden` + `system`), not after `owner_id` — it is a
-   *     server-stamped scope anchor. Provisioned but **inert**: the stamping
-   *     middleware (ADR-0117 D2/D4) has not landed, so nothing writes a value
-   *     yet.
-   *
-   *     ⚠️ D1 also defines a fourth tier, `ownership: 'business_unit'` (owning
-   *     unit, no owning person), which `applySystemFields` already implements —
-   *     but the `ownership` enum below is still `'user' | 'org' | 'none'`, so
-   *     that value is still deliberately REJECTED by this schema (the enum
-   *     member is #5678). The column being injected does NOT mean the tier is
-   *     authorable.
+   *     Governed by the same `ownership` property, but over a WIDER set of
+   *     tiers than `owner_id`: injected under `'user'`, when `ownership` is
+   *     omitted, and under `'business_unit'` (the tier that carries this anchor
+   *     and deliberately no `owner_id`); withheld under `'org' | 'none'`.
+   *     Shaped after `organization_id` (`readonly` + `hidden` + `system`), not
+   *     after `owner_id` — it is a server-stamped scope anchor. Provisioned but
+   *     **inert**: the stamping middleware (ADR-0117 D2/D4) has not landed, so
+   *     nothing writes a value yet — including on `'business_unit'` objects,
+   *     where the declaration is authorable (#5678) while the stamp is not.
    *
    * The authority on which of these an object actually carries is
    * `resolveInjectedSystemColumns` (`@objectstack/spec/data`): `applySystemFields`
@@ -1409,7 +1555,10 @@ const ObjectSchemaBase = z.object({
             "object-level `ownership` property: `'user'` (or omitted) injects it, while " +
             "`'org'` and `'none'` BOTH skip it and no `owner_id` is injected at all — " +
             "`'org'` for an org-wide catalog (Dataverse-style), `'none'` for a junction/link " +
-            'table. `systemFields` controls only `tenant` (organization_id) and `audit` ' +
+            "table. `'business_unit'` skips it too, for a different reason: that tier is " +
+            'owned by an org UNIT rather than a person, so it carries ' +
+            '`owning_business_unit_id` and deliberately no `owner_id` (ADR-0117 D1). ' +
+            '`systemFields` controls only `tenant` (organization_id) and `audit` ' +
             '(created_at/created_by/updated_at/updated_by).',
           ownership:
             '`ownership` is a TOP-LEVEL object key, not a `systemFields` key — write it ' +
@@ -1657,7 +1806,7 @@ const ObjectSchemaBase = z.object({
   /**
    * Search Engine Config 
    */
-  searchableFields: z.array(z.string()).optional().describe('Fields the `$search` query matches against (ADR-0061). Canonical default for the record picker, list quick-search and global search; views may narrow it. When unset, search auto-defaults to the name/title field plus short-text fields.'),
+  searchableFields: z.array(z.string()).optional().describe('Fields the `$search` query matches against (ADR-0061). Canonical default for the record picker, list quick-search and global search; views may narrow it. When unset, search auto-defaults to the name/title field plus short-text fields. Entries must name a STORED column: a virtual `formula` field is computed on read and materializes no column, so searching it can never match and it is refused (#6674) — mirror the value onto a stored text field and declare that.'),
 
   /**
    * System Capabilities
@@ -1802,7 +1951,7 @@ const ObjectSchemaBase = z.object({
 
   // ADR-0010 — runtime protection envelope (internal — set by loader).
   ...MetadataProtectionFields,
-}, { error: objectUnknownKeyError }).strict();
+});
 
 /**
  * Converts a snake_case name to a human-readable Title Case label.
@@ -1814,107 +1963,6 @@ function snakeCaseToLabel(name: string): string {
     .map(word => word.charAt(0).toUpperCase() + word.slice(1))
     .join(' ');
 }
-
-/**
- * Known-confusable schema keys → precise authoring guidance.
- *
- * ADR-0032's "no silent failure" principle applied to metadata *shape*: an
- * unknown top-level key on `ObjectSchema.create()` used to be discarded by
- * Zod's default `.strip()`, so a misauthored schema key vanished with no
- * error, no warning, and a green `tsc` — shipping dead metadata the author
- * believed they had wired up (issue #1535, object-level `workflows: [...]`).
- *
- * These entries turn the most likely mistakes into a fixable error that points
- * at the *supported* mechanism rather than a generic "unknown key".
- */
-const UNKNOWN_KEY_GUIDANCE: Record<string, string> = {
-  workflows:
-    '`workflows` is not an ObjectSchema field. Object-level, record-triggered ' +
-    'automation is authored as a lifecycle hook (`src/objects/<name>.hook.ts`, ' +
-    'wrapped in `defineHook()` from `@objectstack/spec/data`) or as a top-level ' +
-    '`record_change` flow — not as `workflows[]` on the object schema.',
-  workflow:
-    '`workflow` is not an ObjectSchema field. Record-triggered automation is ' +
-    'authored as a lifecycle hook (`src/objects/<name>.hook.ts`) or a top-level ' +
-    '`record_change` flow.',
-  hooks:
-    '`hooks` is not an ObjectSchema field. Lifecycle hooks live in their own ' +
-    '`src/objects/<name>.hook.ts` module, wrapped in `defineHook()` from ' +
-    '`@objectstack/spec/data`.',
-  triggers:
-    '`triggers` is not an ObjectSchema field. Use a lifecycle hook ' +
-    '(`src/objects/<name>.hook.ts`) or a top-level `record_change` flow.',
-
-  // ── Tombstones for RETIRED keys (upgrade prescriptions) ────────────────
-  // A retired key's error must carry the fix: the compile/validation error is
-  // the one upgrade channel every consumer is guaranteed to hit — an agent
-  // bumping @objectstack/spec sees THIS message, not our docs site. Each entry
-  // names what replaced the key and the version/decision that removed it.
-  // Tombstones age out too: drop an entry ~two majors after the removal
-  // (by then it's archaeology, not an upgrade; see CHANGELOG.md for history).
-  namespace:
-    '`namespace` was retired in ADR-0006 D4 — the object `name` IS the canonical id ' +
-    'everywhere (API, ObjectQL, REST, SDK, DB table), so there is no separate namespace ' +
-    'to declare. Embed the module prefix in the name instead: `namespace: "sys", ' +
-    'name: "user"` becomes `name: "sys_user"`. Until #4001 closed this shape on the ' +
-    'parse path it was stripped in silence, so an object declaring one shipped under ' +
-    'the unprefixed name its author did not intend.',
-  compactLayout:
-    '`compactLayout` was renamed to `highlightFields` in @objectstack/spec 11.7.0 ' +
-    '(ADR-0085 semantic roles) and the alias was retired in 11.9.1 (#2536). ' +
-    'Rename the key — the value shape (ordered field-name list) is unchanged.',
-  detail:
-    'The `detail` UI-hints block was removed by ADR-0085 (spec 11.7.0). Its ' +
-    'jobs moved to top-level semantic roles: `detail.stageField` → `stageField` ' +
-    '(string | false), `detail.highlightFields` → `highlightFields`, section ' +
-    'layout → `fieldGroups` + `Field.group`. Whole-page customization is done ' +
-    'by assigning a custom Page schema instead of per-page hint keys.',
-  views:
-    '`views` is not an ObjectSchema field: the object-level `views.form/*` and ' +
-    '`views.detail/*` UI-hint dialect was never part of the spec and its ' +
-    'renderer support was removed (ADR-0085). Use the semantic roles ' +
-    '(`highlightFields`, `stageField`, `fieldGroups`) for hints and `listViews` ' +
-    'for named list views.',
-  defaultDetailForm:
-    '`defaultDetailForm` was never implemented and was removed from the spec ' +
-    '(#2402). Curate the record page by assigning a custom Page schema; form ' +
-    'layout derives from `fieldGroups` + `Field.group`.',
-  softDelete:
-    '`softDelete` was removed from the spec in 16.0 (#2377, ADR-0049 ' +
-    'enforce-or-remove) — there is no soft-delete/recycle-bin runtime, so it ' +
-    'stored nothing and implied restore semantics that do not exist. Deletes ' +
-    'are hard deletes; remove the key.',
-  versioning:
-    '`versioning` was removed from the spec in 16.0 (#2377, ADR-0049) — no ' +
-    'record-versioning engine ever read it (it snapshotted no history). Use ' +
-    'per-field `Field.trackHistory` for field-level history, or a data ' +
-    'lifecycle policy (`lifecycle`) for retention.',
-  search:
-    '`search` (the SearchConfig block) was removed from the spec in 16.0 ' +
-    '(#2377, ADR-0049) — no search-engine config was consumed. Declare the ' +
-    'indexed fields with `searchableFields` (ADR-0061); records stay queryable ' +
-    'via the normal data API regardless.',
-  recordName:
-    '`recordName` was removed from the spec in 16.0 (#2377, ADR-0049) — it was ' +
-    'never read. Auto-naming is modelled as a `Field` of type \'autonumber\' ' +
-    '(with `autonumberFormat`) designated as the object\'s `nameField`.',
-  keyPrefix:
-    '`keyPrefix` was removed from the spec in 16.0 (#2377, ADR-0049) — record ' +
-    'ids are not prefixed from it (no Salesforce-style key-prefix runtime). ' +
-    'Remove the key; it had no effect.',
-  tags:
-    '`tags` (object-level categorization) was removed from the spec (#2377, ' +
-    'ADR-0049) — it had no runtime reader. Remove the key; use `managedBy` for ' +
-    'lifecycle bucketing or a real field for per-record tagging.',
-  active:
-    '`active` was removed from the spec (#2377, ADR-0049) — no runtime reader ' +
-    'gated on it, so an "inactive" object was still fully queryable and usable. ' +
-    'Remove the key; gate availability with permissions/sharing instead.',
-  abstract:
-    '`abstract` was removed from the spec (#2377, ADR-0049) — object ' +
-    'inheritance/abstraction is not implemented, so an abstract object still ' +
-    'got a table and was instantiable. Remove the key.',
-};
 
 /** Levenshtein edit distance — backs the "did you mean" hint for typo'd keys. */
 function editDistance(a: string, b: string): number {
@@ -2380,20 +2428,42 @@ function normalizeRowCrudOverride(
 // =================================================================
 
 /**
- * How a package relates to an object it references.
+ * How a contribution relates to the object it targets — the registry's
+ * CONTRIBUTOR-kind vocabulary.
  * 
  * - `own`: This package is the original author/owner of the object.
  *   Only one package may own a given object name. The owner defines
  *   the base schema (table name, primary key, core fields).
  * 
+ * - `overlay`: [ADR-0029 D9.1] A TENANT customization layer over the owner's
+ *   definition, hydrated from a `sys_metadata` row. It REPLACES the base layer
+ *   at resolution time (`base = overlay ?? own`) while owning nothing — no
+ *   namespace claim, no package membership, no table — so the single-owner
+ *   invariant keeps counting exactly one `own` per object name with no
+ *   exemption clause.
+ * 
  * - `extend`: This package adds fields, views, or actions to an
  *   existing object owned by another package. Multiple packages
  *   may extend the same object. Extensions are merged at boot time.
  * 
+ * ## LOADER-FACING, NEVER AUTHOR-FACING
+ * 
+ * No author ever writes one of these values. A package author declares
+ * `objectExtensions: [{ extend: '…' }]` and the LOADER picks `extend`; the
+ * package loader picks `own`; ADR-0029 D9.1 binds `overlay` to the two
+ * `sys_metadata` hydration seams and to nothing else. This enum is the shared
+ * vocabulary those loaders name their choice with — not an authoring surface —
+ * and D9.1 binds it to stay that way, because a new kind that no hand-written
+ * or AI-written metadata can reach for adds no way to get metadata wrong.
+ * 
+ * NOTE: this is the package-CONTRIBUTION kind, DISTINCT from the RECORD
+ * -ownership model (`user` | `org` | `none`) that lives on the object schema's
+ * own `ownership` property — do not conflate the two despite the shared word.
+ * 
  * Follows Salesforce/ServiceNow patterns:
  *   object name = database table name, globally unique, no namespace prefix.
  */
-export const ObjectOwnershipEnum = z.enum(['own', 'extend']);
+export const ObjectOwnershipEnum = z.enum(['own', 'extend', 'overlay']);
 export type ObjectOwnership = z.input<typeof ObjectOwnershipEnum>;
 
 /**

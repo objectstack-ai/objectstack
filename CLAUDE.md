@@ -1,7 +1,7 @@
 # CLAUDE.md
 
 **[AGENTS.md](./AGENTS.md) is the source of truth for working in this repo — read it.**
-Its Prime Directives are binding. Do not rely on this file alone; the three rules that
+Its Prime Directives are binding. Do not rely on this file alone; the four rules that
 must never be missed are inlined here because missing any one of them wastes or corrupts
 other agents' work.
 
@@ -42,6 +42,34 @@ write expressed as a **Bash** command (`>`/`>>`, `sed -i`, `perl -i`, `tee`, `cp
 allowed through, so the rule still outranks the hook. Deliberate non-task exception (both
 hooks, one switch): `OS_ALLOW_MAIN_EDITS=1`. Follow the rule because it's correct, not
 because the hook fires.
+
+## ⛔ Never `git stash` — the stash stack is NOT covered by worktree isolation
+
+`git stash` keeps its stack in `refs/stash` inside the **common `.git` directory**, so
+**every worktree of the repo shares one LIFO stack**. The per-task isolation above does
+not extend to it: two agents stashing in their own worktrees push and pop the *same*
+stack — your `pop` restores whatever the other agent pushed a moment earlier, and your
+own changes stay on the stack for them to take. `pop` reports **success**; the only
+symptom is someone else's files appearing in your `git status`, and a following
+`git add -A` merges their work into your PR. Not hypothetical: it happened between two
+parallel agents mid reverse-verification (objectui#3430) and cost both of them their
+in-flight changes, recoverable only as unreachable commits.
+
+Use one of these instead — no shared state, all inside your own worktree:
+
+```
+git checkout origin/main -- <path>     # then: git checkout <your-branch> -- <path>
+git diff > /tmp/wip.patch && git checkout -- <paths>   # then: git apply /tmp/wip.patch
+git commit -am wip                                     # then: git reset --soft HEAD~1
+git worktree add ../objectstack-<task>-cmp <ref>       # a second tree to compare against
+```
+
+A PreToolUse hook (`.claude/hooks/guard-shared-stash.sh`) enforces this — it blocks the
+`Bash` commands that push/pop/drop/clear the stack, and allows the forms that cannot take
+another agent's entry: `git stash list`/`show`/`create`, and `git stash apply <sha>` /
+`store <sha>` pinned to a **literal hex object id** (never `stash@{N}` — that is a
+*position* in a stack you don't own). Deliberate exception: `OS_ALLOW_STASH=1`. Changing
+the hook? Re-run `.claude/hooks/guard-shared-stash.selftest.sh`.
 
 ## ⛔ Never edit `content/docs/releases/` in a code PR
 

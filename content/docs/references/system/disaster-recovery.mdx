@@ -97,10 +97,10 @@ Complete disaster recovery plan configuration
 | **enabled** | `boolean` | optional | Enable disaster recovery plan |
 | **rpo** | `{ value: number; unit?: Enum<'seconds' \| 'minutes' \| 'hours'> }` | ✅ | Recovery Point Objective |
 | **rto** | `{ value: number; unit?: Enum<'seconds' \| 'minutes' \| 'hours'> }` | ✅ | Recovery Time Objective |
-| **backup** | `{ strategy?: Enum<'full' \| 'incremental' \| 'differential'>; schedule?: string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; retention: object; destination: object; … }` | ✅ | Backup configuration |
+| **backup** | `{ strategy?: Enum<'full' \| 'incremental' \| 'differential'>; schedule?: string \| object; retention: object; destination: object; … }` | ✅ | Backup configuration |
 | **failover** | `{ mode?: Enum<'active_passive' \| 'active_active' \| 'pilot_light' \| 'warm_standby'>; autoFailover?: boolean; healthCheckInterval?: number; failureThreshold?: number; … }` | optional | Multi-region failover configuration |
 | **replication** | `{ mode?: Enum<'synchronous' \| 'asynchronous' \| 'semi_synchronous'>; maxLagSeconds?: number; includeObjects?: string[]; excludeObjects?: string[] }` | optional | Data replication settings |
-| **testing** | `{ enabled?: boolean; schedule?: string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; notificationChannel?: string }` | optional | Automated disaster recovery testing |
+| **testing** | `{ enabled?: boolean; schedule?: string \| object; notificationChannel?: string }` | optional | Automated disaster recovery testing |
 | **runbookUrl** | `string` | optional | URL to disaster recovery runbook/playbook |
 | **contacts** | `{ name: string; role: string; email?: string; phone?: string }[]` | optional | Emergency contact list for DR incidents |
 

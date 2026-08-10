@@ -6,10 +6,18 @@ import type {
   CreateShareLinkInput,
   ListShareLinksFilter,
   ResolveShareLinkResult,
-  ShareLinkExecutionContext,
   ShareLinkPermission,
   ShareLinkAudience,
 } from '@objectstack/spec/contracts';
+/**
+ * [#6206 / #6430 — maintainer ruling A] Every method here that adjudicates
+ * access takes the FULL envelope. The route-local `ShareLinkExecutionContext`
+ * is the HTTP layer's 401 vocabulary and is deliberately not named in this
+ * file: the contexts this file receives are forwarded into `engine.find`, where
+ * `accessible_org_ids` (ADR-0105 D2), `posture` (ADR-0095 D2), `org_user_ids`,
+ * `systemPermissions` and `tabPermissions` are all read.
+ */
+import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { SharingEngine } from './sharing-service.js';
 import {
   deleteRowsForDeletedRecords,
@@ -194,11 +202,15 @@ export interface ShareLinkServiceOptions {
    * revoke a link someone else minted on their record — not just the link's
    * creator. Absent → only the creator (and system) may revoke, the pre-D8
    * behaviour, so a deployment without the sharing service degrades safely.
+   *
+   * [#6206] An ENFORCEMENT probe — it decides a 403, and resolves ownership /
+   * hierarchy scope under the context it is given — so it receives the caller's
+   * COMPLETE envelope, exactly like the visibility read in `createLink`.
    */
   canManageShares?: (
     object: string,
     recordId: string,
-    context: ShareLinkExecutionContext,
+    context: ExecutionContext,
   ) => Promise<boolean>;
   /** [#5190] Optional logger for the record-delete cascade / orphan sweep. */
   logger?: { info?: Function; warn?: Function; error?: Function; debug?: Function };
@@ -221,7 +233,7 @@ export class ShareLinkService implements IShareLinkService {
   private readonly canManageShares?: (
     object: string,
     recordId: string,
-    context: ShareLinkExecutionContext,
+    context: ExecutionContext,
   ) => Promise<boolean>;
   private readonly logger?: ShareLinkServiceOptions['logger'];
 
@@ -236,7 +248,7 @@ export class ShareLinkService implements IShareLinkService {
 
   async createLink(
     input: CreateShareLinkInput,
-    context: ShareLinkExecutionContext,
+    context: ExecutionContext,
   ): Promise<ShareLink> {
     if (!input.object) throw makeError(400, 'VALIDATION_FAILED', 'object is required');
     if (!input.recordId) throw makeError(400, 'VALIDATION_FAILED', 'recordId is required');
@@ -285,6 +297,14 @@ export class ShareLinkService implements IShareLinkService {
     // record you can access; a client can no longer share arbitrary rows of a
     // publicSharing-enabled object it cannot see. Internal (isSystem) callers
     // read under the system context as before.
+    //
+    // [#6206] `context` is passed through UNCHANGED — it is the caller's whole
+    // resolved envelope and every dimension of it is an input to this read:
+    // Layer 0 reads `accessible_org_ids` under the `group` posture (ADR-0105
+    // D2, where an absent set denies), Layer 1 reads positions / permissions /
+    // `org_user_ids`, and `posture` travels with the context rather than being
+    // re-derived here (ADR-0095 D2). Rebuilding a subset at this seam is what
+    // made this check answer 403 for every `group`-posture caller.
     const exists = await this.engine.find(input.object, {
       where: { id: input.recordId },
       fields: ['id'],
@@ -329,7 +349,7 @@ export class ShareLinkService implements IShareLinkService {
     return row;
   }
 
-  async revokeLink(idOrToken: string, context: ShareLinkExecutionContext): Promise<void> {
+  async revokeLink(idOrToken: string, context: ExecutionContext): Promise<void> {
     if (!idOrToken) throw makeError(400, 'VALIDATION_FAILED', 'id or token is required');
     const filter = idOrToken.startsWith('shl_') ? { id: idOrToken } : { token: idOrToken };
     const rows = await this.engine.find('sys_share_link', {
@@ -369,7 +389,7 @@ export class ShareLinkService implements IShareLinkService {
 
   async listLinks(
     filter: ListShareLinksFilter,
-    context: ShareLinkExecutionContext,
+    context: ExecutionContext,
   ): Promise<ShareLink[]> {
     const where: Record<string, unknown> = {};
     if (filter.object) where.object_name = filter.object;

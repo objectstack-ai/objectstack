@@ -281,15 +281,76 @@ function schemaHrefFrom(fromCategory: string): (name: string) => string | null {
 
 
 /**
+ * Every page this run publishes: `category` -> page slug -> the schemas that
+ * page documents.
+ *
+ * Grouped ONCE and read twice — by §2 below, which emits the pages, and by
+ * `sourcePathToDocsRoute`, which has to answer "is there a page for this file?"
+ * while §2 is still part-way through the categories. Neither of the two obvious
+ * shortcuts can answer it: asking the sink (`wasEmitted`) makes the reply depend
+ * on which category the walk reached first, and asking the disk makes a run's
+ * output depend on the previous run's, so a deleted page would keep resolving
+ * until someone regenerated twice.
+ */
+function groupSchemasByPage(): Map<string, Map<string, Array<{ name: string; content: any }>>> {
+  const byCategory = new Map<string, Map<string, Array<{ name: string; content: any }>>>();
+
+  for (const category of Object.keys(CATEGORIES)) {
+    const categorySchemaDir = path.join(SCHEMA_DIR, category);
+    if (!fs.existsSync(categorySchemaDir)) {
+      console.log(`Warning: Schema directory ${categorySchemaDir} does not exist`);
+      continue;
+    }
+
+    const pages = new Map<string, Array<{ name: string; content: any }>>();
+    for (const file of fs.readdirSync(categorySchemaDir).filter(f => f.endsWith('.json'))) {
+      const schemaName = file.replace('.json', '');
+      const content = JSON.parse(fs.readFileSync(path.join(categorySchemaDir, file), 'utf-8'));
+      // Category-scoped: the page is owned by the file in THIS category that puts
+      // the name on its export surface — declaration or re-export. `misc` stays
+      // the catch-all for a published schema no `.zod.ts` here accounts for
+      // (`security/*` declares two in plain `.ts` files), and it is honest about
+      // it: `sourcePathFor` finds no file, so the page prints no "Source:" line.
+      const zodFile = schemaIndex.pageFor(category, schemaName) || 'misc';
+
+      if (!pages.has(zodFile)) pages.set(zodFile, []);
+      pages.get(zodFile)!.push({ name: schemaName, content });
+    }
+
+    byCategory.set(category, pages);
+  }
+
+  return byCategory;
+}
+
+/**
  * Rewrite a source path referenced from JSDoc (`../automation/sync.zod.ts`) to
  * the docs route that renders it. Without this the generated page links to a
  * path that only exists in the repo, i.e. a 404 on the site.
+ *
+ * Always given a path WITH a category segment: `lib/file-description.ts`
+ * completes a same-directory spelling from its `fromCategory` before calling in,
+ * precisely so this stays the `<category>/<file>` lookup #4696 settled on and
+ * never has to guess which `auth.zod.ts` an author meant.
  */
 function sourcePathToDocsRoute(target: string): string | null {
   const m = target.match(/(?:^|\/)([\w-]+)\/([\w.-]+)\.zod\.ts$/);
   if (!m) return null;
   const [, category, zodFile] = m;
   if (!CATEGORIES[category]) return null;
+  // A real category is not yet a page. This used to be the whole test, which
+  // was survivable only because every path the old regex could match happened
+  // to name a file with a page behind it. #6484 widened what reaches here to
+  // include same-directory spellings, and FOUR of the nine name a neighbour
+  // that does not exist at all — `identity/auth`, `system/audit`,
+  // `system/compliance`, `system/masking`, all four long since removed. Under
+  // the old test each would have become a confident link to a 404 (measured:
+  // deleting this line puts exactly those four dead routes into the artifact).
+  //
+  // File existence is not the test either: seven `.zod.ts` sources publish no
+  // page at all, their schemas being unrepresentable in JSON Schema. The test
+  // is whether THIS run emits the page, which is what the map knows.
+  if (!PAGES_BY_CATEGORY.get(category)?.has(zodFile)) return null;
   return `/docs/references/${category}/${zodFile}`;
 }
 
@@ -420,7 +481,14 @@ function generateZodFileMarkdown(zodFile: string, schemas: Array<{name: string, 
   const sourcePath = sourceRel ? path.join(REPO_ROOT, sourceRel) : undefined;
   let fileDesc = '';
   if (sourcePath && fs.existsSync(sourcePath)) {
-      fileDesc = renderFileDescription(fs.readFileSync(sourcePath, 'utf-8'), { sourcePathToDocsRoute });
+      // `category` is what a path written relative to the module's own
+      // directory is relative TO — without it the renderer cannot tell which
+      // `auth.zod.ts` a neighbour reference means, and until #6484 it was never
+      // told, so those references shipped as plain prose.
+      fileDesc = renderFileDescription(fs.readFileSync(sourcePath, 'utf-8'), {
+        fromCategory: category,
+        sourcePathToDocsRoute,
+      });
   }
 
   let md = `---\n`;
@@ -507,7 +575,11 @@ const SECTION_GROUPS: Record<string, Array<{ section: string; pages: string[] }>
   ],
   automation: [
     { section: 'Flow & Execution', pages: ['flow', 'control-flow', 'execution', 'node-executor', 'state-machine', 'time-relative-trigger'] },
-    { section: 'Integration & Data', pages: ['sync', 'etl', 'connector', 'webhook', 'bpmn-interop', 'offline'] },
+    // `sync` (#4738, L1) and `etl` (#6414, L2) are both retired; `offline` went
+    // with `ui/offline.zod.ts` (#4988). `buildCategoryPages` filters by what was
+    // emitted, so leaving a dead name here is silently harmless — which is why
+    // each is removed deliberately instead.
+    { section: 'Integration & Data', pages: ['connector', 'webhook', 'bpmn-interop'] },
     { section: 'Approvals & Jobs', pages: ['approval', 'job'] },
   ],
   cloud: [
@@ -699,6 +771,15 @@ function deadDocLinks(mdx: string): string[] {
 
 console.log('Building documentation...');
 
+/**
+ * The page inventory, built before anything is rendered.
+ *
+ * It has to exist before the first `renderFileDescription` call, because that
+ * is where `sourcePathToDocsRoute` is asked whether a referenced neighbour has
+ * a page — an answer no partially-filled sink could give.
+ */
+const PAGES_BY_CATEGORY = groupSchemasByPage();
+
 /** Categories that had schemas to regenerate from — drives the flush() guard. */
 let managedCount = 0;
 
@@ -734,34 +815,11 @@ if (fs.existsSync(DOCS_ROOT)) {
     // But verify we don't kill the manual files.
 }
 
-Object.keys(CATEGORIES).forEach(category => {
-  const categorySchemaDir = path.join(SCHEMA_DIR, category);
-  
-  if (!fs.existsSync(categorySchemaDir)) {
-    console.log(`Warning: Schema directory ${categorySchemaDir} does not exist`);
-    return;
-  }
-  
-  const files = fs.readdirSync(categorySchemaDir).filter(f => f.endsWith('.json'));
-  const zodFileSchemas = new Map<string, Array<{name: string, content: any}>>();
-  
-  files.forEach(file => {
-    const schemaName = file.replace('.json', '');
-    const schemaPath = path.join(categorySchemaDir, file);
-    const content = JSON.parse(fs.readFileSync(schemaPath, 'utf-8'));
-    // Category-scoped: the page is owned by the file in THIS category that puts
-    // the name on its export surface — declaration or re-export. `misc` stays
-    // the catch-all for a published schema no `.zod.ts` here accounts for
-    // (`security/*` declares two in plain `.ts` files), and it is honest about
-    // it: `sourcePathFor` finds no file, so the page prints no "Source:" line.
-    const zodFile = schemaIndex.pageFor(category, schemaName) || 'misc';
-    
-    if (!zodFileSchemas.has(zodFile)) {
-      zodFileSchemas.set(zodFile, []);
-    }
-    zodFileSchemas.get(zodFile)!.push({ name: schemaName, content });
-  });
-  
+// The grouping is `PAGES_BY_CATEGORY`'s, not a second one computed here: the
+// page a schema lands on decides both what this loop writes and what
+// `sourcePathToDocsRoute` calls a live route, and two enumerations of that could
+// disagree — the same discipline §2.6 already applies to the root index.
+PAGES_BY_CATEGORY.forEach((zodFileSchemas, category) => {
   const categoryDir = path.join(DOCS_ROOT, category);
 
   // Generate file

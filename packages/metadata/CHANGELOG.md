@@ -1,5 +1,516 @@
 # @objectstack/metadata
 
+## 17.0.0-rc.6
+
+### Major Changes
+
+- 9960cd2: fix(metadata): remove the second, stale-keyed producer of `idx_sys_metadata_overlay_active` (#6771)
+
+  **Breaking:** `addSysMetadataOverlayIndex` and its `AddSysMetadataOverlayIndexResult`
+  type are removed from `@objectstack/metadata/migrations`. Nothing needs to replace
+  them — see below.
+
+  One index name, `idx_sys_metadata_overlay_active`, had **two** producers with
+  **different** keys:
+
+  | producer                                                                 | key                                                                                |
+  | ------------------------------------------------------------------------ | ---------------------------------------------------------------------------------- |
+  | `metadata-protocol`'s `ensureMetadataOverlayIndexes` (runtime, ADR-0048) | `(type, name, organization_id, COALESCE(package_id, ''))` `WHERE state = 'active'` |
+  | this package's `addSysMetadataOverlayIndex`                              | `(type, name, organization_id, environment_id, scope)`                             |
+
+  The second key is the pre-ADR-0048 one. `environment_id` has been retired since
+  ADR-0005 (2026-05 revision) — `saveMetaItem` no longer writes it and overlay reads
+  never consult it, so it is NULL on every new row, and SQL UNIQUE treats NULLs as
+  DISTINCT. `scope` is not part of the current discriminator at all. Both producers
+  used `IF NOT EXISTS`, so whichever ran first claimed the name and the other
+  silently became a no-op — decided by boot order, not by any declaration.
+
+  Measured against real SQLite before removal:
+
+  - On a normal `DatabaseLoader` boot the stored DDL is
+    `` CREATE UNIQUE INDEX `idx_sys_metadata_overlay_active` on `sys_metadata` (`type`, `name`, `organization_id`, `package_id`) `` —
+    the **declared** index from `metadata-core`'s `sys-metadata.object.ts`, materialized
+    by `SqlDriver.syncDeclaredIndexes`, already holds the name with the current key.
+    `addSysMetadataOverlayIndex` therefore changed nothing, while still returning
+    `status: 'created'`.
+  - In the one window where it was _not_ a no-op — the table present but its declared
+    indexes not yet materialized, which the engine path hits by construction because
+    ObjectQL's startup owns the sync — it installed the **retired** key. Since
+    `syncDeclaredIndexes` skips by name, nothing ever repaired it afterwards, and
+    overlay uniqueness was left unenforced on every new row.
+
+  So the function could only ever do nothing or do harm. Overlay uniqueness keeps the
+  two producers that are correctly keyed and deliberate: the runtime partial,
+  NULL-safe index from `metadata-protocol`, and — for stacks assembled without it —
+  the coarser unrestricted UNIQUE that the declaration in `metadata-core` materializes,
+  exactly as that file documents.
+
+  Both call sites in `DatabaseLoader.ensureSchema()` are gone with it, and the empty
+  `catch` that surrounded the engine-path one now reports per the ADR-0120 D4 shape
+  (name what did not happen, point at the fix, never block the boot) instead of
+  swallowing driver-resolution failures.
+
+  **Migration:** if you called `addSysMetadataOverlayIndex(driver)` directly, delete
+  the call. Assemble `metadata-protocol` for the partial, active-scoped index, or rely
+  on the declared index that `syncSchema` already builds.
+
+  <!-- adr-0087: not-required (no-migration-prescription) what is removed is a TypeScript function export, not an authored metadata surface: no metadata key, no key spelling and no stored value moves, so `objectstack migrate meta` has nothing to rewrite and the ledger has no upgrader to reach. The index itself is unchanged in the only spelling that ever reached a database from a correct producer. Measured: the export had zero call sites outside its own package across objectstack, cloud and objectui. -->
+
+### Patch Changes
+
+- 55da611: fix(metadata,objectql): stop restating the object name inside driver queries — and stop casting away the query's type to do it (#6231)
+
+  `DriverQuery` (`Omit<QueryAST, 'object'>`) landed in #6076 and five drivers
+  followed in #6075, but five **call sites** stayed as they were, because they
+  were hidden behind a cast where the compiler could not see them. This removes
+  the redundant key at all five and, with it, the casts that existed only to
+  carry it.
+
+  The redundant key was never the expensive half. `git grep 'query\.object' --
+'packages/drivers/*/src'` is zero: no driver reads it, so the key itself was
+  inert. **The cast was the cost.** `as any` on a query argument does not
+  suppress one key — it switches off checking for `where`, `orderBy` and
+  `fields` as well, which is precisely the account #5181's changeset opened
+  (cloud#1053 measured 20 such sites; cloud#1030's `$like` — an operator the
+  filter dialect does not have — survived compilation and reached the runtime
+  through exactly this hole). `packages/metadata`'s `DatabaseLoader` is the
+  main metadata read path, so it was the worst place to be running unchecked.
+
+  The five sites:
+
+  - `metadata` `DatabaseLoader._find` / `._findOne` / `._count` — each was
+    `driver.find(table, { object: table, ...query } as any)`. The helpers now
+    declare `query: DriverQuery` and hand it to the driver unchanged and uncast,
+    so all nine of their call sites' `where` / `orderBy` / `fields` are checked
+    again.
+  - `objectql` `ObjectQL.resolveSecret` — the `sys_secret` read was
+    `{ object: 'sys_secret', where: { id } } as QueryAST`, where the cast existed
+    only to satisfy the AST's then-required `object`. Both are gone.
+  - `objectql` `LifecycleService` governance counter — `count(obj.name,
+{ object: obj.name })` carried no cast; it was admitted by a hand-written
+    driver shape whose `query` was `Record<string, unknown>`, which would equally
+    have admitted a `where` the dialect does not have. That shape is now the named
+    `CountCapableDriver` typed with `DriverQuery`, and the call passes argument
+    one only.
+
+  No behaviour changes: the key was inert on every path, and the object name has
+  always travelled as the driver methods' first argument. What changes is that
+  these call sites are type-checked again, and that re-adding the key is now a
+  compile error (`TS2353`) rather than something a cast quietly absorbs.
+
+- 8b06bba: fix(spec): `EngineQueryOptionsSchema.search` accepts the bare query string ADR-0061 D1 calls canonical (#7178)
+
+  Two sibling schemas in `packages/spec` described the same key and disagreed.
+  `BaseQuerySchema.search` (`query.zod.ts`, hence `QueryAST`, hence `DriverQuery`)
+  has been `z.union([z.string(), FullTextSearchSchema])` since its own drift
+  repair, with a doc comment saying why: the bare string **is** the canonical
+  Tier-1 contract (ADR-0061 D1 — "the client sends only the query text; the server
+  resolves which fields to search from object metadata"), it is what every surface
+  sends, and it is what the dogfood HTTP proof pins.
+  `EngineQueryOptionsSchema.search` — the options type of `IDataEngine.find` /
+  `findOne` — declared the structured `FullTextSearchSchema` **only**.
+
+  The runtime never agreed with that narrowing. `expandSearchOnAst`
+  (`objectql/src/engine.ts`) reads `search` through `normalizeSearch`, whose first
+  line is `if (typeof raw === 'string') return { query: raw }`, and
+  `protocol-data.test.ts` asserts the protocol layer hands the engine a bare
+  string. So the type forbade what the engine serves, and callers paid the
+  standard price: `as any` on the query argument — which does not suppress
+  `search` alone, it switches off checking for `where` / `orderBy` / `fields` in
+  the same literal. Since this schema is not `.strict()`, an unknown key there is
+  **silently dropped**, so the cast this divergence forced was precisely the cast
+  `check:query-options-erasure` exists to stop.
+
+  This is the same-family drift REPAIR, not a new dialect — the identical fix
+  `BaseQuerySchema.search` already carries, for the identical reason. On the query
+  side the divergence surfaced as a validation failure the moment #3899 started
+  validating request bodies; here it surfaced as a type error, when #6231 retyped
+  `DatabaseLoader`'s read helpers to `DriverQuery` and the **engine** branch alone
+  refused to compile (TS2345 — `DriverQuery` not assignable to
+  `EngineQueryOptionsParsed`, purely because of `search`; nothing else differs).
+
+  Consumer census before landing, per the card's own guard: every site that reads
+  object-form members off an engine-options `search` already narrows with `typeof`
+  — `engine.ts` (`typeof raw === 'object' ? raw?.fields : undefined`),
+  `search-filter.ts` `normalizeSearch`, and `metadata-protocol/protocol.ts`'s
+  `searchFields` ingress gate. No consumer needed a guard added, and none changes
+  behavior: they were all written for the union already. `count` is untouched —
+  `EngineCountOptionsSchema` declares no `search` key at all.
+
+  With the schemas agreed, the casts the divergence forced are deleted:
+  `DatabaseLoader`'s three engine-branch `as any` (`_find` / `_findOne` /
+  `_count`), which restores real `where` / `orderBy` / `fields` checking on the
+  metadata main read path, and the seven `as any` in
+  `engine-findone-contract.test.ts` that were passing the canonical spelling.
+  `scripts/query-options-erasure-baseline.json` is ratcheted down accordingly.
+
+- 7c6261a: refactor(metadata): peel the stored envelope before an `api` row is parsed as an endpoint (#5309)
+
+  Internal refactor — no authored format changes, no observable acceptance change
+  for the shapes the platform stores today.
+
+  A metadata _type name_ is worn by two different documents: the **authored
+  declaration** (exactly its spec vocabulary) and the **stored row** (that
+  declaration plus the metadata layer's own bookkeeping — `packageId`, `state`,
+  `version`, `publishedDefinition`, `publishedAt`, `publishedBy`, written by
+  `MetadataManager.register` / `publishPackage` and read back by `publishPackage`'s
+  package filter). Both `ApiEndpointSchema` parse sites — `buildEndpointIndex` (the
+  load-time backstop) and `gateApiItemsForPublish` (the publish gate) — used to hand
+  the whole stored row to the schema, and only its unknown-key _stripping_ kept the
+  bookkeeping from being judged as endpoint vocabulary.
+
+  `peelStoredEnvelope` (`packages/metadata/src/stored-envelope.ts`) now takes the
+  envelope off first, so the schema sees the authored body and nothing else:
+
+  - a row carrying a `metadata` value IS an envelope around it — the body is that
+    value, everything beside it is bookkeeping. This is the `data.metadata ?? data`
+    rule the publish gate, `publishedDefinition` and `getPublished` already shared;
+  - otherwise the body is the row minus the declared bookkeeping keys.
+
+  The peel returns views and never mutates the row, so every existing envelope
+  reader (`publishPackage`'s `packageId` filter, `query`'s `state` / `packageId`
+  filters, `revertPackage`) is untouched, and `publishedDefinition` still snapshots
+  `data.metadata ?? data` verbatim.
+
+  One consequence worth naming: `buildEndpointIndex` was the last reader that did
+  NOT follow the layer's body-selection rule, so a publish envelope
+  (`{ name, packageId, state, metadata: {…} }`) used to pass the publish gate and
+  then be excluded from the endpoint index — its route answered 404. The two doors
+  now read the same document.
+
+  This is the prerequisite for tightening `ApiEndpointSchema` (#5384): with the
+  schema flipped to `strictObject` locally, `packages/metadata` went from 11 failing
+  tests to 1, and the one left is an authored non-vocabulary key being refused by
+  name — which is what that tightening is for.
+
+- 1da39f5: fix(metadata): `isMissingTableError` no longer reads Postgres' write-path missing-COLUMN message as a missing TABLE (#6347)
+
+  `isMissingTableError` is the single predicate that licenses a caller to treat a
+  failed read as "the table is not provisioned yet, so there are genuinely no
+  rows". Its own docblock names `column "x" does not exist` (SQLSTATE 42703) as a
+  real failure that must stay loud — "a case where 'start numbering at 1' would be
+  the wrong answer against a table that may be full of rows" — and the code did
+  not honour that, in one direction only.
+
+  Postgres has **two** missing-column phrasings:
+
+  | path                              | message                                                | judged                        |
+  | :-------------------------------- | :----------------------------------------------------- | :---------------------------- |
+  | read (`SELECT`)                   | `column "bogus" does not exist`                        | correctly NOT a missing table |
+  | write (`INSERT`/`UPDATE`/`ALTER`) | `column "label" of relation "sys_team" does not exist` | **wrongly** a missing table   |
+
+  The write-path phrase contains a complete, legal missing-table phrase —
+  `relation "sys_team" does not exist` — as a substring, so the table-scoped
+  message test matched it. The code channel did not rescue it either: the matcher
+  is a sequential OR, so an error carrying `code: '42703'` falls past both code
+  lines and is decided by its message. The same superstring covers every other
+  sub-object of a relation Postgres phrases this way, e.g.
+  `constraint "uq_x" of relation "sys_team" does not exist` (42704).
+
+  A message regex can never exclude a superstring, so the repair is a
+  **front-exclusion** evaluated before any positive test: the column-level
+  SQLSTATEs the docblock already names (`42703`, `42704`, `3D000`) and the
+  `"x" of relation "y"` sub-object phrasing. Recognising one ends the question
+  with `false` — it does not descend into `cause`, because an error that
+  identifies as "a column of an existing relation" is that error whatever it
+  wraps.
+
+  What changes for you: a driver error of that shape now propagates instead of
+  being silenced. Every consumer of the predicate is affected the same way, and
+  all of them get louder rather than quieter — `DatabaseLoader.nextEventSeq` and
+  `SysMetadataRepository`'s history counters no longer restart `event_seq` at 1,
+  `ObjectQLEngine`'s autonumber seed no longer reseeds from 0, and the metadata
+  loaders no longer answer "nothing declared". The set of errors judged benign
+  shrinks; nothing that was loud becomes quiet. Genuine missing-table detection is
+  unchanged for PostgreSQL, MySQL/MariaDB and the SQLite family.
+
+- 91cefb8: refactor(types,rest,metadata,analytics): Postgres 的 `"x" of relation "y"` 短语收归一处，三个包不再各修一遍同一个超串洞（#6615）
+
+  Postgres 把「关系内部某个子对象」的失败写成 `column "label" of relation "sys_team" does not exist`——里面**逐字包含**一句合法的「表不存在」短语 `relation "sys_team" does not exist`，含义却相反：关系正因为存在才被点名。任何对「这句话是不是在说表没了」的正则收紧都消不掉这个匹配，短语确实在里面；唯一的修法是**先问更具体的问题**。所以修的是**顺序**，不是模式。
+
+  正因为如此，这个短语被分三次教给了这个仓库，分属三个包、三个 PR，其中两次是在别处已经踩过同一个洞之后：`@objectstack/rest` 的 `mapDataError`（#5352）、`@objectstack/service-analytics` 的缺列扣除（#6035 / PR #6346）、`@objectstack/metadata` 的 `MISSING_TABLE.excludes`（#6347 / PR #6613）。本次把它收进 `@objectstack/types`，与 `isUniqueViolationError`（#6250）和 `isModuleNotFoundError`（framework#3265）同一个理由与同一个位置。
+
+  **两种宽度，故意保留成两个导出。** 三个消费者要的并不是同一条正则，差别也不是随手写的，而是**每个站点哪个方向的误差是安全的**：
+
+  - `matchMissingColumnOfRelation(message)` —— 严格提取器，锚定 Postgres 的 errmsg 模板 `column "%s" of relation "%s" does not exist`，返回列名。`rest` 用它把 42703 答成 `400 INVALID_FIELD` 而不是 `404`；`service-analytics` 用它在分类前扣除缺列。这两处**过宽**会把真正缺失的表变成硬失败、回退 #5033 刻意保留的宽容，**漏匹配**只是让消息含糊一点——所以必须严格。
+  - `isRelationSubObjectPhrase(message)` —— 宽检测器，丢掉 `column` / `[a-z0-9_]+` / `does not exist` 三个锚点：任意子对象、任意带引号标识符、任意判词。`metadata` 用它做排除。这一处**过宽**只会把良性判定变成响亮判定，**漏匹配**却会让 `event_seq` 从 1 重新开始、撞进一张已有行的历史表——方向正好相反。
+
+  把两者合并成一条正则，无论哪种宽度胜出都会对其中一个调用方是错的；这是卡片记录在案的风险，两个导出即为此而设，理由是承重的而非风格的。仓库里第四份拷贝（`service-analytics` 测试内用于守护 fixture 的那条正则）同时收编：它本是为「两张面孔别对不上」而写，却把断言打在其中一面的私有复述上，因而正是它要防的漂移。
+
+  行为逐字保持不变：搬进来的两条模式与原站点逐字节相同。`@objectstack/service-analytics` 因此新增一条对 `@objectstack/types` 的依赖边——这是本次唯一的依赖变化，构造上无环（`@objectstack/types` 只依赖 `@objectstack/spec`，后者无仓内依赖），且仓库 73 个包中已有 25 个、16 个 service 中已有 5 个携带同一条边。
+
+- 3de535b: fix(metadata,repo): every enumeration of the stack-collection set is now answerable to `stack.zod.ts`, and the artifact map stops aiming `data:` at the analytics kind (#6242)
+
+  `ObjectStackDefinitionSchema` decides which collections a stack may declare — 32
+  of them today. **Seven** other places re-enumerate that same set by hand (eight
+  enumerations in all, because ObjectQL declares its list twice), and nothing
+  compared any of them to the schema or to each other:
+
+  | Enumeration                                   | Site                                                  |
+  | --------------------------------------------- | ----------------------------------------------------- |
+  | `MAP_SUPPORTED_FIELDS` / `PLURAL_TO_SINGULAR` | `packages/spec/src/shared/metadata-collection.zod.ts` |
+  | `MetadataCategoryEnum`                        | `packages/spec/src/kernel/package-artifact.zod.ts`    |
+  | `metadataArrayKeys` ×2                        | `packages/objectql/src/engine.ts`                     |
+  | `ARTIFACT_FIELD_TO_TYPE`                      | `packages/metadata/src/plugin.ts`                     |
+  | `APP_CATEGORY_KEYS`                           | `packages/runtime/src/app-plugin.ts`                  |
+  | `STACK_COLLECTION_COVERAGE`                   | `examples/app-showcase/src/coverage.ts`               |
+
+  They had drifted independently: `ragPipelines` mapped in three of them though no
+  schema declares it; `workflows` / `approvals` / `roles` / `profiles` / `policies`
+  still iterated by both ObjectQL loops after ADR-0019 / ADR-0020 / ADR-0088 /
+  ADR-0090 retired them; `triggers` + `workflows` still legal artifact categories;
+  19 of 32 collections absent from that enum.
+
+  Every row looks like a one-line typo in isolation, and each **has** been fixed
+  one line at a time before — `docs` in `ARTIFACT_FIELD_TO_TYPE`, `roles` →
+  `positions` in the same map, `capabilities` in `metadataArrayKeys` — each still
+  carrying its "this key was missing and it silently dropped X" comment. The cause
+  is structural: `KIND_COVERAGE` is answerable to the metadata-type registry and
+  fails CI when a kind is added without an entry, and the liveness ledger is
+  answerable to the same registry. The collection maps were answerable to nothing.
+
+  **The gate.** `pnpm check:stack-collection-maps` (root
+  `scripts/check-stack-collection-maps.mjs`, wired into the lint job) derives the
+  collection set from `ObjectStackDefinitionSchema` — top-level keys whose value is
+  `z.array(<X>Schema)`, a mechanical rule rather than a second hand-kept list — and
+  reconciles all eight enumerations against it in **both** directions. Deriving them
+  is not possible today (they disagree on purpose as often as by accident: `views`
+  has no `name`, `data` seeds key by `object`, `translations` is a record), so each
+  deviation must instead be a waiver row **carrying its reason**, and the list is a
+  ratchet: a waiver that no longer applies fails, like a stale ledger row. An
+  enumeration whose symbol cannot be extracted fails too — an empty list would
+  reconcile against everything.
+
+  Writing it immediately found a **seventh** site the hand-audit had missed
+  (`APP_CATEGORY_KEYS`) and one divergence _between_ the two ObjectQL copies that
+  neither list shows alone: `jobs`, `emailTemplates`, `tools` and `skills` are
+  registered from a manifest and **not** from a nested plugin, so a package
+  shipping them from a nested plugin registers nothing and stamps no ADR-0010
+  provenance. `capabilities` was added to that copy for exactly this reason
+  (#5870); nobody then asked what else the two lists disagreed about. Recorded as
+  a waiver with the measurement, not fixed here — closing it changes what a nested
+  plugin registers at boot.
+
+  **The one code change**: `ARTIFACT_FIELD_TO_TYPE` no longer maps `data:` (the
+  SEED collection) to `'dataset'` (the ADR-0021 analytics kind) — the exact name
+  collision `metadata-plugin.zod.ts` warns about in prose. The entry was provably
+  inert (`SeedSchema` declares no `name`, and the ingest loop skips nameless
+  items), so nothing changes at runtime; what changes is that a dead pointer aimed
+  at the wrong kind is gone, instead of waiting for either side to move. Not
+  repointed at `'seed'`: seeds are applied by `SeedLoaderService` off the bundle,
+  never registered as metadata items, so that would be new behaviour rather than a
+  corrected name. The absence is now pinned by the gate.
+
+  Everything else the gate reports is recorded as a waiver with its reason and left
+  alone, deliberately — three of the drift rows sit on **acceptance faces**
+  (`MetadataCategoryEnum` decides what a published artifact may declare) and the
+  rest are `engine-core` behaviour changes owing their own verification. The value
+  landing today is that all eight enumerations now have a checked relationship to
+  the schema rather than an assumed one.
+
+- Updated dependencies [3d5c090]
+- Updated dependencies [e5bd768]
+- Updated dependencies [e027b3e]
+- Updated dependencies [c2429b0]
+- Updated dependencies [445a0c2]
+- Updated dependencies [f6609e6]
+- Updated dependencies [a70358a]
+- Updated dependencies [97e7e3c]
+- Updated dependencies [8828b9e]
+- Updated dependencies [53068c1]
+- Updated dependencies [ee58392]
+- Updated dependencies [f16e54e]
+- Updated dependencies [06be54e]
+- Updated dependencies [259459d]
+- Updated dependencies [3f7f14e]
+- Updated dependencies [6968885]
+- Updated dependencies [eaed61f]
+- Updated dependencies [debe2f6]
+- Updated dependencies [97b0798]
+- Updated dependencies [5fa04fb]
+- Updated dependencies [43a7a8d]
+- Updated dependencies [73f69dc]
+- Updated dependencies [04c56aa]
+- Updated dependencies [b3efeb7]
+- Updated dependencies [ddd075a]
+- Updated dependencies [88154be]
+- Updated dependencies [e8dc61e]
+- Updated dependencies [2f3e793]
+- Updated dependencies [d8e8d9c]
+- Updated dependencies [94e749b]
+- Updated dependencies [ea1d916]
+- Updated dependencies [ae31a19]
+- Updated dependencies [e0f300b]
+- Updated dependencies [62b6a2f]
+- Updated dependencies [5b4780b]
+- Updated dependencies [a933452]
+- Updated dependencies [8140915]
+- Updated dependencies [7b48cf9]
+- Updated dependencies [b5404f4]
+- Updated dependencies [f764691]
+- Updated dependencies [e120a5a]
+- Updated dependencies [e650d67]
+- Updated dependencies [121852d]
+- Updated dependencies [04476e7]
+- Updated dependencies [79228cd]
+- Updated dependencies [b3363e9]
+- Updated dependencies [2ef1807]
+- Updated dependencies [d03fe25]
+- Updated dependencies [2672f85]
+- Updated dependencies [11066f6]
+- Updated dependencies [916af17]
+- Updated dependencies [84c86fb]
+- Updated dependencies [2a2a9fb]
+- Updated dependencies [a2e157c]
+- Updated dependencies [95c4227]
+- Updated dependencies [2a61116]
+- Updated dependencies [d4df105]
+- Updated dependencies [e2798fa]
+- Updated dependencies [0fd8556]
+- Updated dependencies [74155c7]
+- Updated dependencies [6908830]
+- Updated dependencies [8b06bba]
+- Updated dependencies [4c54037]
+- Updated dependencies [0f7157b]
+- Updated dependencies [d9bef45]
+- Updated dependencies [f549a0d]
+- Updated dependencies [82da264]
+- Updated dependencies [f586f1a]
+- Updated dependencies [9b9b70f]
+- Updated dependencies [f5a9bc2]
+- Updated dependencies [881a3cc]
+- Updated dependencies [ad6317b]
+- Updated dependencies [8a88885]
+- Updated dependencies [5f7669e]
+- Updated dependencies [becbe53]
+- Updated dependencies [b127c8b]
+- Updated dependencies [a80302a]
+- Updated dependencies [474f131]
+- Updated dependencies [050cd82]
+- Updated dependencies [4d552af]
+- Updated dependencies [44d677c]
+- Updated dependencies [c32944d]
+- Updated dependencies [1dd780f]
+- Updated dependencies [c8d6f6e]
+- Updated dependencies [a1b66ef]
+- Updated dependencies [92a67f2]
+- Updated dependencies [9136327]
+- Updated dependencies [bf0ae99]
+- Updated dependencies [cb3b6cd]
+- Updated dependencies [73b7234]
+- Updated dependencies [d2b97c3]
+- Updated dependencies [59b794f]
+- Updated dependencies [fc3a36a]
+- Updated dependencies [69787f0]
+- Updated dependencies [5d022a1]
+- Updated dependencies [042b9ee]
+- Updated dependencies [f549a0d]
+- Updated dependencies [a36db28]
+- Updated dependencies [3f8817a]
+- Updated dependencies [a2443e3]
+- Updated dependencies [e1554b1]
+- Updated dependencies [4856789]
+- Updated dependencies [c3f4916]
+- Updated dependencies [33e0385]
+- Updated dependencies [2205363]
+- Updated dependencies [09fe58d]
+- Updated dependencies [d0a5ceb]
+- Updated dependencies [e18a162]
+- Updated dependencies [d6d1a50]
+- Updated dependencies [d127ff0]
+- Updated dependencies [9b86cf6]
+- Updated dependencies [8825a06]
+- Updated dependencies [5087ac6]
+- Updated dependencies [2d1ddf0]
+- Updated dependencies [354b00f]
+- Updated dependencies [3de535b]
+- Updated dependencies [fe2e15a]
+- Updated dependencies [c6b6bb4]
+- Updated dependencies [59c544d]
+- Updated dependencies [2f59da0]
+- Updated dependencies [5e247fd]
+- Updated dependencies [1a53a02]
+- Updated dependencies [ab07b53]
+- Updated dependencies [a954634]
+- Updated dependencies [8ad609c]
+- Updated dependencies [bbee302]
+- Updated dependencies [08863dd]
+- Updated dependencies [56664f5]
+- Updated dependencies [31cbe90]
+- Updated dependencies [90bbf25]
+- Updated dependencies [eb91eba]
+- Updated dependencies [42da73d]
+- Updated dependencies [643b7c7]
+- Updated dependencies [d0d5205]
+- Updated dependencies [1a15893]
+- Updated dependencies [b70e534]
+- Updated dependencies [2233a85]
+- Updated dependencies [62dd69a]
+- Updated dependencies [e15e679]
+- Updated dependencies [2ab1257]
+- Updated dependencies [4cc4fb7]
+- Updated dependencies [28d1eb7]
+- Updated dependencies [2c26040]
+- Updated dependencies [f758cec]
+- Updated dependencies [684ab22]
+- Updated dependencies [78f0be8]
+- Updated dependencies [35f7fb4]
+- Updated dependencies [a5302c7]
+- Updated dependencies [7084313]
+- Updated dependencies [91cefb8]
+- Updated dependencies [0e043d8]
+- Updated dependencies [dadd1ad]
+- Updated dependencies [2f2e63c]
+- Updated dependencies [486d526]
+- Updated dependencies [89d7b35]
+- Updated dependencies [85ec26d]
+- Updated dependencies [f6476fc]
+- Updated dependencies [4ac12ef]
+- Updated dependencies [b88f5e8]
+- Updated dependencies [42cc219]
+- Updated dependencies [d42a92f]
+- Updated dependencies [51d74ad]
+- Updated dependencies [d7e0b42]
+- Updated dependencies [3510e4a]
+- Updated dependencies [aa4b90d]
+- Updated dependencies [54299ca]
+- Updated dependencies [dc61def]
+- Updated dependencies [251e888]
+- Updated dependencies [183b4c4]
+- Updated dependencies [2fdb36e]
+- Updated dependencies [e787608]
+- Updated dependencies [20526f5]
+- Updated dependencies [c5eef1d]
+- Updated dependencies [e0f300b]
+- Updated dependencies [761a0ba]
+- Updated dependencies [61282f9]
+- Updated dependencies [be87153]
+- Updated dependencies [60f0dd8]
+- Updated dependencies [a87c5cd]
+- Updated dependencies [a47f338]
+- Updated dependencies [2598216]
+- Updated dependencies [2c7e62d]
+- Updated dependencies [eb7613c]
+- Updated dependencies [ecc9110]
+- Updated dependencies [f7bd4e2]
+- Updated dependencies [361bd5b]
+- Updated dependencies [129b378]
+- Updated dependencies [88f9d94]
+- Updated dependencies [1818998]
+- Updated dependencies [3d4c545]
+- Updated dependencies [bb7cb41]
+- Updated dependencies [09ee21c]
+- Updated dependencies [f549a0d]
+- Updated dependencies [3fc2e48]
+- Updated dependencies [e8f435c]
+- Updated dependencies [41610f6]
+  - @objectstack/spec@17.0.0-rc.6
+  - @objectstack/platform-objects@17.0.0-rc.6
+  - @objectstack/metadata-core@17.0.0-rc.6
+  - @objectstack/core@17.0.0-rc.6
+  - @objectstack/metadata-fs@17.0.0-rc.6
+  - @objectstack/types@17.0.0-rc.6
+
 ## 17.0.0-rc.5
 
 ### Patch Changes

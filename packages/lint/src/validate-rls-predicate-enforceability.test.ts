@@ -1,12 +1,13 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { describe, it, expect } from 'vitest';
-import { isSupportedRlsExpression } from '@objectstack/formula';
+import { describe, it, expect, afterEach } from 'vitest';
+import { isSupportedRlsExpression, setCelPushdownLimitsModeForTests } from '@objectstack/formula';
 
 import {
   validateRlsPredicateEnforceability,
   RLS_PREDICATE_UNENFORCEABLE,
   RLS_PREDICATE_UNPARSEABLE,
+  RLS_PREDICATE_OVER_BUDGET,
 } from './validate-rls-predicate-enforceability.js';
 import { AUTHORING_RULES, runAuthoringRules } from './authoring-rules.js';
 
@@ -305,5 +306,204 @@ describe('validateRlsPredicateEnforceability — the verdict IS the RLSCompiler\
     const stack = policyWith('using', 'size(record.tags) > 0');
     expect(runAuthoringRules('lint', { normalized: stack }).map((f) => f.rule))
       .toContain(RLS_PREDICATE_UNENFORCEABLE);
+  });
+});
+
+// ── Over budget is not a dialect mistake (#6778) ─────────────────────
+//
+// The pushdown compiler collapses a `DEFAULT_LIMITS` overrun into
+// `reason: 'parse-error'` deliberately — it is the reason every consumer
+// already routes to its deny path. Correct for the runtime, whose only
+// decision is deny-or-not; wrong for an authoring diagnostic, whose job is to
+// name the edit. Before #6778 an 80-term conjunction — valid, lowerable CEL
+// that is merely too big — was reported under `rls-predicate-unparseable`,
+// whose hint explains SQL-vs-CEL syntax confusion.
+//
+// These cases run at BOTH positions of `cel-pushdown-limits.ts`'s dated GA
+// switch, because the two positions are where the whole question lives: during
+// 17.0.0-rc.x the grace window admits an over-limit predicate and this rule
+// must stay silent; at the v17 GA flip the same predicate is refused and must
+// be told the truth about why.
+
+/** Over one `DEFAULT_LIMITS` bound each, and nothing else wrong with them. */
+const OVER_BUDGET = {
+  maxAstNodes: Array.from({ length: 80 }, (_, i) => `record.f${i} == ${i}`).join(' && '),
+  maxDepth: '('.repeat(40) + 'record.a == 1' + ')'.repeat(40),
+  maxListElements: `record.x in [${Array.from({ length: 100 }, (_, i) => i).join(', ')}]`,
+} as const;
+
+/** Genuinely not CEL — the class `rls-predicate-unparseable` was written for. */
+const NOT_CEL = {
+  'SQL AND': 'a = current_user.id AND b = 1',
+  'a subquery': 'id IN (SELECT id FROM users)',
+  'a stray operator': 'record.stage ==',
+} as const;
+
+describe('validateRlsPredicateEnforceability — a bounds overrun is its own id (#6778)', () => {
+  afterEach(() => {
+    // A suite must not leak a mode into the next file.
+    setCelPushdownLimitsModeForTests('rc-grace')();
+  });
+
+  const atGa = <T>(fn: () => T): T => {
+    const restore = setCelPushdownLimitsModeForTests('fail-closed');
+    try {
+      return fn();
+    } finally {
+      restore();
+    }
+  };
+
+  // ── The shipped position: nothing changes today ───────────────────
+  it.each(Object.entries(OVER_BUDGET))(
+    'stays silent on an over-%s predicate during the rc grace window — no behaviour change today',
+    (_limit, source) => {
+      // The grace window admits it (it still compiles and WARNs), so
+      // `isSupportedRlsExpression` is true and the rule never fires.
+      expect(isSupportedRlsExpression(source)).toBe(true);
+      expect(validateRlsPredicateEnforceability(policyWith('using', source))).toEqual([]);
+    },
+  );
+
+  // ── The GA position: the whole point of the card ──────────────────
+  it('at the GA flip, an over-budget predicate reports over-budget — naming the bound and its value', () => {
+    const findings = atGa(() => validateRlsPredicateEnforceability(policyWith('using', OVER_BUDGET.maxAstNodes)));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      severity: 'error',
+      rule: RLS_PREDICATE_OVER_BUDGET,
+      path: 'permissions[0].rowLevelSecurity[0].using',
+      where: 'permission set "sales_rep" policy "own_leads" on object "lead"',
+    });
+    // The bound and the budget are the two facts "shrink it to fit" needs.
+    expect(findings[0].message).toMatch(/maxAstNodes/);
+    expect(findings[0].message).toMatch(/platform limit 256/);
+    expect(findings[0].message).toMatch(/Exceeded maxAstNodes \(256\)/);
+    // The verdict is unchanged, so the consequence prose must still be there.
+    expect(findings[0].message).toMatch(/DROPS the policy at request time/);
+    expect(findings[0].message).toMatch(/ZERO rows/);
+    // An over-budget predicate is long by definition — the quote is bounded.
+    expect(findings[0].message).toContain('...');
+    expect(findings[0].message.length).toBeLessThan(OVER_BUDGET.maxAstNodes.length + 1200);
+  });
+
+  it('prescribes shrinking, and never sends the author to check their dialect', () => {
+    const [f] = atGa(() => validateRlsPredicateEnforceability(policyWith('using', OVER_BUDGET.maxAstNodes)));
+    // The real remedies.
+    expect(f.hint).toMatch(/field in \[a, b, …\]/);
+    expect(f.hint).toMatch(/current_user\.<key>/);
+    expect(f.hint).toMatch(/[Dd]enormalise/);
+    expect(f.hint).toMatch(/hook or action body/);
+    // Splitting is only sound on a top-level `||`; policies are OR-ed, so
+    // splitting an `&&` would WIDEN access. Saying so is the point of the hint.
+    expect(f.hint).toMatch(/never split a top-level `&&`/);
+    expect(f.hint).toMatch(/WIDEN access/);
+    // …and explicitly NOT the SQL-vs-CEL prose this class used to get.
+    expect(f.hint).toMatch(/no syntax or dialect error/);
+    expect(f.hint).not.toMatch(/canonical CEL \(ADR-0058 D1\)/);
+    expect(f.hint).not.toMatch(/rather than SQL `AND` \/ `OR`/);
+    expect(f.hint).not.toMatch(/LIKE/);
+  });
+
+  it('names the bound that was actually blown, not a hard-coded one', () => {
+    // Reading `limit` / `limitValue` off the sister entrance's payload rather
+    // than assuming `maxAstNodes` is what makes the hint worth reading: an
+    // author told to shorten the wrong axis edits the wrong thing.
+    const [depth] = atGa(() => validateRlsPredicateEnforceability(policyWith('using', OVER_BUDGET.maxDepth)));
+    expect(depth.rule).toBe(RLS_PREDICATE_OVER_BUDGET);
+    expect(depth.message).toMatch(/maxDepth/);
+    expect(depth.message).toMatch(/platform limit 32/);
+    expect(depth.message).not.toMatch(/maxAstNodes/);
+
+    const [list] = atGa(() => validateRlsPredicateEnforceability(policyWith('using', OVER_BUDGET.maxListElements)));
+    expect(list.rule).toBe(RLS_PREDICATE_OVER_BUDGET);
+    expect(list.message).toMatch(/maxListElements/);
+    expect(list.message).toMatch(/platform limit 64/);
+    expect(list.message).not.toMatch(/maxAstNodes/);
+  });
+
+  it('carries the WRITE-path consequence when the over-budget clause is `check`', () => {
+    const [f] = atGa(() => validateRlsPredicateEnforceability(policyWith('check', OVER_BUDGET.maxAstNodes)));
+    expect(f).toMatchObject({
+      rule: RLS_PREDICATE_OVER_BUDGET,
+      path: 'permissions[0].rowLevelSecurity[0].check',
+    });
+    expect(f.message).toMatch(/PermissionDeniedError/);
+    expect(f.message).not.toMatch(/ZERO rows/);
+  });
+
+  // ── The discrimination, which IS the card ─────────────────────────
+  //
+  // A split that cannot be shown to separate the two classes is decoration.
+  // Both halves are pinned in one table so a future change that collapses them
+  // — in either direction — goes red here rather than silently mislabelling
+  // one class again.
+  it('discriminates over-budget from not-CEL at the GA position, in both directions', () => {
+    const expected: Array<[string, string, string]> = [
+      ...Object.entries(OVER_BUDGET).map(
+        ([limit, src]) => [`over ${limit}`, src, RLS_PREDICATE_OVER_BUDGET] as [string, string, string],
+      ),
+      ...Object.entries(NOT_CEL).map(
+        ([label, src]) => [label, src, RLS_PREDICATE_UNPARSEABLE] as [string, string, string],
+      ),
+    ];
+    const actual = atGa(() =>
+      expected.map(([label, src]) => [label, ids(policyWith('using', src))] as const),
+    );
+    expect(actual).toEqual(expected.map(([label, , rule]) => [label, [rule]]));
+  });
+
+  it('a predicate that is BOTH unparseable and huge is unparseable — syntax is judged first', () => {
+    // 80 SQL `AND` terms: over `maxAstNodes` in size, but the bridge does not
+    // cover `AND`, so it is not CEL at all. Shortening it would not help; the
+    // author has to rewrite it, so the syntax id is the useful one. The parse
+    // never reaches a bounds fault because it throws on `AND` first.
+    const source = Array.from({ length: 80 }, (_, i) => `f${i} = ${i}`).join(' AND ');
+    expect(source.length).toBeGreaterThan(OVER_BUDGET.maxAstNodes.length / 2);
+    expect(atGa(() => ids(policyWith('using', source)))).toEqual([RLS_PREDICATE_UNPARSEABLE]);
+  });
+
+  it('leaves the unenforceable class alone — an over-budget check never steals a shape fault', () => {
+    // Reported at BOTH switch positions: this class does not involve the parse
+    // bounds at all, so neither position may re-route it.
+    for (const source of ['size(record.tags) > 0', "record.account.region == 'EU'", 'amount + 1 > 2']) {
+      expect(ids(policyWith('using', source))).toEqual([RLS_PREDICATE_UNENFORCEABLE]);
+      expect(atGa(() => ids(policyWith('using', source)))).toEqual([RLS_PREDICATE_UNENFORCEABLE]);
+    }
+  });
+
+  // ── The red/green boundary is untouched ───────────────────────────
+  it('refuses exactly what it refused before — only the explanation moved', () => {
+    // #6778 is explicitly NOT a behaviour change. The rule's verdict is still
+    // `isSupportedRlsExpression`, so lint-clean must remain that function's own
+    // answer at BOTH switch positions, over-budget sources included.
+    const corpus = [
+      ...Object.values(OVER_BUDGET),
+      ...Object.values(NOT_CEL),
+      'owner_id == current_user.id',
+      "status = 'published'",
+      'size(record.tags) > 0',
+    ];
+    for (const mode of ['rc-grace', 'fail-closed'] as const) {
+      const restore = setCelPushdownLimitsModeForTests(mode);
+      try {
+        for (const source of corpus) {
+          const lintIsClean = validateRlsPredicateEnforceability(policyWith('using', source)).length === 0;
+          expect({ mode, source: source.slice(0, 40), lintIsClean }).toEqual({
+            mode,
+            source: source.slice(0, 40),
+            lintIsClean: isSupportedRlsExpression(source),
+          });
+        }
+      } finally {
+        restore();
+      }
+    }
+  });
+
+  it('reaches the author through the real registry, not just a direct call', () => {
+    const stack = policyWith('using', OVER_BUDGET.maxAstNodes);
+    expect(atGa(() => runAuthoringRules('validate', { normalized: stack, parsed: stack }).map((f) => f.rule)))
+      .toEqual([RLS_PREDICATE_OVER_BUDGET]);
   });
 });

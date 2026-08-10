@@ -1,5 +1,707 @@
 # @objectstack/plugin-security
 
+## 17.0.0-rc.6
+
+### Major Changes
+
+- 9e9445b: <!-- adr-0087: not-required (no-migration-prescription) what this change removes is a VALUE in one platform-seeded sys_permission_set row, not an authorable key. No spec schema key is retired: object_permissions['*'] stays fully authorable, and admin_full_access / organization_admin / viewer_readonly still ship one. Nothing an app authored becomes invalid, nothing stored fails to parse, and the seeded row itself is rewritten by the boot seeder, so there is no stored shape for `objectstack migrate meta` to rewrite and nothing for the ledger to carry. The Migration section below prescribes a DEPLOYMENT action -- declare the object access you were relying on -- not a consumer code or metadata rewrite. -->
+
+  fix(plugin-security)!: `member_default` no longer grants a `*` wildcard — the platform baseline is explicit-allow (#5491)
+
+  **This is a deliberate, breaking narrowing of the default security posture.
+  Deployments that relied on the implicit wildcard lose that access. That is the
+  intended behaviour change, not a side effect — read the migration below before
+  upgrading.**
+
+  `member_default` is the additive `everyone` baseline: it resolves for **every**
+  authenticated member, in addition to whatever else they hold. It carried
+  `object_permissions["*"] = {allowCreate: true, allowRead: true, allowEdit: true,
+allowDelete: false}`, and object permissions merge most-permissively — so that
+  entry was not a default, it was a **floor no application could get under**. An
+  app's explicit-allow object gate was erased on three of the four axes; only
+  delete stayed profile-driven, because the baseline never granted it.
+
+  HotCRM's 17.0 GA sweep measured the consequence across 5 profiles × 17 objects
+  (188 probes, each user with their own bearer token):
+
+  - **21 of 21 create-DENIAL probes returned `201`** — every profile created on
+    every object once validation passed, including objects the profile explicitly
+    denied;
+  - a `service_agent` profile that declares no edit anywhere edited its own
+    `crm_account`;
+  - on `public_read` objects the wildcard yielded **`200` with ALL rows** for
+    non-holders — real unauthorized reads, not the documented "200 with 0 rows"
+    empty-set pattern;
+  - `security/explain` stated it outright for a profile carrying an all-false
+    deny: _"create on 'crm_opportunity' is granted by [member_default]"_.
+
+  Because app-side authorization suites validate the app's _declarations_, CI
+  stayed green while the runtime posture was default-open — `declared ≠ enforced`
+  inside the security layer itself.
+
+  **The change.** The wildcard is removed on all three live axes. The platform
+  baseline narrows to explicit-allow: object access now comes from OWDs plus
+  profile / permission-set **declarations** only. Deny-precedence merge semantics
+  were considered and rejected — permission sets remain additive capability
+  containers (ADR-0090); the fix is to stop the platform shipping a grant nobody
+  asked for, not to invent a veto.
+
+  What `member_default` still declares, it still enforces, and nothing here is
+  newly granted: read on the better-auth identity tables (their writes stay
+  denied — that door is better-auth), self-service on `sys_user_preference` (now
+  an explicit entry rather than an implicit one; the effective access for a member
+  is byte-identical, and its `sys_user_preference_self` RLS carve-out already
+  declared exactly that intent), and every row-level policy it shipped before —
+  `owner_only_writes`, `owner_only_deletes` and the identity `_self` carve-outs
+  are untouched. The set stays anchor-safe, so its `everyone` binding is
+  unaffected. `admin_full_access`, `organization_admin` and `viewer_readonly` keep
+  their wildcards: those are granted deliberately to a principal, which is exactly
+  what the baseline was not.
+
+  ## Migration
+
+  After upgrading, a member holding **no** application profile has no access to
+  application objects. Restore access by declaring it, in one of two places:
+
+  1. **Ship an app default profile.** Mark a permission set `isDefault: true` and
+     the CLI wires it as the additive per-request baseline (ADR-0056 D7 /
+     ADR-0090 D5). This is the recommended route and what the bundled showcase app
+     already does — list the objects members legitimately touch, with the axes
+     they need.
+  2. **Grant per position / per user.** Bind an ordinary permission set through
+     `sys_position_permission_set` or `sys_user_permission_set`.
+
+  To find what a deployment was silently relying on, ask
+  `GET /api/v1/security/explain?object=<name>&operation=<op>` for a
+  representative member before upgrading: any answer attributing the grant to
+  `[member_default]` on an application object is access that will stop. An app
+  whose own profiles already declare everything its users do is unaffected.
+
+### Minor Changes
+
+- 04c56aa: security: add a fail-closed authored-row-write verdict to `ISecurityService`
+
+  `ISecurityService` gains an optional, verdict-shaped, by-id method:
+
+  ```ts
+  checkAuthoredRowWrite?(
+    object: string,
+    recordId: string,
+    operation: AuthoredRowWriteOperation, // 'update' | 'delete'
+    context?: SecurityContext,
+  ): Promise< AuthoredRowWriteVerdict >;  // 'admit' | 'abstain'
+  ```
+
+  It answers one question no existing surface could: does an **app-authored**
+  row-level security policy admit this row for this write, on its own, with the
+  platform's ownership floor taken out by provenance?
+
+  Every other method reports the **composed** RLS verdict, and sitting inside that
+  composition is the platform's own wildcard write floor (`created_by ==
+current_user.id`, shipped on the `member_default` baseline every authenticated
+  member resolves additively). So "the composed RLS admits this row" is true for
+  the row's CREATOR whether or not any app policy mentions it — which makes it a
+  measurably different question, not a cheaper spelling of the same one. A caller
+  deferring to the composed answer would hand transferred records back to their
+  former creators.
+
+  `admit` iff at least one applicable, non-floor policy matches the row for the
+  operation. `abstain` in every other case — no authored policy, no match, an
+  unreadable or cross-tenant row, a principal-less or on-behalf-of context, or any
+  internal failure. The method never throws outward, and it is **optional**: a
+  deployment whose security service omits it behaves byte-for-byte as before,
+  because callers feature-detect and read absence as `abstain`.
+
+  `@objectstack/plugin-security` implements it on the registered `security`
+  service, reading the verdict off the same layered RLS computation the middleware
+  enforces with — no second RLS evaluator.
+
+- 6029cc1: Explain and enforcement now resolve ONE authorization aggregation (#6352).
+
+  `buildContextForUser()` — the explain API's reconstruction of an arbitrary user's
+  context, behind `explain(request, callerContext)` and the `userId` parameter — was
+  a hand-written second implementation of `@objectstack/core`'s `resolveAuthzContext`
+  aggregation. Its agreement with enforcement was guaranteed by two comments saying
+  it mirrored the resolver ("mirroring the runtime resolver's semantics", "we compute
+  it here with the IDENTICAL rule") and by nothing else: no assertion anywhere in the
+  repo compared the two.
+
+  It did not agree. Measured over identical rows, the mirror dropped:
+
+  | input                                                          | resolver       | explain mirror |
+  | -------------------------------------------------------------- | -------------- | -------------- |
+  | `sys_member` role positions (ADR-0095 D3)                      | `org_admin`, … | —              |
+  | position-bound permission sets (`sys_position_permission_set`) | resolved       | —              |
+  | the `everyone` anchor's bound sets (ADR-0090 D5)               | resolved       | —              |
+  | `platform_admin` position projection (ADR-0068 D2)             | projected      | —              |
+  | `systemPermissions` / `posture` / `email` / `ai_seat`          | resolved       | —              |
+
+  The user-visible consequence: permission sets are resolved BY NAME from
+  `context.positions ∪ context.permissions`, and a set carried by a POSITION only
+  becomes a name inside the resolver. So for any user whose grants arrive through a
+  position — the ordinary way an org grants access — the explain panel resolved fewer
+  sets than enforcement and reported a denial the runtime never made. A security UI
+  that says "you have no access" about access you have is worse than no panel.
+
+  `buildContextForUser` now calls `resolveUserAuthzGrants` (core's userId-driven
+  resolver core, already the same entry point `runAs:'user'` automation runs use) and
+  adds presentation only: the ADR-0091 expired-grant and `delegated_from` annotations
+  the resolver correctly discards, and `hasPlatformAdminGrant`, which is now read
+  back off the resolver's own posture verdict instead of recomputed. The returned
+  context additionally carries `systemPermissions`, `org_user_ids`, `posture`,
+  `tabPermissions` and `email` — additive; no field was removed or renamed.
+
+  Pinned by a parity suite that runs both implementations over the same fixture rows
+  (org role projection, position-bound sets, the `everyone` anchor, both
+  `platform_admin` polarities, `organization_admin` → `TENANT_ADMIN`, ADR-0091
+  windows) and asserts each case's concrete expected output, so the pin cannot pass
+  by both sides resolving to nothing. Restoring the mirror turns 9 of those cases
+  red.
+
+- a954634: feat(meta): object schemas served by `/meta` and `/metadata` are masked per caller (ADR-0106, #3682)
+
+  The data plane has enforced field-level security everywhere it matters for
+  several releases — list reads mask values, exports project columns, and the
+  write path 403s forbidden fields. The **metadata** plane did not: any
+  authenticated caller who asked `GET /meta/object/:name` received the full object
+  schema, including fields they have no read access to at all.
+
+  That is more than a list of names. A field carries its label, type, **picklist
+  option values** (often a sensitive operational taxonomy), its **formula**
+  expression (pricing and scoring IP), its `visibleWhen` predicate, its
+  `defaultValue`, and — via ADR-0066 D3 — the `requiredPermissions` capability
+  names guarding it. For a customer running a dealer, supplier or patient portal
+  on ObjectStack, the only remediation available in their own tier was modelling
+  discipline: keep sensitive fields off portal-visible objects, or split one
+  business entity into an internal object and a portal object and synchronize
+  them. This is a platform-side fix, so every deployment inherits it.
+
+  **What changes.** Serving an object schema now projects `fields` onto the set
+  the caller may read, and a field outside that set is removed **whole** — no
+  name, no label, no options, no formula, no `requiredPermissions`. Partial
+  redaction was rejected: keeping the name still leaks existence and invites
+  clients to render ghost columns. Masking keys on the `readable` bit only; a
+  readable-but-not-editable field stays in the schema, because the UI must render
+  it and the `editable` affordance is already served per caller by
+  `/auth/me/permissions`.
+
+  Every outlet that serves an object schema goes through one shared projection,
+  so coverage is not a per-route promise:
+
+  - `GET /meta/object/:name` — the cached branch (the default) **and** the
+    uncached branch, which is what `?state=draft`, `?preview=draft` and
+    `?package=` take;
+  - `GET /meta/object/:name?layers=true` — the layered diagnostic view, all three
+    of `code` / `overlay` / `effective`;
+  - `GET /meta/:type/:section/:name` — the compound-name read;
+  - `GET /meta/object` — the list read, each item projected independently;
+  - the runtime `/metadata` catch-all — the protocol-backed, registry-backed and
+    last-ditch single reads, the `/metadata/objects` list (protocol and registry),
+    and the legacy one-segment `/metadata/:objectName` spelling.
+
+  **Caching is unchanged in cost and correct per cohort.** The shared metadata
+  cache still stores one full schema per (type, name, locale, environment) — no
+  caller dimension in the key — and the mask runs after retrieval. What varies
+  per caller is the validator: a stable hash of the caller's _denied_ field set is
+  folded into the ETag. A caller who can read everything denies nothing, so their
+  fingerprint is empty and both their ETag and their response body are
+  **byte-identical** to previous releases. Callers in one permission cohort share
+  `304`s; a permission change moves the fingerprint and self-invalidates the stale
+  `304`, so nothing needs purging after a permission-set edit.
+
+  **Exemptions** are a property of the caller, not of the route: `isSystem` and
+  platform-admin callers (holders of `studio.access` / `setup.access`, the same
+  judgement the app filter uses) receive the full schema on any route, because
+  Studio and Setup authoring cannot work against a projected schema.
+
+  **Failure posture is explicit and three-tiered.** With no `security` service
+  registered the schema is served unmasked — that deployment has no FLS posture at
+  all and tightening only the metadata plane would be theater. When field
+  visibility cannot be _determined_ (a registry-hydration window), the schema is
+  served unmasked but loudly: a structured warning, a new
+  `objectstack_meta_field_visibility_undetermined_total` counter, and a response
+  downgraded to `Cache-Control: private, no-store` with no shared ETag. Failing
+  closed there would brick every render of the object for every user and can
+  deadlock console bootstrap, since permission sets are themselves metadata. When
+  permission evaluation **throws**, the request fails with `503
+FIELD_VISIBILITY_UNRESOLVED` — an unhealthy security service must not auto-open
+  a disclosure hole, and an empty-fields `200` would be both a silently wrong UI
+  and cacheable poison.
+
+  **Guest and public deployments** get a deliberate posture rather than an
+  accidental one: `@objectstack/plugin-security` gains
+  `getMetadataReadableFields`, which resolves the configured fallback permission
+  set (`security.fallbackPermissionSet`, default `member_default`) for a caller
+  who resolves to zero sets, exactly as `/auth/me/permissions` does.
+  `getReadableFields` is unchanged — on the data plane, mirroring the engine
+  middleware's fall-open is what keeps it drift-free.
+
+  **Escape hatch.** Masking is the platform default. A deployment that explicitly
+  wants an unmasked metadata plane sets `OS_ALLOW_UNMASKED_OBJECT_METADATA=1`, or
+  `metadata.maskObjectFields: false` on the REST server. Toggling it changes
+  disclosure only: the console reads every field affordance from
+  `/auth/me/permissions`, so UI correctness is unaffected either way.
+
+  Operators fronting the runtime with a CDN or reverse proxy should read the new
+  "CDN / reverse-proxy caching of `/meta` object schemas" section in the
+  production-readiness guide before tuning anything — in particular, do not
+  configure a proxy to ignore `Cache-Control: private`, and do not strip or
+  rewrite `ETag` on these routes.
+
+- 9e9445b: fix(plugin-security): the row-level write gate honours `modifyAllRecords` and `edit`-level record shares (#5492)
+
+  HotCRM's 17.0 GA acceptance sweep measured two declared write-widening
+  mechanisms as completely inert. A manager profile carrying `viewAllRecords` +
+  `modifyAllRecords` got `403 … (row-level security)` on **every** cross-owner
+  write — update and delete, four objects — while its reads widened exactly as
+  declared (43/43, 9/9). And all three `edit`-level sharing rules materialised
+  into `sys_record_share` correctly and widened reads exactly, yet a `PATCH` by
+  the share target was refused every time. Read-level shares correctly denied
+  writes, so the machinery distinguished the levels on paper and the write gate
+  then ignored the distinction.
+
+  **One root cause.** Row-level write access was two authorities AND-ed together
+  with no knowledge of each other. `ISharingService` reads all three declared
+  wideners (ownership at write DEPTH, `sys_record_share.access_level`, the
+  `modifyAllRecords` bypass); the security plugin's by-id write pre-image gate
+  read only RLS — and sitting inside that RLS is the platform's own ownership
+  floor, `owner_only_writes` / `owner_only_deletes` (`created_by ==
+current_user.id`, applicability `positions: ['org_member']`). That floor is a
+  second implementation of "ownership", and it is the one blind to every widener.
+  Every member resolves it additively from the `member_default` baseline — a
+  manager is an org member too — so the widener-blind copy always won.
+
+  **The fix is composition by provenance, not a new bypass.** The pre-image gate
+  now asks the authority that owns those mechanisms for its tri-state verdict
+  (`ISharingService.checkEdit` / `checkDelete`, the contract added in #6428):
+
+  - `allow` — a positive basis exists, so the declared authority **replaces** the
+    platform floor;
+  - `abstain` — record sharing does not enforce on this row at all (a `public`
+    object, an object with no owner field, a platform internal), so the floor
+    **stays**: it is the only row-level write gate such rows have;
+  - `deny` — the floor stays; the refusal belongs to the sharing middleware that
+    produced the verdict.
+
+  The action boundary is inherited rather than restated (ADR-0111 D3): update asks
+  `checkEdit`, delete asks `checkDelete`, so an `edit` share widens update and
+  still does not confer delete. `modifyAllRecords` covers both verbs
+  (`MODIFY_ALL_WRITE_KEYS`).
+
+  **What is deliberately unchanged.** Layer 0's tenant wall and every
+  **app-authored** RLS policy are untouched — only the policies the platform
+  itself ships are replaceable, matched by the same `(object, name, using)`
+  provenance key ADR-0105 D3 uses for tenant policies, so an app policy spelling
+  the identical predicate keeps refusing (ADR-0049: a declared security property
+  stays declared). This is therefore not `modifyAllRecords` bypassing write-side
+  RLS on an ordinary business posture, which ADR-0066 ① withholds and this change
+  leaves withheld; it is the platform's floor deferring to the platform's own
+  ownership authority. The on-behalf-of (ADR-0090 D10) path keeps both principals'
+  floors, matching `hasWriteBypass`, which already fails closed for a delegated
+  context. A deployment without `@objectstack/plugin-sharing` sees no change at
+  all: with nothing to consult, the gate abstains and the floor decides.
+
+  Net effect for deployments: a Modify All Data holder can now correct, reassign
+  and clean up records they did not create, and an `edit`-share recipient can
+  finally edit the record shared with them. Nothing that was refused for lack of a
+  grant becomes permitted — read-share targets are still denied writes, `edit`
+  shares still cannot delete, and a member with neither is still refused.
+
+- d19fb5c: fix(verify,plugin-security,cli): `bootStack` honours the app-declared default permission set, like `serve` always did (#7001)
+
+  Two boot paths disagreed about whether an application's declared default
+  permission profile exists.
+
+  - **`objectstack serve` honoured it** — it read the permission set marked
+    `isDefault: true` off `config.permissions` and passed the name as the
+    `SecurityPlugin` `fallbackPermissionSet`.
+  - **`bootStack` did not** — `@objectstack/verify` constructed a vanilla
+    `new SecurityPlugin()` and never read `config.permissions` at all.
+
+  So the profile an app declares was in force when a human ran the CLI and
+  silently absent when the app's own suite booted it: a `declared ≠ enforced`
+  split inside the harness that exists to catch that split. Green tests,
+  different production behaviour.
+
+  It was invisible until #5491. Until then the platform's `member_default`
+  carried an `object_permissions['*']` wildcard, so a member with no application
+  profile reached every object anyway and the declared fallback was never
+  load-bearing. #5491 removed that floor deliberately and its Migration section
+  prescribes exactly one consumer action — ship an app default profile via
+  `isDefault: true` — which `bootStack` had no way to express. Measured in
+  cloud's `ee-group-showcase`, adding the prescribed profile changed nothing: the
+  same acceptance cases still failed at the object gate.
+
+  **What changed.** The resolution now lives in one place and both boot paths call
+  it: `appSecurityPluginOptions(config)`, new in `@objectstack/plugin-security`
+  next to the existing `appDefaultPermissionSetName`. It answers the question a
+  booter actually has — _what do I hand the `SecurityPlugin` constructor for this
+  config_ — rather than just the name, because the second half
+  (`name ? { fallbackPermissionSet: name } : undefined`) is a decision, not
+  formatting, and while `serve.ts` had open-coded it, `bootStack` had simply never
+  grown one. `serve.ts` is converged onto the same helper, so the two now agree by
+  construction rather than by each caller remembering.
+
+  **Behavioural change, `@objectstack/verify` only.** `bootStack(config)` on an
+  app that declares an `isDefault` permission set now boots with that profile as
+  the additive per-request baseline (ADR-0090 D5), matching `objectstack dev`. An
+  app that declares no such set is unaffected — the resolution yields `undefined`
+  and the plugin keeps deriving `member_default` from its built-in sets, exactly
+  as before.
+
+  A suite that deliberately wants the platform's own baseline over an app that
+  declares a default now says so: `bootStack(config, { security: new SecurityPlugin() })`.
+  A plugin passed in `opts.security` still wins whole and is never merged into —
+  it arrives carrying its own constructor options, and silently rewriting one of
+  them would be a worse surprise than the bug being fixed.
+
+  Measured blast radius across the framework's own suites: of 86 dogfood files and
+  524 tests, exactly one assertion moved — `me-apps-and-everyone-baseline`, which
+  asserts the bootstrap binds `member_default` to the `everyone` anchor and whose
+  header already read "Deliberately VANILLA". That dependence was real but silent,
+  expressed only by the harness default; it is now stated in the argument. The
+  showcase fixtures that needed the app profile were already hand-wiring a
+  `SecurityPlugin` for it (`test/showcase-security.ts`, added by #5491) — the
+  "custom security code" these dogfood apps exist to prove unnecessary — and are
+  unchanged by this release.
+
+### Patch Changes
+
+- 63f3b87: ADR-0094 D5-R: retire the "customize packaged permission sets through an ADR-0005 env
+  overlay" direction (2026-07-14), and make the ADR text and the
+  `permission-set-projection.ts` header agree with what is enforced.
+
+  `#6483` (PR #6608) rolled `permission` back to `allowOrgOverride: false`, so a metadata
+  write against a **code-declared (artifact-backed)** permission set is refused with 403
+  `NOT_OVERRIDABLE` — ADR-0005's security row ("overlays would create silent privilege
+  drift") is enforced again. The supported channel for those sets is the one ADR-0086
+  always named: edit the package and re-publish. Environment authoring survives on the
+  `allowRuntimeCreate` tier, for sets whose definition lives only in `sys_metadata`
+  (data-door creations, and package sets authored + published through the metadata door);
+  that tier edits the single stored definition in place and is deliberately **not**
+  described as a re-route of the retired overlay channel.
+
+  No behaviour change: the four production write points keep their current dispositions.
+  The refusal is left to the producer — `plugin-security` does not re-derive
+  artifact-backing to pre-empt it — and the two write points that catch a failed metadata
+  write (the `restore` leg and the boot backfill) keep reporting on the durability channel.
+  What changes is prose, plus test coverage that can now see the gate: the suite's protocol
+  stub models ADR-0005's tier gate, so the four cases that pinned the retired direction no
+  longer pass for want of a stub that could refuse.
+
+- 73f69dc: fix(plugin-security): `checkAuthoredRowWrite` answers the declaration, not the caller's read scope (#7281)
+
+  `ISecurityService.checkAuthoredRowWrite` asks one question — _does an
+  app-authored row-level widener admit this row for this write?_ — and it resolved
+  that question by re-reading the row through the **caller's own** execution
+  context. That `findOne` re-enters the middleware chain, so `plugin-sharing`'s
+  READ filter applied: on a `private`-OWD object a cross-owner row is invisible to
+  the caller, the read answered null, and the verdict was `abstain` for a row the
+  declaration names by predicate.
+
+  Measured on the real stack across two objects identical in every respect except
+  their OWD — same widener text, same principal, same cross-owner row shape:
+
+  | OWD           | verdict before | verdict after |
+  | ------------- | -------------- | ------------- |
+  | `public_read` | `admit`        | `admit`       |
+  | `private`     | **`abstain`**  | **`admit`**   |
+
+  So the by-id widener surface was live on read-open objects and stood down on
+  read-closed ones, discriminated by a property the widener's author never
+  mentions — and `private` is the posture #5493 built that surface for. The
+  maintainer ruled it a defect (2026-08-10): the verdict is about the row and the
+  policy, not about what the caller may see. The probe read now resolves under an
+  elevated, principal-less scope.
+
+  **This does not widen anything.** The predicate carries the whole of the
+  question and travels in the query rather than in the scope: `{id} AND
+layer0(tenant wall) AND layer1(app-authored policies)`, both layers still
+  compiled from the caller's own permission sets and tenant before the read, and
+  the read is projected to `id` so the probe can only ever learn _that_ a row
+  matches. A row in another tenant, a row no authored policy matches, and a caller
+  holding no authored policy at all all still answer `abstain` — pinned, including
+  by mutation: delete the tenant layer from the predicate and the cross-tenant case
+  goes red. `admit` also remains evidence and never authorization: the by-id write
+  pre-image gate still resolves the write under the caller's own context and
+  refuses on its own terms.
+
+  One consequence is stated plainly rather than papered over: because that
+  pre-image gate performs the same caller-scoped read, a `private`-OWD cross-owner
+  by-id write is **still refused end-to-end** after this change — now by the
+  row-level gate (`PERMISSION_DENIED`, "…(row-level security)") rather than by the
+  sharing middleware's `FORBIDDEN`. Whether a write should reach a row the caller
+  cannot read is a separate contract question about that gate's read scope, and it
+  is not settled here. Both behaviours are pinned on the real stack.
+
+  The `@objectstack/spec` half is documentation only: `ISecurityService`'s contract
+  listed "the row is unreadable" among the `abstain` cases, which is exactly the
+  conflation the ruling removed. No signature, shape or vocabulary changes, and the
+  method stays optional and fail-closed.
+
+- f3e26b7: docs(plugin-security,skills): re-premise `member_default`'s removed wildcard in the published customer skill and in the plugin's own README (#7151)
+
+  Two shipped documents still described a permission-set shape the platform has not
+  had for two releases. Both premises were re-measured against the real imported
+  `defaultPermissionSets` at this branch point, and both had expired:
+
+  - `member_default.objects['*']` is `undefined` — the plain `'*'` object grant was
+    removed when the platform baseline narrowed to explicit-allow.
+  - Neither `member_default` nor `viewer_readonly` carries a `tenant_isolation`
+    entry in `rowLevelSecurity`, and neither carries any wildcard tenant policy at
+    all. Tenant isolation is **Layer 0** (`tenant-layer.ts`) since ADR-0095 D1.
+
+  **`packages/plugins/plugin-security/README.md`** described the pre-ADR-0095
+  probe-and-strip mechanism as the plugin's own current behaviour ("Service present
+  → keeps the wildcard `tenant_isolation` RLS policy … shipped with the default
+  `member_default` / `viewer_readonly` permission sets"). Rewritten to the real
+  mechanism: the plugin resolves a tenancy **posture** at start time; the tenant
+  wall is Layer 0, AND-composed ahead of business RLS and inert under `single`; and
+  the strip that survives targets the platform's own tenant-scoped policies **by
+  provenance** (`organization_admin`'s `sys_member_org` / `sys_invitation_org` /
+  `sys_team_org`, the `sys_organization_self` carve-out), never an app-authored
+  policy — which reaches the compiler and fails closed there (ADR-0105 D3).
+
+  **`skills/objectstack-data/SKILL.md`** (published customer guidance) did not
+  merely mention the wildcard — its ⚠️ callout built a recommendation on a leak
+  that cannot happen. The recommended recipe
+  (`tenancy: { enabled: false }` + `requiredPermissions`) is unchanged and still
+  correct, but every stated reason for it was rewritten to the measured one:
+
+  - the empty-list symptom is the Layer 0 tenant wall denying rows whose
+    `organization_id` is null or absent, not a `member_default` RLS policy;
+  - `viewAllRecords` short-circuits business RLS only and never crosses the wall —
+    that takes a true platform admin (the superuser bit **and** a
+    platform-exclusive capability) on a posture that permits it;
+  - the ⚠️ now names the surviving hazard truthfully. `tenancy: { enabled: false }`
+    alone switches the wall off for every caller, and the risk is any permission
+    set with a wildcard read grant — the shipped `viewer_readonly` still has one —
+    not `member_default`, which grants only the objects it names.
+
+  No runtime behaviour changes; documentation only.
+
+- 4c31321: Docs: bring the second ADR-0094 copy in `permission-set-projection.ts` up to D5-R.
+
+  PR #6962 retired the 2026-07-14 "customize packaged permission sets through an ADR-0005
+  env overlay" direction and corrected this file's **header**. A second copy survived in
+  the function-level JSDoc of `upsertEnvPermissionSet` — an exported symbol, so the stale
+  text ships in the published `.d.ts` and reads as fact to the next author. It stated both
+  halves D5-R retired: that an env-scope overlay is the platform's standard customization
+  of a packaged definition, and that deleting the overlay resets the row to the shipped
+  declaration.
+
+  Both are now stated as current: `#6483` (PR #6608) rolled `permission` back to
+  `allowOrgOverride: false`, so a metadata write against a code-declared (artifact-backed)
+  set is refused by the producer with 403 `NOT_OVERRIDABLE` and the supported channel is
+  ADR-0086's (edit the package, re-publish); and `#6960` measures the ordinary delete path
+  refusing to lift even a legacy pre-rollback overlay, leaving `OS_METADATA_WRITABLE` as
+  the only documented removal — so "delete = reset" is recorded as retired rather than
+  restated. The retirement itself is kept in the text, not deleted, so a reader arriving
+  at this function does not have to reconstruct the history.
+
+  Prose only — no behaviour change. The same retired direction was also corrected in three
+  neighbouring comments in this package (the `readDeclaredBody` JSDoc, and the two
+  `security-plugin.ts` package-managed write-gate comments) plus their two test rationales,
+  so the package no longer states the direction in two voices.
+
+- Updated dependencies [3d5c090]
+- Updated dependencies [e5bd768]
+- Updated dependencies [e027b3e]
+- Updated dependencies [c2429b0]
+- Updated dependencies [445a0c2]
+- Updated dependencies [f6609e6]
+- Updated dependencies [a70358a]
+- Updated dependencies [97e7e3c]
+- Updated dependencies [8828b9e]
+- Updated dependencies [53068c1]
+- Updated dependencies [ee58392]
+- Updated dependencies [f16e54e]
+- Updated dependencies [06be54e]
+- Updated dependencies [259459d]
+- Updated dependencies [3f7f14e]
+- Updated dependencies [6968885]
+- Updated dependencies [eaed61f]
+- Updated dependencies [debe2f6]
+- Updated dependencies [97b0798]
+- Updated dependencies [5fa04fb]
+- Updated dependencies [43a7a8d]
+- Updated dependencies [73f69dc]
+- Updated dependencies [04c56aa]
+- Updated dependencies [b3efeb7]
+- Updated dependencies [ddd075a]
+- Updated dependencies [88154be]
+- Updated dependencies [e8dc61e]
+- Updated dependencies [2f3e793]
+- Updated dependencies [d8e8d9c]
+- Updated dependencies [94e749b]
+- Updated dependencies [ea1d916]
+- Updated dependencies [ae31a19]
+- Updated dependencies [b230e5e]
+- Updated dependencies [5d24f4b]
+- Updated dependencies [29b94ed]
+- Updated dependencies [07c68b0]
+- Updated dependencies [f6cd635]
+- Updated dependencies [e0f300b]
+- Updated dependencies [62b6a2f]
+- Updated dependencies [5b4780b]
+- Updated dependencies [a933452]
+- Updated dependencies [8140915]
+- Updated dependencies [7b48cf9]
+- Updated dependencies [b5404f4]
+- Updated dependencies [f764691]
+- Updated dependencies [e120a5a]
+- Updated dependencies [e9b5265]
+- Updated dependencies [e650d67]
+- Updated dependencies [04476e7]
+- Updated dependencies [79228cd]
+- Updated dependencies [b3363e9]
+- Updated dependencies [2ef1807]
+- Updated dependencies [d03fe25]
+- Updated dependencies [2672f85]
+- Updated dependencies [11066f6]
+- Updated dependencies [916af17]
+- Updated dependencies [84c86fb]
+- Updated dependencies [2a2a9fb]
+- Updated dependencies [a2e157c]
+- Updated dependencies [95c4227]
+- Updated dependencies [2a61116]
+- Updated dependencies [d4df105]
+- Updated dependencies [e2798fa]
+- Updated dependencies [0fd8556]
+- Updated dependencies [74155c7]
+- Updated dependencies [6908830]
+- Updated dependencies [8b06bba]
+- Updated dependencies [4c54037]
+- Updated dependencies [0f7157b]
+- Updated dependencies [d9bef45]
+- Updated dependencies [f549a0d]
+- Updated dependencies [82da264]
+- Updated dependencies [f586f1a]
+- Updated dependencies [9b9b70f]
+- Updated dependencies [f5a9bc2]
+- Updated dependencies [881a3cc]
+- Updated dependencies [ad6317b]
+- Updated dependencies [d5e9f6e]
+- Updated dependencies [8a88885]
+- Updated dependencies [5f7669e]
+- Updated dependencies [becbe53]
+- Updated dependencies [b127c8b]
+- Updated dependencies [a80302a]
+- Updated dependencies [474f131]
+- Updated dependencies [050cd82]
+- Updated dependencies [4d552af]
+- Updated dependencies [44d677c]
+- Updated dependencies [c32944d]
+- Updated dependencies [1dd780f]
+- Updated dependencies [cafec0a]
+- Updated dependencies [c8d6f6e]
+- Updated dependencies [92a67f2]
+- Updated dependencies [9136327]
+- Updated dependencies [bf0ae99]
+- Updated dependencies [cb3b6cd]
+- Updated dependencies [73b7234]
+- Updated dependencies [d2b97c3]
+- Updated dependencies [59b794f]
+- Updated dependencies [fc3a36a]
+- Updated dependencies [69787f0]
+- Updated dependencies [5d022a1]
+- Updated dependencies [042b9ee]
+- Updated dependencies [f549a0d]
+- Updated dependencies [a36db28]
+- Updated dependencies [3f8817a]
+- Updated dependencies [a2443e3]
+- Updated dependencies [e1554b1]
+- Updated dependencies [4856789]
+- Updated dependencies [c3f4916]
+- Updated dependencies [33e0385]
+- Updated dependencies [2205363]
+- Updated dependencies [09fe58d]
+- Updated dependencies [d0a5ceb]
+- Updated dependencies [e18a162]
+- Updated dependencies [d6d1a50]
+- Updated dependencies [d127ff0]
+- Updated dependencies [9b86cf6]
+- Updated dependencies [8825a06]
+- Updated dependencies [5087ac6]
+- Updated dependencies [6965160]
+- Updated dependencies [2d1ddf0]
+- Updated dependencies [354b00f]
+- Updated dependencies [3de535b]
+- Updated dependencies [fe2e15a]
+- Updated dependencies [c6b6bb4]
+- Updated dependencies [59c544d]
+- Updated dependencies [2f59da0]
+- Updated dependencies [8ad609c]
+- Updated dependencies [bbee302]
+- Updated dependencies [08863dd]
+- Updated dependencies [56664f5]
+- Updated dependencies [31cbe90]
+- Updated dependencies [90bbf25]
+- Updated dependencies [eb91eba]
+- Updated dependencies [42da73d]
+- Updated dependencies [643b7c7]
+- Updated dependencies [d0d5205]
+- Updated dependencies [1a15893]
+- Updated dependencies [b70e534]
+- Updated dependencies [2233a85]
+- Updated dependencies [62dd69a]
+- Updated dependencies [e15e679]
+- Updated dependencies [2ab1257]
+- Updated dependencies [4cc4fb7]
+- Updated dependencies [28d1eb7]
+- Updated dependencies [2c26040]
+- Updated dependencies [f758cec]
+- Updated dependencies [78f0be8]
+- Updated dependencies [35f7fb4]
+- Updated dependencies [a5302c7]
+- Updated dependencies [7084313]
+- Updated dependencies [0e043d8]
+- Updated dependencies [dadd1ad]
+- Updated dependencies [2f2e63c]
+- Updated dependencies [486d526]
+- Updated dependencies [89d7b35]
+- Updated dependencies [85ec26d]
+- Updated dependencies [f6476fc]
+- Updated dependencies [4ac12ef]
+- Updated dependencies [b88f5e8]
+- Updated dependencies [42cc219]
+- Updated dependencies [d42a92f]
+- Updated dependencies [51d74ad]
+- Updated dependencies [d7e0b42]
+- Updated dependencies [3510e4a]
+- Updated dependencies [aa4b90d]
+- Updated dependencies [54299ca]
+- Updated dependencies [dc61def]
+- Updated dependencies [251e888]
+- Updated dependencies [183b4c4]
+- Updated dependencies [2fdb36e]
+- Updated dependencies [e787608]
+- Updated dependencies [20526f5]
+- Updated dependencies [c5eef1d]
+- Updated dependencies [e0f300b]
+- Updated dependencies [761a0ba]
+- Updated dependencies [61282f9]
+- Updated dependencies [be87153]
+- Updated dependencies [60f0dd8]
+- Updated dependencies [a87c5cd]
+- Updated dependencies [a47f338]
+- Updated dependencies [2598216]
+- Updated dependencies [2c7e62d]
+- Updated dependencies [eb7613c]
+- Updated dependencies [ecc9110]
+- Updated dependencies [f7bd4e2]
+- Updated dependencies [361bd5b]
+- Updated dependencies [1818998]
+- Updated dependencies [09ee21c]
+- Updated dependencies [f549a0d]
+- Updated dependencies [3fc2e48]
+- Updated dependencies [e8f435c]
+- Updated dependencies [41610f6]
+  - @objectstack/spec@17.0.0-rc.6
+  - @objectstack/platform-objects@17.0.0-rc.6
+  - @objectstack/formula@17.0.0-rc.6
+  - @objectstack/core@17.0.0-rc.6
+
 ## 17.0.0-rc.5
 
 ### Patch Changes

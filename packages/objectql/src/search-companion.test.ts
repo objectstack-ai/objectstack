@@ -6,6 +6,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import type { ServiceObject } from '@objectstack/spec/data';
 import {
   SEARCH_COMPANION_FIELD,
   provisionSearchCompanion,
@@ -17,7 +18,7 @@ import {
 import { expandSearchToFilter, resolveSearchFields } from './search-filter';
 import { SchemaRegistry } from './registry';
 
-const contact = () => ({
+const contact = (): ServiceObject => ({
   name: 'crm_contact',
   fields: {
     name: { type: 'text', label: 'Name' },
@@ -102,7 +103,7 @@ describe('provisionSearchCompanion', () => {
 describe('SchemaRegistry integration (compile-time seam)', () => {
   it('provisions the companion on registered objects when searchCompanion is on', () => {
     const registry = new SchemaRegistry({ multiTenant: false, searchCompanion: true });
-    registry.registerObject(contact() as any, 'test-pkg', 'crm');
+    registry.registerObject(contact(), 'test-pkg', 'crm');
     const schema = registry.getObject('crm_contact')!;
     expect(schema.fields![SEARCH_COMPANION_FIELD]).toBeDefined();
     expect((schema.fields![SEARCH_COMPANION_FIELD] as any).hidden).toBe(true);
@@ -110,7 +111,7 @@ describe('SchemaRegistry integration (compile-time seam)', () => {
 
   it('does NOT provision when the flag is off (default) — pure additive', () => {
     const registry = new SchemaRegistry({ multiTenant: false });
-    registry.registerObject(contact() as any, 'test-pkg', 'crm');
+    registry.registerObject(contact(), 'test-pkg', 'crm');
     expect(registry.getObject('crm_contact')!.fields![SEARCH_COMPANION_FIELD]).toBeUndefined();
   });
 

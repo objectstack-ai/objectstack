@@ -115,8 +115,29 @@ export const EngineQueryOptionsSchema = lazySchema(() => BaseEngineOptionsSchema
   /** Keyset cursor — REMOVED (#4286); same tombstone as `QuerySchema.cursor`. */
   cursor: retiredKey(QUERY_CURSOR_REMOVED),
 
-  /** Full-text search configuration */
-  search: FullTextSearchSchema.optional(),
+  /**
+   * Full-Text Search.
+   *
+   * The bare string IS the canonical Tier-1 contract (ADR-0061 D1: "the
+   * client sends only the query text; the server resolves which fields to
+   * search from object metadata") — it is what every surface sends, what the
+   * engine's `$search` expansion actually serves, and what the dogfood HTTP
+   * proof (`showcase-search.dogfood.test.ts`) pins. The structured
+   * `FullTextSearchSchema` form remains for the declared Tier-2 knobs.
+   *
+   * The union is schema-side drift REPAIR, not a new dialect — the same
+   * repair `BaseQuerySchema.search` (`query.zod.ts`) already carries, and for
+   * the same reason: this schema declared only the object form while the
+   * executor and the ADR's own conformance ledger served the string. Here the
+   * divergence surfaced as a type error rather than a validation failure
+   * (#7178): `DriverQuery` (= `Omit<QueryAST, 'object'>`, which inherits the
+   * union) was not assignable to `EngineQueryOptionsParsed` purely because of
+   * this key, so every engine caller wanting the canonical spelling had to
+   * `as any` the whole query — switching off `where`/`orderBy`/`fields`
+   * checking too, and, since this schema is not `.strict()`, arming exactly
+   * the silent-key-drop that `check:query-options-erasure` exists to stop.
+   */
+  search: z.union([z.string(), FullTextSearchSchema]).optional(),
 
   /**
    * Fields the `search` expansion may match against — intersected with the
@@ -200,11 +221,23 @@ export const EngineUpdateOptionsSchema = lazySchema(() => BaseEngineOptionsSchem
 
 /**
  * One strip event on a write path: the engine dropped caller-supplied field(s)
- * from the payload for a LEGAL reason (static `readonly` (#2948) or a TRUE
- * `readonlyWhen` predicate) and completed the write without them. The write
- * itself still succeeds — stripping is legitimate semantics, not an error —
- * but callers that report success per requested field (e.g. a flow's
- * `update_record` step) need to know which fields never landed (#3407).
+ * from the payload for a LEGAL reason — a read-only lock (static `readonly`
+ * (#2948) or a TRUE `readonlyWhen` predicate (#3042)), or the primary-key strip
+ * that keeps a ruled-non-key payload value out of the id column (#6437) — and
+ * completed the write without them. The write itself still succeeds —
+ * stripping is legitimate semantics, not an error — but callers that report
+ * success per requested field (e.g. a flow's `update_record` step) need to know
+ * which fields never landed (#3407).
+ *
+ * `reason` is an OPEN vocabulary in the sense that matters to a consumer: it
+ * grows as the write path gains legal strips, and it is widened deliberately
+ * rather than force-fitted. Reusing an existing arm for a new strip class would
+ * make `reason` LIE, which is strictly worse than the silence it replaces — the
+ * judgement PR #6433 recorded in a code comment and #6437 discharged by adding
+ * `primary_key`. A consumer that branches on `reason` must therefore be
+ * exhaustive (a `Record<DroppedFieldsEvent['reason'], …>` tsc re-checks), never
+ * a binary test whose `else` arm silently relabels every future value as
+ * read-only.
  *
  * Delivered in-process via the `onFieldsDropped` listener on the write options
  * (see `WriteObservabilityOptions` in `contracts/data-engine.ts`). The
@@ -223,9 +256,26 @@ export const DroppedFieldsEventSchema = lazySchema(() => z.object({
    *   stripped for non-system contexts (#2948);
    * - `readonly_when` — a `readonlyWhen` predicate locked the field for the
    *   target record's state; on a multi-row update this is "locked in ≥1
-   *   matched row" semantics (#3042).
+   *   matched row" semantics (#3042);
+   * - `primary_key` — the field is the object's primary key and the engine had
+   *   ALREADY RULED the submitted value is not one, so writing it would have
+   *   overwritten the identity of the row(s) the call actually targets
+   *   (#6262 / PR #6433 on the multi branch, #6435 on the by-id branch; #6437).
+   *   The row is identified by the `id` argument or by the predicate, never by
+   *   this payload key. NOT a read-only lock: a TRUTHY SCALAR `data.id` IS the
+   *   bound key and is left in place, so this reason names the strip of a
+   *   payload `id` the update-dispatch ruling (`resolveEngineUpdateDispatch`)
+   *   has already classified as *not* an identifier — an authoring error the
+   *   write survives without.
+   *
+   * `primary_key` names the FIELD's role, not the offending value's shape, on
+   * purpose: `not_a_primary_key` would describe the value and become false the
+   * day the strip widens to the same-value truthy-scalar no-op the engine
+   * currently leaves alone. `primary_key` stays true either way, and sits in
+   * the same register as the two read-only arms — each answers "what about this
+   * FIELD caused the strip?".
    */
-  reason: z.enum(['readonly', 'readonly_when']).describe('Why the fields were dropped: static readonly (#2948) or a TRUE readonlyWhen predicate (#3042)'),
+  reason: z.enum(['readonly', 'readonly_when', 'primary_key']).describe('Why the fields were dropped: static readonly (#2948), a TRUE readonlyWhen predicate (#3042), or the primary-key strip of a payload id the engine ruled is not an identifier (#6437)'),
 }).describe('A write-path strip event: caller-supplied fields legally dropped from the payload (#3407)'));
 
 // --------------------------------------------------------------------------
@@ -767,3 +817,6 @@ export type DataEngineCountOptions = z.input<typeof DataEngineCountOptionsSchema
 export type DataEngineRequest = z.input<typeof DataEngineRequestSchema>;
 /** Post-parse shape of {@link DataEngineRequest} — defaults applied, transforms run (ADR-0122). */
 export type DataEngineRequestParsed = z.infer<typeof DataEngineRequestSchema>;
+export type DataEngineExecuteRequest = z.input<typeof DataEngineExecuteRequestSchema>;
+export type DataEngineInsertRequest = z.input<typeof DataEngineInsertRequestSchema>;
+export type DataEngineVectorFindRequest = z.input<typeof DataEngineVectorFindRequestSchema>;

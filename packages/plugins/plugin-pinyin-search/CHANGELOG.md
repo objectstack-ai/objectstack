@@ -1,5 +1,110 @@
 # @objectstack/plugin-pinyin-search
 
+## 17.0.0-rc.6
+
+### Patch Changes
+
+- 2465133: fix(plugins): sweep the service-lookup erasures out of the plugin composition roots, and fix the two alias-only HTTP reads it exposed (#4251 B5)
+
+  Batch B5 of the #4251 sweep: the seven remaining `packages/plugins/*` composition
+  roots. 35 lookup sites that had been erased to `any` now carry the slot's
+  contract, so the compiler checks what each plugin actually calls on the service
+  it resolved. The ratchet drops 143 sites / 32 files to 108 / 25.
+
+  **Two real defects, both of the shape this sweep exists to find.** Approvals'
+  actionable-link pages (ADR-0043) and sharing's public share-link REST routes each
+  read the HTTP server under `http-server` _only_ — the deprecated alias. The
+  ledger records `http.server` as canonical and as the only name present on every
+  provider path: `runtime.ts`'s `config.server` path registers no alias at all. On
+  that path both lookups threw, the surrounding `catch` swallowed it, and the
+  routes silently never mounted — approval e-mail action links 404'd and the
+  share-link surface was absent, with nothing in the log to say so. Both reads are
+  now canonical-first with the alias as fallback, each name in its own `try`
+  because `getService` throws on an empty slot (so `a() ?? b()` inside one `try`
+  never reaches `b` — the same correction #4393 made in metadata and
+  cloud-connection).
+
+  Typing choices follow the batch method: pure data-plane consumers take the
+  narrow contract (`IDataEngine` in reports), consumers that bind hook or
+  middleware seams take the engine seen whole (`IObjectQLEngine` in approvals,
+  sharing and pinyin-search), and slots with no contract get a **named** local
+  surface rather than `any` — plugin-email's `MailSettingsSurface`, and the
+  surfaces the consuming packages already declared (`ApprovalMessagingSurface`,
+  `SharingSecurityProbe`, `ReportEmail`). A named surface that omits a member
+  still makes the compiler name every call site; `any` says nothing.
+
+  No behaviour change beyond the two alias reads. No contract changes.
+
+- Updated dependencies [f16e54e]
+- Updated dependencies [06be54e]
+- Updated dependencies [259459d]
+- Updated dependencies [3f7f14e]
+- Updated dependencies [debe2f6]
+- Updated dependencies [ad878e7]
+- Updated dependencies [3028326]
+- Updated dependencies [ddd075a]
+- Updated dependencies [fe2dfa1]
+- Updated dependencies [6f6fec7]
+- Updated dependencies [ea1d916]
+- Updated dependencies [10c4ea9]
+- Updated dependencies [2ef1807]
+- Updated dependencies [55da611]
+- Updated dependencies [0fd8556]
+- Updated dependencies [6fde910]
+- Updated dependencies [9c82b89]
+- Updated dependencies [74155c7]
+- Updated dependencies [742a6a5]
+- Updated dependencies [6908830]
+- Updated dependencies [b7d3be4]
+- Updated dependencies [2a0d65e]
+- Updated dependencies [82da264]
+- Updated dependencies [f586f1a]
+- Updated dependencies [b127c8b]
+- Updated dependencies [92a67f2]
+- Updated dependencies [edb4af0]
+- Updated dependencies [f09a2e7]
+- Updated dependencies [fc3a36a]
+- Updated dependencies [69787f0]
+- Updated dependencies [5d022a1]
+- Updated dependencies [55011af]
+- Updated dependencies [3f8817a]
+- Updated dependencies [53ef057]
+- Updated dependencies [d6d1a50]
+- Updated dependencies [c804f19]
+- Updated dependencies [dbe92a7]
+- Updated dependencies [114e727]
+- Updated dependencies [5e247fd]
+- Updated dependencies [1a53a02]
+- Updated dependencies [1507ba3]
+- Updated dependencies [bf42e76]
+- Updated dependencies [bfe689b]
+- Updated dependencies [d0d5205]
+- Updated dependencies [de43f94]
+- Updated dependencies [28d1eb7]
+- Updated dependencies [3fb42d2]
+- Updated dependencies [82397b6]
+- Updated dependencies [4df747c]
+- Updated dependencies [7084313]
+- Updated dependencies [47a4e67]
+- Updated dependencies [91cefb8]
+- Updated dependencies [9bc846b]
+- Updated dependencies [4fedb11]
+- Updated dependencies [d13f627]
+- Updated dependencies [a841151]
+- Updated dependencies [1788e19]
+- Updated dependencies [1f6ed16]
+- Updated dependencies [d86815e]
+- Updated dependencies [e13fd91]
+- Updated dependencies [2bd4e5e]
+- Updated dependencies [129b378]
+- Updated dependencies [88f9d94]
+- Updated dependencies [1818998]
+- Updated dependencies [c9bf940]
+- Updated dependencies [a682670]
+  - @objectstack/objectql@17.0.0-rc.6
+  - @objectstack/core@17.0.0-rc.6
+  - @objectstack/types@17.0.0-rc.6
+
 ## 17.0.0-rc.5
 
 ### Patch Changes

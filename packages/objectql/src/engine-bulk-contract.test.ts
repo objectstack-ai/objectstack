@@ -54,7 +54,7 @@ async function makeEngine(driverOpts?: { bulkCreate?: (object: string, rows: any
   const d = makeDriver(driverOpts);
   engine.registerDriver(d.driver, true);
   await engine.init();
-  engine.registry.registerObject({ name: 'task', fields: { title: { type: 'text' } } } as any);
+  engine.registry.registerObject({ name: 'task', fields: { title: { type: 'text' } } });
   return { engine, storeFor: d.storeFor };
 }
 

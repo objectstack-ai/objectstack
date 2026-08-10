@@ -5,11 +5,23 @@
 // driver — builds through the same `create({driver,config})` as every other
 // kind. These are the first direct tests of the factory's id → driver mapping.
 
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createDefaultDatasourceDriverFactory } from '../default-datasource-driver-factory.js';
+import {
+  createDefaultDatasourceDriverFactory,
+  missingTursoDriverMessage,
+  TURSO_DRIVER_INSTALL_COMMAND,
+  TURSO_DRIVER_PACKAGE,
+  missingSqliteWasmDriverMessage,
+  SQLITE_WASM_DRIVER_INSTALL_COMMAND,
+  SQLITE_WASM_DRIVER_PACKAGE,
+  missingMongodbDriverMessage,
+  MONGODB_DRIVER_INSTALL_COMMAND,
+  MONGODB_DRIVER_PACKAGE,
+} from '../default-datasource-driver-factory.js';
+import { isUnbuiltWorkspaceFailure } from '../connect-failure-remedy.js';
 
 const factory = () => createDefaultDatasourceDriverFactory({ dev: false });
 
@@ -352,5 +364,309 @@ describe('createDefaultDatasourceDriverFactory — legacy config spellings are n
     });
     const driver: any = handle.driver ?? handle;
     expect(driver.config.url).toBe('mongodb://svc:pw@mongo.internal:27017/events');
+  });
+});
+
+// #7314 — the OPTIONAL libSQL driver is missing, and until now this arm said so
+// and stopped: `turso driver requested but @objectstack/driver-turso is not
+// installed (…)`. The HOST loader (`@objectstack/runtime`'s
+// `loadTursoDriverFactory`, single owner since #6268) has answered the same
+// missing package with the install command, the consequence and the reason for
+// refusing since #5602 — so the SAME fault got two qualities of answer depending
+// on whether the datasource happened to be the host's `default` (told how to fix
+// it) or one added in Setup / probed by `testConnection` / declared as a
+// non-default (told only that it was broken).
+//
+// Pinned by CONTENT rather than by `toThrow()`: the defect is what the message
+// omits, and a throw-only assertion was green throughout the years this arm
+// omitted it.
+describe('createDefaultDatasourceDriverFactory — the missing libSQL package is answered with a remedy (#7314)', () => {
+  const message = (cause: unknown, datasource?: string) =>
+    missingTursoDriverMessage({ cause, ...(datasource ? { datasource } : {}) });
+
+  const notInstalled = Object.assign(
+    new Error(`Cannot find package '${TURSO_DRIVER_PACKAGE}' imported from /app/node_modules/x.mjs`),
+    { code: 'ERR_MODULE_NOT_FOUND' },
+  );
+
+  it('states the exact install command, on its own copy-pasteable line', () => {
+    expect(TURSO_DRIVER_INSTALL_COMMAND).toBe('npm install @objectstack/driver-turso');
+    expect(message(notInstalled)).toContain(`\n\n    ${TURSO_DRIVER_INSTALL_COMMAND}\n\n`);
+  });
+
+  it('names the package that is missing', () => {
+    expect(TURSO_DRIVER_PACKAGE).toBe('@objectstack/driver-turso');
+    expect(message(notInstalled)).toContain(TURSO_DRIVER_PACKAGE);
+  });
+
+  it('states the consequence and that the refusal is deliberate', () => {
+    const text = message(notInstalled);
+    // Not decoration: without it the reader's next move is to look for the
+    // fallback, and a libSQL selection quietly served by another engine is the
+    // #3276 class — writes accepted into the wrong database.
+    expect(text).toContain('refuses rather than falling back');
+    expect(text).toContain('wrong database');
+  });
+
+  it('names the datasource that failed, and falls back to `default`', () => {
+    expect(message(notInstalled, 'warehouse')).toContain("datasource 'warehouse'");
+    expect(message(notInstalled)).toContain("datasource 'default'");
+  });
+
+  it('keeps the import error verbatim, so the unbuilt-workspace classifier still fires', () => {
+    // Load-bearing: this arm re-throws a NEW Error and therefore drops the
+    // original `code`, so `isUnbuiltWorkspaceFailure` can only recognise an
+    // unbuilt/uninstalled workspace from the `Cannot find package` TEXT the
+    // message carries. Drop the interpolation and a half-built worktree silently
+    // goes back to being told "Fix the datasource configuration" (#5794).
+    const text = message(notInstalled);
+    expect(text).toContain(notInstalled.message);
+    expect(isUnbuiltWorkspaceFailure(new Error(text))).toBe(true);
+  });
+
+  it('names no escape hatch and no host-boot knob — one fix, stated once', () => {
+    const text = message(notInstalled);
+    // `OS_ALLOW_DRIVER_CONNECT_FAILURE` would only hide a package that does not
+    // exist (#5794), and `OS_DATABASE_URL` / `--database` select the HOST's
+    // `default` datasource — neither can affect the datasource that failed here.
+    expect(text).not.toContain('OS_ALLOW_DRIVER_CONNECT_FAILURE');
+    expect(text).not.toContain('OS_DATABASE_URL');
+    expect(text).not.toContain('--database');
+    expect(text.match(new RegExp(TURSO_DRIVER_INSTALL_COMMAND.replace(/\//g, '\\/'), 'g'))).toHaveLength(1);
+  });
+
+  it('is what the turso arm actually raises when the optional package is absent', async () => {
+    // `@objectstack/driver-turso` is deliberately not a dependency of this
+    // package — that is what "optional" means — so the missing-package path is
+    // reachable here for a real reason and needs no stub.
+    let raised: unknown;
+    try {
+      await factory().create({
+        driver: 'turso',
+        name: 'warehouse',
+        config: { url: 'libsql://my-db.turso.io', authToken: 'tok' },
+      });
+    } catch (err) {
+      raised = err;
+    }
+    if (raised === undefined) {
+      throw new Error(
+        `${TURSO_DRIVER_PACKAGE} resolved from @objectstack/service-datasource, so this case no `
+        + 'longer exercises the missing-package arm. If the package was made a dependency, this '
+        + 'assertion is the notice that the pin above needs a stubbed import instead.',
+      );
+    }
+    expect((raised as Error).message).toContain(TURSO_DRIVER_INSTALL_COMMAND);
+    expect((raised as Error).message).toContain(TURSO_DRIVER_PACKAGE);
+    expect((raised as Error).message).toContain("datasource 'warehouse'");
+  });
+});
+
+// #7385 — the same generalisation over the two SIBLING optional arms.
+//
+// `sqlite-wasm` and `mongodb` ride in optional packages exactly like `turso`,
+// and after #7314 they were the two arms still answering an absent one with
+//
+//     sqlite-wasm driver requested but @objectstack/driver-sqlite-wasm is not installed (…).
+//     mongodb driver requested but @objectstack/driver-mongodb is not installed (…).
+//
+// — the fault, no install command, no consequence, and not even the name of the
+// datasource that failed. One class of problem, two qualities of answer,
+// decided by which driver the admin picked.
+//
+// Pinned by CONTENT for the reason #7384 gave: the defect is what the message
+// OMITS, so `toThrow()` was green throughout.
+//
+// Unlike the libSQL package, BOTH of these resolve inside this workspace (they
+// are `devDependencies` of `@objectstack/service-datasource`, which is how the
+// construction suites above build real drivers). So the arm-level cases cannot
+// simply ask for a driver and watch it fail the way the turso one does — they
+// make the optional import fail on purpose instead.
+const notInstalled = (pkg: string) =>
+  Object.assign(new Error(`Cannot find package '${pkg}' imported from /app/node_modules/x.mjs`), {
+    code: 'ERR_MODULE_NOT_FOUND',
+  });
+
+/**
+ * Build a datasource whose OPTIONAL driver package is absent, and return what
+ * the arm raised. The package is a real dependency here, so absence is staged:
+ * the module registry is reset, the specifier is mocked with a factory that
+ * throws the resolver's own error, and the factory module is re-imported so its
+ * lazy `await import(...)` hits the mock. Both are undone in `finally`, so the
+ * construction suites in this file keep seeing the real drivers.
+ */
+async function raiseWithPackageAbsent(
+  pkg: string,
+  spec: { driver: string; name?: string; config?: Record<string, unknown> },
+): Promise<unknown> {
+  vi.resetModules();
+  vi.doMock(pkg, () => {
+    throw notInstalled(pkg);
+  });
+  try {
+    const mod = await import('../default-datasource-driver-factory.js');
+    await mod.createDefaultDatasourceDriverFactory({ dev: false }).create(spec as never);
+    return undefined;
+  } catch (err) {
+    return err;
+  } finally {
+    vi.doUnmock(pkg);
+    vi.resetModules();
+  }
+}
+
+describe('createDefaultDatasourceDriverFactory — the missing WASM SQLite package is answered with a remedy (#7385)', () => {
+  const message = (cause: unknown, datasource?: string) =>
+    missingSqliteWasmDriverMessage({ cause, ...(datasource ? { datasource } : {}) });
+  const cause = notInstalled(SQLITE_WASM_DRIVER_PACKAGE);
+
+  it('states the exact install command, on its own copy-pasteable line', () => {
+    expect(SQLITE_WASM_DRIVER_INSTALL_COMMAND).toBe('npm install @objectstack/driver-sqlite-wasm');
+    expect(message(cause)).toContain(`\n\n    ${SQLITE_WASM_DRIVER_INSTALL_COMMAND}\n\n`);
+  });
+
+  it('names the package that is missing', () => {
+    expect(SQLITE_WASM_DRIVER_PACKAGE).toBe('@objectstack/driver-sqlite-wasm');
+    expect(message(cause)).toContain(SQLITE_WASM_DRIVER_PACKAGE);
+  });
+
+  it('states a consequence that is TRUE for this engine, not the libSQL one', () => {
+    const text = message(cause);
+    expect(text).toContain('refuses rather than falling back');
+    // What a fallback would actually cost here: durability (the memory driver
+    // accepts writes and drops them at shutdown, #4083), or the native addon
+    // this driver id exists to avoid.
+    expect(text).toContain('drop it at shutdown');
+    expect(text).toContain('better-sqlite3');
+    // And what it must NOT claim: `sqlite-wasm` opens a local file, so there is
+    // no remote database for a fallback to shadow. #7384's "your libSQL data
+    // stays untouched … the wrong database" reads well here and would be a lie.
+    expect(text).not.toContain('wrong database');
+    expect(text).not.toContain('stays untouched');
+  });
+
+  it('names the datasource that failed, and falls back to `default`', () => {
+    expect(message(cause, 'wasm-store')).toContain("datasource 'wasm-store'");
+    expect(message(cause)).toContain("datasource 'default'");
+  });
+
+  it('keeps the import error verbatim, so the unbuilt-workspace classifier still fires', () => {
+    // Load-bearing exactly as in the turso arm: this re-throw drops the original
+    // `code`, so `isUnbuiltWorkspaceFailure` can only recognise a half-built
+    // checkout from the `Cannot find package` TEXT carried here. That case is
+    // the COMMON one for this package — `@objectstack/runtime` and the CLI both
+    // depend on it outright, so a reader who hits this is usually unbuilt rather
+    // than uninstalled, and must not be told to install what they already have.
+    const text = message(cause);
+    expect(text).toContain(cause.message);
+    expect(isUnbuiltWorkspaceFailure(new Error(text))).toBe(true);
+  });
+
+  it('names no escape hatch and no host-boot knob — one fix, stated once', () => {
+    const text = message(cause);
+    expect(text).not.toContain('OS_ALLOW_DRIVER_CONNECT_FAILURE');
+    expect(text).not.toContain('OS_DATABASE_URL');
+    expect(text).not.toContain('--database');
+    expect(text.match(new RegExp(SQLITE_WASM_DRIVER_INSTALL_COMMAND.replace(/\//g, '\\/'), 'g')))
+      .toHaveLength(1);
+  });
+
+  it('is what the sqlite-wasm arm actually raises when the optional package is absent', async () => {
+    const raised = await raiseWithPackageAbsent(SQLITE_WASM_DRIVER_PACKAGE, {
+      driver: 'sqlite-wasm',
+      name: 'wasm-store',
+      config: { filename: 'data/app.db' },
+    });
+    expect(raised).toBeInstanceOf(Error);
+    expect((raised as Error).message).toContain(SQLITE_WASM_DRIVER_INSTALL_COMMAND);
+    expect((raised as Error).message).toContain(SQLITE_WASM_DRIVER_PACKAGE);
+    expect((raised as Error).message).toContain("datasource 'wasm-store'");
+    expect((raised as Error).message).toContain('refuses rather than falling back');
+  });
+});
+
+describe('createDefaultDatasourceDriverFactory — the missing MongoDB package is answered with a remedy (#7385)', () => {
+  const message = (cause: unknown, datasource?: string) =>
+    missingMongodbDriverMessage({ cause, ...(datasource ? { datasource } : {}) });
+  const cause = notInstalled(MONGODB_DRIVER_PACKAGE);
+
+  it('states the exact install command, on its own copy-pasteable line', () => {
+    expect(MONGODB_DRIVER_INSTALL_COMMAND).toBe('npm install @objectstack/driver-mongodb');
+    expect(message(cause)).toContain(`\n\n    ${MONGODB_DRIVER_INSTALL_COMMAND}\n\n`);
+  });
+
+  it('names the package that is missing', () => {
+    expect(MONGODB_DRIVER_PACKAGE).toBe('@objectstack/driver-mongodb');
+    expect(message(cause)).toContain(MONGODB_DRIVER_PACKAGE);
+  });
+
+  it('states the consequence and that the refusal is deliberate', () => {
+    const text = message(cause);
+    expect(text).toContain('refuses rather than falling back');
+    // Mongo is a server this process CONNECTS to, so #7384's consequence is
+    // true here in substance: a local store shadowing a remote database is the
+    // #3276 class — writes accepted into the wrong place.
+    expect(text).toContain('stays untouched');
+    expect(text).toContain('wrong database');
+  });
+
+  it('names the datasource that failed, and falls back to `default`', () => {
+    expect(message(cause, 'events')).toContain("datasource 'events'");
+    expect(message(cause)).toContain("datasource 'default'");
+  });
+
+  it('keeps the import error verbatim, so the unbuilt-workspace classifier still fires', () => {
+    const text = message(cause);
+    expect(text).toContain(cause.message);
+    expect(isUnbuiltWorkspaceFailure(new Error(text))).toBe(true);
+  });
+
+  it('names no escape hatch and no host-boot knob — one fix, stated once', () => {
+    const text = message(cause);
+    expect(text).not.toContain('OS_ALLOW_DRIVER_CONNECT_FAILURE');
+    expect(text).not.toContain('OS_DATABASE_URL');
+    expect(text).not.toContain('--database');
+    expect(text.match(new RegExp(MONGODB_DRIVER_INSTALL_COMMAND.replace(/\//g, '\\/'), 'g')))
+      .toHaveLength(1);
+  });
+
+  it('is what the mongodb arm actually raises when the optional package is absent', async () => {
+    const raised = await raiseWithPackageAbsent(MONGODB_DRIVER_PACKAGE, {
+      driver: 'mongodb',
+      name: 'events',
+      config: { host: 'mongo.internal', database: 'events' },
+    });
+    expect(raised).toBeInstanceOf(Error);
+    expect((raised as Error).message).toContain(MONGODB_DRIVER_INSTALL_COMMAND);
+    expect((raised as Error).message).toContain(MONGODB_DRIVER_PACKAGE);
+    expect((raised as Error).message).toContain("datasource 'events'");
+    expect((raised as Error).message).toContain('refuses rather than falling back');
+  });
+});
+
+// The point of the card, stated as one assertion: the three optional arms now
+// give ONE quality of answer. Skeleton parity rather than byte equality —
+// `missingTursoDriverMessage` is deliberately left as its own function (it
+// merged hours earlier and #7384's tests pin its wording), and this is what
+// makes converging it onto the shared builder a provably inert change later.
+describe('createDefaultDatasourceDriverFactory — all three optional-driver arms answer in the same shape (#7385)', () => {
+  const messages = [
+    missingTursoDriverMessage({ datasource: 'd', cause: notInstalled(TURSO_DRIVER_PACKAGE) }),
+    missingSqliteWasmDriverMessage({ datasource: 'd', cause: notInstalled(SQLITE_WASM_DRIVER_PACKAGE) }),
+    missingMongodbDriverMessage({ datasource: 'd', cause: notInstalled(MONGODB_DRIVER_PACKAGE) }),
+  ];
+
+  it.each([
+    ["datasource 'd'", 'names the datasource'],
+    ['is not installed. Install it next to the server that opens this datasource:', 'states the fault + where to install'],
+    ['It is an OPTIONAL package,', 'says the package is optional'],
+    ['This refuses rather than falling back to another engine:', 'says the refusal is deliberate'],
+    ['Import error: ', 'ends on the verbatim import error'],
+  ])('every arm carries %j (%s)', (fragment) => {
+    for (const text of messages) expect(text).toContain(fragment);
+  });
+
+  it('every arm is classified as an unbuilt workspace when that is the real cause', () => {
+    for (const text of messages) expect(isUnbuiltWorkspaceFailure(new Error(text))).toBe(true);
   });
 });

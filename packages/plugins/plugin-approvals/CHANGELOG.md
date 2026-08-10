@@ -1,5 +1,437 @@
 # @objectstack/plugin-approvals
 
+## 17.0.0-rc.6
+
+### Minor Changes
+
+- 5fa04fb: Point the account app's **Approvals** navigation entry at the Approvals Inbox component, and contribute an **Approvals Inbox** entry to Setup (#7234).
+
+  The entry point has not moved — the account menu still shows **Approvals** with the same
+  label and icon in every locale. Its destination has. It used to open the raw
+  `sys_approval_request` grid, which is an admin/diagnostic view of the engine's own table
+  and cannot show an approver a single decision button: every action on that object is gated
+  on `record.viewer.can_act || record.viewer.can_override`, and the `viewer` block is
+  attached only by the approvals REST path, never by the generic data API the object route
+  reads. The result was a correct-looking list of rows nobody could act on. The entry is now
+  `{ type: 'component', componentRef: 'approvals:inbox' }`, so it opens the full inbox —
+  decision actions, business vocabulary, node progress and the request drawer.
+
+  - **Account app**: `nav_account_approvals` becomes a component entry gated by
+    `requiresService: 'approvals'`, so it disappears where `plugin-approvals` is not
+    installed (the previous `requiresObject` gate does not apply to a component entry).
+  - **Setup**: `plugin-approvals` contributes a new **Approvals Inbox** entry at the top of
+    **Setup → Approvals**, above the three raw tables, which stay exactly as they were —
+    admin-gated by `manage_platform_settings` and now unambiguously the diagnostic surface.
+    Labels ship in all four locales (zh-CN 审批中心).
+  - `sys_approval_request` is no longer surfaced raw to end users anywhere.
+  - **Docs**: the approver's queue is documented as the Approvals Inbox, with a snippet for
+    mounting it in any business app — one navigation entry naming the component-registry key
+    `approvals:inbox`, never a console path.
+
+  Reaching the inbox end to end in the browser additionally requires the console pin bump,
+  tracked separately.
+
+### Patch Changes
+
+- e5bd768: refactor(spec)!: retire `ActionDescriptor.isAsync` — a second spelling of `supportsPause` that nothing ever read (#6748, ADR-0049)
+
+  <!-- adr-0087: registered action-descriptor-is-async-retired -->
+
+  **FROM → TO:** `isAsync: true` → delete the key; declare `supportsPause: true` (plus the
+  `resumeAuthority` its pauses need) and return `suspend: true` from `execute()`.
+  `isAsync: false` → delete the key; there was never anything to preserve.
+
+  `ActionDescriptor.isAsync` declared "suspends the flow awaiting an external reply" and no
+  execution path read it. Measured fresh before removal across all three repos — objectstack,
+  objectui and cloud — with zero property reads: every hit was the declaration itself, a
+  generated baseline, one of five shipped descriptors WRITING it, a fixture pinning the
+  shape, or prose. Declaring it never made a node suspend; omitting it never stopped one.
+
+  This is the remove leg of the ADR-0049 disposition its sibling took the other way. The two
+  keys said the same thing — "this node type can suspend the run" — and #6667 split them by
+  evidence: `supportsPause` became an enforced fact (`AutomationEngine` now refuses a
+  suspension whose type does not declare it, at the one seam every suspension passes
+  through), while `isAsync` had no consumer to grow into. Keeping both would leave the
+  platform publishing two names for one capability with only one of them honoured — and
+  `screen` declared BOTH, so a plugin author copying it had no way to tell which.
+
+  The retirement kit:
+
+  - **Tombstone, not deletion** (`retiredKey()`): `ActionDescriptorSchema` is not `.strict()`,
+    so a plain delete would let existing descriptors parse clean and lose the key in silence
+    (the ADR-0104 shape). Authoring `isAsync` now fails `tsc` at the descriptor literal and
+    fails the parse inside `defineActionDescriptor()` — with the prescription in the message.
+  - **ADR-0087 D3 `SemanticMigration`** (`action-descriptor-is-async-retired`) plus the exact
+    `RETIRED_KEYS_BY_MAJOR` entry. No D2 conversion, deliberately: a descriptor is published
+    from an executor's TypeScript and never stored in stack metadata, so there is no source
+    for `os migrate meta` to rewrite — the `EnhancedApiError.fieldErrors` disposition.
+  - The five shipped writers stop writing it (`screen`, `map`, `wait`, `approval`,
+    `approval_revise`); the descriptors they publish lose the key, which is why the two
+    runtime packages appear here.
+  - Generated baselines (`authorable-surface/automation.json` gains `[RETIRED]`,
+    `authorable-defaults/automation.json` loses the default line), `spec-changes.json`, the
+    upgrade guide and the reference docs regenerated.
+
+  No runtime behaviour changes — that impossibility is the reason for the removal. The same
+  commit also corrects `supportsPause`'s TSDoc, which still described itself as a declaration
+  no execution path reads; #6667 made that false (#6749).
+
+- f40c5b4: refactor(plugin-approvals,plugin-reports): enforcement implementations annotate the full `ExecutionContext` (#7135)
+
+  The services half of #7070, mirroring what PR #7140 did for
+  `plugin-sharing` / `plugin-audit`. #6523 converged 36 contract signatures onto
+  the complete `resolveAuthzContext` envelope, applying the #6206 ruling —
+  enforcement adjudicates on the whole envelope, never a per-site subset. The
+  implementations behind those contracts still annotated their own parameters
+  with the six-field shape the contracts used to name, so nothing they could
+  _read_ had widened.
+
+  `ApprovalService`, the approval flow-node provider and `ReportService` now
+  declare `ExecutionContext` on all 43 of those positions, and the casts the
+  narrow annotation forced are gone:
+
+  - `isOverrideActor()` read the derived `posture` (ADR-0095) through an
+    unchecked `(context as any)`. That gate decides whether a platform or tenant
+    admin may release a STUCK approval — one routed to an unstaffed position, the
+    only in-product recovery from a permanently locked record — so an erasure sat
+    directly on an enforcement input: a mistyped rung would have compiled and
+    silently denied every override. It is a declared read now.
+  - Both services' `SYSTEM_CTX` is typed as the envelope and passed as itself,
+    retiring the `SYSTEM_CTX as unknown as …` double casts at the three sites
+    that hand it to a contract method.
+  - The `(context as any).userId` / `.tenantId` reads in `ApprovalService` now
+    read declared fields.
+  - `OwnerContextResolver` returns the envelope, which is what a scheduled report
+    actually resolves for its owner (#2849 / #2980).
+
+  **No runtime behaviour changes.** The values were always complete — this
+  family's damage was type-side — so every gate answers exactly what it answered
+  before. Method parameters only WIDEN what they accept, so no caller is
+  affected, and no public export changes shape.
+
+  Casts deliberately kept, and now documented where they sit: `organizationId`
+  is not a field of the envelope at all — that spelling has its own history
+  (#5858 / `check:org-identifier`) and was held out of this change by #7070. In
+  `approval-node.ts` the single remaining assertion exists only because the
+  literal names that key; it was reduced from `as unknown as …` to a single
+  `as ExecutionContext`, which still requires the literal to be comparable to
+  the envelope.
+
+  Because a re-narrowed annotation would compile, ship and pass every test in
+  these packages, the convergence is pinned by a new compile-time module per
+  package, `exec-context-annotation.pin.ts`: it hands each parameter a fresh
+  literal naming envelope-only fields (`posture`, `accessible_org_ids`,
+  `org_user_ids`), which TypeScript's excess-property check rejects the moment a
+  parameter narrows back, plus negative cases so a parameter erased to `any`
+  cannot pass either.
+
+  The exported `SharingExecutionContext` type itself is NOT removed here: it is
+  defined in `packages/spec`, which is single-owner, so its retirement is a
+  separate follow-up.
+
+- 5d12675: Unify the approval-status vocabulary across the `sys_approval_request` i18n bundles (#7232).
+
+  A request rendered through the generic object surfaces used a different word than the same
+  request in the Approvals Inbox and in the account-app navigation. The bundles now say what
+  those surfaces already say:
+
+  - **zh-CN**: the `status` option `pending` reads 待审批 (was 待处理), and the `my_pending`
+    view reads 待我审批 (was 我的待办), matching the account-app nav entry; the view's
+    empty-state title was aligned to the same wording.
+  - **en**: the `status` options are humanized — `Pending` / `Approved` / `Rejected` /
+    `Recalled` / `Returned` — instead of shipping the raw enum values as labels.
+  - **ja-JP / es-ES**: the `my_pending` view label now matches the nav wording (承認待ち /
+    Aprobaciones pendientes).
+
+  Status **values** are unchanged — this is display wording only, so no stored data, filter,
+  or API payload is affected.
+
+- dadd1ad: refactor(spec,plugin-sharing): retire the exported `SharingExecutionContext` type (#7218)
+
+  <!-- adr-0087: registered sharing-execution-context-retired -->
+
+  **BREAKING — public surface removal.** `SharingExecutionContext` is deleted from
+  `@objectstack/spec` (`contracts/sharing-service`) and from
+  `@objectstack/plugin-sharing`, which re-exported it. Both `api-surface/` and
+  `export-origins/` snapshots are regenerated accordingly.
+
+  This is the deferred deletion recorded when #7070 split the convergence in two.
+  #6523 / PR #7068 converged 36 contract signatures onto the full
+  `resolveAuthzContext` envelope (`ExecutionContext`), applying the #6206 ruling —
+  enforcement adjudicates on the whole envelope, never a per-site subset. The
+  consumer halves then re-annotated the implementations: PR #7140 (identity:
+  `plugin-sharing`, `plugin-audit`) and PR #7206 (services: `plugin-approvals`,
+  `plugin-reports`). Both landed with the type still exported, because it is
+  DEFINED in `packages/spec` and that package's retirement is the spec seat's to
+  make. Nothing declares it any more, so it goes.
+
+  **Migration.** Anyone who imported `SharingExecutionContext` from either package
+  should import `ExecutionContext` from `@objectstack/spec` instead — the type the
+  contracts have declared since #7068. The old shape was six optional fields, all
+  of which exist on the envelope with the same names and types, so a value that
+  satisfied the retired type already satisfies `ExecutionContext`; only the
+  spelling of the annotation changes.
+
+  **No runtime behaviour changes.** The type was erased at compile time and no
+  signature's accepted shape moved: the contracts already took the wide envelope.
+
+  **What the retirement did NOT remove — the reason to read the pins.** Deleting
+  the type does not make re-narrowing a compile error. Structural subtyping still
+  accepts a six-field context where the envelope is expected, so the boundary is
+  held by the declared parameter type plus the pins, exactly as before. The three
+  `exec-context-annotation.pin.ts` files (`plugin-sharing`, `plugin-approvals`,
+  `plugin-reports`) told their failure story as "the parameter narrows back to
+  `SharingExecutionContext`", which a deletion would have quietly hollowed out.
+  Each now keeps the retired six-field shape as a local, non-exported SPECIMEN
+  type and refutes every enforcement parameter against it by type identity, so a
+  re-narrowing under ANY name is red — alongside the fresh-literal
+  excess-property checks they already carried. `sharing-service.test.ts` in
+  `packages/spec` is re-anchored the same way, and its "twin unchanged in shape"
+  case becomes a "twin stays retired" case. The narrative the retired type's doc
+  block carried (the measured `(context as any).posture` specimen, and why tsc
+  cannot police this) moves to the module doc of `contracts/sharing-service`,
+  which the contracts and pins now point at.
+
+- 2465133: fix(plugins): sweep the service-lookup erasures out of the plugin composition roots, and fix the two alias-only HTTP reads it exposed (#4251 B5)
+
+  Batch B5 of the #4251 sweep: the seven remaining `packages/plugins/*` composition
+  roots. 35 lookup sites that had been erased to `any` now carry the slot's
+  contract, so the compiler checks what each plugin actually calls on the service
+  it resolved. The ratchet drops 143 sites / 32 files to 108 / 25.
+
+  **Two real defects, both of the shape this sweep exists to find.** Approvals'
+  actionable-link pages (ADR-0043) and sharing's public share-link REST routes each
+  read the HTTP server under `http-server` _only_ — the deprecated alias. The
+  ledger records `http.server` as canonical and as the only name present on every
+  provider path: `runtime.ts`'s `config.server` path registers no alias at all. On
+  that path both lookups threw, the surrounding `catch` swallowed it, and the
+  routes silently never mounted — approval e-mail action links 404'd and the
+  share-link surface was absent, with nothing in the log to say so. Both reads are
+  now canonical-first with the alias as fallback, each name in its own `try`
+  because `getService` throws on an empty slot (so `a() ?? b()` inside one `try`
+  never reaches `b` — the same correction #4393 made in metadata and
+  cloud-connection).
+
+  Typing choices follow the batch method: pure data-plane consumers take the
+  narrow contract (`IDataEngine` in reports), consumers that bind hook or
+  middleware seams take the engine seen whole (`IObjectQLEngine` in approvals,
+  sharing and pinyin-search), and slots with no contract get a **named** local
+  surface rather than `any` — plugin-email's `MailSettingsSurface`, and the
+  surfaces the consuming packages already declared (`ApprovalMessagingSurface`,
+  `SharingSecurityProbe`, `ReportEmail`). A named surface that omits a member
+  still makes the compiler name every call site; `any` says nothing.
+
+  No behaviour change beyond the two alias reads. No contract changes.
+
+- Updated dependencies [3d5c090]
+- Updated dependencies [e5bd768]
+- Updated dependencies [e027b3e]
+- Updated dependencies [c2429b0]
+- Updated dependencies [445a0c2]
+- Updated dependencies [f6609e6]
+- Updated dependencies [a70358a]
+- Updated dependencies [97e7e3c]
+- Updated dependencies [8828b9e]
+- Updated dependencies [53068c1]
+- Updated dependencies [ee58392]
+- Updated dependencies [f16e54e]
+- Updated dependencies [06be54e]
+- Updated dependencies [259459d]
+- Updated dependencies [3f7f14e]
+- Updated dependencies [6968885]
+- Updated dependencies [eaed61f]
+- Updated dependencies [debe2f6]
+- Updated dependencies [97b0798]
+- Updated dependencies [5fa04fb]
+- Updated dependencies [43a7a8d]
+- Updated dependencies [73f69dc]
+- Updated dependencies [04c56aa]
+- Updated dependencies [b3efeb7]
+- Updated dependencies [ddd075a]
+- Updated dependencies [88154be]
+- Updated dependencies [e8dc61e]
+- Updated dependencies [2f3e793]
+- Updated dependencies [d8e8d9c]
+- Updated dependencies [94e749b]
+- Updated dependencies [ea1d916]
+- Updated dependencies [ae31a19]
+- Updated dependencies [b230e5e]
+- Updated dependencies [5d24f4b]
+- Updated dependencies [29b94ed]
+- Updated dependencies [07c68b0]
+- Updated dependencies [f6cd635]
+- Updated dependencies [e0f300b]
+- Updated dependencies [62b6a2f]
+- Updated dependencies [5b4780b]
+- Updated dependencies [a933452]
+- Updated dependencies [8140915]
+- Updated dependencies [7b48cf9]
+- Updated dependencies [b5404f4]
+- Updated dependencies [f764691]
+- Updated dependencies [e120a5a]
+- Updated dependencies [e9b5265]
+- Updated dependencies [e650d67]
+- Updated dependencies [121852d]
+- Updated dependencies [04476e7]
+- Updated dependencies [79228cd]
+- Updated dependencies [b3363e9]
+- Updated dependencies [2ef1807]
+- Updated dependencies [d03fe25]
+- Updated dependencies [2672f85]
+- Updated dependencies [11066f6]
+- Updated dependencies [916af17]
+- Updated dependencies [84c86fb]
+- Updated dependencies [2a2a9fb]
+- Updated dependencies [a2e157c]
+- Updated dependencies [95c4227]
+- Updated dependencies [2a61116]
+- Updated dependencies [d4df105]
+- Updated dependencies [e2798fa]
+- Updated dependencies [0fd8556]
+- Updated dependencies [74155c7]
+- Updated dependencies [6908830]
+- Updated dependencies [8b06bba]
+- Updated dependencies [4c54037]
+- Updated dependencies [0f7157b]
+- Updated dependencies [d9bef45]
+- Updated dependencies [f549a0d]
+- Updated dependencies [82da264]
+- Updated dependencies [f586f1a]
+- Updated dependencies [9b9b70f]
+- Updated dependencies [f5a9bc2]
+- Updated dependencies [881a3cc]
+- Updated dependencies [ad6317b]
+- Updated dependencies [d5e9f6e]
+- Updated dependencies [8a88885]
+- Updated dependencies [5f7669e]
+- Updated dependencies [becbe53]
+- Updated dependencies [b127c8b]
+- Updated dependencies [a80302a]
+- Updated dependencies [474f131]
+- Updated dependencies [050cd82]
+- Updated dependencies [4d552af]
+- Updated dependencies [44d677c]
+- Updated dependencies [c32944d]
+- Updated dependencies [1dd780f]
+- Updated dependencies [cafec0a]
+- Updated dependencies [c8d6f6e]
+- Updated dependencies [92a67f2]
+- Updated dependencies [9136327]
+- Updated dependencies [bf0ae99]
+- Updated dependencies [cb3b6cd]
+- Updated dependencies [73b7234]
+- Updated dependencies [d2b97c3]
+- Updated dependencies [59b794f]
+- Updated dependencies [fc3a36a]
+- Updated dependencies [69787f0]
+- Updated dependencies [5d022a1]
+- Updated dependencies [042b9ee]
+- Updated dependencies [f549a0d]
+- Updated dependencies [a36db28]
+- Updated dependencies [3f8817a]
+- Updated dependencies [a2443e3]
+- Updated dependencies [e1554b1]
+- Updated dependencies [4856789]
+- Updated dependencies [c3f4916]
+- Updated dependencies [33e0385]
+- Updated dependencies [2205363]
+- Updated dependencies [09fe58d]
+- Updated dependencies [d0a5ceb]
+- Updated dependencies [e18a162]
+- Updated dependencies [d6d1a50]
+- Updated dependencies [d127ff0]
+- Updated dependencies [9b86cf6]
+- Updated dependencies [8825a06]
+- Updated dependencies [5087ac6]
+- Updated dependencies [6965160]
+- Updated dependencies [2d1ddf0]
+- Updated dependencies [354b00f]
+- Updated dependencies [3de535b]
+- Updated dependencies [fe2e15a]
+- Updated dependencies [c6b6bb4]
+- Updated dependencies [59c544d]
+- Updated dependencies [2f59da0]
+- Updated dependencies [5e247fd]
+- Updated dependencies [1a53a02]
+- Updated dependencies [a954634]
+- Updated dependencies [8ad609c]
+- Updated dependencies [bbee302]
+- Updated dependencies [08863dd]
+- Updated dependencies [56664f5]
+- Updated dependencies [31cbe90]
+- Updated dependencies [90bbf25]
+- Updated dependencies [eb91eba]
+- Updated dependencies [42da73d]
+- Updated dependencies [643b7c7]
+- Updated dependencies [d0d5205]
+- Updated dependencies [1a15893]
+- Updated dependencies [b70e534]
+- Updated dependencies [2233a85]
+- Updated dependencies [62dd69a]
+- Updated dependencies [e15e679]
+- Updated dependencies [2ab1257]
+- Updated dependencies [4cc4fb7]
+- Updated dependencies [28d1eb7]
+- Updated dependencies [2c26040]
+- Updated dependencies [f758cec]
+- Updated dependencies [78f0be8]
+- Updated dependencies [35f7fb4]
+- Updated dependencies [a5302c7]
+- Updated dependencies [7084313]
+- Updated dependencies [91cefb8]
+- Updated dependencies [0e043d8]
+- Updated dependencies [dadd1ad]
+- Updated dependencies [2f2e63c]
+- Updated dependencies [486d526]
+- Updated dependencies [89d7b35]
+- Updated dependencies [85ec26d]
+- Updated dependencies [f6476fc]
+- Updated dependencies [4ac12ef]
+- Updated dependencies [b88f5e8]
+- Updated dependencies [42cc219]
+- Updated dependencies [d42a92f]
+- Updated dependencies [51d74ad]
+- Updated dependencies [d7e0b42]
+- Updated dependencies [3510e4a]
+- Updated dependencies [aa4b90d]
+- Updated dependencies [54299ca]
+- Updated dependencies [dc61def]
+- Updated dependencies [251e888]
+- Updated dependencies [183b4c4]
+- Updated dependencies [2fdb36e]
+- Updated dependencies [e787608]
+- Updated dependencies [20526f5]
+- Updated dependencies [c5eef1d]
+- Updated dependencies [e0f300b]
+- Updated dependencies [761a0ba]
+- Updated dependencies [61282f9]
+- Updated dependencies [be87153]
+- Updated dependencies [60f0dd8]
+- Updated dependencies [a87c5cd]
+- Updated dependencies [a47f338]
+- Updated dependencies [2598216]
+- Updated dependencies [2c7e62d]
+- Updated dependencies [eb7613c]
+- Updated dependencies [ecc9110]
+- Updated dependencies [f7bd4e2]
+- Updated dependencies [361bd5b]
+- Updated dependencies [129b378]
+- Updated dependencies [88f9d94]
+- Updated dependencies [1818998]
+- Updated dependencies [3d4c545]
+- Updated dependencies [bb7cb41]
+- Updated dependencies [09ee21c]
+- Updated dependencies [f549a0d]
+- Updated dependencies [3fc2e48]
+- Updated dependencies [e8f435c]
+- Updated dependencies [41610f6]
+  - @objectstack/spec@17.0.0-rc.6
+  - @objectstack/platform-objects@17.0.0-rc.6
+  - @objectstack/formula@17.0.0-rc.6
+  - @objectstack/metadata-core@17.0.0-rc.6
+  - @objectstack/core@17.0.0-rc.6
+  - @objectstack/types@17.0.0-rc.6
+
 ## 17.0.0-rc.5
 
 ### Patch Changes

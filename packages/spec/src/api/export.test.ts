@@ -20,6 +20,8 @@ import {
   ExportJobSummarySchema,
   ScheduleExportRequestSchema,
   ScheduleExportResponseSchema,
+  ImportRequestSchema,
+  CreateImportJobRequestSchema,
 } from './export.zod';
 
 // ==========================================
@@ -712,5 +714,63 @@ describe('ExportApiContracts', () => {
     Object.values(ExportApiContracts).forEach((contract) => {
       expect(contract.output).toBeDefined();
     });
+  });
+});
+
+// ==========================================
+// Import Request — runAutomations declared default (#6704)
+// ==========================================
+
+/**
+ * The DECLARED default of `runAutomations`, pinned against the value the server
+ * actually applies.
+ *
+ * This half of the pin is deliberately schema-local: it asserts what a consumer
+ * who validates a request body through the published schema MATERIALISES. The
+ * other half — that the materialised value is the same one
+ * `POST /data/:object/import` decides on — lives in
+ * `packages/rest/src/import-run-automations-agreement.test.ts`, because only
+ * that package can reach both the schema and `prepareImportRequest`. Neither
+ * half alone is the fact #6704 is about: the fact is the AGREEMENT.
+ *
+ * Before #6704 the two disagreed on exactly one input — the omitted key — and
+ * that is the case a reader should look at first.
+ */
+describe('ImportRequestSchema — runAutomations declared default (#6704)', () => {
+  const bodyWithout = { format: 'json' as const, rows: [{ title: 'a' }] };
+
+  it('materialises `true` when the caller omits the key', () => {
+    expect(ImportRequestSchema.parse(bodyWithout).runAutomations).toBe(true);
+  });
+
+  it('keeps an explicit opt-out — `false` survives the parse', () => {
+    expect(ImportRequestSchema.parse({ ...bodyWithout, runAutomations: false }).runAutomations)
+      .toBe(false);
+  });
+
+  it('keeps an explicit opt-in', () => {
+    expect(ImportRequestSchema.parse({ ...bodyWithout, runAutomations: true }).runAutomations)
+      .toBe(true);
+  });
+
+  it('says the same thing on the async job body — it is the same schema object', () => {
+    // `CreateImportJobRequestSchema === ImportRequestSchema`, but both defs are
+    // PUBLISHED separately (two JSON Schema files, two reference tables, two
+    // authorable-defaults rows), so the async twin is asserted by name rather
+    // than left to the reader to infer from the aliasing.
+    expect(CreateImportJobRequestSchema.parse(bodyWithout).runAutomations).toBe(true);
+    expect(
+      CreateImportJobRequestSchema.parse({ ...bodyWithout, runAutomations: false }).runAutomations,
+    ).toBe(false);
+  });
+
+  it('describes the default it declares — the prose ships in the reference tables', () => {
+    // The old prose ("off by default for bulk") rendered into
+    // `content/docs/references/api/export.mdx` for BOTH defs and told an author
+    // the opposite of what the server does. Pin the direction, not the wording.
+    const described = (ImportRequestSchema.shape.runAutomations as { description?: string })
+      .description ?? '';
+    expect(described).not.toMatch(/off by default/i);
+    expect(described).toMatch(/ON by default/);
   });
 });

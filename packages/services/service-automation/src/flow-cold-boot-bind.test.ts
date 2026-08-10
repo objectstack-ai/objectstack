@@ -83,7 +83,8 @@ function fakeProtocolService(flows: unknown[]) {
  * spreads `_diagnostics` onto every served item, a preview read badges `_draft`,
  * and an overlay row carries its `_packageId`. cloud#971 — the first two are
  * read-time annotations the closed `FlowSchema` (#4001) rejects; the third is
- * ADR-0010 envelope state `FLOW_KEYS` allowlists and the bind must PRESERVE.
+ * ADR-0010 envelope state `FlowSchema` DECLARES (via `MetadataProtectionFields`)
+ * and the bind must PRESERVE.
  */
 function asServedByProtocol<T extends object>(flow: T) {
     return {
@@ -183,7 +184,7 @@ describe('cold-boot bind survives the read path annotations (cloud#971)', () => 
 
     it('keeps the ADR-0010 protection envelope — the strip is not a blanket "_" purge', async () => {
         // `_packageId` shares the underscore spelling but is envelope state
-        // `FLOW_KEYS` allowlists. Dropping it would erase a packaged flow's
+        // `FlowSchema` declares. Dropping it would erase a packaged flow's
         // provenance on every rebind, so the strip must be exactly the read
         // decorations and nothing more.
         const rec = recordingRecordChangeTrigger();

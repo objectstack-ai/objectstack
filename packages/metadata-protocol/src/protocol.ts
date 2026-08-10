@@ -4,11 +4,29 @@ import type {
     DataProtocol, MetadataProtocol, PackageProtocol,
 } from '@objectstack/spec/api';
 import { IDataEngine, engineCanRollBack } from '@objectstack/core';
-import { readEnvWithDeprecation } from '@objectstack/types';
+import { readEnvWithDeprecation, resolveTenancyPosture } from '@objectstack/types';
+// [#6285] ADR-0105 D1's authority on "does this deployment wall organizations?".
+// `resolveMultiOrgEnabled()` is DEMOTED and its own doc comment says answering
+// this question with it is a bug (cloud#1020, #5233) — so the posture, and only
+// the posture, is what the runtime authoring gate is told.
+import { postureEnforcesWall } from '@objectstack/spec/security';
 import type { MetadataHostEngine } from './host-engine.js';
 import { evaluateRuntimeAuthoringGate } from './runtime-authoring-gate.js';
+import type { RuntimeAuthoringIssue } from './runtime-authoring-gate.js';
+// [#6418] `sys_metadata`'s overlay-uniqueness indexes: probe-first DDL plus the
+// ADR-0120 D4 reporting that replaced this file's empty `catch` blocks.
+import { ensureMetadataOverlayIndexes } from './migrations/overlay-index.js';
 import { SysMetadataRepository, type SysMetadataEngine } from './sys-metadata-repository.js';
-import { ConflictError, assertProtocolCompat, type MetadataItem } from '@objectstack/metadata-core';
+import {
+    ConflictError,
+    assertProtocolCompat,
+    applyAuditFieldGovernance,
+    // [#6562] The injection/strip pair over the shared injected-column
+    // definition table — see {@link governServedItem} / {@link stripServedSystemColumns}.
+    applyInjectedSystemColumns,
+    stripInjectedSystemColumns,
+    type MetadataItem,
+} from '@objectstack/metadata-core';
 // [#5532] One vocabulary of "which driver read errors are benign", shared with
 // `sys-metadata-repository.ts` in this package and with `DatabaseLoader` in
 // `@objectstack/metadata` (#5108). See `rethrowUnlessMetadataStoreUnprovisioned`.
@@ -28,6 +46,8 @@ import {
     parseFilterAST, isFilterAST, VALID_AST_OPERATORS, REFERENCE_VALUE_TYPES, referenceTargetOf,
     AggregationFunction, DateGranularity, resolveSearchFieldResolution,
     SEARCHABLE_TEXTUAL_TYPES, SEARCHABLE_ENUM_TYPES, SEARCH_AUTO_EXCLUDED_FIELDS,
+    isVirtualSearchField,
+    RUNTIME_OWNED_FIELD_TYPES,
     RPC_QUERY_ALIAS_SLOTS, foldQueryAliasSlots,
     type QueryAliasConflict, type QueryAliasSlot,
     type DroppedFieldsEvent, type QueryAST, type EngineQueryOptionsParsed,
@@ -47,15 +67,15 @@ import {
 } from '@objectstack/spec/kernel';
 import { validateObjectNamespacePrefix, deriveNamespaceFromPackageId } from '@objectstack/spec/kernel';
 import { stripReadDecorations } from '@objectstack/spec/kernel';
-// [#5206 step 2, #5040 E7 / ADR-0121] The endpoint publish gates, reused
-// verbatim — see `gateApiDraftsForPublish`. `validateApiEndpointDeclarations`
-// is the ONE judge of what is servable; this module calls it, it never restates
-// a criterion.
-import {
-    ApiEndpointSchema,
-    validateApiEndpointDeclarations,
-    type ApiEndpoint,
-} from '@objectstack/spec/api';
+// [#5488] The `@objectstack/spec/api` import that stood here — `ApiEndpointSchema`,
+// `validateApiEndpointDeclarations`, `type ApiEndpoint` — went with
+// `gateApiDraftsForPublish` (see its retirement note in `publishPackageDrafts`).
+// This module no longer judges endpoints at all: `api` is code-only since #5488,
+// so no `api` draft can be authored here, and the ONE judge of what is servable
+// stays `validateApiEndpointDeclarations` on the artifact route (stack schema,
+// `publishPackage` #5189, and `buildEndpointIndex` at load, PR #5203). An
+// endpoint-shaped import left behind with no caller reads as a capability this
+// module still has (#3950), so it is removed rather than parked.
 import { z } from 'zod';
 import {
     computeMetadataDiagnostics,
@@ -131,21 +151,84 @@ function canonicalizeMetaRequestType<T extends { type: string }>(request: T): T 
 }
 
 /**
- * [#5206 step 2] Where an author of THIS path sets the namespace the ADR-0121
- * D2 gate demands.
+ * The last thing every `/meta` read does to an OBJECT document before it leaves
+ * this service: make the field metadata it reports agree with what the engine
+ * enforces on the write path — in BOTH of the ways it used to disagree.
  *
- * The criterion itself is the endpoint gate's — this sentence only answers the
- * follow-up question "so where do I put it, from here?", which differs per
- * publish path (`MetadataManager.publishPackage` has its own, #5189). It is
- * appended to the gate's own message, never in place of it.
+ * The mismatch this closes is structural, not incidental. A `/meta` object read
+ * resolves through `sys_metadata` overlay → MetadataService → SchemaRegistry,
+ * and only the last of those three has been through `applySystemFields`, so the
+ * answer a caller got depended on which link produced it — with nothing in the
+ * response saying which one had. Two halves, filed and ruled separately:
+ *
+ *  - **[#4513] the VALUE half.** The two stored layers answered with whatever
+ *    the artifact/overlay body happened to declare, while `ObjectQL.update` was
+ *    stripping caller writes to the audit family off the registry's
+ *    post-injection schema. `created_at` read `readonly: false` and wrote as
+ *    read-only, on the same field, at the same moment, from the one face a
+ *    client can actually see (#4447 fixed the write half; this is the read
+ *    half). {@link applyAuditFieldGovernance} normalizes a DECLARED audit field.
+ *  - **[#6562] the PRESENCE half.** The stored layers reported the platform's
+ *    own injected columns — `created_at`, `owner_id`, `organization_id`,
+ *    `owning_business_unit_id`, … — as simply ABSENT, so an author reading an
+ *    overlay-backed object reasonably concluded the columns do not exist, while
+ *    every one of them is real in the database, filterable, orderable and
+ *    enforced read-only on write. Maintainer ruling (2026-08-08), Option B: the
+ *    read serves the EFFECTIVE runtime schema and the overlay-backed minority
+ *    converges on the registry-backed majority.
+ *    {@link applyInjectedSystemColumns} adds an UNDECLARED injected column.
+ *
+ * The two are composed rather than folded, because they do different things to
+ * different fields: governance rewrites what the author declared, injection only
+ * ever adds what nobody declared. Both return their input by reference when
+ * nothing was needed, so the registry-sourced path (injected AND governed at
+ * registration) and every non-object type pay a comparison and no copy.
+ *
+ * Applied per EXIT rather than inside `decorateMetadataItem`: decoration is a
+ * diagnostics concern whose output `stripReadDecorations` deliberately removes
+ * again on write, and neither of these is that — they are what the document
+ * means. The read exits are also the ONLY place injection may happen (ruling
+ * constraint 1): `getMetaItemLayered` calls this on `effective` and never on
+ * `overlay`, so Studio's "what you customised" diff keeps showing the row the
+ * author actually stored.
+ *
+ * ⛔ The write path owes this function a counterpart. See
+ * {@link stripServedSystemColumns} — without it the standard Studio GET → edit →
+ * PUT round-trip would persist the injected columns into `sys_metadata`, and the
+ * #4326 byte-identical invariant would break the day this shipped.
  */
-const PUBLISH_DRAFTS_NAMESPACE_REMEDY =
-    "From `publishPackageDrafts` specifically: the namespace is read from the package's registered "
-    + '`manifest.namespace`, so declare it on the manifest and re-install/update the package '
-    + '(`installPackage` derives a default from the package id for Studio-authored packages, so an '
-    + 'absent one means the package is not in the runtime registry or its manifest predates that). '
-    + 'Alternatively publish the endpoints as part of a stack artifact (`defineStack` → compile → '
-    + 'artifact ingest), which carries the manifest and runs these same gates at parse time.';
+function governServedItem<T>(type: string, item: T): T {
+    if (canonicalMetaType(type) !== 'object') return item;
+    return applyInjectedSystemColumns(applyAuditFieldGovernance(item));
+}
+
+/**
+ * [#6562] The write-path counterpart of {@link governServedItem}'s injection
+ * half: take the injected-but-undeclared system columns back off a body on its
+ * way IN, so a served document handed straight back still persists byte-identical.
+ *
+ * Exactly the shape, and exactly the reason, of the `stripReadDecorations` call
+ * beside it in `saveMetaItem` (#4326) — the write path persists the request body
+ * verbatim by design (ADR-0005 §Validation), so anything the READ adds must come
+ * off again on the way in or it is baked into `sys_metadata.metadata`, into its
+ * checksum, and into every history diff. Kept a SEPARATE strip from that one
+ * rather than folded into `METADATA_READ_DECORATIONS`, because the two lists are
+ * different in kind: a read decoration is derived diagnostics no schema accepts,
+ * whereas an injected column is a real, spec-valid field declaration an author
+ * may legitimately write — so this strip removes only a field byte-identical to
+ * the platform's own definition, and a declared `owner_id` carrying the author's
+ * own label survives untouched.
+ */
+function stripServedSystemColumns<T>(type: string, item: T): T {
+    return canonicalMetaType(type) === 'object' ? stripInjectedSystemColumns(item) : item;
+}
+
+// [#5488] `PUBLISH_DRAFTS_NAMESPACE_REMEDY` stood here (#5206 step 2): the
+// "so where do I declare the namespace, from here?" sentence appended to the
+// ADR-0121 D2 gate's own message on this path. It is retired with
+// `gateApiDraftsForPublish`, the only thing that ever appended it — this path
+// no longer reports endpoint violations, because it can no longer receive an
+// `api` draft to violate anything.
 
 /**
  * [#3770] One-shot flag for the "engine has no schema registry" warning emitted
@@ -999,24 +1082,126 @@ const CLONE_STRIP_FIELDS: readonly string[] = [
  * reject. The #3043 threat is app approval/status/verdict fields (the issue's
  * `sporadic_application` / `assessment`), never `sys_`; this is the same
  * platform-vs-authored boundary `applySystemFields` uses for ownership.
+ *
+ * SCOPE, second boundary — RUNTIME-OWNED field types
+ * ({@link RUNTIME_OWNED_FIELD_TYPES}: today `autonumber`) are left to the
+ * ENGINE's own insert strip (`stripRuntimeOwnedFields`, #5503), which runs on
+ * every insert path including the direct `engine.insert` callers this ingress
+ * never sees. Skipping them here removes no protection and prevents this seam
+ * from PRE-EMPTING an exemption it does not implement: the engine strip honours
+ * `preserveAudit` (#3493 — a historical import reinstating legacy record
+ * numbers) while this one knows only `isSystem`. Before #5628 the distinction
+ * was academic, because an `autonumber` field carried no `readonly` flag for the
+ * loop below to notice; now that `Field.autonumber` injects one, stripping here
+ * would silently delete the value a historical import is entitled to keep,
+ * BEFORE the engine could apply the whitelist. Author-declared `readonly` on
+ * every other type is untouched — the #3043 strip is exactly as wide as it was.
+ *
+ * SCOPE, third boundary — `preserveAudit` IS NOT READ HERE, DELIBERATELY (#6640).
+ * The historical-import exemption (#3493) is an **UPDATE-path rule only**; see
+ * {@link warnPreserveAuditIgnoredOnInsert} for the ruling, the reason, and the
+ * loud signal a non-system INSERT gets for asking.
  */
 function stripReadonlyForInsert(schema: any, data: any, context: any): any {
     if (context?.isSystem) return data;
     if (!schema || schema.managedBy || String(schema.name ?? '').startsWith('sys_')) return data;
     const fields = schema?.fields;
     if (!fields || data == null) return data;
+    // [#6640] The UNION of names actually removed, across every row of a batch —
+    // the same aggregation `mergeDroppedFieldEvents` applies, and for the same
+    // reason: the strip is schema-uniform, so one signal per ingress call is
+    // faithful where one per row would be noise.
+    const stripped = new Set<string>();
     const stripRow = (row: any): any => {
         if (row == null || typeof row !== 'object') return row;
         let out = row;
         for (const name of Object.keys(fields)) {
             if (!fields[name]?.readonly) continue;
+            // [#5628] The engine's runtime-owned strip owns these, with the
+            // wider exemption set. See the note above.
+            if (RUNTIME_OWNED_FIELD_TYPES.has(String(fields[name]?.type ?? ''))) continue;
             if (!(name in out)) continue;
             if (out === row) out = { ...row };
             delete out[name];
+            stripped.add(name);
         }
         return out;
     };
-    return Array.isArray(data) ? data.map(stripRow) : stripRow(data);
+    const result = Array.isArray(data) ? data.map(stripRow) : stripRow(data);
+    if (context?.preserveAudit && stripped.size > 0) {
+        warnPreserveAuditIgnoredOnInsert(String(schema.name ?? ''), Array.from(stripped));
+    }
+    return result;
+}
+
+/**
+ * [#6640] THE loud half of the `preserveAudit` ruling — a non-system INSERT that
+ * asks for the historical-import exemption is TOLD it does not exist here.
+ *
+ * ## The contradiction this closes
+ *
+ * `FieldSchema.readonly`'s `.describe()` promised the `preserveAudit` exemption
+ * (#3493) on BOTH write paths, and `docs/protocol/objectql/security.mdx` agreed.
+ * Only UPDATE ever implemented it: `stripReadonlyFields` (objectql's
+ * rule-validator) consults `isPreservableUnderAudit`, while this INSERT ingress
+ * has never read `preserveAudit` at all — `isSystem` is its only exemption. REST
+ * import's `treatAsHistorical` (`rest/src/import-runner.ts`) puts
+ * `preserveAudit: true` on the write context and creates through `createData`,
+ * i.e. through exactly this seam. So ONE historical import PRESERVED an
+ * author-declared `readonly` business column (`closed_at`, `resolved_by`) on the
+ * rows it updated and SILENTLY DROPPED it on the rows it created.
+ *
+ * ## Which half the ruling kept (maintainer, 2026-08-08 — option 2)
+ *
+ * The **enforcement** is the truth and the **contract** was narrowed to it: the
+ * exemption is UPDATE-only, and this entry keeps honouring `isSystem` alone.
+ * Honouring `preserveAudit` here instead would have handed a NON-system caller —
+ * `treatAsHistorical` arrives on an ordinary REST import request — the ability to
+ * seed the approval/status columns #3043 exists to protect, in one POST. That is
+ * the #3043 threat model reversed, for a capability with no measured consumer:
+ * replaying archival readonly facts on INSERT is available today, from a system
+ * context, which is what the in-repo importer can run as.
+ *
+ * ## Why it is a WARNING and not a throw — measured, not assumed
+ *
+ * The ruling made loudness binding and left the SHAPE to whichever one can be
+ * both loud and non-breaking. A throw cannot: `runImport`'s per-row writer
+ * collects a write error into `toFailedResult(rowNo, res.error)` rather than
+ * aborting the run, so refusing here would not stop a historical import — it
+ * would convert every row it CREATES into a failed row, while the rows it
+ * updates still succeed. And the trigger is not exotic: the audit family itself
+ * (`created_at` / `created_by` / `updated_at` / `updated_by`) is `readonly: true`
+ * in the registry's `AUDIT_FIELD_DEFS`, so an ordinary export→historical-import
+ * round-trip carries readonly columns on every row. Measured on this branch, a
+ * throwing variant took the historical import of 2 new rows from
+ * `{created: 2, errors: 0}` to `{created: 0, errors: 2}`. Breaking the shipped
+ * `treatAsHistorical` flow for new rows is precisely the condition under which
+ * the ruling names the loud WARNING — strip still applied — as the
+ * containment-correct landing.
+ *
+ * The silence this replaces was specific: the drop itself already surfaces
+ * through `droppedFields` (#3431), but a caller who EXPLICITLY asked for the
+ * exemption could not tell "your fields were stripped by the ordinary #3043
+ * rule" from "the exemption you requested does not exist on this path". This
+ * says the second one, by name. It fires ONLY when `preserveAudit` was requested
+ * AND something was actually removed — a request that loses nothing has nothing
+ * to report, and the ordinary non-`preserveAudit` strip is left exactly as quiet
+ * as #3043 designed it.
+ *
+ * Family precedent #5714/#5931: a declared key silently ignored on one branch
+ * joins the loud set by default. Those two could reject outright because they
+ * judge AUTHORING input, before anything runs; this one sits on a live write
+ * path, which is what moves it from throw to warn.
+ */
+function warnPreserveAuditIgnoredOnInsert(object: string, fields: readonly string[]): void {
+    console.warn(
+        `[Protocol] preserveAudit is UPDATE-only and was IGNORED on this INSERT` +
+        `${object ? ` (object '${object}')` : ''}: the historical-import exemption (#3493) applies when a ` +
+        `record is UPDATED, never when it is created, so the readonly field(s) ${fields.join(', ')} were ` +
+        `STRIPPED from this create rather than preserved. To replay archival readonly facts on INSERT, ` +
+        `write from a system context (\`context.isSystem\`) — a non-system create may not seed a readonly ` +
+        `column (#3043/#6640).`,
+    );
 }
 
 /**
@@ -1322,6 +1507,174 @@ const WIRE_QUERY_ALIAS_SLOTS: readonly QueryAliasSlot[] = (() => {
 })();
 
 /**
+ * The OData `$`-prefixed spelling of each bare wire parameter this normalizer
+ * consumes, hoisted out of the loop in `findData` that used to own it so the
+ * arity survey below and that loop read ONE table (#7321). Adding a `$` alias
+ * in one place and not the other is exactly how a parameter ends up folded but
+ * unchecked.
+ *
+ * `$filter` / `$expand` are deliberately absent: they are declared as slot
+ * aliases on {@link WIRE_QUERY_ALIAS_SLOTS} instead, because they fold straight
+ * to a canonical key rather than to a bare wire spelling.
+ */
+const WIRE_DOLLAR_ALIASES: readonly (readonly [string, string])[] = [
+    ['$top', 'top'],
+    ['$skip', 'skip'],
+    ['$orderby', 'orderBy'],
+    ['$select', 'select'],
+    ['$count', 'count'],
+    ['$search', 'search'],
+    ['$searchFields', 'searchFields'],
+];
+
+/**
+ * [#7321] The list-query slots whose DECLARED value type admits an array, by
+ * canonical key. Everything else this normalizer reads — including a leftover
+ * key lowered into an implicit field filter — is single-valued, and an array on
+ * it is a repeated wire parameter (see {@link assertQueryParamArity}).
+ *
+ * This set is the whole judgement. `IHttpRequest.query` is
+ * `Record< string, string | string[] >` and the array arm is produced by a real
+ * first-party adapter (`NodeHttpServer` hands `?x=1&x=2` through as
+ * `['1','2']`, measured over a socket on #6878), so `Array.isArray` at this
+ * boundary means one of exactly two things: a repeated querystring parameter,
+ * or a JSON array in a `POST /data/:object/query` body. This normalizer serves
+ * BOTH ingresses and cannot tell them apart — which is why the rule keys off the
+ * declared TYPE rather than off the request. On a slot that never declares an
+ * array, `Array.isArray` is unambiguous evidence of repetition; on a slot that
+ * does, it is the ordinary shape and must not be touched.
+ *
+ * Per member, why the array is legal (`packages/spec/src/data/query.zod.ts`):
+ *  - `fields`        — `z.array(FieldNodeSchema)`; `?$select=a&$select=b` IS the
+ *                      projection `['a','b']`.
+ *  - `orderBy`       — `z.array(SortNodeSchema)`, and `normalizeSortNodes` has an
+ *                      explicit `string[]` arm: repetition COMPOSES into a
+ *                      multi-key sort (`?sort=name&sort=-age`), it does not
+ *                      conflict.
+ *  - `expand`        — the name-array arm lowers to `{name: {object: name}}`.
+ *  - `searchFields`  — `z.array(z.string())`; the engine reads the comma-string
+ *                      and the array from either slot.
+ *  - `where`         — a FILTER AST is an array (`['status','=','open']`), so a
+ *                      blanket arity refusal here would reject the AST body form
+ *                      outright. A repeated `?filter=` is still refused, one
+ *                      block down, by `isFilterAST` failing to read it.
+ *  - `groupBy`       — `z.array(GroupByNodeSchema)`.
+ *  - `aggregations`  — `z.array(AggregationNodeSchema)`.
+ *  - `joins` / `windowFunctions` — retired ARRAY keys (#4286). The tombstone,
+ *                      not an arity refusal, must stay their answer.
+ *
+ * Deliberately NOT here, each because the spec declares a scalar: `limit`/`top`
+ * and `offset` (`z.number()`), `search` (`string | FullTextSearch`), `object`
+ * (`z.string()`), `having` (a `FilterCondition` OBJECT — the engine has no AST
+ * arm for it), the `count` response flag, and the retired scalars `cursor` /
+ * `distinct`.
+ */
+const ARRAY_VALUED_QUERY_SLOTS: readonly string[] = [
+    'fields', 'orderBy', 'expand', 'searchFields', 'where',
+    'groupBy', 'aggregations', 'joins', 'windowFunctions',
+];
+
+/**
+ * [#7321] {@link ARRAY_VALUED_QUERY_SLOTS} expanded to every WIRE spelling that
+ * reaches it, derived from the same two tables the fold uses so a new alias
+ * cannot silently lose its array arm — the failure mode would be `?$select=a&
+ * $select=b` starting to 400, i.e. the damage case this card exists to avoid.
+ */
+const ARRAY_VALUED_LIST_QUERY_PARAMS: ReadonlySet<string> = (() => {
+    const names = new Set<string>(ARRAY_VALUED_QUERY_SLOTS);
+    for (const slot of WIRE_QUERY_ALIAS_SLOTS) {
+        if (!names.has(slot.canonical)) continue;
+        for (const alias of slot.aliases) names.add(alias);
+    }
+    for (const [dollar, bare] of WIRE_DOLLAR_ALIASES) {
+        if (names.has(bare)) names.add(dollar);
+    }
+    return names;
+})();
+
+/**
+ * [#7321] A parameter this normalizer reads as single-valued, supplied more
+ * than once.
+ *
+ * ## Why a refusal, and why this code
+ *
+ * `?$top=1&$top=2` is a well-formed request carrying two irreconcilable
+ * intents. Picking one is the silent drop itself, and coercing the pair is
+ * worse: `Number(['1','2'])` is `NaN`, so the window reached the driver as
+ * `limit: NaN` — driver-dependent behaviour under a 200, never an error. That
+ * is the same class #6928 / PR #7299 refused one layer over on
+ * `GET /api/v1/notifications`, and the same rule #6307 / #6877 landed in
+ * `packages/rest` (`readSingleQueryValue`); the wording below is theirs
+ * verbatim so a caller who repeats a parameter on two different routes is told
+ * the same thing twice, not two things once.
+ *
+ * `INVALID_REQUEST` / 400 is what {@link conflictingQueryParamsError} in this
+ * same normalizer already answers for the IDENTICAL condition reached the other
+ * way — two SPELLINGS of one slot carrying different values (#4181 → #3795).
+ * One slot given two values is one defect; it must not carry two codes
+ * depending on whether the caller repeated `filter` or wrote `filter` and
+ * `where`. (The rest layer spells its 400 `VALIDATION_ERROR` and the runtime
+ * layer `VALIDATION_FAILED`; those are each package's house catalog member for
+ * a 400, registered per package in `error-code-ledger.zod.ts`. The RULE and the
+ * status are what have to agree across the three, and do.)
+ *
+ * ## Why the count and not the values
+ *
+ * Two identical values are still two occurrences and are still refused: "at
+ * most one DISTINCT value" would be a de-duplication rule no caller can
+ * predict, while "supply it at most once" is checkable client-side without
+ * knowing anything about our semantics (#6877).
+ */
+function repeatedQueryParamError(param: string, count: number): Error {
+    const err: any = new Error(
+        `The '${param}' query parameter was supplied ${count} times. Supply it at most once — `
+        + 'this endpoint will not choose between conflicting values. It was NOT applied as a '
+        + 'list: a single-valued parameter given an array coerces to a value nobody asked for '
+        + `(Number(['1','2']) is NaN), which the driver then answers under a 200.`,
+    );
+    err.status = 400;
+    err.code = 'INVALID_REQUEST';
+    err.param = param;
+    return err;
+}
+
+/**
+ * [#7321] Refuse a repeated occurrence of any list-query parameter this
+ * normalizer reads as single-valued, and normalise the benign one-element array
+ * away so nothing below has to know the union existed.
+ *
+ * Runs at the TOP of `findData`, ahead of the `$`-alias pass and the #3795 slot
+ * fold, for two reasons:
+ *
+ *  1. The message then quotes the parameter the caller actually wrote — the
+ *     #4226 discipline. After the fold, `?$top=1&$top=2` would be reported as
+ *     `'limit'`, a name absent from the request.
+ *  2. The fold compares slot spellings by `JSON.stringify`, so an unchecked
+ *     `?top=1&top=2&limit=1` reaches it as `['1','2']` vs `'1'` and is refused
+ *     as a "conflicting query parameters" problem — a true refusal with a false
+ *     diagnosis. Checking arity first means the caller is told what is actually
+ *     wrong.
+ *
+ * Length 0 is DELETED rather than set to `undefined` (which is what the rest
+ * layer's `refuseRepeatedQueryParams` does with it): the leftover-key bucket
+ * below reads `Object.keys(options)`, so a key left behind carrying `undefined`
+ * would be lowered into an implicit `{field: undefined}` predicate. "Not
+ * supplied" has to mean absent here, not present-and-empty.
+ */
+function assertQueryParamArity(options: Record<string, unknown>): void {
+    for (const name of Object.keys(options)) {
+        const value = options[name];
+        if (!Array.isArray(value)) continue;
+        if (ARRAY_VALUED_LIST_QUERY_PARAMS.has(name)) continue;
+        if (value.length > 1) throw repeatedQueryParamError(name, value.length);
+        // length 1 → one occurrence an adapter encoded as an array; length 0 →
+        // no occurrence at all.
+        if (value.length === 0) delete options[name];
+        else options[name] = value[0];
+    }
+}
+
+/**
  * [#4181 → #3795] Spellings of ONE slot carrying DIFFERENT values. Two values
  * for one slot cannot be reconciled — merging them would invent an intent the
  * caller never expressed, and picking one is the silent drop itself — so an
@@ -1371,6 +1724,42 @@ function unusableFilterError(param: string, detail: string): Error {
     err.param = param;
     return err;
 }
+
+/**
+ * [#6994] Field types whose value NO driver materialises, so no driver can
+ * ORDER BY them.
+ *
+ * `formula` is the whole set today, and deliberately not a synonym for
+ * "computed": the three computed types diverge exactly here.
+ *
+ * | type | column | sortable |
+ * |---|---|---|
+ * | `formula` | none — `SqlDriver.createColumn` returns early; `driver-turso`'s transport skips it with the same `Virtual — no column` note | **no** |
+ * | `summary` | `table.float`, maintained by the engine | yes (measured #6924: `orderBy <summary> desc` -> E D C B A over 5 4 3 2 1) |
+ * | `autonumber` | `table.string`, engine-assigned | yes |
+ *
+ * So the spec's own `COMPUTED_VALUE_TYPES` (`formula`/`summary`/`autonumber`)
+ * is the WRITE contract — "never client-written" — and is the wrong set to
+ * gate a sort with: it would refuse the two types that sort correctly.
+ *
+ * This is a local set rather than a shared spec constant because the same fact
+ * is currently spelled in five places, none of them in `packages/spec`:
+ * `driver-sql`'s `fieldHasColumn` and `createColumn`, `driver-turso`'s
+ * `remote-transport`, `objectql`'s `planFormulaProjection` and
+ * `search-companion`, and `plugin-audit`'s `VIRTUAL_FIELD_TYPES`.
+ * Consolidating them is a cross-package change and is filed separately; adding
+ * a sixth local spelling here — with that ledger written down — keeps this fix
+ * inside one package rather than opening a spec-wide edit for one string.
+ *
+ * One deliberate divergence from `fieldHasColumn`: that helper short-circuits
+ * on `multiple` (a `multiple` field is a JSON column whatever its type), so it
+ * would answer "has a column" for a `multiple` formula. This set does not,
+ * because the questions differ — `fieldHasColumn` asks whether DDL emits a
+ * column, this asks whether there is a persisted VALUE to order by, and a
+ * formula's value is computed on read and never written, so that JSON column
+ * is always empty. Ordering by it degrades exactly as the bare case does.
+ */
+const UNMATERIALIZED_SORT_TYPES: ReadonlySet<string> = new Set(['formula']);
 
 /**
  * [#4226] A sort the normalizer cannot turn into a usable `SortNode[]`, or one
@@ -2089,6 +2478,43 @@ export interface MetadataAuthoringGateContext {
 export type MetadataAuthoringGate = (ctx: MetadataAuthoringGateContext) => void | Promise<void>;
 
 /**
+ * Which authoring channel a kernel's metadata writes arrive on (#6710).
+ *
+ * ADR-0005 carves out "the package author's own bootstrap channel" from the
+ * runtime authoring rules: a control-plane kernel installing a package is not
+ * an author publishing into a live tenant, and gating it would refuse the very
+ * bodies the platform ships. The carve-out is legitimate and stays.
+ *
+ * What #6710 changed is **how a kernel says it is that channel**. Until this
+ * type existed the answer was inferred from `environmentId === undefined` — a
+ * ROW-SCOPING key pressed into service as a topology signal. That proxy lies:
+ * the CLI's lightweight host-config assembler (`serve.ts`'s auto-register
+ * branch, `new ObjectQLPlugin()` with no options) also leaves `environmentId`
+ * undefined, and it serves an END-USER `PUT /api/v1/meta/*`. Both topologies
+ * read identically, so the whole #4463 gate — all 26 shared `AUTHORING_RULES`
+ * — was disengaged on a self-hosted app server. #5086 had already moved the
+ * code-only refusal off the same proxy for the same reason ("keying
+ * authorization off a row-scoping key is what made a type-level declaration
+ * depend on deployment topology; the declaration decides it here instead").
+ *
+ * So the channel is now DECLARED, not inferred:
+ *
+ * - `'environment'` — metadata arrives from an author (Studio tenant, MCP/AI
+ *   agent, `PUT /api/v1/meta/*`). The gate runs. **This is the default**, and
+ *   the default is the whole point: an assembly that forgets to declare gets
+ *   MORE enforcement, never less, so the next assembly variant nobody thought
+ *   about cannot silently reopen this hole.
+ * - `'package-author'` — this kernel IS the package author's own bootstrap
+ *   channel. Only the genuine control-plane assembly may state this.
+ *
+ * Deliberately a channel NAME and not a boolean: `skipAuthoringRules: true`
+ * would be the same bytes with the opposite meaning — a kill switch any
+ * assembly could reach for to make a red publish go away. A caller has to
+ * claim to BE the package author to be treated as one.
+ */
+export type MetadataAuthoringChannel = 'environment' | 'package-author';
+
+/**
  * Implements the per-domain contracts this class ACTUALLY provides (ADR-0076
  * D10 — the facade never implemented the other domains; those live in their
  * owning services and are reached through the discovery `services` registry,
@@ -2107,8 +2533,26 @@ export class ObjectStackProtocolImplementation implements
      * saveMetaItem insert/update and loadMetaFromDb query is filtered by
      * `environment_id = environmentId`, so per-project kernels see only their own
      * metadata even if several projects share the same physical database.
+     *
+     * [#6710] Row scoping ONLY. This key keeps every one of its other jobs —
+     * the `environment_id` stamp/filter, the ADR-0005 overlay-whitelist gate,
+     * the #3050 authoring-gate scope, the local metadata-storage provisioning
+     * decision — but it no longer decides whether the #4463 runtime authoring
+     * rules run. See {@link authoringChannel}.
      */
     private environmentId?: string;
+
+    /**
+     * The declared authoring channel (#6710). Defaults to `'environment'`,
+     * which is what makes the #4463 gate active on every kernel that does not
+     * explicitly claim to be the package author's own bootstrap channel.
+     *
+     * Read by {@link assertRuntimeAuthoringRules} and nothing else — this is
+     * deliberately NOT a general-purpose authorization key. The ADR-0005
+     * overlay gate and the #3050 authoring gate keep reading `environmentId`,
+     * because those two really are about row scope.
+     */
+    private authoringChannel: MetadataAuthoringChannel;
 
     /**
      * Lazily-instantiated SysMetadataRepository per organization. Keyed by
@@ -2267,14 +2711,23 @@ export class ObjectStackProtocolImplementation implements
         return (name, body) => canonicalize.call(automation, name, body);
     }
 
+    /**
+     * @param authoringChannel [#6710] which channel this kernel's metadata
+     * writes arrive on. Omitted ⇒ `'environment'` ⇒ the #4463 runtime
+     * authoring gate is ACTIVE. Only the genuine control-plane assembly passes
+     * `'package-author'`. The default is the fail-safe direction on purpose:
+     * a caller that forgets this argument gets more enforcement, never less.
+     */
     constructor(
         engine: IDataEngine,
         getServicesRegistry?: () => Map<string, any>,
         environmentId?: string,
+        authoringChannel: MetadataAuthoringChannel = 'environment',
     ) {
         this.engine = engine as MetadataHostEngine;
         this.getServicesRegistry = getServicesRegistry;
         this.environmentId = environmentId;
+        this.authoringChannel = authoringChannel;
     }
 
     /**
@@ -2374,12 +2827,68 @@ export class ObjectStackProtocolImplementation implements
      * strictly better information than the CLI's single-package view — the
      * inversion #4463 D2 points out: the same rule can be more decisive here
      * than it can be at build time.
+     *
+     * [#6285 / #6155 Q3=A] It also supplies the two DEPLOYMENT facts the CLI
+     * cannot know and the shared registry therefore must not read: the
+     * organization partition this write lands in, and whether this deployment
+     * enforces an organization wall. Both are gathered here — the impure side —
+     * and passed as arguments, so `evaluateRuntimeAuthoringGate` stays a pure
+     * function of its inputs and a test can drive both postures without
+     * mutating the process.
+     *
+     * [#4717] Throws on the gating half, RETURNS the advisory half. Advisories
+     * do not block anything, so the only honest place for them is the 2xx the
+     * write earns — `saveMetaItem` attaches them to its response, and the only
+     * other caller (the draft→active promotion in `publishMetaItem`) simply
+     * ignores the value, which is why adding this channel could not change what
+     * either door does.
+     * Returns an empty array on every early return: no rules ran, so there is
+     * nothing to report, and "clean" is told apart from "nothing ran" by the
+     * gate's own `rulesRun`, not by this.
      */
     private assertRuntimeAuthoringRules(evt: {
         type: string; name: string; state: 'draft' | 'active'; body: unknown; source?: string;
-    }): void {
-        if (this.environmentId === undefined) return;
-        if (evt.state !== 'active') return;
+        /**
+         * The organization partition of this write (`saveMetaItem`'s
+         * `organizationId`). Absent = a platform-level / environment write,
+         * which is one limb of the #6285 refusal combination.
+         */
+        organizationId?: string | null;
+    }): RuntimeAuthoringIssue[] {
+        // [#6710] The ADR-0005 carve-out, now DECLARED instead of inferred.
+        //
+        // This line used to read `if (this.environmentId === undefined)
+        // return;` — the carve-out keyed off a ROW-SCOPING key. #6285 measured
+        // that short-circuit and found every *regular* serving path safely on
+        // the gated side (`os dev` / `os start` bind `env_local`, the
+        // standalone artifact stack `proj_local`, a cloud per-project kernel
+        // its own), and concluded the only thing behind it was the
+        // control-plane bootstrap kernel. That conclusion was incomplete, and
+        // #6710 measured the counter-example at boot level: the CLI's
+        // lightweight host-config assembler (`serve.ts`'s
+        // `config.objects && !hasObjectQL` branch → `new ObjectQLPlugin()`
+        // with no options) ALSO leaves `environmentId` undefined, and it
+        // serves an end-user `PUT /api/v1/meta/*`. `isHostConfig` →
+        // `shouldBootWithLibrary === false` is the flagship showcase's own
+        // boot shape, so a self-hosted app server ran all 26 shared
+        // `AUTHORING_RULES` on exactly nothing — and for a Studio tenant or an
+        // MCP/AI author this gate is not the weakest of four doors, it is the
+        // ONLY one (#4463's filing reason).
+        //
+        // Two topologies, one key, opposite intents: that is the definition of
+        // a proxy signal, and #5086 had already retired the same proxy for the
+        // code-only refusal a few hundred lines below. So the channel is now
+        // stated by the assembly (`assembleMetadataProtocol` ← the plugin
+        // option) rather than guessed from row scope, and the DEFAULT is the
+        // gated one. An assembly that forgets to declare gets more
+        // enforcement, never less — the direction matters more than the
+        // mechanism, because the failure mode being designed out is precisely
+        // "a new assembly variant nobody thought about".
+        //
+        // `environmentId` keeps every other job it has, including the #3050
+        // authoring gate's own scope check below.
+        if (this.authoringChannel === 'package-author') return [];
+        if (evt.state !== 'active') return [];
         // `os migrate meta --stored --apply` rewrites rows that ALREADY EXIST
         // into the current dialect. It is not an author publishing anything —
         // it is the platform healing its own storage — and #4463 D4 is explicit
@@ -2394,7 +2903,7 @@ export class ObjectStackProtocolImplementation implements
         // no caller can spell its way past the gate. `duplicatePackage` is
         // deliberately NOT here — it mints brand-new rows under new names, and
         // a copy of a broken flow is a new broken flow.
-        if (evt.source === 'migrate-stored') return;
+        if (evt.source === 'migrate-stored') return [];
         const singular = PLURAL_TO_SINGULAR[evt.type] ?? evt.type;
 
         // Resolution context. Best-effort: a host without a registry (a
@@ -2410,14 +2919,49 @@ export class ObjectStackProtocolImplementation implements
             objects = [];
         }
 
-        const err = evaluateRuntimeAuthoringGate({
+        const verdict = evaluateRuntimeAuthoringGate({
             type: singular,
             name: evt.name,
             state: evt.state,
             body: evt.body,
             objects,
+            ...(evt.organizationId !== undefined ? { organizationId: evt.organizationId } : {}),
+            orgWallEnforced: this.orgWallEnforced(),
         });
-        if (err) throw err;
+        if (verdict.error) throw verdict.error;
+        return verdict.advisories;
+    }
+
+    /**
+     * [#6285] Does this deployment enforce an organization wall (ADR-0105 D1)?
+     *
+     * The authoritative reading, and the only one:
+     * `postureEnforcesWall(resolveTenancyPosture())`. `resolveMultiOrgEnabled()`
+     * is the demoted legacy input — a deployment that sets only the canonical
+     * `OS_TENANCY_POSTURE` reads `false` there while genuinely running a walled
+     * posture, which is the bug shape cloud#1020 and #5233 already paid for.
+     *
+     * Read per call rather than memoised: `resolveTenancyPosture()` reads
+     * `process.env` live by contract, and a gate that cached the answer at
+     * construction would disagree with every other consumer for the life of the
+     * process.
+     *
+     * `resolveTenancyPosture()` THROWS on an unrecognized `OS_TENANCY_POSTURE`
+     * — deliberately, so a typo cannot silently remove the wall. That refusal
+     * belongs at boot, not on a metadata write, so it is caught here and read
+     * as WALLED. Fail-closed is the direction ADR-0105 argues for on exactly
+     * this input ("refusing to boot rather than silently falling back to a
+     * posture with no organization wall"), and it costs nothing in practice: a
+     * deployment in that state does not boot, and even when reached it only
+     * arms a guardrail — a publish still has to match every other limb of the
+     * refusal combination to be turned away.
+     */
+    private orgWallEnforced(): boolean {
+        try {
+            return postureEnforcesWall(resolveTenancyPosture());
+        } catch {
+            return true;
+        }
     }
 
     /**
@@ -2507,13 +3051,25 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
-     * One-time guard for ensuring the overlay-uniqueness UNIQUE INDEX exists
-     * on `sys_metadata`. ADR-0005: scopes overlays by
-     * `(type, name, organization_id, environment_id, scope)` for active rows only.
-     * Idempotent SQL — safe to attempt on every protocol instance.
+     * One-time guard for ensuring the overlay-uniqueness UNIQUE INDEXes exist
+     * on `sys_metadata`. ADR-0005 (revised 2026-05) + ADR-0048: per-env DBs
+     * replace the old "per-project" isolation, so `environment_id` is no longer
+     * a discriminator — overlay uniqueness is
+     * `(type, name, organization_id, COALESCE(package_id, ''))`, enforced once
+     * among ACTIVE rows and once among DRAFT rows. Idempotent SQL — safe to
+     * attempt on every protocol instance.
      *
-     * Inlined here (rather than importing from @objectstack/metadata/migrations)
-     * to avoid a circular dependency: metadata already depends on objectql.
+     * ⚠️ This method resolves a raw-SQL seam and nothing more. The DDL, its
+     * ORDER and its reporting live in `./migrations/overlay-index.ts` (#6418),
+     * which replaced the DROP-then-CREATE sequence that used to sit here: the
+     * drop always succeeded and a failing create left `sys_metadata` with no
+     * unique index at all, silently, because both `catch` blocks were empty.
+     * See that module's header for why the order is now probe-first and why the
+     * dialect fallback must stay NON-unique.
+     *
+     * Kept in this package (rather than imported from
+     * `@objectstack/metadata/migrations`) to avoid a circular dependency:
+     * metadata already depends on objectql.
      */
     private overlayIndexEnsured = false;
     private async ensureOverlayIndex(): Promise<void> {
@@ -2544,66 +3100,15 @@ export class ObjectStackProtocolImplementation implements
                     throw new Error('driver has neither raw nor execute');
                 }
             };
-            // ADR-0005 (revised 2026-05) + ADR-0048: per-env DBs replace the old
-            // "per-project" isolation, so `environment_id` is no longer a
-            // discriminator. Overlay uniqueness is `(type, name,
-            // organization_id, COALESCE(package_id,''))` filtered to active
-            // rows — `package_id` is in the key so two installed packages
-            // shipping the same name each get their own overlay, while
-            // `COALESCE(...,'')` keeps the package-less (global) rows unique
-            // among themselves (a plain unique index would treat NULLs as
-            // distinct and allow duplicate globals). Drop the legacy composite
-            // index first so the new partial UNIQUE can claim the same name —
-            // DROP INDEX IF EXISTS is idempotent.
-            try { await exec("DROP INDEX IF EXISTS idx_sys_metadata_overlay_active"); } catch { /* best-effort */ }
-            const partialSql =
-                "CREATE UNIQUE INDEX IF NOT EXISTS idx_sys_metadata_overlay_active " +
-                "ON sys_metadata (type, name, organization_id, COALESCE(package_id, '')) " +
-                "WHERE state = 'active'";
-            const fallbackSql =
-                "CREATE INDEX IF NOT EXISTS idx_sys_metadata_overlay_active " +
-                "ON sys_metadata (type, name, organization_id, package_id)";
-            try {
-                await exec(partialSql);
-            } catch (err: any) {
-                const msg = err instanceof Error ? err.message : String(err);
-                if (/partial|where clause|syntax/i.test(msg)) {
-                    try {
-                        await exec(fallbackSql);
-                    } catch {
-                        // ignore — non-essential optimization
-                    }
-                }
-                // "already exists" or anything else: best-effort
-            }
-            // Mirror the same partial-UNIQUE for draft rows so a second
-            // simultaneous draft cannot be inserted for the same
-            // (type,name,org,package). The unique-active index above already
-            // guards published rows; the two never collide because the
-            // `state` predicate disambiguates them. DROP first so an existing
-            // legacy 3-column draft index is replaced in-place (ADR-0048).
-            try { await exec("DROP INDEX IF EXISTS idx_sys_metadata_overlay_draft"); } catch { /* best-effort */ }
-            const draftPartialSql =
-                "CREATE UNIQUE INDEX IF NOT EXISTS idx_sys_metadata_overlay_draft " +
-                "ON sys_metadata (type, name, organization_id, COALESCE(package_id, '')) " +
-                "WHERE state = 'draft'";
-            try {
-                await exec(draftPartialSql);
-            } catch (err: any) {
-                const msg = err instanceof Error ? err.message : String(err);
-                if (/partial|where clause|syntax/i.test(msg)) {
-                    try {
-                        await exec(
-                            "CREATE INDEX IF NOT EXISTS idx_sys_metadata_overlay_draft " +
-                            "ON sys_metadata (type, name, organization_id, package_id)",
-                        );
-                    } catch {
-                        // ignore — best effort
-                    }
-                }
-            }
+            // `console` satisfies the logger surface structurally; this class
+            // carries no injected logger, and its own diagnostics go to
+            // `console.warn` throughout (see `emitMetadataMutation`).
+            await ensureMetadataOverlayIndexes(exec, console);
         } catch {
-            // ignore — index is an optimization, not a correctness invariant
+            // A boot must never fail over an index. Note this arm is now only
+            // reachable for driver RESOLUTION failures: every DDL failure past
+            // this point is classified and reported by the migration itself,
+            // instead of vanishing into an empty catch (#6418).
         }
     }
 
@@ -2748,6 +3253,34 @@ export class ObjectStackProtocolImplementation implements
             ai: 'ai',
             i18n: 'i18n',
             'file-storage': 'storage',
+            // [#6633] The package-management surface. `package` is NOT a
+            // CoreServiceName slot, so it must not enter SERVICE_CONFIG — a
+            // non-slot row there is the shape of the retired `graphql` defect,
+            // and it would also fabricate a `services` availability entry whose
+            // remedy line lies. Its route flows through the
+            // NON_SLOT_SERVICE_ROUTES loop below instead: same gate
+            // (registered service), same mapping table, one hop over.
+            package: 'packages',
+        };
+
+        // [#6633] Routes advertised for registered services that are not
+        // CoreServiceName slots. Advertised iff the service is registered —
+        // the same convention every SERVICE_CONFIG row uses, and for `package`
+        // it is exactly the predicate that decides the mount on both real host
+        // types: the @objectstack/rest direct-mount registrar is gated on this
+        // same service (`direct-mount-composition.ts`), and the runtime
+        // dispatcher — whose `/packages` domain is unconditional — answers
+        // discovery from its own `getDiscoveryInfo()`, never from this
+        // builder.
+        //
+        // `datasources` is deliberately NOT here (same reasoning as `mcp`,
+        // #5679): the federation mount belongs to the REST host, which this
+        // builder cannot see, and the runtime dispatcher serves no
+        // `/datasources` domain at all — advertising it from here would be the
+        // advertise-the-unmounted half of ADR-0076 D12. The REST discovery
+        // endpoint advertises it from its recorded direct mounts.
+        const NON_SLOT_SERVICE_ROUTES: Record<string, string> = {
+            package: '/api/v1/packages',
         };
 
         const optionalRoutes: Partial<ApiRoutes> = {};
@@ -2757,6 +3290,16 @@ export class ObjectStackProtocolImplementation implements
         for (const [serviceName, config] of Object.entries(SERVICE_CONFIG)) {
             const route = advertisedRoute(serviceName, config.route);
             if (registeredServices.has(serviceName) && route) {
+                const routeKey = serviceToRouteKey[serviceName];
+                if (routeKey) {
+                    optionalRoutes[routeKey] = route;
+                }
+            }
+        }
+
+        // [#6633] Same flow for the non-slot routed services declared above.
+        for (const [serviceName, route] of Object.entries(NON_SLOT_SERVICE_ROUTES)) {
+            if (registeredServices.has(serviceName)) {
                 const routeKey = serviceToRouteKey[serviceName];
                 if (routeKey) {
                     optionalRoutes[routeKey] = route;
@@ -2897,6 +3440,15 @@ export class ObjectStackProtocolImplementation implements
             name,
             /** @deprecated Use `name`. Removed in protocol 18 (#4828). */
             apiName: name,
+            // [#5936] The operator's value, passed as read — no local default.
+            // What an ABSENT `NODE_ENV` advertises is decided once, inside
+            // `resolveDiscoveryEnvironment` (`production`, per the 2026-08-07
+            // ruling, direction 1), so this producer and the runtime dispatcher
+            // cannot drift on it. Before that ruling the default lived at the
+            // dispatcher's own call site and this producer had no equivalent, so
+            // a deployment that forgot the variable was told `development` here
+            // and `production` there — the exact drift the shared mapper exists
+            // to prevent (#4828). Do not re-introduce a default here.
             environment: resolveDiscoveryEnvironment(
                 (globalThis as { process?: { env?: Record<string, string | undefined> } })
                     .process?.env?.NODE_ENV,
@@ -2908,7 +3460,34 @@ export class ObjectStackProtocolImplementation implements
         };
     }
 
-    async getMetaTypes() {
+    /**
+     * [#6992] The LIVE metadata-type set of this kernel: every type either
+     * registry has heard of, whether or not `DEFAULT_METADATA_TYPE_REGISTRY`
+     * declares it. Spellings are returned as each source stores them
+     * (singular or plural) — callers normalise through
+     * {@link PLURAL_TO_SINGULAR}, as they already did inline.
+     *
+     * Two sources, and both are needed:
+     *
+     *  - `engine.registry.getRegisteredTypes()` — the SchemaRegistry. This is
+     *    the one that actually carries the plugin-registered family: manifests
+     *    register through the `manifest` service during kernel Phase 1
+     *    (`ql.registerApp`), so by Phase 2 it holds `theme`, `connector`,
+     *    `webhook`, `sharing_rule`, `analytics_cube`, … — none of which have a
+     *    registry entry.
+     *  - the `metadata` service's `getRegisteredTypes()` — types the
+     *    MetadataManager knows. Its `typeRegistry` is seeded with
+     *    `DEFAULT_METADATA_TYPE_REGISTRY` in the manager's constructor, so
+     *    early in boot this source contributes only declared types; it grows
+     *    later (artifact load, `additionalTypes`) and is read for the types
+     *    the SchemaRegistry has not been told about.
+     *
+     * Extracted from {@link getMetaTypes} rather than copied: the listing and
+     * {@link reportUnhydratableOrgScopedRows} must answer "which types exist
+     * here" identically, or the audit accuses a type the listing does not
+     * admit exists (and vice versa). One accessor, no second vocabulary.
+     */
+    private async listLiveMetadataTypes(): Promise<string[]> {
         const schemaTypes = this.engine.registry.getRegisteredTypes();
 
         // Also include types from MetadataService (runtime-registered: agent, tool, etc.)
@@ -2923,7 +3502,11 @@ export class ObjectStackProtocolImplementation implements
             // MetadataService not available
         }
 
-        const allTypes = Array.from(new Set([...schemaTypes, ...runtimeTypes]));
+        return Array.from(new Set([...schemaTypes, ...runtimeTypes]));
+    }
+
+    async getMetaTypes() {
+        const allTypes = await this.listLiveMetadataTypes();
 
         // Phase 3a-1: enrich response with per-type registry metadata so admin
         // UI can render directory pages, filter by domain, decide which types
@@ -3344,7 +3927,11 @@ export class ObjectStackProtocolImplementation implements
                     if (recPkg && data && typeof data === 'object' && (data as any)._packageId === undefined) {
                         (data as any)._packageId = recPkg;
                     }
-                    return { data, packageId: recPkg };
+                    // [#6602] The row's own scope travels with its body. The
+                    // merged set below is env-wide rows PLUS this org's rows,
+                    // and the two are only distinguishable here, at the row.
+                    const recOrg = (record as { organization_id?: string | null }).organization_id ?? null;
+                    return { data, packageId: recPkg, organizationId: recOrg };
                 });
 
                 // ADR-0048 (#1828) — package-aware merge: a package-scoped row
@@ -3369,9 +3956,22 @@ export class ObjectStackProtocolImplementation implements
                 // shared {@link hydrateOverlayIntoRegistry} that both callers
                 // use: a read and a write that register differently would put
                 // the registry in two different states for the same row.
+                //
+                // [#6602] The kernel gate below is only half the rule, and the
+                // half that was missing is the ROW's: `overlays` is the MERGED
+                // env-wide + org-scoped set, so this loop used to graft this
+                // caller's org bodies into the registry every other org in the
+                // process reads from — one listing call was enough, and it also
+                // undid the write-side gate for anything already saved. The
+                // per-row verdict now lives in the shared hydrator, which each
+                // row's own `organizationId` answers to; the merged LIST above
+                // is unchanged, so org readers still get their overlays.
                 if (this.environmentId === undefined) {
-                    for (const { data, packageId: recPkg } of overlays) {
-                        this.hydrateOverlayIntoRegistry(request.type, data, recPkg);
+                    for (const { data, packageId: recPkg, organizationId: recOrg } of overlays) {
+                        this.hydrateOverlayIntoRegistry(request.type, data, {
+                            packageId: recPkg,
+                            organizationId: recOrg,
+                        });
                     }
                 }
             }
@@ -3544,7 +4144,11 @@ export class ObjectStackProtocolImplementation implements
                         (it as any)?.name,
                         packageId ?? ((it as any)?._packageId as string | undefined),
                     );
-                    return mergeArtifactProtection(it, a) as any;
+                    // [#4513] Same governance as the single-item read — the list
+                    // is the other exit a client reads field metadata from, and
+                    // an overlay row wins over the (already-governed) registry
+                    // entry in the merge above, so it carries the same lie.
+                    return governServedItem(request.type, mergeArtifactProtection(it, a)) as any;
                 }),
             ),
         };
@@ -3605,7 +4209,11 @@ export class ObjectStackProtocolImplementation implements
                         if (recPkg && (draftItem as any)._packageId === undefined) (draftItem as any)._packageId = recPkg;
                         (draftItem as any)._draft = true;
                     }
-                    return { type: request.type, name: request.name, item: decorateMetadataItem(request.type, draftItem) };
+                    return {
+                        type: request.type,
+                        name: request.name,
+                        item: decorateMetadataItem(request.type, governServedItem(request.type, draftItem)),
+                    };
                 }
             } catch (error) {
                 // [#5532] Falling through to the active read here would answer
@@ -3695,7 +4303,11 @@ export class ObjectStackProtocolImplementation implements
                 err.status = 404;
                 throw err;
             }
-            return { type: request.type, name: request.name, item: decorateMetadataItem(request.type, item) };
+            return {
+                type: request.type,
+                name: request.name,
+                item: decorateMetadataItem(request.type, governServedItem(request.type, item)),
+            };
         }
 
         // 2. MetadataService (runtime-registered items: HMR-updated view/page/
@@ -3790,7 +4402,7 @@ export class ObjectStackProtocolImplementation implements
         const artifactItem = this.lookupArtifactItem(request.type, request.name, request.packageId);
         let decorated = decorateMetadataItem(
             request.type,
-            mergeArtifactProtection(item, artifactItem),
+            governServedItem(request.type, mergeArtifactProtection(item, artifactItem)),
         );
         // ADR-0047 — list views additionally get reference-integrity
         // diagnostics (userFilters/tabs fields must exist on the source
@@ -4051,7 +4663,16 @@ export class ObjectStackProtocolImplementation implements
             this.rethrowUnlessMetadataStoreUnprovisioned(error);
         }
 
-        const effective: unknown | null = overlay ?? code;
+        // [#4513] `effective` is documented above as "what `getMetaItem` would
+        // return", and the response's `_diagnostics` is computed from it — so it
+        // carries the same audit-family governance that read now applies, or the
+        // sentence stops being true the moment the overlay declares a writable
+        // `created_at`. `code` and `overlay` are deliberately left RAW: they are
+        // the diagnostic's whole point (what the package shipped vs what was
+        // customised), and a Studio diff showing `code`'s declaration next to
+        // `effective`'s governed value is the platform override made visible,
+        // not a defect.
+        const effective: unknown | null = governServedItem(request.type, overlay ?? code);
 
         const _diagnostics =
             effective !== null && effective !== undefined
@@ -4300,6 +4921,26 @@ export class ObjectStackProtocolImplementation implements
      *   both boot hydration (`loadMetaFromDb`) and runtime authoring
      *   (`applyObjectRegistryMutation`) register the schema before its table
      *   is reachable.
+     *
+     *   [#6190] That justification rested on a premise the WRITE path did not
+     *   enforce until this note was written. `allowOrgOverride: false` closed
+     *   the overlay tier only; `object` is also `allowRuntimeCreate: true`, and
+     *   that tier stamped `organization_id` on the row like any other — so a
+     *   Studio-authored `object` COULD legitimately exist as a per-org row,
+     *   invisible to boot hydration, and this gate's fail-closed answer meant
+     *   404 for every record in a table that still held the data. The premise
+     *   is now true by enforcement: {@link orgScopedWriteRefusal} refuses an
+     *   org-scoped write of any type the registry declares non-org-overridable,
+     *   on both minting paths, so the only org-scoped `object` rows that can
+     *   exist are residue written before that gate (#6190's ruling 2 = A:
+     *   handled non-destructively — made audible by
+     *   {@link reportUnhydratableOrgScopedRows} and disposed of operationally,
+     *   NOT rewritten by a migration). Fail-closed stays the right answer for
+     *   those: the registry entry is genuinely absent, and serving the table
+     *   would serve one org's rows to every org. Pinned by
+     *   `protocol.org-scoped-write-refused.test.ts`, which keeps `object` as
+     *   its named specimen precisely so this paragraph cannot go stale
+     *   silently again.
      * - **No registry on the engine at all → skip.** There is no source of
      *   truth to consult, so the check cannot answer; failing closed would
      *   break every registry-less host (edge/Lite embeddings, engine doubles)
@@ -4436,6 +5077,84 @@ export class ObjectStackProtocolImplementation implements
      * gets a message that says which relationship it tried to cross and
      * prescribes what `query-syntax.mdx` has prescribed since #4240:
      * denormalise the value onto the queried object and sort by that.
+     *
+     * [#6924] WHAT to denormalise onto was wrong, and this overturns #4256's
+     * own recorded wording. That issue chose "a formula or rollup field that
+     * copies it into a real column" — a prescription the platform cannot
+     * deliver, so the refusal handed the author a dead end at the exact moment
+     * they asked for help. Measured on a REAL `SqlDriver` (better-sqlite3) and
+     * on `InMemoryDriver`, with a `formula` field named directly — which at the
+     * time was NOT dotted and NOT unknown, so this gate let it through
+     * (#6994 closes that, third verdict below):
+     *
+     * ```
+     * control  orderBy title asc    -> A B C D E      (a real column sorts)
+     * baseline no sort              -> C A E B D      (insertion order)
+     * orderBy  <formula field> asc  -> C A E B D  200 (insertion order)
+     * orderBy  <formula field> desc -> C A E B D  200 (direction-blind)
+     * ```
+     *
+     * No column exists to order by (`SqlDriver.createColumn` returns early for
+     * `formula`; sqlite answers `no such column`), the #3821 unknown-column
+     * backstop retries WITHOUT the sort, and the response is 200 with every
+     * row present in an arbitrary order — the very failure #4226/#4256 exist
+     * to stop. Following the old hint therefore landed the author back inside
+     * the defect they had just been refused for.
+     *
+     * `rollup`/`summary` was the other half of that wording and is NOT broken
+     * the same way — it does get a real, maintained column (`table.float`;
+     * measured: `orderBy <summary> desc` -> E D C B A over values 5 4 3 2 1).
+     * It is dropped from the hint because it cannot do THIS job: a rollup
+     * aggregates CHILD records (count/sum/min/max/avg), so it cannot carry a
+     * looked-up parent's column (`account.company_name`) onto this object.
+     * Wrong tool, not a broken one — naming it here still sends the author
+     * somewhere that cannot work.
+     *
+     * "Stored" is #6673's vocabulary for the same correction on the SEARCH
+     * axis (`validate-searchable-fields.ts`, "a stored text field"); the two
+     * axes deliberately say the same word.
+     *
+     * [#6994] The non-dotted half of that same defect, refused as the THIRD
+     * verdict below. It is the SORT axis finally growing the verdict its two
+     * neighbours in this class already have: `assertSearchFieldsExist` splits
+     * `unknown` from `unsearchable` (a known field whose TYPE search cannot
+     * scan) and `assertExpandFieldsExist` splits `unknown` from `notRelations`
+     * (a known field whose TYPE cannot be expanded). Sort had only `unknown`
+     * and `dotted`, so "known field, wrong type for this axis" was the one
+     * member of the family with no door — which is why a `formula` field
+     * reached a driver that has no column for it.
+     *
+     * SCOPE: this is an INGRESS gate, so it covers what reaches {@link findData}
+     * — the REST list route, `POST /data/:object/query`, the export route (which
+     * funnels its `$orderby` through here) and the RPC dispatcher.
+     *
+     * [#7095] It is no longer the ONLY door for this verdict, and the half it
+     * cannot reach is now closed rather than merely noted. A caller reaching
+     * `engine.find()` / `engine.findOne()` directly — hooks, flows, reports,
+     * expand sub-reads — used to get the silent drop;
+     * `assertOrderByIsMaterializable` (`@objectstack/objectql`, `engine.ts`)
+     * refuses it there with the SAME `400 INVALID_SORT` and the same remedy
+     * sentence this gate emits, ruled on #7095 (an ORDER BY the engine cannot
+     * apply is a refusal with guidance prose, never a silent drop). What made
+     * leaving it at ingress untenable is that the direct path is AUTHOR-
+     * reachable, not merely internal: a saved report's `query.orderBy` is
+     * forwarded verbatim into `engine.find` (`plugin-reports`), and it never
+     * passes through here.
+     *
+     * ONE EDGE, measured and deliberately left: a nested `expand` sort is also
+     * forwarded into the expansion sub-read (`expandRelatedRecords`), and the
+     * engine door does fire there — but that sub-read sits inside a pre-existing
+     * graceful-degradation `catch` that swallows EVERY expand failure and
+     * retains the raw foreign keys. So that one path improves from silent to
+     * OBSERVABLE (a warning carrying the field and the remedy) rather than
+     * becoming a refusal. Reversing that backstop is the #3821-family swallow —
+     * a separate decision on all expand failure modes, not a rider on this one.
+     *
+     * This gate is UNCHANGED and still the first door: it keeps the `param` name
+     * in the message (which the engine cannot know) and the `unknown` >
+     * `dotted` > unmaterializable precedence. The engine door deliberately
+     * judges only the third verdict — see its docblock for why it does not
+     * inherit the other two.
      */
     private assertSortFieldsExist(object: string, orderBy: ReadonlyArray<{ field: string }>, param: string): void {
         if (orderBy.length === 0) return;
@@ -4458,23 +5177,78 @@ export class ObjectStackProtocolImplementation implements
             );
         }
         const dotted = names.filter((f) => f.includes('.'));
-        if (dotted.length === 0) return;
-        const first = dotted[0];
-        const head = first.split('.')[0];
-        const headDef: any = gate.fields[head];
-        const crossesRelation = headDef != null && REFERENCE_VALUE_TYPES.has(headDef.type);
+        if (dotted.length > 0) {
+            const first = dotted[0];
+            const head = first.split('.')[0];
+            const headDef: any = gate.fields[head];
+            const crossesRelation = headDef != null && REFERENCE_VALUE_TYPES.has(headDef.type);
+            throw invalidSortError(
+                param,
+                (crossesRelation
+                    ? `sorts by '${first}', which follows the relationship '${head}' into another object — `
+                      + `sort reaches only columns of '${object}' itself`
+                    : `sorts by '${first}', a dotted path — sort reaches only whole columns of '${object}', `
+                      + "not values inside them")
+                + (dotted.length > 1 ? ` (also: ${dotted.slice(1).join(', ')})` : ''),
+                {
+                    hint: ` Denormalise the value onto '${object}' (a stored field, written when the`
+                        + ' source changes) and sort by that. Not a formula field: it is virtual,'
+                        + ' no driver materialises a column for one, and ORDER BY on it is silently'
+                        + ' dropped.',
+                    extra: { field: first, fields: dotted, object },
+                },
+            );
+        }
+
+        // [#6994] The third verdict on this axis: a name that is a REAL,
+        // non-dotted field of this object and still cannot be ordered by,
+        // because its TYPE materialises no column ({@link
+        // UNMATERIALIZED_SORT_TYPES} — `formula`, today the whole set).
+        //
+        // This is the shape the doc comment above already describes and this
+        // gate already let through: being in `gate.known` is what carried it
+        // past the unknown check, being undotted is what carried it past the
+        // check just above. Re-measured on this branch's base (real `SqlDriver`
+        // over better-sqlite3, real `ObjectQL`, real protocol on top):
+        //
+        // ```
+        // FORMULA  orderBy sort_key asc  -> ["C","A","E","B","D"]  5 rows, 200
+        //   its sort_key values          -> ["C","A","E","B","D"]
+        // FORMULA  orderBy sort_key desc -> ["C","A","E","B","D"]  asc === desc
+        // RAW SQL  order by sort_key     -> sqlite: no such column: sort_key
+        // ```
+        //
+        // The response literally carries the values it was asked to sort by,
+        // out of order, under a 200 — so the answer contradicts the request in
+        // plain view and still reports success.
+        //
+        // PRECEDENCE — `unknown` > `dotted` > this. It is last for the same
+        // reason the expand gate reports `unknown` before `not-a-reference`:
+        // identity errors first, then shape, then type. The two above are
+        // therefore unchanged verdict-for-verdict, and a dotted path whose head
+        // is a formula field keeps the dotted answer (it is wrong about the
+        // shape too, and the shape is what the caller wrote).
+        const unmaterialized = names.filter(
+            (f) => UNMATERIALIZED_SORT_TYPES.has(String(gate.fields[f]?.type ?? '')),
+        );
+        if (unmaterialized.length === 0) return;
+        const virtualFirst = unmaterialized[0];
+        const virtualType = String(gate.fields[virtualFirst]?.type);
         throw invalidSortError(
             param,
-            (crossesRelation
-                ? `sorts by '${first}', which follows the relationship '${head}' into another object — `
-                  + `sort reaches only columns of '${object}' itself`
-                : `sorts by '${first}', a dotted path — sort reaches only whole columns of '${object}', `
-                  + "not values inside them")
-            + (dotted.length > 1 ? ` (also: ${dotted.slice(1).join(', ')})` : ''),
+            `sorts by '${virtualFirst}', a ${virtualType} field on '${object}' — a ${virtualType} `
+            + 'value is computed on read, so no driver materialises a column to order by'
+            + (unmaterialized.length > 1 ? ` (also: ${unmaterialized.slice(1).join(', ')})` : ''),
             {
-                hint: ` Denormalise the value onto '${object}' (a formula or rollup field that`
-                    + ' copies it into a real column) and sort by that.',
-                extra: { field: first, fields: dotted, object },
+                // Deliberately the same remedy, in the same words, as the
+                // dotted refusal above and as #6673's SEARCH-axis correction:
+                // one vocabulary across the doors, so an author refused twice
+                // is not sent two different ways.
+                hint: ` Denormalise the value onto '${object}' (a stored field, written when the`
+                    + ' source changes) and sort by that. A formula field is virtual: with no'
+                    + ' column behind it the ORDER BY reaches the driver, finds nothing, and is'
+                    + ' dropped — the arbitrary order this refusal replaces.',
+                extra: { field: virtualFirst, fields: unmaterialized, object },
             },
         );
     }
@@ -4498,9 +5272,24 @@ export class ObjectStackProtocolImplementation implements
      * `?status=<typo>` is a 400 and `?select=<typo>` is not, on one endpoint,
      * about the same field map.
      *
-     * The engine's tolerance is untouched: it guards INTERNAL callers (hooks,
-     * flows, expand sub-reads, registry-less hosts) that never pass through
-     * this ingress, exactly like the object-existence gate above.
+     * The engine's tolerance on THIS axis is untouched: it guards INTERNAL
+     * callers (hooks, flows, expand sub-reads, registry-less hosts) that never
+     * pass through this ingress, exactly like the object-existence gate above.
+     * An unknown projection name is dropped and the projection falls back to
+     * `*`, so the engine still over-returns rather than throwing.
+     *
+     * [#7095] That tolerance is PER-AXIS, and this docblock used to be read as
+     * a statement about the engine in general — it is not one any more, so the
+     * limit is written here rather than left to be inferred. On the SORT axis
+     * the engine now REFUSES an ORDER BY it cannot materialise
+     * (`assertOrderByIsMaterializable`, `@objectstack/objectql`), because the
+     * two axes fail differently: a dropped projection name returns MORE than
+     * asked (every column, inspectable in the response), while a dropped sort
+     * returns the right rows in an order the response cannot be distinguished
+     * from a satisfied one — and with `limit`, an arbitrary page of them. The
+     * #7095 sweep found no in-tree internal caller relying on the sort drop, so
+     * narrowing it cost no caller anything; nothing equivalent has been measured
+     * for the projection axis, and this sentence is not a licence to assume it.
      *
      * [#4196] It also owns the projection's SHAPE, which is a different
      * question from its names and is answered first — see below.
@@ -4654,11 +5443,16 @@ export class ObjectStackProtocolImplementation implements
      * export would stop downloading "the unsearched superset … in a file that
      * looks authoritative".
      *
-     * Two rejections, one code, different messages, because the fixes differ
-     * (the same split the expand axis draws): a name that is no field at all
-     * is a typo, while a REAL field outside the searchable set needs the
-     * OBJECT changed — added to a declared `searchableFields`, or declared
-     * searchable at all when the auto-default excludes its type. The allowed
+     * Rejections share one code and differ in message, because the fixes
+     * differ (the same split the expand axis draws): a name that is no field
+     * at all is a typo, while a REAL field outside the searchable set needs
+     * the OBJECT changed — added to a declared `searchableFields`, or declared
+     * searchable at all when the auto-default excludes its type. [#6674] adds
+     * the one case where changing the OBJECT cannot help either: a VIRTUAL
+     * (`formula`) field has no stored column on any driver, so declaring it
+     * searchable is not a narrower search but a scan of nothing — it used to
+     * clear this gate precisely BECAUSE the object declared it, the fail-open
+     * shape this axis exists to refuse. The allowed
      * set itself comes from {@link resolveSearchFieldResolution} in
      * `@objectstack/spec/data` — the same function the engine's search
      * expansion consumes — so this gate cannot admit a field the engine would
@@ -4730,10 +5524,24 @@ export class ObjectStackProtocolImplementation implements
         const declaredSet = new Set<string>(Array.isArray(gate.schema?.searchableFields) ? gate.schema.searchableFields : []);
         const unknown = names.filter((n) => !allowedSet.has(n) && !gate.known.has(n) && !declaredSet.has(n));
         const staleDeclared = names.filter((n) => !allowedSet.has(n) && !gate.known.has(n) && declaredSet.has(n));
-        const unsearchable = names.filter((n) => !allowedSet.has(n) && gate.known.has(n));
+        // [#6674] A VIRTUAL field is its own rejection, split out of
+        // `unsearchable` before the source branch below rather than after it,
+        // because BOTH of that branch's messages are wrong for it. The declared
+        // one ("a field outside it cannot be a search target until it is added
+        // there") is false — it may already BE in the list, which is exactly the
+        // shape this closes; the auto one prescribes "declare `searchableFields`
+        // to choose the searchable set explicitly", which for a formula field is
+        // an instruction to author the refused declaration. The fix is neither:
+        // the value has no column anywhere, so it must be mirrored onto a stored
+        // one. Judged by the same `@objectstack/spec/data` predicate the
+        // resolution applies, so gate and engine cannot disagree about which
+        // types have a column.
+        const virtual = names.filter((n) => !allowedSet.has(n) && gate.known.has(n) && isVirtualSearchField(gate.fields[n]));
+        const unsearchable = names.filter((n) => !allowedSet.has(n) && gate.known.has(n) && !isVirtualSearchField(gate.fields[n]));
         const [offenders, reason] =
             unknown.length > 0 ? [unknown, 'unknown' as const]
             : staleDeclared.length > 0 ? [staleDeclared, 'stale-declared' as const]
+            : virtual.length > 0 ? [virtual, 'virtual' as const]
             : [unsearchable, 'unsearchable' as const];
         if (offenders.length === 0) return;
         const first = offenders[0];
@@ -4744,6 +5552,18 @@ export class ObjectStackProtocolImplementation implements
                 + (offenders.length > 1 ? ` (also: ${offenders.slice(1).join(', ')})` : '')
                 + '. The declaration is stale — searching it can never match, and the engine '
                 + "silently skipped it. Fix the object's 'searchableFields' to name real fields.";
+        } else if (reason === 'virtual') {
+            const vtype = gate.fields[first]?.type ?? 'formula';
+            detail = `Field '${first}' on object '${object}' is a virtual '${vtype}' field and cannot be searched`
+                + (offenders.length > 1 ? ` (also: ${offenders.slice(1).join(', ')})` : '')
+                + `. Its value is computed on read and never stored, so no driver materializes a `
+                + `column for 'search' to scan and the entry can never match — measured as 0 rows, `
+                + 'with no error, on both the in-memory and the SQL backends.'
+                + (declaredSet.has(first)
+                    ? ` The object's 'searchableFields' declares it, which is what made the entry `
+                      + 'look like coverage; remove it there as well.'
+                    : '')
+                + ` Mirror the computed value onto a stored text field on '${object}' and search that instead.`;
         } else if (reason === 'unknown') {
             // A dotted path is a special unknown: plausible vocabulary from the
             // select/sort axes, but search scans this object's own columns.
@@ -5049,6 +5869,20 @@ export class ObjectStackProtocolImplementation implements
         // `context` unconditionally: the protocol must not depend on a gate
         // above it staying switched on.
         delete options.context;
+
+        // [#7321] Arity BEFORE any read, fold or coercion. `IHttpRequest.query`
+        // is `Record< string, string | string[] >`; the array arm is real (the
+        // `node:http` adapter hands `?x=1&x=2` through as `['1','2']`, measured
+        // over a socket on #6878), and every coercion below was written for the
+        // string arm. `Number(['1','2'])` is `NaN`, so `?$top=1&$top=2` used to
+        // reach the driver as `limit: NaN` — a wrong answer served as a 200.
+        //
+        // Single-vs-multi is a PER-PARAMETER judgement, never a sweep: `$select`
+        // / `$expand` / `$searchFields` / `$orderby` accept the array arm on
+        // purpose and are untouched here. See
+        // {@link ARRAY_VALUED_QUERY_SLOTS} for the full disposition.
+        assertQueryParamArity(options);
+
         // Forward the dispatcher's ExecutionContext so RBAC/RLS middleware
         // can apply per-request enforcement. The protocol layer is purely
         // a normalizer — it must never strip security context.
@@ -5071,16 +5905,12 @@ export class ObjectStackProtocolImplementation implements
         // arrived under, so a rejection quotes the parameter the caller
         // actually wrote. Telling someone who sent `?$orderby=…` that
         // "'orderBy' is invalid" names a parameter absent from their request.
+        //
+        // [#7321] The table itself now lives at module scope
+        // ({@link WIRE_DOLLAR_ALIASES}) so the arity survey above and this fold
+        // cannot drift apart on which `$` spellings exist.
         const wireSpelling: Record<string, string> = {};
-        for (const [dollar, bare] of [
-            ['$top', 'top'],
-            ['$skip', 'skip'],
-            ['$orderby', 'orderBy'],
-            ['$select', 'select'],
-            ['$count', 'count'],
-            ['$search', 'search'],
-            ['$searchFields', 'searchFields'],
-        ] as const) {
+        for (const [dollar, bare] of WIRE_DOLLAR_ALIASES) {
             if (options[dollar] != null && options[bare] == null) {
                 options[bare] = options[dollar];
                 wireSpelling[bare] = dollar;
@@ -5699,7 +6529,55 @@ export class ObjectStackProtocolImplementation implements
         // listener never breaks the write (the engine catches + logs).
         const dropped: DroppedFieldsEvent[] = [];
         opts.onFieldsDropped = (e: DroppedFieldsEvent) => { dropped.push(e); };
-        const result = await this.engine.update(request.object, request.data, opts);
+        // [#6479] At THIS ingress the row is the one the caller named — `request.id`,
+        // the path `:id` — and nothing in the payload gets to move it.
+        //
+        // The engine's dispatch reads the PAYLOAD first: a truthy scalar `data.id`
+        // outranks `options.where.id` (`engine-update-dispatch.ts`, case *"a SCALAR
+        // data.id still wins over a scalar where.id"* — `expectId: 'rec_1'`). That
+        // rule is correct and deliberate for a caller who hands ObjectQL a payload
+        // and nothing else (#5748 / PR #5919, ruling A); it is a HOLE here, because
+        // this caller has already named the row twice — in the URL and in `where` —
+        // and the three gates around this line all judge THAT row:
+        //
+        //   probe   → `probeRecord(object, request.id)`      (existence, #4435)
+        //   OCC     → `assertVersionOf(…, request.id, …)`    (If-Match / expectedVersion)
+        //   receipt → `{ id: request.id, record: result }`
+        //
+        // Passing `request.data` verbatim let a body `{"id":"rec_2"}` on
+        // `PATCH /data/task/rec_1` bind rec_2: probed rec_1, OCC-checked rec_1,
+        // WROTE rec_2, and answered `id: rec_1` beside rec_2's readback. rec_2 was
+        // never probed and never version-checked, so a client that GETs a record,
+        // edits it and PUTs the whole body back — with the wrong row's id picked up
+        // from a mis-clicked list or a stale refresh — performed a silent cross-row
+        // write past its own `If-Match`.
+        //
+        // The fix is the shape the BULK ingress has always used for the same
+        // question (`rest-server.ts`, batch `update`: `ql.update(op.object,
+        // { ...data, id }, …)` — the operation's id after the spread, so it wins).
+        // Two ingresses, one answer (#4550 / #4434). It changes no engine verdict:
+        // the call still dispatches `by-id`, on the id `where` already carried.
+        //
+        // Deliberately NOT route B (400 on mismatch) or route C (ban `id` in
+        // `UpdateDataRequestSchema`) — both were rejected by the 2026-08-08 triage
+        // ruling on #6479; B installs a new rejection on a shipped API and C
+        // changes the accepted request shape.
+        //
+        // A non-record payload is passed through UNTOUCHED (`undefined`, `null`, an
+        // array): the engine reads `data.id` unguarded on purpose, so `undefined`
+        // is its `TypeError`, and an ingress that answered a non-record payload
+        // more kindly than the producer would be the very looseness
+        // `engine-update-dispatch.ts` exists to prevent. Those shapes carry no
+        // scalar `id` to outrank `where.id` either, so the invariant holds for them
+        // through `opts.where` alone.
+        const writeData = (
+            request.data !== null
+            && typeof request.data === 'object'
+            && !Array.isArray(request.data)
+        )
+            ? { ...(request.data as Record<string, unknown>), id: request.id }
+            : request.data;
+        const result = await this.engine.update(request.object, writeData, opts);
         return {
             object: request.object,
             id: request.id,
@@ -6975,6 +7853,51 @@ export class ObjectStackProtocolImplementation implements
         return out;
     })();
 
+    /**
+     * [#6960] Metadata types whose LOADER merges a per-org/env overlay row on
+     * top of the artifact at read time — `supportsOverlay: true` on the
+     * registry entry, read straight off the declaration.
+     *
+     * This is a strictly different question from {@link OVERLAY_ALLOWED_TYPES}
+     * (`allowOrgOverride`), and the registry keeps the two flags apart on
+     * purpose: `supportsOverlay` is a CAPABILITY of the read path ("an overlay
+     * row under this name changes what is served"), `allowOrgOverride` is a
+     * PERMISSION on the write path ("a tenant may author one"). #6483 / PR
+     * #6608 rolled the permission back for six types — `permission`,
+     * `position`, `page`, `app`, `dataset`, `book` — and deliberately left
+     * the capability alone, which is exactly the state #6960 was filed about:
+     * a row authored BEFORE the rollback still merges overlay-wins today.
+     *
+     * Registry-derived, never a hand-written list (Prime Directive #8), and
+     * augmented with the plural spelling so `/api/v1/meta/pages/...` is judged
+     * identically to the singular — the same normalization every sibling set
+     * in this class does.
+     */
+    private static readonly OVERLAY_CAPABLE_TYPES: ReadonlySet<string> = (() => {
+        const out = new Set<string>();
+        for (const entry of DEFAULT_METADATA_TYPE_REGISTRY) {
+            if (!entry.supportsOverlay) continue;
+            out.add(entry.type);
+            const plural = SINGULAR_TO_PLURAL[entry.type];
+            if (plural) out.add(plural);
+        }
+        return out;
+    })();
+
+    /**
+     * [#6960] Does this type's loader merge an overlay row at read time?
+     * Normalizes plural→singular, like every other predicate here.
+     *
+     * Read ONLY by `deleteMetaItem`'s two-tier authorization (and mirrored by
+     * `SysMetadataRepository`'s delete gate); it never widens a create or an
+     * update. See the call site for the ruling that licenses the asymmetry.
+     */
+    private static mergesOverlayAtRead(type: string): boolean {
+        const singular = PLURAL_TO_SINGULAR[type] ?? type;
+        return this.OVERLAY_CAPABLE_TYPES.has(singular)
+            || this.OVERLAY_CAPABLE_TYPES.has(type);
+    }
+
     /** Normalize plural→singular before consulting the allow-list. */
     private static isOverlayAllowed(type: string): boolean {
         const singular = PLURAL_TO_SINGULAR[type] ?? type;
@@ -7056,6 +7979,110 @@ export class ObjectStackProtocolImplementation implements
         );
         (err as any).code = 'NOT_OVERRIDABLE';
         (err as any).status = 403;
+        return err;
+    }
+
+    /**
+     * [#6190] The org-scope half of the same family: a write that would stamp
+     * `sys_metadata.organization_id` on a type the registry declares has NO
+     * per-org channel. Returns the refusal, or `null` when the write is fine.
+     *
+     * ## Why a write-time refusal and not a read-time repair
+     *
+     * `allowOrgOverride` and `allowRuntimeCreate` are orthogonal tiers (see
+     * {@link isRuntimeCreateAllowed}), and the runtime-create tier never
+     * consulted the ORG dimension: `SysMetadataRepository.put` stamps
+     * `organization_id: this.organizationId` whatever the type is, so a
+     * Studio-authored item of an `allowOrgOverride: false` type persisted a
+     * per-org row that the platform can never read back. Cold boot
+     * (`loadMetaFromDb`, `organization_id: null`) walks past it and the
+     * env-wide consumers never ask for it — the write path was strictly more
+     * permissive than the read path, which is the false-compliance shape
+     * ADR-0049 forbids. Measured consequences, both silent before this gate:
+     *
+     *  - `flow` — the row binds its triggers for the life of the process that
+     *    wrote it and stops firing after the next restart, with no log line
+     *    (#6190's original report; the cold-boot warn that made the residue
+     *    audible shipped separately, see
+     *    {@link reportUnhydratableOrgScopedRows}).
+     *  - `object` — worse, and fails CLOSED: the object is absent from the
+     *    registry after boot while its physical table still holds the data, so
+     *    {@link assertObjectRegistered} answers 404 `OBJECT_NOT_FOUND` for
+     *    every record in it.
+     *
+     * Maintainer ruling 2026-08-08 on #6190 (option A of three): refuse the
+     * write. Option B — silently coercing the row to env-wide — was rejected
+     * because it rewrites the tenancy statement the author made; option D —
+     * the log alone — leaves declared ≠ enforced.
+     *
+     * ## Shape decisions
+     *
+     *  - **Registry-derived, never a hand-written type list** (Prime Directive
+     *    #8): the predicate is {@link isOverlayAllowed} — the same one the
+     *    sibling refusal below it uses, over the same derived
+     *    {@link OVERLAY_ALLOWED_TYPES} set. A type that gains
+     *    `allowOrgOverride: true` tomorrow is admitted here the same day, with
+     *    nothing to keep in sync.
+     *  - **The operator hatch stays ONE door.** Because the predicate is
+     *    `isOverlayAllowed`, `OS_METADATA_WRITABLE` unlocks org scoping exactly
+     *    as it unlocks the overlay — which is what this file already promises a
+     *    few lines down ("unlocking a type there unlocks it here too") and what
+     *    the ruling asked for by naming this the *sibling* of the
+     *    `NOT_OVERRIDABLE` refusal. Two differently-keyed notions of
+     *    "overridable" inside one method would be the drift, not the safety.
+     *
+     *    The DIAGNOSTIC is deliberately wider than the refusal:
+     *    {@link reportUnhydratableOrgScopedRows} ignores the hatch and reports
+     *    an org-scoped row of any non-org-overridable type, because the hatch
+     *    unlocks the write and cannot teach `loadMetaFromDb` to read the row
+     *    back. So an operator who deliberately opens the door still gets told,
+     *    at every boot, that what they wrote did not survive it. Warning is
+     *    free and should be maximal; refusing removes a capability, and the
+     *    declaration — including its documented override — decides that.
+     *  - **Statically-declared types only.** A type with no entry in
+     *    `DEFAULT_METADATA_TYPE_REGISTRY` is plugin-registered at runtime, and
+     *    both existing gates ({@link isRuntimeCreateAllowed} here,
+     *    `assertAllowed` in the repository) treat that family as permissive by
+     *    construction — `getMetaTypes()` synthesises `allowRuntimeCreate: true`
+     *    for it. Refusing those here would extend a ruling measured over the
+     *    registry to a surface nobody measured, so they keep today's behaviour.
+     *    Their org rows are skipped by cold boot too; that gap is stated in the
+     *    PR rather than silently widened here.
+     *  - **`NOT_OVERRIDABLE`, not a new code.** The condition IS "this type has
+     *    no per-org override channel", the sentence `NOT_OVERRIDABLE` already
+     *    carries, and the code vocabulary is a closed set owned by
+     *    `packages/spec`'s ledger (ADR-0112 D3) — a cross-package edit this
+     *    card is not authorised to make. The message carries the distinction.
+     *
+     * Pinned by `protocol.org-scoped-write-refused.test.ts`.
+     */
+    private static orgScopedWriteRefusal(
+        type: string,
+        name: string,
+        organizationId: string | null | undefined,
+    ): Error | null {
+        if (!organizationId) return null;
+        const singular = PLURAL_TO_SINGULAR[type] ?? type;
+        if (this.isOverlayAllowed(type)) return null;
+        if (!this.STATIC_REGISTRY_TYPES.has(singular) && !this.STATIC_REGISTRY_TYPES.has(type)) return null;
+        const err: any = new Error(
+            `[not_overridable] Metadata item '${type}/${name}' cannot be written org-scoped `
+            + `(organization '${organizationId}'). `
+            + `The metadata-type registry declares allowOrgOverride=false for '${singular}', so the platform has `
+            + `no per-org channel for it: boot hydration loads env-wide rows only, so this row would be absent `
+            + `from the registry after the next restart — a '${singular}' that answered today would stop `
+            + `(an 'object' answers 404 OBJECT_NOT_FOUND for every record in its still-populated table, a 'flow' `
+            + `silently stops firing). Save it env-wide instead (retry with no active organization), or ship the `
+            + `per-org variant as its own deployment (ADR-0005: "Per-org variants are a deployment, not an `
+            + `overlay"). An operator may set OS_METADATA_WRITABLE=${singular} to grant a runtime escape hatch, `
+            + `but note the row still will not survive a restart — the hatch unlocks the write, not the read, `
+            + `and boot logs every such row it walks past. `
+            + `See docs/adr/0005-metadata-customization-overlay.md and #6190.`
+        );
+        err.code = 'NOT_OVERRIDABLE';
+        err.status = 403;
+        err.organizationId = organizationId;
+        err.docs = 'docs/adr/0005-metadata-customization-overlay.md';
         return err;
     }
 
@@ -7440,17 +8467,117 @@ export class ObjectStackProtocolImplementation implements
         if (request.type !== 'object' && request.type !== 'objects') return;
         this.engine.registry.registerItem(request.type, request.item, 'name');
         try {
+            const layer = this.classifyObjectContribution(request.name, request.packageId);
+            if (layer.kind === 'mismatch') {
+                // Unreachable from `saveMetaItem`, which refuses this row at
+                // the producer (D9.9) — but `applyRegistryWriteThrough` has
+                // other callers (rollback, publish promotion), and registering
+                // the layer anyway would put `sys_metadata` and the registry
+                // back into the disagreement D9.9 exists to prevent.
+                throw ObjectStackProtocolImplementation.overlayPackageMismatchError(
+                    request.name, layer.packageId, layer.ownerPackageId,
+                );
+            }
             this.engine.registry.registerObject(
                 { ...(request.item as Record<string, unknown>), _provenance: 'org' } as any,
-                // `||`, not `??`: an empty-string binding is "no package", the
-                // same normalisation the boot branch applies to `package_id`.
-                request.packageId || 'sys_metadata',
+                layer.packageId,
+                undefined,
+                // [ADR-0029 D9.8] The KIND, chosen by asking the registry a
+                // question it can answer: does a PACKAGED owner already hold
+                // this name? Registering unconditionally as `'own'` is what
+                // made this seam splice the packaged contributor out and
+                // destroy the code definition at write time (#6853).
+                layer.kind,
             );
         } catch (err: any) {
             console.warn(
                 `[Protocol] registerObject failed for ${request.name}: ${err?.message ?? err}`,
             );
         }
+    }
+
+    /**
+     * [ADR-0029 D9.8/D9.9] Which contributor KIND a `sys_metadata` object row
+     * registers as — and whether it may register at all.
+     *
+     * ```
+     * packaged `own` contributor already registered for this name?
+     *   no  -> `own`      (a runtime-authored object; today's behaviour, keyed
+     *                      by the row's package_id or the sentinel)
+     *   yes -> `overlay`  (a tenant layer over the code definition)
+     * ```
+     *
+     * Every row this classifies came out of `sys_metadata` and is therefore
+     * tenant-authored by definition, which is why the question is only about
+     * the OTHER side: a runtime-authored object's owner IS the tenant's own
+     * row, and re-writing it stays an ordinary re-registration rather than
+     * becoming a layer over itself.
+     *
+     * The row's `package_id` (`P`) is provenance ON the layer, never an
+     * ownership claim (D9.9), so against the packaged owner's id `O`:
+     *
+     * | case | verdict |
+     * |:--|:--|
+     * | `P == O` | the normal case — one overlay layer over `O`'s object. |
+     * | `P` empty / absent (the `'sys_metadata'` sentinel) | **accepted** — a package-less env-wide overlay is ADR-0005's platform-global shape. Before D9 this THREW `already owned by package "O"`, an artefact of the borrowed `own` slot rather than a decision (#6995, measured as P2). |
+     * | `P == Q`, some other package | **mismatch** — refused loudly. |
+     *
+     * Falls back to `'own'` — today's behaviour — for a registry that does not
+     * offer the discriminator, so a duck-typed engine double is never made to
+     * fail by a question it cannot answer.
+     */
+    private classifyObjectContribution(
+        name: string,
+        rowPackageId: string | null | undefined,
+    ):
+        | { kind: 'own' | 'overlay'; packageId: string }
+        | { kind: 'mismatch'; packageId: string; ownerPackageId: string } {
+        // `||`, not `??`: an empty-string binding is "no package", the same
+        // normalisation both hydration seams apply to `package_id`.
+        const binding = rowPackageId || '';
+        const registry: any = (this.engine as any)?.registry;
+        const owner = typeof registry?.getPackagedObjectOwner === 'function'
+            ? registry.getPackagedObjectOwner(name)
+            : undefined;
+        const ownerPackageId: unknown = owner?.packageId;
+        if (typeof ownerPackageId !== 'string' || ownerPackageId === '') {
+            return { kind: 'own', packageId: binding || 'sys_metadata' };
+        }
+        if (binding !== '' && binding !== ownerPackageId) {
+            return { kind: 'mismatch', packageId: binding, ownerPackageId };
+        }
+        return { kind: 'overlay', packageId: binding || 'sys_metadata' };
+    }
+
+    /**
+     * [ADR-0029 D9.9] The mis-bound overlay refusal.
+     *
+     * The overlay-uniqueness index keys on
+     * `(type, name, organization_id, COALESCE(package_id, ''))` (ADR-0005
+     * amendment, #6825), so `sys_metadata` can legitimately hold two active
+     * rows for one `(type, name)` bound to two packages. For every other type
+     * that is fine — two packages really can ship `page/home`. For `object` it
+     * is not representable: `computeFQN` is identity, so the registry holds
+     * exactly one entry per object name and could never serve two. Refusing
+     * the mis-bound row is what keeps the two stores in agreement instead of
+     * letting `sys_metadata` describe a shape the registry cannot hold.
+     */
+    private static overlayPackageMismatchError(
+        name: string, rowPackageId: string, ownerPackageId: string,
+    ): Error {
+        const err: any = new Error(
+            `[object_overlay_package_mismatch] Cannot layer object '${name}': the overlay is bound to package `
+            + `'${rowPackageId}', but the object is owned by package '${ownerPackageId}'. `
+            + `An object has exactly one registry entry, so it can carry exactly one overlay layer — bind the `
+            + `customization to '${ownerPackageId}', or have '${rowPackageId}' extend the object instead. `
+            + `See docs/adr/0029-kernel-object-ownership-and-platform-objects-decomposition.md.`,
+        );
+        err.code = 'OBJECT_OVERLAY_PACKAGE_MISMATCH';
+        err.status = 422;
+        err.packageId = rowPackageId;
+        err.ownerPackageId = ownerPackageId;
+        err.docs = 'docs/adr/0029-kernel-object-ownership-and-platform-objects-decomposition.md';
+        return err;
     }
 
     /**
@@ -7472,14 +8599,52 @@ export class ObjectStackProtocolImplementation implements
      * so a colliding overlay no longer grafts the first-registered package's
      * provenance/lock onto another package's row.
      *
-     * Returns whether anything was registered (bodies without a `name`, and
-     * registry doubles without `registerItem`, are no-ops).
+     * ── [#6602] THE ROW-SCOPE GATE LIVES HERE, AND ITS ARGUMENT IS REQUIRED ──
+     *
+     * ADR-0005 (revised 2026-05): **only env-wide rows
+     * (`organization_id IS NULL`) enter the process-wide SchemaRegistry.**
+     * Per-org overlays are served on demand by `getMetaItem` /
+     * `getMetaItems` and never grafted into the shared registry, because that
+     * registry has exactly one plain key per `(type, name)` and no org
+     * dimension to hold them apart.
+     *
+     * Boot already obeyed this — `loadMetaFromDb` filters
+     * `organization_id: null` and states the rule in its own comment — but
+     * the two RUNTIME seams did not: {@link applyRegistryWriteThrough} gated
+     * on `environmentId` alone (its TSDoc claimed the rule and the code said
+     * nothing about org), and the `getMetaItems` hydration loop walked the
+     * merged env-wide + org record set. Measured on an unscoped kernel, an
+     * org-scoped `view` write landed in the registry under the plain key, and
+     * one org-scoped listing call did the same — so org B's next listing
+     * started from org A's body (#6602).
+     *
+     * `organizationId` is therefore a REQUIRED parameter and not an optional
+     * one: an omitted org would default to "env-wide" and reinstate the exact
+     * hole, whereas a required one makes every caller state the row's scope.
+     * Declared = enforced, at the ONE choke point all three hydration callers
+     * (boot, read-side, write-through) already share — a fourth caller cannot
+     * forget a gate it has to answer to compile.
+     *
+     * The KERNEL-scope gate (`environmentId === undefined`) deliberately
+     * stays with the callers: that is a fact about the kernel this protocol
+     * instance serves, not about the row in hand.
+     *
+     * Returns whether anything was registered (org-scoped rows, bodies
+     * without a `name`, and registry doubles without `registerItem`, are
+     * no-ops).
      */
-    private hydrateOverlayIntoRegistry(type: string, data: unknown, packageId?: string | null): boolean {
+    private hydrateOverlayIntoRegistry(
+        type: string,
+        data: unknown,
+        options: { packageId?: string | null; organizationId: string | null },
+    ): boolean {
+        // [#6602] ADR-0005 — a per-org overlay is served on demand, never
+        // grafted into the registry every org in this process shares.
+        if (options.organizationId !== null && options.organizationId !== undefined) return false;
         if (!data || typeof data !== 'object' || !('name' in data)) return false;
         const registry: any = (this.engine as any)?.registry;
         if (!registry || typeof registry.registerItem !== 'function') return false;
-        const artifact = this.lookupArtifactItem(type, (data as any).name, packageId ?? undefined);
+        const artifact = this.lookupArtifactItem(type, (data as any).name, options.packageId ?? undefined);
         registry.registerItem(type, mergeArtifactProtection(data, artifact), 'name' as any);
         return true;
     }
@@ -7516,15 +8681,43 @@ export class ObjectStackProtocolImplementation implements
      * gate the read-side hydration carries: a project-scoped row must not be
      * registered into a registry that unscoped (control-plane) callers share.
      * The write must not be more permissive about that than the read is.
+     *
+     * [#6602] That sentence was true of the ENVIRONMENT dimension and false
+     * of the ORGANIZATION one: the gate above says nothing about
+     * `organization_id`, so on an unscoped kernel a per-org overlay write
+     * hydrated straight into the process-wide registry under the plain key —
+     * the designed per-org overlay leaking out of its org. `organizationId`
+     * is now part of this request and is handed to
+     * {@link hydrateOverlayIntoRegistry}, which owns the row-scope verdict
+     * for all three hydration paths. Callers pass the SAME `orgId` they wrote
+     * the row with, so the registry's view cannot disagree with the row's
+     * scope.
      */
-    private applyRegistryWriteThrough(request: { type: string; name: string; item?: any; packageId?: string | null }): void {
+    private applyRegistryWriteThrough(request: {
+        type: string;
+        name: string;
+        item?: any;
+        packageId?: string | null;
+        /** The row's org scope — `null` for an env-wide row. [#6602] */
+        organizationId: string | null;
+    }): void {
         if (request.type === 'object' || request.type === 'objects') {
+            // NOT org-gated, deliberately: an `object` is `allowOrgOverride:
+            // false` (ADR-0005) and its physical TABLE is env-wide, so the
+            // registry entry backing it is env-wide too — `assertObjectRegistered`
+            // fails CLOSED on a missing entry, and refusing to register here
+            // would make a runtime-created object unreachable for data CRUD
+            // rather than merely un-listed. This branch has never carried the
+            // `environmentId` gate either, for the same reason.
             this.applyObjectRegistryMutation(request);
             return;
         }
         if (this.environmentId !== undefined) return;
         try {
-            this.hydrateOverlayIntoRegistry(request.type, request.item, request.packageId ?? undefined);
+            this.hydrateOverlayIntoRegistry(request.type, request.item, {
+                packageId: request.packageId ?? undefined,
+                organizationId: request.organizationId,
+            });
         } catch (err: any) {
             // Best-effort, exactly like the object branch: the row is already
             // persisted, so a registry hiccup must not fail the write that
@@ -7538,7 +8731,8 @@ export class ObjectStackProtocolImplementation implements
 
     /**
      * Heal the in-memory registry after a metadata reset (overlay-row
-     * delete) on control-plane kernels. Two layers:
+     * delete). Walks the layers UNDER the deleted overlay, in order, and
+     * stops at the first one that can serve the name:
      *
      *  1. Drop the plain-key runtime shadow so the packaged artifact
      *     (registered under `<packageId>:<name>`) becomes the visible
@@ -7551,41 +8745,246 @@ export class ObjectStackProtocolImplementation implements
      *     MetadataService baseline (FilesystemLoader-sourced types) and
      *     re-register it, preserving the historical refresh behaviour
      *     for items the SchemaRegistry never held as artifacts.
+     *  3. [#5079] When NEITHER layer has anything, the deleted row was the
+     *     whole item — so the plain-key entry is retired too
+     *     ({@link SchemaRegistry.removeOverlayEntry}).
+     *
+     * ## Why step 3 exists (#5079, the #4432 residual)
+     *
+     * Step 1 declines for a runtime-CREATED item: `removeRuntimeShadow` only
+     * un-shadows a packaged artifact, and there is none. Step 2 then found
+     * nothing either — and the method returned, leaving the plain-key entry
+     * that #4521's write-through had put there. Nothing else ever removed it,
+     * so for the life of the process `GET /meta/<type>` kept enumerating a
+     * deleted item, `GET /meta/<type>/<name>` kept serving its body, and the
+     * ADR-0110 D3 declaration gate kept resolving it — while the row was gone
+     * from `sys_metadata` and the handler registry had already dropped it.
+     * The measured symptom: after `DELETE /meta/action/x`, `POST
+     * /actions/<obj>/x` 404s with the *handler-miss* wording ("not found")
+     * instead of ADR-0110's "has no declaration", because the declaration was
+     * still resolvable from this stale entry. The delete's own receipt already
+     * tells the truth here — #5927 splits it into "reset to artifact default"
+     * (artifact-backed) vs "it no longer exists" (runtime-only); step 3 is the
+     * registry making the same distinction the receipt makes.
+     *
+     * ## Why the layer-2 read is now diagnosed, and runs on every kernel
+     *
+     * [#5840] left this read on plain `get` because it "decides nothing" —
+     * true then, false now: its `undefined` is what licenses step 3 to retire
+     * an entry. So it goes through {@link readItemFromMetadataService}, which
+     * carries the ADR-0110 D3 verdict, and a DEGRADED read stops the walk
+     * without retiring anything. Retiring on an outage would answer "this
+     * item exists in no layer" from a read that never reached one — the exact
+     * miss-vs-outage confusion #5532/#5840 closed on the sibling paths. The
+     * same helper also folds in the singular/plural retry, so a baseline
+     * stored under the twin spelling is found rather than retired.
+     *
+     * RE-REGISTRATION stays control-plane-only (`environmentId === undefined`)
+     * — the historical refresh semantics of the original call sites, unchanged.
+     * Only the READ is now unconditional, because a project kernel needs the
+     * same evidence before retiring an entry.
+     *
+     * ## Why `organizationId` is a REQUIRED parameter (#6780)
+     *
+     * Every tier above is `(type, name)`-addressed: `removeRuntimeShadow`
+     * drops the PLAIN key, the layer-2 re-register writes the PLAIN key, and
+     * `removeOverlayEntry` retires the PLAIN key. There is exactly one
+     * plain-key entry per (type, name) in a process, and per ADR-0005 it
+     * belongs to the ENV-WIDE row — an org-scoped overlay never enters the
+     * registry at all (the rule {@link hydrateOverlayIntoRegistry} owns since
+     * #6602). So a heal run on behalf of an ORG-scoped delete cannot address
+     * anything of its own: it can only un-shadow or retire the entry every
+     * other org and the control plane read.
+     *
+     * Measured on `origin/main` before this gate existed: env-wide
+     * `view/shared_grid` in the registry → org A saves its own overlay (the
+     * entry correctly stays `Env grid`, #6602 holding) → org A DELETEs ITS
+     * OWN overlay → `registry.getItem('view','shared_grid')` is `undefined`
+     * while the env-wide row still sits in `sys_metadata`. While the entry is
+     * gone, direct registry readers answer as if the item does not exist
+     * (ADR-0110 D3's declaration gate, `resolveRouteActionDeclaration`,
+     * fail-closed `assertObjectRegistered` → 404) — one tenant's "reset my
+     * customization" degrading every other tenant's runtime on the unscoped
+     * kernels #5086 measured the flagship showcase booting with.
+     *
+     * The verdict lives HERE rather than at the call sites for the reason
+     * {@link hydrateOverlayIntoRegistry} states on the register side (#6602 /
+     * PR #6779): this is the ONE choke point all four heal callers already
+     * route through, and a REQUIRED (never optional) `organizationId` makes a
+     * fifth caller answer the question at compile time. An optional parameter
+     * would default an omission to "env-wide" and reinstate the exact hole.
+     *
+     * REGISTER WIDE, RETIRE NARROW — the asymmetry is deliberate. The
+     * write-through's `object` branch is NOT org-gated ({@link
+     * applyRegistryWriteThrough}), and that carve-out does not transfer to
+     * removal: it is argued from `assertObjectRegistered` failing CLOSED, so
+     * a surplus entry degrades to "listable but rowless" and the next reload
+     * heals it, while a wrongly retired entry 404s data CRUD for every tenant.
+     * The two costs are not symmetric, so the two gates are not either.
+     *
+     * The KERNEL-scope gate stays where it was: `environmentId === undefined`
+     * still guards re-registration only, because that is a fact about the
+     * kernel this protocol instance serves, not about the row in hand.
      *
      * Best-effort: a failure must never block the delete that already
      * succeeded; the next full reload fixes the registry anyway.
      */
-    private async restoreArtifactRegistryView(type: string, name: string): Promise<void> {
+    private async restoreArtifactRegistryView(
+        type: string,
+        name: string,
+        /** The DELETE's own scope — `null` for an env-wide row. [#6780] */
+        organizationId: string | null,
+    ): Promise<void> {
+        // [#6780] ADR-0005 — the plain-key entry belongs to the env-wide row,
+        // so only an env-wide removal may heal (or retire) it.
+        if (organizationId !== null && organizationId !== undefined) return;
         try {
             const registry: any = this.engine.registry;
+            const singular = PLURAL_TO_SINGULAR[type] ?? type;
+
+            // ── [ADR-0029 D9.7] THE OBJECT HALF'S LAYER SUBTRACTION ──
+            //
+            // Runs AHEAD of the tier walk, not inside tier 3, and the reason is
+            // the same asymmetry #6808 was filed for — one layer down. Tier 1
+            // (`removeRuntimeShadow`) returns as soon as it heals the generic
+            // `metadata` map, so an object whose plain-key shadow it can heal
+            // would never reach a tier-3 limb, and its overlay LAYER would stay
+            // registered in `objectContributors` — the deleted customization
+            // still being served by `getObject`, which is what the data plane
+            // dispatches on.
+            //
+            // Unconditionally correct for `object`, which is why it needs no
+            // tier: the row is gone, so its layer goes with it, and whatever
+            // was underneath — a packaged owner, or nothing — is what should be
+            // served next. When a packaged owner IS underneath, this is the
+            // whole restoration: it is already there, at its own priority, in
+            // its own namespace, with its own definition, so nothing has to be
+            // reconstructed from values that no longer exist (#6853's measured
+            // wall).
+            if (singular === 'object' && typeof registry.removeObjectOverlay === 'function') {
+                registry.removeObjectOverlay(name);
+            }
+
             let healed = false;
             if (typeof registry.removeRuntimeShadow === 'function') {
-                const singular = PLURAL_TO_SINGULAR[type] ?? type;
                 healed = registry.removeRuntimeShadow(singular, name);
                 if (type !== singular) {
                     healed = registry.removeRuntimeShadow(type, name) || healed;
                 }
             }
             if (healed) return;
-            // MetadataService re-registration is control-plane-only — it
-            // preserves the historical refresh semantics gated on
-            // `environmentId === undefined` at the original call sites.
-            if (this.environmentId !== undefined) return;
-            const services = this.getServicesRegistry?.();
-            const metadataService = services?.get('metadata');
-            if (metadataService && typeof metadataService.get === 'function') {
-                // [#5840] Measured and deliberately left on plain `get`. This
-                // read decides nothing and asserts nothing: it returns void,
-                // its `undefined` produces no answer to any caller, and the
-                // method's own contract above is "best-effort, the next full
-                // reload fixes the registry anyway". Routing it through
-                // `getDiagnosed` could only add a log line to a path that is
-                // already documented as silent — over-applying the rule, which
-                // is how `error`/`warn` become unreadable (AGENTS.md
-                // "Degradation log levels", the do-not-over-apply half).
-                const artifactItem = await metadataService.get(type, name);
-                if (artifactItem !== undefined) {
-                    this.engine.registry.registerItem(type, artifactItem, 'name');
+
+            const baseline = await this.readItemFromMetadataService(type, name);
+            if (baseline.data !== undefined && baseline.data !== null) {
+                if (this.environmentId === undefined) {
+                    this.engine.registry.registerItem(type, baseline.data, 'name');
+                }
+                return;
+            }
+            // ADR-0110 D3 — an outage is not an absence. Leave the entry: it
+            // is stale, which is exactly where this method already was, and a
+            // later delete or reload heals it.
+            if (baseline.degraded) return;
+
+            // [#5079] No artifact, no baseline: the row WAS the item.
+            if (typeof registry.removeOverlayEntry === 'function') {
+                registry.removeOverlayEntry(singular, name);
+                if (type !== singular) registry.removeOverlayEntry(type, name);
+            }
+            // [#6808] …and an `object` lives in a SECOND place, so tier 3 has a
+            // second limb. `applyObjectRegistryMutation` writes both halves on
+            // the way in — `registerItem` into the generic `metadata` map, and
+            // `registerObject` into `objectContributors` — while every verb
+            // this walk used above (`removeRuntimeShadow`, `registerItem`,
+            // `removeOverlayEntry`) addresses only the first. So the walk
+            // retired the listing copy and left the DISPATCH copy: measured
+            // over the real `SysMetadataRepository`, after the delete
+            // `metadata['object']` was empty while `registry.getObject(name)`
+            // — and `getItem('object', name)`, which special-cases back to it —
+            // still served the object, keeping the deleted row's schema
+            // readable and WRITABLE for the life of the process.
+            //
+            // Same tier as `removeOverlayEntry`, and only that tier: tiers 1
+            // and 2 both concluded that a lower layer still serves this name
+            // (a packaged artifact, or a MetadataService baseline), and an
+            // object that is still served must stay registered — retiring it
+            // there would turn "reset to artifact default" into an outage,
+            // because `assertObjectRegistered` fails CLOSED for the whole data
+            // plane. Only "no layer serves it" licenses removal, which is the
+            // verdict this branch already carries for the other half.
+            //
+            // The ADR-0029 extender guard lives in the registry verb (see
+            // {@link SchemaRegistry.unregisterObject}) and it THROWS — which
+            // this best-effort heal must not propagate: the repository delete
+            // has already committed, and the operator's row is gone either
+            // way. So the refusal is caught and stated, deliberately NOT left
+            // to the silent outer `catch`: an extended object surviving a
+            // delete is a real divergence between the store and the runtime,
+            // and it must be visible in the log rather than inferred later
+            // from a registry that disagrees with `sys_metadata`.
+            //
+            // ── AND IT NEVER RETIRES A CODE-SHIPPED OBJECT ──
+            //
+            // The same refusal `removeOverlayEntry` carries one line up, for
+            // the same reason: unregistering shipped code that the overlay
+            // delete never touched would be a worse bug than the one this
+            // closes. It is asked through the protocol's OWN existing predicate
+            // ({@link isArtifactBacked} → `SchemaRegistry.getArtifactItem`,
+            // which for `object` reads the contributor definition and applies
+            // exactly the artifact test the sibling verb applies to the plain
+            // key), so this limb inherits that judgement instead of open-coding
+            // a second one.
+            //
+            // Not theoretical, and NOT already covered by the gate at the top of
+            // `deleteMetaItem`: that two-tier authorization — which refuses an
+            // artifact-backed `object` outright with `not_overridable` — runs
+            // only when `environmentId !== undefined`. On a CONTROL-PLANE
+            // kernel it is skipped, and `revertCommit`'s soft-remove limb
+            // reaches this walk without it either, so the delete can arrive
+            // here for a name a code package still ships. Retiring it would
+            // take that object off the whole data plane until restart, because
+            // `assertObjectRegistered` fails closed.
+            //
+            // ── [ADR-0029 D9.7] THE LAYER-ADDRESSED VERB RUNS FIRST ──
+            //
+            // When a packaged owner survives underneath, the tenant's delete
+            // removes ONE thing: its overlay LAYER. The packaged definition is
+            // already there — its own priority, its own namespace, its own body
+            // — so restoring the artifact view is a SUBTRACTION, not a
+            // reconstruction. That is what dissolves #6853's measured wall
+            // (the delete-time heal needed five values and three of them no
+            // longer existed by the time it ran): the judgement moved to write
+            // time, where the packaged owner is one lookup away.
+            //
+            // It also retires #7012's package-binding guard, deliberately and
+            // measurably rather than by tidiness. That guard existed because
+            // `isArtifactBacked` was FALSIFIED here — an overlay row bound to
+            // the packaged owner's id destroyed the packaged contributor at
+            // write time, so the predicate answered "not shipped" for an object
+            // the package still ships. D9 removes the falsification at its
+            // source: the packaged `own` contributor is never spliced out, so
+            // the predicate is honest and the case the guard protected cannot
+            // reach the retirement limb at all (`removeObjectOverlay` returns
+            // first, and `isArtifactBacked` is true besides). What the guard
+            // still reached after that was only its own ACCEPTED COST — a
+            // package-bound RUNTIME-authored object (Studio's package
+            // workspace, #4636), indistinguishable from a shipped one by
+            // binding alone, kept listable-but-rowless until restart. With the
+            // predicate honest that is no longer the cheap direction, it is
+            // simply the wrong answer: nothing ships the name, the row WAS the
+            // item, and the operator asked for it to be gone.
+            if (
+                singular === 'object'
+                && !this.isArtifactBacked(singular, name)
+                && typeof registry.unregisterObject === 'function'
+            ) {
+                try {
+                    registry.unregisterObject(name);
+                } catch (err: any) {
+                    console.warn(
+                        `[Protocol] object '${name}' was deleted from sys_metadata but stays registered: `
+                        + `${err?.message ?? err}`,
+                    );
                 }
             }
         } catch {
@@ -7706,6 +9105,18 @@ export class ObjectStackProtocolImplementation implements
         // Placed first so the destructive-change diff, the schema gate, the
         // authoring gate and the persisted body all see the same document.
         request.item = stripReadDecorations(request.item);
+        // [#6562] …and OUR OWN injected system columns, for the same reason and
+        // at the same moment. `governServedItem` now serves the EFFECTIVE object
+        // schema, so the very same Studio round-trip would otherwise persist
+        // `created_at` / `owner_id` / `organization_id` / … into a body whose
+        // author declared none of them — turning the platform's own columns into
+        // a phantom customization in `sys_metadata`, in the checksum, in every
+        // history diff, and in the layered read's `overlay` layer. Placed
+        // alongside the decoration strip so the destructive-change diff, the
+        // schema gate, the authoring gate and the persisted body all still see
+        // one document. See {@link stripServedSystemColumns} for why this is a
+        // separate strip from the decoration list and not another entry in it.
+        request.item = stripServedSystemColumns(request.type, request.item);
         // Per-item lifecycle (ADR-0005 §"Drafts"). Default is `'publish'`
         // (legacy semantics — save goes straight live) to keep callers
         // that predate the draft/publish split working. Studio's
@@ -7757,10 +9168,55 @@ export class ObjectStackProtocolImplementation implements
         // type there unlocks it here too. `deleteMetaItem` is deliberately
         // NOT gated the same way — removing a code-only row that predates
         // this refusal is repair, and must stay possible.
+        //
+        // [#6960] THAT CARVE-OUT NOW NAMES BOTH TIERS, because as written it
+        // covered only the CODE-ONLY one (`allowRuntimeCreate: false` AND
+        // `allowOrgOverride: false`, i.e. the `if` immediately below) while
+        // the identical argument had grown a second population: an
+        // ARTIFACT-BACKED item of a type that kept `allowRuntimeCreate: true`
+        // and had its `allowOrgOverride` ROLLED BACK to `false` (#6483 / PR
+        // #6608 — `permission` / `position` / `page` / `app` / `dataset` /
+        // `book`). Its loader still merges the overlay at read time
+        // (`supportsOverlay: true`, untouched by the rollback), so a row
+        // authored before the rollback keeps shaping the effective body while
+        // the ordinary "Reset to package default" answered 403 — repair
+        // reachable only through the operator hatch. The maintainer ruled on
+        // 2026-08-10 that the delete side moves for that tier too: the
+        // removal restores the code-declared state, is strictly narrowing,
+        // and cannot widen anything.
+        //
+        // ⛔ THE ASYMMETRY IS DELIBERATE AND DELETE-ONLY. This gate and the
+        // artifact-backed refusal below it are UNCHANGED: create and update
+        // on such an item stay refused exactly as today. Do not "restore
+        // symmetry" in either direction — symmetrizing towards delete re-opens
+        // the write door #6483 closed, symmetrizing towards save re-traps the
+        // repair. And the relaxation is keyed on `supportsOverlay`, not on
+        // `allowOrgOverride`, so it stops at the tier boundary: `object`
+        // (`supportsOverlay: false`, its overlay a contributor LAYER per
+        // ADR-0029 D9) keeps refusing both verbs, which is D9.6's declared
+        // cost and is pinned. See {@link deleteMetaItem}.
         if (!overlayAllowed && !runtimeCreateAllowed) {
             throw this.isArtifactBacked(request.type, request.name)
                 ? ObjectStackProtocolImplementation.codeOnlyOverrideError(request.type, request.name)
                 : ObjectStackProtocolImplementation.codeOnlyCreateError(request.type);
+        }
+
+        // [#6190] …and the ORG dimension of the same declaration, on the tier
+        // that never consulted it. Placed HERE — before the topology carve-out
+        // below, before the destructive diff, before the schema parse — for the
+        // two reasons #5086 put its own refusal first: the verdict depends on
+        // nothing but the type and the requested scope, and "refused, not
+        // refused after writing" is the property the issue was filed about, so
+        // the gate must precede every path that could persist a row. Draft
+        // saves are gated identically (the branch is below): a draft is the
+        // first half of the SECOND minting path this closes, and #4463 D1
+        // recorded what happens when only one of the two doors gates.
+        // See {@link orgScopedWriteRefusal} for the ruling and the shape.
+        {
+            const orgRefusal = ObjectStackProtocolImplementation.orgScopedWriteRefusal(
+                request.type, request.name, request.organizationId,
+            );
+            if (orgRefusal) throw orgRefusal;
         }
 
         if (this.environmentId !== undefined) {
@@ -7792,11 +9248,35 @@ export class ObjectStackProtocolImplementation implements
             if (lockErr) throw lockErr;
         }
 
+        const singularType = PLURAL_TO_SINGULAR[request.type] ?? request.type;
+
+        // [ADR-0029 D9.9 / #6995] The refusal that is about REPRESENTABILITY
+        // rather than authorization: an `object` overlay bound to a package
+        // that does not own the object. See
+        // {@link overlayPackageMismatchError} for why one object name can
+        // carry at most one overlay layer while `sys_metadata` can hold two
+        // rows for it.
+        //
+        // AT THE PRODUCER, deliberately. Before D9 this row reached
+        // `registerObject`, which threw `already owned by package "…"` into
+        // `applyObjectRegistryMutation`'s best-effort `console.warn` — and
+        // `saveMetaItem` still returned a SUCCESS RECEIPT for a write the
+        // runtime had discarded (#6995, the silent write-side divergence).
+        // The receipt and the registry now agree because the write never
+        // happens: this precedes `ensureOverlayIndex` and every `put`.
+        if (singularType === 'object') {
+            const layer = this.classifyObjectContribution(request.name, request.packageId);
+            if (layer.kind === 'mismatch') {
+                throw ObjectStackProtocolImplementation.overlayPackageMismatchError(
+                    request.name, layer.packageId, layer.ownerPackageId,
+                );
+            }
+        }
+
         // Phase 3a-destructive: for object/field writes, diff against the
         // current schema and 409 if the change would drop data — unless the
         // caller has acknowledged the risk with `force: true`. The admin UI
         // surfaces the structured `issues` payload in a confirmation dialog.
-        const singularType = PLURAL_TO_SINGULAR[request.type] ?? request.type;
         if (!request.force && (singularType === 'object' || singularType === 'field')) {
             try {
                 const existing = await this.getMetaItem({
@@ -8008,12 +9488,22 @@ export class ObjectStackProtocolImplementation implements
         // immediately after the schema check because a rule reads a body the
         // schema already accepted — a Zod failure is the more basic verdict and
         // must be the one the author sees first.
-        this.assertRuntimeAuthoringRules({
+        //
+        // [#4717] The advisory half of D3 starts its journey here. `errors` is
+        // thrown above as the 422; `advisories` never blocks anything, so it is
+        // captured and rides the 2xx this write is about to earn. Held in a
+        // local rather than on `this`: the gate is per-write and two concurrent
+        // saves must not read each other's findings.
+        const runtimeAdvisories = this.assertRuntimeAuthoringRules({
             type: request.type,
             name: request.name,
             state: mode === 'draft' ? 'draft' : 'active',
             body: request.item,
             source: writeSource,
+            // [#6285] The write's organization partition. It was always here;
+            // it simply never travelled to the gate, which is the whole reason
+            // the "platform-level flow" limb could not be judged before.
+            organizationId: request.organizationId ?? null,
         });
 
         // Pre-persistence authoring gate (#3050): a domain plugin may veto the
@@ -8176,6 +9666,9 @@ export class ObjectStackProtocolImplementation implements
                     name: request.name,
                     item: request.item,
                     packageId: request.packageId ?? null,
+                    // [#6602] The SAME scope the row was just written with —
+                    // a per-org overlay stays out of the shared registry.
+                    organizationId: orgId,
                 });
                 await this.ensureObjectStorage(request.type, request.name);
             }
@@ -8212,6 +9705,24 @@ export class ObjectStackProtocolImplementation implements
                 version: result.version,
                 seq: result.seq,
                 ...(projectionApplied ? { projectionApplied } : {}),
+                // [#4717] #4463 D3's advisory half, finally on the response.
+                //
+                // CONDITIONAL on purpose, and the condition is the contract:
+                // the key is omitted — never `[]` — when the gate had nothing
+                // to say, so a clean save's response bytes are exactly what
+                // they were before this field existed and no existing caller
+                // sees a new key. `SaveMetaItemResponseSchema.advisories` is
+                // declared optional for that reason, and the conformance suite
+                // pins BOTH directions (present with findings, absent without),
+                // because an optional key is precisely what a conformance gate
+                // built on "nothing was stripped" cannot notice on its own.
+                //
+                // Save door only. The gate also runs on the draft→active
+                // promotion (#4463 D1, so `?mode=draft` + publish is not a
+                // bypass) and that door does NOT carry this field yet — its own
+                // response contract only just landed as #7294. The asymmetry is
+                // deliberate and stated in the changeset.
+                ...(runtimeAdvisories.length > 0 ? { advisories: runtimeAdvisories } : {}),
                 // #5745 — the literal union, not `string`. An object-literal
                 // property widens a two-literal ternary to `string`, which made
                 // this method fail to satisfy `MetadataProtocol.saveMetaItem`
@@ -8637,6 +10148,18 @@ export class ObjectStackProtocolImplementation implements
          * same contract as `seedApplied` — surfaced, never thrown.
          */
         materializeApplied?: PublishMaterializeResult;
+        /**
+         * Present when an ADR-0094 mutation projector is registered for this
+         * type: the outcome of the awaited post-persist projection. The
+         * draft→active promotion runs the projector exactly as a direct active
+         * save does, so this is the same receipt `saveMetaItem` returns.
+         *
+         * [#7294] It was ASSIGNED below and missing from this annotation, so
+         * the method's declared type denied a key the wire body carried — the
+         * same declared-≠-returned gap one layer down from the one #7294
+         * closed on the spec side.
+         */
+        projectionApplied?: MutationProjectionOutcome;
     }> {
         const { singularType, orgId, result } = await this.promoteDraftForPublish(request);
         const response: {
@@ -8697,6 +10220,21 @@ export class ObjectStackProtocolImplementation implements
             err.status = 403;
             throw err;
         }
+        // [#6190] The draft→active promotion is the OTHER way an org-scoped row
+        // of a non-org-overridable type reaches `active` — `publishMetaItem`
+        // and, behind Studio's "publish whole app", `publishPackageDrafts`.
+        // `saveMetaItem`'s gate now refuses to MINT such a draft, so what this
+        // door closes is the promotion of residue that predates the refusal:
+        // a legacy org-scoped draft row must not be promotable into a fresh
+        // active phantom. Exactly the #4463 D1 posture — gating one door and
+        // not the other makes the refusal bypassable by anyone who saves
+        // `?mode=draft` and then POSTs `/publish`.
+        {
+            const orgRefusal = ObjectStackProtocolImplementation.orgScopedWriteRefusal(
+                request.type, request.name, request.organizationId,
+            );
+            if (orgRefusal) throw orgRefusal;
+        }
         // ADR-0010 L3 — lock blocks publish too (publishing is a write).
         const _publishLockErr = await this.assertLockAllowsWrite({
             type: request.type,
@@ -8727,6 +10265,10 @@ export class ObjectStackProtocolImplementation implements
                 name: request.name,
                 state: 'active',
                 body: draftForGate.body,
+                // [#6285] Same partition the draft is being promoted in. Without
+                // it the draft door would be a bypass for this refusal alone,
+                // which is the exact hole #4463 D1 closed for the other 26.
+                organizationId: orgId,
             });
         }
 
@@ -8803,6 +10345,8 @@ export class ObjectStackProtocolImplementation implements
             name: args.name,
             item: args.body,
             packageId: args.packageId,
+            // [#6602] The promoted draft carries the org it was drafted in.
+            organizationId: args.orgId,
         });
         // Create the object's table now so it's CRUD-able without a restart.
         await this.ensureObjectStorage(args.requestType, args.name);
@@ -8948,140 +10492,6 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
-     * [#5206 step 2, #5189, #5040 E7 / ADR-0121] Run the endpoint publish gates
-     * over a batch's `api` drafts and report every failure as a publish-blocking
-     * violation.
-     *
-     * ## Why it exists on THIS path
-     *
-     * E7 (#5111) hung the per-endpoint gates on `ObjectStackDefinitionSchema`,
-     * so every path that parses a STACK is covered. `publishPackageDrafts`
-     * parses no stack: it reads `sys_metadata` draft rows and promotes them.
-     * #5189 closed the same hole on `MetadataManager.publishPackage`; this is
-     * the other door, and the one Studio's "publish everything" button actually
-     * goes through (ADR-0033 / ADR-0067 D2). Until now the only type-aware
-     * pre-flight here was the object namespace-prefix check, so an `api` draft
-     * — anonymous, unmetered, whatever — became `active` unjudged.
-     *
-     * ## One judge, never a second criteria set
-     *
-     * Everything this method decides comes from
-     * {@link validateApiEndpointDeclarations}: the same function the stack
-     * schema runs, the same function `publishPackage` runs, and (minus the two
-     * identity-bearing gates) the same `firstFailure` the endpoint matcher's
-     * load-time backstop runs. The messages are the gate's own — they already
-     * name the endpoint, the offending key and the fix, which is the whole
-     * point of refusing HERE instead of in a boot log. Nothing in this file
-     * restates a rule about what is servable.
-     *
-     * ## Why it can run the FULL gate, namespace included
-     *
-     * Unlike `publishPackage` — which indexes by `packageId`, holds no manifest
-     * and must be handed a `namespace` — this path already resolves the
-     * package's declared `manifest.namespace` for the object-prefix rule. So
-     * the namespace gate (ADR-0121 D1/D2) is judgeable here and is judged.
-     * Deliberately NOT conditional on the namespace being present: the gate's
-     * own precondition ("a stack that declares `apis:` MUST declare an explicit
-     * `manifest.namespace`") is a criterion, and skipping it when the answer is
-     * "there is none" would reopen the hole for exactly the packages least
-     * likely to have been through a stack compile. The object-prefix rule above
-     * grandfathers namespace-less packages because a bare object name is a
-     * naming smell; a namespace-less endpoint is an unownable URL.
-     *
-     * ## Boundaries, stated rather than silently assumed
-     *
-     * - Judged over the drafts BEING PROMOTED, mirroring the object-prefix rule
-     *   directly above it. A draft that collides with an already-`active`
-     *   endpoint of the same package is therefore not caught here; the matcher
-     *   resolves store-wide duplicate claims deterministically and names the
-     *   loser at `error` level (`buildEndpointIndex`). Widening this to the
-     *   package's whole active set would mean refusing a publish over something
-     *   the author is not publishing — a different contract, not a bug fix.
-     * - A draft row that vanished between `listDrafts` and here is skipped, not
-     *   invented into a gate failure: the promote loop reports the real
-     *   `no_draft` for it.
-     * - A store read that FAILS propagates. "Could not read the draft" must
-     *   never be answered with "the gate passed" (ADR-0110 D3's distinction,
-     *   same reason the matcher refuses to turn an outage into a 404).
-     *
-     * @param drafts the batch's draft headers, as `listDrafts` returned them.
-     * @param namespace the package's declared `manifest.namespace`, or
-     *   `undefined` when it declares none (the gate reports that itself).
-     * @returns one entry per violation, `[]` when the batch has no `api`
-     *   drafts (a package without endpoints is untouched by this pass).
-     */
-    private async gateApiDraftsForPublish(
-        drafts: ReadonlyArray<{ type: string; name: string; organizationId: string | null }>,
-        namespace: string | undefined,
-    ): Promise<Array<{ type: string; name: string; error: string; code: string }>> {
-        const apiDrafts = drafts.filter((d) => canonicalMetaType(d.type) === 'api');
-        if (apiDrafts.length === 0) return [];
-
-        const violations: Array<{ type: string; name: string; error: string; code: string }> = [];
-        /** Parsed endpoints, index-aligned with {@link gatedNames}. */
-        const endpoints: ApiEndpoint[] = [];
-        const gatedNames: string[] = [];
-
-        for (const d of apiDrafts) {
-            const draftOrgId = d.organizationId ?? null;
-            const draftRepo = this.getOverlayRepo(draftOrgId);
-            const ref = { type: 'api', name: d.name, org: draftOrgId ?? 'env' } as unknown as Parameters<typeof draftRepo.get>[0];
-            const draft = await draftRepo.get(ref, { state: 'draft' });
-            if (!draft) continue; // raced away — the promote loop reports `no_draft`
-
-            // Parsing is the gate's PRECONDITION, not a sixth gate: an
-            // `ApiEndpoint` is what `validateApiEndpointDeclarations` judges.
-            // Refusing an unparseable draft here is the same ruling #5189 made
-            // on the sibling path — a shape that cannot be gated could not be
-            // served either (the matcher's own loud skip refuses it at load),
-            // so publishing it would mint a route that answers 404 forever.
-            const parsed = ApiEndpointSchema.safeParse(draft.body);
-            if (!parsed.success) {
-                for (const issue of parsed.error.issues) {
-                    violations.push({
-                        type: 'api',
-                        name: d.name,
-                        error:
-                            `api draft '${d.name}' does not satisfy ApiEndpointSchema and cannot be published: `
-                            + `${issue.message} (at ${issue.path.join('.') || '<root>'}). An endpoint that does `
-                            + `not parse cannot be gated (ADR-0121) and would be EXCLUDED from endpoint `
-                            + `matching at load anyway, so its declared route would answer 404.`,
-                        code: 'ENDPOINT_SCHEMA',
-                    });
-                }
-                continue;
-            }
-            endpoints.push(parsed.data);
-            gatedNames.push(d.name);
-        }
-
-        for (const issue of validateApiEndpointDeclarations(endpoints, { namespace })) {
-            // The gate reports per-endpoint issues at `['apis', <index>, …]` and
-            // the namespace PRECONDITION once at `['apis']` — the latter is a
-            // property of the package, not of any one endpoint, so it is
-            // reported once, unattributed, with this path's own remedy appended.
-            const index = typeof issue.path[1] === 'number' ? issue.path[1] : undefined;
-            if (index === undefined) {
-                violations.push({
-                    type: 'api',
-                    name: '',
-                    error: `${issue.message} ${PUBLISH_DRAFTS_NAMESPACE_REMEDY}`,
-                    code: 'ENDPOINT_GATE',
-                });
-                continue;
-            }
-            violations.push({
-                type: 'api',
-                name: gatedNames[index] ?? '',
-                error: issue.message,
-                code: 'ENDPOINT_GATE',
-            });
-        }
-
-        return violations;
-    }
-
-    /**
      * Publish every pending DRAFT bound to a package in one shot (ADR-0033) —
      * the "publish whole app" action. Promotes each draft→active by reusing the
      * per-item {@link publishMetaItem} primitive (which runs the overridable /
@@ -9176,19 +10586,43 @@ export class ObjectStackProtocolImplementation implements
             }
         }
 
-        // [#5206 step 2, #5040 E7 / ADR-0121] The endpoint publish gates on the
-        // OTHER publish path. `MetadataManager.publishPackage` gained them in
-        // #5189; this function — the real entry point behind Studio's "publish
-        // everything" (ADR-0033 / ADR-0067 D2) — promoted `api` drafts to
-        // active without meeting a single gate. The security consequence is
-        // already caught one layer down (PR #5203 re-judges every stored item
-        // at index-build time and EXCLUDES the ones that never passed), so what
-        // this closes is the LATENESS: ADR-0121 says publish refuses, and an
-        // author is owed a prescription naming the offending key here, not an
-        // `error` line in a boot log they never read. The load-time backstop
-        // stays exactly where it is — this is the earlier door, not a
-        // replacement for the last one.
-        preflightViolations.push(...(await this.gateApiDraftsForPublish(drafts, pkgNamespace)));
+        // [#5488 — RETIRED GATE, recorded overturn of PR #5279]
+        //
+        // `gateApiDraftsForPublish` stood here (#5206 step 2, #5040 E7 /
+        // ADR-0121) and ran the endpoint publish gates over this batch's `api`
+        // drafts. It is deliberately REMOVED, two days after it landed, by the
+        // maintainer ruling of 2026-08-07T16:59Z implemented in #5488 — not
+        // deleted as dead weight and not lost in a refactor.
+        //
+        // Why it can go: the gate judged whether an `api` draft was fit to be
+        // PROMOTED TO ACTIVE in `sys_metadata`. No such row is ever served. The
+        // serving criterion belongs to `IMetadataService.matchEndpoint` →
+        // `EndpointMatcher` → `MetadataManager.listForIndex('api')`, which
+        // reads the manager's registry plus its filesystem/memory loaders;
+        // `sys_metadata` is in neither, so a promoted endpoint 404s forever
+        // (real boot, #5488 — no `EXCLUDED` line, because it was never in the
+        // index to be excluded from). The gate was a correct verdict about a
+        // state with no consumer.
+        //
+        // Why it MUST go rather than sit unreached: `api` is now code-only
+        // (`allowRuntimeCreate: false` + `allowOrgOverride: false`), and the
+        // #5086 inlet refuses the write BEFORE persistence and BEFORE the
+        // draft/publish branch — it does not look at `mode`. So no `api` draft
+        // row can be created any more, and this gate could never again see one.
+        // Leaving it would leave unreachable code asserting a rule about a row
+        // that cannot exist, which is the shape of a phantom check.
+        //
+        // What still judges endpoints, unchanged: `validateApiEndpointDeclarations`
+        // / `identityFreeEndpointGateFailure` (`api/endpoint-publish-gate.ts`)
+        // on the route that actually serves — the stack schema, `publishPackage`
+        // (#5189), and again at load in `buildEndpointIndex` (PR #5203). ADR-0121
+        // keeps its "publish REJECTS" ruling in full on that route; only the
+        // runtime-authored-draft door it used to also cover is gone, because
+        // that door opened onto nothing.
+        //
+        // Re-entry, as the ruling recorded it: if #2657 Part B promotes `apis`
+        // to a registered type WITH A REAL CONSUMPTION PATH, this gate comes
+        // back with it — implementation first, declaration second.
 
         if (preflightViolations.length > 0) {
             return {
@@ -10054,6 +11488,18 @@ export class ObjectStackProtocolImplementation implements
      * artifact is restored to its pre-commit `prevVersion`. The revert is itself
      * recorded as a NEW commit (operation='revert'), so history stays
      * append-only and the revert is itself revertible.
+     *
+     * [#6621] BOTH limbs refresh the SchemaRegistry, so a revert that answers
+     * `success: true` is one the running process has already acted on. The
+     * restore limb writes the restored body through ({@link
+     * applyRegistryWriteThrough}, the #4521 rule the sibling
+     * {@link rollbackMetaItem} has always carried); the soft-remove limb runs
+     * the same three-tier heal the sibling {@link deleteMetaItem} runs after
+     * its own `repo.delete` ({@link restoreArtifactRegistryView}). Before
+     * this, a batch revert persisted its change and left the runtime
+     * dispatching the reverted-away body until restart —
+     * {@link rollbackToPackageCommit} inherited it, so a whole-package
+     * rollback could report success and change nothing the process could see.
      */
     async revertCommit(request: {
         commitId: string;
@@ -10094,22 +11540,182 @@ export class ObjectStackProtocolImplementation implements
                 const current = await repo.get(ref, { state: 'active' });
                 if (!it.existedBefore) {
                     // Created by this commit → soft-remove (metadata only; table stays).
+                    //
+                    // [#6620] The write INTENT is derived per item, exactly as
+                    // the sibling DELETE caller {@link deleteMetaItem} derives
+                    // it (and as the sibling revert caller
+                    // {@link rollbackMetaItem} derives its own) — all three now
+                    // agree. Stated as the CONSTANT `'override-artifact'` this
+                    // limb used to carry, `SysMetadataRepository.delete` opened
+                    // with `assertAllowed(ref.type, opts.intent)` — the same
+                    // gate `put` uses — which refuses every type that is not
+                    // `allowOrgOverride`, `object` among them. So a commit that
+                    // CREATED an object could not be reverted at all: the
+                    // first-build undo (publish a brand-new app, then undo it)
+                    // left every created object behind, answered `success:
+                    // false` with a populated `failed[]`, and left the package
+                    // half-reverted — its overlay-allowed items removed, its
+                    // objects not.
+                    //
+                    // Per ITEM, not per call: one first-build commit routinely
+                    // creates a runtime object beside a packaged-artifact name,
+                    // so a hoisted intent has to pick one and be wrong about
+                    // the other. A genuinely artifact-backed item still
+                    // resolves to `'override-artifact'` and is still refused
+                    // with `NOT_OVERRIDABLE` — the derivation states the
+                    // caller's case, it does not widen the repository's gate,
+                    // which is unchanged and right.
+                    //
+                    // Sibling limb: #6563 (PR #6642) did the same for the
+                    // restore branch below, where the intent was UNSTATED and
+                    // fell through to `restoreVersion`'s `?? 'override-artifact'`
+                    // default. The registry half of both limbs is #6621, fixed
+                    // here and below.
+                    const intent: 'override-artifact' | 'runtime-only' =
+                        this.isArtifactBacked(it.type, it.name) ? 'override-artifact' : 'runtime-only';
                     if (current) {
                         await repo.delete(ref, {
                             parentVersion: current.hash,
                             actor,
                             source: 'protocol.revertCommit',
-                            intent: 'override-artifact',
+                            intent,
                             state: 'active',
                         });
                     }
+                    // [#6621] The registry must stop serving what the revert
+                    // just removed — the #4521 rule on the DELETE side of it.
+                    //
+                    // Measured on `origin/main` before this line existed: a
+                    // first-build undo of a created `object` answered
+                    // `success: true`, left `sys_metadata` with zero rows for
+                    // the name, and `SchemaRegistry` kept serving the body —
+                    // the same split the restore limb below showed, one limb
+                    // over. Same for an overlay `view` on a control-plane
+                    // kernel, where the plain-key entry `saveMetaItem`'s
+                    // write-through had put there simply stayed.
+                    //
+                    // WHICH heal, and why not a bare unregister: this is the
+                    // #6687 three-tier walk the sibling delete caller
+                    // {@link deleteMetaItem} runs after its own `repo.delete`,
+                    // and the tiers are the point. A soft-removed overlay that
+                    // shadows a packaged artifact must fall BACK to the
+                    // artifact (tier 1, ADR-0005 reset), not vanish; only when
+                    // no layer serves the name at all is the plain-key entry
+                    // retired (tier 3, #5079). A flat `removeOverlayEntry`
+                    // here would delete names a code package still ships. Both
+                    // delete/revert callers now run the same walk, exactly as
+                    // both now derive the same per-item intent.
+                    //
+                    // Run for the no-row case too, deliberately: that is the
+                    // self-heal branch `deleteMetaItem` documents — a stale
+                    // shadow can outlive the row it came from, and this limb's
+                    // contract is "this artifact is not here after the revert",
+                    // not "a row was deleted".
+                    //
+                    // [#6602] ORG GATE, and it is asymmetric ON PURPOSE. Only
+                    // an env-wide revert may mutate the process-wide registry:
+                    // an org-scoped row never entered it (ADR-0005, the rule
+                    // {@link hydrateOverlayIntoRegistry} owns), so healing on
+                    // its behalf would un-shadow or retire an entry that
+                    // belongs to the env-wide row every other org reads. The
+                    // write-through's object branch is deliberately NOT
+                    // org-gated, and that carve-out does not transfer here: it
+                    // is argued from `assertObjectRegistered` failing CLOSED,
+                    // which licenses registering broadly and never retiring
+                    // broadly. Register wide, retire narrow.
+                    //
+                    // [#6780] The verdict this comment argues now lives INSIDE
+                    // {@link restoreArtifactRegistryView} as a REQUIRED
+                    // parameter, so `orgId` is handed over rather than tested
+                    // here: PR #6807's call-site `if (orgId === null)` guarded
+                    // this ONE caller while the sibling `deleteMetaItem` — the
+                    // caller this limb was modelled on — had the same hole on
+                    // all three of its own call sites. The gate moved to the
+                    // choke point every caller shares; the pin below this
+                    // comment is unchanged and still covers the batch path.
+                    await this.restoreArtifactRegistryView(it.type, it.name, orgId);
                     reverted.push({ type: it.type, name: it.name, action: 'removed' });
                 } else if (it.prevVersion !== null && it.prevVersion !== undefined) {
                     // Edited an existing artifact → restore the pre-commit body.
-                    await repo.restoreVersion(ref, it.prevVersion, {
+                    //
+                    // [#6563] The write INTENT is derived per item, exactly as the
+                    // sibling caller {@link rollbackMetaItem} derives it. Left
+                    // unstated, `SysMetadataRepository.restoreVersion` defaults to
+                    // `'override-artifact'` and `put`'s `assertAllowed` refuses every
+                    // type that is not `allowOrgOverride` — `object` among them — so
+                    // each `object` item of a reverted commit came back in `failed[]`
+                    // as `NOT_OVERRIDABLE` while the same edit reverted fine one
+                    // artifact at a time through the version-history revert. The
+                    // repository's default is right for callers that genuinely mean
+                    // "override a packaged artifact"; the defect was this caller never
+                    // saying which of the two cases it is.
+                    //
+                    // Per ITEM, not per call: `revertCommit` reverts a batch, and a
+                    // commit routinely mixes a runtime-created object with an overlay
+                    // on a packaged view. A genuinely artifact-backed item still
+                    // resolves to `'override-artifact'` and is still refused — the
+                    // derivation states the case, it does not widen the gate.
+                    //
+                    // The soft-remove limb above stated the same intent as a
+                    // CONSTANT and was fixed the same way (#6620), so both limbs now
+                    // derive it. The registry half of both is #6621, below.
+                    const intent: 'override-artifact' | 'runtime-only' =
+                        this.isArtifactBacked(it.type, it.name) ? 'override-artifact' : 'runtime-only';
+                    // [#6621 / #4636] The ownership key the write-through needs,
+                    // read from the ROW rather than from the request — the sibling
+                    // revert caller {@link rollbackMetaItem} reads it exactly this
+                    // way, and for the same reason: `revertCommit` has no
+                    // `packageId` parameter either, and inventing one would let a
+                    // caller re-key an artifact it does not own. Left unpassed, a
+                    // row bound to `app.<slug>` re-registers under the
+                    // `'sys_metadata'` sentinel and `registerObject` throws
+                    // `already owned by package "app.<slug>"` into a best-effort
+                    // `console.warn` — a revert that reports success while the
+                    // registry keeps the body it was supposed to revert.
+                    //
+                    // Read BEFORE the restore, deliberately (#4636 again): the row
+                    // exists at this point and a read failure still fails this ITEM
+                    // cleanly into `failed[]`. Read afterwards it would be a
+                    // fallible query downstream of a write that already succeeded —
+                    // the shape that ends in a `catch {}` swallowing a real outage
+                    // (#4867). Per ITEM, because a batch mixes bindings.
+                    const restorePackageId = await this.resolveOverlayPackageBinding(it.type, it.name, orgId);
+                    const restored = await repo.restoreVersion(ref, it.prevVersion, {
                         actor,
                         source: 'protocol.revertCommit',
                         message: `revert commit ${request.commitId}`,
+                        intent,
+                    });
+                    // [#6621] #4521 — a revert is a live write like any other: the
+                    // restored body must be the one the runtime dispatches on
+                    // immediately, not after someone lists the type.
+                    //
+                    // Measured on `origin/main` before this call existed, with the
+                    // real `SysMetadataRepository`: an `object` saved twice and then
+                    // reverted answered `{ success: true, revertedCount: 1,
+                    // failed: [] }`, the stored row came back to `["name","amount"]`
+                    // — and `SchemaRegistry.getObject(...)` still carried
+                    // `due_date`. `success: true` while CRUD dispatches on the body
+                    // the operator just reverted away, healing only at the next
+                    // restart. Type-agnostic: an overlay `view` on a control-plane
+                    // kernel showed the same split (`stored 'Cases'` vs
+                    // `registry 'Renamed'`).
+                    //
+                    // The registry key is the SINGULAR type — the spelling
+                    // `saveMetaItem`'s own write-through registered under — while
+                    // the repo-facing reads above keep `it.type`, which is the
+                    // spelling the row is stored with. Two different keys, on
+                    // purpose.
+                    this.applyRegistryWriteThrough({
+                        type: PLURAL_TO_SINGULAR[it.type] ?? it.type,
+                        name: it.name,
+                        item: restored.item.body,
+                        packageId: restorePackageId,
+                        // [#6602] The row's OWN scope, per item. An org-scoped row
+                        // is refused by {@link hydrateOverlayIntoRegistry} and never
+                        // reaches the registry every org in this process shares —
+                        // inherited, not re-decided here.
+                        organizationId: orgId,
                     });
                     reverted.push({ type: it.type, name: it.name, action: 'restored' });
                 }
@@ -10295,6 +11901,9 @@ export class ObjectStackProtocolImplementation implements
                 name: request.name,
                 item: result.item.body,
                 packageId: rollbackPackageId,
+                // [#6602] A rollback restores the row IN ITS OWN SCOPE — an
+                // org-scoped restore must not graft the body process-wide.
+                organizationId: orgId,
             });
             return {
                 success: true,
@@ -10456,14 +12065,59 @@ export class ObjectStackProtocolImplementation implements
         request = canonicalizeMetaRequestType(request);
         // Two-tier authorization for delete (mirrors saveMetaItem).
         //  • Artifact-backed item → delete becomes a tombstone overlay,
-        //    requires `allowOrgOverride`.
+        //    requires `allowOrgOverride`…
+        //  • …EXCEPT when the type's loader merges overlays at read time
+        //    (`supportsOverlay: true`) — then removing the row is repair and
+        //    is allowed without it. [#6960, delete-only; see below.]
         //  • DB-only item → hard delete of a user-created row,
         //    requires `allowRuntimeCreate` (or `allowOrgOverride`).
         if (this.environmentId !== undefined) {
             const overlayAllowed = ObjectStackProtocolImplementation.isOverlayAllowed(request.type);
             const runtimeCreateAllowed = ObjectStackProtocolImplementation.isRuntimeCreateAllowed(request.type);
             const artifactBacked = this.isArtifactBacked(request.type, request.name);
-            if (artifactBacked && !overlayAllowed) {
+            // [#6960] …and the ONE removal the refusal above must not swallow.
+            //
+            // MAINTAINER RULING, 2026-08-10 (#6960): removing a legacy env
+            // overlay on a type whose per-org override channel was rolled back
+            // is allowed through the ordinary delete path. Deleting an overlay
+            // restores the code-declared state — it is the NARROWING direction
+            // and cannot widen anything — so refusing it serves no security
+            // purpose while trapping the repair behind `OS_METADATA_WRITABLE`.
+            //
+            // ⛔ DELETE ONLY, AND IT IS NOT AN OVERSIGHT. Create and update on
+            // the same item stay refused exactly as before (`saveMetaItem`'s
+            // sibling gate is untouched); a future tidy-up that "restores
+            // symmetry" here re-opens the write door the #6483 rollback closed.
+            // The asymmetry is the ruling.
+            //
+            // THE TIER BOUNDARY, which is what makes this narrow enough to be
+            // safe: {@link mergesOverlayAtRead} is `supportsOverlay`, NOT
+            // `allowOrgOverride`.
+            //
+            //  • `supportsOverlay: true` + `allowOrgOverride: false` — the
+            //    ROLLED-BACK OVERLAYABLE tier (`permission` / `position` /
+            //    `page` / `app` / `dataset` / `book`, and any type that lands
+            //    in this shape later). #6483 / PR #6608 closed the write door
+            //    and left the read path merging overlay-wins, so a row
+            //    authored before the rollback still shapes the effective body
+            //    and the ordinary "Reset to package default" flow answered 403
+            //    with the item still customized. That is the stuck operator
+            //    this branch releases.
+            //  • `supportsOverlay: false` — `object` above all, whose overlay
+            //    is a CONTRIBUTOR LAYER (ADR-0029 D9) rather than a merge, and
+            //    whose reset refusal is D9.6's declared and maintainer-approved
+            //    cost. This branch does not reach it and must not: pinned by
+            //    `protocol-object-overlay-layer.test.ts` on both topologies.
+            //
+            // The same carve-out is mirrored — deliberately, not by accident —
+            // in `SysMetadataRepository`'s delete gate, because that one is
+            // TOPOLOGY-INDEPENDENT: a control-plane kernel skips this whole
+            // block (`environmentId === undefined`) and would otherwise be
+            // refused there instead, leaving the fix half-done. See
+            // {@link SysMetadataRepository.assertDeleteAllowed}.
+            const legacyOverlayRemoval = ObjectStackProtocolImplementation
+                .mergesOverlayAtRead(request.type);
+            if (artifactBacked && !overlayAllowed && !legacyOverlayRemoval) {
                 const err = new Error(
                     `[not_overridable] Metadata item '${request.type}/${request.name}' is provided by a code package `
                     + `and the type has not opted into per-org overlay writes. `
@@ -10538,8 +12192,18 @@ export class ObjectStackProtocolImplementation implements
                     // shadow may linger in the registry (e.g. pollution from
                     // before this fix shipped) — drop it so the artifact
                     // view really IS the default we claim below.
+                    //
+                    // [#6780] `orgId` is passed, and this branch is where it
+                    // matters MOST: with no row to delete, an org that never
+                    // customized anything at all could evict the env-wide
+                    // plain-key entry with a single no-op DELETE. Measured on
+                    // `origin/main`: receipt `{reset: false, "nothing to
+                    // delete"}` and `registry.getItem('view','shared_grid')`
+                    // → `undefined`, the env-wide row untouched in
+                    // `sys_metadata`. A gate applied only to the delete-ful
+                    // branch below would have left this door standing open.
                     if (targetState === 'active') {
-                        await this.restoreArtifactRegistryView(request.type, request.name);
+                        await this.restoreArtifactRegistryView(request.type, request.name, orgId);
                     }
                     return {
                         success: true,
@@ -10586,8 +12250,16 @@ export class ObjectStackProtocolImplementation implements
                 // see {@link restoreArtifactRegistryView}. Draft discards
                 // skip this: drafts never hydrate into the registry, and the
                 // still-active overlay (if any) must keep its shadow.
+                //
+                // [#6780] SCOPED by the same `orgId` the row was deleted with,
+                // so the registry's view cannot disagree with the row's scope
+                // — the sibling rule the write side states in
+                // {@link applyRegistryWriteThrough}. Org A resetting ITS OWN
+                // overlay used to retire the plain-key entry belonging to the
+                // ENV-WIDE row, i.e. one tenant's "reset to default" blanked
+                // the item for every other tenant and the control plane.
                 if (targetState === 'active') {
-                    await this.restoreArtifactRegistryView(request.type, request.name);
+                    await this.restoreArtifactRegistryView(request.type, request.name, orgId);
                 }
 
                 // Storage teardown (opt-in): drop the now-orphaned physical table
@@ -10725,8 +12397,17 @@ export class ObjectStackProtocolImplementation implements
                 }
             }
 
+            // [#6780] The legacy path deletes under the SAME org predicate it
+            // built into `scopedWhere` above, so the heal reads its scope from
+            // the same place. Reachable only on a control-plane kernel for a
+            // code-only type, which is exactly the kernel whose registry every
+            // org shares — the narrowest path and the widest blast radius.
             if (request.state !== 'draft') {
-                await this.restoreArtifactRegistryView(request.type, request.name);
+                await this.restoreArtifactRegistryView(
+                    request.type,
+                    request.name,
+                    request.organizationId ?? null,
+                );
             }
 
             return {
@@ -10868,9 +12549,30 @@ export class ObjectStackProtocolImplementation implements
                         // the write path's `request.packageId || 'sys_metadata'`:
                         // an empty binding is "no package", and the sentinel
                         // marks exactly that one thing.
+                        //
+                        // [ADR-0029 D9.8] …and the KIND is chosen, not
+                        // defaulted. Registering every row as `'own'` is what
+                        // made this seam replay a destruction of the packaged
+                        // definition on EVERY boot, silently and with a clean
+                        // `{loaded:1,errors:0,invalid:0}` receipt (#6853 P6).
+                        // [D9.9] A row bound to a package that does NOT own the
+                        // object throws here on purpose: the per-record catch
+                        // below counts it in `errors` with its reason, which is
+                        // the boot-side half of the write-path refusal.
+                        const layer = this.classifyObjectContribution(
+                            String(record.name),
+                            (record as { package_id?: string | null }).package_id,
+                        );
+                        if (layer.kind === 'mismatch') {
+                            throw ObjectStackProtocolImplementation.overlayPackageMismatchError(
+                                String(record.name), layer.packageId, layer.ownerPackageId,
+                            );
+                        }
                         this.engine.registry.registerObject(
                             { ...(data as Record<string, unknown>), _provenance: 'org' } as any,
-                            (record as { package_id?: string | null }).package_id || 'sys_metadata',
+                            layer.packageId,
+                            undefined,
+                            layer.kind,
                         );
                     } else {
                         // Same rule as the getMetaItems read-side hydration and
@@ -10886,10 +12588,21 @@ export class ObjectStackProtocolImplementation implements
                         // When artifacts load after this hydration the merge
                         // finds nothing and the row registers unchanged — same
                         // as before, scoped or not.
+                        //
+                        // [#6602] The org argument states what the WHERE
+                        // clause above already selected for. It is a no-op
+                        // today by construction — and that is the point: the
+                        // rule this branch's comment states ("hydrate only
+                        // env-wide rows") stops depending on a query filter
+                        // staying correct, because the hydrator refuses an
+                        // org-scoped row whatever selected it.
                         this.hydrateOverlayIntoRegistry(
                             normalizedType,
                             data,
-                            (record as { package_id?: string | null }).package_id ?? undefined,
+                            {
+                                packageId: (record as { package_id?: string | null }).package_id ?? undefined,
+                                organizationId: (record as { organization_id?: string | null }).organization_id ?? null,
+                            },
                         );
                     }
                     loaded++;
@@ -10898,6 +12611,9 @@ export class ObjectStackProtocolImplementation implements
                     console.warn(`[Protocol] Failed to hydrate ${record.type}/${record.name}: ${e instanceof Error ? e.message : String(e)}`);
                 }
             }
+            // #6190 — say out loud which org-scoped rows this filter just
+            // walked past. See {@link reportUnhydratableOrgScopedRows}.
+            await this.reportUnhydratableOrgScopedRows();
         } catch (e: unknown) {
             // #5841 — the ONE benign reason this whole read can fail is
             // `sys_metadata` not being provisioned yet: on a first boot, before
@@ -10941,6 +12657,216 @@ export class ObjectStackProtocolImplementation implements
             }
         }
         return { loaded, errors, invalid, storeUnavailable };
+    }
+
+    /**
+     * [#6190] Cold boot walks past every `organization_id IS NOT NULL` row.
+     * For the types the registry declares per-org overridable that is the
+     * design (ADR-0005 revised 2026-05 — those overlays are loaded on demand
+     * by `getMetaItem`/`getMetaItems`, which is why the filter above exists).
+     * For every OTHER type it is a stored row the platform has no per-org
+     * channel for, and until this method the skip was **completely silent**.
+     *
+     * The measured specimen is `flow`. `flow` is `allowOrgOverride: false`
+     * (rolled back in #6283 / PR #6478, matching ADR-0005:57) but
+     * `allowRuntimeCreate: true`, so a tenant authoring a BRAND-NEW flow in
+     * Studio still writes `sys_metadata.organization_id = '<org>'` — the
+     * runtime `PUT /metadata/:type/:name` threads `resolveActiveOrganizationId`
+     * into `saveMetaItem`, and `SysMetadataRepository.put` stamps
+     * `organization_id: this.organizationId` whatever the type is. That flow
+     * binds its triggers for the rest of the process's life (the publish-time
+     * write-through puts it in the process-wide registry) and then, on the
+     * next restart, this filter drops it and the `kernel:ready` binder —
+     * `getMetaItems({ type: 'flow' })`, no `organizationId`, so
+     * `orgRecords = []` — never sees it. It stops firing, and nothing said so:
+     * the `kernel:bootstrapped` unbound audit cannot report a flow that was
+     * never registered.
+     *
+     * This method does not change what boot loads. It makes the absence
+     * LOUD — AGENTS.md's rule, and the half of #6190 that is implementable
+     * without a contract ruling. Whether such a row should exist at all
+     * (refuse the write / force it env-wide / teach the binder to read per-org)
+     * is the maintainer decision recorded on the issue; the operator-visible
+     * consequence is the same either way and it is what an operator needs
+     * TODAY to explain an automation that stopped after a restart.
+     *
+     * Shape decisions, all deliberate:
+     *
+     *  - **Which rows.** Registry-derived, never a hand-written list
+     *    (Prime Directive #7): the complement of
+     *    {@link OVERLAY_ALLOWED_TYPES}'s source flag. Derived from
+     *    `DEFAULT_METADATA_TYPE_REGISTRY` and NOT from
+     *    {@link isOverlayAllowed}, because the `OS_METADATA_WRITABLE` escape
+     *    hatch only unlocks the WRITE — an env-unlocked type's org rows are
+     *    hydrated no more than any other's, so silencing the line on that
+     *    flag would hide exactly the deployment most likely to have these rows.
+     *  - **[#6992] …plus every LIVE type the registry does not declare at
+     *    all.** {@link listLiveMetadataTypes} — the same accessor
+     *    {@link getMetaTypes} lists from. A plugin-registered type (`theme`,
+     *    `connector`, `webhook`, `sharing_rule`, `analytics_cube`, …) has no
+     *    registry entry, so the loop above could not reach it, yet
+     *    `loadMetaFromDb`'s filter is type-BLIND and skips its org-scoped rows
+     *    exactly like a `flow`'s. That family was the one getting neither the
+     *    refusal nor the warning. It has no declaration to consult, and
+     *    `getMetaTypes()` synthesises `allowOrgOverride: false` for it, so
+     *    "not per-org overridable" is its correct reading here.
+     *
+     *    ── THE DIVERGENCE FROM THE REFUSAL IS DELIBERATE ──
+     *
+     *    {@link orgScopedWriteRefusal} keys off the STATIC registry and
+     *    returns `null` for exactly this family (its "Statically-declared
+     *    types only" bullet); this audit keys off the LIVE set and reports it.
+     *    The two sets are meant to differ, and a future reader should not
+     *    "fix" one to match the other. The asymmetry is this file's own stated
+     *    posture, three bullets up in that method: *warning is free and should
+     *    be maximal; refusing removes a capability*. Widening the refusal
+     *    would extend the 2026-08-08 ruling — reasoned over the 27 declared
+     *    entries — onto a surface nobody measured; widening the warning costs
+     *    an operator one more segment on a line that already exists. Same
+     *    reasoning by which this method ignores `OS_METADATA_WRITABLE` while
+     *    the refusal honours it. Ruled on #6992, scoped to the diagnostic.
+     *
+     *    Measured, not assumed (#6992): at the instant this method runs — in
+     *    `ObjectQLPlugin.start()` Phase 2, after every plugin's `init` — a
+     *    real `app-showcase` boot has 7 live types with no registry entry
+     *    (`analytics_cube`, `connector`, `data`, `package`, `sharing_rule`,
+     *    `theme`, `webhook`), all of them from the SchemaRegistry. The
+     *    widening is therefore live and not defeated by boot order.
+     *  - **Two predicates, both narrowing.** `organization_id IS NOT NULL`
+     *    plus the type list keeps the query empty-by-default: a healthy
+     *    deployment reads nothing and prints nothing. A driver that drops
+     *    either predicate degrades to reading more rows, never to a false
+     *    line — the JS filter re-checks both.
+     *  - **One aggregated line.** Counts per type plus a capped sample of
+     *    names, so a tenant with a thousand such rows costs one line rather
+     *    than a thousand.
+     *  - **Best-effort, and non-fatal by construction.** A diagnostic must
+     *    never be the reason a boot fails, so its own catch swallows: the
+     *    caller's outer catch classifies REAL hydration outages
+     *    (`storeUnavailable`, #5897) and this must not be able to reach it.
+     */
+    private async reportUnhydratableOrgScopedRows(): Promise<void> {
+        /** Names printed per type before the line collapses to a count. */
+        const SAMPLE_PER_TYPE = 5;
+        try {
+            const orgOverridable = new Set<string>();
+            /** Types `DEFAULT_METADATA_TYPE_REGISTRY` declares, whatever their flags. */
+            const declaredTypes = new Set<string>();
+            /** [#6992] Live types with NO registry entry — reported, never refused. */
+            const undeclaredTypes = new Set<string>();
+            const scannedTypes: string[] = [];
+            const scan = (singular: string): void => {
+                scannedTypes.push(singular);
+                // Both spellings: `sys_metadata.type` may hold the legacy
+                // plural, exactly as the hydration loop above assumes.
+                const plural = SINGULAR_TO_PLURAL[singular];
+                if (plural) scannedTypes.push(plural);
+            };
+            for (const entry of DEFAULT_METADATA_TYPE_REGISTRY) {
+                declaredTypes.add(entry.type);
+                if (entry.allowOrgOverride) {
+                    orgOverridable.add(entry.type);
+                    continue;
+                }
+                scan(entry.type);
+            }
+            // [#6992] Widen to the live registry — see the TSDoc's "…plus every
+            // LIVE type the registry does not declare at all" bullet. Best
+            // effort like the rest of this method: a kernel whose accessors
+            // throw degrades to the declared scan it had before, never to a
+            // failed boot.
+            let liveTypes: string[] = [];
+            try {
+                liveTypes = await this.listLiveMetadataTypes();
+            } catch {
+                liveTypes = [];
+            }
+            for (const liveType of liveTypes) {
+                const singular = PLURAL_TO_SINGULAR[liveType] ?? liveType;
+                if (declaredTypes.has(singular) || undeclaredTypes.has(singular)) continue;
+                undeclaredTypes.add(singular);
+                scan(singular);
+            }
+            if (scannedTypes.length === 0) return;
+
+            const rows = await this.engine.find('sys_metadata', {
+                where: {
+                    state: 'active',
+                    organization_id: { $null: false },
+                    type: { $in: scannedTypes },
+                },
+            });
+            if (!rows || rows.length === 0) return;
+
+            // Re-check both predicates in JS: a driver that cannot lower one
+            // of them hands back a superset, and a superset must not become a
+            // false accusation.
+            const counts = new Map<string, number>();
+            const samples = new Map<string, string[]>();
+            const scannedSingulars = new Set<string>(
+                scannedTypes.map((t) => PLURAL_TO_SINGULAR[t] ?? t),
+            );
+            let total = 0;
+            for (const row of rows) {
+                const org = (row as { organization_id?: string | null }).organization_id;
+                if (org === null || org === undefined || org === '') continue;
+                const singular = PLURAL_TO_SINGULAR[String(row.type)] ?? String(row.type);
+                if (orgOverridable.has(singular)) continue;
+                // [#6992] Re-check the TYPE predicate too, which is what the
+                // TSDoc above has always promised ("the JS filter re-checks
+                // both"). Before the live widening, `orgOverridable` was that
+                // re-check: within the declared registry, "not org-overridable"
+                // and "in the scanned list" were the same statement. They are
+                // not any more — a row of a type that is neither declared NOR
+                // live (a plugin uninstalled since the row was written) is
+                // absent from the list, so only this line keeps a driver that
+                // cannot lower `$in` from turning a superset into a line about
+                // a type this kernel never scanned.
+                if (!scannedSingulars.has(singular)) continue;
+                total++;
+                counts.set(singular, (counts.get(singular) ?? 0) + 1);
+                const names = samples.get(singular) ?? [];
+                if (names.length < SAMPLE_PER_TYPE) names.push(`${String(row.name)}@${String(org)}`);
+                samples.set(singular, names);
+            }
+            if (total === 0) return;
+
+            let reportedUndeclared = false;
+            const detail = Array.from(counts.entries())
+                .map(([type, count]) => {
+                    const names = samples.get(type) ?? [];
+                    const more = count > names.length ? `, +${count - names.length} more` : '';
+                    // [#6992] Mark the plugin-registered family. Not decoration:
+                    // the operator's next step differs between the two: a
+                    // DECLARED type's org-scoped write is refused from now on
+                    // (#6190), so the listed rows are historical residue and
+                    // cannot grow; an UNDECLARED type's write is not refused,
+                    // so the same names come back after every restart until the
+                    // author stops writing them org-scoped.
+                    const mark = undeclaredTypes.has(type) ? ' [plugin-registered]' : '';
+                    if (mark) reportedUndeclared = true;
+                    return `${type}×${count}${mark} (${names.join(', ')}${more})`;
+                })
+                .join('; ');
+            console.warn(
+                `[Protocol] [metadata_org_scoped_unhydrated] ${total} active sys_metadata row(s) are ` +
+                `org-scoped on types with NO per-org channel (the registry declares allowOrgOverride=false, ` +
+                `or does not declare the type at all), so boot hydration skipped them and they are absent ` +
+                `from the process-wide registry: ${detail}. ` +
+                `A 'flow' listed here will NOT bind its triggers in this process (the kernel:ready binder ` +
+                `reads flows env-wide) — it fired until the last restart and stops now. ` +
+                (reportedUndeclared
+                    ? `Types marked [plugin-registered] have no metadata-type registry entry, so the #6190 `
+                    + `org-scope write refusal does NOT cover them: rows of those types can still be written `
+                    + `org-scoped, and will be listed here again after every restart until the author stops. `
+                    : '') +
+                `Re-save the item env-wide (no active organization), or delete the row. See #6190 / #6992 / ADR-0005.`,
+            );
+        } catch {
+            // Diagnostics never break boot — see the TSDoc. Deliberately not
+            // routed to the caller's outer catch: that one classifies real
+            // hydration outages, and a failed extra probe is not one.
+        }
     }
 
     // ==========================================

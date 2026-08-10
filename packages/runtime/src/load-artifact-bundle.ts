@@ -142,7 +142,39 @@ export async function mergeRuntimeModule(bundle: any, artifactAbsPath: string, t
             console.warn(`${tag} runtime module '${moduleAbsPath}' exported no \`functions\` map`);
             return;
         }
-        const existing = (bundle.functions && typeof bundle.functions === 'object' && !Array.isArray(bundle.functions))
+        // The ARRAY form (`[{ name, handler: '<ref>', effect }]`) carries its
+        // declaration exactly like the map form, but names itself by an entry's
+        // `name` instead of by a map key. Rebuilding it as a map below would
+        // attach the callable and drop everything standing beside it —
+        // `effect: 'writes'` included — which is #4396's silent un-declaring in
+        // the other spelling: the function still registers, still runs, and its
+        // writes are still counted as none, so #4354's broken-sweep alert stays
+        // quiet on the one run that needed it. Unreachable until #6238 let the
+        // array form past the parse; reachable now, so it is handled here.
+        if (Array.isArray(bundle.functions)) {
+            const moduleFns = fns as Record<string, unknown>;
+            const attached = new Set<string>();
+            const mergedEntries = (bundle.functions as unknown[]).map((entry) => {
+                if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return entry;
+                const record = entry as Record<string, unknown>;
+                const name = typeof record.name === 'string' ? record.name : undefined;
+                if (name === undefined) return entry;
+                const fn = moduleFns[name];
+                if (typeof fn !== 'function') return entry;
+                attached.add(name);
+                return { ...record, handler: fn };
+            });
+            // A module function the artifact declared no entry for still has to
+            // register — the map branch keeps those, and dropping them here
+            // would make the array form quietly ship fewer functions than it
+            // was built with.
+            for (const [name, fn] of Object.entries(moduleFns)) {
+                if (typeof fn === 'function' && !attached.has(name)) mergedEntries.push({ name, handler: fn });
+            }
+            bundle.functions = mergedEntries;
+            return;
+        }
+        const existing = (bundle.functions && typeof bundle.functions === 'object')
             ? bundle.functions as Record<string, unknown>
             : {};
         // The module supplies the CALLABLE; the JSON supplies what the function

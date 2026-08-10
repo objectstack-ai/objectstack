@@ -11,14 +11,20 @@ description: Record-level sharing and editability checks.
 ## Methods
 
 ```ts
-services.sharing.buildReadFilter(object: string, context: SharingExecutionContext): Promise<unknown | null>
-services.sharing.canEdit(object: string, recordId: string, context: SharingExecutionContext): Promise<boolean>
-services.sharing.canDelete(object: string, recordId: string, context: SharingExecutionContext): Promise<boolean>
-services.sharing.canManageShares(object: string, recordId: string, context: SharingExecutionContext): Promise<boolean>
-services.sharing.grant(input: GrantShareInput, context: SharingExecutionContext): Promise<RecordShare>
-services.sharing.revoke(shareId: string, context: SharingExecutionContext, scope?: { object: string; recordId: string }): Promise<void>
-services.sharing.listShares(object: string, recordId: string, context: SharingExecutionContext): Promise<RecordShare[]>
+services.sharing.buildReadFilter(object: string, context: ExecutionContext): Promise<unknown | null>
+services.sharing.canEdit(object: string, recordId: string, context: ExecutionContext): Promise<boolean>
+services.sharing.canDelete(object: string, recordId: string, context: ExecutionContext): Promise<boolean>
+services.sharing.canManageShares(object: string, recordId: string, context: ExecutionContext): Promise<boolean>
+services.sharing.grant(input: GrantShareInput, context: ExecutionContext): Promise<RecordShare>
+services.sharing.revoke(shareId: string, context: ExecutionContext, scope?: { object: string; recordId: string }): Promise<void>
+services.sharing.listShares(object: string, recordId: string, context: ExecutionContext): Promise<RecordShare[]>
 ```
+
+Every method above **adjudicates access**, so each takes the complete
+`resolveAuthzContext` envelope (`ExecutionContext`) — not a per-site subset
+(#6523, applying the #6206 ruling). The six-field `SharingExecutionContext`
+these signatures used to name was retired in #7218; pass the whole context you
+were handed, unchanged.
 
 ## Management authority (ADR-0111)
 
@@ -86,7 +92,7 @@ export async function mayEditContract(
 ): Promise<boolean> {
   return sharing.canEdit('contract', recordId, {
     userId: session.userId,
-    // `SharingExecutionContext` names the org `tenantId`; a session exposes the
+    // The execution context names the org `tenantId`; a session exposes the
     // same value as `organizationId` (the `session.tenantId` alias was removed in
     // v11, #3290).
     tenantId: session.organizationId,

@@ -40,6 +40,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import type { ServiceObject } from '@objectstack/spec/data';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { SchemaRegistry } from './registry.js';
 // [#4550 / #5480] The producer's OWN write-verb dispatch decisions, so this
@@ -147,10 +148,14 @@ function makeHarness() {
     // reported on, and the only one where `saveMetaItem`'s overlay gate is
     // engaged at all.
     const protocol = new ObjectStackProtocolImplementation(engine, undefined, 'env_test');
-    return { registry, protocol, rows, historyRows, synced };
+    // `engine` is returned so a test can wrap a verb and stage a REAL concurrent
+    // write between two of the protocol's reads (see the #6215 conflict pin) —
+    // the only way the optimistic lock can still refuse a rollback now that the
+    // parent hash and the write scope come from the same row.
+    return { registry, protocol, rows, historyRows, synced, engine };
 }
 
-function objectBody(name: string, extra?: Record<string, unknown>) {
+function objectBody(name: string, extra?: Record<string, unknown>): ServiceObject {
     return {
         name,
         label: 'Invoice',
@@ -297,7 +302,7 @@ describe('#4636 — cloud#970 counter-example: a freshly created app stays edita
         // Exactly what `applyObjectRegistryMutation` would do if it moved the
         // ownership key and left the provenance stamp out — the shape measured
         // as "B-minimal" on this issue. Nothing else about the run differs.
-        registry.registerObject(objectBody('myapp_invoice') as any, APP_PKG);
+        registry.registerObject(objectBody('myapp_invoice'), APP_PKG);
 
         await expect(protocol.saveMetaItem({
             type: 'object',
@@ -346,24 +351,24 @@ describe('#4636 — rollback re-registers under the row\'s own package binding',
     });
 
     /**
-     * TRIPWIRE — this pins a DEFECT, not a desired behaviour.
+     * #6215 — the flipped tripwire.
      *
-     * The package-bound half of the ownership key resolved above is
-     * unreachable through `rollbackMetaItem` today, and not because of
-     * anything in this PR: `SysMetadataRepository.restoreVersion` calls `put`
-     * with no `packageId`, `put` scopes its existing-row lookup with
+     * This test used to assert the DEFECT (`[tripwire] a package-bound
+     * rollback still 409s`): `SysMetadataRepository.restoreVersion` called
+     * `put` with no `packageId`, `put` scoped its existing-row lookup with
      * `whereFor(ref, state, opts.packageId ?? null)`, and `null` is a
-     * PREDICATE (`package_id IS NULL`) rather than "any package". So the
-     * lookup misses the package-bound row it is restoring, reads its parent
-     * hash as null, and every rollback of a package-bound row answers 409
-     * before any registry write-through runs. Filed as #6215.
+     * PREDICATE (`package_id IS NULL`) rather than "any package" — so the
+     * lookup missed the package-bound row it was restoring, read its parent
+     * hash as null, and every rollback of a package-bound row answered 409
+     * before any registry write-through ran.
      *
-     * When that is fixed this test FAILS, which is the point: whoever fixes it
-     * must then assert what the write-through does with the key, and the
-     * assertion is already written one test up.
+     * `restoreVersion` now reads the raw active row and threads its
+     * `package_id` into `put`, so this is the assertion #4636 PR1 staged one
+     * test up, on the half that was unreachable then: the package-bound key,
+     * carried through a real rollback.
      */
-    it('[tripwire] a package-bound rollback still 409s — a pre-existing repository-scoping defect', async () => {
-        const { protocol } = makeHarness();
+    it('resolves the ownership key from the ROW: a package-bound rollback keeps its package id', async () => {
+        const { registry, protocol, rows } = makeHarness();
 
         await protocol.saveMetaItem({
             type: 'object',
@@ -380,10 +385,91 @@ describe('#4636 — rollback re-registers under the row\'s own package binding',
             item: evolved,
         });
 
+        const back = await protocol.rollbackMetaItem({
+            type: 'object',
+            name: 'myapp_invoice',
+            toVersion: 1,
+        });
+
+        expect(back.success).toBe(true);
+        // The write-through half: the restored body is re-registered under the
+        // row's OWN package id, never the sentinel, so the package filter that
+        // `saveMetaItem` populates keeps matching after a rollback…
+        expect(owner(registry, 'myapp_invoice')?.packageId).toBe(APP_PKG);
+        expect(registry.getAllObjects(APP_PKG).map((o: any) => o.name)).toEqual(['myapp_invoice']);
+        // …and the registry serves the RESTORED body, not the one being reverted.
+        expect(Object.keys((registry.getObject('myapp_invoice') as any).fields)).not.toContain('due_date');
+        // Same stamp as every other org write — a rollback is not a package install.
+        expect((owner(registry, 'myapp_invoice')?.definition as any)?._provenance).toBe('org');
+        // The defect's SECOND face: the lookup that missed the bound row would,
+        // had the parent check passed, have INSERTED an unbound duplicate
+        // instead of updating it. One row, still bound, carrying v1's body.
+        // (`sys_metadata`'s partial unique index keys on
+        // `COALESCE(package_id,'')`, so the duplicate would survive a real DB.)
+        const stored = Array.from(rows.values()).filter((r) => r.name === 'myapp_invoice');
+        expect(stored).toHaveLength(1);
+        expect(stored[0].package_id).toBe(APP_PKG);
+        expect(Object.keys(JSON.parse(stored[0].metadata).fields)).not.toContain('due_date');
+    });
+
+    /**
+     * The refusal that must SURVIVE the fix. `rollbackMetaItem`'s 409 is not
+     * retired — it is narrowed to the case it always claimed to report: the row
+     * really did advance between the rollback's parent read and its write.
+     *
+     * Staging that needs a real interleaving, because the parent hash and the
+     * write scope now come from the SAME read: the engine's `findOne` is
+     * wrapped to hand the rollback a snapshot of the active row and, in the
+     * same breath, let a concurrent publish land on the stored row. If the trap
+     * never fires the rollback succeeds and this test goes red — it cannot rot
+     * into a green that asserts nothing.
+     */
+    it('still refuses (METADATA_CONFLICT / 409) when the package-bound row REALLY advanced', async () => {
+        const { protocol, engine, rows } = makeHarness();
+
+        await protocol.saveMetaItem({
+            type: 'object',
+            name: 'myapp_invoice',
+            packageId: APP_PKG,
+            item: objectBody('myapp_invoice'),
+        });
+        const evolved = objectBody('myapp_invoice');
+        (evolved.fields as any).due_date = { name: 'due_date', type: 'date', label: 'Due' };
+        await protocol.saveMetaItem({
+            type: 'object',
+            name: 'myapp_invoice',
+            packageId: APP_PKG,
+            item: evolved,
+        });
+
+        const realFindOne = engine.findOne.bind(engine);
+        // The concurrent publish lands between `restoreVersion`'s parent read
+        // and `put`'s optimistic-lock read. That second read is identified by
+        // the one property only it has — it runs INSIDE the write transaction,
+        // so the engine call carries a `context` — rather than by counting
+        // reads, which would silently stop covering anything the day a read is
+        // added to the rollback path.
+        let fired = false;
+        engine.findOne = async (table: string, opts: Record<string, any>) => {
+            const row = await realFindOne(table, opts);
+            if (!fired && table === 'sys_metadata' && row && 'context' in opts && opts.where?.state === 'active') {
+                fired = true;
+                (row as any).checksum = `sha256:${'a'.repeat(64)}`; // someone else published
+            }
+            return row;
+        };
+
         await expect(protocol.rollbackMetaItem({
             type: 'object',
             name: 'myapp_invoice',
             toVersion: 1,
-        })).rejects.toThrow(/metadata_conflict/);
+        })).rejects.toMatchObject({ code: 'METADATA_CONFLICT', status: 409 });
+        expect(fired).toBe(true);
+        // The refusal is total: the stored row still carries the body the
+        // concurrent writer left, and no unbound duplicate was created.
+        const stored = Array.from(rows.values()).filter((r) => r.name === 'myapp_invoice');
+        expect(stored).toHaveLength(1);
+        expect(stored[0].package_id).toBe(APP_PKG);
+        expect(Object.keys(JSON.parse(stored[0].metadata).fields)).toContain('due_date');
     });
 });

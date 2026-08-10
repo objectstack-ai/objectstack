@@ -124,7 +124,7 @@ async function engineWith(opts: { transactional: boolean }) {
   const driver = makeDriver('primary', { transactional: opts.transactional });
   engine.registerDriver(driver, true);
   await engine.init();
-  engine.registry.registerObject({ name: 'thing', fields: { name: { type: 'text' } } } as any, '__test__');
+  engine.registry.registerObject({ name: 'thing', fields: { name: { type: 'text' } } }, '__test__');
   return { rec, engine, driver };
 }
 

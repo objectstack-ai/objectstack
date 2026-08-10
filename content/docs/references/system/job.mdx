@@ -58,7 +58,7 @@ const result = CronScheduleSchema.parse(data);
 | **name** | `string` | ✅ | Job name (snake_case) |
 | **label** | `string` | optional | Human-readable label |
 | **description** | `string` | optional | Job description / purpose |
-| **schedule** | `{ type: 'cron'; expression: string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; timezone?: string } \| { type: 'interval'; intervalMs: integer } \| { type: 'once'; at: string }` | ✅ | Job schedule configuration |
+| **schedule** | `{ type: 'cron'; expression: string \| object; timezone?: string } \| { type: 'interval'; intervalMs: integer } \| { type: 'once'; at: string }` | ✅ | Job schedule configuration |
 | **handler** | `string` | ✅ | Handler function name (must match a key in `defineStack({ functions })`) |
 | **retryPolicy** | `{ maxRetries?: integer; backoffMs?: integer; backoffMultiplier?: number; maxRetryDelayMs?: integer; … }` | optional | Retry policy: failed runs (including timeouts) are retried with exponential backoff (delay = min(backoffMs * backoffMultiplier^(retry-1), maxRetryDelayMs), optionally jittered) up to maxRetries retries after the initial attempt (#3494). Omit the block for a single attempt; declaring it without `maxRetries` also means no retry since 17.0.0 (#4661) — state a count to opt in. |
 | **timeout** | `integer` | optional | Per-attempt time limit in milliseconds; an over-limit run is recorded with execution status "timeout" (#3494). The in-flight handler is abandoned, not forcibly cancelled. Omit for no time limit. |
@@ -83,7 +83,7 @@ const result = CronScheduleSchema.parse(data);
 | **jobId** | `string` | ✅ | Job identifier |
 | **startedAt** | `string` | ✅ | ISO 8601 datetime when execution started |
 | **completedAt** | `string` | optional | ISO 8601 datetime when execution completed |
-| **status** | `Enum<'running' \| 'success' \| 'failed' \| 'timeout'>` | ✅ | Execution status |
+| **status** | `Enum<'running' \| 'success' \| 'failed' \| 'timeout' \| 'degraded'>` | ✅ | Execution status |
 | **error** | `string` | optional | Error message if failed |
 | **durationMs** | `integer` | optional | Execution duration in milliseconds |
 
@@ -98,6 +98,7 @@ const result = CronScheduleSchema.parse(data);
 * `success`
 * `failed`
 * `timeout`
+* `degraded`
 
 
 ---
@@ -125,7 +126,7 @@ const result = CronScheduleSchema.parse(data);
 | **backoffMultiplier** | `number` | ✅ | Exponential backoff multiplier; 1 (the default) keeps the delay flat |
 | **maxRetryDelayMs** | `integer` | ✅ | Ceiling for a single backoff delay (ms) |
 | **jitter** | `boolean` | ✅ | Randomize each delay within [50%, 100%] of its computed value — spreads a thundering herd of simultaneous retries |
-| **retryDelayMs** | `never` | optional | [REMOVED] `retryDelayMs` was removed in @objectstack/spec 17.0.0 (#4661, #4964) — the retry policy now has ONE spelling for its base delay across every surface that carries it: `job.retryPolicy`, a `try_catch` node's `retry`, `flow.errorHandling` and an ETL pipeline's `retry`. Rename the key to `backoffMs`; the value (milliseconds before the first retry) is unchanged. `os migrate meta --from 16` rewrites it for you. |
+| **retryDelayMs** | `never` | optional | [REMOVED] `retryDelayMs` was removed in @objectstack/spec 17.0.0 (#4661, #4964) — the retry policy now has ONE spelling for its base delay across every surface that carries it: `job.retryPolicy`, a `try_catch` node's `retry` and `flow.errorHandling`. Rename the key to `backoffMs`; the value (milliseconds before the first retry) is unchanged. Run `os migrate meta --from 16` to rewrite existing sources automatically. |
 
 
 ---

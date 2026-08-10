@@ -1777,7 +1777,8 @@ describe('PUT /meta/:type/:name handler — header → request plumbing (PR-10d.
     const protocol = createMockProtocol();
     protocol.saveMetaItem = vi.fn().mockResolvedValue({ success: true });
     const rest = new RestServer(server as any, protocol as any, ANON_API as any);
-    (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
+    // [#6603] this route now demands `manage_metadata` — an authoring capability, not just a session.
+    (rest as any).resolveExecCtx = async () => ({ userId: 'test-user', systemPermissions: ['manage_metadata'] });
   rest.registerRoutes();
 
     const route = getPutRoute(rest, '/api/v1/meta/:type/:name');
@@ -1807,7 +1808,8 @@ describe('PUT /meta/:type/:name handler — header → request plumbing (PR-10d.
     const protocol = createMockProtocol();
     protocol.saveMetaItem = vi.fn().mockResolvedValue({ success: true });
     const rest = new RestServer(server as any, protocol as any, ANON_API as any);
-    (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
+    // [#6603] this route now demands `manage_metadata` — an authoring capability, not just a session.
+    (rest as any).resolveExecCtx = async () => ({ userId: 'test-user', systemPermissions: ['manage_metadata'] });
   rest.registerRoutes();
     const route = getPutRoute(rest, '/api/v1/meta/:type/:name');
 
@@ -1830,7 +1832,8 @@ describe('PUT /meta/:type/:name handler — header → request plumbing (PR-10d.
     const protocol = createMockProtocol();
     protocol.saveMetaItem = vi.fn().mockResolvedValue({ success: true });
     const rest = new RestServer(server as any, protocol as any, ANON_API as any);
-    (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
+    // [#6603] this route now demands `manage_metadata` — an authoring capability, not just a session.
+    (rest as any).resolveExecCtx = async () => ({ userId: 'test-user', systemPermissions: ['manage_metadata'] });
   rest.registerRoutes();
     const route = getPutRoute(rest, '/api/v1/meta/:type/:name');
 
@@ -1856,7 +1859,8 @@ describe('PUT /meta/:type/:name handler — header → request plumbing (PR-10d.
     err.status = 409;
     protocol.saveMetaItem = vi.fn().mockRejectedValue(err);
     const rest = new RestServer(server as any, protocol as any, ANON_API as any);
-    (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
+    // [#6603] this route now demands `manage_metadata` — an authoring capability, not just a session.
+    (rest as any).resolveExecCtx = async () => ({ userId: 'test-user', systemPermissions: ['manage_metadata'] });
   rest.registerRoutes();
     const route = getPutRoute(rest, '/api/v1/meta/:type/:name');
 
@@ -2325,20 +2329,49 @@ describe('mapDataError — schema/constraint envelopes', () => {
     expect(r.body.error).toContain('insufficient privileges');
   });
 
-  it('does NOT pass through an explicit 5xx status (message stays sanitized)', () => {
+  // [#5582] This case was "does NOT pass through an explicit 5xx status
+  // (message stays sanitized)", and BOTH halves of that title have now been
+  // ruled on separately — which is why it is two cases.
+  //
+  // The status half was the defect: `mapDataError`'s passthrough stopped at
+  // 4xx while `resolveErrorResponse`'s went to 599, so one declared error got
+  // two answers depending on which door caught it, and on the data routes a
+  // declared 502/503 was rewritten to 500 by a message-text heuristic. The
+  // passthrough is now the same 400-599 both sides (#5437 / PR #5464 is the
+  // ruling it now matches).
+  //
+  // The message half was never in question and is unchanged: a 5xx's own words
+  // never reach the client.
+  it('passes an explicit 5xx status through, with its code and WITHOUT its message', () => {
+    const r = mapDataError(
+      Object.assign(new Error('connect ECONNREFUSED 10.0.0.5:5432 (internal pool)'), {
+        status: 502,
+        code: 'UPSTREAM_UNAVAILABLE',
+      }),
+    );
+    // The declared status and the machine-readable code both survive...
+    expect(r.status).toBe(502);
+    expect(r.body.code).toBe('UPSTREAM_UNAVAILABLE');
+    // ...and neither is the degraded answer this used to give.
+    expect(r.status).not.toBe(500);
+    expect(r.body.code).not.toBe('INTERNAL_ERROR');
+    // The sanitization half of the old assertion, kept verbatim.
+    expect(String(r.body.error)).not.toContain('ECONNREFUSED');
+    expect(JSON.stringify(r.body)).not.toContain('10.0.0.5');
+  });
+
+  it('a 5xx that declares NO code passes its status and invents no code', () => {
+    // The shape this case originally carried. `declaresServerFault` — the
+    // `@objectstack/types` criterion the 5xx arm reads for the `code` half —
+    // needs a non-empty string `code`, and ADR-0112 says the PRODUCER names the
+    // condition: the declared half is honoured, the undeclared half is left
+    // empty rather than filled with an invented `INTERNAL_ERROR`. Same answer
+    // `resolveErrorResponse` already gives this shape.
     const r = mapDataError(
       Object.assign(new Error('connect ECONNREFUSED 10.0.0.5:5432 (internal pool)'), { status: 502 }),
     );
-    // 5xx bypasses the passthrough and falls into the sanitizing heuristics.
-    expect(r.status).not.toBe(502);
-    expect(r.body.code).not.toBe('FORBIDDEN');
-    // [#5489] Both negatives above were satisfied by the OLD landing as well —
-    // a 400 carrying `connect ECONNREFUSED 10.0.0.5:5432 (internal pool)`
-    // verbatim, which is a server fault wearing a client-error status AND the
-    // leak the sanitizing heuristics were supposed to stop. Pinned positively
-    // now that the terminal branch is a sanitised 500.
-    expect(r.status).toBe(500);
-    expect(r.body.code).toBe('INTERNAL_ERROR');
+    expect(r.status).toBe(502);
+    expect(r.body.code).toBeUndefined();
     expect(String(r.body.error)).not.toContain('ECONNREFUSED');
   });
 
@@ -2384,6 +2417,40 @@ describe('mapDataError — schema/constraint envelopes', () => {
     expect(r.status).toBe(409);
     expect(r.body.code).toBe('DELETE_RESTRICTED');
     expect(r.body.dependentCount).toBe(1);
+  });
+
+  // [#7307] Two audiences, two fields. `error` is what Console renders verbatim
+  // in a toast; `developerMessage` is where the API names and the
+  // `deleteBehavior` remedy live. The transport must carry both and must not
+  // merge them.
+  it('ships DELETE_RESTRICTED developerMessage alongside the user-facing error', () => {
+    const r = mapDataError(
+      Object.assign(new Error('该部门正被 1 条零星申请记录通过「申报部门」引用,请先删除或改派这些记录。'), {
+        code: 'DELETE_RESTRICTED',
+        status: 409,
+        developerMessage:
+          "Cannot delete sys_business_unit (b1): 1 dependent os_ehr_app record(s) reference it via apply_dept. " +
+          "Delete or reassign them first, or set deleteBehavior:'cascade' on os_ehr_app.apply_dept.",
+        dependentObject: 'os_ehr_app',
+        dependentCount: 1,
+      }),
+      'sys_business_unit',
+    );
+    expect(r.status).toBe(409);
+    expect(r.body.error).toBe('该部门正被 1 条零星申请记录通过「申报部门」引用,请先删除或改派这些记录。');
+    expect(r.body.error).not.toMatch(/deleteBehavior/);
+    expect(r.body.developerMessage).toContain("set deleteBehavior:'cascade' on os_ehr_app.apply_dept");
+  });
+
+  it('omits developerMessage entirely when the thrower carries none', () => {
+    const r = mapDataError(
+      Object.assign(new Error('Cannot delete sys_position (p1): 1 dependent record'), {
+        code: 'DELETE_RESTRICTED',
+        status: 409,
+      }),
+      'sys_position',
+    );
+    expect(r.body).not.toHaveProperty('developerMessage');
   });
 
   it('maps SQLite "has no column named" → 400 INVALID_FIELD with the field', () => {
@@ -2902,7 +2969,7 @@ describe('RestServer metadata translation — page documents', () => {
         components: [
           {
             type: 'page:header',
-            properties: { title: 'Connect an Agent', subtitle: 'Give any MCP-capable client…', icon: 'bot' },
+            properties: { title: 'Connect an Agent', subtitle: 'Give any MCP-capable client…', actions: ['connect_agent'] },
           },
         ],
       },
@@ -2919,7 +2986,7 @@ describe('RestServer metadata translation — page documents', () => {
     expect(out.item.label).toBe('连接智能体');
     expect(out.item.regions[0].components[0].properties.title).toBe('连接智能体');
     expect(out.item.regions[0].components[0].properties.subtitle).toBe('让任意支持 MCP 的 AI 客户端受控访问此环境。');
-    expect(out.item.regions[0].components[0].properties.icon).toBe('bot');
+    expect(out.item.regions[0].components[0].properties.actions).toEqual(['connect_agent']);
   });
 
   it('translates page documents in a list response', async () => {
@@ -2931,24 +2998,43 @@ describe('RestServer metadata translation — page documents', () => {
 });
 
 // ---------------------------------------------------------------------------
-// ADR-0045 — hidden-app visibility gate (filterAppForUser)
+// ADR-0045 §3 (revised 2026-08, #4829) — the PUBLISH gate (filterAppForUser)
+//
+// Two keys, two contracts, pinned in both directions because conflating them is
+// the defect this block exists to prevent recurring:
+//
+//   `_unpublished: true`  machine-managed publish gate — externally
+//                         unobservable, builders only. THIS is what the gate reads.
+//   `hidden: true`        navigation presentation — not in the App Switcher,
+//                         surfaced via the avatar menu. Fully routable and
+//                         permission-checked for EVERY user; the gate ignores it.
+//
+// Until #4829 this suite pinned the gate on `hidden`, which is why the
+// regression it caused survived: the platform's own `account` app is authored
+// `hidden: true` (see `platform-objects`' ACCOUNT_APP, "Surface via the avatar
+// dropdown, not the App Switcher"), so a green pin was asserting that every
+// normal user is denied their own password / avatar / session settings. A pin
+// that only tests one direction can be satisfied by the wrong mechanism.
+// End-to-end proof over the wire lives in `meta-app-publish-gate.test.ts`.
 // ---------------------------------------------------------------------------
 
-describe('filterAppForUser — ADR-0045 hidden-app gate', () => {
+describe('filterAppForUser — ADR-0045 publish gate', () => {
   const make = () => new RestServer(createMockServer() as any, createMockProtocol() as any, ANON_API as any);
-  const hiddenApp = { name: 'production_management', hidden: true, navigation: [] };
+  const unpublishedApp = { name: 'production_management', _unpublished: true, navigation: [] };
   const visibleApp = { name: 'crm', navigation: [] };
+  // The #4829 repro, in the shape `platform-objects` actually authors it.
+  const accountApp = { name: 'account', hidden: true, navigation: [] };
 
-  it('drops a hidden app for users without builder access', () => {
+  it('drops an UNPUBLISHED app for users without builder access', () => {
     const rest: any = make();
-    expect(rest.filterAppForUser(hiddenApp, new Set<string>())).toBeNull();
-    expect(rest.filterAppForUser(hiddenApp, new Set(['manage_users']))).toBeNull();
+    expect(rest.filterAppForUser(unpublishedApp, new Set<string>())).toBeNull();
+    expect(rest.filterAppForUser(unpublishedApp, new Set(['manage_users']))).toBeNull();
   });
 
-  it('returns a hidden app to builders (studio.access or setup.access)', () => {
+  it('returns an unpublished app to builders (studio.access or setup.access)', () => {
     const rest: any = make();
-    expect(rest.filterAppForUser(hiddenApp, new Set(['studio.access']))?.name).toBe('production_management');
-    expect(rest.filterAppForUser(hiddenApp, new Set(['setup.access']))?.name).toBe('production_management');
+    expect(rest.filterAppForUser(unpublishedApp, new Set(['studio.access']))?.name).toBe('production_management');
+    expect(rest.filterAppForUser(unpublishedApp, new Set(['setup.access']))?.name).toBe('production_management');
   });
 
   it('leaves visible apps untouched for everyone', () => {
@@ -2956,13 +3042,42 @@ describe('filterAppForUser — ADR-0045 hidden-app gate', () => {
     expect(rest.filterAppForUser(visibleApp, new Set<string>())?.name).toBe('crm');
   });
 
-  it('still applies requiredPermissions to hidden apps builders can see', () => {
+  it('still applies requiredPermissions to unpublished apps builders can see', () => {
     const rest: any = make();
-    const gated = { ...hiddenApp, requiredPermissions: ['manage_platform_settings'] };
+    const gated = { ...unpublishedApp, requiredPermissions: ['manage_platform_settings'] };
     expect(rest.filterAppForUser(gated, new Set(['studio.access']))).toBeNull();
     expect(
       rest.filterAppForUser(gated, new Set(['studio.access', 'manage_platform_settings']))?.name,
     ).toBe('production_management');
+  });
+
+  // ---- the other direction: `hidden` must NOT gate access (#4829) ----
+
+  it('#4829: a `hidden` app is served to a user with NO permissions at all', () => {
+    const rest: any = make();
+    expect(rest.filterAppForUser(accountApp, new Set<string>())?.name).toBe('account');
+    expect(rest.filterAppForUser(accountApp, new Set(['manage_users']))?.name).toBe('account');
+  });
+
+  it('#4829: `hidden` survives the filter untouched — the shell, not the server, acts on it', () => {
+    const rest: any = make();
+    // The server must keep serving the flag: nav placement is the CLIENT's
+    // decision, and stripping it here would move the launcher bug one layer out.
+    expect(rest.filterAppForUser(accountApp, new Set<string>())?.hidden).toBe(true);
+  });
+
+  it('the two keys are independent — `hidden` does not weaken the publish gate', () => {
+    const rest: any = make();
+    const both = { name: 'draft_settings', hidden: true, _unpublished: true, navigation: [] };
+    expect(rest.filterAppForUser(both, new Set<string>())).toBeNull();
+    expect(rest.filterAppForUser(both, new Set(['studio.access']))?.name).toBe('draft_settings');
+  });
+
+  it('a hidden app still answers to `requiredPermissions` — nav-only never means ungated', () => {
+    const rest: any = make();
+    const gated = { ...accountApp, requiredPermissions: ['account.access'] };
+    expect(rest.filterAppForUser(gated, new Set<string>())).toBeNull();
+    expect(rest.filterAppForUser(gated, new Set(['account.access']))?.name).toBe('account');
   });
 });
 

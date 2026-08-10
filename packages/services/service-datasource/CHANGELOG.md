@@ -1,5 +1,447 @@
 # @objectstack/service-external-datasource
 
+## 17.0.0-rc.6
+
+### Major Changes
+
+- e2798fa: feat(service-datasource)!: `DRIVER_CATALOG` publishes `mongodb`, and the factory can no longer fall through to `memory` (#6345)
+
+  **BREAKING — `DRIVER_CATALOG`'s MongoDB entry publishes `id: 'mongodb'`.** That
+  field is documented as "used as `datasource.driver`" and it is literally what the
+  Studio connection form writes into a datasource row, so this is the face of
+  #6345's `mongo` → `mongodb` rename that reaches stored data. Rows written before
+  the rename carry `mongo`; the ADR-0087 D2 conversion
+  `datasource-driver-mongo-to-mongodb` converges them at every rehydration seam,
+  and `mongo` remains an accepted alias so a deployment that skipped the migration
+  still connects. The factory's dispatch arm renames with it (`kind === 'mongodb'`).
+
+  **A `turso` construction arm — which the rename made mandatory, not optional.**
+  `createDefaultDatasourceDriverFactory().supports()` is
+  `resolveDriverId(id) !== undefined`, so the moment `turso` gained a config
+  contract in `@objectstack/spec` this factory began claiming it. Before this arm,
+  that claim was answered by `create()`'s trailing `memory` fall-through: a libSQL
+  datasource would have been built as an ephemeral in-process store that accepts
+  writes, reports success and loses everything — the #3276 silent-wrong-engine
+  class with a new spelling. The arm is the same shape `mongodb` and `sqlite-wasm`
+  already use (lazy import, typed not-installed error), because all three ride in
+  optional packages and being an optional INSTALL has never meant lacking a
+  contract.
+
+  The CLI and standalone stack still inject their own turso factory for the
+  `default` datasource (#5602's host-factory seam), and an injected factory
+  replaces this one — so this arm serves every OTHER door: a runtime datasource
+  created in Setup, `testConnection`, a declared non-default datasource. Those
+  doors previously got `supports() === false` and degraded; they now build.
+
+  **The fall-through itself is gone.** `memory` was the last arm's _implicit_
+  position — no `if`, just the end of the function — so any `BuiltinDriverId` the
+  switch did not handle silently became an in-memory store. It is now an explicit
+  `kind === 'memory'` arm followed by an exhaustiveness stop typed `never`: adding
+  a builtin without an arm is a compile error, and if a stale published
+  `@objectstack/spec` ever reaches a newer consumer at run time, the result is a
+  named refusal rather than a different engine. This is the trap the next driver
+  would have inherited; turso is simply the one that found it.
+
+  **Why `major`.** The published `DRIVER_CATALOG[].id` value changes. Any consumer
+  that compares a stored `datasource.driver` against the catalog id — a form
+  pre-selecting the current driver, a grouped list, an equality filter — stops
+  matching pre-rename rows until the conversion has run. Nothing throws, which is
+  precisely why this is not a `minor`: the failure is a dropdown that silently
+  shows no selection, and a bump that lets it arrive unannounced would be the same
+  class of quiet as the defect the rename fixes.
+
+  **Not renamed, deliberately:** `SqlDialect`'s `'mongo'` member
+  (`data/type-compat.ts`). That is a different vocabulary — it names the type
+  system of an EXTERNAL schema being introspected, alongside `snowflake` and
+  `bigquery`, and is never a `datasource.driver`. Renaming it would have been
+  sympathetic magic on a matching string.
+
+  <!-- adr-0087: registered datasource-driver-mongo-to-mongodb -->
+
+### Patch Changes
+
+- 01faeb1: fix(service-datasource): a `pool` block on a `memory` datasource is rejected, not dropped in silence (#5931)
+
+  #5714 made a `pool` block the driver cannot honour a loud authoring error, but
+  its ruling was scoped to the two sqlite arms — `memory` kept dropping it. The
+  `memory` arm hands `InMemoryDriver` nothing but `buildMemoryConfig(spec)`, which
+  reads `spec.config` and never `spec.pool`, so a sized pool reached nothing and
+  said nothing. Measured through the real factory:
+
+  ```text
+  memory   + pool{min:3,max:9}   driver config {"persistence":false}   pool undefined
+  sqlite   + pool{min:3,max:9}   rejected (since #5714)
+  postgres + pool{min:3,max:9}   knex config.pool {"min":3,"max":9}    live {min:3,max:9}
+  ```
+
+  `memory` now joins `POOL_UNSUPPORTED_DRIVER_IDS`, so the same three doors that
+  already rejected sqlite reject it: the Setup wizard's create/update, the
+  boot-time auto-connect pre-pass, and the driver factory itself.
+
+  **Behaviour change.** A datasource declaring `driver: 'memory'` (or `inmemory` /
+  `in-memory` / `mingo`) together with a non-empty `pool` block used to load and
+  run; it now throws at whichever door it arrives through. The fix is the one edit
+  the message names — delete the `pool` block. Nothing is lost by deleting it: it
+  configured nothing before. An absent or empty `pool` is unchanged, and every
+  `memory` datasource without one builds exactly as it did. No declaration in this
+  repo, the example apps included, carried the combination.
+
+  **Its own explanation, not SQLite's.** SQLite is rejected because a second
+  connection to `:memory:` opens a separate, empty database, so sizing the pool
+  would split one datasource across several stores. That reasoning is false for
+  `memory`: there is no connection at all — the store is a plain data structure in
+  this process — so the message says that instead. Telling an author their driver
+  picked a connection strategy for them would send them looking for a knob that
+  does not exist. Reasons are now keyed by driver id, which makes an arm joining
+  the set without writing one a type error.
+
+  Maintainer ruling 2026-08-07, which also set the default for the next sister
+  arm: when a declared key is silently dropped on one arm and an earlier ruling
+  already made it a loud authoring error on a sibling, the new arm joins the
+  existing rejection set rather than queueing for a ruling of its own — unless the
+  original rationale was measured to be arm-specific.
+
+  No API surface is added — `POOL_UNSUPPORTED_DRIVER_IDS`,
+  `driverReadsDeclaredPool`, `unsupportedPoolIssue`, `unsupportedPoolMessage` and
+  `assertDatasourcePoolSupported` keep the signatures #5714 published, and the
+  sqlite arms' rejection text is byte-for-byte unchanged.
+
+- d92ed03: fix(service-datasource): 未构建的工作区不再被当成「配置写错了」(#5794)
+
+  datasource 的 fail-fast 报错原本只有一句收尾建议,不分成因:
+
+  ```
+  ✗ datasource 'default': connect failed — Cannot find module
+    '…/@objectstack/driver-sql/dist/index.mjs' imported from …
+    Fix the datasource configuration, or set OS_ALLOW_DRIVER_CONNECT_FAILURE=1
+    to boot anyway and serve errors until it is reachable.
+  ```
+
+  对「数据库真连不上」——错的 DSN、轮换掉的密码、断掉的网络——这句话是对的。
+  但对**驱动包没构建**这一个成因,两半都是有害建议:
+
+  - **「Fix the datasource configuration」** 把读者支去改一份本来就正确的配置。
+    在那里写什么都变不出一个 `dist/` 目录。
+  - **「set OS_ALLOW_DRIVER_CONNECT_FAILURE=1 to boot anyway」** 比没用更糟:
+    它不是绕过问题,而是**藏起**问题。半个工作区会宣称自己启动成功,然后对每个
+    请求回 `ERR_DATASOURCE_UNAVAILABLE`——比诚实地拒绝启动难查得多。那个开关是
+    为「数据库暂时不可达」准备的(一个关于世界的事实,可能自己好起来);缺构建产物
+    是关于这份 checkout 的事实,不该有任何环境变量能启动越过它。
+
+  而唯一有效的修法(`pnpm build`)一个字都没提。
+
+  现在 connect 失败会按**成因**选收尾句。底层错误是模块解析失败时(ESM `import()`
+  报 `err.code === 'ERR_MODULE_NOT_FOUND'`,CJS `require()` 报 `MODULE_NOT_FOUND`;
+  `code` 被 re-throw 丢掉时退回 `Cannot find module` / `Cannot find package` 文本),
+  消息改成:
+
+  ```
+  The driver package could not be LOADED at all — it is not installed, or its build
+  output is missing. That is a build precondition, not a datasource fault: the
+  configuration is fine, and no boot-time override can make a driver that does not
+  exist answer a query. Run `pnpm install && pnpm build`, then start again.
+  ```
+
+  一个正确修法,只说一次,**不提**那个逃生开关——连「别用它」都不提:一个已经卡住的
+  读者会去找最短的那行看起来能让他继续的话。这与 `datasource-pool-support.ts`
+  (#5714 / #5931)和 `check:dev-prereqs`(#5795)是同一条消息纪律。
+
+  判据复用 `@objectstack/types` 的 `isModuleNotFoundError`(framework#3265 起的唯一
+  所有者),不另起一份;它先看结构化的 `err.code`、再退回文本,而这个结构化信号原本
+  在 `handleFailure` 只收 `reason: string` 时被丢弃了,所以抛出值本身现在也一并传入。
+
+  **纯诊断分类,零行为变化。** fail-fast 的判定、触发时机、抛出的错误类型、保留的
+  连接状态,以及设了 `OS_ALLOW_DRIVER_CONNECT_FAILURE` 时的降级启动路径全部不变;
+  其它成因(真连接失败、驱动不受支持、凭据解析不出)的消息逐字未动。
+
+- 6146b67: `os migrate plan` no longer creates a database on a project that has never been started (#6743)
+
+  `migrate plan` is a dry run, and since #3917 it has reported the boot-time
+  create-table DDL and the artifact seed instead of performing them. It still
+  brought the database file itself into existence, though: SQLite creates the
+  file at open, so a `plan` in a fresh project left behind a 0-table
+  `.objectstack/data/objectstack.db` — a write side effect from a read-only
+  command, and one that erased the only signal ("no database file yet") by which
+  the next command can tell a never-started project from a started one.
+
+  A missing SQLite target is now opened as an empty in-memory database instead of
+  being created. **The plan output is unchanged**, deliberately: a database with
+  zero tables is exactly what a freshly created empty file is, so "every table
+  needs creating" — the true and useful answer for a new project — still prints,
+  and the `Database:` line still names the real target path rather than the
+  in-memory stand-in.
+
+  New driver capability, additive and off by default:
+  `SqlDriverConfig.sqliteAbsentFile` (`'create'` | `'empty-in-memory'`, default
+  `'create'`). Every existing caller keeps SQLite's own create-if-absent
+  behaviour. It is threaded to the driver as a host-composition option
+  (`createDefaultDatasourceDriverFactory`, `DefaultDatasourcePlugin`,
+  `createStandaloneStack`), not as an authorable `datasource.config` key — a
+  datasource must not be able to declare itself into never persisting.
+
+  `os migrate apply` deliberately does **not** use it: it boots deferred too, but
+  flushes the deferred DDL after confirmation and needs a real file to flush into.
+
+- b948a41: The `sqlite-wasm` and `mongodb` arms of the shared datasource driver factory now tell you how to install the optional driver package they are missing (#7385)
+
+  All three of `sqlite-wasm`, `mongodb` and `turso` are built from OPTIONAL packages, so all three have to answer "the package is not here". After #7314 fixed the libSQL arm, the other two still answered with the fault and nothing else:
+
+  ```text
+  sqlite-wasm driver requested but @objectstack/driver-sqlite-wasm is not installed (…).
+  mongodb driver requested but @objectstack/driver-mongodb is not installed (…).
+  ```
+
+  No install command, no statement of what happens next, and not even the name of the datasource that failed — while the `turso` arm beside them stated all three. An admin who added a mongo datasource in Setup and one who added a libSQL datasource hit the same class of problem and got two different qualities of answer, decided by nothing but which driver they picked.
+
+  Both arms now answer through a shared builder, keeping the two discipline points #7384 landed under: the message NAMES THE DATASOURCE (several may be declared and only one of them is this engine), and it names exactly one fix with no escape hatch — no `OS_ALLOW_DRIVER_CONNECT_FAILURE` (it would only hide a package that does not exist) and no `OS_DATABASE_URL` / `--database` (they select the HOST's `default` datasource and can do nothing for the one that failed). The underlying import error is still interpolated in full, which is what keeps `isUnbuiltWorkspaceFailure` able to recognise a half-built checkout from these arms and re-route the remedy to `pnpm install && pnpm build`.
+
+  The consequence sentence is per-engine rather than copied. Mongo, like libSQL, is a server this process connects to, so a silent fallback would open a local database while the real server stayed untouched. `sqlite-wasm` has no remote to shadow, so it states its own truth instead: stepping down to the in-process memory driver would accept every write and drop it at shutdown, leaving the configured file empty, and stepping down to native `better-sqlite3` would need exactly the native addon a WASM datasource is chosen to avoid.
+
+  New exports, mirroring the libSQL pair, so a host that renders its own remedy reads one declaration instead of re-typing a command: `SQLITE_WASM_DRIVER_PACKAGE`, `SQLITE_WASM_DRIVER_INSTALL_COMMAND`, `missingSqliteWasmDriverMessage`, `MONGODB_DRIVER_PACKAGE`, `MONGODB_DRIVER_INSTALL_COMMAND`, `missingMongodbDriverMessage`.
+
+- b0c16a5: fix(service-datasource): the open-core libSQL arm tells you how to install the driver it is missing (#7314)
+
+  `@objectstack/driver-turso` is an OPTIONAL install — it drags `@libsql/client`
+  and its native bindings — so both loaders that can build a libSQL datasource
+  have to answer "the package is not here". Until now they answered it very
+  differently.
+
+  The HOST loader (`@objectstack/runtime`'s `loadTursoDriverFactory`, the single
+  owner since #6268) raises `MissingDriverPackageError` carrying the install
+  command as data, plus a message naming the command, the consequence, and why the
+  boot refuses instead of quietly opening a SQLite file. The shared open-core
+  factory's `turso` arm — the one that serves **every other door**: a datasource
+  added in Setup, `testConnection`, a declared non-default datasource — said only:
+
+  ```text
+  turso driver requested but @objectstack/driver-turso is not installed (…).
+  ```
+
+  The fault and nothing else. Same missing package, and whether you were told how
+  to fix it depended on whether your datasource happened to be named `default`.
+
+  That arm now answers with the same quality of remedy:
+
+  ```text
+  datasource 'warehouse': a libSQL/Turso datasource was requested, but the driver
+  package @objectstack/driver-turso is not installed. Install it next to the
+  server that opens this datasource:
+
+      npm install @objectstack/driver-turso
+
+  (pnpm add … / yarn add ….) It is an OPTIONAL package, so a default install stays
+  free of @libsql/client and its native bindings. This refuses rather than falling
+  back to another engine: a silent fallback would open an empty local database
+  that accepts writes while your libSQL data stays untouched, and every write
+  would land in the wrong database. Import error: …
+  ```
+
+  Two deliberate differences from the host loader's wording, because this arm
+  serves different doors. It **names the datasource** — here there may be several
+  and only one of them is libSQL. And it names **no** `OS_DATABASE_URL` /
+  `--database` / `OS_ALLOW_DRIVER_CONNECT_FAILURE`: those select or bypass the
+  HOST's `default` datasource and can do nothing for the datasource that actually
+  failed, and pointing a stuck reader at a knob that cannot affect their problem
+  is the failure `connect-failure-remedy.ts` was written to end (#5794). One fix,
+  stated once, no escape hatch named.
+
+  The original import error is still interpolated in full, which is load-bearing
+  rather than context: this re-throw drops the error's `code`, so the
+  unbuilt-workspace classifier can only recognise a half-built checkout from the
+  `Cannot find package` text the message carries.
+
+  `TURSO_DRIVER_PACKAGE`, `TURSO_DRIVER_INSTALL_COMMAND` and
+  `missingTursoDriverMessage` are exported, so a host that renders the remedy
+  itself reads one declaration instead of re-typing a sentence.
+
+  Behaviour is otherwise unchanged: the same failure at the same moment, still a
+  refusal and never a fallback to a different engine. Only the message differs.
+
+- Updated dependencies [3d5c090]
+- Updated dependencies [e5bd768]
+- Updated dependencies [e027b3e]
+- Updated dependencies [c2429b0]
+- Updated dependencies [445a0c2]
+- Updated dependencies [f6609e6]
+- Updated dependencies [a70358a]
+- Updated dependencies [97e7e3c]
+- Updated dependencies [8828b9e]
+- Updated dependencies [53068c1]
+- Updated dependencies [ee58392]
+- Updated dependencies [f16e54e]
+- Updated dependencies [06be54e]
+- Updated dependencies [259459d]
+- Updated dependencies [3f7f14e]
+- Updated dependencies [6968885]
+- Updated dependencies [eaed61f]
+- Updated dependencies [debe2f6]
+- Updated dependencies [97b0798]
+- Updated dependencies [43a7a8d]
+- Updated dependencies [73f69dc]
+- Updated dependencies [04c56aa]
+- Updated dependencies [b3efeb7]
+- Updated dependencies [ddd075a]
+- Updated dependencies [88154be]
+- Updated dependencies [e8dc61e]
+- Updated dependencies [2f3e793]
+- Updated dependencies [d8e8d9c]
+- Updated dependencies [94e749b]
+- Updated dependencies [ea1d916]
+- Updated dependencies [ae31a19]
+- Updated dependencies [e0f300b]
+- Updated dependencies [62b6a2f]
+- Updated dependencies [5b4780b]
+- Updated dependencies [a933452]
+- Updated dependencies [8140915]
+- Updated dependencies [7b48cf9]
+- Updated dependencies [b5404f4]
+- Updated dependencies [f764691]
+- Updated dependencies [e120a5a]
+- Updated dependencies [e650d67]
+- Updated dependencies [04476e7]
+- Updated dependencies [79228cd]
+- Updated dependencies [b3363e9]
+- Updated dependencies [2ef1807]
+- Updated dependencies [d03fe25]
+- Updated dependencies [2672f85]
+- Updated dependencies [11066f6]
+- Updated dependencies [916af17]
+- Updated dependencies [84c86fb]
+- Updated dependencies [2a2a9fb]
+- Updated dependencies [a2e157c]
+- Updated dependencies [95c4227]
+- Updated dependencies [2a61116]
+- Updated dependencies [d4df105]
+- Updated dependencies [e2798fa]
+- Updated dependencies [0fd8556]
+- Updated dependencies [74155c7]
+- Updated dependencies [6908830]
+- Updated dependencies [8b06bba]
+- Updated dependencies [4c54037]
+- Updated dependencies [0f7157b]
+- Updated dependencies [d9bef45]
+- Updated dependencies [f549a0d]
+- Updated dependencies [82da264]
+- Updated dependencies [f586f1a]
+- Updated dependencies [9b9b70f]
+- Updated dependencies [f5a9bc2]
+- Updated dependencies [881a3cc]
+- Updated dependencies [ad6317b]
+- Updated dependencies [8a88885]
+- Updated dependencies [5f7669e]
+- Updated dependencies [becbe53]
+- Updated dependencies [b127c8b]
+- Updated dependencies [a80302a]
+- Updated dependencies [474f131]
+- Updated dependencies [050cd82]
+- Updated dependencies [4d552af]
+- Updated dependencies [44d677c]
+- Updated dependencies [c32944d]
+- Updated dependencies [1dd780f]
+- Updated dependencies [c8d6f6e]
+- Updated dependencies [92a67f2]
+- Updated dependencies [9136327]
+- Updated dependencies [bf0ae99]
+- Updated dependencies [cb3b6cd]
+- Updated dependencies [73b7234]
+- Updated dependencies [d2b97c3]
+- Updated dependencies [59b794f]
+- Updated dependencies [fc3a36a]
+- Updated dependencies [69787f0]
+- Updated dependencies [5d022a1]
+- Updated dependencies [042b9ee]
+- Updated dependencies [f549a0d]
+- Updated dependencies [a36db28]
+- Updated dependencies [3f8817a]
+- Updated dependencies [a2443e3]
+- Updated dependencies [e1554b1]
+- Updated dependencies [4856789]
+- Updated dependencies [c3f4916]
+- Updated dependencies [33e0385]
+- Updated dependencies [2205363]
+- Updated dependencies [09fe58d]
+- Updated dependencies [d0a5ceb]
+- Updated dependencies [e18a162]
+- Updated dependencies [d6d1a50]
+- Updated dependencies [d127ff0]
+- Updated dependencies [9b86cf6]
+- Updated dependencies [8825a06]
+- Updated dependencies [5087ac6]
+- Updated dependencies [2d1ddf0]
+- Updated dependencies [354b00f]
+- Updated dependencies [3de535b]
+- Updated dependencies [fe2e15a]
+- Updated dependencies [c6b6bb4]
+- Updated dependencies [2f59da0]
+- Updated dependencies [8ad609c]
+- Updated dependencies [bbee302]
+- Updated dependencies [08863dd]
+- Updated dependencies [56664f5]
+- Updated dependencies [31cbe90]
+- Updated dependencies [90bbf25]
+- Updated dependencies [eb91eba]
+- Updated dependencies [42da73d]
+- Updated dependencies [643b7c7]
+- Updated dependencies [d0d5205]
+- Updated dependencies [1a15893]
+- Updated dependencies [b70e534]
+- Updated dependencies [2233a85]
+- Updated dependencies [62dd69a]
+- Updated dependencies [e15e679]
+- Updated dependencies [2ab1257]
+- Updated dependencies [4cc4fb7]
+- Updated dependencies [28d1eb7]
+- Updated dependencies [2c26040]
+- Updated dependencies [f758cec]
+- Updated dependencies [78f0be8]
+- Updated dependencies [35f7fb4]
+- Updated dependencies [a5302c7]
+- Updated dependencies [7084313]
+- Updated dependencies [91cefb8]
+- Updated dependencies [0e043d8]
+- Updated dependencies [dadd1ad]
+- Updated dependencies [2f2e63c]
+- Updated dependencies [486d526]
+- Updated dependencies [89d7b35]
+- Updated dependencies [85ec26d]
+- Updated dependencies [f6476fc]
+- Updated dependencies [4ac12ef]
+- Updated dependencies [b88f5e8]
+- Updated dependencies [42cc219]
+- Updated dependencies [d7e0b42]
+- Updated dependencies [3510e4a]
+- Updated dependencies [aa4b90d]
+- Updated dependencies [54299ca]
+- Updated dependencies [dc61def]
+- Updated dependencies [251e888]
+- Updated dependencies [183b4c4]
+- Updated dependencies [2fdb36e]
+- Updated dependencies [20526f5]
+- Updated dependencies [c5eef1d]
+- Updated dependencies [e0f300b]
+- Updated dependencies [761a0ba]
+- Updated dependencies [be87153]
+- Updated dependencies [60f0dd8]
+- Updated dependencies [a87c5cd]
+- Updated dependencies [a47f338]
+- Updated dependencies [2598216]
+- Updated dependencies [2c7e62d]
+- Updated dependencies [eb7613c]
+- Updated dependencies [ecc9110]
+- Updated dependencies [f7bd4e2]
+- Updated dependencies [361bd5b]
+- Updated dependencies [129b378]
+- Updated dependencies [88f9d94]
+- Updated dependencies [1818998]
+- Updated dependencies [09ee21c]
+- Updated dependencies [f549a0d]
+- Updated dependencies [3fc2e48]
+- Updated dependencies [e8f435c]
+- Updated dependencies [41610f6]
+  - @objectstack/spec@17.0.0-rc.6
+  - @objectstack/core@17.0.0-rc.6
+  - @objectstack/types@17.0.0-rc.6
+
 ## 17.0.0-rc.5
 
 ### Patch Changes

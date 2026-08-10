@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/service-messaging",
-  "version": "17.0.0-rc.5",
+  "version": "17.0.0-rc.6",
   "license": "Apache-2.0",
   "description": "Messaging Service for ObjectStack — outbound notification dispatch (ADR-0012). Ships the MessagingChannel registry, emit() fan-out, and the always-on inbox channel; other channels (email/webhook/push/IM) plug in.",
   "type": "module",
@@ -21,7 +21,8 @@
   "dependencies": {
     "@objectstack/core": "workspace:*",
     "@objectstack/platform-objects": "workspace:*",
-    "@objectstack/spec": "workspace:*"
+    "@objectstack/spec": "workspace:*",
+    "@objectstack/types": "workspace:*"
   },
   "devDependencies": {
     "@objectstack/metadata-core": "workspace:*",

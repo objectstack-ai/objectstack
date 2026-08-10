@@ -13,6 +13,18 @@ import {
 } from '@objectstack/core';
 import { pluralToSingular } from '@objectstack/spec/shared';
 import { CoreServiceName } from '@objectstack/spec/system';
+// [ADR-0106 / #3682] Metadata-plane FLS — the SAME projection the REST `/meta`
+// exits run. Two dispatchers, one normalizer (`@objectstack/metadata-core`),
+// because D5's "every schema-serving outlet" is only true if a future exit
+// inherits the decision instead of re-deciding it.
+import {
+    ObjectSchemaMaskEvaluationError,
+    applyObjectSchemaMask,
+    isObjectSchemaMaskingEnabled,
+    resolveObjectSchemaMaskPosture,
+    type ObjectSchemaMaskPosture,
+} from '@objectstack/metadata-core';
+import { organizationIdForMetaWrite } from '../meta-write-org-scope.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
 
@@ -41,6 +53,107 @@ function slimDocList(type: string, data: any, query?: Record<string, string>): a
     if (Array.isArray(data)) return strip(data);
     if (data && Array.isArray(data.items)) return { ...data, items: strip(data.items) };
     return data;
+}
+
+/**
+ * [ADR-0106 D6 tier 3] The dispatcher's answer when the caller's field
+ * visibility could not be evaluated: a 503, never the unmasked body and never
+ * an empty-fields 200. Mirrors the REST layer's `sendFieldVisibilityFault`.
+ */
+function fieldVisibilityFault(deps: DomainHandlerDeps, objectName: string): HttpDispatcherResult {
+    return {
+        handled: true,
+        response: deps.error(
+            `Field visibility for object '${objectName}' could not be evaluated; the object schema is not being served.`,
+            503,
+        ),
+    };
+}
+
+/**
+ * [ADR-0106 D2/D4/D6/D7/D8] Build this request's object-schema masker — the
+ * dispatcher-side twin of `RestServer.resolveObjectMasker`.
+ *
+ * Resolved once per request and asked per object name, so the `/metadata` list
+ * read pays one context + service resolution for the whole page.
+ */
+async function resolveObjectMasker(
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+): Promise<(objectName: string) => Promise<ObjectSchemaMaskPosture>> {
+    const enabled = isObjectSchemaMaskingEnabled();
+    if (!enabled) {
+        const disabled: ObjectSchemaMaskPosture = { kind: 'passthrough', reason: 'disabled' };
+        return async () => disabled;
+    }
+    const security = await deps.resolveService(context, 'security').catch(() => undefined);
+    const execCtx = (context as any)?.executionContext;
+    return (objectName: string) => resolveObjectSchemaMaskPosture({
+        objectName,
+        context: execCtx,
+        security: security as any,
+        enabled: true,
+        telemetry: {
+            warn: (message, meta) => {
+                (globalThis as any).console?.warn?.(message, meta);
+            },
+        },
+    });
+}
+
+/**
+ * Project one served object schema, or report the D6 tier-3 fault.
+ *
+ * `'fault'` covers both the throw tier and the empty-projection case — see
+ * `applyObjectSchemaMask`'s `emptied` for why an empty-fields 200 is not an
+ * option the ADR leaves open.
+ */
+async function maskObjectSchema(
+    masker: (objectName: string) => Promise<ObjectSchemaMaskPosture>,
+    objectName: string,
+    document: any,
+): Promise<{ ok: true; document: any } | { ok: false }> {
+    let posture: ObjectSchemaMaskPosture;
+    try {
+        posture = await masker(objectName);
+    } catch (error) {
+        if (error instanceof ObjectSchemaMaskEvaluationError) return { ok: false };
+        throw error;
+    }
+    const masked = applyObjectSchemaMask(document, posture);
+    if (masked.emptied) return { ok: false };
+    return { ok: true, document: masked.document };
+}
+
+/**
+ * [ADR-0106 D5(2)] Project every object schema in a list answer.
+ *
+ * A no-op for any type but `object`/`objects`, and shape-preserving for both
+ * list shapes the dispatcher hands around (a bare array and an
+ * `{ type, items }` envelope). One unevaluable object fails the whole list —
+ * serving the rest would leave a hole in the projection that no client can see.
+ */
+async function maskObjectSchemaList(
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+    typeOrName: string,
+    data: any,
+): Promise<{ ok: true; data: any } | { ok: false; object: string }> {
+    if (pluralToSingular(typeOrName) !== 'object') return { ok: true, data };
+    const list: any[] | null = Array.isArray(data)
+        ? data
+        : (data && Array.isArray(data.items) ? data.items : null);
+    if (!list || list.length === 0) return { ok: true, data };
+
+    const masker = await resolveObjectMasker(deps, context);
+    const projected: any[] = [];
+    for (const item of list) {
+        const objectName = String(item?.name ?? '');
+        const masked = await maskObjectSchema(masker, objectName, item);
+        if (!masked.ok) return { ok: false, object: objectName };
+        projected.push(masked.document);
+    }
+    return { ok: true, data: Array.isArray(data) ? projected : { ...data, items: projected } };
 }
 
 /**
@@ -150,12 +263,59 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
 
         // PUT /metadata/:type/:name (Save)
         if (method === 'PUT' && body) {
+            // [#7019] The SECOND TRANSPORT for the operation #6603 gated on the
+            // REST side. Same `protocol.saveMetaItem`, same metadata, different
+            // door — so a gate on only one of them is not a gate, it is a
+            // detour sign. Mechanism copied from `POST /_migrate-stored` below
+            // in this very file rather than reinvented.
+            //
+            // The read side of this dispatcher already runs the ADR-0106 mask
+            // (`resolveObjectMasker` / `maskObjectSchema` above), which is
+            // exactly the read/write asymmetry #6603 describes: a caller is
+            // served an object schema with the fields they may not read removed
+            // WHOLE, and sending that document straight back used to persist it
+            // — deleting those fields. Refusing the write is the write-side
+            // answer, here as there.
+            //
+            // Independently of masking: before this, any authenticated session
+            // could clobber any metadata item through this transport.
+            //
+            // Gate FIRST — before the protocol service is resolved — so an
+            // unauthorized caller cannot use the 501-vs-200 answer to probe
+            // which kernels can save, and so nothing is written before the
+            // refusal. `manage_metadata` is ADR-0066 D1's authoring capability;
+            // engine self-invocation (`isSystem`) bypasses, matching
+            // `actionPermissionError` and the migrate-stored gate below.
+            const ec: any = _context.executionContext;
+            if (!ec?.isSystem && !new Set<string>(ec?.systemPermissions ?? []).has('manage_metadata')) {
+                return {
+                    handled: true,
+                    response: deps.error(
+                        'Saving a metadata item requires the `manage_metadata` capability.',
+                        403,
+                    ),
+                };
+            }
+
             // Try to get the protocol service directly
             const protocol = await deps.resolveService(_context, 'protocol');
 
             if (protocol && typeof protocol.saveMetaItem === 'function') {
                 try {
-                    const organizationId = await deps.resolveActiveOrganizationId(_context);
+                    // [#7018 / the #6190 ruling, Option A] The session's active
+                    // organization rides this write ONLY for types the registry
+                    // declares `allowOrgOverride: true`. For every other type it
+                    // is dropped and the write lands env-wide — byte-identical to
+                    // what a no-active-org session already produces today.
+                    //
+                    // Threading it unconditionally is how the runtime minted rows
+                    // boot never reads: `SysMetadataRepository.put` stamps
+                    // `organization_id` for EVERY type, while `loadMetaFromDb`
+                    // hydrates `organization_id IS NULL` only. See
+                    // `../meta-write-org-scope.js` for why the predicate is the
+                    // static registry flag and not `isOverlayAllowed`.
+                    const activeOrganizationId = await deps.resolveActiveOrganizationId(_context);
+                    const organizationId = organizationIdForMetaWrite(type, activeOrganizationId);
                     const result = await protocol.saveMetaItem({ type, name, item: body, organizationId, ...(packageId ? { packageId } : {}) });
                     return { handled: true, response: deps.success(result) };
                 } catch (e: any) {
@@ -199,6 +359,15 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                     : protocol?.environmentId;
                 const scoped = scopedEnv !== undefined;
 
+                // [ADR-0106 D2/D5(3)] ONE posture for this caller × this object,
+                // resolved before any lookup, applied to whichever of the three
+                // lookups below answers. Resolving it per-lookup is how the
+                // registry-backed path ends up unmasked while the protocol-backed
+                // one is masked — two answers to one question, which is the
+                // shape #6562 already records for a different dimension of this
+                // very fan-out.
+                const objectMasker = await resolveObjectMasker(deps, _context);
+
                 if (scoped && typeof protocol.getMetaItem === 'function') {
                     try {
                         const organizationId = await deps.resolveActiveOrganizationId(_context);
@@ -211,7 +380,13 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                         // registry fallback below never ran. The guard now asks the
                         // question its own comment claims it asks.
                         if (data?.item != null) {
-                            return { handled: true, response: deps.success(data) };
+                            // The fault RETURNS from inside the try on purpose:
+                            // a masking failure is not a lookup miss, and
+                            // falling through to the registry below would answer
+                            // with the very body the fault exists to withhold.
+                            const masked = await maskObjectSchema(objectMasker, name, data.item);
+                            if (!masked.ok) return fieldVisibilityFault(deps, name);
+                            return { handled: true, response: deps.success({ ...data, item: masked.document }) };
                         }
                     } catch { /* fall through to registry / 404 */ }
                 }
@@ -225,7 +400,11 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                     // the declared `GetMetaItemResponseSchema` envelope — `type` and
                     // `name` come from the request, the same values the protocol
                     // would have echoed back.
-                    if (data) return { handled: true, response: deps.success({ type: 'object', name, item: data }) };
+                    if (data) {
+                        const masked = await maskObjectSchema(objectMasker, name, data);
+                        if (!masked.ok) return fieldVisibilityFault(deps, name);
+                        return { handled: true, response: deps.success({ type: 'object', name, item: masked.document }) };
+                    }
                 }
 
                 // Last-ditch protocol attempt for unscoped kernels whose
@@ -236,7 +415,9 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                         const organizationId = await deps.resolveActiveOrganizationId(_context);
                         const data = await protocol.getMetaItem({ type: 'object', name, organizationId });
                         if (data?.item != null) {
-                            return { handled: true, response: deps.success(data) };
+                            const masked = await maskObjectSchema(objectMasker, name, data.item);
+                            if (!masked.ok) return fieldVisibilityFault(deps, name);
+                            return { handled: true, response: deps.success({ ...data, item: masked.document }) };
                         }
                     } catch { /* fall through to 404 */ }
                 }
@@ -382,7 +563,12 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                 const data = await protocol.getMetaItems({ type: typeOrName, packageId, organizationId, previewDrafts });
                 // Return any valid response from protocol (including empty items arrays)
                 if (data && (data.items !== undefined || Array.isArray(data))) {
-                    return { handled: true, response: deps.success(slimDocList(typeOrName, data, query)) };
+                    // [ADR-0106 D5(2)] The dispatcher's list read is the same
+                    // outlet as REST's `GET /meta/object`, reached by a different
+                    // door.
+                    const projected = await maskObjectSchemaList(deps, _context, typeOrName, data);
+                    if (!projected.ok) return fieldVisibilityFault(deps, projected.object);
+                    return { handled: true, response: deps.success(slimDocList(typeOrName, projected.data, query)) };
                 }
             } catch {
                 // Protocol doesn't know this type, fall through
@@ -415,16 +601,26 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
         if (qlService?.registry) {
             if (typeOrName === 'objects') {
                 const objs = qlService.registry.getAllObjects(packageId);
-                return { handled: true, response: deps.success({ type: 'object', items: objs }) };
+                const projected = await maskObjectSchemaList(deps, _context, 'object', { type: 'object', items: objs });
+                if (!projected.ok) return fieldVisibilityFault(deps, projected.object);
+                return { handled: true, response: deps.success(projected.data) };
             }
             // Try listing items of the given type
             const items = qlService.registry.listItems?.(typeOrName, packageId);
             if (items && items.length > 0) {
                 return { handled: true, response: deps.success({ type: typeOrName, items }) };
             }
-            // Legacy: treat as object name
+            // Legacy: treat as object name. [ADR-0106 D5(4)] A schema-bearing
+            // exit reached by a one-segment path — masked like every other, so
+            // the legacy spelling is not a way around the projection.
             const obj = qlService.registry.getObject(typeOrName);
-            if (obj) return { handled: true, response: deps.success(obj) };
+            if (obj) {
+                const masked = await maskObjectSchema(
+                    await resolveObjectMasker(deps, _context), typeOrName, obj,
+                );
+                if (!masked.ok) return fieldVisibilityFault(deps, typeOrName);
+                return { handled: true, response: deps.success(masked.document) };
+            }
         }
         return { handled: true, response: deps.error('Not found', 404) };
     }

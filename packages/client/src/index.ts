@@ -16,6 +16,7 @@ import {
   GetMetaItemsResponse,
   GetMetaItemResponse,
   SaveMetaItemResponse,
+  PublishMetaItemResponse,
   LoginRequest,
   SessionResponse,
   GetPresignedUrlRequest,
@@ -161,7 +162,8 @@ export interface QueryOptions {
 
 /**
  * Canonical query options using Spec protocol field names.
- * This is the recommended interface for `data.find()` queries.
+ * This is the vocabulary `data.find()` still accepts — `find` itself
+ * carries `@deprecated`; new code should call `data.query()` instead.
  *
  *  Canonical field mapping (QueryAST-aligned):
  *   - `where`   — filter conditions (replaces legacy `filter`/`filters`)
@@ -928,14 +930,30 @@ export class ObjectStackClient {
      * the per-item flow beside `packages.publishDrafts`' package-scoped one.
      * 404 [no_draft] when there is nothing to publish. Compound names pass
      * through unencoded, like `getItem`.
+     *
+     * The resolved `version` is the ADR-0008 optimistic-concurrency token, the
+     * same carrier `saveItem` returns and with the same job: echo it back as
+     * `If-Match` on the next write to the item. It is nameable here only since
+     * #7294, which declared `PublishMetaItemResponseSchema` — this method
+     * resolved to `any` before that, because the publish door had no
+     * declaration at all for a return type to point at.
+     *
+     * The three `*Applied` receipts are each present only when their side
+     * effect ran, and each reports its own `success`: a 200 here means the
+     * draft was promoted, NOT that a seed load or a data-plane projection
+     * caught up.
      */
-    publishItem: async (type: string, name: string, opts?: { message?: string }) => {
+    publishItem: async (
+        type: string,
+        name: string,
+        opts?: { message?: string },
+    ): Promise<PublishMetaItemResponse> => {
         const route = this.getRoute('metadata');
         const res = await this.fetch(`${this.baseUrl}${route}/${type}/${name}/publish`, {
             method: 'POST',
             body: JSON.stringify(opts?.message ? { message: opts.message } : {}),
         });
-        return this.unwrapResponse<any>(res);
+        return this.unwrapResponse<PublishMetaItemResponse>(res);
     },
 
     /**
@@ -1046,7 +1064,15 @@ export class ObjectStackClient {
         sentBy?: string;
         [k: string]: any;
     }): Promise<any> => {
-        const res = await this.fetch(`${this.baseUrl}/api/v1/email/send`, {
+        // [#6714] The base comes from `getRoute('email')`: a connected client
+        // follows the server's advertised `routes.email` (the REST discovery
+        // endpoint projects it from its recorded route registrations — the
+        // mount follows `apiPath`, so the old hard-coded `/api/v1` was a live
+        // 404 on any `apiPath` deployment); an unconnected client — or one
+        // talking to a server that advertises no `email` key — falls back to
+        // the `/api/v1/email` convention, byte-identical to the old hardcode.
+        const route = this.getRoute('email');
+        const res = await this.fetch(`${this.baseUrl}${route}/send`, {
             method: 'POST',
             body: JSON.stringify(message),
         });
@@ -1060,22 +1086,31 @@ export class ObjectStackClient {
    * catalog and importing tables as federated objects. 503
    * [external_service_unavailable] without the `external-datasource`
    * service. (#3587 gap closure)
+   *
+   * [#6633] The family base comes from `getRoute('datasources')`: a connected
+   * client follows the server's advertised `routes.datasources` (the REST
+   * discovery endpoint derives it from its recorded mounts, ADR-0076 D12);
+   * an unconnected client — or one talking to a server that advertises no
+   * `datasources` key — falls back to the `/api/v1/datasources` convention,
+   * byte-identical to the pre-#6633 hardcode.
    */
   datasources = {
     external: {
         /** List remote tables on a datasource, optionally by `schema`. */
         listTables: async (name: string, opts?: { schema?: string }): Promise<any> => {
             const qs = opts?.schema ? `?schema=${encodeURIComponent(opts.schema)}` : '';
+            const route = this.getRoute('datasources');
             const res = await this.fetch(
-                `${this.baseUrl}/api/v1/datasources/${encodeURIComponent(name)}/external/tables${qs}`,
+                `${this.baseUrl}${route}/${encodeURIComponent(name)}/external/tables${qs}`,
             );
             return this.unwrapResponse<any>(res);
         },
 
         /** Generate an Object draft (structured + `*.object.ts` source) from a remote table. */
         draft: async (name: string, remoteTable: string, opts?: Record<string, any>): Promise<any> => {
+            const route = this.getRoute('datasources');
             const res = await this.fetch(
-                `${this.baseUrl}/api/v1/datasources/${encodeURIComponent(name)}/external/tables/${encodeURIComponent(remoteTable)}/draft`,
+                `${this.baseUrl}${route}/${encodeURIComponent(name)}/external/tables/${encodeURIComponent(remoteTable)}/draft`,
                 { method: 'POST', body: JSON.stringify(opts ?? {}) },
             );
             return this.unwrapResponse<any>(res);
@@ -1086,8 +1121,9 @@ export class ObjectStackClient {
          * Object"). 400 [external_import_error] when refused.
          */
         import: async (name: string, remoteTable: string, opts?: Record<string, any>): Promise<any> => {
+            const route = this.getRoute('datasources');
             const res = await this.fetch(
-                `${this.baseUrl}/api/v1/datasources/${encodeURIComponent(name)}/external/tables/${encodeURIComponent(remoteTable)}/import`,
+                `${this.baseUrl}${route}/${encodeURIComponent(name)}/external/tables/${encodeURIComponent(remoteTable)}/import`,
                 { method: 'POST', body: JSON.stringify(opts ?? {}) },
             );
             return this.unwrapResponse<any>(res);
@@ -1095,8 +1131,9 @@ export class ObjectStackClient {
 
         /** Refresh and return the cached remote-catalog snapshot. */
         refreshCatalog: async (name: string): Promise<any> => {
+            const route = this.getRoute('datasources');
             const res = await this.fetch(
-                `${this.baseUrl}/api/v1/datasources/${encodeURIComponent(name)}/external/refresh-catalog`,
+                `${this.baseUrl}${route}/${encodeURIComponent(name)}/external/refresh-catalog`,
                 { method: 'POST', body: JSON.stringify({}) },
             );
             return this.unwrapResponse<any>(res);
@@ -1104,8 +1141,9 @@ export class ObjectStackClient {
 
         /** Validate this datasource's federated objects against the remote schema. */
         validate: async (name: string): Promise<any> => {
+            const route = this.getRoute('datasources');
             const res = await this.fetch(
-                `${this.baseUrl}/api/v1/datasources/${encodeURIComponent(name)}/external/validate`,
+                `${this.baseUrl}${route}/${encodeURIComponent(name)}/external/validate`,
                 { method: 'POST', body: JSON.stringify({}) },
             );
             return this.unwrapResponse<any>(res);
@@ -1720,6 +1758,59 @@ export class ObjectStackClient {
   _unwrap<T>(res: Response): Promise<T> { return this.unwrapResponse<T>(res); }
   /** @internal */
   _isFilterAST(v: unknown): boolean { return this.isFilterAST(v); }
+
+  /**
+   * @internal The unscoped API base this client's server actually serves,
+   * derived from the advertised routes (#6714 face 3).
+   *
+   * There is no discovery key that carries the raw API base itself, and the
+   * `scoping` block carries posture only (`enabled` / `resolution` / `scoped`
+   * / `environmentId` — no path), so the one derivable source is
+   * `routes.data`: the REST discovery endpoint advertises it as
+   * `{realBase}{dataPrefix}` with `dataPrefix` defaulting to `/data`. This
+   * derivation strips that conventional suffix; when the deployment customises
+   * `dataPrefix` away from `/data` the derivation declines and the caller
+   * falls back to the `/api/v1` convention — exactly today's behavior, so the
+   * change is strictly "follow the advertised base when it is derivable".
+   *
+   * When the discovery response was served from the environment-scoped mount
+   * (`scoping.scoped`), `routes.data` is `{base}/environments/{id}/data`; the
+   * scope segment must come off so the returned base is the UNSCOPED one (the
+   * scoped client re-appends its own environment id, which need not be the one
+   * discovery resolved). `scoping.environmentId` names that segment when the
+   * server resolved one — but rest advertises it as `req.params?.environmentId`,
+   * so a host that did not populate the route param answers `scoped: true` with
+   * NO id and a `routes.data` still carrying the literal `:environmentId`. That
+   * case strips one trailing `/environments/{segment}` on the strength of
+   * `scoped` alone, which is sound because a scoped response's base ends with
+   * that segment by construction. If NEITHER shape is present the advertised
+   * base is not one this derivation understands, so it declines rather than
+   * return a base of unknown shape — handing back a still-scoped base would make
+   * `scope()` build a doubled `/environments/…/environments/…` URL, i.e.
+   * strictly WORSE than the hardcode this replaces. Declining is always
+   * byte-identical to today.
+   */
+  _apiBase(): string {
+    const data = this.discoveryInfo?.routes?.data;
+    if (typeof data === 'string' && data.endsWith('/data')) {
+      let base = data.slice(0, -'/data'.length);
+      const scoping = this.discoveryInfo?.scoping;
+      if (scoping?.scoped) {
+        const advertised = typeof scoping.environmentId === 'string' && scoping.environmentId
+          ? `/environments/${scoping.environmentId}`
+          : undefined;
+        if (advertised && base.endsWith(advertised)) {
+          base = base.slice(0, -advertised.length);
+        } else {
+          const stripped = base.replace(/\/environments\/[^/]+$/, '');
+          if (stripped === base) return '/api/v1';
+          base = stripped;
+        }
+      }
+      if (base) return base;
+    }
+    return '/api/v1';
+  }
 
   /**
    * Organization Services
@@ -3786,15 +3877,21 @@ export class ObjectStackClient {
    */
   notifications = {
     /**
-     * List notifications for the current user
+     * List notifications for the current user.
+     *
+     * Returns the newest `limit` notifications — a WINDOW, not a page. The
+     * `cursor` parameter was removed in protocol 17 (#6361): it was appended to
+     * the query string here and read by nothing on the server, so a caller
+     * paginating by it re-read the first window forever. Omit `limit` to take
+     * the server's window (the platform inbox answers 50, clamped to 1..200);
+     * raise it to see further back. There is no continuation token.
      */
-    list: async (options?: { read?: boolean; type?: string; limit?: number; cursor?: string }): Promise<ListNotificationsResponse> => {
+    list: async (options?: { read?: boolean; type?: string; limit?: number }): Promise<ListNotificationsResponse> => {
       const route = this.getRoute('notifications');
       const params = new URLSearchParams();
       if (options?.read !== undefined) params.set('read', String(options.read));
       if (options?.type) params.set('type', options.type);
       if (options?.limit) params.set('limit', String(options.limit));
-      if (options?.cursor) params.set('cursor', options.cursor);
       const qs = params.toString();
       const res = await this.fetch(`${this.baseUrl}${route}${qs ? `?${qs}` : ''}`);
       return this.unwrapResponse<ListNotificationsResponse>(res);
@@ -4221,8 +4318,23 @@ export class ObjectStackClient {
         }
 
         // 1. Handle Pagination
-        if (normalizedOptions.top) queryParams.set('top', normalizedOptions.top.toString());
-        if (normalizedOptions.skip) queryParams.set('skip', normalizedOptions.skip.toString());
+        //
+        // [#6485] PRESENCE, not truthiness — the same test the canonical
+        // normalizer directly above already applies (`if (v2.limit != null)`).
+        // Emitting on truthiness made `0` survive the normalizer and then be
+        // discarded here, so `find('task', { limit: 0 })` reached the server
+        // with no `top` param. The GET list route has no default page size, so
+        // an absent `top` returns the ENTIRE match set: the caller who asked
+        // for no records got every record, under a 200 with no warning.
+        // `top=0` is honoured end to end — the protocol normalizer folds it to
+        // `limit: 0` and forwards it, and `SqlDriver.find` paginates on
+        // presence too, so the statement carries `LIMIT 0` and answers empty.
+        // `skip=0` is a consistency change only: it already equals the
+        // server's default, so the request means the same either way — but one
+        // emitter must not hold two rules for one pair.
+        // Mirrored verbatim in `ScopedProjectClient.data.find`.
+        if (normalizedOptions.top != null) queryParams.set('top', normalizedOptions.top.toString());
+        if (normalizedOptions.skip != null) queryParams.set('skip', normalizedOptions.skip.toString());
 
         // 2. Handle Sort
         if (normalizedOptions.sort) {
@@ -4777,8 +4889,24 @@ export class ObjectStackClient {
       // which suits `mcp` exactly: `/mcp` is mounted bare, so even a
       // project-scoped discovery response advertises the unscoped path.
       mcp: '/api/v1/mcp',
+      // [#6633] `datasources` became a declared `ApiRoutes` key (the base of
+      // the `datasources/:name/external/*` federation-admin family), and this
+      // map is TOTAL over declared keys by design. `/api/v1/datasources` is
+      // not a guess: it is where `@objectstack/rest` mounts the family today,
+      // so an unconnected client builds byte-identical URLs to the pre-#6633
+      // hardcode — the fallback agrees with the mount instead of competing
+      // with it.
+      datasources: '/api/v1/datasources',
+      // [#6714] `email` became a declared `ApiRoutes` key (the base under
+      // which `POST {email}/send` is mounted), and this map is TOTAL over
+      // declared keys by design. `/api/v1/email` is not a guess: it is where
+      // `@objectstack/rest` mounts the surface on a default-base boot, so an
+      // unconnected client builds byte-identical URLs to the pre-#6714
+      // hardcode — the fallback agrees with the mount instead of competing
+      // with it.
+      email: '/api/v1/email',
     };
-    
+
     return routeMap[type] || `/api/v1/${type}`;
   }
 }
@@ -4808,8 +4936,19 @@ export class ScopedProjectClient {
   /** The environmentId this client is scoped to. */
   getProjectId(): string { return this.environmentId; }
 
-  /** Prefix segment inserted between the baseUrl and the resource path. */
-  private scope(): string { return `/api/v1/environments/${encodeURIComponent(this.environmentId)}`; }
+  /**
+   * Prefix segment inserted between the baseUrl and the resource path.
+   *
+   * [#6714 face 3] The API base comes from the parent's discovery-derived
+   * `_apiBase()` rather than a hard-coded `/api/v1`: the server's scoped
+   * mount point is `getScopedBasePath(getApiBasePath())`, which follows
+   * `apiPath`, so a scoped client talking to an `apiPath` deployment built
+   * 404 URLs for every `meta` / `data` / `batch` / `packages` / `automation`
+   * call. An unconnected parent — or one whose advertised routes the base
+   * cannot be derived from — keeps building byte-identical
+   * `/api/v1/environments/...` URLs.
+   */
+  private scope(): string { return `${this.parent._apiBase()}/environments/${encodeURIComponent(this.environmentId)}`; }
 
   private url(suffix: string): string {
     return `${this.parent._baseUrl()}${this.scope()}${suffix}`;
@@ -4905,8 +5044,10 @@ export class ScopedProjectClient {
         Object.assign(normalizedOptions, options);
       }
 
-      if (normalizedOptions.top) queryParams.set('top', normalizedOptions.top.toString());
-      if (normalizedOptions.skip) queryParams.set('skip', normalizedOptions.skip.toString());
+      // [#6485] Presence, not truthiness — see the twin in
+      // `ObjectStackClient.data.find` for why `0` must reach the wire.
+      if (normalizedOptions.top != null) queryParams.set('top', normalizedOptions.top.toString());
+      if (normalizedOptions.skip != null) queryParams.set('skip', normalizedOptions.skip.toString());
       if (normalizedOptions.sort) {
         if (Array.isArray(normalizedOptions.sort) && typeof normalizedOptions.sort[0] === 'object') {
           queryParams.set('sort', JSON.stringify(normalizedOptions.sort));
@@ -5196,6 +5337,7 @@ export type {
   GetMetaItemsResponse,
   GetMetaItemResponse,
   SaveMetaItemResponse,
+  PublishMetaItemResponse,
   CheckPermissionRequest,
   CheckPermissionResponse,
   GetObjectPermissionsResponse,
@@ -5207,11 +5349,12 @@ export type {
   GetPresenceResponse,
   // Workflow re-exports removed (#4451, v17): the types were deleted from
   // @objectstack/spec/api with the retired workflow slot.
-  ListViewsResponse,
-  GetViewResponse,
-  CreateViewResponse,
-  UpdateViewResponse,
-  DeleteViewResponse,
+  // View-management re-exports removed (#6239, v17): the five viewId-addressed
+  // methods and their ten schemas were deleted from @objectstack/spec/api with
+  // the retired `ViewProtocol` — no host implemented them and no route reached
+  // them. A view's stored definition travels on the metadata types
+  // (`GetMetaItemResponse` / `SaveMetaItemResponse` with `type: 'view'`), and
+  // the resolved render-time view on `getUiView`.
   RegisterDeviceRequest,
   RegisterDeviceResponse,
   ListNotificationsResponse,

@@ -49,7 +49,7 @@ Complete object dependency graph for seed data loading
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **nodes** | `{ object: string; dependsOn: string[]; references: { field: string; targetObject: string; targetField: string; fieldType: Enum<'lookup' \| 'master_detail' \| 'user'>; … }[] }[]` | ✅ | All objects in the dependency graph |
+| **nodes** | `{ object: string; dependsOn: string[]; references: object[] }[]` | ✅ | All objects in the dependency graph |
 | **insertOrder** | `string[]` | ✅ | Topologically sorted insert order |
 | **circularDependencies** | `string[][]` | ✅ | Circular dependency chains (e.g., [["a", "b", "a"]]) |
 
@@ -190,7 +190,7 @@ Complete seed loader result
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Overall success status |
 | **dryRun** | `boolean` | ✅ | Whether this was a dry-run |
-| **dependencyGraph** | `{ nodes: { object: string; dependsOn: string[]; references: { field: string; targetObject: string; targetField: string; fieldType: Enum<'lookup' \| 'master_detail' \| 'user'>; … }[] }[]; insertOrder: string[]; circularDependencies: string[][] }` | ✅ | Object dependency graph |
+| **dependencyGraph** | `{ nodes: object[]; insertOrder: string[]; circularDependencies: string[][] }` | ✅ | Object dependency graph |
 | **results** | `{ object: string; mode: Enum<'insert' \| 'update' \| 'upsert' \| 'replace' \| 'ignore'>; inserted: integer; updated: integer; … }[]` | ✅ | Per-object load results |
 | **errors** | `{ sourceObject: string; field: string; targetObject: string; targetField: string; … }[]` | ✅ | All reference resolution errors |
 | **summary** | `{ objectsProcessed: integer; totalRecords: integer; totalInserted: integer; totalUpdated: integer; … }` | ✅ | Summary statistics |

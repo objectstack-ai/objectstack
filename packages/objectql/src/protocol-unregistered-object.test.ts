@@ -126,7 +126,7 @@ describe('#3770 — data-plane object-existence gate (real ObjectQL engine)', ()
         stores = made.stores;
         engine.registerDriver(made.driver, true);
         await engine.init();
-        engine.registry.registerObject(registeredObject as any);
+        engine.registry.registerObject(registeredObject);
         protocol = new ObjectStackProtocolImplementation(engine);
 
         // Case B setup: a physical table exists under the unregistered name,

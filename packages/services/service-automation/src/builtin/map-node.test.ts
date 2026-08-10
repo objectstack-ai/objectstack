@@ -5,6 +5,20 @@ import { AutomationEngine } from '../engine.js';
 import type { NodeExecutor } from '../engine.js';
 import { InMemorySuspendedRunStore } from '../suspended-run-store.js';
 import { registerMapNode } from './map-node.js';
+import { defineActionDescriptor } from '@objectstack/spec/automation';
+
+/**
+ * The `resumeAuthority: 'any'` a pausing fixture needs since #5561: the resume
+ * gate follows a linked-run chain to the CHILD's node, so the type the child
+ * parks on is what a resume of the parent is judged against — and a type that
+ * declares nothing is now refused there. These tests are about linked-run
+ * mechanics, not the gate (`resume-authority-gate.test.ts` owns that), so the
+ * fixtures state the posture they rely on.
+ */
+const openPauser = (type: string) => defineActionDescriptor({
+  type, version: '1.0.0', name: type,
+  supportsPause: true, resumeAuthority: 'any',
+});
 
 function silentLogger() {
   return { info() {}, warn() {}, error() {}, debug() {}, child() { return silentLogger(); } } as any;
@@ -34,6 +48,7 @@ function setup(childNodes: Array<{ id: string; type: string }>, captured: unknow
   // Pauses the child (stands in for an approval / screen / wait).
   engine.registerNodeExecutor({
     type: 'pauser',
+    descriptor: openPauser('pauser'),
     async execute() { return { success: true, suspend: true }; },
   } as NodeExecutor);
   // Fails the child terminally.

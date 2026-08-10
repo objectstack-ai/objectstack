@@ -21,11 +21,14 @@ import {
 // REJECTS. It was filed as #5515 rather than fixed there because the owner
 // schema is this file's, not `automation/etl.zod.ts`'s. This is that gate.
 //
-// The two gates are deliberately SEPARATE — same document, different owning
-// schema — and so is the ~40-line harness below, which is a near-copy of the
-// sibling's. Sharing it would mean a third module imported by both; at two
-// call sites the duplication is cheaper than the indirection, and each gate
-// stays readable end to end. A third such gate is the point to extract.
+// ⚠️ That sibling gate is GONE as of #6414: the L2 ETL layer it guarded was
+// retired under ADR-0049 (no executor, ever), and a gate over a deleted schema
+// has nothing left to assert. This is now the document's ONLY compile gate, so
+// it absorbed the one assertion of the sibling's that was not about ETL — the
+// TOTAL ```typescript block count, which is what makes adding a block to
+// SYNC_ARCHITECTURE.md a deliberate act. The ~40-line harness below stays
+// exactly where it was; it was a near-copy of the sibling's, and with the
+// sibling gone it is simply the harness.
 //
 // ## Why the compiler API instead of type-level pins
 //
@@ -142,32 +145,50 @@ function typescriptBlocks(markdown: string): string[] {
  */
 const ELISION = /\.\.\.\s*[,}\]]/;
 
-describe('[#5515] SYNC_ARCHITECTURE.md L3 connector example compiles', () => {
+describe('[#5515] SYNC_ARCHITECTURE.md L3 connector examples compile', () => {
   const markdown = readFileSync(SYNC_ARCHITECTURE, 'utf8');
-  const connectorBlocks = typescriptBlocks(markdown).filter((b) => b.includes('Connector'));
+  const allBlocks = typescriptBlocks(markdown);
+  const connectorBlocks = allBlocks.filter((b) => b.includes('Connector'));
   const sketches = connectorBlocks.filter((b) => ELISION.test(b));
   const compilable = connectorBlocks.filter((b) => !ELISION.test(b));
 
-  it('finds the example this gate exists for, and classifies the ones it skips', () => {
+  it('finds the examples this gate exists for, and classifies the ones it skips', () => {
     // Anti-vacuity, in both directions: a selector that matched nothing would
     // make the compile assertion below pass over an empty program (the way a
     // gate goes dormant), and a sketch counted as compilable would fail it for
     // a reason that is not about the schema.
-    expect(connectorBlocks.length, '`Connector` examples in SYNC_ARCHITECTURE.md').toBe(3);
-    // The two skipped ones are the Migration Guide's "Before (L3 `syncConfig`)"
-    // and "After (L3)" fragments, which elide with a bare `...`. They are
-    // exempt on their FORM (not TypeScript), never on their merits — the whole
-    // lesson of #5515 is that "it's only a doc snippet" is how four rejected
-    // spellings survived in a file authors copy from.
-    expect(sketches.length, 'Migration-Guide sketches that elide with `...`').toBe(2);
-    expect(compilable.length, 'the full `sapConnector` example').toBe(1);
-    // The document's TOTAL ```typescript count is pinned by the sibling gate
-    // (`automation/etl-author-shape.test.ts`), which is what makes ADDING a
-    // block a deliberate act; this gate pins the `Connector` slice of it.
+    //
+    // ⚠️ This block ABSORBED the total-count pin at #6414. It used to end with
+    // "the document's TOTAL ```typescript count is pinned by the sibling gate
+    // (`automation/etl-author-shape.test.ts`)" — and that sibling was deleted
+    // with the L2 layer it guarded. A deleted gate takes its assertions with it
+    // silently, which is the one way a documentation gate fails without anyone
+    // seeing red, so the total-count pin moves HERE rather than lapsing. That
+    // is what still makes adding a block to this document a deliberate act.
+    expect(allBlocks.length, 'total ```typescript blocks — classify any new one').toBe(2);
+    expect(connectorBlocks.length, '`Connector` examples in SYNC_ARCHITECTURE.md').toBe(2);
+    // Zero sketches TODAY, and the classifier is kept anyway. The two it used
+    // to exempt were the Migration Guide's "Before (L3 `syncConfig`)" / "After
+    // (L3)" fragments, which #6414 replaced when the guide's direction reversed
+    // (there is no longer an L2 to migrate to). They were exempt on their FORM
+    // (not TypeScript), never on their merits — the lesson of #5515 is that
+    // "it's only a doc snippet" is how four rejected spellings survived in a
+    // file authors copy from, so a re-introduced sketch must still be
+    // classified rather than silently compiled.
+    expect(sketches.length, 'Migration-Guide sketches that elide with `...`').toBe(0);
+    expect(compilable.length, 'full, compilable connector examples').toBe(2);
+    // Also pinned deliberately: the L2 "Before" snippet in the Migration Guide
+    // is fenced as PLAIN text, not `typescript`, because `ETLPipeline` no
+    // longer exists and the snippet is shown precisely as the thing that no
+    // longer compiles. If someone re-fences it as `typescript`, the total above
+    // goes to 3 and this gate says so.
+    expect(markdown).toContain("const pipeline: ETLPipeline = {");
+    expect(markdown).not.toContain("```typescript\nimport type { ETLPipeline }");
   });
 
-  it('compiles the `sapConnector` example verbatim, import line included', () => {
-    const probes: Record<string, string> = { 'doc-l3-connector': compilable[0]! };
+  it('compiles every full connector example verbatim, import line included', () => {
+    const probes: Record<string, string> = {};
+    compilable.forEach((block, i) => { probes[`doc-l3-connector-${i}`] = block; });
     // The harness's own control: a probe that MUST fail. Without it a
     // resolution failure (paths mapping wrong, host overlay not applied) would
     // report zero diagnostics and read as a green example.
@@ -179,7 +200,12 @@ describe('[#5515] SYNC_ARCHITECTURE.md L3 connector example compiles', () => {
     const results = compileProbes(probes);
     expect(render(results.get('harness-self-test')!), 'the harness must be able to report an error')
       .toContain('TS2739');
-    expect(render(results.get('doc-l3-connector')!), 'the L3 example must compile clean').toBe('');
+    compilable.forEach((_, i) => {
+      expect(
+        render(results.get(`doc-l3-connector-${i}`)!),
+        `L3 example #${i} must compile clean`,
+      ).toBe('');
+    });
   });
 });
 

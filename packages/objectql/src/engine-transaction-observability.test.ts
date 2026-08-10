@@ -135,7 +135,7 @@ describe('transaction() degrade with no beginTransaction warns once (#4619)', ()
     const driver = makeDriver('memory', { transactional: false });
     engine.registerDriver(driver, true);
     await engine.init();
-    engine.registry.registerObject({ name: 'thing', fields: { name: { type: 'text' } } } as any, '__test__');
+    engine.registry.registerObject({ name: 'thing', fields: { name: { type: 'text' } } }, '__test__');
     return { rec, engine, driver };
   }
 
@@ -197,7 +197,7 @@ describe('transaction() degrade with no beginTransaction warns once (#4619)', ()
     const engine = new ObjectQL({ logger: rec.logger } as any);
     engine.registerDriver(makeDriver('memory'), true);
     await engine.init();
-    engine.registry.registerObject({ name: 'thing', fields: { name: { type: 'text' } } } as any, '__test__');
+    engine.registry.registerObject({ name: 'thing', fields: { name: { type: 'text' } } }, '__test__');
 
     await engine.transaction(async () => {
       await engine.insert('thing', { name: 'A' });

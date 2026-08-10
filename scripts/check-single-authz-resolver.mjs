@@ -198,14 +198,17 @@ const ALLOW = new Map([
   ],
   [
     'packages/plugins/plugin-security/src/explain-engine.ts',
-    'Explain/diagnostic mirror, NOT a request-context resolver. buildContextForUser() ' +
-    'reconstructs an ARBITRARY user\'s grants for the explain API\'s `userId` parameter; ' +
-    'its only caller is security-plugin.ts explainAccessForCaller, which authorizes the ' +
-    'CALLER separately (manage_users or a delegated adminScope, ADR-0090 D6/D12) through ' +
-    'the normal path. It resolves nobody\'s enforcement context, so it is not the ' +
-    'drift-into-enforcement this gate guards. Its parity with the canonical resolver is a ' +
-    'real but DIFFERENT invariant, unguarded today and filed as #6352 — do not fold it in ' +
-    'here by widening this gate\'s remit without saying so in the header.',
+    'Explain/diagnostic surface, NOT a request-context resolver, and since #6352 no longer a ' +
+    'second aggregation either: buildContextForUser() now CALLS resolveUserAuthzGrants (the ' +
+    'canonical resolver\'s userId-driven core) for every position / permission-set / posture / ' +
+    'platform_admin verdict. What still trips this heuristic is the explain-ONLY provenance ' +
+    'pass (collectGrantProvenance), which re-reads the same two tables purely to ANNOTATE rows ' +
+    'the resolver dropped — expired grants ("held until … — expired") and delegated_from ' +
+    'origin — and feeds no verdict. The exemption is therefore narrower than it was, not ' +
+    'wider: the parity invariant it used to defer is now pinned by the tests in ' +
+    'explain-engine.test.ts ("buildContextForUser ↔ resolveUserAuthzGrants parity"), never by ' +
+    'this gate. Do not fold that invariant in here by widening this gate\'s remit without ' +
+    'saying so in the header.',
   ],
 ]);
 

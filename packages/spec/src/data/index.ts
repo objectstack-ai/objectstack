@@ -7,6 +7,14 @@ export * from './filter.zod';
 // against, so they cannot drift apart again (#3774; the fifth — MongoDB's
 // `translateFilter` — was enrolled by #4405).
 export * from './filter-logic-conformance';
+// The boolean identity reduction those cases pin (#5659) — `$and: []` is TRUE,
+// `$or: []` is FALSE, `{}` is a TRUE disjunct, `$not: {}` is FALSE. One
+// implementation, consumed by driver-sql, driver-mongodb, driver-memory and the
+// flow linter, so the scan and the compilers cannot answer with two different
+// predicates. Deliberately a sibling of the case table rather than a member of
+// it: the table is data every backend is checked against, this is the shared
+// answer three of them now compute WITH.
+export * from './filter-verdict';
 // Canonical conformance cases for the filter TEXT operators — case folding
 // (ASCII-only, #4706 Q1), literal comparands (no LIKE wildcards, no regex
 // metacharacters), and the refusal of the retired `$regex`/`$options`. A
@@ -20,6 +28,12 @@ export * from './temporal-conformance';
 // set, so neither a sort key that fails to identify a row (#3106) nor the
 // absence of one altogether (#4363) can let pages overlap or skip.
 export * from './pagination-conformance';
+// Canonical conformance cases for the AGGREGATE vocabulary — the values each
+// declared `AggregationFunction` must produce over one fixture. Created with
+// `count_distinct`'s SQL lowering (#6409), whose emitted shape
+// (`count(distinct x)`) is the first in the vocabulary that two faces of one
+// driver can get wrong in ways only a row-result comparison sees.
+export * from './aggregation-conformance';
 export * from './date-macros.zod';
 export * from './calendar-day';
 // Session-scoped filter placeholders ({current_user_id} / {current_org_id}) —
@@ -31,6 +45,10 @@ export * from './context-tokens.zod';
 // insert-time default resolution and every driver's DDL agree on which
 // `defaultValue`s may become a physical column DEFAULT (#4560).
 export * from './default-value-tokens';
+// The shape discriminator over that vocabulary (#7127): literal vs runtime
+// token vs Expression envelope, plus the shared literal-vs-value-contract
+// check both `defaultValue` authoring gates run (FieldSchema + ActionParam).
+export * from './default-value-shape';
 export * from './object.zod';
 // API-method derivation — the single source of truth turning an object's
 // `enable.apiMethods` whitelist into its effective operation set (#3391).
@@ -50,6 +68,14 @@ export * from './autonumber-format';
 export * from './validation.zod';
 export * from './hook.zod';
 export * from './hook-body.zod';
+// The bulk-write hook dispatch contract (ADR-0058 Addendum II) — what a
+// predicate (`multi: true`) write hands a lifecycle hook in BOTH phases: per-row
+// dispatch, per-row `previous`, a batch-scoped payload, and one budget ceiling
+// for before and after alike. Stated apart from `hook.zod.ts`'s shape table on
+// purpose: that table describes the engine as BUILT (pinned in objectql), this
+// one states the contract the engine is being brought to, with a `delivered`
+// flag per event so "not yet" can never read as "yes".
+export * from './bulk-write-hook-conformance';
 export * from './mapping.zod';
 export * from './data-engine.zod';
 export * from './driver.zod';

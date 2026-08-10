@@ -153,11 +153,35 @@ describe('[#5367] a dataset refusal answers 400 DATASET_INVALID from its own env
     body: unknown;
     analytics: () => AnalyticsService;
     message: RegExp;
+    /** Defaults to `DATASET_INVALID`; see the one row that legitimately differs. */
+    code?: string;
   }> = [
     {
-      name: 'dataset-compiler: an aggregate the v1 runtime cannot lower',
+      /*
+       * ⚠️ This row's ANSWER changed at #6188, and the change is the finding —
+       * measured on this route, not predicted.
+       *
+       * The only inputs that ever reached `dataset-compiler`'s aggregate refusal
+       * were `array_agg` and `string_agg`; #6188 retired both from
+       * `AggregationFunction`, so the route's own `DatasetSchema.parse` now
+       * refuses this body one layer earlier. Measured before/after on this
+       * route: `400 DATASET_INVALID` → `400 VALIDATION_FAILED`. The status is
+       * unchanged — the caller still gets a 4xx naming their own mistake — but
+       * the producer, and therefore the code, is the schema now.
+       *
+       * Kept rather than deleted, with the successor answer pinned: the row's
+       * `listEntry` is the audit trail for one entry #5367 removed from the
+       * route's message list, and that trail is what the coverage test below
+       * checks. What this row can no longer prove is that the route envelopes a
+       * COMPILER aggregate refusal — that branch is unreachable end to end while
+       * `UNSUPPORTED_AGGREGATES` is empty. Rows ②–⑤ still carry that guarantee
+       * for the compiler, executor and strategy; saying so is more useful than
+       * synthesising an aggregate to keep the old shape alive.
+       */
+      name: 'dataset schema: an aggregate retired from the vocabulary (#6188)',
       listEntry: 'not supported by the v1 dataset runtime',
       analytics: aggregateAnalytics,
+      code: 'VALIDATION_FAILED',
       body: {
         dataset: {
           ...dataset,
@@ -165,7 +189,11 @@ describe('[#5367] a dataset refusal answers 400 DATASET_INVALID from its own env
         },
         selection: { dimensions: ['stage'], measures: ['names'] },
       },
-      message: /measure "names" uses aggregate "string_agg" which is not supported by the v1 dataset runtime/,
+      // ⚠️ The route replaces the message with a generic
+      // "Invalid dataset definition." and carries the parse error in `detail`,
+      // so this row asserts the generic message here and the prescription
+      // below — where it actually lands.
+      message: /Invalid dataset definition\./,
     },
     {
       name: 'dataset-compiler: a dimension traversing an undeclared relationship path',
@@ -208,12 +236,12 @@ describe('[#5367] a dataset refusal answers 400 DATASET_INVALID from its own env
   ];
 
   for (const c of CASES) {
-    it(`${c.name} → 400 DATASET_INVALID`, async () => {
+    it(`${c.name} → 400 ${c.code ?? 'DATASET_INVALID'}`, async () => {
       const route = buildRoute(async () => c.analytics());
       const res = await post(route, c.body);
 
       expect(res.statusCode).toBe(400);
-      expect(res.body.code).toBe('DATASET_INVALID');
+      expect(res.body.code).toBe(c.code ?? 'DATASET_INVALID');
       // The message survives intact so the author can act on it, and the body is
       // the 4xx shape (`message`), not the 5xx one (`error`).
       expect(String(res.body.message)).toMatch(c.message);
@@ -232,6 +260,43 @@ describe('[#5367] a dataset refusal answers 400 DATASET_INVALID from its own env
       'not declared in the dataset',
       'not supported by the v1 dataset runtime',
     ]);
+  });
+
+  /*
+   * [#6188] Where the retirement prescription actually lands on this route —
+   * measured, not assumed, because the answer has a known cut in it.
+   *
+   * The route replaces every parse failure's `message` with a generic
+   * "Invalid dataset definition." and puts the real one in `detail`, capped at
+   * 1000 characters (`rest-server.ts`). The prescription's zod-wrapped message
+   * is 1076 chars for `array_agg` and 1304 for `string_agg`, so the two clauses
+   * an author must act on — "was removed" (~index 192) and the imperative
+   * "Delete the aggregation" (690 / 918) — arrive, and the closing
+   * `os migrate meta --from 16` sentence is TRUNCATED away on this surface
+   * only. It is intact everywhere the cap does not apply: the `tsc` error, a
+   * direct `DatasetSchema.parse`, and `os validate`.
+   *
+   * Pinned rather than papered over. Shortening the prescription to fit one
+   * route's cap would degrade it on every surface that has no cap, and raising
+   * the cap (or returning the issues structurally) is a REST-lane decision
+   * about every long prescription, not this vocabulary's to make.
+   */
+  it('the retirement prescription reaches the HTTP caller in `detail`, minus the truncated tail', async () => {
+    const route = buildRoute(async () => aggregateAnalytics());
+    const res = await post(route, {
+      dataset: { ...dataset, measures: [{ name: 'names', aggregate: 'string_agg', field: 'name' }] },
+      selection: { dimensions: ['stage'], measures: ['names'] },
+    });
+
+    expect(res.statusCode).toBe(400);
+    const detail = String(res.body.detail);
+    expect(detail).toContain('`string_agg`');
+    expect(detail).toContain('was removed');
+    expect(detail).toContain('Delete the aggregation');
+    // The cap's measured consequence — asserted so that raising the cap, or
+    // shortening the message, shows up here as a deliberate change.
+    expect(detail.length).toBe(1000);
+    expect(detail).not.toContain('os migrate meta');
   });
 
   it('POSITIVE control (aggregate path): the same wiring, a valid selection → 200 with rows', async () => {

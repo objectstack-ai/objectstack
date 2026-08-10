@@ -60,8 +60,7 @@
 
 import { z } from 'zod';
 
-import { withoutDirectAliasTableRegistration } from './alias-table-registry';
-import { strictUnknownKeyError } from './suggestions.zod';
+import { strictUnknownKeyError, type KeySetGuidance } from './suggestions.zod';
 
 /**
  * True when `schema` accepts no value at all — a `z.never()`, however wrapped.
@@ -125,6 +124,18 @@ export interface StrictObjectOptions {
    */
   guidance?: Readonly<Record<string, string>>;
   /**
+   * The same channel, keyed by a **named key set** instead of an exact key: one
+   * prescription for a whole family, emitted once per message. Added at #6619
+   * for the three prescriptions that were hand-written `$ZodErrorMap`s precisely
+   * because this form did not exist — a set of eleven retired analytics keys
+   * with one migration answer, and the ADR-0089 visibility family, which is a
+   * pattern rather than a list.
+   *
+   * An exact {@link guidance} entry always wins over a set; among sets,
+   * declaration order decides. See {@link KeySetGuidance}.
+   */
+  guidanceSets?: readonly KeySetGuidance[];
+  /**
    * Extra candidates for the "did you mean" fallback beyond the shape's own
    * keys. For a base that gets `.extend()`ed elsewhere, naming the extension's
    * keys here keeps the suggestion useful on the extended surface.
@@ -164,7 +175,41 @@ export interface StrictObjectDeclaration {
   readonly shape: z.ZodRawShape;
 }
 
-const DECLARATIONS: StrictObjectDeclaration[] = [];
+/**
+ * The registry array, owned by a HOISTED function declaration.
+ *
+ * ⚠️ **Deliberately not a module-level `const`, and this is load-bearing.**
+ * `strictObject` is called at MODULE SCOPE by schemas that sit inside the
+ * `field.zod` ↔ `suggestions.zod` ↔ this module import cycle, so under
+ * `OS_EAGER_SCHEMAS=1` it can run while this module is still initializing. A
+ * `const` is in its temporal dead zone until its own line executes, so the call
+ * throws `ReferenceError: Cannot access 'DECLARATIONS' before initialization`
+ * at IMPORT time — before a single test body runs. A hoisted `function`
+ * declaration is fully initialized from the first instruction of module
+ * evaluation, which is the same property `automation/flow.zod.ts`'s
+ * `flowNodeObject()` relies on for its own cycle (#4415, and its docblock says
+ * so out loud).
+ *
+ * Measured, not assumed. On `main` the cycle happened to be entered through
+ * `field.zod` first, which resolves this module fully before anything calls
+ * into it. #5593 moved `automation/`'s schemas from `strictUnknownKeyError` to
+ * this helper, and that one edge reordered the entry: the `automation` barrel
+ * now reaches THIS module first, then `suggestions.zod`, then `field.zod`,
+ * whose own module-scope `strictObject(…)` call lands here mid-initialization.
+ *
+ * ⚠️ The failure mode is why this is written down rather than left to the
+ * types. `lazySchema` defers construction behind a Proxy, so an ordinary
+ * `vitest run` never evaluates a schema at import time and stays GREEN; the
+ * eager subprocess dies before any test body runs, and vitest cannot even
+ * format the stack, so the owning file reports *no result at all*. What caught
+ * it was CI's `check-test-completeness` gate noticing that
+ * `automation/flow-region-cycle.test.ts` was counted and never reported. Pinned
+ * from this side too, in `strict-object.test.ts`.
+ */
+function declarationStore(): StrictObjectDeclaration[] {
+  const self = declarationStore as unknown as { list?: StrictObjectDeclaration[] };
+  return (self.list ??= []);
+}
 
 /**
  * Every authoring shape {@link strictObject} has built **so far in this
@@ -188,16 +233,32 @@ const DECLARATIONS: StrictObjectDeclaration[] = [];
  * nothing judges, and that must fail loudly rather than pass quietly.
  */
 export function strictObjectDeclarations(): readonly StrictObjectDeclaration[] {
-  return DECLARATIONS;
+  return declarationStore();
 }
 
 /**
- * A `.strict()` object whose unknown-key error names the surface, echoes the
- * offending key, and suggests the closest declared key — with the candidate
- * list read from `shape` rather than transcribed alongside it.
+ * Register an authoring surface and build its unknown-key error map, **without
+ * closing the shape** — the half of {@link strictObject} that a schema whose
+ * door is one level up needs on its own (#6619).
+ *
+ * The case it exists for is `view.zod.ts`'s `FormFieldBaseSchema`: a
+ * module-private base with exactly ONE consumer, `FormFieldSchema =
+ * base.extend({ fields }).strict()`. Both the error map and the strictness ride
+ * the `.extend()`, so the base is not a door and #4001 批 18 deliberately left
+ * it open — the ledger's `strip` row for that site is a measurement artifact,
+ * not authorable surface. Folding its bespoke map in with `strictObject` would
+ * have flipped that posture as a side effect of a TEXT change, which is exactly
+ * the acceptance-surface edit this migration is not allowed to make.
+ *
+ * Everything else is identical to `strictObject`, because `strictObject` is
+ * this function plus `z.object(shape, { error }).strict()`: same lazy build,
+ * same tombstone-aware candidate list, same one registration the audit reads.
  */
-export function strictObject<T extends z.ZodRawShape>(options: StrictObjectOptions, shape: T) {
-  const { surface, history, aliases, guidance, extraKeys = [], retiredForms } = options;
+export function strictObjectError<T extends z.ZodRawShape>(
+  options: StrictObjectOptions,
+  shape: T,
+): z.core.$ZodErrorMap {
+  const { surface, history, aliases, guidance, guidanceSets, extraKeys = [], retiredForms } = options;
 
   // The error map is built on FIRST USE, not at construction.
   //
@@ -229,14 +290,14 @@ export function strictObject<T extends z.ZodRawShape>(options: StrictObjectOptio
         typeof issue.input === 'string' ? retiredForms[issue.input] : undefined;
       if (prescription) return prescription;
     }
-    // Built WITHOUT registering in the direct-call registry (#5483). This table
-    // is already recorded below with its `shape`, which is the stronger record:
-    // letting it land in both would judge it twice — the second time against
-    // the transcription-shaped view (`knownKeys`, tombstones filtered out)
-    // rather than the shape — and would make that registry's population depend
-    // on whether anything happened to reject a key first, since this build is
-    // deferred to the first rejection.
-    return (build ??= withoutDirectAliasTableRegistration(() => strictUnknownKeyError({
+    // The table is recorded ONCE, below, with its `shape` — the strong record
+    // the audit reads. Between #5483 and #5593 a second, transcription-shaped
+    // registry existed for the 44 call sites that predated this helper, and
+    // this build had to be run with that registry suppressed so a
+    // `strictObject` surface would not be judged twice (the second time against
+    // `knownKeys` rather than the shape). #5593 migrated the last of those call
+    // sites and deleted the registry, so the suppression went with it.
+    return (build ??= strictUnknownKeyError({
       surface,
       // Declared-but-unwritable keys (tombstones) are excluded — see
       // `acceptsNothing`. They stay in the SHAPE, so writing one still raises
@@ -249,10 +310,20 @@ export function strictObject<T extends z.ZodRawShape>(options: StrictObjectOptio
       history,
       aliases,
       guidance,
-    })))(issue);
+      guidanceSets,
+    }))(issue);
   };
 
-  DECLARATIONS.push({ options, shape });
+  declarationStore().push({ options, shape });
 
-  return z.object(shape, { error }).strict();
+  return error;
+}
+
+/**
+ * A `.strict()` object whose unknown-key error names the surface, echoes the
+ * offending key, and suggests the closest declared key — with the candidate
+ * list read from `shape` rather than transcribed alongside it.
+ */
+export function strictObject<T extends z.ZodRawShape>(options: StrictObjectOptions, shape: T) {
+  return z.object(shape, { error: strictObjectError(options, shape) }).strict();
 }

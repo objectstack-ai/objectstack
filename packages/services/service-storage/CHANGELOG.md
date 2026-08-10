@@ -1,5 +1,595 @@
 # @objectstack/service-storage
 
+## 17.0.0-rc.6
+
+### Minor Changes
+
+- 06be54e: fix(objectql): a value admitted by an `OS_ALLOW_LAX_*` escape hatch stops released field files from being collected (#4797)
+
+  `recordDataMigrationRun`'s contract says a deployment whose data has regressed
+  since it last verified closes its own gate. That only happened when a migration
+  was re-run — nothing told the ledger when the data actually regressed.
+
+  Normally nothing has to. Once `sys_migration` records a verified ADR-0104
+  migration the write path is strict, a non-conforming value is refused, and the
+  certificate cannot go stale. **The operator escape hatches are the exception,
+  and they exist precisely to relax a deployment that has already verified.** With
+  `OS_ALLOW_MEDIA_VALUES` / `OS_ALLOW_LAX_MEDIA_VALUES` / `OS_ALLOW_LAX_VALUE_SHAPES`
+  on, a non-conforming value is admitted and persisted while the row still reads
+  `verified_at` non-null, `blocking: 0`. Turn the switch off — or let any other
+  process or machine run without it — and strict returns to reject the very data
+  this deployment stored. Meanwhile the `adr-0104-file-references` row also governs
+  reclamation of released field files, so the reap guard kept **deleting bytes** on
+  the strength of a certificate that was no longer true, with nothing in the ledger
+  saying so.
+
+  **A lax-admitted write now records a deviation.** The engine's admit path — the
+  same sink that already tallies counterexamples for #4769 — stamps
+  `sys_migration.deviation_observed_at` (plus a `deviation_detail` naming the
+  object, field, type and parse issue) on the migration whose contract the value
+  broke.
+
+  **The marker gates the irreversible path, and only that.** Authority is withdrawn
+  in proportion to reversibility:
+
+  | behaviour                                 | reversible?                 | predicate                      | while a deviation stands |
+  | ----------------------------------------- | --------------------------- | ------------------------------ | ------------------------ |
+  | strict value-shape enforcement (#3438)    | a rejected write is retried | `isDataMigrationFlagVerified`  | continues                |
+  | tombstoning a released file (#3459 PR-5b) | lifted on re-attach         | `isDataMigrationFlagVerified`  | continues                |
+  | reap guard's byte delete                  | **never**                   | `authorisesIrreversibleAction` | **refuses**              |
+
+  A certificate is not a boolean; it is authority over a set of behaviours, and the
+  two halves are withdrawn on different evidence. One admitted write is a complete
+  disproof of "nothing here violates this contract" — enough to stop deleting data
+  forever. It is _not_ evidence of the same order as the full-store scan that
+  earned the certificate, so it does not revoke it: doing that would turn an
+  explicitly temporary switch into a one-way door, forcing a full re-migration on
+  anyone who used the escape hatch once.
+
+  Recording without gating was rejected for the opposite reason — a marker no code
+  consumes is a declared-but-unenforced field, and the bytes get deleted regardless.
+
+  **Getting back to full authority is the documented route.** A real
+  `os migrate files-to-references --apply` / `os migrate value-shapes --apply` run
+  walks the whole store again, which _is_ evidence of the same order, and clears
+  the marker.
+
+  Additive and backward compatible. A `sys_migration` row written before these
+  columns existed reads as "no deviation observed", so upgrading never retroactively
+  closes a gate a deployment earned — the marker only ever closes it on an observed
+  deviation. `isDataMigrationFlagVerified` is unchanged and keeps its existing
+  consumers; the new `authorisesIrreversibleAction` (spec) and `mayActIrreversibly`
+  (platform-objects) are the stronger pair, and the reap guard is their one caller.
+
+- 20526f5: feat(spec,service-storage): restore prefix enumeration cursor-shaped — `IStorageService.list(prefix, { cursor, limit })` (#6781)
+
+  `list?(prefix): Promise<StorageFileInfo[]>` was retired in #5540 / #5541 on the
+  measurement "nothing in the repo calls either". True for this repo, false one repo
+  over: `cloud` has two production callers — tenant attachment reclamation on
+  environment delete (cloud#935 is the incident where that sweep silently did nothing)
+  and marketplace snapshot GC. Both retirement notes reserved exactly one route back,
+  word for word, and this is it (maintainer ruling on cloud#1203, option B).
+
+  **The new member is the reserved shape, not the old one restored.**
+
+  ```ts
+  list?(prefix: string, options?: StorageListOptions): Promise<StorageListPage>;
+
+  interface StorageListOptions { cursor?: string; limit?: number }
+  interface StorageListPage { items: StorageFileInfo[]; nextCursor?: string }
+  ```
+
+  The two defects #5266 measured in the old signature are now unrepresentable:
+
+  | #5266 defect                            | Why it cannot recur                                                                                                                                                      |
+  | --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+  | S3 truncated at 1000 objects, no signal | A page carries `nextCursor` **iff** more remains. The 1000 is now the default `limit`, and a capped page says so instead of looking complete.                            |
+  | local listed one level, S3 recursed     | One prescribed semantics — raw key-string prefix, matched recursively — asserted against **both** backends from one table in `storage-adapter-list.conformance.test.ts`. |
+
+  **Semantics every adapter must implement** (`IStorageService.list` carries the full
+  text): raw key prefix, so `list('a')` returns `a/b/c` _and_ `ab.txt` and a trailing
+  slash is what scopes to a folder; files only, with filesystem directories and S3
+  zero-byte directory markers both skipped; ascending key order; pages full except the
+  last; `nextCursor` iff more remains; no duplicates and no gaps across a run.
+
+  **`limit` and `cursor` are refused, never coerced** — `VALIDATION_ERROR` / 400
+  (ADR-0112). The validator and the cursor codec live on the _contract_
+  (`resolveStorageListLimit`, `encodeStorageListCursor`, `decodeStorageListCursor`), not
+  in each adapter, so two backends cannot answer the same bad argument two ways. A
+  consequence worth knowing: a cursor means one thing everywhere — "resume after this
+  key" — so both shipped adapters issue byte-identical cursors and a
+  `SwappableStorageService` adapter swap mid-sweep resumes instead of restarting.
+
+  **Additive.** `list` stays OPTIONAL, like every other capability on this contract: a
+  third-party adapter that cannot enumerate is unaffected and still compiles. Making it
+  required would be a major-version act, and enumeration is genuinely optional for a
+  backend.
+
+  Shipped with it: the S3 adapter loops `ListObjectsV2` with `ContinuationToken` inside a
+  single call so a `limit` past the 1000-key `MaxKeys` ceiling is served in full, and
+  resumes across calls with `StartAfter`; the local adapter emulates the S3 key space with
+  a pruned walk whose memory is bounded by `limit` rather than by the size of the tree;
+  `SwappableStorageService` forwards it. `storage-adapter-list-retirement.test.ts` is
+  renamed to `storage-adapter-list-contract.test.ts` and **flipped** rather than deleted —
+  it used to hold "the retired shape has not crept back", it now holds "both adapters
+  carry the restored member, in the cursor shape and not the array one".
+
+  ADR-0087 note: the `storage-service-list-retired` ledger entry is amended, not withdrawn.
+  The single-argument `list(prefix)` stays retired and a call written against it still
+  fails to compile; what changed is the entry's `replacement`, which said "no replacement"
+  and would otherwise have shipped in the same release as the replacement — sending an
+  upgrader to hand-roll S3 pagination, which is precisely the option the ruling rejected.
+
+### Patch Changes
+
+- 2e4274d: fix(service-storage): forward the caller's full execution envelope to the `sys_attachment` sharing gates (#7145)
+
+  `callerContext()` in `attachment-access-hooks.ts` rebuilt a five-field
+  projection of the caller's `ExecutionContext` (`userId` / `tenantId` /
+  `positions` / `permissions` / `isSystem`) before handing it to
+  `ISharingService.canEdit`, whose contract declares the **full** envelope and
+  whose doc block tells callers they "MUST NOT rebuild a subset of it" (#6523 /
+  the #6206 ruling). This is the same defect PR #7143 fixed for the `sys_comment`
+  kit (#7141), one package over — the attachment kit is what the comment kit was
+  derived from.
+
+  The projection was doing two jobs at once and only one of them was correct:
+
+  - **Dropping the middleware-private keys was correct**, and is preserved.
+    plugin-security's middleware stamps the access DEPTH it resolved for the
+    object of the operation in flight — `sys_attachment` here — onto the context
+    in place (`sc.__readScope = …`), while these gates ask the sharing service
+    about the **parent record's** object. Forwarding that whole would hand one
+    object's widening to another object's owner-match, the stale-scope leak
+    `resolveWriteScopeForSharing` was extracted to prevent. The keys are now
+    dropped by the `__` **prefix** rather than by name, which also covers the
+    engine's other operation-private markers on that channel (`__expandRead`
+    waives the object-level CRUD check, `__referentialFieldClear` the
+    referential-clear write) and cannot go stale when a fifth key is added.
+  - **Dropping the principal fields was the defect.** Two of them decide the
+    verdict these gates then trust:
+
+    - `onBehalfOf` — `ISecurityService.hasWriteBypass`, the `modifyAllRecords`
+      probe `SharingService.canEdit` consults last, is documented to fail CLOSED
+      on a delegated context and implements that by reading exactly
+      `context?.onBehalfOf?.userId`. Stripped, the guard could never fire on the
+      attachment path, and the `/mcp` OAuth agent principal that
+      `resolve-execution-context` builds _with_ the delegation link reached the
+      bypass probe looking like an ordinary direct call.
+    - `principalKind` — `resolvePermissionSetsForContext` keys the ADR-0090 D10
+      rule "an agent's grants are EXACTLY its scope-derived ceiling" on
+      `principalKind === 'agent'`. Stripped, the additive human baseline was
+      appended to an agent's ceiling here, so the sets the bypass probe evaluated
+      were a superset of what the user consented to.
+
+    `systemPermissions`, `accessible_org_ids`, `posture`, `audience` and
+    `rlsMembership` were dropped by the same projection and are forwarded now for
+    the same reason.
+
+  Both `canEdit` call sites are covered — the `beforeInsert` parent gate and the
+  `beforeDelete` per-row authorization loop — and the same
+  envelope-minus-private-keys rule is applied to the read middleware's
+  parent-visibility probe, which spread the whole operation context into a `find`
+  on a different object.
+
+  No access depth is synthesised for the parent object: absent depth leaves the
+  sharing owner-match at its narrowest (`own`), which is the safe direction and
+  byte-for-byte what the projection produced. Resolving the parent's own depth
+  would WIDEN these gates and is deliberately left to the separate decision
+  tracked as #7144.
+
+  Enforcement effect: a delegated (`onBehalfOf`-carrying) principal is now refused
+  where the contract says it is refused. No caller gains access.
+
+- db59e9c: hooks: drop the last three `doc` / `previousDoc` alias reads on a hook context — read the engine's own keys only
+
+  Behaviour is unchanged: every one of these limbs guarded against a producer that
+  has never existed, so none of them could be reached.
+
+  - `service-storage` attachment lifecycle read `ctx.result ?? ctx.input.doc ?? ctx.input.data`
+  - `plugin-sharing` primary-BU projection read `(ctx.input.data ?? ctx.input.doc).user_id`
+  - `runtime`'s hook sandbox read `engineCtx.input ?? engineCtx.doc` and `engineCtx.previous ?? engineCtx.previousDoc`
+
+  Every ObjectQL write context spells the payload `data` — measured and pinned by
+  `hook-input-shape-contract.test.ts` in `@objectstack/objectql` ("insert carries
+  `data` — never `doc`", #5273). The top-level pair is the same family one level
+  up: `HookContextSchema` declares `input` / `result` / `previous` and neither a
+  `doc` nor a `previousDoc`, and `engine.ts` — the sole producer of a HookContext
+  — builds neither. The limbs survived only because the old `HookContext.input`
+  contract table documented insert as `{ doc, options }`; that table was corrected
+  in #5668, and the same alias was removed from `trigger-record-change` in #5671.
+  These are the remainder (#5906), removed rather than left as a second de-facto
+  contract (PD #12).
+
+- fc3a36a: fix(spec,objectql,sharing,storage): a hook can tell a per-row bulk dispatch from a single-record write again (#6966)
+
+  A predicate (`multi: true`) write dispatches its lifecycle hooks **once per
+  matched row** — `after*` since #5038, `before*` since #5574 — on a context
+  deliberately indistinguishable from a single-id write's, so a handler written
+  for one record works unchanged on a batch. That indistinguishability is the
+  feature, and it also erased the only signal several handlers had.
+
+  Before #5574 a bulk `before*` fired once with `input.id` present-but-`undefined`,
+  so "`input.id` is empty" meant "this call stands for N rows". Guards across the
+  platform were written on it. Every one of them **silently inverted** rather than
+  failing: a per-row context has an id, so the guard now answers "single write" for
+  every row of a batch. Two further assumptions broke with it — that the engine
+  reuses one `HookContext` across a write's before/after pair, and that `after*`
+  work keyed on the write's row set runs once.
+
+  ### New: `HookContext.dispatch`
+
+  The engine now states the fact rather than leaving it to be inferred:
+
+  ```ts
+  ctx.dispatch; // { mode: 'record' | 'per-row', index: number, scope: object } | undefined
+  ```
+
+  - `mode` — `'record'` when the call is the caller's whole write; `'per-row'`
+    when it is one of N.
+  - `index` — position in the fan-out. `index === 0` is how a handler does
+    batch-scoped work once instead of N times.
+  - `scope` — scratch shared by **every** dispatch of one write, both phases, same
+    object identity. This is the seam handlers used to get by stashing on the
+    context itself, which only ever worked because a single-id write reuses one
+    context across its pair.
+
+  Bound at every write dispatch site — insert, update, delete, both phases.
+  Optional, and an absent marker reads as "not a per-row dispatch", so a handler
+  reads `ctx.dispatch?.mode === 'per-row'` and existing code keeps its behaviour.
+  Reads carry no marker: a read has no fan-out.
+
+  It is deliberately **not** the `isPredicateBulkWrite` discriminator #5574
+  retired. That one was removed under ADR-0049 for having neither a producer nor a
+  reachable consumer — it inferred "bulk" from `input.id` and `options.multi` at
+  the consumer, which is exactly what `asScalarId` stays unexported to prevent
+  (#4434 / #4550). This one is produced by the engine at the point the dispatch
+  ladder is decided, and the platform's own handlers read it.
+
+  ### Behaviour fixed
+
+  **Sharing rules and the record-share cascade (`@objectstack/plugin-sharing`).**
+  The `before*` hook stashes the write's affected row set for the `after*` hook to
+  act on. On a predicate write that stash was landing on a per-row context the
+  `after` phase never saw, so `readAffectedRows` answered `resolve-failed` and both
+  subscribers took their safe branch: every bulk update or delete on a ruled object
+  revoked **all** of that object's rule grants and queued a full asynchronous
+  re-grant — once per matched row, with the repeats racing each other's re-grants.
+  Access was never widened (the trade is the ruling's "over-granting is an
+  incident, under-granting is a wobble" direction), but a bounded write now takes
+  the bounded path again: the rows are unioned as the engine hands them over, the
+  cap still applies to the union, and the `after*` work runs once per write.
+
+  **File-reference ownership (`@objectstack/service-storage`).** The `beforeDelete`
+  hook that pre-resolved ids for a `where`-shaped delete was dead on every path,
+  and `afterDelete` was falling back to one `sys_file` lookup **per row** where the
+  batch fits one `$in`. Both are fixed by the marker, and the pre-resolution query
+  is gone entirely — the engine has already matched the rows and hands them over.
+  The `beforeUpdate` copy-on-claim pass no longer runs once per row against a
+  batch-scoped payload, which also removes a row-conditioned rewrite of a shared
+  `SET` clause (out of contract under ADR-0058 Addendum II D3).
+
+  No authored metadata changes, and no write's result, event or return contract
+  changes.
+
+- d0d5205: refactor(core,plugin-audit,service-storage,plugin-reports): give the `__` operation-private-key convention a single owner (#7284)
+
+  `withoutOperationPrivateKeys` — the rule that a consumer forwarding a caller's
+  execution envelope to a question about a DIFFERENT object must first drop the
+  `__`-prefixed keys plugin-security stamped for the operation in flight — had been
+  hand-copied into three packages: `plugin-audit`'s comment access hooks (#7141),
+  `service-storage`'s attachment access hooks (#7145) and `plugin-reports`' report
+  service (#7204). Each carried its own `OPERATION_PRIVATE_KEY_PREFIX` and its own
+  doc block, and the prose had already diverged while the code still agreed — the
+  shape that makes a later divergence in behaviour hard to notice.
+
+  The helper now lives once, in `@objectstack/core`
+  (`security/operation-private-keys.ts`), exported from the package root. Core is
+  the only candidate all three consumers already depend on: `plugin-security` is
+  the producer of the convention and the most honest owner, but none of the three
+  depends on it and a string-prefix filter does not justify three new dependency
+  edges onto a plugin; `@objectstack/spec` is fenced off by Prime Directive #2. The
+  new home sits beside `assemble-execution-context.ts`, which owns the other end of
+  the same lifecycle — that file is where an `ExecutionContext` is built at a
+  transport entry point, this one is where it is stripped back down before being
+  forwarded.
+
+  The full reasoning moved with the code rather than being thinned: which keys the
+  middleware stamps and why each is a widening input, why they are dropped by
+  PREFIX and never by a name list, and why the fresh copy is load-bearing in both
+  directions. Each consumer keeps only its own local half — which object _its_
+  gates actually ask about — and points at the shared home.
+
+  No behaviour change: the three copies were byte-equivalent, and all three
+  packages' suites pass unchanged. Two new pins at the home cover it — the rule's
+  own behaviour, which no package-level test had ever asserted directly, and a
+  repository-shape pin that turns red if a fourth file declares its own copy.
+
+- a5302c7: fix(service-storage): a predicate update writing a file field is refused, instead of giving N records one file id (#7102)
+
+  `file-reference-lifecycle.ts` states **exclusive ownership** in its module
+  header: at most one `(object, record, field)` slot owns a `sys_file`, so
+  copying an already-owned id into a second slot copies the bytes rather than
+  sharing the row. The property that buys is that read authorisation for a
+  file's bytes derives from exactly one parent record — writing a private
+  record's file id into a world-readable one cannot widen who can read it.
+
+  **Before.** A predicate update
+  (`engine.update(obj, { avatar: 'fileX' }, { multi: true, where: … })`) had one
+  payload for N matched rows — `driver.updateMany` takes one `SET` clause — so
+  `beforeUpdate` resolved ONE copy and the driver wrote it to **all** matched
+  records. `afterUpdate` then claimed it for the first row; `claimFile` never
+  steals, so the rest logged `already owned by …` and moved on. Three matched
+  records ended up referencing one file that one of them owned, with read
+  authorisation for those bytes decided by a third record — exactly the
+  widening the design exists to prevent. Two log warnings were the only signal,
+  and nothing failed.
+
+  **After.** That write is refused, in `beforeUpdate`, before the driver runs:
+
+  ```
+  FILE_FIELD_BULK_WRITE_REFUSED / 400  (FileFieldBulkWriteError)
+  ```
+
+  an ADR-0112 envelope error carrying a registered `code` and a 4xx `status`, so
+  the REST layer answers `400` rather than promoting a bare `Error` to a `500`.
+  Nothing is written, nothing is copied, and no `sys_file` row is read. The
+  remedy is the caller's: update each record separately, so each one gets a file
+  it owns.
+
+  **Scope of the refusal.** It fires only when a file **id token** reaches a
+  file-class field through a predicate update — the one shape that produces the
+  shared id, decided by `isFileIdToken`, the same arbiter copy-on-claim and the
+  read resolver already use. Three predicate writes that own nothing are
+  deliberately unaffected and keep working per row: clearing a file field
+  (`{ avatar: null }`), writing an external URL, and writing a legacy inline
+  blob — each releases the file its own row's slot owned. Single-record updates,
+  inserts and every delete path are byte-identical to before.
+
+  `FILE_FIELD_BULK_WRITE_REFUSED` is registered in `@objectstack/spec`'s
+  `ERROR_CODE_LEDGER` under `@objectstack/service-storage` (ADR-0112 D3), so the
+  code is a catalogued wire value rather than an unregistered string the REST
+  layer would mint by side effect.
+
+- f8fe47e: feat(runtime,rest,plugin-auth,service-i18n,service-storage): route-ledger 条目类型加可选 `responseSchema` (#5791)
+
+  #3877 的「最小首步」，维护者 2026-08-06 已批。**纯增量、零行为变更**：五个 route
+  ledger 的现有条目一行未改，字段缺省即「未声明」。
+
+  ## 为什么是这一步
+
+  #3877 量到的洞不是「发出的和声明的不一致」，而是**大多数路由根本没有可对账的声明**：
+  237 条已挂载路由里 215 条是 `sdk` 面，而携带 schema 引用的是 **0 条**。于是同一单
+  里裁定了两件事——Stage C（批量补 ~190 条响应 schema）**永不排期**（一条响应 schema
+  是「这个端点承诺什么」的产品决定，批量生产正是 #3676 / #3833 / #3847 / #3870 四个
+  缺陷的成因），以及先把「这条路由声明了什么」变成**可查询数据**，让 Stage D 的棘轮
+  将来有东西可棘。本次落地的就是后者。
+
+  ## 字段语义
+
+  `responseSchema` 是 `@objectstack/spec/api` 导出名，指向该路由**响应载荷**的声明：
+  路由套 `{ success, data }` 信封时指 `data`，不套时指整个 body。信封本身不归它管，
+  由 `pnpm check:route-envelope` 结构化守住——一个字段无法同时诚实地描述两层。
+
+  五个 ledger 是五个各自独立声明、按约定同形的 interface，因此是五处同名同措辞的可选
+  字段，**不是**新建共享类型包。三个 ledger 明确要求保持 import-free（客户端守卫按
+  相对**源文件**编译它们），且 `zod` 并非每个持有 ledger 的包的依赖，故字段存的是
+  **名字**而非 live schema 对象，解析放在能 import spec 的守卫里。
+
+  ## 已填的两条（实证，不是批量）
+
+  只填 #5682 已给出双断言覆盖（safeParse 判**值** + 键集判**键**）的 discovery 族两条，
+  且刻意分处两个 ledger，以证明一个字段形状确实服务五个独立声明的条目类型：
+
+  - `packages/runtime` `GET /discovery` → `DiscoverySchema`（走信封，指 `data`）
+  - `packages/rest` `GET /api/v1/discovery` → `DiscoverySchema`（裸发，指整个 body）
+
+  `GET /api/v1` 这条 bare-base 别名**故意不填**：它与上面那条共用同一个
+  `discoveryHandler` 闭包，但 #5682 的测试只驱动 `/api/v1/discovery`，「同一个 handler
+  所以同一个形状」是对代码的论证而非对代码的测量。没有覆盖就不填。
+
+  ## 新增守卫
+
+  - `packages/client/src/route-ledger-response-schema.test.ts` —— 五个 ledger 的并集里
+    每一个 `responseSchema` 都到**活的** `@objectstack/spec/api` 导出里解析，并且真的
+    调用一次 `safeParse`（spec 的 schema 是 `lazySchema()` 代理，只查属性存在会被代理
+    陷阱满足）。含否定对照（少一个字母的名字、空串、导出了但不是 schema）与反空转下界。
+  - `discovery-schema-conformance.test.ts`（runtime / rest 各一）—— 钉住 ledger 报的
+    schema 就是该套件实际解析用的**同一个对象**，并各自测量了载荷所在的层级。
+
+- Updated dependencies [3d5c090]
+- Updated dependencies [e5bd768]
+- Updated dependencies [e027b3e]
+- Updated dependencies [c2429b0]
+- Updated dependencies [445a0c2]
+- Updated dependencies [f6609e6]
+- Updated dependencies [a70358a]
+- Updated dependencies [97e7e3c]
+- Updated dependencies [8828b9e]
+- Updated dependencies [53068c1]
+- Updated dependencies [ee58392]
+- Updated dependencies [f16e54e]
+- Updated dependencies [06be54e]
+- Updated dependencies [259459d]
+- Updated dependencies [3f7f14e]
+- Updated dependencies [6968885]
+- Updated dependencies [eaed61f]
+- Updated dependencies [debe2f6]
+- Updated dependencies [97b0798]
+- Updated dependencies [5fa04fb]
+- Updated dependencies [43a7a8d]
+- Updated dependencies [73f69dc]
+- Updated dependencies [04c56aa]
+- Updated dependencies [b3efeb7]
+- Updated dependencies [ddd075a]
+- Updated dependencies [88154be]
+- Updated dependencies [e8dc61e]
+- Updated dependencies [2f3e793]
+- Updated dependencies [d8e8d9c]
+- Updated dependencies [94e749b]
+- Updated dependencies [ea1d916]
+- Updated dependencies [ae31a19]
+- Updated dependencies [e0f300b]
+- Updated dependencies [62b6a2f]
+- Updated dependencies [5b4780b]
+- Updated dependencies [a933452]
+- Updated dependencies [8140915]
+- Updated dependencies [7b48cf9]
+- Updated dependencies [b5404f4]
+- Updated dependencies [f764691]
+- Updated dependencies [e120a5a]
+- Updated dependencies [e650d67]
+- Updated dependencies [04476e7]
+- Updated dependencies [79228cd]
+- Updated dependencies [b3363e9]
+- Updated dependencies [2ef1807]
+- Updated dependencies [d03fe25]
+- Updated dependencies [2672f85]
+- Updated dependencies [11066f6]
+- Updated dependencies [916af17]
+- Updated dependencies [84c86fb]
+- Updated dependencies [2a2a9fb]
+- Updated dependencies [a2e157c]
+- Updated dependencies [95c4227]
+- Updated dependencies [2a61116]
+- Updated dependencies [d4df105]
+- Updated dependencies [e2798fa]
+- Updated dependencies [0fd8556]
+- Updated dependencies [74155c7]
+- Updated dependencies [6908830]
+- Updated dependencies [8b06bba]
+- Updated dependencies [4c54037]
+- Updated dependencies [0f7157b]
+- Updated dependencies [d9bef45]
+- Updated dependencies [f549a0d]
+- Updated dependencies [82da264]
+- Updated dependencies [f586f1a]
+- Updated dependencies [9b9b70f]
+- Updated dependencies [f5a9bc2]
+- Updated dependencies [881a3cc]
+- Updated dependencies [ad6317b]
+- Updated dependencies [8a88885]
+- Updated dependencies [5f7669e]
+- Updated dependencies [becbe53]
+- Updated dependencies [b127c8b]
+- Updated dependencies [a80302a]
+- Updated dependencies [474f131]
+- Updated dependencies [050cd82]
+- Updated dependencies [4d552af]
+- Updated dependencies [44d677c]
+- Updated dependencies [c32944d]
+- Updated dependencies [1dd780f]
+- Updated dependencies [c8d6f6e]
+- Updated dependencies [92a67f2]
+- Updated dependencies [9136327]
+- Updated dependencies [bf0ae99]
+- Updated dependencies [cb3b6cd]
+- Updated dependencies [73b7234]
+- Updated dependencies [d2b97c3]
+- Updated dependencies [59b794f]
+- Updated dependencies [fc3a36a]
+- Updated dependencies [69787f0]
+- Updated dependencies [5d022a1]
+- Updated dependencies [042b9ee]
+- Updated dependencies [f549a0d]
+- Updated dependencies [a36db28]
+- Updated dependencies [3f8817a]
+- Updated dependencies [a2443e3]
+- Updated dependencies [e1554b1]
+- Updated dependencies [4856789]
+- Updated dependencies [c3f4916]
+- Updated dependencies [33e0385]
+- Updated dependencies [2205363]
+- Updated dependencies [09fe58d]
+- Updated dependencies [d0a5ceb]
+- Updated dependencies [e18a162]
+- Updated dependencies [d6d1a50]
+- Updated dependencies [d127ff0]
+- Updated dependencies [9b86cf6]
+- Updated dependencies [8825a06]
+- Updated dependencies [5087ac6]
+- Updated dependencies [2d1ddf0]
+- Updated dependencies [354b00f]
+- Updated dependencies [3de535b]
+- Updated dependencies [fe2e15a]
+- Updated dependencies [c6b6bb4]
+- Updated dependencies [59c544d]
+- Updated dependencies [2f59da0]
+- Updated dependencies [8ad609c]
+- Updated dependencies [bbee302]
+- Updated dependencies [08863dd]
+- Updated dependencies [56664f5]
+- Updated dependencies [31cbe90]
+- Updated dependencies [90bbf25]
+- Updated dependencies [eb91eba]
+- Updated dependencies [42da73d]
+- Updated dependencies [643b7c7]
+- Updated dependencies [d0d5205]
+- Updated dependencies [1a15893]
+- Updated dependencies [b70e534]
+- Updated dependencies [2233a85]
+- Updated dependencies [62dd69a]
+- Updated dependencies [e15e679]
+- Updated dependencies [2ab1257]
+- Updated dependencies [4cc4fb7]
+- Updated dependencies [28d1eb7]
+- Updated dependencies [2c26040]
+- Updated dependencies [f758cec]
+- Updated dependencies [78f0be8]
+- Updated dependencies [35f7fb4]
+- Updated dependencies [a5302c7]
+- Updated dependencies [7084313]
+- Updated dependencies [91cefb8]
+- Updated dependencies [0e043d8]
+- Updated dependencies [dadd1ad]
+- Updated dependencies [2f2e63c]
+- Updated dependencies [486d526]
+- Updated dependencies [89d7b35]
+- Updated dependencies [85ec26d]
+- Updated dependencies [f6476fc]
+- Updated dependencies [4ac12ef]
+- Updated dependencies [b88f5e8]
+- Updated dependencies [42cc219]
+- Updated dependencies [d42a92f]
+- Updated dependencies [51d74ad]
+- Updated dependencies [d7e0b42]
+- Updated dependencies [3510e4a]
+- Updated dependencies [aa4b90d]
+- Updated dependencies [54299ca]
+- Updated dependencies [dc61def]
+- Updated dependencies [251e888]
+- Updated dependencies [183b4c4]
+- Updated dependencies [2fdb36e]
+- Updated dependencies [e787608]
+- Updated dependencies [20526f5]
+- Updated dependencies [c5eef1d]
+- Updated dependencies [e0f300b]
+- Updated dependencies [761a0ba]
+- Updated dependencies [61282f9]
+- Updated dependencies [be87153]
+- Updated dependencies [60f0dd8]
+- Updated dependencies [a87c5cd]
+- Updated dependencies [a47f338]
+- Updated dependencies [2598216]
+- Updated dependencies [2c7e62d]
+- Updated dependencies [eb7613c]
+- Updated dependencies [ecc9110]
+- Updated dependencies [f7bd4e2]
+- Updated dependencies [361bd5b]
+- Updated dependencies [129b378]
+- Updated dependencies [88f9d94]
+- Updated dependencies [1818998]
+- Updated dependencies [09ee21c]
+- Updated dependencies [f549a0d]
+- Updated dependencies [3fc2e48]
+- Updated dependencies [e8f435c]
+- Updated dependencies [41610f6]
+  - @objectstack/spec@17.0.0-rc.6
+  - @objectstack/platform-objects@17.0.0-rc.6
+  - @objectstack/core@17.0.0-rc.6
+  - @objectstack/types@17.0.0-rc.6
+  - @objectstack/observability@17.0.0-rc.6
+
 ## 17.0.0-rc.5
 
 ### Patch Changes

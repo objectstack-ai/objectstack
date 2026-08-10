@@ -8,6 +8,20 @@ import { SystemIdentifierSchema } from '../shared/identifiers.zod';
 import { ExpressionInputSchema } from '../shared/expression.zod';
 import { FilterConditionSchema } from './filter.zod';
 import { FIELD_KEY_GUIDANCE } from './authoring-key-lint';
+import { DEFAULT_AUTONUMBER_FORMAT } from './autonumber-format';
+// #7127 — the `defaultValue` authoring gate: shape discrimination (literal /
+// runtime token / CEL envelope), the per-token × per-type table, and the
+// shared literal-vs-stored-contract check. `default-value-shape` reaches
+// `field-value.zod`, whose only import back into THIS file is the type-only
+// `FieldType` (erased at runtime) — `AddressSchema` moved there (see its
+// re-export below), so the edge is one-way and no runtime ESM cycle closes.
+import {
+  checkLiteralDefaultValue,
+  defaultValueTokenIssue,
+  discriminateDefaultValueShape,
+  suggestDefaultValueToken,
+} from './default-value-shape';
+import { AddressSchema } from './field-value.zod';
 
 /**
  * Field Type Enum
@@ -77,6 +91,25 @@ export const FieldType = z.enum([
 ]);
 
 export type FieldType = z.input<typeof FieldType>;
+
+/**
+ * Field types whose stored value the RUNTIME owns outright — issued by the
+ * engine (or the driver's persistent sequence), never supplied by a caller on
+ * either write path. Today exactly `autonumber` (#5503).
+ *
+ * This is the PROTOCOL's statement of that ownership, so the consumers that act
+ * on it read one vocabulary instead of each carrying its own literal: objectql's
+ * write-path strips (`isRuntimeOwnedField` / `stripRuntimeOwnedFields`, which
+ * treat these types as implicitly read-only), and the DataProtocol create
+ * ingress, which defers to those strips rather than pre-empting them with its
+ * own narrower exemption set (`stripReadonlyForInsert`, #5628).
+ *
+ * Keep the set to types whose value is (a) persisted, (b) issued by the runtime,
+ * and (c) never legitimately supplied by a caller. `formula` and `summary` are
+ * deliberately NOT here: they are derived-on-read/roll-up, not stored values a
+ * caller could forge into a sequence.
+ */
+export const RUNTIME_OWNED_FIELD_TYPES: ReadonlySet<string> = new Set<string>(['autonumber']);
 
 /**
  * Select Option Schema
@@ -200,18 +233,17 @@ export const CurrencyValueSchema = lazySchema(() => z.object({
 }));
 
 /**
- * Address Schema
- * Structured address for address field type
+ * Address Schema — structured address for the `address` field type.
+ *
+ * DECLARED in `./field-value.zod` since #7127 (it IS the enforced address
+ * VALUE contract, ADR-0104 D1) and re-exported here for compatibility. The
+ * move is what lets THIS file import the value-contract module for its
+ * `defaultValue` gate without closing a runtime ESM cycle: `field-value.zod`
+ * dereferenced `AddressSchema` at module-eval time, and that top-level read
+ * was the one runtime edge back into this file (its remaining `FieldType`
+ * import is type-only, erased at runtime).
  */
-export const AddressSchema = lazySchema(() => z.object({
-  street: z.string().optional().describe('Street address'),
-  city: z.string().optional().describe('City name'),
-  state: z.string().optional().describe('State/Province'),
-  postalCode: z.string().optional().describe('Postal/ZIP code'),
-  country: z.string().optional().describe('Country name or code'),
-  countryCode: z.string().optional().describe('ISO country code (e.g., US, GB)'),
-  formatted: z.string().optional().describe('Formatted address string'),
-}));
+export { AddressSchema };
 
 /**
  * Field Schema - Best Practice Enterprise Pattern
@@ -243,11 +275,25 @@ export const AddressSchema = lazySchema(() => z.object({
  */
 /**
  * Prescriptive rejection for a mis-spelled `unique` scope (ADR-0120
- * §Terminology; pattern of `strictTenancyError`): the error must carry the
- * vocabulary and, for the two predictable near-misses (`'tenant'`, `'org'`),
- * name `'organization'` explicitly — a typo must be a loud, fixable parse
- * error, never a silent scope change. Declared before `UniqueScopeSchema`
- * because `OS_EAGER_SCHEMAS=1` evaluates the factory at module load (TDZ).
+ * §Terminology): the error must carry the vocabulary and, for the two
+ * predictable near-misses (`'tenant'`, `'org'`), name `'organization'`
+ * explicitly — a typo must be a loud, fixable parse error, never a silent
+ * scope change. Declared before `UniqueScopeSchema` because
+ * `OS_EAGER_SCHEMAS=1` evaluates the factory at module load (TDZ).
+ *
+ * ⚠️ **The last hand-written `$ZodErrorMap` in `packages/spec`, and it stays
+ * one.** This docblock used to say "pattern of `strictCapabilitiesError`";
+ * #6805 folded that sibling into the shared `strictObject` template and the
+ * pointer would have gone stale, so it is replaced by the reason this map is
+ * NOT following it. The fold's channel is `unrecognized_keys` — an unknown
+ * KEY, answered from a per-key `guidance` table. This map answers
+ * `invalid_union`, a VALUE-level verdict on a key the schema declares, which
+ * `strictObject` does not address at any level. Folding it would be a category
+ * error, and `alias-integrity.test.ts`'s class pin
+ * (`NO module outside the shared helpers writes its own unrecognized_keys
+ * map`) is scoped by `issue.code` precisely so this site is out of class by
+ * measurement rather than by an exemption — that pin reads this file as a live
+ * control.
  */
 const uniqueScopeError: z.core.$ZodErrorMap = (issue) => {
   if (issue.code !== 'invalid_union') return undefined;
@@ -477,7 +523,7 @@ export const FieldSchema = lazySchema(() => strictObject({
   // `(tenantField, field)` index); `'global'` = platform-wide single-column
   // unique. See {@link UniqueScopeSchema} for the scope vocabulary (ADR-0120).
   unique: UniqueScopeSchema.default(false).describe("Unique constraint and its scope (ADR-0120). 'organization' = one holder per organization (NULL-safe composite with the organization key part on organization-scoped objects) — prefer this explicit spelling in new code; true = same per-organization scope (positional synonym, stays valid); 'global' = one holder across the whole installation. 'tenant'/'org' are rejected — the word is 'organization'"),
-  defaultValue: z.unknown().optional().describe('Default value'),
+  defaultValue: z.unknown().optional().describe('Default applied on INSERT when the field is omitted or null (`\'\'` is a real value, not absence). Three legal shapes (#7127), discriminated in the engine\'s own order: a CEL Expression envelope `{ dialect: \'cel\', source: \'today()\' }` (accepted structurally; result type is a runtime concern); a runtime TOKEN — `NOW()` on `datetime`/`date`/`time` only, `current_user` on `user` or `lookup` with `reference: \'sys_user\'` only, neither on a multi-value field; or a LITERAL, which must satisfy this field\'s own stored value contract (ADR-0104 D1 `valueSchemaFor`). Anything else is refused at parse time with a prescriptive message.'),
   
   /** Text/String Constraints */
   maxLength: z.number().optional().describe('Max character length'),
@@ -694,6 +740,21 @@ export const FieldSchema = lazySchema(() => strictObject({
   // addressFormat, color colorFormat/allowAlpha/presetColors, slider showValue/marks,
   // barcode/qr barcodeFormat/qrErrorCorrection/displayValue/allowScanning.
   language: z.string().optional().describe('Programming language for syntax highlighting (e.g., javascript, python, sql)'),
+  // `step` is the slider's **UI increment** and deliberately NOT a stored-value constraint —
+  // ADR-0049's "ledger" half, ruled 2026-08-08 (#6514). Note it is renderer-LIVE, not dead,
+  // which is why it is NOT in the pruned list above and never joins it: objectui's
+  // `packages/fields/src/widgets/SliderField.tsx:14` reads it (`field.step ?? 1`) and hands it
+  // to the Slider, and `packages/spec/liveness/field.json` ledgers it `live` on that evidence.
+  // What it does not do is BIND the written value: the numeric branch of
+  // `packages/objectql/src/validation/record-validator.ts` enforces `min`/`max` for `slider`
+  // and reads `step` nowhere. The settings-side ruling (#6199 / PR #6501, which DID enforce a
+  // grid) does not transfer: its hook was that schema's own "numeric bounds and step" comment
+  // grouping `step` with `min`/`max`, which this declaration does not share — and enforcing a
+  // grid here would make already-stored off-grid values start failing on their next edit,
+  // because record-validator judges updates to existing rows. Should grid enforcement ever
+  // gain real user pull it returns as a feature request in PR #6501's shape: anchor at
+  // `min + k * step` (falling back to 0 when no `min` is declared), epsilon-tolerant
+  // comparison. See docs/audits/2026-06-dead-surface-disposition-plan.md (P2 field prune).
   step: z.number().optional().describe('Step increment for slider (default: 1)'),
 
   // Currency field config
@@ -764,7 +825,7 @@ export const FieldSchema = lazySchema(() => strictObject({
   conditionalRequired: retiredKey(
     '`conditionalRequired` was removed in @objectstack/spec 17 (#3855) — use `requiredWhen`. ' +
     'Rename the key; the value (a CEL predicate) is unchanged. ' +
-    'Run `os migrate meta --from 16` to rewrite it automatically.',
+    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
   ),
 
   /**
@@ -783,7 +844,7 @@ export const FieldSchema = lazySchema(() => strictObject({
 
   /** Security & Visibility */
   hidden: z.boolean().default(false).describe('Hidden from default UI'),
-  readonly: z.boolean().default(false).describe('Read-only — never editable in forms, AND server-enforced on BOTH write paths: a non-system write to this field is silently dropped from the payload on UPDATE (#2948/#3003) and on INSERT (#3043; a create can no longer directly seed e.g. `approval_status: "approved"`), symmetric with `readonlyWhen`. A stripped INSERT field still falls back to its `defaultValue`. Exempt from the strip: `isSystem` writes (seed replay, migration), and an opt-in "historical" import (`preserveAudit`, #3493) — which admits a whitelist (the audit/timestamp family plus author-declared business `readonly` fields). A normal (non-system) import is NOT system-context and still strips.'),
+  readonly: z.boolean().default(false).describe('Read-only — never editable in forms, AND server-enforced on BOTH write paths: a non-system write to this field is silently dropped from the payload on UPDATE (#2948/#3003) and on INSERT (#3043; a create can no longer directly seed e.g. `approval_status: "approved"`), symmetric with `readonlyWhen`. A stripped INSERT field still falls back to its `defaultValue`. Exempt from the strip on BOTH paths: `isSystem` writes (seed replay, migration). Exempt on the UPDATE path ONLY: an opt-in "historical" import (`preserveAudit`, #3493) — which admits a whitelist (the audit/timestamp family plus author-declared business `readonly` fields). On INSERT the exemption does NOT apply (#6640): a non-system create that requests `preserveAudit` still has its readonly fields stripped, and is warned loudly that the exemption is UPDATE-only — replaying archival readonly facts on create requires a system context. A normal (non-system) import is NOT system-context and still strips.'),
 
   /**
    * [ADR-0066 D3] Capabilities required to READ/EDIT this field. A field
@@ -831,8 +892,30 @@ export const FieldSchema = lazySchema(() => strictObject({
    * collapse the number into the wrong counter scope, so generation throws
    * instead; `objectstack compile` lints this (unknown field → build error,
    * optional field → warning).
+   *
+   * ## Omitting it — the contract default (#6555)
+   *
+   * The key stays optional, and a field that omits it renders with
+   * {@link DEFAULT_AUTONUMBER_FORMAT} — `{0000}`, i.e. `0001`, `0002`, … The
+   * default belongs to the CONTRACT, not to whoever happens to be generating
+   * the number: every consumer resolves it through
+   * {@link resolveAutonumberFormat} rather than substituting its own. That is
+   * the whole point of the maintainer's 2026-08-08 ruling — the two hand-written
+   * fallbacks it replaces disagreed (the SQL driver substituted `{0000}` while
+   * the engine's in-memory fallback emitted a bare `1`), so one metadata
+   * document minted differently-shaped numbers depending on the driver behind it.
+   *
+   * Declared here as a JSON-Schema `default` annotation rather than a Zod
+   * `.default()`: this key is flat on `FieldSchema`, shared by all ~49 field
+   * types, so a parse-time default would materialize `autonumberFormat:
+   * '{0000}'` on every `text`, `number` and `lookup` field ever parsed — a
+   * format on a field that has no counter. The annotation states the default
+   * to schema consumers and AI metadata authors without touching parse output.
    */
-  autonumberFormat: z.string().optional().describe('Auto-number format: literal text + {0000} counter, {YYYY}/{MM}/{DD}/{YYYYMMDD} date tokens (business tz), and {field_name} interpolation. Counter resets per rendered prefix (e.g. AD{YYYYMMDD}{0000} resets daily).'),
+  autonumberFormat: z.string().optional().meta({
+    description: 'Auto-number format: literal text + {0000} counter, {YYYY}/{MM}/{DD}/{YYYYMMDD} date tokens (business tz), and {field_name} interpolation. Counter resets per rendered prefix (e.g. AD{YYYYMMDD}{0000} resets daily). Omitted on an `autonumber` field ⇒ the contract default `{0000}` (#6555).',
+    default: DEFAULT_AUTONUMBER_FORMAT,
+  }),
   // `index` (field-level bool) removed in the 16.x line (#2377, ADR-0049): the
   // driver builds indexes from the object's `indexes[]` array; a field-level
   // `index: true` created no index. Declare the index in object `indexes[]`.
@@ -860,6 +943,60 @@ export const FieldSchema = lazySchema(() => strictObject({
         'condition is false the write contract permits null, but the column would refuse ' +
         'it. Use `required: true` + `storage.notNull` for an unconditional constraint, or ' +
         '`requiredWhen` alone for a conditional write contract (the column stays nullable).',
+    });
+  }
+
+  // #7127: an authored `defaultValue` must be one of the key's three legal
+  // shapes — CEL envelope / runtime token / literal — and legal for THIS
+  // field. The shapes are told apart FIRST (`default-value-shape.ts`, the
+  // engine's own discrimination order): running the value contract over the
+  // whole key would judge a token's spelling as data, which is right only by
+  // accident. Then each branch gets its own verdict:
+  //   envelope → structural acceptance ONLY (a CEL result type is unknowable
+  //              at parse time; a wrong one is an ADR-0032 runtime concern);
+  //   token    → the per-token × per-type table (`defaultValueTokenIssue`);
+  //   literal  → the field's own stored value contract, through the SAME
+  //              shared core the #6970 action-param gate runs.
+  //
+  // Presence is the ENGINE's rule (`applyFieldDefaults`): `null`/`undefined`
+  // mean "no default", while `''` is a real default — deliberately NOT the
+  // action-param rule, whose dispatcher treats blank as absent.
+  const dv = field.defaultValue;
+  if (dv == null) return;
+  const dvText = JSON.stringify(dv) ?? String(dv);
+  const shape = discriminateDefaultValueShape(dv);
+  if (shape === 'expression') return;
+  if (shape === 'token') {
+    const message = defaultValueTokenIssue(
+      { type: field.type, multiple: field.multiple, options: field.options, name: field.name, reference: field.reference },
+      dv,
+    );
+    if (message !== null) {
+      ctx.addIssue({ code: 'custom', path: ['defaultValue'], message });
+    }
+    return;
+  }
+  const verdict = checkLiteralDefaultValue(
+    { type: field.type, multiple: field.multiple, options: field.options },
+    dv,
+  );
+  if (!verdict.ok) {
+    const suggestion = suggestDefaultValueToken(dv);
+    const suggestionText = suggestion === undefined
+      ? ''
+      : ` Did you mean the runtime token \`${suggestion}\`? Near-miss spellings are never accepted as tokens `
+        + '(a genuinely-intended literal must stay storable) — write the exact token, or a valid literal.';
+    ctx.addIssue({
+      code: 'custom',
+      path: ['defaultValue'],
+      message:
+        `Field "${field.name ?? '<unnamed>'}" (${field.type}): the default ${dvText} cannot satisfy this `
+        + `field's own stored value contract — ${verdict.detail ?? 'invalid value'}. The engine stores a `
+        + 'literal default VERBATIM at insert (applyFieldDefaults), so this would seed data the field type '
+        + "cannot hold, surfacing far from the cause. Write the default in the field's stored value shape, "
+        + 'or use one of the other legal shapes: a runtime token (`NOW()` on `datetime`/`date`/`time`; '
+        + "`current_user` on `user` or `lookup` with `reference: 'sys_user'`) or a CEL Expression envelope "
+        + `({ dialect: 'cel', source: '…' }).${suggestionText}`,
     });
   }
 }));
@@ -910,7 +1047,29 @@ export const Field = {
   avatar: (config: FieldInput = {}) => ({ type: 'avatar', ...config } as const),
   formula: (config: FieldInput = {}) => ({ type: 'formula', ...config } as const),
   summary: (config: FieldInput = {}) => ({ type: 'summary', ...config } as const),
-  autonumber: (config: FieldInput = {}) => ({ type: 'autonumber', ...config } as const),
+  /**
+   * Auto-number — a record number the RUNTIME issues from its sequence.
+   *
+   * The builder injects `readonly: true` (#5628). `readonly` is a TWO-part
+   * contract (see `FieldSchema.readonly`): "never editable in forms" AND
+   * server-enforced on both write paths. #5503 closed the server half for
+   * `autonumber` by type ({@link RUNTIME_OWNED_FIELD_TYPES}), but the FORM half
+   * is keyed on the flag — so without it a renderer drew an editable "record
+   * number" box whose value the server was already guaranteed to discard: the
+   * user types a number, the create succeeds, and the record comes back
+   * carrying a different one. Declaring the flag the builder's output already
+   * behaves like is the shortest "declared = enforced" path.
+   *
+   * The injection is UNCONDITIONAL — it is applied after `config`, so it cannot
+   * be spread away — and `readonly: false` is a compile error at the authoring
+   * site rather than a silent coercion: an autonumber field is runtime-owned by
+   * construction, so "editable record number" is not a state the author can
+   * ask for. Restating `readonly: true` is allowed (it is merely redundant).
+   * A hand-written `{ type: 'autonumber' }` literal is unaffected — it is
+   * covered by the by-TYPE server enforcement, which never depended on the flag.
+   */
+  autonumber: (config: FieldInput & { readonly?: true } = {}) =>
+    ({ type: 'autonumber', ...config, readonly: true } as const),
   markdown: (config: FieldInput = {}) => ({ type: 'markdown', ...config } as const),
   html: (config: FieldInput = {}) => ({ type: 'html', ...config } as const),
   password: (config: FieldInput = {}) => ({ type: 'password', ...config } as const),

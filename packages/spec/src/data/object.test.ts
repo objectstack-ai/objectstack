@@ -7,6 +7,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 // only became visible when tsconfig.test.json put these files in front of tsc
 // (#5286).
 import { ObjectSchema, ObjectCapabilities, IndexSchema, ObjectFieldGroupSchema, ObjectExternalBindingSchema, ObjectAccessConfigSchema, LifecycleSchema, TenancyConfigSchema, isTenancyDisabled, resolveCrudAffordances, type ServiceObject } from './object.zod';
+import { resolveInjectedSystemColumns } from './injected-system-columns';
 import type { StateMachineValidation } from './validation.zod';
 
 describe('ObjectCapabilities', () => {
@@ -65,6 +66,56 @@ describe('ObjectCapabilities', () => {
   it('rejects unknown capability keys instead of stripping them', () => {
     const result = ObjectCapabilities.safeParse({ feedEnabled: true });
     expect(result.success).toBe(false);
+  });
+
+  // ── #6805 — the map folded into the shared `strictObject` template ────────
+  // `strictCapabilitiesError` was a hand-written `$ZodErrorMap`, so
+  // `CAPABILITIES_RETIRED_KEY_GUIDANCE` registered in no registry and nothing
+  // judged it. Acceptance did not move (every case above is unchanged); these
+  // pin the assembly the template brings.
+
+  const capabilityRejection = (body: Record<string, unknown>): string => {
+    const result = ObjectCapabilities.safeParse(body);
+    expect(result.success).toBe(false);
+    return result.success ? '' : result.error.issues.map((i) => i.message).join('\n');
+  };
+
+  it.each([
+    ['searchible', 'searchable'],
+    ['trackHistroy', 'trackHistory'],
+    ['clon', 'clone'],
+    ['feed', 'feeds'],
+  ])('a near-miss `%s` now gets the rename channel, not just "not an `enable` capability flag"', (written, canonical) => {
+    const message = capabilityRejection({ [written]: true });
+    expect(message).toContain(`\`${written}\` → \`${canonical}\``);
+    expect(message).not.toContain('is not an `enable` capability flag');
+  });
+
+  it('a key beyond edit distance is still named, with no misleading suggestion', () => {
+    const message = capabilityRejection({ feedEnabled: true });
+    expect(message).toContain('`feedEnabled`');
+    expect(message).not.toContain('Did you mean');
+  });
+
+  it('emission order: which key is wrong → the fix → the history, last (#5955)', () => {
+    const message = capabilityRejection({ trash: false, searchible: true });
+    const preamble = 'Unrecognized key(s) on `enable`:';
+    const fix = 'os migrate meta --from 16';
+    const history = 'every flag carries an enforcement contract (#2707)';
+
+    expect(message.startsWith(preamble)).toBe(true);
+    expect(message.indexOf(fix)).toBeGreaterThan(message.indexOf(preamble));
+    expect(message.indexOf(history)).toBeGreaterThan(message.indexOf(fix));
+    expect(message.trimEnd().endsWith(`${history}.`)).toBe(true);
+    expect(message.split(history)).toHaveLength(2);
+  });
+
+  it('the tombstone text survives the fold byte-for-byte', () => {
+    expect(capabilityRejection({ mru: true })).toContain(
+      '`enable.mru` was removed from @objectstack/spec in the 16.x line (#2377/#3207, '
+      + 'ADR-0049) — Most-Recently-Used tracking was never implemented; no reader '
+      + 'existed, so the flag changed nothing.',
+    );
   });
 });
 
@@ -910,7 +961,7 @@ describe('ObjectSchema.create()', () => {
   // together.
   describe('ownership record-model field (#3175)', () => {
     it('accepts the record-ownership opt-out values the registry reads', () => {
-      for (const ownership of ['user', 'org', 'none'] as const) {
+      for (const ownership of ['user', 'business_unit', 'org', 'none'] as const) {
         const obj = ObjectSchema.create({ name: 'catalog', ownership, fields: { title: { type: 'text' } } });
         expect(obj.ownership).toBe(ownership);
       }
@@ -930,64 +981,81 @@ describe('ObjectSchema.create()', () => {
       })).toThrow(/record-ownership model|registerObject/);
     });
 
-    // [#4611 / ADR-0117] DELIBERATE REJECTION — do not "complete" this enum.
+    // [#4611 → #5678 / ADR-0117 D1] The REWRITTEN #4611 pin — direction flipped.
     //
-    // ADR-0117 (Accepted, D1/D3 scoped) reserves a fourth tier,
-    // `ownership: 'business_unit'`, whose contract is: NO `owner_id`, and a
-    // kernel-stamped `owning_business_unit_id` instead (D1's table). The
-    // protocol name is registered (`SystemFieldName.OWNING_BUSINESS_UNIT_ID`)
-    // and, since #5677, open-core INJECTS the column — but the enum VALUE is
-    // still not added here.
+    // History, because the flip is the point and a reader who only sees the
+    // current assertions will re-derive the wrong rule. #4611 pinned the
+    // OPPOSITE: `ownership: 'business_unit'` REJECTED, and the rejection message
+    // enumerating exactly three legal values. That pin was correct for its
+    // window and it named its own expiry — "when #5678 arrives, this test
+    // failing is the intended signal to REWRITE it (not to delete the guard)".
+    // This is that rewrite.
     //
-    // ⚠️ The ORIGINAL reason recorded here has EXPIRED, and the pin outlived it.
-    // It read: `applySystemFields` decides owner injection with a DENY-list
-    // (`wantOwner = ownership !== 'org' && ownership !== 'none' && …`), so a
-    // fourth value would fall through and be stamped with `owner_id` — the exact
-    // INVERSE of what D1 declares. #5677 flipped that judgement to an ALLOW-list
-    // (`packages/objectql/src/registry.ts`, and the shared derivation
-    // `resolveInjectedSystemColumns` in `./injected-system-columns.ts`), so the
-    // engine now implements D1's `business_unit` row correctly and the inverse-
-    // stamping hazard is gone. Do NOT re-derive the old argument from this pin.
+    // The ordering the two pins encode, end to end:
+    //   #4611  — enum has 3 values; `applySystemFields` used a DENY-list
+    //            (`ownership !== 'org' && ownership !== 'none'`), so a fourth
+    //            value would have been stamped `owner_id` — the exact INVERSE of
+    //            D1's table. Rejecting it was the honest answer.
+    //   #5677  — flipped the judgement to an ALLOW-list in
+    //            `packages/objectql/src/registry.ts` and the shared derivation
+    //            `resolveInjectedSystemColumns` (`./injected-system-columns.ts`).
+    //            The engine now implements D1's `business_unit` row correctly.
+    //   #5678  — THIS change: the acceptance surface catches up. Strictly after
+    //            #5677, never before — a tier the schema emits before the engine
+    //            honours it gets the inverse result on its first appearance.
     //
-    // What survives is the plain sequencing fact: extending the acceptance
-    // surface is its own change, tracked as #5678 (protocol seat). Until it
-    // lands, the value is rejected, and the rejection is the honest answer — a
-    // tier an author cannot write is not a tier the schema should advertise.
+    // What this pin now guards, and why each half is here:
+    //   • the fourth value is ACCEPTED — the D1 declaration surface exists;
+    //   • it resolves to D1's row (`owner_id` ❌ / `owning_business_unit_id` ✅)
+    //     asserted against the injection AUTHORITY, not against prose, so the
+    //     enum member cannot drift away from what the engine does with it;
+    //   • a FIFTH value is still rejected, and the rejection enumerates all four
+    //     legal values — that enumeration is what tells an author (or an AI)
+    //     what to write instead, and it is the half that silently rots when a
+    //     later tier is added to the enum without updating the message.
     //
-    // When #5678 arrives, this test failing is the intended signal to REWRITE it
-    // (not to delete the guard) — assert the fourth value is accepted and that a
-    // fifth is still rejected naming four legal values. Co-update targets in the
-    // same PR, both of which currently state "still rejected" in prose:
-    //   • `packages/spec/src/system/constants/system-names.ts` — the
-    //     `OWNING_BUSINESS_UNIT_ID` JSDoc (its "not authorable yet" paragraph);
-    //   • the `systemFields` JSDoc in this directory's `object.zod.ts`.
-    //
-    // NOTE the direction: 'business_unit' was ALREADY rejected before #4611 —
-    // this test does not change behaviour, it PINS the pre-existing rejection
-    // so a later "obvious" enum completion cannot pass unnoticed. It also
-    // asserts the message still enumerates the three legal values, since that
-    // enumeration is what tells an author (or an AI) what to write instead.
-    it('rejects `business_unit` until ADR-0117 D1 injection lands, naming the three legal values (#4611)', () => {
+    // Still deliberately ABSENT: anything about the D2 stamping policy, the D4
+    // transfer guard, D5 legal-entity resolution or the D8 enablement gate.
+    // Those four remain undecided in ADR-0117 (Accepted D1/D3 scoped only); the
+    // column stays provisioned-but-inert, so an object declaring this tier gets
+    // the COLUMN today and no value in it. Do not read acceptance here as a
+    // decision on any of them.
+    it('accepts `business_unit` and resolves it to D1s row — owner_id withheld, unit anchor injected (#4611 → #5678)', () => {
+      const obj = ObjectSchema.create({
+        name: 'inventory_item',
+        ownership: 'business_unit',
+        fields: { sku: { type: 'text' } },
+      });
+      expect(obj.ownership).toBe('business_unit');
+
+      // The declaration must mean what D1's table says it means. Asserted
+      // against `resolveInjectedSystemColumns` — the single derivation both
+      // `applySystemFields` and author-time lint consume.
+      const plan = resolveInjectedSystemColumns(obj);
+      expect(plan.owner, 'business_unit is owned by a UNIT, not a person').toBe(false);
+      expect(plan.owningBusinessUnit).toBe(true);
+      expect(plan.names.has('owner_id')).toBe(false);
+      expect(plan.names.has('owning_business_unit_id')).toBe(true);
+    });
+
+    it('still rejects a fifth value, and the rejection enumerates all four legal values (#4611 → #5678)', () => {
       let message = '';
       try {
         ObjectSchema.create({
           name: 'inventory_item',
-          // @ts-expect-error — reserved by ADR-0117; not a legal value until the injection lands
-          ownership: 'business_unit',
+          // @ts-expect-error — 'team' is not an ADR-0117 tier; the enum has exactly four members
+          ownership: 'team',
           fields: { sku: { type: 'text' } },
         });
-        throw new Error('expected ObjectSchema.create to reject ownership: business_unit');
+        throw new Error('expected ObjectSchema.create to reject ownership: team');
       } catch (e) {
         message = e instanceof Error ? e.message : String(e);
       }
 
       expect(message).not.toContain('expected ObjectSchema.create to reject');
-      // The rejection must keep listing what IS legal — an author pointed at
-      // ADR-0117 needs to land on 'user' today, not guess.
-      for (const legal of ['user', 'org', 'none']) {
+      for (const legal of ['user', 'business_unit', 'org', 'none']) {
         expect(message, `rejection should enumerate the legal value '${legal}'`).toContain(legal);
       }
-      // And it must not have silently become legal.
       expect(message).not.toBe('');
     });
   });
@@ -1504,10 +1572,24 @@ describe('TenancyConfigSchema — #2763 strategy/crossTenantAccess removal', () 
   });
 
   it('rejects arbitrary unknown tenancy keys instead of silently stripping them (#1535)', () => {
+    // Truly arbitrary — no tombstone, no near-declared-key. Rejected with the
+    // surface named; there is nothing more the message can honestly offer.
+    const result = TenancyConfigSchema.safeParse({ enabled: true, zzNotAKey: 1 });
+    expect(result.success).toBe(false);
+    expect(result.error!.issues.map((i) => i.message).join('\n'))
+      .toContain('Unrecognized key(s) on `tenancy`: `zzNotAKey`');
+  });
+
+  it('a near-miss of a live key gets the template rename, not a dead-end verdict (#6619)', () => {
+    // While the map was hand-written, `tenantfield` was answered with
+    // "`tenantfield` is not a `tenancy` key." — a verdict that names the
+    // problem and never the fix. The fold onto `strictObject` brought the
+    // edit-distance channel with it: the same input now points at the key the
+    // author meant. A deliberate byte change, recorded as such.
     const result = TenancyConfigSchema.safeParse({ enabled: true, tenantfield: 'org_id' });
     expect(result.success).toBe(false);
     expect(result.error!.issues.map((i) => i.message).join('\n'))
-      .toContain('`tenantfield` is not a `tenancy` key');
+      .toContain('Did you mean `tenantfield` → `tenantField`?');
   });
 
   it('rejects a retired key on ObjectSchema.create() (the authoring entrypoint)', () => {
@@ -1522,22 +1604,28 @@ describe('TenancyConfigSchema — #2763 strategy/crossTenantAccess removal', () 
 });
 
 /**
- * Message ORDER on `strictTenancyError` (#6416, applying #5955's ruling).
+ * Message ORDER on the `tenancy` unknown-key rejection (#6416, applying
+ * #5955's ruling; #6619 folded the map into the shared template).
  *
- * A hand-written `$ZodErrorMap`: it never calls `strictUnknownKeyError`, so
- * #5955's reorder of the shared template did not reach it, and it is not one of
- * the 44 direct call sites #5593 migrates to `strictObject` either. Its
- * explanatory sentence is the standing two-modes explainer, and its FIX channel
- * is the per-key `  • ` bullets built just above it — the tombstone that tells
- * an upgrading author what to write instead. Those bullets used to sit BEHIND
- * ~160 characters of standing background, which is past the front of the
- * single-line renders several consumers use (`os validate`'s `• where: message`,
- * CI logs).
+ * Written against `strictTenancyError`, the hand-written `$ZodErrorMap` that
+ * neither #5955 nor #5593 could reach; #6416 direction 1 reordered it in place
+ * with these pins as acceptance criteria, and #6619 folded it into
+ * `strictObject` — the tombstones as exact `guidance` entries, the standing
+ * two-modes explainer in the template's `history` slot (which is the slot for
+ * "the sentence that must come LAST"). The pins migrated with the code: the
+ * ORDER contract (front matter → fix channels → explainer last) is now the
+ * template's own. Two byte-level changes rode the fold, pinned below:
+ *
+ * - a near-miss of a live key (`tenantfield`) gets the template's rename in
+ *   the front matter instead of the dead-end "`x` is not a `tenancy` key."
+ *   bullet the hand-written map emitted;
+ * - a key with no fix at all gets NO bullet — the front matter plus the
+ *   explainer carry everything the old catch-all bullet said.
  *
  * ORDER pins, not presence checks. Every `toContain` in the block above stays
  * green under either order — that is exactly why they cannot carry this fact.
  */
-describe('strictTenancyError message order — bullets before the explainer (#6416)', () => {
+describe('tenancy unknown-key message order — bullets before the explainer (#6416 / #6619)', () => {
   const EXPLAINER =
     'The two supported tenancy modes are: database-per-tenant = environment-level ' +
     'deployment (no object config); row-level isolation = `tenancy.enabled` + ' +
@@ -1562,28 +1650,41 @@ describe('strictTenancyError message order — bullets before the explainer (#64
     expect(m.endsWith(` ${EXPLAINER}`)).toBe(true);
   });
 
-  it('keeps EVERY per-key bullet ahead of the explainer, not just the first', () => {
+  it('keeps EVERY fix channel ahead of the explainer, not just the first', () => {
     // One issue names every offending key, so the explainer is a per-MESSAGE
-    // sentence: a reorder that put it after the first bullet would bury the rest.
+    // sentence: a reorder that put it after the first fix would bury the rest.
+    // Three keys, all three channels at once: two tombstone bullets plus the
+    // rename `tenantfield` earns since #6619 (the hand-written map answered it
+    // with a dead-end "is not a `tenancy` key." bullet instead).
     const m = messageFor({ strategy: 'isolated', crossTenantAccess: true, tenantfield: 'org_id' });
-    for (const bullet of [
+    for (const fix of [
+      'Did you mean `tenantfield` → `tenantField`?',
       '`tenancy.strategy` was removed',
       '`tenancy.crossTenantAccess` was removed',
-      '`tenantfield` is not a `tenancy` key.',
     ]) {
-      expect(m).toContain(bullet);
-      expect(m.indexOf(bullet), bullet).toBeLessThan(m.indexOf(EXPLAINER));
+      expect(m).toContain(fix);
+      expect(m.indexOf(fix), fix).toBeLessThan(m.indexOf(EXPLAINER));
     }
     expect(m.split(EXPLAINER)).toHaveLength(2);
     expect(m.endsWith(` ${EXPLAINER}`)).toBe(true);
   });
 
-  it('is a full-message pin for the plain unknown-key case', () => {
+  it('is a full-message pin for the near-miss case', () => {
     // Any stray separator, dropped newline or duplicated clause fails here.
+    // Byte change vs the hand-written map, deliberate (#6619): the dead-end
+    // bullet became the rename the author can act on.
     expect(messageFor({ tenantfield: 'org_id' })).toBe(
-      'Unrecognized key(s) on `tenancy`: `tenantfield`.\n' +
-      '  • `tenantfield` is not a `tenancy` key. ' +
+      'Unrecognized key(s) on `tenancy`: `tenantfield`. ' +
+      'Did you mean `tenantfield` → `tenantField`? ' +
       EXPLAINER,
+    );
+  });
+
+  it('is a full-message pin for the no-fix case', () => {
+    // No tombstone, no near key: no bullet at all — the front matter and the
+    // explainer carry everything the old catch-all bullet said.
+    expect(messageFor({ zzNotAKey: 1 })).toBe(
+      `Unrecognized key(s) on \`tenancy\`: \`zzNotAKey\`. ${EXPLAINER}`,
     );
   });
 });

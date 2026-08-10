@@ -1,6 +1,6 @@
 {
   "type": "page",
-  "_note": "PageSchema (UI). Renderers live in objectui, so consumers are cited as prose in `note` (not `evidence`, which resolves framework file:line). Seeded from the Studio page-design dogfood (framework#2254/#2261/#2265). Containers (variables/regions/interfaceConfig/slots/aria) classified at top level — one drill level, no divergent sub-statuses. The removed roadmap page types (record_review/blank) and their config fields (recordReview/blankLayout) were hard-removed — no longer authorable.",
+  "_note": "PageSchema (UI). Renderers live in objectui; objectui paths are cited with the `objectui:` realm marker (in `evidence` or `note` prose) and counted, not resolved against this repo (#5623). Seeded from the Studio page-design dogfood (framework#2254/#2261/#2265). Containers (variables/regions/interfaceConfig/slots/aria) classified at top level — one drill level, no divergent sub-statuses. The removed roadmap page types (record_review/blank) and their config fields (recordReview/blankLayout) were hard-removed — no longer authorable.",
   "props": {
     "source": {
       "status": "live",
@@ -40,11 +40,17 @@
     },
     "template": {
       "status": "live",
-      "note": "layout template (e.g. header-sidebar-main) selects the region arrangement — objectui components/renderers/layout/page.tsx + containers.tsx."
+      "verifiedAt": "2026-08-10",
+      "evidenceScope": "cross-repo",
+      "evidence": "objectui: packages/components/src/renderers/layout/page.tsx:397-398 resolves schema.template through TEMPLATE_REGISTRY (header-sidebar-main / three-column / dashboard, defined at :285-386) and :531 selects that layout variant for the render — measured objectui @11c1e71e",
+      "note": "layout template (e.g. header-sidebar-main) selects the region arrangement. RE-CITED 2026-08-10 (#7133/#7142): the old citation was split across 'page.tsx + containers.tsx' and the containers.tsx half is dead for this key — its only `template` occurrences (:240-248) are a `{field.path}` string-interpolation helper, an unrelated sense of the word. Verdict unchanged: LIVE."
     },
     "regions": {
       "status": "live",
-      "note": "region → component tree rendering (header/main/sidebar/footer) — objectui components/renderers/layout/page.tsx + containers.tsx."
+      "verifiedAt": "2026-08-10",
+      "evidenceScope": "cross-repo",
+      "evidence": "objectui: packages/components/src/renderers/layout/page.tsx:290 branches on schema.regions, :197-204 resolves the named slots (header/sidebar/main/aside/footer) and appends the remainder below main at :211, and :157 flattens their components for the JSX-source path — measured objectui @11c1e71e",
+      "note": "region → component tree rendering (header/main/sidebar/footer). RE-CITED 2026-08-10 (#7133/#7142): same split-citation pruning as `template` — at objectui @11c1e71e the containers.tsx half names `regions` only in a comment (:798, 'page:section — thin wrapper used inside regions'). Verdict unchanged: LIVE."
     },
     "isDefault": {
       "status": "live",

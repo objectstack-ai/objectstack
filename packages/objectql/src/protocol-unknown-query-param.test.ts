@@ -124,7 +124,7 @@ describe('#4134 — unknown list query params (real ObjectQL engine)', () => {
         const { driver, stores } = makeStubDriver();
         engine.registerDriver(driver, true);
         await engine.init();
-        engine.registry.registerObject(taskObject as any, 'test-package');
+        engine.registry.registerObject(taskObject, 'test-package');
         protocol = new ObjectStackProtocolImplementation(engine);
 
         const rows = new Map<string, Record<string, unknown>>();

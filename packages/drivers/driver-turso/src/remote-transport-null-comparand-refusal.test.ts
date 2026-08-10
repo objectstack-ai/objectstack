@@ -337,8 +337,12 @@ describe('RemoteTransport $null comparand refusal (#1116)', () => {
     it('leaves the regex family taking a non-string comparand', async () => {
       // Measured consistent and fail-closed across backends; `driver-sql`'s
       // #5041 comment excludes the family from its guard by name.
-      expect((await compile({ name: { $startsWith: 42 } })).args).toEqual(['42%']);
-      expect((await compile({ name: { $contains: true } })).args).toEqual(['%true%']);
+      // [#6518] The wildcard is `*`, not `%` — this transport emits `GLOB` now,
+      // because the family is case-SENSITIVE by contract and SQLite's `LIKE`
+      // is not. The claim under test is still that a NUMBER and a BOOLEAN keep
+      // rendering to text rather than being refused.
+      expect((await compile({ name: { $startsWith: 42 } })).args).toEqual(['42*']);
+      expect((await compile({ name: { $contains: true } })).args).toEqual(['*true*']);
     });
   });
 

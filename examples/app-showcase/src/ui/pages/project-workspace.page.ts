@@ -28,7 +28,7 @@ export const ProjectWorkspacePage = definePage({
             title: 'New Project + Tasks',
             subtitle:
               'Master-detail entry — fill the project, add its tasks inline, and save them together.',
-            icon: 'folder-plus',
+            // `icon` removed here (#6946): `page:header` never drew one — retired from the spec.
           },
         },
       ],

@@ -42,6 +42,15 @@
 //      ADR-0018, so the scalar parses fine), not `os validate`, and not even
 //      the one bind-time warn rule 3's case gets.
 //
+//   5. A `type: 'record_change'` flow whose start-node `triggerType` the engine
+//      routes NOWHERE — present but off-grammar (`triggerType: 'onCreate'`,
+//      #6637's original specimen) or absent entirely (the omission shape,
+//      widened into this same id by #7215 once #7039 had repaired the corpus's
+//      one live instance). Both are a flow that declares WHAT it is and then
+//      never arms it — two spellings of one defect. See 1f for the measured
+//      silence — every named runtime channel skips it because they all key off
+//      the same resolution that already gave up.
+//
 // The spec import is deliberate and is what makes rule 3 possible without a
 // second copy of the descriptor's shape living in this file. It stays inside the
 // package's stated dependency direction — lint → `@objectstack/spec`, never onto
@@ -54,15 +63,24 @@
 // It is whether THIS STACK is enough to know that:
 //
 //   - `error` — the never-fire family. `flow-time-relative-descriptor-invalid`,
-//     `flow-time-relative-descriptor-unroutable` and
-//     `flow-trigger-unknown-event` each read a value whose verdict is settled by
-//     a contract that ships in this repo: `TimeRelativeTriggerSchema` for the
+//     `flow-time-relative-descriptor-unroutable`, `flow-trigger-unknown-event`
+//     and `flow-trigger-unroutable` each read a value whose verdict is settled
+//     by a contract that ships in this repo: `TimeRelativeTriggerSchema` for the
 //     first, the engine's own `typeof … === 'object'` routing predicate for the
-//     second, `triggerTypeToHookEvents`' closed token grammar for the third.
+//     second, `triggerTypeToHookEvents`' closed token grammar for the third, and
+//     `resolveTriggerBinding`'s whole hardcoded branch chain for the fourth.
 //     Nothing an author or a tenant can INSTALL changes any of those verdicts,
 //     so there is no reading of the stack under which the flow fires. A rule
 //     that can prove a declared trigger is dead should not be asking the author
-//     to notice a warning about it.
+//     to notice a warning about it. `flow-trigger-unroutable` is the one that
+//     had to be MEASURED rather than assumed (#6637): a plugin CAN supply a
+//     trigger implementation, so "installing something fixes it" is a live
+//     hypothesis for this id in a way it is not for the other three. It is
+//     false — `registerTrigger` is keyed by the RESOLVED type
+//     (`record_change` / `schedule` / `time_relative` / `api`), and the
+//     authored-token → resolved-type map is a private chain of literal
+//     `startsWith` / `typeof` tests with no registry lookup anywhere in it. No
+//     package can teach the engine a new authored token.
 //   - `warning` — `flow-trigger-unknown-object`, both halves. An object name
 //     this stack does not define may be defined by another installed package,
 //     and this rule cannot see that package's objects. The hedge is real, so the
@@ -131,6 +149,29 @@ export const FLOW_TIME_RELATIVE_DESCRIPTOR_INVALID = 'flow-time-relative-descrip
  *     there is no runtime channel at all for it to be moved earlier from.
  */
 export const FLOW_TIME_RELATIVE_DESCRIPTOR_UNROUTABLE = 'flow-time-relative-descriptor-unroutable';
+/**
+ * #6637 — a `type: 'record_change'` flow whose start-node `triggerType` the
+ * engine routes to NO trigger at all, so the flow is silently demoted to a
+ * manual one. Widened by #7215 to also cover the token being ABSENT
+ * entirely — the omission shape is exactly as dead at runtime as the
+ * contradiction shape this id originally caught, so one id and one severity
+ * cover both (see 1f for the history of why the widening waited).
+ *
+ * A separate id from `flow-trigger-unknown-event`, on the same distinction that
+ * separates the two `timeRelative` ids: whether the engine ROUTES the value.
+ * The two partition the declared-but-dead tokens and can never both fire on one
+ * value, because being `record-`-prefixed is exactly what routes a token:
+ *
+ *   - `record-`-prefixed but off-grammar (`record-after-updated`) — the engine
+ *     ROUTES it to the record-change trigger, which maps it to zero hook events
+ *     and says so in a bind-time warn. That is `…-UNKNOWN-EVENT`, and this rule
+ *     file moves that warn earlier.
+ *   - anything else (`onCreate`, `on_update`, `''`, `['onCreate']`, or the key
+ *     absent entirely) — the engine routes it NOWHERE. That is this id, and
+ *     there is no runtime channel to move earlier from: see 1f for the three
+ *     call sites that each skip it.
+ */
+export const FLOW_TRIGGER_UNROUTABLE = 'flow-trigger-unroutable';
 
 type AnyRec = Record<string, unknown>;
 
@@ -173,6 +214,22 @@ function renderNonObject(v: unknown): string {
   if (t === 'string' || t === 'number' || t === 'boolean') return `${JSON.stringify(v)} (a ${t})`;
   if (t === 'bigint') return `${String(v)}n (a bigint)`;
   return `a ${t}`;
+}
+
+/**
+ * Render a `config.triggerType` for the 1f message. Unlike `renderNonObject`
+ * this one has to survive an ARRAY (`['onCreate']` is a real authored shape that
+ * reaches 1f — see 1d, which claims only the arrays holding a `record-` element),
+ * so it quotes strings and JSON-renders everything else, falling back to the
+ * bare type for the values `JSON.stringify` returns `undefined` for (a function,
+ * a symbol). Same reasoning as `renderNonObject`: a diagnostic that interpolates
+ * the word "undefined" into a sentence about a value that is very much present
+ * misreports its own subject.
+ */
+function renderTriggerToken(v: unknown): string {
+  if (typeof v === 'string') return `'${v}'`;
+  const json = JSON.stringify(v);
+  return json === undefined ? `a ${typeof v}` : json;
 }
 
 /** The start node of a flow definition, if any. */
@@ -465,6 +522,114 @@ export function validateFlowTriggerReadiness(stack: AnyRec): FlowTriggerReadines
           `sibling key config.schedule on the same start node (it defaults to daily, so it is usually ` +
           `omitted). See TimeRelativeTriggerSchema and ` +
           `content/docs/references/automation/time-relative-trigger.mdx.`,
+      });
+    }
+
+    // 1f. #6637 — a flow that DECLARES `type: 'record_change'` and then names a
+    //     start-node `triggerType` the engine routes to no trigger at all.
+    //
+    //     `triggerType: 'onCreate'` is the specimen. What actually happens was
+    //     measured rather than assumed, because the card's word for it
+    //     ("silently degrades") is a summary and a diagnostic has to be true:
+    //
+    //       - `AutomationEngine.resolveTriggerBinding` tests the authored token
+    //         with a literal `startsWith('record-')`, then tries the array form,
+    //         `timeRelative`, `config.schedule`/`flow.type === 'schedule'`, and
+    //         `flow.type === 'api'`/`triggerType === 'api'`. A token matching
+    //         none of them falls off the end and the method returns `undefined`.
+    //       - `activateFlowTrigger` opens with `if (!resolved) return;`, so the
+    //         flow is never bound and never logs a word. It is now, in every
+    //         respect the engine can observe, a manual flow.
+    //       - `getTriggerBindingAudit` — the silent-miss audit built for exactly
+    //         this class of defect — calls the SAME resolver and skips it with
+    //         `if (!resolved) continue; // manual / screen flow — nothing to
+    //         bind`. So the one channel that exists to name unbound flows cannot
+    //         see this one, and neither can its two consumers: the automation
+    //         plugin's `kernel:bootstrapped` warn loop, and the CLI startup
+    //         summary's `unbound` list.
+    //
+    //     What is left is not a diagnostic. `getFlowRuntimeStates` does report
+    //     the flow with `bound: false` and `triggerType: undefined`, but the
+    //     only place that surfaces is the banner's count line ("N flow(s)
+    //     registered, N-1 bound") — a number with no flow name and no reason.
+    //     So the message below says "nothing names it", which is the measured
+    //     claim, rather than "no signal at all", which would be one count off.
+    //
+    //     The scope is the narrow one, and the narrowing is what makes the rule
+    //     safe: it speaks ONLY for flows that declare `type: 'record_change'`.
+    //     Falling through to no binding is also the legitimate mechanism by
+    //     which a flow IS manual, and `lint-flow-patterns.test.ts` already pins
+    //     a deliberate `does NOT flag record_change` case for a neighbouring
+    //     rule — so a criterion phrased on the fall-through ALONE would flag
+    //     every manual and screen flow in existence. A flow that declares
+    //     `record_change` has stated its own intent: `autolaunched` and `screen`
+    //     are the types a genuinely manual flow declares, and neither reaches
+    //     here. That is what makes this decidable at authoring time.
+    //
+    //     One shape is deliberately NOT this rule's, pinned by a test:
+    //
+    //       - a `record_change` flow that ALSO declares something the engine
+    //         does route (`config.schedule`, `triggerType: 'api'`). That flow
+    //         binds and fires — on the wrong trigger's terms. A real defect, a
+    //         different one ("mis-bound", not "never bound"), with its own
+    //         severity argument to make. `routesToSomeTrigger` below is the
+    //         engine's chain character for character precisely so this rule
+    //         stays silent there instead of guessing at a second verdict.
+    //
+    //     The criterion covers BOTH ways a `record_change` flow ends up
+    //     unrouted: `triggerType` PRESENT but off-grammar (the contradiction —
+    //     `triggerType: 'onCreate'`, #6637's original specimen) and
+    //     `triggerType` ABSENT entirely (the omission — dead the same way,
+    //     arguably worse, and previously excluded on purpose). They were not
+    //     always one rule's concern: at #6637 time the omission shape had a
+    //     live instance in `examples/app-todo` (`TaskCompletionFlow`, #6882)
+    //     whose repair was a judgement about that app's semantics rather than a
+    //     lint decision, so covering the omission then would have gated a
+    //     shipped example app on a guess — the criterion required the key to be
+    //     PRESENT and the omission was tracked separately (#7041 item 2).
+    //     #7039 repaired that instance (`TaskCompletionFlow` now declares
+    //     `triggerType: 'record-after-update'`), which put a green corpus
+    //     under the open question; #7215 (maintainer-ruled) decided to widen
+    //     now rather than wait for the next omission instance to make landing
+    //     costly again. Both shapes are equally dead at runtime — two
+    //     spellings of one defect — so they share this id and severity.
+    const routesToSomeTrigger =
+      isRecordTriggered ||
+      isArrayRecordTriggered ||
+      isTimeRelative ||
+      config.schedule != null ||
+      flow.type === 'schedule' ||
+      flow.type === 'api' ||
+      triggerType === 'api';
+    if (start && flow.type === 'record_change' && !routesToSomeTrigger) {
+      const hasTriggerType = config.triggerType != null;
+      findings.push({
+        // `error` (#5762's criterion, applied to a fourth id). The verdict is
+        // the engine's own routing chain — literal `startsWith`/`typeof` tests
+        // with no registry lookup in them — so no installed package can make
+        // this token resolve. `registerTrigger` is keyed by the RESOLVED type,
+        // which is the near-miss worth stating: a plugin can supply the
+        // record-change trigger itself, and it still would not help, because
+        // the flow never reaches the point of asking for one.
+        severity: 'error',
+        rule: FLOW_TRIGGER_UNROUTABLE,
+        where: `flow "${flowName}" › start node`,
+        path: `flows[${flowIndex}].nodes[${start.index}].config.triggerType`,
+        message:
+          `declares type: 'record_change' but ` +
+          (hasTriggerType
+            ? `its start node's triggerType is ${renderTriggerToken(config.triggerType)}, which the engine ` +
+              `routes to NO trigger`
+            : `its start node has no triggerType at all, so there is nothing for the engine to route`) +
+          ` — it binds a record-change flow only for a token starting with 'record-', so this flow is demoted ` +
+          `to a manual one and never fires. Nothing NAMES it: the unbound-flow audit resolves the same binding ` +
+          `and skips the flow as "manual — nothing to bind", so neither the boot warning nor the startup ` +
+          `summary lists it; the only trace is the banner's flow count being one higher than its bound count.`,
+        hint:
+          `Use record-{before,after}-{create,update,delete,write} ('write' is create OR update in one flow, ` +
+          `#3427; create/insert are synonyms). If the flow really is launched by hand or from a screen, ` +
+          `declare type: 'autolaunched' or 'screen' instead of 'record_change' — those types have no trigger ` +
+          `to be missing.`,
       });
     }
 

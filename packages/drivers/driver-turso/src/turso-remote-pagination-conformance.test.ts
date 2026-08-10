@@ -61,6 +61,7 @@ import {
   PAGINATION_CASES,
   PAGINATION_ROWS,
   PAGINATION_UNORDERED_CASES,
+  PAGINATION_ZERO_LIMIT_CASES,
 } from '@objectstack/spec/data';
 import { TursoDriver } from './turso-driver.js';
 import { makeLibsqlSqliteStub, type LibsqlSqliteStub } from './libsql-sqlite-stub.testkit.js';
@@ -195,5 +196,95 @@ describe('TursoDriver remote — paged reads are a partition of the result set',
     const seen = await walk(5);
     expect(seen).toEqual([...PAGINATION_ALL_IDS].sort());
     expect(seen).not.toEqual(PAGINATION_ROWS.map((r) => r.id));
+  });
+
+  /**
+   * `limit: 0` means "return no records" (#6485/#6577). This transport does not
+   * go through knex at all — `remote-transport.ts` assembles its own
+   * `LIMIT`/`OFFSET` — so its agreement with the local half is a separate fact
+   * needing its own measurement, not an inheritance. It reads `!== undefined`
+   * today; this is what stops that from silently becoming `if (query.limit)`.
+   */
+  describe('`limit: 0` returns no records', () => {
+    for (const testCase of PAGINATION_ZERO_LIMIT_CASES) {
+      it(testCase.name, async () => {
+        const rows: Array<Record<string, unknown>> = await driver.find('ticket', { ...testCase.query });
+        expect(rows).toHaveLength(testCase.expectedRowCount);
+      });
+    }
+  });
+
+  /**
+   * The SELECT this transport puts on the wire for `query`, read off a
+   * recording client rather than recompiled here — the same instrument
+   * `remote-pagination-tiebreaker.test.ts` uses, and for the same reason: a
+   * test that rebuilds the expected statement asserts only that the builder
+   * works, and stays green on the day `find()` stops calling it.
+   */
+  async function statementFor(query: Record<string, unknown>): Promise<{ sql: string; args: unknown[] }> {
+    const sent: Array<{ sql: string; args: unknown[] }> = [];
+    const recorder = makeLibsqlSqliteStub();
+    const client = {
+      execute: async (stmt: { sql: string; args?: unknown[] }) => {
+        sent.push({ sql: stmt.sql, args: stmt.args ?? [] });
+        return recorder.execute(stmt);
+      },
+      batch: async (stmts: Array<{ sql: string; args?: unknown[] }>) => {
+        for (const s of stmts) sent.push({ sql: s.sql, args: s.args ?? [] });
+        return Promise.all(stmts.map((s) => recorder.execute(s)));
+      },
+      close: () => recorder.close(),
+    };
+    const recording = new TursoDriver({ url: 'libsql://recorder.turso.io', client: client as never });
+    await recording.connect();
+    await recording.syncSchema(TICKET_OBJECT.name, TICKET_OBJECT);
+    sent.length = 0; // drop the DDL round-trip; only the read is under test
+    await recording.find('ticket', query);
+    await recording.disconnect();
+    recorder.close();
+    const reads = sent.filter((s) => /^\s*SELECT/i.test(s.sql));
+    expect(reads).toHaveLength(1);
+    return reads[0]!;
+  }
+
+  /**
+   * An OFFSET with no LIMIT — the defect the case-set's bare-offset control
+   * surfaced here, and a separate bug from the `limit: 0` one it was added for.
+   *
+   * SQLite's grammar is `LIMIT expr [OFFSET expr]`, so an OFFSET cannot stand
+   * alone. This compiler emitted the two clauses independently and the server
+   * answered `near "OFFSET": syntax error` — for every offset value, not a
+   * boundary case, and only on THIS transport: the local half goes through knex,
+   * which synthesises the `LIMIT -1` no-limit sentinel.
+   *
+   * Kept as its own block rather than left to the shared control because the
+   * control asserts a row COUNT, and a count assertion reports this as "expected
+   * 12, got a thrown error" — which reads as a pagination fault rather than as
+   * a statement that never parsed.
+   */
+  describe('an offset with no limit still assembles a legal statement', () => {
+    for (const offset of [0, 1, 5]) {
+      it(`offset ${offset} alone does not throw a syntax error`, async () => {
+        const rows: Array<Record<string, unknown>> = await driver.find('ticket', { offset });
+        expect(rows).toHaveLength(PAGINATION_ROWS.length - offset);
+      });
+    }
+
+    it('sends what knex builds for the local transport — `LIMIT ? OFFSET ?` bound `[-1, 3]`', async () => {
+      const sent = await statementFor({ offset: 3 });
+      expect(sent.sql.toUpperCase()).toContain('LIMIT ? OFFSET ?');
+      expect(sent.args).toEqual([-1, 3]);
+    });
+
+    it("still sends the caller's own limit when one was given — the sentinel is not a default", async () => {
+      const sent = await statementFor({ limit: 0, offset: 3 });
+      expect(sent.args).toEqual([0, 3]);
+    });
+
+    it('adds no LIMIT at all when neither was given — the sentinel is not unconditional', async () => {
+      const sent = await statementFor({});
+      expect(sent.sql.toUpperCase()).not.toContain('LIMIT');
+      expect(sent.args).toEqual([]);
+    });
   });
 });

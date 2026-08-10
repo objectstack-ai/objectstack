@@ -16,6 +16,7 @@ import { CoreServiceName } from '@objectstack/spec/system';
 import type { IAutomationService } from '@objectstack/spec/contracts';
 import { isServiceServeable } from '../service-serveable.js';
 import { validationFailure } from '../validation-failure.js';
+import { parseIntegerParam, parseStringParam } from '../query-param.js';
 import { capabilityUnavailable } from './unavailable.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
@@ -119,7 +120,7 @@ export function createAutomationDomain(deps: DomainHandlerDeps): DomainRoute {
  *   DELETE /:name                → deleteFlow (unregisterFlow)
  *   POST   /:name/trigger        → execute (legacy: trigger/:name also supported)
  *   POST   /:name/toggle         → toggleFlow
- *   GET    /:name/runs           → listRuns
+ *   GET    /:name/runs           → listRuns (query: limit, cursor — validated, #7300)
  *   GET    /:name/runs/:runId    → getRun
  *   POST   /:name/runs/:runId/resume → resume a paused run (screen input / ADR-0019)
  *   GET    /:name/runs/:runId/screen → the screen a paused run awaits
@@ -353,7 +354,9 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
         // `ApprovalService`, which records the decision and enforces the slate —
         // on a SYMBOL-keyed marker. Assembling the signal field-wise (never
         // spreading the body) keeps that unforgeable even if a caller invents
-        // extra keys.
+        // extra keys. Since #5561 a node type that declares NO `resumeAuthority`
+        // is gated the same way, so this door is one a descriptor opts into with
+        // `'any'` rather than one every pausing node inherits.
         //
         // REFUSAL codes come back from the engine and are answered as such
         // rather than a 200 carrying `success: false` (which reads as "your
@@ -429,7 +432,36 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
         // GET /:name/runs → listRuns
         if (parts[1] === 'runs' && !parts[2] && m === 'GET') {
             if (typeof automationService.listRuns === 'function') {
-                const options = query ? { limit: query.limit ? Number(query.limit) : undefined, cursor: query.cursor } : undefined;
+                // [#7300] Both options are CHECKED at the point they are read,
+                // in the shared query-parameter refusal this route now consumes
+                // with `/notifications` (#6928 / PR #7299 — the same defect, one
+                // file over). What used to stand here was
+                // `{ limit: query.limit ? Number(query.limit) : undefined,
+                //    cursor: query.cursor }`:
+                //
+                //  - `?limit=abc` coerced to `NaN`, which no guard downstream
+                //    catches — `AutomationEngine.listRuns` computes
+                //    `options?.limit ?? 20` (`??` does not catch NaN), hands NaN
+                //    to `store.listHistory(flowName, NaN)`, and ends on
+                //    `.slice(0, NaN)`, which is `[]`. The caller was told "this
+                //    flow has no runs", with a 200, for a typo in the window.
+                //  - `cursor` was forwarded raw into a slot the contract types
+                //    `cursor?: string` (`IAutomationService.listRuns`), so a
+                //    repeated `?cursor=a&cursor=b` handed an ARRAY to a service
+                //    that declared it would receive a string. Today's engine
+                //    ignores the option entirely, which is exactly why this is
+                //    worth closing at the boundary rather than downstream: the
+                //    first implementation that starts honouring cursors must not
+                //    be the one that discovers the type was never enforced.
+                //
+                // Out-of-range numbers are NOT refused — `?limit=1000` still
+                // reaches the engine as 1000 and is sliced there. Range is the
+                // service's declared business (`ListRunsRequestSchema` bounds it
+                // 1..100); this gate only refuses values that were never whole
+                // numbers.
+                const options = query
+                    ? { limit: parseIntegerParam('limit', query.limit), cursor: parseStringParam('cursor', query.cursor) }
+                    : undefined;
                 const runs = await automationService.listRuns(name, options);
                 return { handled: true, response: deps.success({ runs, hasMore: false }) };
             }

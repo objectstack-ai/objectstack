@@ -9,14 +9,20 @@
       "note": "scheduling identity; a job without one is skipped loudly."
     },
     "label": {
-      "status": "dead",
-      "verifiedAt": "2026-08-02",
-      "note": "display metadata; no runtime consumer (sys_job stores name/schedule only). Docs-shaped annotation, deliberately KEPT and not authorWarn'd — the hook.label/description precedent, exempt from enforce-or-remove (ADR-0033)."
+      "status": "live",
+      "verifiedAt": "2026-08-10",
+      "evidenceScope": "cross-repo",
+      "evidence": "objectui @aeb8424b: packages/app-shell/src/views/metadata-admin/previews/JobPreview.tsx:257 takes `label` off the job draft with the job's own `name` as fallback, and packages/app-shell/src/views/metadata-admin/previews/JobPreview.tsx:313 renders it as the preview card's title",
+      "producer": "objectui @aeb8424b: packages/app-shell/src/views/metadata-admin/previews/index.ts:62 registers JobPreview against the `job` metadata type, and packages/app-shell/src/views/metadata-admin/ResourceEditPage.tsx:949 resolves that registration and hands the component the draft being edited — the read point is reachable, not merely present",
+      "note": "display metadata, and it IS displayed: the metadata-admin job preview shows it as the card title, falling back to the job `name` when unset. RE-GRADED dead → live 2026-08-10 (#7131) under the maintainer ruling that a designer preview rendering a key to a human is a runtime consumer — see README, 'Designer previews count as consumers'. The superseded wording, 'no runtime consumer (sys_job stores name/schedule only)', was true about the SCHEDULER and false as a whole-system claim: for a docs-shaped key the display IS the runtime effect, so sys_job was never the surface that could falsify it. UNCHANGED by the re-grade: still docs-shaped annotation, deliberately KEPT and not authorWarn'd — the hook.label/description precedent, exempt from enforce-or-remove (ADR-0033). `live` here does not mean the scheduler acquired a use for it."
     },
     "description": {
-      "status": "dead",
-      "verifiedAt": "2026-08-02",
-      "note": "same as `label`: docs-shaped, deliberately kept, no warning."
+      "status": "live",
+      "verifiedAt": "2026-08-10",
+      "evidenceScope": "cross-repo",
+      "evidence": "objectui @aeb8424b: packages/app-shell/src/views/metadata-admin/previews/JobPreview.tsx:258 takes `description` off the job draft, and packages/app-shell/src/views/metadata-admin/previews/JobPreview.tsx:316 renders it beneath the title whenever it is non-empty",
+      "producer": "objectui @aeb8424b: packages/app-shell/src/views/metadata-admin/previews/index.ts:62 registers JobPreview against the `job` metadata type, and packages/app-shell/src/views/metadata-admin/ResourceEditPage.tsx:949 resolves that registration and hands the component the draft being edited",
+      "note": "same as `label`: docs-shaped, deliberately kept, no warning — and displayed under the title in the same preview card. Re-graded dead → live with `label` on 2026-08-10 (#7131), same ruling, same ADR-0033 KEPT status."
     },
     "schedule": {
       "status": "live",
@@ -38,9 +44,11 @@
     },
     "timeout": {
       "status": "live",
-      "verifiedAt": "2026-08-02",
+      "verifiedAt": "2026-08-09",
+      "evidenceScope": "in-repo",
       "evidence": "packages/services/service-job/src/run-with-policy.ts:25-33",
-      "note": "per-attempt limit; an over-limit run records execution status 'timeout' (JobTimeoutError). The in-flight handler is abandoned, not cancelled — as documented."
+      "producer": "packages/runtime/src/app-plugin.ts:875-876 — the scheduler threads `{ retryPolicy: job.retryPolicy, timeout: job.timeout }` into svc.schedule, and only when the author set one of them",
+      "note": "per-attempt limit; an over-limit run records execution status 'timeout' (JobTimeoutError). The in-flight handler is abandoned, not cancelled — as documented. Producer side re-verified 2026-08-09 (#4837 slice): the seeded row cited the consumer only, which is the shape that carried `Seed.env` — here it holds, because #3494 wired the threading at the same time as the enforcement."
     },
     "enabled": {
       "status": "live",

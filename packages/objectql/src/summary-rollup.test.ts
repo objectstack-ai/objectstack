@@ -253,7 +253,7 @@ describe('roll-up summary index — a roll-up registered at RUNTIME still comput
     await engine.init();
 
     // A write BEFORE the roll-up exists — this is what warmed the stale cache.
-    engine.registry.registerObject({ name: 'note', fields: { body: { type: 'text' } } } as any);
+    engine.registry.registerObject({ name: 'note', fields: { body: { type: 'text' } } });
     await engine.insert('note', { body: 'warm the summary index' });
 
     // Now publish the parent + child, the way a runtime publish does.
@@ -420,7 +420,7 @@ describe('roll-up summary seeding on the PARENT insert (#5749)', () => {
         ghost_count: { type: 'summary', summaryOperations: { object: 'ghost', field: 'id', function: 'count' } },
       },
     } as any);
-    engine.registry.registerObject({ name: 'ghost', fields: { label: { type: 'text' } } } as any);
+    engine.registry.registerObject({ name: 'ghost', fields: { label: { type: 'text' } } });
 
     const p = await engine.insert('orphan_parent', { name: 'x' });
     expect(storeFor('orphan_parent').get(p.id).ghost_count ?? null).toBeNull();

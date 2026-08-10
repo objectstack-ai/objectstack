@@ -1,5 +1,321 @@
 # @objectstack/service-messaging
 
+## 17.0.0-rc.6
+
+### Patch Changes
+
+- f9a5c59: fix(service-messaging): close `DeliveryPayload.severity` to `'info' | 'warning' | 'critical'` (#7174)
+
+  `DeliveryPayload.severity` was declared `'info' | 'warning' | 'critical' | string`.
+  TypeScript absorbs a literal union member into the wider primitive it is unioned
+  with, so this was exactly `string` — the three names read as a closed vocabulary
+  but enforced nothing. `severity: 'urgent'` (or `''`) type-checked with no error,
+  even though the value flows into `inbox-channel.ts`'s `n.severity ?? 'info'` and
+  the `sys_inbox_message.severity` select column, whose options are the three
+  names, and even though this package's three sibling declarations of the same
+  concept — `MessagingService['emit']`'s `EmitInput.severity`
+  (`messaging-service.ts`), `MessagingChannel`'s `Notification['severity']`
+  (`channel.ts`), and the `inbox-message` object's `severity` select field — are
+  already closed to exactly this set.
+
+  Dropping the trailing `| string` makes the type mean what it says. No runtime
+  behaviour changes — every real producer already writes `input.severity ?? 'info'`
+  where `input.severity` is itself the already-closed `EmitInput.severity`, so no
+  in-repo construction site changes shape. This is the type-level twin of #7086
+  (`NotifyConfigSchema.severity`, closed in PR #7192): a construction site that
+  would previously narrow silently through the collapsed union now gets a
+  compiler refusal instead, named as a `@ts-expect-error` pin.
+
+  This is a narrowing of a publicly exported type
+  (`packages/services/service-messaging/src/outbox.ts`), so a consumer assigning
+  an out-of-vocabulary literal directly to `DeliveryPayload.severity` would newly
+  fail to compile — hence `patch`, following the #7140 precedent for a type-side
+  enforcement tightening with no runtime behaviour change.
+
+- 932d7e2: Migrate the inbox read-receipt race fallback onto the shared `isUniqueViolationError` predicate from `@objectstack/types` (#6542), deleting the last hand-written `isUniqueViolation()` copy that #6250 inventoried. One behaviour change, in the direction the call site wants: the shared predicate follows a bounded step down the `cause` chain, so a unique-constraint conflict wrapped by a pool or query-builder layer now triggers the `flipToRead()` convergence instead of being rethrown as a failed mark-read.
+- f1850d8: fix(services): `markAllRead` clears the WHOLE inbox, not one 200-row window (#6436)
+
+  `POST /api/v1/notifications/read/all` is published as "mark **every**
+  currently-unread inbox message as read". It swept
+  `listInbox(userId, { read: false, limit: 200 })` — one page of the LIST, and
+  `200` is that list's hard cap — so it cleared at most 200 receipts per call.
+
+  Measured over the real stack (sqlite-wasm + ObjectQL + service-messaging + hono
+
+  - dispatcher), one user, 260 unread:
+
+  | request                                |            before |            after |
+  | :------------------------------------- | ----------------: | ---------------: |
+  | `POST /notifications/read/all`         |  `readCount: 200` | `readCount: 260` |
+  | `GET /notifications` (same user, next) | `unreadCount: 60` | `unreadCount: 0` |
+
+  **#6363 did not cause this — it removed the cover.** While `unreadCount` was
+  itself window-scoped the shortfall was self-consistent and invisible: clear 200,
+  poll, see a window with nothing unread in it, badge 0. Now that the badge is a
+  true total, the same request pair states the contradiction out loud, which also
+  raises the severity — a user presses "mark all read" and the badge stays lit.
+
+  **A second, sharper face of the same defect, fixed with it.** That window was
+  `created_at desc` over ALL rows, with the `read` filter applied in memory AFTER
+  the truncation. An inbox whose newest 200 were already read therefore handed the
+  sweep an EMPTY id list and marked **nothing at all**, however much older unread
+  sat behind it. That is also why "loop the pages until one comes back empty" is
+  not the fix: it exits on exactly that empty first page.
+
+  **What it does now.** It reads the unread SET rather than a page of the list, in
+  a FIXED two reads whatever the inbox size — the same one-column, unwindowed
+  projection of `sys_inbox_message` that #6363's `countUnreadTotal` already issues
+  to answer the badge, joined against the receipt spine `listInbox` already reads
+  unbounded. No loop and no page count to bound; nothing is asked of the data
+  layer that the bell's poll does not already ask on every saturated page. The
+  write stays one receipt per unread notification — that is the receipt model
+  itself (ADR-0030) — and `markRead`'s check-then-act upsert, its unique-conflict
+  convergence and its "no receipt row yet" insert are untouched.
+
+  `readCount` now reports the number of **distinct notifications this call flipped
+  to `read`** (it reported "the unread ones inside the newest 200 rows"). Two
+  consequences: a notification materialized by several inbox rows counts once, and
+  an inbox row carrying no `notification_id` is skipped rather than counted —
+  read-state is keyed by the event id, so the receipt the old code wrote for those
+  (keyed by the inbox ROW id) was one the join could never read back.
+
+  Unchanged: the list window (default 50, cap 200, newest first), `unreadCount`,
+  `markRead`, and an inbox smaller than the old window — which does the same
+  writes it always did, and no extra ones.
+
+- 17d0954: fix(services): `unreadCount` counts the TOTAL unread, not the returned window (#6363)
+
+  `ListNotificationsResponseSchema.unreadCount` is published into the API
+  reference as **"Total number of unread notifications"** — a `.describe()`, so it
+  is the documentation shipped to every consumer of
+  `GET /api/v1/notifications`. It was counted inside `rows.map(...)` in
+  `MessagingService.listInbox`, i.e. over the rows that `limit` had already
+  truncated, so the badge saturated at the window size forever.
+
+  Measured on a real stack (sqlite-wasm + ObjectQL + service-messaging + hono +
+  dispatcher) with 60 unread messages:
+
+  | request     | `notifications[]` | `unreadCount` (before) | `unreadCount` (after) |
+  | :---------- | ----------------: | ---------------------: | --------------------: |
+  | no `limit`  |                50 |                 **50** |                **60** |
+  | `?limit=10` |                10 |                 **10** |                **60** |
+
+  The declaration was right and the implementation was wrong, so the
+  implementation moved (maintainer ruling, 2026-08-07). Every consumer that
+  renders `unreadCount` as a bell badge now gets the number it asked for; nothing
+  had to learn an implementation detail to read the field correctly.
+
+  **The list itself is unchanged.** `notifications[]` is still the window —
+  `limit` rows, default 50, hard cap 200, newest first. The two bounds were
+  conflated, not shared.
+
+  Read-state lives on `sys_notification_receipt`, not on the inbox row
+  (ADR-0030), so the total is a reverse join rather than a `count()`. It is
+  computed only when the window came back **saturated** (`rows.length === limit`)
+  — a short window is already the whole matching set, so the common inbox costs
+  exactly what it cost before. When the window does saturate, the extra work is
+  one projection read of a single column (`notification_id`) under the same
+  `where`, no `orderBy` and no `limit`: the same order as the receipt scan
+  `listInbox` already performs unconditionally, and exact under a `type` filter
+  and for rows carrying no `notification_id`.
+
+  Two related behaviours are unchanged and now pinned: a `read` filter narrows
+  the list and never the badge (asking for the read half does not mean zero
+  unread), and a `type` filter narrows both (the count answers the query that was
+  asked).
+
+- Updated dependencies [3d5c090]
+- Updated dependencies [e5bd768]
+- Updated dependencies [e027b3e]
+- Updated dependencies [c2429b0]
+- Updated dependencies [445a0c2]
+- Updated dependencies [f6609e6]
+- Updated dependencies [a70358a]
+- Updated dependencies [97e7e3c]
+- Updated dependencies [8828b9e]
+- Updated dependencies [53068c1]
+- Updated dependencies [ee58392]
+- Updated dependencies [f16e54e]
+- Updated dependencies [06be54e]
+- Updated dependencies [259459d]
+- Updated dependencies [3f7f14e]
+- Updated dependencies [6968885]
+- Updated dependencies [eaed61f]
+- Updated dependencies [debe2f6]
+- Updated dependencies [97b0798]
+- Updated dependencies [5fa04fb]
+- Updated dependencies [43a7a8d]
+- Updated dependencies [73f69dc]
+- Updated dependencies [04c56aa]
+- Updated dependencies [b3efeb7]
+- Updated dependencies [ddd075a]
+- Updated dependencies [88154be]
+- Updated dependencies [e8dc61e]
+- Updated dependencies [2f3e793]
+- Updated dependencies [d8e8d9c]
+- Updated dependencies [94e749b]
+- Updated dependencies [ea1d916]
+- Updated dependencies [ae31a19]
+- Updated dependencies [e0f300b]
+- Updated dependencies [62b6a2f]
+- Updated dependencies [5b4780b]
+- Updated dependencies [a933452]
+- Updated dependencies [8140915]
+- Updated dependencies [7b48cf9]
+- Updated dependencies [b5404f4]
+- Updated dependencies [f764691]
+- Updated dependencies [e120a5a]
+- Updated dependencies [e650d67]
+- Updated dependencies [04476e7]
+- Updated dependencies [79228cd]
+- Updated dependencies [b3363e9]
+- Updated dependencies [2ef1807]
+- Updated dependencies [d03fe25]
+- Updated dependencies [2672f85]
+- Updated dependencies [11066f6]
+- Updated dependencies [916af17]
+- Updated dependencies [84c86fb]
+- Updated dependencies [2a2a9fb]
+- Updated dependencies [a2e157c]
+- Updated dependencies [95c4227]
+- Updated dependencies [2a61116]
+- Updated dependencies [d4df105]
+- Updated dependencies [e2798fa]
+- Updated dependencies [0fd8556]
+- Updated dependencies [74155c7]
+- Updated dependencies [6908830]
+- Updated dependencies [8b06bba]
+- Updated dependencies [4c54037]
+- Updated dependencies [0f7157b]
+- Updated dependencies [d9bef45]
+- Updated dependencies [f549a0d]
+- Updated dependencies [82da264]
+- Updated dependencies [f586f1a]
+- Updated dependencies [9b9b70f]
+- Updated dependencies [f5a9bc2]
+- Updated dependencies [881a3cc]
+- Updated dependencies [ad6317b]
+- Updated dependencies [8a88885]
+- Updated dependencies [5f7669e]
+- Updated dependencies [becbe53]
+- Updated dependencies [b127c8b]
+- Updated dependencies [a80302a]
+- Updated dependencies [474f131]
+- Updated dependencies [050cd82]
+- Updated dependencies [4d552af]
+- Updated dependencies [44d677c]
+- Updated dependencies [c32944d]
+- Updated dependencies [1dd780f]
+- Updated dependencies [c8d6f6e]
+- Updated dependencies [92a67f2]
+- Updated dependencies [9136327]
+- Updated dependencies [bf0ae99]
+- Updated dependencies [cb3b6cd]
+- Updated dependencies [73b7234]
+- Updated dependencies [d2b97c3]
+- Updated dependencies [59b794f]
+- Updated dependencies [fc3a36a]
+- Updated dependencies [69787f0]
+- Updated dependencies [5d022a1]
+- Updated dependencies [042b9ee]
+- Updated dependencies [f549a0d]
+- Updated dependencies [a36db28]
+- Updated dependencies [3f8817a]
+- Updated dependencies [a2443e3]
+- Updated dependencies [e1554b1]
+- Updated dependencies [4856789]
+- Updated dependencies [c3f4916]
+- Updated dependencies [33e0385]
+- Updated dependencies [2205363]
+- Updated dependencies [09fe58d]
+- Updated dependencies [d0a5ceb]
+- Updated dependencies [e18a162]
+- Updated dependencies [d6d1a50]
+- Updated dependencies [d127ff0]
+- Updated dependencies [9b86cf6]
+- Updated dependencies [8825a06]
+- Updated dependencies [5087ac6]
+- Updated dependencies [2d1ddf0]
+- Updated dependencies [354b00f]
+- Updated dependencies [3de535b]
+- Updated dependencies [fe2e15a]
+- Updated dependencies [c6b6bb4]
+- Updated dependencies [59c544d]
+- Updated dependencies [2f59da0]
+- Updated dependencies [8ad609c]
+- Updated dependencies [bbee302]
+- Updated dependencies [08863dd]
+- Updated dependencies [56664f5]
+- Updated dependencies [31cbe90]
+- Updated dependencies [90bbf25]
+- Updated dependencies [eb91eba]
+- Updated dependencies [42da73d]
+- Updated dependencies [643b7c7]
+- Updated dependencies [d0d5205]
+- Updated dependencies [1a15893]
+- Updated dependencies [b70e534]
+- Updated dependencies [2233a85]
+- Updated dependencies [62dd69a]
+- Updated dependencies [e15e679]
+- Updated dependencies [2ab1257]
+- Updated dependencies [4cc4fb7]
+- Updated dependencies [28d1eb7]
+- Updated dependencies [2c26040]
+- Updated dependencies [f758cec]
+- Updated dependencies [78f0be8]
+- Updated dependencies [35f7fb4]
+- Updated dependencies [a5302c7]
+- Updated dependencies [7084313]
+- Updated dependencies [91cefb8]
+- Updated dependencies [0e043d8]
+- Updated dependencies [dadd1ad]
+- Updated dependencies [2f2e63c]
+- Updated dependencies [486d526]
+- Updated dependencies [89d7b35]
+- Updated dependencies [85ec26d]
+- Updated dependencies [f6476fc]
+- Updated dependencies [4ac12ef]
+- Updated dependencies [b88f5e8]
+- Updated dependencies [42cc219]
+- Updated dependencies [d42a92f]
+- Updated dependencies [51d74ad]
+- Updated dependencies [d7e0b42]
+- Updated dependencies [3510e4a]
+- Updated dependencies [aa4b90d]
+- Updated dependencies [54299ca]
+- Updated dependencies [dc61def]
+- Updated dependencies [251e888]
+- Updated dependencies [183b4c4]
+- Updated dependencies [2fdb36e]
+- Updated dependencies [e787608]
+- Updated dependencies [20526f5]
+- Updated dependencies [c5eef1d]
+- Updated dependencies [e0f300b]
+- Updated dependencies [761a0ba]
+- Updated dependencies [61282f9]
+- Updated dependencies [be87153]
+- Updated dependencies [60f0dd8]
+- Updated dependencies [a87c5cd]
+- Updated dependencies [a47f338]
+- Updated dependencies [2598216]
+- Updated dependencies [2c7e62d]
+- Updated dependencies [eb7613c]
+- Updated dependencies [ecc9110]
+- Updated dependencies [f7bd4e2]
+- Updated dependencies [361bd5b]
+- Updated dependencies [129b378]
+- Updated dependencies [88f9d94]
+- Updated dependencies [1818998]
+- Updated dependencies [09ee21c]
+- Updated dependencies [f549a0d]
+- Updated dependencies [3fc2e48]
+- Updated dependencies [e8f435c]
+- Updated dependencies [41610f6]
+  - @objectstack/spec@17.0.0-rc.6
+  - @objectstack/platform-objects@17.0.0-rc.6
+  - @objectstack/core@17.0.0-rc.6
+  - @objectstack/types@17.0.0-rc.6
+
 ## 17.0.0-rc.5
 
 ### Patch Changes

@@ -41,6 +41,38 @@ export * from './package-upgrade.zod';
 export * from './plugin-capability.zod';
 export * from './plugin-lifecycle-advanced.zod';
 export * from './plugin-loading.zod';
+// plugin-loading.zod's CONFIGURATION half (PluginLoadingConfigSchema +
+// PluginLoadingStrategySchema / PluginPreloadConfigSchema /
+// PluginCodeSplittingSchema / PluginDynamicImportSchema /
+// PluginInitializationSchema / PluginDependencyResolutionSchema /
+// PluginHotReloadSchema / PluginCachingSchema / PluginSandboxingSchema /
+// PluginPerformanceMonitoringSchema + every type alias) was REMOVED per ADR-0049
+// enforce-or-remove (#4914), together with the `Manifest.loading` key that was
+// its only carrier — that key is now a `retiredKey()` tombstone in
+// `manifest.zod.ts`, because `ManifestSchema` is not `.strict()` and a plain
+// deletion would strip it in silence.
+//
+// The block declared a full loading policy — lazy/eager strategy, preloading,
+// code splitting, dynamic import, initialization, dependency resolution, hot
+// reload, caching, sandboxing and performance budgets — and NOTHING read it. A
+// bare-name scan of objectstack, cloud and objectui (each with a control probe)
+// put every hit inside `packages/spec` itself. `manifest.loading.*` had zero
+// readers in `packages/core`, `packages/runtime` and `packages/metadata`.
+//
+// `sandboxing` is why this outranked ordinary inert-key cleanup: it declared
+// process/vm/iframe/web-worker isolation, IPC transports and an `allowedServices`
+// ACL, so an AI author (ADR-0033) reading it concluded the platform sandboxes
+// plugins, wrote the config, and got a clean parse and zero isolation. An inert
+// security control is worse than an absent one because it is believed.
+//
+// Hot reload converges on ONE vocabulary (ruling §2): the surviving side is
+// `HotReloadConfigSchema` in `plugin-lifecycle-advanced.zod.ts`, which is the one
+// `HotReloadManager` (`packages/core/src/hot-reload.ts`) reads. It has an
+// implementation body but no runtime composes it yet — kept as the starting
+// point for a future enforce decision, which is deliberately NOT this change.
+//
+// What survives here is only the observational half (`PluginLoadingEventSchema`,
+// `PluginLoadingStateSchema`).
 // plugin-runtime.zod (DynamicLoadRequestSchema / DynamicUnloadRequestSchema /
 // DynamicPluginResultSchema / PluginSourceSchema / DynamicPluginOperationSchema
 // + every type alias) was REMOVED per ADR-0049 enforce-or-remove (#4834). The

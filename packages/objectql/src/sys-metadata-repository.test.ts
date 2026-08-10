@@ -321,24 +321,35 @@ describe('SysMetadataRepository', () => {
         expect(result.version).toMatch(/^sha256:/);
     });
 
-    it('put accepts statically-registered `api` with intent=runtime-only (#5271)', async () => {
-        // The other half of the same gate: `api` graduated INTO the registry
-        // with `allowRuntimeCreate: true`, so the repository door it already
-        // had must stay open. `assertAllowed` is a TYPE gate — the body shape
-        // is judged by `saveMetaItem`'s 422, one layer up.
-        const result = await repo.put(
-            { org: 'org_alpha', type: 'api', name: 'my_api' },
-            {
-                name: 'my_api',
-                path: '/api/v1/apps/alpha/tasks',
-                method: 'GET',
-                type: 'object_operation',
-                target: 'alpha_task',
-                objectParams: { object: 'alpha_task', operation: 'find' },
-            },
-            { parentVersion: null, actor: 'studio', intent: 'runtime-only' },
-        );
-        expect(result.version).toMatch(/^sha256:/);
+    it('put refuses statically-registered `api` with allowRuntimeCreate:false (#5488)', async () => {
+        // RETIREMENT PIN. This case asserted the OPPOSITE until 2026-08-09:
+        // `api` graduated into the registry with `allowRuntimeCreate: true`
+        // (#5271), so "the repository door it already had must stay open".
+        // That door is now deliberately shut — maintainer ruling
+        // 2026-08-07T16:59Z, implemented in #5488 — because a runtime-created
+        // endpoint was never served: `matchEndpoint` reads
+        // `MetadataManager.listForIndex('api')` (registry + filesystem/memory
+        // loaders), and a runtime write lands in `sys_metadata`, in neither.
+        //
+        // `assertAllowed` derives its allow-list from the same registry
+        // constant the protocol inlet uses, so the repository refuses in the
+        // same breath — the second of the two doors #5086 named. The body
+        // below is deliberately spec-VALID: only a body nothing else would
+        // reject proves the refusal came from the TYPE gate.
+        await expect(
+            repo.put(
+                { org: 'org_alpha', type: 'api', name: 'my_api' },
+                {
+                    name: 'my_api',
+                    path: '/api/v1/apps/alpha/tasks',
+                    method: 'GET',
+                    type: 'object_operation',
+                    target: 'alpha_task',
+                    objectParams: { object: 'alpha_task', operation: 'find' },
+                },
+                { parentVersion: null, actor: 'studio', intent: 'runtime-only' },
+            ),
+        ).rejects.toMatchObject({ code: 'NOT_CREATABLE', status: 403 });
     });
 
     it('put still refuses plugin-registered type without runtime-only intent', async () => {
@@ -673,18 +684,31 @@ describe('SysMetadataRepository', () => {
 
     it('promoteDraft carries the draft package binding onto the promoted active row', async () => {
         // A whole-app build stages every artifact bound to the app's workspace
-        // package and the app starts `hidden`. Promotion MUST preserve that
-        // binding — otherwise the active app row lands unbound (package_id NULL)
-        // and the ADR-0045 publish visibility flip (which looks up hidden apps
-        // by package: getMetaItems({ type:'app', packageId })) never matches it,
-        // leaving the freshly-built app hidden from the app switcher forever.
+        // package and the app starts `_unpublished` (#4829 — the ADR-0045 §3
+        // gate; it rode on `hidden` until the two contracts were split).
+        // Promotion MUST preserve that binding — otherwise the active app row
+        // lands unbound (package_id NULL) and the publish visibility flip (which
+        // looks up unpublished apps by package: getMetaItems({ type:'app',
+        // packageId })) never matches it, leaving the freshly-built app
+        // externally unobservable forever.
         const ref = { org: 'org_alpha', type: 'app' as const, name: 'ticket_service_app' };
+        // `intent: 'runtime-only'` — a whole-app build stages a BRAND-NEW app
+        // (nothing artifact-backed under this name), which is exactly the
+        // intent the protocol layer computes for it. Required since #6483
+        // rolled `app`'s `allowOrgOverride` back to `false` (ADR-0005): the
+        // repository's default `override-artifact` intent now 403s for `app`,
+        // while the runtime-create tier this write actually belongs to stays
+        // open (`allowRuntimeCreate: true`).
         await repo.put(
             ref,
-            { name: 'ticket_service_app', label: 'Tickets', hidden: true },
-            { parentVersion: null, actor: 'studio', state: 'draft', packageId: 'app.tickets' },
+            { name: 'ticket_service_app', label: 'Tickets', _unpublished: true },
+            { parentVersion: null, actor: 'studio', state: 'draft', packageId: 'app.tickets', intent: 'runtime-only' },
         );
-        await repo.promoteDraft(ref, { actor: 'admin' });
+        // Same `runtime-only` intent the real caller computes: the protocol's
+        // publish handler derives intent from `isArtifactBacked` and nothing
+        // ships an artifact under this name (promoteDraft's own default is
+        // `override-artifact`, which #6483's `app` rollback now 403s).
+        await repo.promoteDraft(ref, { actor: 'admin', intent: 'runtime-only' });
         const activeRow = Array.from(engine.rows.values()).find(
             (r) => (r as any).type === 'app'
                 && (r as any).name === 'ticket_service_app'

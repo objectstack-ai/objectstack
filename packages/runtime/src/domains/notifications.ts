@@ -14,7 +14,7 @@
  * as it did from the if-chain.
  *
  * Routes (path is the sub-path after `/notifications`):
- *   GET  ''          → listInbox    (query: read, type, limit)
+ *   GET  ''          → listInbox    (query: read, type, limit — validated, #6928)
  *   POST /read       → markRead     (body: { ids: string[] })
  *   POST /read/all   → markAllRead
  */
@@ -24,9 +24,69 @@ import { MarkNotificationsReadRequestSchema } from '@objectstack/spec/api';
 import type { INotificationService } from '@objectstack/spec/contracts';
 import { isServiceServeable } from '../service-serveable.js';
 import { validationFailure, fieldsFromZodIssues } from '../validation-failure.js';
+import { parseBooleanParam, parseIntegerParam, parseStringParam } from '../query-param.js';
 import { capabilityUnavailable } from './unavailable.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
+
+// ---------------------------------------------------------------------------
+// [#6928] GET /notifications — the query parse point, with the coercions checked
+// ---------------------------------------------------------------------------
+//
+// All three filters on this route arrive as raw strings (the typed SDK cannot
+// produce anything else, and neither can a browser), and all three used to be
+// coerced with a bare `Number(...)` / `String(...)` / `=== 'true'`. A coercion
+// with no check does not fail — it INVENTS a value and serves it, which is why
+// every one of these was a 200 with the wrong answer rather than a 400:
+//
+//   ?limit=abc  →  NaN         →  data.find({ limit: NaN })   (the filed defect)
+//   ?read=1     →  false       →  the UNREAD half, silently
+//   ?type=a&type=b → 'a,b'     →  a topic nothing matches, silently
+//
+// [#7300] The parsers that refuse those used to live right here, module-local,
+// because one consumer did not justify a shared module. `GET /automation/:name
+// /runs` turned out to carry character-for-character the same `Number(...)`
+// coercion, so they moved to `../query-param.ts` — unchanged in behaviour, and
+// consumed from both routes rather than copied into the second one. Each
+// parser's docblock over there says what it refuses and, the half that matters
+// more, what it deliberately still accepts unchanged; the route-specific
+// mechanism stays below, at the call site.
+
+/**
+ * `read` — a TRI-state filter: absent means both halves of the inbox, so
+ * `undefined` has to stay reachable and must never collapse into `false`.
+ * `String(query.read) === 'true'` answered `false` for every spelling that was
+ * not exactly `true`, so `?read=1` served the UNREAD half to a caller who had
+ * asked for the read half.
+ */
+const parseReadFilter = (raw: unknown): boolean | undefined => parseBooleanParam('read', raw);
+
+/**
+ * `limit` — the window size, and the defect #6928 was filed for. `NaN` survived
+ * `MessagingService.listInbox`'s clamp (`Math.min(Math.max(NaN ?? 50, 1), 200)`
+ * — `??` does not catch NaN and neither bound rejects it) and reached the driver
+ * as `data.find({ limit: NaN })`.
+ *
+ * The out-of-RANGE number stays accepted on purpose: the clamp is the DECLARED
+ * contract (`ListNotificationsRequestSchema.limit` — the platform inbox "clamps
+ * any requested value into 1..200 rather than refusing it"), so `?limit=1000`
+ * still answers 200 rows and `?limit=-5` still answers 1.
+ */
+const parseLimitWindow = (raw: unknown): number | undefined => parseIntegerParam('limit', raw);
+
+/**
+ * `type` — the topic filter, declared `z.string()`. A repeated `?type=a&type=b`
+ * arrives as an ARRAY and `String(...)` made it the single topic `'a,b'` — an
+ * empty inbox, served as a 200.
+ *
+ * The falsy gate is this route's own, preserved verbatim from
+ * `query?.type ? String(query.type) : undefined`: an empty `?type=` has always
+ * meant "no topic filter" here and must not become a new 400.
+ */
+function parseTypeFilter(raw: unknown): string | undefined {
+    if (!raw) return undefined;
+    return parseStringParam('type', raw);
+}
 
 export function createNotificationsDomain(deps: DomainHandlerDeps): DomainRoute {
     return {
@@ -104,9 +164,14 @@ export async function handleNotificationRequest(
 
     // GET /notifications — list the user's inbox joined with read-state.
     if (subPath === '' && m === 'GET') {
-        const read = query?.read === undefined ? undefined : String(query.read) === 'true';
-        const limit = query?.limit ? Number(query.limit) : undefined;
-        const type = query?.type ? String(query.type) : undefined;
+        // [#6928] Each coerced parameter is CHECKED at the point it is coerced,
+        // and a value the contract does not admit is refused (400) instead of
+        // being guessed at. Each parser's own docblock (top of this file) says
+        // what it refuses and — the half that matters more — what it
+        // deliberately still accepts unchanged.
+        const read = parseReadFilter(query?.read);
+        const limit = parseLimitWindow(query?.limit);
+        const type = parseTypeFilter(query?.type);
         const result = await inbox.listInbox(userId, { read, type, limit });
         return { handled: true, response: deps.success(result) };
     }

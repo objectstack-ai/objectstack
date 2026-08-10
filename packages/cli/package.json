@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/cli",
-  "version": "17.0.0-rc.5",
+  "version": "17.0.0-rc.6",
   "description": "Command Line Interface for ObjectStack Protocol",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -12,7 +12,8 @@
     "build": "if [ -n \"$OS_SKIP_DTS\" ]; then tsc -p tsconfig.build.json --noCheck --declaration false --declarationMap false; else tsc -p tsconfig.build.json; fi",
     "dev": "tsc -p tsconfig.build.json --watch",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "check:app-nav-i18n": "node scripts/check-app-nav-i18n.mjs --self-test && node scripts/check-app-nav-i18n.mjs"
   },
   "keywords": [
     "objectstack",

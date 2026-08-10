@@ -2,8 +2,8 @@
 
 import { z } from 'zod';
 import { PluginCapabilityManifestSchema } from './plugin-capability.zod';
-import { PluginLoadingConfigSchema } from './plugin-loading.zod';
 import { CORE_PLUGIN_TYPES } from './plugin.zod';
+import { retiredKey } from '../shared/retired-key';
 import { SeedSchema } from '../data/seed.zod';
 import { NavigationContributionSchema } from '../ui/app.zod';
 
@@ -380,7 +380,7 @@ export const ManifestSchema = z.object({
      * Enables connecting to new types of datasources.
      */
     drivers: z.array(z.object({
-      id: z.string().describe('Driver unique identifier (e.g. "postgres", "mongo")'),
+      id: z.string().describe('Driver unique identifier (e.g. "postgres", "mongodb")'),
       label: z.string().describe('Human readable name'),
       description: z.string().optional(),
     })).optional().describe('Driver contributions'),
@@ -502,12 +502,33 @@ export const ManifestSchema = z.object({
     .describe('Navigation items this package contributes into apps owned by other packages'),
 
   /**
-   * Plugin Loading Configuration.
-   * Configures how the plugin is loaded, initialized, and managed at runtime.
-   * Includes strategies for lazy loading, code splitting, caching, and hot reload.
+   * REMOVED in v17 (#4914, ADR-0049 enforce-or-remove).
+   *
+   * `loading` carried the whole `PluginLoadingConfig` block — `strategy`,
+   * `preload`, `codeSplitting`, `dynamicImport`, `initialization`,
+   * `dependencyResolution`, `hotReload`, `caching`, `sandboxing`, `monitoring`
+   * — and NOTHING read any of it. It parsed, it entered the manifest, and it
+   * changed nothing. Tombstoned rather than deleted because `ManifestSchema` is
+   * not `.strict()`: a plain deletion would silently strip the key, replacing an
+   * inert declaration with an invisible one.
+   *
+   * See `plugin-loading.zod.ts` for the full record, including why `sandboxing`
+   * made this a security concern and not merely tidying.
    */
-  loading: PluginLoadingConfigSchema.optional()
-    .describe('Plugin loading and runtime behavior configuration'),
+  loading: retiredKey(
+    '`manifest.loading` was removed in @objectstack/spec 17.0.0 (#4914, ADR-0049 ' +
+    'enforce-or-remove) — the entire block (`strategy`, `preload`, `codeSplitting`, ' +
+    '`dynamicImport`, `initialization`, `dependencyResolution`, `hotReload`, `caching`, ' +
+    '`sandboxing`, `monitoring`) had no runtime reader in any repo, so authoring it ' +
+    'configured nothing. Delete the key. Plugins are composed at boot — `defineStack` ' +
+    'registers them and the kernel runs `init` then `start` in an order topologically ' +
+    "resolved from each composed plugin's own `dependencies` / `optionalDependencies` " +
+    '(`resolvePluginOrder`); the set is fixed until the process restarts. ' +
+    '⚠️ `loading.sandboxing` in particular never isolated anything: it did not run ' +
+    'plugins in a process, vm, iframe or web-worker, and `allowedServices` gated no ' +
+    'call. If you were relying on it for isolation, you had none — use the plugin trust ' +
+    'tier (`manifest.runtime`) and the permission declarations, which are enforced.',
+  ),
 
   /**
    * Platform Compatibility Requirements.

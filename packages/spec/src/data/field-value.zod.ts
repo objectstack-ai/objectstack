@@ -34,7 +34,6 @@ import { z } from 'zod';
 import { lazySchema } from '../shared/lazy-schema';
 import { SystemObjectName } from '../system/constants/system-names';
 import type { FieldType } from './field.zod';
-import { AddressSchema } from './field.zod';
 
 /* ────────────────────────────────────────────────────────────────────────────
  * Semantic type classes
@@ -234,16 +233,19 @@ export function isMultiValueField(def: ValueShapeFieldDef): boolean {
 /** `YYYY-MM-DD` — the calendar-day stored form (driver collapses Date → day). */
 export const CalendarDateValueSchema = lazySchema(() =>
   z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'expected YYYY-MM-DD (calendar day, not an instant)'));
+export type CalendarDateValue = z.input<typeof CalendarDateValueSchema>;
 
 /** ISO-8601 instant with explicit zone — the `datetime` stored form. */
 export const InstantValueSchema = lazySchema(() =>
   z.string().refine((s) => !Number.isNaN(Date.parse(s)) && (/[Zz]$/.test(s) || /[+-]\d{2}:?\d{2}$/.test(s.slice(10))),
     'expected an ISO-8601 instant with explicit zone (e.g. 2026-03-15T14:30:00.000Z)'));
+export type InstantValue = z.input<typeof InstantValueSchema>;
 
 /** `HH:MM[:SS[.fff]]` with optional zone — the `time` stored form (#2004). */
 export const ClockTimeValueSchema = lazySchema(() =>
   z.string().regex(/^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d(\.\d+)?)?(Z|[+-]([01]\d|2[0-3]):?[0-5]\d)?$/,
     'expected HH:MM or HH:MM:SS (wall-clock time of day)'));
+export type ClockTimeValue = z.input<typeof ClockTimeValueSchema>;
 
 /** GPS point — the shape field-zoo stores and renderers read. See header re: the retired `{latitude, longitude}` form. */
 export const LocationValueSchema = lazySchema(() => z.object({
@@ -252,9 +254,33 @@ export const LocationValueSchema = lazySchema(() => z.object({
   altitude: z.number().optional().describe('Altitude in meters'),
   accuracy: z.number().optional().describe('Accuracy in meters'),
 }));
+export type LocationValue = z.input<typeof LocationValueSchema>;
+
+/**
+ * Address Schema — structured address for the `address` field type.
+ *
+ * DECLARED here since #7127 (previously in `./field.zod`, which re-exports it
+ * for compatibility): it is the enforced address VALUE contract, so this
+ * module is its true home — and the old `field.zod` declaration was the ONE
+ * runtime edge back into that file. `field.zod` now consumes this module's
+ * value contract for its `defaultValue` gate, and a runtime edge in each
+ * direction is an ESM evaluation cycle whose order-dependent TDZ crash this
+ * move retires structurally (the remaining `FieldType` import above is
+ * type-only and erased at runtime).
+ */
+export const AddressSchema = lazySchema(() => z.object({
+  street: z.string().optional().describe('Street address'),
+  city: z.string().optional().describe('City name'),
+  state: z.string().optional().describe('State/Province'),
+  postalCode: z.string().optional().describe('Postal/ZIP code'),
+  country: z.string().optional().describe('Country name or code'),
+  countryCode: z.string().optional().describe('ISO country code (e.g., US, GB)'),
+  formatted: z.string().optional().describe('Formatted address string'),
+}));
 
 /** Structured address value — adopts the (previously unconsumed) `AddressSchema` as the enforced contract. */
 export const AddressValueSchema = AddressSchema;
+export type AddressValue = z.input<typeof AddressValueSchema>;
 
 /**
  * Declared media value (ADR-0104 D3 wave 1) — the inline metadata object the
@@ -276,6 +302,7 @@ export const FileValueSchema = lazySchema(() => z.looseObject({
   alt: z.string().optional(),
   duration: z.number().optional(),
 }));
+export type FileValue = z.input<typeof FileValueSchema>;
 
 /**
  * Media/attachment STORED value (ADR-0104 D3 wave 2) — an opaque `sys_file` id.
@@ -297,6 +324,7 @@ export const FileValueSchema = lazySchema(() => z.looseObject({
 export const FileReferenceIdValueSchema = lazySchema(() =>
   z.string().regex(/^[A-Za-z0-9_-]{1,64}$/, 'Expected an opaque sys_file id'),
 );
+export type FileReferenceIdValue = z.input<typeof FileReferenceIdValueSchema>;
 
 /**
  * Media/attachment value in either form — the TRANSITIONAL union that was the
@@ -311,6 +339,7 @@ export const FileLikeValueSchema = lazySchema(() => z.union([
   z.string().min(1),
   FileValueSchema,
 ]));
+export type FileLikeValue = z.input<typeof FileLikeValueSchema>;
 
 /**
  * A stored reference value that is really an EMBEDDED RECORD, serialized.
@@ -353,6 +382,7 @@ export const ReferenceIdValueSchema = lazySchema(() =>
       'Replace the value with the referenced record\'s id.',
   }),
 );
+export type ReferenceIdValue = z.input<typeof ReferenceIdValueSchema>;
 
 function optionCodes(def: ValueShapeFieldDef): string[] {
   if (!Array.isArray(def.options)) return [];

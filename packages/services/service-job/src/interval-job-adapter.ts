@@ -154,8 +154,19 @@ export class IntervalJobAdapter implements IJobService {
 
     const startMs = Date.now();
     try {
-      await runWithPolicy(record.name, () => record.handler({ jobId: record.name, data }), record.options);
-      execution.status = 'success';
+      const outcome = await runWithPolicy(record.name, () => record.handler({ jobId: record.name, data }), record.options);
+      // #5548 — a handler that resolves `{ outcome: 'degraded' }` ran to
+      // completion without doing its work. Recording that as `success` here
+      // would put the in-memory execution history (what `getExecutions()`
+      // returns, including `DbJobAdapter`'s, which delegates to this adapter)
+      // at odds with the `sys_job_run` row the DB adapter writes for the very
+      // same run. Not a failure: `status` moves, nothing else does.
+      if (outcome && outcome.outcome === 'degraded') {
+        execution.status = 'degraded';
+        execution.error = outcome.reason;
+      } else {
+        execution.status = 'success';
+      }
     } catch (err) {
       execution.status = err instanceof JobTimeoutError ? 'timeout' : 'failed';
       execution.error = err instanceof Error ? err.message : String(err);

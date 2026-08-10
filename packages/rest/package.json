@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/rest",
-  "version": "17.0.0-rc.5",
+  "version": "17.0.0-rc.6",
   "license": "Apache-2.0",
   "description": "ObjectStack REST API Server - automatic REST endpoint generation from protocol",
   "type": "module",
@@ -16,10 +16,12 @@
   "scripts": {
     "build": "tsup --config ../../tsup.config.ts",
     "dev": "tsc -w",
-    "test": "vitest run"
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@objectstack/core": "workspace:*",
+    "@objectstack/metadata-core": "workspace:*",
     "@objectstack/observability": "workspace:*",
     "@objectstack/platform-objects": "workspace:*",
     "@objectstack/service-package": "workspace:*",

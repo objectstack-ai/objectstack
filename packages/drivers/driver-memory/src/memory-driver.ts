@@ -1,7 +1,11 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { DriverOptions } from '@objectstack/spec/data';
-import { canonicalAstOperator } from '@objectstack/spec/data';
+// [#6520] `asciiCaseInsensitiveRegexSource` is `$icontains`' fold, defined once
+// in the spec: this face hands a PATTERN to mingo rather than comparing two
+// strings, so the fold has to live in the pattern source. See its docblock for
+// why an `i` flag is the wrong tool.
+import { canonicalAstOperator, asciiCaseInsensitiveRegexSource } from '@objectstack/spec/data';
 import type { DriverQuery, IDataDriver } from '@objectstack/spec/contracts';
 import { Logger, createLogger, nextUtcCalendarDay } from '@objectstack/core';
 import { Query, Aggregator } from 'mingo';
@@ -312,7 +316,19 @@ export class InMemoryDriver implements IDataDriver {
     }
 
     // 4. Pagination (Limit)
-    if (query.limit) {
+    //
+    // PRESENCE, not truthiness (#6577). `limit: 0` means "return no records"
+    // (#6485), and `0` is falsy — so `if (query.limit)` dropped the slice and
+    // answered a request for NOTHING with the WHOLE table. Measured before this
+    // line changed, three rows seeded: `{ limit: 0 }` returned 3, and
+    // `{ limit: 0, offset: 1 }` returned 2 — the OFFSET applied and the LIMIT
+    // silently did not, which is why the shape survived every paging suite.
+    //
+    // `offset` above is deliberately left on truthiness: `slice(0)` IS the
+    // identity slice, so presence and truthiness cannot be told apart there —
+    // no behaviour to fix. The #5499 freeze exception granted here is the limit
+    // door only.
+    if (query.limit !== undefined) {
       results = results.slice(0, query.limit);
     }
 
@@ -953,6 +969,23 @@ export class InMemoryDriver implements IDataDriver {
         case '$endsWith':
           regexConditions.push({ $regex: new RegExp(`${this.escapeRegex(val)}$`, 'i') });
           break;
+        // [#6520] `$icontains` — case-insensitive over ASCII and NOTHING else.
+        //
+        // Note what this arm does NOT do, because every neighbour above does it:
+        // it never passes the `i` flag. That flag is the FULL Unicode fold, so
+        // it would match `CAFÉ` against `café` — the answer the SQL family
+        // cannot give (SQLite folds ASCII only) and therefore the one the
+        // protocol forbids (#4706 Q1 = A). The fold instead lives in the pattern
+        // SOURCE, one `[Aa]` class per ASCII letter, built by the spec's shared
+        // `asciiCaseInsensitiveRegexSource` — the same source `driver-mongodb`
+        // binds, so the two document-shaped faces fold identically.
+        //
+        // The neighbours' `i` flags are NOT a precedent to copy here: they are
+        // the `$contains` family folding Unicode, which is the open defect #6682
+        // tracks on this face, not the behaviour to extend.
+        case '$icontains':
+          regexConditions.push({ $regex: new RegExp(asciiCaseInsensitiveRegexSource(val)) });
+          break;
         case '$between': {
           // [#5328] The arm used to be CONDITIONAL — a comparand that was not a
           // two-element array skipped it and wrote nothing, so the field
@@ -1002,9 +1035,16 @@ export class InMemoryDriver implements IDataDriver {
           result[op] = store(val);
           break;
         // Evaluated by mingo under the same name. `$exists` is a presence
-        // predicate, `$regex`/`$options` a pattern and its flags — none of them
-        // is a comparand, so none takes the field's storage form (#4047).
-        case '$exists': case '$regex': case '$options':
+        // predicate, not a comparand, so it does not take the field's storage
+        // form (#4047).
+        //
+        // [#5702] `$regex` and `$options` were passed through here too, on the
+        // same line, for the same "not a comparand" reason. Both are RETIRED
+        // (#4706) and refused by the shape gate before this method runs, so the
+        // arm is gone rather than left as an unreachable third name — an
+        // evaluation arm for a refused operator is exactly what let this
+        // driver's two faces answer one `$regex` differently for so long.
+        case '$exists':
           result[op] = val;
           break;
         default:

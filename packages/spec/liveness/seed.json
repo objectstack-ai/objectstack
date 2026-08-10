@@ -22,9 +22,11 @@
     },
     "env": {
       "status": "live",
-      "verifiedAt": "2026-08-01",
-      "evidence": "packages/metadata-protocol/src/seed-loader.ts:91",
-      "note": "filterByEnv drops datasets whose env list excludes the running environment."
+      "verifiedAt": "2026-08-09",
+      "evidenceScope": "in-repo",
+      "evidence": "packages/metadata-protocol/src/seed-loader.ts:191 (filterByEnv drops datasets whose env list excludes the running environment)",
+      "producer": "packages/metadata-protocol/src/seed-loader.ts:174 — `load()` resolves the comparison environment ITSELF (resolveEnvConfig, :1809, off NODE_ENV) before anything reads config, rather than trusting a caller to pass it",
+      "note": "THE SPECIMEN THIS FIELD EXISTS FOR (#4837). Until #4704 this row was `live` on the consumer pointer alone and the verdict was FALSE: the cited line really did call filterByEnv, but none of the SIX call sites that build a SeedLoaderRequest (app boot, per-org replay, hot reload, package apply, draft publish, marketplace install) passed `env` — so `config.env` was permanently undefined, filterByEnv returned its input on its first line, and `dataset.env` was never read at all. `seed-loader.test.ts` passed throughout, because it supplies `config.env` itself: it exercised a mechanism nothing fed. #4704 fixed the wiring INSIDE `load()`, the one funnel every seeding path goes through, so call site seven cannot reopen the hole. Re-verified 2026-08-09 with both sides cited."
     },
     "records": {
       "status": "live",

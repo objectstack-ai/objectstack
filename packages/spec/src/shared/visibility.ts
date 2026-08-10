@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import type { z } from 'zod';
+import type { StrictObjectOptions } from './strict-object';
 
 /**
  * # Conditional-visibility predicate normalization (ADR-0089)
@@ -45,7 +45,7 @@ type WithVisibilityAliases = {
  * a conditional-visibility predicate:
  *
  * ```ts
- * z.object({ ..., visibleWhen: Expr.optional(), visibleOn: Expr.optional() })
+ * strictObject(VISIBILITY_STRICT_OPTIONS, { ..., visibleWhen: Expr.optional() })
  *   .transform(normalizeVisibleWhen)
  * ```
  */
@@ -67,65 +67,74 @@ export function normalizeVisibleWhen<T extends WithVisibilityAliases>(
   return { ...rest, visibleWhen: canonical } as Omit<T, 'visibleOn' | 'visibility'>;
 }
 
-/** A key that is (or is a likely mis-spelling of) the visibility predicate. */
-function looksLikeVisibilityKey(key: string): boolean {
-  return /vis|conceal|hidden|show.?when/i.test(key);
-}
+/**
+ * A key that is (or is a likely mis-spelling of) the visibility predicate.
+ *
+ * **Deliberately a pattern and not a list.** The keys this has to answer are the
+ * ones nobody enumerated: `visibleWhenn`, `visibleIf`, `hiddenWhen`, `conceal`,
+ * `showWhen`, a `visibility` pasted onto a view form. Enumerating them is the
+ * shape of guess this family exists to stop the author making.
+ *
+ * It also matches the CANONICAL `visibleWhen` and both deprecated aliases, and
+ * that is harmless by construction: a key the shape declares is recognised, so
+ * it never reaches the `unrecognized_keys` path this pattern is consulted from.
+ * It is the reason the audit asks a pattern about {@link
+ * VISIBILITY_STRICT_OPTIONS}'s `examples` rather than about the shape's declared
+ * keys — see `KeySetGuidance`.
+ */
+const VISIBILITY_KEY_PATTERN = /vis|conceal|hidden|show.?when/i;
 
 /**
- * Custom zod `error` for the `.strict()` view/page schemas (ADR-0089 D3a).
+ * The shared `strictObject` options for every `.strict()` view/page schema that
+ * carries a conditional-visibility predicate (ADR-0089 D3a).
  *
- * With `.strict()`, a key these schemas do not declare — a stale `visibleOn` past
- * removal, a `visibleWhen` typo, or a wrong-layer paste — is now a **loud parse
- * error** instead of a silent strip (ADR-0049 enforce-or-remove, ADR-0078
- * no-silently-inert). This error map turns that rejection into a *fixable* one: it
- * always names the offending key(s), and when a key looks like the
- * conditional-visibility predicate it points the author at the canonical
- * `visibleWhen`. Every other issue code defers to zod's default (`undefined`).
- *
- * Wire it as the object's `error` alongside `.strict()`:
+ * With the shape closed, a key these schemas do not declare — a stale
+ * `visibleOn` past removal, a `visibleWhen` typo, or a wrong-layer paste — is a
+ * **loud parse error** instead of a silent strip (ADR-0049 enforce-or-remove,
+ * ADR-0078 no-silently-inert). The rejection is *fixable*: it names the
+ * offending key(s), points a visibility-shaped key at the canonical
+ * `visibleWhen`, and — new with the fold below — suggests the closest declared
+ * key for everything else.
  *
  * ```ts
- * z.object({ ..., visibleWhen: Expr.optional() }, { error: strictVisibilityError })
- *   .strict()
+ * strictObject(VISIBILITY_STRICT_OPTIONS, { ..., visibleWhen: Expr.optional() })
  *   .transform(normalizeVisibleWhen)
  * ```
  *
- * ## Message order: the fix comes before the history (#5955 / #6416)
+ * ## Folded out of a hand-written `$ZodErrorMap` (#6619, #6416 direction 2)
  *
- * ```text
- * Unrecognized key(s) on this view/page schema: `k1`.   ← which key is wrong
- * [ If this is the conditional-visibility predicate … ] ← the fix
- * Before ADR-0089 D3a these were dropped silently …     ← why it used to be silent
- * ```
+ * This used to be `strictVisibilityError`, a bespoke map that re-implemented
+ * the front matter, the prescription branch and the trailing history sentence
+ * by hand. Being hand-written is what put it out of reach of #5955 (the shared
+ * template's reorder) and #5593 (the `strictObject` migration) — and, the
+ * reason this card was worth doing, out of reach of `alias-integrity.test.ts`:
+ * a hand-rolled map registers in no registry, so its prescription was
+ * **unmeasured rather than clean**. Declared here, it is judged with every
+ * other table in the package.
  *
- * This map is a hand-written `$ZodErrorMap`, so #5955's fix to the shared
- * `strictUnknownKeyError` template could not reach it and #5593's
- * `strictObject` migration cannot either — #6416 applies the same ruling here.
- * The history sentence used to sit between the key statement and the alias
- * pointer, which is the position several consumers render on ONE line
- * (`os validate`'s `• where: message`, CI logs, and
- * `validateFlowTriggerReadiness`, which flattens the newlines): an author —
- * often an AI — reads the front of that line and acts on it, so the canonical
- * key has to be there. Nothing is dropped and nothing is conditional; the
- * sentence is still emitted verbatim, just last.
+ * The emission ORDER the pins in `ui/view.test.ts` encode is the template's own
+ * and unchanged: front matter → fix channels → the explanatory sentence last.
+ * What changed in the bytes is that the prescription is now rendered as the
+ * template's `\n  • ` bullet rather than joined inline with a space, which is
+ * how every other closed surface in this package already reads it.
  */
-export const strictVisibilityError: z.core.$ZodErrorMap = (issue) => {
-  if (issue.code !== 'unrecognized_keys') return undefined;
-  const keys = (issue as { keys?: readonly string[] }).keys ?? [];
-  const list = keys.map((k) => `\`${k}\``).join(', ');
-  const front = `Unrecognized key(s) on this view/page schema: ${list}.`;
-  const history =
-    `Before ADR-0089 D3a these were dropped silently, shipping inert metadata; ` +
-    `a mis-layered or stale key is now a loud parse error.`;
-  if (keys.some(looksLikeVisibilityKey)) {
-    return (
-      front +
-      ' If this is the conditional-visibility predicate, the canonical key is ' +
-      '`visibleWhen` (ADR-0089) — `visibleOn` (view form) and `visibility` (page ' +
-      'component) are still accepted as deprecated aliases. ' +
-      history
-    );
-  }
-  return `${front} ${history}`;
+export const VISIBILITY_STRICT_OPTIONS: StrictObjectOptions = {
+  surface: 'this view/page schema',
+  history:
+    'Before ADR-0089 D3a these were dropped silently, shipping inert metadata; '
+    + 'a mis-layered or stale key is now a loud parse error.',
+  guidanceSets: [
+    {
+      name: 'VISIBILITY_KEY_PATTERN',
+      keys: VISIBILITY_KEY_PATTERN,
+      // The spellings the pattern is FOR — the audit asserts each really
+      // matches and that none is a key the shape declares, which is the
+      // answerable half of the dead-entry claim for an open family.
+      examples: ['visibleWhenn', 'visibleIf', 'hiddenWhen', 'conceal', 'showWhen'],
+      prescription:
+        'If this is the conditional-visibility predicate, the canonical key is '
+        + '`visibleWhen` (ADR-0089) — `visibleOn` (view form) and `visibility` (page '
+        + 'component) are still accepted as deprecated aliases.',
+    },
+  ],
 };

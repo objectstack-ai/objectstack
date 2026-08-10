@@ -126,7 +126,7 @@ export default class MigrateApply extends Command {
     try {
       // `deferSchemaDdl` is what makes the prompt below meaningful: without it
       // the boot has already created tables and added columns by this point.
-      stack = await bootSchemaStack({ databaseUrl: flags['database-url'], deferSchemaDdl: true });
+      stack = await bootSchemaStack({ jsonOutput: flags.json, databaseUrl: flags['database-url'], deferSchemaDdl: true });
     } catch (error: any) {
       if (flags.json) { await emitJson({ error: error.message }, 0, { compact: true }); this.exit(1); }
       printError(error.message || String(error));

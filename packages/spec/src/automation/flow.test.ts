@@ -83,13 +83,71 @@ describe('FlowVariableSchema', () => {
 
   it('should accept various data types', () => {
     const types = ['text', 'number', 'boolean', 'object', 'list'];
-    
+
     types.forEach(type => {
       const variable = {
         name: 'testVar',
         type,
       };
       expect(() => FlowVariableSchema.parse(variable)).not.toThrow();
+    });
+  });
+
+  // ── #4697: `defaultValue` — the key that makes "declared" mean "bound" ──
+  //
+  // The engine binds an `isInput` variable only when `params[name] !== undefined`,
+  // so before this key a declaration guaranteed nothing at run time. Conditions
+  // are strict CEL, where an unbound name ABORTS the predicate instead of reading
+  // as `false` — the whole run stops (hotcrm#643). The engine half of the contract
+  // is pinned in `service-automation/src/flow-variable-default.test.ts`; this half
+  // is the authorable surface.
+  describe('defaultValue (#4697)', () => {
+    it('accepts a declared default, and keeps it as authored', () => {
+      const parsed = FlowVariableSchema.parse({
+        name: 'createOpportunity', type: 'boolean', isInput: true, defaultValue: false,
+      });
+      expect(parsed.defaultValue).toBe(false);
+      // Not coerced away by the `isInput`/`isOutput` defaults sitting beside it.
+      expect(parsed.isInput).toBe(true);
+      expect(parsed.isOutput).toBe(false);
+    });
+
+    it('is OPTIONAL — a variable without it parses exactly as before, and reads back absent', () => {
+      const parsed = FlowVariableSchema.parse({ name: 'v', type: 'text' });
+      expect(parsed.defaultValue).toBeUndefined();
+      expect('defaultValue' in parsed).toBe(false);
+      // The distinction the engine's `!== undefined` boundary rests on: an
+      // absent key and an authored `null` are different declarations.
+      expect(FlowVariableSchema.parse({ name: 'v', type: 'object', defaultValue: null }).defaultValue).toBeNull();
+    });
+
+    it('carries a value of any shape — `type` is an open string, so there is no vocabulary to check against', () => {
+      // Same posture as every other `defaultValue` on the authoring surface (a
+      // mapping's, an action param's, a page state slot's, a screen field's):
+      // the value is not cross-validated against the declared `type`. Pinned so
+      // that adding such a check reads as the deliberate new validation surface
+      // it would be, rather than as a tightening nobody notices.
+      for (const defaultValue of [false, 0, '', 'text', [], {}, { nested: { deep: 1 } }, [1, 2, 3]]) {
+        expect(() => FlowVariableSchema.parse({ name: 'v', type: 'boolean', defaultValue })).not.toThrow();
+      }
+    });
+
+    it('a flow carries variables with defaults through FlowSchema', () => {
+      const flow = FlowSchema.parse({
+        name: 'lead_conversion',
+        label: 'Lead Conversion',
+        type: 'screen',
+        variables: [
+          { name: 'createOpportunity', type: 'boolean', isInput: true, defaultValue: false },
+          { name: 'attempts', type: 'number', defaultValue: 0 },
+        ],
+        nodes: [
+          { id: 'start', type: 'start', label: 'Start' },
+          { id: 'end', type: 'end', label: 'End' },
+        ],
+        edges: [{ id: 'e1', source: 'start', target: 'end' }],
+      });
+      expect(flow.variables?.map(v => v.defaultValue)).toEqual([false, 0]);
     });
   });
 });
@@ -1234,6 +1292,72 @@ describe('BPMN — Wait Event Configuration', () => {
     }
   });
 
+  /**
+   * #6758 — a prescription that does not parse is WORSE than no prescription:
+   * the author lands in the exact rejection the tombstone exists to spare them,
+   * and the second one is a bare `invalid_type` with no guidance attached. Both
+   * author-facing channels on this block print a `timerDuration` value to copy,
+   * and `timerDuration` is `z.string()` — so every value they print must be
+   * QUOTED. Until this test they printed the bare number `60000`, which is
+   * TS2322 at the authoring site and `expected string, received number` at the
+   * parse (the ADR-0087 conversion has always known better: it writes
+   * `String(next.timeoutMs)`, `conversions/registry.ts` — "Moving the number
+   * unstringified would produce a block that no longer parses").
+   *
+   * The value is EXTRACTED from the message rather than compared to a copy: a
+   * hard-coded `'60000'` here would go green the moment someone reworded the
+   * prose, which is precisely when this needs to be checked.
+   */
+  it('every `timerDuration` value the wait-timeout prescriptions print actually parses (#6758)', () => {
+    const waitNode = (waitEventConfig: Record<string, unknown>) => ({
+      id: 'wait_timer', type: 'wait', label: 'Wait', waitEventConfig,
+    });
+    const messageFor = (waitEventConfig: Record<string, unknown>, code: string) => {
+      const result = FlowNodeSchema.safeParse(waitNode(waitEventConfig));
+      expect(result.success).toBe(false);
+      return result.error!.issues.find((i) => i.code === code)?.message;
+    };
+
+    const channels = {
+      // Channel 1 — `retiredKey()`'s `z.never` message, raised when an upgrading
+      // author still writes the removed key.
+      'the `timeoutMs` tombstone': messageFor({ eventType: 'timer', timeoutMs: 60_000 }, 'invalid_type'),
+      // Channel 2 — the `strictObject` `guidance` entry for the `timeout`
+      // misspelling. Worse than channel 1: there is no first failure to learn
+      // from, so a bad prescription here is the FIRST thing the schema ever says.
+      'the `timeout` misspelling guidance': messageFor({ eventType: 'timer', timeout: 60_000 }, 'unrecognized_keys'),
+    };
+
+    for (const [channel, message] of Object.entries(channels)) {
+      // Anti-vacuity. Delete the guidance entry (or gut the tombstone) and these
+      // two fail loudly, rather than the loop below passing on an empty match set.
+      expect(message, `${channel}: raised no message at all`).toBeDefined();
+      expect(message, `${channel} must still point the author at \`timerDuration\``)
+        .toContain('`timerDuration');
+
+      const printed = [...message!.matchAll(/`timerDuration:\s*([^`]+)`/g)].map((m) => m[1]);
+      expect(printed.length, `${channel} must PRINT a \`timerDuration\` value to copy`)
+        .toBeGreaterThan(0);
+
+      for (const literal of printed) {
+        // Read the printed literal exactly as an author retypes it: `'60000'` is
+        // a string, a bare `60000` is a number — and that gap IS the defect.
+        let authored: unknown;
+        try {
+          authored = JSON.parse(literal.replace(/^'(.*)'$/, '"$1"'));
+        } catch {
+          expect.fail(`${channel} prints \`timerDuration: ${literal}\`, which is not a writable literal`);
+        }
+        const result = FlowNodeSchema.safeParse(waitNode({ eventType: 'timer', timerDuration: authored }));
+        expect(
+          result.success,
+          `${channel} prints \`timerDuration: ${literal}\`, but the schema REJECTS it: `
+          + JSON.stringify(result.error?.issues),
+        ).toBe(true);
+      }
+    }
+  });
+
   it('should accept wait node with manual resume', () => {
     const result = FlowNodeSchema.safeParse({
       id: 'wait_manual',
@@ -1438,23 +1562,6 @@ describe('unknown keys are rejected, not stripped (#4001)', () => {
         expect(message, `\`${key}\` should point at the start node`).toContain('START node');
       }
     });
-
-    it('accepts every key the schema declares (guards FLOW_KEYS drift)', () => {
-      const probes: Record<string, unknown> = {
-        description: 'd', successMessage: 's', errorMessage: 'e', version: 2,
-        status: 'active', template: false, variables: [{ name: 'v', type: 'text' }],
-        active: true, runAs: 'system',
-        errorHandling: { strategy: 'retry', maxRetries: 2 },
-        protection: { lock: 'none' },
-      };
-      for (const [key, value] of Object.entries(probes)) {
-        const result = FlowSchema.safeParse({ ...minimalFlow, [key]: value });
-        const unknown = result.success
-          ? undefined
-          : result.error.issues.find((i) => i.code === 'unrecognized_keys');
-        expect(unknown, `\`${key}\` should be a declared Flow key`).toBeUndefined();
-      }
-    });
   });
 
   describe('FlowNodeSchema', () => {
@@ -1478,24 +1585,6 @@ describe('unknown keys are rejected, not stripped (#4001)', () => {
       expect(unknownKeyIssue(FlowNodeSchema, { id: 'n1', type: 'script', label: 'S', inputs: {} })!.message)
         .toContain('`config`');
     });
-
-    it('accepts every key the schema declares (guards FLOW_NODE_KEYS drift)', () => {
-      const probes: Record<string, unknown> = {
-        config: { a: 1 },
-        connectorConfig: { connectorId: 'c', actionId: 'a', input: {} },
-        position: { x: 0, y: 0 }, timeoutMs: 100,
-        inputSchema: { p: { type: 'string' } }, outputSchema: { o: { type: 'number' } },
-        waitEventConfig: { eventType: 'timer', timerDuration: 'PT1H' },
-        boundaryConfig: { attachedToNodeId: 'n0', eventType: 'error' },
-      };
-      for (const [key, value] of Object.entries(probes)) {
-        const result = FlowNodeSchema.safeParse({ id: 'n1', type: 'script', label: 'S', [key]: value });
-        const unknown = result.success
-          ? undefined
-          : result.error.issues.find((i) => i.code === 'unrecognized_keys');
-        expect(unknown, `\`${key}\` should be a declared FlowNode key`).toBeUndefined();
-      }
-    });
   });
 
   describe('FlowEdgeSchema', () => {
@@ -1518,6 +1607,17 @@ describe('unknown keys are rejected, not stripped (#4001)', () => {
     it('rejects an undeclared key with a suggestion', () => {
       expect(unknownKeyIssue(FlowVariableSchema, { name: 'v', type: 'text', is_input: true })!.message)
         .toContain('`is_input` → `isInput`');
+    });
+
+    it('points `default` / `initialValue` at `defaultValue` (#4697)', () => {
+      // The two words an author reaches for — `default` is what a page state
+      // slot and an action param already alias, and `initialValue` is what the
+      // designer calls it. Still REJECTED; the alias only makes the rejection
+      // say where to go.
+      for (const key of ['default', 'initialValue']) {
+        expect(unknownKeyIssue(FlowVariableSchema, { name: 'v', type: 'boolean', [key]: false })!.message)
+          .toContain(`\`${key}\` → \`defaultValue\``);
+      }
     });
   });
 

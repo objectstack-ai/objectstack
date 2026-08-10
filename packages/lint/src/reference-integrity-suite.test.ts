@@ -191,7 +191,7 @@ describe('reference-integrity suite — every member actually runs', () => {
         // the two must not diverge across commands again.
         runAs: 'user',
         nodes: [
-          { id: 'start', type: 'start', config: { objectName: 'crm_lead', triggerType: 'record-created' } },
+          { id: 'start', type: 'start', config: { objectName: 'crm_lead', triggerType: 'record-after-create' } },
           // validateFlowTemplatePaths: `budget` is not a field on crm_lead. In a
           // FILTER position an erased condition widens the query rather than
           // narrowing it, so the runtime refuses the node — gating, not advisory

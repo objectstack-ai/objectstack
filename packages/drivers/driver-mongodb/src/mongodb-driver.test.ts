@@ -343,9 +343,15 @@ describe.skipIf(!sharedMongod)('MongoDBDriver', () => {
         name: 'account',
         fields: {
           name: { type: 'string', unique: true },
-          email: { type: 'email', indexed: true },
+          email: { type: 'email' },
           company_id: { type: 'lookup', reference_to: 'company' },
         },
+        // [#6810] `email` used to carry a field-level `indexed: true` here. That
+        // was never a `FieldSchema` key (#2377 / ADR-0049); the index is
+        // declared in `indexes[]`, where every other index in this system is
+        // declared. Same resulting index name — the assertions are unchanged,
+        // which is the point.
+        indexes: [{ fields: ['email'] }],
       });
 
       const db = driver.getDb();

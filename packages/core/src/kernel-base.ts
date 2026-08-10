@@ -9,6 +9,7 @@ import {
     assertInitServiceRequirements,
     describeInitOrderFault,
 } from './plugin-order.js';
+import { dispatchHookIsolating, dispatchHookPropagating } from './hook-dispatch.js';
 
 /**
  * Kernel state machine
@@ -120,11 +121,11 @@ export abstract class ObjectKernelBase {
                 }
                 this.hooks.get(name)!.push(handler);
             },
+            // PROPAGATING dispatch, and deliberately WITHOUT the trace line the
+            // kernel's own dispatch sites emit — `context.trigger` has never
+            // logged one, so no logger is handed over (#5282).
             trigger: async (name, ...args) => {
-                const handlers = this.hooks.get(name) || [];
-                for (const handler of handlers) {
-                    await handler(...args);
-                }
+                await dispatchHookPropagating(name, this.hooks.get(name) || [], undefined, args);
             },
             getServices: () => {
                 if (this.services instanceof Map) {
@@ -262,24 +263,16 @@ export abstract class ObjectKernelBase {
      * (`kernel:ready`, `kernel:bootstrapped`, `kernel:listening`) use
      * {@link triggerHookOrThrow} (#5170, #5257).
      *
+     * The loop itself lives in {@link dispatchHookIsolating} — one
+     * implementation shared with `ObjectKernel`'s own `kernel:shutdown`
+     * dispatch, which cannot inherit this method (`ObjectKernel` does not
+     * extend this class) and used to hand-mirror it (#5282).
+     *
      * @param name - Hook name
      * @param args - Arguments to pass to handlers
      */
     protected async triggerHook(name: string, ...args: any[]): Promise<void> {
-        const handlers = this.hooks.get(name) || [];
-        this.logger.debug(`Triggering hook: ${name}`, { 
-            hook: name, 
-            handlerCount: handlers.length 
-        });
-        
-        for (const handler of handlers) {
-            try {
-                await handler(...args);
-            } catch (error) {
-                this.logger.error(`Hook handler failed: ${name}`, error as Error);
-                // Continue with other handlers even if one fails
-            }
-        }
+        await dispatchHookIsolating(name, this.hooks.get(name) || [], this.logger, args);
     }
 
     /**
@@ -317,19 +310,15 @@ export abstract class ObjectKernelBase {
      * default — and it is the reason this dispatcher is chosen per hook rather
      * than swapped in wholesale.
      *
+     * The loop itself lives in {@link dispatchHookPropagating} — the same
+     * function `PluginContext.trigger` runs on both kernels, so "propagating"
+     * means one thing repo-wide (#5282).
+     *
      * @param name - Hook name
      * @param args - Arguments to pass to handlers
      */
     protected async triggerHookOrThrow(name: string, ...args: any[]): Promise<void> {
-        const handlers = this.hooks.get(name) || [];
-        this.logger.debug(`Triggering hook: ${name}`, {
-            hook: name,
-            handlerCount: handlers.length,
-        });
-
-        for (const handler of handlers) {
-            await handler(...args);
-        }
+        await dispatchHookPropagating(name, this.hooks.get(name) || [], this.logger, args);
     }
 
     /**

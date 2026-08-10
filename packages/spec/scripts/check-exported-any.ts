@@ -70,6 +70,13 @@
  * whose green result is "nothing found".
  *
  * Reads the built dist — run after `pnpm --filter @objectstack/spec build`.
+ *
+ * That last sentence is a PRECONDITION, and since #7181 it is enforced rather
+ * than merely documented: the audit refuses a dist that is missing or older than
+ * `src/`. The self-test above is the anti-vacuity floor for a broken DETECTOR; it
+ * says nothing about the vintage of the declarations the audit then reads, and on
+ * a stale dist this gate reports "no exported type resolves to `any`" without
+ * having read the export the developer just added. See lib/dist-freshness.ts.
  */
 import ts from 'typescript';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -77,6 +84,7 @@ import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
+import { inspectDistFreshness } from './lib/dist-freshness';
 
 const PKG_DIR = resolve(fileURLToPath(new URL('.', import.meta.url)), '..');
 const SELF_TEST = process.argv.includes('--self-test');
@@ -265,6 +273,26 @@ function selfTest(): never {
 if (SELF_TEST) selfTest();
 
 // ── Audit ────────────────────────────────────────────────────────────────────
+
+// BEFORE a single `.d.ts` is read (#7181, adopting #7122's primitive). The
+// existing floors — the self-test's count assertions, and the "Could not resolve
+// module symbol … Is the package built?" throw in `scan` — cover a MISSING dist
+// and a broken detector. Neither can see the case this refuses: a dist that is
+// present and resolves fine but predates the edit under test. There the audit
+// runs to completion and prints `✅ no exported type resolves to \`any\`` about a
+// build nobody made, which is a false green on exactly the export the developer
+// just wrote. It sits after `--self-test` deliberately: that path compiles a temp
+// fixture against the real zod and never touches `dist/`, so refusing it on a
+// stale dist would be over-reach.
+const freshness = inspectDistFreshness(
+  PKG_DIR,
+  'check',
+  'pnpm --filter @objectstack/spec check:exported-any',
+);
+if (!freshness.fresh) {
+  console.error(freshness.message);
+  process.exit(1);
+}
 
 const entries = collectEntries();
 const { violations, declared, types, schemas } = scan(makeProgram(Object.values(entries)), entries, KNOWN_ANY);

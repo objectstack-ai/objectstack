@@ -119,12 +119,20 @@ export const SysSetting = ObjectSchema.create({
       description: 'Specifier key inside the namespace (snake_case).',
     }),
 
+    // The option list is the storage-side mirror of `SpecifierScopeSchema`
+    // (`packages/spec/src/system/settings-manifest.zod.ts`), which is the
+    // reference truth for the cascade's layers. Keep the two in step —
+    // `sys-setting.scope-options.test.ts` pins the parity, and the sibling
+    // audit object (`sys_setting_audit.scope`) mirrors the same three.
+    // A fourth option lived here declaring `runtime` (#6036): the spec enum
+    // never accepted it, `SettingsService` never mentioned it, and no write
+    // path could produce such a row — a declared-but-unenforced value domain
+    // of exactly the ADR-0049 kind. Removed rather than implemented.
     scope: Field.select(
       [
         { label: 'Global', value: 'global' },
         { label: 'Tenant', value: 'tenant' },
         { label: 'User',   value: 'user' },
-        { label: 'Runtime',value: 'runtime' },
       ],
       {
         label: 'Scope',

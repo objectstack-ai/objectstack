@@ -91,7 +91,7 @@ const result = ODataConfigSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **enabled** | `boolean` | ✅ | Enable OData API |
 | **path** | `string` | ✅ | OData endpoint path |
-| **metadata** | `{ namespace: string; entityTypes: { name: string; key: string[]; properties: { name: string; type: string; nullable: boolean }[]; navigationProperties?: { name: string; type: string; partner?: string }[] }[]; entitySets: { name: string; entityType: string }[] }` | optional | OData metadata configuration |
+| **metadata** | `{ namespace: string; entityTypes: object[]; entitySets: object[] }` | optional | OData metadata configuration |
 
 
 ---
@@ -102,7 +102,7 @@ const result = ODataConfigSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **error** | `{ code: string; message: string; target?: string; details?: { code: string; message: string; target?: string }[]; … }` | ✅ |  |
+| **error** | `{ code: string; message: string; target?: string; details?: object[]; … }` | ✅ |  |
 
 
 ---
@@ -150,7 +150,7 @@ const result = ODataConfigSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **namespace** | `string` | ✅ | Service namespace |
-| **entityTypes** | `{ name: string; key: string[]; properties: { name: string; type: string; nullable: boolean }[]; navigationProperties?: { name: string; type: string; partner?: string }[] }[]` | ✅ | Entity types |
+| **entityTypes** | `{ name: string; key: string[]; properties: object[]; navigationProperties?: object[] }[]` | ✅ | Entity types |
 | **entitySets** | `{ name: string; entityType: string }[]` | ✅ | Entity sets |
 
 

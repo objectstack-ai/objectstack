@@ -2,7 +2,7 @@
 
 import { z } from 'zod';
 import { retiredKey } from '../shared/retired-key';
-import { strictUnknownKeyError } from '../shared/suggestions.zod';
+import { strictObject } from '../shared/strict-object';
 
 /**
  * # Row-Level Security (RLS) Protocol
@@ -76,7 +76,7 @@ import { strictUnknownKeyError } from '../shared/suggestions.zod';
  * - Manual Sharing: Individual record sharing
  * 
  * ObjectStack RLS:
- * - A small, fixed expression grammar (equality, set-membership, always-true)
+ * - A constrained CEL predicate grammar: comparisons and set-membership against literals or `current_user.*` values, composable with `&&` / `||`; anything that does not lower to a filter fails closed
  * - Subquery-shaped needs are pre-resolved by the runtime (§7.3.1)
  * - Multiple policies OR-combine for union (any-match-allows) semantics
  * 
@@ -212,37 +212,31 @@ export type RLSOperation = z.input<typeof RLSOperation>;
  * }
  * ```
  */
-/**
- * Keys {@link RowLevelSecurityPolicySchema} declares (drift-guarded by
- * rls.test.ts). `priority` is deliberately absent: it is a {@link retiredKey}
- * tombstone in the shape — declared so its rejection carries the prescription,
- * but never a suggestion target.
- */
-const RLS_POLICY_KEYS = [
-  'name', 'label', 'description', 'object', 'operation', 'using', 'check',
-  'positions', 'enabled', 'tags',
-] as const;
-
-const rlsPolicyUnknownKeyError = strictUnknownKeyError({
-  surface: 'this RLS policy',
-  knownKeys: RLS_POLICY_KEYS,
-  aliases: {
-    // ADR-0090 D3 renamed the pre-D3 `roles` vocabulary to `positions`.
-    roles: 'positions',
-    role: 'positions',
-    // PostgreSQL spells the write-side clause `WITH CHECK`.
-    withcheck: 'check',
-    // The read-side clause under other names an author reaches for first.
-    condition: 'using',
-    filter: 'using',
-    where: 'using',
+export const RowLevelSecurityPolicySchema = lazySchema(() => strictObject(
+  {
+    surface: 'this RLS policy',
+    // The suggestion pool is `Object.keys(shape)` minus anything that accepts
+    // nothing (#5593). `priority` is exactly that case and the exclusion is
+    // deliberate: it is a {@link retiredKey} tombstone, declared so its
+    // rejection carries the upgrade prescription, never offered as a rename
+    // target. The hand-transcribed list this replaced had to state the same
+    // exclusion in prose and be trusted to keep it.
+    aliases: {
+      // ADR-0090 D3 renamed the pre-D3 `roles` vocabulary to `positions`.
+      roles: 'positions',
+      role: 'positions',
+      // PostgreSQL spells the write-side clause `WITH CHECK`.
+      withcheck: 'check',
+      // The read-side clause under other names an author reaches for first.
+      condition: 'using',
+      filter: 'using',
+      where: 'using',
+    },
+    history:
+      'Until #4001 these were dropped silently — the policy still parsed, so a ' +
+      'row-level restriction the author wrote was never compiled into the filter.',
   },
-  history:
-    'Until #4001 these were dropped silently — the policy still parsed, so a ' +
-    'row-level restriction the author wrote was never compiled into the filter.',
-});
-
-export const RowLevelSecurityPolicySchema = lazySchema(() => z.object({
+  {
   /**
    * Unique identifier for this policy.
    * Must be unique within the object.
@@ -300,38 +294,74 @@ export const RowLevelSecurityPolicySchema = lazySchema(() => z.object({
 
   /**
    * USING clause - Filter condition for SELECT/UPDATE/DELETE.
-   * 
-   * This is a constrained, SQL-like expression compiled into an ObjectQL
+   *
+   * A constrained CEL predicate (ADR-0058 D1) compiled into an ObjectQL
    * filter (see the supported grammar below). Only rows the compiled filter
    * matches are accessible.
    *
    * **Note**: For INSERT-only policies, USING is not required (only CHECK is needed).
    * For SELECT/UPDATE/DELETE operations, USING is required.
    *
-   * **Security Note**: the compiler maps each form to a structured filter and
-   * binds context values as parameters at the driver layer — context values
-   * are never string-concatenated into SQL. Policy `using` strings are
-   * authored by administrators, not end users.
+   * **Security Note**: the compiler lowers each predicate to a structured
+   * filter and binds context values as parameters at the driver layer —
+   * context values are never string-concatenated into SQL. Policy `using`
+   * strings are authored by administrators, not end users.
    *
    * **Supported expression grammar (reference compiler)**
    *
-   * The reference RLS compiler implements a deliberately **small, fixed
-   * grammar** rather than a general SQL parser. Exactly four forms compile;
-   * anything else fails closed (the policy matches zero rows). Keep `using`
-   * to one of:
+   * There is no blessed list of forms to memorise here, and no count to
+   * quote: the grammar is defined by ONE question — *does the predicate lower
+   * to an ObjectQL filter?* `isSupportedRlsExpression`
+   * (`@objectstack/formula`, `src/rls-predicate.ts`) is that single decision
+   * procedure, and `@objectstack/lint` calls it at authoring time (ADR-0056
+   * D4) so a predicate that would never enforce is rejected instead of
+   * silently dropped. Anything that does not lower **fails closed** — the
+   * policy matches zero rows, never more.
    *
-   * 1. `field = current_user.<prop>` — equality against a context value
-   * 2. `field = 'literal'` — equality against a single-quoted string literal
-   * 3. `field IN (current_user.<array_prop>)` — set membership against a
-   *    pre-resolved id array (see "Dynamic membership" below)
-   * 4. `1 = 1` — always true / no restriction (privileged-position allow-all)
+   * What lowers, written in canonical CEL:
    *
-   * There is intentionally **no** support for `AND`/`OR`/`NOT`, comparison
-   * operators other than `=`, `IS NULL`/`IS NOT NULL`, `NOT IN`, `LIKE`/
-   * `ILIKE`, regex (`~`/`!~`), `ANY`/`ALL`, subqueries, or `NOW()`/
-   * `CURRENT_DATE`/`CURRENT_TIME`. Combine conditions by defining multiple
-   * policies (they OR-combine); express anything subquery-shaped as a
-   * pre-resolved `current_user.*` array instead.
+   * - **Comparison** of a field against a literal or a `current_user.*`
+   *   context value with `==`, `!=`, `<`, `<=`, `>` or `>=` —
+   *   `owner_id == current_user.id`, `amount > 100`, `status != 'draft'`.
+   *   Either operand may be the field; `current_user.id == owner_id` lowers
+   *   to the same filter.
+   * - **Set membership** with `in`, against a pre-resolved `current_user.*`
+   *   array (see "Dynamic membership" below) or an inline CEL list literal —
+   *   `assigned_to_id in current_user.team_member_ids`,
+   *   `status in ['draft', 'pending']`.
+   * - **String prefix / suffix / substring** tests —
+   *   `name.startsWith('AC')`, `name.endsWith('_archived')`,
+   *   `name.contains('demo')`.
+   * - **Composition** of the above with `&&`, `||` and parentheses —
+   *   `organization_id == current_user.organization_id && status == 'published'`.
+   *   `!` negates a *parenthesised comparison* (`!(status == 'draft')`); it
+   *   cannot negate a bare field, because a bare field does not lower on its
+   *   own.
+   * - **Allow-all**: the bare literal `true` (the privileged-position escape
+   *   hatch). `1 == 1` lowers as an ordinary comparison and means the same.
+   *   There is no bare-`false` deny-all — to make a policy inert, set
+   *   `enabled: false`.
+   *
+   * What does **not** lower, and therefore fails closed: SQL `AND` / `OR` /
+   * `NOT`, `NOT IN`, `IS NULL` / `IS NOT NULL`, `LIKE` / `ILIKE`, regex
+   * (`~` / `!~`), `ANY` / `ALL`, arithmetic (`amount + 1 > 2`), subqueries,
+   * `NOW()` / `CURRENT_DATE` / `CURRENT_TIME`, traversal across objects
+   * (`account.owner.id == current_user.id`), and a bare truthy field
+   * (`is_active`). Combine conditions with `&&` / `||`, or by defining
+   * multiple policies (they OR-combine); express anything subquery-shaped as
+   * a pre-resolved `current_user.*` array instead.
+   *
+   * **SQL spelling is a transitional bridge, not a second dialect.** Stored
+   * legacy predicates keep compiling because `sqlPredicateToCel`
+   * (`@deprecated` under ADR-0058 D1) rewrites `=` to `==` and `IN` to `in`
+   * before the one compiler sees them, so `owner_id = current_user.id`,
+   * `status = 'published'` and `assigned_to_id IN (current_user.team_member_ids)`
+   * still enforce. Only that subset is bridged. In particular SQL's
+   * parenthesised value list does **not** survive the bridge —
+   * `status IN ('draft', 'pending')` fails closed, where the CEL list
+   * `status in ['draft', 'pending']` lowers — and SQL keywords outside the
+   * subset (`AND`, `OR`, `NOT IN`, `IS NULL`, `LIKE`) are never rewritten.
+   * Author new policies in CEL.
    *
    * **Context values** — `current_user.*` resolves against the request's
    * execution context (camelCase fields map to snake_case placeholders):
@@ -348,20 +378,20 @@ export const RowLevelSecurityPolicySchema = lazySchema(() => z.object({
    * need a subquery ("tasks assigned to anyone I manage", "accounts in my
    * territories") is resolved by the runtime into
    * `ExecutionContext.rlsMembership` under a stable key, then referenced as
-   * `field IN (current_user.<key>)`. This keeps the compiler subquery-free
+   * `field in current_user.<key>`. This keeps the compiler subquery-free
    * while still supporting hierarchy- and sharing-based access.
    *
    * **Prohibited**: Dynamic SQL, DDL statements, DML statements (INSERT/UPDATE/DELETE)
    *
-   * @example "organization_id = current_user.organization_id"
-   * @example "owner_id = current_user.id"
-   * @example "status = 'published'"
-   * @example "assigned_to_id IN (current_user.team_member_ids)" // §7.3.1 pre-resolved
-   * @example "1 = 1" // privileged-position allow-all
+   * @example "organization_id == current_user.organization_id"
+   * @example "owner_id == current_user.id"
+   * @example "status == 'published'"
+   * @example "assigned_to_id in current_user.team_member_ids" // §7.3.1 pre-resolved
+   * @example "true" // privileged-position allow-all
    */
   using: z.string()
     .optional()
-    .describe('Filter condition for SELECT/UPDATE/DELETE. One of the four compiler-supported forms: `field = current_user.<prop>`, `field = \'literal\'`, `field IN (current_user.<array>)`, or `1 = 1`. Optional for INSERT-only policies.'),
+    .describe('Filter condition for SELECT/UPDATE/DELETE, authored in canonical CEL (ADR-0058 D1). It enforces when the predicate lowers to an ObjectQL filter: a field compared against a literal or a `current_user.*` context value using `==`, `!=`, `<`, `<=`, `>` or `>=`; `in` against a `current_user.*` array or an inline literal list (e.g. status in [\'draft\', \'pending\']); these combined with `&&` / `||`; or the bare allow-all `true`. Anything that does not lower fails closed — the policy matches zero rows. The legacy SQL-ish spellings are still accepted through a transitional bridge that rewrites `=` to `==` and `IN` to `in` (deprecated under ADR-0058 D1); SQL `AND` / `OR` / `NOT IN` / `IS NULL` / `LIKE` are NOT bridged and fail closed. Optional for INSERT-only policies.'),
 
   /**
    * CHECK clause - Validation for INSERT/UPDATE operations.
@@ -380,7 +410,7 @@ export const RowLevelSecurityPolicySchema = lazySchema(() => z.object({
    * - Restrict certain operations (e.g., only allow creating "draft" status)
    * 
    * @example "organization_id = current_user.organization_id"
-   * @example "status IN ('draft', 'pending')" - Only allow certain statuses
+   * @example "status in ['draft', 'pending']" - Only allow certain statuses
    * @example "created_by = current_user.id" - Must be the creator
    */
   check: z.string()
@@ -432,7 +462,8 @@ export const RowLevelSecurityPolicySchema = lazySchema(() => z.object({
   priority: retiredKey(
     '`rowLevelSecurity[].priority` was removed in @objectstack/spec 17.0.0 (#3896 security audit). ' +
     'It never had an effect and could not: applicable policies OR-combine (most permissive wins), ' +
-    'so there is no conflict to order. Delete the key — policy outcomes are unchanged.',
+    'so there is no conflict to order. Delete the key — policy outcomes are unchanged. ' +
+    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
   ),
 
   /**
@@ -445,7 +476,7 @@ export const RowLevelSecurityPolicySchema = lazySchema(() => z.object({
   tags: z.array(z.string())
     .optional()
     .describe('Policy categorization tags'),
-}, { error: rlsPolicyUnknownKeyError }).strict().superRefine((data, ctx) => {
+}).superRefine((data, ctx) => {
   // Ensure at least one of USING or CHECK is provided
   if (!data.using && !data.check) {
     ctx.addIssue({

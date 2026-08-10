@@ -154,7 +154,7 @@ Organization-level incident response policy per ISO 27001:2022
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **enabled** | `boolean` | ✅ | Enable incident response management |
-| **notificationMatrix** | `{ rules: { severity: Enum<'critical' \| 'high' \| 'medium' \| 'low'>; channels: Enum<'email' \| 'sms' \| 'slack' \| 'pagerduty' \| 'webhook'>[]; recipients: string[]; withinMinutes: number; … }[]; escalationTimeoutMinutes: number; escalationChain: string[] }` | ✅ | Notification and escalation matrix |
+| **notificationMatrix** | `{ rules: object[]; escalationTimeoutMinutes: number; escalationChain: string[] }` | ✅ | Notification and escalation matrix |
 | **defaultResponseTeam** | `string` | ✅ | Default incident response team or role |
 | **triageDeadlineHours** | `number` | ✅ | Maximum hours to begin triage after detection |
 | **requirePostIncidentReview** | `boolean` | ✅ | Require post-incident review for all incidents |

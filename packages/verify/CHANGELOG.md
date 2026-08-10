@@ -1,5 +1,429 @@
 # @objectstack/verify
 
+## 17.0.0-rc.6
+
+### Major Changes
+
+- d48aad5: refactor(driver-sql)!: `analyzeQuery` / `findWithWindowFunctions` 不再吃 `any`，窗口门自带扁平形类型 (#6212 批 A+E)
+
+  #5181（PR #6076）收窄了 `IDataDriver` 声明的六个方法，#6075（PR #6210）让五个驱动的实现跟上。收尾漏下的是**驱动自有、不在 `IDataDriver` 上**的那批查询门：它们同样吃 query AST，签名却是 `any`。本次处理 SQL 驱动的两个。
+
+  `any` 在 query 参数上不是「对象名没检查」，而是**检查全关**：`where` 的 filter 方言、`orderBy` 的 sort node 形状、`limit`/`offset` 是不是数字，全部被抹掉——而这两个方法体读的恰恰就是这些字段。`$like` 当年就是从同一个口子活到运行时的（cloud#1030、cloud#1053 实测 20 处）。
+
+  **`analyzeQuery` → `DriverQuery`。** 它是 `explain()` 的实现体，而 `explain()` 本来就声明 `DriverQuery` 并一行转发过来——收窄前这一对是自相矛盾的：契约门声明 AST，它背后的实现声明 `any`。方法体只读 `fields` / `where` / `orderBy` / `limit` / `offset`，全在 `DriverQuery` 内，因此这是一次纯注解：driver-sql 与 driver-sqlite-wasm 实测零报错、零 fixture 改动。
+
+  **`findWithWindowFunctions` → 驱动本地的扁平形类型**，新导出 `SqlWindowFunctionQuery` / `SqlWindowFunctionSpec`：
+
+  ```ts
+  import type { SqlWindowFunctionQuery } from "@objectstack/driver-sql";
+
+  const ranked = await sqlDriver.findWithWindowFunctions("employee", {
+    windowFunctions: [
+      {
+        function: "rank",
+        alias: "salary_rank",
+        partitionBy: ["department"],
+        orderBy: [{ field: "salary", order: "desc" }],
+      },
+    ],
+  });
+  ```
+
+  它**不能**标 `DriverQuery`：`query.windowFunctions` 在 spec 是 `retiredKey()` 墓碑（#4286），`QueryAST['windowFunctions']` 解析为 `undefined`，标上去会让这道门自己已发布文档里的载荷编译不过。类型因此写成 `Omit<DriverQuery, 'windowFunctions'> & { windowFunctions?: SqlWindowFunctionSpec[] }`——契约那一半照旧受检，驱动私有那一半由驱动自己声明。
+
+  类型放在驱动层、**不进 `packages/spec`**，是接着 #4286 的判断往下走：那次删掉 `WindowFunctionNodeSchema` 的理由正是它声明了 `field` / `over` / `frame` 这些门从不读的成员；再往 spec 加一套窗口词汇就是反悔那个判断。spec 的删除注记与 `migrations/registry.ts` 的迁移处方里逐字写着的 `{ function, alias, partitionBy?, orderBy? }`，就是这个类型的出处，三处必须始终说同一句话。请求面的墓碑**没有**被重新打开：`analyzeQuery('o', { windowFunctions: [...] })` 依然是编译错误。
+
+  **顺带（#6212 批 F）**：`@objectstack/verify` 的 `BucketableDriver.aggregate` 从 `query: unknown` 收到 `DriverQuery`。这是一个**已发布**的结构替身，cloud 的 driver-turso 照着它实现——声明 `unknown` 不叫「最小」，叫没检查，并且放任该文件里两处 AST 字面量各自把对象名多写一遍（#5181 的那种冗余）。同时删掉一处 `as never`：那个 cast 只是因为字面量推断把 `'count'` 放宽成了 `string`，注上类型就不需要它了。这里**不预断**驱动自身 `aggregate` 参数类型的收窄（#6212 批 B，排在 #6203 之后）——方法参数按双变比较，驱动那边声明 `any`、`QueryAST` 还是收窄后的类型，都照样满足这个替身。
+
+  **零运行时改动**，全部是类型注解与两处冗余键的删除（实测全仓驱动无一读 `query.object`）。测试：driver-sql 935、driver-sqlite-wasm 254、driver-turso 804、verify 17、dogfood 520 全绿。
+
+  **迁移面**：直接调用这两道门的嵌入方，把内联字面量里编译器指出来的键改对即可（TS2353）。本仓实测非测试生产者为零，两道门只有各自驱动包的测试在用，零处需要改动。标 major 的依据与 #5181 / #6075 一致：**源码级破坏性**（调用点内联字面量与 `BucketableDriver` 的导出形状），运行时行为零变化；`check:api-surface` 只记录导出的存在与否、不记录签名，所以这条说明是该变更唯一的下游载体。
+
+### Minor Changes
+
+- d19fb5c: fix(verify,plugin-security,cli): `bootStack` honours the app-declared default permission set, like `serve` always did (#7001)
+
+  Two boot paths disagreed about whether an application's declared default
+  permission profile exists.
+
+  - **`objectstack serve` honoured it** — it read the permission set marked
+    `isDefault: true` off `config.permissions` and passed the name as the
+    `SecurityPlugin` `fallbackPermissionSet`.
+  - **`bootStack` did not** — `@objectstack/verify` constructed a vanilla
+    `new SecurityPlugin()` and never read `config.permissions` at all.
+
+  So the profile an app declares was in force when a human ran the CLI and
+  silently absent when the app's own suite booted it: a `declared ≠ enforced`
+  split inside the harness that exists to catch that split. Green tests,
+  different production behaviour.
+
+  It was invisible until #5491. Until then the platform's `member_default`
+  carried an `object_permissions['*']` wildcard, so a member with no application
+  profile reached every object anyway and the declared fallback was never
+  load-bearing. #5491 removed that floor deliberately and its Migration section
+  prescribes exactly one consumer action — ship an app default profile via
+  `isDefault: true` — which `bootStack` had no way to express. Measured in
+  cloud's `ee-group-showcase`, adding the prescribed profile changed nothing: the
+  same acceptance cases still failed at the object gate.
+
+  **What changed.** The resolution now lives in one place and both boot paths call
+  it: `appSecurityPluginOptions(config)`, new in `@objectstack/plugin-security`
+  next to the existing `appDefaultPermissionSetName`. It answers the question a
+  booter actually has — _what do I hand the `SecurityPlugin` constructor for this
+  config_ — rather than just the name, because the second half
+  (`name ? { fallbackPermissionSet: name } : undefined`) is a decision, not
+  formatting, and while `serve.ts` had open-coded it, `bootStack` had simply never
+  grown one. `serve.ts` is converged onto the same helper, so the two now agree by
+  construction rather than by each caller remembering.
+
+  **Behavioural change, `@objectstack/verify` only.** `bootStack(config)` on an
+  app that declares an `isDefault` permission set now boots with that profile as
+  the additive per-request baseline (ADR-0090 D5), matching `objectstack dev`. An
+  app that declares no such set is unaffected — the resolution yields `undefined`
+  and the plugin keeps deriving `member_default` from its built-in sets, exactly
+  as before.
+
+  A suite that deliberately wants the platform's own baseline over an app that
+  declares a default now says so: `bootStack(config, { security: new SecurityPlugin() })`.
+  A plugin passed in `opts.security` still wins whole and is never merged into —
+  it arrives carrying its own constructor options, and silently rewriting one of
+  them would be a worse surprise than the bug being fixed.
+
+  Measured blast radius across the framework's own suites: of 86 dogfood files and
+  524 tests, exactly one assertion moved — `me-apps-and-everyone-baseline`, which
+  asserts the bootstrap binds `member_default` to the `everyone` anchor and whose
+  header already read "Deliberately VANILLA". That dependence was real but silent,
+  expressed only by the harness default; it is now stated in the argument. The
+  showcase fixtures that needed the app profile were already hand-wiring a
+  `SecurityPlugin` for it (`test/showcase-security.ts`, added by #5491) — the
+  "custom security code" these dogfood apps exist to prove unnecessary — and are
+  unchanged by this release.
+
+### Patch Changes
+
+- Updated dependencies [3d5c090]
+- Updated dependencies [e5bd768]
+- Updated dependencies [e027b3e]
+- Updated dependencies [c2429b0]
+- Updated dependencies [445a0c2]
+- Updated dependencies [f6609e6]
+- Updated dependencies [a70358a]
+- Updated dependencies [97e7e3c]
+- Updated dependencies [8828b9e]
+- Updated dependencies [53068c1]
+- Updated dependencies [ee58392]
+- Updated dependencies [f16e54e]
+- Updated dependencies [63f3b87]
+- Updated dependencies [06be54e]
+- Updated dependencies [259459d]
+- Updated dependencies [3f7f14e]
+- Updated dependencies [eb1b231]
+- Updated dependencies [2bc1876]
+- Updated dependencies [1d0faa7]
+- Updated dependencies [6968885]
+- Updated dependencies [eaed61f]
+- Updated dependencies [debe2f6]
+- Updated dependencies [97b0798]
+- Updated dependencies [5fa04fb]
+- Updated dependencies [ad878e7]
+- Updated dependencies [43a7a8d]
+- Updated dependencies [73f69dc]
+- Updated dependencies [04c56aa]
+- Updated dependencies [3028326]
+- Updated dependencies [4c5df00]
+- Updated dependencies [b3efeb7]
+- Updated dependencies [ddd075a]
+- Updated dependencies [88154be]
+- Updated dependencies [fe2dfa1]
+- Updated dependencies [6f6fec7]
+- Updated dependencies [e8dc61e]
+- Updated dependencies [2f3e793]
+- Updated dependencies [d8e8d9c]
+- Updated dependencies [94e749b]
+- Updated dependencies [ea1d916]
+- Updated dependencies [f7d80f4]
+- Updated dependencies [ae31a19]
+- Updated dependencies [e0f300b]
+- Updated dependencies [10c4ea9]
+- Updated dependencies [62b6a2f]
+- Updated dependencies [0b63b56]
+- Updated dependencies [8e2bbba]
+- Updated dependencies [5b4780b]
+- Updated dependencies [a933452]
+- Updated dependencies [8140915]
+- Updated dependencies [7b48cf9]
+- Updated dependencies [b5404f4]
+- Updated dependencies [f764691]
+- Updated dependencies [e120a5a]
+- Updated dependencies [e650d67]
+- Updated dependencies [121852d]
+- Updated dependencies [04476e7]
+- Updated dependencies [de6b7f1]
+- Updated dependencies [79228cd]
+- Updated dependencies [ab54608]
+- Updated dependencies [01faeb1]
+- Updated dependencies [d92ed03]
+- Updated dependencies [b3363e9]
+- Updated dependencies [6517448]
+- Updated dependencies [2ef1807]
+- Updated dependencies [d03fe25]
+- Updated dependencies [2672f85]
+- Updated dependencies [fec7848]
+- Updated dependencies [11066f6]
+- Updated dependencies [916af17]
+- Updated dependencies [84c86fb]
+- Updated dependencies [2a2a9fb]
+- Updated dependencies [86e6f6c]
+- Updated dependencies [a2e157c]
+- Updated dependencies [95c4227]
+- Updated dependencies [2a61116]
+- Updated dependencies [d4df105]
+- Updated dependencies [55da611]
+- Updated dependencies [e2798fa]
+- Updated dependencies [e2798fa]
+- Updated dependencies [e2798fa]
+- Updated dependencies [0fd8556]
+- Updated dependencies [6fde910]
+- Updated dependencies [9c82b89]
+- Updated dependencies [c308064]
+- Updated dependencies [74155c7]
+- Updated dependencies [742a6a5]
+- Updated dependencies [6908830]
+- Updated dependencies [8b06bba]
+- Updated dependencies [24122a9]
+- Updated dependencies [b0d54bf]
+- Updated dependencies [b7d3be4]
+- Updated dependencies [2a0d65e]
+- Updated dependencies [861ee32]
+- Updated dependencies [4c54037]
+- Updated dependencies [0f7157b]
+- Updated dependencies [d9bef45]
+- Updated dependencies [f549a0d]
+- Updated dependencies [82da264]
+- Updated dependencies [f586f1a]
+- Updated dependencies [6029cc1]
+- Updated dependencies [9b9b70f]
+- Updated dependencies [f5a9bc2]
+- Updated dependencies [881a3cc]
+- Updated dependencies [ad6317b]
+- Updated dependencies [8a88885]
+- Updated dependencies [5f7669e]
+- Updated dependencies [becbe53]
+- Updated dependencies [b127c8b]
+- Updated dependencies [a80302a]
+- Updated dependencies [474f131]
+- Updated dependencies [050cd82]
+- Updated dependencies [4d552af]
+- Updated dependencies [44d677c]
+- Updated dependencies [c32944d]
+- Updated dependencies [1dd780f]
+- Updated dependencies [c8d6f6e]
+- Updated dependencies [92a67f2]
+- Updated dependencies [9136327]
+- Updated dependencies [bf0ae99]
+- Updated dependencies [edb4af0]
+- Updated dependencies [f09a2e7]
+- Updated dependencies [cb3b6cd]
+- Updated dependencies [73b7234]
+- Updated dependencies [d2b97c3]
+- Updated dependencies [1fe436d]
+- Updated dependencies [7cdbcbb]
+- Updated dependencies [59b794f]
+- Updated dependencies [db59e9c]
+- Updated dependencies [fc3a36a]
+- Updated dependencies [69787f0]
+- Updated dependencies [5d022a1]
+- Updated dependencies [042b9ee]
+- Updated dependencies [55011af]
+- Updated dependencies [f549a0d]
+- Updated dependencies [a36db28]
+- Updated dependencies [3f8817a]
+- Updated dependencies [a2443e3]
+- Updated dependencies [e1554b1]
+- Updated dependencies [53ef057]
+- Updated dependencies [4856789]
+- Updated dependencies [a92b179]
+- Updated dependencies [c3f4916]
+- Updated dependencies [33e0385]
+- Updated dependencies [2205363]
+- Updated dependencies [09fe58d]
+- Updated dependencies [d0a5ceb]
+- Updated dependencies [e18a162]
+- Updated dependencies [d6d1a50]
+- Updated dependencies [d127ff0]
+- Updated dependencies [ea1d916]
+- Updated dependencies [465c5fc]
+- Updated dependencies [c804f19]
+- Updated dependencies [9b86cf6]
+- Updated dependencies [c51ffa5]
+- Updated dependencies [8825a06]
+- Updated dependencies [5087ac6]
+- Updated dependencies [2d1ddf0]
+- Updated dependencies [354b00f]
+- Updated dependencies [3de535b]
+- Updated dependencies [fe2e15a]
+- Updated dependencies [babddf6]
+- Updated dependencies [dbe92a7]
+- Updated dependencies [49f208b]
+- Updated dependencies [6146b67]
+- Updated dependencies [c6b6bb4]
+- Updated dependencies [07383fe]
+- Updated dependencies [9e9445b]
+- Updated dependencies [59c544d]
+- Updated dependencies [f3e26b7]
+- Updated dependencies [870f90c]
+- Updated dependencies [2f59da0]
+- Updated dependencies [114e727]
+- Updated dependencies [5e247fd]
+- Updated dependencies [83a3b1f]
+- Updated dependencies [2443bb4]
+- Updated dependencies [1a53a02]
+- Updated dependencies [623d008]
+- Updated dependencies [73648ba]
+- Updated dependencies [1507ba3]
+- Updated dependencies [a954634]
+- Updated dependencies [8ad609c]
+- Updated dependencies [bbee302]
+- Updated dependencies [08863dd]
+- Updated dependencies [2604d34]
+- Updated dependencies [56664f5]
+- Updated dependencies [cfeb9a0]
+- Updated dependencies [31cbe90]
+- Updated dependencies [bf42e76]
+- Updated dependencies [90bbf25]
+- Updated dependencies [eb91eba]
+- Updated dependencies [8fbed3b]
+- Updated dependencies [ce15dc3]
+- Updated dependencies [42da73d]
+- Updated dependencies [643b7c7]
+- Updated dependencies [bfe689b]
+- Updated dependencies [d0d5205]
+- Updated dependencies [b948a41]
+- Updated dependencies [1a15893]
+- Updated dependencies [b70e534]
+- Updated dependencies [2934761]
+- Updated dependencies [b295e4b]
+- Updated dependencies [2233a85]
+- Updated dependencies [de43f94]
+- Updated dependencies [4c31321]
+- Updated dependencies [62dd69a]
+- Updated dependencies [e15e679]
+- Updated dependencies [2ab1257]
+- Updated dependencies [d586366]
+- Updated dependencies [54fe9d5]
+- Updated dependencies [4cc4fb7]
+- Updated dependencies [28d1eb7]
+- Updated dependencies [2c26040]
+- Updated dependencies [f758cec]
+- Updated dependencies [1fa224a]
+- Updated dependencies [3cc8676]
+- Updated dependencies [e15bf7e]
+- Updated dependencies [3fb42d2]
+- Updated dependencies [78f0be8]
+- Updated dependencies [35f7fb4]
+- Updated dependencies [a5302c7]
+- Updated dependencies [82397b6]
+- Updated dependencies [4df747c]
+- Updated dependencies [7084313]
+- Updated dependencies [47a4e67]
+- Updated dependencies [91cefb8]
+- Updated dependencies [2c2a212]
+- Updated dependencies [9bc846b]
+- Updated dependencies [773f80a]
+- Updated dependencies [f3f855a]
+- Updated dependencies [0e043d8]
+- Updated dependencies [72847c5]
+- Updated dependencies [4fedb11]
+- Updated dependencies [dadd1ad]
+- Updated dependencies [2f2e63c]
+- Updated dependencies [486d526]
+- Updated dependencies [f8fe47e]
+- Updated dependencies [9e9445b]
+- Updated dependencies [89d7b35]
+- Updated dependencies [6155c3c]
+- Updated dependencies [d13f627]
+- Updated dependencies [e5fd28c]
+- Updated dependencies [a841151]
+- Updated dependencies [85ec26d]
+- Updated dependencies [f6476fc]
+- Updated dependencies [4ac12ef]
+- Updated dependencies [1788e19]
+- Updated dependencies [b88f5e8]
+- Updated dependencies [4afdd3e]
+- Updated dependencies [9566c38]
+- Updated dependencies [d538647]
+- Updated dependencies [42cc219]
+- Updated dependencies [d42a92f]
+- Updated dependencies [51d74ad]
+- Updated dependencies [d7e0b42]
+- Updated dependencies [8e13ca8]
+- Updated dependencies [0996899]
+- Updated dependencies [378d8b1]
+- Updated dependencies [3510e4a]
+- Updated dependencies [3415a61]
+- Updated dependencies [17688fe]
+- Updated dependencies [aa4b90d]
+- Updated dependencies [fd6572b]
+- Updated dependencies [54299ca]
+- Updated dependencies [3264516]
+- Updated dependencies [1f6ed16]
+- Updated dependencies [dc61def]
+- Updated dependencies [2465133]
+- Updated dependencies [251e888]
+- Updated dependencies [183b4c4]
+- Updated dependencies [2fdb36e]
+- Updated dependencies [e218483]
+- Updated dependencies [e787608]
+- Updated dependencies [cca11e9]
+- Updated dependencies [cfb549d]
+- Updated dependencies [20526f5]
+- Updated dependencies [c5eef1d]
+- Updated dependencies [e0f300b]
+- Updated dependencies [761a0ba]
+- Updated dependencies [d86815e]
+- Updated dependencies [61282f9]
+- Updated dependencies [be87153]
+- Updated dependencies [60f0dd8]
+- Updated dependencies [a87c5cd]
+- Updated dependencies [a47f338]
+- Updated dependencies [e13fd91]
+- Updated dependencies [2bd4e5e]
+- Updated dependencies [2598216]
+- Updated dependencies [2c7e62d]
+- Updated dependencies [eb7613c]
+- Updated dependencies [68f5ecc]
+- Updated dependencies [b0c16a5]
+- Updated dependencies [ecc9110]
+- Updated dependencies [f7bd4e2]
+- Updated dependencies [361bd5b]
+- Updated dependencies [bd5fc38]
+- Updated dependencies [129b378]
+- Updated dependencies [88f9d94]
+- Updated dependencies [1818998]
+- Updated dependencies [d19fb5c]
+- Updated dependencies [09ee21c]
+- Updated dependencies [f549a0d]
+- Updated dependencies [3fc2e48]
+- Updated dependencies [e8f435c]
+- Updated dependencies [41610f6]
+- Updated dependencies [c9bf940]
+- Updated dependencies [a682670]
+  - @objectstack/spec@17.0.0-rc.6
+  - @objectstack/service-automation@17.0.0-rc.6
+  - @objectstack/objectql@17.0.0-rc.6
+  - @objectstack/plugin-security@17.0.0-rc.6
+  - @objectstack/platform-objects@17.0.0-rc.6
+  - @objectstack/service-analytics@17.0.0-rc.6
+  - @objectstack/service-settings@17.0.0-rc.6
+  - @objectstack/rest@17.0.0-rc.6
+  - @objectstack/runtime@17.0.0-rc.6
+  - @objectstack/service-datasource@17.0.0-rc.6
+  - @objectstack/core@17.0.0-rc.6
+  - @objectstack/plugin-hono-server@17.0.0-rc.6
+  - @objectstack/plugin-sharing@17.0.0-rc.6
+  - @objectstack/plugin-auth@17.0.0-rc.6
+  - @objectstack/types@17.0.0-rc.6
+
 ## 17.0.0-rc.5
 
 ### Patch Changes

@@ -14,8 +14,14 @@ import {
   RestServerConfig,
   type RestApiConfig as RestApiConfigType,
   type RestServerConfig as RestServerConfigType,
+  type MetadataEndpointsConfig,
 } from './rest-server.zod';
 
+import {
+  EXPORT_ENTRY_POINTS,
+  exportNamesOf,
+  holdersOf,
+} from '../../scripts/lib/export-origins-testkit';
 describe('RestApiConfigSchema', () => {
   it('should accept minimal config with defaults', () => {
     const config = RestApiConfigSchema.parse({});
@@ -268,6 +274,55 @@ describe('MetadataEndpointsConfigSchema', () => {
     });
 
     expect(config.endpoints?.schema).toBe(false);
+  });
+
+  it('[ADR-0106 D8] maskObjectFields defaults to true — the mask is ON unless opted out', () => {
+    // The default is the whole security posture of the key: a deployment that
+    // never mentions `maskObjectFields` must still mask served object schemas.
+    // Pinning the MATERIALIZED default (not just the declaration) is what makes
+    // a later `.optional()` — which would hand `undefined` to the REST layer —
+    // fail here rather than silently unmask every metadata read.
+    const config = MetadataEndpointsConfigSchema.parse({});
+
+    expect(config.maskObjectFields).toBe(true);
+  });
+
+  it('[ADR-0106 D8] maskObjectFields: false is the declared per-server opt-out', () => {
+    // The opt-out has to SURVIVE the parse. Before this key had a declared seat,
+    // the schema stripped it (zod's default posture for an undeclared key) and
+    // the REST layer only saw it because it reads its config object raw, through
+    // a cast. An author who parses their config first now keeps the opt-out.
+    const optedOut = MetadataEndpointsConfigSchema.parse({ maskObjectFields: false });
+
+    expect(optedOut.maskObjectFields).toBe(false);
+
+    // Explicit `true` is a real answer too, not a no-op the parse discards.
+    expect(MetadataEndpointsConfigSchema.parse({ maskObjectFields: true }).maskObjectFields).toBe(true);
+  });
+
+  it('[ADR-0106 D8] maskObjectFields is authorable without a cast, and is a boolean (compile-time)', () => {
+    // The declaration's REASON for existing: `objectstack.config.ts` authors the
+    // key by name and `packages/rest`'s `normalizeConfig` reads it. Both of them
+    // go through this input type, so this is the pin that says the key no longer
+    // needs `(metadata as any)` to be reachable.
+    const authored: MetadataEndpointsConfig = { maskObjectFields: false };
+    const readAsBoolean: boolean | undefined = authored.maskObjectFields;
+    expect(readAsBoolean).toBe(false);
+
+    // Optional on the INPUT side — omitting it is how a deployment takes the
+    // default, and it must stay legal.
+    const omitted: MetadataEndpointsConfig = { prefix: '/meta' };
+    expect(omitted.maskObjectFields).toBeUndefined();
+
+    // …and it is a boolean switch, not a string one. Never invoked: its only job
+    // is to make the compiler prove the seat is typed rather than `any`, which
+    // is exactly what the cast it replaces could not do.
+    const mustNotCompile = () => {
+      // @ts-expect-error `maskObjectFields` is a boolean — a truthy string is not the opt-out
+      const wrongType: MetadataEndpointsConfig = { maskObjectFields: 'false' };
+      return wrongType;
+    };
+    expect(typeof mustNotCompile).toBe('function');
   });
 });
 
@@ -708,56 +763,23 @@ describe('[#4579] the OpenApi31 block schemas are not exported from any entry po
     'OpenApiWebhookEvent',
   ] as const;
 
-  it('resolves the export surface: no public entry names any of the six', async () => {
-    const ts = (await import('typescript')).default;
-    const { resolve, dirname } = await import('node:path');
-    const { fileURLToPath } = await import('node:url');
-    const { readFileSync } = await import('node:fs');
-
-    const specDir = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
-    // Every public entry point, read from package.json's exports map so a
-    // future entry cannot silently escape the pin below.
-    const pkg = JSON.parse(readFileSync(resolve(specDir, 'package.json'), 'utf8')) as {
-      exports: Record<string, unknown>;
-    };
-    const entries: Record<string, string> = {};
-    for (const sub of Object.keys(pkg.exports)) {
-      if (sub === '.') entries[sub] = resolve(specDir, 'src/index.ts');
-      else if (/^\.\/[a-z-]+$/.test(sub)) entries[sub] = resolve(specDir, `src/${sub.slice(2)}/index.ts`);
-      // './openapi.json' / './package.json' are not TypeScript entry points.
-    }
-    // Anti-vacuity: the enumeration must have found the real surface.
-    expect(Object.keys(entries)).toContain('./api');
-    expect(Object.keys(entries).length).toBeGreaterThan(10);
-
-    const program = ts.createProgram(Object.values(entries), {
-      module: ts.ModuleKind.ESNext,
-      moduleResolution: ts.ModuleResolutionKind.Bundler,
-      skipLibCheck: true,
-      noEmit: true,
-    });
-    const checker = program.getTypeChecker();
-    const exportsOf = (sub: string) => {
-      const sf = program.getSourceFile(entries[sub]);
-      const moduleSym = sf && checker.getSymbolAtLocation(sf);
-      // Without this guard a resolution failure would make every assertion
-      // below pass vacuously — the exact way a gate goes dormant (#4642).
-      expect(moduleSym, `${sub} module symbol must resolve`).toBeTruthy();
-      return checker.getExportsOfModule(moduleSym!);
-    };
+  it('resolves the export surface: no public entry names any of the six', () => {
+    // Anti-vacuity: the baseline must cover the real surface. (This used to
+    // enumerate package.json's exports map and build its own `ts.createProgram`
+    // right here; `export-origins/` IS that resolution, computed once at build
+    // time and checked in — #4796.)
+    expect(EXPORT_ENTRY_POINTS).toContain('./api');
+    expect(EXPORT_ENTRY_POINTS.length).toBeGreaterThan(10);
 
     // The surface stays non-trivial (the `not.toContain` cannot pass by
     // resolving nothing) and the surviving neighbours stand.
-    const apiNames = exportsOf('./api').map((e) => e.getName());
+    const apiNames = exportNamesOf('./api');
     expect(apiNames.length, './api must export a non-trivial surface').toBeGreaterThan(50);
     expect(apiNames).toContain('RestServerConfigSchema');
     expect(apiNames).toContain('RestApiConfigSchema');
 
-    for (const sub of Object.keys(entries)) {
-      const names = exportsOf(sub).map((e) => e.getName());
-      for (const removed of REMOVED_NAMES) {
-        expect(names, `${sub} must not export ${removed} (#4579)`).not.toContain(removed);
-      }
+    for (const removed of REMOVED_NAMES) {
+      expect(holdersOf(removed), `no entry may export ${removed} (#4579)`).toEqual([]);
     }
   });
 

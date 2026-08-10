@@ -18,7 +18,7 @@ Provides endpoints for executing analytical queries and discovering metadata.
 
 ```typescript
 import { AnalyticsEndpoint, AnalyticsMetadataResponseSchema, AnalyticsQueryRequestSchema, AnalyticsResultResponseSchema, AnalyticsSqlResponseSchema, GetAnalyticsMetaRequestSchema } from '@objectstack/spec/api';
-import type { AnalyticsEndpoint, AnalyticsMetadataResponse, AnalyticsQueryRequest, AnalyticsSqlResponse } from '@objectstack/spec/api';
+import type { AnalyticsEndpoint, AnalyticsMetadataResponse, AnalyticsQueryRequest, AnalyticsSqlResponse, GetAnalyticsMetaRequest } from '@objectstack/spec/api';
 
 // Validate data
 const result = AnalyticsEndpoint.parse(data);
@@ -44,9 +44,9 @@ const result = AnalyticsEndpoint.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
-| **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| … +257 more>; message: string; category?: string; httpStatus?: integer; … }` | optional | Error details if success is false |
+| **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| … +259 more>; message: string; category?: string; httpStatus?: integer; … }` | optional | Error details if success is false |
 | **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
-| **data** | `{ cubes: { name: string; title?: string; description?: string; sql: string; … }[] }` | ✅ |  |
+| **data** | `{ name: string; title?: string; measures: object[]; dimensions: object[] }[]` | ✅ | Available cubes, each as the `CubeMeta` discovery projection — the cube name, its title, and the measures/dimensions a client may name in a query. A bare array: there is no `cubes` wrapper object, and no cube `sql` is published. |
 
 
 ---
@@ -79,9 +79,9 @@ const result = AnalyticsEndpoint.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
-| **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| … +257 more>; message: string; category?: string; httpStatus?: integer; … }` | optional | Error details if success is false |
+| **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| … +259 more>; message: string; category?: string; httpStatus?: integer; … }` | optional | Error details if success is false |
 | **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
-| **data** | `{ rows: Record<string, any>[]; fields: { name: string; type: string }[]; sql?: string }` | ✅ |  |
+| **data** | `{ rows: Record<string, any>[]; fields: object[]; sql?: string }` | ✅ |  |
 
 
 ---
@@ -93,7 +93,7 @@ const result = AnalyticsEndpoint.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
-| **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| … +257 more>; message: string; category?: string; httpStatus?: integer; … }` | optional | Error details if success is false |
+| **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| … +259 more>; message: string; category?: string; httpStatus?: integer; … }` | optional | Error details if success is false |
 | **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `{ sql: string; params: any[] }` | ✅ |  |
 

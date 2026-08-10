@@ -40,7 +40,14 @@ import {
   type ConnectorFieldMapping,
   type DataSyncConfig,
   type WebhookConfig,
+
+  // The `/meta/connector/:name` door's schema (#6245) — `ConnectorSchema` plus
+  // the ADR-0097 cross-field rules. The envelope pins below drive BOTH, because
+  // this is the shape the round-trip actually goes through.
+  DeclarativeConnectorEntrySchema,
 } from './connector.zod';
+
+import { getMetadataTypeSchema } from '../kernel/metadata-type-schemas';
 
 // Import shared auth schemas from canonical source
 import {
@@ -52,6 +59,10 @@ import {
   ConnectorAuthConfigSchema as AuthConfigSchema,
 } from '../shared/connector-auth.zod';
 
+import {
+  originFileOf,
+  originMapOf,
+} from '../../scripts/lib/export-origins-testkit';
 // Deriving types from schemas
 type APIKey = z.infer<typeof APIKeySchema>;
 type OAuth2 = z.infer<typeof OAuth2Schema>;
@@ -836,54 +847,18 @@ describe('[#4911] `./integration` no longer publishes an outbound rate-limit sha
   // ORIGINAL declaration: the same symbol-identity measurement
   // `check:dual-source-exports` makes, but over `src/` so it runs in `pnpm test`
   // without a build.
-  it('no name resolves to two declarations across ./shared and ./integration (types included)', async () => {
-    const ts = (await import('typescript')).default;
-    const { resolve, relative, dirname } = await import('node:path');
-    const { fileURLToPath } = await import('node:url');
-
-    const specDir = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
-    const entries = {
-      './shared': resolve(specDir, 'src/shared/index.ts'),
-      './integration': resolve(specDir, 'src/integration/index.ts'),
-    };
-    const program = ts.createProgram(Object.values(entries), {
-      module: ts.ModuleKind.ESNext,
-      moduleResolution: ts.ModuleResolutionKind.Bundler,
-      skipLibCheck: true,
-      noEmit: true,
-    });
-    const checker = program.getTypeChecker();
-    const unalias = (s: import('typescript').Symbol) =>
-      s.getFlags() & ts.SymbolFlags.Alias ? checker.getAliasedSymbol(s) : s;
-
-    /** entry → exported name → `file:line` of the ORIGINAL declaration. */
-    const originsByEntry = new Map<string, Map<string, string>>();
-    for (const [sub, file] of Object.entries(entries)) {
-      const sf = program.getSourceFile(file);
-      const moduleSym = sf && checker.getSymbolAtLocation(sf);
-      // Without this, a resolution failure would make every assertion below
-      // pass vacuously — the exact way a gate goes dormant (#4642).
-      expect(moduleSym, `${sub} module symbol must resolve`).toBeTruthy();
-
-      const origins = new Map<string, string>();
-      for (const exported of checker.getExportsOfModule(moduleSym!)) {
-        const decl = unalias(exported).declarations?.[0];
-        if (!decl) continue;
-        const declFile = decl.getSourceFile();
-        origins.set(
-          exported.getName(),
-          `${relative(specDir, declFile.fileName)}:${
-            declFile.getLineAndCharacterOfPosition(decl.getStart()).line + 1
-          }`,
-        );
-      }
-      // Guard #2: an entry that resolved to nothing would also pass vacuously.
+  it('no name resolves to two declarations across ./shared and ./integration (types included)', () => {
+    // The per-entry origin maps `export-origins/` records. (Each of these two
+    // pins used to build its own `ts.createProgram` right here; that resolution
+    // is now a build-time artifact — #4796.)
+    const shared = originMapOf('./shared');
+    const integration = originMapOf('./integration');
+    // Guard: an entry that resolved to nothing would make every assertion below
+    // pass vacuously — the exact way a gate goes dormant (#4642).
+    for (const [sub, origins] of [['./shared', shared], ['./integration', integration]] as const) {
       expect(origins.size, `${sub} must export something`).toBeGreaterThan(20);
-      originsByEntry.set(sub, origins);
     }
 
-    const shared = originsByEntry.get('./shared')!;
-    const integration = originsByEntry.get('./integration')!;
 
     // The names this issue is about. TYPE-level absence of the retired shape —
     // the assertion the runtime `in`-checks above structurally cannot make.
@@ -896,11 +871,9 @@ describe('[#4911] `./integration` no longer publishes an outbound rate-limit sha
     expect(integration.get('RateLimitConfigSchema')).toBeUndefined();
     // Positive control for the four `toBeUndefined()`s above: a live neighbour
     // in the same file must still resolve, or they would pass vacuously.
-    expect(integration.get('RetryConfigSchema')).toMatch(
-      /^src\/integration\/connector\.zod\.ts:\d+$/,
-    );
-    expect(shared.get('RateLimitConfig')).toMatch(/^src\/shared\/http\.zod\.ts:\d+$/);
-    expect(shared.get('RateLimitConfigSchema')).toMatch(/^src\/shared\/http\.zod\.ts:\d+$/);
+    expect(originFileOf('./integration', 'RetryConfigSchema')).toBe('src/integration/connector.zod.ts');
+    expect(originFileOf('./shared', 'RateLimitConfig')).toBe('src/shared/http.zod.ts');
+    expect(originFileOf('./shared', 'RateLimitConfigSchema')).toBe('src/shared/http.zod.ts');
 
     // And the general invariant for this pair of entries: any name they BOTH
     // export must resolve to one and the same declaration. The list stayed
@@ -1112,67 +1085,30 @@ describe('[#4703] FieldMapping no longer names three declarations', () => {
   // TypeScript compiler API — the same symbol-identity measurement
   // `check:dual-source-exports` makes against `dist`, run over `src/` so it is
   // part of `pnpm test`. Three entries means THREE pairs, all checked.
-  it('no name resolves to two declarations across ./shared, ./integration and ./data (types included)', async () => {
-    const ts = (await import('typescript')).default;
-    const { resolve, relative, dirname } = await import('node:path');
-    const { fileURLToPath } = await import('node:url');
-
-    const specDir = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
-    const entries = {
-      './shared': resolve(specDir, 'src/shared/index.ts'),
-      './integration': resolve(specDir, 'src/integration/index.ts'),
-      './data': resolve(specDir, 'src/data/index.ts'),
-    };
-    const program = ts.createProgram(Object.values(entries), {
-      module: ts.ModuleKind.ESNext,
-      moduleResolution: ts.ModuleResolutionKind.Bundler,
-      skipLibCheck: true,
-      noEmit: true,
-    });
-    const checker = program.getTypeChecker();
-    const unalias = (s: import('typescript').Symbol) =>
-      s.getFlags() & ts.SymbolFlags.Alias ? checker.getAliasedSymbol(s) : s;
-
-    /** entry → exported name → `file:line` of the ORIGINAL declaration. */
-    const originsByEntry = new Map<string, Map<string, string>>();
-    for (const [sub, file] of Object.entries(entries)) {
-      const sf = program.getSourceFile(file);
-      const moduleSym = sf && checker.getSymbolAtLocation(sf);
-      // Without this, a resolution failure would make every assertion below
-      // pass vacuously — the exact way a gate goes dormant (#4642).
-      expect(moduleSym, `${sub} module symbol must resolve`).toBeTruthy();
-
-      const origins = new Map<string, string>();
-      for (const exported of checker.getExportsOfModule(moduleSym!)) {
-        const decl = unalias(exported).declarations?.[0];
-        if (!decl) continue;
-        const declFile = decl.getSourceFile();
-        origins.set(
-          exported.getName(),
-          `${relative(specDir, declFile.fileName)}:${
-            declFile.getLineAndCharacterOfPosition(decl.getStart()).line + 1
-          }`,
-        );
-      }
-      // Guard #2: an entry that resolved to nothing would also pass vacuously.
+  it('no name resolves to two declarations across ./shared, ./integration and ./data (types included)', () => {
+    // The per-entry origin maps `export-origins/` records. (Each of these two
+    // pins used to build its own `ts.createProgram` right here; that resolution
+    // is now a build-time artifact — #4796.)
+    const shared = originMapOf('./shared');
+    const integration = originMapOf('./integration');
+    const data = originMapOf('./data');
+    // Guard: an entry that resolved to nothing would make every assertion below
+    // pass vacuously — the exact way a gate goes dormant (#4642).
+    for (const [sub, origins] of [['./shared', shared], ['./integration', integration], ['./data', data]] as const) {
       expect(origins.size, `${sub} must export something`).toBeGreaterThan(20);
-      originsByEntry.set(sub, origins);
     }
 
-    const shared = originsByEntry.get('./shared')!;
-    const integration = originsByEntry.get('./integration')!;
-    const data = originsByEntry.get('./data')!;
 
     // Each renamed name resolves into its own domain's file…
     for (const name of ['ConnectorFieldMapping', 'ConnectorFieldMappingSchema']) {
-      expect(integration.get(name), name).toMatch(/^src\/integration\/connector\.zod\.ts:\d+$/);
+      expect(originFileOf('./integration', name), name).toBe('src/integration/connector.zod.ts');
     }
     for (const name of ['ImportFieldMapping', 'ImportFieldMappingSchema']) {
-      expect(data.get(name), name).toMatch(/^src\/data\/mapping\.zod\.ts:\d+$/);
+      expect(originFileOf('./data', name), name).toBe('src/data/mapping.zod.ts');
     }
     // …the base keeps the bare name on `./shared` only…
     for (const name of ['FieldMapping', 'FieldMappingSchema']) {
-      expect(shared.get(name), name).toMatch(/^src\/shared\/mapping\.zod\.ts:\d+$/);
+      expect(originFileOf('./shared', name), name).toBe('src/shared/mapping.zod.ts');
       expect(integration.get(name), `${name} must be gone from ./integration`).toBeUndefined();
       expect(data.get(name), `${name} must be gone from ./data`).toBeUndefined();
     }
@@ -1184,7 +1120,7 @@ describe('[#4703] FieldMapping no longer names three declarations', () => {
     // handful of `./shared` declarations (identical origin — that is fine and
     // is what this measures), so only a name resolving to two DIFFERENT files
     // counts.
-    const pairs: Array<[string, Map<string, string>, string, Map<string, string>]> = [
+    const pairs: Array<[string, ReadonlyMap<string, string>, string, ReadonlyMap<string, string>]> = [
       ['./shared', shared, './integration', integration],
       ['./shared', shared, './data', data],
       ['./integration', integration, './data', data],
@@ -1201,5 +1137,146 @@ describe('[#4703] FieldMapping no longer names three declarations', () => {
     // Empty, and it must stay empty. A failure here is a NEW dual-source name;
     // the fix is to converge or prefix it, never to allow-list it back in.
     expect(conflicts.sort()).toEqual([]);
+  });
+});
+
+// ============================================================================
+// ADR-0010 protection envelope — PRESERVED on round-trip, not merely tolerated
+// (#6362, split out of #6245)
+// ============================================================================
+
+/**
+ * The defect these pins hold shut is the QUIET half of the envelope-handling
+ * pair, and it is quiet in a way that reads as success.
+ *
+ * Both metadata load paths call `applyProtection` on EVERY type, so a
+ * package-loaded connector carries the seven `_`-prefixed envelope keys by the
+ * time anything re-parses it — and since #6245 bound
+ * `DeclarativeConnectorEntrySchema` to `PUT /api/v1/meta/connector/:name`,
+ * something does re-parse it on every write.
+ *
+ * `sharing_rule` is `.strict()`, so its undeclared envelope was REJECTED: a
+ * hard 422, loud, fixed in #6245. `ConnectorSchema` is a plain `z.object`, so
+ * it TOLERATED the same envelope and answered `success` — then stripped every
+ * key from the output. Tolerate is not preserve. Measured on `origin/main`
+ * before the `...MetadataProtectionFields` spread: a stamped catalog descriptor
+ * came back having lost all seven keys, with no error anywhere, so every
+ * downstream reader of `extractProtection` / `resolveLockState` saw an
+ * unlocked, unattributed, org-provenance item.
+ *
+ * ⚠️ Assert the VALUES, key by key — not `success`, and not "some `_` key
+ * survived". A presence-only or parses-only assertion is green on the very
+ * shape this issue is about: the unfixed schema parses that body perfectly
+ * well. The whole defect lives in the output, so the output is what gets
+ * asserted.
+ */
+const STAMPED_ENVELOPE = {
+  _lock: 'no-overlay',
+  _lockReason: 'Ships with the billing package.',
+  _lockSource: 'artifact',
+  _lockDocsUrl: 'https://docs.example.com/locked-connectors',
+  _provenance: 'package',
+  _packageId: 'com.acme.billing',
+  _packageVersion: '1.2.3',
+} as const;
+
+/**
+ * A catalog descriptor: no `provider`, so the ADR-0097 §3/§5 instance rules do
+ * not fire and the entry schema judges exactly what the base schema does. That
+ * keeps these pins about the envelope and nothing else.
+ */
+const STAMPED_CONNECTOR = {
+  name: 'billing_api',
+  label: 'Billing API',
+  type: 'api',
+  ...STAMPED_ENVELOPE,
+} as const;
+
+describe('ADR-0010 protection envelope (#6362)', () => {
+  it('ConnectorSchema PRESERVES every stamped envelope key through a parse', () => {
+    const parsed = ConnectorSchema.parse(STAMPED_CONNECTOR);
+
+    // The reverse-verification target: remove `...MetadataProtectionFields`
+    // from `ConnectorSchema` and this object is `{}` — every key stripped —
+    // while the parse above still succeeds.
+    expect({
+      _lock: parsed._lock,
+      _lockReason: parsed._lockReason,
+      _lockSource: parsed._lockSource,
+      _lockDocsUrl: parsed._lockDocsUrl,
+      _provenance: parsed._provenance,
+      _packageId: parsed._packageId,
+      _packageVersion: parsed._packageVersion,
+    }).toEqual(STAMPED_ENVELOPE);
+  });
+
+  it('the /meta write door (DeclarativeConnectorEntrySchema) preserves it too', () => {
+    // #6245 bound this shape, not the base, to `PUT /meta/connector/:name`.
+    // The base carrying the spread is only half an answer if the door's own
+    // schema drops it, so the door is pinned separately.
+    const parsed = DeclarativeConnectorEntrySchema.parse(STAMPED_CONNECTOR);
+    expect(parsed._packageId).toBe('com.acme.billing');
+    expect(parsed._provenance).toBe('package');
+    expect(parsed._lock).toBe('no-overlay');
+    expect(parsed._lockDocsUrl).toBe('https://docs.example.com/locked-connectors');
+  });
+
+  it('the schema the metadata registry resolves for `connector` preserves it', () => {
+    // The registry lookup is the real entry point — a future rebinding that
+    // pointed `connector` at some third shape would pass both pins above and
+    // still strip the envelope in production.
+    const schema = getMetadataTypeSchema('connector');
+    expect(schema, 'no schema bound for `connector`').toBeDefined();
+
+    const result = schema!.safeParse(STAMPED_CONNECTOR);
+    expect(result.success).toBe(true);
+
+    const out = result.success ? (result.data as Record<string, unknown>) : {};
+    const survived = Object.keys(STAMPED_ENVELOPE).filter((k) => k in out);
+    expect(survived.sort()).toEqual(Object.keys(STAMPED_ENVELOPE).sort());
+  });
+
+  it('a provider-bound instance keeps the envelope alongside the §3/§5 rules', () => {
+    // The envelope must not become a casualty of the cross-field rules: an
+    // instance declaration is package-loaded too, and it is the shape most
+    // likely to be locked.
+    const parsed = DeclarativeConnectorEntrySchema.parse({
+      name: 'billing_openapi',
+      label: 'Billing (OpenAPI)',
+      type: 'api',
+      provider: 'openapi',
+      providerConfig: { spec: './billing-openapi.json' },
+      auth: { type: 'bearer', credentialRef: 'BILLING_TOKEN' },
+      ...STAMPED_ENVELOPE,
+    });
+    expect(parsed._packageId).toBe('com.acme.billing');
+    expect(parsed._lockSource).toBe('artifact');
+  });
+
+  it('declaring the envelope did not open the schema to arbitrary `_` keys', () => {
+    // `ConnectorSchema` is deliberately non-strict (subtypes `.extend()` it),
+    // so an unknown key is stripped rather than refused. The point of this pin
+    // is the converse of the ones above: the spread adds SEVEN named keys, not
+    // a passthrough — an underscore key nobody declared still does not survive.
+    const parsed = ConnectorSchema.parse({
+      ...STAMPED_CONNECTOR,
+      _notAnEnvelopeKey: 'should not survive',
+    });
+    expect('_notAnEnvelopeKey' in parsed).toBe(false);
+    expect(parsed._packageId).toBe('com.acme.billing');
+  });
+
+  it('WebhookConfigSchema — the nested webhook — preserves it as well', () => {
+    // `WebhookConfigSchema` extends `WebhookSchema`, which has carried the
+    // spread since #4001 batch 11. Pinned here so the inherited behaviour
+    // cannot regress silently through a future `.extend()`/`.omit()` on the
+    // connector side.
+    const parsed = WebhookConfigSchema.parse({
+      name: 'billing_events',
+      url: 'https://example.com/hooks/billing',
+      ...STAMPED_ENVELOPE,
+    });
+    expect(parsed._packageId).toBe('com.acme.billing');
+    expect(parsed._provenance).toBe('package');
   });
 });

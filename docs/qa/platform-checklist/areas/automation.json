@@ -1,0 +1,1034 @@
+{
+  "$comment": "Standing platform test checklist — area ledger. Hand-edited, append-only; validated by scripts/check-platform-checklist.mjs (pnpm check:platform-checklist). Authoring rules: docs/qa/platform-checklist/README.md · execution protocol: RUNNER.md.",
+  "area": "automation",
+  "title": "Automation — flows, triggers, roll-ups",
+  "items": [
+    {
+      "id": "automation.flow-run-step-nesting",
+      "title": "Flow Runs render loop/region iterations as a nested execution tree",
+      "since": "v16",
+      "status": "active",
+      "revision": 2,
+      "priority": "P1",
+      "surface": "mixed",
+      "personas": [
+        "admin"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "showcase_batch_reminders (examples/app-showcase/src/automation/flows/index.ts BatchRemindersFlow) — an autolaunched loop flow with a `tasks` list input, runnable on demand via the trigger route"
+        ]
+      },
+      "steps": [
+        "boot showcase isolated (dogfood §0); sign in as the dev admin",
+        "POST /api/v1/automation/showcase_batch_reminders/trigger with body {\"params\": {\"tasks\": [t1, t2, t3]}} — three task-shaped objects each carrying id/title/owner so the loop body's notify node can interpolate {task.title}/{task.owner}",
+        "GET /api/v1/automation/showcase_batch_reminders/runs, take the newest run id, then GET /api/v1/automation/showcase_batch_reminders/runs/:runId for the full step log",
+        "record every step's nodeId, nodeType, status, parentNodeId, iteration, regionKind (ExecutionStepLogSchema #1505 region tags)",
+        "open the flow in the Studio flow-designer (metadata-admin) and its Runs panel (FlowRunsPanel) — NOT the developer Flow Runs page — and expand the newest run",
+        "screenshot the expanded step tree showing the per-iteration children under the loop node",
+        "contrast run: trigger again with {\"params\": {\"tasks\": []}} and capture the loop step of that run"
+      ],
+      "acceptance": [
+        {
+          "clause": "the 3-item run completes (status=completed) and the loop body's send_reminder node executed exactly 3 times",
+          "oracle": "api",
+          "verify": "GET the run detail: status=completed; count steps with nodeId=send_reminder == 3",
+          "evidence": "run-detail API read"
+        },
+        {
+          "clause": "every body step carries the region tags: parentNodeId=loop_tasks, iteration in 0..2, regionKind='loop-body'",
+          "oracle": "api",
+          "verify": "assert the three send_reminder steps each carry {parentNodeId:'loop_tasks', iteration: 0|1|2, regionKind:'loop-body'} and no two share an iteration; top-level steps (start/loop_tasks/end) carry NO parentNodeId",
+          "evidence": "step-log excerpt with the tags"
+        },
+        {
+          "clause": "the designer Runs panel renders the iterations as a nested tree (per-iteration children folded under the loop node, labeled 1-based), not a flat list",
+          "oracle": "screenshot",
+          "verify": "screenshot of the expanded run shows send_reminder rows indented under 'For each task' grouped by iteration — matches FlowRunsPanel buildStepTree (#1505)",
+          "evidence": "Runs panel screenshot"
+        },
+        {
+          "clause": "the rendered tree agrees with the API: same step count and same parent/iteration grouping",
+          "oracle": "api",
+          "verify": "cross-check the screenshot's grouping against the recorded parentNodeId/iteration tags — a tree the API tags cannot reconstruct is a rendering invention",
+          "evidence": "screenshot + step-log side by side"
+        },
+        {
+          "clause": "empty-collection contrast: the 0-item run still completes and its loop step succeeds with zero body children",
+          "oracle": "api",
+          "verify": "run 2 detail: status=completed, no steps with parentNodeId=loop_tasks — 'nothing to iterate' is a success with an empty region, not a failure",
+          "evidence": "second run-detail read"
+        }
+      ],
+      "negative": [
+        "a flat rendering in which all steps show success is a FAIL of the nesting clause — every step passing is exactly what makes the missing tree easy to tick past; the developer Flow Runs page renders steps flat and must never be cited as this item's oracle"
+      ],
+      "traps": [
+        "wrong-panel",
+        "hydration-race"
+      ],
+      "source": [
+        "#3358 §2 — 'the developer Flow Runs page renders steps flat; looking there alone reads as a miss'",
+        "packages/spec/src/automation/execution.zod.ts (ExecutionStepLogSchema parentNodeId/iteration/regionKind)",
+        "objectui packages/app-shell/src/views/metadata-admin/previews/FlowRunsPanel.tsx (#1505 buildStepTree)",
+        "examples/app-showcase/src/automation/flows/index.ts (BatchRemindersFlow)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-07",
+          "change": "initial import from #3358, encoding its wrong-panel lesson as a trap",
+          "ref": "#3358"
+        },
+        {
+          "revision": 2,
+          "date": "2026-08-07",
+          "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        }
+      ]
+    },
+    {
+      "id": "automation.time-relative-trigger",
+      "title": "Time-relative flow triggers author first-class and fire per matching record",
+      "since": "v16",
+      "status": "active",
+      "revision": 2,
+      "priority": "P2",
+      "surface": "mixed",
+      "personas": [
+        "admin"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "showcase_task_due_reminder (type schedule, start config.timeRelative {object: showcase_task, dateField: due_date, offsetDays: [3,1], filter: {status: {$ne: 'done'}}}, runAs system)"
+        ],
+        "knownGaps": [
+          "the stock sweep cadence is the timeRelative default — daily 08:00 UTC — so an in-session fire needs either a cadence override (config.schedule cron/interval on a writable copy of the flow) or a manually provoked sweep; the run record must state which method was used"
+        ]
+      },
+      "steps": [
+        "boot showcase isolated (dogfood §0); sign in as the dev admin",
+        "open showcase_task_due_reminder in the Studio flow-designer; open the start node's panel",
+        "screenshot the first-class timeRelative editor (sweep object / date field / offset days as a numberList editor — not raw JSON)",
+        "read the server boot log: the Flows banner must count showcase_task_due_reminder bound as a time_relative trigger (requires: ['triggers'] — engine warns 'no time_relative trigger is registered' otherwise)",
+        "POST /api/v1/data/showcase_task: one task with due_date exactly 3 days from today and status='todo' (matches offsetDays AND the filter), one with due_date 10 days out (no offset match), one due in 3 days but status='done' (excluded by the filter)",
+        "fire the sweep (per the knownGaps method) and record how it was fired",
+        "GET /api/v1/automation/showcase_task_due_reminder/runs — locate the run(s) produced by the sweep",
+        "GET the matching run's detail: trigger kind, the interpolated notify step, and the recipient",
+        "author-negative: in a scratch/writable package author a flow whose timeRelative sets BOTH offsetDays and withinDays, and build/validate it"
+      ],
+      "acceptance": [
+        {
+          "clause": "the designer renders the dedicated timeRelative panel (sweep object / date field / offset days), not a raw-JSON fallback",
+          "oracle": "screenshot",
+          "verify": "designer panel screenshot shows the named fields populated from the flow source",
+          "evidence": "screenshot"
+        },
+        {
+          "clause": "the flow binds at boot as a time_relative trigger",
+          "oracle": "log",
+          "verify": "boot log counts it bound as time_relative (trigger-schedule time-relative-trigger.ts registers type 'time_relative'); no 'no time_relative trigger is registered' warning",
+          "evidence": "boot log excerpt"
+        },
+        {
+          "clause": "the sweep launches the flow once for the matching record, with that record on the flow context, and the run row records the time_relative trigger kind",
+          "oracle": "api",
+          "verify": "exactly one run whose trigger records time_relative (engine stamps triggerType 'time_relative' — service-automation engine.ts) and whose notify step interpolated the staged task's {record.title}",
+          "evidence": "runs list + run-detail reads"
+        },
+        {
+          "clause": "non-matching records produce NO run: the 10-days-out task (outside offsetDays) and the done task (excluded by filter) are both skipped",
+          "oracle": "api",
+          "verify": "runs list contains no run whose context record is either non-matching task — assert the absence, not just the presence",
+          "evidence": "runs list read after the sweep"
+        },
+        {
+          "clause": "declaring both windowing modes is rejected at authoring: timeRelative requires exactly ONE of withinDays / offsetDays",
+          "oracle": "build",
+          "verify": "the both-modes scratch flow fails build/validate with a located error naming the constraint (packages/spec/src/automation/time-relative-trigger.zod.ts)",
+          "evidence": "build/validate output"
+        }
+      ],
+      "negative": [
+        "a sweep that also fires for the filter-excluded or out-of-window record is a FAIL even though the matching record fired correctly",
+        "a both-windowing-modes flow accepted silently is a FAIL — the schema declares exactly one mode"
+      ],
+      "traps": [
+        "seed-data-thin",
+        "stale-dist"
+      ],
+      "source": [
+        "#3358 §2",
+        "packages/spec/src/automation/time-relative-trigger.zod.ts",
+        "examples/app-showcase/src/automation/flows/index.ts (TaskDueReminderFlow, #1874)",
+        "packages/triggers/trigger-schedule/src/time-relative-trigger.ts"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-07",
+          "change": "initial import from #3358",
+          "ref": "#3358"
+        },
+        {
+          "revision": 2,
+          "date": "2026-08-07",
+          "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        }
+      ]
+    },
+    {
+      "id": "automation.rollup-summary-filter",
+      "title": "Filtered roll-up summaries recompute only through their own filter",
+      "since": "v16",
+      "status": "active",
+      "revision": 2,
+      "priority": "P1",
+      "surface": "mixed",
+      "personas": [
+        "admin"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a parent with several filtered roll-ups in different filter shapes (showcase_expense_report: equality / boolean / operator / unfiltered)"
+        ],
+        "knownGaps": [
+          "the visual filter-editor half needs a summary field in a WRITABLE package — the showcase ships read-only, so Studio editing is not reachable on stock fixtures (#3358)"
+        ]
+      },
+      "steps": [
+        "boot showcase isolated (dogfood §0); sign in as the dev admin",
+        "GET /api/v1/data/showcase_expense_report for EXP-2001 and record all six roll-ups: total_amount (unfiltered SUM), approved_amount (SUM where status=approved), reimbursable_amount (SUM where billable=true), line_count (unfiltered COUNT), rejected_count (COUNT where status=rejected), over_limit_count (COUNT where amount >= 500)",
+        "GET the child showcase_expense_line rows for that report and independently recompute each roll-up from them",
+        "PATCH one line's status approved→rejected over /api/v1/data/showcase_expense_line/:id; re-read the parent and recompute again",
+        "PATCH a different line's billable true→false; re-read the parent",
+        "DELETE one line; re-read the parent — a delete must move every roll-up whose filter matched the deleted row, including the unfiltered total",
+        "(editor half, blocked) on a writable package: edit a summary field's child-row filter in Studio's visual filter editor, save, and re-read the persisted metadata"
+      ],
+      "acceptance": [
+        {
+          "clause": "baseline: every roll-up equals an independent recomputation from the child rows before any edit",
+          "oracle": "api",
+          "verify": "value table: six roll-ups vs six hand-recomputed aggregates over the fetched lines — all equal",
+          "evidence": "parent + child reads with the recomputation table"
+        },
+        {
+          "clause": "after the status flip, only the status-filtered roll-ups move (approved_amount down, rejected_count up) and each lands exactly on the recomputed value",
+          "oracle": "api",
+          "verify": "before/after parent reads: approved_amount and rejected_count equal recomputation; total_amount, line_count, reimbursable_amount, over_limit_count byte-identical to before (the part a naive recompute-everything gets wrong)",
+          "evidence": "before/after value table"
+        },
+        {
+          "clause": "after the billable flip, only reimbursable_amount moves",
+          "oracle": "api",
+          "verify": "before/after reads: reimbursable_amount equals recomputation; all five other roll-ups byte-identical",
+          "evidence": "before/after value table"
+        },
+        {
+          "clause": "a child delete recomputes every roll-up the deleted row participated in, including the unfiltered total and count",
+          "oracle": "api",
+          "verify": "after DELETE: total_amount and line_count drop by the deleted row's contribution; filtered roll-ups whose predicate matched it drop too; roll-ups whose predicate did not match are unchanged",
+          "evidence": "before/after value table"
+        },
+        {
+          "clause": "the child-row filter is settable via the visual editor on a writable package",
+          "oracle": "screenshot",
+          "verify": "edit a summary field's filter in Studio on a writable package and confirm the persisted metadata via the meta API",
+          "evidence": "editor screenshot + saved metadata read"
+        }
+      ],
+      "negative": [
+        "an untouched-filter roll-up that moves on an edit outside its filter (e.g. rejected_count changing on the billable flip) is a FAIL even if every touched value is right"
+      ],
+      "blocked": {
+        "by": "fixture",
+        "ref": "#3358 (editor half needs a writable-package summary field fixture)"
+      },
+      "traps": [
+        "seed-data-thin"
+      ],
+      "source": [
+        "#3358 §2 (recompute half proven; editor half explicitly left unticked)",
+        "examples/app-showcase/src/data/objects/expense-report.object.ts (the six roll-up shapes and their filters)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-07",
+          "change": "initial import from #3358; clause 1 runnable today, clause 2 carries the fixture blocker",
+          "ref": "#3358"
+        },
+        {
+          "revision": 2,
+          "date": "2026-08-07",
+          "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        }
+      ]
+    },
+    {
+      "id": "automation.flow-node-type-matrix",
+      "title": "Every demonstrable flow node type authors in the designer, executes in a run, and surfaces its step in run logs",
+      "since": "v15",
+      "status": "active",
+      "revision": 2,
+      "priority": "P1",
+      "surface": "mixed",
+      "personas": [
+        "admin"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "the showcase flow-per-node-type map (examples/app-showcase/src/automation/flows/): create_record=showcase_inbound_task_webhook · update_record+screen=showcase_reassign_wizard · get_record+decision+delete_record=showcase_inquiry_purge · script+notify=showcase_task_completed · wait=showcase_task_follow_up · subflow=showcase_task_done_notify_owner→showcase_notify_owner · map=showcase_release_signoff · connector_action=showcase_task_completed_rest_ping · loop=showcase_batch_reminders · parallel+http=showcase_fan_out_notify · try_catch=showcase_resilient_sync · assignment=showcase_closure_signoff · approval=showcase_expense_signoff · approval_revise=showcase_budget_approval (wait_revision)"
+        ],
+        "knownGaps": [
+          "parallel_gateway / join_gateway / boundary_event are deliberately NOT in the matrix: BPMN-interop lowering targets whose author-facing forms are the ADR-0031 structured containers — waived with reasons in examples/app-showcase/src/coverage.ts FLOW_NODE_WAIVERS, and the coverage test enforces every OTHER enum member is authored"
+        ]
+      },
+      "variants": [
+        "start",
+        "end",
+        "decision",
+        "assignment",
+        "loop",
+        "create_record",
+        "update_record",
+        "delete_record",
+        "get_record",
+        "http",
+        "notify",
+        "script",
+        "screen",
+        "wait",
+        "subflow",
+        "map",
+        "connector_action",
+        "parallel",
+        "try_catch",
+        "approval",
+        "approval_revise"
+      ],
+      "steps": [
+        "boot showcase isolated (dogfood §0); sign in as the dev admin",
+        "GET /api/v1/automation/actions (the designer palette feed) and record the descriptor list; open the Studio flow-designer palette and screenshot it",
+        "record_change chain: POST a showcase_task then PATCH status→done — fires showcase_task_completed (script+notify), showcase_fan_out_notify (parallel+http), showcase_resilient_sync (try_catch), showcase_task_done_notify_owner (subflow); the create also fires showcase_task_follow_up (wait) and showcase_declarative_connector_ping / showcase_mcp_connector_echo (connector_action)",
+        "on-demand chain: POST /api/v1/automation/<name>/trigger for showcase_batch_reminders {params:{tasks:[…]}} (loop), showcase_inquiry_purge (get_record+decision+delete_record — seed at least one closed showcase_inquiry first), showcase_release_signoff {params:{items:[…]}} (map)",
+        "browser chain: run the Tasks row action showcase_bulk_reassign → showcase_reassign_wizard (screen + update_record)",
+        "approval chain: PATCH a showcase_expense_report to submitted (approval via showcase_expense_signoff); PATCH a showcase_project budget above 100000 to open showcase_budget_approval, then POST /api/v1/approvals/requests/:id/revise so the run parks at the approval_revise node",
+        "webhook chain: POST /api/v1/automation/hooks/showcase_inbound_task_webhook/intake with a valid x-objectstack-signature HMAC (secret 'showcase-webhook-secret') to exercise create_record",
+        "for EACH variant: GET the owning flow's runs (GET /api/v1/automation/<name>/runs + /runs/:runId) and locate a step whose nodeType equals the variant; record run id, step status, and — for suspending types — the paused-then-resumed transition",
+        "screenshot the Runs panel of one composite run (showcase_project_escalation or showcase_fan_out_notify) showing the container-nested steps"
+      ],
+      "acceptance": [
+        {
+          "clause": "the designer palette (fed by GET /api/v1/automation/actions) offers every variant in the matrix as an authorable node",
+          "oracle": "api",
+          "verify": "the actions descriptor list contains every variant id; the palette screenshot (taken after render) shows them offered",
+          "evidence": "actions API read + palette screenshot"
+        },
+        {
+          "clause": "per-variant: each node type appears as an executed step (status success, or the documented pause for suspending types) in at least one captured run — every variant individually verified and recorded",
+          "oracle": "api",
+          "verify": "for each of the 21 variants cite the run id + step whose nodeType matches; a variant with no located step is UNPROVEN for that variant, not a partial pass of the matrix",
+          "evidence": "per-variant table of run id / step / status"
+        },
+        {
+          "clause": "suspending types (screen, wait, approval, approval_revise — and subflow/map when the child pauses) park the run status=paused and resume to completed",
+          "oracle": "api",
+          "verify": "run detail shows status paused while parked and completed after the screen resume / timer elapse / approval decision / resubmit (ExecutionStatus vocabulary: pending|running|paused|completed|failed|cancelled|timed_out|retrying)",
+          "evidence": "before/after run-detail reads per suspending type"
+        },
+        {
+          "clause": "every step in every captured run log names its nodeType, so the matrix is auditable from the run API alone",
+          "oracle": "api",
+          "verify": "no step in the captured runs has an empty/missing nodeType",
+          "evidence": "step-log excerpts"
+        },
+        {
+          "clause": "container-region body steps (loop / parallel / try_catch) carry their region tags in the same runs",
+          "oracle": "api",
+          "verify": "spot-check one body step per container kind for parentNodeId + regionKind (deep coverage lives in automation.flow-run-step-nesting)",
+          "evidence": "tagged step excerpts"
+        }
+      ],
+      "negative": [
+        "registering a flow with an unregistered node type (e.g. type 'bogus_node') must be REFUSED at registerFlow / POST /api/v1/automation — the type is validated against the live action registry (ADR-0018), and silent acceptance of an inert node is the #1887 failure shape"
+      ],
+      "traps": [
+        "wrong-panel",
+        "seed-data-thin",
+        "automation-input"
+      ],
+      "automated": {
+        "kind": "e2e",
+        "ref": "packages/qa/dogfood/test/flow-node.dogfood.test.ts"
+      },
+      "source": [
+        "packages/spec/src/automation/flow.zod.ts (FlowNodeAction — the built-in seed set; type validated at registerFlow, not by a closed enum)",
+        "packages/spec/src/automation/control-flow.zod.ts (LOOP_NODE_TYPE / PARALLEL_NODE_TYPE / TRY_CATCH_NODE_TYPE, ADR-0031)",
+        "packages/spec/src/automation/approval.zod.ts (APPROVAL_NODE_TYPE, APPROVAL_REVISE_NODE_TYPE)",
+        "examples/app-showcase/src/coverage.ts (flowNodeTypes + FLOW_NODE_WAIVERS)",
+        "examples/app-showcase/src/automation/flows/index.ts",
+        "packages/runtime/src/route-ledger.ts (GET /automation/actions, POST /automation/:name/trigger, GET /automation/:name/runs)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-07",
+          "change": "initial — node-type matrix derived from FlowNodeAction + ADR-0031 containers + plugin-approvals registry types, mapped onto the seeded showcase flows",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        },
+        {
+          "revision": 2,
+          "date": "2026-08-08",
+          "change": "pinned enumSource for the variants-freshness ratchet — spec enum drift is caught by the manual check on this item directly",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        }
+      ],
+      "enumSource": {
+        "file": "packages/spec/src/automation/flow.zod.ts",
+        "export": "FlowNodeAction",
+        "expect": 20
+      }
+    },
+    {
+      "id": "automation.trigger-type-matrix",
+      "title": "Every flow trigger type fires and its run row records the trigger kind",
+      "since": "v15",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "mixed",
+      "personas": [
+        "admin"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "one seeded flow per trigger kind: record_change=showcase_urgent_task_alert (record-after-write, the only type:'record_change' flow) · autolaunched=showcase_batch_reminders (trigger route) · schedule=showcase_scheduled_digest (60s interval) · screen=showcase_reassign_wizard (Tasks row action showcase_bulk_reassign) · api=showcase_inbound_task_webhook (HMAC intake hook) · time_relative=showcase_task_due_reminder (schedule flow hosting config.timeRelative)"
+        ]
+      },
+      "variants": [
+        "record_change",
+        "autolaunched",
+        "schedule",
+        "screen",
+        "api",
+        "time_relative"
+      ],
+      "steps": [
+        "boot showcase isolated (dogfood §0); sign in as the dev admin",
+        "record_change (create leg): POST /api/v1/data/showcase_task with priority='urgent' — showcase_urgent_task_alert fires via record-after-write with previous == null (#3427)",
+        "record_change (update leg): POST a normal-priority task, then PATCH priority→'urgent'; also PATCH a task status→'done' and confirm a further save WITHOUT a transition fires nothing",
+        "api: POST /api/v1/automation/hooks/showcase_inbound_task_webhook/intake with JSON {title, assignee, project} and header x-objectstack-signature: sha256=<HMAC-SHA256 of the raw body, key 'showcase-webhook-secret'> — expect a 202 ACK; then find the created showcase_task",
+        "schedule: wait up to ~60s for showcase_scheduled_digest (interval 60000ms) to tick; wait a second interval for a second tick",
+        "screen: from /apps/showcase_app/showcase_task run the row action showcase_bulk_reassign, fill the dialog, submit",
+        "autolaunched: POST /api/v1/automation/showcase_batch_reminders/trigger {params:{tasks:[…]}}",
+        "time_relative: execute per automation.time-relative-trigger; capture only its run row here for the trigger-kind tally",
+        "for each variant, GET /api/v1/automation/<flow>/runs and record the newest run's trigger block (ExecutionLogSchema.trigger)"
+      ],
+      "acceptance": [
+        {
+          "clause": "per-variant: each trigger kind produces a run whose run row records that trigger kind — all six individually verified",
+          "oracle": "api",
+          "verify": "for each variant cite the run id and its trigger.type (record_change runs also carry the object + recordId of the mutation); a variant with no run row is UNPROVEN, whatever the UI showed",
+          "evidence": "per-variant table of run id + trigger block"
+        },
+        {
+          "clause": "record-after-write discriminates its legs: the created-urgent task and the escalated task each produce exactly one run; the no-transition save produces none",
+          "oracle": "api",
+          "verify": "runs list for showcase_urgent_task_alert: two runs (one per leg), and NO run whose trigger recordId is the no-transition save — assert the absence",
+          "evidence": "runs list + the three data mutations"
+        },
+        {
+          "clause": "the webhook intake ACKs 202 and the flow reads the JSON payload as its record",
+          "oracle": "api",
+          "verify": "intake response is 202; the created showcase_task's title/assignee/project equal the POSTed body ({record.*} interpolation from the webhook payload)",
+          "evidence": "intake request/response + task read"
+        },
+        {
+          "clause": "the schedule trigger fires repeatedly on its interval without manual help",
+          "oracle": "api",
+          "verify": "two ticks ⇒ two showcase_scheduled_digest run rows (and two inbox rows for admin@objectos.ai), timestamps ~60s apart",
+          "evidence": "runs list with timestamps"
+        },
+        {
+          "clause": "the screen flow's run pauses at its screen node and the resume completes it",
+          "oracle": "network",
+          "verify": "capture the trigger POST and the /runs/:runId/resume POST; run detail shows paused→completed",
+          "evidence": "network trace + run reads"
+        },
+        {
+          "clause": "build ratchet: every Flow.type enum value is classified with a live runtime in the trigger-conformance ledger",
+          "oracle": "test",
+          "verify": "run packages/qa/dogfood/test/flow-trigger-conformance.test.ts — it rediscovers the enum from flow.zod.ts and fails on any unclassified type",
+          "evidence": "test output"
+        }
+      ],
+      "negative": [
+        "anonymous POST /api/v1/automation/:name/trigger must be denied (401) with NO run row created — a 2xx or a run row is a FAIL (pinned by packages/qa/dogfood/test/showcase-anonymous-deny-surfaces.dogfood.test.ts)",
+        "an intake POST with a wrong or missing HMAC signature must be refused (not 202) and create no task — a silent 202 on a bad signature is a FAIL"
+      ],
+      "traps": [
+        "seed-data-thin",
+        "dispatcher-vs-hono-route"
+      ],
+      "automated": {
+        "kind": "test",
+        "ref": "packages/qa/dogfood/test/flow-trigger-conformance.test.ts"
+      },
+      "source": [
+        "packages/spec/src/automation/flow.zod.ts (Flow.type enum: autolaunched|record_change|schedule|screen|api)",
+        "packages/qa/dogfood/test/flow-trigger-conformance.ledger.ts (one enforced row per type, each with its runtime + proof)",
+        "packages/triggers/trigger-api/src/plugin.ts (HOOKS_PATH /api/v1/automation/hooks/:flowName/:hookId)",
+        "examples/app-showcase/src/automation/flows/index.ts (UrgentTaskAlertFlow #3427, ScheduledDigestFlow, InboundTaskWebhookFlow)",
+        "packages/spec/src/automation/execution.zod.ts (ExecutionLogSchema.trigger)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-07",
+          "change": "initial — trigger matrix derived from the Flow.type enum and its ADR-0060 D5 conformance ledger; time_relative added as the declarative sweep the schedule runtime hosts",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        }
+      ]
+    },
+    {
+      "id": "automation.flow-error-handling",
+      "title": "A failing node inside try_catch is handled (catch region, $error binding); outside it fails the run loudly",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "mixed",
+      "personas": [
+        "admin"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "showcase_resilient_sync — try region POSTs https://api.example.com/v1/tasks (unroutable from the isolated env, so the failure is deterministic); retry {maxRetries:3, backoffMs:1000, backoffMultiplier:2, maxRetryDelayMs:10000}; catch region writes sync_status/sync_error onto the task with the caught $error",
+          "a writable/scratch package to author the UNPROTECTED probe flow into (the showcase itself ships read-only)"
+        ]
+      },
+      "steps": [
+        "boot showcase isolated (dogfood §0); sign in as the dev admin",
+        "handled case: POST a showcase_task and PATCH status→'done' — showcase_resilient_sync runs, its try-region http node fails against the unroutable host, retries, then the catch region runs",
+        "GET /api/v1/automation/showcase_resilient_sync/runs/:runId — record overall status, the try step's status/error/regionKind, the catch step's status/regionKind, and the run duration",
+        "re-read the task over /api/v1/data/showcase_task/:id — sync_status and sync_error",
+        "unhandled case: POST /api/v1/automation a minimal autolaunched probe flow (start → http POST to the same unroutable URL, NOT wrapped in try_catch → end) in the scratch package; trigger it via POST /api/v1/automation/<probe>/trigger",
+        "GET the probe run: overall status and the run-level error",
+        "open the designer Runs panel for both runs; screenshot the failed step marked with its error and the catch-body nesting",
+        "capture the server log lines for the probe run's failure"
+      ],
+      "acceptance": [
+        {
+          "clause": "handled: the run completes (status=completed) — the failure was absorbed by the container, not the run",
+          "oracle": "api",
+          "verify": "run detail: status=completed; the http step inside the try region records status=failure with regionKind='try'; the catch-region update_record step records status=success with regionKind='catch'",
+          "evidence": "run-detail read"
+        },
+        {
+          "clause": "the caught error binds to $error and lands in data: the task carries sync_status='failed' and a non-empty sync_error message",
+          "oracle": "api",
+          "verify": "task read after the run: sync_status='failed', sync_error interpolated from {$error.message}",
+          "evidence": "task read"
+        },
+        {
+          "clause": "the retry policy actually ran before the catch: the failure is not instantaneous",
+          "oracle": "api",
+          "verify": "the run/step duration is at least the first backoff delay (>= ~1s per backoffMs:1000), evidencing at least one retry before the catch — note this oracle's weakness (duration, not a retry counter) in the evidence",
+          "evidence": "durationMs from the run detail"
+        },
+        {
+          "clause": "unhandled: the probe run terminates status=failed with the run-level error populated",
+          "oracle": "api",
+          "verify": "probe run detail: status=failed (ExecutionStatus), error carries the http failure — NOT completed, NOT an empty error",
+          "evidence": "probe run-detail read"
+        },
+        {
+          "clause": "both failures surface in the designer Runs panel: the failed step marked with its error message, catch-body steps nested under the container",
+          "oracle": "screenshot",
+          "verify": "Runs panel screenshots for both runs — the panel renders run/step errors (string run-level, {code,message} step-level) and nests region steps",
+          "evidence": "two Runs panel screenshots"
+        },
+        {
+          "clause": "the unhandled failure is loud in the server log",
+          "oracle": "log",
+          "verify": "an ERROR-level line naming the probe flow/run accompanies the failed run",
+          "evidence": "log excerpt"
+        }
+      ],
+      "negative": [
+        "an unhandled node failure that leaves its run status=completed, or leaves the run-level error empty, is a FAIL — a dead outbound call reporting success is the inert-automation failure shape (#1887)",
+        "a catch region that runs when the try did NOT fail is a FAIL of the container semantics — check the catch steps are absent from a successful run"
+      ],
+      "traps": [
+        "wrong-panel",
+        "single-datapoint"
+      ],
+      "source": [
+        "examples/app-showcase/src/automation/flows/index.ts (ResilientSyncFlow, ADR-0031 try/catch/retry; canonical retry keys #4661)",
+        "packages/spec/src/automation/control-flow.zod.ts (TryCatchConfigSchema)",
+        "packages/spec/src/automation/execution.zod.ts (ExecutionStatus 'failed'; step status/error; regionKind)",
+        "objectui packages/app-shell/src/views/metadata-admin/previews/FlowRunsPanel.tsx (run-level string error vs step-level {code,message})",
+        "packages/runtime/src/route-ledger.ts (POST /automation — automation.create)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-07",
+          "change": "initial — splits handled (try_catch) vs unhandled failure into one contrast item with API + panel + log oracles",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        }
+      ]
+    },
+    {
+      "id": "automation.screen-flow-roundtrip",
+      "title": "Screen flow round-trip: action trigger → paused run → rendered dialog → resume with inputs → persisted write",
+      "since": "v16",
+      "status": "active",
+      "revision": 2,
+      "priority": "P1",
+      "surface": "browser",
+      "personas": [
+        "admin"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "the Tasks list row action showcase_bulk_reassign wired to showcase_reassign_wizard (type screen, runAs user; screen node 'collect' with required field new_assignee; downstream update_record)"
+        ]
+      },
+      "steps": [
+        "boot showcase isolated (dogfood §0); sign in as the dev admin; open /apps/showcase_app/showcase_task",
+        "start capturing POSTs to /api/v1/automation/**",
+        "open the first row's action menu ([data-testid=row-action-trigger]) and click row-action-showcase_bulk_reassign",
+        "record the trigger POST; GET /api/v1/automation/showcase_reassign_wizard/runs to find the new run — status must be paused",
+        "GET /api/v1/automation/showcase_reassign_wizard/runs/:runId/screen and record the served screen contract",
+        "the console renders the screen as a dialog: screenshot it (heading 'New Assignee')",
+        "fill #ff-new_assignee with a unique value and Submit; record the resume POST body",
+        "re-read the task over /api/v1/data/showcase_task/:id — the assignee must equal the submitted value",
+        "negative probe: trigger the action again on another row, then POST /runs/:runId/resume directly with an EMPTY inputs bag",
+        "cancel-mid-flow probe: trigger the action on a fresh row to open the FlowRunner dialog, note its runId (GET /runs — the newest paused run), then DISMISS the dialog via its Cancel button (or the dialog close) WITHOUT submitting; do NOT POST resume",
+        "after the cancel: GET /api/v1/automation/showcase_reassign_wizard/runs/:runId for that run, then GET /runs/:runId/screen and POST /runs/:runId/resume with valid inputs to prove it is still resumable, and re-read the target task"
+      ],
+      "acceptance": [
+        {
+          "clause": "the flow action triggers a run that pauses at the screen node",
+          "oracle": "network",
+          "verify": "a POST matching /automation/[^/]+/trigger was issued and the run reads status=paused at node 'collect'",
+          "evidence": "network trace + run read"
+        },
+        {
+          "clause": "GET …/runs/:runId/screen serves the persisted screen contract, including required on new_assignee",
+          "oracle": "api",
+          "verify": "the screen response lists the field new_assignee with required=true (the durable screen_json half of the contract)",
+          "evidence": "screen API read"
+        },
+        {
+          "clause": "the console renders the paused screen as a dialog on the triggering page",
+          "oracle": "screenshot",
+          "verify": "dialog visible with the screen's heading and input — screenshot before any DOM assertions",
+          "evidence": "dialog screenshot"
+        },
+        {
+          "clause": "Submit POSTs the resume route with the collected inputs and the run completes",
+          "oracle": "network",
+          "verify": "POST …/runs/:runId/resume carries {inputs:{new_assignee:<value>}}; run re-read shows status=completed",
+          "evidence": "resume request body + run read"
+        },
+        {
+          "clause": "the downstream update_record persisted: the task's assignee equals the submitted value on an authoritative read",
+          "oracle": "api",
+          "verify": "GET /api/v1/data/showcase_task/:id shows the new assignee (not just the refreshed grid cell)",
+          "evidence": "task read"
+        },
+        {
+          "clause": "a resume missing the required screen input is refused with 400 and the run STAYS paused",
+          "oracle": "api",
+          "verify": "the empty-inputs resume answers 400 (screen-resume validation); the run re-reads as paused, and a later valid resume still works",
+          "evidence": "rejected resume response + run reads"
+        },
+        {
+          "clause": "cancelling the screen dialog mid-flow closes the dialog but does NOT consume the durable suspension: the run is parked (still paused at 'collect'), not orphaned or cancelled, and remains resumable",
+          "oracle": "api",
+          "verify": "FlowRunner's Cancel/close only calls onClose (setScreenFlow(null)) — it POSTs nothing, so GET /runs/:runId re-reads status=paused at node 'collect'; a follow-up GET /runs/:runId/screen still serves the contract and a POST /runs/:runId/resume with valid inputs completes it (status=completed) and the downstream update_record lands — proving the parked run was resumable, never an orphan",
+          "evidence": "post-cancel run read (paused) + the later successful screen read/resume + task read"
+        }
+      ],
+      "negative": [
+        "a resume with the required new_assignee absent that answers 2xx or completes the run is a FAIL — the screen contract's required flag must be enforced server-side, not only by the dialog",
+        "a cancel that leaves the run status=cancelled/completed, deletes the paused row, or silently fires the downstream update_record is a FAIL — dismissing the dialog must not consume the durable suspension (the run must stay resumable); equally, a cancel that makes the run unresumable (a later valid resume 404s 'no suspended run') is a FAIL"
+      ],
+      "traps": [
+        "automation-input",
+        "hydration-race"
+      ],
+      "automated": {
+        "kind": "e2e",
+        "ref": "objectui e2e/live/screen-flow.spec.ts"
+      },
+      "source": [
+        "objectui e2e/live/screen-flow.spec.ts (framework#3528 — the trigger → dialog → resume → refresh seam)",
+        "objectui packages/app-shell/src/views/FlowRunner.tsx (onClose = dismiss without POSTing resume; the durable suspension is untouched, so the paused run stays resumable)",
+        "examples/app-showcase/src/automation/flows/index.ts (ReassignWizardFlow)",
+        "packages/services/service-automation/src/builtin/screen-resume-validation.test.ts + src/screen-input-contract.ts (400 on missing required inputs)",
+        "packages/runtime/src/route-ledger.ts (resume + getScreen routes)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-07",
+          "change": "initial — promotes the objectui live e2e's seam to a ledger item and adds the server-side required-input negative",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        },
+        {
+          "revision": 2,
+          "date": "2026-08-08",
+          "change": "added the FlowRunner cancel-mid-flow clause — dismissing the screen dialog parks the run (still paused, resumable) rather than orphaning/cancelling it; API run state is the oracle",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        }
+      ]
+    },
+    {
+      "id": "automation.durable-suspend-restart",
+      "title": "Suspended runs persist to sys_automation_run, survive a cold restart, and resume — including nested (linked-run) pauses",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": [
+        "admin"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a FILE-backed database (durability is structurally unreachable on the in-memory store — record the db path in the run env)",
+          "showcase_task_follow_up (wait timer PT1M) and showcase_project_closure → showcase_closure_signoff (approval inside subflow: the nested durable pause pair)"
+        ]
+      },
+      "steps": [
+        "boot showcase isolated against a file DB (dogfood §0); sign in as the dev admin",
+        "POST a showcase_task — showcase_task_follow_up suspends at its wait node (timer PT1M)",
+        "PATCH a showcase_project status→'completed' — showcase_project_closure parks at its subflow node and showcase_closure_signoff parks at its approval node (linked runs)",
+        "read the paused rows from sys_automation_run over the data API by run id: status, flow name, suspended node, and the rehydration payload",
+        "stop the server process entirely; cold-boot a second server over the SAME database file",
+        "re-read the same sys_automation_run rows — still present, still paused",
+        "resume path 1: let the wait timer elapse (the job service schedules a one-shot resume) and confirm the follow-up notify landed",
+        "resume path 2: POST /api/v1/approvals/requests/:id/approve on the closure sign-off — the child resumes, bubbles its decision output, and the parent completes",
+        "confirm the paused rows were CONSUMED on resume (replaced by run history rows), not left behind"
+      ],
+      "acceptance": [
+        {
+          "clause": "each suspend persists a paused sys_automation_run row carrying everything a rehydration needs",
+          "oracle": "api",
+          "verify": "row read by id: status=paused, flow name, suspended nodeId, serialized variables/continuation present and non-empty",
+          "evidence": "row reads"
+        },
+        {
+          "clause": "the paused rows and ordinary records survive a literal cold boot over the same database file",
+          "oracle": "api",
+          "verify": "post-restart reads return the identical paused rows (and the seeded data) — the #4518 wasm-driver class of loss (writes never reaching disk) shows up exactly here",
+          "evidence": "pre/post-restart row reads"
+        },
+        {
+          "clause": "the timer wait resumes without manual intervention after restart and the downstream notify executes",
+          "oracle": "api",
+          "verify": "after the PT1M timer elapses on the NEW process: run status=completed and the reminder notification/inbox row exists for the assignee",
+          "evidence": "run read + notification read"
+        },
+        {
+          "clause": "nested pause: the child parks at its approval node and the parent parks at its subflow node, correlated to the child run; the single approval decision completes BOTH and bubbles the child's decision output into the parent",
+          "oracle": "api",
+          "verify": "before: two paused runs (parent at 'signoff', child at 'ask_signoff'); after the approve: both completed, and the parent's notify carries {signoffResult.decision}",
+          "evidence": "before/after reads of both runs + the owner notification"
+        },
+        {
+          "clause": "resume consumes the paused row: the pause row is gone and a run history row remains in its place",
+          "oracle": "api",
+          "verify": "post-resume: the paused-row id no longer reads as paused; the run's history row exists with terminal status",
+          "evidence": "row reads"
+        }
+      ],
+      "negative": [
+        "a paused run that vanishes after restart — or a resume that reports success while the paused row still reads paused — is a FAIL against durability; both were real (#4420: every persist failed into an unread warn while the pause reported success)"
+      ],
+      "traps": [
+        "stale-dist",
+        "seed-data-thin"
+      ],
+      "automated": {
+        "kind": "e2e",
+        "ref": "packages/qa/dogfood/test/flow-durable-suspend.dogfood.test.ts"
+      },
+      "source": [
+        "packages/qa/dogfood/test/flow-durable-suspend.dogfood.test.ts (#4470 · #4420 · #4518)",
+        "examples/app-showcase/src/automation/flows/index.ts (TaskFollowUpFlow, ProjectClosureFlow/ClosureSignoffSubflow — nested durable pause, linked-runs model)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-07",
+          "change": "initial — promotes the #4470 durable-suspend proof to a ledger item and adds the nested linked-run pair",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        }
+      ]
+    },
+    {
+      "id": "automation.connector-dispatch-matrix",
+      "title": "connector_action dispatches through every registered connector kind, and the registry feeds the designer pickers",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "mixed",
+      "personas": [
+        "admin"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "plugin connectors rest + slack (objectstack.config.ts) and declarative instances showcase_status_api (provider rest) + showcase_mcp_tools (provider mcp, in-repo stdio fixture server) from src/system/connectors/",
+          "the three dispatching flows: showcase_task_completed_rest_ping (rest), showcase_declarative_connector_ping (declarative rest, ADR-0097), showcase_mcp_connector_echo (declarative MCP, #3056)"
+        ],
+        "knownGaps": [
+          "slack DELIVERY is not assertable on stock fixtures — TaskCompletedSlackFlow points at a placeholder channel with no real bot token, so the slack variant is registry-enumeration only"
+        ]
+      },
+      "variants": [
+        "rest (plugin)",
+        "slack (plugin, enumeration only)",
+        "showcase_status_api (declarative rest)",
+        "showcase_mcp_tools (declarative MCP)"
+      ],
+      "steps": [
+        "boot showcase isolated (dogfood §0); sign in as the dev admin",
+        "GET /api/v1/automation/connectors — record the descriptor list and each connector's action list (the MCP instance's actions must come from its tools/list handshake)",
+        "POST a showcase_task — fires showcase_declarative_connector_ping and showcase_mcp_connector_echo on create",
+        "PATCH the task status→'done' — fires showcase_task_completed_rest_ping",
+        "GET each of the three flows' newest run detail; capture the connector step's recorded request and response",
+        "open one connector_action node in the Studio flow-designer; screenshot the connector → action → input pickers and capture the network call that fills them",
+        "negative probe: author a scratch flow whose connectorConfig names connectorId 'nope_connector'; trigger it and read the run"
+      ],
+      "acceptance": [
+        {
+          "clause": "the registry enumerates all four variants with their action lists",
+          "oracle": "api",
+          "verify": "GET /api/v1/automation/connectors lists rest, slack, showcase_status_api, showcase_mcp_tools; the MCP entry's actions include echo_upper",
+          "evidence": "connectors API read"
+        },
+        {
+          "clause": "per-variant: each dispatch-capable variant's flow run captures the outbound call AND its response — rest ping and declarative ping both record GET /api/v1/health → {status:'ok'}; the MCP echo records structuredContent.upper === 'OBJECTSTACK' on the run output",
+          "oracle": "api",
+          "verify": "run-detail reads for the three flows: connector step success with the captured request/response; the MCP run's output variable echo.structuredContent.upper equals 'OBJECTSTACK'",
+          "evidence": "three run-detail reads"
+        },
+        {
+          "clause": "the declarative path is metadata-only end to end: nothing registered showcase_status_api / showcase_mcp_tools in code — the provider materialized them at boot (ADR-0097)",
+          "oracle": "api",
+          "verify": "the two instances exist in the registry read AND dispatch in runs, while src/system/connectors declares them as pure metadata (cite the file in evidence)",
+          "evidence": "registry read + run reads + source citation"
+        },
+        {
+          "clause": "the designer's connector/action/input pickers are fed by the live registry endpoint",
+          "oracle": "network",
+          "verify": "opening the node panel issues GET /api/v1/automation/connectors and the rendered options match the response",
+          "evidence": "network trace + panel screenshot"
+        }
+      ],
+      "negative": [
+        "a connector_action naming an unregistered connectorId must FAIL its step with a named 'connector … not registered'-class error — a silent no-op success is a FAIL (the retired logger-backed stubs delivered nothing while reporting success, #4343)"
+      ],
+      "traps": [
+        "stale-console-bundle",
+        "single-datapoint"
+      ],
+      "source": [
+        "examples/app-showcase/src/automation/flows/index.ts (TaskCompletedRestPingFlow, ShowcaseDeclarativeConnectorPingFlow, ShowcaseMcpConnectorEchoFlow)",
+        "examples/app-showcase/objectstack.config.ts (ConnectorRestPlugin/ConnectorSlackPlugin/ConnectorMcpPlugin + declarative connectors)",
+        "packages/runtime/src/route-ledger.ts (GET /automation/connectors)",
+        "ADR-0097 (provider-bound declarative connector instances)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-07",
+          "change": "initial — connector dispatch matrix over the plugin / declarative-rest / declarative-MCP kinds the showcase seeds, with the unregistered-id negative",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        }
+      ]
+    },
+    {
+      "id": "automation.flow-runs-page-test-trigger",
+      "title": "The developer Flow Runs page triggers a run with typed inputs and drives a screen flow's pause to completion (no orphaned paused rows)",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "mixed",
+      "personas": [
+        "admin"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "showcase_batch_reminders (examples/app-showcase/src/automation/flows/index.ts BatchRemindersFlow) — an autolaunched loop flow declaring one INPUT variable `tasks` (type list, isInput:true), so the Test Run panel renders a JSON textarea for it",
+          "showcase_reassign_wizard (ReassignWizardFlow, type screen) declaring input variables recordId + new_assignee (text) — executing it from this page returns {status:'paused', runId, screen} and the page hands the pause to FlowRunner"
+        ]
+      },
+      "steps": [
+        "boot showcase isolated (dogfood §0); sign in as the dev admin",
+        "open the developer Flow Runs PAGE (apps/console FlowRunsPage) at /apps/showcase_app/component/developer/flow-runs (console route developer/flow-runs) — NOT the Studio flow-designer Runs preview",
+        "typed-input run: select 'Batch Task Reminders (Loop)' (showcase_batch_reminders); the Test Run panel shows the `tasks` input as a JSON `list` textarea; paste three task-shaped objects [{id,title,owner}×3] and click 'Run Flow'",
+        "record the trigger POST (client.automation.execute → POST /api/v1/automation/showcase_batch_reminders/trigger) and screenshot the Result envelope; confirm a fresh row appeared in the Recent Runs panel (client.automation.listRuns → GET /automation/showcase_batch_reminders/runs)",
+        "GET /api/v1/automation/showcase_batch_reminders/runs and match the newest run id/status against the panel row",
+        "screen-flow run: select 'showcase_reassign_wizard'; fill recordId (a real showcase_task id) + new_assignee, click 'Run Flow' — the Result reads 'Waiting for input' (status=paused) and the FlowRunner dialog opens on THIS page",
+        "screenshot the FlowRunner dialog; fill #ff-new_assignee and Submit; record the resume POST (POST /runs/:runId/resume)",
+        "GET /api/v1/automation/showcase_reassign_wizard/runs — the driven run reads status=completed; count the paused rows for this flow before vs after and assert the count did not grow (the framework#3528 orphaned-paused regression)",
+        "re-read the target task over /api/v1/data/showcase_task/:id — its assignee equals the submitted value",
+        "negative probe: run the screen flow again but DISMISS the FlowRunner without submitting; confirm the page offers a 'Continue run' affordance (the durable pause is reopenable) rather than losing the run"
+      ],
+      "acceptance": [
+        {
+          "clause": "a typed-input flow triggers from the page: the `tasks` list input is rendered and editable, Run POSTs the trigger route, and the Result envelope reports a completed run",
+          "oracle": "network",
+          "verify": "capture POST /api/v1/automation/showcase_batch_reminders/trigger carrying {params:{tasks:[…3…]}}; the Result JsonBlock shows the run completed (or the loop body executed 3×) — not an error envelope",
+          "evidence": "trigger request/response + Result screenshot"
+        },
+        {
+          "clause": "the triggered run appears as a history row in the Recent Runs panel and that row matches the API",
+          "oracle": "api",
+          "verify": "GET /automation/showcase_batch_reminders/runs returns a newest run whose id + status equal the panel's freshest row (a row the panel invented that the API does not list is a rendering fault; a run the API lists that the panel omits is a refresh fault)",
+          "evidence": "runs API read + Recent Runs screenshot side by side"
+        },
+        {
+          "clause": "a SCREEN flow executed from this page pauses and the pause is handed to FlowRunner — the page opens the interactive dialog instead of dumping the {status:'paused'} envelope and stopping",
+          "oracle": "screenshot",
+          "verify": "after Run, the Result reads 'Waiting for input' and the FlowRunner dialog renders on the page (the framework#3528 fix: FlowTestRunner sets screenFlow when res.status==='paused' && res.screen && res.runId)",
+          "evidence": "dialog screenshot with the page behind it"
+        },
+        {
+          "clause": "driving the FlowRunner dialog to Submit resumes and completes the run",
+          "oracle": "network",
+          "verify": "Submit POSTs /api/v1/automation/showcase_reassign_wizard/runs/:runId/resume with the collected inputs; the run re-reads status=completed and the downstream update_record landed on the task",
+          "evidence": "resume request body + run read + task read"
+        },
+        {
+          "clause": "no orphaned paused row: after the screen flow is driven to completion, the run reads completed and the flow's paused-row count did not grow — the exact framework#3528 regression the page fix closes",
+          "oracle": "api",
+          "verify": "GET /automation/showcase_reassign_wizard/runs before and after: the run that was paused is now completed and the number of runs left in status=paused is unchanged (each test run of a screen flow used to strand a paused row)",
+          "evidence": "before/after runs reads with the paused-row tally"
+        }
+      ],
+      "negative": [
+        "a screen-flow test run that dumps the {status:'paused'} JSON envelope and stops — no dialog, no way to finish it — leaving a paused run stranded is a FAIL: that is the framework#3528 regression this page's FlowRunner hand-off exists to prevent",
+        "citing the Studio flow-designer Runs preview (metadata-admin FlowRunsPanel) as this item's surface is a wrong-panel FAIL — this item is the developer:flow-runs PAGE (trigger + inline history), which renders steps FLAT; the nested step-tree lives in automation.flow-run-step-nesting"
+      ],
+      "traps": [
+        "wrong-panel",
+        "hydration-race",
+        "automation-input"
+      ],
+      "source": [
+        "objectui apps/console/src/pages/developer/FlowRunsPage.tsx (FlowTestRunner + inline FlowRunsPanel; framework#3528 — hands a paused screen run to FlowRunner so it no longer orphans a paused row)",
+        "objectui packages/app-shell/src/views/FlowRunner.tsx (the shared screen runner reused here)",
+        "objectui apps/console/src/AppContent.tsx (Route path 'developer/flow-runs') + registerDeveloperComponents.tsx (ref 'developer:flow-runs')",
+        "packages/runtime/src/route-ledger.ts (POST /automation/:name/trigger, GET /automation/:name/runs, POST /automation/:name/runs/:runId/resume)",
+        "examples/app-showcase/src/automation/flows/index.ts (BatchRemindersFlow tasks input, ReassignWizardFlow screen)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-08",
+          "change": "initial — pins the developer Flow Runs page's typed-input trigger + the framework#3528 screen-flow hand-off (paused run driven to completion, no orphaned row); distinct from flow-run-step-nesting which reads the designer's Runs preview",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        }
+      ]
+    },
+    {
+      "id": "automation.flow-toggle-kill-switch",
+      "title": "Toggling a record-change flow OFF is a runtime kill switch — the mutation that fired it produces no new run; ON restores firing",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "api",
+      "personas": [
+        "admin"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "showcase_urgent_task_alert (examples/app-showcase/src/automation/flows/index.ts UrgentTaskAlertFlow) — the only type:'record_change' flow, bound via record-after-write and firing on a showcase_task created with priority='urgent' (previous==null, #3427)"
+        ]
+      },
+      "steps": [
+        "boot showcase isolated (dogfood §0); sign in as the dev admin",
+        "baseline: POST /api/v1/data/showcase_task with priority='urgent'; GET /api/v1/automation/showcase_urgent_task_alert/runs and record the run count (one new run for this create)",
+        "read the pre-toggle runtime state: GET /api/v1/automation/_status (getFlowRuntimeStates) — showcase_urgent_task_alert enabled=true, bound=true",
+        "toggle OFF: POST /api/v1/automation/showcase_urgent_task_alert/toggle with {enabled:false} (client.automation.toggle → engine.toggleFlow → deactivateFlowTrigger)",
+        "re-read /_status: enabled=false and the record_change trigger unbound (bound=false)",
+        "POST another priority='urgent' showcase_task; GET the runs list again — assert NO new run row was added (the kill switch)",
+        "toggle ON: POST /api/v1/automation/showcase_urgent_task_alert/toggle {enabled:true}; re-read /_status (enabled=true, bound=true again)",
+        "POST a third priority='urgent' showcase_task; GET the runs list — a new run row appears again",
+        "negative probe (unknown flow): POST /api/v1/automation/does_not_exist/toggle {enabled:false} — expect a not-found error, no state change"
+      ],
+      "acceptance": [
+        {
+          "clause": "baseline: an urgent task created BEFORE any toggle fires the flow exactly once",
+          "oracle": "api",
+          "verify": "GET /automation/showcase_urgent_task_alert/runs after the first urgent create shows one new run whose trigger records the record_change mutation on that task",
+          "evidence": "runs list + the created task id"
+        },
+        {
+          "clause": "toggle OFF is a kill switch: after {enabled:false}, a mutation that used to fire the flow produces NO new run row",
+          "oracle": "api",
+          "verify": "the runs list count is IDENTICAL before and after the second urgent create — assert the ABSENCE of a new run, not merely that a run 'looks skipped'",
+          "evidence": "before/after runs reads bracketing the second create"
+        },
+        {
+          "clause": "the runtime state mirrors the toggle: /_status reports enabled=false and the record_change trigger unbound while off, enabled=true + bound while on",
+          "oracle": "api",
+          "verify": "GET /api/v1/automation/_status (getFlowRuntimeStates) for showcase_urgent_task_alert flips enabled/bound across the OFF and ON toggles — the toggle unbinds the trigger, it does not merely guard execute()",
+          "evidence": "the three /_status reads"
+        },
+        {
+          "clause": "toggle ON restores firing: after {enabled:true}, the next urgent task fires the flow again",
+          "oracle": "api",
+          "verify": "the runs list gains exactly one new run after the third urgent create (and none was added while off) — firing resumed only after the ON toggle",
+          "evidence": "runs list after the re-enable"
+        }
+      ],
+      "negative": [
+        "a new run row appearing while the flow is toggled OFF is a FAIL — the kill switch must unbind the trigger (deactivateFlowTrigger), not just guard the run; a run that fired anyway means the event source was never detached",
+        "a toggle that answers 2xx while /_status still reports enabled/bound unchanged is a FAIL — the reported state must match the enforced state",
+        "toggling an unknown flow that answers 2xx (rather than not-found) is a FAIL"
+      ],
+      "traps": [
+        "seed-data-thin",
+        "dispatcher-vs-hono-route"
+      ],
+      "source": [
+        "packages/runtime/src/route-ledger.ts (POST /automation/:name/toggle → automation.toggle; GET /automation/_status → automation.getRuntimeStatus)",
+        "packages/services/service-automation/src/engine.ts (toggleFlow → flowEnabled + activateFlowTrigger/deactivateFlowTrigger; getFlowRuntimeStates enabled/bound)",
+        "examples/app-showcase/src/automation/flows/index.ts (UrgentTaskAlertFlow — the record_change flow, #3427)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-08",
+          "change": "initial — pins the /toggle runtime kill switch on a record_change flow: OFF unbinds the trigger so the firing mutation produces no run, ON restores it; runs list + runtime state as oracles",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,1034 @@
+{
+  "$comment": "Standing platform test checklist — area ledger. Hand-edited, append-only; validated by scripts/check-platform-checklist.mjs (pnpm check:platform-checklist). Authoring rules: docs/qa/platform-checklist/README.md · execution protocol: RUNNER.md.",
+  "area": "approvals",
+  "title": "Approvals — quorum, per-group sign-off (会签), inbox",
+  "items": [
+    {
+      "id": "approvals.per-group-signoff",
+      "title": "Per-group sign-off (会签) needs one approval from EACH group",
+      "since": "v16",
+      "status": "active",
+      "revision": 3,
+      "priority": "P1",
+      "surface": "browser",
+      "personas": ["approver holding exactly one group (e.g. manager)", "second approver holding the other group (e.g. finance/auditor)"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a launched per_group request whose two groups resolve to two DISTINCT users (showcase: ExpenseSignoffFlow on EXP-2001, Ada Auditor holds auditor — seeded since #3409)",
+          "seed-approval-demo.ts wiring: dev admin holds manager/finance/legal/exec but NOT auditor, so the manager group resolves to the admin and the finance group to Ada Auditor only; EXP-2001 ($1,500) sits under the $5,000 committee threshold so the quorum flow does not also open on it; submitter is Mei Phone (usr_showcase_phone_demo)"
+        ],
+        "knownGaps": [
+          "Ada Auditor exists as a routable sys_user row only — better-auth sign-in for her needs an account provisioned at runtime (seed-approval-demo.ts: 'sign-in still needs a better-auth account'); the finance-group decision therefore needs either a provisioned Ada account or the server-granted admin override (can_override) — the run record must state which path was used"
+        ]
+      },
+      "steps": [
+        "boot showcase isolated (dogfood §0); sign in as the dev admin (the manager-group holder; NOT in the finance group of this node)",
+        "GET /api/v1/approvals/requests?status=pending and locate the EXP-2001 request opened by showcase_expense_signoff's per_group node (groups manager + finance)",
+        "GET /api/v1/approvals/requests/:id — record status, pending_approvers, pending_approver_names, pending_approver_groups, and the per-group tallies",
+        "open the inbox the way a user reaches it — the Approvals entry in the account app's Inbox group, i.e. /_console/apps/com.objectstack.account/component/approvals/inbox (待我审批 tab) — NOT the bare /system/approvals deep-link route (#7234; that route stays supported and is exercised by approvals.notification-deep-link); open the request drawer; screenshot the server-computed group chips",
+        "approve via the drawer dialog (ref-targeted click; fill the comment field); capture the decision POST /api/v1/approvals/requests/:id/approve",
+        "re-read the request via API; then complete the finance group's decision (as Ada, or via the documented override path) and re-read again",
+        "GET /api/v1/approvals/requests/:id/actions for the full decision timeline",
+        "GET /api/v1/automation/showcase_expense_signoff/runs/:runId — the parked flow run before and after finalization"
+      ],
+      "acceptance": [
+        {
+          "clause": "before any decision: status=pending, BOTH groups at 0/1, pending list names two DISTINCT user ids (admin for manager, Ada for finance)",
+          "oracle": "api",
+          "verify": "GET the request; assert status + per-group tallies + two distinct entries in pending_approvers with pending_approver_groups mapping them to manager / finance",
+          "evidence": "the initial request read"
+        },
+        {
+          "clause": "after the manager-group approval: that group is satisfied and dropped from the slate, the request STILL pending on the finance group only",
+          "oracle": "api",
+          "verify": "re-read: status=pending; pending_approvers contains only the finance holder; the manager group's tally reads satisfied",
+          "evidence": "before/after request reads"
+        },
+        {
+          "clause": "the drawer's group chips are server-computed and match the API at each stage",
+          "oracle": "screenshot",
+          "verify": "chip screenshot at each stage alongside the API read — chips are keyed by (name, group) from pending_approver_groups (#2762), not a client recount",
+          "evidence": "screenshots + paired reads"
+        },
+        {
+          "clause": "after the finance-group approval: the request finalizes approved and the flow run resumes down its approve edge to the Approved end",
+          "oracle": "api",
+          "verify": "request status=approved; the showcase_expense_signoff run transitions paused→completed with the approve branch taken",
+          "evidence": "final request read + run read"
+        },
+        {
+          "clause": "the decision timeline carries one approval action per group with distinct actors and round-tripped comments",
+          "oracle": "api",
+          "verify": "GET /:id/actions: two approve rows, two distinct actor ids, each carrying the comment submitted in its dialog",
+          "evidence": "actions read"
+        },
+        {
+          "clause": "the server derives the decision actor from the session — the posted actorId is a hint, not an authority (#3800)",
+          "oracle": "network",
+          "verify": "capture the approve POST; the recorded action row's actor is the authenticated session user regardless of any actorId in the body",
+          "evidence": "decision POST + action row"
+        }
+      ],
+      "negative": [
+        "contrast case: a request whose slots all resolve to ONE user finalizes on a single decision — confirm per_group did NOT (that contrast is the proof the behavior differs)",
+        "a user in neither group POSTing /api/v1/approvals/requests/:id/approve directly must get a server-side FORBIDDEN — an approval recorded for a non-member is a FAIL even if the UI never offered the button"
+      ],
+      "traps": ["automation-input", "wrong-persona"],
+      "source": [
+        "#3358 §1", "#3409", "#3411",
+        "examples/app-showcase/src/automation/flows/index.ts (ExpenseSignoffFlow, behavior per_group)",
+        "examples/app-showcase/src/security/seed-approval-demo.ts (distinct-holder wiring + submitter stamping)",
+        "packages/spec/src/automation/approval.zod.ts (behavior enum + group labels, #3266)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-07", "change": "initial import from the #3358 evidence run (decisive oracle: group drops but request stays pending)", "ref": "#3358" },
+        { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" },
+        { "revision": 3, "date": "2026-08-10", "change": "entry path refreshed: the inbox is opened through the account app's Approvals nav entry (component route) rather than the bare /system/approvals deep link, so the item exercises the path a real user takes after #7213", "ref": "#7331" }
+      ]
+    },
+    {
+      "id": "approvals.quorum-m-of-n",
+      "title": "M-of-N quorum approves at the threshold; one rejection vetoes",
+      "since": "v16",
+      "status": "active",
+      "revision": 2,
+      "priority": "P1",
+      "surface": "browser",
+      "personas": ["three DISTINCT users each holding one of the approver positions"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": ["a quorum (minApprovals: 2) request whose three position approvers resolve to three distinct users"],
+        "knownGaps": [
+          "showcase admin holds manager+finance+legal, so the slate collapses to one person and the runtime clamps 2-of-3 to 1-of-1 — M-of-N is not demonstrable on stock seeds (#3358); needs a dedicated fixture or seed change"
+        ]
+      },
+      "blocked": { "by": "fixture", "ref": "#3358 (quorum slate collapses onto the admin — showcase design call pending)" },
+      "steps": [
+        "boot showcase isolated (dogfood §0); sign in as the dev admin",
+        "runnable today (the clamp contrast): GET the seeded showcase_committee_quorum request on EXP-DEMO (behavior quorum, minApprovals 2 over manager/finance/legal — all resolving to the admin); record the collapsed pending slate",
+        "approve it ONCE as the admin and re-read: it finalizes immediately — the documented runtime clamp (minApprovals can never exceed the resolvable approver count), recorded as the CONTRAST, never as M-of-N proof",
+        "once the three-distinct-users fixture exists: as approver 1, POST /api/v1/approvals/requests/:id/approve — re-read: status STILL pending (1 of 2), approver 1 dropped from the slate",
+        "as approver 2, approve — re-read: status=approved, remaining pending task for approver 3 closed",
+        "GET /:id/actions — exactly two approve rows from two distinct actors",
+        "on a SECOND quorum request: as any single approver, POST /reject — re-read immediately",
+        "screenshot the drawer's M-of-N progress at each stage alongside the API reads"
+      ],
+      "acceptance": [
+        {
+          "clause": "runnable today — clamp contrast: the stock EXP-DEMO slate collapses to the single admin and ONE approval finalizes the request (this is the clamp working, and the proof the fixture gap is real)",
+          "oracle": "api",
+          "verify": "initial read shows a single-user pending slate despite three declared position approvers; one approve flips status to approved; the actions read shows exactly one approval row",
+          "evidence": "before/after reads + actions read"
+        },
+        {
+          "clause": "the request approves exactly when minApprovals DISTINCT approvals are recorded — not before, not after",
+          "oracle": "api",
+          "verify": "status transitions pending→pending→approved across the two approvals; approval action rows count 2 distinct actors; after approval 1 the slate lists the two remaining holders",
+          "evidence": "API reads after each decision"
+        },
+        {
+          "clause": "a single rejection vetoes even with quorum-1 approvals already recorded",
+          "oracle": "api",
+          "verify": "on the second request: status flips to rejected on the first reject; no further tasks remain actionable; the flow run resumes down its reject edge",
+          "evidence": "API read after the reject + run read"
+        },
+        {
+          "clause": "the third approver's pending task is closed by finalization, not left dangling",
+          "oracle": "api",
+          "verify": "after quorum is met, the request no longer lists approver 3 in pending_approvers and their inbox 待我审批 count drops",
+          "evidence": "request read + inbox count"
+        },
+        {
+          "clause": "the drawer's M-of-N tally is server-computed and matches the API at each stage",
+          "oracle": "screenshot",
+          "verify": "progress screenshot after each decision alongside the paired API read",
+          "evidence": "screenshots + reads"
+        }
+      ],
+      "negative": [
+        "a second approval by the SAME user must not count twice toward the quorum — a request that finalizes on two approvals from one actor is a FAIL of the distinctness the tally claims",
+        "the clamp contrast must be filed as evidence of the fixture gap, never ticked as M-of-N passing — a run record marking this item pass on stock seeds is itself a FAIL of protocol"
+      ],
+      "traps": ["seed-data-thin", "wrong-persona"],
+      "source": [
+        "#3358 §1",
+        "examples/app-showcase/src/automation/flows/index.ts (CommitteeQuorumFlow, #3266)",
+        "packages/spec/src/automation/approval.zod.ts (behavior 'quorum' + minApprovals clamp: 'Clamped at runtime so it can never exceed the resolvable approver count')",
+        "examples/app-showcase/src/security/seed-approval-demo.ts (EXP-DEMO launch + admin position grants)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-07", "change": "initial import from #3358; carried the fixture blocker forward explicitly", "ref": "#3358" },
+        { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    },
+    {
+      "id": "approvals.inbox-metadata-actions",
+      "title": "Inbox actions are metadata-driven and gated by the viewer's relationship",
+      "since": "v16",
+      "status": "active",
+      "revision": 3,
+      "priority": "P1",
+      "surface": "browser",
+      "personas": ["approver who is NOT the submitter", "same user viewing a request they submitted"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "requests with a real (non-null) submitter — seeded since #3411 (invoice submitted by admin, others by a no-position persona)",
+          "seed-approval-demo.ts: the invoice dual sign-off request is submitted BY the admin (their own request, so 我发起的 is non-empty), while EXP-2001 / EXP-DEMO are submitted by Mei Phone (other-submitter requests the admin approves)"
+        ]
+      },
+      "steps": [
+        "boot showcase isolated (dogfood §0); sign in as the dev admin",
+        "other-submitter case: reach the inbox the way a user does — the Approvals entry in the account app's Inbox group (/_console/apps/com.objectstack.account/component/approvals/inbox), NOT the bare /system/approvals deep link (#7234) — open the EXP-DEMO request from the 待我审批 tab; screenshot, then read the rendered action set from the drawer DOM",
+        "own-request case: open the invoice request from the 我发起的 tab; screenshot, then read its action set",
+        "GET /api/v1/approvals/requests/:id for both and record the server-computed viewer flags (can_act, is_submitter) and status",
+        "cross-check each rendered action against the declared metadata actions on sys_approval_request (visibility expressions gate on record.viewer.can_act / record.viewer.is_submitter / record.status)",
+        "spot-check an approver action: approve EXP-DEMO from the drawer; capture the POST and re-read the request",
+        "spot-check a submitter action: send a reminder on the invoice request; capture POST /api/v1/approvals/requests/:id/remind",
+        "GET /:id/actions on both requests and record the appended timeline rows"
+      ],
+      "acceptance": [
+        {
+          "clause": "approver-side actions (approve/reject/reassign/send-back/request-info) render from declared metadata on the other-submitter request",
+          "oracle": "dom",
+          "verify": "after confirming render via screenshot, read the action buttons from the drawer DOM and match the declared action set",
+          "evidence": "screenshot + DOM action list"
+        },
+        {
+          "clause": "submitter-side actions (send-reminder, recall) appear ONLY on the viewer's own request",
+          "oracle": "dom",
+          "verify": "own-request drawer shows the two extra actions; other-submitter drawer does not",
+          "evidence": "side-by-side action lists for the two requests"
+        },
+        {
+          "clause": "the rendered gating mirrors the server's viewer flags, which are computed on the request read — not a client heuristic",
+          "oracle": "api",
+          "verify": "for both requests, the API's viewer flags (can_act / is_submitter) predict exactly which action groups rendered; declared visibility expressions on sys_approval_request gate on those flags plus status",
+          "evidence": "request reads + the rendered sets"
+        },
+        {
+          "clause": "each spot-checked action executes its REST route and the state change round-trips",
+          "oracle": "network",
+          "verify": "the approve click POSTs /api/v1/approvals/requests/:id/approve and the re-read reflects the decision; the remind click POSTs /:id/remind and stays status=pending",
+          "evidence": "network traces + re-reads"
+        },
+        {
+          "clause": "every executed action appends a timeline row naming actor and action kind",
+          "oracle": "api",
+          "verify": "GET /:id/actions before/after each spot-check: exactly one new row per action, with the acting user",
+          "evidence": "before/after actions reads"
+        }
+      ],
+      "negative": [
+        "an action button rendered for a viewer whose server flags deny it (can_act=false rendering approve) is a FAIL even if the click would 403 — the declared visibility is the contract being tested, not the eventual rejection"
+      ],
+      "traps": ["automation-input", "hydration-race"],
+      "source": [
+        "#3358 §1", "#3411",
+        "packages/plugins/plugin-approvals/src/sys-approval-request.object.ts (declared actions + viewer-flag visibility expressions)",
+        "packages/rest/src/rest-route-ledger.ts (the approvals action route family)",
+        "objectui apps/console/src/pages/system/ApprovalsInboxPage.tsx (server-declared actions rendered; 待我审批 / 我发起的 tabs)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-07", "change": "initial import from the #3358 evidence run (7-action table proven after #3411 stamped real submitters)", "ref": "#3358" },
+        { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" },
+        { "revision": 3, "date": "2026-08-10", "change": "entry path refreshed: the inbox is reached through the account app's Approvals nav entry (component route) instead of the bare /system/approvals deep link, so the item exercises the post-#7213 user path", "ref": "#7331" }
+      ]
+    },
+    {
+      "id": "approvals.viewer-gating-submitter-side",
+      "title": "A submitter who is not an approver sees no approver buttons",
+      "since": "v16",
+      "status": "active",
+      "revision": 3,
+      "priority": "P1",
+      "surface": "browser",
+      "personas": ["submitter holding NO approver position on their own pending request"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": ["one pending request routed to a position its submitter does not hold"],
+        "knownGaps": [
+          "stock seeds route every request to positions the admin holds, so the admin is an approver on all of them (#3358) — needs one request addressed away from the signed-in persona",
+          "the natural persona exists since #3411 — Mei Phone (usr_showcase_phone_demo) submits EXP-2001/EXP-DEMO and holds no approver position — but she is a sys_user row only: signing in as her needs a better-auth account provisioned at runtime (seed-approval-demo.ts)"
+        ]
+      },
+      "blocked": { "by": "fixture", "ref": "#3358 (needs a request routed to a position the viewing submitter does not hold)" },
+      "steps": [
+        "provision a sign-in account for the no-position submitter persona (Mei Phone) or an equivalent fixture user; sign in as that persona",
+        "open the inbox through the account app's Approvals nav entry (/_console/apps/com.objectstack.account/component/approvals/inbox) — the 我发起的 tab must list her pending EXP-2001 request; the bare /system/approvals route stays supported but is not the user path being tested here (#7234)",
+        "open the request drawer; screenshot the rendered action set",
+        "GET /api/v1/approvals/requests/:id as this persona and record the viewer flags (can_act, is_submitter) and pending_approvers",
+        "forge the gate: as this persona POST /api/v1/approvals/requests/:id/approve directly with an approve body",
+        "re-read the request and its /actions timeline after the forged call"
+      ],
+      "acceptance": [
+        {
+          "clause": "the drawer omits approve/reject for the submitter while still rendering the submitter-side affordances (remind / recall)",
+          "oracle": "screenshot",
+          "verify": "drawer screenshot as the submitter: no approver decision buttons; remind/recall present on the own-request",
+          "evidence": "drawer screenshot"
+        },
+        {
+          "clause": "the server's viewer flags say why: can_act=false, is_submitter=true — the rendered absence is metadata, not a client guess",
+          "oracle": "api",
+          "verify": "the request read as this persona carries can_act=false and is_submitter=true, and pending_approvers does not contain her id",
+          "evidence": "request read"
+        },
+        {
+          "clause": "the gate is server-side: a forged direct POST of the decision route as the submitter is rejected (ADR-0057 D10 — UI absence alone is a client courtesy)",
+          "oracle": "api",
+          "verify": "the forged approve answers FORBIDDEN (403-mapped); test BOTH sides — the entitled approver's decision on the same request succeeds",
+          "evidence": "the rejected call + the entitled approver's accepted call"
+        },
+        {
+          "clause": "the forged call left no trace: status, tallies, and the actions timeline are byte-identical after it",
+          "oracle": "api",
+          "verify": "before/after reads of the request and /:id/actions — no new action row, no tally movement",
+          "evidence": "before/after reads"
+        }
+      ],
+      "negative": [
+        "a forged submitter decision that answers 2xx, appends an action row, or moves a tally is a FAIL — silent server acceptance is the exact failure this gate exists to prevent"
+      ],
+      "traps": ["hydration-race", "wrong-persona"],
+      "source": [
+        "#3358 §1",
+        "ADR-0057 D10 (server is the authoritative visibility gate)",
+        "examples/app-showcase/src/security/seed-approval-demo.ts (Mei Phone: 'a clean submitter — a requester who is never also one of her own approvers')"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-07", "change": "initial import from #3358; upgraded the oracle from DOM-only to both-sides (UI absence + server rejection)", "ref": "#3358" },
+        { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" },
+        { "revision": 3, "date": "2026-08-10", "change": "entry path refreshed to the account app's Approvals nav entry (component route) after #7213/#7234", "ref": "#7331" }
+      ]
+    },
+    {
+      "id": "approvals.notification-deep-link",
+      "title": "An approval notification deep-links straight into the request drawer",
+      "since": "v16",
+      "status": "active",
+      "revision": 3,
+      "priority": "P2",
+      "surface": "browser",
+      "personas": ["any pending approver"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": ["at least one pending request whose open notified the signed-in approver (the three seeded demo requests suffice)"]
+      },
+      "steps": [
+        "boot showcase isolated (dogfood §0); sign in as the dev admin (a pending approver on the seeded requests)",
+        "read the bell notification for a pending approval and record its actionUrl — it must carry /system/approvals?request=<id> (#2678 P1.5)",
+        "cold-load that exact URL in a fresh page (no prior navigation); wait for settle; screenshot with the URL visible",
+        "GET /api/v1/approvals/requests/:id and cross-check the drawer's request identity and status against the read",
+        "repeat the cold load a second time on a fresh page (the hydration-race counter)",
+        "negative probe: cold-load /system/approvals?request=<nonexistent-id> and screenshot the result",
+        "route-parity probe (#7213): cold-load the SAME ?request=<id> on the component route the account app's Approvals entry uses — /_console/apps/com.objectstack.account/component/approvals/inbox?request=<id> — and screenshot; both routes must open the same drawer"
+      ],
+      "acceptance": [
+        {
+          "clause": "the notification's actionUrl carries the ?request=<id> deep link for the exact pending request",
+          "oracle": "api",
+          "verify": "read the notification/inbox row: its actionUrl contains /system/approvals?request= with the request id that the approvals API lists as pending for this user",
+          "evidence": "notification row read"
+        },
+        {
+          "clause": "the ?request= URL opens the request drawer directly on a cold load — verified twice on fresh loads",
+          "oracle": "screenshot",
+          "verify": "fresh navigation renders the drawer for that exact request both times (verify twice on fresh loads)",
+          "evidence": "two screenshots with the URL visible"
+        },
+        {
+          "clause": "the drawer shows the SAME request the API returns for that id — identity, status, pending slate",
+          "oracle": "api",
+          "verify": "field-match the drawer against GET /api/v1/approvals/requests/:id — a drawer that opened on the wrong request also 'renders a drawer'",
+          "evidence": "request read + drawer screenshot"
+        },
+        {
+          "clause": "the SAME ?request= deep link opens the drawer on BOTH routes — the /system/approvals route notification and email links carry, and the component route the account app's Approvals entry mounts (#7213 entry convergence)",
+          "oracle": "screenshot",
+          "verify": "cold-load the same request id on /system/approvals?request= and on /apps/<appId>/component/approvals/inbox?request=; both render the drawer for that id. The /system/approvals route MUST keep working — it is what already-delivered notifications and emails carry, so a component-route-only deep link is a FAIL",
+          "evidence": "one screenshot per route, same request id visible"
+        },
+        {
+          "clause": "an unknown ?request id degrades to the inbox without a drawer (or an explicit not-found state) — never someone else's request",
+          "oracle": "screenshot",
+          "verify": "the nonexistent-id load renders the inbox list with no drawer or a not-found notice; assert no drawer carrying a different request id",
+          "evidence": "screenshot of the degraded state"
+        }
+      ],
+      "negative": [
+        "a deep link that lands on the inbox with the WRONG request (or none) selected while the run records 'drawer rendered' is a FAIL — the clause is the exact request id, not the drawer's existence"
+      ],
+      "traps": ["hydration-race", "shared-browser-tab"],
+      "source": [
+        "#3358 §1",
+        "#7213", "#7233",
+        "objectui apps/console/src/pages/system/ApprovalsInboxPage.tsx (#2678 P1.5 — 'notifications carry /system/approvals?request=<id>')"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-07", "change": "initial import from #3358 (verified twice on fresh loads)", "ref": "#3358" },
+        { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" },
+        { "revision": 3, "date": "2026-08-10", "change": "added the route-parity clause: after #7213 the same ?request= link must open the drawer on BOTH /system/approvals (what notifications carry) and the component route the account app mounts", "ref": "#7331" }
+      ]
+    },
+    {
+      "id": "approvals.decision-action-matrix",
+      "title": "Every approval action executes its REST route and produces the expected state transition plus a timeline entry",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "mixed",
+      "personas": ["dev admin (pending approver on the seeded requests; submitter of the invoice request)"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "the three seeded demo requests (invoice unanimous / EXP-DEMO quorum / EXP-2001 per-group) plus fresh showcase_budget_approval requests raised on demand by PATCHing a showcase_project budget above 100000 (budget != previous.budget)",
+          "showcase_budget_approval's manager step declares the ADR-0044 revise loop (maxRevisions: 2) and lockRecord: false; its exec step (budget > 500000) declares NO revise edge and lockRecord: true — both sides of two gates in one flow"
+        ]
+      },
+      "variants": ["approve", "reject", "reassign", "revise (send-back)", "resubmit", "recall", "remind", "request-info", "comment"],
+      "steps": [
+        "boot showcase isolated (dogfood §0); sign in as the dev admin",
+        "approve: POST /api/v1/approvals/requests/:id/approve {comment} on the EXP-DEMO request; re-read status + run",
+        "reject: raise a fresh budget-approval request (PATCH a project budget to e.g. 200000); POST /:id/reject {comment}; re-read — the flow resumes down its reject edge",
+        "revise: raise another budget-approval request; POST /:id/revise {comment} as the pending manager — re-read status; GET the flow run (parked at the approval_revise node 'wait_revision')",
+        "resubmit: POST /:id/resubmit {comment} as the submitter — re-read: pending again, round 2, fresh slate; then drive revise→resubmit→revise again and attempt a THIRD revise (maxRevisions: 2 — it must auto-reject)",
+        "recall: raise one more pending request; POST /:id/recall as the submitter; re-read",
+        "reassign: on a pending request POST /:id/reassign {to: <userId>, comment}; re-read pending_approvers",
+        "remind: POST /:id/remind on the admin-submitted invoice request; then POST it again immediately (throttle probe)",
+        "request-info + comment: POST /:id/request-info {comment} and /:id/comment {comment} on a pending request",
+        "after EVERY action above: GET /:id and GET /:id/actions; record the status transition and the appended timeline row",
+        "lock contrast: while a request from exec_review (lockRecord: true) is pending, PATCH the project record — refused; while parked at manager_review (lockRecord: false) the same PATCH succeeds",
+        "exec no-revise gate: drive a >500000 budget to exec_review and POST /:id/revise — expect a clear refusal"
+      ],
+      "acceptance": [
+        {
+          "clause": "per-variant: each of the nine actions executes its POST /api/v1/approvals/requests/:id/<action> route and appends exactly one timeline action row naming the actor and the action kind — every variant individually verified",
+          "oracle": "api",
+          "verify": "per-variant table: route called, response status, the new /:id/actions row; a variant with no row (or two) fails that variant",
+          "evidence": "per-variant request/response + actions reads"
+        },
+        {
+          "clause": "decisions finalize per the APPROVAL_STATUSES lifecycle: approve → approved, reject → rejected, and the parked flow run resumes down the matching branch label",
+          "oracle": "api",
+          "verify": "request status transitions pending→approved / pending→rejected; the owning run transitions paused→completed with the approve/reject edge taken",
+          "evidence": "before/after request + run reads"
+        },
+        {
+          "clause": "revise (send-back) moves pending→returned and parks the run at the service-owned approval_revise node; resubmit moves returned→pending as round 2 with a fresh approver slate",
+          "oracle": "api",
+          "verify": "after revise: status=returned, run paused at 'wait_revision'; after resubmit: status=pending, slate repopulated; the resubmit is refused for anyone but the submitter",
+          "evidence": "reads after each move"
+        },
+        {
+          "clause": "the maxRevisions guard holds: the third send-back auto-rejects instead of looping forever",
+          "oracle": "api",
+          "verify": "after two revise/resubmit rounds, the next revise finalizes the request rejected (maxRevisions: 2 on manager_review)",
+          "evidence": "the third-revise response + final read"
+        },
+        {
+          "clause": "recall is submitter-only and moves pending→recalled; the approver's task disappears from the inbox",
+          "oracle": "api",
+          "verify": "recall as submitter succeeds (status=recalled); recall attempted by a non-submitter is FORBIDDEN; 待我审批 no longer lists it",
+          "evidence": "reads + the denied call"
+        },
+        {
+          "clause": "non-finalizing actions mutate only what they own: reassign swaps the slate slot to the target user; remind/request-info/comment leave status=pending and touch nothing but the timeline",
+          "oracle": "api",
+          "verify": "after reassign: pending_approvers contains the target and not the source; after remind/request-info/comment: status and tallies byte-identical, one new timeline row each",
+          "evidence": "before/after reads per action"
+        },
+        {
+          "clause": "lockRecord is enforced on both sides: the exec step (lockRecord: true) refuses record edits while pending; the manager step (lockRecord: false) permits them",
+          "oracle": "api",
+          "verify": "PATCH the project while each step is pending: refused under exec_review, accepted under manager_review (the objectui#2902 pair)",
+          "evidence": "the two PATCH responses"
+        }
+      ],
+      "negative": [
+        "send-back at exec_review reporting success is a FAIL — the step declares no revise edge and the service must refuse with a clear error",
+        "an immediately repeated remind must be throttled ('a reminder was sent recently') — a silent second success is a FAIL",
+        "any action POST accepted from an actor the service should deny (wrong relationship to the request) is a FAIL even when the state happens to end up plausible"
+      ],
+      "traps": ["automation-input", "wrong-persona"],
+      "source": [
+        "#3358 §1 (the action-table evidence this matrix grounds in)",
+        "packages/rest/src/rest-route-ledger.ts (approve/reject/recall/revise/resubmit/reassign/remind/request-info/comment + GET /:id/actions)",
+        "packages/rest/src/rest-server.ts (flowMoveRoute: revise=pending approver, resubmit=submitter; threadRoute access per action; recall submitter-only)",
+        "packages/spec/src/contracts/approval-service.ts (APPROVAL_STATUSES: pending|approved|rejected|recalled|returned)",
+        "examples/app-showcase/src/automation/flows/index.ts (BudgetApprovalFlow — ADR-0044 revise loop, maxRevisions 2, exec step without a revise edge, lockRecord pair)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-07", "change": "initial — decision-action matrix derived from the approvals REST route ledger and the ADR-0044 revise/resubmit flow shape", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    },
+    {
+      "id": "approvals.decision-only-via-service",
+      "title": "An approval-parked run cannot be resumed through the generic automation route — decisions go through the approvals service only",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": ["dev admin (holds finance + legal, so the seeded unanimous request is decidable)"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": ["showcase_invoice_signoff parked at its aggregating approval node (the seeded invoice request, or a fresh one via PATCHing an invoice draft→sent)"]
+      },
+      "steps": [
+        "boot showcase isolated (dogfood §0); sign in as the dev admin",
+        "locate the paused run: GET /api/v1/automation/showcase_invoice_signoff/runs — status=paused at the dual_signoff approval node; note the runId and the matching approval request id",
+        "forge the generic resume: POST /api/v1/automation/showcase_invoice_signoff/runs/:runId/resume with {} and again with {branchLabel: 'approve'}",
+        "re-read the run and the approval request after each forged attempt",
+        "decide properly: POST /api/v1/approvals/requests/:id/approve until the unanimous slate is satisfied; re-read request and run",
+        "contrast (the other side of the gate): pause showcase_reassign_wizard at its screen node via the Tasks row action, then resume THAT run through the same generic route with valid inputs"
+      ],
+      "acceptance": [
+        {
+          "clause": "the generic resume route answers 403 for a run parked on an approval node (resumeAuthority: 'service', #3801) — with or without a branchLabel in the body",
+          "oracle": "api",
+          "verify": "both forged POSTs answer 403; neither 2xx nor a 404 that would mask the gate (the run exists)",
+          "evidence": "the two rejected responses"
+        },
+        {
+          "clause": "the forged attempts change nothing: the run stays paused and the request records no decision",
+          "oracle": "api",
+          "verify": "run re-read: status=paused at dual_signoff; GET /:id/actions: no new action row after the forged calls",
+          "evidence": "before/after run + actions reads"
+        },
+        {
+          "clause": "the ApprovalService decision is the door that works: satisfying the slate resumes the run down the approve edge to completion",
+          "oracle": "api",
+          "verify": "after the approvals-API decisions: request status=approved; the run transitions paused→completed with the notify_cleared step executed",
+          "evidence": "final request + run reads"
+        },
+        {
+          "clause": "the gate is node-scoped, not route-dead: a run paused at a SCREEN node resumes fine through the same generic route",
+          "oracle": "api",
+          "verify": "the showcase_reassign_wizard resume with valid inputs answers 2xx and completes its run — proving the 403 above is the approval-node gate, not a broken route",
+          "evidence": "the accepted screen resume + its run read"
+        }
+      ],
+      "negative": [
+        "a generic resume that answers 2xx on an approval pause is a FAIL of the #3801 gate — fail-open by omission is the exact regression this pins, and a passing screen-flow resume is REQUIRED alongside it to prove the test hit the gate rather than a dead route"
+      ],
+      "traps": ["dispatcher-vs-hono-route"],
+      "automated": { "kind": "test", "ref": "packages/services/service-automation/src/resume-authority-gate.test.ts" },
+      "source": [
+        "packages/runtime/src/route-ledger.ts (the resume route's #3801 note: resumeAuthority 'service' → 403, decisions via ApprovalService.decide)",
+        "examples/app-showcase/src/automation/flows/index.ts (InvoiceDualSignoffFlow — documents the exact 403 + approvals-API sequence)",
+        "packages/spec/src/automation/approval.zod.ts (APPROVAL_NODE_TYPE; ADR-0039 Track A aggregating node)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-07", "change": "initial — pins the #3801 resume-authority gate as a both-sides item (approval 403 + screen 2xx contrast)", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    },
+    {
+      "id": "approvals.dynamic-approver-routing",
+      "title": "A decision's typed outputs route the next stage: expression approvers resolve from the previous decision at node entry",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "mixed",
+      "personas": ["dev admin (org-membership owner — the stage-1 approver of the dynamic-approval demo)"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "showcase_dynamic_approval (#3447 P2): stage 1 routes to org_membership_level 'owner' with a REQUIRED decisionOutput next_reviewers (typed user multi picker); stage 2 resolves an expression approver over vars from that output, with onEmptyApprovers: 'fail'",
+          "trigger: retitle a showcase_announcement (an otherwise approval-free object, so this demo never collides with the expense/invoice/project approval dedupe)"
+        ]
+      },
+      "steps": [
+        "boot showcase isolated (dogfood §0); sign in as the dev admin",
+        "PATCH a showcase_announcement's title over /api/v1/data — showcase_dynamic_approval opens its stage-1 Lead Review request routed at the org owner",
+        "GET /api/v1/approvals/requests/:id — record status and the declared decisionOutputs contract on the request/node",
+        "open the request drawer; screenshot the decision dialog's next_reviewers control — it must be a sys_user MULTI-SELECT picker, not a free-text box",
+        "gate probe: attempt to approve WITHOUT filling next_reviewers; record the refusal",
+        "approve WITH next_reviewers=[the admin] via the dialog; capture the decision POST body",
+        "GET the requests list again — the stage-2 co-sign request must now exist; read its pending_approvers",
+        "GET /api/v1/automation/showcase_dynamic_approval/runs/:runId — the run's variables carry the stage-1 outputs; decide stage 2 and confirm the run completes"
+      ],
+      "acceptance": [
+        {
+          "clause": "the stage-1 decision dialog renders the TYPED control the metadata declares: a required sys_user multi-select for next_reviewers",
+          "oracle": "screenshot",
+          "verify": "dialog screenshot shows a record picker (multi), not free text — the #3508 degraded-to-text failure is the counter-case",
+          "evidence": "decision-dialog screenshot"
+        },
+        {
+          "clause": "approve without the required output is REFUSED and the request stays pending",
+          "oracle": "api",
+          "verify": "the outputless approve is rejected (required decision output enforced on approve, objectui#2955); request re-reads status=pending with no new approval action row",
+          "evidence": "rejected attempt + re-read"
+        },
+        {
+          "clause": "the accepted decision stores its outputs and stage 2's expression approver resolves EXACTLY the picked users at node entry",
+          "oracle": "api",
+          "verify": "the stage-2 request's pending_approvers equal the user ids submitted in next_reviewers — no more, no fewer",
+          "evidence": "decision POST body + stage-2 request read"
+        },
+        {
+          "clause": "the decision outputs ride the flow run's variables (the vars.* the stage-2 expression reads), observable on the run detail",
+          "oracle": "api",
+          "verify": "run read between the stages: the stage-1 outputs present in the run variables snapshot",
+          "evidence": "run-detail read"
+        },
+        {
+          "clause": "deciding stage 2 completes the run end to end",
+          "oracle": "api",
+          "verify": "after the co-sign decision: request finalized and the run transitions paused→completed",
+          "evidence": "final request + run reads"
+        }
+      ],
+      "negative": [
+        "an outputless approve that succeeds is a FAIL — stage 2 declares onEmptyApprovers: 'fail', so a skipped required output would kill the run downstream; the enforcement must be at the decision, not the crash site"
+      ],
+      "traps": ["automation-input", "stale-console-bundle"],
+      "source": [
+        "examples/app-showcase/src/automation/flows/dynamic-approval.flow.ts (#3447 P2)",
+        "packages/spec/src/automation/approval.zod.ts (DecisionOutputDefSchema — typed pickers, required-to-approve objectui#2955; expression approvers + resolveAs)",
+        "examples/app-showcase/src/automation/flows/approver-bindings.flow.ts (#3508 — the degraded-to-free-text failure the typed control fixes)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-07", "change": "initial — covers the #3447 dynamic-routing chain (typed decision outputs → vars → expression approvers) with the required-output gate", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    },
+    {
+      "id": "approvals.ooo-delegation-reroute",
+      "title": "An active out-of-office delegation reroutes an individually-routed approver to the delegate; expiring the window hands the slot back",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "mixed",
+      "personas": ["dev admin (the DELEGATE B — signed in, so they can actually decide the rerouted request)", "a routable non-admin delegator A (sys_user row, e.g. Mei Phone usr_showcase_phone_demo)"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a flow with an INDIVIDUALLY-routed approver — OOO delegation only applies to type user / field / manager (ApprovalService.expandApprovers), NOT position. No ACTIVE seeded showcase flow routes individually (they all route by position), so author a scratch autolaunched flow in a WRITABLE package with a single approval node config.approvers=[{type:'user', value:'<A>'}], shaped after examples/app-showcase/src/automation/flows/approver-bindings.flow.ts (the record-backed approver specimen)",
+          "delegator A = a routable sys_user row that is NOT the signed-in admin (Mei Phone usr_showcase_phone_demo); delegate B = the dev admin"
+        ],
+        "knownGaps": [
+          "the delegate must be the SIGNED-IN admin (B) so the rerouted request is decidable without provisioning a second better-auth account — the same sign-in gap approvals.per-group-signoff records for Ada; routing the scratch flow at a non-admin A and delegating A→admin sidesteps it",
+          "authoring the scratch flow needs a writable/scratch package — the showcase ships read-only"
+        ]
+      },
+      "steps": [
+        "boot showcase isolated (dogfood §0); sign in as the dev admin (the delegate B)",
+        "in a writable/scratch package author + register (POST /api/v1/automation) an autolaunched flow with a single approval node whose approvers=[{type:'user', value:'<A = Mei's sys_user id>'}], behavior first_response",
+        "baseline (no delegation): trigger the flow (POST /api/v1/automation/<flow>/trigger); GET /api/v1/approvals/requests?status=pending, find the new request, GET /:id — pending_approvers must be [A]; GET /:id/actions shows NO ooo_substitute row",
+        "create an ACTIVE delegation: POST /api/v1/data/sys_approval_delegation {delegator_id:'<A>', delegate_id:'<admin/B>', valid_from:<now-1h ISO>, valid_until:<now+24h ISO>, reason:'Annual leave'}",
+        "trigger the flow AGAIN; GET the new request /:id — pending_approvers must now be [B], not [A]; GET /:id/actions — one row action='ooo_substitute' whose comment names 'A → B'",
+        "read the delegate's inbox/notifications — a topic approval.ooo_substituted notification addressed to B, actionUrl /system/approvals (#1322 M4)",
+        "decide as B: POST /api/v1/approvals/requests/:id/approve; GET /:id/actions — the approve row's actor is B (the delegate acts under their OWN identity — nothing impersonated as A)",
+        "expire the window: PATCH the delegation valid_until to a past instant (or DELETE it); trigger the flow ONCE more; GET the newest request /:id — pending_approvers is [A] again and its /actions carries NO ooo_substitute row"
+      ],
+      "acceptance": [
+        {
+          "clause": "baseline: with no active delegation the individually-routed request resolves pending_approvers = [A]",
+          "oracle": "api",
+          "verify": "GET /:id on the pre-delegation request: pending_approvers == ['<A>'] and /:id/actions has no action='ooo_substitute' row",
+          "evidence": "baseline request + actions reads"
+        },
+        {
+          "clause": "an active A→B delegation reroutes the slot: a fresh request resolves pending_approvers = [B] (not A) and records the substitution on the audit trail",
+          "oracle": "api",
+          "verify": "GET /:id after the delegation exists: pending_approvers == ['<B>']; GET /:id/actions carries exactly one action='ooo_substitute' row (actor_id null — a system action) whose comment reads '<A> → <B>'",
+          "evidence": "post-delegation request + actions reads"
+        },
+        {
+          "clause": "the substitution notifies the delegate (M4): B receives an approval.ooo_substituted inbox notification deep-linking the approvals inbox",
+          "oracle": "api",
+          "verify": "the delegate's notification/inbox read contains a topic approval.ooo_substituted row for this request id with actionUrl containing /system/approvals",
+          "evidence": "notification read"
+        },
+        {
+          "clause": "the delegate decides under their OWN identity — the audit stays honest, nothing is impersonated as the delegator",
+          "oracle": "api",
+          "verify": "B's /approve succeeds and finalizes the request; the recorded approve action's actor_id is B, never A (the delegate becomes a real pending approver, ApprovalService docstring)",
+          "evidence": "decision POST + the approve action row"
+        },
+        {
+          "clause": "the window is enforced at RESOLUTION time (isGrantActive, ADR-0091 D2), not by a job: after the window expires a fresh request routes back to A with no substitution",
+          "oracle": "api",
+          "verify": "with valid_until in the past, GET /:id on the newest request: pending_approvers == ['<A>'] and /:id/actions has no ooo_substitute row — B has lost the power the instant the window closed",
+          "evidence": "post-expiry request + actions reads"
+        }
+      ],
+      "negative": [
+        "an approval action attributed to A while B was the one who clicked is a FAIL — the delegate acts under their own identity and the audit must not launder the decision back onto the out-of-office user",
+        "a request that still reroutes to B after the window has expired (or before valid_from) is a FAIL — validity is a half-open [from, until) window enforced at resolution, never a background job that could lag",
+        "a delegation on a POSITION-routed slot that reroutes is out of contract — OOO applies only to individually-routed (user/field/manager) approvers; a per-group/position node must be unaffected"
+      ],
+      "traps": ["wrong-persona", "seed-data-thin"],
+      "source": [
+        "packages/plugins/plugin-approvals/src/sys-approval-delegation.object.ts (#1322 M1 — self-service OOO rule, half-open UTC window, resolution-time enforcement)",
+        "packages/plugins/plugin-approvals/src/approval-service.ts (applyOooDelegation + lookupActiveDelegation — individually-routed only; M4 ooo_substitute audit row + approval.ooo_substituted / approval.ooo_skipped notifications)",
+        "@objectstack/core isGrantActive (ADR-0091 D2 half-open validity predicate)",
+        "examples/app-showcase/src/automation/flows/approver-bindings.flow.ts (the {type:'user'|'manager'|'field'} approver specimens the scratch flow is shaped after)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-08", "change": "initial — pins the #1322 OOO delegation reroute: active A→B window reroutes an individually-routed slot to B (audited + notified, decided under B's own identity); expiry hands it back to A at resolution time", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    },
+    {
+      "id": "approvals.record-page-decisions",
+      "title": "Approve/Reject render in the record header; Reject fires after ONE dialog; a locking approval hides inline edit",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "browser",
+      "personas": ["dev admin (holds the manager position, so showcase_budget_approval's manager_review routes to them — a pending approver standing on the record page)"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "showcase_budget_approval raised on a showcase_project by PATCHing budget above 100000 (budget != previous.budget) — parks at manager_review (approvers position 'manager' = the admin), lockRecord:false; driving budget above 500000 reaches exec_review, lockRecord:true (the locking contrast, objectui#2902)",
+          "the record page surface: objectui packages/app-shell RecordDetailView + useRecordApprovals + buildApprovalDecisionActions"
+        ]
+      },
+      "steps": [
+        "boot showcase isolated (dogfood §0); sign in as the dev admin",
+        "PATCH a showcase_project budget to e.g. 200000 over /api/v1/data — showcase_budget_approval opens and parks at manager_review (routed to manager = admin), lockRecord:false",
+        "open that project's record page (/apps/showcase_app/showcase_project/:id); screenshot the header — Approve and Reject must render in the primary slot (buildApprovalDecisionActions: Approve variant 'primary' order -100, Reject variant 'destructive' order -99, both locations ['record_header'])",
+        "because manager_review is lockRecord:false, confirm inline-edit affordances remain live on this record (the editable contrast)",
+        "click Reject: assert exactly ONE dialog opens — the param dialog carrying the comment textarea inline, titled by the Reject label with the confirm question as its description; there is NO separate confirm-then-comment second dialog (objectui#3126)",
+        "fill the comment and Confirm; capture POST /api/v1/approvals/requests/:id/reject and re-read the request (status=rejected)",
+        "approve path: raise another budget-approval request; on its record page click Approve → one dialog with an optional comment → Confirm → POST /:id/approve → re-read (status=approved)",
+        "lock contrast: drive a >500000 budget to exec_review (lockRecord:true) on a project record page; screenshot — the inline-edit affordances are HIDDEN (recordLockedByApproval → canEdit suppressed)",
+        "both-sides gate: open a project record page whose pending approval routes AWAY from the admin (or has none) — the header offers NO Approve/Reject (approvals.canDecide false)"
+      ],
+      "acceptance": [
+        {
+          "clause": "Approve and Reject render in the record header primary slot for the pending approver",
+          "oracle": "screenshot",
+          "verify": "after the header renders, screenshot shows Approve (primary) ahead of app record_header actions and Reject (destructive) — the strongly-negative order floats the decision buttons into the primary slot (buildApprovalDecisionActions #2670/objectui#2339)",
+          "evidence": "record-header screenshot"
+        },
+        {
+          "clause": "Reject fires after exactly ONE dialog: the comment param is collected INLINE in that single dialog and Confirm POSTs the reject — no second, unexpected comment dialog",
+          "oracle": "network",
+          "verify": "one param dialog (no chained confirm dialog) precedes exactly one POST /api/v1/approvals/requests/:id/reject; the objectui#3126 double-dialog bug (confirm then a second comment dialog, decision silently not sent) must not reproduce",
+          "evidence": "screenshot of the single dialog + the reject network trace"
+        },
+        {
+          "clause": "the decision POSTs the approvals route and the request re-reads with the new status",
+          "oracle": "api",
+          "verify": "reject → GET /:id status=rejected; approve → status=approved; the record header collected the comment (rides actionParams, not the dead collectParams #2955) and it round-trips onto the action row",
+          "evidence": "before/after request reads + the decision action row"
+        },
+        {
+          "clause": "a LOCKING pending approval hides the record's inline-edit affordances; a non-locking one keeps them",
+          "oracle": "screenshot",
+          "verify": "under exec_review (lockRecord:true) the inline-edit affordances are absent (recordLockedByApproval(pendingRequest) → canEdit false, objectui#2902); under manager_review (lockRecord:false) they remain — both sides, on the same flow",
+          "evidence": "two record-page screenshots (locked vs editable)"
+        },
+        {
+          "clause": "the decision buttons are gated by the viewer's approver relationship — a record whose pending approval does not route to the viewer offers neither Approve nor Reject",
+          "oracle": "dom",
+          "verify": "after confirming render via screenshot, the header DOM has no approve_request/reject_request actions when approvals.canDecide is false (the current user is not in pending_approvers)",
+          "evidence": "screenshot + header action DOM list"
+        }
+      ],
+      "negative": [
+        "a Reject that opens a SECOND dialog (a confirm dialog followed by a separate comment dialog) and silently no-ops after the first Confirm is a FAIL — the objectui#3126 regression: the param dialog IS the confirmation, and nothing posts until its own Confirm",
+        "an inline-edit affordance offered while a lockRecord:true approval is pending is a FAIL — the server would reject the save RECORD_LOCKED, and offering the edit is exactly the objectui#2902 mislabel",
+        "Approve/Reject rendered on the header for a viewer who is not a pending approver (canDecide false) is a FAIL even if the eventual POST would 403"
+      ],
+      "traps": ["automation-input", "hydration-race"],
+      "source": [
+        "objectui packages/app-shell/src/views/RecordDetailView.tsx (buildApprovalDecisionActions — record_header Approve/Reject, single-dialog Reject #3126, actionParams comment #2955; approvalLocked/canEdit gating #2902)",
+        "objectui packages/app-shell/src/hooks/useRecordApprovals.ts (recordLockedByApproval, canDecide, /approvals/requests decide routes)",
+        "objectui packages/app-shell/src/views/RecordDetailView.approvalDecisionActions.test.tsx (the param-contract pin)",
+        "examples/app-showcase/src/automation/flows/index.ts (BudgetApprovalFlow — manager_review lockRecord:false / exec_review lockRecord:true on showcase_project)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-08", "change": "initial — the record-page approval surface (distinct from the inbox-drawer items): header Approve/Reject, one-dialog Reject (#3126), decision round-trip, and the lockRecord-driven inline-edit hide (#2902)", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    },
+    {
+      "id": "approvals.sla-escalation",
+      "title": "A node's SLA escalation fires once past its timeout — the declared action runs and an escalate timeline row lands",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "api",
+      "personas": ["dev admin"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a scratch autolaunched flow in a WRITABLE package with an approval node carrying config.escalation {enabled:true, timeoutHours, action, escalateTo, notifySubmitter} (ApprovalEscalationSchema, packages/spec/src/automation/approval.zod.ts)",
+          "clock control OR fractional-hour support: timeoutHours has a min of 1 and the escalation sweep (ApprovalService.runEscalations, ESCALATION_JOB_NAME, ADR-0042) runs on an interval against this.clock.now(), so driving a request PAST its deadline needs an injected/advanced clock or a direct runEscalations() call with a clock whose now() is beyond slaDueAt = created_at + timeoutHours"
+        ],
+        "knownGaps": [
+          "hour-granular SLAs are not drivable on stock fixtures in a single session: the minimum timeoutHours is 1 and the sweep uses real time, so reaching the deadline requires a timing harness (clock injection / controllable runEscalations) that stock showcase does not provide — the timeout-dependent clauses (2/3/4) run only under that harness; clauses 1 and 5 are runnable today"
+        ]
+      },
+      "blocked": { "by": "fixture", "ref": "hour-granular SLA needs a clock-control / runEscalations timing harness (timeoutHours min 1, sweep on real-time interval) — no stock-fixture way to advance past the deadline in-session" },
+      "variants": ["reassign", "auto_approve", "auto_reject", "notify"],
+      "steps": [
+        "boot showcase isolated (dogfood §0); sign in as the dev admin",
+        "in a writable package author + register a flow whose approval node config.escalation = {enabled:true, timeoutHours:1, action:'reassign', escalateTo:'<position machine name or user id>', notifySubmitter:true}",
+        "trigger the flow; GET /api/v1/approvals/requests/:id — status=pending and the request carries sla_due_at = created_at + timeoutHours (the SLA is materialized on open)",
+        "[needs clock control] advance the clock past sla_due_at (inject a clock / drive ApprovalService.runEscalations() with a clock whose now() is beyond the deadline) and run one escalation sweep",
+        "GET /:id/actions — assert exactly one action='escalate' row (the audit-first idempotency marker, actor SLA_ACTOR_ID) whose comment names the action",
+        "assert the declared action's effect: reassign → pending_approvers swapped to the escalatees + an approval.escalated notification to them; auto_approve/auto_reject → request finalized approved/rejected and the owning run resumes; notify → an approval.sla_breached notification to the pending approvers",
+        "with notifySubmitter!==false, read the submitter's inbox — an approval.sla_breached notification addressed to them",
+        "idempotency: run the sweep a SECOND time — GET /:id/actions shows NO second escalate row (single-shot, marker-guarded)",
+        "author-negative: build a scratch flow whose escalation carries an unknown key (or the `timeout`/`sla` alias) and validate it"
+      ],
+      "acceptance": [
+        {
+          "clause": "the node's declared SLA is materialized on the pending request: sla_due_at = created_at + timeoutHours",
+          "oracle": "api",
+          "verify": "GET /:id right after the request opens: sla_due_at equals created_at plus timeoutHours (slaDueAt, packages/plugins/plugin-approvals/src/approval-service.ts) — this half is runnable without clock control",
+          "evidence": "request read with sla_due_at"
+        },
+        {
+          "clause": "past the deadline the sweep escalates exactly ONCE: one action='escalate' timeline row, and a re-run adds none",
+          "oracle": "api",
+          "verify": "after advancing past sla_due_at and sweeping, GET /:id/actions has exactly one action='escalate' row (actor SLA_ACTOR_ID); a second sweep adds no further escalate row (the audit row is the idempotency marker, written before any mutation)",
+          "evidence": "actions reads after the first and second sweeps"
+        },
+        {
+          "clause": "per-variant: the declared escalation action fires — reassign swaps pending_approvers to the escalatees (+ approval.escalated notify), auto_approve/auto_reject finalizes the request and resumes the run, notify posts approval.sla_breached to the pending approvers",
+          "oracle": "api",
+          "verify": "for the authored action, cite the concrete effect: reassign → pending_approvers == escalatees; auto_approve → status=approved + run resumed; auto_reject → status=rejected + run resumed; notify → an approval.sla_breached inbox row for each pending approver (escalateRequest, approval-service.ts)",
+          "evidence": "request/run/notification reads per variant"
+        },
+        {
+          "clause": "notifySubmitter is honored: with notifySubmitter!==false the original submitter is notified of the SLA breach",
+          "oracle": "api",
+          "verify": "the submitter's inbox carries an approval.sla_breached notification naming the escalation action taken",
+          "evidence": "submitter notification read"
+        },
+        {
+          "clause": "the escalation config is strict at authoring: an unknown key (or a remappable alias like `timeout`/`sla`) is rejected/normalized at build, so a declared SLA can never silently no-op",
+          "oracle": "build",
+          "verify": "the unknown-key scratch flow fails validate with a located error naming the escalation surface (ApprovalEscalationSchema.strict, #4001 — 'until #4001 these were dropped silently')",
+          "evidence": "build/validate output"
+        }
+      ],
+      "negative": [
+        "a request left pending past its sla_due_at with NO escalate row ever written is a FAIL — the #4001 'declared but never fired' shape the strict schema + sweep exist to close",
+        "a second escalate row on a re-run is a FAIL — escalation is single-shot, guarded by the audit marker",
+        "an escalation config that parses with an unknown key silently dropped is a FAIL — it means the author's SLA intent was discarded (pre-#4001 behavior)"
+      ],
+      "traps": ["seed-data-thin", "stale-dist"],
+      "source": [
+        "packages/spec/src/automation/approval.zod.ts (ApprovalEscalationSchema — enabled/timeoutHours(min 1)/action(reassign|auto_approve|auto_reject|notify)/escalateTo/notifySubmitter, strict, #4001; carried on the approval node as config.escalation)",
+        "packages/plugins/plugin-approvals/src/approval-service.ts (runEscalations sweep + escalateRequest — audit-first escalate row, per-action effects, notifySubmitter; slaDueAt; ESCALATION_JOB_NAME ADR-0042; this.clock)",
+        "packages/plugins/plugin-approvals/src/sys-approval-request.object.ts (sla_due_at surfaced on the request)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-08", "change": "initial — pins the ADR-0042 SLA escalation (declared action fires once past timeout + escalate timeline row); blocked on a clock-control timing harness (hour granularity), with the sla_due_at materialization and the strict-schema build clause runnable today", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    },
+    {
+      "id": "approvals.account-app-entry",
+      "title": "A non-admin reaches the full Approvals Inbox from the account app's Approvals entry",
+      "since": "v17",
+      "status": "active",
+      "revision": 1,
+      "priority": "P0",
+      "surface": "browser",
+      "personas": ["a NON-ADMIN business user who is a pending approver and has no Setup access"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a bundled console: packages/console/dist is absent in a fresh checkout — build it with `pnpm objectui:build` and confirm dist/.objectui-sha equals .objectui-sha before trusting anything in the browser (`pnpm check:console-sha` exits 0 when there is NO dist at all, so a green check does not prove a console is present)",
+          "a non-admin sign-in account holding only business positions (showcase: contributor + finance) — the seeded personas (Ada Auditor, Mei Phone) are sys_user rows with no better-auth account, so provision one at runtime",
+          "at least one pending request routed to that user (showcase: PATCH a draft invoice to status=sent + issued_on to launch showcase_invoice_signoff, whose finance/legal positions the persona holds)"
+        ]
+      },
+      "steps": [
+        "build the console at the pin and verify the stamp; boot showcase isolated (dogfood §0)",
+        "grep the BUILT bundle for the registration key: `grep -o 'approvals:inbox' packages/console/dist/assets/index-*.js` — the entry chunk must carry the register call, because the unit pin (#7231) stubs the page at its module boundary and does not assert main.tsx performs the side-effect import",
+        "sign in as the non-admin persona; GET /api/v1/meta/app and record which apps the server returns for this session",
+        "open the account app and click the Approvals entry in the Inbox group; screenshot",
+        "read the resulting URL and the rendered surface (tabs, list rows, keyboard hint bar)",
+        "open a request drawer and read the rendered action set; execute one decision and re-read the request",
+        "cold-load the same request via ?request= on this component route",
+        "click a record link in the inbox row and record the resulting URL"
+      ],
+      "acceptance": [
+        {
+          "clause": "the registration survives BUNDLING — the built dist, not just source, contains the approvals:inbox component registration",
+          "oracle": "build",
+          "verify": "the console dist stamp equals .objectui-sha AND the built entry chunk contains the `approvals:inbox` register call; a source-only grep does not satisfy this clause",
+          "evidence": "dist/.objectui-sha + the grep hit with surrounding bundle context"
+        },
+        {
+          "clause": "the entry renders the FULL inbox — tabs (待我审批 / 我发起的 / 全部), the request list and the drawer — not a component-not-found empty state",
+          "oracle": "screenshot",
+          "verify": "screenshot the surface reached by clicking the nav entry; the tab strip and at least one request row must be visible. An empty state naming a missing component is a FAIL and means the side-effect import did not survive the bundle",
+          "evidence": "screenshot + the landed URL"
+        },
+        {
+          "clause": "a NON-ADMIN reaches it — the premise of the whole convergence: business roles have no Setup access",
+          "oracle": "api",
+          "verify": "GET /api/v1/meta/app for this session lists the account app (with the Approvals entry surviving filterAppForUser's nav gating) and does NOT list setup; the same session then renders the inbox",
+          "evidence": "the meta/app read for the non-admin session + the rendered inbox"
+        },
+        {
+          "clause": "decision actions render under the component mount and one of them actually moves the request",
+          "oracle": "api",
+          "verify": "the drawer renders the server-declared action set for a request where this user is a pending approver; executing one decision moves the node tally, drops the user from pending_approvers, appends a timeline row, and replaces the action bar with the can_act=false explanation",
+          "evidence": "before/after drawer screenshots + before/after GET /api/v1/approvals/requests/:id"
+        },
+        {
+          "clause": "?request= deep-links into the drawer on this component route too (route parity with /system/approvals)",
+          "oracle": "screenshot",
+          "verify": "cold-load /apps/<appId>/component/approvals/inbox?request=<id>; the drawer opens on that exact request. Cross-checked against the same id on /system/approvals by approvals.notification-deep-link",
+          "evidence": "screenshot with the URL and the request identity visible"
+        },
+        {
+          "clause": "a record link in an inbox row keeps the CURRENT app segment — it never hard-codes setup or a foreign app",
+          "oracle": "dom",
+          "verify": "after a screenshot confirms the list rendered, read the record link's href: it must be /apps/<the app the inbox is mounted in>/<objectName>/record/<recordId>. Landing on 'Record not found' is NOT automatically a routing failure — first check whether the approver can read that record at all (GET /api/v1/data/<object>/<id> as this persona); record-level invisibility is a separate finding, tracked at #7345",
+          "evidence": "the href + the persona's direct record read"
+        },
+        {
+          "clause": "zh-CN wording is consistent: the nav entry reads 待我审批 and the inbox's tab / status vocabulary reads 待我审批 / 待审批",
+          "oracle": "screenshot",
+          "verify": "set the console locale to zh and screenshot the nav entry and the inbox; nav label 待我审批, tab 待我审批, status badge 待审批",
+          "evidence": "zh screenshots of nav + inbox"
+        }
+      ],
+      "negative": [
+        "an empty state naming a missing component (or a blank pane) where the inbox should render is a FAIL — that is exactly the bundling gap the unit pin cannot see",
+        "the account app's Approvals entry disappearing for the non-admin persona is a FAIL — the nav gating must not strip it (contrast: setup must NOT appear for the same session)"
+      ],
+      "traps": ["stale-console-bundle", "hydration-race", "wrong-persona"],
+      "source": [
+        "#7213 (entry convergence epic)", "#7231", "#7234", "#7331 (this item's browser run)",
+        "packages/platform-objects/src/apps/account.app.ts (the Approvals nav entry, type component / componentRef approvals:inbox)",
+        "packages/platform-objects/src/apps/account-approvals-nav.test.ts (pins the entry shape; explicitly does NOT assert main.tsx's side-effect import)",
+        "objectui apps/console/src/main.tsx + the approvals:inbox registration (objectui#4071)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-10", "change": "initial — the account-app entry had no checklist coverage; authored from the #7331 browser run that first drove it end to end against a dist built at pin 8aad9fd50b16", "ref": "#7331" }
+      ]
+    },
+    {
+      "id": "approvals.setup-nav-entry",
+      "title": "Setup → Approvals leads with Approvals Inbox, above the raw tables",
+      "since": "v17",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "browser",
+      "personas": ["platform admin with Setup access"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a bundled console built at the current pin (see approvals.account-app-entry fixtures)",
+          "at least one pending request the admin is an approver on"
+        ]
+      },
+      "steps": [
+        "boot showcase isolated; sign in as the dev admin",
+        "GET /api/v1/meta/app and read the setup app's group_approvals children in declared order",
+        "open the Setup app, expand the Approvals group, screenshot the expanded group",
+        "read the group's child links in DOM order with their hrefs",
+        "click Approvals Inbox and screenshot the surface it opens"
+      ],
+      "acceptance": [
+        {
+          "clause": "the group's first child is Approvals Inbox, above Requests / Action History / Delegations (OOO)",
+          "oracle": "api",
+          "verify": "the setup app's group_approvals children, in the order the server returns them, are [component approvals:inbox, sys_approval_request, sys_approval_action, sys_approval_delegation]; the rendered sidebar order matches",
+          "evidence": "meta/app read + the sidebar screenshot and DOM link order"
+        },
+        {
+          "clause": "the entry opens the SAME inbox component the account app mounts, at /apps/<setupId>/component/approvals/inbox",
+          "oracle": "screenshot",
+          "verify": "the surface carries the same tab strip and list; the admin variant additionally offers the process / object filters",
+          "evidence": "screenshot + landed URL"
+        },
+        {
+          "clause": "zh-CN: the entry reads 审批中心 and sits above 审批申请 / 审批历史 / 审批委派（外出）",
+          "oracle": "screenshot",
+          "verify": "set the console locale to zh; screenshot the expanded group and read the link order",
+          "evidence": "zh sidebar screenshot + link order"
+        }
+      ],
+      "negative": [
+        "an Approvals group whose first child is the raw sys_approval_request grid is a FAIL — the engine's own table is a read-only wall of rows an approver cannot act on (the decision actions are gated on the viewer block only the approvals REST path attaches)"
+      ],
+      "traps": ["hydration-race", "stale-console-bundle"],
+      "source": [
+        "#7213", "#7268", "#7331 (this item's browser run)",
+        "packages/plugins/plugin-approvals/src/approvals-plugin.ts (navigationContributions → setup group_approvals)",
+        "packages/plugins/plugin-approvals/src/nav-contribution.test.ts"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-10", "change": "initial — the Setup-side Approvals Inbox entry had no checklist coverage", "ref": "#7331" }
+      ]
+    },
+    {
+      "id": "approvals.pending-count-surfaces",
+      "title": "The bell badge and Home's action card agree on the pending-approval count and lead to an app the user can open",
+      "since": "v17",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "browser",
+      "personas": ["a non-admin pending approver", "an admin with >9 combined unread notifications + pending approvals"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a bundled console built at the current pin",
+          "enough seeded sys_inbox_message rows plus pending approvals that the combined total exceeds 9, so the CLAMP case is the one exercised (a total of 9 or less never proves the breakdown is unclamped)"
+        ],
+        "knownGaps": [
+          "sys_inbox_message is granted by no platform permission set, so a plain member's notification count is structurally 0 and the >9 case can only be reached as an admin — tracked at #7344"
+        ]
+      },
+      "steps": [
+        "boot showcase isolated; seed >9 combined notifications + pending approvals for the persona",
+        "open the bell popover; screenshot the header line and read the button badge",
+        "open /_console/home; screenshot the 'Needs your attention' card",
+        "click the card's pending-approvals row and record the URL it navigates to",
+        "GET the approvals API for the same session and compare the counts"
+      ],
+      "acceptance": [
+        {
+          "clause": "the popover header reads `<total> total · N notifications + M pending approvals`, UNCLAMPED, while the bell button badge clamps at 9+",
+          "oracle": "screenshot",
+          "verify": "with a combined total above 9: the button shows 9+ and the popover header shows the real numbers with the breakdown spelled out",
+          "evidence": "screenshot of the badge and the popover header together"
+        },
+        {
+          "clause": "M matches Home's pending-approvals card and the inbox's 待我审批 tab count for the same session",
+          "oracle": "api",
+          "verify": "the popover's M, Home's card, the inbox tab count and the approvals API's pending list for this user are the same number; re-check after a decision moves it",
+          "evidence": "the three surfaces + the API read, before and after one decision"
+        },
+        {
+          "clause": "Home's pending-approvals card navigates within an app the user can open — never /apps/setup/...",
+          "oracle": "dom",
+          "verify": "after a screenshot confirms the card rendered, click it and read the URL: /apps/<an app in this session's meta/app list>/system/approvals. For a non-admin whose app list excludes setup, a setup URL is a FAIL",
+          "evidence": "the landed URL + the session's meta/app list"
+        }
+      ],
+      "negative": [
+        "a popover header that clamps its own breakdown (e.g. '9+ notifications') is a FAIL — the clamp belongs to the button badge; the popover exists to say which N and which M produced it",
+        "the bell's 'View all notifications' and Home's 'View all activity' links are OUT of this item's scope and are known to route into /apps/setup/... for every persona — tracked at objectui#4074 (moved from #7266), browser-confirmed by the #7331 run; do not record them here"
+      ],
+      "traps": ["hydration-race", "single-datapoint", "wrong-persona"],
+      "source": [
+        "#7213", "#7268", "#7331 (this item's browser run)",
+        "objectui packages/app-shell/src/layout/InboxPopover.tsx (totalBadge = unreadTopics + pendingApprovalsCount, clamped at 9+; the breakdown line)",
+        "objectui packages/app-shell/src/console/home/HomePage.tsx (onOpenApprovals → /apps/<approvalsAppSegment>/system/approvals)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-10", "change": "initial — the bell breakdown (objectui#4073) and Home's card target had no checklist coverage", "ref": "#7331" }
+      ]
+    }
+  ]
+}

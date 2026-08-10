@@ -14,7 +14,6 @@ import {
   matchOption,
   splitMulti,
   coerceRow,
-  firstConstraintViolation,
 } from './import-coerce';
 import type { ExportFieldMeta } from './export-format';
 
@@ -274,76 +273,23 @@ describe('coerceRow', () => {
   });
 });
 
-describe('firstConstraintViolation (framework#3956)', () => {
-  const meta = (defs: Record<string, Partial<ExportFieldMeta>>): Map<string, ExportFieldMeta> => {
-    const m = new Map<string, ExportFieldMeta>();
-    for (const [name, d] of Object.entries(defs)) m.set(name, { name, ...d });
-    return m;
-  };
-
-  it('reports a numeric value below `min` with the engine\'s own message', () => {
-    // The issue's repro: penalty_amount { type: 'number', min: 0, max: 9999999.99 }
-    const metaMap = meta({ penalty_amount: { type: 'number', min: 0, max: 9999999.99 } });
-    expect(firstConstraintViolation({ penalty_amount: -500 }, metaMap)).toEqual({
-      field: 'penalty_amount', code: 'min_value', message: 'penalty_amount must be ≥ 0',
-    });
-  });
-
-  it('reports a numeric value above `max`', () => {
-    const metaMap = meta({ pct: { type: 'percent', max: 100 } });
-    expect(firstConstraintViolation({ pct: 101 }, metaMap)).toEqual({
-      field: 'pct', code: 'max_value', message: 'pct must be ≤ 100',
-    });
-  });
-
-  it('reports string length violations both ways', () => {
-    const metaMap = meta({ code: { type: 'text', minLength: 3, maxLength: 5 } });
-    expect(firstConstraintViolation({ code: 'abcdef' }, metaMap)).toEqual({
-      field: 'code', code: 'max_length', message: 'code must be ≤ 5 characters (got 6)',
-    });
-    expect(firstConstraintViolation({ code: 'ab' }, metaMap)).toEqual({
-      field: 'code', code: 'min_length', message: 'code must be ≥ 3 characters (got 2)',
-    });
-  });
-
-  it('accepts values inside the declared bounds', () => {
-    const metaMap = meta({
-      amount: { type: 'currency', min: 0, max: 100 },
-      title: { type: 'text', maxLength: 10 },
-    });
-    expect(firstConstraintViolation({ amount: 0 }, metaMap)).toBeNull();
-    expect(firstConstraintViolation({ amount: 100 }, metaMap)).toBeNull();
-    expect(firstConstraintViolation({ title: 'ten chars!' }, metaMap)).toBeNull();
-  });
-
-  it('skips absent values — a bound never fires on a field the row omits', () => {
-    const metaMap = meta({ amount: { type: 'number', min: 10 } });
-    expect(firstConstraintViolation({}, metaMap)).toBeNull();
-    expect(firstConstraintViolation({ amount: null }, metaMap)).toBeNull();
-    expect(firstConstraintViolation({ amount: '' }, metaMap)).toBeNull();
-  });
-
-  it('skips system / readonly columns the importer never supplies', () => {
-    const metaMap = meta({
-      seq: { type: 'number', min: 100, system: true },
-      score: { type: 'number', min: 100, readonly: true },
-    });
-    expect(firstConstraintViolation({ seq: 1, score: 1 }, metaMap)).toBeNull();
-  });
-
-  it('leaves an unparseable number to coerceRow rather than double-reporting', () => {
-    const metaMap = meta({ amount: { type: 'number', min: 0 } });
-    expect(firstConstraintViolation({ amount: 'abc' }, metaMap)).toBeNull();
-  });
-
-  it('bound-checks only the types the engine bound-checks', () => {
-    // `progress` is numeric per the spec but the engine's validateOne leaves it
-    // unchecked — mirroring the wider spec set here would reject rows the real
-    // write accepts.
-    const metaMap = meta({ p: { type: 'progress', min: 0, max: 1 } });
-    expect(firstConstraintViolation({ p: 42 }, metaMap)).toBeNull();
-  });
-});
+// ── the retired constraint mirror (framework#3956) ────────────────────
+//
+// `firstConstraintViolation` used to be pinned here with eight unit cases. It
+// is gone: the import dry run asks the engine for its verdict through
+// `DataProtocol.validateData` instead of re-deriving one (#4633 ruling D), so
+// there is no longer a copy of the engine's numeric-range / string-length
+// rules in this file to keep in step.
+//
+// Its VERDICTS did not retire with it — `import-dryrun-parity.test.ts` asserts
+// every one of them (min_value, max_value, min_length, max_length, an omitted
+// bounded field, boundary values) against a live engine, and asserts the dry
+// run and the real write agree on each. Two of the eight cases have no
+// successor by design: "skips system / readonly columns" and "bound-checks
+// only the types the engine bound-checks" existed because a hand-maintained
+// copy could disagree with the engine about WHICH fields and types are in
+// scope. With no copy, there is no second opinion to police — that question is
+// `record-validator.ts`'s alone, and pinned in objectql's own tests.
 
 /**
  * #3957 — the importer's row report is where a user meets these messages, and

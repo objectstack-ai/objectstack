@@ -34,6 +34,7 @@ import type { IHttpServer, IHttpRequest, RouteHandler } from '@objectstack/spec/
 // The declared envelope is written in ONE place for the whole platform (#3973).
 import { sendOk, sendError } from '@objectstack/types';
 import type { ShareLinkExecutionContext } from '@objectstack/spec/contracts';
+import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { ShareLinkService } from './share-link-service.js';
 import type { SharingEngine } from './sharing-service.js';
 
@@ -50,14 +51,38 @@ export interface ShareLinkRoutesOptions {
    * an anonymous context (the authenticated routes then 401). The old default
    * trusted `x-user-id` / `x-tenant-id`, which let a client forge attribution
    * and enumerate/revoke other users' links.
+   *
+   * [#6206 / #6430] It returns the FULL {@link ExecutionContext} — the whole
+   * `resolveAuthzContext` envelope — because this module forwards it unchanged
+   * into `createLink` / `listLinks` / `revokeLink`, every one of which
+   * ADJUDICATES access. A resolver that rebuilds a subset here silently changes
+   * those verdicts: `accessible_org_ids` is the `group`-posture Layer 0 wall
+   * (ADR-0105 D2) and denies when absent. The routes' OWN decision — is this
+   * request authenticated at all? — is the only thing they read off it
+   * themselves, via {@link isAuthenticated}.
    */
-  contextFromRequest?: (req: IHttpRequest) => ShareLinkExecutionContext | Promise<ShareLinkExecutionContext>;
+  contextFromRequest?: (req: IHttpRequest) => ExecutionContext | Promise<ExecutionContext>;
 }
 
 // [Finding-2] Secure default: anonymous (no identity read from headers). A
 // deployment that wants authenticated share-link management must wire a
 // verified `contextFromRequest` (the plugin does).
-const defaultContext = (_req: IHttpRequest): ShareLinkExecutionContext => ({});
+const defaultContext = (_req: IHttpRequest): ExecutionContext => ({});
+
+/**
+ * [#6206] The routes' own 401 gate — authenticated vs anonymous, and nothing
+ * more.
+ *
+ * Typed to {@link ShareLinkExecutionContext} deliberately: that is the shape
+ * the contract retains for exactly this decision, and narrowing HERE (at the
+ * read) rather than at the resolver (at the production site) is the whole point
+ * of the ruling. The gate reads no authorization dimension, so it needs no
+ * authorization envelope — while the object the routes hand on to the service
+ * stays the complete one.
+ */
+function isAuthenticated(ctx: ShareLinkExecutionContext): boolean {
+  return Boolean(ctx.userId);
+}
 
 /**
  * ## Why `data` carries the payload bare on this module's five routes
@@ -117,7 +142,7 @@ export function registerShareLinkRoutes(
     try {
       const ctx = await ctxOf(req);
       // [Finding-2] Managing links requires a verified principal.
-      if (!ctx.userId) return sendError(res, 401, 'UNAUTHENTICATED', 'Sign in to create share links');
+      if (!isAuthenticated(ctx)) return sendError(res, 401, 'UNAUTHENTICATED', 'Sign in to create share links');
       const body: any = req.body ?? {};
       if (!body.object || !body.recordId) {
         return sendError(res, 400, 'VALIDATION_FAILED', 'object and recordId are required');
@@ -150,7 +175,7 @@ export function registerShareLinkRoutes(
   http.get(base, (async (req, res) => {
     try {
       const ctx = await ctxOf(req);
-      if (!ctx.userId) return sendError(res, 401, 'UNAUTHENTICATED', 'Sign in to list share links');
+      if (!isAuthenticated(ctx)) return sendError(res, 401, 'UNAUTHENTICATED', 'Sign in to list share links');
       const q = req.query ?? {};
       const links = await service.listLinks(
         {
@@ -173,7 +198,7 @@ export function registerShareLinkRoutes(
   http.delete(`${base}/:idOrToken`, (async (req, res) => {
     try {
       const ctx = await ctxOf(req);
-      if (!ctx.userId) return sendError(res, 401, 'UNAUTHENTICATED', 'Sign in to revoke share links');
+      if (!isAuthenticated(ctx)) return sendError(res, 401, 'UNAUTHENTICATED', 'Sign in to revoke share links');
       await service.revokeLink(req.params.idOrToken, ctx);
       // `{ ok: true }` moves from BEING the body to being its `data`. It was a
       // second word for `success` at the top level (#3689 retired that from

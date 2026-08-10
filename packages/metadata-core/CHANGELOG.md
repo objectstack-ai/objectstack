@@ -1,5 +1,488 @@
 # @objectstack/metadata-core
 
+## 17.0.0-rc.6
+
+### Minor Changes
+
+- 121852d: Metadata-plane FLS: the ADR-0106 D4 read exemption is now **derived** from the #6603 write-capability gate, so "whoever can write a schema can see all of it" is enforced by construction (#7020).
+
+  The two sets used to be maintained separately and were in fact different: the write gate demands `manage_metadata`, while the D4 exemption listed `studio.access` / `setup.access`. They met only on the shipped `admin_full_access` set, which carries all three — so the invariant #6603's ruling stated held by coincidence, not by construction. A caller holding `manage_metadata` alone passed every metadata write gate and still read a **masked** object schema, and its GET, edit and PUT round trip then deleted the fields it was never shown.
+
+  `OBJECT_SCHEMA_MASK_EXEMPT_CAPABILITIES` is now the union of two named halves — `OBJECT_SCHEMA_WRITE_CAPABILITIES` (the write gate's key, spelled once) and `OBJECT_SCHEMA_READ_ONLY_EXEMPT_CAPABILITIES` (`studio.access` / `setup.access`) — both newly exported from `@objectstack/metadata-core`.
+
+  **Behaviour change:** a caller holding `manage_metadata` now reads object schemas unmasked on every schema-serving exit. This widens read access for that cohort and is the ruled intent (maintainer, 2026-08-10). The derivation is one-directional: no principal loses read access, and the `/packages` read cohort (#7033 / #7023) keeps its own separately-ruled set.
+
+- 5e247fd: fix(metadata-protocol): a `/meta` object read serves the effective runtime schema, whichever layer answered (#6562)
+
+  `GET /api/v1/meta/object/:name` answered a **different set of fields** depending
+  on which link of its resolution chain produced the answer, for the same object:
+
+  - **registry-backed** → the schema AFTER `applySystemFields`, so it carried the
+    injected system columns — `created_at`, `created_by`, `updated_at`,
+    `updated_by`, `organization_id`, `owner_id`, `owning_business_unit_id` — even
+    when the author declared none of them;
+  - **overlay-backed** (a `sys_metadata` customization row, or a MetadataService
+    body) → the stored document VERBATIM, so every one of those columns was simply
+    absent.
+
+  Whether an object carries an overlay is invisible to the caller, so the same
+  request reported the platform's own columns or not, and nothing in the response
+  said which had happened. `/meta` is the machine-readable contract clients and AI
+  authors code against: an author reading an overlay-backed object saw no
+  `created_at` / `owner_id` / `organization_id` and reasonably concluded the
+  columns do not exist — while every one of them is real in the database,
+  filterable, orderable, and enforced read-only on write.
+
+  **Every `/meta` object read exit now serves the effective schema.** The
+  single-item read, the list, the cached/ETag branch, both draft reads and the
+  layered read's `effective` layer all report the injected columns, with the same
+  `readonly` / `system` markers the engine enforces (`owner_id` stays
+  `readonly: false` — ownership is transferable). This is the presence half of the
+  seam #4513 closed the value half of.
+
+  Three things deliberately did **not** change:
+
+  - **`?layers=1`'s `overlay` layer stays byte-verbatim.** Injection happens at the
+    read exits only, so Studio's "what you customised" diff never shows a column
+    nobody wrote. Only `effective` is injected.
+  - **A `GET` → `PUT` round-trip still persists a byte-identical body** (#4326).
+    The write path gained the strip counterpart: a field byte-identical to the
+    platform's own definition is removed again on save, so a served document handed
+    straight back stores exactly what it stored before — same checksum, same
+    history diff. A declared `owner_id` carrying the author's own label is _not_
+    the platform's definition and survives untouched.
+  - **A declared system column stays the author's.** Injection only ever adds a
+    column nobody declared; it never rewrites one that was.
+
+  Which columns an object carries is `resolveInjectedSystemColumns`
+  (`@objectstack/spec/data`, #5378) — the same derivation `applySystemFields`
+  consumes — so every opt-out (`systemFields: false`, `managedBy: 'better-auth'`,
+  `systemFields.audit`/`.tenant`, `tenancy.enabled: false`, the per-tier
+  `ownership` table, the `sys_*` namespace) is answered in one place and re-derived
+  in none. **What** each column looks like moves to `@objectstack/metadata-core`
+  (`AUDIT_FIELD_DEFS` and the three tenancy/ownership anchors, re-exported from
+  `@objectstack/objectql` so the symbols still resolve there) — the same relocation,
+  for the same dependency cycle, as the audit-governance table in #4513:
+  `@objectstack/objectql` depends on `@objectstack/metadata-protocol`, so the read
+  path could not import the definitions from the registry that provisions them.
+  One table now feeds the injection pass and the read exits, so they cannot drift.
+
+  One key is deliberately not carried onto a served document: `organization_id`'s
+  `indexed`. It is not a `FieldSchema` key — removed in the 16.x line (#2377,
+  ADR-0049) and rejected by name by the strict schema — and its only consumer is
+  `driver-mongodb`'s schema builder, which reads the registered schema and never a
+  served document. It stays at the injection site; that the registry-backed read
+  answers `_diagnostics: { valid: false }` because of it is filed as #6810.
+
+- a954634: feat(meta): object schemas served by `/meta` and `/metadata` are masked per caller (ADR-0106, #3682)
+
+  The data plane has enforced field-level security everywhere it matters for
+  several releases — list reads mask values, exports project columns, and the
+  write path 403s forbidden fields. The **metadata** plane did not: any
+  authenticated caller who asked `GET /meta/object/:name` received the full object
+  schema, including fields they have no read access to at all.
+
+  That is more than a list of names. A field carries its label, type, **picklist
+  option values** (often a sensitive operational taxonomy), its **formula**
+  expression (pricing and scoring IP), its `visibleWhen` predicate, its
+  `defaultValue`, and — via ADR-0066 D3 — the `requiredPermissions` capability
+  names guarding it. For a customer running a dealer, supplier or patient portal
+  on ObjectStack, the only remediation available in their own tier was modelling
+  discipline: keep sensitive fields off portal-visible objects, or split one
+  business entity into an internal object and a portal object and synchronize
+  them. This is a platform-side fix, so every deployment inherits it.
+
+  **What changes.** Serving an object schema now projects `fields` onto the set
+  the caller may read, and a field outside that set is removed **whole** — no
+  name, no label, no options, no formula, no `requiredPermissions`. Partial
+  redaction was rejected: keeping the name still leaks existence and invites
+  clients to render ghost columns. Masking keys on the `readable` bit only; a
+  readable-but-not-editable field stays in the schema, because the UI must render
+  it and the `editable` affordance is already served per caller by
+  `/auth/me/permissions`.
+
+  Every outlet that serves an object schema goes through one shared projection,
+  so coverage is not a per-route promise:
+
+  - `GET /meta/object/:name` — the cached branch (the default) **and** the
+    uncached branch, which is what `?state=draft`, `?preview=draft` and
+    `?package=` take;
+  - `GET /meta/object/:name?layers=true` — the layered diagnostic view, all three
+    of `code` / `overlay` / `effective`;
+  - `GET /meta/:type/:section/:name` — the compound-name read;
+  - `GET /meta/object` — the list read, each item projected independently;
+  - the runtime `/metadata` catch-all — the protocol-backed, registry-backed and
+    last-ditch single reads, the `/metadata/objects` list (protocol and registry),
+    and the legacy one-segment `/metadata/:objectName` spelling.
+
+  **Caching is unchanged in cost and correct per cohort.** The shared metadata
+  cache still stores one full schema per (type, name, locale, environment) — no
+  caller dimension in the key — and the mask runs after retrieval. What varies
+  per caller is the validator: a stable hash of the caller's _denied_ field set is
+  folded into the ETag. A caller who can read everything denies nothing, so their
+  fingerprint is empty and both their ETag and their response body are
+  **byte-identical** to previous releases. Callers in one permission cohort share
+  `304`s; a permission change moves the fingerprint and self-invalidates the stale
+  `304`, so nothing needs purging after a permission-set edit.
+
+  **Exemptions** are a property of the caller, not of the route: `isSystem` and
+  platform-admin callers (holders of `studio.access` / `setup.access`, the same
+  judgement the app filter uses) receive the full schema on any route, because
+  Studio and Setup authoring cannot work against a projected schema.
+
+  **Failure posture is explicit and three-tiered.** With no `security` service
+  registered the schema is served unmasked — that deployment has no FLS posture at
+  all and tightening only the metadata plane would be theater. When field
+  visibility cannot be _determined_ (a registry-hydration window), the schema is
+  served unmasked but loudly: a structured warning, a new
+  `objectstack_meta_field_visibility_undetermined_total` counter, and a response
+  downgraded to `Cache-Control: private, no-store` with no shared ETag. Failing
+  closed there would brick every render of the object for every user and can
+  deadlock console bootstrap, since permission sets are themselves metadata. When
+  permission evaluation **throws**, the request fails with `503
+FIELD_VISIBILITY_UNRESOLVED` — an unhealthy security service must not auto-open
+  a disclosure hole, and an empty-fields `200` would be both a silently wrong UI
+  and cacheable poison.
+
+  **Guest and public deployments** get a deliberate posture rather than an
+  accidental one: `@objectstack/plugin-security` gains
+  `getMetadataReadableFields`, which resolves the configured fallback permission
+  set (`security.fallbackPermissionSet`, default `member_default`) for a caller
+  who resolves to zero sets, exactly as `/auth/me/permissions` does.
+  `getReadableFields` is unchanged — on the data plane, mirroring the engine
+  middleware's fall-open is what keeps it drift-free.
+
+  **Escape hatch.** Masking is the platform default. A deployment that explicitly
+  wants an unmasked metadata plane sets `OS_ALLOW_UNMASKED_OBJECT_METADATA=1`, or
+  `metadata.maskObjectFields: false` on the REST server. Toggling it changes
+  disclosure only: the console reads every field affordance from
+  `/auth/me/permissions`, so UI correctness is unaffected either way.
+
+  Operators fronting the runtime with a CDN or reverse proxy should read the new
+  "CDN / reverse-proxy caching of `/meta` object schemas" section in the
+  production-readiness guide before tuning anything — in particular, do not
+  configure a proxy to ignore `Cache-Control: private`, and do not strip or
+  rewrite `ETag` on these routes.
+
+### Patch Changes
+
+- 1a53a02: fix(meta): `/meta` object reads stop reporting `readonly: false` on fields the write path refuses (#4513)
+
+  `#4447` made the audit-provenance family (`created_at`, `created_by`,
+  `updated_at`, `updated_by`) engine-owned on the **write** path: the registry's
+  `applySystemFields` forces `{ readonly: true, system: true }` over a _declared_
+  audit field, and `ObjectQL.update` strips a non-system caller's write to it.
+
+  The **read** path never learned it. A `/meta` object read resolves through
+  `sys_metadata` overlay → MetadataService → SchemaRegistry, and only the last of
+  those three has been through `applySystemFields` — so an object whose built
+  artifact ships a materialized `created_at` carrying FieldSchema defaults
+  (`readonly: false`) reported that value to every client while writes to that
+  same field were being refused. Measured before the fix, all of the read exits
+  agreed with each other and disagreed with the engine:
+
+  ```
+  single  read: {"type":"datetime","label":"Created At","readonly":false}
+  list    read: {"type":"datetime","label":"Created At","readonly":false}
+  cached  read: {"type":"datetime","label":"Created At","readonly":false}
+  layered read: {"type":"datetime","label":"Created At","readonly":false}
+  ```
+
+  One field, two answers — and the machine-readable one, the only face a client
+  or an AI author writing code off `/meta` can see, was the wrong one.
+
+  **What changes.** Every `/meta` object read exit now reports the audit family
+  the way the engine enforces it. That covers the single-item read (both the
+  singular and plural type spelling), the list read, the cached/ETag branch, the
+  `?preview=draft` and `?state=draft` reads, and the layered read's `effective`
+  layer. `GET` bodies for objects that declare an audit field will show
+  `readonly: true, system: true` where they previously showed `readonly: false`
+  or omitted the keys; nothing else about the document changes, and the ETag for
+  such an object changes once.
+
+  **What deliberately does not change.**
+
+  - The layered read's `code` and `overlay` layers stay raw — showing the
+    package's declaration beside the governed `effective` value is the
+    diagnostic's whole point.
+  - `sys_metadata` still stores exactly what the author saved; the correction is
+    applied on the way out, so no phantom customization appears in the diff.
+  - An object that opts out of the audit family (`systemFields: false`,
+    `systemFields.audit: false`, `managedBy: 'better-auth'`) is untouched — the
+    engine enforces nothing there, so a read that claimed otherwise would be the
+    same lie pointing the other way.
+  - Only `readonly` and `system` are forced. Every other key an author writes —
+    `label`, `description`, `hidden`, `group`, and `type` for an external object
+    mapping a differently-typed remote column — stays theirs.
+
+  The governance table moved from `packages/objectql/src/registry.ts` to
+  `@objectstack/metadata-core` (`AUDIT_FIELD_GOVERNANCE`, plus the
+  `applyAuditFieldGovernance` normalizer the read path applies), by the same
+  criterion and for the same cycle as the `#5619` engine-dispatch predicates:
+  `@objectstack/objectql` depends on `@objectstack/metadata-protocol`, so the
+  read path cannot import the table from the registry that enforces it, and a
+  second copy would agree only until someone edited one side. `objectql`
+  re-exports the symbol from its original path, so its public API is unchanged.
+
+- 3d4c545: fix(metadata): `sys_view_definition` 的「活跃行唯一」真正生效——归档视图不再占用 (name, organization_id, owner) 名额
+
+  `sys_view_definition` 的 `idx_sys_view_def_active` 索引注释一直承诺「among active rows」，但这个语义从未在任何一层交付：声明面的 `partial: "state = 'active'"` 没有任何 driver 消费者（`syncDeclaredIndexes` 走 knex 的 `table.unique()`，无法表达 `WHERE`），该键已随 #5248 / #4943 退役；而与 `sys_metadata` 不同，这张表背后**没有**任何等价的运行时迁移。结果是建出来的一直是无谓词的全量 UNIQUE 索引——用户归档（或软删、重置）一个视图后，**无法再新建同名视图**，被一条自己刚扔掉的记录挡住。
+
+  现在补上运行时迁移 `ensureViewDefinitionActiveIndex`（照 `metadata-protocol` 既有的 `ensureOverlayIndex` 范式），在 `kernel:ready` 用 raw SQL 发 `CREATE UNIQUE INDEX idx_sys_view_def_active … WHERE state = 'active'`：
+
+  - **名额可回收**——归档视图不再占用名额，同名视图可以重建；
+  - **唯一性不放宽**——两条 `state='active'` 的同名同域行仍然被拒；
+  - **复用声明的索引名**——`syncDeclaredIndexes` 按名跳过，后续每次启动都不会把全量 UNIQUE 索引重新加回来；
+  - **降级只会退回今天的行为，不会更低**——迁移先用一个临时探针索引验证当前方言与数据确实能建出部分索引，成功后才替换既有索引。因此 MySQL / MariaDB（无部分索引）上原有的全量 UNIQUE 索引原样保留（归档行在该方言上仍占名额，以 `info` 记录），不会出现「旧索引已删、新索引没建成」的无约束窗口。
+
+  `metadata-core` 侧只更新了 `sys-view-definition.object.ts` 的注释：该声明现在被明确记为**降级形态**（供无部分索引的方言与不跑该迁移的宿主使用），不应删除。
+
+  已知未涵盖：`owner` 为 NULL 的共享视图与 `organization_id` 为 NULL 的环境级视图，因 SQL UNIQUE 的 NULL-distinct 语义本来就不受该索引约束。这是早于本次修复的既有缺口，本迁移只改变**行范围**（`WHERE state = 'active'`）而不动键的拼写——这也正是它严格弱于被替换的索引、因而不可能在存量数据上建失败的原因。该缺口已另单记录。
+
+- bb7cb41: fix(metadata): two same-name active SHARED views can no longer coexist — `sys_view_definition`'s active-row index gets a NULL-safe key (#6417)
+
+  #5839 / PR #6415 delivered "unique among ACTIVE rows" for `sys_view_definition`
+  as a runtime partial UNIQUE index, and deliberately changed only the index's
+  **row scope** — that is what made it strictly weaker than the index it replaced
+  and therefore incapable of failing on existing data. It also left the other
+  half of the same index broken, and pinned that gap honestly rather than closing
+  it.
+
+  SQL UNIQUE treats NULLs as mutually **distinct**. `owner` is NULL for SHARED
+  views and `organization_id` is NULL for environment-level ones, so
+  `(name, organization_id, owner)` constrained **personal views only**. Measured
+  on real SQLite over the driver's own DDL:
+
+  ```text
+  two ACTIVE personal views, same (name, org, owner) : REJECTED
+  two ACTIVE shared views    (owner NULL)            : OK   ← unconstrained
+  two ACTIVE env-level views (organization_id NULL)  : OK   ← unconstrained
+  ```
+
+  Two same-name shared views inside one tenant were therefore reachable, while
+  `name` is declared as the globally unique qualified view id (`object.viewKey`)
+  — so the view switcher, which aggregates and de-duplicates by `name`, and every
+  read path that locates a view by name, had no defined answer about which row
+  they got.
+
+  **What changes.** Per the maintainer ruling of 2026-08-08 this is now forbidden.
+  The same runtime migration materializes the key NULL-safe, folding each nullable
+  part's NULLs into one bucket that is unique among itself:
+
+  ```sql
+  CREATE UNIQUE INDEX idx_sys_view_def_active ON sys_view_definition
+    (name, COALESCE(organization_id, '__global__'), COALESCE(owner, ''))
+    WHERE state = 'active'
+  ```
+
+  Both spellings are copied from an existing in-repo precedent rather than
+  invented: `'__global__'` is ADR-0120 D3's reserved sentinel for the tenant
+  column (the driver's `GLOBAL_TENANT`), and `COALESCE(owner, '')` is
+  `ensureOverlayIndex`'s `COALESCE(package_id, '')` form for a non-tenant nullable
+  discriminator. Neither can collide with real data — an organization id may never
+  equal `'__global__'`, and an owner is a user id, never the empty string.
+  **Storage is untouched**: rows keep their NULLs, only the index folds them, so
+  `WHERE owner = ''` still matches nothing.
+
+  Unchanged: archived rows stay exempt (#5839's active-only scoping survives, on
+  shared views too), a shared view and a personal view may still share a name, and
+  so may two tenants' or two environments' rows.
+
+  **This is a tightening, so it can fail to build.** Unlike #5839, rows that
+  violate the new key exist in the wild today, precisely because nothing rejected
+  them. The migration probes before it replaces anything, and on a conflict takes
+  ADR-0120 D4's disposition: the previous index is left in place (the table is
+  never left unconstrained), the report names the key that is not enforced, ships
+  the exact `GROUP BY … HAVING COUNT(*) > 1` query that lists the offending rows,
+  points at `os migrate plan` — and the boot continues. Resolve the duplicate
+  active shared views, restart, and the tightening applies itself.
+
+  Dialects with no partial indexes (MySQL/MariaDB) keep the declared bare
+  composite, which is ADR-0120 D3's own degradation. That report is **raised from
+  `info` to `error`**: under #5839 alone the dialect lost slot recycling, a
+  functional degradation the next user hits immediately, but it now loses an
+  integrity guarantee the platform states it enforces while continuing to look
+  healthy — AGENTS.md's durability arm. The line names both gaps that stay open
+  there and the duplicate-listing query. The unclassifiable-failure arm is raised
+  with it, so the failure nobody can name is never reported more quietly than the
+  one that has a name.
+
+- Updated dependencies [3d5c090]
+- Updated dependencies [e5bd768]
+- Updated dependencies [e027b3e]
+- Updated dependencies [c2429b0]
+- Updated dependencies [445a0c2]
+- Updated dependencies [f6609e6]
+- Updated dependencies [a70358a]
+- Updated dependencies [97e7e3c]
+- Updated dependencies [8828b9e]
+- Updated dependencies [53068c1]
+- Updated dependencies [ee58392]
+- Updated dependencies [f16e54e]
+- Updated dependencies [06be54e]
+- Updated dependencies [259459d]
+- Updated dependencies [3f7f14e]
+- Updated dependencies [6968885]
+- Updated dependencies [eaed61f]
+- Updated dependencies [debe2f6]
+- Updated dependencies [97b0798]
+- Updated dependencies [43a7a8d]
+- Updated dependencies [73f69dc]
+- Updated dependencies [04c56aa]
+- Updated dependencies [b3efeb7]
+- Updated dependencies [ddd075a]
+- Updated dependencies [88154be]
+- Updated dependencies [e8dc61e]
+- Updated dependencies [2f3e793]
+- Updated dependencies [d8e8d9c]
+- Updated dependencies [94e749b]
+- Updated dependencies [ea1d916]
+- Updated dependencies [ae31a19]
+- Updated dependencies [e0f300b]
+- Updated dependencies [62b6a2f]
+- Updated dependencies [5b4780b]
+- Updated dependencies [a933452]
+- Updated dependencies [8140915]
+- Updated dependencies [7b48cf9]
+- Updated dependencies [b5404f4]
+- Updated dependencies [f764691]
+- Updated dependencies [e120a5a]
+- Updated dependencies [e650d67]
+- Updated dependencies [04476e7]
+- Updated dependencies [79228cd]
+- Updated dependencies [b3363e9]
+- Updated dependencies [2ef1807]
+- Updated dependencies [d03fe25]
+- Updated dependencies [2672f85]
+- Updated dependencies [11066f6]
+- Updated dependencies [916af17]
+- Updated dependencies [84c86fb]
+- Updated dependencies [2a2a9fb]
+- Updated dependencies [a2e157c]
+- Updated dependencies [95c4227]
+- Updated dependencies [2a61116]
+- Updated dependencies [d4df105]
+- Updated dependencies [e2798fa]
+- Updated dependencies [0fd8556]
+- Updated dependencies [74155c7]
+- Updated dependencies [6908830]
+- Updated dependencies [8b06bba]
+- Updated dependencies [4c54037]
+- Updated dependencies [0f7157b]
+- Updated dependencies [d9bef45]
+- Updated dependencies [f549a0d]
+- Updated dependencies [82da264]
+- Updated dependencies [9b9b70f]
+- Updated dependencies [f5a9bc2]
+- Updated dependencies [881a3cc]
+- Updated dependencies [ad6317b]
+- Updated dependencies [8a88885]
+- Updated dependencies [5f7669e]
+- Updated dependencies [becbe53]
+- Updated dependencies [b127c8b]
+- Updated dependencies [a80302a]
+- Updated dependencies [474f131]
+- Updated dependencies [050cd82]
+- Updated dependencies [4d552af]
+- Updated dependencies [44d677c]
+- Updated dependencies [c32944d]
+- Updated dependencies [1dd780f]
+- Updated dependencies [c8d6f6e]
+- Updated dependencies [92a67f2]
+- Updated dependencies [9136327]
+- Updated dependencies [bf0ae99]
+- Updated dependencies [cb3b6cd]
+- Updated dependencies [73b7234]
+- Updated dependencies [d2b97c3]
+- Updated dependencies [59b794f]
+- Updated dependencies [fc3a36a]
+- Updated dependencies [69787f0]
+- Updated dependencies [5d022a1]
+- Updated dependencies [042b9ee]
+- Updated dependencies [f549a0d]
+- Updated dependencies [a36db28]
+- Updated dependencies [3f8817a]
+- Updated dependencies [a2443e3]
+- Updated dependencies [e1554b1]
+- Updated dependencies [4856789]
+- Updated dependencies [c3f4916]
+- Updated dependencies [33e0385]
+- Updated dependencies [2205363]
+- Updated dependencies [09fe58d]
+- Updated dependencies [d0a5ceb]
+- Updated dependencies [e18a162]
+- Updated dependencies [d127ff0]
+- Updated dependencies [9b86cf6]
+- Updated dependencies [8825a06]
+- Updated dependencies [5087ac6]
+- Updated dependencies [2d1ddf0]
+- Updated dependencies [354b00f]
+- Updated dependencies [3de535b]
+- Updated dependencies [fe2e15a]
+- Updated dependencies [c6b6bb4]
+- Updated dependencies [2f59da0]
+- Updated dependencies [8ad609c]
+- Updated dependencies [bbee302]
+- Updated dependencies [08863dd]
+- Updated dependencies [56664f5]
+- Updated dependencies [31cbe90]
+- Updated dependencies [90bbf25]
+- Updated dependencies [eb91eba]
+- Updated dependencies [42da73d]
+- Updated dependencies [643b7c7]
+- Updated dependencies [1a15893]
+- Updated dependencies [b70e534]
+- Updated dependencies [2233a85]
+- Updated dependencies [62dd69a]
+- Updated dependencies [e15e679]
+- Updated dependencies [2ab1257]
+- Updated dependencies [4cc4fb7]
+- Updated dependencies [2c26040]
+- Updated dependencies [f758cec]
+- Updated dependencies [78f0be8]
+- Updated dependencies [35f7fb4]
+- Updated dependencies [a5302c7]
+- Updated dependencies [7084313]
+- Updated dependencies [0e043d8]
+- Updated dependencies [dadd1ad]
+- Updated dependencies [2f2e63c]
+- Updated dependencies [486d526]
+- Updated dependencies [89d7b35]
+- Updated dependencies [85ec26d]
+- Updated dependencies [f6476fc]
+- Updated dependencies [4ac12ef]
+- Updated dependencies [b88f5e8]
+- Updated dependencies [42cc219]
+- Updated dependencies [d7e0b42]
+- Updated dependencies [3510e4a]
+- Updated dependencies [aa4b90d]
+- Updated dependencies [54299ca]
+- Updated dependencies [dc61def]
+- Updated dependencies [251e888]
+- Updated dependencies [183b4c4]
+- Updated dependencies [2fdb36e]
+- Updated dependencies [20526f5]
+- Updated dependencies [c5eef1d]
+- Updated dependencies [e0f300b]
+- Updated dependencies [761a0ba]
+- Updated dependencies [be87153]
+- Updated dependencies [60f0dd8]
+- Updated dependencies [a87c5cd]
+- Updated dependencies [a47f338]
+- Updated dependencies [2598216]
+- Updated dependencies [2c7e62d]
+- Updated dependencies [eb7613c]
+- Updated dependencies [ecc9110]
+- Updated dependencies [f7bd4e2]
+- Updated dependencies [361bd5b]
+- Updated dependencies [1818998]
+- Updated dependencies [09ee21c]
+- Updated dependencies [f549a0d]
+- Updated dependencies [3fc2e48]
+- Updated dependencies [e8f435c]
+- Updated dependencies [41610f6]
+  - @objectstack/spec@17.0.0-rc.6
+
 ## 17.0.0-rc.5
 
 ### Patch Changes

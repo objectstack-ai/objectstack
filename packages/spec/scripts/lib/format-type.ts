@@ -75,6 +75,62 @@ export const anchorFor = (schemaName: string) => `#${schemaName.toLowerCase()}`;
 const INLINE_KEY_LIMIT = 4;
 
 /**
+ * How many `{ … }` shape levels one cell expands before printing `object`
+ * (#6374).
+ *
+ * `INLINE_KEY_LIMIT` caps a summary's KEYS at its own level; the two enum
+ * budgets cap one key's VOCABULARY; `VARIANT_LIMIT` caps a union's ARITY.
+ * Nothing capped how many times a cell could re-enter the object branch, and
+ * cell width is the product of all four axes. `ui/page.mdx`'s `Page.slots` was
+ * the corpus maximum at 1538 characters with the enum elision already firing
+ * eight times inside it: 4 keys × a 2-variant union × a 176-character shape.
+ *
+ * WHY 1 — the number is RECOVERED, not chosen. This renderer has always had a
+ * depth budget of exactly one shape level, written as the ternary in the key
+ * loop below: a child that is itself an object printed `object` rather than its
+ * shape. That budget was applied on ONE of the four ways down. An array element
+ * (`{ … }[]`), a `Record` value (`Record<string, { … }>`) and a union variant
+ * (`{ … } | { … }[]`) each re-entered the object branch through `renderType`
+ * with the budget nowhere in scope, so the same shape at the same reader-facing
+ * depth printed opaquely or in full depending on whether its author had wrapped
+ * it in an array. That is a fact about the Zod spelling, not about how a reader
+ * needs to read it — the same asymmetry #6225 removed for vocabularies. This
+ * constant makes the existing rule apply to all four descents; the ternary it
+ * replaces is its depth-1 case.
+ *
+ * The corpus confirms 1 is the only admissible value. Regenerating all 215
+ * pages (8499 type cells) at each candidate, counting emitted cell widths:
+ *
+ *   depth limit | (none, before) |    1 |    2 |    3 |    4
+ *   cells >200  |            121 |   42 |  173 |  191 |  191
+ *   cells >400  |              9 |    1 |   19 |   35 |   35
+ *   cells >600  |              3 |    1 |    2 |   14 |   22
+ *   cells >900  |              1 |    0 |    1 |    1 |    1
+ *   p95 / p99   |      145 / 229 | 124/180 | 154/260 | 154/280 | 154/287
+ *   max         |           1538 |  656 | 1538 | 1538 | 1538
+ *
+ * Every limit above 1 is worse than shipping nothing: raising it necessarily
+ * LOOSENS the direct-object-child path, which was already at 1, so cells over
+ * 200 rise from 121 to 173+ and the flagship never moves. There is no sweep to
+ * balance here and no threshold to tune — 1 is the status quo made uniform,
+ * and 2 and up are a regression dressed as a budget.
+ *
+ * At 1, every cell still over 400 characters is `ui/page.mdx`'s
+ * `PageComponent.type` (656), a top-level vocabulary in a union variant that
+ * #6225 deliberately leaves alone and that carries no nested shape at all.
+ * Shape-driven width is gone from the corpus.
+ *
+ * WHAT A READER LOSES, and why `object` is the honest rendering. Nothing is
+ * silently truncated: `object` claims nothing about keys, so unlike a prefix it
+ * cannot be mistaken for a complete list — which is the #5340 principle applied
+ * to shapes rather than to enum members. It is also not a new elision style in
+ * these tables: `object` is what a nested shape has always printed, and the
+ * complete shape stays where it always was — its own `## Schema` section when
+ * the generator emits one, and `json-schema/` in every case.
+ */
+const SHAPE_DEPTH_LIMIT = 1;
+
+/**
  * Character budget for one `Enum<…>` BODY rendered INSIDE an inline shape
  * summary. Over it, members are dropped until the body fits and the count of
  * what was dropped is printed in their place (#5340).
@@ -162,8 +218,12 @@ const TOP_LEVEL_ENUM_WIDTH_LIMIT = 160;
  * A union's width is variant COUNT times variant WIDTH, so neither enum budget
  * above can reach it: `ui/app.mdx`'s `App.navigation` prints
  * `{ id: string; label: string; icon?: string; order?: number; … }` nine times,
- * seven of them character-identical, for 582 characters of correct-but-repeated
- * type. The maintainer's ruling on #6226 chose a cap on the count that prints
+ * eight of the nine being one character-identical spelling (the ninth is
+ * `{ type: 'separator'; … }`), for 582 characters of correct-but-repeated
+ * type. (The repetition itself is #6569's subject, ruled after this cap landed
+ * and handled by the dedupe at the call site; this constant governs only how
+ * many DISTINCT spellings are worth reading.) The ruling on #6226 chose a cap
+ * on the count that prints
  * how many variants it hid, over a whole-cell character budget degrading to
  * `object` and over restoring `$ref` links: those lose more information, and a
  * SECOND elision style in the same table is worse than the width it would fix.
@@ -364,8 +424,9 @@ function elideEnum(values: unknown[], budget: number | null): { body: string; hi
  *
  * Shared by all three elisions (#6225/#6226 reuse what #5340 measured): the
  * enum-body budget, the top-level vocabulary relocation, and the `anyOf`
- * variant cap. They differ in what they count, never in whether a marker is
- * worth printing.
+ * variant cap — which since #6569 also counts variants withheld for spelling a
+ * string the cell already prints. They differ in what they count, never in
+ * whether a marker is worth printing.
  *
  * Re-measured on the corpus with both new limits in place, by regenerating with
  * this guard forced to return `elided` unconditionally: it refuses **54** of the
@@ -426,7 +487,18 @@ export function formatPropertyType(prop: any, ctx?: TypeContext): RenderedProper
   return { cell: formatType(prop, ctx), allowedValues: null };
 }
 
+/**
+ * `depth` is the count of `{ … }` shape levels already OPEN above this node,
+ * and it is a parameter rather than a `TypeContext` field on purpose: a caller
+ * that passes no `ctx` (every unit test that only wants a type string) must
+ * still get the width budget, the way it always got the ternary this replaces.
+ * `ctx` carries facts about the PAGE; depth is a fact about the RECURSION.
+ */
 export function formatType(prop: any, ctx?: TypeContext): string {
+  return renderType(prop, ctx, 0);
+}
+
+function renderType(prop: any, ctx: TypeContext | undefined, depth: number): string {
   if (!prop) return 'any';
 
   // A `retiredKey()` tombstone. `never` is both the accurate TypeScript (the
@@ -452,7 +524,7 @@ export function formatType(prop: any, ctx?: TypeContext): string {
       if (ctx!.expanding?.has(name)) return 'object';
       const expanding = new Set(ctx!.expanding ?? []);
       expanding.add(name);
-      return formatType({ ...target, $ref: undefined }, { ...ctx!, expanding });
+      return renderType({ ...target, $ref: undefined }, { ...ctx!, expanding }, depth);
     }
 
     const href = ctx?.schemaHref?.(name) ?? null;
@@ -460,7 +532,7 @@ export function formatType(prop: any, ctx?: TypeContext): string {
   }
 
   if (prop.type === 'array') {
-    const element = formatType(prop.items, ctx);
+    const element = renderType(prop.items, ctx, depth);
     // An open object element renders as an intersection and a multi-variant
     // element as a union — `[]` would re-associate either — so parenthesize
     // and the cell keeps meaning "array of that".
@@ -477,14 +549,86 @@ export function formatType(prop: any, ctx?: TypeContext): string {
 
   if (prop.anyOf || prop.oneOf) {
     const variants = prop.anyOf || prop.oneOf;
-    const rendered = variants.map((v: any) => formatType(v, ctx));
+    const rendered: string[] = variants.map((v: any) => renderType(v, ctx, depth));
     const full = rendered.join(' | ');
-    if (rendered.length <= VARIANT_LIMIT) return full;
+
+    // A cell spells each DISTINCT variant rendering once, and counts every
+    // variant it did not spell — repeats included (#6569).
+    //
+    // Two independent facts decide what a union cell shows, and this is one
+    // expression of both. `VARIANT_LIMIT` caps how many spellings are worth
+    // reading; the dedupe drops spellings that carry nothing because the cell
+    // already prints them character for character. They compose into a single
+    // marker rather than stacking two elisions, so the invariant a reader can
+    // rely on stays one sentence: SPELLINGS SHOWN + THE COUNT = THE UNION'S
+    // ARITY, whichever rule withheld a variant.
+    //
+    // Identical spellings are not new here, but #6374 made them common: with
+    // `SHAPE_DEPTH_LIMIT` in force every all-object union below a summary
+    // prints `object` per variant, so `object | object | object | object`
+    // appeared on 9 cells across 5 shipped reference pages, and
+    // `kernel/manifest.mdx`'s `Manifest.navigationContributions` spelled four
+    // of them and then counted `… +5 more` identical ones behind them. Those
+    // pages are the authoritative input for AI authors (ADR-0033), where a
+    // cell that reads as a rendering bug costs more than a wide one.
+    //
+    // 9 and not the 11 #6569 was filed with, because a SUBSTRING count of
+    // `object | object` also matches the two cells that spell
+    // `object | object[]` (`ui/page.mdx`'s `slots`,
+    // `automation/state-machine.mdx`'s `states`) — two spellings, which the
+    // rule below deliberately never collapses. Worth knowing before grepping:
+    // re-deriving 11 that way and concluding the dedupe missed two cells is
+    // the wrong conclusion from a correct observation. Counting all duplicate
+    // spellings rather than only `object` ones, the rule moves 14 cells on 7
+    // pages; the extra 5 repeat a SHAPE spelling (`ui/app.mdx`,
+    // `data/validation.mdx`).
+    //
+    // WHY THE COUNT STAYS. Collapsing to a bare `object` would drop the union's
+    // ARITY, which after the depth budget is the only fact that cell still
+    // carries — "choose one of N shapes" degraded to "some object". #6226 ruled
+    // that a union elision must self-report what it hid; a dedupe that reports
+    // nothing re-decides that ruling by the back door.
+    //
+    // WHY NO NEW NOTATION. The count is `… +N more`, the marker the table
+    // already uses for elided enum members (#5340), relocated vocabularies
+    // (#6225) and capped variants (#6226) — not a multiplicity sigil like
+    // `object ×4`. #6226's ruling turned on exactly this: a SECOND omission
+    // style in one table is worse than the width it would fix. `N` counts
+    // variants-not-spelled in every one of the four positions, so the marker
+    // keeps meaning one thing.
+    //
+    // WHY EQUALITY IS ON THE RENDERED STRING, and why it is not restricted to
+    // ADJACENT runs. This renderer judges what a reader sees, so two variants
+    // are interchangeable here exactly when their cells are byte-identical —
+    // `object | object[]` (`ui/page.mdx`'s `Page.slots`) is two spellings and
+    // never collapses, however alike the schemas are. Adjacency was measured
+    // and rejected: `App.navigation` — #6226's own filed instance — renders
+    // seven identical nav-item shapes, then `{ type: 'separator'; … }`, then an
+    // EIGHTH copy of the nav-item shape. A `uniq`-style adjacent rule leaves
+    // that eighth copy spelled a second time, i.e. it leaves the defect in the
+    // one cell the family was filed on. It is the only corpus site where the
+    // two rules differ (3 of 554 union renderings, all three that cell on its
+    // three pages).
+    //
+    // THE PAY-FOR-YOUR-MARKER GUARD APPLIES UNCHANGED — not exempted, and its
+    // refusals are correct. Under it a run of identical spellings only
+    // collapses once the count is cheaper than the repetition: `object |
+    // object` would GROW by 3 characters and `object | object | object` saves
+    // 6 against a 12-character marker footprint, so both keep their repeats;
+    // four is the first width at which `object` repeats pay (15 saved).
+    // Measured on the corpus: 554 union renderings, 14 carry a duplicate
+    // spelling, and the guard accepts all 14 — no corpus cell sits in the
+    // refusal band today, which is why the refusal is pinned by unit test
+    // rather than by a page.
+    const spelled = [...new Set(rendered)];
+    const shown = spelled.slice(0, VARIANT_LIMIT);
+    const hidden = rendered.length - shown.length;
+    if (hidden === 0) return full;
     // The variants a reader does not see are counted, never silently dropped —
     // the principle #5340 established for enum members, applied to the other
     // axis a cell grows along (#6226). `elideWithMarker` keeps the count from
     // costing more than the spellings it replaces.
-    const elided = elideWithMarker(rendered.slice(0, VARIANT_LIMIT), rendered.length - VARIANT_LIMIT, full.length);
+    const elided = elideWithMarker(shown, hidden, full.length);
     return elided ?? full;
   }
 
@@ -496,7 +640,7 @@ export function formatType(prop: any, ctx?: TypeContext): string {
     // open object with a declared shape printed as a bare `Record<string, any>`
     // and the author-facing page lost keys the schema *requires*.
     const open = prop.additionalProperties
-      ? `Record<string, ${formatType(prop.additionalProperties, ctx)}>`
+      ? `Record<string, ${renderType(prop.additionalProperties, ctx, depth)}>`
       : null;
 
     // Inline object: show its shape one level deep instead of an opaque `Object`.
@@ -517,18 +661,22 @@ export function formatType(prop: any, ctx?: TypeContext): string {
       : [];
 
     if (keys.length > 0) {
+      // The shape budget, spent HERE rather than at each of the four descents
+      // that reach this branch (#6374). A cell opens `SHAPE_DEPTH_LIMIT` shape
+      // levels; below that a shape prints `object`, whichever way down it was
+      // reached — a direct object child, an array element, a `Record` value or
+      // a union variant. Wrappers do not spend the budget, only shapes do, so
+      // `{ … }[]` and `Record<string, { … }>` are one level, not two.
+      if (depth >= SHAPE_DEPTH_LIMIT) return 'object';
       const shown = keys.slice(0, INLINE_KEY_LIMIT).map(k => {
         const child = prop.properties[k];
         const optional = (prop.required || []).includes(k) ? '' : '?';
-        // Depth-limited: nested objects stay opaque so a table cell can't explode.
         // Everything below this point is a SUMMARY of the child, not the
         // child's own row, so a long enum reached from here is elided (#5340).
         // The flag is set once, here, and inherited by every branch underneath
-        // — arrays of objects recurse (only a direct object child is forced
-        // opaque above), so `errors?: { code: Enum<…> }[]` is reached this way.
-        const childType = child?.type === 'object' && child.properties
-          ? 'object'
-          : formatType(child, ctx && { ...ctx, inShapeSummary: true });
+        // — arrays of objects recurse, so `errors?: { code: Enum<…> }[]` is
+        // reached this way.
+        const childType = renderType(child, ctx && { ...ctx, inShapeSummary: true }, depth + 1);
         return `${k}${optional}: ${childType}`;
       });
       // `…` elides further LIVE declared keys; `& Record<…>` states that

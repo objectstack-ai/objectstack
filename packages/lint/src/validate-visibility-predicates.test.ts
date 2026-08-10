@@ -3,10 +3,10 @@
 import { describe, it, expect } from 'vitest';
 import {
   validateVisibilityPredicates,
-  VISIBILITY_ALIAS_DEPRECATED,
   VISIBILITY_ROOT_MISLAYERED,
   VISIBILITY_BARE_IDENTIFIER,
   VISIBILITY_PREDICATE_SYNTAX,
+  VISIBILITY_PREDICATE_OVER_BUDGET,
 } from './validate-visibility-predicates.js';
 import { AUTHORING_RULES } from './authoring-rules.js';
 
@@ -37,40 +37,88 @@ describe('validateVisibilityPredicates (ADR-0089 D3b)', () => {
     expect(validateVisibilityPredicates(stack)).toEqual([]);
   });
 
-  it('flags a deprecated `visibleOn` alias on a form section (→ visibleWhen)', () => {
-    const stack = {
-      views: [
-        { name: 'task_form', sections: [{ label: 'S', visibleOn: "record.a == 1", fields: [] }] },
-      ],
-    };
-    const findings = validateVisibilityPredicates(stack);
-    expect(findings).toHaveLength(1);
-    expect(findings[0].rule).toBe(VISIBILITY_ALIAS_DEPRECATED);
-    expect(findings[0].severity).toBe('warning');
-    expect(findings[0].path).toBe('views[0].sections[0].visibleOn');
-  });
+  // ── #6318: the alias-KEY rule is RETIRED; the alias-VALUE read is not ──
+  //
+  // Three tests here used to assert that a `visibleOn` / `visibility` KEY
+  // produced a `visibility-alias-deprecated` finding, one per carrier. That
+  // rule never reached a real input: through all three CLI commands the stack
+  // arrives at the `normalized` tier, and the ADR-0087 D2 conversions rename the
+  // key INSIDE `normalizeStackInput`, one layer above. Measured at retirement,
+  // per site: raw object 1 finding, `normalized` tier 0. The only shape that
+  // still fired is the one those three fixtures used — a view CONTAINER with
+  // top-level `sections` — which strict `ViewSchema` refuses outright
+  // ("Unrecognized key(s) on this view container: `sections`"). Green unit test,
+  // impossible fixture: #4984 / #6251.
+  //
+  // What SURVIVES those three assertions, and is what the replacements below
+  // pin instead: the traversal reaches all three carriers, and `checkElement`
+  // still reads the predicate VALUE through the deprecated key, so a value
+  // defect written under an alias is judged rather than skipped. Each asserts
+  // the EXACT finding set — non-empty and named, so it cannot pass by producing
+  // nothing, and restoring the retired rule would fail it on set inequality.
+  //
+  // The surface itself is not unguarded: the same D2 conversion emits a
+  // `warnConversionNotice` from `defineStack` naming the site, the conversion
+  // and the protocol-16 retirement window. `authoring-rule-input-tier.test.ts`
+  // (premise 3) pins that notice as the recorded guard.
+  describe('the deprecated alias keys (#6318 — key rule retired, value read kept)', () => {
+    it('a `visibleOn` KEY with a clean value is clean — no rule judges the spelling', () => {
+      const stack = {
+        views: [
+          { name: 'task_form', sections: [{ label: 'S', visibleOn: "record.a == 1", fields: [] }] },
+        ],
+      };
+      // Deliberately labelled: this green is VACUOUS with respect to the fold —
+      // it is empty because the rule is gone, not because anything normalized.
+      // It earns its place only as the retirement's direct statement, and the
+      // three assertions below are what carry the real evidence.
+      expect(validateVisibilityPredicates(stack)).toEqual([]);
+    });
 
-  it('flags a deprecated `visibleOn` alias on a form field', () => {
-    const stack = {
-      views: [
-        { name: 'task_form', sections: [{ fields: [{ field: 'notes', visibleOn: "record.a == 1" }] }] },
-      ],
-    };
-    const findings = validateVisibilityPredicates(stack);
-    expect(findings.map((f) => f.rule)).toEqual([VISIBILITY_ALIAS_DEPRECATED]);
-    expect(findings[0].path).toBe('views[0].sections[0].fields[0].visibleOn');
-  });
+    it('a form SECTION predicate is still read through `visibleOn` (value verdict survives)', () => {
+      const stack = {
+        views: [
+          { name: 'task_form', sections: [{ label: 'S', visibleOn: "data.a == 1", fields: [] }] },
+        ],
+      };
+      const findings = validateVisibilityPredicates(stack);
+      expect(findings.map((f) => f.rule)).toEqual([VISIBILITY_ROOT_MISLAYERED]);
+      expect(findings[0].path).toBe('views[0].sections[0]');
+    });
 
-  it('flags a deprecated `visibility` alias on a page component', () => {
-    const stack = {
-      pages: [
-        { name: 'p', regions: [{ components: [{ type: 'element:text', visibility: "page.x != ''" }] }] },
-      ],
-    };
-    const findings = validateVisibilityPredicates(stack);
-    expect(findings).toHaveLength(1);
-    expect(findings[0].rule).toBe(VISIBILITY_ALIAS_DEPRECATED);
-    expect(findings[0].path).toBe('pages[0].regions[0].components[0].visibility');
+    it('a form FIELD predicate is still read through `visibleOn`', () => {
+      const stack = {
+        views: [
+          { name: 'task_form', sections: [{ fields: [{ field: 'notes', visibleOn: "data.a == 1" }] }] },
+        ],
+      };
+      const findings = validateVisibilityPredicates(stack);
+      expect(findings.map((f) => f.rule)).toEqual([VISIBILITY_ROOT_MISLAYERED]);
+      expect(findings[0].path).toBe('views[0].sections[0].fields[0]');
+    });
+
+    it('a PAGE COMPONENT predicate is still read through the page-side `visibility` key', () => {
+      const stack = {
+        pages: [
+          { name: 'p', regions: [{ components: [{ type: 'element:text', visibility: "data.x != ''" }] }] },
+        ],
+      };
+      const findings = validateVisibilityPredicates(stack);
+      expect(findings.map((f) => f.rule)).toEqual([VISIBILITY_ROOT_MISLAYERED]);
+      expect(findings[0].path).toBe('pages[0].regions[0].components[0]');
+    });
+
+    it('the canonical key still wins over an alias on the same element (ADR-0089 ordering)', () => {
+      // Why the surviving alias limbs can only add coverage and never change a
+      // verdict: `visibleWhen` is read first, so a stale alias beside it is
+      // ignored rather than allowed to overrule the canonical spelling.
+      const stack = {
+        views: [
+          { name: 'f', sections: [{ visibleWhen: "record.ok == 1", visibleOn: "data.stale == 1", fields: [] }] },
+        ],
+      };
+      expect(validateVisibilityPredicates(stack)).toEqual([]);
+    });
   });
 
   it('flags a `data.`-rooted predicate in a runtime view as mis-layered', () => {
@@ -84,14 +132,16 @@ describe('validateVisibilityPredicates (ADR-0089 D3b)', () => {
     expect(findings[0].severity).toBe('warning');
   });
 
-  it('reports BOTH alias + mis-layer when a `visibleOn` predicate is `data.`-rooted', () => {
+  it('a `data.`-rooted predicate under `visibleOn` reports the mis-layer ALONE (#6318)', () => {
+    // Was: "reports BOTH alias + mis-layer". The alias half is retired; the
+    // surviving half — the mis-layer verdict is reached THROUGH the deprecated
+    // key — is what this now pins, as an exact one-element set.
     const stack = {
       views: [
         { name: 'task_form', sections: [{ visibleOn: "data.status == 'x'", fields: [] }] },
       ],
     };
-    const rules = validateVisibilityPredicates(stack).map((f) => f.rule).sort();
-    expect(rules).toEqual([VISIBILITY_ALIAS_DEPRECATED, VISIBILITY_ROOT_MISLAYERED].sort());
+    expect(validateVisibilityPredicates(stack).map((f) => f.rule)).toEqual([VISIBILITY_ROOT_MISLAYERED]);
   });
 
   it('does not confuse a field literally named `data` (e.g. `record.data`) for a data root', () => {
@@ -117,12 +167,20 @@ describe('validateVisibilityPredicates (ADR-0089 D3b)', () => {
   });
 
   it('walks legacy `groups` (alias of sections) too', () => {
+    // The `groups` bucket has no other test in this file, so the half-fact this
+    // used to carry — the traversal descends `groups` at all — had to survive
+    // #6318's retirement of the alias-KEY rule that used to demonstrate it. It
+    // is re-demonstrated with a rule that still exists, and with the alias key
+    // kept on the fixture so the group walk and the alias-value read are pinned
+    // together exactly as before.
     const stack = {
       views: [
-        { name: 'f', groups: [{ visibleOn: "record.a == 1", fields: [] }] },
+        { name: 'f', groups: [{ visibleOn: "data.a == 1", fields: [{ field: 'x', visibleWhen: 'approved' }] }] },
       ],
     };
-    expect(validateVisibilityPredicates(stack).map((f) => f.rule)).toEqual([VISIBILITY_ALIAS_DEPRECATED]);
+    const findings = validateVisibilityPredicates(stack);
+    expect(findings.map((f) => f.rule)).toEqual([VISIBILITY_ROOT_MISLAYERED, VISIBILITY_BARE_IDENTIFIER]);
+    expect(findings.map((f) => f.path)).toEqual(['views[0].groups[0]', 'views[0].groups[0].fields[0]']);
   });
 
   it('is clean on an empty / model-less stack', () => {
@@ -164,13 +222,21 @@ describe('validateVisibilityPredicates (ADR-0089 D3b)', () => {
       expect(validateVisibilityPredicates(stack, { layer: 'metadata' })).toEqual([]);
     });
 
-    it('still flags a deprecated alias key in the metadata layer (alias check is layer-agnostic)', () => {
+    it('reads the value through a deprecated alias key on the metadata layer too (#6318)', () => {
+      // Was: "still flags a deprecated alias key in the metadata layer (alias
+      // check is layer-agnostic)". The alias-KEY rule is retired, so the
+      // layer-agnostic claim about it is gone. What survives — and is the half
+      // that ever mattered — is that the alias-VALUE read is layer-agnostic:
+      // the same key feeds the layer-directional root verdict in BOTH
+      // directions. Pinned bidirectionally on one fixture, exact sets both ways.
       const stack = {
-        views: [{ name: 'f', sections: [{ visibleOn: "data.a == 1", fields: [] }] }],
+        views: [{ name: 'f', sections: [{ visibleOn: "record.a == 1", fields: [] }] }],
       };
-      const rules = validateVisibilityPredicates(stack, { layer: 'metadata' }).map((f) => f.rule);
-      // alias present, but `data.` is correct for the metadata layer → only the alias finding.
-      expect(rules).toEqual([VISIBILITY_ALIAS_DEPRECATED]);
+      // metadata layer forbids the runtime `record.` root → reported through the alias key…
+      expect(validateVisibilityPredicates(stack, { layer: 'metadata' }).map((f) => f.rule))
+        .toEqual([VISIBILITY_ROOT_MISLAYERED]);
+      // …and the same alias-spelled predicate is correct on the runtime layer.
+      expect(validateVisibilityPredicates(stack)).toEqual([]);
     });
 
     it('does not confuse an identifier ending in `record` (e.g. `my_record.x`) for a record root', () => {
@@ -236,10 +302,13 @@ describe('visibility-bare-identifier (#6128 / #5149 requirement 3)', () => {
       expect(bareFindings(stack).map((f) => f.path)).toEqual(['pages[0].regions[0].components[0]']);
     });
 
-    it('reads the value through the deprecated `visibleOn` alias too (alias + bare, both reported)', () => {
+    it('reads the value through the deprecated `visibleOn` alias too (bare ALONE since #6318)', () => {
+      // Was an "alias + bare, both reported" pair. The alias half is retired;
+      // the half this test existed for — the gate reaches a bare identifier
+      // written under the deprecated key — is unchanged and is now the whole
+      // expected set.
       const stack = { views: [{ name: 'f', sections: [{ visibleOn: "status == 'x'", fields: [] }] }] };
-      const rules = validateVisibilityPredicates(stack).map((f) => f.rule).sort();
-      expect(rules).toEqual([VISIBILITY_ALIAS_DEPRECATED, VISIBILITY_BARE_IDENTIFIER].sort());
+      expect(validateVisibilityPredicates(stack).map((f) => f.rule)).toEqual([VISIBILITY_BARE_IDENTIFIER]);
     });
 
     it('reads the value through the deprecated page-side `visibility` alias too', () => {
@@ -645,19 +714,15 @@ describe('visibility-predicate-syntax (#6253)', () => {
       expect(validateVisibilityPredicates(formStack('type(record.x) == string'))).toEqual([]);
     });
 
-    it('a `DEFAULT_LIMITS` overrun is reported too, in the front end\'s own words', () => {
-      // `parseCelToAst` also returns null for a source over the platform bounds.
-      // That is a bounds fault, not a syntax one, and the message says so rather
-      // than pretending to have found a typo — the same way ADR-0032 already
-      // reports it under the "invalid CEL predicate" heading.
+    it('a `DEFAULT_LIMITS` overrun is NOT this rule any more — it is `over-budget` (#7217)', () => {
+      // Was: "reported too, in the front end's own words", asserted under
+      // `visibility-predicate-syntax`. #7217 keeps the verdict and moves the
+      // wording and the id; this case is now the exclusivity pin for the split,
+      // and its full coverage lives in the `over-budget` block below.
       const overrun = `record.a${' + record.b'.repeat(400)}`;
-      const findings = syntaxFindings(formStack(overrun));
-      expect(findings).toHaveLength(1);
-      expect(findings[0].message).toContain('Exceeded maxAstNodes');
-      // The echoed predicate is elided, so one runaway expression cannot flood
-      // the console with a 4KB finding.
-      expect(findings[0].message).not.toContain(overrun);
-      expect(findings[0].message).toContain('...');
+      expect(syntaxFindings(formStack(overrun))).toEqual([]);
+      expect(validateVisibilityPredicates(formStack(overrun)).map((f) => f.rule))
+        .toEqual([VISIBILITY_PREDICATE_OVER_BUDGET]);
     });
 
     it.each([
@@ -689,12 +754,14 @@ describe('visibility-predicate-syntax (#6253)', () => {
       expect(findings[0].where).toBe('page "p"');
     });
 
-    it('reads the value through the deprecated `visibleOn` alias (alias + syntax, both reported)', () => {
-      // Two independent defects on one element, so unlike the syntax/bare-ref
-      // pair these DO both report.
+    it('reads the value through the deprecated `visibleOn` alias (syntax ALONE since #6318)', () => {
+      // Was an "alias + syntax, both reported" pair, whose point was that two
+      // INDEPENDENT defects on one element both report. The alias half is
+      // retired, so what is left is the syntax verdict reached through the
+      // deprecated key — and the independence claim it was making now belongs
+      // to the syntax/bare-ref exclusivity pin, which states it directly.
       const stack = { views: [{ name: 'f', sections: [{ visibleOn: 'status === "x"', fields: [] }] }] };
-      expect(validateVisibilityPredicates(stack).map((f) => f.rule).sort())
-        .toEqual([VISIBILITY_ALIAS_DEPRECATED, VISIBILITY_PREDICATE_SYNTAX].sort());
+      expect(validateVisibilityPredicates(stack).map((f) => f.rule)).toEqual([VISIBILITY_PREDICATE_SYNTAX]);
     });
 
     it('reads the value through the deprecated page-side `visibility` alias', () => {
@@ -734,5 +801,148 @@ describe('visibility-predicate-syntax (#6253)', () => {
     expect(entry, 'validateVisibilityPredicates must be registered').toBeDefined();
     expect(entry!.tier).toBe('gating');
     expect([...entry!.commands].sort()).toEqual(['build', 'lint', 'validate']);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// `visibility-predicate-over-budget` — #7217.
+//
+// The defect this closes is an INSTRUCTION that makes an obedient author
+// worse. An over-budget `visibleWhen` is flawless bare CEL; the gate refused it
+// (correctly) as "not valid CEL" (false) and prescribed the dialect ("write
+// `==` not `===`, `&&` not `and` …"), which is advice that cannot succeed. An
+// LLM author follows the last sentence it was handed, rewrites operators that
+// were never wrong, and returns with the same 80-clause predicate.
+//
+// The verdict is untouched: the same sources are refused before and after, at
+// the same severity, one finding each. Only the class, the id and the words
+// changed. Both directions are pinned deliberately — a fix that turned EVERY
+// refusal into a size refusal would be green on the first block below, which is
+// why the syntax block re-asserts the dialect wording it must not lose.
+// ─────────────────────────────────────────────────────────────────────
+
+/** Only the over-budget findings. */
+function overBudgetFindings(stack: Record<string, unknown>, opts?: { layer: 'runtime' | 'metadata' }) {
+  return validateVisibilityPredicates(stack, opts).filter((f) => f.rule === VISIBILITY_PREDICATE_OVER_BUDGET);
+}
+
+/** The escalation's own shape — 80-term conjunction, `maxAstNodes` (#6833 / #7073). */
+const OVER_AST_NODES = Array.from({ length: 80 }, (_, i) => `record.f${i} == ${i}`).join(' && ');
+/** 60-level parenthesis nest — `maxDepth`. Recursion that leaves no AST node. */
+const OVER_DEPTH = `${'('.repeat(60)}record.a${')'.repeat(60)} == 1`;
+/** 200-element list literal — `maxListElements`. */
+const OVER_LIST = `record.id in [${Array.from({ length: 200 }, (_, i) => `'u${i}'`).join(',')}]`;
+
+describe('visibility-predicate-over-budget (#7217)', () => {
+  describe('the acceptance pair', () => {
+    it('an over-budget but valid predicate names the SIZE fault and the bound, never the dialect', () => {
+      const findings = validateVisibilityPredicates(formStack(OVER_AST_NODES));
+
+      // The whole reported set: one finding, the new id, still gating.
+      expect(findings.map((f) => f.rule)).toEqual([VISIBILITY_PREDICATE_OVER_BUDGET]);
+      expect(findings[0].severity).toBe('error');
+      expect(findings[0].path).toBe('views[0].sections[0].fields[0]');
+      expect(findings[0].where).toBe('view "task_form"');
+
+      // ⛔ The headline was FALSE: this IS valid CEL.
+      expect(findings[0].message).not.toContain('is not valid CEL');
+      expect(findings[0].message).toContain('syntactically valid CEL');
+      // The front end's own summary is quoted, and the bound is NAMED with the
+      // platform's value for it — which is what "shrink it to fit" needs.
+      expect(findings[0].message).toContain('Exceeded maxAstNodes (256)');
+      expect(findings[0].message).toContain('`maxAstNodes` budget (platform limit 256)');
+      // The consequence is unchanged: it still falls OPEN on screen.
+      expect(findings[0].message).toContain('#5149');
+
+      // ⛔ The defect itself: the dialect prescription must not reach this class.
+      expect(findings[0].hint).not.toMatch(/bare CEL/);
+      expect(findings[0].hint).not.toContain('`===`');
+      expect(findings[0].hint).toContain('SIZE fault, not a dialect mistake');
+      expect(findings[0].hint).toContain("`record.f in ['a', 'b', …]`");
+    });
+
+    it('the SAME predicate under budget is clean — paired so it cannot pass vacuously', () => {
+      // Delete the rule and the first expectation goes red; loosen the verdict
+      // (report everything) and the second does.
+      expect(overBudgetFindings(formStack(OVER_AST_NODES))).toHaveLength(1);
+      const underBudget = Array.from({ length: 8 }, (_, i) => `record.f${i} == ${i}`).join(' && ');
+      expect(validateVisibilityPredicates(formStack(underBudget))).toEqual([]);
+    });
+  });
+
+  it.each([
+    ['maxAstNodes (80-term conjunction)', OVER_AST_NODES, 'maxAstNodes', 256],
+    ['maxDepth (60-level nest)', OVER_DEPTH, 'maxDepth', 32],
+    ['maxListElements (200-element list)', OVER_LIST, 'maxListElements', 64],
+  ])('%s — the bound that was actually exceeded is the one named', (_name, source, limit, value) => {
+    // Not one hard-coded bound: the name and its value are read off the front
+    // end's structured overrun, so a source that overruns a DIFFERENT axis is
+    // sent to shorten that axis and not `maxAstNodes` by default.
+    const findings = overBudgetFindings(formStack(source as string));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].message).toContain(`\`${limit}\` budget (platform limit ${value})`);
+    expect(findings[0].hint).toContain('SIZE fault, not a dialect mistake');
+  });
+
+  it('a genuine dialect fault keeps the #6253 id, message and hint verbatim', () => {
+    // The flipped pin. The obvious way to get #7217 wrong is to turn EVERY
+    // refusal into a size refusal — green on every case above, and a total loss
+    // of the wording #6253 shipped.
+    const findings = validateVisibilityPredicates(formStack('country === "USA"'));
+    expect(findings.map((f) => f.rule)).toEqual([VISIBILITY_PREDICATE_SYNTAX]);
+    expect(findings[0].message).toContain('is not valid CEL');
+    expect(findings[0].hint).toContain('`===` is not a CEL operator');
+    expect(findings[0].hint).not.toMatch(/SIZE fault/);
+  });
+
+  it('a dialect fault with no single-token equivalent keeps the FALLBACK dialect hint', () => {
+    // The arm the card names: the fallback hint fires when no NON_CEL_SPELLINGS
+    // row matches — which is exactly the arm an over-budget source used to land
+    // in. It must still fire for a source that genuinely is not CEL.
+    const findings = validateVisibilityPredicates(formStack('record.stage @@ "won"'));
+    expect(findings.map((f) => f.rule)).toEqual([VISIBILITY_PREDICATE_SYNTAX]);
+    expect(findings[0].hint).toContain('Visibility predicates are bare CEL');
+    expect(findings[0].hint).not.toMatch(/SIZE fault/);
+  });
+
+  it('still exactly ONE finding — the bare-identifier rule stays out of the way', () => {
+    // An over-budget source yields no AST, so there are no identifiers to judge.
+    // The exclusivity property #6253/#6128 established survives the split.
+    const rootless = Array.from({ length: 80 }, (_, i) => `f${i} == ${i}`).join(' && ');
+    expect(validateVisibilityPredicates(formStack(rootless)).map((f) => f.rule))
+      .toEqual([VISIBILITY_PREDICATE_OVER_BUDGET]);
+  });
+
+  it('elides the echoed predicate — one runaway expression cannot flood the console', () => {
+    const findings = overBudgetFindings(formStack(OVER_AST_NODES));
+    expect(findings[0].message).not.toContain(OVER_AST_NODES);
+    expect(findings[0].message).toContain('...');
+  });
+
+  it('a blank predicate is still not a fault of any class', () => {
+    // `parseCelToAstWithReason` answers `empty` rather than `parse`; paired with
+    // a live case so the assertion can actually fail.
+    expect(overBudgetFindings(formStack(OVER_AST_NODES))).toHaveLength(1);
+    expect(validateVisibilityPredicates(formStack('   '))).toEqual([]);
+    expect(validateVisibilityPredicates(formStack(undefined))).toEqual([]);
+  });
+
+  it('speaks the LAYER\'s binding root in its remedy', () => {
+    // A `*.form.ts` author binds `data`, so a `record.`-flavoured example would
+    // be a second wrong prescription in a rule whose whole point is that the
+    // prescription must be followable.
+    const metadata = overBudgetFindings(formStack(OVER_AST_NODES), { layer: 'metadata' });
+    expect(metadata).toHaveLength(1);
+    expect(metadata[0].hint).toContain("`data.f in ['a', 'b', …]`");
+    expect(metadata[0].hint).not.toContain('`record.f in');
+  });
+
+  it('reaches page components too — the id is not view-only', () => {
+    const stack = {
+      pages: [{ name: 'p', regions: [{ components: [{ type: 'element:text', visibleWhen: OVER_AST_NODES }] }] }],
+    };
+    const findings = overBudgetFindings(stack);
+    expect(findings.map((f) => f.path)).toEqual(['pages[0].regions[0].components[0]']);
+    expect(findings[0].where).toBe('page "p"');
   });
 });

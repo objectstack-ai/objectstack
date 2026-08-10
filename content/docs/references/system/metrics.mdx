@@ -98,8 +98,8 @@ Metric data point
 | **timestamp** | `string` | ✅ | Observation timestamp |
 | **value** | `number` | optional | Metric value |
 | **labels** | `Record<string, string>` | optional | Metric labels |
-| **histogram** | `{ count: integer; sum: number; buckets: { upperBound: number; count: integer }[] }` | optional |  |
-| **summary** | `{ count: integer; sum: number; quantiles: { quantile: number; value: number }[] }` | optional |  |
+| **histogram** | `{ count: integer; sum: number; buckets: object[] }` | optional |  |
+| **summary** | `{ count: integer; sum: number; quantiles: object[] }` | optional |  |
 
 
 ---
@@ -231,7 +231,7 @@ Metrics configuration
 | **slos** | `{ name: string; label: string; description?: string; sli: string; … }[]` | optional |  |
 | **exports** | `{ type: Enum<'prometheus' \| 'openmetrics' \| 'graphite' \| 'statsd' \| 'influxdb' \| 'datadog' \| … +5 more>; endpoint?: string; interval?: integer; batch?: object; … }[]` | optional |  |
 | **collectionInterval** | `integer` | optional |  |
-| **retention** | `{ period?: integer; downsampling?: { afterSeconds: integer; resolution: integer }[] }` | optional |  |
+| **retention** | `{ period?: integer; downsampling?: object[] }` | optional |  |
 | **cardinalityLimits** | `{ maxLabelCombinations?: integer; onLimitExceeded?: Enum<'drop' \| 'sample' \| 'alert'> }` | optional |  |
 
 
@@ -271,7 +271,7 @@ Service Level Objective
 | **sli** | `string` | ✅ | SLI name |
 | **target** | `number` | ✅ | Target percentage |
 | **period** | `{ type: Enum<'rolling' \| 'calendar'>; duration?: integer; calendar?: Enum<'daily' \| 'weekly' \| 'monthly' \| 'quarterly' \| 'yearly'> }` | ✅ | Time period |
-| **errorBudget** | `{ enabled: boolean; alertThreshold: number; burnRateWindows?: { window: integer; threshold: number }[] }` | optional |  |
+| **errorBudget** | `{ enabled: boolean; alertThreshold: number; burnRateWindows?: object[] }` | optional |  |
 | **alerts** | `{ name: string; severity: Enum<'info' \| 'warning' \| 'critical'>; condition: object }[]` | ✅ |  |
 | **enabled** | `boolean` | ✅ |  |
 

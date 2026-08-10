@@ -1,0 +1,7 @@
+{
+  "file": "packages/spec/src/identity/position.zod.ts",
+  "adrs": [
+    "ADR-0090"
+  ],
+  "invariant": "Positions are deliberately FLAT — no `parent`, no hierarchy (D3). Visibility rollup lives on the business-unit tree; adding a second tree here is the mistake ADR-0057 D5 retired and D3 bans, and the word 'role' is reserved-forbidden in this vocabulary."
+}

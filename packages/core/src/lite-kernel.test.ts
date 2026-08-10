@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { LiteKernel } from './lite-kernel';
-import type { Plugin } from './types';
+import type { Plugin, PluginContext } from './types';
 
 // Unique per-process temp path — a shared hardcoded /tmp file can be owned by a
 // different user (CI / multi-user hosts), causing EACCES under concurrent runs.
@@ -393,6 +393,81 @@ describe('LiteKernel with Configurable Logger', () => {
             await expect(kernel.shutdown()).resolves.toBeUndefined();
             // Both the later hook handler AND the plugin teardown behind it ran.
             expect(reached).toEqual(['later-shutdown', 'plugin-destroy']);
+            expect(kernel.getState()).toBe('stopped');
+        });
+
+        // #5282. The behavioural half above says the cleanup continues; this
+        // says the failure is REPORTED, naming the hook, in the exact wording
+        // `ObjectKernel`'s teardown pin asserts on the other side
+        // (`kernel.test.ts`, #5274). Until #5282 the two kernels printed that
+        // line from two hand-written loops; they now print it from one shared
+        // dispatcher, and this is the LiteKernel end of the pin that goes red
+        // if that single implementation stops logging.
+        it('logs `Hook handler failed: kernel:shutdown` for the handler that threw (#5282)', async () => {
+            const errorSpy = vi.spyOn(
+                (kernel as unknown as { logger: { error: (...a: unknown[]) => void } }).logger,
+                'error',
+            );
+
+            const plugin: Plugin = {
+                name: 'shutdown-thrower-logging',
+                init: async (ctx: PluginContext) => {
+                    ctx.hook('kernel:shutdown', async () => { throw new Error('shutdown boom'); });
+                },
+            };
+
+            try {
+                kernel.use(plugin);
+                await kernel.bootstrap();
+                await kernel.shutdown();
+
+                expect(errorSpy.mock.calls.map((c) => String(c[0]))).toContain(
+                    'Hook handler failed: kernel:shutdown',
+                );
+                expect(kernel.getState()).toBe('stopped');
+            } finally {
+                errorSpy.mockRestore();
+            }
+        });
+
+        // #5282, the LiteKernel half of the dual-path pin (`kernel.test.ts`
+        // carries the ObjectKernel half). `kernel:shutdown` has TWO dispatch
+        // paths with different flavours on BOTH kernels, and the ruling that
+        // shared the dispatch loops deliberately did NOT flip either:
+        //
+        //   - the kernel's own teardown dispatch isolates (`triggerHook`): a
+        //     throwing handler is logged and the cleanup behind it still runs;
+        //   - a plugin calling `ctx.trigger('kernel:shutdown')` by hand goes
+        //     through `PluginContext.trigger`, which propagates.
+        //
+        // Nothing in the repo triggers `kernel:shutdown` by hand today, so this
+        // is DORMANT rather than a live defect — pinned so the difference is a
+        // documented fact instead of a surprise found at teardown.
+        it('dispatches kernel:shutdown two ways: ctx.trigger propagates, the kernel teardown isolates (#5282)', async () => {
+            const reached: string[] = [];
+            let captured!: PluginContext;
+
+            const plugin: Plugin = {
+                name: 'dual-path-shutdown',
+                init: async (ctx: PluginContext) => {
+                    captured = ctx;
+                    ctx.hook('kernel:shutdown', async () => { throw new Error('manual boom'); });
+                    ctx.hook('kernel:shutdown', async () => { reached.push('later-shutdown'); });
+                },
+            };
+
+            kernel.use(plugin);
+            await kernel.bootstrap();
+
+            // Path 1 — manual trigger: PROPAGATING. The error reaches the
+            // caller unwrapped and the second handler never runs.
+            await expect(captured.trigger('kernel:shutdown')).rejects.toThrow('manual boom');
+            expect(reached).toEqual([]);
+
+            // Path 2 — the kernel's own teardown: ISOLATING. Same handlers,
+            // same hook name, opposite treatment of the same throw.
+            await kernel.shutdown();
+            expect(reached).toEqual(['later-shutdown']);
             expect(kernel.getState()).toBe('stopped');
         });
     });

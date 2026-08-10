@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { SchemaRegistry, applySystemFields, reconcileManagedApiMethods, warnStrippedLegacyApiMethods, warnFunctionalCompleteness, computeFQN, parseFQN } from './registry';
-import { AUDIT_PROVENANCE_FIELDS } from '@objectstack/spec/data';
+import { AUDIT_PROVENANCE_FIELDS, type ServiceObject } from '@objectstack/spec/data';
 
 describe('SchemaRegistry', () => {
     let registry: SchemaRegistry;
@@ -88,8 +88,8 @@ describe('SchemaRegistry', () => {
     // ==========================================
     describe('Object Ownership', () => {
         it('should register owned object using object name as canonical key', () => {
-            const obj = { name: 'account', fields: { name: { type: 'text' } } };
-            const key = registry.registerObject(obj as any, 'com.example.crm', 'crm', 'own');
+            const obj: ServiceObject = { name: 'account', fields: { name: { type: 'text' } } };
+            const key = registry.registerObject(obj, 'com.example.crm', 'crm', 'own');
 
             expect(key).toBe('account');
             const resolved = registry.getObject('account');
@@ -98,30 +98,30 @@ describe('SchemaRegistry', () => {
         });
 
         it('should register object without namespace', () => {
-            const obj = { name: 'task', fields: {} };
-            const key = registry.registerObject(obj as any, 'com.example.app');
+            const obj: ServiceObject = { name: 'task', fields: {} };
+            const key = registry.registerObject(obj, 'com.example.app');
 
             expect(key).toBe('task');
             expect(registry.getObject('task')).toBeDefined();
         });
 
         it('should allow only one owner per object name', () => {
-            const obj = { name: 'shared', fields: {} };
-            registry.registerObject(obj as any, 'com.vendor.a', 'vendor_a', 'own');
+            const obj: ServiceObject = { name: 'shared', fields: {} };
+            registry.registerObject(obj, 'com.vendor.a', 'vendor_a', 'own');
 
-            const obj2 = { name: 'shared', fields: {} };
+            const obj2: ServiceObject = { name: 'shared', fields: {} };
             expect(() => {
-                registry.registerObject(obj2 as any, 'com.vendor.b', undefined, 'own');
+                registry.registerObject(obj2, 'com.vendor.b', undefined, 'own');
             }).toThrow(/already owned/);
         });
 
         it('should allow re-registration by same owner', () => {
-            const obj = { name: 'account', fields: { v1: { type: 'text' } } };
-            registry.registerObject(obj as any, 'com.example.crm', 'crm', 'own');
+            const obj: ServiceObject = { name: 'account', fields: { v1: { type: 'text' } } };
+            registry.registerObject(obj, 'com.example.crm', 'crm', 'own');
 
-            const obj2 = { name: 'account', fields: { v2: { type: 'text' } } };
+            const obj2: ServiceObject = { name: 'account', fields: { v2: { type: 'text' } } };
             expect(() => {
-                registry.registerObject(obj2 as any, 'com.example.crm', 'crm', 'own');
+                registry.registerObject(obj2, 'com.example.crm', 'crm', 'own');
             }).not.toThrow();
 
             const resolved = registry.getObject('account');
@@ -136,8 +136,8 @@ describe('SchemaRegistry', () => {
         it('designates nameField from an existing title-eligible field when none declared', () => {
             // No `nameField` declared; `title` (text) is derivable → registry
             // should DESIGNATE it on the owned object.
-            const obj = { name: 'ticket', fields: { notes: { type: 'text' }, title: { type: 'text' } } };
-            registry.registerObject(obj as any, 'com.example.crm', undefined, 'own');
+            const obj: ServiceObject = { name: 'ticket', fields: { notes: { type: 'text' }, title: { type: 'text' } } };
+            registry.registerObject(obj, 'com.example.crm', undefined, 'own');
 
             const resolved = registry.getObject('ticket');
             expect((resolved as any)?.nameField).toBe('title');
@@ -149,19 +149,19 @@ describe('SchemaRegistry', () => {
         });
 
         it('prefers a `name`-ish field and respects an explicit pointer', () => {
-            const named = { name: 'company', fields: { description: { type: 'text' }, company_name: { type: 'text' } } };
-            registry.registerObject(named as any, 'com.crm', undefined, 'own');
+            const named: ServiceObject = { name: 'company', fields: { description: { type: 'text' }, company_name: { type: 'text' } } };
+            registry.registerObject(named, 'com.crm', undefined, 'own');
             expect((registry.getObject('company') as any)?.nameField).toBe('company_name');
 
-            const explicit = { name: 'invoice', nameField: 'ref', fields: { ref: { type: 'text' }, memo: { type: 'text' } } };
-            registry.registerObject(explicit as any, 'com.fin', undefined, 'own');
+            const explicit: ServiceObject = { name: 'invoice', nameField: 'ref', fields: { ref: { type: 'text' }, memo: { type: 'text' } } };
+            registry.registerObject(explicit, 'com.fin', undefined, 'own');
             expect((registry.getObject('invoice') as any)?.nameField).toBe('ref');
         });
 
         it('does NOT add a `name` column to a title-LESS object (no schema migration)', () => {
             // currency/date/select/lookup → nothing title-eligible. The object
             // must be left as-is: no `nameField`, no synthesized `name` field.
-            const obj = {
+            const obj: ServiceObject = {
                 name: 'sys_ledger_entry',
                 fields: {
                     amount: { type: 'currency' },
@@ -170,7 +170,7 @@ describe('SchemaRegistry', () => {
                     account: { type: 'lookup' },
                 },
             };
-            registry.registerObject(obj as any, 'com.objectstack.system', undefined, 'own');
+            registry.registerObject(obj, 'com.objectstack.system', undefined, 'own');
 
             const resolved = registry.getObject('sys_ledger_entry');
             // Nothing title-eligible (currency/date/select/lookup + injected
@@ -185,8 +185,8 @@ describe('SchemaRegistry', () => {
         });
 
         it('does NOT add a `name` column to a FIELDLESS object', () => {
-            const obj = { name: 'sys_empty', fields: {} };
-            registry.registerObject(obj as any, 'com.objectstack.system', undefined, 'own');
+            const obj: ServiceObject = { name: 'sys_empty', fields: {} };
+            registry.registerObject(obj, 'com.objectstack.system', undefined, 'own');
 
             const resolved = registry.getObject('sys_empty');
             expect((resolved as any)?.nameField).toBeUndefined();
@@ -199,11 +199,11 @@ describe('SchemaRegistry', () => {
     // ==========================================
     describe('Object Extension', () => {
         it('should merge extension fields into owner', () => {
-            const owner = { name: 'contact', fields: { email: { type: 'text' } } };
-            registry.registerObject(owner as any, 'com.base', 'base', 'own');
+            const owner: ServiceObject = { name: 'contact', fields: { email: { type: 'text' } } };
+            registry.registerObject(owner, 'com.base', 'base', 'own');
 
-            const ext = { name: 'contact', fields: { phone: { type: 'text' } } };
-            registry.registerObject(ext as any, 'com.crm', undefined, 'extend', 200);
+            const ext: ServiceObject = { name: 'contact', fields: { phone: { type: 'text' } } };
+            registry.registerObject(ext, 'com.crm', undefined, 'extend', 200);
 
             const resolved = registry.getObject('contact');
             expect(resolved?.fields).toHaveProperty('email');
@@ -211,33 +211,33 @@ describe('SchemaRegistry', () => {
         });
 
         it('should apply priority order (higher wins)', () => {
-            const owner = { name: 'task', label: 'Task', fields: {} };
-            registry.registerObject(owner as any, 'com.base', 'base', 'own', 100);
+            const owner: ServiceObject = { name: 'task', label: 'Task', fields: {} };
+            registry.registerObject(owner, 'com.base', 'base', 'own', 100);
 
-            const ext1 = { name: 'task', label: 'Extended Task', fields: {} };
-            registry.registerObject(ext1 as any, 'com.ext1', undefined, 'extend', 150);
+            const ext1: ServiceObject = { name: 'task', label: 'Extended Task', fields: {} };
+            registry.registerObject(ext1, 'com.ext1', undefined, 'extend', 150);
 
-            const ext2 = { name: 'task', label: 'Final Task', fields: {} };
-            registry.registerObject(ext2 as any, 'com.ext2', undefined, 'extend', 250);
+            const ext2: ServiceObject = { name: 'task', label: 'Final Task', fields: {} };
+            registry.registerObject(ext2, 'com.ext2', undefined, 'extend', 250);
 
             const resolved = registry.getObject('task');
             expect(resolved?.label).toBe('Final Task');
         });
 
         it('should merge validations additively', () => {
-            const owner = { name: 'order', fields: {}, validations: [{ type: 'required', field: 'id' }] };
-            registry.registerObject(owner as any, 'com.base', 'base', 'own');
+            const owner: ServiceObject = { name: 'order', fields: {}, validations: [{ type: 'required', name: 'id_required', message: 'id is required', field: 'id' }] };
+            registry.registerObject(owner, 'com.base', 'base', 'own');
 
-            const ext = { name: 'order', fields: {}, validations: [{ type: 'required', field: 'status' }] };
-            registry.registerObject(ext as any, 'com.ext', undefined, 'extend');
+            const ext: ServiceObject = { name: 'order', fields: {}, validations: [{ type: 'required', name: 'status_required', message: 'status is required', field: 'status' }] };
+            registry.registerObject(ext, 'com.ext', undefined, 'extend');
 
             const resolved = registry.getObject('order');
             expect(resolved?.validations).toHaveLength(2);
         });
 
         it('should fail extension without owner', () => {
-            const ext = { name: 'phantom', fields: {} };
-            registry.registerObject(ext as any, 'com.ext', undefined, 'extend');
+            const ext: ServiceObject = { name: 'phantom', fields: {} };
+            registry.registerObject(ext, 'com.ext', undefined, 'extend');
 
             const resolved = registry.getObject('phantom');
             expect(resolved).toBeUndefined();
@@ -249,22 +249,22 @@ describe('SchemaRegistry', () => {
     // ==========================================
     describe('Object Resolution', () => {
         it('should resolve by canonical name', () => {
-            const obj = { name: 'deal', fields: {} };
-            registry.registerObject(obj as any, 'com.crm', 'crm', 'own');
+            const obj: ServiceObject = { name: 'deal', fields: {} };
+            registry.registerObject(obj, 'com.crm', 'crm', 'own');
 
             expect(registry.resolveObject('deal')).toBeDefined();
         });
 
         it('should resolve system objects by their sys_ prefixed name', () => {
-            const obj = { name: 'sys_user', fields: {} };
-            registry.registerObject(obj as any, 'com.objectstack.system', 'sys', 'own');
+            const obj: ServiceObject = { name: 'sys_user', fields: {} };
+            registry.registerObject(obj, 'com.objectstack.system', 'sys', 'own');
 
             expect(registry.getObject('sys_user')).toBeDefined();
         });
 
         it('should cache merged objects', () => {
-            const obj = { name: 'cached', fields: {} };
-            registry.registerObject(obj as any, 'com.test', 'test', 'own');
+            const obj: ServiceObject = { name: 'cached', fields: {} };
+            registry.registerObject(obj, 'com.test', 'test', 'own');
 
             const first = registry.resolveObject('cached');
             const second = registry.resolveObject('cached');
@@ -272,13 +272,13 @@ describe('SchemaRegistry', () => {
         });
 
         it('should invalidate cache on re-registration', () => {
-            const obj = { name: 'evolve', fields: { v1: { type: 'text' } } };
-            registry.registerObject(obj as any, 'com.test', 'test', 'own');
+            const obj: ServiceObject = { name: 'evolve', fields: { v1: { type: 'text' } } };
+            registry.registerObject(obj, 'com.test', 'test', 'own');
 
             const first = registry.resolveObject('evolve');
 
-            const obj2 = { name: 'evolve', fields: { v2: { type: 'text' } } };
-            registry.registerObject(obj2 as any, 'com.test', 'test', 'own');
+            const obj2: ServiceObject = { name: 'evolve', fields: { v2: { type: 'text' } } };
+            registry.registerObject(obj2, 'com.test', 'test', 'own');
 
             const second = registry.resolveObject('evolve');
             expect(first).not.toBe(second);
@@ -291,8 +291,8 @@ describe('SchemaRegistry', () => {
     // ==========================================
     describe('getAllObjects', () => {
         it('should return all merged objects', () => {
-            registry.registerObject({ name: 'a', fields: {} } as any, 'com.pkg1', 'pkg1', 'own');
-            registry.registerObject({ name: 'b', fields: {} } as any, 'com.pkg2', 'pkg2', 'own');
+            registry.registerObject({ name: 'a', fields: {} }, 'com.pkg1', 'pkg1', 'own');
+            registry.registerObject({ name: 'b', fields: {} }, 'com.pkg2', 'pkg2', 'own');
 
             const all = registry.getAllObjects();
             expect(all).toHaveLength(2);
@@ -300,8 +300,8 @@ describe('SchemaRegistry', () => {
         });
 
         it('should filter by packageId', () => {
-            registry.registerObject({ name: 'a', fields: {} } as any, 'com.pkg1', 'pkg1', 'own');
-            registry.registerObject({ name: 'b', fields: {} } as any, 'com.pkg2', 'pkg2', 'own');
+            registry.registerObject({ name: 'a', fields: {} }, 'com.pkg1', 'pkg1', 'own');
+            registry.registerObject({ name: 'b', fields: {} }, 'com.pkg2', 'pkg2', 'own');
 
             const filtered = registry.getAllObjects('com.pkg1');
             expect(filtered).toHaveLength(1);
@@ -309,8 +309,8 @@ describe('SchemaRegistry', () => {
         });
 
         it('should include objects where package is extender', () => {
-            registry.registerObject({ name: 'base_obj', fields: {} } as any, 'com.owner', 'base', 'own');
-            registry.registerObject({ name: 'base_obj', fields: { ext: { type: 'text' } } } as any, 'com.extender', undefined, 'extend');
+            registry.registerObject({ name: 'base_obj', fields: {} }, 'com.owner', 'base', 'own');
+            registry.registerObject({ name: 'base_obj', fields: { ext: { type: 'text' } } }, 'com.extender', undefined, 'extend');
 
             const filtered = registry.getAllObjects('com.extender');
             expect(filtered).toHaveLength(1);
@@ -322,7 +322,7 @@ describe('SchemaRegistry', () => {
     // ==========================================
     describe('Uninstall', () => {
         it('should remove owner contribution', () => {
-            registry.registerObject({ name: 'removable', fields: {} } as any, 'com.pkg', 'pkg', 'own');
+            registry.registerObject({ name: 'removable', fields: {} }, 'com.pkg', 'pkg', 'own');
             expect(registry.getObject('removable')).toBeDefined();
 
             registry.unregisterObjectsByPackage('com.pkg');
@@ -330,8 +330,8 @@ describe('SchemaRegistry', () => {
         });
 
         it('should remove extension contribution', () => {
-            registry.registerObject({ name: 'target', fields: { base: { type: 'text' } } } as any, 'com.owner', 'base', 'own');
-            registry.registerObject({ name: 'target', fields: { ext: { type: 'text' } } } as any, 'com.ext', undefined, 'extend');
+            registry.registerObject({ name: 'target', fields: { base: { type: 'text' } } }, 'com.owner', 'base', 'own');
+            registry.registerObject({ name: 'target', fields: { ext: { type: 'text' } } }, 'com.ext', undefined, 'extend');
 
             registry.unregisterObjectsByPackage('com.ext');
 
@@ -341,8 +341,8 @@ describe('SchemaRegistry', () => {
         });
 
         it('should prevent uninstall of owner with active extenders', () => {
-            registry.registerObject({ name: 'important', fields: {} } as any, 'com.owner', 'base', 'own');
-            registry.registerObject({ name: 'important', fields: {} } as any, 'com.ext', undefined, 'extend');
+            registry.registerObject({ name: 'important', fields: {} }, 'com.owner', 'base', 'own');
+            registry.registerObject({ name: 'important', fields: {} }, 'com.ext', undefined, 'extend');
 
             expect(() => {
                 registry.unregisterObjectsByPackage('com.owner');
@@ -350,8 +350,8 @@ describe('SchemaRegistry', () => {
         });
 
         it('should allow force uninstall of owner with extenders', () => {
-            registry.registerObject({ name: 'forced', fields: {} } as any, 'com.owner', 'base', 'own');
-            registry.registerObject({ name: 'forced', fields: {} } as any, 'com.ext', undefined, 'extend');
+            registry.registerObject({ name: 'forced', fields: {} }, 'com.owner', 'base', 'own');
+            registry.registerObject({ name: 'forced', fields: {} }, 'com.ext', undefined, 'extend');
 
             expect(() => {
                 registry.unregisterObjectsByPackage('com.owner', true);
@@ -364,9 +364,9 @@ describe('SchemaRegistry', () => {
     // ==========================================
     describe('Contributors API', () => {
         it('should return all contributors for object', () => {
-            registry.registerObject({ name: 'multi', fields: {} } as any, 'com.owner', 'pkg', 'own', 100);
-            registry.registerObject({ name: 'multi', fields: {} } as any, 'com.ext1', undefined, 'extend', 200);
-            registry.registerObject({ name: 'multi', fields: {} } as any, 'com.ext2', undefined, 'extend', 300);
+            registry.registerObject({ name: 'multi', fields: {} }, 'com.owner', 'pkg', 'own', 100);
+            registry.registerObject({ name: 'multi', fields: {} }, 'com.ext1', undefined, 'extend', 200);
+            registry.registerObject({ name: 'multi', fields: {} }, 'com.ext2', undefined, 'extend', 300);
 
             const contribs = registry.getObjectContributors('multi');
             expect(contribs).toHaveLength(3);
@@ -376,7 +376,7 @@ describe('SchemaRegistry', () => {
         });
 
         it('should return owner contributor', () => {
-            registry.registerObject({ name: 'owned', fields: {} } as any, 'com.owner', 'pkg', 'own');
+            registry.registerObject({ name: 'owned', fields: {} }, 'com.owner', 'pkg', 'own');
 
             const owner = registry.getObjectOwner('owned');
             expect(owner).toBeDefined();
@@ -463,7 +463,7 @@ describe('SchemaRegistry', () => {
     // ==========================================
     describe('Reset', () => {
         it('should clear all state', () => {
-            registry.registerObject({ name: 'obj', fields: {} } as any, 'com.pkg', 'pkg', 'own');
+            registry.registerObject({ name: 'obj', fields: {} }, 'com.pkg', 'pkg', 'own');
             registry.registerItem('action', { name: 'act' }, 'name');
 
             registry.reset();
@@ -572,8 +572,12 @@ describe('applySystemFields', () => {
         expect(out.fields.organization_id).toBeDefined();
         expect(out.fields.organization_id.type).toBe('lookup');
         expect(out.fields.organization_id.reference).toBe('sys_organization');
-        // Multi-tenant stacks index the column (per-tenant filtering).
-        expect(out.fields.organization_id.indexed).toBe(true);
+        // [#6810] Multi-tenant stacks index the column (per-tenant filtering) —
+        // declared in `indexes[]`, which is what a driver materializes from. The
+        // field-level `indexed: true` this used to read was never a
+        // `FieldSchema` key (#2377 / ADR-0049) and only ever reached one driver.
+        expect((out as any).indexes).toEqual([{ fields: ['organization_id'] }]);
+        expect(out.fields.organization_id.indexed).toBeUndefined();
         // author-declared field still present
         expect(out.fields.first_name).toBeDefined();
     });
@@ -585,7 +589,10 @@ describe('applySystemFields', () => {
         const out = applySystemFields(baseLead, { multiTenant: false });
         expect(out.fields.organization_id).toBeDefined();
         expect(out.fields.organization_id.type).toBe('lookup');
-        expect(out.fields.organization_id.indexed).toBe(false);
+        // [#6810] "Unindexed" is now the ABSENCE of a declaration, not a
+        // declaration whose value is false.
+        expect((out as any).indexes).toBeUndefined();
+        expect(out.fields.organization_id.indexed).toBeUndefined();
         // audit fields are tenant-independent — still injected
         expect(out.fields.created_at).toBeDefined();
         expect(out.fields.updated_at).toBeDefined();
@@ -747,22 +754,20 @@ describe('applySystemFields', () => {
     //   org                 ❌              ❌
     //   none                ❌              ❌
     //
-    // ⚠️ `ownership: 'business_unit'` is NOT a legal ObjectSchema value yet —
-    // the spec enum gains it in #5678, strictly AFTER this PR (that ordering is
-    // #5677's whole point: the engine must honour the tier before the schema
-    // can emit it, or the tier's first appearance gets the inverse result).
-    // These fixtures therefore duck-type the schema, exactly as every other
-    // opt-out case in this suite already does — `applySystemFields` takes a
-    // `ServiceObject`, and the registry reads `ownership` as a value, not as a
-    // Zod-parsed enum. When #5678 lands, the `as any` here can be dropped
-    // without changing a single assertion.
+    // `ownership: 'business_unit'` is a legal ObjectSchema value as of #5678,
+    // which landed strictly AFTER #5677 — that ordering is #5677's whole point:
+    // the engine must honour the tier before the schema can emit it, or the
+    // tier's first appearance gets the inverse result. These fixtures used to
+    // duck-type the schema through `as any` for exactly that gap; the casts are
+    // gone now that `ServiceObject` (`z.input<typeof ObjectSchemaBase>`) admits
+    // the value, and not one assertion below changed when they were removed.
     describe('[ADR-0117 D1] owning_business_unit_id injection', () => {
         it("does NOT inject owner_id for ownership: 'business_unit' — but DOES inject owning_business_unit_id", () => {
             // THE regression this issue exists to prevent. Under the old
             // deny-list this object was stamped `owner_id` (a person) even
             // though the tier's entire meaning is "owned by a unit, not a
             // person" — see #4611's one-shot probe.
-            const unitOwned: any = { ...baseLead, name: 'inventory_item', ownership: 'business_unit' };
+            const unitOwned: ServiceObject = { ...baseLead, name: 'inventory_item', ownership: 'business_unit' };
             const out = applySystemFields(unitOwned, { multiTenant: false });
 
             expect(out.fields.owner_id).toBeUndefined();
@@ -777,7 +782,7 @@ describe('applySystemFields', () => {
         });
 
         it("injects BOTH anchors on the default tier and on an explicit ownership: 'user'", () => {
-            for (const schema of [baseLead, { ...baseLead, ownership: 'user' } as any]) {
+            for (const schema of [baseLead, { ...baseLead, ownership: 'user' } satisfies ServiceObject]) {
                 const out = applySystemFields(schema, { multiTenant: false });
                 expect(out.fields.owner_id).toBeDefined();
                 expect(out.fields.owning_business_unit_id).toBeDefined();
@@ -850,7 +855,7 @@ describe('applySystemFields', () => {
 
     it('SchemaRegistry({ multiTenant: true }) auto-injects on registerObject', () => {
         const reg = new SchemaRegistry({ multiTenant: true });
-        reg.registerObject({ name: 'lead', fields: { first_name: { type: 'text' } } } as any, 'crm', 'crm', 'own');
+        reg.registerObject({ name: 'lead', fields: { first_name: { type: 'text' } } }, 'crm', 'crm', 'own');
         const stored = (reg as any).objectContributors.get('lead')[0].definition;
         expect(stored.fields.organization_id).toBeDefined();
         expect(stored.fields.organization_id.reference).toBe('sys_organization');

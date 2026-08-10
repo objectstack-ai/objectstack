@@ -277,6 +277,12 @@ describe('ADR-0104 fresh-datastore attestation vs. the boot that seeds (#4769)',
    * A store this boot did NOT create carries history that is not ours to
    * vouch for either way: a verified row there is evidence by scan, and a
    * single write's observation must not overturn a walk of the whole store.
+   *
+   * That is still true, and it is the reason #4797 answers this case with a
+   * deviation marker instead of a revocation — the certificate survives and
+   * only the irreversible authority it carried is withheld. This test owns
+   * the revocation half; the marker half is pinned in
+   * `adr0104-lax-deviation-marker.test.ts`.
    */
   it('never revokes a flag on a store this boot did not create', async () => {
     const store = newStore();
@@ -288,10 +294,11 @@ describe('ADR-0104 fresh-datastore attestation vs. the boot that seeds (#4769)',
       await expect(
         engine.insert('showcase_task', { id: 't1', title: 'Lax', cover: OFF_SHAPE_COVER }),
       ).resolves.toBeDefined();
-      // Counted (the fact is true), but the ledger is left alone.
+      // Counted (the fact is true), and the CERTIFICATE is left alone.
       expect(engine.valueShapeViolationsAdmitted()[FILE_REFERENCES_MIGRATION_ID]?.count).toBe(1);
       const row = rowsOf(store, 'sys_migration').find((r) => r.id === FILE_REFERENCES_MIGRATION_ID);
       expect(row?.verified_at).not.toBeNull();
+      expect(row?.blocking).toBe(0);
     } finally {
       vi.unstubAllEnvs();
     }

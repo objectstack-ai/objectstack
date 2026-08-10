@@ -1,5 +1,547 @@
 # @objectstack/client
 
+## 17.0.0-rc.6
+
+### Major Changes
+
+- 90bbf25: refactor(spec,client)!: retire the `cursor` half of `GET /api/v1/notifications` and stop declaring a `limit` default nothing applied (#6361, ADR-0049)
+
+  `GET /api/v1/notifications` declared `cursor` on **both** halves of its contract
+  and honoured it on neither. The dispatcher domain reads `read` / `type` / `limit`
+  and nothing else, and no emit site has ever written the response key — so a
+  caller paginating by the published contract re-read the first window forever,
+  with no error and no 400. Measured over a real boot with 60 unread before the
+  removal: `page2 === page1`, and **both pages parsed green** against the response
+  schema, which is why no conformance gate could see it.
+
+  It was worse than inert, because it had a shipped **producer**: the SDK appended
+  `cursor` to the query string, so the dead parameter was reachable from ordinary
+  typed code. That is `data.query.cursor` (#4286, `query-cursor-retired`) one layer
+  up, with the same verdict for the same reason — down to deleting the SDK
+  producer alongside the key.
+
+  Ruled jointly with #6363 (maintainer ruling 2026-08-07, Option A): one
+  capability's two halves are never half-deleted. #6363 made its declaration
+  **true** (`unreadCount` really is the total); this one removes a declaration
+  there was no implementation to make true **about**. Opposite repairs, one rule.
+
+  ### Migration: FROM → TO
+
+  | FROM                                            | TO                                                                        |
+  | :---------------------------------------------- | :------------------------------------------------------------------------ |
+  | `client.notifications.list({ cursor })`         | `client.notifications.list({ limit })` — ask for a bigger window          |
+  | reading `response.cursor`                       | nothing; it was never emitted, so it always read `undefined`              |
+  | relying on the declared `limit` default of `20` | send `limit: 20` explicitly, or omit `limit` and take the server's window |
+
+  **One-line fix:** delete the `cursor` argument. This route is **not paginated** —
+  it answers the newest `limit` notifications and stops, so a larger `limit` is the
+  only way to see further back. There is no continuation token to carry over, and
+  nothing ever minted one, so no caller holds a value that needs migrating.
+
+  `cursor` is **tombstoned rather than deleted** on both schemas: neither is
+  `.strict()`, so a bare deletion would have made Zod silently strip whatever a
+  caller kept sending — a clean parse and a parameter that never takes effect,
+  which is this very defect re-created one layer down (#3733, ADR-0104). Writing
+  it is now a `tsc` error (TS2353) and a parse-time rejection carrying the fix.
+
+  ### `limit`: the default is dropped, not re-spelled
+
+  The ruling allowed either declaring the real server default (50) or dropping it
+  and describing the window as server-decided. The **second** is taken, because the
+  fiction was the _mechanism_ and not the number: nothing parses this query string
+  through the schema (#3899 wired the route catalog's `requestSchema` to the real
+  entry for **bodies** only), so `.default(20)` never stamped anything onto
+  anything. Re-spelling it `50` would have kept a declaration that does not execute
+  and merely made it coincide with the implementation until someone moved the
+  clamp. `limit` is now plainly `.optional()`, with the server's behaviour
+  described as the server's: the platform inbox answers **50** and clamps any
+  requested value into **1..200**.
+
+  No `.int()`, `.positive()` or `.max(200)` constraint is declared either — the
+  service _clamps_ an out-of-range limit rather than refusing it, and declaring a
+  rejection the wire does not perform is the same declared-not-enforced defect
+  mirrored.
+
+  ### Behaviour on the wire is UNCHANGED
+
+  Deliberately, and worth stating because a removal invites the opposite
+  assumption: a request still carrying `?cursor=` is **ignored, not refused**. The
+  route reads three named query keys and validates no query against a schema, so an
+  unknown key never produced a 400 and does not start now. A caller that omitted
+  `limit` receives the same 50 rows it always received. What changed is the
+  contract, which stopped promising what the wire never delivered. `unreadCount` is
+  #6363's landed business and is untouched.
+
+  <!-- adr-0087: registered notification-list-cursor-retired -->
+
+- f549a0d: refactor(spec,client)!: retire `ViewProtocol`'s five viewId-addressed methods and their ten schemas (#6239)
+
+  `listViews`, `getView`, `createView`, `updateView` and `deleteView` — the
+  `ViewProtocol` interface and `ListViews`/`GetView`/`CreateView`/`UpdateView`/`DeleteView`
+  Request+Response schemas in `api/protocol.zod.ts` — are REMOVED under ADR-0049
+  enforce-or-remove (maintainer ruling 2026-08-07). `@objectstack/client` drops the
+  five response types it re-exported.
+
+  Measured on `origin/main` immediately before the removal, the surface had none of
+  the three things a protocol method needs:
+
+  - **no implementation** — `packages/metadata-protocol/src/protocol.ts` declares no
+    `listViews`/`getView`/`createView`/`updateView`/`deleteView`; its only view
+    resolver is `getUiView`;
+  - **no route** — `packages/rest/src/rest-server.ts` never mentions `viewId`, so
+    nothing viewId-addressed was reachable over HTTP at all;
+  - **no caller** — the only `ViewProtocol` mention outside its own file was
+    `content/docs/kernel/services-checklist.mdx`, which already recorded the five as
+    declared-and-unrouted.
+
+  FROM → TO — both replacements are surfaces that were always the live ones:
+
+  | removed                                                                                   | use instead                                                                                                                                                |
+  | ----------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+  | `listViews` / `getView` / `createView` / `updateView` / `deleteView` (+ their 10 schemas) | the generic metadata methods with `type: 'view'` — `getMetaItem` / `getMetaItems` / `saveMetaItem` / `deleteMetaItem`, served at `/api/v1/meta/view/:name` |
+  | `GetViewResponse` as "the shape of the resolved view"                                     | `GetUiViewResponse` — `getUiView`, served at `GET /api/v1/ui/view/:object/:type`                                                                           |
+
+  **The fix:** delete the import and address views by NAME through the metadata API
+  (`view` is a metadata type), or by object+type through `getUiView`. Nothing
+  addressed a view by `viewId` before this change either; that is the finding.
+
+  **Why a removal rather than a note.** The declared surface is name-identical and
+  semantics-adjacent to a real one, which makes it an attractive nuisance in every
+  grep — and it has already mis-directed a decision: **#5948's issue body AND its
+  2026-08-07 maintainer ruling both read `GetViewResponseSchema` (zero
+  implementations) as the contract of `GET /ui/view/:object/:type`**, whose declared
+  response is `GetUiViewResponseSchema`, 250 lines up and one word different. That
+  ruling's reasoning happened to survive the mix-up; this removal stops relying on
+  that luck.
+
+  The retirement kit — route 3: **no tombstone and no D2 conversion** (none of the ten
+  was a key on an authorable shape, and nothing parsed them, so there is no source or
+  `sys_metadata` row to rewrite). `RETIRED_DEFS_BY_MAJOR[17]` (10 defs) plus the D3
+  `SemanticMigration` `view-management-protocol-retired` are the declaration; the
+  generated baselines and reference docs lose their entries in the same change.
+
+  If "read and write ONE view by id" becomes a real requirement, it returns
+  implementation-first.
+
+  <!-- adr-0087: registered view-management-protocol-retired -->
+
+### Patch Changes
+
+- ec3dfd7: fix(client): `data.find({ limit })` reached the server as an empty query, and `QueryOptionsV2.expand` reached it as nothing at all (#6322)
+
+  `data.find()` accepts two vocabularies — the canonical `QueryOptionsV2`
+  (`where` / `fields` / `orderBy` / `limit` / `offset` / `expand`) and the legacy
+  `QueryOptions` (`filter` / `select` / `sort` / `top` / `skip`) — and picked the
+  branch with a hand-written condition that named four keys:
+  `'where' in options || 'fields' in options || 'orderBy' in options || 'offset' in options`.
+  That condition was a second, independent statement of what `QueryOptionsV2`
+  declares, and it had fallen behind the interface twice.
+
+  **`limit` was missing from it.** `client.data.find('task', { limit: 20 })` — a
+  canonical key as the only key, and the most natural spelling of "first 20" —
+  was not recognised as canonical, fell to the legacy branch, and that branch
+  reads only `top` / `skip` / `sort` / `select` / `filter` / `filters` /
+  `aggregations` / `groupBy`. Nothing there reads `limit`, so the value was
+  dropped between the call and the wire: the request went out with an **empty
+  query string**, the caller got the server's default page size, HTTP 200, no
+  warning. Its pagination twin `{ offset: 5 }` worked correctly, because `offset`
+  happened to be one of the four listed keys — one interface, two pagination
+  keys, opposite behaviour.
+
+  **`expand` was missing too, and had no mapping either.** It is declared on
+  `QueryOptionsV2`, documented as the replacement for a legacy `populate` that
+  `QueryOptions` never had, and was carried by neither branch — not one character
+  of it reached the wire, on either of the two `find` implementations.
+
+  **What changed.** The branch predicate is now derived from the interface rather
+  than restated beside it: the canonical-only key set is
+  `Exclude<keyof QueryOptionsV2, keyof QueryOptions>`, held as a
+  `Record<…, true>` that TypeScript rejects when a key is missing or extra. A key
+  added to `QueryOptionsV2` from now on is a compile error until it is listed, so
+  the next canonical key is covered on the day it is declared. Appending `limit`
+  to the old list would have been the third round of the same mistake.
+
+  `expand` now maps onto the spelling the server actually accepts:
+  `?expand=<comma-separated relation names>`, which
+  `HttpFindQueryParamsSchema` declares for the GET list route and the protocol
+  normalizer splits on commas before folding each name into the engine's expand
+  map. The `Record` form contributes its keys — the same relation names the
+  server derives from the comma list. A **nested** per-relation query inside
+  `expand` has no spelling on a GET, so it is now refused with an error naming
+  the relation and the keys it could not carry, rather than trimmed away
+  silently; `data.query()` carries a QueryAST body and is where nested expand
+  detail belongs.
+
+  Both `find` implementations — `ObjectStackClient.data.find` and
+  `ScopedProjectClient.data.find`, which were byte-identical copies of the same
+  defect — read the one shared predicate and the one shared `expand` mapping.
+
+  No change to the five paired keys: canonical and legacy spellings of the same
+  query still produce byte-identical transport parameters, and that parity is now
+  pinned by a test table both implementations are driven through.
+
+- 466c503: fix(client): `data.find()` emits `top`/`skip` on presence, so `limit: 0` reaches the server (#6485)
+
+  Both `find` implementations — `ObjectStackClient.data.find` and its
+  byte-identical `ScopedProjectClient.data.find` copy — emitted the two pagination
+  transport params on **truthiness**:
+
+  ```ts
+  if (normalizedOptions.top)
+    queryParams.set("top", normalizedOptions.top.toString());
+  if (normalizedOptions.skip)
+    queryParams.set("skip", normalizedOptions.skip.toString());
+  ```
+
+  while the canonical normalizer ten lines above already tested **presence**
+  (`if (v2.limit != null) normalizedOptions.top = v2.limit`). So `0` survived the
+  normalizer and was then discarded by the emitter. Both now test presence, in
+  both copies.
+
+  **What changes on the wire, and why that is the fix rather than a preference.**
+  `find('task', { limit: 0 })` — and equally `{ top: 0 }` — used to reach the
+  server with **no `top` param at all**. The GET list route has no default page
+  size, so an absent `top` returns the _entire_ match set: the caller who asked
+  for no records received every record, under HTTP 200 with no warning.
+
+  The direction was measured before the change rather than assumed, because a
+  client fix is only worth having if the server honours what it sends:
+
+  | layer                                                                                                               | `top=0`                                                                                                                                                         |
+  | :------------------------------------------------------------------------------------------------------------------ | :-------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+  | REST list route → `ObjectStackProtocolImplementation.findData`                                                      | not rejected, not ignored — folds `top` into `limit`, coerces `Number('0')`, forwards `{ limit: 0 }` to the engine; envelope reports `total: 0, hasMore: false` |
+  | `SqlDriver.find` (the driver behind the default file-backed SQLite datasource, and every Postgres/MySQL deployment) | paginates on presence — `LIMIT 0`, **zero rows**                                                                                                                |
+  | `TursoRemoteTransport`                                                                                              | presence — `LIMIT ?` bound to `0`, zero rows                                                                                                                    |
+
+  So `limit: 0` now means "return no records" end to end, which is what the
+  canonical branch already implied.
+
+  **`offset: 0` / `skip: 0` were dropped too, and that half is a consistency
+  change with no behavioural consequence** — `skip=0` is already the server's
+  default, so the request means the same thing whether the param is sent or not.
+  They are aligned because one emitter must not hold two rules for one pair, not
+  because a wrong answer was being returned.
+
+  Callers passing a non-zero `limit`/`top`/`offset`/`skip`, or omitting them
+  entirely, are unaffected — the emitted query string is byte-identical.
+
+- b3363e9: feat(spec,client): declare the publish door's response — `PublishMetaItemResponseSchema` (#7294)
+
+  `POST /api/v1/meta/:type/:name/publish` has been served since long before this
+  change, and had no contract behind it: the string `PublishMetaItem` appeared
+  nowhere under `packages/spec/src/`, and the endpoint was absent from
+  `plugin-rest-api.zod.ts`'s metadata table. So `version` on the publish response
+  sat in exactly the state `version` on the _save_ response sat in before #5745 —
+  the ADR-0008 optimistic-concurrency token, the value a caller echoes back as
+  `If-Match` to get a 409 instead of a lost update, riding a public wire surface
+  with nothing declaring it. `PublishMetaItemResponse` could not be named at the
+  type level either, which is why `client.metadata.publishItem()` resolved to
+  `any`.
+
+  This carries the #5745 "declared = returned" discipline one door over, with the
+  same three artifacts the save door has:
+
+  - **`PublishMetaItemResponseSchema`** declares the FULL measured body —
+    `success` / `version` / `seq` required, `message` and the three conditional
+    side-effect receipts (`seedApplied` / `materializeApplied` /
+    `projectionApplied`) optional. Optionality is measured, not assumed: the sole
+    producer's single response literal always sets the first three, and attaches
+    each receipt only when the matching side effect ran, so an absent receipt
+    means "that side effect did not run", never "it failed".
+  - **The endpoint declaration**, so the catalog names the route it serves and
+    points at the schema. No `requestSchema`: the body's only read key is
+    `message`, taken only when already a string, so the route cannot 400 a
+    malformed body and declaring one would advertise a gate that does not run.
+  - **A producer-side conformance gate**
+    (`publish-meta-response-conformance.test.ts`), driving a real
+    `publishMetaItem` against a real ObjectQL engine through the schema across
+    the plain shape and every receipt path. A field added to the response, or
+    dropped from the schema, now turns that red instead of silently vanishing at
+    parse.
+
+  `client.metadata.publishItem()` is typed `Promise<PublishMetaItemResponse>` and
+  the type is re-exported, matching `saveItem` / `SaveMetaItemResponse`.
+
+  Also fixes a declared-≠-returned gap one layer down: `publishMetaItem`'s own
+  `Promise<...>` annotation omitted `projectionApplied` while the implementation
+  assigned it, so the method's type denied a key its callers were receiving.
+
+  No behavior change — nothing about the response body moved. This declares what
+  was already on the wire.
+
+- 11066f6: feat(spec,metadata-protocol,rest,client): the direct-mount surfaces (`packages`, `datasources/:name/external/*`) become discoverable, and the SDK follows the advertised base (#6633)
+
+  The rest surface's `/discovery` never advertised `routes.packages` — routes
+  mounted but not advertised, the unstated half of ADR-0076 D12 — so the SDK's
+  `packages.*` always fell back to the hard-coded `/api/v1/packages`; and the
+  SDK's `datasources.external.*` had no discovery mechanism at all, hard-coding
+  `/api/v1/datasources/...` in each of its five methods. On any deployment with a
+  non-default API base, both families built wrong URLs (measured in #6633).
+  Maintainer ruling 2026-08-08 (route B, prerequisite for #6306):
+
+  - **spec** (minor, additive): `ApiRoutesSchema` declares a `datasources` key —
+    the base of the federation-admin family. Optional like `mcp`: absent = not
+    mounted.
+  - **metadata-protocol** (minor, additive): `getDiscovery()` advertises
+    `routes.packages: '/api/v1/packages'` iff the `package` service is
+    registered (`serviceToRouteKey` gains the mapping; the route flows through a
+    non-slot table because `package` is not a `CoreServiceName`). `datasources`
+    is deliberately NOT advertised by this builder — the mount belongs to the
+    REST host it cannot see (same disposition as `mcp`).
+  - **rest** (minor): `/discovery` advertises `routes.packages` and
+    `routes.datasources` as projections of the RECORDED direct mounts (#5822) —
+    advertisement and mounting derive from one fact, so #6306's later mount-base
+    move carries the advertisement along by construction. Not mounted ⇒ not
+    advertised. An end-to-end parity pin (`discovery-advertised-direct-mounts.
+parity.test.ts`) drives the composed surface and goes red on any change that
+    moves only one side.
+  - **client** (patch, behavior fix): the five `datasources.external.*` methods
+    derive their base via `getRoute('datasources')` — connected clients follow
+    the advertised base; unconnected clients (or servers that advertise no
+    `datasources` key) keep building byte-identical `/api/v1/...` URLs.
+
+  No key is removed and no wire shape changes for existing deployments: servers
+  gain two advertised keys, and the SDK changes URLs only when a server
+  advertises the new keys with a non-default base.
+
+- 916af17: feat(spec,rest,client): the email surface becomes discoverable and the SDK follows the advertised base; the scoped client derives its prefix from discovery (#6714)
+
+  `@objectstack/client` 的 `email.send` 硬编码 `${baseUrl}/api/v1/email/send`,而服务端
+  `registerEmailEndpoints` 挂在 `getApiBasePath()` 下、**已经跟随 `apiPath`** —— 设了
+  `apiPath` 的部署上这是**现活 404**,不是潜伏项。实测(`apiPath: '/backend/api/v9'`
+  启动,录制挂载表):email 面只有 `POST /backend/api/v9/email/send` 一条,
+  `POST /api/v1/email/send` 在表中**不存在**。`ScopedProjectClient.scope()` 同样硬编码
+  `/api/v1/environments/...`,scoped 面全部 `meta` / `data` / `batch` / `packages` /
+  `automation` URL 由它拼出;同一启动下 83 条 scoped 路由全在
+  `/backend/api/v9/environments/:environmentId/...`,`/api/v1/environments/` 前缀零挂载。
+
+  按维护者裁定(2026-08-08)复刻 #6633 / PR #6712 的四车道模式:
+
+  - **spec**(minor,纯增量):`ApiRoutesSchema` 声明 `email` 键 —— `POST {email}/send`
+    的挂载 base。`optional` 同 `datasources`:缺席 = 未挂载。
+  - **rest**(minor):`/discovery` 把 `routes.email` 作为**已录制挂载**的投影通告
+    (RouteManager 表中 `registerEmailEndpoints` 写入的那一行,mounted ⇒ advertised,
+    不二次计算)—— 挂载随 `apiPath` 移动时,通告按构造随行。未挂载 ⇒ 不通告。
+    奇偶钉(`discovery-advertised-direct-mounts.parity.test.ts`)扩展覆盖 email:
+    通告值 + `/send` 必须在同一张挂载表里解析得到,单侧移动即红。
+  - **client**(patch,行为修复):`email.send` 走 `getRoute('email')`;
+    `ScopedProjectClient.scope()` 从通告的 `routes.data` base 推导 scoped 前缀。
+    未连接、或服务端未通告 / 不可推导时,回退 URL 与旧硬编码**逐字节一致**。
+
+  面 3 为何用 `routes.data` 而不是 `scoping` 块:实测 discovery 的 `scoping` 只有
+  `enabled` / `resolution` / `scoped` / `environmentId` 四个键,**全是姿态、无路径**,
+  无法推导 base;`routes.data` 由 rest 通告为 `{realBase}{crud.dataPrefix}`,是唯一可
+  推导的来源。`dataPrefix` 被改成非 `/data` 时推导主动放弃、回退惯例(不做宽松再解析)。
+
+  `cloud.environments.*` 面(约 30 处)经测量**未改**:本仓无任何宿主挂载 `/cloud/*` ——
+  `@objectstack/rest` 的路由台账(`rest-route-ledger.ts`,由双向 conformance 门禁保证
+  穷尽)cloud 行数为 **0**;runtime dispatcher 无 cloud domain(无 `handleCloud`、无
+  `domains/cloud.ts`),且显式把 `/cloud` 列为他宿主的控制面(`skipPaths`)。而 `apiPath`
+  是 `@objectstack/rest` 独有配置项 —— 该面不随 `apiPath` 移动,按裁定「不随则不收敛」
+  保持原样。
+
+- 1bb5a56: fix(client): `QueryOptionsV2`'s JSDoc no longer calls itself "the recommended interface" for a deprecated method
+
+  `packages/client/src/index.ts`'s `data.find()` carries `@deprecated Use
+data.query() with standard QueryAST parameters instead` (#986: deprecate the
+  legacy-parameter entries, promote `data.query(AST)`), but the `QueryOptionsV2`
+  interface — one of the two options shapes `find()` accepts — described itself
+  as _"the recommended interface for `data.find()` queries"_. A recommended
+  vocabulary for a method the same file marks deprecated is a self-contradiction
+  in the published type declarations: `dist/index.d.ts` ships both claims to
+  every consumer's editor.
+
+  Maintainer ruling on #6795 (2026-08-09, upholding #986): keep the
+  `@deprecated` tag — `find` is implemented product direction and both the CLI
+  and objectui's data adapter already call `data.query()` — and reword only the
+  self-description. `QueryOptionsV2`'s JSDoc now says it is the vocabulary
+  `data.find()` still accepts, not a recommendation, and points at
+  `data.query()` for new code.
+
+  No behavior change: `QueryOptionsV2`'s fields, `find()`'s normalization, and
+  the `@deprecated` tag are all unchanged. JSDoc/`.d.ts` wording only.
+
+- Updated dependencies [3d5c090]
+- Updated dependencies [e5bd768]
+- Updated dependencies [e027b3e]
+- Updated dependencies [c2429b0]
+- Updated dependencies [445a0c2]
+- Updated dependencies [f6609e6]
+- Updated dependencies [a70358a]
+- Updated dependencies [97e7e3c]
+- Updated dependencies [8828b9e]
+- Updated dependencies [53068c1]
+- Updated dependencies [ee58392]
+- Updated dependencies [f16e54e]
+- Updated dependencies [06be54e]
+- Updated dependencies [259459d]
+- Updated dependencies [3f7f14e]
+- Updated dependencies [6968885]
+- Updated dependencies [eaed61f]
+- Updated dependencies [debe2f6]
+- Updated dependencies [97b0798]
+- Updated dependencies [43a7a8d]
+- Updated dependencies [73f69dc]
+- Updated dependencies [04c56aa]
+- Updated dependencies [b3efeb7]
+- Updated dependencies [ddd075a]
+- Updated dependencies [88154be]
+- Updated dependencies [e8dc61e]
+- Updated dependencies [2f3e793]
+- Updated dependencies [d8e8d9c]
+- Updated dependencies [94e749b]
+- Updated dependencies [ea1d916]
+- Updated dependencies [ae31a19]
+- Updated dependencies [e0f300b]
+- Updated dependencies [62b6a2f]
+- Updated dependencies [5b4780b]
+- Updated dependencies [a933452]
+- Updated dependencies [8140915]
+- Updated dependencies [7b48cf9]
+- Updated dependencies [b5404f4]
+- Updated dependencies [f764691]
+- Updated dependencies [e120a5a]
+- Updated dependencies [e650d67]
+- Updated dependencies [04476e7]
+- Updated dependencies [79228cd]
+- Updated dependencies [b3363e9]
+- Updated dependencies [2ef1807]
+- Updated dependencies [d03fe25]
+- Updated dependencies [2672f85]
+- Updated dependencies [11066f6]
+- Updated dependencies [916af17]
+- Updated dependencies [84c86fb]
+- Updated dependencies [2a2a9fb]
+- Updated dependencies [a2e157c]
+- Updated dependencies [95c4227]
+- Updated dependencies [2a61116]
+- Updated dependencies [d4df105]
+- Updated dependencies [e2798fa]
+- Updated dependencies [0fd8556]
+- Updated dependencies [74155c7]
+- Updated dependencies [6908830]
+- Updated dependencies [8b06bba]
+- Updated dependencies [4c54037]
+- Updated dependencies [0f7157b]
+- Updated dependencies [d9bef45]
+- Updated dependencies [f549a0d]
+- Updated dependencies [82da264]
+- Updated dependencies [f586f1a]
+- Updated dependencies [9b9b70f]
+- Updated dependencies [f5a9bc2]
+- Updated dependencies [881a3cc]
+- Updated dependencies [ad6317b]
+- Updated dependencies [8a88885]
+- Updated dependencies [5f7669e]
+- Updated dependencies [becbe53]
+- Updated dependencies [b127c8b]
+- Updated dependencies [a80302a]
+- Updated dependencies [474f131]
+- Updated dependencies [050cd82]
+- Updated dependencies [4d552af]
+- Updated dependencies [44d677c]
+- Updated dependencies [c32944d]
+- Updated dependencies [1dd780f]
+- Updated dependencies [c8d6f6e]
+- Updated dependencies [92a67f2]
+- Updated dependencies [9136327]
+- Updated dependencies [bf0ae99]
+- Updated dependencies [cb3b6cd]
+- Updated dependencies [73b7234]
+- Updated dependencies [d2b97c3]
+- Updated dependencies [59b794f]
+- Updated dependencies [fc3a36a]
+- Updated dependencies [69787f0]
+- Updated dependencies [5d022a1]
+- Updated dependencies [042b9ee]
+- Updated dependencies [f549a0d]
+- Updated dependencies [a36db28]
+- Updated dependencies [3f8817a]
+- Updated dependencies [a2443e3]
+- Updated dependencies [e1554b1]
+- Updated dependencies [4856789]
+- Updated dependencies [c3f4916]
+- Updated dependencies [33e0385]
+- Updated dependencies [2205363]
+- Updated dependencies [09fe58d]
+- Updated dependencies [d0a5ceb]
+- Updated dependencies [e18a162]
+- Updated dependencies [d6d1a50]
+- Updated dependencies [d127ff0]
+- Updated dependencies [9b86cf6]
+- Updated dependencies [8825a06]
+- Updated dependencies [5087ac6]
+- Updated dependencies [2d1ddf0]
+- Updated dependencies [354b00f]
+- Updated dependencies [3de535b]
+- Updated dependencies [fe2e15a]
+- Updated dependencies [c6b6bb4]
+- Updated dependencies [2f59da0]
+- Updated dependencies [8ad609c]
+- Updated dependencies [bbee302]
+- Updated dependencies [08863dd]
+- Updated dependencies [56664f5]
+- Updated dependencies [31cbe90]
+- Updated dependencies [90bbf25]
+- Updated dependencies [eb91eba]
+- Updated dependencies [42da73d]
+- Updated dependencies [643b7c7]
+- Updated dependencies [d0d5205]
+- Updated dependencies [1a15893]
+- Updated dependencies [b70e534]
+- Updated dependencies [2233a85]
+- Updated dependencies [62dd69a]
+- Updated dependencies [e15e679]
+- Updated dependencies [2ab1257]
+- Updated dependencies [4cc4fb7]
+- Updated dependencies [28d1eb7]
+- Updated dependencies [2c26040]
+- Updated dependencies [f758cec]
+- Updated dependencies [78f0be8]
+- Updated dependencies [35f7fb4]
+- Updated dependencies [a5302c7]
+- Updated dependencies [7084313]
+- Updated dependencies [0e043d8]
+- Updated dependencies [dadd1ad]
+- Updated dependencies [2f2e63c]
+- Updated dependencies [486d526]
+- Updated dependencies [89d7b35]
+- Updated dependencies [85ec26d]
+- Updated dependencies [f6476fc]
+- Updated dependencies [4ac12ef]
+- Updated dependencies [b88f5e8]
+- Updated dependencies [42cc219]
+- Updated dependencies [d7e0b42]
+- Updated dependencies [3510e4a]
+- Updated dependencies [aa4b90d]
+- Updated dependencies [54299ca]
+- Updated dependencies [dc61def]
+- Updated dependencies [251e888]
+- Updated dependencies [183b4c4]
+- Updated dependencies [2fdb36e]
+- Updated dependencies [20526f5]
+- Updated dependencies [c5eef1d]
+- Updated dependencies [e0f300b]
+- Updated dependencies [761a0ba]
+- Updated dependencies [be87153]
+- Updated dependencies [60f0dd8]
+- Updated dependencies [a87c5cd]
+- Updated dependencies [a47f338]
+- Updated dependencies [2598216]
+- Updated dependencies [2c7e62d]
+- Updated dependencies [eb7613c]
+- Updated dependencies [ecc9110]
+- Updated dependencies [f7bd4e2]
+- Updated dependencies [361bd5b]
+- Updated dependencies [1818998]
+- Updated dependencies [09ee21c]
+- Updated dependencies [f549a0d]
+- Updated dependencies [3fc2e48]
+- Updated dependencies [e8f435c]
+- Updated dependencies [41610f6]
+  - @objectstack/spec@17.0.0-rc.6
+  - @objectstack/core@17.0.0-rc.6
+
 ## 17.0.0-rc.5
 
 ### Major Changes

@@ -623,7 +623,7 @@ describe('readonlyWhen binds a TOTAL record (#4953)', () => {
     } as never)).toThrow(/could not be evaluated/);
   });
 
-  it('does not disturb the #4889 parent binding: unbound root still LOCKS, parent stays unmaterialised', () => {
+  it('does not disturb the #4889 parent binding: unbound root still LOCKS, and this function still materialises no header', () => {
     // `parent` is a row of ANOTHER object — this function has no declared-field
     // list for it — and an ABSENT parent is the signal #4889 depends on.
     const warnings: string[] = [];
@@ -631,8 +631,26 @@ describe('readonlyWhen binds a TOTAL record (#4953)', () => {
       warn: (m: string) => warnings.push(m),
     } as never)).toEqual({});
     expect(warnings.some((w) => w.includes("reads 'parent'") && w.includes('LOCKED'))).toBe(true);
-    // A parent that IS bound but does not carry the key stays a fault (no
-    // materialisation of the header): fail-open, the change goes through.
+    // [#6457 — RE-ANNOTATED, verdict deliberately NOT flipped here.]
+    //
+    // A parent that IS bound but does not carry the key is still a fault at
+    // THIS seam: fail-open, the change goes through. That was the hole #6457
+    // closed, and the sentence below is the reason this assertion nonetheless
+    // stays exactly as PR #6454 wrote it.
+    //
+    // #6457's ruling materialises the header INSIDE the engine's
+    // `resolveMasterDetailParent(s)`, using the MASTER object's declared-field
+    // table — the one thing this pure function does not and cannot have. So the
+    // strip's own contract is unchanged (its signature never grew a second field
+    // table), and a caller that hands it a genuinely sparse header still gets
+    // the fail-open answer pinned here. What changed is that the ENGINE no
+    // longer hands it one.
+    //
+    // The moved verdict therefore lives where the change lives, and is pinned
+    // end-to-end against a real driver in `engine-readonly-when-parent.test.ts`
+    // ("ROW 2 — THE FIX"), with its `requiredWhen` mirror in
+    // `engine-required-when-parent.test.ts`. Read the two together: this one
+    // says the strip did not move, that one says the write path did.
     const warnings2: string[] = [];
     expect(stripReadonlyWhenFields(invoiceLineFields, { quantity: 9999 }, { id: 'l1', invoice: 'inv1' }, {
       warn: (m: string) => warnings2.push(m),
@@ -884,9 +902,8 @@ describe('stripReadonlyFields — implicit readonly on autonumber (#5503)', () =
 
 describe('stripRuntimeOwnedFields — the INSERT-side strip (#5503)', () => {
   it('drops a caller-supplied record number', () => {
-    const out = stripRuntimeOwnedFields(
-      numberedFields, { title: 'x', account_number: 'ACC-777777' }, new Set(['title', 'account_number']),
-    );
+    const supplied = { title: 'x', account_number: 'ACC-777777' };
+    const out = stripRuntimeOwnedFields(numberedFields, { ...supplied }, supplied);
     expect(out).toEqual({ title: 'x' });
   });
 
@@ -895,24 +912,83 @@ describe('stripRuntimeOwnedFields — the INSERT-side strip (#5503)', () => {
     // strip lives (that is the #3043 protocol ingress); this narrower helper
     // must not quietly take over that job and start stripping columns the
     // trusted internal writers legitimately seed on create.
-    const out = stripRuntimeOwnedFields(
-      numberedFields,
-      { title: 'x', closed_at: '2021-01-01T00:00:00Z' },
-      new Set(['title', 'closed_at']),
-    );
+    const supplied = { title: 'x', closed_at: '2021-01-01T00:00:00Z' };
+    const out = stripRuntimeOwnedFields(numberedFields, { ...supplied }, supplied);
     expect(out).toEqual({ title: 'x', closed_at: '2021-01-01T00:00:00Z' });
   });
 
   it('KEEPS a hook-stamped value and returns the SAME object when nothing is stripped', () => {
     const d = { title: 'x', account_number: 'HOOK-1' };
-    expect(stripRuntimeOwnedFields(numberedFields, d, new Set(['title']))).toBe(d);
+    expect(stripRuntimeOwnedFields(numberedFields, d, { title: 'x' })).toBe(d);
   });
 
   it('KEEPS it under preserveAudit', () => {
+    const supplied = { account_number: 'LEGACY-7' };
     const out = stripRuntimeOwnedFields(
-      numberedFields, { account_number: 'LEGACY-7' }, new Set(['account_number']), undefined, { preserveAudit: true },
+      numberedFields, { ...supplied }, supplied, undefined, { preserveAudit: true },
     );
     expect(out).toEqual({ account_number: 'LEGACY-7' });
+  });
+});
+
+// #6339 — the insert-side twin of #5591, and wrong for the identical reason:
+// the strip runs AFTER `beforeInsert`, so the value on the key at strip time is
+// not necessarily the caller's. A key-only guard deleted whatever was standing
+// there, which killed a hook that RE-ISSUED a record number the caller had also
+// submitted — while the same hook's write survived on a caller that had not.
+describe('stripRuntimeOwnedFields — supplied VALUE identity, not just key presence (#6339)', () => {
+  it('KEEPS a record number a hook OVERWROTE, even though the caller supplied it', () => {
+    // The caller forged `account_number`; a beforeInsert hook then wrote its
+    // own over it. What sits on the key now is a PLATFORM write.
+    const supplied = { title: 'x', account_number: 'ACC-777777' };
+    const afterHooks = { title: 'x', account_number: 'HOOK-OVERWRITE' };
+    const out = stripRuntimeOwnedFields(numberedFields, afterHooks, supplied);
+    expect(out).toEqual({ title: 'x', account_number: 'HOOK-OVERWRITE' });
+    expect(out).toBe(afterHooks); // nothing dropped ⇒ same reference
+  });
+
+  it('STILL drops it when the hook wrote the caller value back unchanged', () => {
+    // Identity is the whole test: an unchanged value is indistinguishable from
+    // "no hook touched it", and the fail-safe direction is to strip.
+    const supplied = { account_number: 'ACC-777777' };
+    const out = stripRuntimeOwnedFields(numberedFields, { account_number: 'ACC-777777' }, supplied);
+    expect(out).toEqual({});
+  });
+
+  it('drops a caller-forged NaN — `Object.is`, not `===`', () => {
+    // `===` reports NaN !== NaN, which would read a forged NaN as "a hook
+    // rewrote this" and KEEP it. The one input where the loose operator
+    // inverts the verdict, so it is pinned rather than left to a reviewer.
+    const numeric = { fields: { seq: { type: 'autonumber' } } };
+    const supplied = { seq: Number.NaN };
+    const out = stripRuntimeOwnedFields(numeric, { seq: Number.NaN }, supplied);
+    expect(out).toEqual({});
+  });
+
+  it('does not read an inherited `Object.prototype` key as caller-supplied', () => {
+    // `constructor` matches the machine-name regex, so it is a legal field
+    // name; `name in supplied` would be TRUE for it on any plain object and
+    // would strip a hook stamp. Own-property check, pinned.
+    const oddly = { fields: { constructor: { type: 'autonumber' } } };
+    const out = stripRuntimeOwnedFields(oddly, { constructor: 'HOOK-1' }, {});
+    expect(out).toEqual({ constructor: 'HOOK-1' });
+  });
+
+  it('warns only for the value it really dropped', () => {
+    // The warning is the caller-visible half of the strip: a hook-overwritten
+    // key is COMMITTED, so warning about it would make the log lie in exactly
+    // the direction `runtimeOwnedStripWarning` promises it does not.
+    const warns: string[] = [];
+    const logger = { warn: (m: string) => warns.push(m) } as any;
+    stripRuntimeOwnedFields(
+      numberedFields, { account_number: 'HOOK-OVERWRITE' }, { account_number: 'ACC-777777' }, logger,
+    );
+    expect(warns).toEqual([]);
+    stripRuntimeOwnedFields(
+      numberedFields, { account_number: 'ACC-777777' }, { account_number: 'ACC-777777' }, logger,
+    );
+    expect(warns).toHaveLength(1);
+    expect(warns[0]).toContain("Field 'account_number'");
   });
 });
 

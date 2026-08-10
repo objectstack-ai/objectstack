@@ -241,6 +241,48 @@ describe('validateComponentProps — value verdicts', () => {
   });
 
   /**
+   * #6276 — the #5068 worklist entry #5775's key-by-key ruling left behind.
+   * The picker's renderer reads FOUR keys through one `ds.<k> ?? props.<k>`
+   * pattern; two of the flat spellings were declared and two were not, so this
+   * gate reported `sort`/`limit` as undeclared while the renderer honoured
+   * them. Both halves of the rule are asserted, because they fail differently:
+   * the key must stop being an unknown-key finding, and its VALUE must now be
+   * judged (before the declaration a wrong `limit` was stripped in silence).
+   */
+  it('reports nothing on the flat `sort` / `limit` shorthands the picker honours (#6276)', () => {
+    const findings = validateComponentProps(
+      stackWith([
+        {
+          type: 'element:record_picker',
+          id: 'project_picker',
+          properties: {
+            object: 'showcase_project',
+            labelField: 'name',
+            sort: [{ field: 'created_at', order: 'desc' }],
+            limit: 20,
+          },
+        },
+      ]),
+    );
+    expect(findings).toEqual([]);
+  });
+
+  it('now judges the VALUE of a flat `limit` instead of stripping it (#6276)', () => {
+    const findings = validateComponentProps(
+      stackWith([
+        {
+          type: 'element:record_picker',
+          properties: { object: 'showcase_project', limit: 'twenty' },
+        },
+      ]),
+    );
+    expect(invalid(findings).map((f) => f.path)).toEqual([
+      'pages[0].regions[0].components[0].properties.limit',
+    ]);
+    expect(invalid(findings)[0].message).toContain('expected number, received string');
+  });
+
+  /**
    * The container half of #5775. `page:card` `children` and the three thin
    * containers' `children` were all reported as unknown keys while the
    * renderers rendered exactly them; `record:path` `stages[].terminal` and the
@@ -267,6 +309,48 @@ describe('validateComponentProps — value verdicts', () => {
       ]),
     );
     expect(findings).toEqual([]);
+  });
+
+  /**
+   * #6776 — the five keys #5775's count missed. Each is read by an objectui
+   * renderer and each was reported here as an undeclared key, so objectui's
+   * published manifest and this gate disagreed about the same author's page.
+   * This is the acceptance test for the declaration half: the shapes that used
+   * to warn must now be silent.
+   */
+  it('reports nothing on the page:header / page:accordion keys the renderers honour (#6776)', () => {
+    const findings = validateComponentProps(
+      stackWith([
+        // objectui `apps/console/src/preview-samples.ts:68` verbatim — the
+        // measured warning site, on a non-record page.
+        { type: 'page:header', properties: { title: 'Welcome to the CRM', recordChrome: false } },
+        { type: 'page:header', properties: { title: 'Lead', showStar: false, showCopyId: false } },
+        { type: 'page:accordion', properties: { items: [], variant: 'card' } },
+        { type: 'page:tabs', properties: { tabStyle: 'card', items: [] } },
+      ]),
+    );
+    expect(findings).toEqual([]);
+  });
+
+  /**
+   * The other direction of the same card. `page:tabs.type` is now a tombstone,
+   * and a tombstone is REFUSED rather than reported as unknown — so the finding
+   * arrives as `component-props-invalid` carrying the rename prescription, not
+   * as `component-props-unknown-key` carrying nothing. The conversion that
+   * rewrites it is `retiredFromLoadPath`, so it deliberately does NOT run on
+   * this normalized input: an already-stored page keeps the old key and the
+   * author is told, which is the whole point of the tombstone.
+   */
+  it('refuses the retired `page:tabs.type` by name, with the prescription (#6776)', () => {
+    const findings = validateComponentProps(
+      stackWith([{ type: 'page:tabs', properties: { type: 'card', items: [] } }]),
+    );
+    expect(invalid(findings).map((f) => f.path)).toEqual([
+      'pages[0].regions[0].components[0].properties.type',
+    ]);
+    expect(invalid(findings)[0].message).toContain('tabStyle');
+    // Not an unknown key — the schema still declares it, as a tombstone.
+    expect(unknownKeys(findings)).toEqual([]);
   });
 
   /**

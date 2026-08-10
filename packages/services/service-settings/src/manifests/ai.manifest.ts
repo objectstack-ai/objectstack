@@ -185,8 +185,12 @@ const manifest = {
     { type: 'group', id: 'defaults', label: 'Generation defaults', required: false,
       description: 'Applied when an agent or chat request does not specify its own value.',
       visible: "${data.provider !== 'memory'}" },
+    // No `step` on purpose (#6550 ruling): since #6199 a declared `step` binds
+    // as a value constraint on both doors, and temperature's true domain is
+    // continuous on [0, 2] — a 0.1 grid refused legal values like `0.15`.
+    // `min`/`max` stay: the window IS the true domain, so it binds honestly.
     { type: 'slider', key: 'temperature', label: 'Temperature',
-      required: false, default: 0.7, min: 0, max: 2, step: 0.1,
+      required: false, default: 0.7, min: 0, max: 2,
       description: '0 = deterministic, 2 = highly creative.',
       visible: "${data.provider !== 'memory'}" },
     { type: 'number', key: 'max_tokens', label: 'Max output tokens',

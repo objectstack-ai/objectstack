@@ -116,8 +116,8 @@ describe('cloneData — real ObjectQL engine', () => {
         const { driver } = makeStubDriver();
         engine.registerDriver(driver, true);
         await engine.init();
-        engine.registry.registerObject(accountObject as any);
-        engine.registry.registerObject(lockedObject as any);
+        engine.registry.registerObject(accountObject);
+        engine.registry.registerObject(lockedObject);
         protocol = new ObjectStackProtocolImplementation(engine);
     });
 

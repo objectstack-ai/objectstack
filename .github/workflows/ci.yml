@@ -215,13 +215,110 @@ jobs:
       # naming the cause, not a silently empty shard. An EMPTY shard file must
       # short-circuit the test step below: `turbo run test` with zero --filter
       # args runs the entire workspace.
+      #
+      # WHERE THE AFFECTED DIFF STARTS (#6195, the #6129 family's third
+      # consumer). The one thing this base must never be is
+      # `github.event.pull_request.base.sha`.
+      #
+      # The payload's `base.sha` is frozen when the PR is OPENED and does not
+      # move on `synchronize`. HEAD, meanwhile, is the merge ref
+      # (`refs/pull/N/merge`) that the checkout above resolves by default on a
+      # `pull_request` event — no `ref:` is given, so this job stands on a merge
+      # commit containing everything main has today. Everything main gained
+      # while the PR sat open therefore lands between the two, and
+      # `turbo ls --affected` reads it as this PR's own changes: packages only
+      # SOMEBODY ELSE's merged PR touched get tested on this shard.
+      #
+      # The direction is conservative — the frozen base is an ancestor of HEAD,
+      # so its file set is a strict SUPERSET of this PR's own. Nothing that
+      # should run is skipped; what degrades is the optimisation itself, and it
+      # degrades with how long the PR has been open. At ~18 merges a day an
+      # affected-only shard drifts back toward a full run.
+      #
+      # Measured on turbo 2.10.7 against a real merge-ref fixture (base branch
+      # moved 1 commit touching pkg-b; this PR touched pkg-a only):
+      #   TURBO_SCM_BASE=<frozen base.sha>            -> pkg-a, pkg-b
+      #   TURBO_SCM_BASE=merge-base(origin/main,HEAD) -> pkg-a
+      #
+      # Four spellings that look like the fix and are not:
+      #   - `base.sha...HEAD` (three dots). Three-dot means
+      #     `merge-base(base.sha, HEAD)..HEAD`, and the frozen sha is ALREADY an
+      #     ancestor of HEAD, so it IS its own merge base and the set does not
+      #     move. Measured: still both packages. (pr-automation.yml records the
+      #     same result for its own diff — same fact, one family.)
+      #   - `HEAD^1`. Correct on a merge ref and silently wrong the day someone
+      #     gives this checkout a `ref:`, where parent^1 becomes the PR's
+      #     previous commit. `merge-base` is right under BOTH checkouts.
+      #   - Dropping the variable and letting turbo default to `main`. Measured
+      #     in a CI-shaped clone: `fetch-depth: 0` populates
+      #     `refs/remotes/origin/*`, NOT local heads, so there is no local `main`
+      #     — and turbo does not error, it silently returns the ENTIRE
+      #     workspace, untouched packages included. Safe, and the whole
+      #     optimisation gone.
+      #   - `TURBO_SCM_BASE=origin/$BASE_REF`, letting turbo resolve the ref.
+      #     Measured correct today, but it rests the shard's package set on
+      #     `turbo ls`'s internal choice of dot-ness — undocumented, and
+      #     `turbo ls` is experimental (see above). Resolving to a commit here
+      #     leaves turbo no choice to make.
       - name: Compute this shard's package set
         env:
-          TURBO_SCM_BASE: ${{ github.event.pull_request.base.sha }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          PINNED_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
+          SCM_BASE=''
           if [ "${{ github.event_name }}" = "pull_request" ]; then
-            pnpm exec turbo ls --affected --output=json > "$RUNNER_TEMP/turbo-ls.json"
+            if [ -z "$BASE_REF" ]; then
+              echo "::warning::This pull_request event carries no base branch, so the affected-set diff base cannot be computed."
+            else
+              # `fetch-depth: 0` above already makes this resolve — the fetch is
+              # the guard for the day that changes, not the normal path.
+              #
+              # `git cat-file -e` rather than the more idiomatic strict
+              # `git rev-parse` spelling, and the reason is not style.
+              # check-shard-attestation.mjs classifies a job as an aggregate GATE
+              # when the job's joined `run:` text contains BOTH the string
+              # "check-shard-attestation.mjs" and, as a bare substring, that
+              # script's own dash-dash-verify flag. This job already carries the
+              # first (its --emit step at the bottom), so spelling that flag
+              # anywhere in this step — including in a comment, since comments
+              # are part of `run:` — silently reclassifies the shard job as a
+              # gate. The drift guard then fails with two complaints that name
+              # nothing to do with the real edit ("its job-level if: is not
+              # always()", "never downloads the shard attestations it claims to
+              # count"). Measured both ways on this very change; do not "tidy"
+              # this back.
+              if ! git cat-file -e "refs/remotes/origin/$BASE_REF^{commit}" 2>/dev/null; then
+                git fetch --no-tags --quiet origin "+refs/heads/$BASE_REF:refs/remotes/origin/$BASE_REF" \
+                  || echo "::warning::Could not fetch origin/$BASE_REF; the merge-base resolution below will decide."
+              fi
+              # `if !` rather than a bare assignment on purpose: these steps run
+              # under `bash -e`, where a failing command substitution kills the
+              # step with no message at all.
+              if ! SCM_BASE=$(git merge-base "refs/remotes/origin/$BASE_REF" HEAD); then
+                SCM_BASE=''
+              fi
+            fi
+          fi
+          if [ -n "$SCM_BASE" ]; then
+            # The drift is printed, not just corrected: nothing in this log ever
+            # said which commit the affected diff started from, which is why the
+            # decay was invisible.
+            DRIFT=$(git rev-list --count "$PINNED_BASE_SHA..$SCM_BASE" 2>/dev/null || echo '?')
+            echo "Affected-set diff base: $SCM_BASE  (merge-base of origin/$BASE_REF and HEAD)"
+            echo "Frozen payload base.sha: $PINNED_BASE_SHA  -- $BASE_REF has moved $DRIFT commit(s) since it was frozen, and that drift is exactly what this step used to charge to this PR."
+            TURBO_SCM_BASE="$SCM_BASE" pnpm exec turbo ls --affected --output=json > "$RUNNER_TEMP/turbo-ls.json"
           else
+            # Falling back to the FULL package list, never to the frozen
+            # base.sha. This is not the #4690 silent-skip anti-pattern: that is
+            # about a gate PASSING on input it could not read, and the full list
+            # is a strict superset of the affected one — this shard still runs
+            # everything it would have run and more. Cost is minutes; the
+            # alternative is a red Test Core on a PR with nothing wrong with it.
+            # Push and merge-queue builds take this branch by design (the queue
+            # result IS the next main, so it gets main's validation).
+            if [ "${{ github.event_name }}" = "pull_request" ]; then
+              echo "::warning::Could not resolve merge-base(origin/$BASE_REF, HEAD); falling back to the full package list for this shard rather than diffing from the frozen base.sha (#6195)."
+            fi
             pnpm exec turbo ls --output=json > "$RUNNER_TEMP/turbo-ls.json"
           fi
           node scripts/partition-test-shards.mjs "$RUNNER_TEMP/turbo-ls.json" \
@@ -333,6 +430,9 @@ jobs:
     # means a future shard-count change cannot deadlock the repo. `name:` and
     # `if: always()` are therefore both load-bearing: this must not become
     # `if: !cancelled()` (see dogfood-gate), and it must not be renamed.
+    # Both halves are now asserted rather than only written down: the `name:`
+    # literal by `check:required-contexts` (#6865), the `if: always()` and the
+    # attestation roster by `check:shard-attestation` (#6082).
     #
     # ── It COUNTS credentials; it does not read one aggregate word (#6082) ──
     #
@@ -377,7 +477,7 @@ jobs:
       - name: Download test shard attestations
         id: attestations
         continue-on-error: true
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           pattern: shard-attest-test-*
           path: ${{ runner.temp }}/shard-attestations
@@ -422,7 +522,8 @@ jobs:
   # temporal conformance matrix holds to one standard. Its NAME still says
   # "live PG + MySQL" on purpose: the name IS the required check, so renaming
   # it would silently drop the gate wherever branch protection lists it — the
-  # same trap the dogfood shards note below.
+  # same trap the dogfood shards note below. `check:required-contexts` pins
+  # this literal, parenthetical and all (#6865).
   temporal-conformance:
     name: Temporal Conformance (live PG + MySQL)
     needs: filter
@@ -863,7 +964,10 @@ jobs:
     # EVERY pull request in the repo sat permanently BLOCKED (mergeable, all
     # checks green, merge button dead). #3622's own comment called for updating
     # branch protection; keeping the contract HERE instead means a future
-    # shard-count change cannot deadlock the repo a second time.
+    # shard-count change cannot deadlock the repo a second time — and since
+    # #6865 the bare name is pinned by `check:required-contexts` rather than
+    # only described here, so a rename fails in the ESLint job instead of in
+    # the queue.
     #
     # Also aggregates dogfood-verify (the CLI pass that used to ride shard 1),
     # so the one required context still covers everything it covered before
@@ -916,7 +1020,7 @@ jobs:
       - name: Download dogfood attestations
         id: attestations
         continue-on-error: true
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           pattern: shard-attest-dogfood-*
           path: ${{ runner.temp }}/shard-attestations
@@ -943,8 +1047,9 @@ jobs:
     needs: filter
     # See THE FILTER CONTRACT on the filter job's outputs (#4928). No
     # aggregation gate stands behind this job — its own name IS the required
-    # context — so this `if:` is the only thing between a filter flake and a
-    # green "Build Core" that built nothing.
+    # context, pinned by `check:required-contexts` since #6865 — so this `if:`
+    # is the only thing between a filter flake and a green "Build Core" that
+    # built nothing.
     if: ${{ !cancelled() && needs.filter.outputs.core != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -1176,7 +1281,8 @@ jobs:
   #
   # The NAME is the required-check contract — the same trap the dogfood shards
   # note above: renaming it silently drops the gate wherever branch protection
-  # lists it, with every PR still green.
+  # lists it, with every PR still green. Pinned by `check:required-contexts`
+  # since #6865.
   console-pin:
     name: Console Pin Gate
     needs: filter

@@ -8,6 +8,22 @@ import { registerScreenNodes } from './builtin/screen-nodes.js';
 import { InMemorySuspendedRunStore } from './suspended-run-store.js';
 import type { NodeExecutor } from './engine.js';
 import type { IAutomationService } from '@objectstack/spec/contracts';
+import { defineActionDescriptor } from '@objectstack/spec/automation';
+
+/**
+ * A pausing fixture's `resumeAuthority: 'any'` declaration (#5561).
+ *
+ * These tests continue their pause through the public `AutomationEngine.resume`
+ * door, and since #5561 step two a node type opts into that door rather than
+ * inheriting it — one that declares nothing is refused. Nothing in this file is
+ * about the resume gate itself (`resume-authority-gate.test.ts` owns it), so each
+ * pausing fixture states the posture it relies on, exactly as the four pausing
+ * built-ins do.
+ */
+const openPauser = (type: string) => defineActionDescriptor({
+    type, version: '1.0.0', name: type,
+    supportsPause: true, resumeAuthority: 'any',
+});
 
 // ─── Helper: Create a minimal logger for unit tests ─────────────────
 
@@ -463,6 +479,7 @@ describe('AutomationEngine', () => {
         function registerPausingNode(captured: { runId?: unknown }) {
             engine.registerNodeExecutor({
                 type: 'pause_node',
+                descriptor: openPauser('pause_node'),
                 async execute(_node, variables) {
                     captured.runId = variables.get('$runId');
                     return { success: true, suspend: true, correlation: 'req_1' };
@@ -690,6 +707,7 @@ describe('AutomationEngine', () => {
                 const e = new AutomationEngine(createTestLogger(), store);
                 e.registerNodeExecutor({
                     type: 'pause_node',
+                    descriptor: openPauser('pause_node'),
                     async execute() {
                         // Snapshot a nested object + array so we can assert the
                         // variable map round-trips through the store.
@@ -791,6 +809,7 @@ describe('AutomationEngine', () => {
                 const e = new AutomationEngine(createTestLogger()); // no store
                 e.registerNodeExecutor({
                     type: 'pause_node',
+                    descriptor: openPauser('pause_node'),
                     async execute() { return { success: true, suspend: true, correlation: 'req_1' }; },
                 });
                 e.registerFlow('p', {
@@ -1756,6 +1775,7 @@ describe('AutomationEngine - Back-edge re-entry (ADR-0044)', () => {
     it('cancelRun consumes a suspended run and records a terminal cancelled log', async () => {
         engine.registerNodeExecutor({
             type: 'pause',
+            descriptor: openPauser('pause'),
             async execute() { return { success: true, suspend: true, correlation: 'test-pause' }; },
         });
         engine.registerFlow('pausing_flow', {
@@ -2415,16 +2435,34 @@ describe('AutomationEngine - Execution Status', () => {
 // ─── ADR-0018: Action Descriptor Registry & Open Node Types ──────────
 
 describe('Action Descriptor Registry (ADR-0018)', () => {
-    /** Logger that records warn() messages so we can assert soft-validation. */
-    function createCapturingLogger(warnings: string[]) {
+    /** One captured `warn` call: its message AND its structured meta. */
+    type CapturedWarn = { msg: string; meta?: Record<string, any> };
+
+    /** Logger that records warn() calls so we can assert soft-validation. */
+    function createCapturingLogger(warnings: CapturedWarn[]) {
         const logger: any = {
             info: () => {},
-            warn: (msg: string) => warnings.push(msg),
+            warn: (msg: string, meta?: Record<string, any>) => warnings.push({ msg: String(msg), meta }),
             error: () => {},
             debug: () => {},
             child: () => logger,
         };
         return logger;
+    }
+
+    /**
+     * Whether a captured warning REPORTS the node type `t`.
+     *
+     * #6654 — the unknown type names are flow-author metadata with no
+     * newline constraint, so `warnUnknownNodeTypes` moved them out of the
+     * message into the structured `unknownTypes` slot. What these tests are
+     * about is unchanged (was the type reported, once), so they read the slot
+     * the finding now lives in; that the MESSAGE no longer carries it is
+     * pinned in `engine-residual-log-cause.test.ts`'s #6654 site 4.
+     */
+    function reportsType(w: CapturedWarn, t: string): boolean {
+        const unknown = (w.meta?.unknownTypes ?? []) as string[];
+        return w.msg.includes(t) || unknown.includes(t);
     }
 
     const baseFlow = (type: string) => ({
@@ -2443,7 +2481,7 @@ describe('Action Descriptor Registry (ADR-0018)', () => {
     });
 
     it('accepts a flow whose node type is a plugin-registered executor (the core bug fix)', () => {
-        const warnings: string[] = [];
+        const warnings: CapturedWarn[] = [];
         const engine = new AutomationEngine(createCapturingLogger(warnings));
 
         // A brand-new, non-built-in node type — previously rejected by the
@@ -2455,11 +2493,11 @@ describe('Action Descriptor Registry (ADR-0018)', () => {
 
         expect(() => engine.registerFlow('plugin_node_flow', baseFlow('send_sms'))).not.toThrow();
         // No "unknown node type" warning for a registered executor.
-        expect(warnings.some(w => w.includes('send_sms'))).toBe(false);
+        expect(warnings.some(w => reportsType(w, 'send_sms'))).toBe(false);
     });
 
     it('registers the flow and reports the unknown type once the vocabulary is sealed (#4771)', () => {
-        const warnings: string[] = [];
+        const warnings: CapturedWarn[] = [];
         const engine = new AutomationEngine(createCapturingLogger(warnings));
 
         // Soft-fail per ADR-0018: register but warn (a temporarily-absent
@@ -2467,28 +2505,28 @@ describe('Action Descriptor Registry (ADR-0018)', () => {
         // to the moment the vocabulary can no longer grow — during boot an
         // unknown type means "no plugin has registered it YET" (#4771).
         expect(() => engine.registerFlow('plugin_node_flow', baseFlow('not_a_real_type'))).not.toThrow();
-        expect(warnings.some(w => w.includes('not_a_real_type'))).toBe(false);
+        expect(warnings.some(w => reportsType(w, 'not_a_real_type'))).toBe(false);
 
         const audit = engine.sealNodeTypeVocabulary();
         expect(audit).toEqual([
             expect.objectContaining({ flowName: 'plugin_node_flow', unknownTypes: ['not_a_real_type'] }),
         ]);
-        expect(warnings.some(w => w.includes('not_a_real_type'))).toBe(true);
+        expect(warnings.some(w => reportsType(w, 'not_a_real_type'))).toBe(true);
     });
 
     it('warns INLINE for a flow registered after the vocabulary is sealed (#4771)', () => {
-        const warnings: string[] = [];
+        const warnings: CapturedWarn[] = [];
         const engine = new AutomationEngine(createCapturingLogger(warnings));
 
         // Post-boot registration (Studio publish / dev reload) is judged against
         // a complete vocabulary, so the assertion is true and immediate.
         engine.sealNodeTypeVocabulary();
         engine.registerFlow('plugin_node_flow', baseFlow('not_a_real_type'));
-        expect(warnings.filter(w => w.includes('not_a_real_type'))).toHaveLength(1);
+        expect(warnings.filter(w => reportsType(w, 'not_a_real_type'))).toHaveLength(1);
     });
 
     it('does not warn for the structural start/end node types', () => {
-        const warnings: string[] = [];
+        const warnings: CapturedWarn[] = [];
         const engine = new AutomationEngine(createCapturingLogger(warnings));
         engine.registerFlow('struct_only', {
             name: 'struct_only',
@@ -2501,11 +2539,11 @@ describe('Action Descriptor Registry (ADR-0018)', () => {
             edges: [{ id: 'e1', source: 'start', target: 'end' }],
         });
         engine.sealNodeTypeVocabulary();
-        expect(warnings.filter(w => w.includes('no registered executor'))).toHaveLength(0);
+        expect(warnings.filter(w => w.msg.includes('no registered executor'))).toHaveLength(0);
     });
 
     it('stays quiet about a DISABLED flow — a flow that cannot run cannot fail (#4771)', () => {
-        const warnings: string[] = [];
+        const warnings: CapturedWarn[] = [];
         const engine = new AutomationEngine(createCapturingLogger(warnings));
 
         // `status: 'obsolete'` unbinds the flow and guards execute(), so
@@ -2513,21 +2551,21 @@ describe('Action Descriptor Registry (ADR-0018)', () => {
         // this check was moved to stop making.
         engine.registerFlow('retired_flow', { ...baseFlow('not_a_real_type'), status: 'obsolete' });
         expect(engine.sealNodeTypeVocabulary()).toEqual([]);
-        expect(warnings.filter(w => w.includes('not_a_real_type'))).toHaveLength(0);
+        expect(warnings.filter(w => reportsType(w, 'not_a_real_type'))).toHaveLength(0);
     });
 
     it('seals idempotently — a second seal never re-reports the same finding (#4771)', () => {
-        const warnings: string[] = [];
+        const warnings: CapturedWarn[] = [];
         const engine = new AutomationEngine(createCapturingLogger(warnings));
         engine.registerFlow('plugin_node_flow', baseFlow('not_a_real_type'));
 
         expect(engine.sealNodeTypeVocabulary()).toHaveLength(1);
         expect(engine.sealNodeTypeVocabulary()).toHaveLength(1); // still reports as STATE…
-        expect(warnings.filter(w => w.includes('not_a_real_type'))).toHaveLength(1); // …but warns once
+        expect(warnings.filter(w => reportsType(w, 'not_a_real_type'))).toHaveLength(1); // …but warns once
     });
 
     it('says nothing about a type a plugin registered AFTER the flow (the #4771 false alarm)', () => {
-        const warnings: string[] = [];
+        const warnings: CapturedWarn[] = [];
         const engine = new AutomationEngine(createCapturingLogger(warnings));
 
         // Exactly the showcase cold-boot order: flows are pulled first, the
@@ -2537,7 +2575,7 @@ describe('Action Descriptor Registry (ADR-0018)', () => {
         engine.registerNodeExecutor({ type: 'approval', async execute() { return { success: true }; } });
 
         expect(engine.sealNodeTypeVocabulary()).toEqual([]);
-        expect(warnings.filter(w => w.includes('approval'))).toHaveLength(0);
+        expect(warnings.filter(w => reportsType(w, 'approval'))).toHaveLength(0);
     });
 
     it('publishes a descriptor into the registry when an executor declares one', () => {
@@ -2554,7 +2592,6 @@ describe('Action Descriptor Registry (ADR-0018)', () => {
                 supportsCancellation: false,
                 supportsRetry: true,
                 needsOutbox: true,
-                isAsync: false,
                 source: 'plugin',
                 deprecated: false,
                 maturity: 'ga',
@@ -2578,7 +2615,7 @@ describe('Action Descriptor Registry (ADR-0018)', () => {
                 type: 'send_sms', version: '1.0.0', name: 'Send SMS',
                 category: 'io', paradigms: ['flow'], supportsPause: false,
                 supportsCancellation: false, supportsRetry: true,
-                needsOutbox: false, isAsync: false, source: 'plugin', deprecated: false, maturity: 'ga',
+                needsOutbox: false, source: 'plugin', deprecated: false, maturity: 'ga',
             },
             async execute() { return { success: true }; },
         });

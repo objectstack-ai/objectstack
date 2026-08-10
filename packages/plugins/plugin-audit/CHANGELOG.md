@@ -1,5 +1,637 @@
 # @objectstack/plugin-audit
 
+## 17.0.0-rc.6
+
+### Patch Changes
+
+- c8ff269: fix(plugin-audit): consume the engine's bound `ctx.previous` and record one normalised view on both sides of the diff (#6656)
+
+  `plugin-audit` used to fetch its own pre-image. `captureBefore`, registered on
+  `beforeUpdate` / `beforeDelete`, issued a `ql.findOne` for the target row and
+  stashed it on `ctx.__previous`, because `HookContext.previous` was "officially
+  typed but not always populated by the engine itself". That is no longer true on
+  any path this plugin registers for, so the read is retired and the writer reads
+  the contract value.
+
+  **The read that goes away** (measured with a counting driver on the audited
+  object, `driver.findOne` per write):
+
+  | write                                | before | after |
+  | :----------------------------------- | -----: | ----: |
+  | single-id `update()`                 |      2 |     1 |
+  | single-id `delete()`                 |      2 |     1 |
+  | predicate `update()`, 3 matched rows |      3 |     0 |
+  | predicate `delete()`, 3 matched rows |      3 |     0 |
+
+  The predicate column is the larger half and was pure waste. #5574 binds
+  `input.id` on every per-row _before_ context, which defeated the handler's own
+  `if (!id) return` bulk guard — so it read every matched row, and every result
+  was discarded, because `__previous` landed on the per-row _before_ context while
+  the per-row _after_ contexts (the ones the writer actually runs on) never saw
+  it. The engine's own matched-row read is untouched and still serves both phases,
+  so the ledger is unchanged.
+
+  **What the ledger records changes, and deliberately.** The two sides of an audit
+  diff came from two different pipelines: `before` through the engine's read path
+  (credentials masked, formulas hydrated, file references resolved) and `after`
+  from the raw write result. That asymmetry — not the redundant read — is why a
+  write that touched one field recorded phantom "changes" for every secret, file
+  and formula field on the record. Retiring the read makes both sides
+  same-source; the writer now also gives them one view, so the surface levels
+  upward rather than down to raw store contents:
+
+  - **Credential fields are masked on both sides.** Single-id delete `old_value`
+    still reads `••••••••` for a `secret` field — that face is byte-identical.
+    Change detection still runs on the raw values, so rotating a secret is still
+    recorded as a change; only the recorded values are masked.
+  - **A pre-existing leak is closed.** The stored `secret:` ref was already
+    reaching `sys_audit_log.new_value` on every create and update, and a
+    `password` field — which ADR-0100 stores in cleartext at rest — was landing
+    there **in plaintext**, in the audit ledger and in the `sys_activity` summary
+    rendered in the record feed. Both now record the mask.
+  - **Virtual (`formula`) fields leave the full snapshots.** `ctx.result` carries
+    hydrated formulas (#5504) and the raw pre-image structurally cannot, so
+    create `new_value` would have described a field delete `old_value` could
+    never carry. Only genuinely virtual fields are dropped: `autonumber` and
+    `summary` are stored columns present and equal on both sides, and they stay
+    in the snapshot.
+
+  Two consequences worth naming, both narrowing single-id delete to what bulk
+  delete already did: its `old_value` now records a file field's stored id rather
+  than the resolved `{id, name, size, url}` object, and drops formula values. An
+  object whose label field is a formula falls back to the record id in the
+  `sys_activity` label on delete for the same reason.
+
+  No audit coverage is removed: the plugin keeps its `afterInsert` / `afterUpdate`
+  / `afterDelete` registrations, which is what holds the engine's pre-image demand
+  gates open, and every one of them keeps the `excludeObjects` face from #5860.
+
+- 0f8d16a: perf(plugin-audit): 审计跳过名单上到注册面,平台内部表不再为白读买单 (#5860)
+
+  plugin-audit 的五个写入注册(`captureBefore` 的 `beforeUpdate`/`beforeDelete`,
+  `writeAudit` 的 `afterInsert`/`afterUpdate`/`afterDelete`)此前**不带任何对象范围**,
+  因而在引擎眼里全部是全局 hook。"哪些对象要审计"这个知识一直存在 —— `SKIP_OBJECTS`
+  —— 但它停在 handler 内部的早退里,注册面上看不见。于是按对象计算需求的两道门只能保守
+  判真:#5284 的单 id `update()` 前置行门、#5038 的批量门,对 `sys_job_queue`、
+  `sys_job_run`、`sys_upload_session`、`ai_traces` 这些表同样判"需要",每次写入白读一遍
+  行集,而 handler 的第一行就返回了。放大倍数最刺眼的是 `sys_job_queue`:每条队列消息
+  至少三次写入(publish / lease / terminal),自 #5160 起每封邮件都走它。
+
+  现在这五个注册带上 `excludeObjects`(#5928 / PR #6575 落地的声明式排除面),名单由
+  `SKIP_OBJECTS` **派生**而非重抄,两个面不可能各自漂移。handler 内的早退**保留**为纵深
+  防御 —— 它护住的是每一个非 hook 调用方 —— 所以审计写入的行为逐位守恒,变的只是引擎
+  能看见的范围。
+
+  **为什么是减法而不是允许列表**:对象全集在运行期是开放的。`/meta` PUT 会把新对象注册进
+  运行中的引擎,而 `SchemaRegistry.registerObject` 不发任何事件,插件侧没有可订阅的通道去
+  追平一份枚举出来的名单 —— 那样的名单会在启动时冻结,此后新建的对象**静默**不被审计,对
+  合规插件是无声的倒退。排除面没有这个失败模式:安装时没人听说过的对象默认被审计。这条性质
+  已单独钉在测试里。
+
+  顺带,`writeCommentMentions` 收为 `{ object: 'sys_comment' }` —— 它的 handler 第一行本就
+  拒绝其他对象,这是一个封闭的单名允许列表,现有契约一直表达得了。行为不变,但它不再出现在
+  其他任何对象的 `afterInsert` 需求里。
+
+- 83f7743: fix(plugin-audit): localize select option labels in the tracked-change activity summary (#7289)
+
+  `sys_activity.summary` is composed at **write time** and shipped verbatim to
+  every consumer at once — the record discussion feed, console home activity, the
+  header inbox, the Setup `sys_activity` list, and mobile/REST/SDUI.
+  `displayFieldValue` rendered a select/picklist value by scanning `field.options[]`
+  and returning the matching option's **authored** `label`. `field.options` comes
+  from `engine.getSchema(name)`, which is locale-independent metadata, while the
+  shipped bundles carry those same labels under
+  `objects.<object>.fields.<field>.options.<value>` (`sys_audit_log.fields.action.options.create = "创建"`).
+  Nothing on this path read them.
+
+  After #7230 localized the field label, that left a zh-CN workspace with
+
+  ```
+  阶段: Proposal → Closed Won
+  ```
+
+  — a half-localized string at the bottom of a fully-localized page. The tracked-change
+  branch now resolves the option label through the same locale-bound translator its
+  field label already uses, on the bundles' own key shape, with the authored label as
+  the fallback. A bundle miss returns `undefined`, so the authored label and then
+  `String(value)` answer exactly as before: the change can only replace an authored
+  label with that label's translation, never the reverse.
+
+  **The fired-milestone branch is deliberately left alone**, and the opt-out is by
+  construction rather than by omission — `renderMilestoneSummary` passes no option
+  resolver, so a select token there still renders its authored label byte-for-byte.
+  A milestone summary is an author-written sentence with no bundle key of its own,
+  and #7290 ruled leaving templates untranslated a contract decision. #7290's own
+  change (a reference id → the referenced record's title) is locale-_independent_
+  data — the same string in every locale — which is why it could be added to an
+  untranslated sentence; an option label is locale-_dependent_ rendering, so reading
+  the bundle there would guarantee a split sentence (`Deal moved to 已赢单`) in
+  exactly the case the bundle exists for. The tracked-change branch has the opposite
+  geometry: its frame is fully localized, so there the authored value is the mismatch.
+
+  **Read cost is unchanged.** This is a bundle lookup, not I/O: zero added reads on
+  every write shape, so the #6656 / PR #6977 retirement (2 → 1 reads per single-id
+  write, 3 → 0 per predicate write) that #7291 and #7333 preserved still stands,
+  and `displayFieldValue` stays synchronous.
+
+  Historical rows keep their write-time composition; only new writes improve.
+
+- 5777b1a: fix(plugin-audit): localize the tracked-change activity label and render lookup titles instead of raw ids (#7230)
+
+  `sys_activity.summary` is composed at write time and shipped verbatim to every
+  feed surface at once — the record discussion feed, console home activity, the
+  header inbox, the Setup `sys_activity` list, and mobile/REST/SDUI. Its
+  tracked-change branch (ADR-0052 §5b, `"<label>: <old> → <new>"`) was producing
+  strings like `Rating Owner: ∅ → oBK25…` at the bottom of an otherwise
+  fully-localized page. Two independent causes, both fixed here:
+
+  - **The label was never localized.** `renderTrackedChangeSummary` was the one
+    summary branch never handed the locale-bound `translate` its three siblings
+    (`messages.activityCreated` / `messages.activityDeleted` /
+    `messages.activityUpdated`, plus the object label via `displayLabelFor`) all
+    resolve through — an oversight against ADR-0053 / #3039 write-time
+    localization. The field label now resolves through the same translator, on the
+    bundles' own key shape (`objects.<object>.fields.<field>.label`), and falls
+    back to the authored `label`, then the machine key, exactly as before.
+  - **A reference value printed its raw id.** `displayFieldValue` resolved
+    select/picklist option labels only, so a `lookup` / `master_detail` / `user`
+    value fell through to `String(value)` — the stored 32-char id. It now renders
+    the referenced record's title, resolved through ADR-0079's
+    `resolveDisplayField` (`nameField` → deprecated `displayNameField` alias →
+    derivation) rather than a local name-guessing heuristic.
+
+  The `∅ →` notation is unchanged, and so is every other summary branch. The
+  change is restore-invariant: an id that cannot be resolved — a target removed
+  out of band, an unregistered object, a failing read — renders exactly as it did
+  before.
+
+  **Read cost, measured with a counting driver** (the same technique that measured
+  #6656 / PR #6977's retirement of the redundant pre-image read from this write
+  path, and pinned as cases in `audit-lookup-summary.test.ts`):
+
+  - **0 added reads** on every create, every delete, every update that moves no
+    tracked reference field, and every update that moves an _untracked_ one —
+    including on rows that do carry references. #6977's counts (1 `findOne` per
+    single-id write, 0 per predicate write) are untouched.
+  - **1 read per distinct target object** on an update that does move a tracked
+    reference: both sides of the change are answered by a single
+    `id: { $in: [...] }` selecting only the id and title columns, however many
+    tracked reference fields point at that object.
+
+  Historical `sys_activity` rows keep their original write-time composition — only
+  new writes improve.
+
+- 3e8e669: fix(plugin-audit): forward the caller's full execution envelope to the `sys_comment` sharing gates (#7141)
+
+  `callerContext()` in `comment-access-hooks.ts` rebuilt a five-field projection
+  of the caller's `ExecutionContext` (`userId` / `tenantId` / `positions` /
+  `permissions` / `isSystem`) before handing it to `ISharingService.canEdit`,
+  whose contract declares the **full** envelope and whose doc block tells callers
+  they "MUST NOT rebuild a subset of it" (#6523 / the #6206 ruling). #7136 (PR
+  #7140) widened the return _annotation_; this is the body.
+
+  The projection was doing two jobs at once and only one of them was correct:
+
+  - **Dropping the middleware-private keys was correct**, and is preserved.
+    plugin-security's middleware stamps the access DEPTH it resolved for the
+    object of the operation in flight — `sys_comment` — onto the context in place
+    (`sc.__readScope = …`), while these gates ask the sharing service about the
+    **parent record's** object. Forwarding that whole would hand one object's
+    widening to another object's owner-match, the stale-scope leak
+    `resolveWriteScopeForSharing` was extracted to prevent. The keys are now
+    dropped by the `__` **prefix** rather than by name, which also covers the
+    engine's other operation-private markers on that channel (`__expandRead`
+    waives the object-level CRUD check, `__referentialFieldClear` the
+    referential-clear write) and cannot go stale when a fifth key is added.
+  - **Dropping the principal fields was the defect.** Two of them decide the
+    verdict this gate then trusts:
+
+    - `onBehalfOf` — `ISecurityService.hasWriteBypass`, the `modifyAllRecords`
+      probe `SharingService.canEdit` consults last, is documented to fail CLOSED
+      on a delegated context and implements that by reading exactly
+      `context?.onBehalfOf?.userId`. Stripped, the guard could never fire on this
+      path, and the `/mcp` OAuth agent principal that `resolve-execution-context`
+      builds _with_ the delegation link reached the bypass probe looking like an
+      ordinary direct call.
+    - `principalKind` — `resolvePermissionSetsForContext` keys the ADR-0090 D10
+      rule "an agent's grants are EXACTLY its scope-derived ceiling" on
+      `principalKind === 'agent'`. Stripped, the additive human baseline was
+      appended to an agent's ceiling here, so the sets the bypass probe evaluated
+      were a superset of what the user consented to.
+
+    `systemPermissions`, `accessible_org_ids`, `posture`, `audience` and
+    `rlsMembership` were dropped by the same projection and are forwarded now for
+    the same reason.
+
+  The same envelope-minus-private-keys rule is applied to the read side's
+  parent-record probe, which spread the whole operation context into a `find` on
+  a different object.
+
+  No access depth is synthesised for the parent object: absent depth leaves the
+  sharing owner-match at its narrowest (`own`), which is the safe direction and
+  byte-for-byte what the projection produced. Resolving the parent's own depth
+  would WIDEN this gate and is deliberately left as a separate decision.
+
+  Enforcement effect: a delegated (`onBehalfOf`-carrying) principal is now refused
+  where the contract says it is refused. No caller gains access.
+
+- 62b6a2f: docs(spec,plugin-audit): record that the parent-record write gates match ownership at `own` BY DESIGN (#7144)
+
+  Documentation only — no gate changes what it returns for any input.
+
+  `ISharingService`'s write gates widen ownership "by write DEPTH", but that depth
+  is an INPUT the caller supplies: the CRUD middleware resolves it for the object
+  of the operation in flight and stamps it on the operation context. The
+  `sys_comment` gates (`@objectstack/plugin-audit`) and the `sys_attachment` kit
+  (`@objectstack/service-storage`) ask this service about the PARENT record's
+  object, so the stamped depth belongs to a different object and is dropped — and
+  the owner-match runs at its narrowest, `own`. A caller whose write depth on the
+  parent is `unit` / `unit_and_below` / `org` can therefore edit that parent
+  directly and is refused when editing a comment or attachment on it.
+
+  That divergence is deliberate and runs in the restrictive direction (refusals,
+  never a leak). The contract now says so, and — the part that matters for anyone
+  tempted to "fix" it — says WHY the alternative is not merely unimplemented:
+  `ISecurityService.resolveWriteScope`, the only tool a package outside
+  `plugin-security` has for the parent's depth, fails OPEN, because
+  `getEffectiveScope` returns `'org'` when no permission set mentions the object
+  at all — indistinguishable from a genuine `modifyAllRecords` holder. Handed to a
+  write gate as the depth it becomes authoritative on its own and the owner-match
+  short-exits `true` for every owned row of that object. Inheriting the parent's
+  edit authority starts with a depth primitive that can tell "org depth" from
+  "nothing matched", not with these gates.
+
+- 3c03725: fix(plugin-audit): `activityMilestones` summary tokens render referenced record titles, not raw ids (#7290)
+
+  ADR-0052 §5b.2 lets an object declare a semantic milestone whose summary
+  interpolates `{token}`s from the record — `{ field: 'stage', value:
+'closed_won', summary: 'Deal won by {owner}' }`. A token naming a `lookup` /
+  `master_detail` / `user` field was interpolated with no title map, so it fell
+  through to the raw stored id and the record timeline read `Deal won by oBK25…`.
+
+  The milestone branch takes **precedence** over the tracked-change branch, so on
+  every object that declares `activityMilestones` this was the string users saw,
+  and #7230's fix to the tracked-change branch never reached them.
+
+  A reference token now renders the referenced record's title, resolved through
+  ADR-0079's `resolveDisplayField`. The author's template wording is untouched —
+  only what a token resolves to changes — and the change is restore-invariant: an
+  id with no resolvable title (target removed out of band, unregistered object,
+  failing read) renders exactly as it did before. The empty-token rule is
+  unchanged too: an empty value still renders as the empty string, not `∅`.
+
+  **Read cost.** `matchMilestone` was split into detection and rendering so the
+  read plan is built from the tokens of the template that actually **fired**, and
+  only then. Measured with a copy-returning counting driver: every create, every
+  delete, every update of a milestone-declaring object that fires no milestone,
+  and every fired milestone whose template names no reference token all add
+  **zero** reads; a fired milestone with reference tokens costs **one read per
+  distinct target object** (two tokens onto the same object are one batched
+  `id: { $in: [...] }`), paid only on the transition itself. The alternative
+  placement — resolving before knowing whether a milestone fired — was measured at
+  **3 reads on a write that fires nothing**, and was rejected: it is the shape
+  #6656's Option A+ ruling was obtained to remove from this write path.
+
+  A target object that designates a credential field as its title is **not read
+  at all** — the same `collectMaskedReadFields` predicate the ledger masks with,
+  so no secret can reach a user-facing summary through this path.
+
+- d0d5205: refactor(core,plugin-audit,service-storage,plugin-reports): give the `__` operation-private-key convention a single owner (#7284)
+
+  `withoutOperationPrivateKeys` — the rule that a consumer forwarding a caller's
+  execution envelope to a question about a DIFFERENT object must first drop the
+  `__`-prefixed keys plugin-security stamped for the operation in flight — had been
+  hand-copied into three packages: `plugin-audit`'s comment access hooks (#7141),
+  `service-storage`'s attachment access hooks (#7145) and `plugin-reports`' report
+  service (#7204). Each carried its own `OPERATION_PRIVATE_KEY_PREFIX` and its own
+  doc block, and the prose had already diverged while the code still agreed — the
+  shape that makes a later divergence in behaviour hard to notice.
+
+  The helper now lives once, in `@objectstack/core`
+  (`security/operation-private-keys.ts`), exported from the package root. Core is
+  the only candidate all three consumers already depend on: `plugin-security` is
+  the producer of the convention and the most honest owner, but none of the three
+  depends on it and a string-prefix filter does not justify three new dependency
+  edges onto a plugin; `@objectstack/spec` is fenced off by Prime Directive #2. The
+  new home sits beside `assemble-execution-context.ts`, which owns the other end of
+  the same lifecycle — that file is where an `ExecutionContext` is built at a
+  transport entry point, this one is where it is stripped back down before being
+  forwarded.
+
+  The full reasoning moved with the code rather than being thinned: which keys the
+  middleware stamps and why each is a widening input, why they are dropped by
+  PREFIX and never by a name list, and why the fresh copy is load-bearing in both
+  directions. Each consumer keeps only its own local half — which object _its_
+  gates actually ask about — and points at the shared home.
+
+  No behaviour change: the three copies were byte-equivalent, and all three
+  packages' suites pass unchanged. Two new pins at the home cover it — the rule's
+  own behaviour, which no package-level test had ever asserted directly, and a
+  repository-shape pin that turns red if a fourth file declares its own copy.
+
+- 3415a61: refactor(plugin-sharing,plugin-audit): enforcement implementations annotate the full `ExecutionContext` (#7136)
+
+  The consumer half of #6523. That change converged 36 contract signatures onto
+  the complete `resolveAuthzContext` envelope, applying the #6206 ruling —
+  enforcement adjudicates on the whole envelope, never a per-site subset. The
+  implementations behind those contracts still annotated their own parameters
+  with `SharingExecutionContext`, the six-field shape the contracts used to name,
+  so nothing they could _read_ had widened.
+
+  `SharingService`, `SharingRuleService`, the sharing exec-context seam and
+  plugin-audit's comment-access gates now declare `ExecutionContext` on all 27 of
+  those parameters — plus the two return types that produce the contexts feeding
+  them — and the casts the narrow annotation forced are gone:
+
+  - `exec-context-seam.testkit.ts` resolved a REAL context and then had to force
+    it into the narrow type — `{ ...authz, isSystem: false } as unknown as
+SharingExecutionContext`. It now returns what it resolved, so a drift in
+    `resolveAuthzContext`'s output reaches the tests that trust this seam instead
+    of being absorbed by a double cast.
+  - `SharingRuleService`'s system context is typed as the envelope and passed as
+    itself, retiring `SYSTEM_CTX as any` at all 10 of its call sites — an erasure
+    on an enforcement input switches checking off for the whole argument, not
+    just for the readonly-array mismatch that provoked it.
+  - The `(context as any).userId` / `.tenantId` reads in `SharingService` now read
+    declared fields.
+
+  **No runtime behaviour changes.** The values were always complete — this
+  family's damage was type-side — so every gate answers exactly what it answered
+  before. Method parameters only WIDEN what they accept, so no caller is affected.
+
+  Two casts are deliberately kept, and are now documented where they sit:
+  `__readScope` / `__writeScope` are private keys plugin-security's middleware
+  stamps onto the context it forwards and are not fields of the envelope, and
+  `organizationId` is not on the envelope at all — that spelling has its own
+  history (#5858 / `check:org-identifier`) and was held out of this change.
+
+  Because a re-narrowed annotation would compile, ship and pass every test in
+  these packages, the convergence is pinned by a new compile-time module,
+  `exec-context-annotation.pin.ts`: it hands each enforcement parameter a fresh
+  literal naming envelope-only fields (`posture`, `accessible_org_ids`,
+  `org_user_ids`), which TypeScript's excess-property check rejects the moment a
+  parameter narrows back, plus negative cases so a parameter erased to `any`
+  cannot pass either.
+
+- 2465133: fix(plugins): sweep the service-lookup erasures out of the plugin composition roots, and fix the two alias-only HTTP reads it exposed (#4251 B5)
+
+  Batch B5 of the #4251 sweep: the seven remaining `packages/plugins/*` composition
+  roots. 35 lookup sites that had been erased to `any` now carry the slot's
+  contract, so the compiler checks what each plugin actually calls on the service
+  it resolved. The ratchet drops 143 sites / 32 files to 108 / 25.
+
+  **Two real defects, both of the shape this sweep exists to find.** Approvals'
+  actionable-link pages (ADR-0043) and sharing's public share-link REST routes each
+  read the HTTP server under `http-server` _only_ — the deprecated alias. The
+  ledger records `http.server` as canonical and as the only name present on every
+  provider path: `runtime.ts`'s `config.server` path registers no alias at all. On
+  that path both lookups threw, the surrounding `catch` swallowed it, and the
+  routes silently never mounted — approval e-mail action links 404'd and the
+  share-link surface was absent, with nothing in the log to say so. Both reads are
+  now canonical-first with the alias as fallback, each name in its own `try`
+  because `getService` throws on an empty slot (so `a() ?? b()` inside one `try`
+  never reaches `b` — the same correction #4393 made in metadata and
+  cloud-connection).
+
+  Typing choices follow the batch method: pure data-plane consumers take the
+  narrow contract (`IDataEngine` in reports), consumers that bind hook or
+  middleware seams take the engine seen whole (`IObjectQLEngine` in approvals,
+  sharing and pinyin-search), and slots with no contract get a **named** local
+  surface rather than `any` — plugin-email's `MailSettingsSurface`, and the
+  surfaces the consuming packages already declared (`ApprovalMessagingSurface`,
+  `SharingSecurityProbe`, `ReportEmail`). A named surface that omits a member
+  still makes the compiler name every call site; `any` says nothing.
+
+  No behaviour change beyond the two alias reads. No contract changes.
+
+- Updated dependencies [3d5c090]
+- Updated dependencies [e5bd768]
+- Updated dependencies [e027b3e]
+- Updated dependencies [c2429b0]
+- Updated dependencies [445a0c2]
+- Updated dependencies [f6609e6]
+- Updated dependencies [a70358a]
+- Updated dependencies [97e7e3c]
+- Updated dependencies [8828b9e]
+- Updated dependencies [53068c1]
+- Updated dependencies [ee58392]
+- Updated dependencies [f16e54e]
+- Updated dependencies [06be54e]
+- Updated dependencies [259459d]
+- Updated dependencies [3f7f14e]
+- Updated dependencies [6968885]
+- Updated dependencies [eaed61f]
+- Updated dependencies [debe2f6]
+- Updated dependencies [97b0798]
+- Updated dependencies [5fa04fb]
+- Updated dependencies [ad878e7]
+- Updated dependencies [43a7a8d]
+- Updated dependencies [73f69dc]
+- Updated dependencies [04c56aa]
+- Updated dependencies [3028326]
+- Updated dependencies [b3efeb7]
+- Updated dependencies [ddd075a]
+- Updated dependencies [88154be]
+- Updated dependencies [fe2dfa1]
+- Updated dependencies [6f6fec7]
+- Updated dependencies [e8dc61e]
+- Updated dependencies [2f3e793]
+- Updated dependencies [d8e8d9c]
+- Updated dependencies [94e749b]
+- Updated dependencies [ea1d916]
+- Updated dependencies [ae31a19]
+- Updated dependencies [e0f300b]
+- Updated dependencies [10c4ea9]
+- Updated dependencies [62b6a2f]
+- Updated dependencies [5b4780b]
+- Updated dependencies [a933452]
+- Updated dependencies [8140915]
+- Updated dependencies [7b48cf9]
+- Updated dependencies [b5404f4]
+- Updated dependencies [f764691]
+- Updated dependencies [e120a5a]
+- Updated dependencies [e650d67]
+- Updated dependencies [04476e7]
+- Updated dependencies [79228cd]
+- Updated dependencies [b3363e9]
+- Updated dependencies [2ef1807]
+- Updated dependencies [d03fe25]
+- Updated dependencies [2672f85]
+- Updated dependencies [11066f6]
+- Updated dependencies [916af17]
+- Updated dependencies [84c86fb]
+- Updated dependencies [2a2a9fb]
+- Updated dependencies [a2e157c]
+- Updated dependencies [95c4227]
+- Updated dependencies [2a61116]
+- Updated dependencies [d4df105]
+- Updated dependencies [55da611]
+- Updated dependencies [e2798fa]
+- Updated dependencies [0fd8556]
+- Updated dependencies [6fde910]
+- Updated dependencies [9c82b89]
+- Updated dependencies [74155c7]
+- Updated dependencies [742a6a5]
+- Updated dependencies [6908830]
+- Updated dependencies [8b06bba]
+- Updated dependencies [b7d3be4]
+- Updated dependencies [2a0d65e]
+- Updated dependencies [4c54037]
+- Updated dependencies [0f7157b]
+- Updated dependencies [d9bef45]
+- Updated dependencies [f549a0d]
+- Updated dependencies [82da264]
+- Updated dependencies [f586f1a]
+- Updated dependencies [9b9b70f]
+- Updated dependencies [f5a9bc2]
+- Updated dependencies [881a3cc]
+- Updated dependencies [ad6317b]
+- Updated dependencies [8a88885]
+- Updated dependencies [5f7669e]
+- Updated dependencies [becbe53]
+- Updated dependencies [b127c8b]
+- Updated dependencies [a80302a]
+- Updated dependencies [474f131]
+- Updated dependencies [050cd82]
+- Updated dependencies [4d552af]
+- Updated dependencies [44d677c]
+- Updated dependencies [c32944d]
+- Updated dependencies [1dd780f]
+- Updated dependencies [c8d6f6e]
+- Updated dependencies [92a67f2]
+- Updated dependencies [9136327]
+- Updated dependencies [bf0ae99]
+- Updated dependencies [edb4af0]
+- Updated dependencies [f09a2e7]
+- Updated dependencies [cb3b6cd]
+- Updated dependencies [73b7234]
+- Updated dependencies [d2b97c3]
+- Updated dependencies [59b794f]
+- Updated dependencies [fc3a36a]
+- Updated dependencies [69787f0]
+- Updated dependencies [5d022a1]
+- Updated dependencies [042b9ee]
+- Updated dependencies [55011af]
+- Updated dependencies [f549a0d]
+- Updated dependencies [a36db28]
+- Updated dependencies [3f8817a]
+- Updated dependencies [a2443e3]
+- Updated dependencies [e1554b1]
+- Updated dependencies [53ef057]
+- Updated dependencies [4856789]
+- Updated dependencies [c3f4916]
+- Updated dependencies [33e0385]
+- Updated dependencies [2205363]
+- Updated dependencies [09fe58d]
+- Updated dependencies [d0a5ceb]
+- Updated dependencies [e18a162]
+- Updated dependencies [d6d1a50]
+- Updated dependencies [d127ff0]
+- Updated dependencies [c804f19]
+- Updated dependencies [9b86cf6]
+- Updated dependencies [8825a06]
+- Updated dependencies [5087ac6]
+- Updated dependencies [2d1ddf0]
+- Updated dependencies [354b00f]
+- Updated dependencies [3de535b]
+- Updated dependencies [fe2e15a]
+- Updated dependencies [dbe92a7]
+- Updated dependencies [c6b6bb4]
+- Updated dependencies [59c544d]
+- Updated dependencies [2f59da0]
+- Updated dependencies [114e727]
+- Updated dependencies [5e247fd]
+- Updated dependencies [1a53a02]
+- Updated dependencies [1507ba3]
+- Updated dependencies [8ad609c]
+- Updated dependencies [bbee302]
+- Updated dependencies [08863dd]
+- Updated dependencies [56664f5]
+- Updated dependencies [31cbe90]
+- Updated dependencies [bf42e76]
+- Updated dependencies [90bbf25]
+- Updated dependencies [eb91eba]
+- Updated dependencies [42da73d]
+- Updated dependencies [643b7c7]
+- Updated dependencies [bfe689b]
+- Updated dependencies [d0d5205]
+- Updated dependencies [1a15893]
+- Updated dependencies [b70e534]
+- Updated dependencies [2233a85]
+- Updated dependencies [de43f94]
+- Updated dependencies [62dd69a]
+- Updated dependencies [e15e679]
+- Updated dependencies [2ab1257]
+- Updated dependencies [4cc4fb7]
+- Updated dependencies [28d1eb7]
+- Updated dependencies [2c26040]
+- Updated dependencies [f758cec]
+- Updated dependencies [3fb42d2]
+- Updated dependencies [78f0be8]
+- Updated dependencies [35f7fb4]
+- Updated dependencies [a5302c7]
+- Updated dependencies [82397b6]
+- Updated dependencies [4df747c]
+- Updated dependencies [7084313]
+- Updated dependencies [47a4e67]
+- Updated dependencies [9bc846b]
+- Updated dependencies [0e043d8]
+- Updated dependencies [4fedb11]
+- Updated dependencies [dadd1ad]
+- Updated dependencies [2f2e63c]
+- Updated dependencies [486d526]
+- Updated dependencies [89d7b35]
+- Updated dependencies [d13f627]
+- Updated dependencies [a841151]
+- Updated dependencies [85ec26d]
+- Updated dependencies [f6476fc]
+- Updated dependencies [4ac12ef]
+- Updated dependencies [1788e19]
+- Updated dependencies [b88f5e8]
+- Updated dependencies [42cc219]
+- Updated dependencies [d42a92f]
+- Updated dependencies [51d74ad]
+- Updated dependencies [d7e0b42]
+- Updated dependencies [3510e4a]
+- Updated dependencies [aa4b90d]
+- Updated dependencies [54299ca]
+- Updated dependencies [1f6ed16]
+- Updated dependencies [dc61def]
+- Updated dependencies [251e888]
+- Updated dependencies [183b4c4]
+- Updated dependencies [2fdb36e]
+- Updated dependencies [e787608]
+- Updated dependencies [20526f5]
+- Updated dependencies [c5eef1d]
+- Updated dependencies [e0f300b]
+- Updated dependencies [761a0ba]
+- Updated dependencies [d86815e]
+- Updated dependencies [61282f9]
+- Updated dependencies [be87153]
+- Updated dependencies [60f0dd8]
+- Updated dependencies [a87c5cd]
+- Updated dependencies [a47f338]
+- Updated dependencies [e13fd91]
+- Updated dependencies [2bd4e5e]
+- Updated dependencies [2598216]
+- Updated dependencies [2c7e62d]
+- Updated dependencies [eb7613c]
+- Updated dependencies [ecc9110]
+- Updated dependencies [f7bd4e2]
+- Updated dependencies [361bd5b]
+- Updated dependencies [1818998]
+- Updated dependencies [09ee21c]
+- Updated dependencies [f549a0d]
+- Updated dependencies [3fc2e48]
+- Updated dependencies [e8f435c]
+- Updated dependencies [41610f6]
+- Updated dependencies [c9bf940]
+- Updated dependencies [a682670]
+  - @objectstack/spec@17.0.0-rc.6
+  - @objectstack/objectql@17.0.0-rc.6
+  - @objectstack/platform-objects@17.0.0-rc.6
+  - @objectstack/core@17.0.0-rc.6
+
 ## 17.0.0-rc.5
 
 ### Patch Changes

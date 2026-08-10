@@ -2,7 +2,7 @@
 
 import { z } from 'zod';
 import { lazySchema } from '../shared/lazy-schema';
-import { strictUnknownKeyError } from '../shared/suggestions.zod';
+import { strictObject } from '../shared/strict-object';
 
 // Why the members sit in THIS order (the generated reference renders the JSDoc
 // below; this rationale stays in source):
@@ -69,6 +69,7 @@ export const ApproverType = z.enum([
   // ownership-queue implementation (queue entity + membership + claim).
   'queue',
 ]);
+export type ApproverType = z.input<typeof ApproverType>;
 
 /**
  * Deprecated approver-type spellings → their canonical replacement
@@ -368,26 +369,22 @@ export const APPROVAL_BRANCH_LABELS = {
  * worst instance of the ADR-0078 trap.
  */
 
-/** Keys {@link ApprovalNodeApproverSchema} declares (drift-guarded by approval.test.ts). */
-const APPROVAL_APPROVER_KEYS = ['type', 'value', 'resolveAs', 'group', 'organization'] as const;
-
-const approvalApproverUnknownKeyError = strictUnknownKeyError({
-  surface: 'this approval approver',
-  knownKeys: APPROVAL_APPROVER_KEYS,
-  aliases: {
-    approver: 'value',
-    userid: 'value',
-    org: 'organization',
-    grouplabel: 'group',
-    expandas: 'resolveAs',
-  },
-  history:
-    'Until #4001 these were dropped silently — the approver still parsed, so the ' +
-    'request could route to the wrong slate without a diagnostic.',
-});
-
 /** A single approver assignment on an Approval node. */
-export const ApprovalNodeApproverSchema = lazySchema(() => z.object({
+export const ApprovalNodeApproverSchema = lazySchema(() => strictObject(
+  {
+    surface: 'this approval approver',
+    aliases: {
+      approver: 'value',
+      userid: 'value',
+      org: 'organization',
+      grouplabel: 'group',
+      expandas: 'resolveAs',
+    },
+    history:
+      'Until #4001 these were dropped silently — the approver still parsed, so the ' +
+      'request could route to the wrong slate without a diagnostic.',
+  },
+  {
   // `xEnumDeprecated` lists enum members that still PARSE but must not be
   // offered for new authoring. Without it the Studio designer derives its
   // approver-type dropdown straight from this enum and keeps offering `role`
@@ -500,26 +497,25 @@ export const ApprovalNodeApproverSchema = lazySchema(() => z.object({
       + '`$parent` (one level up), or an organization slug. Omitted = the request\'s own organization.',
     xRef: { kind: 'organization', symbols: [...APPROVER_ORG_SYMBOLS] },
   }),
-}, { error: approvalApproverUnknownKeyError }).strict());
+}));
 export type ApprovalNodeApprover = z.input<typeof ApprovalNodeApproverSchema>;
 
-/**
- * A TYPED decision-output declaration (#3447 P2 follow-up). The bare-string
- * form of a `decisionOutputs` entry renders as free text; this form tells the
- * decision UI which picker to render and whether to collect one id or many.
- * The runtime treats `key` as the whitelist entry either way — `type` and
- * `multiple` only shape the INPUT WIDGET, never the accepted value.
- */
-const decisionOutputUnknownKeyError = strictUnknownKeyError({
-  surface: 'this decision-output declaration',
-  knownKeys: ['key', 'label', 'type', 'multiple', 'required'],
-  aliases: { name: 'key', widget: 'type', many: 'multiple' },
-  history:
-    'Until #4001 these were dropped silently — the declaration still parsed, so the ' +
-    'decision dialog rendered a different input than the author specified.',
-});
-
-export const DecisionOutputDefSchema = lazySchema(() => z.object({
+export const DecisionOutputDefSchema = lazySchema(() => strictObject(
+  /**
+   * A TYPED decision-output declaration (#3447 P2 follow-up). The bare-string
+   * form of a `decisionOutputs` entry renders as free text; this form tells the
+   * decision UI which picker to render and whether to collect one id or many.
+   * The runtime treats `key` as the whitelist entry either way — `type` and
+   * `multiple` only shape the INPUT WIDGET, never the accepted value.
+   */
+  {
+    surface: 'this decision-output declaration',
+    aliases: { name: 'key', widget: 'type', many: 'multiple' },
+    history:
+      'Until #4001 these were dropped silently — the declaration still parsed, so the ' +
+      'decision dialog rendered a different input than the author specified.',
+  },
+  {
   /** The output key — what the flow receives as `<nodeId>.<key>`. */
   key: z.string().min(1).describe('Output key (the flow variable name under the node id)'),
   /** Display label for the decision-dialog field; defaults to a title-cased key. */
@@ -549,7 +545,7 @@ export const DecisionOutputDefSchema = lazySchema(() => z.object({
    * filled them in.
    */
   required: z.boolean().optional().describe('Approver must supply this output to approve'),
-}, { error: decisionOutputUnknownKeyError }).strict());
+}));
 export type DecisionOutputDef = z.input<typeof DecisionOutputDefSchema>;
 
 /**
@@ -581,26 +577,25 @@ export function normalizeDecisionOutputs(
   return out;
 }
 
-/**
- * Per-node SLA escalation — carried on the Approval node itself, so each
- * Approval step on the canvas defines its own SLA.
- */
-const approvalEscalationUnknownKeyError = strictUnknownKeyError({
-  surface: 'this approval escalation',
-  knownKeys: ['enabled', 'timeoutHours', 'action', 'escalateTo', 'notifySubmitter'],
-  aliases: {
-    timeout: 'timeoutHours',
-    hours: 'timeoutHours',
-    sla: 'timeoutHours',
-    to: 'escalateTo',
-    target: 'escalateTo',
+export const ApprovalEscalationSchema = lazySchema(() => strictObject(
+  /**
+   * Per-node SLA escalation — carried on the Approval node itself, so each
+   * Approval step on the canvas defines its own SLA.
+   */
+  {
+    surface: 'this approval escalation',
+    aliases: {
+      timeout: 'timeoutHours',
+      hours: 'timeoutHours',
+      sla: 'timeoutHours',
+      to: 'escalateTo',
+      target: 'escalateTo',
+    },
+    history:
+      'Until #4001 these were dropped silently — the escalation still parsed, so an SLA ' +
+      'the author declared never fired the way they intended.',
   },
-  history:
-    'Until #4001 these were dropped silently — the escalation still parsed, so an SLA ' +
-    'the author declared never fired the way they intended.',
-});
-
-export const ApprovalEscalationSchema = lazySchema(() => z.object({
+  {
   enabled: z.boolean().default(false).describe('Enable SLA-based escalation for this node'),
   timeoutHours: z.number().min(1).describe('Hours before escalation triggers'),
   action: z.enum(['reassign', 'auto_approve', 'auto_reject', 'notify']).default('notify')
@@ -616,7 +611,7 @@ export const ApprovalEscalationSchema = lazySchema(() => z.object({
     xRef: { kind: 'position' },
   }),
   notifySubmitter: z.boolean().default(true).describe('Notify the original submitter on escalation'),
-}, { error: approvalEscalationUnknownKeyError }).strict());
+}));
 export type ApprovalEscalation = z.input<typeof ApprovalEscalationSchema>;
 /** Post-parse shape of {@link ApprovalEscalation} — defaults applied, transforms run (ADR-0122). */
 export type ApprovalEscalationParsed = z.infer<typeof ApprovalEscalationSchema>;
@@ -637,50 +632,43 @@ export type ApprovalEscalationParsed = z.infer<typeof ApprovalEscalationSchema>;
  * first-class engine-adjacent state owned by `plugin-approvals`; this config
  * only describes how the node behaves.
  */
-/** Keys {@link ApprovalNodeConfigSchema} declares (drift-guarded by approval.test.ts). */
-const APPROVAL_NODE_CONFIG_KEYS = [
-  'approvers', 'behavior', 'minApprovals', 'lockRecord', 'approvalStatusField',
-  'onEmptyApprovers', 'decisionOutputs', 'escalation', 'maxRevisions',
-] as const;
-
-const approvalNodeConfigUnknownKeyError = strictUnknownKeyError({
-  surface: "this approval node's config",
-  knownKeys: APPROVAL_NODE_CONFIG_KEYS,
-  aliases: {
-    approver: 'approvers',
-    approvalmode: 'behavior',
-    mode: 'behavior',
-    statusfield: 'approvalStatusField',
-    quorum: 'minApprovals',
+export const ApprovalNodeConfigSchema = lazySchema(() => strictObject(
+  {
+    surface: "this approval node's config",
+    aliases: {
+      approver: 'approvers',
+      approvalmode: 'behavior',
+      mode: 'behavior',
+      statusfield: 'approvalStatusField',
+      quorum: 'minApprovals',
+    },
+    guidance: {
+      // The ADR-0019 re-home map: the process-level approval concepts an author
+      // (or AI) trained on Salesforce-style approval processes reaches for, each
+      // pointed at where the concept lives on the flow graph now.
+      steps:
+        '`steps` is not an approval-node config key — ADR-0019 collapsed the standalone ' +
+        'approval process into Flow: successive approval STEPS are successive `approval` ' +
+        'NODES on the canvas, each with its own config.',
+      entryCriteria:
+        '`entryCriteria` is not an approval-node config key — entry criteria are the ' +
+        '`condition` on the EDGE entering this node (ADR-0019).',
+      onApprove:
+        '`onApprove` is not an approval-node config key — on-approve actions are the ' +
+        "nodes wired to this node's `approve` out-edge (ADR-0019).",
+      onReject:
+        '`onReject` is not an approval-node config key — on-reject actions are the ' +
+        "nodes wired to this node's `reject` out-edge (ADR-0019).",
+      rejectionBehavior:
+        '`rejectionBehavior` is not an approval-node config key — back-to-previous is a ' +
+        'declared BACK-EDGE to an earlier node (`type: \'back\'`, ADR-0044), and the ' +
+        'revise loop is the `revise` out-edge with `maxRevisions` bounding it.',
+    },
+    history:
+      'Until #4001 these were dropped silently — the node still parsed, so an approval ' +
+      'gate shipped that quietly ignored part of its declared behavior.',
   },
-  guidance: {
-    // The ADR-0019 re-home map: the process-level approval concepts an author
-    // (or AI) trained on Salesforce-style approval processes reaches for, each
-    // pointed at where the concept lives on the flow graph now.
-    steps:
-      '`steps` is not an approval-node config key — ADR-0019 collapsed the standalone ' +
-      'approval process into Flow: successive approval STEPS are successive `approval` ' +
-      'NODES on the canvas, each with its own config.',
-    entryCriteria:
-      '`entryCriteria` is not an approval-node config key — entry criteria are the ' +
-      '`condition` on the EDGE entering this node (ADR-0019).',
-    onApprove:
-      '`onApprove` is not an approval-node config key — on-approve actions are the ' +
-      "nodes wired to this node's `approve` out-edge (ADR-0019).",
-    onReject:
-      '`onReject` is not an approval-node config key — on-reject actions are the ' +
-      "nodes wired to this node's `reject` out-edge (ADR-0019).",
-    rejectionBehavior:
-      '`rejectionBehavior` is not an approval-node config key — back-to-previous is a ' +
-      'declared BACK-EDGE to an earlier node (`type: \'back\'`, ADR-0044), and the ' +
-      'revise loop is the `revise` out-edge with `maxRevisions` bounding it.',
-  },
-  history:
-    'Until #4001 these were dropped silently — the node still parsed, so an approval ' +
-    'gate shipped that quietly ignored part of its declared behavior.',
-});
-
-export const ApprovalNodeConfigSchema = lazySchema(() => z.object({
+  {
   /** Who may act on this step. */
   approvers: z.array(ApprovalNodeApproverSchema).min(1).describe('Allowed approvers for this node'),
 
@@ -780,7 +768,7 @@ export const ApprovalNodeConfigSchema = lazySchema(() => z.object({
    */
   maxRevisions: z.number().int().min(0).default(3)
     .describe('Max send-backs for revision before auto-reject (0 = send-back disabled)'),
-}, { error: approvalNodeConfigUnknownKeyError }).strict());
+}));
 export type ApprovalNodeConfig = z.input<typeof ApprovalNodeConfigSchema>;
 /** Post-parse shape of {@link ApprovalNodeConfig} — defaults applied, transforms run (ADR-0122). */
 export type ApprovalNodeConfigParsed = z.infer<typeof ApprovalNodeConfigSchema>;

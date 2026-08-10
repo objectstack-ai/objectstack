@@ -2,6 +2,24 @@
 
 import type { HookContext } from '@objectstack/spec/data';
 import type { IDataEngine } from '@objectstack/spec/contracts';
+// [#6656] The read-mask CONTRACT, imported rather than re-typed. `SECRET_MASK`
+// is the exact string the engine's read path substitutes and
+// `collectMaskedReadFields` is the exact predicate that picks the fields
+// (`secret` always; `password` unless the object is `managedBy: 'better-auth'`
+// — ADR-0100). A hand-copied `'••••••••'` or a re-typed "is it secret?" test
+// here would be a second de-facto contract that drifts from the engine's by one
+// character and leaks on the day it does; `secret-fields.ts` makes the same
+// argument for its own single definition. The `/core` subpath is the
+// engine-free surface of the same package.
+import { SECRET_MASK, collectMaskedReadFields } from '@objectstack/objectql/core';
+// [#7230] ADR-0079's record display-name contract, imported rather than
+// re-derived. `resolveDisplayField` IS the definition of "which field is this
+// object's human title" (`nameField` → deprecated `displayNameField` alias →
+// deterministic derivation). A local "try name, then title, then subject"
+// heuristic here would be a second de-facto contract that disagrees with the
+// picker, the search companion and the approval inbox the day an author sets
+// `nameField` — the same argument the SECRET_MASK import above makes.
+import { resolveDisplayField } from '@objectstack/spec/data';
 
 /**
  * Minimal structural view of `NotificationService.emit` (ADR-0030). Declared
@@ -141,6 +159,32 @@ const SKIP_OBJECTS = new Set<string>([
   'ai_traces',                   // LLM trace telemetry
 ]);
 
+/**
+ * [#5860] The same list, on the REGISTRATION face.
+ *
+ * `SKIP_OBJECTS` above is consulted inside the handlers, where it is invisible
+ * to the engine. That made every audit registration read as GLOBAL, so the
+ * per-object demand gates (#5284's single-id prior-row read on `update()`,
+ * #5038's bulk equivalents) had to answer "yes, a hook covers this object" for
+ * every one of these tables and buy a row read for a handler that returns on
+ * its first line. The knowledge existed; the contract had nowhere to put it
+ * until #5928 / PR #6575 added `excludeObjects`.
+ *
+ * Why the negative face and not `object: [...]` with the complement: the object
+ * universe is OPEN. `/meta` PUT registers new objects into a running engine and
+ * `SchemaRegistry.registerObject` emits no event, so an enumerated allow list
+ * would freeze at boot and silently stop auditing everything created after —
+ * for a compliance plugin, a regression that reports nothing. Subtraction has
+ * no such failure mode: an object nobody had heard of at install time is
+ * audited by default. Pinned in `audit-hook-object-scope.test.ts`.
+ *
+ * DERIVED, never re-typed: the registration face and the handlers' early return
+ * are one list, so neither can drift from the other. The early return stays as
+ * defence in depth — it is what protects every non-hook caller of these
+ * handlers, and it keeps audit behaviour bit-for-bit conserved by this change.
+ */
+const AUDIT_EXCLUDED_OBJECTS: string[] = [...SKIP_OBJECTS];
+
 /** Fields that are noise in diffs (always change, never user-meaningful). */
 const NOISE_FIELDS = new Set<string>([
   'updated_at',
@@ -190,8 +234,44 @@ function recordLabel(record: any, id: string): string {
  * exclusion is kept on its own merit — the derived-is-implied reason above —
  * and it is keyed on the field TYPE from `fieldDefs`, never on a key being
  * missing, which is why the fix one layer down did not disturb it.
+ *
+ * [#6656] Since the pre-image became the engine's raw row, `before` no longer
+ * carries formula keys at all while `after` still does (#5504's write-path
+ * hydration) — so the asymmetry is back on the SNAPSHOT faces, which this set
+ * never reached. `ledgerView(..., { dropComputed: true })` now applies the same
+ * rule to create `new_value` and delete `old_value`; this set is the single
+ * definition both faces read.
  */
 const COMPUTED_FIELD_TYPES = new Set<string>(['formula', 'summary', 'rollup', 'autonumber', 'auto_number']);
+
+/**
+ * [#6656] Field types that are **virtual** — no driver ever returns a column
+ * for one. Dropped from the FULL SNAPSHOTS (create `new_value`, delete
+ * `old_value`), which is a different job from {@link COMPUTED_FIELD_TYPES}
+ * above, on a deliberately different set.
+ *
+ * Why a snapshot needs the rule at all: `ctx.result` hydrates formulas onto
+ * what a write hands back (#5504) while the pre-image is the engine's RAW row,
+ * which structurally cannot carry them. Left in, create `new_value` would
+ * describe formula fields and delete `old_value` could not — the two snapshot
+ * faces disagreeing about their own vocabulary.
+ *
+ * ⚠️ Why it is NARROWER than `COMPUTED_FIELD_TYPES`, and must stay so. Of that
+ * set only `formula` is virtual — "formulas are virtual: no driver ever returns
+ * a column for one" (`engine.ts`, #5504). The rest are ordinary **stored**
+ * columns the engine maintains: `autonumber` is seeded at insert
+ * (`seedAutonumber`), and a `summary` roll-up is written to the parent row by
+ * `recomputeSummaries` and seeded at create time (#5749/#6063). They are
+ * present on BOTH sides and symmetric, so dropping them from a snapshot would
+ * delete real ledger content — the record's human-facing number, and its
+ * roll-up values — to fix an asymmetry they never had.
+ *
+ * The wider set stays correct for `diff()`, whose rule is a different one: a
+ * derived value's CHANGE is already implied by the source fields that produced
+ * it. That is about change reporting; this is about what a snapshot can
+ * contain. Do not unify them.
+ */
+const VIRTUAL_FIELD_TYPES = new Set<string>(['formula']);
 
 /**
  * Compute a shallow JSON diff between two records. Returns only keys whose
@@ -230,18 +310,98 @@ function safeStringify(v: any): string {
 }
 
 /**
- * Resolve a field value to its display string, preferring a select/picklist
- * option label over the raw stored value. Empty/missing → "∅".
+ * [#7230] Field types whose stored value is a FOREIGN RECORD ID rather than
+ * something a human can read. `user` is on the list because it is "a lookup
+ * specialized to the `sys_user` system object — stored IDENTICALLY (FK string
+ * column → sys_user.id)" (`field.zod.ts`), which is exactly the field class the
+ * measured symptom came from (`Rating Owner: ∅ → oBK25…`). `tree` is NOT on the
+ * list: it carries no `reference`, so there is no target object to read.
+ *
+ * The same three types, for the same reason, are what `plugin-approvals`
+ * resolves for its inbox display (`resolveLookupFields`) — one vocabulary for
+ * "this value is a reference", not two.
  */
-function displayFieldValue(field: any, value: any): string {
+const REFERENCE_FIELD_TYPES: ReadonlySet<string> = new Set(['lookup', 'master_detail', 'user']);
+
+/**
+ * [#7230] The referenced record ids carried by one lookup-field value.
+ *
+ * A single-value lookup stores one id; a `multiple: true` one stores an ARRAY
+ * (`field.zod.ts`: "Stores as Array/JSON"). Only the in-memory array shape is
+ * unpacked — a driver that hands the column back as an unparsed JSON string is
+ * left to the raw fallback rather than guessed at here, since parsing it would
+ * be this file inventing a storage contract it does not own.
+ *
+ * Objects are deliberately skipped: since #6656 both sides of the diff are raw
+ * driver rows, so an already-expanded `{id, name}` cannot reach here, and
+ * writing a limb for it would be consumer-side tolerance for a producer that
+ * does not exist (PD #12).
+ */
+function referenceIdsOf(value: any): string[] {
+  const one = (v: any): string | null => {
+    if (v === null || v === undefined || v === '') return null;
+    if (typeof v === 'string') return v.trim() ? v : null;
+    if (typeof v === 'number' || typeof v === 'bigint') return String(v);
+    return null;
+  };
+  if (Array.isArray(value)) return value.map(one).filter((v): v is string => v !== null);
+  const single = one(value);
+  return single === null ? [] : [single];
+}
+
+/**
+ * Resolve a field value to its display string, preferring a select/picklist
+ * option label — or, for a reference field, the referenced record's title —
+ * over the raw stored value. Empty/missing → "∅".
+ *
+ * [#7230] `titlesFor` is the pre-resolved id → title map for THIS field's
+ * target object (see `resolveLookupTitles`). It is a lookup into an
+ * already-batched result, never a read: this function stays synchronous, and a
+ * caller with nothing to resolve passes nothing and keeps today's behaviour
+ * exactly. [#7290] Both summary branches now feed it: the tracked-change diff
+ * (`renderTrackedChangeSummary`) and the fired-milestone template
+ * (`renderMilestoneSummary`), each from its own read plan.
+ *
+ * An id with no entry in the map — record deleted, object unregistered, title
+ * field unresolvable — falls back to the raw id, which is what this function
+ * returned before the branch existed. The change is therefore restore-invariant:
+ * it can only replace an id with a title, never a title with an id.
+ *
+ * [#7289] `optionLabelFor` is the locale-bound lookup for THIS field's option
+ * labels — `objects.<object>.fields.<field>.options.<value>`, the key shape the
+ * shipped bundles actually carry (`translations/zh-CN.objects.generated.ts`:
+ * `sys_audit_log.fields.action.options.create = "创建"`). Like `titlesFor` it is an
+ * already-resolved lookup and never I/O, so this function stays SYNCHRONOUS;
+ * and like `titlesFor`, a caller with nothing to resolve passes nothing and
+ * keeps today's behaviour exactly. That opt-in shape is load-bearing rather
+ * than stylistic — see {@link renderMilestoneSummary}, which passes nothing on
+ * purpose and is documented there.
+ *
+ * The lookup is consulted only where a DECLARED OPTION MATCHED, so a value
+ * matching no option still renders `String(value)` as before. Bundles are
+ * generated FROM the declared options (`os i18n extract`), so a bundle key with
+ * no matching declared option cannot arise, and a miss falls straight back to
+ * the authored `label`. Same restore-invariance as the reference branch: it can
+ * only replace an authored label with that label's translation.
+ */
+function displayFieldValue(
+  field: any,
+  value: any,
+  titlesFor?: Map<string, string>,
+  optionLabelFor?: (optionValue: string) => string | undefined,
+): string {
   if (value === null || value === undefined || value === '') return '∅';
+  if (titlesFor && typeof field?.type === 'string' && REFERENCE_FIELD_TYPES.has(field.type)) {
+    const ids = referenceIdsOf(value);
+    if (ids.length > 0) return ids.map((id) => titlesFor.get(id) ?? id).join(', ');
+  }
   const options = field?.options;
   if (Array.isArray(options)) {
     for (const o of options) {
       const ov = o && typeof o === 'object' ? (o.value ?? o.name ?? o.label) : o;
       if (ov === value) {
         const ol = o && typeof o === 'object' ? (o.label ?? o.name ?? ov) : o;
-        return String(ol);
+        return optionLabelFor?.(String(ov)) ?? String(ol);
       }
     }
   }
@@ -249,61 +409,251 @@ function displayFieldValue(field: any, value: any): string {
 }
 
 /**
- * ADR-0052 §5b — declarative activity. For fields declared `trackHistory: true`,
- * render the diff the writer already captured as a human-readable timeline
- * summary ("Stage: Proposal → Closed Won"; multiple changes joined by "; "),
- * using the field label and select option labels. Returns null when no tracked
- * field changed, so the caller falls back to the generic "Updated <object>".
+ * [#7230] Every tracked-change field of `fields` that is a reference, grouped
+ * by TARGET OBJECT — the tracked-change branch's read plan for
+ * {@link resolveLookupTitles}.
+ *
+ * Grouping by target object (not by field, and emphatically not by row) is what
+ * keeps this off the write hot path: N tracked reference fields pointing at one
+ * object cost ONE read, and a write that changes no tracked reference field
+ * produces an empty plan and therefore no read at all.
  */
-function renderTrackedChangeSummary(
+function planTrackedLookupReads(
   fields: Record<string, any> | undefined | null,
   oldVals: Record<string, any> | null,
   newVals: Record<string, any> | null,
+): Map<string, Set<string>> {
+  const byObject = new Map<string, Set<string>>();
+  if (!fields || !newVals) return byObject;
+  for (const key of Object.keys(newVals)) {
+    const field = fields[key];
+    if (!field || field.trackHistory !== true) continue;
+    if (typeof field.type !== 'string' || !REFERENCE_FIELD_TYPES.has(field.type)) continue;
+    const reference = typeof field.reference === 'string' ? field.reference.trim() : '';
+    if (!reference) continue;
+    for (const raw of [oldVals ? oldVals[key] : undefined, newVals[key]]) {
+      for (const id of referenceIdsOf(raw)) {
+        let set = byObject.get(reference);
+        if (!set) { set = new Set<string>(); byObject.set(reference, set); }
+        set.add(id);
+      }
+    }
+  }
+  return byObject;
+}
+
+/**
+ * ADR-0052 §5b — declarative activity. For fields declared `trackHistory: true`,
+ * render the diff the writer already captured as a human-readable timeline
+ * summary ("Stage: Proposal → Closed Won"; multiple changes joined by "; "),
+ * using the field label, select option labels and referenced record titles.
+ * Returns null when no tracked field changed, so the caller falls back to the
+ * generic "Updated <object>".
+ *
+ * [#7230] `translate` is the SAME locale-bound translator the three sibling
+ * summary branches already resolve through (`messages.activityCreated` /
+ * `messages.activityDeleted` / `messages.activityUpdated`, and `displayLabelFor`
+ * for the object name). This branch was the one never handed it, so a
+ * fully-localized page ended with an English field label — ADR-0053 /
+ * framework#3039 write-time localization, applied where it was missed. The key
+ * shape is the bundle's own (`objects.<object>.fields.<field>.label`), and a
+ * miss returns `undefined` so the authored def label, then the machine key,
+ * still answer exactly as before.
+ *
+ * [#7289] The select/picklist VALUE is localized through that same translator
+ * on the bundles' own option key shape, one line below the label. This branch's
+ * FRAME is fully localized — the verb template and the object label (ADR-0053 /
+ * framework#3039), and the field label since #7230 — so an authored-language
+ * option value was the single remaining untranslated token inside it
+ * (`阶段: Proposal → Closed Won` on a zh-CN page). Filling it makes the string
+ * uniformly localized instead of half-localized, which is the whole defect.
+ */
+function renderTrackedChangeSummary(
+  objectName: string,
+  fields: Record<string, any> | undefined | null,
+  oldVals: Record<string, any> | null,
+  newVals: Record<string, any> | null,
+  translate: (key: string, params?: Record<string, unknown>) => string | undefined,
+  lookupTitles?: Map<string, Map<string, string>>,
 ): string | null {
   if (!fields || !newVals) return null;
   const parts: string[] = [];
   for (const key of Object.keys(newVals)) {
     const field = fields[key];
     if (!field || field.trackHistory !== true) continue;
-    const label = (typeof field.label === 'string' && field.label) || key;
-    const from = displayFieldValue(field, oldVals ? oldVals[key] : undefined);
-    const to = displayFieldValue(field, newVals[key]);
+    const label =
+      translate(`objects.${objectName}.fields.${key}.label`) ??
+      (typeof field.label === 'string' && field.label.length > 0 ? field.label : key);
+    const reference = typeof field.reference === 'string' ? field.reference : undefined;
+    const titlesFor = reference ? lookupTitles?.get(reference) : undefined;
+    // Only a field that DECLARES options can consume this, so the ordinary
+    // tracked scalar allocates no closure; both calls below share the one.
+    const optionLabelFor = Array.isArray(field.options)
+      ? (optionValue: string): string | undefined =>
+          translate(`objects.${objectName}.fields.${key}.options.${optionValue}`)
+      : undefined;
+    const from = displayFieldValue(
+      field,
+      oldVals ? oldVals[key] : undefined,
+      titlesFor,
+      optionLabelFor,
+    );
+    const to = displayFieldValue(field, newVals[key], titlesFor, optionLabelFor);
     parts.push(`${label}: ${from} → ${to}`);
   }
   return parts.length > 0 ? parts.join('; ') : null;
 }
 
 /**
+ * [#7290] The `{token}` pattern of an `activityMilestones` summary template.
+ *
+ * A FRESH instance per call, deliberately: a module-level `/g` regex carries
+ * `lastIndex` between callers, and this one is read twice per fired milestone
+ * (once to plan the reads, once to render). One definition, no shared cursor.
+ */
+function milestoneTokenRe(): RegExp {
+  return /\{(\w+)\}/g;
+}
+
+/**
  * ADR-0052 §5b.2 — declarative semantic milestones. If a watched field
  * transitioned INTO a configured `value` on this update (before ≠ value, after =
- * value), return the interpolated summary (and optional activity type). `{token}`
- * in the template is replaced by the record's field value, resolving select
- * option labels when possible. Returns null when no milestone fired (needs the
- * `before` snapshot to detect a transition). Takes precedence over the raw
- * field-change summary.
+ * value), return the matched summary TEMPLATE (and optional activity type).
+ * Returns null when no milestone fired (needs the `before` snapshot to detect a
+ * transition). Takes precedence over the raw field-change summary.
+ *
+ * [#7290] Detection only — the `{token}` interpolation moved out to
+ * {@link renderMilestoneSummary}, with {@link planMilestoneTokenReads} between
+ * them. Splitting it is what keeps the reference read OFF the write hot path
+ * and this function synchronous:
+ *
+ *   match (sync, no I/O) → plan from the MATCHED template's tokens → one read
+ *   per distinct target object → render (sync)
+ *
+ * A read placed BEFORE this function would have to speculate on the whole
+ * after-row, and would therefore fire on every update of a milestone-declaring
+ * object — including the overwhelming majority where no milestone fires at all.
+ * That is the shape #6656 / PR #6977's ruling was obtained to remove from this
+ * file, so the plan is built from what actually matched, or not at all.
  */
 function matchMilestone(
   objectDef: any,
-  fields: Record<string, any> | null,
   before: Record<string, any> | null,
   after: Record<string, any> | null,
-): { summary: string; type?: string } | null {
+): { template: string; type?: string } | null {
   const milestones =
     objectDef && Array.isArray(objectDef.activityMilestones) ? objectDef.activityMilestones : null;
   if (!milestones || !after || !before) return null;
   for (const m of milestones) {
     if (!m || typeof m.field !== 'string' || typeof m.summary !== 'string') continue;
     if (after[m.field] === m.value && before[m.field] !== m.value) {
-      const summary = m.summary.replace(/\{(\w+)\}/g, (_match: string, key: string) => {
-        const v = after[key];
-        if (v === null || v === undefined || v === '') return '';
-        const field = fields ? fields[key] : undefined;
-        return field ? displayFieldValue(field, v) : String(v);
-      });
-      return { summary, type: typeof m.type === 'string' ? m.type : undefined };
+      return { template: m.summary, type: typeof m.type === 'string' ? m.type : undefined };
     }
   }
   return null;
+}
+
+/**
+ * [#7290] The read plan for one FIRED milestone template — the referenced ids
+ * its `{token}`s actually name, grouped by TARGET OBJECT.
+ *
+ * Keyed on the matched template rather than on the row: a template naming no
+ * reference field (`'Task completed: {title}'` — the shipped showcase example)
+ * produces an empty plan and therefore no read, and a token whose value is
+ * empty contributes nothing because `referenceIdsOf` yields no ids for it.
+ * Grouping by target object gives the same batching as
+ * {@link planTrackedLookupReads}: N reference tokens pointing at one object are
+ * answered by ONE `id: { $in: [...] }`.
+ *
+ * Unlike the tracked-change plan this one does NOT filter on `trackHistory`.
+ * The token is whatever the milestone author wrote, and `trackHistory` governs
+ * the field-change summary — a different branch, which a fired milestone
+ * replaces outright. Requiring it here would silently render raw ids for the
+ * exact templates authors write (`'Deal won by {owner}'` on an untracked
+ * `owner`), which is the defect, not a guard against it.
+ *
+ * Only the AFTER row is read, because that is the only side the interpolation
+ * consults — a milestone summary describes the state the record arrived in.
+ */
+function planMilestoneTokenReads(
+  template: string,
+  fields: Record<string, any> | undefined | null,
+  after: Record<string, any> | null,
+): Map<string, Set<string>> {
+  const byObject = new Map<string, Set<string>>();
+  if (!fields || !after) return byObject;
+  for (const match of template.matchAll(milestoneTokenRe())) {
+    const key = match[1];
+    const field = fields[key];
+    if (!field || typeof field.type !== 'string' || !REFERENCE_FIELD_TYPES.has(field.type)) continue;
+    const reference = typeof field.reference === 'string' ? field.reference.trim() : '';
+    if (!reference) continue;
+    for (const id of referenceIdsOf(after[key])) {
+      let set = byObject.get(reference);
+      if (!set) { set = new Set<string>(); byObject.set(reference, set); }
+      set.add(id);
+    }
+  }
+  return byObject;
+}
+
+/**
+ * [#7290] Interpolate a fired milestone's `{token}`s from the after-row.
+ *
+ * The author's template wording is theirs and is not touched — only what a
+ * token RESOLVES TO changes: a `lookup` / `master_detail` / `user` token now
+ * renders the referenced record's title instead of the raw 32-char id
+ * (`'Deal won by oBK25…'` → `'Deal won by 张伟'`), using the already-batched
+ * `lookupTitles` from {@link planMilestoneTokenReads}. Everything else is
+ * byte-identical to the pre-#7290 behaviour, including the empty-value rule:
+ * a token whose value is null/undefined/'' renders as the EMPTY STRING here,
+ * not as `displayFieldValue`'s `∅` — a milestone sentence is prose, not a
+ * diff row.
+ *
+ * Restore-invariant for the same reason `displayFieldValue`'s branch is: an id
+ * with no resolved title renders exactly as it did before.
+ *
+ * [#7289] Select option labels are deliberately NOT localized here, and the
+ * opt-out is BY CONSTRUCTION: no option resolver is handed to
+ * `displayFieldValue`, so a select token renders its AUTHORED label byte-for-byte
+ * as it did before that card. This is neither an oversight nor an accident of a
+ * shared helper — the tracked-change branch localizes them, and the asymmetry is
+ * the ruling, so it is recorded here rather than inferred from the call.
+ *
+ * The two branches differ in what SURROUNDS the token. #7290's title resolution
+ * is locale-INDEPENDENT: `usr_1` → `张伟` is the record's own datum, the same
+ * string in every locale, so it could be added to an untranslated sentence
+ * without giving that sentence a locale. An option label is locale-DEPENDENT
+ * rendering, and a milestone template is an author-written sentence with NO
+ * bundle key of its own — #7290 ruled translating templates a contract decision
+ * and left it. So the author's own option label is the only rendering
+ * guaranteed to agree with the sentence around it: template and option label are
+ * both authored metadata, in one language, by one author. Reading the bundle
+ * here would GUARANTEE a split sentence (`Deal moved to 已赢单`) in exactly the
+ * case the bundle exists for — authoring language ≠ workspace locale — trading
+ * the reported half-localized string for its mirror image.
+ *
+ * The tracked-change branch has the opposite geometry: its frame is fully
+ * localized, so there the authored value is the mismatch and translating it is
+ * the fix. Pinned in `audit-option-label-summary.test.ts` as a WITH-LOCALE
+ * milestone case, because the pre-existing seam case in
+ * `audit-milestone-summary.test.ts` boots with no locale and cannot bite here.
+ */
+function renderMilestoneSummary(
+  template: string,
+  fields: Record<string, any> | undefined | null,
+  after: Record<string, any> | null,
+  lookupTitles?: Map<string, Map<string, string>>,
+): string {
+  return template.replace(milestoneTokenRe(), (_match: string, key: string) => {
+    const v = after ? after[key] : undefined;
+    if (v === null || v === undefined || v === '') return '';
+    const field = fields ? fields[key] : undefined;
+    if (!field) return String(v);
+    const reference = typeof field.reference === 'string' ? field.reference : undefined;
+    const titlesFor = reference ? lookupTitles?.get(reference) : undefined;
+    return displayFieldValue(field, v, titlesFor);
+  });
 }
 
 /**
@@ -506,43 +856,222 @@ export function installAuditWriters(
   };
 
   /**
-   * beforeUpdate / beforeDelete: capture "previous" snapshot via api.sudo()
-   * so we can compute the diff in the afterXxx hook. We attach the snapshot
-   * to the context (`(ctx as any).__previous`) since `HookContext.previous`
-   * is officially typed but not always populated by the engine itself.
+   * [#7230, #7290] Referenced record TITLES for a summary — id → title, per
+   * target object — resolved from a read PLAN its caller built.
+   *
+   * Taking the plan as a PARAMETER rather than building it here is what keeps
+   * the two summary branches one implementation: `planTrackedLookupReads` (the
+   * diff, #7230) and `planMilestoneTokenReads` (a fired milestone's tokens,
+   * #7290) both end here. The title-field resolution, the masking skip below
+   * and the `['id', titleField]` projection are therefore shared by
+   * construction — a second copy for the milestone branch would be a second
+   * de-facto contract, and the mask is precisely where that must not happen.
+   *
+   * ## Why this is shaped as a plan + one read per target object
+   *
+   * `sys_activity.summary` is composed at WRITE time, so anything this function
+   * does lands on the write hot path. One day before this change, #6656 / PR
+   * #6977 retired `captureBefore`'s redundant pre-image read from this exact
+   * path under maintainer ruling Option A+ — measured 2 → 1 reads per single-id
+   * write and 3 → 0 per predicate write. A per-row (or worse, per-value) title
+   * read here would hand that saving straight back, in the same file. So:
+   *
+   *  - **Zero reads is the default.** `planTrackedLookupReads` produces an empty
+   *    plan unless a field that is BOTH `trackHistory: true` AND a reference
+   *    type actually changed in this write. Every other write — the overwhelming
+   *    majority, including every create and delete — pays nothing, and
+   *    `#6977`'s counts are untouched. Pinned in `audit-lookup-summary.test.ts`.
+   *    [#7290] `planMilestoneTokenReads` is empty on the same default: it is
+   *    only ever called once a milestone has ALREADY matched, i.e. on the
+   *    transition `before !== value && after === value`, and it is empty again
+   *    whenever that template names no reference token. Pinned in
+   *    `audit-milestone-summary.test.ts`.
+   *  - **One read per distinct target object**, never per field and never per
+   *    value: N tracked reference fields pointing at one object are answered by
+   *    a single `id: { $in: [...] }`. Same batching shape `plugin-approvals`
+   *    uses for its inbox display enrichment.
+   *  - **Only the id and the title column are selected**, so resolving a title
+   *    cannot drag a wide row (or a blob) through the write path.
+   *
+   * What it cannot batch away: `writeAudit` is dispatched PER ROW, so a
+   * predicate update over N rows that changes a tracked reference field on each
+   * pays N reads (one per row per distinct target object). That is inherent to
+   * per-row summary composition, not to this batching — and it is bounded by
+   * "the object declares a tracked reference field", which the audited-object
+   * pre-image read #6977 removed was not.
+   *
+   * ## Masking (#6656 non-regression)
+   *
+   * An explicit `nameField` pointer is honoured by `resolveDisplayField` even
+   * when it points at a title-INELIGIBLE type, so an object could in principle
+   * designate a credential field as its title. The read is skipped in that case
+   * rather than trusted to mask downstream: `collectMaskedReadFields` is the
+   * same contract predicate `ledgerView` masks with, so "no credential value
+   * reaches a user-facing activity summary" holds on this path by the same
+   * definition, not by a second one.
+   *
+   * Best-effort throughout: an unregistered object, an unreadable row or a
+   * failing driver leaves the id unresolved, and `displayFieldValue` renders the
+   * raw id exactly as it did before this branch existed.
    */
-  const captureBefore = async (ctx: HookContext) => {
-    if (SKIP_OBJECTS.has(ctx.object)) return;
-    const id = (ctx.input as any)?.id;
-    if (!id) return; // bulk update/delete — too costly to snapshot every row here
-    try {
-      // Use the engine directly (not api.sudo) so we can thread the
-      // active transaction through. On drivers with single-connection
-      // pools (e.g. SQLite via knex) a sudo() findOne that does NOT
-      // carry the open transaction will deadlock for the full
-      // acquireConnectionTimeout (~60s) because the outer transaction
-      // holds the only connection.
-      const trx = (ctx as any).transaction;
-      const ql = (ctx as any).ql ?? (ctx as any).api?.engine;
-      if (ql?.findOne) {
-        const prev = await ql.findOne(ctx.object, {
-          where: { id },
-          context: { isSystem: true, ...(trx ? { transaction: trx } : {}) },
+  const resolveLookupTitles = async (
+    api: any,
+    plan: Map<string, Set<string>>,
+  ): Promise<Map<string, Map<string, string>> | undefined> => {
+    if (plan.size === 0) return undefined;
+    const sys = api.sudo();
+    const out = new Map<string, Map<string, string>>();
+    for (const [objectName, idSet] of plan) {
+      const def = getObjectDef(objectName);
+      const titleField = resolveDisplayField(def as any);
+      if (!titleField || titleField === 'id') continue;
+      if (collectMaskedReadFields(def).includes(titleField)) continue;
+      const ids = Array.from(idSet);
+      try {
+        const rows: any[] = await sys.object(objectName).find({
+          where: { id: { $in: ids } },
+          fields: ['id', titleField],
+          limit: ids.length,
         });
-        if (prev) (ctx as any).__previous = prev;
-        return;
+        const titles = new Map<string, string>();
+        for (const row of rows ?? []) {
+          const id = row?.id;
+          const title = row?.[titleField];
+          if (id === null || id === undefined) continue;
+          if (title === null || title === undefined) continue;
+          const text = String(title).trim();
+          if (text) titles.set(String(id), text);
+        }
+        if (titles.size > 0) out.set(objectName, titles);
+      } catch {
+        /* best-effort — an unresolvable reference renders as its raw id */
       }
-      const api: any = (ctx as any).api;
-      if (!api?.sudo) return;
-      const prev = await api.sudo().object(ctx.object).findOne({ where: { id } });
-      if (prev) (ctx as any).__previous = prev;
-    } catch {
-      /* ignore — best-effort */
     }
+    return out.size > 0 ? out : undefined;
   };
 
-  engine.registerHook('beforeUpdate', captureBefore, { packageId });
-  engine.registerHook('beforeDelete', captureBefore, { packageId });
+  /**
+   * [#6656, Option A+] The view the ledger records for one record.
+   *
+   * Retiring `captureBefore` (below) makes both sides of every diff come from
+   * the SAME pipeline — the raw driver row — where before they came from two:
+   * `before` through the engine's read path (masked, formula-hydrated,
+   * file-references resolved) and `after` from the raw write result. That
+   * asymmetry, not the redundant read, was the root cause of the phantom diff
+   * rows. Same-source is therefore delivered by the retirement itself; this
+   * function delivers the second half — same *view* — so levelling the two
+   * sides levels them UPWARD rather than down to the raw store contents.
+   *
+   * Two limbs, and only two, because only two field classes still differ once
+   * both sides are raw (each measured, not assumed):
+   *
+   *  1. **credential fields** (`secret`, and `password` off better-auth
+   *     objects). The raw value is a `secret:` ref, or — for `password`, which
+   *     ADR-0100 stores PLAINTEXT at rest — the cleartext itself. Masked here
+   *     to exactly what the read path substitutes, on BOTH sides. This is the
+   *     compliance face the #6656 ruling protects: single-id delete
+   *     `old_value` keeps reading `••••••••`, byte-identical to before this
+   *     change, and the ref/cleartext that today reaches `new_value` on every
+   *     create and update stops doing so.
+   *  2. **virtual fields** (`VIRTUAL_FIELD_TYPES` — `formula` only) — dropped
+   *     from FULL SNAPSHOTS. `ctx.result` carries hydrated formulas (#5504) so
+   *     `new_value` had them; the raw pre-image has no such column, so
+   *     `old_value` structurally could not — a fresh asymmetry that the very
+   *     change removing the old one would otherwise introduce. Deliberately
+   *     NARROWER than the `COMPUTED_FIELD_TYPES` set `diff()` uses: see that
+   *     constant's note for why `autonumber` and `summary` are stored,
+   *     symmetric, and must stay in the snapshot.
+   *
+   * **File-reference fields need no limb, and that is a measurement rather
+   * than an omission.** They are named in the ruling because today's `before`
+   * carries the resolved `{id, name, size, url}` object against a raw id on
+   * the `after` side. Once the pre-image is the engine's, both sides hold the
+   * stored id token and agree by construction. Writing an "if it looks
+   * resolved, take `.id`" limb would be a consumer-side tolerance for a
+   * producer that no longer exists (PD #12) — and it could never be shown to
+   * go red, because no path reaches it.
+   *
+   * Non-mutating on purpose: `ctx.previous` and `ctx.result` are the engine's
+   * own objects — `result` is the record the caller gets back — and some
+   * drivers hand out live store references. Masking in place would rewrite the
+   * record, and on such a driver the store itself. (That aliasing is real: it
+   * contaminated the first probe run on this card, making the two views look
+   * identical.)
+   *
+   * @param dropComputed pass `true` for full snapshots (create `new_value`,
+   *   delete `old_value`); `false` for diff output, which `diff()` has already
+   *   filtered, and for the label source, where a formula `name` is the point.
+   */
+  const ledgerView = (
+    objectName: string,
+    record: any,
+    { dropComputed }: { dropComputed: boolean },
+  ): Record<string, any> | null => {
+    if (!record || typeof record !== 'object') return null;
+    const out: Record<string, any> = { ...record };
+    for (const field of collectMaskedReadFields(getObjectDef(objectName))) {
+      // `field in out` and the null-preserving branch both mirror
+      // `maskSecretFields` exactly: an unset credential stays `null` (so "no
+      // secret" and "a secret is set" remain distinguishable), and a field the
+      // row does not carry is never invented.
+      if (!(field in out)) continue;
+      out[field] = out[field] == null ? null : SECRET_MASK;
+    }
+    if (dropComputed) {
+      const defs = getFieldDefs(objectName);
+      for (const key of Object.keys(out)) {
+        const type = defs?.[key]?.type;
+        if (typeof type === 'string' && VIRTUAL_FIELD_TYPES.has(type)) delete out[key];
+      }
+    }
+    return out;
+  };
+
+  /**
+   * ⛔ RETIRED — `captureBefore` on `beforeUpdate` / `beforeDelete` (#6656,
+   * ADR-0049 enforce-or-remove). Do not reintroduce it.
+   *
+   * It existed because `HookContext.previous` was "officially typed but not
+   * always populated by the engine itself". That is no longer true on any
+   * path this plugin registers for, and it was verified in code rather than
+   * taken from the card (re-measured on `97b079896`; the anchors below moved
+   * from the ones #5846 recorded, so they are restated, not copied):
+   *
+   *   single-id update  `engine.ts:7012` dispatch, bound `:7010` under the
+   *                     `wantsPriorRecord` gate at `:6992`
+   *   single-id delete  `:7899` dispatch, bound `:7896`/`:7897`
+   *                     (`readPreImage` → `bindPreImage`) under `:7857`
+   *   predicate update  `:7084` → `dispatchPerRowBeforeHooks`, bound per row `:1825`
+   *   predicate delete  `:7962` → `dispatchPerRowBeforeHooks`, bound per row `:1825`
+   *
+   * and the after phase is bound too — `buildPerRowAfterContexts` (`:1746`)
+   * binds `previous` on every per-row `afterUpdate` / `afterDelete` context,
+   * which is the one `writeAudit` actually reads.
+   *
+   * Each demand gate is the SAME predicate as its dispatch gate
+   * (`hasHooksFor(before*) || hasHooksFor(after*) || getSummaryDescriptors()`),
+   * so there is no path on which an audit hook runs with `previous` unbound.
+   * `writeAudit` stays registered on `afterUpdate`/`afterDelete`, so the gates
+   * stay open on the after-hook term and the engine still buys the one read.
+   *
+   * What the retirement removes, measured with a counting driver on this
+   * branch point (`driver.findOne` on the audited object, per write):
+   *
+   *   single-id update  2 → 1      single-id delete  2 → 1
+   *   predicate update  3 → 0      predicate delete  3 → 0   (3 matched rows)
+   *
+   * The predicate column is the larger half and it was pure waste: #5574 binds
+   * `input.id` on every per-row *before* context, which defeated the
+   * `if (!id) return` bulk guard this handler opened with, so it read every
+   * row — and every result was discarded, because `__previous` landed on the
+   * per-row *before* context while the per-row *after* contexts never saw it.
+   *
+   * Retired rather than left as a no-op registration: a hook whose only
+   * remaining effect is holding a demand gate open is exactly what
+   * `sys_fetch_previous_delete` had become when #5929 removed it from
+   * objectql's own plugin — reproducing that shape here, one package over,
+   * would re-create the defect the engine lane just closed.
+   */
 
   /**
    * afterInsert / afterUpdate / afterDelete: write audit_log + activity rows.
@@ -557,8 +1086,20 @@ export function installAuditWriters(
     const api: any = (ctx as any).api;
     if (!api?.sudo) return;
 
+    // [#6656] Both sides, RAW — the engine's write result and the engine's
+    // bound pre-image, now one pipeline. These two are what CHANGE DETECTION
+    // reads (`diff`, `matchMilestone`); what the ledger RECORDS is their
+    // `ledgerView`. Keeping those roles apart is what lets a credential
+    // rotation still produce a row — the values compare unequal while both
+    // render as the mask — instead of masking first and thereby deleting the
+    // audit trail of every secret change along with the phantom ones.
+    //
+    // ⛔ Read `previous` unconditionally. It is a contract value; do NOT gate
+    // it on `ctx.input.options.multi` or otherwise re-derive the engine's
+    // dispatch ladder here (`asScalarId` is unexported for exactly this
+    // reason — #4434 / #4550, restated in the #6656 ruling).
     const after: any = ctx.result;
-    const before: any = (ctx as any).__previous ?? (ctx as any).previous ?? null;
+    const before: any = (ctx as any).previous ?? null;
 
     // Resolve record id from after (insert/update) or before (delete) or input.
     let recordId: string | undefined =
@@ -610,22 +1151,25 @@ export function installAuditWriters(
     // though writes succeed.
     const recordOrgId: string | undefined =
       (typeof (ctx.result as any)?.organization_id === 'string' && (ctx.result as any).organization_id) ||
-      (typeof ((ctx as any).__previous as any)?.organization_id === 'string' && ((ctx as any).__previous as any).organization_id) ||
+      (typeof before?.organization_id === 'string' && before.organization_id) ||
       undefined;
     const tenantId: string | undefined = sess.tenantId ?? recordOrgId;
 
     let oldValue: Record<string, any> | null = null;
     let newValue: Record<string, any> | null = null;
     if (action === 'create') {
-      newValue = (after && typeof after === 'object') ? { ...after } : null;
+      newValue = ledgerView(ctx.object, after, { dropComputed: true });
     } else if (action === 'update') {
+      // Detect on the raw values, record the masked ones — see the note on
+      // `before`/`after` above. `diff` has already dropped computed fields, so
+      // its output needs no second pass for them.
       const d = diff(before || {}, after || {}, getFieldDefs(ctx.object));
-      oldValue = d.old;
-      newValue = d.next;
       // If nothing meaningfully changed, skip the audit row to avoid noise.
-      if (Object.keys(newValue).length === 0) return;
+      if (Object.keys(d.next).length === 0) return;
+      oldValue = ledgerView(ctx.object, d.old, { dropComputed: false });
+      newValue = ledgerView(ctx.object, d.next, { dropComputed: false });
     } else if (action === 'delete') {
-      oldValue = before && typeof before === 'object' ? { ...before } : null;
+      oldValue = ledgerView(ctx.object, before, { dropComputed: true });
     }
 
     const auditRow: Record<string, any> = {
@@ -656,7 +1200,16 @@ export function installAuditWriters(
       auditRow.actor = actorLabel;
     }
 
-    const label = recordLabel(after ?? before, recordId ?? '');
+    // [#6656] Masked, but computed fields KEPT: `recordLabel` reads
+    // `name`/`title`/… and an object whose label field is a formula would
+    // otherwise degrade to the bare id (#5504 names that exact symptom). The
+    // mask still applies, so no credential value can reach a user-facing
+    // activity summary through the label.
+    const label = recordLabel(
+      ledgerView(ctx.object, after, { dropComputed: false }) ??
+        ledgerView(ctx.object, before, { dropComputed: false }),
+      recordId ?? '',
+    );
     // Summaries are user-facing (the record Discussion feed and Setup
     // dashboards render them verbatim), so name the object by its display
     // label ("Semantic Zoo"), not its API name ("showcase_semantic_zoo"), and
@@ -680,13 +1233,54 @@ export function installAuditWriters(
       // ADR-0052 §5b — declarative activity, precedence: a configured semantic
       // milestone (§5b.2) wins; else a tracked field-change diff ("Stage:
       // Proposal → Closed Won", §5b.1); else the generic fallback.
-      const milestone = matchMilestone(getObjectDef(ctx.object), getFieldDefs(ctx.object), before, after);
+      // [#6656] Masked views, not the raw pair. The milestone branch
+      // interpolates `{field}` from the after-row straight into a summary the
+      // record feed and Setup dashboards render verbatim, so it must never see
+      // a raw credential value. Computed fields are kept (a milestone may key on a
+      // formula); detection is unaffected for every other class, since the
+      // mask touches credential fields only — and a milestone whose declared
+      // `value` is a secret's plaintext would be a leak in the metadata
+      // itself, not a case worth preserving.
+      const summaryFields = getFieldDefs(ctx.object);
+      const beforeView = ledgerView(ctx.object, before, { dropComputed: false });
+      const afterView = ledgerView(ctx.object, after, { dropComputed: false });
+      const milestone = matchMilestone(getObjectDef(ctx.object), beforeView, afterView);
       if (milestone) {
-        summary = milestone.summary;
+        // [#7290] The read is keyed on the tokens of the template that ACTUALLY
+        // FIRED, and is reached only on the transition itself — rare by
+        // construction, since a milestone fires on `before !== value && after
+        // === value` and never again while the record sits at that value. An
+        // update of a milestone-declaring object that fires NOTHING pays zero,
+        // which is what keeps #6656 / PR #6977's retirement in place on this
+        // branch too; a plan built before the match would have paid on every
+        // such update, which is the shape that ruling was obtained to remove.
+        //
+        // The plan reads the same MASKED after-view the interpolation renders
+        // from, so a credential field can no more become a read key here than
+        // it can reach the summary text.
+        const lookupTitles = await resolveLookupTitles(
+          api,
+          planMilestoneTokenReads(milestone.template, summaryFields, afterView),
+        );
+        summary = renderMilestoneSummary(milestone.template, summaryFields, afterView, lookupTitles);
         if (milestone.type) activityType = milestone.type;
       } else {
+        // [#7230] The read plan is built from the SAME masked views the summary
+        // renders, and only reached once a milestone has declined — a write
+        // that changes no tracked reference field issues no read at all.
+        const lookupTitles = await resolveLookupTitles(
+          api,
+          planTrackedLookupReads(summaryFields, oldValue, newValue),
+        );
         summary =
-          renderTrackedChangeSummary(getFieldDefs(ctx.object), oldValue, newValue) ??
+          renderTrackedChangeSummary(
+            ctx.object,
+            summaryFields,
+            oldValue,
+            newValue,
+            translate,
+            lookupTitles,
+          ) ??
           translate('messages.activityUpdated', { object: objectDisplay, label }) ??
           `Updated ${objectDisplay} "${label}"`;
       }
@@ -743,9 +1337,12 @@ export function installAuditWriters(
     }
   };
 
-  engine.registerHook('afterInsert', writeAudit, { packageId });
-  engine.registerHook('afterUpdate', writeAudit, { packageId });
-  engine.registerHook('afterDelete', writeAudit, { packageId });
+  // [#5860] Same subtraction as the before-phase pair above. `afterUpdate` and
+  // `afterDelete` are the two the bulk gates (#5038) read, and `afterUpdate` is
+  // the one #5284's single-id gate reads.
+  engine.registerHook('afterInsert', writeAudit, { excludeObjects: AUDIT_EXCLUDED_OBJECTS, packageId });
+  engine.registerHook('afterUpdate', writeAudit, { excludeObjects: AUDIT_EXCLUDED_OBJECTS, packageId });
+  engine.registerHook('afterDelete', writeAudit, { excludeObjects: AUDIT_EXCLUDED_OBJECTS, packageId });
 
   /**
    * `enable.feeds` server-side enforcement (#2707). Comments are created
@@ -878,7 +1475,11 @@ export function installAuditWriters(
       }
     }
   };
-  engine.registerHook('afterInsert', writeCommentMentions, { packageId });
+  // [#5860] A CLOSED single-name allow list — the handler's first line already
+  // refused every other object, and unlike the skip list above that knowledge
+  // was always expressible. Saying it here is behaviour-conserving and takes
+  // this registration out of every other object's `afterInsert` demand.
+  engine.registerHook('afterInsert', writeCommentMentions, { object: 'sys_comment', packageId });
 }
 
 // Re-export for convenience.

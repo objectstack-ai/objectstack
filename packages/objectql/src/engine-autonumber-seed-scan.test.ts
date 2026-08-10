@@ -90,10 +90,15 @@ const TICKET_SCHEMA = {
 };
 
 /**
- * Legacy path: NO format at all, so there is no `{0..0}` slot and no prefix.
- * `renderAutonumber` emits the bare counter (`'1'`, `'2'`, … `'10'`), and the
- * seed reads the LAST digit run of the whole stored value. There is no
- * lexicographic reading of these values that equals the numeric one.
+ * Legacy path: NO format at all, so the seed reads the LAST digit run of the
+ * whole stored value. There is no lexicographic reading of these values that
+ * equals the numeric one.
+ *
+ * The stored values below are bare (`'7'`, `'8'`, … `'10'`) — what a deployment
+ * on this path had already issued. What the engine now ISSUES is rendered
+ * through the contract default `{0000}` (#6555/#7262), so the next number is
+ * `'0011'`, not `'11'`. The reading is unaffected: `{0000}` renders prefix `''`
+ * and suffix `''`, which is the unanchored branch these rows have always taken.
  */
 const LEGACY_SCHEMA = {
   name: 'legacy',
@@ -388,9 +393,13 @@ describe('ObjectQL seedAutonumber — the scan must cover every row in scope (#6
 
       const result = await engine.insert('legacy', { title: 'Next' });
 
-      expect(result.ref_no).toBe('11');
-      // `'9'` is the lexicographic max; seeding from it re-issues `'10'`.
-      expect(result.ref_no).not.toBe('10');
+      // ⚠️ `0011`, not a bare `11`, since #6555/#7262 — a format-less field
+      // renders through the declared default `{0000}`. Do not "fix" this back:
+      // the padding is what makes this engine path and `driver-sql` mint the
+      // same shape. The counter (11) is what this case is really about.
+      expect(result.ref_no).toBe('0011');
+      // `'9'` is the lexicographic max; seeding from it re-issues counter 10.
+      expect(result.ref_no).not.toBe('0010');
     });
 
     it('scans past one page with no prefix to push down', async () => {

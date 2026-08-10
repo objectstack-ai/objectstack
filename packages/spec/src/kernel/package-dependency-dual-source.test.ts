@@ -2,6 +2,12 @@
 
 import { describe, it, expect } from 'vitest';
 
+import {
+  EXPORT_ENTRY_POINTS,
+  exportNamesOf,
+  holderOriginsOf,
+  originFile,
+} from '../../scripts/lib/export-origins-testkit';
 // ─── [#4741] `PackageDependency` has ONE owner per name (./kernel renamed) ───
 //
 // Dual-source ledger #4535, cluster C7 — the last cluster of the second batch.
@@ -36,68 +42,15 @@ import { describe, it, expect } from 'vitest';
 // to anyone reading `./kernel`, and independently rejected at BUILD time by
 // RENAMED_DEFS invariant 3, "the source def is still emitted").
 describe('[#4741] PackageDependency dual-source retirement (C7)', () => {
-  it('resolves the export surface: one owner per name, across every public entry', async () => {
-    const ts = (await import('typescript')).default;
-    const { resolve, relative, dirname } = await import('node:path');
-    const { fileURLToPath } = await import('node:url');
-    const { readFileSync } = await import('node:fs');
-
-    const specDir = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
-    // Every public entry point, read from package.json's exports map so a
-    // future entry cannot silently escape the uniqueness pins below.
-    const pkg = JSON.parse(readFileSync(resolve(specDir, 'package.json'), 'utf8')) as {
-      exports: Record<string, unknown>;
-    };
-    const entries: Record<string, string> = {};
-    for (const sub of Object.keys(pkg.exports)) {
-      if (sub === '.') entries[sub] = resolve(specDir, 'src/index.ts');
-      else if (/^\.\/[a-z-]+$/.test(sub)) entries[sub] = resolve(specDir, `src/${sub.slice(2)}/index.ts`);
-      // './openapi.json' / './package.json' are not TypeScript entry points.
-    }
-    // Anti-vacuity: the enumeration must have found the real surface.
+  it('resolves the export surface: one owner per name, across every public entry', () => {
+    // Anti-vacuity: the baseline must cover the real surface. (This used to
+    // enumerate package.json's exports map and build its own `ts.createProgram`
+    // right here; `export-origins/` IS that resolution, computed once at build
+    // time and checked in — #4796.)
     for (const needed of ['./cloud', './kernel']) {
-      expect(Object.keys(entries), `exports map must include ${needed}`).toContain(needed);
+      expect(EXPORT_ENTRY_POINTS, `exports map must include ${needed}`).toContain(needed);
     }
-    expect(Object.keys(entries).length).toBeGreaterThan(10);
-
-    const program = ts.createProgram(Object.values(entries), {
-      module: ts.ModuleKind.ESNext,
-      moduleResolution: ts.ModuleResolutionKind.Bundler,
-      skipLibCheck: true,
-      noEmit: true,
-    });
-    const checker = program.getTypeChecker();
-    const unalias = (s: import('typescript').Symbol) =>
-      s.getFlags() & ts.SymbolFlags.Alias ? checker.getAliasedSymbol(s) : s;
-
-    const exportsOf = (sub: string) => {
-      const sf = program.getSourceFile(entries[sub]);
-      const moduleSym = sf && checker.getSymbolAtLocation(sf);
-      // Without this guard a resolution failure would make every assertion
-      // below pass vacuously — the exact way a gate goes dormant (#4642).
-      expect(moduleSym, `${sub} module symbol must resolve`).toBeTruthy();
-      return checker.getExportsOfModule(moduleSym!);
-    };
-
-    const originOf = (sym: import('typescript').Symbol, label: string) => {
-      const decl = unalias(sym).declarations?.[0];
-      expect(decl, `${label} must have a declaration`).toBeTruthy();
-      const declFile = decl!.getSourceFile();
-      return `${relative(specDir, declFile.fileName)}:${
-        declFile.getLineAndCharacterOfPosition(decl!.getStart()).line + 1
-      }`;
-    };
-
-    /** Every entry that exports `name`, with each occurrence's declaration origin. */
-    const holdersOf = (name: string) => {
-      const out: Array<{ sub: string; origin: string }> = [];
-      for (const sub of Object.keys(entries)) {
-        for (const sym of exportsOf(sub).filter((e) => e.getName() === name)) {
-          out.push({ sub, origin: originOf(sym, `${sub} ${name}`) });
-        }
-      }
-      return out;
-    };
+    expect(EXPORT_ENTRY_POINTS.length).toBeGreaterThan(10);
 
     // 1. The renamed-away side: `./kernel` still has a non-trivial surface — so
     //    the `not.toContain` below cannot pass by resolving nothing — and no
@@ -105,7 +58,7 @@ describe('[#4741] PackageDependency dual-source retirement (C7)', () => {
     //    same-prefix neighbours are the trap this cluster was warned about:
     //    `PackageDependencyConflict` and `PackageDependencyResolutionResult`
     //    are DIFFERENT concepts that merely share a prefix, and must be intact.
-    const kernelNames = exportsOf('./kernel').map((e) => e.getName());
+    const kernelNames = exportNamesOf('./kernel');
     expect(kernelNames.length, './kernel must export a non-trivial surface').toBeGreaterThan(40);
     for (const retired of ['PackageDependencySchema', 'PackageDependency']) {
       expect(kernelNames, `./kernel must not export ${retired}`).not.toContain(retired);
@@ -125,11 +78,11 @@ describe('[#4741] PackageDependency dual-source retirement (C7)', () => {
     //    kernel/plugin-security.zod.ts and is exported by ./kernel alone — the
     //    rename must not fan out into a second entry.
     for (const name of ['ResolvedPackageDependencySchema', 'ResolvedPackageDependency']) {
-      const holders = holdersOf(name);
+      const holders = holderOriginsOf(name);
       expect(holders.length, `${name} must be exported (by ./kernel)`).toBeGreaterThan(0);
       for (const h of holders) {
         expect(h.sub, `${name} must only be exported by ./kernel`).toBe('./kernel');
-        expect(h.origin).toMatch(/^src\/kernel\/plugin-security\.zod\.ts:\d+$/);
+        expect(originFile(h.origin)).toBe('src/kernel/plugin-security.zod.ts');
       }
     }
 
@@ -143,9 +96,9 @@ describe('[#4741] PackageDependency dual-source retirement (C7)', () => {
     //    the C14/C15/C17 lesson: a re-export can lie about the domain even when
     //    the symbol itself is honest. Exact equality, not a subset check.
     for (const name of ['PackageDependencySchema', 'PackageDependency']) {
-      const holders = holdersOf(name);
+      const holders = holderOriginsOf(name);
       expect(holders.map((h) => h.sub), `${name} must be owned by ./cloud alone`).toEqual(['./cloud']);
-      expect(holders[0].origin).toMatch(/^src\/cloud\/package-version\.zod\.ts:\d+$/);
+      expect(originFile(holders[0].origin)).toBe('src/cloud/package-version.zod.ts');
     }
   });
 

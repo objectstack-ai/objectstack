@@ -106,7 +106,10 @@
     },
     "widget": {
       "status": "live",
-      "note": "objectui generic form widget override. ObjectForm (packages/plugin-form/src/ObjectForm.tsx) threads `field.widget` into the renderer; form.tsx resolves `widget || type` and looks it up as `field:<widget>` in the ComponentRegistry (renderFieldComponent). Used to render pick-not-type controls for sys_sharing_rule (object-ref / filter-condition / recipient-picker) and sys_permission_set (capability-multiselect). Degrades to the `type` renderer when the widget is unregistered."
+      "verifiedAt": "2026-08-09",
+      "evidenceScope": "cross-repo",
+      "evidence": "objectui @09987b68: packages/plugin-form/src/ObjectForm.tsx:585-590 — threads the per-field widget override into the renderer, naming permission-facet-link; objectui @09987b68: packages/components/src/renderers/form/form.tsx:230 — resolveWidgetType resolves widget || field.widget || type; objectui @09987b68: packages/plugin-detail/src/index.tsx:563 — ComponentRegistry.register('permission-facet-link', withFieldCarrier(PermissionFacetLink), { namespace: 'field' }); objectui @09987b68: packages/fields/src/index.tsx:2203-2205 — fieldWidgetMap carries object-ref / filter-condition / recipient-picker",
+      "note": "objectui generic form widget override. ObjectForm (packages/plugin-form/src/ObjectForm.tsx) threads `field.widget` into the renderer; form.tsx resolves `widget || type` and looks it up as `field:<widget>` in the ComponentRegistry (renderFieldComponent). Used to render pick-not-type controls for sys_sharing_rule (object-ref / filter-condition / recipient-picker) and sys_permission_set (permission-facet-link). Degrades to the `type` renderer when the widget is unregistered. CORRECTED 2026-08-09 (#6773): this note named `capability-multiselect` as sys_permission_set's widget, and that half was never true. No producer stamped it — ADR-0056 P1 stamps `permission-facet-link` on all six facets through the single `applyFieldWidgetOverrides` choke point (objectui packages/data-objectstack/src/index.ts:2492-2501) — and `field:capability-multiselect` was registered only by the docs-site-only `registerFields()`, never by the live `registerAllFields()` walk over `fieldWidgetMap`, so authoring it always fell through to the `type` renderer. objectui#3308 / PR objectui#3793 then retired the name outright (ADR-0049 enforce-or-remove); it is absent from `packages/*/src` at pin `09987b68` apart from tombstone comments and a retirement pin test. The other three names were re-checked at the same pin and are still in `fieldWidgetMap`. The verdict itself is unchanged and was never at risk — `widget` is live on the sys_sharing_rule trio alone; what was wrong was one worked example, i.e. false evidence in the base the next enforce-or-remove audit reads (the #5175 lesson)."
     },
     "requiredPermissions": {
       "status": "live",
@@ -136,7 +139,8 @@
     },
     "step": {
       "status": "live",
-      "note": "slider — SliderField.tsx (min/max/step live)."
+      "verifiedAt": "2026-08-08",
+      "note": "CAVEAT — RENDERER-only: objectui SliderField.tsx:14 reads `field.step ?? 1`; the write path never validates the grid (record-validator.ts's numeric branch enforces min/max for slider and reads step nowhere). Ruled UI-only and deliberately unenforced 2026-08-08 (#6514) — see docs/audits/2026-06-dead-surface-disposition-plan.md (P2 field) and the comment beside the declaration in src/data/field.zod.ts."
     },
     "group": {
       "status": "live",
@@ -153,7 +157,10 @@
     },
     "precision": {
       "status": "live",
-      "note": "CAVEAT — UI display formatting only; DDL never sizes (maps to float). (NumberField.tsx:16)."
+      "verifiedAt": "2026-08-10",
+      "evidenceScope": "cross-repo",
+      "evidence": "objectui: packages/fields/src/widgets/CurrencyField.tsx:45 reads field.precision and applies it at :51 as the Intl min/max fraction digits, at :60 to round on blur and at :90 as the input step; objectui: packages/fields/src/widgets/PercentField.tsx:13 applies it at :31 and derives the slider step from it at :62 and :75; objectui: packages/fields/src/index.tsx:662 applies it at :673 when formatting a percent cell; objectui: packages/plugin-grid/src/useColumnSummary.ts:261 uses it as the decimal count for a column summary — measured objectui @11c1e71e",
+      "note": "RE-CITED 2026-08-10 (#7133/#7142): the old pointer was 'NumberField.tsx:16', and that file now states the OPPOSITE in its own comment at :17 — 'Step follows `scale` (decimal places), not `precision` (total digit count)' — reading `numberField?.scale` and never `precision`. The decimal cell formatter made the same correction (packages/fields/src/index.tsx:611-616: reading `precision` there had padded a decimal(10,0) value out to '1.0000000000'). So the citation died to a deliberate fix, not to a move, and the verdict still holds elsewhere: currency and percent are where `precision` is applied. CAVEAT retained — UI display formatting only; DDL never sizes (maps to float)."
     },
     "scale": {
       "status": "live",
@@ -219,8 +226,10 @@
     },
     "currencyConfig": {
       "status": "live",
-      "evidence": "objectui: packages/fields/src/index.tsx:469 reads currencyConfig.defaultCurrency",
-      "note": "LIVE via objectui renderer — the 2026-06 audit mis-classified as dead (renderer side not re-verified). Corrected after checking ../objectui."
+      "verifiedAt": "2026-08-10",
+      "evidenceScope": "cross-repo",
+      "evidence": "objectui: packages/i18n/src/currency.ts:32 reads field.currencyConfig.defaultCurrency as the second step of resolveFieldCurrency's ADR-0053 precedence chain; objectui: packages/fields/src/widgets/CurrencyField.tsx:45 calls resolveFieldCurrency and applies the resolved code at :51 through formatAmount, which passes it to Intl.NumberFormat — measured objectui @11c1e71e",
+      "note": "RE-CITED 2026-08-10 (#7133/#7142): the old pointer 'packages/fields/src/index.tsx:469' now lands in formatRelativeDays, a date-phrase helper with no currency involvement — the resolver moved to @object-ui/i18n and packages/fields/src/currency.ts:14 only re-exports it, which is why the old line drifted onto unrelated code rather than disappearing. Verdict unchanged: LIVE, and now cited at both the reader that consumes the key and the widget that applies the resolved currency."
     },
     "dimensions": {
       "status": "live",
@@ -243,13 +252,17 @@
     },
     "relatedList": {
       "status": "live",
-      "evidence": "objectui: packages/app-shell/src/views/RecordDetailView.tsx + utils/deriveRelatedLists.ts",
-      "note": "LIVE via objectui renderer — the 2026-06 audit mis-classified as dead (renderer side not re-verified). Corrected after checking ../objectui."
+      "verifiedAt": "2026-08-10",
+      "evidenceScope": "cross-repo",
+      "evidence": "objectui: packages/app-shell/src/utils/deriveRelatedLists.ts:131 skips the FK entirely when relatedList is false and :138 marks the derived list isPrimary when it is 'primary'; objectui: packages/app-shell/src/views/RecordDetailView.tsx:1037 calls deriveRelatedLists and renders what it returns, consuming the derived structure rather than the key — measured objectui @11c1e71e",
+      "note": "RE-CITED 2026-08-10 (#7133/#7142): the old split citation's RecordDetailView half went to prose — every `relatedList` occurrence in that file is now a comment (:1013, :1847, :1857, :1864). The working half is deriveRelatedLists, which is what branches on the value. RecordDetailView is kept, explicitly labelled as the consumer of the DERIVED list, so the next re-audit does not read its zero key-hits as rot a second time. Verdict unchanged: LIVE."
     },
     "relatedListTitle": {
       "status": "live",
-      "evidence": "objectui: packages/app-shell/src/views/RecordDetailView.tsx + utils/deriveRelatedLists.ts",
-      "note": "LIVE via objectui renderer — the 2026-06 audit mis-classified as dead (renderer side not re-verified). Corrected after checking ../objectui."
+      "verifiedAt": "2026-08-10",
+      "evidenceScope": "cross-repo",
+      "evidence": "objectui: packages/app-shell/src/utils/deriveRelatedLists.ts:140-141 uses relatedListTitle as the related-list title when it is a non-empty string, falling back to a label derived from the child object; objectui: packages/app-shell/src/views/RecordDetailView.tsx:1037 renders the derived list — measured objectui @11c1e71e",
+      "note": "RE-CITED 2026-08-10 (#7133/#7142): same repair as `relatedList` — the RecordDetailView half of the old split citation is comments only (:1847 describes the rule it no longer implements), while deriveRelatedLists is the reader that applies the value. Verdict unchanged: LIVE."
     },
     "relatedListColumns": {
       "status": "live",

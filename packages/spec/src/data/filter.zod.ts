@@ -86,21 +86,128 @@ export const EqualityOperatorSchema = lazySchema(() => z.object({
 }));
 
 /**
- * Comparison operators for numeric and date comparisons.
- * Supported data types: Number, Date
+ * The comparand contract shared by `$gt` / `$gte` / `$lt` / `$lte` (#5685).
+ *
+ * Module-private on purpose: it is documentation attached to four slots, not an
+ * authorable surface of its own, so it stays out of the exported API surface.
+ * The reasoning behind every sentence is in {@link ComparisonOperatorSchema}'s
+ * docblock.
+ */
+const ORDERING_COMPARAND_DESCRIPTION =
+  'Comparand is a number, a Date, a string, or a { $field } reference. '
+  + 'STRING is the form the platform itself produces: the date-macro resolver '
+  + 'returns only strings ("{current_year_start}" -> "2026-01-01"), and the '
+  + 'guaranteed spellings are an ISO calendar day (YYYY-MM-DD), a UTC ISO-8601 '
+  + 'instant, or a wall-clock time of day (HH:MM[:SS[.fff]]) for a Field.time '
+  + 'column. Those are ASCII and fixed-width, so lexicographic order IS '
+  + 'chronological order and every backend agrees; the driver reconciles the '
+  + 'comparand with the column (a bare calendar day used as an upper bound '
+  + 'becomes the half-open next-day boundary). Ordering NON-temporal text is '
+  + 'permitted but NOT promised: the order is the backend collation\'s '
+  + '(byte-wise on SQLite, the database locale on Postgres, UTF-16 code units '
+  + 'in the JS matchers), and those coincide only for ASCII.';
+
+/**
+ * Ordering-comparison operators.
+ *
+ * Supported comparand types: **Number, Date, ISO/clock STRING, FieldReference**.
+ *
+ * ## Why `string` is in the union (#5685)
+ *
+ * Until this was written down the four slots read `number | Date |
+ * FieldReference` — and the platform's own producers put a STRING in them and
+ * nothing else. The declaration did not merely under-describe reality, it
+ * contradicted it:
+ *
+ * - `resolveFilterTokens` (`@objectstack/core`, `filter-tokens.ts`) is the
+ *   evaluator for the `{token}` grammar, and **every** branch returns a string
+ *   — `asYmd(…)` for a calendar day, `.toISOString()` for the sub-day tokens.
+ *   Its own module example is exactly this shape:
+ *   `{ close_date: { $gte: '{current_year_start}' } }` →
+ *   `{ close_date: { $gte: '2026-01-01' } }`.
+ * - `date-macros.zod.ts` states the same rule from the other end: "the DRIVER
+ *   only ever sees ISO date / timestamp strings, never `{tokens}`".
+ * - Three first-party callers send strings today —
+ *   `lifecycle-service.ts` (`{ created_at: { $lt: keepCutoff } }`, a
+ *   `.toISOString()`), `plugin-email`'s `outbox-sweep.ts` (same shape), and
+ *   `plugin-auth`'s better-auth adapter, which lowers a `gt`/`gte`/`lt`/`lte`
+ *   clause with the producer's own untyped `condition.value`.
+ *
+ * The mismatch was already COSTING something, and the receipt is in the tree:
+ * `@objectstack/objectql`'s `filter-comparand-shape.ts` (#5869) had to state,
+ * as its reason for not using this schema as its gate, that the schema is
+ * "stricter than the runtime in ways the runtime deliberately allows — `$gt` is
+ * declared `number | Date | FieldReference`, while `['created_at', '>',
+ * '2026-01-01']` lowers to a STRING bound that every backend accepts and that
+ * **the showcase apps rely on**". A second package building around this
+ * declaration, and writing down that it is wrong, is the measurement that says
+ * the pull is real rather than hypothetical.
+ *
+ * An author — an AI author in particular — reading `number | Date` concluded
+ * that a date window must be a `Date` object or an epoch number, which is the
+ * one form the platform's own date-macro path can never hand them. This is the
+ * declaration aligning to a contract the rest of the stack already keeps, not
+ * a new capability: every evaluation surface ALREADY compares strings
+ * (`driver-sql` binds `>`/`>=`/`<`/`<=`, `formula`'s `matchesFilter` and
+ * `driver-memory`'s matcher fall through to the JS operators).
+ *
+ * ## Why a BARE string, and not an ISO-shaped refinement (#5685 rider ①)
+ *
+ * A tempting narrowing is "accept only an ISO date / date-time string". It was
+ * measured and rejected, for three reasons:
+ *
+ * 1. **This schema is field-AGNOSTIC.** It never sees which column the operator
+ *    is applied to, so any value-shape refinement here is a guess about the
+ *    column. Comparand-vs-column correctness is a field-TYPED judgement and it
+ *    already has an owner: `SqlDriver.coerceFilterValue` dispatches on
+ *    `temporalFieldKind` — `storageDatetimeValue` for `datetime`, `toDateOnly`
+ *    for `date`, `canonicalTimeOfDay` for `time`, passthrough otherwise.
+ * 2. **An ISO refinement would reject a form this platform DECLARES.**
+ *    `field-value.zod.ts`'s `CLOCK_TIME_TYPES` defines a `Field.time` value as
+ *    `HH:MM[:SS[.fff]]` and says in as many words that it is "not
+ *    `Date.parse`-able". `SqlDriver.temporalFilterValue` canonicalises exactly
+ *    that in the COMPARAND position (`'14:30'` → `'14:30:00'`, the #3979
+ *    contract pair). A `$gte: '09:00'` on a `time` column is a supported
+ *    comparison an ISO refinement would refuse.
+ * 3. **date-only and full-timestamp are already reconciled by the driver**, so
+ *    narrowing buys no safety there. A bare `YYYY-MM-DD` anchors to midnight
+ *    UTC for a lower bound and is rewritten to the half-open
+ *    `< next-day-midnight` for an upper bound (`calendarDayUpperBoundRewrite`,
+ *    the #3777 convention).
+ *
+ * ## What widening ADMITS, stated plainly
+ *
+ * `string` also admits ordering comparisons on NON-temporal text columns
+ * (`{ code: { $gt: 'M' } }`). That is real SQL and every backend answers it —
+ * but **the ORDER is the backend's, not this contract's**: `driver-sql` binds a
+ * plain `>` decided by the dialect's collation (byte-wise on SQLite, the
+ * database locale on Postgres, the column collation on MySQL), while `formula`
+ * and `driver-memory` use the JS operators, i.e. UTF-16 code-unit order. Those
+ * answers coincide for ASCII and diverge outside it — the same split
+ * {@link StringOperatorSchema} had to rule on for case sensitivity.
+ *
+ * **The comparand form this contract guarantees is therefore the ISO/clock one**
+ * — `YYYY-MM-DD`, a UTC ISO-8601 instant, or `HH:MM[:SS[.fff]]`. All three are
+ * ASCII and fixed-width, so lexicographic order IS chronological order and every
+ * backend agrees. Ordering arbitrary natural-language text is permitted, not
+ * promised: it is the collation's answer, and it may differ per backend.
  */
 export const ComparisonOperatorSchema = lazySchema(() => z.object({
   /** Greater than - SQL: > | MongoDB: $gt */
-  $gt: z.union([z.number(), z.date(), FieldReferenceSchema]).optional(),
-  
+  $gt: z.union([z.number(), z.date(), z.string(), FieldReferenceSchema]).optional()
+    .describe(`Greater than. ${ORDERING_COMPARAND_DESCRIPTION}`),
+
   /** Greater than or equal to - SQL: >= | MongoDB: $gte */
-  $gte: z.union([z.number(), z.date(), FieldReferenceSchema]).optional(),
-  
+  $gte: z.union([z.number(), z.date(), z.string(), FieldReferenceSchema]).optional()
+    .describe(`Greater than or equal to. ${ORDERING_COMPARAND_DESCRIPTION}`),
+
   /** Less than - SQL: < | MongoDB: $lt */
-  $lt: z.union([z.number(), z.date(), FieldReferenceSchema]).optional(),
-  
+  $lt: z.union([z.number(), z.date(), z.string(), FieldReferenceSchema]).optional()
+    .describe(`Less than. ${ORDERING_COMPARAND_DESCRIPTION}`),
+
   /** Less than or equal to - SQL: <= | MongoDB: $lte */
-  $lte: z.union([z.number(), z.date(), FieldReferenceSchema]).optional(),
+  $lte: z.union([z.number(), z.date(), z.string(), FieldReferenceSchema]).optional()
+    .describe(`Less than or equal to. ${ORDERING_COMPARAND_DESCRIPTION}`),
 }));
 
 // ============================================================================
@@ -119,15 +226,100 @@ export const SetOperatorSchema = lazySchema(() => z.object({
 }));
 
 /**
+ * The endpoint contract shared by both of `$between`'s bounds (#6571).
+ *
+ * Module-private on purpose, exactly like {@link ORDERING_COMPARAND_DESCRIPTION}:
+ * it is documentation attached to a slot, not an authorable surface of its own,
+ * so it stays out of the exported API surface. The reasoning behind every
+ * sentence is in {@link RangeOperatorSchema}'s docblock.
+ */
+const RANGE_ENDPOINT_DESCRIPTION =
+  'Closed interval [min, max]. Each endpoint is a number, a Date, a string, or '
+  + 'a { $field } reference — the SAME union the ordering comparisons take, '
+  + 'because a range IS its two ordering bounds. STRING is the form the '
+  + 'platform itself produces: the date-macro resolver walks INTO arrays, so '
+  + '{ $between: ["{current_year_start}", "{current_year_end}"] } resolves to '
+  + 'two strings. The guaranteed spellings are an ISO calendar day '
+  + '(YYYY-MM-DD), a UTC ISO-8601 instant, or a wall-clock time of day '
+  + '(HH:MM[:SS[.fff]]) for a Field.time column; those are ASCII and '
+  + 'fixed-width, so lexicographic order IS chronological order and every '
+  + 'backend agrees. The driver reconciles each endpoint with the column '
+  + 'independently (a bare calendar day used as the MAX becomes the half-open '
+  + 'next-day boundary). Ranging over NON-temporal text is permitted but NOT '
+  + 'promised: the order is the backend collation\'s, and those coincide only '
+  + 'for ASCII.';
+
+/**
  * Range operator for interval checks (closed interval).
  * SQL: BETWEEN ? AND ? | MongoDB: $gte AND $lte
+ *
+ * Supported endpoint types: **Number, Date, ISO/clock STRING, FieldReference**.
+ *
+ * ## Why `string` is in BOTH endpoint unions (#6571)
+ *
+ * This is the same contradiction {@link ComparisonOperatorSchema} carried until
+ * #5685, in the one slot where it bites hardest. Until this was written down
+ * both endpoints read `number | Date | FieldReference` — and the platform's own
+ * producers put a STRING in them:
+ *
+ * - **The date-macro resolver descends into arrays.** `resolveFilterTokens`
+ *   (`@objectstack/core`, `filter-tokens.ts`) evaluates the `{token}` grammar,
+ *   and its `walk` has an explicit array arm (`if (Array.isArray(node)) return
+ *   node.map(walk)`), so a tuple comparand is resolved member by member. Every
+ *   branch of that resolver returns a string — `asYmd(…)` for a calendar day,
+ *   `.toISOString()` for the sub-day tokens. So
+ *   `{ close_date: { $between: ['{current_year_start}', '{current_year_end}'] } }`
+ *   becomes `{ close_date: { $between: ['2026-01-01', '2026-12-31'] } }`, whose
+ *   two endpoints were **exactly the type this schema declared it refused**.
+ * - **This package's own conformance corpus spells it.**
+ *   `temporal-conformance.ts` — the shared cross-driver expectation table, in
+ *   `packages/spec` itself — states three `$between` cases with string
+ *   endpoints: `{ at: { $between: ['2026-04-29', '2026-07-28'] } }` with its
+ *   `{90_days_ago}`/`{today}` token twin, the degenerate single-day range, and
+ *   `{ at: { $between: ['08:00:00', '18:00:00'] } }` on a `Field.time` column.
+ *   A declaration contradicted by the conformance table one directory over is
+ *   not under-describing reality; it is disagreeing with it.
+ * - **The driver already normalises both ends per column type.**
+ *   `SqlDriver.coerceFilterValue` recurses through arrays member-wise
+ *   (`value.map(v => this.coerceFilterValue(table, field, v))`), and
+ *   `calendarDayBetweenRewrite` coerces the min and rewrites a bare-calendar-day
+ *   max into the half-open `< next-day(max)` bound — knex's `whereBetween` being
+ *   inclusive on both ends, it inherits the same rule `$lte` has (#3777).
+ *
+ * A closed interval is the natural spelling of a **date window**, which makes
+ * this the slot an author — an AI author in particular — is most likely to
+ * reach for with the resolver's own output in hand, and the old declaration
+ * told them that output was invalid.
+ *
+ * ## Why a BARE string, and not an ISO-shaped refinement (#6571 rider ①)
+ *
+ * Identical to {@link ComparisonOperatorSchema}'s finding, and re-measured for
+ * the tuple: this schema is field-**agnostic** (it never sees which column the
+ * range applies to), an ISO refinement would reject the `HH:MM[:SS[.fff]]` form
+ * `field-value.zod.ts`'s `CLOCK_TIME_TYPES` declares and the conformance case
+ * above exercises, and date-only vs full-timestamp is already reconciled
+ * downstream by `calendarDayBetweenRewrite`. Endpoint-vs-column correctness is
+ * a field-TYPED judgement that already has an owner; re-guessing it here would
+ * refuse working ranges.
+ *
+ * ## What widening ADMITS, stated plainly
+ *
+ * `string` also admits ranges over NON-temporal text (`{ code: { $between:
+ * ['A', 'M'] } }`). That is real SQL and every backend answers it — but **the
+ * ORDER is the backend's, not this contract's**: `driver-sql` emits
+ * `whereBetween`, decided by the dialect's collation, while the JS matchers use
+ * UTF-16 code-unit order. Those coincide for ASCII and diverge outside it.
+ * Nothing here promises the two endpoints are ordered relative to each other
+ * either — an inverted `[max, min]` range is a well-formed filter that matches
+ * nothing, at every backend.
  */
 export const RangeOperatorSchema = lazySchema(() => z.object({
   /** Between (inclusive) - takes [min, max] array */
   $between: z.tuple([
-    z.union([z.number(), z.date(), FieldReferenceSchema]),
-    z.union([z.number(), z.date(), FieldReferenceSchema])
-  ]).optional(),
+    z.union([z.number(), z.date(), z.string(), FieldReferenceSchema]),
+    z.union([z.number(), z.date(), z.string(), FieldReferenceSchema])
+  ]).optional()
+    .describe(`Between (inclusive). ${RANGE_ENDPOINT_DESCRIPTION}`),
 }));
 
 // ============================================================================
@@ -187,23 +379,56 @@ export const RangeOperatorSchema = lazySchema(() => z.object({
  * `$contains`. An application whose users search non-ASCII text should not read
  * `$icontains` as "accent- and case-blind search" — it is not one.
  *
- * ### Implementation status — declared here, NOT yet answered by any backend
+ * ### Implementation status — EVERY face answers it (#6520)
  *
- * This PR is the contract half of the #4706 ruling and deliberately ships no
- * runtime behaviour (#5701). No driver evaluates `$icontains` today; all five
- * refuse it, loudly, as an operator they do not implement — which is the
- * fail-closed direction and stays true until #5702 lands the lowerings. The
- * same issue carries the `$contains`-family alignment the ruling above
- * requires (SQLite/turso `LIKE` made case-exact, mongo's hardcoded `'i'`
- * removed). Until then the sentence above is the DECLARATION and #5702 is the
- * gap; `FILTER_TEXT_CASES` (`filter-text-conformance.ts`) is the standard that
- * measures the gap, and the driver-conformance ledger carries one DEBT row per
- * backend so the gap is counted rather than assumed.
+ * #5701 shipped this declaration deliberately ahead of every runtime, #5702
+ * (closed 2026-08-08, retuned by #6518) landed the lowerings on the SQL family,
+ * and #6520 closed the remainder in one PR. Measured per face, by running
+ * `{ name: { $icontains: 'acme' } }` against a fixture holding BOTH `acme corp`
+ * and `ACME CORP` — not by grepping for a case arm, which is blind to the face
+ * that inherits its compiler and so undercounts:
+ *
+ * | face | `$icontains` | how it gets there |
+ * |---|---|---|
+ * | `driver-sql` | ANSWERS both rows | its own `case '$icontains'`, folding through the same emitter that carries the escaping |
+ * | `driver-sqlite-wasm` | ANSWERS both rows | INHERITED — `SqliteWasmDriver extends SqlDriver`; this package carries no text case arm of its own, on a different ENGINE |
+ * | `driver-turso` | ANSWERS both rows, on BOTH transports | local inherits `SqlDriver`; the remote transport compiles independently and has its own arm |
+ * | `driver-memory` — query path, reference matcher, analytics face | ANSWERS both rows | #6520; the pattern faces take {@link asciiCaseInsensitiveRegexSource}, the matcher {@link asciiCaseInsensitiveContains} |
+ * | `driver-mongodb` | ANSWERS both rows | #6520; an ASCII-only `$regex`, never `$options: 'i'` |
+ * | objectql `having` | ANSWERS both rows | #6520; {@link asciiCaseInsensitiveContains} over the aggregated row |
+ * | `formula` `matchesFilterCondition` | ANSWERS both rows | #6520; the same helper, on the RLS write-side `check` |
+ * | `service-analytics` (3 compilers) | ANSWERS both rows | #6520; an ASCII fold rendered into SQL on both sides of the `LIKE` |
+ *
+ * **So the sentence an author needs is no longer "not portable".** `$icontains`
+ * is executable on every backend and every evaluation face the platform ships,
+ * and it folds the SAME domain on all of them. The divergence #6520 was filed
+ * over — an app whose tests run on the in-memory double and whose production
+ * runs SQL getting two answers from one filter — is closed.
+ *
+ * One posture note that is NOT about `$icontains` and is easy to misread from
+ * this table: `formula`'s evaluator answers an operator it does not know with a
+ * silent `false` (fail-closed — it governs a WRITE-side `check`, so an
+ * unevaluable condition DENIES), where the other JS faces throw
+ * `INVALID_FILTER`. That difference is deliberate and documented on
+ * `matches-filter.ts`; what #6520 changed is that no operator this array
+ * DECLARES is answered that way any more.
+ *
+ * The `$contains`-family alignment the ruling above requires is likewise part
+ * done rather than pending: #6518 made that family case-EXACT across the SQL
+ * dialects, while `driver-memory`'s query path and `driver-mongodb` still fold
+ * the whole Unicode range — the two rows #6682 tracks.
+ *
+ * `FILTER_TEXT_CASES` (`filter-text-conformance.ts`) is the standard that
+ * measures all of the above, and the driver-conformance ledger still carries a
+ * DEBT row for `driver-memory` and `driver-mongodb` — on requirement 2 alone
+ * now, since #6520 closed requirement 1 on both — so what is open stays counted
+ * rather than assumed.
  *
  * @see FILTER_TEXT_CASES — the conformance standard for every operator here.
  * @see RETIRED_FILTER_OPERATORS — why `$regex` is not in this list.
  * @see https://github.com/objectstack-ai/objectstack/issues/4706 (the ruling)
- * @see https://github.com/objectstack-ai/objectstack/issues/5702 (the backends)
+ * @see https://github.com/objectstack-ai/objectstack/issues/5702 (the SQL family — landed)
+ * @see https://github.com/objectstack-ai/objectstack/issues/6520 (the JS faces — landed)
  */
 export const StringOperatorSchema = lazySchema(() => z.object({
   /** Contains substring, CASE-SENSITIVELY - SQL: LIKE %?% (case-exact) */
@@ -230,10 +455,121 @@ export const StringOperatorSchema = lazySchema(() => z.object({
     + 'sqlite-wasm) folds ASCII only, so a Unicode promise here would be a '
     + 'guarantee three of the five could not keep. The comparand is matched '
     + 'LITERALLY — "%", "_" and regex metacharacters are ordinary characters, not '
-    + 'wildcards. Case-SENSITIVE containment is $contains. [#5701: declared by the '
-    + 'protocol; the driver lowerings land with #5702.]'
+    + 'wildcards. Case-SENSITIVE containment is $contains. [#5701 declared it; #5702 '
+    + 'lowered it on the SQL family (driver-sql, driver-sqlite-wasm, driver-turso on '
+    + 'both transports); #6520 lowered it on every JS evaluation face, so it is '
+    + 'portable across every backend the platform ships.]'
   ),
 }));
+
+// ============================================================================
+// The ASCII fold — ONE implementation for every JS evaluation face (#6520)
+// ============================================================================
+
+/** `A`..`Z`, and the `a`..`z` they fold onto. The domain #4706 Q1 = A pinned. */
+const ASCII_UPPER_FIRST = 0x41; // 'A'
+const ASCII_UPPER_LAST = 0x5a; // 'Z'
+const ASCII_CASE_DELTA = 0x20; // 'a' - 'A'
+
+/**
+ * [#6520] Fold a string's ASCII case, and NOTHING else — the `$icontains`
+ * comparison domain, as a function.
+ *
+ * ## Why this is in the spec and not four times in four packages
+ *
+ * `$icontains` has six JS evaluation faces (`driver-memory`'s query path,
+ * reference matcher and analytics face, `driver-mongodb`, objectql's `having`,
+ * `@objectstack/formula`'s `matchesFilterCondition`) plus three SQL compilers in
+ * `service-analytics`. Every one of them needs the same fold, and this repo has
+ * already measured what happens when such a rule is written out per package:
+ * *"a list written out here would agree with the spec on the day it was typed
+ * and never again"* (`driver-memory/src/filter-refusal.ts`, on the operator
+ * vocabulary) — the #3948 shape, reached through the fold instead of the word
+ * list. One definition means a fold that is wrong is wrong everywhere at once,
+ * which is the only way six faces can be held to one answer.
+ *
+ * ## Why not `toLowerCase()`
+ *
+ * `String.prototype.toLowerCase()` is the FULL Unicode fold: it maps `É` to `é`
+ * and `МОСКВА` to `москва`. The contract says those must NOT match (#4706 Q1 =
+ * A), and the reason is not preference — SQLite has no ICU in this repo's build,
+ * so its `lower()` folds ASCII only, and three of the five drivers are SQLite
+ * underneath. A Unicode promise here would be one the SQL family could not keep,
+ * so a JS face that reaches for `toLowerCase()` does not merely differ from the
+ * ruling: it re-opens the divergence the ruling closed. `FILTER_TEXT_CASES`'
+ * `CAFÉ` / `café` pair is the row that catches it.
+ *
+ * The same trap wears a second disguise on the regex-evaluating faces: a
+ * `RegExp` built with the `i` flag ALSO folds the whole Unicode range. Those
+ * faces take {@link asciiCaseInsensitiveRegexSource}, not an `i` flag.
+ *
+ * @see asciiCaseInsensitiveContains — the containment test built on this.
+ * @see https://github.com/objectstack-ai/objectstack/issues/4706 (the ruling)
+ * @see https://github.com/objectstack-ai/objectstack/issues/6520 (the JS faces)
+ */
+export function foldAsciiCase(value: string): string {
+  let out = '';
+  for (let i = 0; i < value.length; i++) {
+    const code = value.charCodeAt(i);
+    out += code >= ASCII_UPPER_FIRST && code <= ASCII_UPPER_LAST
+      ? String.fromCharCode(code + ASCII_CASE_DELTA)
+      : value[i];
+  }
+  return out;
+}
+
+/**
+ * [#6520] Does `haystack` contain `needle`, ignoring ASCII case only?
+ *
+ * The `$icontains` predicate for every face that can compare two JS strings
+ * directly — the reference matcher, objectql's `having`, `formula`. The fold
+ * runs on BOTH sides, which is the half that is easy to get wrong: folding only
+ * the comparand compares a folded needle against a raw haystack and matches just
+ * the rows that were already lower-case. `FILTER_TEXT_CASES`' first row (an
+ * upper-case row from a lower-case comparand) is the one that catches it, and
+ * `driver-sql`'s emitter carries the same note over its own two-sided fold.
+ */
+export function asciiCaseInsensitiveContains(haystack: string, needle: string): boolean {
+  return foldAsciiCase(haystack).includes(foldAsciiCase(needle));
+}
+
+/**
+ * [#6520] `comparand` as a regular-expression SOURCE that matches it LITERALLY,
+ * ignoring ASCII case only.
+ *
+ * For the faces that cannot fold the stored value because they hand a pattern to
+ * an engine rather than comparing two strings: `driver-memory`'s mingo query
+ * path and its analytics face, and `driver-mongodb`'s translator. Neither can
+ * apply {@link foldAsciiCase} to the column, so the fold has to live in the
+ * PATTERN — each ASCII letter becomes the two-member character class `[Aa]`,
+ * which folds that position on both sides without touching any other character.
+ *
+ * Two properties, and the second is the one an `i` flag would destroy:
+ *
+ * - **The comparand is LITERAL.** Every regex metacharacter is escaped, so
+ *   `a.b` matches `a.b` and not `axb` — the `$regex` defect #4706 retired the
+ *   operator over, restated as a requirement (`FILTER_TEXT_CASES`' `.` row).
+ * - **The fold is ASCII-ONLY.** `É` is not an ASCII letter, so it is emitted as
+ *   itself and compares literally. A `new RegExp(source, 'i')` would fold it and
+ *   fail the `CAFÉ` row — so callers pass NO flags. The returned source is
+ *   already case-insensitive exactly where the contract says it should be.
+ */
+export function asciiCaseInsensitiveRegexSource(comparand: string): string {
+  let out = '';
+  for (let i = 0; i < comparand.length; i++) {
+    const ch = comparand[i];
+    const code = comparand.charCodeAt(i);
+    if (code >= ASCII_UPPER_FIRST && code <= ASCII_UPPER_LAST) {
+      out += `[${ch}${String.fromCharCode(code + ASCII_CASE_DELTA)}]`;
+    } else if (code >= ASCII_UPPER_FIRST + ASCII_CASE_DELTA && code <= ASCII_UPPER_LAST + ASCII_CASE_DELTA) {
+      out += `[${String.fromCharCode(code - ASCII_CASE_DELTA)}${ch}]`;
+    } else {
+      // Escape every regex metacharacter — the comparand is text, not a pattern.
+      out += /[\\^$.*+?()[\]{}|/]/.test(ch) ? `\\${ch}` : ch;
+    }
+  }
+  return out;
+}
 
 // ============================================================================
 // 3.5 Special Operators
@@ -263,20 +599,34 @@ export const FieldOperatorsSchema = lazySchema(() => z.object({
   $eq: z.any().optional(),
   $ne: z.any().optional(),
   
-  // Comparison (numeric/date)
-  $gt: z.union([z.number(), z.date(), FieldReferenceSchema]).optional(),
-  $gte: z.union([z.number(), z.date(), FieldReferenceSchema]).optional(),
-  $lt: z.union([z.number(), z.date(), FieldReferenceSchema]).optional(),
-  $lte: z.union([z.number(), z.date(), FieldReferenceSchema]).optional(),
+  // Ordering. `string` is in the union for the reason {@link ComparisonOperatorSchema}
+  // gives at length (#5685): the date-macro resolver and all three first-party
+  // callers produce ISO/clock STRINGS in these slots and nothing else. This copy
+  // is the ENFORCED one — `NormalizedFilterSchema` validates against it and the
+  // exported `FieldOperators` is inferred from it — so it must not drift from the
+  // documentation copy above.
+  $gt: z.union([z.number(), z.date(), z.string(), FieldReferenceSchema]).optional(),
+  $gte: z.union([z.number(), z.date(), z.string(), FieldReferenceSchema]).optional(),
+  $lt: z.union([z.number(), z.date(), z.string(), FieldReferenceSchema]).optional(),
+  $lte: z.union([z.number(), z.date(), z.string(), FieldReferenceSchema]).optional(),
   
   // Set & Range
   $in: z.array(z.any()).optional(),
   $nin: z.array(z.any()).optional(),
+  // Range. `string` is in BOTH endpoint unions for the reason
+  // {@link RangeOperatorSchema} gives at length (#6571): the date-macro resolver
+  // walks into arrays, so a token range resolves to two ISO/clock STRINGS, and
+  // this package's own `temporal-conformance.ts` corpus spells that shape. This
+  // copy is the ENFORCED one — `NormalizedFilterSchema` validates against it and
+  // the exported `FieldOperators` is inferred from it — so it must not drift
+  // from the documentation copy above. #5685 landed the sibling ordering slots
+  // in the documentation copy first and left the reachable surface still
+  // rejecting the platform's own output; both spellings move together.
   $between: z.tuple([
-    z.union([z.number(), z.date(), FieldReferenceSchema]),
-    z.union([z.number(), z.date(), FieldReferenceSchema])
+    z.union([z.number(), z.date(), z.string(), FieldReferenceSchema]),
+    z.union([z.number(), z.date(), z.string(), FieldReferenceSchema])
   ]).optional(),
-  
+
   // String-specific. Case-SENSITIVE, except `$icontains` which folds ASCII case
   // only — see {@link StringOperatorSchema} for the contract and its boundary.
   $contains: z.string().optional(),
@@ -464,13 +814,41 @@ export type Filter<T = any> = {
     | {
         $eq?: T[K];
         $ne?: T[K];
-        $gt?: T[K] extends number | Date ? T[K] : never;
-        $gte?: T[K] extends number | Date ? T[K] : never;
-        $lt?: T[K] extends number | Date ? T[K] : never;
-        $lte?: T[K] extends number | Date ? T[K] : never;
+        // Ordering (#5685). The TYPED half of what {@link ComparisonOperatorSchema}
+        // declares — and unlike that field-agnostic schema, `T` is known here, so
+        // this stays type-precise instead of admitting `string` everywhere:
+        //   - a `Date` field also takes the ISO STRING the date-macro resolver
+        //     produces (`{ close_date: { $gte: '2026-01-01' } }`), which the old
+        //     `T[K] extends number | Date ? T[K]` guard rejected outright;
+        //   - a `string` field (a `Field.time` `'09:00'`, an autonumber code) is
+        //     orderable at every backend, where the old guard collapsed it to
+        //     `never` and made the operator unwritable;
+        //   - a `number` field stays numbers-only — nothing here wants `'5'`.
+        $gt?: T[K] extends number ? number : T[K] extends Date | string ? T[K] | string : never;
+        $gte?: T[K] extends number ? number : T[K] extends Date | string ? T[K] | string : never;
+        $lt?: T[K] extends number ? number : T[K] extends Date | string ? T[K] | string : never;
+        $lte?: T[K] extends number ? number : T[K] extends Date | string ? T[K] | string : never;
         $in?: T[K][];
         $nin?: T[K][];
-        $between?: T[K] extends number | Date ? [T[K], T[K]] : never;
+        // Range (#6571). The TYPED half of what {@link RangeOperatorSchema}
+        // declares, and the exact mirror of the ordering guard above — a range
+        // IS its two ordering bounds, so the two must agree slot for slot:
+        //   - a `Date` field also takes the ISO STRINGS the date-macro resolver
+        //     produces for a token range (it walks into arrays), which the old
+        //     `T[K] extends number | Date ? [T[K], T[K]]` guard rejected outright;
+        //   - a `string` field (a `Field.time` `'08:00:00'`, an autonumber code)
+        //     is rangeable at every backend, where the old guard collapsed it to
+        //     `never` and made the operator unwritable — the very shape
+        //     `temporal-conformance.ts` pins for `Field.time`;
+        //   - a `number` field stays numbers-only — nothing here wants `['5','9']`.
+        // Each endpoint is widened independently, so a half-resolved range
+        // (`[new Date(...), '2026-12-31']`) type-checks, which is what a partial
+        // macro resolution actually hands the author.
+        $between?: T[K] extends number
+          ? [number, number]
+          : T[K] extends Date | string
+            ? [T[K] | string, T[K] | string]
+            : never;
         $contains?: T[K] extends string ? string : never;
         $notContains?: T[K] extends string ? string : never;
         $startsWith?: T[K] extends string ? string : never;
@@ -1063,21 +1441,29 @@ export const FilterArraySchema: z.ZodType<FilterArray, FilterArray> = z.lazy(() 
  * not narrow a query, it WIDENS it, and on an RLS read scope that is a
  * permission bypass rather than a degraded feature (#3948).
  *
- * ## `$icontains` is DECLARED but deliberately NOT here yet
+ * ## `$icontains` JOINED this array in #6520 — the staging is over
  *
- * {@link StringOperatorSchema}, {@link FieldOperatorsSchema} and {@link Filter}
- * declare `$icontains` (#5701, the contract half of the #4706 ruling). This
- * array does not, and the difference is deliberate rather than an oversight:
- * those three are declaration and TYPE surfaces with no runtime allowlist
- * reader (verified — `NormalizedFilterSchema` is their only consumer, and
- * nothing parses a filter through it at runtime), so declaring there is inert.
- * Adding it HERE would flip driver-memory from a loud refusal to the silent
- * widening measured above, before a single backend can answer the operator.
+ * It was declared by {@link StringOperatorSchema} and deliberately absent here
+ * from #5701 until #6520, and that gap was the mechanism described above rather
+ * than an oversight: adding the name while `driver-memory`'s matcher had no arm
+ * flipped a loud refusal into the silent widening measured above.
  *
- * **`$icontains` joins this array in the PR that implements it (#5702), not
- * before.** `filter-operator-vocabulary.test.ts` pins the difference between
- * the two surfaces at exactly `{ $icontains }`, so this staging cannot silently
- * grow a second member, and clearing it is what makes that pin fail.
+ * The gap closed the only way it could — **in ONE PR with the arms**, which is
+ * the constraint the #6520 ruling made binding (maintainer, 2026-08-08: the word
+ * list must not land ahead of the evaluators). #6520 gave every JS evaluation
+ * face an ASCII fold ({@link foldAsciiCase}) in the same commit that added the
+ * name here: `driver-memory` (query path, reference matcher and analytics face),
+ * `driver-mongodb`, objectql's `having`, `@objectstack/formula`, and
+ * `service-analytics`' three SQL compilers. So the claim this array makes —
+ * *backends implement this operator* — is true of `$icontains` for the first
+ * time.
+ *
+ * What that means for the NEXT operator is unchanged, and is the reason the
+ * measurement above is kept: stage it in {@link FieldOperatorsSchema} alone,
+ * record it in `filter-operator-vocabulary.test.ts`, and add it here only when
+ * every face can answer it. That pin now asserts an EMPTY difference between the
+ * declaration and enforcement surfaces, so a name added to one and not the other
+ * fails in either direction.
  *
  * Retired operators (`$regex`, `$options`) are not here either, and never were.
  * Their prescriptions live in {@link RETIRED_FILTER_OPERATORS}.
@@ -1090,7 +1476,7 @@ export const FILTER_OPERATORS = [
   // Set & Range
   '$in', '$nin', '$between',
   // String
-  '$contains', '$notContains', '$startsWith', '$endsWith',
+  '$contains', '$notContains', '$startsWith', '$endsWith', '$icontains',
   // Special
   '$null', '$exists',
 ] as const;
@@ -1143,15 +1529,23 @@ export interface RetiredFilterOperatorGuidance {
  * took that trade explicitly: the spec declares, the existing refusal sites
  * enforce.
  *
- * Those sites are the five that already refuse unknown operators today —
+ * Those sites are the five that refuse unknown operators —
  * `driver-sql`'s `default:` arm, `driver-turso`'s remote transport,
  * `driver-memory`'s `filter-refusal.ts`, `driver-mongodb`'s
  * `translateFieldOperators`, and `objectql`'s `having` — and the point of one
- * table is that they stop each writing their own sentence. Wiring them to it is
- * **#5702**, deliberately not this PR: `$regex` still has one live producer
- * (`plugin-auth`'s ObjectQL adapter, on the authentication path), so a refusal
- * landing before #5710 flips that producer would break sign-in. Hard order:
- * **#5710 flips the producer, then #5702 turns these strings into refusals.**
+ * table is that they stop each writing their own sentence. When this block was
+ * written, wiring them was deliberately deferred behind a hard order ("#5710
+ * flips the producer, then #5702 turns these strings into refusals"), because
+ * `$regex` still had one live producer on the authentication path. Both gates
+ * have fired since — #5710 flipped `plugin-auth`'s adapter to `$contains`,
+ * #5702 wired all five sites — so that ordering is shipped history, not
+ * pending advice. Census per face, by executing `{ $regex }` and a dangling
+ * `{ $options }` against each (re-verified 2026-08, #6993): all five print
+ * this table's `why` verbatim; the four driver faces throw it in the ADR-0112
+ * envelope (`INVALID_FILTER` / 400 — `driver-sqlite-wasm` and both turso
+ * transports inherit or mirror it), while `having`'s refusal is still a bare
+ * `Error` carrying the sentence without `code`/`status` — the one open half,
+ * tracked as #7047.
  *
  * ## Why `$regex` was retired rather than implemented (#4706)
  *

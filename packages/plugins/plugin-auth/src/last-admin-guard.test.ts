@@ -380,6 +380,26 @@ describe('[#5892] break-glass: the last unbanned administrator cannot be banned'
 // Predicate / bulk writes — the shape a by-id guard would miss
 // ---------------------------------------------------------------------------
 
+/**
+ * ⚠️ [#5574] These predicate cases are load-bearing in a way they were not when
+ * they were written, and the reason is worth stating where it will be read.
+ *
+ * They used to exercise a BATCH dispatch: one `beforeUpdate` / `beforeDelete`
+ * call for the whole write, with `input.id` present-but-undefined, so the guard
+ * fell through to the caller's predicate and saw the whole doomed set.
+ * ADR-0058 Addendum II made the `before*` phase PER MATCHED ROW, so every
+ * dispatch now names one administrator — and a guard reading "there is an id,
+ * so this is a by-id write" approves each one on its own merits (banning one
+ * admin out of three is legitimate) while the batch bans all three. Measured:
+ * every case below went green-to-red on the engine change and was restored by
+ * making `options.multi` outrank the bound id in `resolveTargetIds`.
+ *
+ * So: these are not "the bulk variant of the by-id cases". They are the pin
+ * that a break-glass invariant over a POPULATION survives being asked one row
+ * at a time. Do not fold them into the by-id cases, and do not rewrite this
+ * guard to reason from `ctx.previous` — per-row `previous` is exactly the
+ * information that cannot see a batch.
+ */
 describe('[#5892] the guard holds on predicate (multi) bans, not only by-id', () => {
   let engine: ObjectQL;
 

@@ -2,6 +2,7 @@
 // ADR-0090 D6 — explain engine: layer verdicts, attribution, machine artifact.
 
 import { describe, it, expect } from 'vitest';
+import { resolveUserAuthzGrants } from '@objectstack/core';
 import { PermissionSetSchema } from '@objectstack/spec/security';
 import { PermissionEvaluator } from './permission-evaluator';
 import { explainAccess, buildContextForUser, type ExplainEngineDeps } from './explain-engine';
@@ -420,42 +421,77 @@ describe('posture derivation aligns with enforcement (label-drift elimination)',
   });
 });
 
-describe('buildContextForUser', () => {
-  const ql = {
+// ─── buildContextForUser (#6352) ────────────────────────────────────────────
+//
+// `buildContextForUser` no longer aggregates anything. It calls
+// `@objectstack/core`'s `resolveUserAuthzGrants` — the SAME function every
+// inbound request resolves through — and adds only presentation: the ADR-0091
+// expired / delegated row annotations, and `hasPlatformAdminGrant` read back off
+// the resolver's own posture verdict.
+//
+// ⚠ The fixtures below use a `where`-HONOURING fake, and that is load-bearing,
+// not tidiness. The deleted mirror filtered rows in memory, so it produced the
+// right answer even against a fake that ignored `where` and returned every row
+// for a table. The resolver delegates filtering to the engine, exactly as the
+// real ObjectQL engine does, so a fake that ignores `where` now reports grants
+// nobody holds — a fixture defect the old shape was blind to.
+
+type Rows = Record<string, any[]>;
+
+/** Minimal `where`-honouring ObjectQL stand-in: scalar equality and `$in`. */
+function makeGrantQl(tables: Rows) {
+  return {
     async find(object: string, opts: any) {
-      if (object === 'sys_user_position') return [{ user_id: 'u2', position: 'hr_specialist' }];
-      if (object === 'sys_user_permission_set') return [{ user_id: 'u2', permission_set_id: 'ps1' }];
-      if (object === 'sys_permission_set') return [{ id: 'ps1', name: 'payroll_reader' }];
-      return [];
+      const where = opts?.where ?? {};
+      return (tables[object] ?? []).filter((row) =>
+        Object.entries(where).every(([key, cond]) => {
+          const cell = row[key];
+          if (cond && typeof cond === 'object' && '$in' in (cond as any)) {
+            return ((cond as any).$in as unknown[]).includes(cell);
+          }
+          return cell === cond;
+        }),
+      );
     },
   };
+}
+
+const NOW = Date.parse('2026-07-10T12:00:00Z');
+
+describe('buildContextForUser', () => {
+  const ql = makeGrantQl({
+    sys_user_position: [{ user_id: 'u2', position: 'hr_specialist' }],
+    sys_user_permission_set: [{ user_id: 'u2', permission_set_id: 'ps1' }],
+    sys_permission_set: [{ id: 'ps1', name: 'payroll_reader' }],
+  });
 
   it('derives hasPlatformAdminGrant from an UNSCOPED admin_full_access user grant (matches resolveAuthzContext)', async () => {
-    const qlUnscoped = {
-      async find(object: string, _opts: any) {
-        if (object === 'sys_user_permission_set') return [{ user_id: 'u2', permission_set_id: 'psAdmin' /* organization_id absent → unscoped */ }];
-        if (object === 'sys_permission_set') return [{ id: 'psAdmin', name: 'admin_full_access' }];
-        return [];
-      },
-    };
+    const qlUnscoped = makeGrantQl({
+      // organization_id absent → unscoped
+      sys_user_permission_set: [{ user_id: 'u2', permission_set_id: 'psAdmin' }],
+      sys_permission_set: [{ id: 'psAdmin', name: 'admin_full_access' }],
+    });
     const ctx = await buildContextForUser(qlUnscoped, 'u2');
     expect(ctx.hasPlatformAdminGrant).toBe(true);
     expect(ctx.permissions).toContain('admin_full_access');
+    // The resolver PROJECTS the built-in position from the same grant (ADR-0068
+    // D2) and resolves the rung once — both now reach the panel unchanged.
+    expect(ctx.positions).toContain('platform_admin');
+    expect(ctx.posture).toBe('PLATFORM_ADMIN');
   });
 
   it('a SCOPED (org-specific) admin_full_access user grant does NOT set hasPlatformAdminGrant', async () => {
-    const qlScoped = {
-      async find(object: string, _opts: any) {
-        if (object === 'sys_user_permission_set') return [{ user_id: 'u2', permission_set_id: 'psAdmin', organization_id: 'org1' }];
-        if (object === 'sys_permission_set') return [{ id: 'psAdmin', name: 'admin_full_access' }];
-        return [];
-      },
-    };
+    const qlScoped = makeGrantQl({
+      sys_user_permission_set: [{ user_id: 'u2', permission_set_id: 'psAdmin', organization_id: 'org1' }],
+      sys_permission_set: [{ id: 'psAdmin', name: 'admin_full_access' }],
+    });
     const ctx = await buildContextForUser(qlScoped, 'u2');
     expect(ctx.hasPlatformAdminGrant).toBe(false);
     // The name is still resolved into permissions (it grants object CRUD), but it
     // no longer confers platform_admin posture — the drift this closes.
     expect(ctx.permissions).toContain('admin_full_access');
+    expect(ctx.positions).not.toContain('platform_admin');
+    expect(ctx.posture).toBe('MEMBER');
   });
 
   it('reconstructs positions + direct grants + the everyone anchor', async () => {
@@ -464,10 +500,16 @@ describe('buildContextForUser', () => {
       userId: 'u2',
       positions: ['hr_specialist', 'everyone'],
       permissions: ['payroll_reader'],
+      // [#6352] The resolver's full envelope now reaches the panel. These four
+      // were MISSING from the hand-written mirror, which is why an explanation
+      // could disagree with enforcement — see the parity suite below.
+      systemPermissions: [],
+      org_user_ids: ['u2'],
+      posture: 'MEMBER',
       // [ADR-0105 D2] The DELEGATOR's own org access set, resolved here rather
       // than inherited — a delegated read is bounded by the delegator's own
-      // memberships. This fixture's `ql` serves no `sys_member` rows, so it is
-      // empty, which fails the `group` wall closed.
+      // memberships. This fixture serves no `sys_member` rows, so it is empty,
+      // which fails the `group` wall closed.
       accessible_org_ids: [],
       expiredGrants: [],
       delegatedPositions: [],
@@ -476,18 +518,12 @@ describe('buildContextForUser', () => {
   });
 
   it('surfaces delegation provenance for a position held via a delegated_from row (ADR-0091 D3)', async () => {
-    const NOW = Date.parse('2026-07-10T12:00:00Z');
-    const qlDelegated = {
-      async find(object: string, _opts: any) {
-        if (object === 'sys_user_position') {
-          return [
-            { user_id: 'u2', position: 'hr_specialist' },
-            { user_id: 'u2', position: 'approver', delegated_from: 'u_boss', valid_until: '2026-07-20T00:00:00Z' },
-          ];
-        }
-        return [];
-      },
-    };
+    const qlDelegated = makeGrantQl({
+      sys_user_position: [
+        { user_id: 'u2', position: 'hr_specialist' },
+        { user_id: 'u2', position: 'approver', delegated_from: 'u_boss', valid_until: '2026-07-20T00:00:00Z' },
+      ],
+    });
     const ctx = await buildContextForUser(qlDelegated, 'u2', NOW);
     expect(ctx.positions).toEqual(['hr_specialist', 'approver', 'everyone']);
     expect(ctx.delegatedPositions).toEqual([
@@ -496,32 +532,22 @@ describe('buildContextForUser', () => {
   });
 
   it('filters grants outside their validity window and reports them as expired (ADR-0091 D2)', async () => {
-    const NOW = Date.parse('2026-07-10T12:00:00Z');
-    const qlWindowed = {
-      async find(object: string, _opts: any) {
-        if (object === 'sys_user_position') {
-          return [
-            { user_id: 'u2', position: 'hr_specialist' },
-            { user_id: 'u2', position: 'payroll_approver', valid_until: '2026-07-01T00:00:00Z' },
-            // Pending (future valid_from) is filtered but NOT reported as expired.
-            { user_id: 'u2', position: 'auditor', valid_from: '2026-08-01T00:00:00Z' },
-          ];
-        }
-        if (object === 'sys_user_permission_set') {
-          return [
-            { user_id: 'u2', permission_set_id: 'ps1' },
-            { user_id: 'u2', permission_set_id: 'ps2', valid_until: '2026-06-01T00:00:00Z' },
-          ];
-        }
-        if (object === 'sys_permission_set') {
-          return [
-            { id: 'ps1', name: 'payroll_reader' },
-            { id: 'ps2', name: 'quarter_close_admin' },
-          ];
-        }
-        return [];
-      },
-    };
+    const qlWindowed = makeGrantQl({
+      sys_user_position: [
+        { user_id: 'u2', position: 'hr_specialist' },
+        { user_id: 'u2', position: 'payroll_approver', valid_until: '2026-07-01T00:00:00Z' },
+        // Pending (future valid_from) is filtered but NOT reported as expired.
+        { user_id: 'u2', position: 'auditor', valid_from: '2026-08-01T00:00:00Z' },
+      ],
+      sys_user_permission_set: [
+        { user_id: 'u2', permission_set_id: 'ps1' },
+        { user_id: 'u2', permission_set_id: 'ps2', valid_until: '2026-06-01T00:00:00Z' },
+      ],
+      sys_permission_set: [
+        { id: 'ps1', name: 'payroll_reader' },
+        { id: 'ps2', name: 'quarter_close_admin' },
+      ],
+    });
     const ctx = await buildContextForUser(qlWindowed, 'u2', NOW);
     expect(ctx.positions).toEqual(['hr_specialist', 'everyone']);
     expect(ctx.permissions).toEqual(['payroll_reader']);
@@ -529,6 +555,219 @@ describe('buildContextForUser', () => {
       { kind: 'position', name: 'payroll_approver', until: '2026-07-01T00:00:00Z' },
       { kind: 'permission_set', name: 'quarter_close_admin', until: '2026-06-01T00:00:00Z' },
     ]);
+  });
+});
+
+// ─── [#6352] The explain panel and enforcement resolve ONE aggregation ───────
+//
+// Every case below runs `buildContextForUser` and `resolveUserAuthzGrants` over
+// the SAME rows and asserts they agree — the assertion nothing in the repo made
+// while the mirror existed. Convergence makes agreement structural rather than
+// coincidental, so the suite's real job is the second half of each case: the
+// `expected` block pins what the shared aggregation must actually PRODUCE, so
+// the pin can never pass by both sides resolving to nothing.
+//
+// Each `expected` block was RED before convergence. Measured against the mirror
+// on the first fixture's rows: it returned positions `['hr_specialist',
+// 'everyone']` (no `sys_member` role projection) and permissions
+// `['payroll_reader']` (no position-bound set, no `ai_seat`), against the
+// resolver's `['org_admin', 'hr_specialist', 'everyone']` and
+// `['payroll_reader', 'hr_tools', 'ai_seat']`. A user whose grants arrive
+// through a POSITION was explained as holding none of them — the panel denying
+// what enforcement allows, which is the exact failure an explain panel exists
+// to prevent.
+describe('buildContextForUser ↔ resolveUserAuthzGrants parity (#6352)', () => {
+  const PARITY_CASES: Array<{
+    name: string;
+    tables: Rows;
+    expected: {
+      positions: string[];
+      permissions: string[];
+      systemPermissions: string[];
+      accessible_org_ids: string[];
+      posture: string;
+      hasPlatformAdminGrant: boolean;
+    };
+  }> = [
+    {
+      // The measured pre-change divergence, in one fixture: an org role
+      // (ADR-0095 D3 `sys_member` projection), a platform-RBAC position
+      // (ADR-0057 D4), a permission set the POSITION carries
+      // (`sys_position_permission_set`), and the ADR-0024 `ai_seat` synthesis.
+      name: 'org role + position-bound permission set + ai_seat',
+      tables: {
+        sys_user: [{ id: 'u2', email: 'u2@example.com', ai_access: true }],
+        sys_member: [{ user_id: 'u2', organization_id: 'org1', role: 'admin' }],
+        sys_user_position: [{ user_id: 'u2', position: 'hr_specialist' }],
+        sys_position: [{ id: 'pos_hr', name: 'hr_specialist' }],
+        sys_position_permission_set: [{ position_id: 'pos_hr', permission_set_id: 'ps_hr_tools' }],
+        sys_user_permission_set: [{ user_id: 'u2', permission_set_id: 'ps1' }],
+        sys_permission_set: [
+          { id: 'ps1', name: 'payroll_reader' },
+          { id: 'ps_hr_tools', name: 'hr_tools', system_permissions: ['manage_users'] },
+        ],
+      },
+      expected: {
+        positions: ['org_admin', 'hr_specialist', 'everyone'],
+        permissions: ['payroll_reader', 'hr_tools', 'ai_seat'],
+        systemPermissions: ['manage_users'],
+        accessible_org_ids: ['org1'],
+        posture: 'MEMBER',
+        hasPlatformAdminGrant: false,
+      },
+    },
+    {
+      // [ADR-0090 D5] The audience anchor is not decoration: a set bound to the
+      // implicit `everyone` position must RESOLVE. The mirror pushed `everyone`
+      // onto the list and then read no position-bound sets at all, so anything
+      // granted this way was invisible to the panel.
+      name: 'everyone-anchor-bound permission set resolves',
+      tables: {
+        sys_position: [{ id: 'pos_everyone', name: 'everyone' }],
+        sys_position_permission_set: [{ position_id: 'pos_everyone', permission_set_id: 'ps_base' }],
+        sys_permission_set: [{ id: 'ps_base', name: 'company_directory' }],
+      },
+      expected: {
+        positions: ['everyone'],
+        permissions: ['company_directory'],
+        systemPermissions: [],
+        accessible_org_ids: [],
+        posture: 'MEMBER',
+        hasPlatformAdminGrant: false,
+      },
+    },
+    {
+      // [ADR-0068 D2] The platform_admin derivation, both polarities.
+      name: 'unscoped admin_full_access derives platform_admin',
+      tables: {
+        sys_user_permission_set: [{ user_id: 'u2', permission_set_id: 'psAdmin' }],
+        sys_permission_set: [{ id: 'psAdmin', name: 'admin_full_access' }],
+      },
+      expected: {
+        positions: ['platform_admin', 'everyone'],
+        permissions: ['admin_full_access'],
+        systemPermissions: [],
+        accessible_org_ids: [],
+        posture: 'PLATFORM_ADMIN',
+        hasPlatformAdminGrant: true,
+      },
+    },
+    {
+      name: 'org-scoped admin_full_access does NOT derive platform_admin',
+      tables: {
+        sys_user_permission_set: [{ user_id: 'u2', permission_set_id: 'psAdmin', organization_id: 'org1' }],
+        sys_permission_set: [{ id: 'psAdmin', name: 'admin_full_access' }],
+      },
+      expected: {
+        positions: ['everyone'],
+        permissions: ['admin_full_access'],
+        systemPermissions: [],
+        accessible_org_ids: [],
+        posture: 'MEMBER',
+        hasPlatformAdminGrant: false,
+      },
+    },
+    {
+      // [ADR-0095 D3] The org-admin rung comes from the CAPABILITY grant
+      // `auto-org-admin-grant` writes, never from the better-auth role.
+      name: 'organization_admin capability grant derives TENANT_ADMIN',
+      tables: {
+        sys_member: [{ user_id: 'u2', organization_id: 'org1', role: 'admin' }],
+        sys_user_permission_set: [{ user_id: 'u2', permission_set_id: 'psOrg', organization_id: 'org1' }],
+        sys_permission_set: [{ id: 'psOrg', name: 'organization_admin' }],
+      },
+      expected: {
+        positions: ['org_admin', 'everyone'],
+        permissions: ['organization_admin'],
+        systemPermissions: [],
+        accessible_org_ids: ['org1'],
+        posture: 'TENANT_ADMIN',
+        hasPlatformAdminGrant: false,
+      },
+    },
+    {
+      // [ADR-0091 D2] Validity windows drop rows on BOTH sides, including the
+      // platform_admin derivation: an EXPIRED unscoped admin_full_access grant
+      // must not confer the rung. Only the explain-side annotation survives.
+      name: 'ADR-0091 windows: expired admin grant confers nothing',
+      tables: {
+        sys_user_position: [
+          { user_id: 'u2', position: 'hr_specialist' },
+          { user_id: 'u2', position: 'payroll_approver', valid_until: '2026-07-01T00:00:00Z' },
+          { user_id: 'u2', position: 'auditor', valid_from: '2026-08-01T00:00:00Z' },
+        ],
+        sys_user_permission_set: [
+          { user_id: 'u2', permission_set_id: 'ps1' },
+          { user_id: 'u2', permission_set_id: 'psAdmin', valid_until: '2026-06-01T00:00:00Z' },
+        ],
+        sys_permission_set: [
+          { id: 'ps1', name: 'payroll_reader' },
+          { id: 'psAdmin', name: 'admin_full_access' },
+        ],
+      },
+      expected: {
+        positions: ['hr_specialist', 'everyone'],
+        permissions: ['payroll_reader'],
+        systemPermissions: [],
+        accessible_org_ids: [],
+        posture: 'MEMBER',
+        hasPlatformAdminGrant: false,
+      },
+    },
+  ];
+
+  for (const { name, tables, expected } of PARITY_CASES) {
+    it(`agrees with the enforcement resolver — ${name}`, async () => {
+      const grants = await resolveUserAuthzGrants(makeGrantQl(tables), 'u2', { nowMs: NOW });
+      const ctx = await buildContextForUser(makeGrantQl(tables), 'u2', NOW);
+
+      // (a) The two agree, field for field, on the whole aggregation surface.
+      expect(ctx.positions).toEqual(grants.positions);
+      expect(ctx.permissions).toEqual(grants.permissions);
+      expect(ctx.systemPermissions).toEqual(grants.systemPermissions);
+      expect(ctx.accessible_org_ids).toEqual(grants.accessible_org_ids);
+      expect(ctx.org_user_ids).toEqual(grants.org_user_ids);
+      expect(ctx.posture).toEqual(grants.posture);
+      expect(ctx.hasPlatformAdminGrant).toBe(grants.posture === 'PLATFORM_ADMIN');
+
+      // (b) Non-vacuity: agreeing on nothing is not agreement. Pin what the one
+      // aggregation must actually produce for these rows.
+      expect(ctx.positions).toEqual(expected.positions);
+      expect(ctx.permissions).toEqual(expected.permissions);
+      expect(ctx.systemPermissions).toEqual(expected.systemPermissions);
+      expect(ctx.accessible_org_ids).toEqual(expected.accessible_org_ids);
+      expect(ctx.posture).toBe(expected.posture);
+      expect(ctx.hasPlatformAdminGrant).toBe(expected.hasPlatformAdminGrant);
+    });
+  }
+
+  it('the explain-only surface is ADDITIVE — it annotates rows, it never changes the verdict', async () => {
+    const tables: Rows = {
+      sys_user_position: [
+        { user_id: 'u2', position: 'hr_specialist' },
+        { user_id: 'u2', position: 'approver', delegated_from: 'u_boss', valid_until: '2026-07-20T00:00:00Z' },
+        { user_id: 'u2', position: 'payroll_approver', valid_until: '2026-07-01T00:00:00Z' },
+      ],
+      sys_user_permission_set: [{ user_id: 'u2', permission_set_id: 'ps2', valid_until: '2026-06-01T00:00:00Z' }],
+      sys_permission_set: [{ id: 'ps2', name: 'quarter_close_admin' }],
+    };
+    const grants = await resolveUserAuthzGrants(makeGrantQl(tables), 'u2', { nowMs: NOW });
+    const ctx = await buildContextForUser(makeGrantQl(tables), 'u2', NOW);
+
+    // The annotations are non-empty…
+    expect(ctx.delegatedPositions).toEqual([
+      { name: 'approver', from: 'u_boss', until: '2026-07-20T00:00:00Z' },
+    ]);
+    expect(ctx.expiredGrants).toEqual([
+      { kind: 'position', name: 'payroll_approver', until: '2026-07-01T00:00:00Z' },
+      { kind: 'permission_set', name: 'quarter_close_admin', until: '2026-06-01T00:00:00Z' },
+    ]);
+    // …and the aggregation is still byte-identical to enforcement's. An expired
+    // grant is REPORTED, never RESOLVED.
+    expect(ctx.positions).toEqual(grants.positions);
+    expect(ctx.permissions).toEqual(grants.permissions);
+    expect(ctx.positions).not.toContain('payroll_approver');
+    expect(ctx.permissions).not.toContain('quarter_close_admin');
   });
 });
 

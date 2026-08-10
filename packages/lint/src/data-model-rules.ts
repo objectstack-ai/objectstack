@@ -33,6 +33,32 @@ const NUMERIC_TYPES = new Set([
   'number', 'currency', 'integer', 'decimal', 'percent', 'float', 'double',
 ]);
 const OPTION_FIELD_TYPES = new Set(['select', 'multiselect', 'radio', 'enum']);
+/**
+ * Field names that give an object a title FACE, for R9
+ * (`object/missing-name-field`).
+ *
+ * DIVERGES from spec's `NAME_ISH_EXACT`
+ * (`packages/spec/src/data/display-name.ts`) by exactly one entry: `code`. That
+ * difference is INTENTIONAL — the maintainer ruled on 2026-08-10 (#6734) to
+ * keep both sets as they are and write the gap down in both places rather than
+ * converge them. The two sets answer different questions:
+ *
+ *   - R9 asks the LOOSER **"will records be anonymous?"** — is there anything
+ *     here a human could read instead of a raw id? A `code` clears that bar, so
+ *     it counts as a title face and is listed below.
+ *   - ADR-0079 derivation (`resolveDisplayField`) asks **"what IS the title?"**
+ *     — which field to PICK as the primary. A `code` is an identifier, not a
+ *     title, so spec deliberately omits it from tier 1 (name-ish exact) and
+ *     tier 2 (name-ish affix). A `code`-only object can still be derived at
+ *     tier 3 ("first title-eligible field by declaration order") — by a
+ *     different rule and a different priority, so the two are not equivalent
+ *     even where they agree on the outcome.
+ *
+ * Nothing user-visible turns on the gap: R9 is `severity: 'suggestion'` and
+ * ADR-0079's `Record #<id>` floor means no object ships without a title either
+ * way. Do not "fix" either set into the other without a ruling that supersedes
+ * the one above.
+ */
 const NAME_LIKE_FIELDS = ['name', 'title', 'subject', 'label', 'full_name', 'display_name', 'code'];
 
 /** Child object names that read as line-items / composition (entered with the parent). */

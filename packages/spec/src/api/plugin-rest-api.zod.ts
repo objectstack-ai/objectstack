@@ -736,7 +736,10 @@ export const DEFAULT_METADATA_ROUTES: RestApiRouteRegistration = {
   prefix: '/api/v1/meta',
   service: 'metadata',
   category: 'metadata',
-  methods: ['getMetaTypes', 'getMetaItems', 'getMetaItem', 'saveMetaItem'],
+  methods: [
+    'getMetaTypes', 'getMetaItems', 'getMetaItem', 'getMetaItemLayered', 'saveMetaItem',
+    'publishMetaItem',
+  ],
   authRequired: true,
   endpoints: [
     {
@@ -784,6 +787,30 @@ export const DEFAULT_METADATA_ROUTES: RestApiRouteRegistration = {
       cacheTtl: 3600,
     },
     {
+      method: 'GET',
+      path: '/:type/:name/layers',
+      handler: 'getMetaItemLayered',
+      category: 'metadata',
+      public: false,
+      summary: 'Get a metadata item as its three layers (code / overlay / effective)',
+      description:
+        'Diagnostic projection powering Studio\'s "code default vs override vs effective" '
+        + 'comparison: the packaged baseline, the tenant customization row, and the merged '
+        + 'result side by side. A DIFFERENT representation from `GET /:type/:name`, which '
+        + 'answers only the merged value under `item` — hence its own path and its own '
+        + 'response schema (#5882). Reached until now only as `GET /:type/:name?layers=true`, '
+        + 'which still works during its deprecation window but is answered with '
+        + '`Deprecation` / `Link` headers pointing here.',
+      tags: ['Metadata'],
+      // No `requestSchema`, for the same reason as `GET /:type/:name` above
+      // (#3899): every input is path/query-bound, so no request body exists to
+      // validate and declaring one would advertise a gate that cannot run.
+      responseSchema: 'GetMetaItemLayeredResponseSchema',
+      // Not cacheable: this is a diagnostic read that deliberately bypasses the
+      // metadata cache so it always reflects the live overlay row.
+      cacheable: false,
+    },
+    {
       method: 'PUT',
       path: '/:type/:name',
       handler: 'saveMetaItem',
@@ -798,6 +825,30 @@ export const DEFAULT_METADATA_ROUTES: RestApiRouteRegistration = {
       // layer's per-type validation behind `saveMetaItem`, which rejects an
       // off-spec item with 422 + `issues`.
       responseSchema: 'SaveMetaItemResponseSchema',
+      permissions: ['metadata.write'],
+      cacheable: false,
+    },
+    {
+      method: 'POST',
+      path: '/:type/:name/publish',
+      handler: 'publishMetaItem',
+      category: 'metadata',
+      public: false,
+      summary: 'Publish the pending draft overlay (promotes draft → active)',
+      description:
+        'Promotes the item\'s pending DRAFT overlay to the live `active` row and records an '
+        + '`op=\'publish\'` history event. The sibling write door of `PUT /:type/:name` — the '
+        + 'ADR-0033 two-step spelling, where `?mode=draft` stages a body and this makes it live. '
+        + '404 `[no_draft]` when there is nothing to publish; 409 `metadata_conflict` when the '
+        + 'published row advanced while the draft was held. Served since before #7294 with no '
+        + 'declaration behind it — this entry is what makes its response contract nameable.',
+      tags: ['Metadata'],
+      // No `requestSchema` (#3899): the body is optional and its only read key
+      // is `message`, taken only when it is already a string and ignored
+      // otherwise — the route cannot 400 a malformed body, so declaring a
+      // schema here would advertise a gate that does not run. Every other
+      // input (`:type`, `:name`) is path-bound.
+      responseSchema: 'PublishMetaItemResponseSchema',
       permissions: ['metadata.write'],
       cacheable: false,
     },
@@ -1059,7 +1110,12 @@ export const DEFAULT_NOTIFICATION_ROUTES: RestApiRouteRegistration = {
       category: 'notification',
       public: false,
       summary: 'List notifications',
-      description: 'Returns paginated list of notifications for the current user',
+      // NOT "paginated" (#6361). The route answers the newest `limit` rows and
+      // stops; there is no continuation token on either half of the contract
+      // since `cursor` was removed in protocol 17. The catalog is a
+      // machine-readable surface (Route & surface ownership rule 4), so a
+      // pagination claim here is read by SDKs and codegen as a capability.
+      description: 'Returns the newest window of notifications for the current user (not paginated)',
       tags: ['Notifications'],
       responseSchema: 'ListNotificationsResponseSchema',
       cacheable: false,

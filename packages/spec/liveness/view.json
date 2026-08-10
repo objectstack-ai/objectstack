@@ -4,13 +4,15 @@
   "props": {
     "name": {
       "status": "dead",
-      "verifiedAt": "2026-08-01",
-      "note": "Container item identity, declared in #4001 batch 6e and dead as a BODY key — the honest reading of a copy nobody reads. The live one is the sys_metadata row column: the door supplies it (saveMetaItem({type:'view', name})) and readers that resolve a view by name use the row, or a ViewItem's own name (rest-server.ts:5422 reads view.name on a ViewItem, not on a container). Declared anyway, and deliberately not authorWarn'd, because the platform's own writers send it — artifact-shipped containers (service-ai/ai_traces) and the metadata-validation sweep both do, so tombstoning it rejected shapes we write ourselves. Exactly the correction translation/name needed in batch 5."
+      "evidenceScope": "cross-repo",
+      "verifiedAt": "2026-08-10",
+      "note": "Container item identity, declared in #4001 batch 6e and dead as a BODY key — the honest reading of a copy nobody reads. The live one is the sys_metadata row column: the door supplies it (saveMetaItem({type:'view', name})) and readers that resolve a view by name use the row, or a ViewItem's own name (rest-server.ts:5422 reads view.name on a ViewItem, not on a container). Declared anyway, and deliberately not authorWarn'd, because the platform's own writers send it — artifact-shipped containers (service-ai/ai_traces) and the metadata-validation sweep both do, so tombstoning it rejected shapes we write ourselves. Exactly the correction translation/name needed in batch 5. VERDICT RE-TESTED AND UPHELD 2026-08-10 (#7427) under the previews ruling (#7131): `translation.name` re-graded on that ruling precisely because its preview read the BODY copy as a display fallback, so this twin was measured for the same shape and does not have it. At objectui @e9ab52f9 ViewPreview reads the item name from its `name` PROP (ViewPreview.tsx:110, `String(name) || 'default'`) — the saved identity the registry passes in, i.e. the sys_metadata row column this note already calls the live one — and never touches `draft.name`. The body copy stays unread, which is what `dead` claims here."
     },
     "label": {
       "status": "dead",
-      "verifiedAt": "2026-08-01",
-      "note": "Display metadata on the container with no runtime consumer. Not authorWarn'd: the README's rule is that pure display annotation (description, tags, icon) must not warn, and the job.label / translation.label precedent is this exact case — docs-shaped, deliberately kept, ADR-0033 exempt from enforce-or-remove."
+      "evidenceScope": "cross-repo",
+      "verifiedAt": "2026-08-10",
+      "note": "Display metadata on the container with no runtime consumer. VERDICT RE-TESTED AND UPHELD 2026-08-10 (#7427) under the maintainer ruling that a designer preview rendering a key to a human is a runtime consumer (2026-08-10, #7131; README, 'Designer previews count as consumers'). It is the twin of `translation.label`, which that ruling DID re-grade, so it was measured, and it splits on REACHABILITY — the half of the README rule that is easy to skip. THE MEASUREMENT, at objectui @e9ab52f9: ViewPreview is registered for `view` (previews/index.ts:37) and resolved by ResourceEditPage.tsx:949, and it genuinely READS this key — ViewPreview.tsx:115 injects `(body).label ?? (draft).label ?? name` as the label of the single named listView it hands to the `object-view` schema. The read is real; the RENDER is not reachable. That injected label has exactly two render paths in plugin-view's ObjectView, and this preview takes neither: ObjectView.tsx:1119 renders `{view.label || key}` as a named-view tab, but ObjectView.tsx:1112 returns null when the map holds one entry or fewer, and ViewPreview always injects exactly one; ObjectView.tsx:993 passes the label into the `renderListView` list-view schema (ListView appends it to export filenames), but `renderListView` is a prop and plugin-view/src/index.tsx:58-64 registers the bare `ObjectViewRenderer` for `object-view` — it renders ObjectView with schema and dataSource only, so the prop is undefined on this path. A read point whose render cannot fire is what PR #7425 meant by 'a preview no registry hands a draft to is a read point that never runs', one level in: here the registry does hand it a draft, and the draft's label still reaches no human. Not authorWarn'd: the README's rule is that pure display annotation (description, tags, icon) must not warn, and the job.label / translation.label precedent is this exact case — docs-shaped, deliberately kept, ADR-0033 exempt from enforce-or-remove. To re-open: a second listView entry, or `renderListView` wired on this path, would make it render — either change flips this row."
     },
     "object": {
       "status": "live",
@@ -119,7 +121,10 @@
         },
         "sharing": {
           "status": "live",
-          "note": "objectui: ListView sharing tooltip incl. lockedBy (ListView.test.tsx:2276 'should display lockedBy in sharing tooltip when set'). Supersedes the audit's 'sharing.lockedBy dead' line."
+          "verifiedAt": "2026-08-10",
+          "evidenceScope": "cross-repo",
+          "evidence": "objectui: packages/plugin-list/src/ListView.tsx:2544 gates the toolbar sharing badge on schema.sharing.type, :2549 renders its tooltip from the same value and :2573 counts it when laying out the toolbar's left side; objectui: packages/plugin-list/src/__tests__/ListView.test.tsx:2428 pins the lockedBy tooltip — measured objectui @11c1e71e",
+          "note": "RE-CITED 2026-08-10 (#7133/#7142): the old citation was the TEST ALONE, at ListView.test.tsx:2276. The test survives with its content intact — it is now packages/plugin-list/src/__tests__/ListView.test.tsx:2428, 'should display lockedBy in sharing tooltip when set' — so this was line drift, not deletion. A test is the weaker half of a liveness claim, so the production reader is cited first and the test kept as the pin. Verdict unchanged: LIVE. Supersedes the 2026-06 audit's 'sharing.lockedBy dead' line."
         },
         "rowHeight": {
           "status": "live",
@@ -135,11 +140,17 @@
         },
         "hiddenFields": {
           "status": "live",
-          "note": "objectui: ObjectGrid.tsx (audit L15)."
+          "verifiedAt": "2026-08-10",
+          "evidenceScope": "cross-repo",
+          "evidence": "objectui: packages/react/src/spec-bridge/bridges/list-view.ts:123 copies the authored key onto the list node; objectui: packages/plugin-list/src/ListView.tsx:763 seeds the hidden-field set from schema.hiddenFields and :1491-1494 filters those names out of the effective column set, with :1509 listing it as a memo dependency — measured objectui @11c1e71e",
+          "note": "RE-CITED 2026-08-10 (#7132/#7142): the previous citation was 'ObjectGrid.tsx (audit L15)', which has ZERO occurrences of hiddenFields at objectui @11c1e71e. The zero belongs to the key, not the scanner — the same substring instrument returns 2-31 hits for the nine sibling keys still cited to that file. The applying reader is ListView's effective-fields memo: the grid is handed an already-filtered `columns` array and never sees the key."
         },
         "fieldOrder": {
           "status": "live",
-          "note": "objectui: ObjectGrid.tsx (audit L15)."
+          "verifiedAt": "2026-08-10",
+          "evidenceScope": "cross-repo",
+          "evidence": "objectui: packages/react/src/spec-bridge/bridges/list-view.ts:124 copies the authored key onto the list node; objectui: packages/plugin-list/src/ListView.tsx:1499-1500 builds an order map from schema.fieldOrder and reorders the effective column set by it, with :1509 listing it as a memo dependency — measured objectui @11c1e71e",
+          "note": "RE-CITED 2026-08-10 (#7132/#7142): the previous 'ObjectGrid.tsx (audit L15)' citation greps to zero at objectui @11c1e71e. Column ordering is applied in the same ListView effective-fields memo as hiddenFields, before the grid is handed its `columns` array."
         },
         "rowActions": {
           "status": "live",
@@ -164,7 +175,10 @@
         },
         "inlineEdit": {
           "status": "live",
-          "note": "objectui: ObjectGrid.tsx (audit L15)."
+          "verifiedAt": "2026-08-10",
+          "evidenceScope": "cross-repo",
+          "evidence": "objectui: packages/plugin-list/src/ListView.tsx:791-794 seeds inline-edit state from schema.inlineEdit and :1559 forwards it to the grid node under the renamed key `editable`; objectui: packages/plugin-grid/src/ObjectGrid.tsx:2197 passes editable down to the data-table and :2204 mounts renderCellEditor only when it is set, with :2194 gating the save/cancel action column — measured objectui @11c1e71e",
+          "note": "RE-CITED 2026-08-10 (#7132/#7142): the previous 'ObjectGrid.tsx (audit L15)' citation greps to zero because of a ONE-HOP RENAME, not because the key is inert — ObjectGrid never spells `inlineEdit`, it reads `editable`, which is what ListView renames the key to at :1559. The value is applied (no cell editor is mounted without it); only the spelling changes at the boundary. That rename is exactly the instrument blindness that made the old citation read as dead."
         },
         "exportOptions": {
           "status": "live",
@@ -293,11 +307,17 @@
         },
         "groups": {
           "status": "live",
-          "note": "objectui: legacy alias of sections, normalized at ObjectForm.tsx:90 and spec-bridge form-view.ts:169 (spec.sections ?? spec.groups). Audit L24 drift resolved by alias-at-one-boundary."
+          "verifiedAt": "2026-08-09",
+          "evidenceScope": "cross-repo",
+          "evidence": "packages/spec/src/ui/view.zod.ts (foldFormGroupsIntoSections + the .overwrite on FormViewSchema — the PRODUCER fold, #6926: groups-only folds onto sections, sections wins when both are present, and groups is absent from every parsed form); objectui: packages/react/src/spec-bridge/bridges/form-view.ts:169 packages/plugin-form/src/ObjectForm.tsx:129-142 (objectui @7b3e048 — the pre-existing boundary folds, now redundant for parsed forms and retiring in a later cross-repo lap)",
+          "note": "WHERE THE FOLD LIVES: at the producer, as of #6926 — a `.overwrite()` on FormViewSchema, inherited by every parse door (ViewSchema.form/.formViews.*, both ViewItemSchema form arms, and ViewMetadataSchema's container AND flattened form-overlay members, which picks it up through .extend()). Before #6926 the alias was declared but folded NOWHERE in this repo: it was honored one boundary downstream in objectui (alias-at-one-boundary, objectui#2545, after a groups-only spec rendered nothing), while the framework's REST public-form routes read `sections` only — so the same authored form rendered in the console and degraded on GET /forms/:slug, POST /forms/:slug/submit and GET /forms/:slug/lookup/:field. That omission is what let #6926 be filed reading a live key as dead; it is recorded here so the next reader cannot repeat it. STILL NOT FOLDED (measured 2026-08-09, #6926): a RUNTIME-saved sys_metadata row — saveMetaItem validates through ViewMetadataSchema and then deliberately discards parsed.data to keep Studio round-trip keys, and the read replays the ADR-0087 stored-row conversion chain, which is not a zod parse. Code-authored views (defineView/defineForm → registry) DO reach REST folded. Pre-parse consumers still read the authored key and are right to: packages/lint's view rules walk authored sources. Audit L24 drift resolved by alias-at-one-boundary; superseded by the producer fold."
         },
         "subforms": {
           "status": "live",
-          "note": "objectui: deriveMasterDetail.ts:338, LineItemsPanel.tsx:45 — master-detail fully wired (audit L17)."
+          "verifiedAt": "2026-08-10",
+          "evidenceScope": "cross-repo",
+          "evidence": "objectui: packages/plugin-form/src/ObjectForm.tsx:175 branches on schema.subforms and :197 hands it to MasterDetailForm as `details`; objectui: packages/plugin-form/src/MasterDetailForm.tsx:315 reads schema.details and :240 renders one panel per entry, with :227 summing their amount fields; objectui: packages/plugin-form/src/ModalForm.tsx:736 and packages/plugin-form/src/DrawerForm.tsx:558 take the same key through their own envelopes (ModalForm applies at :756/:786, DrawerForm at :570) — measured objectui @11c1e71e",
+          "note": "RE-CITED 2026-08-10 (#7133/#7142): the old citation named deriveMasterDetail.ts:338 and LineItemsPanel.tsx:45, and neither file mentions `subforms` at objectui @11c1e71e. deriveMasterDetail DERIVES master-detail panels from relationship metadata — its output is merged with the authored key one level up, in app-shell MetadataProvider.tsx:304-307 — and LineItemsPanel.tsx:41-55 is the per-panel schema, one hop past the rename to `details`. The form renderers are the readers that branch on the authored key. Verdict unchanged: LIVE, master-detail fully wired (audit L17)."
         },
         "sharing": {
           "status": "live",

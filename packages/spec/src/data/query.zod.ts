@@ -65,20 +65,61 @@ export const SortNodeSchema = lazySchema(() => strictObject(
   },
 ));
 
+// Retired-VALUE prescriptions. Declared with `//` (never `/** */`) and ABOVE the
+// enum's JSDoc deliberately: `build-docs.ts` takes a file's FIRST JSDoc as the
+// reference page's blurb, so a doc comment here would displace the function
+// table below. (The `crypto.hash` / `HookBodyCapability` precedent,
+// `data/hook-body.zod.ts`, which is the other enum-value retirement in tree.)
+const AGG_RETIRED_MIDDLE =
+  ' was removed from `AggregationFunction` in @objectstack/spec 17 (#6188, ADR-0049 '
+  + 'enforce-or-remove) — no SQL backend ever compiled it. `SqlDriver.mapAggregateFunc` and '
+  + '`RemoteTransport.aggregate` each lower the same set of functions and refuse the rest, and '
+  + "the v1 dataset runtime had to subtract this one by name to stop it reaching a `COUNT(*)` "
+  + 'fallback that returns a row count in place of the value asked for. On the backend family '
+  + 'this platform targets it was a declaration that could only fail. ';
+const AGG_RETIRED_TAIL =
+  'There is no replacement in the query vocabulary: read the rows with an ordinary `fields` '
+  + 'query and shape them in the caller, or model the roll-up as a stored field. It returns '
+  + 'only WITH a portable lowering — ADR-0049\'s enforce leg, implementation first. '
+  + 'Run `os migrate meta --from 16` to rewrite existing sources automatically.';
+
+const ARRAY_AGG_RETIRED =
+  '`array_agg`' + AGG_RETIRED_MIDDLE
+  + 'Delete the aggregation, or the dataset measure that declared it. ' + AGG_RETIRED_TAIL;
+
+const STRING_AGG_RETIRED =
+  '`string_agg`' + AGG_RETIRED_MIDDLE
+  + 'Its dialect divergence is the widest of the family — the delimiter is a second argument '
+  + 'in PostgreSQL, a `SEPARATOR` clause in MySQL and a differently-named function in SQL '
+  + 'Server — so there was never one shape to lower it to. Delete the aggregation, or the '
+  + 'dataset measure that declared it. ' + AGG_RETIRED_TAIL;
+
 /**
  * Aggregation Function Enum
  * Standard aggregation functions for data analysis.
- * 
+ *
  * Supported Functions:
  * - **count**: Count rows (SQL: COUNT(*) or COUNT(field))
  * - **sum**: Sum numeric values (SQL: SUM(field))
  * - **avg**: Average numeric values (SQL: AVG(field))
  * - **min**: Minimum value (SQL: MIN(field))
  * - **max**: Maximum value (SQL: MAX(field))
- * - **count_distinct**: Count unique values (SQL: COUNT(DISTINCT field))
- * - **array_agg**: Aggregate values into array (SQL: ARRAY_AGG(field))
- * - **string_agg**: Concatenate values (SQL: STRING_AGG(field, delimiter))
- * 
+ * - **count_distinct**: Count DISTINCT NON-NULL values (SQL: COUNT(DISTINCT field));
+ *   `field` is REQUIRED — there is no `COUNT(DISTINCT *)`
+ *
+ * `array_agg` and `string_agg` were REMOVED in 17 (#6188). They were declared
+ * here from the day the enum was written and compiled by no SQL backend, while
+ * `service-analytics` carried a hand-written subtraction list naming exactly
+ * these two. `count_distinct` was deliberately kept on the other side of that
+ * split (maintainer ruling, 2026-08-07): a dashboard staple with one portable
+ * lowering (`COUNT(DISTINCT x)`), it took ADR-0049's ENFORCE leg — and #6409
+ * closed it, lowering the function on both SQL faces (`SqlDriver` and the Turso
+ * remote transport). The declaration led its implementation by decision rather
+ * than by drift, and no longer leads it at all: every value of this enum is
+ * compiled by the SQL family, and the values are pinned across the two faces by
+ * `AGGREGATION_CASES`. Authoring a retired value is a `tsc` error and a parse
+ * error carrying the prescription above.
+ *
  * Performance Considerations:
  * - COUNT(*) is typically faster than COUNT(field) as it doesn't check for nulls
  * - COUNT DISTINCT may require additional memory for tracking unique values
@@ -107,8 +148,19 @@ export const SortNodeSchema = lazySchema(() => strictObject(
  */
 export const AggregationFunction = z.enum([
   'count', 'sum', 'avg', 'min', 'max',
-  'count_distinct', 'array_agg', 'string_agg'
-]);
+  'count_distinct'
+], {
+  // Only the two spellings that USED to be legal get the retirement message.
+  // Telling the author of `arry_agg` that their value "was removed" would
+  // misinform, so everything else keeps zod's own enum error, which already
+  // lists the legal functions. (`crypto.hash`, and the `managedBy: 'system'`
+  // precedent one level up in object.zod.ts.)
+  error: (issue) => {
+    if (issue.input === 'array_agg') return ARRAY_AGG_RETIRED;
+    if (issue.input === 'string_agg') return STRING_AGG_RETIRED;
+    return undefined;
+  },
+});
 
 /**
  * Date Granularity Enum
@@ -146,9 +198,41 @@ export const GroupByNodeSchema = lazySchema(() => z.union([
 ]));
 
 /**
+ * The prescription for the per-aggregation `distinct` flag removed in #6815.
+ *
+ * Not exported, unlike {@link QUERY_CURSOR_REMOVED} / {@link
+ * QUERY_DISTINCT_REMOVED}: those two are re-declared on
+ * `EngineQueryOptionsSchema` and `HttpFindQueryParamsSchema` and need one
+ * string at two rejection sites, while this key lives on exactly one schema —
+ * `AggregationNodeSchema`, which `QuerySchema.aggregations` and
+ * `EngineAggregateOptionsSchema.aggregations` both reuse by reference, so both
+ * inherit the tombstone without restating it.
+ *
+ * No `os migrate meta` step is named: `QueryAST` is a REQUEST surface (the
+ * client SDK builder's output and the `POST /data/:object/query` body), never
+ * stored in stack metadata, so there is no source for a conversion to rewrite
+ * — the #4286 disposition, verbatim. The ADR-0087 registration is the
+ * protocol-17 semantic migration `aggregation-node-distinct-retired`.
+ */
+const AGGREGATION_DISTINCT_REMOVED =
+  '`query.aggregations[].distinct` was removed in @objectstack/spec 17 (#6815, ADR-0049) — '
+  + 'exactly ONE of the six faces that read an aggregation honoured it. The objectql in-memory '
+  + 'fallback deduplicated the values before applying the function, while `driver-sql`, '
+  + '`driver-turso`, `driver-mongodb`, `driver-memory` and the service-analytics SQL builder '
+  + "all ignored it — so `{ function: 'sum', field: 'amount', distinct: true }` answered a "
+  + 'DEDUPLICATED sum when the engine fell back in memory and an ordinary sum on every SQL '
+  + 'datasource: one query, two numbers, chosen by which backend happened to serve it. Both '
+  + 'answers are plausible, so nothing surfaced the divergence. Delete the key. For a '
+  + 'deduplicated COUNT the live spelling is the `count_distinct` aggregation function, which '
+  + 'every SQL face compiles to `COUNT(DISTINCT field)` (#6409) and the in-memory fallback '
+  + 'computes identically. `SUM(DISTINCT …)` / `AVG(DISTINCT …)` get no replacement: no '
+  + 'backend ever computed them here, and a per-row measure that needs deduplicating is a '
+  + 'modelling problem to fix in the data, not a flag on the read.';
+
+/**
  * Aggregation Node
  * Represents an aggregated field with function.
- * 
+ *
  * Aggregations summarize data across groups of rows (GROUP BY).
  * Used with `groupBy` to create analytical queries.
  * 
@@ -179,7 +263,12 @@ export const AggregationNodeSchema = lazySchema(() => z.object({
   function: AggregationFunction.describe('Aggregation function'),
   field: z.string().optional().describe('Field to aggregate (optional for COUNT(*))'),
   alias: z.string().describe('Result column alias'),
-  distinct: z.boolean().optional().describe('Apply DISTINCT before aggregation'),
+  /**
+   * Per-aggregation DISTINCT — REMOVED (#6815, ADR-0049). One face honoured it
+   * and five ignored it; `count_distinct` is the one deduplicating spelling
+   * every face computes. See {@link AGGREGATION_DISTINCT_REMOVED}.
+   */
+  distinct: retiredKey(AGGREGATION_DISTINCT_REMOVED),
   filter: FilterConditionSchema.optional().describe('[EXPERIMENTAL — not enforced] Per-aggregation filter (SQL FILTER (WHERE …)). Neither the SQL builders nor the in-memory fallback applies it (#4286); filter the whole query with `where` instead.'),
 }));
 
@@ -501,6 +590,7 @@ export type SortNodeParsed = z.infer<typeof SortNodeSchema>;
 export type AggregationNode = z.input<typeof AggregationNodeSchema>;
 export type GroupByNode = z.input<typeof GroupByNodeSchema>;
 export type DateGranularityValue = z.input<typeof DateGranularity>;
+export type AggregationFunction = z.input<typeof AggregationFunction>;
 // `FieldNode` is declared next to its schema rather than here: since #4196 it
 // is no longer recursive, it is just the name the docs and the engine give to
 // "one entry of a select list". (`JoinNode` and `WindowFunctionNode`/`WindowSpec`

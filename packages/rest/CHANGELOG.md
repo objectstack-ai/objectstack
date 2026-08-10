@@ -1,5 +1,1642 @@
 # @objectstack/rest
 
+## 17.0.0-rc.6
+
+### Major Changes
+
+- 9b9b70f: refactor(rest)!: 按 ADR-0049 退役 `ExportFieldMeta` 的八个约束键 —— 唯一的读者已随导入 dry run 的镜像一起退役 (#6536)
+
+  **BREAKING.** `@objectstack/rest` 导出的 `ExportFieldMeta` 不再声明
+  `required` / `system` / `readonly` / `hasDefault` / `min` / `max` /
+  `minLength` / `maxLength`，`buildFieldMetaMap` 也不再计算它们。
+  `ExportFieldMeta` 本身、以及全部展示类键（`name` / `type` / `label` /
+  `options` / `reference` / `displayField` / `multiple`）原样保留。
+
+  这是一次**休眠代码清扫，不是缺陷修复** —— 今天没有任何用户会撞上它。
+
+  ## 为什么这八个键留不住
+
+  它们只为一个消费者存在：导入 dry run 手抄的前置校验镜像
+  （`firstMissingRequiredField` / `firstConstraintViolation`，framework#3956）。
+  #4633 ruling D 已经退役了那份镜像（PR #6532）—— dry run 改为通过
+  `DataProtocol.validateData` 向引擎要判决，而引擎读的是对象自己的 schema。
+  于是 `buildFieldMetaMap` 每次导入照算不误、却**没有任何代码再读**，正是
+  ADR-0049 enforce-or-remove 针对的「已声明、无人读」形状。PR #6532 当时重写了
+  注释、把键留在原地，并写明退役是一次独立的清扫 —— 本 PR 就是它承诺的那次。
+
+  关键在于：这八个键**从来不是事实来源**。`buildFieldMetaMap(schema)` 是从调用方
+  自己传进来的那个 `schema` 上**派生**出它们的，所以这张表只是把调用方手里已有的
+  事实抄了第二份。约束词表旁边没有执行者，却和展示词表并排站着 —— 这恰恰是
+  AI 生成的消费端最容易误当成契约的形状。
+
+  ## 迁移：FROM → TO
+
+  只有一类代码受影响：直接调用 `buildFieldMetaMap`（或通过
+  `prepareImportRequest` 拿到 `PreparedImport.metaMap`）并读取这八个键的外部消费者。
+  仓内、以及 `objectui` 同级仓，逐键逐类型核查后**读者为零**。
+
+  ```ts
+  // FROM
+  const meta = buildFieldMetaMap(schema).get("amount");
+  if (meta?.required && !meta.hasDefault) reject();
+  if (meta?.max != null && value > meta.max) reject();
+
+  // TO —— 从你本来就持有的那个 schema 上读，也就是引擎读的同一份
+  const field = schema.fields["amount"];
+  if (field?.required && field.defaultValue == null) reject();
+  if (field?.max != null && value > field.max) reject();
+  ```
+
+  一行版：**把读取点从派生副本移回 `schema.fields[name]`。**
+
+  `hasDefault` 没有一对一的替代键 —— 它本身就是派生谓词
+  `defaultValue != null`，镜像的是引擎 `applyFieldDefaults` 的判断
+  （`packages/objectql/src/engine.ts`，`if (f.defaultValue == null) continue;`）。
+  那条事实仍然成立，只是它的权威出处一直在引擎里，不在这份副本里；所以请读
+  `field.defaultValue` 并自己套用同一个 `!= null` 判断。
+
+  ⚠️ **请对着一次真实运行验证，而不是只看 tsc 变绿**：这八个是**可选**键，挂在一个
+  本身继续存在的接口上，所以 JS 消费者（或任何 `any` 类型的读取）升级后读到的是
+  `undefined`，编译期一个字都不会说。TypeScript 消费者才会在读取处收到编译错误。
+
+  字段定义上的 `required` / `min` / `maxLength` 等**照旧完全可写、且照旧由引擎强制** ——
+  本次没有任何可编写或已存储的元数据形状发生变化。
+
+  <!-- adr-0087: registered export-field-meta-constraints-retired -->
+
+### Minor Changes
+
+- 97b0798: fix(spec,rest,runtime)!: the ADR-0045 publish gate gets its own machine-managed key — `app.hidden` goes back to meaning navigation, and the built-in Account app stops 404ing for every normal user (#4829)
+
+  <!-- adr-0087: registered app-hidden-to-unpublished -->
+
+  **FROM → TO:** nothing to rewrite by hand. `app.hidden` keeps its spelling and its
+  authoring contract; the publish gate moves to a new machine-managed key,
+  `app._unpublished`, which no author writes. Stored `sys_metadata` app rows carrying
+  `hidden: true` are rewritten to `_unpublished: true` by the ADR-0087 conversion
+  `app-hidden-to-unpublished` — automatically on every stored-row read, and in place via
+  `os migrate meta --stored --apply`.
+
+  ## The defect
+
+  `filterAppForUser` (`@objectstack/rest`) treated `app.hidden` as an access gate:
+
+  ```ts
+  if (
+    item.hidden === true &&
+    !sysPerms.has("studio.access") &&
+    !sysPerms.has("setup.access")
+  )
+    return null;
+  ```
+
+  `hidden` does not mean that. Its contract, written in `app.zod.ts` the day the key was
+  born alongside the built-in Account app, is navigation presentation: _"Hidden apps stay
+  fully routable and permission-checked"_ — keep it out of the App Switcher, surface it from
+  the avatar menu, which is exactly how personal-settings apps behave in GitHub Settings,
+  the Google account chip and Salesforce Personal Settings.
+
+  So the platform's own `account` app — authored `hidden: true` on purpose — was erased from
+  `GET /api/v1/meta/app` for every user without `studio.access` / `setup.access`. Clicking
+  the avatar → Profile landed on _"App not available — it may still be publishing"_, and
+  password changes, avatar, linked accounts, active sessions and the inbox were all
+  unreachable. Any admin saw a completely healthy system, which is why it survived a release
+  candidate and shipped a downstream workaround.
+
+  The two contracts arrived from different places. ADR-0045 §3 did not introduce `hidden`; it
+  **borrowed** it, citing an "ADR-0019 launcher contract (`hidden`, `active`)" as an existing
+  read side. That contract does not exist — **ADR-0019 contains no `hidden`** and never
+  discussed launchers, the avatar menu or the Account app. The reference was dangling from
+  the day it was written, which is why nothing caught the collision it created: one boolean,
+  two contracts, disagreeing on the only question that matters — _may a normal user reach
+  this app?_
+
+  ## What changed
+
+  - **`AppSchema` declares `_unpublished`** — the ADR-0045 §3 publish gate. `true` means the
+    app is unpublished: externally unobservable, not merely unlisted. It is written by the AI
+    additive-materialization path and cleared by `POST /packages/:id/publish-drafts`, and its
+    `_` prefix is this repo's existing marker for the channel tooling stamps onto artifacts
+    (ADR-0010's `_lock` / `_provenance` envelope; the prefix `lintAuthoredRecordKeys` already
+    skips). It is _declared_ rather than omitted because the write path validates against
+    this very schema (`saveMetaItem` → 422; `Registry.validate('app', …)` → `AppSchema.parse`),
+    so an undeclared key would make the platform's own flip unwritable. The strict door
+    answers the author-shaped spellings — `unpublished`, `published`, `draft` — with a
+    prescription that says _publish state is not authorable_, rather than routing them onto
+    the key.
+  - **`app.hidden` is navigation only**, and its docblock now says so with the incident
+    attached. Authoring `hidden: true` affects the App Switcher and nothing else.
+  - **The REST gate judges `_unpublished`.** A hidden app is served to everyone, with its
+    `hidden` flag intact so the shell can place it; an unpublished app still 404s externally
+    and still reaches builders for direct-URL preview, and `requiredPermissions` still applies
+    to both.
+  - **`publish-drafts` clears `_unpublished`** instead of un-hiding. It writes `false` rather
+    than deleting the key, because ADR-0045 §3 makes publish/unpublish symmetric, and it
+    copies `hidden` through untouched — publishing no longer rewrites a presentation choice
+    as a side effect. The response fields keep their `unhiddenApps` / `unhideError` spelling:
+    they are a wire contract read by the objectui Publish button, and renaming them from a
+    repo that cannot update that consumer would be a silent break of exactly the kind this
+    change is about.
+  - **ADR-0045 is amended**, its dangling ADR-0019 reference corrected, and both
+    implementation sites (`rest-server.ts`, `runtime/domains/packages.ts`) are now anchored in
+    `scripts/adr-anchors.json` — neither carried an anchor before, which is why an author
+    could change ADR-0045's §3 without knowing they were changing a decision.
+
+  ## Why a new key rather than deleting the gate
+
+  Taking `hidden` out of the access decision was proposed first and refused. The gate is §3 of
+  an **Accepted** ADR with pin tests and a live implementation behind it, so removing it in a
+  patch would reverse a recorded decision by side effect. It is also the worse failure
+  direction: a gate that fails **open** exposes a half-built app to real users, silently.
+
+  ## Migration reach
+
+  The conversion is `retiredFromLoadPath: true`, and here that flag is load-bearing rather
+  than bookkeeping — it confines the rewrite to **stored rows**. `hidden` is not retired as an
+  authorable key, so a conversion running on the load path would rewrite
+  `defineApp({ hidden: true })`, and the Account app itself, into unpublished apps and
+  reproduce the defect through the conversion layer. Excluded from the load path, it replays
+  only where the old meaning is the only meaning: the stored-row rehydration seams and
+  `os migrate meta`. Stored `hidden: true` was unambiguous under the old regime — that value
+  _was_ the gate, so nobody stored it to mean "keep me out of the switcher"; code-declared
+  apps like `ACCOUNT_APP` never enter `sys_metadata`, and the Studio app form has no `hidden`
+  control.
+
+  ## Follow-ups (other repos, filed separately)
+
+  - **cloud** — the AI materialization write point must stamp `_unpublished: true` where it
+    stamps `hidden: true` today.
+  - **objectui** — the Unpublished banner and the Publish button must read/clear
+    `_unpublished`; the App Switcher keeps reading `hidden`, which now means only what it says.
+  - **os-project-titanwind-ehr** — PLAT-DEF-040's startup `{hidden:false}` overlay can be
+    deleted once this ships.
+
+- 2ef1807: fix(objectql,rest,spec): the `DELETE_RESTRICTED` 409 stops handing a business user a developer instruction
+
+  Deleting a record that other records reference is correctly refused with
+  `409 DELETE_RESTRICTED`. The transport was never the problem — `status` is set
+  and the structured fields survive the mapper. What reached the end user was:
+  `error.message` is shipped verbatim as `body.error` by `mapDataError`, and
+  Console renders that as-is in a toast. So an operator deleting a 部门 in a fully
+  Chinese app read
+
+  ```
+  Cannot delete sys_business_unit (): 1 dependent os_tianshun_ehr_sporadic_application
+  record(s) reference it via apply_dept (apply_dept is required, so it cannot be
+  cleared). Delete or reassign them first, or set deleteBehavior:'cascade' on
+  os_tianshun_ehr_sporadic_application.apply_dept.
+  ```
+
+  — an English sentence in a zh-CN UI, naming two tables and a column they have
+  never seen (they know them as 「零星申请」 and 「申报部门」), ending in a
+  metadata-authoring instruction a business user cannot act on and will open a
+  support ticket about.
+
+  **The error now carries two messages, because it has two audiences.**
+
+  - `message` is the **user's** half: rendered in the caller's locale
+    (`ExecutionContext.locale`) from a new built-in catalog, against resolved
+    **labels** for the object, the dependent object and the referencing field —
+    translation bundle → declared `label` → API name, so the API name is where the
+    ladder ends rather than where it starts. The actionable half of the old advice
+    ("delete or reassign them first") stays; `deleteBehavior` does not appear in
+    any locale.
+  - `developerMessage` is the **developer's** half, and is the previous sentence
+    byte for byte: English, API names, and the `deleteBehavior:'cascade'` remedy.
+    The guidance is correct and useful — it is moved to a channel that reaches
+    developers, not deleted. `@objectstack/rest` ships it as a sibling field of the
+    409 body (it discloses nothing the envelope did not already carry: `object` and
+    `dependentObject` are API names on the same body), and the engine's delete
+    error log now carries it too, so a zh-CN deployment's server log does not lose
+    its operator detail to the localized sentence.
+
+  `code`, `status`, `object`, `dependentObject` and `dependentCount` are
+  unchanged, and the wire code does **not** split — one `DELETE_RESTRICTED`
+  (ADR-0112), two sentences, exactly as the field catalog splits a message key
+  without splitting `FieldErrorCode`.
+
+  **New in `@objectstack/spec/system`** (`operation-message.ts`): the operation
+  message catalog — `renderOperationMessage`, `BUILTIN_OPERATION_MESSAGES`
+  (`en` / `zh-CN` / `ja-JP` / `es-ES`), `operationMessageTranslationKey`, plus
+  `objectLabelKey` in `i18n-resolver`. A deployment overrides any sentence with a
+  `translation` item under `errors.<messageKey>`. It is a **separate** catalog from
+  `validation-message.ts` deliberately: that one is addressed `validation.field.*`
+  because every entry names a field and the constraint it broke, and a
+  `DELETE_RESTRICTED` names neither — the offending field is on a different object
+  from the one the caller acted on, and there is no `fields[]` entry to hang it
+  off. Filing it there would give deployments an override key that lies about what
+  it overrides.
+
+  `minor`, not `major`: nothing breaks. The structured fields clients match on are
+  untouched, no test or doc ever pinned the message text, and both new fields are
+  additive. `check-changeset-no-major.mjs` is the second reason — every publishable
+  package is in the Changesets `fixed` group, so one `major` promotes all ~70
+  packages, and the launch-window convention ships even genuinely breaking changes
+  as `minor`.
+
+  This is #3957's fix reached from the operation side: same defect (platform copy
+  composed in English with API names concatenated in), same machinery, one layer
+  up.
+
+- fec7848: fix(rest): 设置了 `api.apiPath` 时,9 条 direct-mount 路由跟随同一个 API base(#6306)
+
+  `RestServer.getApiBasePath()` 回答 `api.apiPath ?? `${basePath}/${version}``,
+而 `rest-api-plugin.ts` 为两个 direct-mount registrar(`packages._`×4、`datasources/:name/external/_`×5)自行重算了一次`${basePath}/${version}`,
+从不读取 `apiPath`。两个表达式只在 `apiPath`未设时相等——于是设置了`apiPath` 的部署同时出现两个 API 前缀。实测(`apiPath: '/backend/api/v9'`,
+真实 `createRestApiPlugin(...).start()`组合、记录型 host server 枚举全部
+挂载):**92 条路由中 83 条迁到`{apiPath}`,恰好 9 条滞留 `/api/v1`**;
+`{apiPath}/openapi.json`的`isUnderBase` 过滤把这 9 条排除在文档之外
+(**71 paths**);`/discovery` 也如实通告了滞留位置
+(`routes.packages: '/api/v1/packages'`)——通告没有说谎,是挂载本身分裂了。
+
+  按 maintainer 裁定(Option 1,单一真相源):registrar 现在直接消费
+  `restServer.getApiBasePath()` 的返回值——共享同一个值,而不是把 `??`
+  表达式复制到第二处(复制正是这个缺陷的成因)。`getApiBasePath()` 因此
+  从 `private` 变为 public,职责写入其 doc comment。
+
+  **行为变化,仅限设置了 `api.apiPath` 的部署**:这 9 条路由的 URL 从
+  `/api/v1/...` 移到 `{apiPath}/...`,旧前缀不再服务(无兼容双挂载)。
+  修复后实测 92 条全部挂在 `{apiPath}` 下,`{apiPath}/openapi.json`
+  完整列出这 9 条(**71 → 79 paths**),`/discovery` 通告 `{apiPath}/packages`
+  与 `{apiPath}/datasources`。
+
+  需要动手的只有**基础设施配置**:若反向代理、健康检查或外部监控里硬编码了
+  `/api/v1/packages` 或 `/api/v1/datasources/*/external/*`,改成 `{apiPath}/…`。
+  **SDK 与应用代码无需改动**:`@objectstack/client` 自 #6633 / PR #6712 起从
+  `/discovery` 通告的 base 派生这两个面,而通告是已录制挂载的投影,因此客户端
+  按构造跟随本次移动。该键也没有 authoring 路径可达
+  (`defineStack({server:{api:…}})` 被 strict 块 loud 拒绝,`api:{apiPath}` 被
+  静默 strip,`os serve` 只转发两个 scoping 键),只有程序化组合
+  `createRestApiPlugin` 的 embedder 能设到它。
+
+  **默认配置(未设 `apiPath`)逐字节不变**:两个表达式在该情形下同值;实测
+  修复前后默认挂载表(92 条)、`{base}/openapi.json`(79 paths)与
+  `/discovery` 通告完全一致,逐行 diff 无差异。
+
+  另修复同一来源的第二处分歧:插件旧表达式用 `||` 兜底(空串 `basePath`
+  ⇒ `/api`),`RestServer` 规范化用 `??`(空串保留)——`basePath: ''` 时
+  route-manager 面挂 `/v1` 而 9 条挂 `/api/v1`,同样的分裂不需要 `apiPath`
+  也会出现(实测 83/9)。读同一个值后该分歧不复存在。
+
+  Bump 判定为 `minor` 而非 `patch` / `major`。不是 `patch`:除了修缺陷,它
+  改变了一个真实配置键下可观测的 URL 表面,并且新增了公共 API 面
+  (`RestServer.getApiBasePath()` 由 `private` 转 public,是这次单一真相源的
+  承载物)。不是 `major`:没有任何可授权(authorable)的键被移除或重命名,
+  没有需要作者迁移的元数据(因而 ADR-0087 无可登记项),默认部署逐字节不变,
+  受影响部署的客户端按构造跟随;唯一的 FROM → TO 落在部署方自己的代理配置上,
+  而这些部署今天本就是 split-brain——本次是让 `apiPath` 被完整遵守,不是收回
+  一个曾被兑现的承诺。
+
+- 11066f6: feat(spec,metadata-protocol,rest,client): the direct-mount surfaces (`packages`, `datasources/:name/external/*`) become discoverable, and the SDK follows the advertised base (#6633)
+
+  The rest surface's `/discovery` never advertised `routes.packages` — routes
+  mounted but not advertised, the unstated half of ADR-0076 D12 — so the SDK's
+  `packages.*` always fell back to the hard-coded `/api/v1/packages`; and the
+  SDK's `datasources.external.*` had no discovery mechanism at all, hard-coding
+  `/api/v1/datasources/...` in each of its five methods. On any deployment with a
+  non-default API base, both families built wrong URLs (measured in #6633).
+  Maintainer ruling 2026-08-08 (route B, prerequisite for #6306):
+
+  - **spec** (minor, additive): `ApiRoutesSchema` declares a `datasources` key —
+    the base of the federation-admin family. Optional like `mcp`: absent = not
+    mounted.
+  - **metadata-protocol** (minor, additive): `getDiscovery()` advertises
+    `routes.packages: '/api/v1/packages'` iff the `package` service is
+    registered (`serviceToRouteKey` gains the mapping; the route flows through a
+    non-slot table because `package` is not a `CoreServiceName`). `datasources`
+    is deliberately NOT advertised by this builder — the mount belongs to the
+    REST host it cannot see (same disposition as `mcp`).
+  - **rest** (minor): `/discovery` advertises `routes.packages` and
+    `routes.datasources` as projections of the RECORDED direct mounts (#5822) —
+    advertisement and mounting derive from one fact, so #6306's later mount-base
+    move carries the advertisement along by construction. Not mounted ⇒ not
+    advertised. An end-to-end parity pin (`discovery-advertised-direct-mounts.
+parity.test.ts`) drives the composed surface and goes red on any change that
+    moves only one side.
+  - **client** (patch, behavior fix): the five `datasources.external.*` methods
+    derive their base via `getRoute('datasources')` — connected clients follow
+    the advertised base; unconnected clients (or servers that advertise no
+    `datasources` key) keep building byte-identical `/api/v1/...` URLs.
+
+  No key is removed and no wire shape changes for existing deployments: servers
+  gain two advertised keys, and the SDK changes URLs only when a server
+  advertises the new keys with a non-default base.
+
+- 916af17: feat(spec,rest,client): the email surface becomes discoverable and the SDK follows the advertised base; the scoped client derives its prefix from discovery (#6714)
+
+  `@objectstack/client` 的 `email.send` 硬编码 `${baseUrl}/api/v1/email/send`,而服务端
+  `registerEmailEndpoints` 挂在 `getApiBasePath()` 下、**已经跟随 `apiPath`** —— 设了
+  `apiPath` 的部署上这是**现活 404**,不是潜伏项。实测(`apiPath: '/backend/api/v9'`
+  启动,录制挂载表):email 面只有 `POST /backend/api/v9/email/send` 一条,
+  `POST /api/v1/email/send` 在表中**不存在**。`ScopedProjectClient.scope()` 同样硬编码
+  `/api/v1/environments/...`,scoped 面全部 `meta` / `data` / `batch` / `packages` /
+  `automation` URL 由它拼出;同一启动下 83 条 scoped 路由全在
+  `/backend/api/v9/environments/:environmentId/...`,`/api/v1/environments/` 前缀零挂载。
+
+  按维护者裁定(2026-08-08)复刻 #6633 / PR #6712 的四车道模式:
+
+  - **spec**(minor,纯增量):`ApiRoutesSchema` 声明 `email` 键 —— `POST {email}/send`
+    的挂载 base。`optional` 同 `datasources`:缺席 = 未挂载。
+  - **rest**(minor):`/discovery` 把 `routes.email` 作为**已录制挂载**的投影通告
+    (RouteManager 表中 `registerEmailEndpoints` 写入的那一行,mounted ⇒ advertised,
+    不二次计算)—— 挂载随 `apiPath` 移动时,通告按构造随行。未挂载 ⇒ 不通告。
+    奇偶钉(`discovery-advertised-direct-mounts.parity.test.ts`)扩展覆盖 email:
+    通告值 + `/send` 必须在同一张挂载表里解析得到,单侧移动即红。
+  - **client**(patch,行为修复):`email.send` 走 `getRoute('email')`;
+    `ScopedProjectClient.scope()` 从通告的 `routes.data` base 推导 scoped 前缀。
+    未连接、或服务端未通告 / 不可推导时,回退 URL 与旧硬编码**逐字节一致**。
+
+  面 3 为何用 `routes.data` 而不是 `scoping` 块:实测 discovery 的 `scoping` 只有
+  `enabled` / `resolution` / `scoped` / `environmentId` 四个键,**全是姿态、无路径**,
+  无法推导 base;`routes.data` 由 rest 通告为 `{realBase}{crud.dataPrefix}`,是唯一可
+  推导的来源。`dataPrefix` 被改成非 `/data` 时推导主动放弃、回退惯例(不做宽松再解析)。
+
+  `cloud.environments.*` 面(约 30 处)经测量**未改**:本仓无任何宿主挂载 `/cloud/*` ——
+  `@objectstack/rest` 的路由台账(`rest-route-ledger.ts`,由双向 conformance 门禁保证
+  穷尽)cloud 行数为 **0**;runtime dispatcher 无 cloud domain(无 `handleCloud`、无
+  `domains/cloud.ts`),且显式把 `/cloud` 列为他宿主的控制面(`skipPaths`)。而 `apiPath`
+  是 `@objectstack/rest` 独有配置项 —— 该面不随 `apiPath` 移动,按裁定「不随则不收敛」
+  保持原样。
+
+- 465c5fc: REST 的 9 条 direct-mount 路由现在对 `RestServer` 可枚举,并随之进入 `GET {apiPath}/openapi.json`
+
+  `package-routes.ts`(4 条 `packages.*`)与 `external-datasource-routes.ts`(5 条
+  `datasources/:name/external/*`)一直绕过 `RouteManager`、直接挂在宿主 `IHttpServer` 上,
+  `RestServer` 因此不持有「这 9 条本次 boot 是否挂载」的事实。#5588(PR #5821)把
+  `/openapi.json` 的 built-in 段改成服务器自身路由表的投影之后,这 9 条(其中 8 条在
+  `rest-route-ledger.ts` 里是 `disposition: 'sdk'` 的真实能力)就不在生成的文档里 ——
+  用 `/openapi.json` 生成客户端的 consumer 拿不到它们,任何基于 `getRoutes()` 的自省也看不见。
+
+  现在两个 registrar 各自把「实际挂载的那一个数组」原样返回,由组合步骤
+  (`mountAndRecordDirectRoutes`,`rest-api-plugin.ts` 调用)登记到 `RestServer` 上:
+
+  - `RestServer.getRoutes()` 返回本次 boot 的**全部**已挂载路由,每条带 `source`
+    (`'route-manager' | 'direct-mount'`),类型为新导出的 `MountedRoute`;
+  - `/openapi.json` 的 built-in 段随之覆盖这 9 条,带各自的 summary / tags / 路径参数;
+  - 描述与挂载**同源**:返回的数组就是用来挂载的那个数组,不存在第二份手工清单。
+
+  诚实性两个方向都保持不变:某次 boot 没有 `package` 服务 ⇒ `packages.*` 既没挂载、
+  也不出现在 `getRoutes()` 与文档里;federation 那 5 条无条件挂载(服务缺席时按请求答 503),
+  所以它们始终出现 —— 文档说的仍然只是「什么被挂载了」。
+
+  对使用者的影响:`getRoutes()` 的返回值多了 9 条(服务在场时)以及每条上的 `source`
+  字段;既有的 `method` / `path` / `handler` / `metadata` 读法不变。
+
+- 623d008: feat(rest): `PUT /api/v1/meta/:type/:name` 要求 `manage_metadata` 能力 (#6603)
+
+  **这是一次访问面收紧,线上可见。** 保存单个元数据项的这条路由此前只有
+  `enforceAuth` —— 任何已认证会话都能写任意元数据项。现在它与隔壁的
+  `POST /api/v1/meta/_migrate-stored` 用同一道门、同一套机制:调用方必须持有
+  ADR-0066 D1 的 `manage_metadata` 能力,`isSystem` 照例放行。
+
+  ## 谁开始吃 403,需要什么
+
+  **任何不持 `manage_metadata` 的已认证调用方**,对这条路由的 `PUT` 一律
+  403 `FORBIDDEN`(匿名调用方仍先吃 `/meta` 伞下的 401,门是第二层)。
+  平台自带的 `admin_full_access` 权限集本就带 `manage_metadata`,所以
+  Studio / Setup 里的管理员与 CLI 的 dev admin **不受影响**;受影响的是
+  自建集成、自建权限集,以及只持 `setup.access` 的 `organization_admin`。
+
+  **要恢复写入:给该调用方的权限集加上 `manage_metadata`**(Setup →
+  Permission Sets → `systemPermissions`),而不是绕过这条路由。
+
+  ## 为什么必须收紧
+
+  ADR-0106 D1 会把调用方不可读的字段**整个**从服务出的对象 schema 里摘掉,
+  而这条路由原样持久化收到的 body。于是一次最普通的
+  GET → 改个 label → PUT,就把调用方**从来没被允许看见的字段删掉了**,
+  整个交互过程中没有任何东西提示。GET-改-PUT 正是 AI agent 编写元数据的
+  标准动作,原先这个动作会静默销毁它看不见的字段;现在它在写入时得到一个
+  **响亮的 403**。
+
+  同时这也关掉一个与掩码无关、更早就存在的洞:任何已认证会话都能覆写
+  任意 schema。
+
+  ## 尚未关闭的部分
+
+  本次只收紧这一条路由。同形的 `PUT /meta/:type/:section/:name`(复合名)
+  与运行时 dispatcher 自己的 `/meta` PUT 仍无能力门,同一次往返丢失仍可经
+  它们复现 —— 已另立 #7019 跟踪,不在本次范围内。
+
+- 73648ba: feat(rest,runtime): 元数据写入的其余三扇门同样要求 `manage_metadata` 能力 (#7019)
+
+  **这是一次访问面收紧,线上可见。** #6603 只给 `PUT /api/v1/meta/:type/:name`
+  一条路由落了 `manage_metadata` 门,而同一个写操作还有另外三扇门没有门。本次
+  把它们补齐,用的是**同一道门、同一套机制**(各自照抄所在文件的既有先例):
+
+  - `PUT /api/v1/meta/:type/:section/:name` —— 复合名保存(`@objectstack/rest`);
+  - `DELETE /api/v1/meta/:type/:name` —— 重置为构件默认值(`@objectstack/rest`);
+  - 运行时 dispatcher 自己的 `/meta` PUT —— 同一操作的**第二条传输**(`@objectstack/runtime`)。
+
+  ## 谁开始吃 403,需要什么
+
+  **任何不持 `manage_metadata` 的已认证调用方**,对上述三条路径的写入一律 403
+  (匿名调用方仍先吃 `/meta` 伞下的 401,能力门是第二层)。`isSystem`(引擎自调)
+  照例放行。平台自带的 `admin_full_access` 权限集本就带 `manage_metadata`,所以
+  Studio / Setup 里的管理员与 CLI 的 dev admin **不受影响**;受影响的是自建集成、
+  自建权限集,以及只持 `setup.access` 的 `organization_admin`。
+
+  **要恢复写入:给该调用方的权限集加上 `manage_metadata`**(Setup →
+  Permission Sets → `systemPermissions`),而不是绕过这些路由。
+
+  ## 为什么必须收紧
+
+  两条**各自独立成立**的理由:
+
+  1. **ADR-0106 的读写不对称。** D1 会把调用方不可读的字段**整个**从服务出的对象
+     schema 里摘掉,而这些路由原样持久化收到的 body。#6603 落地后**实测**:同一次
+     GET → 改个 label → PUT 的字段丢失,经复合名这扇门可原样复现 —— 缺陷没有被修复,
+     只是换了一扇门。本次复测的前后对照:
+
+     ```
+     加门前: compound PUT status : 200 | saveMetaItem calls : 1 | STORE after PUT : id, name
+     加门后: compound PUT status : 403 | saveMetaItem calls : 0 | STORE after PUT : bonus_formula, id, name, salary_grade
+     ```
+
+  2. **一个与掩码无关、更早就存在的洞:** 任何已认证会话都能覆写(或重置)任意
+     元数据项。`DELETE` 这条尤其是这个理由而**不是**掩码理由 —— 它不往返、不掩码,
+     只是把定制覆盖层整个丢掉,`?dropStorage=true` 还会连对象的物理表一起拆掉。
+
+  三处门都落在解析 protocol **之前**,所以未授权调用方无法用 501-vs-200 指纹探测
+  内核能力,且拒绝时**什么都没写、什么都没删**。
+
+  ## 不在本次范围
+
+  只收紧写入面;读路径的姿态(ADR-0106 掩码)不变。#7020 记录的「门要求的能力集
+  与 D4 掩码豁免集不是同一个集合」仍然成立,本次不替维护者选对齐方向。
+
+- a954634: feat(meta): object schemas served by `/meta` and `/metadata` are masked per caller (ADR-0106, #3682)
+
+  The data plane has enforced field-level security everywhere it matters for
+  several releases — list reads mask values, exports project columns, and the
+  write path 403s forbidden fields. The **metadata** plane did not: any
+  authenticated caller who asked `GET /meta/object/:name` received the full object
+  schema, including fields they have no read access to at all.
+
+  That is more than a list of names. A field carries its label, type, **picklist
+  option values** (often a sensitive operational taxonomy), its **formula**
+  expression (pricing and scoring IP), its `visibleWhen` predicate, its
+  `defaultValue`, and — via ADR-0066 D3 — the `requiredPermissions` capability
+  names guarding it. For a customer running a dealer, supplier or patient portal
+  on ObjectStack, the only remediation available in their own tier was modelling
+  discipline: keep sensitive fields off portal-visible objects, or split one
+  business entity into an internal object and a portal object and synchronize
+  them. This is a platform-side fix, so every deployment inherits it.
+
+  **What changes.** Serving an object schema now projects `fields` onto the set
+  the caller may read, and a field outside that set is removed **whole** — no
+  name, no label, no options, no formula, no `requiredPermissions`. Partial
+  redaction was rejected: keeping the name still leaks existence and invites
+  clients to render ghost columns. Masking keys on the `readable` bit only; a
+  readable-but-not-editable field stays in the schema, because the UI must render
+  it and the `editable` affordance is already served per caller by
+  `/auth/me/permissions`.
+
+  Every outlet that serves an object schema goes through one shared projection,
+  so coverage is not a per-route promise:
+
+  - `GET /meta/object/:name` — the cached branch (the default) **and** the
+    uncached branch, which is what `?state=draft`, `?preview=draft` and
+    `?package=` take;
+  - `GET /meta/object/:name?layers=true` — the layered diagnostic view, all three
+    of `code` / `overlay` / `effective`;
+  - `GET /meta/:type/:section/:name` — the compound-name read;
+  - `GET /meta/object` — the list read, each item projected independently;
+  - the runtime `/metadata` catch-all — the protocol-backed, registry-backed and
+    last-ditch single reads, the `/metadata/objects` list (protocol and registry),
+    and the legacy one-segment `/metadata/:objectName` spelling.
+
+  **Caching is unchanged in cost and correct per cohort.** The shared metadata
+  cache still stores one full schema per (type, name, locale, environment) — no
+  caller dimension in the key — and the mask runs after retrieval. What varies
+  per caller is the validator: a stable hash of the caller's _denied_ field set is
+  folded into the ETag. A caller who can read everything denies nothing, so their
+  fingerprint is empty and both their ETag and their response body are
+  **byte-identical** to previous releases. Callers in one permission cohort share
+  `304`s; a permission change moves the fingerprint and self-invalidates the stale
+  `304`, so nothing needs purging after a permission-set edit.
+
+  **Exemptions** are a property of the caller, not of the route: `isSystem` and
+  platform-admin callers (holders of `studio.access` / `setup.access`, the same
+  judgement the app filter uses) receive the full schema on any route, because
+  Studio and Setup authoring cannot work against a projected schema.
+
+  **Failure posture is explicit and three-tiered.** With no `security` service
+  registered the schema is served unmasked — that deployment has no FLS posture at
+  all and tightening only the metadata plane would be theater. When field
+  visibility cannot be _determined_ (a registry-hydration window), the schema is
+  served unmasked but loudly: a structured warning, a new
+  `objectstack_meta_field_visibility_undetermined_total` counter, and a response
+  downgraded to `Cache-Control: private, no-store` with no shared ETag. Failing
+  closed there would brick every render of the object for every user and can
+  deadlock console bootstrap, since permission sets are themselves metadata. When
+  permission evaluation **throws**, the request fails with `503
+FIELD_VISIBILITY_UNRESOLVED` — an unhealthy security service must not auto-open
+  a disclosure hole, and an empty-fields `200` would be both a silently wrong UI
+  and cacheable poison.
+
+  **Guest and public deployments** get a deliberate posture rather than an
+  accidental one: `@objectstack/plugin-security` gains
+  `getMetadataReadableFields`, which resolves the configured fallback permission
+  set (`security.fallbackPermissionSet`, default `member_default`) for a caller
+  who resolves to zero sets, exactly as `/auth/me/permissions` does.
+  `getReadableFields` is unchanged — on the data plane, mirroring the engine
+  middleware's fall-open is what keeps it drift-free.
+
+  **Escape hatch.** Masking is the platform default. A deployment that explicitly
+  wants an unmasked metadata plane sets `OS_ALLOW_UNMASKED_OBJECT_METADATA=1`, or
+  `metadata.maskObjectFields: false` on the REST server. Toggling it changes
+  disclosure only: the console reads every field affordance from
+  `/auth/me/permissions`, so UI correctness is unaffected either way.
+
+  Operators fronting the runtime with a CDN or reverse proxy should read the new
+  "CDN / reverse-proxy caching of `/meta` object schemas" section in the
+  production-readiness guide before tuning anything — in particular, do not
+  configure a proxy to ignore `Cache-Control: private`, and do not strip or
+  rewrite `ETag` on these routes.
+
+- 2934761: fix(rest): a repeated `?version=` on `/packages/:id` is refused, not silently resolved (#6307)
+
+  `IHttpRequest.query` is declared `Record<string, string | string[]>` — a repeated
+  query parameter arrives as an **array**. Both `/api/v1/packages/:id` handlers read
+  it as a string and passed it straight to `PackageService.get/delete`, whose
+  parameter is `version?: string`. Measured on `main` before the fix:
+
+  ```
+  GET    /packages/com.acme.crm?version=1.0.0&version=2.0.0
+         → packageService.get('com.acme.crm', ['1.0.0','2.0.0'])
+  DELETE /packages/com.acme.crm?version=1.0.0&version=2.0.0
+         → packageService.delete('com.acme.crm', ['1.0.0','2.0.0'])
+         → 200 { message: 'Deleted com.acme.crm@1.0.0,2.0.0' }
+  ```
+
+  The `DELETE` line is the sharp one. `if (!version && protocol.deletePackage)` is
+  what gates the **full uninstall** (#2747: the package's metadata rows, the durable
+  `sys_packages` record, and the registered data-plane cleanups — plugin-security
+  revoking its permission sets and bindings). Any truthy `version` skips it, so a
+  repeated parameter silently narrowed the _scope of the operation_ on a destructive
+  verb and still reported success.
+
+  **Both verbs now refuse the ambiguity** with `400 VALIDATION_ERROR`
+  (`The "version" query parameter was supplied 2 times. Supply it at most once — this
+endpoint will not choose between conflicting values.`). `?version=a&version=b` is a
+  well-formed request carrying two conflicting intents; picking one silently is a
+  wrong answer delivered as a `200`. The rule is identical on both verbs — one
+  parameter, one answer — and the code comes from ADR-0112's **standard** catalog
+  rather than a newly registered synonym, because "this request contradicts itself"
+  is a generic validation condition.
+
+  The rule is about **multiplicity, not shape**: the parameter may be supplied at
+  most once. A one-element array is one occurrence encoded differently by an adapter
+  and is accepted; an empty array is no occurrence. Two identical values are still
+  two occurrences and are still refused — "at most one _distinct_ value" would be a
+  de-duplication rule no client can predict, while "supply it at most once" is
+  checkable client-side.
+
+  **Not tolerance for off-spec input.** The contract already declared the array; the
+  consumer simply never handled a shape it was told to expect.
+
+  **Nothing that works today changes.** A single `?version=1.0.0`, no `version` at
+  all, and an empty `?version=` all behave exactly as before — including the full
+  uninstall still being reached when no version is supplied. No in-repo caller,
+  documented example or SDK path repeats the parameter (`client.packages.get` builds
+  `?version=` from a single `version?: string`), so the new 400 is unreachable from
+  any supported client. It is `minor` rather than `patch` only because a request
+  shape that used to answer `200` now answers `400`.
+
+  Adapter note, measured over a real socket: the `node:http` adapter
+  (`NodeHttpServer`) hands `['1.0.0','2.0.0']` to the handler as the contract
+  declares, while the Hono adapter collapses a repeat to the first value before any
+  handler sees it. Both are contract-legal (the union permits either), which is
+  exactly why the consumer must handle the declared shape rather than depend on
+  which server booted.
+
+- b295e4b: feat(runtime,rest): `/packages` 域补齐授权门 —— 写/破坏性路由要求 `manage_metadata`,读路由要求 D4 读集,全域匿名门 (#7033) (#7023)
+
+  `/packages` 是最后一个零授权判据的路由域:普查实测一个连 `userId` 都没有(身份解析为
+  `principalKind: 'guest'`)的调用方,对**破坏性**的 `POST /:id/discard-drafts`、整包
+  `GET /:id/export`(27 种 metadata)、`GET /packages`(id 枚举面)与 `POST /:id/publish-drafts`
+  一律得 **200** 并真的调进目标函数;而隔壁五个同族域(`/meta`、`/actions`、`/automation`、
+  `/ai`、`/security`)都带 `shouldDenyAnonymous` 匿名门。本次按维护者 2026-08-09 裁定补齐:
+
+  - **全域匿名门**:`shouldDenyAnonymous` 作为 `handlePackagesRequest` 的**第一条语句**,
+    在 ObjectQL registry 探测之前,使匿名调用方拿不到 401-vs-503 的部署指纹。
+  - **写 / 破坏性路由**(install / enable / disable / publish / publish-drafts /
+    discard-drafts / commit-revert / rollback / revert / adopt-orphans / duplicate /
+    manifest-PATCH / DELETE)要求 `manage_metadata` —— 与 #6603 / #7019 给 `/meta` 写面
+    落的同一道门、同一判据(「能写 schema 的人就该是能管理 package 的人」)。
+  - **读路由**(list / detail / commits / export)要求 ADR-0106 D4 读集
+    `OBJECT_SCHEMA_MASK_EXEMPT_CAPABILITIES`(`studio.access` / `setup.access`)—— **引用
+    该常量,不复制**,使 package 读取的能力集不会与 metadata 掩码豁免集漂移。
+  - 门覆盖**两个 transport**:runtime dispatcher 域(`domains/packages.ts`)**与**
+    `@objectstack/rest` 直挂注册器(`package-routes.ts` 的 `refusePackageRequest`,
+    经 `RestServer.resolvePackageRouteExecutionContext` 解析与其余表面同一身份)。缺
+    resolver 时 REST 侧**失败即关**(401),不留裸露回退。所有门都在协议/服务解析**之前**
+    判,拒绝时不写不删(防「先删后拒」)。`isSystem`(不可从线上伪造)旁路,CORS `OPTIONS` 放行。
+
+  **盲区(明说,勿当已核):** `cloud` 仓在本会话与前序普查会话中**均未挂载**(`add_repo`
+  两次被拒),调用方普查**不覆盖该仓**。若 `cloud` 内存在直打 `/api/v1/packages/*` 或
+  dispatcher `/packages` 且今天不持 `manage_metadata` / D4 读集的生产调用方,本门可能将其
+  403 —— 落地后需在 `cloud` 补一次调用方普查复核。`#7020` 记录的「门能力集 ≠ D4 掩码豁免集」
+  对齐方向仍归维护者,本次不动。
+
+- d586366: fix(rest): a public form that declares no fields now REFUSES the submit instead of accepting every key the caller sent (#6920)
+
+  `POST /api/v1/forms/:slug/submit` narrows a visitor's suppliable keys to the
+  fields the matched FormView's `sections` declare — and the filter read
+  `allowedFields.size === 0 || allowedFields.has(k)`. For a form with no declared
+  fields that limb degenerated, and not into "every field of the object": it
+  accepted **every key the caller sent**, minus the `#3022` server-managed anchors
+  and the three prototype keys. Measured on the real registered handler,
+  anonymously, against a `sections: []` form:
+
+      submit accepted = ["email","internal_margin","internal_tier",
+                         "not_even_a_field","status","subject"]
+
+  `not_even_a_field` is not declared on the target object at all. So an anonymous
+  visitor could set `status`, a workflow stage, an internal tier — anything, on
+  the one object the form targets. `publicFormGrant` (ADR-0056) keeps the insert
+  scoped to that object, so this was never a cross-object hole; it was an
+  unbounded **column** surface on one. The way in is an ordinary authoring
+  mid-state: the author creates the public form and wires its sections later.
+
+  **What changes.** A form whose sections declare no fields now answers
+  `400 VALIDATION_ERROR` and inserts nothing. The message names the empty
+  declaration and gives the author's fix ("wire the fields it collects into the
+  form's sections"); it names no object, field or slug, because this reply is
+  readable by anyone on the internet. The three authoring shapes that reach it —
+  `sections: []`, sections present but declaring no fields, and `sections` omitted
+  — are treated identically, and the refusal keys off the **declaration**, not the
+  body, so an empty POST is refused too rather than inserting a blank row.
+
+  `VALIDATION_ERROR` is the standard ADR-0112 catalog's generic validation
+  failure, and what `HttpStatusErrorCodeMap[400]` already names a bare 400. It is
+  deliberately not a newly minted `FORM_*` synonym of a condition the catalog
+  already covers.
+
+  **Why a refusal and not a silent drop.** Dropping the keys would have kept the
+  `201` and changed no wire status, but it would swallow data the caller believes
+  it wrote — a visitor is told their support ticket was filed and an empty row is
+  stored. Loud is also the only answer that reaches the author, who is the one who
+  can fix it.
+
+  **This is a behaviour change on a shipped success path.** A deployment that
+  today collects submissions through a section-less public form starts getting
+  `400`s. That form's read side already publishes nothing (`fields: {}`) since
+  `#6601`, so it cannot render either — the two planes now enforce the same rule,
+  "the form declares what it collects", on both. **Fix: declare the fields in the
+  form's `sections`.** Forms that already declare sections are entirely
+  unaffected — that path never consulted the removed limb.
+
+  `#3022`'s anchor guarantee is preserved unchanged: `owner_id`,
+  `organization_id`, `id` and the audit columns remain unsuppliable on this
+  surface, including when a FormView mis-declares one in a section.
+
+- 54fe9d5: fix(rest): 未声明字段的公开表单不再向匿名调用者发布目标对象的**全部**字段(#6601)
+
+  `GET /api/v1/forms/:slug` 会把目标对象的 schema 一并内嵌进应答,好让匿名前端不必再走
+  一次需要鉴权的 `/meta` 就能渲染表单。收窄的依据是表单 `sections` 声明的字段集合,但那段
+  代码写的是:
+
+  ```ts
+  if (allowed.size === 0 || allowed.has(name)) {
+    fields[name] = def;
+  }
+  ```
+
+  `allowed.size === 0` —— 表单**没有 sections**,或者 sections 一个字段都没声明 —— 会
+  落到「发布该对象每一个非 server-managed 字段」这一支。**这条路由是匿名的**,所以发出去的
+  是完整的字段定义:label、type、picklist 的选项值(常常就是一份运营分类表)、formula
+  表达式(定价/评分 IP)。下方的 `safeForm` 只过滤表单自己的 `sections`(未声明
+  `publicPicker` 的 lookup),它与 `objectSchema.fields` 是同一份应答上的两个并列键,从不
+  收窄后者。那段代码上方注释里的「limited to fields referenced by the form」在这一支上是
+  不成立的;注释同时提到的「submit 侧仍有服务端字段白名单」是**写**侧防线,挡不住**读**侧
+  的披露。
+
+  「表单先建、sections 之后再配」是完全正常的编写中间态,所以这不是一个刁钻配置。
+  ADR-0106(#3682)刚刚让平台能完整地讲出「调用者读不到的字段,对它而言在任何平面上都不
+  存在」这句话,而这条路由是它剩下的那个反例,且调用者是**匿名**的。
+
+  **行为变化(线上可见)。** 发布集合现在等于表单声明的字段集合本身:
+
+  ```ts
+  if (!allowed.has(name)) continue;
+  ```
+
+  一个字段都没声明的表单,`objectSchema.fields` 就是 `{}`。应答的信封形状不变
+  (`objectSchema` 仍是 `{ name, label, fields }`,不会变成 `null`),`object` /
+  `label` / `form` 几个键也都不变。**已经正常声明了 sections 的表单,应答逐字节不变** ——
+  它们本来走的就是 `allowed.has(name)` 那一支。
+
+  这里没有新增任何可编写的键。发布应当是一次**声明**,而不是从空集合里掉出来的默认值
+  (AGENTS.md「Explicit composition over default magic」);真需要「整对象发布」的场景,
+  带着真实用例来提,再按 ADR-0049「没有需求牵引就不造能力」的顺序决定要不要造这个开关。
+
+  `PUBLIC_FORM_SERVER_MANAGED_FIELDS` 的处理(#3022 的 server-managed 锚点)完全未动,
+  `POST /forms/:slug/submit` 与 `GET /forms/:slug/lookup/:field` 也都未动。
+
+- 361bd5b: fix(spec,rest): three routes stop serving shapes their `responseSchema` never declared (#5882 #5950 #6442)
+
+  Sweep #6487. One admission criterion: a route serves a response shape its
+  declared `responseSchema` does not describe. Three members, one direction each,
+  stated per member rather than picked for cheapness.
+
+  **`GET /meta/:type/:name` — the ADR-0010 protection envelope is now declared
+  (#5950).** The uncached branch has always sent `lock` plus nine siblings on top
+  of `{ type, name, item }`, and `GetMetaItemResponseSchema` declared only the
+  three, so `.parse()` silently stripped every one of them. `lock` is the READ
+  half of the ADR-0008 optimistic-concurrency chain whose write half `#5745`
+  already declared — leaving it undeclared meant an SDK caller had to cast to read
+  it, the consumer-side tolerance Prime Directive #12 rejects. All ten keys are
+  declared **optional**, measured rather than assumed: the cached branch (the
+  default, `enableCache: true`) rebuilds the envelope as three keys and resolves
+  no lock at all, so `optional` here means "this branch did not publish it", never
+  "unlocked". Zero runtime change. Whether lock presence should depend on a cache
+  setting at all is the larger question #5950 raises and is deliberately left open.
+
+  **`?layers=true` becomes `GET /meta/:type/:name/layers` (#5882).** The flag made
+  one route answer two unrelated resource representations — the ordinary envelope,
+  and a three-layer diagnostic projection (`code` / `overlay` / `effective`) that
+  drives Studio's "code default vs override vs effective" tabs — while the route
+  declared a single `responseSchema`. Anything generating a client from the route
+  table wrote a parser that was simply wrong for the flagged call. Per the
+  maintainer's ruling the projection gets its own path and its own
+  `GetMetaItemLayeredResponseSchema`: one path, one shape. The alternative —
+  teaching the route declaration to express "two shapes chosen by a query flag" —
+  was rejected as a new primitive every future tool would have to understand, and
+  conditional response selection is exactly where codegen and AI-written clients
+  go wrong.
+
+  The `?layers=` spelling still answers the identical body during a deprecation
+  window (both entry points run one helper, so the two cannot drift), and now
+  carries `Deprecation: true` plus a `Link` header naming its successor. No
+  `Sunset` date: choosing the hard cut-off is a maintainer call.
+
+  **`GET /analytics/meta` narrows to what it serves (#6442).**
+  `AnalyticsMetadataResponseSchema.data` declared `{ cubes: CubeSchema[] }` while
+  both implementations of `AnalyticsService.getMeta` return a bare `CubeMeta[]`
+  that the runtime hands to `success()` verbatim. A client written against the
+  published contract read `data.cubes` and got `undefined`; validating a live
+  response against the schema failed outright. Per the maintainer's ruling the
+  declaration narrows to the `CubeMeta[]` projection — zero runtime change — and
+  the generated `references/api/analytics.mdx`, which was publishing the wrong
+  shape, corrects itself. If a dashboard ever needs `format` or `description`, the
+  recorded return path is to add the key to the `CubeMeta` projection (additive);
+  widening the endpoint back to full cube definitions would push each cube's `sql`
+  to clients and is not revisited.
+
+### Patch Changes
+
+- 121852d: Metadata-plane FLS: the ADR-0106 D4 read exemption is now **derived** from the #6603 write-capability gate, so "whoever can write a schema can see all of it" is enforced by construction (#7020).
+
+  The two sets used to be maintained separately and were in fact different: the write gate demands `manage_metadata`, while the D4 exemption listed `studio.access` / `setup.access`. They met only on the shipped `admin_full_access` set, which carries all three — so the invariant #6603's ruling stated held by coincidence, not by construction. A caller holding `manage_metadata` alone passed every metadata write gate and still read a **masked** object schema, and its GET, edit and PUT round trip then deleted the fields it was never shown.
+
+  `OBJECT_SCHEMA_MASK_EXEMPT_CAPABILITIES` is now the union of two named halves — `OBJECT_SCHEMA_WRITE_CAPABILITIES` (the write gate's key, spelled once) and `OBJECT_SCHEMA_READ_ONLY_EXEMPT_CAPABILITIES` (`studio.access` / `setup.access`) — both newly exported from `@objectstack/metadata-core`.
+
+  **Behaviour change:** a caller holding `manage_metadata` now reads object schemas unmasked on every schema-serving exit. This widens read access for that cohort and is the ruled intent (maintainer, 2026-08-10). The derivation is one-directional: no principal loses read access, and the `/packages` read cohort (#7033 / #7023) keeps its own separately-ruled set.
+
+- de6b7f1: fix(rest): dashboard 组件门禁在默认配置下真正执行 (#5881)
+
+  ADR-0057 D10 的 `requiresService` 组件门禁 —— 剔除指向未注册可选服务的 dashboard
+  磁贴 —— 在默认部署里一次都没跑过。`GET /meta/:type/:name` 的单条读取有一条缓存分支,
+  它排除了 `app`(per-user RBAC 过滤)与 `doc` / `book`(per-caller audience),唯独没有
+  排除 `dashboard`;而 `enableCache` 默认为 `true`。门禁写在非缓存分支里,于是只有显式
+  关掉缓存的部署才会执行到它。
+
+  后果正是该 ADR 点名要防的那一幕:在没有某个可选服务的部署里(比如单租户运行时里的
+  Organizations KPI,其 `org-scoping` 服务不存在),console 会渲染一块绑定到缺失服务的
+  死磁贴 —— 尽管服务端的门禁代码在、测试也在。
+
+  **修复**:`dashboard` 与 `app` 同款,从缓存分支排除,两种拼写(`/meta/dashboard/x`
+  与规范复数 `/meta/dashboards/x`)都覆盖。其它元数据类型的 ETag 快路径不受影响。
+
+  **为什么不是"把门禁提到分支之外、两条路径共用"** —— 那读起来更整齐,但 ETag 无法承载
+  门禁结论:validator 是**未过滤文档**的哈希,而 `notModified` 在 protocol 内部就已判定,
+  REST 层没有机会重判。共用之后送出的就是"过滤过的正文 + 指向未过滤正文的 validator"。
+  一次 boot 之内这没有危害(已注册服务集在 bootstrap 之后不可变),但 `Cache-Control:
+private, no-cache` 意味着客户端**存下正文**、之后只做重验证,而存下的正文比进程活得久:
+  一次关掉该可选服务的重新部署并不改变文档,ETag 不变 ⇒ 每次重验证都回 304 ⇒ 那块死磁贴
+  恰好在移除其服务的那次部署之后被永久缓存下来。放弃快路径的代价则接近于零:
+  `getMetaItemCached` 本就委托给 `getMetaItem`,服务端两条路做的是同样的工作,失去的只是
+  304 省下的正文字节。
+
+  对调用方的可见变化:dashboard 的单条读取不再返回 ETag / 304,每次都是完整的 200。
+
+- d9bef45: fix(spec,rest): `OVERLAY_PERSISTENCE_FAILED` leaves the error-code ledger — it lost its only producer (#5783)
+
+  `ERROR_CODE_LEDGER` registered `OVERLAY_PERSISTENCE_FAILED` under
+  `@objectstack/metadata-protocol`, but nothing in the repository can emit it any
+  more. Its one emission point was the `catch` inside `saveMetaItem`'s legacy
+  raw-engine branch, and #5264 (PR #5782) deleted that branch. A registered code
+  with no producer is ADR-0112's "no silent fourth state" read backwards: the
+  vocabulary promises a client a code no response can carry, and the ledger's own
+  admission test cannot notice, because it checks casing, duplication and
+  shadowing — never whether anyone still throws the code.
+
+  Verified before removing: a declaration-and-emission search over `origin/main`
+  finds the name only in the ledger row itself, two generated reference pages, one
+  `rest-server.ts` comment, one historical changeset plus its CHANGELOG entry, and
+  two `packages/rest` tests that construct the error themselves. No producer, and
+  no consumer — including `objectui` and `cloud`, both searched at their
+  `origin/main` — reads the literal. Removal only shrinks a dead row: nothing
+  gates an emission on ledger membership, so no runtime or gate starts rejecting
+  anything it accepted before.
+
+  **Wire impact: none.** No response carried this code, so no client can lose one.
+  The narrowing is type-level: `ErrorCode` (`StandardErrorCode` ∪ the ledger, what
+  `ApiErrorSchema.code` validates) no longer admits the string, so TypeScript
+  would now reject `code: 'OVERLAY_PERSISTENCE_FAILED'` at a call site — and there
+  is no such call site left to reject.
+
+  Note for whoever compiles the release: #5437's changeset
+  (`rest-5xx-message-withheld.md`) names this code as one of two examples of a
+  `code` that "still rides on the response". That sentence was accurate when it
+  was written; the other example, `NOT_IMPLEMENTED`, is unaffected and still
+  demonstrates the same behaviour.
+
+  The two `packages/rest` tests that asserted `resolveErrorResponse`'s handling of
+  a declared 5xx keep their substance and switch to a producer that still exists —
+  `metadata-protocol`'s `batchData` atomic refusal (`501` / `NOT_IMPLEMENTED`) and
+  the surviving overlay-delete `500`. Three stale comments are corrected in the
+  same pass: the `agent` entry in `metadata-plugin.zod.ts` (which described a
+  routing mechanism replaced by #5086's 403 refusal), the reachability argument in
+  `rest-5xx-message-sanitization.test.ts`, and `resolveErrorResponse`'s own
+  docblock in `rest-server.ts`.
+
+- 82da264: feat: declare `ExecutionContext.authGate`, so the ADR-0069 gate sits inside the closed field set (#7280)
+
+  The ADR-0069 authentication-policy gate (expired password, enforced MFA) rode
+  the execution context **undeclared**: REST's `computeExecCtx` spread it onto the
+  assembled envelope with `...(authGate ? { authGate } : {})` behind an `as any`,
+  and its `enforceAuth` read it back ten lines later. Nothing was broken — but the
+  closed entry field set shipped in #6216 is derived from `keyof ExecutionContext`,
+  so a field that exists only inside an `as any` is **outside every closure gate by
+  construction**: `ENTRY_EXECUTION_CONTEXT_FIELDS` could not list it,
+  `ExecutionContextEntryFields` could not demand it, and the runtime pin that
+  reconciles the closed set against `ExecutionContextSchema.shape` could not see
+  it. It was the exact blind spot that gate exists to remove, sitting one `as any`
+  outside it.
+
+  **@objectstack/spec** declares the field:
+
+  ```ts
+  authGate: z.object({ code: z.string(), message: z.string() }).optional();
+  ```
+
+  Both inner keys are required, matching the sole producer
+  (`AuthManager.computeAuthGate`, which sets both on every return branch) — `code`
+  is the stable machine code a client branches on, `message` is what the blocked
+  user reads, and the transport seam renders both as the `403` body.
+
+  **@objectstack/core** picks it up as an ENTRY-decided field — it is resolved from
+  the request's own session at the transport entry point, never written mid-request
+  — so `ExecutionContextAssemblyInput` gains a **required** `authGate` input on the
+  same footing as `accessToken`: every face states its decision instead of omitting
+  it. A guest principal never carries one (no authenticated session for a policy
+  gate to attach to). Also exported: `normalizeAuthGate`, which completes a session
+  user's loose `authGate` into the declared shape at the one producer rather than
+  tolerating a partial shape downstream — a gate naming a `code` but no `message`
+  no longer renders a `403` body with `message: undefined`. `AuthGate` is now
+  derived from the schema instead of being a second hand-written declaration.
+
+  **@objectstack/rest** passes the resolved gate as an assembler input and drops the
+  post-assembly spread; the remaining `as any` covers `__kernel` alone.
+  **@objectstack/runtime** (the runtime / MCP dispatcher) passes `authGate:
+undefined` on the record: it enforces the same gate at its own seam
+  (`HttpDispatcher.enforceAuthGate` re-reads the session and calls
+  `evaluateAuthGate`) and never reads `context.authGate`, so carrying it there
+  would be a second copy no consumer reads.
+
+  **No runtime behaviour change on either surface.** The shared assembler omits
+  `undefined`-valued keys, so the key is present exactly when it was before. The one
+  new behaviour is the normalization above, on a shape the sole producer never
+  emits today.
+
+- f586f1a: refactor: one shared `ExecutionContext` assembler, two named anonymous entries (#6216)
+
+  `resolveAuthzContext` already made AUTHORIZATION resolution single-sourced; the
+  step after it — turning the resolved envelope into the `ExecutionContext` that
+  reaches enforcement — was still one hand-written copy per transport, and the
+  copies drifted twice for real: **#6071** (the REST copy never set
+  `principalKind`, so every enforcement judgment reading it was silently
+  never-true on that face) and **#6206 / #6551** (a dropped `accessible_org_ids`
+  produced real 403s on the share-link faces).
+
+  **@objectstack/core** gains the single assembly, with the anonymous divergence
+  as named API rather than drift (maintainer ruling 2026-08-08 on #6216, Option
+  A):
+
+  - `assembleExecutionContext(input)` — the **fail-closed default** entry. No
+    resolved principal → `undefined`, and the surface answers 401.
+  - `assembleExecutionContextOrGuest(input)` — the **explicit guest** entry. No
+    resolved principal → a first-class guest envelope (`principalKind: 'guest'`,
+    `positions: ['guest']`), whose consumers are live (`explain-engine`'s
+    guest ⇒ `EXTERNAL` posture floor). Adopted only by a surface whose product
+    semantics serve anonymous principals.
+  - The field set is **closed by type**: `ExecutionContextEntryFields` requires a
+    decision for every `ExecutionContext` field that is not explicitly declared
+    non-entry-resolved, so a new field cannot reach one transport and miss
+    another. Also exported: `ENTRY_EXECUTION_CONTEXT_FIELDS`,
+    `EntryExecutionContextField`, `ExecutionContextAssemblyInput`,
+    `OAuthTokenProvenance`, `EntryLocalization`.
+
+  **@objectstack/runtime** (`resolveExecutionContext`, the runtime / MCP
+  dispatcher) and **@objectstack/rest** (`computeExecCtx`) now assemble through
+  that module — the dispatcher via the guest entry, REST via the fail-closed
+  default.
+
+  **No runtime behaviour change on either surface.** The remaining per-face
+  divergences are required inputs rather than silent omissions: REST passes
+  `accessToken: undefined` (it has never carried the session bearer on the
+  envelope, and `session.accessToken` is a published hook surface) and
+  `oauth: undefined` (OAuth bearers are honoured on the `/mcp` door alone). The
+  one measurable difference is that a key whose value was `undefined` is now
+  omitted rather than spelled — invisible to `ctx.x` reads, to `JSON.stringify`
+  and to spreading the envelope.
+
+- 53ef057: fix(rest,objectql): the import dry run asks the engine for its verdict instead of predicting it (#4633 ruling D)
+
+  `POST /api/v1/data/:object/import?dryRun=true` green-lit rows the very same
+  endpoint then rejected. Measured on 17.0.0-rc.1: a CSV cell aimed at a
+  structured `address` field reported `{ ok: 1, created: 1 }` on the dry run and
+  `{ errors: 1, code: 'VALIDATION_FAILED' }` on the real write.
+
+  The dry run predicted the write's verdict with a hand-copied mirror of a slice
+  of the engine's rules (`import-coerce.ts`'s `firstMissingRequiredField` and
+  `firstConstraintViolation`). A copy cannot structurally keep up with the family
+  it mirrors: ADR-0104 value shapes (`address` / `location` / references / media),
+  `format` checks, object-level `validations` and the state machine had no
+  counterpart, and `coerceFieldValue` routes structured shapes through its
+  pass-through catch-all, so no verdict was formed at all.
+
+  **The mirror is retired.** The dry run now calls `DataProtocol.validateData`
+  (#6037), which runs the same `validateRecord` / `evaluateValidationRules` that
+  `insert()` runs, under the deployment's own ADR-0104 posture — so a bad value
+  shape is an error on a self-certified deployment and an admitted warning on a
+  warn-first one, exactly as on the write. Agreement is by construction, not by a
+  copy kept in step by hand.
+
+  Also in this change:
+
+  - **`engine.validate()` now resolves `defaultValue`s and seeds owned roll-up
+    `summary` fields before validating, on `insert` mode**, because `insert()`
+    does. Without it a required-but-defaulted column left unmapped was previewed
+    `failed` and written `created` — a false alarm on the row a preview is meant
+    to reassure you about. `update` mode still does not default (#2706).
+  - **A row report failed by validation now names the offending column.** The
+    engine's `ValidationError` carries `fields[]`, so the row's `field` is set and
+    its `code` is the field-level code (`required`, `min_value`, `max_length`,
+    `invalid_type`, …) rather than the wrapper's `VALIDATION_FAILED`. This is the
+    same vocabulary the dry run and the per-cell coercion failures already spoke;
+    before, a `min: 0` violation was `min_value` on the dry run and
+    `VALIDATION_FAILED` on the write.
+  - **Dry-run rows may carry `warnings[]`** — findings this deployment admits
+    rather than rejects (ADR-0104 warn-first). The row is `ok`, and the complaint
+    is visible instead of living only in a server log line.
+
+  A protocol that does not implement `validateData` (plugin-auth's identity
+  import, whose write is better-auth rather than the engine) is not handed a
+  substitute: its dry run reports coercion and create/update/skip resolution only.
+  An engine-derived preview of a non-engine write would report findings that write
+  never produces.
+
+- a92b179: rest 的异步导入行数上限改为直接读取 spec 的 `IMPORT_JOB_MAX_ROWS` 导出，不再自己声明一份同值字面量（#6535）。
+
+  **行为没有任何变化**：两处此前都是 `50_000`，改后仍是 `50_000`，上限、`413` 文案、拒绝边界全部不动。
+  这是一次一致性收敛，不是缺陷修复——因此按 patch 计。
+
+  收敛掉的是一处漂移面：`packages/spec/src/api/export.zod.ts` 的那份导出带着 TSDoc，是这个
+  上限的**对外说明**（喂给生成的 reference 表面）；而真正执行拒绝的是 `packages/rest`，它此前
+  读的是自己那份本地 `const`，两者之间只有一句 "mirrors spec" 注释相连。没有任何 gate 比较这
+  两个数——`api-surface/api.json` 只记下 `"IMPORT_JOB_MAX_ROWS (const)"` 这个**名字**，不记它的
+  **值**——所以把 spec 那份改成 20_000、执行侧纹丝不动，`pnpm test` 与全部 `check:*` 依然全绿
+  （本 PR 实测过）。失效方向是文档说一套、系统做一套，而 `413` 文案里内插的又是 rest 那一份，
+  连报错都会自洽地说谎。现在一处定义、两处读点（`maxRows:` 与 `413` 文案）同源。
+
+- 07383fe: REST: a declared 5xx status now survives on the CRUD data routes
+
+  `mapDataError`'s explicit-status passthrough accepted only 4xx, while
+  `resolveErrorResponse` (the door every metadata/UI/discovery/batch route uses)
+  accepts 400-599. The same thrown error therefore got two different answers
+  depending on which route caught it, and on the data routes a producer's
+  declared 5xx was overwritten — the status re-derived from the message text, or
+  falling through to `500 INTERNAL_ERROR`.
+
+  The passthrough is now 400-599 on both doors, with the same disposition #5437
+  already ruled for a declared server fault: **keep the status, keep the
+  machine-readable `code`, drop the prose**. The `code` half reads
+  `declaresServerFault` from `@objectstack/types`, so an empty or non-string code
+  is not mistaken for an ADR-0112 declaration and nothing is invented when the
+  producer named no code.
+
+  User-visible effect: an aggregate function a SQL backend cannot compile
+  (`count_distinct` / `array_agg` / `string_agg`) now answers
+  `501 NOT_IMPLEMENTED` instead of `500 INTERNAL_ERROR`, and an upstream/
+  dependency `502` / `503` reaches the caller as itself rather than as a generic 500. The 4xx half is unchanged (wording truncated, `object` retained), no 5xx
+  message text reaches the client, and the withheld text still reaches the
+  operator log.
+
+- 870f90c: REST: the `/meta` write routes' 501 refusals now speak the ADR-0112 error envelope
+
+  `DELETE /meta/:type/:name`, `PUT /meta/:type/:name` and `PUT /meta/:type/:section/:name`
+  answer 501 when the protocol implementation lacks the corresponding method. Each
+  answered that refusal in a different shape: the `DELETE` sent a bare-string
+  `error` with no code at all, and the two `PUT` twins sent the code as a _sibling_
+  of `error` rather than inside it — while `POST /meta/_migrate-stored`, a few
+  hundred lines away in the same file, already sent the ADR-0112 nested shape for
+  the same condition.
+
+  All four now answer `{ error: { code: 'NOT_IMPLEMENTED', message } }`, so
+  `err.error.code` — the position ADR-0112 declares — resolves on every one of
+  them. `NOT_IMPLEMENTED` is unchanged and needs no new catalog entry: it is
+  already the standard catalog's member for 501.
+
+  **Wire-visible** for a caller running a kernel that does not implement metadata
+  writes. A client that read `err.code` (the sibling position) on the two `PUT`
+  routes must read `err.error.code` instead; a client that read `err.error` as a
+  string on the `DELETE` route must read `err.error.message`. No in-repo or
+  objectui consumer read either retired position.
+
+- 83a3b1f: fix(rest): `GET /meta/books/:name` no longer bypasses the ADR-0046 §6.7 audience gate (#6241)
+
+  The single-item metadata read has a cached branch and an uncached one, and the
+  ADR-0046 §6.7 audience gate lives in the uncached one. The comment above the
+  cached branch's entry condition has always stated why `doc` and `book` must skip
+  it:
+
+  > `doc` and `book` bypass the shared cache: their §6.7 audience gate is
+  > per-caller, and a shared ETag would leak gated content across viewers.
+
+  The condition beneath that sentence compared the **raw** `:type` path segment
+  against the literals `'doc'` / `'book'`. The route serves both spellings, and
+  Prime Directive #3 makes the **plural** one canonical — so
+  `GET /api/v1/meta/books/:name` did not match the exclusion, took the cached
+  branch, and the audience gate never ran. `enableCache` defaults to `true`, which
+  made the failing path the default one.
+
+  Measured against a real `RestServer` — one book declaring
+  `audience: { permissionSet: … }`, one signed-in caller holding no permission
+  set:
+
+  ```
+  singular "book"  :: cachedCalls=0 status=[403] PERMISSION_DENIED
+  plural   "books" :: cachedCalls=1 status=[]    full gated body served
+  ```
+
+  Same book, same caller, two spellings of one route. `GET /meta/docs/:name` took
+  the same path. This was **fail-open**: the wrong outcome is disclosure of gated
+  documentation, not an availability error.
+
+  **The fix is structural, not two corrected literals.** This is #3984 recurring
+  in the same file eight days later, so the handler now normalizes the type
+  **once** at the top (`RestServer.metaTypeSingular`) and every gate below reads
+  that local — a per-type gate added later has no raw param in scope to compare
+  against by accident. The cache exclusion and the §6.7 gate now read one shared
+  predicate, so "which types bypass the cache" and "which types are audience
+  gated" can no longer drift apart. A repository guard
+  (`pnpm check:meta-type-normalized`, AST-based, zero exemptions) refuses the next
+  raw comparison in `packages/rest/src`.
+
+  **Behaviour change worth knowing:** `GET /meta/docs/:name` and
+  `GET /meta/books/:name` now take the uncached branch, as their singular
+  spellings always did, so those two responses no longer carry an `ETag` /
+  `Cache-Control` validator and a conditional request no longer answers `304`. No
+  other metadata type is affected. The cost is only the 304's saved bytes —
+  `getMetaItemCached` delegates to `getMetaItem`, so the server does identical
+  work either way — and the ETag it gave up was a hash of the **unfiltered**
+  document, which is the cross-viewer leak the exclusion exists to prevent.
+
+- 2443bb4: `/meta` reads localize the canonical PLURAL spelling, not just the singular
+
+  The three metadata read handlers (`GET /meta/:type`, `GET /meta/:type/:name`,
+  `GET /meta/:type/:section/:name`) handed the raw `:type` path segment to the
+  translate helpers, whose "does this type translate" predicate reads a set derived
+  from singular-only translator keys (`view` / `action` / `object` / `app` /
+  `dashboard` / `page`). Prime Directive #3 makes plural the canonical REST
+  spelling, so a caller following the documentation received unlocalized
+  labels/descriptions/navigation while the singular spelling of the same route
+  returned the translated document.
+
+  `translateMetaItem` / `translateMetaItems` now fold the spelling to the canonical
+  singular before asking, so both spellings answer the same localized body. The set
+  of translatable types is unchanged — only which spellings reach it.
+
+- 91cefb8: refactor(types,rest,metadata,analytics): Postgres 的 `"x" of relation "y"` 短语收归一处，三个包不再各修一遍同一个超串洞（#6615）
+
+  Postgres 把「关系内部某个子对象」的失败写成 `column "label" of relation "sys_team" does not exist`——里面**逐字包含**一句合法的「表不存在」短语 `relation "sys_team" does not exist`，含义却相反：关系正因为存在才被点名。任何对「这句话是不是在说表没了」的正则收紧都消不掉这个匹配，短语确实在里面；唯一的修法是**先问更具体的问题**。所以修的是**顺序**，不是模式。
+
+  正因为如此，这个短语被分三次教给了这个仓库，分属三个包、三个 PR，其中两次是在别处已经踩过同一个洞之后：`@objectstack/rest` 的 `mapDataError`（#5352）、`@objectstack/service-analytics` 的缺列扣除（#6035 / PR #6346）、`@objectstack/metadata` 的 `MISSING_TABLE.excludes`（#6347 / PR #6613）。本次把它收进 `@objectstack/types`，与 `isUniqueViolationError`（#6250）和 `isModuleNotFoundError`（framework#3265）同一个理由与同一个位置。
+
+  **两种宽度，故意保留成两个导出。** 三个消费者要的并不是同一条正则，差别也不是随手写的，而是**每个站点哪个方向的误差是安全的**：
+
+  - `matchMissingColumnOfRelation(message)` —— 严格提取器，锚定 Postgres 的 errmsg 模板 `column "%s" of relation "%s" does not exist`，返回列名。`rest` 用它把 42703 答成 `400 INVALID_FIELD` 而不是 `404`；`service-analytics` 用它在分类前扣除缺列。这两处**过宽**会把真正缺失的表变成硬失败、回退 #5033 刻意保留的宽容，**漏匹配**只是让消息含糊一点——所以必须严格。
+  - `isRelationSubObjectPhrase(message)` —— 宽检测器，丢掉 `column` / `[a-z0-9_]+` / `does not exist` 三个锚点：任意子对象、任意带引号标识符、任意判词。`metadata` 用它做排除。这一处**过宽**只会把良性判定变成响亮判定，**漏匹配**却会让 `event_seq` 从 1 重新开始、撞进一张已有行的历史表——方向正好相反。
+
+  把两者合并成一条正则，无论哪种宽度胜出都会对其中一个调用方是错的；这是卡片记录在案的风险，两个导出即为此而设，理由是承重的而非风格的。仓库里第四份拷贝（`service-analytics` 测试内用于守护 fixture 的那条正则）同时收编：它本是为「两张面孔别对不上」而写，却把断言打在其中一面的私有复述上，因而正是它要防的漂移。
+
+  行为逐字保持不变：搬进来的两条模式与原站点逐字节相同。`@objectstack/service-analytics` 因此新增一条对 `@objectstack/types` 的依赖边——这是本次唯一的依赖变化，构造上无环（`@objectstack/types` 只依赖 `@objectstack/spec`，后者无仓内依赖），且仓库 73 个包中已有 25 个、16 个 service 中已有 5 个携带同一条边。
+
+- 2c2a212: fix(reports): owner-gate the saved-report schedule routes (#2980)
+
+  The report read/run/delete routes are owner-isolated (a caller may only touch a
+  report they own, denied as `REPORT_NOT_FOUND` to avoid leaking that the id
+  exists), but the two schedule routes bypassed that gate: `unscheduleReport` and
+  `listSchedules` took the caller `context` as `_context` and never consulted it,
+  querying under the system context (RLS-bypassing). Any authenticated caller
+  could therefore delete another owner's report schedule — a cross-owner
+  destructive write — or list another owner's schedules (leaking recipient
+  addresses and cron), by supplying an id.
+
+  Both now resolve the schedule's parent report and require the caller to own it,
+  mirroring the sibling routes:
+
+  - **`unscheduleReport`** loads the schedule, then its report, and deletes only
+    when `canAccessReport` holds; a cross-owner attempt throws `REPORT_NOT_FOUND`
+    (mapped to `404` by the REST layer, deny-as-404 anti-enumeration), while a
+    genuinely-absent schedule stays idempotent. `scheduleReport` (create) was
+    already gated via `getReport`, so only the delete/list doors were open.
+  - **`listSchedules`** returns an empty list to any non-system caller who cannot
+    access the report it is scoped to — the same non-leaking posture as
+    `listReports`. The scheduler's system context still sees every schedule.
+
+  No authoring-surface or metadata change; existing owner-path behavior is
+  unchanged.
+
+- 773f80a: fix(rest): REST 面的执行上下文补齐 ADR-0090 D9/D10 的 principal 分类(#6071)
+
+  `resolveAuthzContext`(`@objectstack/core`)被提取出来,正是为了让两个 HTTP 入口
+  不再在**授权**上漂移。但它之后的一步 —— 把授权信封组装成 `ExecutionContext` ——
+  仍是两份手写副本,而两份的字段集已经不一致:runtime / dispatcher 那份
+  (`packages/runtime/src/security/resolve-execution-context.ts`)按 ADR-0090 D9/D10
+  设置 `principalKind`(必要时连同 `onBehalfOf`),`rest-server.ts` 的 `computeExecCtx`
+  两个都不设。
+
+  后果不在装饰面而在 enforcement 面:`plugin-security/explain-engine.ts` 的
+  posture 下限、`security-plugin.ts` 的 agent 基线、`observability/perf-timing.ts`
+  的披露闸门都读 `principalKind`,于是同一个请求走 dispatcher 与走 REST 会拿到不同
+  的上下文,读这个字段的判断在 `os serve` / `dev` 的数据与元数据路由上**从不成立**。
+  问题由 #5859 实施时的 dogfood 全栈 boot 插桩测得:到达消费方的键集里 `__kernel`
+  在(自证是 rest-server 这条组装路径)、`principalKind` 不在。
+
+  本次改动只补这一个传输上缺的字段,口径与 runtime 侧完全一致:
+
+  - 会话(cookie)或 API key 背书的主体 ⇒ `principalKind: 'human'` —— 与 runtime
+    侧「an authenticated (API-key) request resolves as a human principal, never
+    guest」的钉子同一判定。
+  - `'agent'` 与随之而来的 `onBehalfOf` **在本传输上不可表达**:它需要一个指明已授权
+    客户端的 OAuth access token,而该凭据只在 dispatcher 的 `/mcp` 门上被接受
+    (`acceptOAuthAccessToken`),正是为了不让粗粒度的工具族 scope 溜进 REST。
+  - `'guest'` 同样不可表达:`computeExecCtx` 在信封没有 `userId` 时就返回
+    `undefined`,匿名 REST 调用者本来就拿不到任何上下文(随后被 `enforceAuth` 401)。
+    **匿名面零变化** —— 不给匿名调用者凭空发一个 guest 上下文。
+
+  行为差量(逐条核过,无一条改变授权结果):`explain-engine.ts` 的 guest ⇒ `EXTERNAL`
+  与 `security-plugin.ts` 的 agent 分支在 REST 面仍不成立(前者的 `!context?.userId`
+  前肢本就恒真,后者读 `'agent'` 标签、且真正的兜底是委托 LINK);`perf-timing.ts`
+  只认 `'service'` / `'system'`,`'human'` 不开闸。唯一可观测的新增是 explain 输出里
+  多回显一个 `principalKind: 'human'`(该字段在 explain schema 中本就是 optional)。
+
+- f3f855a: Refuse a repeated single-valued query parameter instead of silently answering the wrong thing (#6877)
+
+  `IHttpRequest.query` is declared `Record< string, string | string[] >`, and the array
+  arm is produced by a real first-party adapter (`NodeHttpServer` hands `?x=1&x=2`
+  through as `['1','2']`, measured over a socket). `rest-server.ts` read ~50 of its
+  query parameters as if the union had one arm, so a repeated parameter was coerced
+  into a _different_ value and served with a `200` rather than refused. None of it was
+  a type error — every site laundered the array through `any`, `String()` or
+  `Number()`.
+
+  Two of the outcomes were inversions rather than degradations:
+
+  - `PUT /meta/:type/:name?force=false&force=false` — the read fell through to
+    `!!forceRaw`, and a non-empty array is truthy, so repeating an explicit **opt-out**
+    switched the destructive-change guard **on**.
+  - `GET /data/:object/export?limit=1&limit=2` — `Number([...])` is `NaN`, `NaN || 0`
+    is `0`, `Math.max(1, 0)` is `1`: a **one-row export**, `200 OK`.
+
+  Each affected handler now declares which of its parameters are single-valued, and a
+  repeated one is refused with `400` and the ADR-0112 nested envelope
+  `{ error: { code: 'VALIDATION_ERROR', message } }` — the same rule and message
+  #6307 landed on `/api/v1/packages/:id`, now shared rather than duplicated. The rule
+  counts occurrences, not values: a one-element array is one occurrence and is
+  accepted (and unwrapped), an empty array is none, two identical values are still two.
+
+  **Wire-visible**: requests that used to receive a wrong `200` now receive a `400`.
+  No well-formed single-value request changes in any way.
+
+  Parameters that are genuinely multi-valued are deliberately untouched and pinned by
+  tests — `select` / `expand` on `GET /data/:object/:id` (whose consumer takes
+  `string | string[]` by design), `objects` on `/search`, `fields` / `searchFields` on
+  the export route, and `approverId` on `/approvals/requests`.
+
+- f8fe47e: feat(runtime,rest,plugin-auth,service-i18n,service-storage): route-ledger 条目类型加可选 `responseSchema` (#5791)
+
+  #3877 的「最小首步」，维护者 2026-08-06 已批。**纯增量、零行为变更**：五个 route
+  ledger 的现有条目一行未改，字段缺省即「未声明」。
+
+  ## 为什么是这一步
+
+  #3877 量到的洞不是「发出的和声明的不一致」，而是**大多数路由根本没有可对账的声明**：
+  237 条已挂载路由里 215 条是 `sdk` 面，而携带 schema 引用的是 **0 条**。于是同一单
+  里裁定了两件事——Stage C（批量补 ~190 条响应 schema）**永不排期**（一条响应 schema
+  是「这个端点承诺什么」的产品决定，批量生产正是 #3676 / #3833 / #3847 / #3870 四个
+  缺陷的成因），以及先把「这条路由声明了什么」变成**可查询数据**，让 Stage D 的棘轮
+  将来有东西可棘。本次落地的就是后者。
+
+  ## 字段语义
+
+  `responseSchema` 是 `@objectstack/spec/api` 导出名，指向该路由**响应载荷**的声明：
+  路由套 `{ success, data }` 信封时指 `data`，不套时指整个 body。信封本身不归它管，
+  由 `pnpm check:route-envelope` 结构化守住——一个字段无法同时诚实地描述两层。
+
+  五个 ledger 是五个各自独立声明、按约定同形的 interface，因此是五处同名同措辞的可选
+  字段，**不是**新建共享类型包。三个 ledger 明确要求保持 import-free（客户端守卫按
+  相对**源文件**编译它们），且 `zod` 并非每个持有 ledger 的包的依赖，故字段存的是
+  **名字**而非 live schema 对象，解析放在能 import spec 的守卫里。
+
+  ## 已填的两条（实证，不是批量）
+
+  只填 #5682 已给出双断言覆盖（safeParse 判**值** + 键集判**键**）的 discovery 族两条，
+  且刻意分处两个 ledger，以证明一个字段形状确实服务五个独立声明的条目类型：
+
+  - `packages/runtime` `GET /discovery` → `DiscoverySchema`（走信封，指 `data`）
+  - `packages/rest` `GET /api/v1/discovery` → `DiscoverySchema`（裸发，指整个 body）
+
+  `GET /api/v1` 这条 bare-base 别名**故意不填**：它与上面那条共用同一个
+  `discoveryHandler` 闭包，但 #5682 的测试只驱动 `/api/v1/discovery`，「同一个 handler
+  所以同一个形状」是对代码的论证而非对代码的测量。没有覆盖就不填。
+
+  ## 新增守卫
+
+  - `packages/client/src/route-ledger-response-schema.test.ts` —— 五个 ledger 的并集里
+    每一个 `responseSchema` 都到**活的** `@objectstack/spec/api` 导出里解析，并且真的
+    调用一次 `safeParse`（spec 的 schema 是 `lazySchema()` 代理，只查属性存在会被代理
+    陷阱满足）。含否定对照（少一个字母的名字、空串、导出了但不是 schema）与反空转下界。
+  - `discovery-schema-conformance.test.ts`（runtime / rest 各一）—— 钉住 ledger 报的
+    schema 就是该套件实际解析用的**同一个对象**，并各自测量了载荷所在的层级。
+
+- 129b378: fix(types,rest): one named answer for "which column conflicted" — an index name is never returned as one (#6544)
+
+  #6250 retired four private "is this a unique violation?" vocabularies into
+  `isUniqueViolationError`. It left the harder half of the question behind: the
+  import runner's `sanitizeRowError` still carried its own three-dialect regex
+  chain, because it does **more** than answer yes/no — it names the offending
+  column so the importer can say _"A record with this `email` already exists."_
+  This lands that second answer as a shared export and migrates the last private
+  copy onto it.
+
+  **New — `uniqueViolationColumn(error)` in `@objectstack/types`** (`string |
+undefined`), sibling to `isUniqueViolationError` and gated on it, reading the
+  same channels one step down the same bounded `cause` chain, plus
+  node-postgres' `detail` field.
+
+  **Its contract, per the maintainer's 2026-08-08 ruling: a value comes back only
+  when the identifier the driver printed is determinably a COLUMN.** When a
+  dialect names an _index_ instead — MySQL's `Duplicate entry … for key
+'idx_email_unique'`, Postgres' `violates unique constraint "sys_user_email_key"`,
+  SQLite's `UNIQUE constraint failed: index 'x'` — the answer is `undefined`,
+  never the index name. Callers render this into a form field, and an index name
+  mistaken for a column points the user at a field that does not exist, whereas
+  `undefined` degrades to generic copy. A **composite** key (`Key (tenant_id,
+email)=(…)`) is `undefined` for the same reason: there is no single offending
+  column, and naming the first is the same class of wrong answer.
+
+  **⚠️ User-visible change on MySQL imports.** MySQL's duplicate-entry message
+  names the index and never the column, so the importer no longer names a column
+  there: rows that used to read _"A record with this `idx_email_unique` already
+  exists."_ — or, on MySQL 8's table-qualified `for key 'sys_user.email'`, a
+  plausible-looking _`email`_ that was still an index name — now read **"A record
+  with this value already exists."** That is deliberate and is the accepted cost
+  of the ruling. The conflict is still recognised as a conflict; only the naming
+  narrowed.
+
+  Three smaller import messages improve in the same move, all previously wrong
+  rather than merely vague:
+
+  - SQLite's expression/partial-index form used to render as _"A record with this
+    **index** already exists."_
+  - Postgres' expression index used to render the truncated fragment _"A record
+    with this **lower(email** already exists."_
+  - A Postgres conflict with no `DETAIL:` line used to fall through to the SQL
+    backstop and echo the driver's own sentence — index name included — at the
+    importer. It now gets the same generic conflict copy, which is also the exact
+    wording `mapDataError` puts in the 409 `UNIQUE_VIOLATION` body, so the
+    importer and the API say one thing about one condition.
+
+  Not changed: the NOT NULL branch, the raw-SQL backstop, and every non-conflict
+  message, which pass through exactly as before.
+
+- 88f9d94: fix(types,rest): one named unique-violation predicate — a MySQL conflict is 409 UNIQUE_VIOLATION, not 500 (#6250)
+
+  **On MySQL, every unique-constraint conflict came back as `500 INTERNAL_ERROR`.**
+  The API contract registers `UNIQUE_VIOLATION` as a 409 code
+  (`packages/spec/src/api/error-code-ledger.zod.ts`), so a front end had no way to
+  tell "this email is already taken" from "the server fell over" — no retry advice,
+  no field to point at, and a 5xx in the operator's dashboards for what is an
+  ordinary client outcome. SQLite and Postgres deployments never saw it, which is
+  why it survived: their conflict prose happens to contain the words the mapping
+  looked for.
+
+  **Cause: the conflict verdict was nested inside a leak heuristic.** REST's 409
+  branch lived inside the true-branch of `looksLikeInternalErrorLeak()`, keyed on
+  the substrings `unique constraint` / `unique violation`. MySQL says
+  `ER_DUP_ENTRY: Duplicate entry '…' for key '…'`, which matches no limb of that
+  heuristic, so the conflict never reached the `if` at all and fell out of the
+  terminal `UNCLASSIFIED_FAULT`. Two unrelated questions — "is this a conflict?"
+  and "would echoing this text leak internals?" — had been fused into one, and
+  MySQL is where they disagree.
+
+  Measured on the previous release, through the real error mapper:
+
+  ```
+  mysql,    bare message       500 INTERNAL_ERROR  →  409 UNIQUE_VIOLATION
+  mysql,    knex-wrapped SQL   500 DATABASE_ERROR  →  409 UNIQUE_VIOLATION
+  postgres, SQLSTATE only      500 INTERNAL_ERROR  →  409 UNIQUE_VIOLATION
+  sqlite,   message            409 UNIQUE_VIOLATION   (unchanged)
+  postgres, message            409 UNIQUE_VIOLATION   (unchanged)
+  ```
+
+  So the hole was never MySQL-only: the mapping read one of the two channels
+  drivers use. A Postgres error carrying SQLSTATE `23505` with unremarkable prose
+  was a 500 as well.
+
+  **New: `isUniqueViolationError(error)`, exported from `@objectstack/types`.** One
+  named predicate replaces the substring test, reading every channel a driver
+  uses — `code` (`23505` / `ER_DUP_ENTRY` / `SQLITE_CONSTRAINT_UNIQUE`), `errno`
+  (`1062`), the message, and one step down the `cause` chain that pool and
+  query-builder layers wrap with. Its vocabulary is the union of the four
+  hand-written copies the repo already carried, so routing REST through it cannot
+  narrow any verdict clients rely on today; an unrecognised error is never a
+  conflict, because a false 409 tells an SDK not to retry and points the user at a
+  value that is fine.
+
+  **The internal-leak classifier is byte-identical.** The fix hoists the conflict
+  question out of it rather than widening its criteria, so nothing else it guards
+  is reclassified as safe-to-expose. And the 409 body is fixed text: MySQL embeds
+  the offending user data in its message (`Duplicate entry 'a@b.com' …`) and
+  Postgres the index and column names, none of which reaches the client. The full
+  driver text still reaches the server log.
+
+  No action needed. Clients that already handled `409 UNIQUE_VIOLATION` on SQLite
+  and Postgres now receive it on MySQL too.
+
+- 3fc2e48: fix(spec,rest,cli): validation diagnostics reach the real defect — named view-union branches, and `invalid_key` / `invalid_element` descent (#6391, #5389)
+
+  Two cases where a refusal fired correctly but its _diagnostic_ could not reach the
+  element that actually failed. Both fixes change the DIAGNOSTIC face only: every
+  input that parsed before parses after, every input refused before is refused
+  after, and each refusal keeps its issue codes (ADR-0112 / #6142 — a better
+  diagnostic never weakens the envelope). Pinned in both directions.
+
+  **#6391 — `ViewMetadataSchema`'s union members are now contractual.** Three of
+  its four members were inline expressions with no name, so a consumer diagnosing a
+  failure could only reach a branch by indexing the nested `invalid_union`
+  `errors[]` **by member position**; objectui shipped exactly that and had to hold
+  the coupling down with a canary test (objectui#3606 / PR objectui#3624). The
+  union is now built from a named record:
+
+  - `VIEW_METADATA_BRANCHES` — the branch names, in the union's own order;
+  - `VIEW_METADATA_MEMBERS` — branch name → the schema the union actually holds
+    (`viewItem` is identically `ViewItemWireSchema`, as before);
+  - `selectViewMetadataBranch(body)` — which branch a body claims, by the
+    discriminants the members already declare;
+  - `diagnoseViewMetadata(body)` — the failing branch **named**, with that branch's
+    own leaf issues and real field paths, so no consumer needs `errors[i]`.
+
+  The union is **not** converted to `z.discriminatedUnion`. That would move the
+  acceptance face — a discriminated union refuses an unknown discriminant outright
+  where this one falls through all four members, and several of these shapes carry
+  no discriminant at all. `ViewMetadataSchema` remains the only judge of
+  acceptance; the dispatch only explains a verdict it did not make, and a pin
+  asserts the two never disagree.
+
+  **#5389 — `invalid_key` / `invalid_element` are descended, in all three
+  consumers.** Zod hangs a failing record-key / map-element schema's real issues on
+  `issue.issues` — the same shape as `invalid_union`'s `issue.errors`, one property
+  name over. The family had already been fixed three times for `errors` (#4971,
+  #5014, #5341) and none of the three consumers read `issues`, so both codes
+  surfaced as a bare wrapper line with the prescription stranded in the payload.
+  Now `formatZodError`/`formatZodIssue` (spec), `zodIssuesToFields` (the REST wire)
+  and `formatZodErrors` (the CLI terminal) all descend it.
+
+  Before / after, a `z.record` with a constrained key:
+
+  ```
+    ✗ fields.First Name: Invalid key in record
+  ```
+
+  ```
+    ✗ fields.First Name: Invalid key in record
+      ✗ fields.First Name: Invalid identifier. Must be lowercase snake_case …
+  ```
+
+  The expansion is strictly additive on every surface: the container's own line
+  (and, on the wire, its own `{field, code: 'invalid_shape', message}` entry) is
+  unchanged, and the leaves follow it. Unlike a union's branches — competing
+  candidates, therefore ranked and capped — a container's `issues` are the one list
+  the inner schema produced, so every one of them is reported.
+
+- Updated dependencies [3d5c090]
+- Updated dependencies [e5bd768]
+- Updated dependencies [e027b3e]
+- Updated dependencies [c2429b0]
+- Updated dependencies [445a0c2]
+- Updated dependencies [f6609e6]
+- Updated dependencies [a70358a]
+- Updated dependencies [97e7e3c]
+- Updated dependencies [8828b9e]
+- Updated dependencies [53068c1]
+- Updated dependencies [ee58392]
+- Updated dependencies [f16e54e]
+- Updated dependencies [06be54e]
+- Updated dependencies [259459d]
+- Updated dependencies [3f7f14e]
+- Updated dependencies [6968885]
+- Updated dependencies [eaed61f]
+- Updated dependencies [debe2f6]
+- Updated dependencies [97b0798]
+- Updated dependencies [5fa04fb]
+- Updated dependencies [43a7a8d]
+- Updated dependencies [73f69dc]
+- Updated dependencies [04c56aa]
+- Updated dependencies [b3efeb7]
+- Updated dependencies [ddd075a]
+- Updated dependencies [88154be]
+- Updated dependencies [e8dc61e]
+- Updated dependencies [2f3e793]
+- Updated dependencies [d8e8d9c]
+- Updated dependencies [94e749b]
+- Updated dependencies [ea1d916]
+- Updated dependencies [ae31a19]
+- Updated dependencies [e0f300b]
+- Updated dependencies [62b6a2f]
+- Updated dependencies [5b4780b]
+- Updated dependencies [a933452]
+- Updated dependencies [8140915]
+- Updated dependencies [7b48cf9]
+- Updated dependencies [b5404f4]
+- Updated dependencies [f764691]
+- Updated dependencies [e120a5a]
+- Updated dependencies [e650d67]
+- Updated dependencies [121852d]
+- Updated dependencies [04476e7]
+- Updated dependencies [79228cd]
+- Updated dependencies [b3363e9]
+- Updated dependencies [2ef1807]
+- Updated dependencies [d03fe25]
+- Updated dependencies [2672f85]
+- Updated dependencies [11066f6]
+- Updated dependencies [916af17]
+- Updated dependencies [84c86fb]
+- Updated dependencies [2a2a9fb]
+- Updated dependencies [a2e157c]
+- Updated dependencies [95c4227]
+- Updated dependencies [2a61116]
+- Updated dependencies [d4df105]
+- Updated dependencies [e2798fa]
+- Updated dependencies [0fd8556]
+- Updated dependencies [74155c7]
+- Updated dependencies [6908830]
+- Updated dependencies [8b06bba]
+- Updated dependencies [4c54037]
+- Updated dependencies [0f7157b]
+- Updated dependencies [d9bef45]
+- Updated dependencies [f549a0d]
+- Updated dependencies [82da264]
+- Updated dependencies [f586f1a]
+- Updated dependencies [9b9b70f]
+- Updated dependencies [f5a9bc2]
+- Updated dependencies [881a3cc]
+- Updated dependencies [ad6317b]
+- Updated dependencies [8a88885]
+- Updated dependencies [5f7669e]
+- Updated dependencies [becbe53]
+- Updated dependencies [b127c8b]
+- Updated dependencies [a80302a]
+- Updated dependencies [474f131]
+- Updated dependencies [050cd82]
+- Updated dependencies [4d552af]
+- Updated dependencies [44d677c]
+- Updated dependencies [c32944d]
+- Updated dependencies [1dd780f]
+- Updated dependencies [c8d6f6e]
+- Updated dependencies [92a67f2]
+- Updated dependencies [9136327]
+- Updated dependencies [bf0ae99]
+- Updated dependencies [cb3b6cd]
+- Updated dependencies [73b7234]
+- Updated dependencies [d2b97c3]
+- Updated dependencies [59b794f]
+- Updated dependencies [fc3a36a]
+- Updated dependencies [69787f0]
+- Updated dependencies [5d022a1]
+- Updated dependencies [042b9ee]
+- Updated dependencies [f549a0d]
+- Updated dependencies [a36db28]
+- Updated dependencies [3f8817a]
+- Updated dependencies [a2443e3]
+- Updated dependencies [e1554b1]
+- Updated dependencies [4856789]
+- Updated dependencies [c3f4916]
+- Updated dependencies [33e0385]
+- Updated dependencies [2205363]
+- Updated dependencies [09fe58d]
+- Updated dependencies [d0a5ceb]
+- Updated dependencies [e18a162]
+- Updated dependencies [d6d1a50]
+- Updated dependencies [d127ff0]
+- Updated dependencies [9b86cf6]
+- Updated dependencies [8825a06]
+- Updated dependencies [5087ac6]
+- Updated dependencies [2d1ddf0]
+- Updated dependencies [354b00f]
+- Updated dependencies [3de535b]
+- Updated dependencies [fe2e15a]
+- Updated dependencies [c6b6bb4]
+- Updated dependencies [59c544d]
+- Updated dependencies [2f59da0]
+- Updated dependencies [5e247fd]
+- Updated dependencies [1a53a02]
+- Updated dependencies [a954634]
+- Updated dependencies [8ad609c]
+- Updated dependencies [bbee302]
+- Updated dependencies [08863dd]
+- Updated dependencies [56664f5]
+- Updated dependencies [31cbe90]
+- Updated dependencies [90bbf25]
+- Updated dependencies [eb91eba]
+- Updated dependencies [42da73d]
+- Updated dependencies [643b7c7]
+- Updated dependencies [d0d5205]
+- Updated dependencies [1a15893]
+- Updated dependencies [b70e534]
+- Updated dependencies [2233a85]
+- Updated dependencies [62dd69a]
+- Updated dependencies [e15e679]
+- Updated dependencies [2ab1257]
+- Updated dependencies [4cc4fb7]
+- Updated dependencies [28d1eb7]
+- Updated dependencies [2c26040]
+- Updated dependencies [f758cec]
+- Updated dependencies [78f0be8]
+- Updated dependencies [35f7fb4]
+- Updated dependencies [a5302c7]
+- Updated dependencies [7084313]
+- Updated dependencies [91cefb8]
+- Updated dependencies [0e043d8]
+- Updated dependencies [dadd1ad]
+- Updated dependencies [2f2e63c]
+- Updated dependencies [486d526]
+- Updated dependencies [89d7b35]
+- Updated dependencies [85ec26d]
+- Updated dependencies [f6476fc]
+- Updated dependencies [4ac12ef]
+- Updated dependencies [b88f5e8]
+- Updated dependencies [42cc219]
+- Updated dependencies [d42a92f]
+- Updated dependencies [51d74ad]
+- Updated dependencies [d7e0b42]
+- Updated dependencies [3510e4a]
+- Updated dependencies [aa4b90d]
+- Updated dependencies [54299ca]
+- Updated dependencies [dc61def]
+- Updated dependencies [251e888]
+- Updated dependencies [183b4c4]
+- Updated dependencies [2fdb36e]
+- Updated dependencies [e787608]
+- Updated dependencies [20526f5]
+- Updated dependencies [c5eef1d]
+- Updated dependencies [e0f300b]
+- Updated dependencies [761a0ba]
+- Updated dependencies [61282f9]
+- Updated dependencies [be87153]
+- Updated dependencies [60f0dd8]
+- Updated dependencies [a87c5cd]
+- Updated dependencies [a47f338]
+- Updated dependencies [2598216]
+- Updated dependencies [2c7e62d]
+- Updated dependencies [eb7613c]
+- Updated dependencies [ecc9110]
+- Updated dependencies [f7bd4e2]
+- Updated dependencies [361bd5b]
+- Updated dependencies [129b378]
+- Updated dependencies [88f9d94]
+- Updated dependencies [1818998]
+- Updated dependencies [3d4c545]
+- Updated dependencies [bb7cb41]
+- Updated dependencies [09ee21c]
+- Updated dependencies [f549a0d]
+- Updated dependencies [3fc2e48]
+- Updated dependencies [e8f435c]
+- Updated dependencies [41610f6]
+  - @objectstack/spec@17.0.0-rc.6
+  - @objectstack/platform-objects@17.0.0-rc.6
+  - @objectstack/metadata-core@17.0.0-rc.6
+  - @objectstack/core@17.0.0-rc.6
+  - @objectstack/types@17.0.0-rc.6
+  - @objectstack/observability@17.0.0-rc.6
+  - @objectstack/service-package@17.0.0-rc.6
+
 ## 17.0.0-rc.5
 
 ### Patch Changes

@@ -1,0 +1,1042 @@
+{
+  "$comment": "Standing platform test checklist — area ledger. Hand-edited, append-only; validated by scripts/check-platform-checklist.mjs (pnpm check:platform-checklist). Authoring rules: docs/qa/platform-checklist/README.md · execution protocol: RUNNER.md.",
+  "area": "api-backend",
+  "title": "REST / batch / formula / build-time gates",
+  "items": [
+    {
+      "id": "api-backend.batch-transactional-discovery",
+      "title": "transactionalBatch capability bit matches the mounted /batch behavior — atomicity, rollback codes, size cap",
+      "since": "v16",
+      "status": "active",
+      "revision": 2,
+      "priority": "P1",
+      "surface": "api",
+      "personas": [
+        "admin (or any member entitled to the objects the batch touches)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "two batch-writable objects (showcase_private_note and showcase_task both accept baseline member creates)",
+          "default maxBatchSize (200 unless RestServerConfig.batch overrides)"
+        ]
+      },
+      "steps": [
+        "boot showcase isolated; GET /api/v1/discovery and read capabilities.transactionalBatch (also compare client.capabilities.transactionalBatch if driving via @objectstack/client)",
+        "POST /api/v1/batch with a well-formed cross-object atomic batch: operations = [create showcase_private_note {title}, create showcase_task {title}], options {\"atomic\": true}; verify both rows exist afterwards",
+        "POST /api/v1/batch with the same operations and options {\"atomic\": false}; capture status + error code",
+        "POST /api/v1/batch where a MIDDLE operation must fail (e.g. create showcase_invoice missing its required name), sandwiched between two valid creates; capture the per-operation results and re-read all three would-be rows",
+        "POST /api/v1/batch with operations.length > maxBatchSize (201 no-op creates on the default config); capture the rejection",
+        "POST /api/v1/data/showcase_private_note/batch (the PER-OBJECT batch door) with a mixed valid/invalid set and NO atomic flag; capture the per-row outcomes"
+      ],
+      "acceptance": [
+        {
+          "clause": "the discovery bit is true exactly when /batch is mounted and transaction-capable — capability read and live behavior agree",
+          "oracle": "api",
+          "verify": "GET /api/v1/discovery capabilities.transactionalBatch == true AND the atomic batch in step 2 succeeds end-to-end (or, on a runtime without tx support, the bit is false and /batch refuses atomically-dependent use)",
+          "evidence": "discovery body + batch trace"
+        },
+        {
+          "clause": "atomic:false on the CROSS-OBJECT /batch answers 400 BATCH_NOT_ATOMIC — the endpoint is all-or-nothing by construction (batch.zod.ts: atomic accepted for symmetry, MUST be true)",
+          "oracle": "api",
+          "verify": "step-3 response: status 400, error code BATCH_NOT_ATOMIC, message pointing at POST /data/:object/batch for non-atomic per-object batches",
+          "evidence": "response"
+        },
+        {
+          "clause": "a failing member rolls the whole atomic batch back with the #4793 per-row codes: rows before the failure report ROLLED_BACK (written then undone), rows after report NOT_ATTEMPTED (never ran) — and NO row from the batch persists",
+          "oracle": "api",
+          "verify": "step-4 per-operation results carry the two codes in the right positions; follow-up GETs find none of the three records",
+          "evidence": "batch response + the absent-row reads"
+        },
+        {
+          "clause": "an oversize batch is refused up front with 400 BATCH_TOO_LARGE (the configured maxBatchSize, default 200) and creates nothing",
+          "oracle": "api",
+          "verify": "step-5 response: 400 + BATCH_TOO_LARGE; system-context count of the probe-titled rows is 0",
+          "evidence": "response + count"
+        },
+        {
+          "clause": "the per-object /data/:object/batch door defaults to NON-atomic per-row outcomes (ADR-0119 D4: atomic defaults false there — the declared-but-unenforced default(true) was the defect): valid rows land, invalid rows report their error, neither blocks the other",
+          "oracle": "api",
+          "verify": "step-6 response has per-row success and error entries; re-reads confirm valid rows persisted",
+          "evidence": "response + re-reads"
+        }
+      ],
+      "negative": [
+        "the two batch doors must not be conflated: atomic:false must NOT be accepted-and-ignored on /api/v1/batch (silent non-atomic acceptance is the pre-ADR-0119 bug shape), and the per-object door must NOT silently roll back valid rows when a sibling row fails without atomic being requested"
+      ],
+      "traps": [
+        "dispatcher-vs-hono-route"
+      ],
+      "source": [
+        "#3358 §9",
+        "packages/spec/src/api/batch.zod.ts (ADR-0119 D4)",
+        "packages/spec/src/api/error-code-ledger.zod.ts (BATCH_NOT_ATOMIC, BATCH_TOO_LARGE, NOT_ATTEMPTED, ROLLED_BACK — #4793)",
+        "packages/rest/src/rest-route-ledger.ts (batch family)",
+        "packages/spec/src/api/discovery.zod.ts (transactionalBatch)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-07",
+          "change": "initial import from #3358",
+          "ref": "#3358"
+        },
+        {
+          "revision": 2,
+          "date": "2026-08-07",
+          "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        }
+      ]
+    },
+    {
+      "id": "api-backend.formula-gates",
+      "title": "Formula runtime fixes hold and date-arithmetic fails at build time",
+      "since": "v16",
+      "status": "active",
+      "revision": 2,
+      "priority": "P1",
+      "surface": "build",
+      "steps": [
+        "build the workspace (or confirm dist freshness) so @objectstack/formula's BUILT output is what runs — the stale-dist trap is the known false-negative here",
+        "evaluate the fixed runtime shapes against the built package: due_date == today() (date equality against the macro), cond ? x : null (ternary with null arm), floor(x)/ceil(x)",
+        "author a scratch object config carrying a formula field with date arithmetic (end - start + 1) and run os build on it",
+        "run os build on the UNTOUCHED showcase app",
+        "capture the harness values, both build exit codes, and the located error text"
+      ],
+      "acceptance": [
+        {
+          "clause": "the runtime shapes evaluate correctly against the BUILT package (not src)",
+          "oracle": "test",
+          "verify": "harness run returns the expected values for the three shapes; the harness imports from dist/node_modules, never src",
+          "evidence": "harness output"
+        },
+        {
+          "clause": "date arithmetic is a build-time ERROR in os build — not a runtime surprise",
+          "oracle": "build",
+          "verify": "os build exits non-zero on the scratch config",
+          "evidence": "build output + exit code"
+        },
+        {
+          "clause": "the build error is LOCATED and actionable: it names the object/field (or file) carrying the offending formula, not just a generic failure",
+          "oracle": "build",
+          "verify": "error text contains the scratch field's name/path",
+          "evidence": "error text"
+        },
+        {
+          "clause": "the gate does not over-fire: os build on the stock showcase (which uses legitimate date comparisons like due_date == today()) exits 0",
+          "oracle": "build",
+          "verify": "untouched showcase os build exit code 0",
+          "evidence": "build output"
+        }
+      ],
+      "negative": [
+        "a green harness run that silently loaded src instead of dist is a false pass — capture the resolved module path as part of the evidence; if the path points into src/, the clause is not-run, not pass"
+      ],
+      "traps": [
+        "stale-dist"
+      ],
+      "source": [
+        "#3358 §9"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-07",
+          "change": "initial import from #3358",
+          "ref": "#3358"
+        },
+        {
+          "revision": 2,
+          "date": "2026-08-07",
+          "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        }
+      ]
+    },
+    {
+      "id": "api-backend.enforce-or-remove-authoring-gates",
+      "title": "Removed/retired authoring keys fail at parse/build with located guidance",
+      "since": "v16",
+      "status": "active",
+      "revision": 2,
+      "priority": "P1",
+      "surface": "build",
+      "steps": [
+        "sample retired keys across the ADR-0087 registries, at minimum: a query-surface tombstone (QueryAST cursor / joins / distinct / windowFunctions — retiredKey per #4286), the error-envelope tombstone (EnhancedApiError.fieldErrors, renamed to fields by ADR-0114 D4), and one entry from the retired-filter-operator registry in packages/spec/src/data/filter.zod.ts (RetiredFilterOperatorGuidance)",
+        "author a config/payload using each sampled key: parse the query via the spec schema (QuerySchema.safeParse with cursor: {...}), parse an error envelope carrying fieldErrors, author an object using the retired filter operator; run ObjectSchema.create / os build where the key is config-side",
+        "capture each rejection's full text",
+        "author one key documented as silently-stripped-by-design (a pure display annotation) and parse it — the strip must be deliberate, documented behavior, not an accident",
+        "record which registry each sampled key came from"
+      ],
+      "acceptance": [
+        {
+          "clause": "each tombstoned key is REJECTED at parse/build — never silently stripped (the retiredKey mechanism exists precisely because non-strict schemas would otherwise drop the key clean)",
+          "oracle": "build",
+          "verify": "safeParse fails / os build exits non-zero for every sampled tombstone",
+          "evidence": "the rejections"
+        },
+        {
+          "clause": "every rejection carries LOCATED guidance naming the replacement: cursor → keyset where-predicate on the sort key, joins → expand, fieldErrors → fields (ADR-0114 D4 #3977), retired filter operator → its registry-declared successor",
+          "oracle": "build",
+          "verify": "each error text names the replacement spelling; a bare 'unknown key' with no prescription is a FAIL of the guidance contract",
+          "evidence": "error texts"
+        },
+        {
+          "clause": "the sampled silently-stripped-by-design key still parses clean AND its documentation says so — the strip stays deliberate and documented, not accidental",
+          "oracle": "build",
+          "verify": "parse succeeds; cite the doc/schema comment declaring the strip",
+          "evidence": "parse result + doc cite"
+        },
+        {
+          "clause": "the sample covers at least three distinct registries/surfaces (query schema, error envelope, filter operators) — one surface proving the mechanism does not prove the others wired it",
+          "oracle": "build",
+          "verify": "run record lists the sampled keys and their registry of origin",
+          "evidence": "run record"
+        }
+      ],
+      "negative": [
+        "also sample one key documented as silently-stripped-by-design (e.g. pure display annotations) to confirm the strip stays deliberate and documented, not accidental — and a tombstoned key that parses CLEAN anywhere is a P1 FAIL (the silent fourth state ADR-0049/0078 forbids)"
+      ],
+      "source": [
+        "#3358 §9",
+        "ADR-0049",
+        "ADR-0087",
+        "#4286 (query tombstones)",
+        "ADR-0114 D4 / #3977 (fieldErrors)",
+        "packages/spec/src/shared/retired-key.ts",
+        "packages/spec/src/data/filter.zod.ts (RetiredFilterOperatorGuidance)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-07",
+          "change": "initial import from #3358",
+          "ref": "#3358"
+        },
+        {
+          "revision": 2,
+          "date": "2026-08-07",
+          "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        }
+      ]
+    },
+    {
+      "id": "api-backend.server-timing-admin-gated",
+      "title": "Server-Timing spans emit for admins only — on the server os dev actually runs",
+      "since": "v16",
+      "status": "active",
+      "revision": 2,
+      "priority": "P2",
+      "surface": "api",
+      "personas": [
+        "admin",
+        "non-admin member"
+      ],
+      "steps": [
+        "start the REAL dev server (os dev) with OS_SERVER_TIMING enabled — never a simulated dispatch; the #3361 regression lived exactly in the dispatcher-vs-hono seam while unit tests stayed green",
+        "as admin: GET /api/v1/data/showcase_task with the X-OS-Debug-Timing request header; dump all response headers",
+        "as the non-admin member: the identical request; dump headers",
+        "restart the server WITHOUT OS_SERVER_TIMING and repeat the admin request",
+        "capture the three header dumps"
+      ],
+      "acceptance": [
+        {
+          "clause": "admin responses carry the Server-Timing spans (auth/db/hooks/serialize) on the live hono server",
+          "oracle": "network",
+          "verify": "step-2 response has a Server-Timing header naming the span set",
+          "evidence": "header dump"
+        },
+        {
+          "clause": "non-admin responses carry NO spans — the gate keys on the caller's privilege, and the payload of the response is otherwise identical (timing must not leak through a side door)",
+          "oracle": "network",
+          "verify": "step-3 response lacks Server-Timing entirely",
+          "evidence": "header dump"
+        },
+        {
+          "clause": "with the env flag off, even the admin gets no spans — the opt-in is the second gate, both sides verified",
+          "oracle": "network",
+          "verify": "step-4 response lacks Server-Timing",
+          "evidence": "header dump"
+        },
+        {
+          "clause": "the oracle is the live server os dev runs (dispatcher-vs-hono seam), not a unit-level simulated dispatch",
+          "oracle": "network",
+          "verify": "evidence headers come from real HTTP responses against the running dev-server port recorded in the run env",
+          "evidence": "the raw traces incl. host:port"
+        }
+      ],
+      "negative": [
+        "a run that only checks the admin side is at best partial: the non-admin absence is the security half of the item, and it must be measured on the same live server in the same run"
+      ],
+      "traps": [
+        "dispatcher-vs-hono-route",
+        "wrong-persona"
+      ],
+      "source": [
+        "#3358 §9",
+        "#3361"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-07",
+          "change": "initial import from #3358; oracle pinned to the live server because of #3361",
+          "ref": "#3358"
+        },
+        {
+          "revision": 2,
+          "date": "2026-08-07",
+          "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        }
+      ]
+    },
+    {
+      "id": "api-backend.query-contract-matrix",
+      "title": "Data-API query contract: every filter operator gives known answers; $-params, select, sort, expand honored; malformed input 400s with the exact code",
+      "since": "v15",
+      "status": "active",
+      "revision": 1,
+      "priority": "P0",
+      "surface": "api",
+      "personas": [
+        "admin (baseline known-answer runs)",
+        "contributor (the RLS/FLS-restricted persona for the expand enforcement clause)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "seeded showcase_account rows (Northwind, Contoso, Fabrikam, Stark Industries, 华宁科技, … with status ∈ {active, prospect, churned}, sales_region ∈ {amer, emea, apac}, numeric annual_revenue, date signed_on, churn_reason null except churned rows) — the known-answer dataset",
+          "seeded showcase_task rows (status ∈ {backlog, todo, in_progress, in_review, done}, assignee emails, numeric progress/estimate_hours, project lookup)"
+        ]
+      },
+      "steps": [
+        "boot showcase isolated; as admin GET /api/v1/data/showcase_account with no filter and a generous $top — this unfiltered baseline is the local ground truth every operator answer is computed from (never hardcode counts; the seed can drift)",
+        "for each operator variant below, run BOTH spellings against showcase_account (or showcase_task where the type fits): the POST /api/v1/data/showcase_account/query body form (where: {field: {$op: value}}) and the AST array form ([field, op, value] — spellings per AST_OPERATOR_MAP); e.g. where {status: {$eq: 'active'}}, {annual_revenue: {$gt: 10000000}}, {status: {$in: ['active','prospect']}}, {annual_revenue: {$between: [5000000, 50000000]}}, {name: {$contains: 'orth'}}, {name: {$startsWith: 'Con'}}, {churn_reason: {$null: true}}",
+        "for each operator: compute the expected id set from the baseline locally and compare with the returned records — a known-answer check, not a smoke 200",
+        "pagination window: GET /api/v1/data/showcase_account?$orderby=name&$top=3&$skip=2 and verify it equals rows 3–5 of the locally sorted baseline; also POST body limit/offset/top equivalents",
+        "selection: ?$select=name,status (and body fields: ['name','status']) — response objects carry exactly the requested keys (plus system identity keys); dotted related column fields: ['account.name'] on showcase_invoice",
+        "sort: $orderby / orderBy asc and desc on annual_revenue — full ordering compared to the locally sorted baseline, not just first row",
+        "expand: as the CONTRIBUTOR (restricted persona), POST /api/v1/data/showcase_invoice/query with expand: {contact: {object: 'showcase_contact', fields: ['name']}} on an invoice they own — contributor holds NO showcase_contact grant, so the expanded row must be withheld/masked while their own invoice row returns (15.1 §A6: expand routes through the secured find path, #2850)",
+        "negative shapes: POST query where {status: {$nin: 'done'}} on showcase_task (scalar comparand for a collection operator — #5869) and the AST twin ['status','not_in','done']; GET with an unknown $-param (?$pageSize=5); GET with a bare unknown key (?not_a_field=x); sort on a nonexistent field; a where clause naming a nonexistent field",
+        "boundary: where {status: {$in: []}} (must match NOTHING) and {status: {$nin: []}} (must match EVERYTHING) — both documented-legitimate, never 400 (filter-comparand-shape.ts)"
+      ],
+      "acceptance": [
+        {
+          "clause": "every operator variant returns exactly the locally-computed answer set from the seeded data, in both the $-object and AST spellings — set equality on ids, not count equality",
+          "oracle": "api",
+          "verify": "per-variant diff of returned ids vs the baseline-computed expectation; any extra OR missing row fails that variant",
+          "evidence": "per-variant diff table"
+        },
+        {
+          "clause": "pagination is stable and windowed: $top/$skip (and limit/offset/top body keys) return the exact ordered slice of the baseline",
+          "oracle": "api",
+          "verify": "slice comparison against the locally sorted baseline for at least two windows",
+          "evidence": "the two window responses"
+        },
+        {
+          "clause": "$select/fields narrows the payload to the requested columns (dotted related columns included) — no unrequested business fields leak",
+          "oracle": "api",
+          "verify": "key-set assertion on every returned record",
+          "evidence": "response bodies"
+        },
+        {
+          "clause": "sort orders the FULL result both directions; INVALID_SORT (400) answers a sort on a nonexistent field",
+          "oracle": "api",
+          "verify": "full-sequence comparison asc+desc; then the bad-sort trace shows 400 + code INVALID_SORT",
+          "evidence": "ordered responses + rejection"
+        },
+        {
+          "clause": "expand enforces the TARGET object's RLS/FLS on expanded rows (15.1 §A6): the restricted contributor's expand of showcase_contact returns their invoice row with the contact withheld/masked, never the foreign contact's fields",
+          "oracle": "api",
+          "verify": "contributor expand response: invoice present, contact expansion absent/null/masked; the SAME query as admin returns the contact (both sides)",
+          "evidence": "both personas' responses"
+        },
+        {
+          "clause": "a scalar comparand on a collection operator answers 400 INVALID_FILTER naming the operator, the field, and the expected shape — never 500 DATABASE_ERROR (#5869, both doors: the $-object body AND the AST array spelling)",
+          "oracle": "api",
+          "verify": "both step-8 $nin probes: status 400, code INVALID_FILTER, message names the operator and field",
+          "evidence": "both rejections"
+        },
+        {
+          "clause": "unknown inputs get their exact ledgered code: unknown $-param → 400 UNSUPPORTED_QUERY_PARAM (listing the supported $-params), unknown bare key or unknown where-field → 400 INVALID_FIELD (#4134 — a filter on a nonexistent field must NEVER answer 200 with rows, in either direction)",
+          "oracle": "api",
+          "verify": "the three traces show 400 + the named codes",
+          "evidence": "rejections"
+        },
+        {
+          "clause": "empty-list boundary: $in: [] returns zero rows, $nin: [] returns the full visible set, both 200 — arity is not the gate's business, only list-ness",
+          "oracle": "api",
+          "verify": "the two responses vs the baseline",
+          "evidence": "responses"
+        },
+        {
+          "clause": "every variant below carries a recorded verdict; operators not runnable against seeded types (none expected — the account/task fields cover text/number/date/select/null) are recorded skipped-with-reason, never silently omitted",
+          "oracle": "api",
+          "verify": "run record has one row per variant",
+          "evidence": "run record"
+        }
+      ],
+      "negative": [
+        "silent WIDENING is the catastrophic failure mode (#3899): a malformed query body (e.g. {\"filter\": {…}} — not a QueryAST key) must answer 400 VALIDATION_FAILED, never degrade into an unfiltered 200 full read; verify by asserting the malformed-body probe's status AND that its response row count is not the full table"
+      ],
+      "variants": [
+        "op:eq",
+        "op:ne",
+        "op:gt",
+        "op:gte",
+        "op:lt",
+        "op:lte",
+        "op:in",
+        "op:not_in",
+        "op:between",
+        "op:contains",
+        "op:not_contains",
+        "op:starts_with",
+        "op:ends_with",
+        "op:like (driver-verbatim pattern, NOT auto-%-wrapped — canonicalAstOperator keeps it distinct)",
+        "op:is_null",
+        "op:is_not_null",
+        "param:$top",
+        "param:$skip",
+        "param:$select",
+        "param:$orderby",
+        "param:$count",
+        "param:$search",
+        "param:$filter",
+        "param:$expand"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/objectql/src/engine.test.ts ([#2850] expand sub-read through the secured find path) + packages/objectql/src/filter-comparand-shape.ts (#5869 gate)"
+      },
+      "traps": [
+        "seed-data-thin",
+        "single-datapoint",
+        "dispatcher-vs-hono-route"
+      ],
+      "source": [
+        "packages/spec/src/data/filter.zod.ts (AST_OPERATOR_MAP / FieldOperatorsSchema — the operator variant source)",
+        "packages/spec/src/data/query.zod.ts (QueryAST keys)",
+        "packages/metadata-protocol/src/protocol.ts (supported $-params + UNSUPPORTED_QUERY_PARAM #2926 ⑩, INVALID_FIELD #4134)",
+        "#5869 (commit 10c4ea9)",
+        "release-15.1 plan §A6",
+        "examples/app-showcase/src/data/seed/index.ts"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-07",
+          "change": "new — query-contract matrix over the spec operator vocabulary with known-answer checks, per the deep-test contract",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        }
+      ]
+    },
+    {
+      "id": "api-backend.error-envelope-ledger",
+      "title": "Sampled endpoints return the standard error envelope with ledgered codes — no invented codes, no retired keys, statuses match the map",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": [
+        "admin",
+        "a baseline member (for the 403 sample)",
+        "anonymous (for the 401 sample)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "showcase_invoice.name is required:true — the cheapest deterministic VALIDATION_FAILED",
+          "a member persona lacking showcase_announcement create (member_default: create false) — the deterministic 403"
+        ]
+      },
+      "steps": [
+        "boot showcase isolated; induce one error per family and capture the FULL body + status each time:",
+        "validation: as admin POST /api/v1/data/showcase_invoice {} (missing required name) — expect the field-level envelope",
+        "auth: anonymous GET /api/v1/data/showcase_private_note — the 401 sample",
+        "authorization: as the baseline member POST /api/v1/data/showcase_announcement {\"title\": \"probe\"} — the 403 sample",
+        "not-found: GET /api/v1/data/not_a_real_object and GET /api/v1/data/showcase_task/nonexistent-id-0000 — the two 404 flavors",
+        "batch: POST /api/v1/batch with options {\"atomic\": false} — the registered-extension-code sample (BATCH_NOT_ATOMIC)",
+        "query-rejection: GET /api/v1/data/showcase_account?$pageSize=5 — the UNSUPPORTED_QUERY_PARAM sample",
+        "validate every captured body against the spec: code membership in StandardErrorCode ∪ ERROR_CODE_LEDGER, envelope shape per ErrorResponseSchema/EnhancedApiErrorSchema (noting the REST flat dialect where it is the declared shape), fields[] entries against FieldErrorCode"
+      ],
+      "acceptance": [
+        {
+          "clause": "every sampled error code is LEDGERED: code ∈ StandardErrorCode (errors.zod.ts) ∪ ERROR_CODE_LEDGER (error-code-ledger.zod.ts) — an unregistered code is a FAIL per ADR-0112 D3/D4 (no silent fourth state)",
+          "oracle": "api",
+          "verify": "for each captured body, membership check of error code against the two spec files",
+          "evidence": "the captured bodies + the membership table"
+        },
+        {
+          "clause": "the validation sample carries the field-level array under `fields` with codes from the FIELD-level catalog (lowercase snake, ADR-0114 D2): missing name → fields[] entry {field: 'name', code: 'required'} with a localized message and label",
+          "oracle": "api",
+          "verify": "step-2 body: top-level code VALIDATION_FAILED, fields[0].field == 'name', fields[0].code == 'required'",
+          "evidence": "the body"
+        },
+        {
+          "clause": "the retired `fieldErrors` key NEVER appears in any sampled body (ADR-0114 D4 tombstone — producers emit `fields`)",
+          "oracle": "api",
+          "verify": "key-absence assertion across all captured bodies",
+          "evidence": "the bodies"
+        },
+        {
+          "clause": "HTTP status matches the code's declared mapping (HttpStatusErrorCodeMap): 400 validation/filter/param codes, 401 UNAUTHENTICATED, 403 PERMISSION_DENIED, 404 not-found flavors",
+          "oracle": "api",
+          "verify": "status-vs-code table across the samples; any mismatch (e.g. a 500 carrying a caller-fixable code) fails",
+          "evidence": "the table"
+        },
+        {
+          "clause": "the two 404 flavors are distinguishable in the body (unknown OBJECT vs unknown RECORD) so a client can tell schema drift from data absence",
+          "oracle": "api",
+          "verify": "compare the two step-5 bodies: different messages/codes identifying object-level vs record-level not-found",
+          "evidence": "both bodies"
+        },
+        {
+          "clause": "one sample per family variant below is captured — a family not sampled leaves the item partial",
+          "oracle": "api",
+          "verify": "run record carries one verdict per family",
+          "evidence": "run record"
+        }
+      ],
+      "negative": [
+        "any sampled failure answering 500 INTERNAL/UNCLASSIFIED for input the CALLER can fix is a FAIL of this item (the #5869 class — a server-fault code for a client mistake); likewise a 2xx on any of the induced-error probes is a FAIL (silent success)"
+      ],
+      "variants": [
+        "family:validation",
+        "family:auth-401",
+        "family:authz-403",
+        "family:not-found-object",
+        "family:not-found-record",
+        "family:batch-extension-code",
+        "family:query-rejection"
+      ],
+      "traps": [
+        "dispatcher-vs-hono-route"
+      ],
+      "source": [
+        "packages/spec/src/api/error-code-ledger.zod.ts (ADR-0112 D3)",
+        "packages/spec/src/api/errors.zod.ts (StandardErrorCode, FieldErrorCode, HttpStatusErrorCodeMap)",
+        "packages/spec/src/shared/error-map.zod.ts",
+        "packages/rest/src/rest-route-ledger.ts (sampled families)",
+        "ADR-0114 D2/D4"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-07",
+          "change": "new — error-envelope conformance sampling grounded in the two-tier code ledger, per the deep-test contract",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        }
+      ]
+    },
+    {
+      "id": "api-backend.bulk-write-contract",
+      "title": "Bulk write doors (createMany/updateMany/deleteMany, per-object batch): per-row outcomes, size cap, single/bulk parity, no silent full-table writes",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": [
+        "a baseline member (bulk writes on showcase_private_note — also exercises the owner-scoping of #2982)",
+        "admin (cap and parity runs)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "showcase_private_note (baseline create/edit — the bulk probe object)",
+          "default maxBatchSize 200 unless overridden"
+        ]
+      },
+      "steps": [
+        "boot showcase isolated; as the member POST /api/v1/data/showcase_private_note/createMany with records: [3 notes with unique-marker titles]; GET them back",
+        "single/bulk parity: POST a 4th note via the single door (POST /api/v1/data/showcase_private_note) and diff its response/stored shape against one createMany row (same fields stamped: owner_id, timestamps, defaults)",
+        "as the member POST /api/v1/data/showcase_private_note/updateMany with a where clause matching ONLY the marker titles and a body change; re-read",
+        "as the member POST updateMany with a where clause matching NOTHING (an impossible marker); capture the response",
+        "as admin POST createMany with records.length == maxBatchSize+1 (201 on default config); capture",
+        "as the member POST deleteMany scoped to the marker titles; re-read; then re-issue the same deleteMany (now matching nothing)",
+        "throughout: capture per-row result arrays and any ERR_BULK_RESULT_MISMATCH appearance"
+      ],
+      "acceptance": [
+        {
+          "clause": "createMany lands every row with the same server-side stamping as the single door: owner_id auto-stamped to the caller, defaults applied — single/bulk parity on the stored shape",
+          "oracle": "api",
+          "verify": "field-by-field diff of a createMany row vs the single-door row (ignoring ids/timestamps values, comparing key sets and stamped semantics)",
+          "evidence": "the reads + diff"
+        },
+        {
+          "clause": "updateMany applies exactly to the where-matched set: marker rows changed, every other row untouched (spot-check via a system-context read of a non-marker note)",
+          "oracle": "api",
+          "verify": "re-reads: all marker rows carry the change; the control row does not",
+          "evidence": "re-reads"
+        },
+        {
+          "clause": "an empty match is a calm no-op: updateMany/deleteMany matching nothing answer 2xx reporting 0 affected — NOT an error, and NEVER a full-table write (the #2982 failure shape was bulk writes escaping their scope)",
+          "oracle": "api",
+          "verify": "step-4/6 responses report zero affected; a follow-up unfiltered system read shows no unexpected mutations/deletions",
+          "evidence": "responses + control read"
+        },
+        {
+          "clause": "the size cap holds on the bulk doors: maxBatchSize+1 records answer 400 BATCH_TOO_LARGE and create nothing",
+          "oracle": "api",
+          "verify": "step-5 response 400 + BATCH_TOO_LARGE; count of that batch's marker rows is 0",
+          "evidence": "response + count"
+        },
+        {
+          "clause": "deleteMany removes exactly the scoped set and the deletion persists",
+          "oracle": "api",
+          "verify": "post-delete GET finds zero marker rows; the member's other notes remain",
+          "evidence": "re-reads"
+        },
+        {
+          "clause": "ERR_BULK_RESULT_MISMATCH never surfaces on these healthy paths — its appearance means the engine's reported outcome diverged from the driver's actual writes and is an immediate FAIL with the trace attached",
+          "oracle": "api",
+          "verify": "grep the captured responses (and server log) for ERR_BULK_RESULT_MISMATCH",
+          "evidence": "responses + log excerpt"
+        }
+      ],
+      "negative": [
+        "run the updateMany-matching-nothing probe as a persona with rows it CANNOT see and confirm the invisible rows are not counted or mutated (bulk writes are RLS-scoped, #2982) — a nonzero affected-count there is a security FAIL, not a bookkeeping quirk"
+      ],
+      "variants": [
+        "door:createMany",
+        "door:updateMany",
+        "door:deleteMany",
+        "door:per-object-batch (POST /data/:object/batch)"
+      ],
+      "automated": {
+        "kind": "dogfood",
+        "ref": "packages/qa/dogfood/test/owner-anchor-and-bulk-writes.dogfood.test.ts (bulk halves)"
+      },
+      "traps": [
+        "wrong-persona"
+      ],
+      "source": [
+        "packages/rest/src/rest-route-ledger.ts (batch family — the four doors)",
+        "packages/spec/src/api/batch.zod.ts",
+        "packages/spec/src/api/error-code-ledger.zod.ts (BATCH_TOO_LARGE, ERR_BULK_RESULT_MISMATCH)",
+        "#2982",
+        "release-15.1 plan §A3/A4"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-07",
+          "change": "new — bulk-write contract item (boundaries, parity, per-row outcomes), per the deep-test contract",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        }
+      ]
+    },
+    {
+      "id": "api-backend.route-ledger-live-parity",
+      "title": "Every ledgered route family — REST, dispatcher, auth, storage/i18n services — and the non-ledgered mounts (/api/settings, /api/v1/datasources) are actually mounted on the live server — no route that exists only in unit tests",
+      "since": "v16",
+      "status": "active",
+      "revision": 2,
+      "priority": "P2",
+      "surface": "api",
+      "personas": [
+        "admin (authenticated, so a 401 cannot mask a 404)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "packages/rest/src/rest-route-ledger.ts — the audited route inventory (route-manager + direct-mount rows, full wire paths at /api/v1)"
+        ]
+      },
+      "steps": [
+        "boot the real HTTP stack (os dev); read REST_ROUTE_LEDGER and pick at least one representative route per family (discovery, openapi, metadata, ui, crud, batch, data-actions, forms, search, security, security-explain, record-shares, sharing-rules, reports, approvals, email, analytics, packages, external-datasource)",
+        "fire each sampled route as admin with a minimal-valid shape (GETs verbatim; parameterized routes filled with real seeded names, e.g. GET /api/v1/data/showcase_task, GET /api/v1/meta/object/showcase_task, GET /api/v1/security/explain)",
+        "capture status + code per route",
+        "read the OTHER ledgers and fire one representative route each: the dispatcher ledger (packages/runtime/src/route-ledger.ts) families share-links/keys/notifications/suggested-bindings/i18n/analytics (e.g. GET /api/v1/share-links, POST /api/v1/keys, GET /api/v1/notifications, GET /api/v1/security/suggested-bindings, GET /api/v1/i18n/locales, POST /api/v1/analytics/query), AUTH_ROUTE_LEDGER (GET /api/v1/auth/get-session), the storage + i18n service ledgers",
+        "fire the NON-LEDGERED mounts: GET /api/settings (note the /api/settings base — NOT /api/v1), GET /api/v1/datasources/drivers, GET /api/v1/datasources",
+        "fire the dispatcher meta state route: GET /api/v1/meta/objects/showcase_task/state/status?from=in_review, the same with ?from omitted, and GET /api/v1/meta/objects/not_a_real_object/state/status as the 404 control",
+        "fire one deliberately-unmounted path (GET /api/v1/definitely-not-a-route) as the 404 control",
+        "compare GET /api/v1/discovery capability bits against the families that answered (search/export/transactionalBatch at minimum)"
+      ],
+      "acceptance": [
+        {
+          "clause": "every sampled ledger route answers something OTHER than a routing 404 on the live server — 2xx, or a structured 4xx/5xx from the handler (401/403/400/503 all prove the route is mounted); the #3361 lesson: unit-level dispatch proves nothing about the hono server",
+          "oracle": "api",
+          "verify": "per-route status table; any ledgered route answering the same not-found shape as the 404 control is a FAIL (mounted-in-tests-only)",
+          "evidence": "the status table + control trace"
+        },
+        {
+          "clause": "the 404 control behaves as a control: the unmounted path answers the routing not-found shape, so the per-route comparison is meaningful",
+          "oracle": "api",
+          "verify": "control trace shows the distinct routing-404 body",
+          "evidence": "control trace"
+        },
+        {
+          "clause": "openapi.json answers its DECLARED envelope either way: 200 with an OpenAPI 3.1 document, or 503 OPENAPI_UNAVAILABLE when no spec is bundled — never a raw 404",
+          "oracle": "api",
+          "verify": "GET /api/v1/openapi.json status ∈ {200, 503} with the ledgered code on 503",
+          "evidence": "trace"
+        },
+        {
+          "clause": "discovery capability bits agree with live behavior for the sampled capabilities (a bit true ⇒ the family answers; a bit false ⇒ the family refuses coherently)",
+          "oracle": "api",
+          "verify": "cross-check the discovery body against the sampled families' answers",
+          "evidence": "discovery body + table"
+        },
+        {
+          "clause": "direct-mount rows (package-routes, external-datasource-routes — the registrars that bypass RouteManager) are sampled too, since their registration path is exactly the one route-manager enumeration misses",
+          "oracle": "api",
+          "verify": "at least one direct-mount route in the sample set answers non-routing-404",
+          "evidence": "trace"
+        },
+        {
+          "clause": "the sweep reaches the OTHER ledgers, not just the 19 REST families: the DISPATCHER ledger's representative routes each answer non-routing-404 on the live hono server — share-links (GET /api/v1/share-links), keys (POST /api/v1/keys), notifications (GET /api/v1/notifications), suggested-bindings (GET /api/v1/security/suggested-bindings), i18n (GET /api/v1/i18n/locales), analytics (POST /api/v1/analytics/query, capability-conditional) — the #3361 dispatcher-vs-hono class this item exists for, now covered on the dispatcher's OWN table (packages/runtime/src/route-ledger.ts), not just the REST one",
+          "oracle": "api",
+          "verify": "per-route status table for the six dispatcher families vs the 404 control; a dispatcher route answering the routing-404 shape is a FAIL (dispatcher-mounted-in-tests-only)",
+          "evidence": "the dispatcher status table + control trace"
+        },
+        {
+          "clause": "the auth and service ledgers are swept too: a representative route from AUTH_ROUTE_LEDGER (packages/plugins/plugin-auth/src/auth-route-ledger.ts — e.g. GET /api/v1/auth/get-session), the storage service ledger (packages/services/service-storage/src/storage-route-ledger.ts) and the i18n service ledger (packages/services/service-i18n/src/i18n-route-ledger.ts) each answer non-routing-404 — the three surfaces #3636 ledgered OUTSIDE @objectstack/rest",
+          "oracle": "api",
+          "verify": "one representative route per ledger answers non-404; read each ledger for its own representative route rather than guessing paths",
+          "evidence": "the per-ledger traces"
+        },
+        {
+          "clause": "the NON-LEDGERED mounts answer too, and their absence from any route ledger is recorded as the finding: GET /api/settings (service-settings, mounted at /api/settings — NOT under /api/v1) answers non-404, and GET /api/v1/datasources/drivers (always-available static catalog) plus GET /api/v1/datasources (200, or 503 SERVICE_UNAVAILABLE when the admin service is unwired) answer non-404 — yet neither /api/settings nor the /api/v1/datasources admin CRUD appears in packages/rest/src/rest-route-ledger.ts (the tranche-3 route-ledger discipline gap, PENDING-GAPS §E)",
+          "oracle": "api",
+          "verify": "the /api/settings and /api/v1/datasources traces are non-routing-404; the run record notes both mounts are unledgered",
+          "evidence": "the two traces + the unledgered-mount finding"
+        },
+        {
+          "clause": "the dispatcher meta state route is live AND correct: GET /api/v1/meta/objects/showcase_task/state/status?from=in_review (dispatcher ledger meta.getLegalNextStates, ADR-0020 D3.3) answers non-404 and returns next == ['done','in_progress'] — exactly the declared task_status_flow transition set for that state; ?from omitted returns next:null (no from ⇒ no transition table), a field with no FSM returns next:null, and an unknown object → 404",
+          "oracle": "api",
+          "verify": "the state-route response's next[] equals the object's state_machine transitions for the from-state (examples/app-showcase/src/data/objects/task.object.ts task_status_flow: in_review → [done, in_progress]); the null/404 controls hold",
+          "evidence": "the state-route responses (from=in_review, from-omitted, unknown-object) vs the declared transitions"
+        }
+      ],
+      "negative": [
+        "do not tick this from RestServer.getRoutes() output or unit tests — the item exists because that oracle lied (#3361, dispatcher-vs-hono-route); the only admissible evidence is live HTTP traces from the running server"
+      ],
+      "variants": [
+        "discovery",
+        "openapi",
+        "metadata",
+        "ui",
+        "crud",
+        "batch",
+        "data-actions",
+        "forms",
+        "search",
+        "security",
+        "security-explain",
+        "record-shares",
+        "sharing-rules",
+        "reports",
+        "approvals",
+        "email",
+        "analytics",
+        "packages (direct-mount)",
+        "external-datasource (direct-mount)",
+        "dispatcher:share-links",
+        "dispatcher:keys",
+        "dispatcher:notifications",
+        "dispatcher:suggested-bindings",
+        "dispatcher:i18n",
+        "dispatcher:analytics (capability-conditional)",
+        "dispatcher:meta-state-route (meta.getLegalNextStates)",
+        "ledger:auth (AUTH_ROUTE_LEDGER)",
+        "ledger:storage-service",
+        "ledger:i18n-service",
+        "unledgered:/api/settings",
+        "unledgered:/api/v1/datasources"
+      ],
+      "traps": [
+        "dispatcher-vs-hono-route"
+      ],
+      "source": [
+        "packages/rest/src/rest-route-ledger.ts (variant source — the 19 REST families)",
+        "packages/rest/src/rest-route-ledger.conformance.test.ts",
+        "packages/runtime/src/route-ledger.ts (dispatcher ledger — share-links/keys/notifications/suggested-bindings/i18n/analytics families + the meta.getLegalNextStates state route)",
+        "packages/plugins/plugin-auth/src/auth-route-ledger.ts (AUTH_ROUTE_LEDGER — the enumerated better-auth table, #3656)",
+        "packages/services/service-storage/src/storage-route-ledger.ts + packages/services/service-i18n/src/i18n-route-ledger.ts (tranche-3 per-service ledgers, #3636)",
+        "packages/services/service-settings/src/settings-routes.ts (/api/settings — non-/api/v1 mount, UNLEDGERED)",
+        "packages/services/service-datasource/src/admin-routes.ts (/api/v1/datasources admin CRUD — UNLEDGERED, tranche-3 gap)",
+        "examples/app-showcase/src/data/objects/task.object.ts (task_status_flow transitions for the meta state-route clause)",
+        "docs/qa/platform-checklist/PENDING-GAPS.md §D/§E",
+        "#3587",
+        "#3361"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-07",
+          "change": "new — live-mount parity sweep over the audited route ledger, per the deep-test contract",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        },
+        {
+          "revision": 2,
+          "date": "2026-08-08",
+          "change": "extended the sweep beyond the 19 REST families to the OTHER ledgers + non-ledgered mounts: dispatcher ledger (share-links/keys/notifications/suggested-bindings/i18n/analytics), AUTH_ROUTE_LEDGER, storage/i18n service ledgers, /api/settings, /api/v1/datasources; added a live-mount clause per ledger with a 404 control (the #3361 dispatcher-vs-hono class), and folded in the meta.getLegalNextStates state route (legal next states == declared task_status_flow set) since api-backend is its natural home",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        }
+      ]
+    },
+    {
+      "id": "api-backend.declarative-endpoint-execution",
+      "title": "Metadata-authored `api` endpoints mount as real URLs with their declared auth/cache policy",
+      "since": "v17",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": [
+        "admin",
+        "anonymous"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "the two live declarative endpoints in examples/app-showcase/src/system/apis/index.ts (a GET task feed at /api/v1/apps/showcase/tasks and a flow-delegating endpoint) — ADR-0121 / #5040"
+        ]
+      },
+      "variants": [
+        "object_operation target — the task feed (authed read)",
+        "flow target — delegates to a flow",
+        "policy: authRequired (default true)",
+        "policy: cacheTtl → Cache-Control",
+        "script/proxy target — answer 501 in the open framework"
+      ],
+      "steps": [
+        "boot showcase isolated; sign in as admin",
+        "GET /api/v1/apps/showcase/tasks authed; capture status, body, and response headers",
+        "GET the same endpoint unauthenticated; capture status",
+        "author a script-target endpoint shape in a scratch package and hit it; capture the 501",
+        "GET /apps/showcase/nope (no matching declaration); capture the transport 404"
+      ],
+      "acceptance": [
+        {
+          "clause": "the object_operation endpoint answers 200 authed with the delegated data, and carries the declared cache policy (Cache-Control: private, max-age=30 when cacheTtl is set)",
+          "oracle": "api",
+          "verify": "authed GET status 200 + body + Cache-Control header vs the declared policy",
+          "evidence": "response + headers"
+        },
+        {
+          "clause": "authRequired defaults true — the anonymous call is refused 401 UNAUTHENTICATED, not served",
+          "oracle": "api",
+          "verify": "unauth GET status 401 + code",
+          "evidence": "the response"
+        },
+        {
+          "clause": "a script/proxy target answers 501 in the open framework (declared ≠ delivered surfaces honestly, not a fake 200)",
+          "oracle": "api",
+          "verify": "the 501 envelope",
+          "evidence": "the response"
+        },
+        {
+          "clause": "an unmatched path under /apps/** falls through to the transport 404 — the notFound seam does not swallow it",
+          "oracle": "api",
+          "verify": "GET a nonexistent app path → 404",
+          "evidence": "the response"
+        }
+      ],
+      "negative": [
+        "a declarative endpoint serving anonymously when authRequired is true (or unset) is a FAIL — the default is closed"
+      ],
+      "automated": {
+        "kind": "dogfood",
+        "ref": "packages/qa/dogfood/test/showcase-declarative-endpoints.dogfood.test.ts + declarative-endpoint-policy.dogfood.test.ts"
+      },
+      "traps": [
+        "dispatcher-vs-hono-route"
+      ],
+      "source": [
+        "examples/app-showcase/src/system/apis/index.ts (the two live endpoints)",
+        "ADR-0121 / #5040 (declarative endpoint E-series)",
+        "packages/runtime notFound-fallback mount seam"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-08",
+          "change": "initial — the coverage.json `api` waiver was STALE (showcase authors two live endpoints with dogfood pins); un-waived",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        }
+      ]
+    },
+    {
+      "id": "api-backend.package-rest-lifecycle",
+      "title": "Package REST lifecycle: POST /packages creates (201), a duplicate name is refused 409 (no silent manifest clobber), PATCH partial-patches the manifest, and an explicit overwrite re-install replaces in place without duplicating",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "api",
+      "personas": [
+        "admin (manage_metadata / package authoring)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a runtime that accepts package install/patch over HTTP (os dev's dispatcher install route, packages.install → POST /api/v1/packages); a scratch package id (e.g. qa_pkg_lifecycle_probe) so no shipped package is mutated"
+        ],
+        "knownGaps": [
+          "if the deployment blocks runtime package install (read-only metadata), record it as a fixture requirement and treat the item blocked(environment) rather than failing the install probes"
+        ]
+      },
+      "steps": [
+        "boot showcase isolated; sign in as admin; choose a scratch id qa_pkg_lifecycle_probe",
+        "POST /api/v1/packages with { manifest: { id: 'qa_pkg_lifecycle_probe', name: 'QA Probe', version: '1.0.0', scope: 'custom', type: 'app' } }; capture status + body; then GET /api/v1/packages/qa_pkg_lifecycle_probe to confirm it persisted (the dispatcher install lands in BOTH the in-memory registry and durable sys_packages)",
+        "POST the SAME manifest again with NO overwrite flag; capture status + body",
+        "PATCH /api/v1/packages/qa_pkg_lifecycle_probe with { name: 'QA Probe Renamed', description: 'edited', version: '1.1.0' }; GET the package back and confirm the patch persisted and that id/scope/type and the lifecycle fields (enabled/status/installedAt) are untouched",
+        "PATCH three malformed bodies: { name: '' }, { version: 'not-semver' }, and {} (nothing to update); capture each rejection",
+        "re-install with the explicit opt-in: POST /api/v1/packages?overwrite=true (or body { overwrite: true }) carrying the same id and a changed manifest (version 2.0.0); capture status",
+        "GET /api/v1/packages and count rows whose id == qa_pkg_lifecycle_probe — must be exactly one",
+        "confirm the LIVE routing seam: POST /api/v1/packages resolves to the dispatcher install route (REST moved marketplace publish OFF the bare path to POST /api/v1/packages/publish in #3610), and PATCH /api/v1/packages/:id answers non-404 though it is absent from packages/rest/src/rest-route-ledger.ts (dispatcher-only)"
+      ],
+      "acceptance": [
+        {
+          "clause": "a scratch package installs → 201: POST /api/v1/packages returns 201 with the created package, and a follow-up GET reads it back (the install lands in the in-memory registry AND durable sys_packages, per packages.ts routing through protocol.installPackage)",
+          "oracle": "api",
+          "verify": "POST status 201; GET /api/v1/packages/qa_pkg_lifecycle_probe returns the package",
+          "evidence": "the POST + GET responses"
+        },
+        {
+          "clause": "a duplicate name is refused 409, NEVER silently overwritten: the second POST (no overwrite) answers 409 with message \"Package 'qa_pkg_lifecycle_probe' already exists\" and the bare-409 derived code RESOURCE_CONFLICT (HttpStatusErrorCodeMap 409) — the #2995 data-loss footgun (a silent re-install destroying the existing manifest) is closed",
+          "oracle": "api",
+          "verify": "step-3 response: status 409, code RESOURCE_CONFLICT, message names the existing id; the stored manifest is unchanged from step 2",
+          "evidence": "the 409 response + a re-read proving the manifest survived"
+        },
+        {
+          "clause": "PATCH is a real partial patch: only name/description/version present are changed and read back; identity (id/scope/type) and lifecycle (enabled/status/installedAt) are preserved — a PATCH is not a full replace",
+          "oracle": "api",
+          "verify": "step-4 GET: the three patched fields updated, the identity+lifecycle fields byte-identical to before the PATCH",
+          "evidence": "before/after package reads"
+        },
+        {
+          "clause": "PATCH validates its inputs: an empty name → 400 ('name must not be empty'), a non-semver version → 400 ('version must be semantic (e.g. 1.0.0)'), and a nothing-to-update body → 400 — each a caller-fixable 400, never a 500",
+          "oracle": "api",
+          "verify": "the three step-5 responses are 400 with the located messages",
+          "evidence": "the three rejections"
+        },
+        {
+          "clause": "the explicit overwrite re-install replaces in place WITHOUT duplicating: POST with overwrite=true (body or query) succeeds and the subsequent GET /api/v1/packages lists exactly ONE row for the id — the overwrite is the deliberate opt-out of the 409 guard, and it never leaves two package rows behind",
+          "oracle": "api",
+          "verify": "step-6 status is a success (201/200); step-7 count of qa_pkg_lifecycle_probe rows == 1; the manifest reflects the overwrite (version 2.0.0)",
+          "evidence": "the overwrite response + the deduped list"
+        },
+        {
+          "clause": "the sweep is against the LIVE server, not one ledger: POST /api/v1/packages is served by the dispatcher install route (not the REST marketplace publish moved to /packages/publish in #3610), and PATCH /api/v1/packages/:id answers non-404 despite being absent from the REST route ledger",
+          "oracle": "api",
+          "verify": "POST /api/v1/packages installs (not a 400 publish-shape rejection); PATCH /api/v1/packages/:id answers non-routing-404",
+          "evidence": "the two traces"
+        }
+      ],
+      "negative": [
+        "a second POST of the same id answering 2xx and silently replacing the manifest is the #2995 data-loss FAIL (the whole reason the 409 guard exists)",
+        "a PATCH that resets enabled/status/installedAt (a full replace masquerading as a partial patch) is a FAIL",
+        "an overwrite re-install that leaves two rows for one id in GET /api/v1/packages is a FAIL (duplication, not replacement)"
+      ],
+      "traps": [
+        "dispatcher-vs-hono-route"
+      ],
+      "source": [
+        "packages/runtime/src/domains/packages.ts (POST install: pkgId-required 400, 409-duplicate guard + overwrite opt-in #2995; PATCH partial-patch validators; routes through protocol.installPackage / protocol.updatePackage)",
+        "packages/runtime/src/route-ledger.ts (POST /packages → packages.install, PATCH /packages/:id → packages.update, GET /packages → packages.list)",
+        "packages/rest/src/rest-route-ledger.ts (POST /api/v1/packages/publish moved off the bare POST /packages in #3610; GET/DELETE /packages/:id direct-mount shadows)",
+        "packages/spec/src/api/errors.zod.ts (HttpStatusErrorCodeMap 409 → RESOURCE_CONFLICT)",
+        "PENDING-GAPS §G3 (#2995 dup-clobber, #2971, #3007)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-08",
+          "change": "new — package REST lifecycle (create/409-dup/patch/overwrite-reinstall), grounded in the dispatcher packages domain and the 409 data-loss guard; per PENDING-GAPS §G3",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        }
+      ]
+    },
+    {
+      "id": "api-backend.api-console-discovery-execute",
+      "title": "Studio Developer API Console: the endpoint tree mirrors /discovery, a seeded-object GET executes with live JSON + status + timing, and a malformed body surfaces the server error envelope verbatim",
+      "since": "v17",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "browser",
+      "personas": [
+        "admin"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "the console Developer hub reachable (objectui apps/console/src/pages/developer/ApiConsolePage.tsx, developer:api-console route)",
+          "stock showcase seed with showcase_task rows (the seeded object the GET executes against)"
+        ]
+      },
+      "steps": [
+        "boot showcase isolated; sign in as admin; open Studio → Developer → API Console",
+        "GET /api/v1/discovery out of band and record its services + routes maps — the ground truth the tree is gated on (useApiDiscovery gates each service group on isServiceUsable(discovery.services[name]), ADR-0076 D12)",
+        "screenshot the endpoint tree AFTER the 'Discovering APIs' spinner settles; only then read the DOM",
+        "spot-check the tree against REST_ROUTE_LEDGER families: a seeded object (showcase_task) shows its CRUD family (GET/POST/PATCH/DELETE /api/v1/data/showcase_task) under a Data group, the Metadata group lists /api/v1/meta/object/showcase_task, System lists discovery/packages/health",
+        "select GET /api/v1/data/showcase_task and click Send; capture the response pane: status code, the JSON body, and the duration (ms)",
+        "cross-check the pane's JSON against a direct GET of the same URL (the page fetches `${client.baseUrl}${url}` — the same wire call)",
+        "select POST /api/v1/data/showcase_task, enter a MALFORMED body (invalid JSON, or a body missing the required fields), and Send; capture the response pane"
+      ],
+      "acceptance": [
+        {
+          "clause": "the tree mirrors /discovery: every rendered service group corresponds to a service the /discovery payload reports usable (isServiceUsable) — a stub/unavailable service renders NO group — and a seeded object's CRUD + meta families appear, spot-checked against REST_ROUTE_LEDGER",
+          "oracle": "screenshot",
+          "verify": "the tree screenshot cross-checked name-by-name against the pre-captured /discovery services map; the showcase_task CRUD + meta entries are present",
+          "evidence": "tree screenshot + the /discovery body, diffed"
+        },
+        {
+          "clause": "a seeded-object GET executes to LIVE JSON + status + timing: Send on GET /api/v1/data/showcase_task yields status 200, a JSON body of real seeded rows, and a duration reading — and the body matches a direct GET of the same URL",
+          "oracle": "network",
+          "verify": "response-pane status 200 + JSON rows == direct GET; the pane shows a non-zero ms duration",
+          "evidence": "the response-pane screenshot + the direct GET response"
+        },
+        {
+          "clause": "status + timing are the REAL response's, not faked: the pane's status code (and its color band) and the ms figure are computed from the actual fetch (performance.now delta) — a 4xx endpoint shows its real 4xx, a network failure shows status 0 (the page's own catch), distinguishable from a server envelope",
+          "oracle": "network",
+          "verify": "drive one endpoint that answers 4xx and confirm the pane shows that 4xx status, not a 200",
+          "evidence": "the 4xx pane + its trace"
+        },
+        {
+          "clause": "a malformed body surfaces the server error envelope VERBATIM: an invalid/under-specified POST body renders the server's standard error envelope (ledgered code + message) in the response pane exactly as returned — not a swallowed client-side error, not a fabricated success",
+          "oracle": "network",
+          "verify": "the malformed POST's pane shows the server's 400 envelope (code ∈ the ledger, e.g. VALIDATION_FAILED) identical to the raw HTTP response",
+          "evidence": "the pane + the raw response body"
+        },
+        {
+          "clause": "the discovery→console pipeline reaches the request form: the tree is searchable/collapsible and selecting an endpoint populates method + URL + any body template — read the DOM only after the screenshot confirms the pane rendered",
+          "oracle": "dom",
+          "verify": "selecting an endpoint sets the method dropdown and URL input; the body textarea appears for POST/PATCH/PUT",
+          "evidence": "DOM excerpt after the render screenshot"
+        }
+      ],
+      "negative": [
+        "a tree entry for a service /discovery reports unusable (stub/unavailable) is a FAIL — the discovery payload is the authority, not a hardcoded catalog",
+        "a response pane showing a 2xx/blank for a request the server actually refused (or masking the server envelope behind a generic client message) is a FAIL"
+      ],
+      "traps": [
+        "stale-console-bundle",
+        "hydration-race",
+        "wrong-panel"
+      ],
+      "source": [
+        "objectui apps/console/src/pages/developer/ApiConsolePage.tsx (the API console: raw fetch to `${client.baseUrl}${url}`, status/duration/JSON pane, request history)",
+        "objectui apps/console/src/pages/developer/hooks/useApiDiscovery.ts (tree built from GET /api/v1/discovery services/routes + client.meta types/objects; isServiceUsable gate per ADR-0076 D12)",
+        "packages/rest/src/rest-route-ledger.ts (the REST families the tree is spot-checked against)",
+        "packages/spec/src/api/discovery.zod.ts (the discovery payload)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-08",
+          "change": "new — Studio Developer API Console: discovery-mirrored tree, live GET execution (JSON+status+timing), malformed-body envelope passthrough; per PENDING-GAPS §C",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        }
+      ]
+    }
+  ]
+}

@@ -210,3 +210,28 @@ overrides:
   #     `<3.4.13`, which would self-invalidate the day 3.4.13 is itself flagged
   #     (the undici 7.28.0 / brace-expansion 5.0.8 specimens, #4961 / #5032).
   'dompurify@<4.0.0': '^3.4.13'
+  # OSV 2026-08-08 (#6529) — same "it names a fixed version, so take the fix"
+  # disposition as the two batches above; no exemption is involved.
+  #   nanoid GHSA-2v37-7h3g-55p8 / CVE-2026-67213 (8.2 high) — a custom
+  #     alphabet generator loops forever when `size` is zero, so an
+  #     attacker-influenced size is a denial of service. The advisory carries
+  #     TWO affected ranges: introduced:0 → fixed:3.3.17, and
+  #     introduced:4.0.0 → fixed:5.1.6. Only the first one is live here.
+  #     Transitive-only via postcss@8.5.25, which declares nanoid ^3.3.16 and
+  #     was the single consumer pulling the flagged 3.3.16 (measured: one
+  #     `nanoid:` edge in the whole lockfile). Nothing in this workspace
+  #     declares a 3.x nanoid directly, so — exactly as for dompurify above —
+  #     check-override-consistency.mjs lists this as an override it cannot
+  #     cross-check against a declared range, which is correct for this shape.
+  #     ^3.3.17 sits INSIDE postcss's own ^3.3.16 range, so this is a dedupe
+  #     onto the patched line, not a forced upgrade past what postcss supports.
+  #     ⚠️ The four drivers that declare nanoid ^6.0.0 (driver-mongodb,
+  #     driver-sql, driver-sqlite-wasm, driver-turso) are deliberately OUT of
+  #     this selector: 6.0.0 is above the advisory's second fixed line (5.1.6)
+  #     and is not affected, and the <4.0.0 bound is what keeps it that way —
+  #     a bound written at the package ceiling would have dragged that whole
+  #     major back onto the 3.x line.
+  #     Bound at the 4.0.0 major boundary per this block's header rule — never
+  #     `<3.3.17`, which would self-invalidate the day 3.3.17 is itself flagged
+  #     (the undici 7.28.0 / brace-expansion 5.0.8 specimens, #4961 / #5032).
+  'nanoid@<4.0.0': '^3.3.17'

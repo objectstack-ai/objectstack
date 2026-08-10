@@ -13,7 +13,14 @@
  * pivots, charts) layers on top of these primitives.
  */
 
-import type { SharingExecutionContext } from './sharing-service.js';
+// [#6523 / #6206 ruling default] Reports are read UNDER the caller's context —
+// row visibility, the saved-report gate and the schedule owner check all read
+// it — so every method takes the complete `resolveAuthzContext` envelope rather
+// than the six-field context shape this contract used to borrow from
+// `sharing-service` (`SharingExecutionContext`, retired in #7218 once every
+// implementation had been re-annotated). See item 3 of the module doc in
+// `./sharing-service.js` for the boundary.
+import type { ExecutionContext } from '../kernel/execution-context.zod.js';
 
 /** Render format supported by `IReportService.run()`. */
 export type ReportFormat = 'csv' | 'json' | 'html_table';
@@ -117,36 +124,36 @@ export interface ScheduleReportInput {
  */
 export interface IReportService {
   /** Execute a report by id. */
-  run(reportId: string, context: SharingExecutionContext): Promise<ReportRunResult>;
+  run(reportId: string, context: ExecutionContext): Promise<ReportRunResult>;
 
   /** Execute an ad-hoc report from an in-memory definition. */
-  runAdHoc(input: SaveReportInput, context: SharingExecutionContext): Promise<ReportRunResult>;
+  runAdHoc(input: SaveReportInput, context: ExecutionContext): Promise<ReportRunResult>;
 
   /** Upsert a saved report. Returns the persisted row. */
-  saveReport(input: SaveReportInput, context: SharingExecutionContext): Promise<SavedReport>;
+  saveReport(input: SaveReportInput, context: ExecutionContext): Promise<SavedReport>;
 
   /** List saved reports — optionally filtered by object. */
   listReports(
     filter: { object?: string; ownerId?: string } | undefined,
-    context: SharingExecutionContext,
+    context: ExecutionContext,
   ): Promise<SavedReport[]>;
 
   /** Get a saved report by id. */
-  getReport(reportId: string, context: SharingExecutionContext): Promise<SavedReport | null>;
+  getReport(reportId: string, context: ExecutionContext): Promise<SavedReport | null>;
 
   /** Delete a saved report by id (and any attached schedules). */
-  deleteReport(reportId: string, context: SharingExecutionContext): Promise<void>;
+  deleteReport(reportId: string, context: ExecutionContext): Promise<void>;
 
   /** Create or update a schedule. */
-  scheduleReport(input: ScheduleReportInput, context: SharingExecutionContext): Promise<ReportSchedule>;
+  scheduleReport(input: ScheduleReportInput, context: ExecutionContext): Promise<ReportSchedule>;
 
   /** Remove a schedule by id. */
-  unscheduleReport(scheduleId: string, context: SharingExecutionContext): Promise<void>;
+  unscheduleReport(scheduleId: string, context: ExecutionContext): Promise<void>;
 
   /** List schedules — optionally filtered by report. */
   listSchedules(
     filter: { reportId?: string } | undefined,
-    context: SharingExecutionContext,
+    context: ExecutionContext,
   ): Promise<ReportSchedule[]>;
 
   /**

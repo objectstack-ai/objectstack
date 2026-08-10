@@ -100,9 +100,9 @@ const result = HttpConfigSchema.parse(data);
 | **message** | `string` | optional | Notification body |
 | **channels** | `string \| string[]` | optional | Channels to fan out to (default: inbox) |
 | **topic** | `string` | optional | Event topic (default: "notify") |
-| **severity** | `string` | optional | info \| warning \| critical |
-| **sourceObject** | `string` | optional | Object name of the record the notification links to (writes sys_notification.source_object). Requires sourceId. |
-| **sourceId** | `string` | optional | Record id the notification links to (writes sys_notification.source_id). Requires sourceObject. |
+| **severity** | `Enum<'info' \| 'warning' \| 'critical'>` | optional | Severity forwarded to the messaging service |
+| **sourceObject** | `string` | optional | Object name of the record the notification links to (writes sys_notification.source_object). Only takes effect together with sourceId — a half-specified click-through target is dropped at execute time, so the inbox never renders a dead link. |
+| **sourceId** | `string` | optional | Record id the notification links to (writes sys_notification.source_id). Only takes effect together with sourceObject — a half-specified click-through target is dropped at execute time, so the inbox never renders a dead link. |
 | **actorId** | `string` | optional | User id that caused the event (writes sys_notification.actor_id) |
 | **actionUrl** | `string` | optional | Explicit click-through URL; overrides the link synthesized from sourceObject/sourceId |
 | **payload** | `Record<string, any>` | optional | Extra template inputs merged into the notification payload |

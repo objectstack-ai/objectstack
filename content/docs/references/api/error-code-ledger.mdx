@@ -20,10 +20,48 @@ validates against. An unregistered code fails schema parse — which fails the
 envelope conformance suites — which fails CI. That friction is the point
 (ADR-0112: "no silent fourth state" for error codes, per ADR-0049/0078).
 
+## Scope: THIS ledger registers framework packages only (#4805)
+
+Every owner key below is a package published from this repository, and that
+is a RULE — not an accident of the current list, and not something a reader
+should have to infer by scanning the package names. A downstream product
+repo (`objectstack-ai/cloud`, or any product built on the platform) does
+**not** register its codes here. It maintains its OWN ledger, in its own
+repo, and composes the validation itself:
+
+1. **shape** — `envelopeViolations(body)` (`contract.zod.ts`), and
+2. **vocabulary** — `code ∈ StandardErrorCode ∪ <its own ledger>`, which
+   `makeApiErrorSchema(<its own ledger>)` (`contract.zod.ts`) gives as a
+   single parse instead of the two-step assertion.
+
+The deployed wire vocabulary stays closed and checkable either way — which
+is what ADR-0112's "no silent fourth state" asks for. It never asked for
+every entry to live physically in one file.
+
+Why federated rather than admitting downstream entries (maintainer ruling on
+#4805, 2026-08-03, re-confirmed 2026-08-09; raised from cloud#930/#944):
+
+- **A commercial vocabulary does not belong in an Apache-2.0 spec.** The
+  codes worth registering are precisely the product-specific ones (billing
+  and plan-gating states, control-plane provisioning refusals), and
+  registering them here would have the OSS spec enumerate a closed-source
+  product's states under package names absent from this distribution.
+- **Cadence mismatch breeds bypass.** A downstream code arrives with a
+  downstream feature; making each one cost a cross-repo PR plus a pin bump
+  pushes authors toward reusing a semantically wrong existing code, which is
+  less visible than inventing one.
+
+The corollary for THIS file: a PR adding an owner key for a package that is
+not published from this repository is out of scope by construction — the
+fix for that need is a ledger in the owning repo, composed as above. The
+one thing a downstream repo must NOT do is emit a code registered nowhere:
+that is the silent fourth state, wherever the ledger lives.
+
 ## Registering a new code
 
-Add it to your package's entry (create the entry if your package has none),
-SCREAMING_SNAKE (`^[A-Z][A-Z0-9_]*$` — lint-enforced by
+Add it to your package's entry (create the entry if your package has none —
+a framework package; see the scope rule above if yours ships from another
+repo), SCREAMING_SNAKE (`^[A-Z][A-Z0-9_]*$` — lint-enforced by
 `error-code-ledger.test.ts`), with a trailing `//` comment when the name
 alone doesn't carry the meaning. Prefer a domain prefix for anything not
 self-evidently global (`ATTACHMENT_*`, `REPORT_*`, `SETTINGS_*`). If the
@@ -190,6 +228,7 @@ const result = ErrorCode.parse(data);
 * `FEEDS_DISABLED`
 * `FILES_DISABLED`
 * `FILE_DOWNLOAD_DENIED`
+* `FILE_FIELD_BULK_WRITE_REFUSED`
 * `FILE_NOT_FOUND`
 * `FILTER_TOKEN_UNKNOWN`
 * `FILTER_TOKEN_UNRESOLVED`
@@ -247,6 +286,7 @@ const result = ErrorCode.parse(data);
 * `OAUTH_REGISTER_FAILED`
 * `OBJECT_API_DISABLED`
 * `OBJECT_API_METHOD_NOT_ALLOWED`
+* `OBJECT_OVERLAY_PACKAGE_MISMATCH`
 * `OPENAPI_UNAVAILABLE`
 * `OS_PROTOCOL_INCOMPATIBLE`
 * `PACKAGE_DELETE_FAILED`

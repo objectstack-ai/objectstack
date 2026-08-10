@@ -21,8 +21,8 @@ Architecture alignment:
 ## TypeScript Usage
 
 ```typescript
-import { MiddlewareConfigSchema, MiddlewareType, RouteHandlerMetadataSchema, ServerCapabilitiesSchema, ServerEventSchema, ServerEventType, ServerStatusSchema } from '@objectstack/spec/system';
-import type { MiddlewareConfig, MiddlewareType, RouteHandlerMetadata, ServerCapabilities, ServerEvent, ServerEventType, ServerStatus } from '@objectstack/spec/system';
+import { MiddlewareConfigSchema, MiddlewareType, RouteHandlerMetadataSchema } from '@objectstack/spec/system';
+import type { MiddlewareConfig, MiddlewareType, RouteHandlerMetadata } from '@objectstack/spec/system';
 
 // Validate data
 const result = MiddlewareConfigSchema.parse(data);
@@ -72,67 +72,6 @@ const result = MiddlewareConfigSchema.parse(data);
 | **handler** | `string` | ✅ | Handler identifier or name |
 | **metadata** | `{ summary?: string; description?: string; tags?: string[]; operationId?: string }` | optional |  |
 | **security** | `{ authRequired: boolean; permissions?: string[]; rateLimit?: string }` | optional |  |
-
-
----
-
-## ServerCapabilities
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **httpVersions** | `Enum<'1.0' \| '1.1' \| '2.0' \| '3.0'>[]` | ✅ | Supported HTTP versions |
-| **websocket** | `boolean` | ✅ | WebSocket support |
-| **sse** | `boolean` | ✅ | Server-Sent Events support |
-| **serverPush** | `boolean` | ✅ | HTTP/2 Server Push support |
-| **streaming** | `boolean` | ✅ | Response streaming support |
-| **middleware** | `boolean` | ✅ | Middleware chain support |
-| **routeParams** | `boolean` | ✅ | URL parameter support (/users/:id) |
-| **compression** | `boolean` | ✅ | Built-in compression support |
-
-
----
-
-## ServerEvent
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **type** | `Enum<'starting' \| 'started' \| 'stopping' \| 'stopped' \| 'request' \| 'response' \| 'error'>` | ✅ | Event type |
-| **timestamp** | `string` | ✅ | Event timestamp (ISO 8601) |
-| **data** | `Record<string, any>` | optional | Event-specific data |
-
-
----
-
-## ServerEventType
-
-### Allowed Values
-
-* `starting`
-* `started`
-* `stopping`
-* `stopped`
-* `request`
-* `response`
-* `error`
-
-
----
-
-## ServerStatus
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **state** | `Enum<'stopped' \| 'starting' \| 'running' \| 'stopping' \| 'error'>` | ✅ | Current server state |
-| **uptime** | `integer` | optional | Server uptime in milliseconds |
-| **server** | `{ port: integer; host: string; url?: string }` | optional |  |
-| **connections** | `{ active: integer; total: integer }` | optional |  |
-| **requests** | `{ total: integer; success: integer; errors: integer }` | optional |  |
 
 
 ---

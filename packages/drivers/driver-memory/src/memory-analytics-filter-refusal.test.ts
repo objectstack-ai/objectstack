@@ -141,7 +141,6 @@ describe('[#5345] MemoryAnalyticsService — filters it cannot compile are refus
     { op: '$startsWith', where: { name: { $startsWith: 'al' } } },
     { op: '$endsWith', where: { name: { $endsWith: 'ta' } } },
     { op: '$null', where: { closed_at: { $null: true } } },
-    { op: '$regex', where: { name: { $regex: '^al' } } },
   ];
 
   for (const { op, where } of UNCOMPILABLE) {
@@ -150,6 +149,34 @@ describe('[#5345] MemoryAnalyticsService — filters it cannot compile are refus
       // Not "you made a typo": the operator is real, this surface cannot run it.
       expect(err.message).toContain('declared by the Filter Protocol');
       expect(err.message).toContain('Supported operators on this surface');
+    });
+  }
+
+  /**
+   * [#5702] `$regex` was the sixth row of the table above until this change, and
+   * it was in the WRONG table: its assertion read "declared by the Filter
+   * Protocol, not compilable by this face", and `$regex` was never declared by
+   * the Filter Protocol at all — it was an undeclared spelling this package
+   * evaluated. #4706 retired it outright, so it is no longer a
+   * declared-but-uncompilable operator on this face; it is a refused one on
+   * every face, with a prescription attached.
+   *
+   * Kept as its own case rather than deleted, because the analytics face is a
+   * SECOND door into the same walk and "the query path refuses it" is not
+   * evidence that this one does — the two faces answering one filter differently
+   * is the divergence class this whole file exists over (#5345).
+   */
+  for (const op of ['$regex', '$options'] as const) {
+    it(`refuses the retired ${op} on the analytics face too, naming $icontains`, async () => {
+      const err = await expectRefusal(() => count({ name: { [op]: '^al' } } as FilterCondition), op);
+      expect(err.message).toContain('RETIRED');
+      expect(err.message).toContain('$icontains');
+      // NOT the uncompilable-on-this-face sentence. Asserted against that
+      // message's own distinctive phrase rather than against "declared by the
+      // Filter Protocol", which the spec's prescription also contains — in the
+      // NEGATED form ("was never declared by the Filter Protocol"), so a
+      // substring test on it passes for both messages and pins nothing.
+      expect(err.message).not.toContain('Supported operators on this surface');
     });
   }
 

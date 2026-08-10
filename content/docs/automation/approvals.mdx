@@ -314,9 +314,24 @@ and nothing can move it, so the run parks forever.
 
 ### The approver finds it in their queue
 
-Requests land in **Setup → Approvals → Requests**, whose `my_pending` view
-filters to `status = pending` and `pending_approvers` containing the current
-user. Programmatically:
+The approver's surface is the **Approvals Inbox** — in the stock console, the
+**Approvals** entry in the account menu. It lists what is waiting on the current
+user (`status = pending`, `pending_approvers` containing them) and it is the only
+surface that carries the **decision actions**: approve, reject, return, reassign,
+request info, delegate, remind, override.
+
+<Callout type="info">
+**Why the raw `sys_approval_request` table is not that surface.** Every decision
+action on the object is gated on `record.viewer.can_act ||
+record.viewer.can_override`, and the `viewer` block is computed and attached only
+by the approvals REST path (`/api/v1/approvals/*`) — never by the generic data
+API a plain object view reads. Browse the table directly and you get a correct,
+completely inert list: the rows are there, the buttons are not. The table stays
+available under **Setup → Approvals → Requests** for admins and diagnostics,
+which is what it is good for.
+</Callout>
+
+Programmatically the same queue is:
 
 ```bash
 curl -b cookies.txt \
@@ -351,6 +366,45 @@ the queue. If people need to be told, do one of: add a `notify` node next to
 the approval node in the flow (the practical answer), or install a messaging
 service and drive `remind()`. Reminder, escalation, return, and reassignment
 *do* publish notification topics — the initial request doesn't.
+</Callout>
+
+### Mount the approvals inbox in your app
+
+Approvals are cross-cutting: people approve expenses inside the expenses app,
+not by leaving for a platform app. Add one navigation entry to any app you ship
+and that app gets the full inbox:
+
+```ts
+// my-app.app.ts
+navigation: [
+  // …
+  {
+    id: 'nav_approvals',
+    type: 'component',
+    label: 'Approvals',
+    componentRef: 'approvals:inbox',
+    icon: 'check-circle',
+    // Hide the entry where the approvals plugin is not installed. Enforced
+    // server-side: a gated-off entry never reaches the browser.
+    requiresService: 'approvals',
+  },
+],
+```
+
+`componentRef` names a **component-registry key**, not a URL. The console owns
+the route it resolves to, so `approvals:inbox` keeps working if that route ever
+changes — never hand-write a console path into app metadata.
+
+The inbox is per-user, not per-app: it shows the signed-in user everything
+waiting on them across every object, because "what is waiting on me" is a
+property of the person and not of the app they happen to have open. Filtering it
+down to one app's objects is not an option today.
+
+<Callout type="info">
+The platform's own **Account** app mounts it exactly this way, and
+**Setup → Approvals → Approvals Inbox** mounts the same component for admins
+above the raw `sys_approval_request` / `sys_approval_action` /
+`sys_approval_delegation` tables.
 </Callout>
 
 ### The decision

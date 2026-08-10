@@ -92,6 +92,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { DatasetSchema } from '@objectstack/spec/ui';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
+import { matchMissingColumnOfRelation } from '@objectstack/types';
 import { AnalyticsService } from '../analytics-service.js';
 
 const EMPTY = { rows: [], fields: [], totals: [] };
@@ -196,9 +197,15 @@ describe('[#6035] postgres’s missing-COLUMN wording is a hard failure, not a m
     // answer `400 INVALID_FIELD` instead of a `404`, pinned in `rest.test.ts`.
     // If these two stop being the same sentence, the two faces have started
     // disagreeing about what postgres says — which is what this fix removed.
-    expect(MISSING_COLUMN_JOINED).toMatch(
-      /column\s+["'`]([a-z0-9_]+)["'`]\s+of relation\s+\S+\s+does not exist/i,
-    );
+    //
+    // [#6615] Asked through the SHARED parser rather than a fourth open-coded
+    // copy of the regex. The copy this replaces was itself the drift this test
+    // set out to prevent: it could be edited without `mapDataError` moving, so
+    // "the two faces agree" was pinned against a private restatement of one of
+    // them. Now the fixture is checked against the one definition both read,
+    // and the column name it yields is asserted too — `mapDataError` puts
+    // exactly that string in the `field` of its `400 INVALID_FIELD`.
+    expect(matchMissingColumnOfRelation(MISSING_COLUMN_JOINED)).toBe('label');
     // …and it does contain a well-formed missing-TABLE wording, which is the
     // whole reason a subtraction is needed rather than a tighter anchor.
     expect(MISSING_COLUMN_JOINED).toMatch(/relation\s+["'`]?[A-Za-z0-9_$.]+["'`]?\s+does not exist/i);

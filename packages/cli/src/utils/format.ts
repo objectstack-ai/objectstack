@@ -4,6 +4,7 @@ import chalk from 'chalk';
 import type { ZodError } from 'zod';
 import { formatZodIssue } from '@objectstack/spec';
 import type { TenancyPosture } from '@objectstack/spec/security';
+import { writeStdoutDirect } from './json-stdout.js';
 
 // ─── Constants ──────────────────────────────────────────────────────
 export const CLI_NAME = 'objectstack';
@@ -46,11 +47,22 @@ export interface EmitJsonOptions {
    * Exists so the sweep onto `emitJson` could be a pure truncation fix with no
    * observable output change: roughly half the CLI's `--json` sites were
    * already compact and half indented, and this preserves whichever each one
-   * emitted. The split is accidental rather than designed — `os login --json`
-   * prints a compact payload and then an indented one in the same run — so
-   * unifying it is worth doing, but as its own decision, not as a side effect
-   * of fixing truncated pipes.
+   * emitted.
    *
+   * This comment used to cite `os login --json` — a compact payload followed by
+   * an indented one in the same run — as proof the split was accidental. That
+   * was true, and worse than a formatting inconsistency: two documents on one
+   * stdout parse as neither a single document nor as NDJSON. #6531 fixed it,
+   * and in doing so gave `compact` its one *designed* use. `os login` is the
+   * CLI's sole declared NDJSON command, because its device flow is genuinely
+   * two events over time and the first one has to reach an automation consumer
+   * before the user authorizes; there, one line per document IS the contract,
+   * enforced through a single emitter in `commands/login.ts` and pinned by
+   * `test/login-json-ndjson.e2e.test.ts`.
+   *
+   * Everywhere else `--json` still means exactly one JSON document on stdout
+   * (#6217), so the remaining compact call sites are still only preserving
+   * historical formatting and unifying them stays worth doing on its own.
    * New code should use the default.
    */
   compact?: boolean;
@@ -129,9 +141,11 @@ export function isExitSignal(error: unknown): boolean {
  * applies here too.
  */
 export async function emitText(text: string, exitCode: CliExitCode = 0): Promise<void> {
-  await new Promise<void>((resolve, reject) => {
-    process.stdout.write(text + '\n', (err) => (err ? reject(err) : resolve()));
-  });
+  // `writeStdoutDirect`, not `process.stdout.write`: a `--json` command that
+  // boots a kernel reserves stdout so the kernel's INFO stream goes to stderr
+  // (#6217), and the payload is the one thing that must still reach the real
+  // stdout. Outside a reservation this is `process.stdout.write` verbatim.
+  await writeStdoutDirect(text + '\n');
   if (exitCode !== 0) process.exitCode = exitCode;
 }
 
@@ -194,18 +208,37 @@ export function createTimer() {
 // ─── Zod Error Formatting ───────────────────────────────────────────
 
 /**
- * How far the branch lines of an expanded union are pushed to sit UNDER the
- * `code: message` line this file prints for the union itself.
+ * How far the nested lines of an expanded issue are pushed to sit UNDER the
+ * `code: message` line this file prints for the issue itself.
  *
  * `formatZodIssue` indents its own depth-0 line by 2 spaces and each nested
  * level by 2 more; this file's per-issue block is at 4/6. Adding 4 puts the
- * first branch level at 8 — one step below the `invalid_union: Invalid input`
+ * first nested level at 8 — one step below the `invalid_union: Invalid input`
  * line it explains — and keeps every deeper level nested relative to it.
  */
-const UNION_BRANCH_REINDENT = '    ';
+const NESTED_ISSUE_REINDENT = '    ';
 
 /**
- * The lines that explain an `invalid_union`, or nothing at all.
+ * [#5389] The issue codes whose real diagnosis is nested one level down, and
+ * which `formatZodIssue` therefore renders as more than one line.
+ *
+ * `invalid_union` puts each candidate branch on `issue.errors[]`; `invalid_key`
+ * / `invalid_element` put the key/element schema's own issues on
+ * `issue.issues[]`. Same defect, two property names — and the gate below has to
+ * name both, or the terminal keeps printing `invalid_key: Invalid key in
+ * record` with the prescription stranded in the payload.
+ *
+ * Kept in step with `CONTAINER_ISSUE_CODES` in `@objectstack/spec`'s
+ * `error-map.zod.ts`, which is where the descent itself lives.
+ */
+const EXPANDABLE_ISSUE_CODES: ReadonlySet<string> = new Set([
+  'invalid_union',
+  'invalid_key',
+  'invalid_element',
+]);
+
+/**
+ * The lines that explain an expandable issue, or nothing at all.
  *
  * Zod folds every branch of a failed union into ONE issue whose own `message`
  * is the literal `"Invalid input"`; each branch's real rejection sits in
@@ -227,18 +260,24 @@ const UNION_BRANCH_REINDENT = '    ';
  * so had to re-implement the ranking — the terminal needs exactly the STRING
  * that spec already exports, so here the reuse is a plain import.
  *
- * Line 0 of that render is the union's own verdict, which the caller has
+ * [#5389] The same import now also covers `invalid_key` / `invalid_element`,
+ * whose diagnosis hangs on `issue.issues[]` instead. Widening the gate is the
+ * WHOLE of this file's share of that fix — the descent is spec's, so the
+ * terminal inherits it the moment it stops refusing to ask.
+ *
+ * Line 0 of that render is the issue's own verdict, which the caller has
  * already printed in this file's own idiom; only the explanation is returned,
  * so the change is strictly ADDITIVE — nothing that printed before #5341 stops
- * printing. A non-union issue renders as a single line, hence never reaches
- * here and could not add one anyway.
+ * printing. An issue with nothing nested renders as a single line, hence never
+ * reaches here and could not add one anyway.
  */
-function unionBranchLines(issue: unknown): string[] {
-  if ((issue as { code?: unknown } | null)?.code !== 'invalid_union') return [];
+function nestedIssueLines(issue: unknown): string[] {
+  const code = (issue as { code?: unknown } | null)?.code;
+  if (typeof code !== 'string' || !EXPANDABLE_ISSUE_CODES.has(code)) return [];
   return formatZodIssue(issue as Parameters<typeof formatZodIssue>[0])
     .split('\n')
     .slice(1)
-    .map((line) => `${UNION_BRANCH_REINDENT}${line}`);
+    .map((line) => `${NESTED_ISSUE_REINDENT}${line}`);
 }
 
 export function formatZodErrors(error: ZodError) {
@@ -277,8 +316,9 @@ export function formatZodErrors(error: ZodError) {
         console.log(chalk.dim(`      received: ${chalk.red((issue as any).received)}`));
       }
 
-      // [#5341] …and, for a union, the branch that actually explains it.
-      for (const line of unionBranchLines(issue)) {
+      // [#5341] …and, for a union — [#5389] or a record key / map element —
+      // the nested issues that actually explain it.
+      for (const line of nestedIssueLines(issue)) {
         console.log(chalk.dim(line));
       }
     }

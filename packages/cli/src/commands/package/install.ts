@@ -215,8 +215,32 @@ export default class PackageInstall extends Command {
       printKV('  Runtime',   runtime);
       if (data.installedAt) printKV('  Installed', String(data.installedAt));
       console.log('');
-      console.log('  The manifest is cached under .objectstack/installed-packages/ on the');
-      console.log('  runtime host and re-registers on every boot (survives restarts).');
+      // #6721: the cache directory is quoted from the RESPONSE, never from a
+      // literal or a locally-resolved constant. The directory lives on the
+      // REMOTE host — everything above this line came back over HTTP from
+      // `runtime`, and this command never touches the target's disk — so the
+      // only truthful source is the host itself. #6643 documented at length why
+      // no consumer-side answer works (a local constant describes the machine
+      // typing the command; it is only the *default*, wrong the moment a host
+      // configures `storageDir`; a static import of
+      // `@objectstack/cloud-connection` would make a pure-HTTP command fail at
+      // module load). The fix was upstream, and it landed: the POST response now
+      // carries `storageDir: this.storageDir` — the same resolved value
+      // (`ledger.dir`) its GET listing sibling already served.
+      //
+      // ⛔ No fallback. When the field is missing — an older host that predates
+      // the producer half — this block prints NOTHING. A `??
+      // '.objectstack/installed-packages/'` would re-introduce exactly the
+      // defect Prime Directive #12 forbids and #5996 deleted: a consumer
+      // inventing a value the producer declined to state. Saying less is
+      // correct; guessing is not. An empty or non-string value is the same
+      // "host did not state it" case, not a reason to print a blank path.
+      const storageDir = typeof data.storageDir === 'string' ? data.storageDir.trim() : '';
+      if (storageDir) {
+        console.log('  The manifest is cached on the runtime host and re-registers on every');
+        console.log('  boot (survives restarts):');
+        console.log(`    ${storageDir}`);
+      }
     } catch (error) {
       printError((error as Error).message);
       this.exit(1);

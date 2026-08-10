@@ -2,7 +2,7 @@
 
 import { z } from 'zod';
 import { lazySchema } from '../shared/lazy-schema';
-import { strictUnknownKeyError } from '../shared/suggestions.zod';
+import { strictObject } from '../shared/strict-object';
 import { ExpressionInputSchema } from '../shared/expression.zod';
 import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
 import { FieldType } from '../data/field.zod';
@@ -133,56 +133,6 @@ export const BulkActionParamSchema = lazySchema(() => z.object({
 }).passthrough());
 export type BulkActionParam = z.input<typeof BulkActionParamSchema>;
 
-/** Declared keys of a bulk-action def — the "did you mean" pool. */
-const BULK_ACTION_DEF_KEYS = [
-  'name', 'label', 'icon', 'variant', 'operation', 'execution', 'patch',
-  'params', 'confirmText', 'confirmLabel', 'visible', 'requiredPermissions',
-  'maxRecords', 'batchSize',
-] as const;
-
-const bulkActionDefUnknownKeyError = strictUnknownKeyError({
-  surface: 'this bulk action definition',
-  knownKeys: BULK_ACTION_DEF_KEYS,
-  aliases: {
-    action: 'name',
-    actionname: 'name',
-    title: 'label',
-    op: 'operation',
-    mode: 'execution',
-    confirm: 'confirmText',
-    confirmmessage: 'confirmText',
-    limit: 'maxRecords',
-    max: 'maxRecords',
-    batch: 'batchSize',
-    // The capability gate IS a declared key here too — `requiredPermissions`
-    // (ADR-0066 D4, #6257) — so its near-misses RENAME onto it, exactly as
-    // they do on `ActionSchema`.
-    permissions: 'requiredPermissions', capabilities: 'requiredPermissions',
-    requiresPermissions: 'requiredPermissions', requiredCapabilities: 'requiredPermissions',
-    acl: 'requiredPermissions',
-  },
-  guidance: {
-    // Not a typo — a real key the RENDERER attaches, which is exactly why an
-    // author reaching for it needs more than "did you mean".
-    actionDef:
-      '`actionDef` is attached by the renderer, not authored: `resolveBulkActions` looks the '
-      + 'action up by `name` and inlines it. Writing it by hand smuggles an action definition '
-      + 'past the action registry — no permission gate, no param contract, no lint. Declare the '
-      + 'action normally and let this def name it.',
-    bulkEnabled:
-      '`action.bulkEnabled` was retired in spec 17: the selection bar is driven by the LIST '
-      + "VIEW's `bulkActions` / `bulkActionDefs`, which is this array. There is nothing to set.",
-    recordIdParam:
-      '`recordIdParam` belongs on the ACTION, not on the def that names it — a per-record bulk '
-      + "run reuses the action's own declaration, and an `execution: 'aggregate'` run carries "
-      + 'the whole selection in `params._selectedIds` instead of a single record id.',
-  },
-  history:
-    'Until #4457 the whole array was `z.array(z.record(z.string(), z.any()))` — every key parsed, '
-    + 'so a mis-spelled one shipped as a button that silently ran the DEFAULT behaviour (or none '
-    + 'at all).',
-});
-
 /**
  * Rich, schema-driven definition of one button in the multi-select bar.
  *
@@ -203,7 +153,49 @@ const bulkActionDefUnknownKeyError = strictUnknownKeyError({
  * modes invisible from the authoring side, which is why they are caught here
  * rather than written down and hoped for.
  */
-export const BulkActionDefSchema = lazySchema(() => z.object({
+export const BulkActionDefSchema = lazySchema(() => strictObject(
+  {
+    surface: 'this bulk action definition',
+    aliases: {
+      action: 'name',
+      actionname: 'name',
+      title: 'label',
+      op: 'operation',
+      mode: 'execution',
+      confirm: 'confirmText',
+      confirmmessage: 'confirmText',
+      limit: 'maxRecords',
+      max: 'maxRecords',
+      batch: 'batchSize',
+      // The capability gate IS a declared key here too — `requiredPermissions`
+      // (ADR-0066 D4, #6257) — so its near-misses RENAME onto it, exactly as
+      // they do on `ActionSchema`.
+      permissions: 'requiredPermissions', capabilities: 'requiredPermissions',
+      requiresPermissions: 'requiredPermissions', requiredCapabilities: 'requiredPermissions',
+      acl: 'requiredPermissions',
+    },
+    guidance: {
+      // Not a typo — a real key the RENDERER attaches, which is exactly why an
+      // author reaching for it needs more than "did you mean".
+      actionDef:
+        '`actionDef` is attached by the renderer, not authored: `resolveBulkActions` looks the '
+        + 'action up by `name` and inlines it. Writing it by hand smuggles an action definition '
+        + 'past the action registry — no permission gate, no param contract, no lint. Declare the '
+        + 'action normally and let this def name it.',
+      bulkEnabled:
+        '`action.bulkEnabled` was retired in spec 17: the selection bar is driven by the LIST '
+        + "VIEW's `bulkActions` / `bulkActionDefs`, which is this array. There is nothing to set.",
+      recordIdParam:
+        '`recordIdParam` belongs on the ACTION, not on the def that names it — a per-record bulk '
+        + "run reuses the action's own declaration, and an `execution: 'aggregate'` run carries "
+        + 'the whole selection in `params._selectedIds` instead of a single record id.',
+    },
+    history:
+      'Until #4457 the whole array was `z.array(z.record(z.string(), z.any()))` — every key parsed, '
+      + 'so a mis-spelled one shipped as a button that silently ran the DEFAULT behaviour (or none '
+      + 'at all).',
+  },
+  {
   name: SnakeCaseIdentifierSchema.describe('Stable identifier — the audit-log action key, and (for an aggregate def) the name of the object action to dispatch.'),
   label: z.string().optional().describe('Button + dialog-header text. Plain string: an authored def is not i18n-resolved (declare a real action and name it in `bulkActions` to get localization).'),
   icon: z.string().optional().describe('Lucide icon name (e.g. "user-check", "trash-2").'),
@@ -218,7 +210,7 @@ export const BulkActionDefSchema = lazySchema(() => z.object({
   requiredPermissions: z.array(z.string()).optional().describe("[ADR-0066 D4] Capability gate on the button, `action.requiredPermissions` semantics verbatim: absent or empty always passes, several are AND-ed, and a client that cannot resolve the caller's capabilities fails OPEN (the server stays the authority). This key exists for INLINE defs — notably the `update`/`delete` data-plane forms, which dispatch no action and so have nothing to inherit a gate from; a def promoted from `bulkActions: ['<name>']` (or an aggregate def naming a declared action) inherits the action's own declaration instead. On a data-plane def the gate governs visibility only — the write itself is still authorized by the data API's object permissions and server hooks."),
   maxRecords: z.number().int().positive().optional().describe('Selection size above which the run is blocked. Set it on defs whose server work is expensive — an aggregate def carries every selected id in one request.'),
   batchSize: z.number().int().positive().optional().describe('Records per executor batch (default 200). Data-plane operations only — an aggregate run is a single call by definition.'),
-}, { error: bulkActionDefUnknownKeyError }).strict()
+})
   .superRefine((def, ctx) => {
     // ── `custom` without `aggregate` is the historical no-op ──────────────
     // `useBulkExecutor`'s custom branch dispatches only when the def carries a

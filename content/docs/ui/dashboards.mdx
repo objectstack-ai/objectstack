@@ -296,8 +296,6 @@ the widget. Supported functions:
 | `min` | Minimum value |
 | `max` | Maximum value |
 | `count_distinct` | Count unique values |
-| `array_agg` | Aggregate values into an array |
-| `string_agg` | Concatenate values |
 
 ### Widget Layout
 
@@ -343,6 +341,10 @@ dateRange: {
 | `last_90_days` | Rolling 90 days |
 | `custom` | User-defined range |
 
+The thirteen named ranges are published as `DATE_RANGE_PRESETS` in
+`@objectstack/spec/ui` — the vocabulary's single source of truth. `custom` is not
+one of them: it selects no window, it opens the picker.
+
 ## Global Filters
 
 Add interactive filter controls that apply to all widgets:
@@ -359,6 +361,35 @@ Each filter's `name` is its stable identity: the key its value is published
 under as a dashboard-level variable (readable in widget expressions as
 `page.<name>`) and the key widgets reference in `filterBindings`. It defaults
 to `field`; the name `dateRange` is reserved for the built-in date range.
+
+### Date Filter Defaults
+
+A `type: 'date'` filter's `defaultValue` must be a value the dashboard can
+actually resolve to a window. Three spellings qualify:
+
+| Spelling | Example | Means |
+| :--- | :--- | :--- |
+| Preset name | `last_7_days` | The preset range of that name (table above) |
+| ISO date | `2026-01-15`, `2026-01-15T08:30:00Z` | That day exactly |
+| Date macro | `{today}`, `{30_days_ago}` | Resolved at query time |
+
+{/* os:check */}
+```typescript
+globalFilters: [
+  { field: 'created_at', label: 'Date Range', type: 'date', defaultValue: 'last_7_days' },
+]
+```
+
+Anything else is rejected at author time. This matters because the failure it
+replaces was silent: an unrecognised name cannot be lifted to a range, so it fell
+through to "a bare string date means equality on that day" and produced
+`created_at = 'last_7_dayz'` — a condition no row matches, which the backend
+answers `200 OK` with a zero. Every tile read 0 while the filter bar showed
+"All time", so the dashboard looked deliberately empty rather than misconfigured.
+
+`custom` is **not** accepted here. It is a `dateRange.defaultRange` sentinel
+meaning "open the picker with no preset applied", and a bare filter value gives
+it no `from`/`to` to hand over.
 
 ### Per-Widget Filter Bindings
 

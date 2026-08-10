@@ -115,8 +115,8 @@ const result = ConditionalValidationSchema.parse(data);
 | **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
 | **type** | `'conditional'` | ✅ |  |
 | **when** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | Predicate (CEL). e.g. P`record.type == 'enterprise'` |
-| **then** | `{ name: string; label?: string; description?: string; active?: boolean; … } \| { name: string; label?: string; description?: string; active?: boolean; … } \| { name: string; label?: string; description?: string; active?: boolean; … } \| { name: string; label?: string; description?: string; active?: boolean; … } \| … +2 more` | ✅ | Validation rule to apply when condition is true |
-| **otherwise** | `{ name: string; label?: string; description?: string; active?: boolean; … } \| { name: string; label?: string; description?: string; active?: boolean; … } \| { name: string; label?: string; description?: string; active?: boolean; … } \| { name: string; label?: string; description?: string; active?: boolean; … } \| … +2 more` | optional | Validation rule to apply when condition is false |
+| **then** | `{ name: string; label?: string; description?: string; active?: boolean; … } \| [ConditionalValidation](#conditionalvalidation) \| … +4 more` | ✅ | Validation rule to apply when condition is true |
+| **otherwise** | `{ name: string; label?: string; description?: string; active?: boolean; … } \| [ConditionalValidation](#conditionalvalidation) \| … +4 more` | optional | Validation rule to apply when condition is false |
 
 
 ---

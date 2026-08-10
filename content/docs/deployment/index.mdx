@@ -74,6 +74,16 @@ os package publish     # → sys_package + immutable, checksummed sys_package_ve
 See the cloud [package](/docs/references/cloud/package) and
 [package-version](/docs/references/cloud/package-version) references.
 
+> **Automating the login step.** `os cloud login` uses the browser device flow
+> in an interactive terminal, and under `--json` it is one of the CLI's two
+> declared **NDJSON** commands (`os login` is the other): stdout is a stream of
+> compact JSON documents, **one per line**, and the verification-URL record is
+> written *before* you authorize so a script can show it while it still
+> matters. Parse that stdout line by line, not with a single `JSON.parse`. See
+> [`os cloud login`](/docs/deployment/cli#os-cloud-login) in the CLI reference.
+> For an unattended pipeline, `os cloud login --email … --password …` skips the
+> device flow entirely and emits a single record.
+
 Installing then happens **inside the target environment**: sign in to that
 environment's Console → **Marketplace** → pick the package → **Install**. The
 install is authorized by your environment login and applied to that environment

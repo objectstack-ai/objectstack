@@ -76,6 +76,7 @@
     "ui/HttpRequest",
     "ui/I18nLabel",
     "ui/InlineAction",
+    "ui/InlineLocaleMap",
     "ui/InterfacePageConfig",
     "ui/JoinedReportBlock",
     "ui/KanbanConfig",

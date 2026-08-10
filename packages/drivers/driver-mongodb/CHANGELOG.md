@@ -1,5 +1,515 @@
 # @objectstack/driver-mongodb
 
+## 17.0.0-rc.6
+
+### Major Changes
+
+- 262e40d: refactor(drivers)!: memory / mongodb 的 `aggregate` / `distinct` 也收进 `DriverQuery`，契约没覆盖的方法不再要求把对象名写两遍 (#6212 批 C)
+
+  #6210 的 changeset 结尾专门留了一句：`aggregate` / `distinct` **不在**那次范围内，因为它们不是 `IDataDriver` 收窄的那六个方法。#6212 记下了这笔账，本次结清 memory 与 mongodb 这两个包的部分。
+
+  这批方法的第一个实参**已经是对象名**，query 里却仍旧要求再写一遍：
+
+  | 位置                                        | 收窄前                              | 收窄后                                 |
+  | :------------------------------------------ | :---------------------------------- | :------------------------------------- |
+  | `MongoDBDriver.aggregate`                   | `query: QueryAST`                   | `query: DriverQuery`                   |
+  | `InMemoryDriver.distinct`                   | `query?: QueryInput`                | `query?: DriverQuery`                  |
+  | `InMemoryDriver.aggregate`                  | `Record<string, any>[] \| QueryAST` | `Record<string, any>[] \| DriverQuery` |
+  | `InMemoryDriver.performAggregation`（私有） | `Omit<QueryInput, 'object'>`        | `DriverQuery`                          |
+
+  因为 `QueryAST` / `QueryInput` 都把 `object` 声明成**必填**，一个手上只有 `where` 的调用方根本叫不出这个类型的名字，于是伸手去拿 `as any` —— 连 `where` / `orderBy` / `limit` 的检查一起关掉。这正是 #5181 记过账的那笔代价（cloud#1053 实测 20 处，cloud#1030 的 `$like` 就是从这个口子活到运行时的）。收窄之后调用方可以直接写字面量：
+
+  ```ts
+  // 收窄前：object 是必填，这句编译不过，于是 ... as any
+  // 收窄后：直接过，且 where / orderBy / aggregations 逐个受检
+  await driver.aggregate("order", {
+    groupBy: ["region"],
+    aggregations: [{ function: "sum", field: "amount", alias: "total" }],
+  });
+  ```
+
+  同一次改动收回了 4 处已经多余的 `as any`（memory 2、mongodb 2），`check:query-options-erasure` 的测试面因此从 267 降到 263，baseline 已按门禁要求同 PR `--update`。
+
+  **`InMemoryDriver.aggregate` 的联合刻意保留。** 两条分支都有活体生产者：mongo 管线数组那支由 `memory-analytics.ts` 喂，AST 那支由 objectql 引擎与 `@objectstack/verify` 的日期分桶探针喂。退役任何一支都会打断其中一条。
+
+  **顺带把 `#6212` 正文的一处归因证伪了**：正文说 `performAggregation` 当初选 `Omit<QueryInput, 'object'>` 是被 `groupBy` 的元素类型差异逼的。实测 `QueryInput` 与 `QueryAST` 在 `groupBy` 上**逐字相同**，差异只在 `search` / `orderBy` / `expand`；直接换 `DriverQuery` 零报错。所以那不是被迫的选择，契约优先取 `DriverQuery`，不再引入第二个查询类型家族。
+
+  **零运行时改动。** 非测试改动 100% 是类型注解，无逻辑、无行为、无 emit 差异（`as` 断言在编译期即被抹除）。测试全绿：memory 532、mongodb 206（另 137 条需真实 mongod，按既有 opt-in 规则跳过）。这也是 #5499 冻结面上被允许的处置口径 —— 与 #6210 在同一批驱动上走的是同一条。
+
+  **迁移面：删掉调用字面量里的 `object:` 键**，与 #5181 / #6210 同一句话，现在覆盖到 `aggregate` / `distinct`。编译器会逐处指出来：
+
+  ```
+  error TS2353: Object literal may only specify known properties,
+                and 'object' does not exist in type 'DriverQuery'.
+  ```
+
+  本仓实测只有一处需要改（`memory-driver.test.ts` 的 `distinct` 用例），且它写的值与第一实参逐字相等，纯冗余。
+
+  标 major 的依据与 #5181 / #6210 一致：**源码级破坏性**（调用点内联字面量），运行时行为零变化。`check:api-surface` 只记录导出的存在与否、不记录签名，因此这条说明同样是该变更唯一的下游载体。
+
+- d367f03: refactor(drivers)!: 五个驱动的 query 参数跟进 `DriverQuery`，休眠的类型谎言就此没有藏身处 (#6075)
+
+  #5181（PR #6076）把 `IDataDriver.find/findOne/count/updateMany/deleteMany/explain` 的 query 参数收窄为 `DriverQuery`（`Omit<QueryAST, 'object'>`），并在同一条 changeset 里写明：「把驱动签名一并迁到 `DriverQuery` 是后续的机械收尾」。这就是那次收尾。
+
+  在此之前，五个驱动的实现仍旧声明 `query: QueryAST`（turso 侧是 `query: any`）。**它不红，也不会红** —— 方法参数按双变比较，实现声明得比契约宽照样满足契约。但调用方现在**有权**省略 `object`，于是这些实现的类型说 `query.object` 是 `string`，运行期却可能是 `undefined`：一句休眠的谎言，没有任何门拦得住下一个照着它写代码的人。
+
+  收尾之后，「驱动读 `query.object`」直接变成编译错误：
+
+  ```ts
+  // 收窄前：编译通过，运行期可能是 undefined —— 谎言
+  // 收窄后：error TS2339: Property 'object' does not exist on type 'DriverQuery'.
+  const name = query.object;
+  ```
+
+  **零运行时改动。** 本次改的全部是类型注解：五个驱动的六个契约方法签名，以及为让类型自洽而必须跟进的少量私有辅助方法参数（mongodb 的 `buildFindOptions` / `buildSortSpec`，sql 的 `findRows` / `orderKeysFor`，turso 的 `toRemoteQuery` / `toRemoteReadQuery`，memory 的 `performAggregation`）—— 它们都只转发或读取 `where` / `orderBy` / `groupBy` 这些字段，本来就不读 `object`。turso 的几处 `query: any` 一并收紧，多拿回一批本已放弃的检查。emit 无差异，测试全绿（memory 524、mongodb 206、sql 906、sqlite-wasm 254、turso 788）。
+
+  **迁移面：删掉驱动调用字面量里的 `object:` 键**，与 #5181 是同一句话，只是现在也覆盖了直接按具体驱动类（`SqlDriver` / `MemoryDriver` / …）而非按 `IDataDriver` 取类型的调用方。编译器会逐处指出来（TS2353 `'object' does not exist in type 'DriverQuery'`）。本仓下游 25 个包实测零处需要改动，改动只落在五个驱动自己的测试里。
+
+  标 major 的依据与 #5181 一致：**源码级破坏性**（调用点内联字面量），运行时行为零变化。`check:api-surface` 只记录导出的存在与否、不记录签名，因此这条说明同样是该变更唯一的下游载体。
+
+  `aggregate` / `distinct` / `syncSchemasBatch` 不在本次范围内 —— 它们不是 `IDataDriver` 收窄的那六个方法，其中 `syncSchemasBatch` 的条目里 `object` 是被真实读取的必填键，`expand` 条目里的 `object` 同理命名的是关联对象，都不是冗余。
+
+### Minor Changes
+
+- 3f8817a: feat(spec,drivers,objectql,analytics,formula): `$icontains` reaches every JS evaluation face (#6520)
+
+  The other half of #5702. That change implemented `$icontains` on the SQL family
+  and correctly left the spec's `FILTER_OPERATORS` alone; this one adds the
+  operator to that array and gives every remaining evaluation face an arm, in ONE
+  change, because those two steps cannot be separated.
+
+  **Why one PR.** `FILTER_OPERATORS` is not a word list, it is a runtime allowlist:
+  `driver-memory`'s shape gate derives from it, and its matcher's `default:` arm
+  assumes the gate already refused anything unimplemented. Measured on a branch
+  that added the name early (#5701): the gate stopped refusing, the matcher fell
+  through, and `match({ name: 'zzz' }, { name: { $icontains: 'acme' } })` returned
+  `true` — the predicate silently dropped, every row matched. A dropped predicate
+  does not narrow a query, it WIDENS it, and on an RLS read scope that is a
+  permission bypass rather than a degraded feature (#3948). So the word list
+  travels with the evaluators or not at all.
+
+  **What now answers it**, all folding the same domain: `driver-memory` (query
+  path, reference matcher, and the analytics/cube face), `driver-mongodb`,
+  `objectql`'s `having`, `@objectstack/formula`'s `matchesFilterCondition` (the RLS
+  write-side `check`), and `service-analytics`' three SQL compilers (the RLS
+  lowering, the native-SQL strategy, and the `/analytics/sql` echo).
+
+  **The fold is ASCII-only, and that is the contract, not an implementation
+  detail** (#4706 Q1 = A). `$icontains: 'café'` does not match `CAFÉ`. Every face
+  reads one shared definition — `foldAsciiCase` /
+  `asciiCaseInsensitiveContains` / `asciiCaseInsensitiveRegexSource`, new exports
+  on `@objectstack/spec/data` — because the two obvious per-package spellings are
+  both wrong in the same direction: `toLowerCase()` folds the whole Unicode range,
+  and so does a `RegExp` built with the `i` flag. SQLite folds ASCII only and three
+  of the five drivers are SQLite underneath, so a Unicode fold on a JS face would
+  re-open exactly the divergence the ruling closed. The pattern-binding faces
+  (mingo, mongo) therefore emit one `[Aa]` character class per ASCII letter and
+  pass NO flags; mongo's `$icontains` is the one arm in its family that does not
+  set `$options: 'i'`.
+
+  The comparand keeps the rules its SQL twin has: matched LITERALLY (`%`, `_` and
+  regex metacharacters are ordinary characters), and refused when empty or
+  non-string — an empty comparand matches every row, which is a predicate that
+  constrains nothing.
+
+  **User-visible effect.** A filter using `$icontains` now behaves the same on the
+  in-memory double and on SQL, so an app whose tests run on one and whose
+  production runs the other stops getting two answers from one filter. Downstream,
+  #5814 (better-auth `Where.mode: 'insensitive'`) no longer hits a 400 on the
+  memory double.
+
+  Not changed, and still tracked: the `$contains` family still folds Unicode on
+  `driver-memory`'s query path and `driver-mongodb` (#6682) — both remain DEBT rows
+  in `scripts/check-driver-conformance.mjs`, now naming one open requirement each
+  instead of two. `formula`'s unknown-operator posture stays a silent, fail-closed
+  `false` (it governs a write-side check, where an unevaluable condition denies
+  rather than widens); the decision and its limits are documented on
+  `matches-filter.ts`, and no operator the spec DECLARES is answered that way any
+  more.
+
+- 82397b6: feat(drivers,objectql): `$regex` / `$options` are refused everywhere, and `$icontains` is implemented on the SQL family (#5702)
+
+  The driver half of the #4706 ruling. #5701 landed the contract (the vocabulary,
+  the `RETIRED_FILTER_OPERATORS` prescriptions, the shared text case-set) and
+  #5710 flipped the last live producer — `plugin-auth`'s ObjectQL adapter, which
+  emitted `$regex` on the authentication path — so the refusal can now land
+  without breaking sign-in.
+
+  **BREAKING for anyone writing `$regex` or `$options` in a filter.** Both are
+  refused on every backend with `INVALID_FILTER` / 400 and a message that names
+  the replacement. `$regex` was never a declared operator: `driver-sql` compiled
+  it to a LIKE-escaped substring (so `a.b` matched only the literal `a.b`),
+  `driver-memory` ran it as a real `RegExp` (so the same filter also matched
+  `axb`, and an _invalid_ pattern was caught and answered `false` — zero rows, in
+  silence), and `objectql`'s `having` did the same. Write `$icontains` for the
+  case-insensitive substring search this was almost always used for, `$contains`
+  for a case-sensitive one; a pattern that genuinely needs a regex has no
+  filter-level replacement.
+
+  **`$icontains` now runs on the SQL family** — `driver-sql`, `driver-sqlite-wasm`,
+  and both of `driver-turso`'s transports (the remote one does not go through
+  knex, so it needed its own). It compiles to `LOWER(col) LIKE LOWER(?) ESCAPE ?`
+  through the same `applyLike` / `pushLike` that carries the `%` / `_` / `\`
+  escaping, as a `fold` parameter rather than a second emitter — a copied emitter
+  is where the escape class would have been dropped, and an unescaped `%` matches
+  every row. An empty or non-string comparand is refused on the validating walk
+  (an empty one matches every row, which widens rather than narrows). On SQLite
+  `lower()` folds ASCII only, which IS the contract (#4706 Q1 = A): `$icontains:
+'café'` does not match `CAFÉ`.
+
+  <!-- adr-0087: registered filter-regex-options-retired -->
+
+  `driver-mongodb`'s unknown-operator arm was throwing a bare `Error` with no
+  `code` and no `status`, three lines from the helper in its own file that sets
+  `INVALID_FILTER` / 400 — a 500-shaped body for a 400-class client mistake. It
+  now speaks the same envelope as its three siblings.
+
+  Two parts of the ruling are deliberately NOT in this change and stay tracked in
+  `scripts/check-driver-conformance.mjs`'s ledger: the `$contains` family's
+  case-sensitivity (#4706 Q2 = A) needs SQLite's `LIKE` replaced by a case-exact
+  construct in the driver, the RLS lowering and the analytics lowering together,
+  or one permission rule compiles to two row sets (#6518); and `$icontains` on the
+  JS evaluation faces needs the spec vocabulary to take the operator, which cannot
+  happen before `driver-memory` has an arm for it (#6520).
+
+### Patch Changes
+
+- 8825a06: drivers: `limit: 0` returns no records, on every driver and every read door
+
+  `limit: 0` was ruled in #6485 to mean **return no records**. Three of the five shipped
+  drivers did not honour it, in three different ways — and the ones that disagreed
+  returned **more** data than was requested, which on an ADR-0021 RLS read scope is
+  over-reach rather than a loose filter. Reachable since #6578: the client now puts
+  `top=0` on the wire, so the answer depended on which driver a deployment configured.
+
+  **`driver-memory` — the slice was dropped.** `find()` sliced with `if (query.limit)`,
+  truthiness, and `0` is falsy. Measured before the fix, three rows seeded:
+  `{ limit: 0 }` returned **3 of 3**, and `{ limit: 0, offset: 1 }` returned 2 — the
+  OFFSET applied and the LIMIT silently did not, which is why every paging suite stayed
+  green over it. Two more sites of the same shape in `memory-analytics.ts` (the `$limit`
+  pipeline stage and the SQL string builder) moved with it. Mingo honours `{ $limit: 0 }`
+  as zero records (measured), so presence is sufficient there.
+
+  **`driver-mongodb` — the value was forwarded faithfully, to a client that means
+  something else by it.** `buildFindOptions` already tested presence, so `0` arrived
+  exactly as written — but the MongoDB Node driver DEFINES `limit: 0` as _no limit_, so
+  the answer was still the whole collection. Fixed with an explicit short-circuit that
+  returns the empty result **before the client is consulted** (`[]` from `find`, `null`
+  from `findOne`, which had the same hole). No round trip is made for a query whose
+  answer is already known, and no future change in the upstream driver's reading of `0`
+  can move this behaviour. Deliberately `=== 0`, not `<= 0`.
+
+  **`driver-sql` — two doors disagreed with a third.** `findRows()`, the door `find()`
+  goes through, has always compiled `limit` on presence. Two others compiled it on
+  truthiness:
+
+  - `findWithWindowFunctions()` — the live window-function read door (#4286). Returns
+    rows, so this was user-visible wrong data: `{ limit: 0 }` returned the whole table.
+  - `analyzeQuery()` / `explain()` — returns a plan. It compiled `select * from "orders"`
+    where `find()` sent `... order by "id" asc limit ?`, so it explained a statement
+    other than the one that would run.
+
+  `offset` moved with `limit` at both doors for internal consistency only. That half is
+  **measured to change nothing**: knex elides a zero offset on better-sqlite3, Postgres
+  and MySQL alike. It is pinned as the no-op it is rather than reported as a fix.
+
+  **`driver-turso` remote transport — an `OFFSET` with no `LIMIT` was a syntax error.**
+  Surfaced by the new conformance control that reads with a bare offset. SQLite's grammar
+  is `LIMIT expr [OFFSET expr]`, and this compiler emitted the two clauses independently,
+  so `find(obj, { offset: N })` with no `limit` produced `near "OFFSET": syntax error` —
+  for **every** `N`, and only on the remote transport (the local half goes through knex,
+  which synthesises the `LIMIT -1` no-limit sentinel). Remote now builds the same
+  statement knex does.
+
+  Result sets only ever get **narrower**. A caller who wants every row should omit
+  `limit` rather than pass `0`.
+
+  `@objectstack/spec` gains `PAGINATION_ZERO_LIMIT_CASES`, the shared conformance
+  case-set pinning this — with controls, so "return nothing, always" cannot pass it. All
+  **five** drivers answer it, with **no DEBT rows**: future drift goes red at
+  `check:driver-conformance` rather than being discovered in production.
+
+- 3510e4a: refactor(spec,drivers,lint): one implementation of the filter identity reduction (#5659)
+
+  `{ $and: [] }` matches every row, `{ $or: [] }` matches none, `{}` is a TRUE
+  disjunct that absorbs its `$or`, `{ $not: {} }` is FALSE. That is a ruling
+  (#5322/#5134) pinned for every backend by the four identity cases in
+  `FILTER_LOGIC_CASES` — and it was implemented four times over: `reduceFilterNode`
+  in `driver-sql`, the same function again in `driver-mongodb`, the
+  `every`/`some`/truthiness algebra of `driver-memory`'s matcher, and nearly a
+  fifth hand-written copy inside `@objectstack/lint`, which declined to write one
+  and filed this issue instead.
+
+  **New in `@objectstack/spec` (`@objectstack/spec/data`): `reduceFilterVerdict`**,
+  beside the case table that proves it. It answers `'true' | 'false' | 'clause'`
+  for a filter node and never throws on its own; each backend's own refusals — the
+  undeclared `$`-combinator and the `undefined` comparand in `driver-sql`, the
+  query-level keys and the `$null` comparand in `driver-mongodb` — are passed in as
+  `FilterVerdictHooks` and are invoked from exactly the positions they were invoked
+  from before. `reduceFilterKeyVerdict` answers the same question for one key, which
+  is what both SQL and MongoDB emitters consult while walking a node.
+
+  **No behaviour changes in the three drivers.** The move is mechanical: the shared
+  algebra replaces each private copy, the refusals stay where they were, and the
+  `FILTER_LOGIC_CASES` conformance suites are green on both sides of the change —
+  including the SQL-inheriting `driver-sqlite-wasm` and `driver-turso`.
+
+  **`@objectstack/lint` gains two warnings it was structurally blind to.** The
+  `multi: true` unbounded-bulk-write rule (#5482) asked "does this filter have zero
+  keys", so a `delete_record` bounded by `filter: { $and: [] }` or
+  `filter: { $or: [{}] }` — a whole-object write by the ruling every driver executes
+  — passed silently. It now asks the reduction, and it warns about both while
+  staying quiet on `{ $or: [] }` and `{ $not: {} }`, which match nothing. The
+  message names the shape it saw (`a filter that REDUCES TO TRUE ({"$and":[]})`)
+  rather than calling a non-empty filter "empty".
+
+  If you have a flow declaring a bulk write bounded by one of those two shapes, the
+  lint will now tell you so — the write was already unbounded at run time; only the
+  feedback is new.
+
+- e13fd91: fix(objectql,driver-mongodb): declare the tenant index in `indexes[]`, so a registry-backed object stops reporting itself invalid (#6810)
+
+  `applySystemFields` provisioned the injected `organization_id` column with
+  `indexed: opts.multiTenant`. `indexed` is **not a `FieldSchema` key** — #2377 /
+  ADR-0049 removed it because a field-level index flag built no index — and
+  `FieldSchema` is a `strictObject`, so a field carrying it is rejected **by
+  name**, with a purpose-written message.
+
+  `registerObject` runs `applySystemFields` _before_ storing and
+  `getItem('object', …)` serves that post-injection document, so the key travelled
+  all the way out to `/meta`, where `decorateMetadataItem` re-parsed the served
+  body and stamped the verdict on it. Measured on every registry-backed object, in
+  **both** tenancy modes, at **both** read exits:
+
+  ```
+  _diagnostics: { valid: false,
+    errors: [{ path: 'fields.organization_id', code: 'unrecognized_keys' }] }
+  ```
+
+  `_diagnostics` is what Studio renders invalid-metadata banners from and what an
+  AI author reads to judge a document it produced. So the platform was reporting a
+  defect on its own column — one the author never wrote and could not fix — and
+  making the verdict useless as a signal on those objects, because a real
+  authoring error was indistinguishable from this one.
+
+  **Two directions, both of them user-visible:**
+
+  - **The false `valid: false` verdict is gone.** A tenancy-enabled object
+    registered through the real `SchemaRegistry` now reads back
+    `_diagnostics: { valid: true }` at both `/meta` exits, in both tenancy modes.
+    Nothing else about the served field changed — `type`, `reference`, and the
+    governance keys that decide who may write it are byte-identical.
+  - **The tenant index moved from a field-level flag to `indexes[]`**, the one
+    surface an index is declared on in this system. On a multi-tenant stack the
+    object now declares `{ fields: ['organization_id'] }`; on a single-tenant
+    stack it declares **nothing** — the absence _is_ what `indexed: false` used to
+    say, since nothing filters by organization on an unwalled stack.
+
+  This is also the first time the intent is actually **enforced**. The sole reader
+  of the old flag was one line in `driver-mongodb`; `driver-sql` — which every
+  walled deployment runs — only ever materialized `indexes[]`, so the wall's
+  hottest predicate ran unindexed no matter what the flag said. Expect the tenant
+  index to now appear as ordinary index drift on existing SQL tables
+  (`idx_<table>_organization_id`), created by `os migrate apply` or by the
+  `autoMigrate: 'safe'` path in dev, like any other declared index.
+
+  `driver-mongodb` reads declared `indexes[]` in place of the retired flag. The
+  generated index name matches the field-level convention already in that file
+  (`idx_<fields>` / `idx_<fields>_unique`), so a re-synced collection finds its
+  existing `idx_organization_id` rather than building a second index under a new
+  name. Declarations are materialized over their columns **verbatim** at every
+  `unique` scope, `'organization'` included — the same call the driver's
+  field-level `unique` documents, because it implements no row-level tenancy and
+  refuses to boot into a multi-tenant deployment (#3724).
+
+  No `FieldSchema` change: re-declaring `indexed` would restore exactly the
+  declared-but-unenforced key #2377 removed.
+
+- Updated dependencies [3d5c090]
+- Updated dependencies [e5bd768]
+- Updated dependencies [e027b3e]
+- Updated dependencies [c2429b0]
+- Updated dependencies [445a0c2]
+- Updated dependencies [f6609e6]
+- Updated dependencies [a70358a]
+- Updated dependencies [97e7e3c]
+- Updated dependencies [8828b9e]
+- Updated dependencies [53068c1]
+- Updated dependencies [ee58392]
+- Updated dependencies [f16e54e]
+- Updated dependencies [06be54e]
+- Updated dependencies [259459d]
+- Updated dependencies [3f7f14e]
+- Updated dependencies [6968885]
+- Updated dependencies [eaed61f]
+- Updated dependencies [debe2f6]
+- Updated dependencies [97b0798]
+- Updated dependencies [43a7a8d]
+- Updated dependencies [73f69dc]
+- Updated dependencies [04c56aa]
+- Updated dependencies [b3efeb7]
+- Updated dependencies [ddd075a]
+- Updated dependencies [88154be]
+- Updated dependencies [e8dc61e]
+- Updated dependencies [2f3e793]
+- Updated dependencies [d8e8d9c]
+- Updated dependencies [94e749b]
+- Updated dependencies [ea1d916]
+- Updated dependencies [ae31a19]
+- Updated dependencies [e0f300b]
+- Updated dependencies [62b6a2f]
+- Updated dependencies [5b4780b]
+- Updated dependencies [a933452]
+- Updated dependencies [8140915]
+- Updated dependencies [7b48cf9]
+- Updated dependencies [b5404f4]
+- Updated dependencies [f764691]
+- Updated dependencies [e120a5a]
+- Updated dependencies [e650d67]
+- Updated dependencies [04476e7]
+- Updated dependencies [79228cd]
+- Updated dependencies [b3363e9]
+- Updated dependencies [2ef1807]
+- Updated dependencies [d03fe25]
+- Updated dependencies [2672f85]
+- Updated dependencies [11066f6]
+- Updated dependencies [916af17]
+- Updated dependencies [84c86fb]
+- Updated dependencies [2a2a9fb]
+- Updated dependencies [a2e157c]
+- Updated dependencies [95c4227]
+- Updated dependencies [2a61116]
+- Updated dependencies [d4df105]
+- Updated dependencies [e2798fa]
+- Updated dependencies [0fd8556]
+- Updated dependencies [74155c7]
+- Updated dependencies [6908830]
+- Updated dependencies [8b06bba]
+- Updated dependencies [4c54037]
+- Updated dependencies [0f7157b]
+- Updated dependencies [d9bef45]
+- Updated dependencies [f549a0d]
+- Updated dependencies [82da264]
+- Updated dependencies [f586f1a]
+- Updated dependencies [9b9b70f]
+- Updated dependencies [f5a9bc2]
+- Updated dependencies [881a3cc]
+- Updated dependencies [ad6317b]
+- Updated dependencies [8a88885]
+- Updated dependencies [5f7669e]
+- Updated dependencies [becbe53]
+- Updated dependencies [b127c8b]
+- Updated dependencies [a80302a]
+- Updated dependencies [474f131]
+- Updated dependencies [050cd82]
+- Updated dependencies [4d552af]
+- Updated dependencies [44d677c]
+- Updated dependencies [c32944d]
+- Updated dependencies [1dd780f]
+- Updated dependencies [c8d6f6e]
+- Updated dependencies [92a67f2]
+- Updated dependencies [9136327]
+- Updated dependencies [bf0ae99]
+- Updated dependencies [cb3b6cd]
+- Updated dependencies [73b7234]
+- Updated dependencies [d2b97c3]
+- Updated dependencies [59b794f]
+- Updated dependencies [fc3a36a]
+- Updated dependencies [69787f0]
+- Updated dependencies [5d022a1]
+- Updated dependencies [042b9ee]
+- Updated dependencies [f549a0d]
+- Updated dependencies [a36db28]
+- Updated dependencies [3f8817a]
+- Updated dependencies [a2443e3]
+- Updated dependencies [e1554b1]
+- Updated dependencies [4856789]
+- Updated dependencies [c3f4916]
+- Updated dependencies [33e0385]
+- Updated dependencies [2205363]
+- Updated dependencies [09fe58d]
+- Updated dependencies [d0a5ceb]
+- Updated dependencies [e18a162]
+- Updated dependencies [d6d1a50]
+- Updated dependencies [d127ff0]
+- Updated dependencies [9b86cf6]
+- Updated dependencies [8825a06]
+- Updated dependencies [5087ac6]
+- Updated dependencies [2d1ddf0]
+- Updated dependencies [354b00f]
+- Updated dependencies [3de535b]
+- Updated dependencies [fe2e15a]
+- Updated dependencies [c6b6bb4]
+- Updated dependencies [2f59da0]
+- Updated dependencies [8ad609c]
+- Updated dependencies [bbee302]
+- Updated dependencies [08863dd]
+- Updated dependencies [56664f5]
+- Updated dependencies [31cbe90]
+- Updated dependencies [90bbf25]
+- Updated dependencies [eb91eba]
+- Updated dependencies [42da73d]
+- Updated dependencies [643b7c7]
+- Updated dependencies [d0d5205]
+- Updated dependencies [1a15893]
+- Updated dependencies [b70e534]
+- Updated dependencies [2233a85]
+- Updated dependencies [62dd69a]
+- Updated dependencies [e15e679]
+- Updated dependencies [2ab1257]
+- Updated dependencies [4cc4fb7]
+- Updated dependencies [28d1eb7]
+- Updated dependencies [2c26040]
+- Updated dependencies [f758cec]
+- Updated dependencies [78f0be8]
+- Updated dependencies [35f7fb4]
+- Updated dependencies [a5302c7]
+- Updated dependencies [7084313]
+- Updated dependencies [91cefb8]
+- Updated dependencies [0e043d8]
+- Updated dependencies [dadd1ad]
+- Updated dependencies [2f2e63c]
+- Updated dependencies [486d526]
+- Updated dependencies [89d7b35]
+- Updated dependencies [85ec26d]
+- Updated dependencies [f6476fc]
+- Updated dependencies [4ac12ef]
+- Updated dependencies [b88f5e8]
+- Updated dependencies [42cc219]
+- Updated dependencies [d7e0b42]
+- Updated dependencies [3510e4a]
+- Updated dependencies [aa4b90d]
+- Updated dependencies [54299ca]
+- Updated dependencies [dc61def]
+- Updated dependencies [251e888]
+- Updated dependencies [183b4c4]
+- Updated dependencies [2fdb36e]
+- Updated dependencies [20526f5]
+- Updated dependencies [c5eef1d]
+- Updated dependencies [e0f300b]
+- Updated dependencies [761a0ba]
+- Updated dependencies [be87153]
+- Updated dependencies [60f0dd8]
+- Updated dependencies [a87c5cd]
+- Updated dependencies [a47f338]
+- Updated dependencies [2598216]
+- Updated dependencies [2c7e62d]
+- Updated dependencies [eb7613c]
+- Updated dependencies [ecc9110]
+- Updated dependencies [f7bd4e2]
+- Updated dependencies [361bd5b]
+- Updated dependencies [129b378]
+- Updated dependencies [88f9d94]
+- Updated dependencies [1818998]
+- Updated dependencies [09ee21c]
+- Updated dependencies [f549a0d]
+- Updated dependencies [3fc2e48]
+- Updated dependencies [e8f435c]
+- Updated dependencies [41610f6]
+  - @objectstack/spec@17.0.0-rc.6
+  - @objectstack/core@17.0.0-rc.6
+  - @objectstack/types@17.0.0-rc.6
+
 ## 17.0.0-rc.5
 
 ### Patch Changes

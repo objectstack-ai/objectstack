@@ -2,6 +2,9 @@
 
 import { describe, it, expect } from 'vitest';
 import { TimeRelativeTriggerSchema, LoopConfigSchema, ParallelConfigSchema, FlowSchema } from '@objectstack/spec/automation';
+// [#5659] The shared identity reduction, asserted beside the rule that consumes
+// it — the rule's verdict and the drivers' verdict are one object now.
+import { reduceFilterVerdict } from '@objectstack/spec/data';
 import { AUTHORING_RULES } from './authoring-rules.js';
 import {
   lintFlowPatterns,
@@ -449,7 +452,12 @@ describe('lintFlowPatterns — user-less runAs unscoped (#1888 / ADR-0049 / ADR-
   // existence. Pinned so nobody "fixes" the gap by guessing.
   it('does NOT flag record_change — undecidable at authoring time, caught at run time', () => {
     const fnds = lintFlowPatterns(
-      scheduledDataFlow({ flowType: 'record_change', startConfig: { triggerType: 'record_change', objectName: 'invoice' } }),
+      // #6637 — the token was `'record_change'` (the flow TYPE echoed into the
+      // trigger slot), which is not an authored trigger token at all: the engine
+      // routes only `record-*`, so that fixture described a flow that never fires.
+      // The pin is about a record-change flow, so it spells one — the same token
+      // the sibling guard below already uses.
+      scheduledDataFlow({ flowType: 'record_change', startConfig: { triggerType: 'record-after-update', objectName: 'invoice' } }),
     );
     expect(fnds.map((f) => f.rule)).not.toContain(FLOW_RUNAS_UNSCOPED);
   });
@@ -1595,19 +1603,112 @@ describe('lintFlowPatterns — unbounded bulk write (#5482)', () => {
       ).toHaveLength(0);
     });
 
-    it('an empty COMBINATOR array — deliberately out of range, both directions', () => {
-      // #5322/#5134 ruled these and every driver implements the ruling: `$and: []`
-      // is TRUE (this one IS a whole-object write and goes unwarned — filed as a
-      // follow-up), `$or: []` is FALSE (matches nothing — warning about it would
-      // be a false alarm). Telling them apart needs the identity REDUCTION, which
-      // already exists three times producer-side; a fourth hand-written copy in a
-      // linter is the divergence `engine-delete-dispatch.ts` exists to prevent.
-      expect(
-        lintFlowPatterns(purgeFlow('delete_record', { objectName: 'lead', filter: { $and: [] }, multi: true })),
-      ).toHaveLength(0);
+    /**
+     * #5659 — the FALSE half of the identity family, and the reason this rule
+     * consumes the shared reduction instead of testing "is it an empty
+     * combinator". Both shapes below match NOTHING: warning that they write the
+     * whole object would be the exact false alarm a hand-written test produces.
+     */
+    it('a filter that reduces to FALSE — matches no row, so nothing to warn about', () => {
       expect(
         lintFlowPatterns(purgeFlow('delete_record', { objectName: 'lead', filter: { $or: [] }, multi: true })),
       ).toHaveLength(0);
+      expect(
+        lintFlowPatterns(purgeFlow('delete_record', { objectName: 'lead', filter: { $not: {} }, multi: true })),
+      ).toHaveLength(0);
+      // FALSE dominates the AND of a node, so a TRUE combinator beside it does
+      // not make the write unbounded.
+      expect(
+        lintFlowPatterns(
+          purgeFlow('delete_record', { objectName: 'lead', filter: { $and: [], $or: [] }, multi: true }),
+        ),
+      ).toHaveLength(0);
+    });
+
+    it('a filter the reduction cannot resolve — `clause`, the conservative answer', () => {
+      // A non-array combinator operand is refused by name at the driver door and
+      // by the schema; the shared predicate answers `'clause'` for it, and this
+      // rule must not turn "I cannot reduce this" into "it writes every row".
+      expect(
+        lintFlowPatterns(purgeFlow('delete_record', { objectName: 'lead', filter: { $and: 'x' }, multi: true })),
+      ).toHaveLength(0);
+      expect(
+        lintFlowPatterns(
+          purgeFlow('delete_record', { objectName: 'lead', filter: { $or: [{ status: 'closed' }] }, multi: true }),
+        ),
+      ).toHaveLength(0);
+    });
+  });
+
+  /**
+   * #5659 — the two shapes this rule was BLIND to until the identity reduction
+   * became a shared predicate.
+   *
+   * Measured on `origin/main` before this change, both returned `[]`: the rule
+   * answered "does the filter have zero keys", and each of these has one. They
+   * are whole-object writes by the same ruling (#5322/#5134) every driver
+   * executes, and the rule now asks that ruling's own implementation
+   * (`@objectstack/spec` `reduceFilterVerdict`) rather than a fourth hand copy.
+   */
+  describe('a filter that REDUCES to TRUE (#5659)', () => {
+    it('flags `{ $and: [] }` — the AND identity, i.e. the whole object', () => {
+      const fnds = lintFlowPatterns(
+        purgeFlow('delete_record', { objectName: 'lead', filter: { $and: [] }, multi: true }),
+      );
+      expect(fnds).toHaveLength(1);
+      expect(fnds[0].rule).toBe(FLOW_MULTI_WRITE_UNFILTERED);
+      expect(fnds[0].where).toBe("flow 'nightly_purge' · node 'purge' (delete_record)");
+      expect(fnds[0].severity).toBeUndefined();
+      // Named as what it is. Calling a non-empty filter "EMPTY" would send the
+      // author looking for a typo instead of reading the identity.
+      expect(fnds[0].message).toContain('REDUCES TO TRUE');
+      expect(fnds[0].message).toContain('{"$and":[]}');
+      expect(fnds[0].message).not.toContain('an EMPTY `filter`');
+      expect(fnds[0].message).toContain("every row of 'lead' is deleted");
+    });
+
+    it('flags `{ $or: [{}] }` — a TRUE disjunct absorbs its `$or`', () => {
+      const fnds = lintFlowPatterns(
+        purgeFlow('delete_record', { objectName: 'lead', filter: { $or: [{}] }, multi: true }),
+      );
+      expect(fnds).toHaveLength(1);
+      expect(fnds[0].rule).toBe(FLOW_MULTI_WRITE_UNFILTERED);
+      expect(fnds[0].message).toContain('REDUCES TO TRUE');
+      expect(fnds[0].message).toContain('{"$or":[{}]}');
+    });
+
+    it('flags the shape at depth, and on update_record too', () => {
+      // `{}` is a TRUE disjunct at any nesting, and `$not` of a FALSE group is
+      // TRUE — the reduction is a walk, not a top-level shape test.
+      expect(
+        lintFlowPatterns(
+          purgeFlow('delete_record', { objectName: 'lead', filter: { $or: [{ $and: [] }] }, multi: true }),
+        ),
+      ).toHaveLength(1);
+      expect(
+        lintFlowPatterns(
+          purgeFlow('update_record', {
+            objectName: 'lead', fields: { status: 'stale' }, filter: { $not: { $or: [] } }, multi: true,
+          }),
+        ),
+      ).toHaveLength(1);
+    });
+
+    it('answers the same verdict the drivers execute', () => {
+      // The point of the shared predicate, asserted directly: this rule's
+      // "carries no condition" IS `reduceFilterVerdict(...) === 'true'`.
+      for (const filter of [{}, { $and: [] }, { $or: [{}] }, { $or: [{ $and: [] }] }]) {
+        expect(reduceFilterVerdict(filter), JSON.stringify(filter)).toBe('true');
+        expect(
+          lintFlowPatterns(purgeFlow('delete_record', { objectName: 'lead', filter, multi: true })),
+        ).toHaveLength(1);
+      }
+      for (const filter of [{ $or: [] }, { $not: {} }, { status: 'closed' }]) {
+        expect(reduceFilterVerdict(filter), JSON.stringify(filter)).not.toBe('true');
+        expect(
+          lintFlowPatterns(purgeFlow('delete_record', { objectName: 'lead', filter, multi: true })),
+        ).toHaveLength(0);
+      }
     });
   });
 

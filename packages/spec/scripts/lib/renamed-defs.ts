@@ -137,6 +137,30 @@ export const RENAMED_DEFS: Readonly<Record<string, string>> = {
   // always had), which no ratchet here measures and which the changeset states.
   // `shared/HttpMethodSubset` is a plain manifest addition.
   'ui/HttpMethod': 'ui/HttpMethodSubset',
+
+  // #6604 / ADR-0112 D9a — `ServiceStatus` was published by `./api` AND
+  // `./system` for two disjoint concepts: the discovery HEALTH ENUM
+  // (`api/discovery.zod.ts`, `z.enum(['operational', ...])`) and the kernel
+  // service STATE OBJECT (`system/core-services.zod.ts`, a `features`-bearing
+  // record). Maintainer ruling 2026-08-08 (Option B): the kernel side is
+  // renamed and `./api` keeps the published bare name untouched — the smallest
+  // blast radius, because the system side had no type alias yet, so the name
+  // had not petrified there.
+  //
+  // 6 keys carried (`enabled` / `features` / `name` / `provider` / `status` /
+  // `version`) — every one of them re-emitted byte-for-byte under the new def,
+  // which is the whole point of routing this through the table rather than the
+  // retirement kit: NOTHING left the author-facing contract. `api/ServiceStatus`
+  // is deliberately absent — it is still emitted, by the enum that always
+  // declared it, so the table would (correctly) reject it as a copy.
+  //
+  // This entry is what finally lets the `./system` side declare
+  // `KernelServiceStatus`: #4593's alias backfill had to skip this one name
+  // because declaring `ServiceStatus` on both entry points would have minted
+  // the #4411 dual-source trap `dual-source-exports.baseline.json` stays empty
+  // to prevent. The rename removes the collision at its source, so the baseline
+  // stays empty rather than gaining its first exception.
+  'system/ServiceStatus': 'system/KernelServiceStatus', // 6 keys carried
 };
 
 /**

@@ -784,15 +784,25 @@ describe('formatType — over-wide enums inside a shape summary are elided with 
     expect(rendered.length).toBe(174);
   });
 
-  it('elides through array-of-object nesting — the `api/*.mdx` `error` shape', () => {
-    // A direct object child is forced opaque, but an ARRAY of objects recurses,
-    // which is how a 261-member enum reached a cell two levels down.
-    const rendered = formatType(ERROR_RESPONSE, ctx());
-    expect(rendered).toBe(
-      "{ success: boolean; error?: { code: Enum<'VALIDATION_ERROR' | 'INVALID_FIELD' | " +
-        "'MISSING_REQUIRED_FIELD' | … +258 more>; message: string }[] }",
+  it('elides through a WRAPPER reached from a summary — array of enum', () => {
+    // REPLACED FIXTURE (#6374). This case used to run on `ERROR_RESPONSE`, whose
+    // enum sat two SHAPE levels down (`{ success; error?: { code: Enum<…> }[] }`)
+    // — a route the shape budget closes: that inner shape now prints `object`,
+    // so there is no enum there left to elide and the old assertion could only
+    // have been kept by asserting an emptiness. What #5340 actually claims is
+    // that the elision composes through the wrappers between a summary and a
+    // vocabulary, and that is still true and still worth pinning — the budget
+    // stops the renderer re-entering the OBJECT branch, it does not sever
+    // `inShapeSummary` from arrays and records. `ERROR_RESPONSE` keeps its job
+    // one block down, where it now pins the budget itself.
+    const rendered = formatType(
+      { type: 'object', properties: { codes: { type: 'array', items: { type: 'string', enum: ERROR_CODES } } } },
+      ctx(),
     );
+    expect(rendered).toContain('… +258 more');
     expect(3 + 258).toBe(ERROR_CODES.length);
+    // Still an array OF the elided vocabulary, not an elided array.
+    expect(rendered.endsWith('>[] }')).toBe(true);
     // Was 5000+ characters in one table cell.
     expect(rendered.length).toBeLessThan(150);
   });
@@ -1144,13 +1154,24 @@ describe('formatPropertyType — a property that IS a vocabulary relocates it (#
  * four reds being precisely the marker cases, and no other block moved.
  */
 describe('formatType — a union spells four variants and counts the rest (#6226)', () => {
+  /**
+   * REPLACED FIXTURE (#6569). The distinguishing key used to be the FIFTH one,
+   * i.e. behind `INLINE_KEY_LIMIT`, so every variant this helper built rendered
+   * to the same string. That was faithful to `App.navigation` and it is why
+   * `… +5 more` used to be reachable here — but once identical spellings
+   * collapse, such a fixture exercises the DEDUPE and not the cap, and every
+   * case below would be asserting the wrong rule. Moving the unique key inside
+   * the limit makes each variant render distinctly, so this block pins the
+   * ARITY CAP alone. The identical-spelling reality of `App.navigation` did not
+   * disappear with the fixture: it is pinned, faithfully, in the #6569 block.
+   */
   const variant = (id: string) => ({
     type: 'object',
-    properties: { id: { type: 'string' }, label: { type: 'string' }, icon: { type: 'string' }, order: { type: 'number' }, [id]: { type: 'string' } },
+    properties: { id: { type: 'string' }, label: { type: 'string' }, [id]: { type: 'string' }, order: { type: 'number' }, icon: { type: 'string' } },
     required: ['id', 'label'],
   });
 
-  it('renders the `App.navigation` cell as four variants plus a count (the filed instance)', () => {
+  it('renders a nine-variant array cell as four variants plus a count', () => {
     const rendered = formatType(
       { type: 'array', items: { anyOf: Array.from({ length: 9 }, (_, i) => variant(`k${i}`)) } },
       ctx(),
@@ -1185,12 +1206,24 @@ describe('formatType — a union spells four variants and counts the rest (#6226
   });
 
   it('does NOT elide five tiny variants — the marker would cost more than it saves', () => {
-    // `string | string | string | string | string` is 42 characters; capping it
+    // `string | number | boolean | null | 'x'` is 38 characters; capping it
     // would print 33 + a 12-character marker footprint and come out LONGER. The
     // pay-for-your-marker guard is shared with the enum elisions, so a count
     // never replaces a spelling that was already shorter than the count.
-    const rendered = formatType({ anyOf: Array.from({ length: 5 }, () => ({ type: 'string' })) }, ctx());
-    expect(rendered).toBe('string | string | string | string | string');
+    //
+    // REPLACED FIXTURE (#6569). This case used to build FIVE IDENTICAL
+    // `string` variants, and that spelling now collapses to `string | … +4
+    // more` — 24 characters saved, so the same guard that refused there accepts
+    // here. The flip is the contract change #6569 makes and is pinned as such
+    // in its own block; what this case is for is the guard's refusal on the
+    // CAP, so it needs five variants the cap can actually be asked about, i.e.
+    // five DISTINCT ones. Same arity, same guard, same verdict — the fixture
+    // just stopped answering a different question than its name.
+    const rendered = formatType(
+      { anyOf: [{ type: 'string' }, { type: 'number' }, { type: 'boolean' }, { type: 'null' }, { const: 'x' }] },
+      ctx(),
+    );
+    expect(rendered).toBe("string | number | boolean | null | 'x'");
     expect(rendered).not.toContain('more');
   });
 
@@ -1199,17 +1232,490 @@ describe('formatType — a union spells four variants and counts the rest (#6226
     expect(rendered).toContain('… +5 more');
   });
 
-  it('caps a union nested inside a shape summary too, alongside the enum elision', () => {
-    // The two elisions compose: `Page.slots`-shaped cells carry both.
+  it('counts a union nested inside a shape summary too — the `Manifest.navigationContributions` cell', () => {
+    // REPLACED EXPECTATION (#6569), on the fixture #6374 already replaced once.
+    // Below a summary all nine variants render `object`, so after #6569 it is
+    // the DEDUPE and not the cap that decides this cell: one spelling survives
+    // and the marker counts the other eight. Kept in this block, and kept
+    // pointing at the corpus cell it is named for, because the two rules share
+    // one marker and this is where a reader checks that they compose — but read
+    // it as the composition, not as the cap: no corpus cell is decided by the
+    // nested cap alone any more.
     const rendered = formatType(
       {
         type: 'object',
         properties: {
-          slot: { anyOf: Array.from({ length: 6 }, (_, i) => variant(`k${i}`)) },
+          app: { type: 'string' },
+          items: { type: 'array', items: { anyOf: Array.from({ length: 9 }, (_, i) => variant(`k${i}`)) } },
+        },
+        required: ['app', 'items'],
+      },
+      ctx(),
+    );
+    expect(rendered).toBe('{ app: string; items: (object | … +8 more)[] }');
+    // 1 spelled + 8 counted = the 9 the schema declares, below a summary exactly
+    // as above one: the budget changes what a variant SPELLS and the dedupe
+    // changes how many spellings are worth printing, but neither changes the
+    // arity the marker reports.
+    expect(1 + 8).toBe(9);
+  });
+});
+
+/**
+ * The real `ui/page.mdx` `Page.slots` node, as `gen:schema` emits it — seven
+ * slot keys, each a union of `PageComponent` or an array of it, and
+ * `PageComponent` inlined by value (not `$ref`d) at all fourteen positions.
+ *
+ * This is the corpus maximum #6374 was filed on: 1538 characters in one table
+ * cell, WITH `INLINE_ENUM_WIDTH_LIMIT` already firing eight times inside it.
+ */
+const PAGE_COMPONENT = {
+  type: 'object',
+  properties: {
+    type: {
+      anyOf: [
+        {
+          type: 'string',
+          enum: [
+            'page:header', 'page:footer', 'page:sidebar', 'page:tabs', 'page:accordion',
+            'page:card', 'page:section', 'record:details', 'record:highlights',
+            'record:related_list', 'record:activity', 'record:chatter', 'record:path',
+            'record:alert', 'record:quick_actions', 'record:reference_rail', 'record:history',
+            'app:launcher', 'nav:menu', 'nav:breadcrumb', 'global:search',
+            'global:notifications', 'user:profile', 'ai:chat_window', 'ai:suggestion',
+            'element:text', 'element:number', 'element:image', 'element:divider',
+            'element:button', 'element:filter', 'element:form', 'element:record_picker',
+            'element:text_input',
+          ],
+        },
+        { type: 'string' },
+      ],
+    },
+    id: { type: 'string' },
+    label: { type: 'string' },
+    properties: { type: 'object', additionalProperties: {} },
+    events: { type: 'object', additionalProperties: {} },
+  },
+  required: ['type'],
+  additionalProperties: false,
+};
+
+const PAGE_SLOTS = {
+  type: 'object',
+  properties: Object.fromEntries(
+    ['header', 'actions', 'alerts', 'highlights', 'details', 'tabs', 'discussion'].map(k => [
+      k,
+      { anyOf: [PAGE_COMPONENT, { type: 'array', items: PAGE_COMPONENT }] },
+    ]),
+  ),
+  additionalProperties: false,
+};
+
+/**
+ * Pin for the shape-depth budget — #6374.
+ *
+ * The renderer has always opened exactly ONE `{ … }` level per cell, but it
+ * spent that budget in the key loop, so only a DIRECT object child was held to
+ * it. An array element, a `Record` value and a union variant each re-entered
+ * the object branch with the budget out of scope, and cell width became keys ×
+ * variants × shape width, multiplied per level. `SHAPE_DEPTH_LIMIT` moves the
+ * same budget to the object branch itself, where all four descents pass.
+ *
+ * REVERSE VERIFICATION, predicted BEFORE running. Reverting = deleting the
+ * `depth >= SHAPE_DEPTH_LIMIT` guard and putting the
+ * `child?.type === 'object' && child.properties ? 'object' : …` ternary back.
+ * The direction is NOT uniformly red, and that asymmetry is the point of the
+ * block: this fix makes an existing rule uniform, so the cases pinning the
+ * limb that already existed MUST stay green under the revert or they are not
+ * pinning uniformity at all. Predicted:
+ *   RED   — every case whose `object` is reached through an array, a `Record`
+ *           value or a union variant (the three descents the budget adds), and
+ *           the no-`ctx` case, which reaches its `object` through a variant.
+ *   GREEN — 'a direct object child was ALREADY opaque' (that IS the ternary),
+ *           both 'a wrapper does not spend the budget' cases (one level either
+ *           way), and 'a keyless `Record` is not a shape' (the guard sits
+ *           inside the declared-keys branch and cannot fire there).
+ * Predicted split: 6 red, 4 green.
+ * ACTUAL: recorded in the PR body against this prediction.
+ */
+describe('formatType — one shape level, whichever way down (#6374)', () => {
+  it('renders the `Page.slots` cell without re-expanding `PageComponent` (the filed instance)', () => {
+    const rendered = formatType(PAGE_SLOTS, ctx());
+    expect(rendered).toBe(
+      '{ header?: object | object[]; actions?: object | object[]; alerts?: object | object[]; ' +
+        'highlights?: object | object[]; … }',
+    );
+    // 1538 → 122 characters. The vacuity guard for the whole block: with the
+    // budget reverted this node renders the same `PageComponent` summary eight
+    // times, so both of these are false by more than an order of magnitude.
+    expect(rendered.length).toBe(122);
+    expect(rendered).not.toContain('Enum<');
+  });
+
+  it('holds an ARRAY element to the budget — the `api/*.mdx` `error` shape', () => {
+    // `ERROR_RESPONSE`'s old job, kept as the array case: the 261-member
+    // vocabulary sat two shape levels down and reached the cell because
+    // `{ … }[]` re-entered the object branch. The array is not what is elided —
+    // the cell still says "an array of them".
+    expect(formatType(ERROR_RESPONSE, ctx())).toBe('{ success: boolean; error?: object[] }');
+  });
+
+  it('holds a `Record` VALUE to the budget — the `GetTranslationsResponse` shape', () => {
+    expect(
+      formatType(
+        {
+          type: 'object',
+          properties: {
+            objects: {
+              type: 'object',
+              additionalProperties: { type: 'object', properties: { label: { type: 'string' } } },
+            },
+          },
+        },
+        ctx(),
+      ),
+    ).toBe('{ objects?: Record<string, object> }');
+  });
+
+  it('holds a union VARIANT to the budget — the `Object.userActions` shape', () => {
+    expect(
+      formatType(
+        {
+          type: 'object',
+          properties: {
+            edit: {
+              anyOf: [
+                { type: 'boolean' },
+                { type: 'object', properties: { enabled: { type: 'boolean' } } },
+              ],
+            },
+          },
+        },
+        ctx(),
+      ),
+    ).toBe('{ edit?: boolean | object }');
+  });
+
+  it('holds a direct object child to the budget — the limb that was ALREADY opaque', () => {
+    // Unchanged by this commit and asserted here on purpose: it is the rule the
+    // other three cases were brought into line with, so it has to be read as
+    // one rule with them rather than as a fourth special case.
+    expect(
+      formatType(
+        {
+          type: 'object',
+          properties: { inner: { type: 'object', properties: { deep: { type: 'string' } } } },
+        },
+        ctx(),
+      ),
+    ).toBe('{ inner?: object }');
+  });
+
+  it('spends the budget on SHAPES, so a wrapper at the top of a cell still opens one level', () => {
+    // `{ … }[]` and `Record<string, { … }>` are one shape level, not two — the
+    // budget counts `{ … }`, and a wrapper is not one. Getting this wrong would
+    // collapse the whole `ConversationSession.messages` family to a bare
+    // `object[]` and take the corpus with it.
+    expect(
+      formatType({ type: 'array', items: { type: 'object', properties: { a: { type: 'string' } } } }, ctx()),
+    ).toBe('{ a?: string }[]');
+    expect(
+      formatType(
+        { type: 'object', additionalProperties: { type: 'object', properties: { a: { type: 'string' } } } },
+        ctx(),
+      ),
+    ).toBe('Record<string, { a?: string }>');
+  });
+
+  it('does not fire on a keyless `Record` below a summary — that is not a shape', () => {
+    // `properties?: Record<string, any>` is on `PageComponent` itself and on
+    // hundreds of other nodes. The guard sits inside the declared-keys branch,
+    // so an open object with NO declared keys renders as it always did.
+    expect(
+      formatType(
+        { type: 'object', properties: { properties: { type: 'object', additionalProperties: {} } } },
+        ctx(),
+      ),
+    ).toBe('{ properties?: Record<string, any> }');
+  });
+
+  it('applies without a `ctx`, because depth is recursion state and not page state', () => {
+    // The ternary this replaces needed no `ctx` either. A budget that lived in
+    // `TypeContext` would silently switch itself off for every caller that
+    // renders a type string without page context — the failure mode
+    // `inShapeSummary` documents one field up, and not one to copy.
+    expect(
+      formatType({
+        type: 'object',
+        properties: {
+          edit: { anyOf: [{ type: 'boolean' }, { type: 'object', properties: { a: { type: 'string' } } }] },
+        },
+      }),
+    ).toBe('{ edit?: boolean | object }');
+  });
+
+  it('leaves a cell that never opened a second shape level byte-identical', () => {
+    // The corpus check that the budget is not a rewrite: 173 of the 215 pages
+    // do not move at all. `BulkActionDef.params` (#5340's instance) and
+    // `App.navigation` (#6226's) are both one level deep and both unchanged.
+    expect(formatType(BULK_ACTION_PARAMS, ctx()).length).toBe(174);
+    expect(formatType(INDEX_SCHEMA, ctx())).toBe(
+      "{ name?: string; fields: string[]; unique?: boolean | 'global' | 'organization' }[]",
+    );
+    expect(formatType(BULK_ACTION_OPTIONS, ctx())).toBe(
+      '({ label: string; value: string | number | boolean } & Record<string, any>)[]',
+    );
+  });
+
+  it('spells an identical variant once and counts the rest — the arity survives the collapse', () => {
+    // RULED, and the pin turned over (#6569). #6374 shipped this cell printing
+    // `object` six times and pinned it that way ON PURPOSE, with the question
+    // filed for the maintainer rather than answered by the implementer: the
+    // repetition read as a bug but it carried the ARITY, and dropping arity
+    // would have re-decided #6226 from inside a depth-budget PR.
+    //
+    // The ruling keeps both halves. The spelling collapses (a second `object`
+    // tells a reader nothing the first did not) and the count is restored in
+    // #6226's own `… +N more` marker rather than in a new multiplicity
+    // notation, so the cell still says "choose one of six shapes" and the table
+    // still has exactly one way of saying "there is more". The budget above
+    // decides what a variant SPELLS; this decides how many spellings are worth
+    // printing; the marker reports the arity either way.
+    const rendered = formatType(
+      {
+        type: 'object',
+        properties: {
+          slot: {
+            anyOf: Array.from({ length: 6 }, (_, i) => ({
+              type: 'object',
+              properties: { id: { type: 'string' }, [`k${i}`]: { type: 'string' } },
+            })),
+          },
         },
       },
       ctx(),
     );
-    expect(rendered).toContain('… +2 more');
+    expect(rendered).toBe('{ slot?: object | … +5 more }');
+    // 1 spelled + 5 counted = the six the schema declares.
+    expect(1 + 5).toBe(6);
+  });
+});
+
+/**
+ * A cell spells each DISTINCT variant rendering once and counts the rest —
+ * #6569, ruled after #6374 shipped the repetition and pinned it as the open
+ * question.
+ *
+ * The condition is #6374's: with `SHAPE_DEPTH_LIMIT` in force, an all-object
+ * union below a summary prints `object` per variant, so 11 cells on 6 shipped
+ * reference pages rendered `object | object | object | object` and
+ * `kernel/manifest.mdx` spelled four of them before counting `… +5 more`
+ * identical ones. The ruling threads between the options the issue laid out:
+ * COLLAPSE the repeated spelling (it carries nothing the first copy did not),
+ * but SELF-REPORT the arity (#6226: an omission must state its size), in the
+ * marker vocabulary the table ALREADY has (#6226 again: a second omission style
+ * in one table is worse than the width it would fix).
+ *
+ * REVERSE VERIFICATION — predicted before running, by deleting the dedupe and
+ * restoring `if (rendered.length <= VARIANT_LIMIT) return full;` with the
+ * `rendered.slice(0, VARIANT_LIMIT)` call under it. The direction is NOT
+ * uniformly red, and the two greens are the point:
+ *   RED   — the four cases whose subject IS the collapse (the `App.navigation`
+ *           cell, the filed 4-object cell, the flipped #6226 scalar pin, the
+ *           arity invariant), plus 'four repeats is the first width that pays'
+ *           and the no-new-notation case. Plus, outside this block, exactly two
+ *           more: the `Manifest.navigationContributions` cell in the #6226 block
+ *           and the identical-variant pin in the #6374 block.
+ *   GREEN — 'refuses the marker while the repetition is narrower than the
+ *           count' (two and three repeats are under `VARIANT_LIMIT`, so the
+ *           baseline prints them verbatim for its own reason and the guard
+ *           prints them verbatim for this one — the rule's FLOOR does not move
+ *           in either direction, which is why it is asserted separately from
+ *           the width where it starts paying), and 'two spellings that differ'
+ *           (the dedupe is a no-op on distinct variants, so `Page.slots` must
+ *           be untouched by construction).
+ *   GREEN — and the whole #6226 cap block, all seven cases: after its fixture
+ *           was re-spelled to render DISTINCT variants, the dedupe is a no-op
+ *           on every one of them. A red there would mean the cap block is still
+ *           answering the dedupe's question instead of the cap's.
+ * Predicted split: 8 red / 2 green in this file's dedupe-sensitive cases, with
+ * the #6226 cap block green throughout.
+ *
+ * ACTUAL: **7 failed | 79 passed**, i.e. 7 red / 3 green — the seven reds are
+ * exactly the seven named above, and the #6226 cap block held green throughout
+ * as predicted (its one red is the composition case, which was predicted red).
+ * ONE MISS, recorded because it says something about the assertion rather than
+ * about the code: the ARITY INVARIANT case was predicted red and stayed GREEN.
+ * It cannot go red — `shown + hidden = arity` is satisfied by the BASELINE
+ * renderer too (the cap reports its own hidden count, and at arity 6 the guard
+ * refuses so all six are shown and nothing is hidden). It is a property both
+ * rules obey, so it pins that the ruling PRESERVED the invariant rather than
+ * discriminating that the dedupe exists. Kept deliberately, and re-classified
+ * here into the green set: it is the regression test for the one thing option
+ * B of the issue would have broken, and a case that would go red if a future
+ * change made the marker count spellings instead of variants.
+ */
+describe('formatType — identical variant spellings collapse into the count (#6569)', () => {
+  /** A nav item: five keys, so the fifth is elided and every item renders alike. */
+  const navItem = (i: number) => ({
+    type: 'object',
+    properties: { id: { type: 'string' }, label: { type: 'string' }, icon: { type: 'string' }, order: { type: 'number' }, [`k${i}`]: { type: 'string' } },
+    required: ['id', 'label'],
+  });
+  const SEPARATOR = {
+    type: 'object',
+    properties: { type: { const: 'separator' }, id: { type: 'string' }, order: { type: 'number' } },
+    required: ['type'],
+  };
+  /** Two keys, so it renders `object` below a summary and `{ … }` above one. */
+  const objectVariant = (i: number) => ({
+    type: 'object',
+    properties: { id: { type: 'string' }, [`k${i}`]: { type: 'string' } },
+  });
+  const NAV_ITEM_CELL = '{ id: string; label: string; icon?: string; order?: number; … }';
+
+  it('collapses a NON-adjacent repeat too — the real `App.navigation` variant order', () => {
+    // The corpus shape, measured: nine variants, of which eight render to one
+    // character-identical nav-item spelling and one is the separator — and the
+    // separator sits SEVENTH, between the run and the eighth copy. This is why
+    // equality is on the rendered string and not on adjacency: a `uniq`-style
+    // adjacent rule collapses the run, then meets the separator, then prints
+    // the nav-item shape A SECOND TIME — i.e. it leaves the repetition in the
+    // one cell #6226 was filed on. It is the only corpus site where the two
+    // rules differ (3 of 554 union renderings, this cell on its three pages).
+    const rendered = formatType(
+      {
+        type: 'array',
+        items: { anyOf: [...Array.from({ length: 7 }, (_, i) => navItem(i)), SEPARATOR, navItem(7)] },
+      },
+      ctx(),
+    );
+    expect(rendered).toBe(
+      `(${NAV_ITEM_CELL} | { type: 'separator'; id?: string; order?: number } | … +7 more)[]`,
+    );
+    // The load-bearing half: the spelling appears ONCE, not once per run.
+    expect(rendered.split(NAV_ITEM_CELL)).toHaveLength(2);
+    // 2 spelled + 7 counted = the nine the schema declares. 582 → 132 chars.
+    expect(2 + 7).toBe(9);
+    expect(rendered.length).toBe(132);
+  });
+
+  it('collapses the four-object cells the issue was filed on', () => {
+    // `ai/conversation.mdx`'s `ConversationSession.messages` — the `content`
+    // key is an array whose element is a union of four object variants, all
+    // four printing `object` because they sit below the summary's one shape
+    // level. Seven more cells (`ui/view.mdx`, `data/object.mdx`,
+    // `api/protocol.mdx`) carry the same union under `data?:`.
+    expect(
+      formatType(
+        {
+          type: 'object',
+          properties: {
+            role: { type: 'string' },
+            content: { type: 'array', items: { anyOf: Array.from({ length: 4 }, (_, i) => objectVariant(i)) } },
+          },
+          required: ['role', 'content'],
+        },
+        ctx(),
+      ),
+    ).toBe('{ role: string; content: (object | … +3 more)[] }');
+  });
+
+  it('flips #6226’s five-identical-scalar pin — the count now pays for itself', () => {
+    // A PIN THAT CHANGES IS A CONTRACT THAT CHANGES, so it is asserted here
+    // rather than quietly re-spelled. #6226 pinned
+    // `string | string | string | string | string` verbatim, and its stated
+    // reason was arithmetic, not principle: capping five variants prints four
+    // of them plus a 12-character marker footprint and comes out LONGER, so the
+    // shared guard refused. The dedupe changes the candidate, not the guard —
+    // ONE spelling plus `… +4 more` is 18 characters against 42, a 24-character
+    // saving — so the same guard, unmodified, now accepts. The reason the old
+    // pin gave for its verdict is exactly the reason the new one gives for the
+    // opposite verdict; that is what makes this a re-measurement rather than a
+    // weakening. The guard's refusal band is still occupied, one width down —
+    // see the next case.
+    expect(formatType({ anyOf: Array.from({ length: 5 }, () => ({ type: 'string' })) }, ctx())).toBe(
+      'string | … +4 more',
+    );
+  });
+
+  it('refuses the marker while the repetition is narrower than the count', () => {
+    // NO EXEMPTION for the pay-for-your-marker guard, and no special case to
+    // make the output prettier: a marker still has to earn its own footprint.
+    // Two `object`s would GROW by 3 characters and three save 6 against a
+    // 12-character footprint, so both keep every repeat. Deliberately green in
+    // both directions — see the block header.
+    expect(
+      formatType({ type: 'object', properties: { slot: { anyOf: [objectVariant(0), objectVariant(1)] } } }, ctx()),
+    ).toBe('{ slot?: object | object }');
+    expect(
+      formatType(
+        { type: 'object', properties: { slot: { anyOf: Array.from({ length: 3 }, (_, i) => objectVariant(i)) } } },
+        ctx(),
+      ),
+    ).toBe('{ slot?: object | object | object }');
+  });
+
+  it('starts paying at four repeats — the guard’s boundary, measured', () => {
+    // Four is the first repeat count where the count is cheaper than the
+    // spellings (33 → 18, a 15-character saving against a 12-character
+    // footprint), and it happens to be exactly where the corpus cells sit. The
+    // boundary is the guard's, not a threshold of this rule's own: nothing in
+    // the dedupe knows about the number four.
+    expect(
+      formatType(
+        { type: 'object', properties: { slot: { anyOf: Array.from({ length: 4 }, (_, i) => objectVariant(i)) } } },
+        ctx(),
+      ),
+    ).toBe('{ slot?: object | … +3 more }');
+  });
+
+  it('never collapses two spellings that DIFFER — `Page.slots` is untouched', () => {
+    // `PageComponent | PageComponent[]` renders `object | object[]`: two
+    // spellings, however alike the schemas behind them. The rule judges what a
+    // reader sees. Deliberately green in both directions — the dedupe must be a
+    // no-op here or it is deleting information rather than repetition.
+    expect(
+      formatType(
+        {
+          type: 'object',
+          properties: { header: { anyOf: [objectVariant(0), { type: 'array', items: objectVariant(0) }] } },
+        },
+        ctx(),
+      ),
+    ).toBe('{ header?: object | object[] }');
+  });
+
+  it('keeps “spellings shown + the count = the arity” true however a variant was withheld', () => {
+    // The one sentence a reader needs. The cap withholds variants because there
+    // are too many worth reading; the dedupe withholds them because the cell
+    // already prints their spelling; both report into the SAME marker, so the
+    // sum has to come out at the schema's arity in both cases and in the case
+    // where they compose.
+    for (const arity of [4, 5, 6, 9, 12]) {
+      const rendered = formatType(
+        {
+          type: 'object',
+          properties: { slot: { anyOf: Array.from({ length: arity }, (_, i) => objectVariant(i)) } },
+        },
+        ctx(),
+      );
+      const hidden = Number(/… \+(\d+) more/.exec(rendered)?.[1] ?? 0);
+      const shown = rendered.slice('{ slot?: '.length, -' }'.length).split(' | ').filter(v => !v.startsWith('…')).length;
+      expect(shown + hidden).toBe(arity);
+    }
+  });
+
+  it('reports the count in the EXISTING marker — no multiplicity notation is invented', () => {
+    // #6226's ruling turned on there being one way to say "there is more" in a
+    // table. `object ×4` (or `object (4)`, or a superscript) would be the
+    // fourth omission style on a page that already carries three uses of one.
+    const rendered = formatType(
+      { type: 'object', properties: { slot: { anyOf: Array.from({ length: 6 }, (_, i) => objectVariant(i)) } } },
+      ctx(),
+    );
+    expect(rendered).toMatch(/… \+\d+ more/);
+    expect(rendered).not.toMatch(/[×*]\s*\d/);
+    expect(rendered).not.toMatch(/\(\s*\d+\s*\)/);
   });
 });

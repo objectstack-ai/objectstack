@@ -192,148 +192,56 @@ export type MiddlewareConfig = z.input<typeof MiddlewareConfigSchema>;
 export type MiddlewareConfigParsed = z.infer<typeof MiddlewareConfigSchema>;
 
 // ==========================================
-// Server Lifecycle Events
+// Server Lifecycle Events / Capabilities / Status — RETIRED
 // ==========================================
 
-/**
- * Server Event Type Enum
- */
-export const ServerEventType = z.enum([
-  'starting',      // Server is starting
-  'started',       // Server has started and is listening
-  'stopping',      // Server is stopping
-  'stopped',       // Server has stopped
-  'request',       // Request received
-  'response',      // Response sent
-  'error',         // Error occurred
-]);
-
-export type ServerEventType = z.input<typeof ServerEventType>;
-
-/**
- * Server Event Schema
- * Events emitted by the HTTP server during lifecycle
- */
-export const ServerEventSchema = lazySchema(() => z.object({
-  /**
-   * Event type
-   */
-  type: ServerEventType.describe('Event type'),
-  
-  /**
-   * Timestamp
-   */
-  timestamp: z.string().datetime().describe('Event timestamp (ISO 8601)'),
-  
-  /**
-   * Event payload
-   */
-  data: z.record(z.string(), z.unknown()).optional().describe('Event-specific data'),
-}));
-
-export type ServerEvent = z.input<typeof ServerEventSchema>;
-
-// ==========================================
-// Server Capability Declaration
-// ==========================================
-
-/**
- * Server Capabilities Schema
- * Declares what features a server implementation supports
- */
-export const ServerCapabilitiesSchema = lazySchema(() => z.object({
-  /**
-   * Supported HTTP versions
-   */
-  httpVersions: z.array(z.enum(['1.0', '1.1', '2.0', '3.0'])).default(['1.1']).describe('Supported HTTP versions'),
-  
-  /**
-   * WebSocket support
-   */
-  websocket: z.boolean().default(false).describe('WebSocket support'),
-  
-  /**
-   * Server-Sent Events support
-   */
-  sse: z.boolean().default(false).describe('Server-Sent Events support'),
-  
-  /**
-   * HTTP/2 Server Push
-   */
-  serverPush: z.boolean().default(false).describe('HTTP/2 Server Push support'),
-  
-  /**
-   * Streaming support
-   */
-  streaming: z.boolean().default(true).describe('Response streaming support'),
-  
-  /**
-   * Middleware support
-   */
-  middleware: z.boolean().default(true).describe('Middleware chain support'),
-  
-  /**
-   * Route parameterization
-   */
-  routeParams: z.boolean().default(true).describe('URL parameter support (/users/:id)'),
-  
-  /**
-   * Built-in compression
-   */
-  compression: z.boolean().default(true).describe('Built-in compression support'),
-}));
-
-export type ServerCapabilities = z.input<typeof ServerCapabilitiesSchema>;
-/** Post-parse shape of {@link ServerCapabilities} — defaults applied, transforms run (ADR-0122). */
-export type ServerCapabilitiesParsed = z.infer<typeof ServerCapabilitiesSchema>;
-
-// ==========================================
-// Server Status & Metrics
-// ==========================================
-
-/**
- * Server Status Schema
- * Current operational status of the server
- */
-export const ServerStatusSchema = lazySchema(() => z.object({
-  /**
-   * Server state
-   */
-  state: z.enum(['stopped', 'starting', 'running', 'stopping', 'error']).describe('Current server state'),
-  
-  /**
-   * Uptime in milliseconds
-   */
-  uptime: z.number().int().optional().describe('Server uptime in milliseconds'),
-  
-  /**
-   * Server information
-   */
-  server: z.object({
-    port: z.number().int().describe('Listening port'),
-    host: z.string().describe('Bound host'),
-    url: z.string().optional().describe('Full server URL'),
-  }).optional(),
-  
-  /**
-   * Connection metrics
-   */
-  connections: z.object({
-    active: z.number().int().describe('Active connections'),
-    total: z.number().int().describe('Total connections handled'),
-  }).optional(),
-  
-  /**
-   * Request metrics
-   */
-  requests: z.object({
-    total: z.number().int().describe('Total requests processed'),
-    success: z.number().int().describe('Successful requests'),
-    errors: z.number().int().describe('Failed requests'),
-  }).optional(),
-}));
-
-export type ServerStatus = z.input<typeof ServerStatusSchema>;
+// `ServerEventType`, `ServerEventSchema` / `ServerEvent`,
+// `ServerCapabilitiesSchema` / `ServerCapabilities` /
+// `ServerCapabilitiesParsed`, and `ServerStatusSchema` / `ServerStatus` were
+// REMOVED per ADR-0049 enforce-or-remove (#5295, protocol 17) — the same route,
+// in the same file, for the same reason as `HttpServerConfigSchema` above
+// (#4938). Route 3 of the retirement playbook: nothing parsed them, so there is
+// no author to hand a `retiredKey()` tombstone to and no stored or authored
+// document for a D2 conversion to rewrite. `RETIRED_DEFS_BY_MAJOR[17]` plus the
+// D3 `SemanticMigration` `http-server-runtime-vocabulary-retired` ARE the
+// declaration.
+//
+// What each declared, and what actually decides it:
+//
+// | retired shape | declared | the live mechanism |
+// |---|---|---|
+// | `ServerEventType` / `ServerEvent` | a 7-value lifecycle/traffic event feed (`starting`, `started`, `stopping`, `stopped`, `request`, `response`, `error`) with a timestamp and a loose payload | nothing emitted it. Lifecycle is the transport plugin's own `start`/`stop` seam; per-request observability is `system/metrics.zod.ts` and `system/logging.zod.ts`, and `OS_SERVER_TIMING` for timings |
+// | `ServerCapabilities` | eight booleans a server implementation would *report* about itself (`websocket`, `sse`, `serverPush`, `streaming`, `middleware`, `routeParams`, `compression`, plus `httpVersions`) | nothing reported or read them. A transport plugin declares what it provides by implementing the kernel plugin contract — the seams it registers ARE the capability statement, and a second self-described record can only disagree with them |
+// | `ServerStatus` | a five-state machine plus uptime, bound host/port and connection/request counters | `/health` for liveness and the metrics surface for counters; no seam ever produced this shape |
+//
+// ## The measurement that made this a removal rather than a conformance surface
+//
+// #5295 was held, not queued, on one doubt: a response/capability vocabulary
+// can legitimately be a REFERENCE surface for host implementers (the CSS-variable
+// rebuttal), and "zero consumers in this repo" is weaker evidence for one of
+// those than for an authorable key. The card's precondition was therefore to
+// measure the reference reader itself. Re-run on `origin/main` immediately
+// before this removal:
+//
+//   1. `plugin-hono-server` — the one in-tree host implementation — neither
+//      implements nor reports any of the three. Its source names no capability
+//      record, no status shape and no lifecycle event union; what it registers
+//      is routes and middleware through the kernel plugin contract.
+//   2. Declaration-site grep (`^(export )?(const|type) <Name>`) puts every
+//      declaration in this file, and a quoted-name sweep across objectstack and
+//      objectui finds no reader outside this file: the only surviving mentions
+//      are three ADR-0122 isomorphism pins (deleted with the schemas) and the
+//      GENERATED reference pages, which document the export because it exists,
+//      not because anyone imports it.
+//   3. The control ran green in the same sweep: `MiddlewareConfig`, declared
+//      twelve lines above these, resolves to a live consumer
+//      (`packages/runtime/src/middleware.ts:4,59`) — so the sweep can see a
+//      reader in this file when there is one.
+//
+// A reference surface with no referent is the #3950 shape: an exported schema
+// with no consumer reads as a capability to whoever finds it. If host-implementer
+// conformance becomes a real requirement, it returns through the ENFORCE route
+// — an adapter contract with a checker behind it, vocabulary second.
 
 // ==========================================
 // Helper Functions

@@ -239,17 +239,63 @@ describe('MongoDB Filter Translator', () => {
   });
 
   describe('operator allowlist (P0-4)', () => {
-    it('rejects $where (server-side JS execution)', () => {
-      expect(() => translateFilter({ name: { $where: 'this.x == 1' } })).toThrow(/unsupported filter operator '\$where'/);
-    });
+    /**
+     * [#5702] These three used to match `/unsupported filter operator '\$x'/` —
+     * the bare `new Error` the `default:` arm threw, with no `code` and no
+     * `status`. The verdict has not changed (they were always refused); the
+     * ENVELOPE has, so the assertion moved with it and now pins the two fields
+     * that decide whether a client sees a 400-class mistake or a 500-shaped
+     * body. Matching on the message alone is what let the bare error live three
+     * lines from this file's own `INVALID_FILTER` helper for two releases.
+     */
+    const refusalOf = (filter: Parameters<typeof translateFilter>[0]) => {
+      try {
+        translateFilter(filter);
+      } catch (e) {
+        return e as Error & { code?: string; status?: number };
+      }
+      throw new Error('expected the translator to refuse this filter, but it returned');
+    };
 
-    it('rejects $function', () => {
-      expect(() => translateFilter({ name: { $function: { body: 'fn', args: [], lang: 'js' } } })).toThrow(/unsupported filter operator/);
-    });
+    for (const [label, filter, op] of [
+      ['$where (server-side JS execution)', { name: { $where: 'this.x == 1' } }, '$where'],
+      ['$function', { name: { $function: { body: 'fn', args: [], lang: 'js' } } }, '$function'],
+      ['an unknown $-operator rather than passing it through', { name: { $expr: 1 } }, '$expr'],
+    ] as const) {
+      it(`rejects ${label}, in the ADR-0112 envelope`, () => {
+        const err = refusalOf(filter);
+        expect(err.code).toBe('INVALID_FILTER');
+        expect(err.status).toBe(400);
+        expect(err.message).toContain(`Unsupported filter operator "${op}"`);
+        // The field is named — a refusal that says only "some operator" makes
+        // the author search a filter tree by hand.
+        expect(err.message).toContain('on field "name"');
+      });
+    }
 
-    it('rejects unknown $-operators rather than passing them through', () => {
-      expect(() => translateFilter({ name: { $expr: 1 } })).toThrow(/unsupported filter operator '\$expr'/);
-    });
+    /**
+     * [#5702] The retired spellings take the OTHER branch of that arm: they were
+     * refused here before this change too (mongo was the one backend already
+     * satisfying #4706's requirement 3), but with the generic sentence. An
+     * author who wrote `$regex` needs `$icontains`, not a list.
+     */
+    for (const [label, filter, mustMention] of [
+      ['$regex', { name: { $regex: 'ac.*' } }, ['$regex', '$icontains']],
+      ['$options on its own', { name: { $options: 'i' } }, ['$options', '$icontains']],
+      [
+        '$regex with $options — one mistake, one fix',
+        { name: { $regex: '^acme', $options: 'i' } },
+        ['$regex', '$options', '$icontains'],
+      ],
+    ] as const) {
+      it(`refuses the retired ${label}, naming the replacement`, () => {
+        const err = refusalOf(filter);
+        expect(err.code).toBe('INVALID_FILTER');
+        expect(err.status).toBe(400);
+        expect(err.message).toContain('RETIRED');
+        for (const mention of mustMention) expect(err.message).toContain(mention);
+      });
+    }
 
     it('still accepts every allowlisted field operator', () => {
       expect(() => translateFilter({ a: { $eq: 1 }, b: { $in: [1, 2] }, c: { $contains: 'x' }, d: { $exists: true } })).not.toThrow();

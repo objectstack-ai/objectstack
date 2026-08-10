@@ -2,7 +2,7 @@
 
 import { z } from 'zod';
 
-import { strictUnknownKeyError } from '../../shared/suggestions.zod';
+import { strictObject } from '../../shared/strict-object';
 import type { DriverDefinition } from '../datasource.zod';
 import {
   driverConfigJsonSchema,
@@ -167,51 +167,48 @@ export const MemoryPersistenceConfigSchema = lazySchema(() => z.union([
 // 2. Connection Configuration
 // ==========================================================================
 
-const MEMORY_CONFIG_KEYS = ['initialData', 'strictMode', 'persistence'] as const;
-
-/**
- * Two keys were declared here and read by nobody: `indexes` and
- * `maxRecordsPerObject`. `InMemoryDriverConfig` (`driver-memory`) has no field
- * for either — the driver indexes nothing (its reads are a linear Mingo scan)
- * and evicts nothing (there is no LRU) — so an author who bounded a store or
- * asked for an index got a clean parse and no behaviour. #4410's enforce step
- * is what surfaced them: giving `config` a gate means every key inside it now
- * claims to be honoured, so a key that is not gets removed rather than blessed.
- * Both are rejected with the prescription below (ADR-0049 enforce-or-remove).
- */
-const memoryConfigUnknownKeyError = strictUnknownKeyError({
-  surface: "this memory datasource's config",
-  knownKeys: MEMORY_CONFIG_KEYS,
-  aliases: {
-    data: 'initialData',
-    seed: 'initialData',
-    seeddata: 'initialData',
-    strict: 'strictMode',
-    persist: 'persistence',
-    persistent: 'persistence',
+export const MemoryConfigSchema = lazySchema(() => strictObject(
+  /**
+   * Two keys were declared here and read by nobody: `indexes` and
+   * `maxRecordsPerObject`. `InMemoryDriverConfig` (`driver-memory`) has no field
+   * for either — the driver indexes nothing (its reads are a linear Mingo scan)
+   * and evicts nothing (there is no LRU) — so an author who bounded a store or
+   * asked for an index got a clean parse and no behaviour. #4410's enforce step
+   * is what surfaced them: giving `config` a gate means every key inside it now
+   * claims to be honoured, so a key that is not gets removed rather than blessed.
+   * Both are rejected with the prescription below (ADR-0049 enforce-or-remove).
+   */
+  {
+    surface: "this memory datasource's config",
+    aliases: {
+      data: 'initialData',
+      seed: 'initialData',
+      seeddata: 'initialData',
+      strict: 'strictMode',
+      persist: 'persistence',
+      persistent: 'persistence',
+    },
+    guidance: {
+      indexes:
+        '`indexes` was declared but never read: the memory driver keeps no indexes — every read is '
+        + 'a linear Mingo scan — so it changed nothing. Drop it, or move the datasource to a '
+        + 'driver that indexes (`sqlite` / `postgres`), where object-level `indexes` apply.',
+      maxRecordsPerObject:
+        '`maxRecordsPerObject` was declared but never read: the memory driver evicts nothing, so a '
+        + 'bound here was never enforced and the store grew unbounded regardless. Drop it and bound '
+        + 'the data you load, or use a driver with real storage limits.',
+      filename:
+        '`filename` is a sqlite key. For a memory datasource that survives restarts set '
+        + "`persistence: 'file'` (the file is scoped per datasource); for a real file-backed SQL "
+        + "database set `driver: 'sqlite'`.",
+      schemaMode: SCHEMA_MODE_BELONGS_ON_DATASOURCE,
+      readOnly: READ_ONLY_BELONGS_ON_DATASOURCE,
+    },
+    history:
+      'Until #4410 nothing validated `datasource.config` at all — an unrecognised key was accepted '
+      + 'in silence and the store came up on the driver defaults instead.',
   },
-  guidance: {
-    indexes:
-      '`indexes` was declared but never read: the memory driver keeps no indexes — every read is '
-      + 'a linear Mingo scan — so it changed nothing. Drop it, or move the datasource to a '
-      + 'driver that indexes (`sqlite` / `postgres`), where object-level `indexes` apply.',
-    maxRecordsPerObject:
-      '`maxRecordsPerObject` was declared but never read: the memory driver evicts nothing, so a '
-      + 'bound here was never enforced and the store grew unbounded regardless. Drop it and bound '
-      + 'the data you load, or use a driver with real storage limits.',
-    filename:
-      '`filename` is a sqlite key. For a memory datasource that survives restarts set '
-      + "`persistence: 'file'` (the file is scoped per datasource); for a real file-backed SQL "
-      + "database set `driver: 'sqlite'`.",
-    schemaMode: SCHEMA_MODE_BELONGS_ON_DATASOURCE,
-    readOnly: READ_ONLY_BELONGS_ON_DATASOURCE,
-  },
-  history:
-    'Until #4410 nothing validated `datasource.config` at all — an unrecognised key was accepted '
-    + 'in silence and the store came up on the driver defaults instead.',
-});
-
-export const MemoryConfigSchema = lazySchema(() => z.object({
+  {
   /**
    * Initial data to pre-populate the in-memory store.
    * Maps object/table names to arrays of records.
@@ -291,7 +288,7 @@ export const MemoryConfigSchema = lazySchema(() => z.object({
    * so two pools that DO opt in still need it to avoid aliasing one file.
    */
   persistence: MemoryPersistenceConfigSchema.or(z.literal(false)).default(false).describe('Persistence configuration (opt-in; defaults to pure in-memory)'),
-}, { error: memoryConfigUnknownKeyError }).strict()
+})
   .describe('Memory Driver Connection Configuration'));
 
 /**

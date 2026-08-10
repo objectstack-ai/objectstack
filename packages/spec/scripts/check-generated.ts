@@ -91,6 +91,16 @@ const GATED: ReadonlyArray<{
   // that has cost real triage time (AGENTS.md records the trap). Flagged so the
   // failure explains itself instead of sending the next reader after a ghost.
   { check: 'check:api-surface', gen: 'gen:api-surface', artifact: 'api-surface/', readsDist: true },
+  // The #4796 declaration-origin baseline. Reads `src/`, NOT the dist — so it
+  // carries no `readsDist` caveat and needs no build. It sits next to
+  // `check:api-surface` because they answer adjacent questions about the same
+  // surface: that one records WHICH NAMES each entry point exports, this one
+  // records WHICH DECLARATION each of those names resolves to. Seventeen
+  // export-surface pin tests read it instead of each building their own
+  // `ts.createProgram` inside a vitest case (~55s of compilation per CI lap,
+  // and a non-deterministic timeout that ejected unrelated PRs from the merge
+  // queue), so its freshness is what those pins mean.
+  { check: 'check:export-origins', gen: 'gen:export-origins', artifact: 'export-origins/' },
   {
     check: 'check:docs',
     gen: 'gen:docs',
@@ -144,6 +154,17 @@ const NO_GENERATOR: ReadonlyArray<{ check: string; why: string }> = [
   { check: 'check:liveness', why: 'audits whether declared spec properties have a reader — no artifact' },
   { check: 'check:empty-state', why: 'audits empty-state coverage — no artifact' },
   { check: 'check:skill-examples', why: 'validates skill examples parse — no artifact' },
+  // #7319. Reads `src/` and the shipped template trees and writes nothing: a
+  // failure is either a manifest to fix or a schema to fix, never a `gen:` to
+  // run. It audits the inverse direction from everything in GATED — those
+  // compare an artifact this package GENERATES against its source, this one
+  // compares a file another package SHIPS against the schema that claims to
+  // describe it. Two drifts had already accumulated in that blind spot (#6861's
+  // stripped `namespace`, #7319's required-but-absent `manifestId`).
+  {
+    check: 'check:template-manifests',
+    why: 'parses every shipped objectstack.manifest.json against TemplateManifestSchema — no artifact',
+  },
   // Landed in #4177 while this ledger landed in #4183 — neither PR could see the
   // other, so `main` carried an unclassified script and this reconciliation was
   // failing on `main` itself. The doc it checks against is hand-written, so there
@@ -238,13 +259,29 @@ const UNGATED_GENERATORS: ReadonlyArray<{ gen: string; why: string }> = [
   // #5744 that names a reconciliation with no second party: the document
   // carries no route section at all — built-in routes are produced at serve
   // time by the package that mounts them (#5588 ruling C, #5078, ADR-0076), so
-  // there is nothing here to compare against a route table. What IS still
-  // ungated is staleness against `src/api`: nothing fails when a contract
-  // schema changes and the artifact is not regenerated. Coherence is covered
-  // (the generator self-checks before writing, #5168) — currency is not.
+  // there is nothing here to compare against a route table. Coherence is
+  // covered (the generator self-checks before writing, #5168); currency this
+  // aggregate still does not verify. #5757 measured what that omission costs
+  // and the answer was nothing — staleness here is unreachable, not merely
+  // unpunished — so "add a gate" was ruled not planned. The `why` carries the
+  // measurement so the next reader does not re-file it.
   {
     gen: 'gen:openapi',
-    why: 'the OpenAPI document is generated but nothing compares its components.schemas against src/api — a stale artifact fails nothing (it IS self-checked for coherence at write time, #5168, and since #5744 it describes no routes to reconcile)',
+    why:
+      'nothing here compares the document\'s components.schemas against src/api — but per the #5757 ' +
+      'measurement a stale artifact is not merely unpunished, it is unreachable on every canonical path. ' +
+      'Staleness cannot outlive one build of this package: `json-schema/**` is a turbo build OUTPUT and is ' +
+      'gitignored, so it is never a task input; `build` declares no `inputs`, so it hashes every git-tracked ' +
+      'file in the package; and everything this generator reads sits in there (the `src/**` closure reached ' +
+      'through `src/api`, these scripts, the manifest). That input surface is a SUBSET of the build task\'s, ' +
+      'so any edit able to make the artifact stale is exactly the edit that busts the cache — and `build` ' +
+      'runs the generator unconditionally (`gen:schema && gen:openapi && tsup`). Deleting the artifact does ' +
+      'not even bust the cache: the next build restores it byte-identically (measured, FULL TURBO). What a ' +
+      'stale copy could mislead is bounded too — the served document holds 0 $refs into components.schemas, ' +
+      'leaving the nine contract schemas an unreferenced island (#6797). It IS self-checked for coherence at ' +
+      'write time (#5168), and since #5744 it describes no routes to reconcile. Gating it would also be ' +
+      'dormant: CI runs this aggregate only as `--reconcile-only` (lint.yml), and a full run sits after ' +
+      '`pnpm build` — green by construction, the #4177/#4232 class.',
   },
   { gen: 'gen:sbom', why: 'the SBOM is a release artifact, regenerated at publish time rather than checked in' },
 ];

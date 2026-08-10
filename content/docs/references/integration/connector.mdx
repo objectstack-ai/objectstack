@@ -11,10 +11,12 @@ Defines the standard connector specification for external system integration.
 Connectors enable ObjectStack to sync data with SaaS apps, databases, file storage,
 and message queues through a unified protocol.
 
-**Positioning in the sync/integration layering** (L1 "Simple Sync" was
-retired in #4738 — narrative-only, zero consumers; see
-`packages/spec/docs/SYNC_ARCHITECTURE.md`):
-- **ETL Pipeline** ([automation/etl.zod.ts](/docs/references/automation/etl)) - Data engineers - Aggregate 10 sources to warehouse
+**Positioning in the sync/integration layering** — this file is now the ONLY
+layer. Both layers above it were retired under ADR-0049 for the same measured
+reason, that no engine ever executed them: L1 "Simple Sync"
+(`automation/sync.zod.ts`) in #4738, and L2 "ETL Pipeline"
+(`automation/etl.zod.ts`) in #6414. See
+`packages/spec/docs/SYNC_ARCHITECTURE.md`:
 - **Enterprise Connector** (THIS FILE) - System integrators - Full SAP integration; connector-attached sync via `syncConfig`
 
 **SCOPE: Most comprehensive integration layer.**
@@ -54,7 +56,8 @@ surface that runs it:** the import mapping's own `mapping.fieldMapping[].transfo
 (`data/mapping.zod.ts` — a string enum,
 `none`/`constant`/`map`/`split`/`join`/`lookup`, with its settings in `params`),
 applied row by row by the REST import path — or an ETL transformation step
-(L2 above). Already authored the retired key? `os migrate meta --from 16` rewrites it.
+(L2 above). Already authored the retired key? `os migrate meta --from 16` rewrites
+existing sources automatically — the key itself is removed.
 
 ## Runtime contract — descriptor vs. registered connector (#2612)
 
@@ -95,9 +98,11 @@ Authentication is now imported from the canonical `auth/config.zod.ts`.
 - Microsoft Dynamics 365 connector
 
 **When to downgrade:**
-- Data transformation only → Use [ETL Pipeline](/docs/references/automation/etl)
-
-See also: [../automation/etl.zod.ts](/docs/references/automation/etl) for the ETL Pipeline layer (data engineering)
+- Per-field value conversion on import only → the import mapping's own
+  `transform` (`data/mapping.zod.ts`), which the REST import path executes
+  row by row. (This used to point at `automation/etl.zod.ts`; L2 was retired
+  at #6414 for having no executor, so the pointer would have been a signpost
+  landing nowhere — the same defect class this header names below.)
 
 ## There is no "Trigger Registry" alternative
 
@@ -110,9 +115,11 @@ platform's authority, at a dead end (#4499; removed alongside the #4480
 per-provider template cluster). The same defect class as the
 `capabilities.readOnly` prescription #4487 corrected: a signpost must land
 somewhere enforced. Lightweight cases are served HERE — a connector instance
-with simple `auth` — or by `automation/etl.zod.ts` for transformation
-pipelines. (The automation-side L1 "Simple Sync" file was itself retired as
-a dead end of the same class in #4738.)
+with simple `auth`. (Both automation-side layers were themselves retired as
+dead ends of the same class: L1 "Simple Sync" in #4738, L2 `etl.zod.ts` in
+#6414. This paragraph named L2 as the transformation destination until the
+second retirement; a signpost that must land somewhere enforced cannot make
+an exception for itself.)
 
 <Callout type="info">
 **Source:** `packages/spec/src/integration/connector.zod.ts`
@@ -122,7 +129,7 @@ a dead end of the same class in #4738.)
 
 ```typescript
 import { CircuitBreakerConfigSchema, ConnectorSchema, ConnectorActionSchema, ConnectorActionEffectSchema, ConnectorConflictResolutionSchema, ConnectorErrorCategorySchema, ConnectorFieldMappingSchema, ConnectorHealthSchema, ConnectorInstanceAPIKeyAuthSchema, ConnectorInstanceAuthSchema, ConnectorInstanceBasicAuthSchema, ConnectorInstanceBearerAuthSchema, ConnectorInstanceNoAuthSchema, ConnectorRetryStrategySchema, ConnectorStatusSchema, ConnectorTriggerSchema, ConnectorTypeSchema, DataSyncConfigSchema, DeclarativeConnectorEntrySchema, ErrorMappingConfigSchema, ErrorMappingRuleSchema, HealthCheckConfigSchema, RetryConfigSchema, SyncStrategySchema, WebhookConfigSchema, WebhookEventSchema, WebhookSignatureAlgorithmSchema } from '@objectstack/spec/integration';
-import type { CircuitBreakerConfig, Connector, ConnectorActionEffect, ConnectorConflictResolution, ConnectorErrorCategory, ConnectorFieldMapping, ConnectorHealth, ConnectorInstanceAuth, ConnectorRetryStrategy, ConnectorStatus, ConnectorType, DataSyncConfig, DeclarativeConnectorEntry, ErrorMappingConfig, ErrorMappingRule, HealthCheckConfig, RetryConfig, SyncStrategy, WebhookConfig, WebhookEvent, WebhookSignatureAlgorithm } from '@objectstack/spec/integration';
+import type { CircuitBreakerConfig, Connector, ConnectorAction, ConnectorActionEffect, ConnectorConflictResolution, ConnectorErrorCategory, ConnectorFieldMapping, ConnectorHealth, ConnectorInstanceAPIKeyAuth, ConnectorInstanceAuth, ConnectorInstanceBasicAuth, ConnectorInstanceBearerAuth, ConnectorInstanceNoAuth, ConnectorRetryStrategy, ConnectorStatus, ConnectorTrigger, ConnectorType, DataSyncConfig, DeclarativeConnectorEntry, ErrorMappingConfig, ErrorMappingRule, HealthCheckConfig, RetryConfig, SyncStrategy, WebhookConfig, WebhookEvent, WebhookSignatureAlgorithm } from '@objectstack/spec/integration';
 
 // Validate data
 const result = CircuitBreakerConfigSchema.parse(data);
@@ -165,18 +172,25 @@ Circuit breaker configuration
 | **auth** | `{ type: 'none' } \| { type: 'bearer'; credentialRef: string } \| { type: 'api-key'; credentialRef: string; headerName?: string; paramName?: string } \| { type: 'basic'; username: string; credentialRef: string }` | optional | Declarative instance auth — references credentials via `credentialRef` (resolved at boot), never inline secrets. Requires `provider` (ADR-0097). |
 | **actions** | `{ key: string; label: string; description?: string; inputSchema?: Record<string, any>; … }[]` | optional |  |
 | **triggers** | `{ key: string; label: string; description?: string; type: Enum<'polling' \| 'webhook'>; … }[]` | optional | Trigger definitions (not yet enforced — never read at registration; see #3197) |
-| **syncConfig** | `{ strategy?: Enum<'full' \| 'incremental' \| 'upsert' \| 'append_only'>; direction?: Enum<'import' \| 'export' \| 'bidirectional'>; schedule?: string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; realtimeSync?: boolean; … }` | optional | Data sync configuration |
+| **syncConfig** | `{ strategy?: Enum<'full' \| 'incremental' \| 'upsert' \| 'append_only'>; direction?: Enum<'import' \| 'export' \| 'bidirectional'>; schedule?: string \| object; realtimeSync?: boolean; … }` | optional | Data sync configuration |
 | **fieldMappings** | `{ source: string; target: string; defaultValue?: any; dataType?: Enum<'string' \| 'number' \| 'boolean' \| 'date' \| 'datetime' \| 'json' \| 'array'>; … }[]` | optional | Field mapping rules |
 | **webhooks** | `{ name: string; label?: string; object?: string; triggers?: Enum<'create' \| 'update' \| 'delete' \| 'bulk_update' \| 'bulk_delete'>[]; … }[]` | optional | Webhook configurations (not yet enforced — never read at registration; see #3197) |
-| **rateLimitConfig** | `never` | optional | [REMOVED] `connector.rateLimitConfig` was removed in @objectstack/spec 17.0.0 (#4911, ADR-0049 D2) — the entire shape is gone, not just this key: `ConnectorRateLimitConfig` and its `RateLimitStrategy` enum were removed with it, because no outbound rate-limiting engine ever existed. The platform's only token bucket (runtime `security/rate-limit.ts`) throttles INBOUND requests to us; nothing throttled the calls a connector makes out, so every knob here was inert while reading like a configured cap. Delete the key. Do NOT substitute `shared` `RateLimitConfig` — that is the inbound limiter and would cap the wrong direction; until an outbound throttle exists, rate-limit at the connector provider or upstream gateway. Run `os migrate meta --from 16` to rewrite it automatically. |
+| **rateLimitConfig** | `never` | optional | [REMOVED] `connector.rateLimitConfig` was removed in @objectstack/spec 17.0.0 (#4911, ADR-0049 D2) — the entire shape is gone, not just this key: `ConnectorRateLimitConfig` and its `RateLimitStrategy` enum were removed with it, because no outbound rate-limiting engine ever existed. The platform's only token bucket (runtime `security/rate-limit.ts`) throttles INBOUND requests to us; nothing throttled the calls a connector makes out, so every knob here was inert while reading like a configured cap. Delete the key. Do NOT substitute `shared` `RateLimitConfig` — that is the inbound limiter and would cap the wrong direction; until an outbound throttle exists, rate-limit at the connector provider or upstream gateway. Run `os migrate meta --from 16` to rewrite existing sources automatically. |
 | **retryConfig** | `{ strategy?: Enum<'exponential_backoff' \| 'linear_backoff' \| 'fixed_delay' \| 'no_retry'>; maxAttempts?: number; initialDelayMs?: number; maxDelayMs?: number; … }` | optional | Retry configuration |
 | **connectionTimeoutMs** | `number` | optional | Connection timeout in ms |
 | **requestTimeoutMs** | `number` | optional | Request timeout in ms |
 | **status** | `Enum<'active' \| 'inactive' \| 'error' \| 'configuring'>` | optional | Connector status |
 | **enabled** | `boolean` | optional | Enable connector. On declarative stack entries, false marks a deliberate catalog-only descriptor (#2612). |
-| **errorMapping** | `{ rules: { sourceCode: string \| number; sourceMessage?: string; targetCode: string; targetCategory: Enum<'validation' \| 'authorization' \| 'not_found' \| 'conflict' \| 'rate_limit' \| … +3 more>; … }[]; defaultCategory?: Enum<'validation' \| 'authorization' \| 'not_found' \| 'conflict' \| 'rate_limit' \| … +3 more>; unmappedBehavior: Enum<'passthrough' \| 'generic_error' \| 'throw'>; logUnmapped?: boolean }` | optional | Error mapping configuration |
+| **errorMapping** | `{ rules: object[]; defaultCategory?: Enum<'validation' \| 'authorization' \| 'not_found' \| 'conflict' \| 'rate_limit' \| … +3 more>; unmappedBehavior: Enum<'passthrough' \| 'generic_error' \| 'throw'>; logUnmapped?: boolean }` | optional | Error mapping configuration |
 | **health** | `{ healthCheck?: object; circuitBreaker?: object }` | optional | Health and resilience configuration |
 | **metadata** | `Record<string, any>` | optional | Custom connector metadata |
+| **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
+| **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
+| **_lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Layer that set _lock (artifact \| package \| env-forced). |
+| **_provenance** | `Enum<'package' \| 'org' \| 'env-forced'>` | optional | Origin of the item (package \| org \| env-forced). |
+| **_packageId** | `string` | optional | Owning package machine id. |
+| **_packageVersion** | `string` | optional | Owning package version. |
+| **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
 
 
 ---
@@ -249,7 +263,7 @@ Standard error category
 | :--- | :--- | :--- | :--- |
 | **source** | `string` | ✅ | Source field name |
 | **target** | `string` | ✅ | Target field name |
-| **transform** | `never` | optional | [REMOVED] `FieldMapping.transform` — authored as `connector.fieldMappings[].transform` and `externalLookup.fieldMappings[].transform` — was removed in @objectstack/spec 17.0.0 (#5552, ADR-0049), and the whole `FieldMappingTransform` union went with it (`constant` / `cast` / `lookup` / `javascript` / `map`) — no runtime ever executed any of the five, and the `javascript` member advertised `dialect: "js"`, a dialect retired in #3278. Delete the key. The transform pipeline that IS enforced is the import mapping's: `mapping.fieldMapping[].transform` (a string enum — `none`/`constant`/`map`/`split`/`join`/`lookup` — with its settings in `params`), applied by the REST import path, which rejects `javascript` with a 400 rather than pretending to run it. Run `os migrate meta --from 16` to rewrite it automatically. |
+| **transform** | `never` | optional | [REMOVED] `FieldMapping.transform` — authored as `connector.fieldMappings[].transform` and `externalLookup.fieldMappings[].transform` — was removed in @objectstack/spec 17.0.0 (#5552, ADR-0049), and the whole `FieldMappingTransform` union went with it (`constant` / `cast` / `lookup` / `javascript` / `map`) — no runtime ever executed any of the five, and the `javascript` member advertised `dialect: "js"`, a dialect retired in #3278. Delete the key. The transform pipeline that IS enforced is the import mapping's: `mapping.fieldMapping[].transform` (a string enum — `none`/`constant`/`map`/`split`/`join`/`lookup` — with its settings in `params`), applied by the REST import path, which rejects `javascript` with a 400 rather than pretending to run it. Run `os migrate meta --from 16` to rewrite existing sources automatically. |
 | **defaultValue** | `any` | optional | Default if source is null/undefined |
 | **dataType** | `Enum<'string' \| 'number' \| 'boolean' \| 'date' \| 'datetime' \| 'json' \| 'array'>` | optional | Target data type |
 | **required** | `boolean` | ✅ | Field is required |
@@ -480,18 +494,25 @@ Connector type
 | **auth** | `{ type: 'none' } \| { type: 'bearer'; credentialRef: string } \| { type: 'api-key'; credentialRef: string; headerName?: string; paramName?: string } \| { type: 'basic'; username: string; credentialRef: string }` | optional | Declarative instance auth — references credentials via `credentialRef` (resolved at boot), never inline secrets. Requires `provider` (ADR-0097). |
 | **actions** | `{ key: string; label: string; description?: string; inputSchema?: Record<string, any>; … }[]` | optional |  |
 | **triggers** | `{ key: string; label: string; description?: string; type: Enum<'polling' \| 'webhook'>; … }[]` | optional | Trigger definitions (not yet enforced — never read at registration; see #3197) |
-| **syncConfig** | `{ strategy?: Enum<'full' \| 'incremental' \| 'upsert' \| 'append_only'>; direction?: Enum<'import' \| 'export' \| 'bidirectional'>; schedule?: string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; realtimeSync?: boolean; … }` | optional | Data sync configuration |
+| **syncConfig** | `{ strategy?: Enum<'full' \| 'incremental' \| 'upsert' \| 'append_only'>; direction?: Enum<'import' \| 'export' \| 'bidirectional'>; schedule?: string \| object; realtimeSync?: boolean; … }` | optional | Data sync configuration |
 | **fieldMappings** | `{ source: string; target: string; defaultValue?: any; dataType?: Enum<'string' \| 'number' \| 'boolean' \| 'date' \| 'datetime' \| 'json' \| 'array'>; … }[]` | optional | Field mapping rules |
 | **webhooks** | `{ name: string; label?: string; object?: string; triggers?: Enum<'create' \| 'update' \| 'delete' \| 'bulk_update' \| 'bulk_delete'>[]; … }[]` | optional | Webhook configurations (not yet enforced — never read at registration; see #3197) |
-| **rateLimitConfig** | `never` | optional | [REMOVED] `connector.rateLimitConfig` was removed in @objectstack/spec 17.0.0 (#4911, ADR-0049 D2) — the entire shape is gone, not just this key: `ConnectorRateLimitConfig` and its `RateLimitStrategy` enum were removed with it, because no outbound rate-limiting engine ever existed. The platform's only token bucket (runtime `security/rate-limit.ts`) throttles INBOUND requests to us; nothing throttled the calls a connector makes out, so every knob here was inert while reading like a configured cap. Delete the key. Do NOT substitute `shared` `RateLimitConfig` — that is the inbound limiter and would cap the wrong direction; until an outbound throttle exists, rate-limit at the connector provider or upstream gateway. Run `os migrate meta --from 16` to rewrite it automatically. |
+| **rateLimitConfig** | `never` | optional | [REMOVED] `connector.rateLimitConfig` was removed in @objectstack/spec 17.0.0 (#4911, ADR-0049 D2) — the entire shape is gone, not just this key: `ConnectorRateLimitConfig` and its `RateLimitStrategy` enum were removed with it, because no outbound rate-limiting engine ever existed. The platform's only token bucket (runtime `security/rate-limit.ts`) throttles INBOUND requests to us; nothing throttled the calls a connector makes out, so every knob here was inert while reading like a configured cap. Delete the key. Do NOT substitute `shared` `RateLimitConfig` — that is the inbound limiter and would cap the wrong direction; until an outbound throttle exists, rate-limit at the connector provider or upstream gateway. Run `os migrate meta --from 16` to rewrite existing sources automatically. |
 | **retryConfig** | `{ strategy?: Enum<'exponential_backoff' \| 'linear_backoff' \| 'fixed_delay' \| 'no_retry'>; maxAttempts?: number; initialDelayMs?: number; maxDelayMs?: number; … }` | optional | Retry configuration |
 | **connectionTimeoutMs** | `number` | optional | Connection timeout in ms |
 | **requestTimeoutMs** | `number` | optional | Request timeout in ms |
 | **status** | `Enum<'active' \| 'inactive' \| 'error' \| 'configuring'>` | optional | Connector status |
 | **enabled** | `boolean` | optional | Enable connector. On declarative stack entries, false marks a deliberate catalog-only descriptor (#2612). |
-| **errorMapping** | `{ rules: { sourceCode: string \| number; sourceMessage?: string; targetCode: string; targetCategory: Enum<'validation' \| 'authorization' \| 'not_found' \| 'conflict' \| 'rate_limit' \| … +3 more>; … }[]; defaultCategory?: Enum<'validation' \| 'authorization' \| 'not_found' \| 'conflict' \| 'rate_limit' \| … +3 more>; unmappedBehavior: Enum<'passthrough' \| 'generic_error' \| 'throw'>; logUnmapped?: boolean }` | optional | Error mapping configuration |
+| **errorMapping** | `{ rules: object[]; defaultCategory?: Enum<'validation' \| 'authorization' \| 'not_found' \| 'conflict' \| 'rate_limit' \| … +3 more>; unmappedBehavior: Enum<'passthrough' \| 'generic_error' \| 'throw'>; logUnmapped?: boolean }` | optional | Error mapping configuration |
 | **health** | `{ healthCheck?: object; circuitBreaker?: object }` | optional | Health and resilience configuration |
 | **metadata** | `Record<string, any>` | optional | Custom connector metadata |
+| **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
+| **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
+| **_lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Layer that set _lock (artifact \| package \| env-forced). |
+| **_provenance** | `Enum<'package' \| 'org' \| 'env-forced'>` | optional | Origin of the item (package \| org \| env-forced). |
+| **_packageId** | `string` | optional | Owning package machine id. |
+| **_packageVersion** | `string` | optional | Owning package version. |
+| **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
 
 
 ---

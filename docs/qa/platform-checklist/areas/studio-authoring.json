@@ -1,0 +1,1029 @@
+{
+  "$comment": "Standing platform test checklist — area ledger. Hand-edited, append-only; validated by scripts/check-platform-checklist.mjs (pnpm check:platform-checklist). Authoring rules: docs/qa/platform-checklist/README.md · execution protocol: RUNNER.md.",
+  "area": "studio-authoring",
+  "title": "Studio authoring — the admin/maker loop: packages, objects, views, record pages, draft→publish",
+  "items": [
+    {
+      "id": "studio-authoring.first-run-loop",
+      "title": "The first-run authoring loop closes: package → object → record → app → publish → end-user, zero code, zero restarts",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P0",
+      "surface": "mixed",
+      "personas": ["admin (seeded admin@objectos.ai)", "end user (same account driving the published app)"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a fresh boot of the showcase example — objectstack dev --ui --seed-admin -p <port> -d file:/tmp/<run>/data.db (the audit's environment: vendored console matching .objectui-sha, seeded admin admin@objectos.ai/admin123)"
+        ],
+        "knownGaps": [
+          "publish fires in ONE click with no confirmation and the Changes panel lists items without field-level diff (audit finding 3, ADR-0016 §3.6 step 4 open) — do NOT assert a review/confirm step exists; its absence is a logged UX gap, not a run failure",
+          "a new app scaffolds ZERO nav items (audit finding 6) — the manual Interfaces → Add nav item → bind-to-object wiring in the steps IS the current contract; do not expect the just-built object to be pre-wired",
+          "mixed-language Studio chrome (audit finding 4) is asserted by i18n.studio-follows-app-locale — locale consistency is that item's business, not this one's"
+        ]
+      },
+      "steps": [
+        "boot the showcase example (objectstack dev --ui --seed-admin -p <port> -d file:/tmp/<run>/data.db), sign in as admin@objectos.ai/admin123, and note the boot timestamp in the server log (the zero-restart clause reads it later)",
+        "Home → 'Build an app' → Studio landing → create a NEW writable package (维修中心 / com.example.repairs) via the new-package wizard",
+        "Data pillar → new object 'Repair Ticket' (the identifier auto-suggests repair_ticket from the display name) → add a picklist field Status with 3 values → Save draft",
+        "open the Changes panel and Publish ('Published all drafts in this package (one atomic release)')",
+        "create a record in the runtime-faithful Records grid with a Status value chosen",
+        "Create app 'Repair Center' (identifier auto-suggested) → Interfaces pillar → add a nav item bound to repair_ticket → Publish",
+        "return Home: the launcher must show Repair Center; open it and drive the end-user list",
+        "verify server truth after each publish: GET /api/v1/meta/object/repair_ticket, GET /api/v1/data/repair_ticket, GET /api/v1/meta/app?id=<new app id>",
+        "negative probe: on the READ-ONLY com.example.showcase package, attempt 'New object' (or 'Add field') and drive the save through to the server; capture the server response"
+      ],
+      "acceptance": [
+        {
+          "clause": "package create round-trips and the package switcher lists the new writable package without a page reload",
+          "oracle": "network",
+          "verify": "the create POST succeeds and the switcher shows the package in the same session (pinned by objectui e2e/live/studio-object-designer.spec.ts test F1)",
+          "evidence": "the create request/response + switcher screenshot"
+        },
+        {
+          "clause": "the published object is server-real: the meta read returns repair_ticket with the authored picklist field carrying exactly the 3 authored options — never ticked off the designer repaint",
+          "oracle": "api",
+          "verify": "GET /api/v1/meta/object/repair_ticket body contains the Status field with its 3 options",
+          "evidence": "the meta read"
+        },
+        {
+          "clause": "the record entered in the Studio Records grid persists to the data plane",
+          "oracle": "api",
+          "verify": "GET /api/v1/data/repair_ticket lists the record with the chosen Status value stored under the field's API name",
+          "evidence": "the data read"
+        },
+        {
+          "clause": "the published app is live in the Home launcher and the end-user list renders the record with the picklist LABEL chip (label resolution, not the raw value)",
+          "oracle": "screenshot",
+          "verify": "launcher screenshot shows Repair Center; end-user list screenshot shows the record row with the label chip; GET /api/v1/meta/app?id=<app id> carries the nav item bound to the object",
+          "evidence": "the two screenshots + the app meta read"
+        },
+        {
+          "clause": "the loop closes with ZERO server restarts and zero code — publish alone made the package, object, and app live (the audit's benchmark: 'Zero code, no dead ends, minutes end-to-end')",
+          "oracle": "log",
+          "verify": "the server log shows a single boot for the whole loop; no restart was performed between the first step and the end-user list",
+          "evidence": "server log excerpt spanning the run"
+        },
+        {
+          "clause": "the writable/read-only gate is enforced SERVER-side: the authoring write into com.example.showcase is rejected by the server even where the client lets the gesture through",
+          "oracle": "api",
+          "verify": "the negative probe's server response is a rejection naming the read-only/installed-package cause (audit finding 1 proved this side holds); the client-side lock itself is access-security.readonly-package-locks-studio — cite a pass there, do not re-prove the DOM lock here",
+          "evidence": "the rejected write's response body"
+        }
+      ],
+      "negative": [
+        "silent acceptance of an authoring write into a read-only package is a FAIL (ADR-0057 D10 — the server is the authoritative gate; the client lock is courtesy)",
+        "a 'published' app absent from the Home launcher, or an end-user list rendering raw picklist values instead of labels, is a FAIL"
+      ],
+      "traps": ["stale-console-bundle", "automation-input", "hydration-race"],
+      "source": [
+        "docs/audits/2026-07-studio-package-create-ux-dogfood.md ('The loop closes' — the canonical walk; findings 1/3/4/6 carried as knownGaps)",
+        "ADR-0016 §9 (the MVP loop this proves)",
+        "ADR-0057 D10 (server-side gate authority)",
+        "access-security.readonly-package-locks-studio (client-side lock — cross-referenced, not duplicated)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-07", "change": "new area item: the full first-run authoring loop, grounded step-by-step in the 2026-07 Studio dogfood audit ('The loop closes'), with the audit's open UX findings carried as knownGaps instead of asserted", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    },
+    {
+      "id": "studio-authoring.object-designer-roundtrip",
+      "title": "Object designer round-trip: field add/edit/reorder persists to metadata, identifiers derive and survive typing",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "mixed",
+      "personas": ["admin"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a writable package to author into (create one via the Studio wizard or POST /api/v1/packages — the source-loaded com.example.showcase is read-only and rejects designer saves server-side)"
+        ]
+      },
+      "steps": [
+        "open the object designer on the writable package: /_console/apps/com.objectstack.studio/metadata/object/new?package=<writable pkg>",
+        "TYPE the object name repair_asset character by character (never .fill — the F2 per-keystroke-sanitisation bug only reproduces when typed) and confirm the underscore survives",
+        "add a Text field, set its label to 'Asset Code', blur — the API name input must derive asset_code (F3)",
+        "add a Picklist field plus one EMPTY option row; wait out the debounced live validation — no validation banner may appear for the empty row (F4); then author 3 real options",
+        "Save draft, Publish; GET /api/v1/meta/object/repair_asset and record the full field list and its order",
+        "reopen the designer: rename one picklist value, drag-reorder the fields, Save draft + Publish again",
+        "GET /api/v1/meta/object/repair_asset again — the rename AND the new field order must be in the persisted metadata, not just the canvas",
+        "create a record via the Records tab and GET /api/v1/data/repair_asset/<id> — the stored column key must be the derived API name (asset_code)"
+      ],
+      "acceptance": [
+        {
+          "clause": "designer edits persist to the metadata store: added, edited, and reordered fields read back from the meta API exactly as authored — the designer repaint is never the oracle",
+          "oracle": "api",
+          "verify": "before/after GET /api/v1/meta/object/repair_asset: field set, picklist values, and field ORDER all match the authored state after each publish",
+          "evidence": "the two meta reads, diffed"
+        },
+        {
+          "clause": "a new field's API name derives from its label on blur, so the data column is the derived name — never a frozen field_N (the contract behind audit finding 2, where the saved record stored 'field_2': 'in_progress' forever)",
+          "oracle": "api",
+          "verify": "the field-apiname input shows asset_code after the label blur (pinned by objectui F3), and the stored record's column key is asset_code",
+          "evidence": "designer screenshot + the record read"
+        },
+        {
+          "clause": "typed identifiers survive per-keystroke sanitisation — repair_asset keeps its underscore when typed char-by-char",
+          "oracle": "dom",
+          "verify": "after a screenshot confirms the designer rendered, the name input's value equals repair_asset (pinned by objectui F2; pre-fix this yielded 'repairasset')",
+          "evidence": "screenshot + input value read"
+        },
+        {
+          "clause": "an empty picklist option row does not trip spec validation (no developer-facing 'System identifier must be at least 2 characters' banner), while the PUBLISHED picklist carries exactly the 3 authored options",
+          "oracle": "api",
+          "verify": "no metadata-validation-banner after the debounce (F4's negative assertion), and the meta read shows 3 options — the empty row was dropped, not persisted",
+          "evidence": "banner-absence screenshot + the meta read"
+        }
+      ],
+      "negative": [
+        "an API name frozen at field_N after its label was set pre-save is audit finding 2 regressed — FAIL, but confirm against a fresh objectui build first: the vendored /_console bundle may predate the derive-on-blur fix the e2e now pins"
+      ],
+      "traps": ["stale-console-bundle", "automation-input"],
+      "automated": { "kind": "e2e", "ref": "objectui: e2e/live/studio-object-designer.spec.ts" },
+      "source": [
+        "objectui: e2e/live/studio-object-designer.spec.ts (F1–F4, the objectui#1926 regression classes: per-keystroke sanitisation, label→api-name derivation, empty picklist row, switcher refresh)",
+        "docs/audits/2026-07-studio-package-create-ux-dogfood.md (finding 2 — field API name did not follow the label at audit time)",
+        "docs/audits/2026-07-studio-package-create-ux-dogfood.md (finding 1 — read-only package rejects designer saves server-side, which is why a writable package is a fixture requirement)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-07", "change": "new item: designer→metadata round-trip with the meta API as oracle, pinning the four objectui live-e2e regression classes (F1–F4) and the audit's field_N identifier finding", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    },
+    {
+      "id": "studio-authoring.view-authoring-live",
+      "title": "List + form view authoring goes live in the running app on publish — no server restart",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "mixed",
+      "personas": ["admin (authors)", "end user (consumes the published views)"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a runtime-authored object in a writable package to bind views to (e.g. repair_asset from studio-authoring.object-designer-roundtrip), so no shipped showcase view is mutated"
+        ]
+      },
+      "steps": [
+        "author a view CONTAINER draft via the metadata draft door: PUT /api/v1/meta/view/qa_repair_asset_views?mode=draft with { object: 'repair_asset', list: { type: 'grid', columns: [...] }, form: { ... } } — the container's own keys are list/form/listViews/formViews (ViewSchema); capture the receipt",
+        "as an end user, open the object's list BEFORE publishing: it must still render the previously published views (or the synthesized default) — the draft is staged only",
+        "publish: POST /api/v1/meta/view/qa_repair_asset_views/publish",
+        "reload the app page (client reload allowed, NO server restart): the list must render the authored column set; open a record: the form view layout must apply",
+        "read back through the consumer door: GET /api/v1/meta/view?object=repair_asset (the getViewsByObject read) returns the container",
+        "edit the list view — reorder the columns and add one — re-publish, reload, and re-screenshot",
+        "capture the server log across the whole sequence (the no-restart clause reads it)"
+      ],
+      "acceptance": [
+        {
+          "clause": "the draft save answers 200 with state:'draft' and a version (the ADR-0008 OCC token) in the receipt",
+          "oracle": "api",
+          "verify": "SaveMetaItemResponse fields per packages/spec/src/api/protocol.zod.ts: success, version, seq, state:'draft'",
+          "evidence": "the PUT response body"
+        },
+        {
+          "clause": "pre-publish, end-user surfaces still serve the last ACTIVE views — the draft is invisible ('a draft is staged only — it is not served to the runtime until published')",
+          "oracle": "screenshot",
+          "verify": "the end-user list rendered before publish shows the OLD columns; pair with a GET of the view name showing no draft leakage",
+          "evidence": "pre-publish screenshot + meta read"
+        },
+        {
+          "clause": "post-publish, the list renders the authored columns and the form renders the authored layout with NO server restart — a client page reload is the documented semantics (the audit's whole loop closed live inside one server session)",
+          "oracle": "screenshot",
+          "verify": "post-publish screenshots show the new list columns and form layout; the server log shows no restart between draft, publish, and render",
+          "evidence": "post-publish screenshots + server log excerpt"
+        },
+        {
+          "clause": "the published container round-trips through the consumer read door",
+          "oracle": "api",
+          "verify": "GET /api/v1/meta/view?object=repair_asset includes qa_repair_asset_views with the authored list/form bodies",
+          "evidence": "the object-scoped view read"
+        },
+        {
+          "clause": "edit + re-publish updates the live list (new column order renders) — the authoring loop is repeatable, not create-only",
+          "oracle": "screenshot",
+          "verify": "the second-publish screenshot shows the reordered/extended columns",
+          "evidence": "before/after screenshots of the list"
+        }
+      ],
+      "negative": [
+        "a view change that needs a SERVER restart to appear is a FAIL against the audit's zero-restart benchmark",
+        "a draft's columns leaking into the end-user list before publish is a lifecycle FAIL (the full draft→publish contract is studio-authoring.draft-publish-lifecycle — this item only asserts the view-flavored live side)"
+      ],
+      "traps": ["stale-console-bundle", "hydration-race"],
+      "source": [
+        "packages/spec/src/ui/view.zod.ts (container keys list/form/listViews/formViews; the 'read by getViewsByObject() / GET /meta/view?object=' binding; guidance map for wrong-layer keys)",
+        "packages/spec/src/api/protocol.zod.ts (SaveMetaItemResponse: state draft|active, 'staged only — not served until published')",
+        "docs/audits/2026-07-studio-package-create-ux-dogfood.md (publish→live launcher/list inside one server session)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-07", "change": "new item: list/form view authoring through the ?mode=draft door with live-in-app verification, grounded in ViewSchema's container contract and the audit's zero-restart loop", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    },
+    {
+      "id": "studio-authoring.record-page-roundtrip",
+      "title": "Record-page authoring round-trip: created bound to its object, seeded from the default layout, block-edited, published, rendered",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "mixed",
+      "personas": ["admin (authors)", "end user (opens the record)"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": ["seeded showcase_invoice records to render the published page against (stock showcase seed)"]
+      },
+      "steps": [
+        "open /_console/apps/showcase_app/metadata/page/new and fill the create form: Label 'Invoice Page <uniq>' (slugifies into Name), Object showcase_invoice; Save",
+        "capture the PUT /api/v1/meta/page/<name> request the save issues",
+        "assert the draft body: type:'record', object:'showcase_invoice', and regions seeded NON-empty from the object's synthesized default detail page (the page resource's createSeed hook) including a record:highlights block — never a blank canvas (ADR-0034 / objectui#1541)",
+        "open the page editor (/apps/showcase_app/metadata/page/<name>): Basics and Layout sections render, and 'Add block' opens the block-type picker",
+        "add a block (e.g. Card), Save draft, Publish through the ResourceEditPage draft/publish chrome",
+        "GET /api/v1/meta/page/<name>: the published regions must include the added block",
+        "open a showcase_invoice record as an end user: the page assignment (usePageAssignment) renders the authored page over the synthesized default",
+        "screenshot the editor canvas and the rendered record page"
+      ],
+      "acceptance": [
+        {
+          "clause": "the created page persists bound to its object with PRE-SEEDED regions — record:highlights present, regions non-empty",
+          "oracle": "network",
+          "verify": "the captured PUT body has type:'record', object:'showcase_invoice', Array.isArray(regions) with blocks including record:highlights (pinned by objectui e2e/live/studio-record-page.spec.ts)",
+          "evidence": "the captured PUT payload"
+        },
+        {
+          "clause": "the page editor exposes block authoring: the picker offers schema-backed block kinds (Card, Section, Record details)",
+          "oracle": "dom",
+          "verify": "after a screenshot confirms the editor rendered, the Add-block dialog lists the three kinds (pinned by objectui e2e/live/studio-editor.spec.ts)",
+          "evidence": "screenshot + dialog DOM read"
+        },
+        {
+          "clause": "draft→publish round-trip: the added block is in the PUBLISHED metadata read back from the server",
+          "oracle": "api",
+          "verify": "GET /api/v1/meta/page/<name> after publish contains the added block in regions",
+          "evidence": "the meta read"
+        },
+        {
+          "clause": "the published record page renders on a real record for the end user",
+          "oracle": "screenshot",
+          "verify": "opening a showcase_invoice record shows the authored page including the added block",
+          "evidence": "record-page screenshot"
+        }
+      ],
+      "negative": [
+        "a new record page opening as a blank canvas (regions: []) is objectui#1541 regressed — the createSeed seeding is the point of the item; FAIL"
+      ],
+      "traps": ["stale-console-bundle", "hydration-race", "automation-input"],
+      "automated": { "kind": "e2e", "ref": "objectui: e2e/live/studio-record-page.spec.ts" },
+      "source": [
+        "objectui: e2e/live/studio-record-page.spec.ts (#1541, ADR-0034 — create bound + seeded regions, asserted off the PUT payload)",
+        "objectui: e2e/live/studio-editor.spec.ts (page editor sections + Add-block picker contract)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-07", "change": "new item: record-page authoring round-trip pinned to the two objectui live e2e specs (create-seeded draft, block picker) and extended to the publish + end-user render sides they do not cover", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    },
+    {
+      "id": "studio-authoring.draft-publish-lifecycle",
+      "title": "Metadata draft→publish lifecycle: drafts staged not served, publish flips visibility atomically, conflicts and invalid drafts refused, and the history/audit/diff/rollback forensics tell the truth",
+      "since": "v16",
+      "status": "active",
+      "revision": 2,
+      "priority": "P1",
+      "surface": "mixed",
+      "personas": ["admin (authors drafts)", "end user (must not see drafts)"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "scratch metadata names only (e.g. qa_lifecycle_probe) via the draft door PUT /api/v1/meta/<type>/<name>?mode=draft — no shipped showcase file is touched",
+          "a writable package with two stageable drafts for the package-wide publish-drafts door"
+        ]
+      },
+      "steps": [
+        "author a dashboard draft: PUT /api/v1/meta/dashboard/qa_lifecycle_probe?mode=draft with one dataset-bound widget (dataset: showcase_task_metrics, dimensions: ['status'], values: ['task_count']) — the same door areas/dashboards.json exercises",
+        "record the receipt: { success, version, seq, state: 'draft' }",
+        "BOTH sides pre-publish: GET /api/v1/meta/dashboard/qa_lifecycle_probe as the runtime read → 404 (never published) — the draft body must not be served; in Studio the item shows the 'Unpublished draft' badge and the 'Changes · n' counter",
+        "publish per-ref: POST /api/v1/meta/dashboard/qa_lifecycle_probe/publish → 200; GET now serves the authored body",
+        "author a SECOND draft revision on the same name and confirm the live read keeps serving revision 1 until that draft is published",
+        "concurrency guard: re-PUT with the STALE version as If-Match and capture the 409",
+        "package-wide door: stage two drafts in the writable package and POST /api/v1/packages/<pkg id>/publish-drafts — both flip in one atomic release (the audit's 'Published all drafts in this package (one atomic release)' toast)",
+        "author an INVALID draft (a widget carrying a stray legacy key) and attempt its publish — the author-time gate must reject the draft→active transition (#4463)",
+        "meta forensics (after the two publishes of qa_lifecycle_probe — revision 1, then the second revision): GET /api/v1/meta/dashboard/qa_lifecycle_probe/history — the durable sys_metadata_history events must list BOTH published revisions (a dashboard is an overlay type, so history is real; a non-overlay type answers { events: [] } by design)",
+        "GET /api/v1/meta/dashboard/qa_lifecycle_probe/diff?from=1&to=2 (or omit the params for previous-vs-current) — the structural diff must name the widget key that changed between the revisions, not dump the whole body",
+        "POST /api/v1/meta/dashboard/qa_lifecycle_probe/rollback with { toVersion: 1 } (send X-Actor or drive it under an authenticated session so the actor is attributable); the runtime GET must then serve revision 1's body again and the rendered dashboard must show revision 1's widget",
+        "attempt a rollback with a missing/invalid toVersion and capture the 400 INVALID_REQUEST guard",
+        "GET /api/v1/meta/dashboard/qa_lifecycle_probe/audit — the save/publish/rollback rows must carry the acting user; run every forensics probe against the REST route-manager server os dev serves, NEVER a simulated dispatch (the dispatcher /meta branch swallows /history as a compound name and 404s)"
+      ],
+      "acceptance": [
+        {
+          "clause": "a draft save answers state:'draft' and is staged only — the runtime read does not serve it (both sides captured: receipt + 404/last-active read)",
+          "oracle": "api",
+          "verify": "PUT receipt has state:'draft' (SaveMetaItemResponseSchema); the follow-up GET returns 404 (or the last ACTIVE body for a previously-published name), never the draft body",
+          "evidence": "receipt + pre-publish GET"
+        },
+        {
+          "clause": "publish flips visibility exactly once: the post-publish read serves the authored body; the pre-publish read never did",
+          "oracle": "api",
+          "verify": "POST /meta/dashboard/qa_lifecycle_probe/publish → 200, then GET returns { type, name, item } with the widget intact",
+          "evidence": "publish response + post-publish GET"
+        },
+        {
+          "clause": "a pending second draft does not perturb the live revision until published",
+          "oracle": "api",
+          "verify": "after staging draft 2, GET still returns revision 1's body; after publishing draft 2, GET returns revision 2",
+          "evidence": "the three reads"
+        },
+        {
+          "clause": "optimistic concurrency holds: a write carrying a stale If-Match version answers 409 metadata_conflict — a concurrent edit is reported, never silently overwritten",
+          "oracle": "api",
+          "verify": "re-PUT with the superseded version token → 409 with the metadata_conflict code (the ADR-0008 chain the receipt's version field exists for)",
+          "evidence": "the 409 response"
+        },
+        {
+          "clause": "package-wide publish-drafts promotes every pending draft in one atomic release — and a non-compliant draft (e.g. an object draft missing the package namespace prefix) aborts the batch BEFORE any promotion",
+          "oracle": "api",
+          "verify": "POST /api/v1/packages/<id>/publish-drafts flips both staged drafts; the namespace-gate rejection path leaves ALL drafts unpromoted (packages/objectql/src/protocol-publish-package-drafts.test.ts pins the atomicity)",
+          "evidence": "the publish-drafts response + post-state reads"
+        },
+        {
+          "clause": "an invalid draft cannot cross into active: the author-time rules gate the draft→active transition (#4463) — publish of the stray-key draft is refused",
+          "oracle": "api",
+          "verify": "the publish attempt on the invalid draft errors; the live read still serves nothing (or the prior good revision)",
+          "evidence": "the refused publish + follow-up GET"
+        },
+        {
+          "clause": "Studio chrome tells the truth: 'Unpublished draft' badge and 'Changes · n' counter while pending, cleared after publish",
+          "oracle": "screenshot",
+          "verify": "badge/counter visible pre-publish, gone post-publish (the audit found this model 'reads consistently everywhere')",
+          "evidence": "before/after Studio screenshots"
+        },
+        {
+          "clause": "the durable history lists BOTH published revisions after two publishes — GET /meta/dashboard/qa_lifecycle_probe/history returns the sys_metadata_history events for revision 1 and revision 2 (real events because a dashboard is an overlay type; a non-overlay type returning { events: [] } is by design, not a miss)",
+          "oracle": "api",
+          "verify": "the /history body carries two version entries with ascending seq/version — consulted on the REST route-manager server, not the dispatcher",
+          "evidence": "the history response"
+        },
+        {
+          "clause": "diff names the changed key, not a whole-body dump — GET .../diff (from=1&to=2, or previous-vs-current) isolates the widget/dimension key that differs between the two revisions",
+          "oracle": "api",
+          "verify": "the diff body reports the changed path (the edited widget key), not the entire document",
+          "evidence": "the diff response"
+        },
+        {
+          "clause": "rollback restores revision 1 AND the live app serves it — POST .../rollback { toVersion: 1 } → 200, the runtime GET then serves revision 1's body, and the rendered dashboard shows revision 1's widget; a missing/invalid toVersion answers 400 INVALID_REQUEST, never a silent no-op",
+          "oracle": "api",
+          "verify": "post-rollback GET /meta/dashboard/qa_lifecycle_probe returns revision 1's body (a screenshot of the reverted widget corroborates the served side); the bad-toVersion attempt returns 400 INVALID_REQUEST",
+          "evidence": "the rollback response + the post-rollback GET + the reverted-render screenshot + the 400 response"
+        },
+        {
+          "clause": "audit rows carry the actor — GET .../audit lists the save/publish/rollback attempts (allowed and denied) each stamped with the acting user, resolved from X-Actor / the session identity, never anonymous",
+          "oracle": "api",
+          "verify": "the /audit body's rows for this name include the publish and rollback actions with a non-empty actor field",
+          "evidence": "the audit response"
+        }
+      ],
+      "negative": [
+        "a draft body served to end users before publish is the lifecycle FAIL this item exists for",
+        "a publish that answers 200 while the live read still serves the old body is a FAIL — the ADR-0045 visibility flip failing loudly is exactly the path packages.ts warns about, and silence there is worse than the warning",
+        "a forensics route consulted on the dispatcher instead of the REST route-manager server is a recording error — the dispatcher /meta branch swallows /history as a compound name and 404s (rest-route-ledger.ts note); the oracle is the live server os dev serves",
+        "a rollback that answers 200 while the live read still serves the newer revision is a FAIL (the restore must actually flip the served body)"
+      ],
+      "traps": ["hydration-race", "dispatcher-vs-hono-route"],
+      "automated": { "kind": "e2e", "ref": "packages/qa/dogfood/test/dashboard-designer-roundtrip.dogfood.test.ts" },
+      "source": [
+        "packages/spec/src/api/protocol.zod.ts (SaveMetaItemResponse: state draft|active, version as If-Match/409 OCC token, 'staged only — not served until published')",
+        "packages/runtime/src/domains/packages.ts (POST /packages/:id/publish-drafts, ADR-0033/ADR-0045 visibility flip + its failure warning)",
+        "packages/objectql/src/protocol-publish-package-drafts.test.ts (atomic namespace gate; #4463 author-time rules gate the draft→active transition)",
+        "packages/rest/src/rest-server.ts (GET /meta/:type/:name/{history,audit,diff} + POST .../rollback: overlay-type history vs { events: [] } for non-overlay; rollback body { toVersion }, 400 on a missing/invalid toVersion; actor from X-Actor / session)",
+        "packages/rest/src/rest-route-ledger.ts (client bindings meta.getHistory / getAudit / diffItem / rollbackItem; the 'dispatcher /meta swallows /history as a compound name and 404s' note — routes hunter #12)",
+        "docs/audits/2026-07-studio-package-create-ux-dogfood.md ('Unpublished draft' badge, 'Changes · n', 'one atomic release' toast)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-07", "change": "new item: both sides of the draft→publish gate (staged-not-served / flipped-on-publish), plus OCC 409, atomic package-wide publish, and the #4463 invalid-draft publish refusal — grounded in the spec receipt schema, the runtime publish-drafts handler, and the pinned dogfood roundtrip", "ref": "claude/platform-test-checklist-ocwugl" },
+        { "revision": 2, "date": "2026-08-08", "change": "clause-extension (routes hunter #12): meta forensics — GET /meta/:type/:name/{history,audit,diff} + POST .../rollback (two publishes → history lists both, diff names the changed key, rollback restores rev-1 and the live app serves it, audit rows carry the actor); traps gain dispatcher-vs-hono-route (the dispatcher /meta branch 404s /history)", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    },
+    {
+      "id": "studio-authoring.authoring-validation-not-persisted",
+      "title": "An invalid authored shape is rejected at save with a LOCATED error and is not persisted",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "mixed",
+      "personas": ["admin"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": ["scratch metadata names only (qa_invalid_probe / qa_invalid_views) — rejected drafts must leave nothing behind, so no cleanup dependency"]
+      },
+      "steps": [
+        "attempt PUT /api/v1/meta/object/qa_invalid_probe?mode=draft with a field MISSING its type; capture the status and full error body",
+        "attempt PUT /api/v1/meta/view/qa_invalid_views?mode=draft with `type`/`columns` at the CONTAINER level (the flat-list-view mistake); capture the guidance error",
+        "after each rejection, GET the name back and record what the store holds",
+        "drive one invalid shape through the Studio designer (browser door) and capture the surfaced error — it must locate the offending field, not say a generic 'save failed'",
+        "author the CORRECTED shapes (field with a type; views wrapped under list:) and confirm both save 200 — the gate rejects the shape, not the name",
+        "dashboard-kind stray keys are deep-covered by dashboards.strict-widget-rejects-stray-keys — cite a pass there rather than re-enumerating the 11 legacy keys here"
+      ],
+      "acceptance": [
+        {
+          "clause": "an invalid object shape is rejected at save with a located error naming the failing path (the '[invalid_metadata] … fields.<name>.type: Required' shape)",
+          "oracle": "api",
+          "verify": "the rejection is 4xx and its body names the exact field path that failed spec validation",
+          "evidence": "the error body"
+        },
+        {
+          "clause": "a wrong-layer view container key is rejected with guidance naming where the key belongs ('`type` belongs to a single VIEW, not to the container. Wrap it: defineView({ list: { … } }) …')",
+          "oracle": "api",
+          "verify": "the error text for container-level type/columns carries the ViewSchema guidance-map prescription, giving the author the fix",
+          "evidence": "the error text"
+        },
+        {
+          "clause": "rejected drafts are NOT persisted — the rejection is authoritative, not cosmetic",
+          "oracle": "api",
+          "verify": "GET after each rejected PUT returns 404 (or the last GOOD revision for a pre-existing name), never a body containing the invalid shape",
+          "evidence": "the GET responses paired with each rejected PUT"
+        },
+        {
+          "clause": "the browser door surfaces the same rejection visibly — a located error banner/toast, never a silent dead Save",
+          "oracle": "screenshot",
+          "verify": "the Studio save attempt shows the validation error naming the offending field",
+          "evidence": "the error-state screenshot"
+        },
+        {
+          "clause": "the corrected shapes save 200 — the gate is precise about the shape, not the operation",
+          "oracle": "api",
+          "verify": "both corrected PUTs succeed with state:'draft' receipts",
+          "evidence": "the two success receipts"
+        }
+      ],
+      "negative": [
+        "a 2xx on an invalid draft, or a rejection that leaves the invalid body readable afterwards, is a FAIL",
+        "silent client-side swallowing — no visible error after a failed save — is a FAIL even though the server refused correctly (the author must SEE the located error)"
+      ],
+      "traps": ["stale-console-bundle", "automation-input"],
+      "source": [
+        "packages/runtime/src/http-dispatcher.test.ts (the located '[invalid_metadata] object/bad failed spec validation: fields.amount.type: Required' error shape)",
+        "packages/spec/src/ui/view.zod.ts (container guidance map: type/columns/data/viewKind/filters/sort each name the wrap prescription)",
+        "dashboards.strict-widget-rejects-stray-keys (dashboard-kind stray keys — cross-referenced, not duplicated)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-07", "change": "new item: authoring validation with located errors and verified non-persistence, sampling object + view kinds and cross-referencing the deepened dashboard stray-key item instead of duplicating it", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    },
+    {
+      "id": "studio-authoring.org-override-registry-gate",
+      "title": "The metadata type registry gates runtime writes: allowOrgOverride=false kinds refuse overlay (403 not_overridable), allowRuntimeCreate=false kinds refuse creation — both sides",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": ["admin"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "the stock showcase artifact (artifact-backed objects like showcase_task and packaged views are the locked targets; a scratch name serves the allowed-create side)"
+        ]
+      },
+      "steps": [
+        "read the authority first: DEFAULT_METADATA_TYPE_REGISTRY in packages/spec/src/kernel/metadata-plugin.zod.ts declares per-kind allowOrgOverride and allowRuntimeCreate — if the flags have changed, revise this item's variants before running",
+        "positive overlay: PUT /api/v1/meta/view/<a packaged showcase view name> with a modified label (view: allowOrgOverride true) → expect acceptance; GET the name and confirm the overlay wins at read",
+        "negative overlay: PUT /api/v1/meta/object/showcase_task (artifact-backed; object: allowOrgOverride false) with any modified body → capture the refusal",
+        "negative create: PUT /api/v1/meta/job/qa_probe_job (job: allowRuntimeCreate false — a runtime-authored job could never be scheduled, #4509) → capture the refusal",
+        "positive create: PUT /api/v1/meta/object/qa_org_probe as a brand-NEW object (object: allowRuntimeCreate true) → expect acceptance — the two flags gate different doors",
+        "cleanup + reset semantics: DELETE /api/v1/meta/view/<overlaid name> and confirm reset:true, then GET returns the artifact default again",
+        "run every probe against the LIVE server os dev runs — never a simulated dispatch"
+      ],
+      "acceptance": [
+        {
+          "clause": "a kind with allowOrgOverride=false refuses the org-level override of an artifact-backed item with 403 not_overridable — the lock is server-side",
+          "oracle": "api",
+          "verify": "PUT /api/v1/meta/object/showcase_task answers 403 with the not_overridable code (the runtime behavior the registry's own doc comment declares)",
+          "evidence": "the 403 response body"
+        },
+        {
+          "clause": "an overlay-enabled kind accepts the write AND the overlay takes precedence at read — the other side of the same gate",
+          "oracle": "api",
+          "verify": "the packaged view accepts the overlay PUT and the follow-up GET serves the overlaid label (overlay-precedence)",
+          "evidence": "the accepted write + the read showing the overlay"
+        },
+        {
+          "clause": "a kind with allowRuntimeCreate=false refuses creation with 403 (not_creatable) — declared-but-inert metadata is refused at the door, not stored to never run",
+          "oracle": "api",
+          "verify": "PUT /api/v1/meta/job/qa_probe_job answers 403 not_creatable (job's flags exist precisely because a runtime job's handler could never resolve — ADR-0049)",
+          "evidence": "the 403 response"
+        },
+        {
+          "clause": "runtime-creatable kinds accept a brand-new item — locked-override and locked-create are independent gates (object: override locked, create open)",
+          "oracle": "api",
+          "verify": "the new-name object PUT is accepted while the artifact-backed object PUT was refused, in the same run",
+          "evidence": "the paired responses"
+        },
+        {
+          "clause": "deleting the overlay row resets to the artifact default: reset:true when a row was removed, reset:false when none existed",
+          "oracle": "api",
+          "verify": "DELETE answers per DeleteMetaItemResponseSchema and the follow-up GET serves the artifact body again",
+          "evidence": "the delete response + post-delete read"
+        }
+      ],
+      "negative": [
+        "a 200 on an overlay write against an artifact-backed object/field is the FAIL this registry exists to prevent (per-org schema drift and upgrade conflicts — the rationale written into the registry entry itself)"
+      ],
+      "variants": [
+        "object (override locked, create open)",
+        "field (override locked, create open)",
+        "job (create locked — 403 not_creatable)",
+        "view (override open)",
+        "dashboard (override open)"
+      ],
+      "traps": ["dispatcher-vs-hono-route"],
+      "automated": { "kind": "unit", "ref": "packages/objectql/src/overlay-precedence.test.ts" },
+      "source": [
+        "packages/spec/src/kernel/metadata-plugin.zod.ts (DEFAULT_METADATA_TYPE_REGISTRY per-kind flags; allowOrgOverride doc: 'runtime returns HTTP 403 not_overridable'; the object/field lock rationale; job's #4509 create lock)",
+        "packages/objectql/src/overlay-precedence.test.ts ('denied — must throw 403 (not_overridable or not_creatable)')",
+        "packages/metadata-protocol/src/protocol.ts (isRuntimeCreateAllowed — the write-gate authority)",
+        "ADR-0005 (metadata customization opt-in), ADR-0049 (enforce-or-remove — the job rationale)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-07", "change": "new item: both sides of the registry's runtime-write gates (not_overridable / not_creatable vs accepted overlay / accepted create), variants sampled straight from DEFAULT_METADATA_TYPE_REGISTRY and pinned to the overlay-precedence suite", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    },
+    {
+      "id": "studio-authoring.expression-editors",
+      "title": "The Studio CEL editors reach the SAME verdict as the engine: formula result-type inference, previous. completion in conditional rules, and RLS lint + test-run — the editor UI, not a second grammar",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "mixed",
+      "personas": ["admin"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a writable package with an object carrying a formula field (role=value) and a field conditional rule (visibleWhen/readonlyWhen/requiredWhen) — the stock showcase formula shapes are the models to author against (showcase_invoice line_total = record.quantity * record.unit_price, showcase_project remaining-budget, field-zoo); the source-loaded com.example.showcase is read-only, so the SAVE round-trip needs a writable package (the editors' lint/autocomplete/inferred-type/test-run themselves run client-side and can be OBSERVED read-only on the showcase fields)",
+          "a writable permission set to host the RLS USING/CHECK CEL editor + test-run (PermissionAdvancedFacets)",
+          "the @objectstack/formula engine present in the console bundle — celAuthoring lazy-loads it"
+        ],
+        "knownGaps": [
+          "the CEL editors lazy-load @objectstack/formula and FEATURE-DETECT every entry point (celAuthoring.ts) — a missing/older engine degrades to no lint / no suggestions / test-run 'unavailable', never an exception. If the vendored bundle lacks the engine, record the affected clauses blocked(dependency) and verify the graceful-degradation clause instead"
+        ]
+      },
+      "steps": [
+        "ground the engine truth FIRST (rule 6 parity): for each probe expression, capture the canonical verdict from the engine — via MCP validate_expression (site: formula / flow_condition) or `objectstack build` — so the editor is judged against server truth. The ENGINE itself is pinned by ai.mcp-validate-expression / api-backend.formula-gates; this item only checks the EDITOR agrees",
+        "F1 formula result-type: open the object field designer (ObjectFieldInspector) on a formula field (type=formula, role=value, scope=record), TYPE a proven-number expression (record.est_hours * 1.1, or record.quantity * record.unit_price) and, separately, one cel-js cannot prove (record.a + record.b); after the 250ms debounce, screenshot the inferred-result-type (Σ) affordance for each",
+        "type an unknown field (record.est_hourz) and a bare field ref in record scope (est_hours, no record. prefix); capture the inline error under the field (aria-invalid, destructive border) and its record.<field> fix text",
+        "F2 conditional-rule editor: open the same field's visibleWhen editor (scope=record, roots record/previous/parent); type `previous.` and then `record.` and capture the autocomplete listbox — it must offer the object's field catalog; type `current_user.` and confirm it does NOT list this object's fields; accept a suggestion and confirm the insertion",
+        "F4 RLS editor: open the permission set's Advanced Facets RLS policy (PermissionAdvancedFacets), enter a USING predicate that is NOT a simple field comparison (blast-radius) and one with a parse fault; confirm the non-pushdownable filter raises a WARNING (Save stays enabled) while the parse fault raises a blocking ERROR that disables Save (celErrorCount>0 → title perm.cel.saveBlocked)",
+        "RLS test-run: open the CelTestRunDialog ('Test this policy against a sample record'), supply a sample record + current_user, Run; capture allow (shield-check) / deny (shield-x) / a non-boolean value (non-bool smell) across three sample+predicate pairs",
+        "parity cross-check: for the SAME expressions, confirm the editor's verdict tier (error/warning/ok, inferred type, allow/deny) equals the engine verdict captured in step 1",
+        "persistence round-trip (writable package): Save the edited formula field → GET /api/v1/meta/object/<obj> shows Field.returnType stamped from the inferred type; Save the RLS policy → GET /api/v1/meta/permission/<name> carries the USING/CHECK predicate"
+      ],
+      "acceptance": [
+        {
+          "clause": "the formula editor (role=value, scope=record) shows the inferred result type after the debounced lint — 'Number' for a proven-number formula, 'unknown' for record.a + record.b (cel-js cannot prove number vs string) — surfaced as the Σ affordance, not guessed",
+          "oracle": "screenshot",
+          "verify": "the inferred-type line reads Number for the proven formula and unknown (with the double()/int() hint) for the unprovable one",
+          "evidence": "the two inferred-type screenshots"
+        },
+        {
+          "clause": "the inferred type stamps Field.returnType on save, but ONLY when the author actually edited the formula this session — GET /meta/object/<obj> shows returnType equal to the inferred type; a formula field left un-edited this session keeps its prior returnType (the formulaEdited guard prevents clobbering)",
+          "oracle": "api",
+          "verify": "the meta read after saving an edited formula carries returnType = the inferred type; an un-edited sibling formula's returnType is unchanged",
+          "evidence": "the meta read"
+        },
+        {
+          "clause": "the editor's lint TIERS equal the canonical engine's — an unknown field and a bare field ref in record scope are ERRORS (with the record.<field> fix, blocking Save), a non-pushdownable USING read filter is a WARNING; the editor calls the SAME @objectstack/formula validateExpression the server and validate_expression use (ADR-0032), so the verdict is identical, not a second grammar",
+          "oracle": "api",
+          "verify": "for each probe, the editor's inline finding severity matches validate_expression / build for the same expression+site (error vs warning vs ok)",
+          "evidence": "the paired editor screenshot + engine verdict, per probe"
+        },
+        {
+          "clause": "record. / previous. member completion offers the object's field catalog, while suppressed roots (current_user, parent) do NOT offer this object's fields, and a bare field ref in record scope is withheld from bare completion and flagged as an error — because a bare ref silently evaluates to null at runtime",
+          "oracle": "dom",
+          "verify": "after a screenshot confirms the editor rendered, the autocomplete listbox after 'previous.' / 'record.' lists field names; after 'current_user.' it does not list this object's fields; a bare 'est_hours' shows the record.<field> error",
+          "evidence": "the autocomplete DOM reads + the bare-ref error"
+        },
+        {
+          "clause": "the RLS blast-radius advisory and the Save gate work together: a non-pushdownable USING read filter raises the fail-open WARNING (advisory, Save stays enabled), while a parse fault raises a blocking ERROR that disables Save (celErrorCount>0, title perm.cel.saveBlocked) — a malformed predicate cannot be persisted",
+          "oracle": "screenshot",
+          "verify": "the non-pushdownable filter shows the widen-access warning with Save still enabled; a parse-faulted predicate disables Save",
+          "evidence": "the two editor states"
+        },
+        {
+          "clause": "test-run dry-runs through the SAME engine the server uses: a predicate that should allow the sample returns allow, one that should deny returns deny, and a non-boolean returns the value/non-bool smell — matching a direct engine evaluate of the same predicate+scope",
+          "oracle": "screenshot",
+          "verify": "allow / deny / value outcomes for three sample+predicate pairs, each matching the engine's own verdict",
+          "evidence": "the three outcome banners"
+        },
+        {
+          "clause": "editor↔engine parity is the whole point (rule 6): for every probe the editor's verdict equals the engine verdict from ai.mcp-validate-expression / api-backend.formula-gates — this item does NOT re-prove the engine, it proves the EDITOR reaches the identical verdict rather than maintaining a second grammar (ADR-0032)",
+          "oracle": "api",
+          "verify": "the per-probe editor verdicts equal the engine verdicts captured up front; cite a pass of ai.mcp-validate-expression for the engine side",
+          "evidence": "the parity table"
+        },
+        {
+          "clause": "when @objectstack/formula cannot load the editors degrade to no-lint / no-suggestions / test-run 'unavailable', never an exception that breaks the form (feature-detect + swallow)",
+          "oracle": "test",
+          "verify": "run objectui packages/app-shell/src/views/metadata-admin/celAuthoring.test.ts (unavailable-engine cases) and cite its output — do not hand-break the bundle in the browser",
+          "evidence": "the test output"
+        }
+      ],
+      "negative": [
+        "an editor verdict that DIFFERS from the engine (validate_expression / build) for the same expression is a FAIL — a second grammar in the GUI is exactly what celAuthoring exists to prevent (ADR-0032)",
+        "a parse-fault formula or RLS predicate that Saves anyway (Save not gated on celErrorCount) is a FAIL — a malformed RLS predicate silently mis-scopes rows and some evaluation paths FAIL OPEN, widening access with no error",
+        "record. / previous. completion offering an unbound root's members, or a bare field ref not flagged in record scope, is a FAIL — it authors a predicate that silently never fires / evaluates to null"
+      ],
+      "variants": [
+        "formula field expression (role=value, scope=record) — inferred result type",
+        "field conditional rule visibleWhen / readonlyWhen / requiredWhen (scope=record, roots record/previous/parent) — previous. completion",
+        "RLS USING read filter (pushdown / fail-open advisory)",
+        "RLS CHECK write filter"
+      ],
+      "traps": ["stale-console-bundle", "hydration-race", "automation-input"],
+      "automated": { "kind": "unit", "ref": "objectui: packages/app-shell/src/views/metadata-admin/celAuthoring.test.ts (+ CelPredicateField.test.tsx, CelTestRunDialog.test.tsx, PermissionAdvancedFacets.cel.test.tsx)" },
+      "source": [
+        "objectui: packages/app-shell/src/views/metadata-admin/celAuthoring.ts (the bridge to @objectstack/formula — the SAME parser/validator the server and the validate_expression agent tool use, ADR-0032; lintCelPredicate / introspectCelScope / testRunCelPredicate / inferCelValueType; lazy feature-detected, error-swallowing degradation)",
+        "objectui: packages/app-shell/src/views/metadata-admin/CelPredicateField.tsx (inline lint, as-you-type autocomplete incl. record./previous. member completion via FIELD_MEMBER_ROOTS, role=value inferred-result-type affordance, aria-invalid on parse error)",
+        "objectui: packages/app-shell/src/views/metadata-admin/CelTestRunDialog.tsx (USING/CHECK dry-run allow/deny/value/unavailable through the server's own engine)",
+        "objectui: packages/app-shell/src/views/metadata-admin/inspectors/ObjectFieldInspector.tsx (formula role=value scope=record → Field.returnType stamped from the inferred type ONLY once edited; FIELD_RULE_ROOTS record/previous/parent for conditional rules)",
+        "objectui: packages/app-shell/src/views/metadata-admin/PermissionAdvancedFacets.tsx (RLS facet hosts CelPredicateField + CelTestRunDialog; onCelErrorsChange → celErrorCount gates Save)",
+        "ai.mcp-validate-expression + api-backend.formula-gates (the ENGINE parity — cross-referenced; this item only proves the editor agrees)",
+        "objectui#2413 (RLS CEL editor + test-run), objectui#1582 (conditional-rule/formula scope + inferred type), ADR-0032 (one CEL engine across GUI/SDK/CLI)",
+        "examples/app-showcase/src/data/objects/invoice.object.ts + project.object.ts + field-zoo.object.ts (stock formula-field expressions to author against)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-08", "change": "new item: the Studio CEL editor UI (formula result-type inference, previous. completion in conditional rules, RLS lint + test-run) round-tripping to the SAME @objectstack/formula verdicts the engine gives — grounded in celAuthoring.ts + CelPredicateField/CelTestRunDialog and cross-referencing the engine-parity items rather than re-proving them", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    },
+    {
+      "id": "studio-authoring.permission-matrix-editor-ux",
+      "title": "Permission-matrix editor UX: field-filter + bulk apply to EXACTLY the visible fields, and the Bulk column never clips at narrow widths",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "mixed",
+      "personas": ["admin"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a writable permission set to edit in the Permission Matrix editor (env-scope metadata-admin, or a package permission set in the Studio Access pillar) — a read-only source-loaded set can be opened to verify the read-only gate but not to exercise bulk writes",
+          "an object with MORE THAN 6 fields to expand in the matrix, so the field sub-table's filter renders (FieldsSubTable shows the filter only when fields.length > 6) — a stock showcase object with a wide field set (showcase_account / showcase_invoice)",
+          "a narrow viewport for the Bulk-column clip check (B3)"
+        ]
+      },
+      "steps": [
+        "open the Permission Matrix editor on a writable permission set (Studio Access pillar, or /_console/apps/com.objectstack.studio/metadata/permission/<name>); expand an object with > 6 fields so the field sub-table's filter renders (threshold is > 6)",
+        "B4 field filter: type a filter that narrows the field set to a couple of fields; confirm the sub-table's 'n / N' counter and the DOM show only the matching fields (the hidden fields' read/edit checkboxes are absent)",
+        "B4 bulk-over-visible: click 'Write all' (perm.field.bulk.writable) → it must grant read+write to EXACTLY the visible fields; clear the filter and confirm the previously-hidden fields are UNTOUCHED (still at their prior grant), never bulk-applied",
+        "on a different filtered set click 'Read all' → it revokes write on the visible fields only; click 'Clear' → it drops the explicit overrides so the visible fields fall back to the read-only default (readable, not editable)",
+        "Save; GET /api/v1/meta/permission/<name> (or the package draft read) and assert the fields map (keyed `${object}.${field}`) carries overrides for ONLY the fields that were visible when each bulk fired — never a filter-hidden field",
+        "B3 clip: shrink the viewport to a narrow width; confirm the object matrix's enclosing overflow-auto container SCROLLS horizontally (the table carries min-w-[960px]) and the Bulk column (Read / CRUD / All / None per row) stays reachable, not clipped off the right edge",
+        "read-only gate: open a read-only package/type set; confirm Save is hidden and the bulk buttons + checkboxes are disabled (the writable gate), and the read-only badge names package-vs-type as the reason",
+        "the grant→access flip (a flipped verb actually changing a persona's API access) is access-security.permission-matrix-edit-loop — cite a pass there; this item does NOT re-prove that a saved grant changes access"
+      ],
+      "acceptance": [
+        {
+          "clause": "the field filter narrows the sub-table to the matching fields only — the visible/total counter and the DOM both reflect the filtered set (hidden fields' read/edit checkboxes absent)",
+          "oracle": "dom",
+          "verify": "after a screenshot confirms the sub-table rendered, only the filtered field rows are present and the 'n / N' counter matches the filtered count",
+          "evidence": "the filtered sub-table DOM read + screenshot"
+        },
+        {
+          "clause": "a field bulk (Write all / Read all) applies to EXACTLY the visible/filtered fields — after the bulk, clearing the filter shows the previously-hidden fields still at their prior grant, so the wrong-scope write never happened (objectui#2600 B4)",
+          "oracle": "dom",
+          "verify": "filter → bulk → clear filter: the hidden fields' read/edit checkbox states are unchanged from before the bulk",
+          "evidence": "before/after checkbox states across the filter clear"
+        },
+        {
+          "clause": "server truth proves the scope: the SAVED permission set's fields map (keyed `${object}.${field}`) carries overrides for ONLY the fields visible at bulk time — a filter-hidden field must not appear from a bulk it was never part of",
+          "oracle": "api",
+          "verify": "GET /meta/permission/<name>: the fields-map keys touched by a bulk are a subset of the field names visible when that bulk fired",
+          "evidence": "the meta read"
+        },
+        {
+          "clause": "'Clear' drops the explicit overrides for the visible fields so they fall back to the default (readable, not editable) — the saved fields map no longer carries those keys, rather than writing an explicit default row",
+          "oracle": "api",
+          "verify": "after Clear + Save, the cleared fields' keys are absent from the fields map",
+          "evidence": "the meta read"
+        },
+        {
+          "clause": "at a narrow viewport the object matrix container scrolls horizontally and the Bulk column (Read / CRUD / All / None) stays reachable — the min-w-[960px] table forces a scrollbar instead of clipping the last column off the right edge (objectui#2600 B3)",
+          "oracle": "screenshot",
+          "verify": "a narrow-width screenshot shows a horizontal scrollbar and, after scrolling right, the full Bulk column",
+          "evidence": "the narrow-viewport screenshot(s)"
+        },
+        {
+          "clause": "the read-only gate holds: a read-only package/type hides Save and disables every bulk button + checkbox; the read-only badge names the reason (package vs type)",
+          "oracle": "screenshot",
+          "verify": "on the read-only set Save is absent, bulk buttons are disabled, and the badge text distinguishes the package gate (engine.studio.pkg.readonly) from the type gate (perm.readOnly)",
+          "evidence": "the read-only screenshot"
+        }
+      ],
+      "negative": [
+        "a field bulk that writes grants to fields hidden by the filter is the FAIL this item exists for — a wrong bulk scope silently grants or revokes access on fields the admin never saw (assert against the SAVED fields map, not the repaint)",
+        "the Bulk column clipped off the right edge at a narrow width with no horizontal scroll is the B3 FAIL — the admin cannot reach Read / CRUD / All / None"
+      ],
+      "variants": [
+        "field bulk: Read all (readable)",
+        "field bulk: Write all (writable)",
+        "field bulk: Clear"
+      ],
+      "traps": ["stale-console-bundle", "hydration-race", "automation-input"],
+      "automated": { "kind": "unit", "ref": "objectui: packages/app-shell/src/views/metadata-admin/PermissionMatrixEditor.fieldBulk.test.tsx (+ PermissionMatrixEditor.readonly.test.tsx)" },
+      "source": [
+        "objectui: packages/app-shell/src/views/metadata-admin/PermissionMatrixEditor.tsx (FieldsSubTable B4 — field filter + bulkSetFields over visibleNames; PermissionTable min-w-[960px] B3 anti-clip on the Bulk column; the writable gate + celErrorCount Save gate)",
+        "objectui: packages/app-shell/src/views/metadata-admin/PermissionMatrixEditor.fieldBulk.test.tsx ('the filter narrows the field set and bulk acts only on what is visible'; 'Clear drops the overrides so fields fall back to the read-only default')",
+        "objectui: packages/app-shell/src/views/metadata-admin/PermissionMatrixEditor.readonly.test.tsx (the read-only package/type gate)",
+        "#3358 §5 B3/B4 (permission-matrix editor UX: Bulk column clip; field-filter + bulk over the visible set)",
+        "access-security.permission-matrix-edit-loop (the grant→access flip — cross-referenced, not duplicated)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-08", "change": "new item: permission-matrix editor UX — field-filter + bulk apply scoped to exactly the visible fields (wrong scope writes wrong grants) and the Bulk column's anti-clip min-width, grounded in PermissionMatrixEditor.tsx + its fieldBulk/readonly tests; cross-refs the permission-matrix-edit-loop for the grant→access side", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    },
+    {
+      "id": "studio-authoring.custom-page-render-and-blocks",
+      "title": "Declarative custom pages render their real block COMPOSITION (not just 'no error'): each declared block resolves its renderer and binds its data source, data-bound blocks show seeded rows (API cross-check), and a block that cannot bind degrades with a NAMED error, never a blank region",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "mixed",
+      "personas": ["admin (seeded admin@objectos.ai) driving the published showcase app as an end user"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a fresh boot of the showcase with seeded data present — GET /api/v1/data/showcase_project · /showcase_task · /showcase_account must each return rows, and the chart datasets showcase_task_metrics / showcase_project_metrics (examples/app-showcase/src/ui/datasets/chart-gallery.dataset.ts) must resolve (seed-data-thin guard: an empty seed makes every data-bound block look 'broken')",
+          "a scratch page name (e.g. qa_page_probe) authorable via the draft door PUT /api/v1/meta/page/qa_page_probe?mode=draft — used ONLY for the degradation probe, so no shipped showcase page is mutated"
+        ],
+        "knownGaps": [
+          "objectui e2e/live/showcase-smoke.spec.ts sweeps only a SUBSET of these pages (My Work, Project Workspace, Active Projects, Component Gallery are in its SURFACES list; Command Center 大屏 / showcase_command_center is NOT) and only asserts render-clean (no pageerror / no placeholder leak / non-empty <main>). This item DEEPENS that shallow pin: it asserts the block composition and the data binding, which the smoke does not — so it is NOT marked `automated`.",
+          "command-center's KPIs read via the console adapter's aggregate path; where the exact aggregate endpoint differs from a plain GET, cross-check the tile against the same filter applied to the data plane (count of the matching rows), not against a pixel."
+        ]
+      },
+      "steps": [
+        "boot the showcase, sign in admin@objectos.ai/admin123, and confirm the seed is not thin: GET /api/v1/data/showcase_project, /showcase_task, /showcase_account each return rows (record the counts — the data-bound clauses read them back)",
+        "Command Center (大屏): open /_console/apps/showcase_app/page/showcase_command_center (the objectui smoke drives the package-id form /apps/com.example.showcase/page/showcase_command_center); screenshot the full-bleed board FIRST (confirm render), THEN read the region DOM",
+        "object-metric KPIs (kind:'full', variant:'bare'): read the 6 hero tiles and cross-check them against the data plane — '活跃项目 Active' == count of showcase_project where status=active, '待办任务 Open' == count of showcase_task where status != done, '风险项目 At-Risk' == count of showcase_project where health=red (aggregate authored in command-center.page.ts)",
+        "object-chart (bar / donut / area) bound to datasets: confirm each chart drew a sized SVG (no recharts width(-1)/height(-1) collapse) with more than one bucket, and cross-check the '任务状态分布' bar buckets against the showcase_task_metrics dataset aggregation (dimensions ['status'], values ['task_count'])",
+        "object-grid (待审核列表 work queue) bound to showcase_task: the grid's rows and its columns (title/project/status/priority/due_date) match GET /api/v1/data/showcase_task",
+        "My Work: open /_console/apps/showcase_app/page/showcase_my_work — the personal object-grid is filtered `owner_id = {current_user_id}`; cross-check its rows against GET /api/v1/data/showcase_task filtered to the signed-in user's id, and confirm the page:card 'Leadership View' (visible: user.email == 'admin@objectos.ai') renders for admin",
+        "Project Workspace: open /_console/apps/showcase_app/page/showcase_project_workspace — the object-master-detail-form renders the showcase_project parent form AND the inline Tasks child (the block composes parent + children, not a bare error)",
+        "Active Projects (type:'list', interfaceConfig): open /_console/apps/showcase_app/page/showcase_active_projects — the always-on base filterBy (status != completed) hides completed rows, the default sort (budget desc) orders them, and the grid/kanban visualization switch + health/status userFilters render",
+        "degradation probe (scratch page, no shipped file touched): PUT /api/v1/meta/page/qa_page_probe?mode=draft a type:'app' page with (a) an object-grid whose objectName is a NONEXISTENT object and (b) a component whose `type` is a bogus string; publish; open /_console/apps/showcase_app/page/qa_page_probe and screenshot — each bad block must surface a NAMED error (SchemaRenderer 'Unknown component type: <t>' red panel / the SchemaErrorBoundary 'Component … failed to render' panel / the block's own empty-or-error state), never a silently blank region",
+        "capture the server log across the whole sweep (the render-clean and no-restart baseline)"
+      ],
+      "acceptance": [
+        {
+          "clause": "every block TYPE declared on the shipped declarative pages resolves to a real renderer — no region renders the OBJUI-001 'Unknown component type' panel or the SchemaErrorBoundary failure panel on command-center / my-work / project-workspace / active-projects; the composition the page authored is the composition on screen",
+          "oracle": "dom",
+          "verify": "after a screenshot confirms each page rendered, the region DOM contains each declared block's rendered output (a chart SVG, a grid table, a metric tile, the master-detail form) and NOT a role=alert error/'Unknown component type' panel",
+          "evidence": "per-page screenshot + region DOM read"
+        },
+        {
+          "clause": "a data-bound block shows SEEDED rows, cross-checked against the server not pixels — command-center's object-grid rows equal GET /api/v1/data/showcase_task, and the '活跃项目 Active' object-metric equals the active-project count from the data plane",
+          "oracle": "api",
+          "verify": "the grid's visible rows and the KPI numbers each match the same query/filter run against /api/v1/data/* — a tile or grid that renders but disagrees with the data plane is caught here",
+          "evidence": "the data reads paired with the tile/grid screenshot"
+        },
+        {
+          "clause": "object-chart buckets are data-real and multi-bucket: each chart drew a sized SVG (no width(-1)/height(-1) collapse) and its buckets match the dataset aggregation — not a single-datapoint smear that 'renders' but proves nothing",
+          "oracle": "api",
+          "verify": "the '任务状态分布' bar buckets equal the showcase_task_metrics aggregate (dimensions status, values task_count); the SVG bounding box has width>0 and height>0",
+          "evidence": "chart screenshot (sized SVG) + the dataset aggregate read"
+        },
+        {
+          "clause": "my-work's {current_user_id} filter is SERVER-honoured: the personal grid's rows equal GET /api/v1/data/showcase_task filtered to the signed-in owner, and a task owned by another user is ABSENT — the token resolved to the real actor, not to every row",
+          "oracle": "api",
+          "verify": "the grid rows are a subset of showcase_task and equal the owner_id={signed-in id} filtered set; a foreign-owned task id is not among them",
+          "evidence": "the filtered data read + the grid screenshot"
+        },
+        {
+          "clause": "the interface (list) page honours its interfaceConfig: active-projects hides completed rows (base filterBy status != completed), orders by budget desc, and exposes the grid/kanban switch plus the health/status user-filters — the page IS the view definition (ADR-0047), not a bare object dump",
+          "oracle": "screenshot",
+          "verify": "the rendered list shows no completed rows, biggest-budget first, with the visualization switch and userFilters controls present; cross-check the no-completed-rows claim against the data plane",
+          "evidence": "the list screenshot + a data read confirming completed rows exist but are filtered out"
+        },
+        {
+          "clause": "object-master-detail-form composes parent + child: project-workspace renders the showcase_project create form AND the inline Tasks child affordance (grid/add-button), not just the parent or an error",
+          "oracle": "dom",
+          "verify": "after a screenshot confirms render, the DOM carries the parent field inputs and the child Tasks section (the master_detail relationship the block auto-derives from showcase_task.project)",
+          "evidence": "screenshot + the master-detail DOM read"
+        },
+        {
+          "clause": "a page block that cannot bind degrades with a NAMED error, never a blank — the scratch page's bogus-`type` block renders 'Unknown component type', and the missing-object object-grid renders an attributable error/empty-state (the SchemaErrorBoundary or the block's own message), so a broken binding is SEEN, not swallowed",
+          "oracle": "screenshot",
+          "verify": "the qa_page_probe render shows the named error for each bad block; a silently blank region for either would be the failure this clause exists for",
+          "evidence": "the scratch-page screenshot"
+        }
+      ],
+      "negative": [
+        "a data-bound region rendering EMPTY over seeded data with no error and no empty-state (silently swallowed) is a FAIL — the OBJUI-001 'Unknown component type' panel is the CORRECT behaviour for a bad block; a blank is the bug",
+        "a declared block silently ABSENT (dropped) while the page still 'renders clean' is a FAIL — render-clean (the smoke's bar) is necessary but not sufficient; the block must actually be composed",
+        "an object-chart 'rendering' as a zero-height or single-bucket smear over a multi-bucket seed is a FAIL (single-datapoint trap)"
+      ],
+      "variants": [
+        "layout container: flex (command-center) / grid (my-work, component-gallery)",
+        "structure: page:header / page:card (with a per-user `visible` gate)",
+        "content: element:text / element:divider",
+        "data-bound: object-metric (aggregate KPI, variant bare) / object-chart (dataset-bound bar/donut/area) / object-grid (object-bound list, {current_user_id} filter) / object-form (create form) / object-master-detail-form (parent + children)"
+      ],
+      "traps": ["hydration-race", "stale-console-bundle", "seed-data-thin", "single-datapoint", "automation-input"],
+      "source": [
+        "packages/spec/src/ui/page.zod.ts (PageComponentType enum — namespaced page:/record:/element: block types; PageComponentSchema.dataSource per-element binding; PageComponentSchema.type = union(enum, string) so objectui-registered custom blocks like object-metric/object-chart/object-grid/object-form/object-master-detail-form/flex/grid are valid)",
+        "examples/app-showcase/src/ui/pages/command-center.page.ts (object-metric bare KPIs + object-chart bar/donut/area on datasets + object-grid work queue), my-work.page.ts ({current_user_id} object-grid + page:card visible-gate), project-workspace.page.ts (object-master-detail-form), active-projects.page.ts (interfaceConfig list: filterBy/sort/appearance/userFilters/addRecord)",
+        "objectui: packages/components/src/renderers/layout/page.tsx (PageRenderer — region/template dispatch, full-bleed for width:'full' main)",
+        "objectui: packages/react/src/SchemaRenderer.tsx (the OBJUI-001 'Unknown component type' red panel + the SchemaErrorBoundary 'Component failed to render' panel — the NAMED-degradation contract; page.<var>/data/user expression scope)",
+        "objectui: e2e/live/showcase-smoke.spec.ts (the shallow render-clean sweep for my-work/project-workspace/active-projects — this item deepens it with block-composition + data-binding assertions)",
+        "examples/app-showcase/src/ui/datasets/chart-gallery.dataset.ts (showcase_task_metrics / showcase_project_metrics — the chart bindings)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-08", "change": "new item: declarative custom pages render their real block composition and bind data (API cross-check, not pixels), with a scratch-page probe proving a bad binding degrades to a NAMED error not a blank — grounded in the four showcase declarative page sources, the PageComponentType enum, objectui PageRenderer + SchemaRenderer, and deepening the shallow showcase-smoke render-clean pin", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    },
+    {
+      "id": "studio-authoring.page-variables-and-actions",
+      "title": "Page variables + page-level actions are runtime-live: variables initialize empty, an interactive writer updates one and dependent visibleWhen predicates re-evaluate WITHOUT reload, and a page action reads the live variable snapshot to POST resolved values that create a real record",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "mixed",
+      "personas": ["admin (seeded admin@objectos.ai) driving the published showcase app as an end user"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "seeded showcase_project rows (the element:record_picker on showcase_page_variables lists them)",
+          "the public web-to-lead endpoint POST /api/v1/forms/contact-us/submit and its showcase_inquiry sink (ADR-0056) reachable on the stock showcase boot — the contact-form submit action posts here"
+        ],
+        "knownGaps": [
+          "neither showcase_page_variables nor showcase_contact_form is in objectui e2e/live/showcase-smoke.spec.ts's SURFACES sweep — there is no automated render-clean pin for either, so this item is browser-driven end to end (not marked `automated`)"
+        ]
+      },
+      "steps": [
+        "open /_console/apps/showcase_app/page/showcase_page_variables and screenshot the INITIAL state: the empty-hint (element:text, visibleWhen \"page.selectedProjectId == ''\") is VISIBLE and the detail panel (divider/heading/body, visibleWhen \"page.selectedProjectId != ''\") is ABSENT — the variable initialized to its empty value",
+        "select a project in the element:record_picker (id: project_picker — the `source` of the selectedProjectId variable) with a ref-targeted selection (not a coordinate click); screenshot again: the empty-hint disappears and the detail panel appears LIVE, with NO page reload",
+        "read the DOM to confirm the toggle is real, not a repaint: the detail-panel nodes are present and the empty-hint absent once the picker wrote page.selectedProjectId",
+        "open /_console/apps/showcase_app/page/showcase_contact_form; type into the element:text_input id=field_email (native setter + input event); the ready_hint (element:text, visibleWhen \"page.inquiryEmail != ''\") must appear the instant a value is present",
+        "fill all four inputs (field_name/field_email/field_company/field_message — each the `source` of its string page variable), click the submit element:button (id: submit_inquiry), and capture the network request its `api` action issues to POST /api/v1/forms/contact-us/submit",
+        "assert the request BODY carries the RESOLVED variable values (name/email/company/message from the typed text), not the literal {{page.inquiryName}} … tokens — the PageVariableActionBridge resolved them from the live snapshot",
+        "cross-check the server effect: GET /api/v1/data/showcase_inquiry — a new row carrying the entered name/email/company/message",
+        "negative probe: reload showcase_page_variables without picking — the detail panel stays hidden (the variable re-initialized empty, it did not retain a stale selection)"
+      ],
+      "acceptance": [
+        {
+          "clause": "page variables initialize to their empty value and GATE dependent blocks on first render: page.selectedProjectId == '' so the empty-hint shows and the detail panel is withheld — the master/detail surface starts in its empty state, driven by the declared variable",
+          "oracle": "screenshot",
+          "verify": "the first render of showcase_page_variables shows the empty-hint and no detail panel",
+          "evidence": "the initial-state screenshot"
+        },
+        {
+          "clause": "an interactive writer updates its variable and dependent visibleWhen predicates re-evaluate LIVE: selecting in project_picker (the `source` of selectedProjectId) reveals the detail panel and hides the hint with NO reload — the write re-runs the predicates immediately (ADR-0049 runtime-live variables)",
+          "oracle": "screenshot",
+          "verify": "before/after screenshots across a single selection: empty-hint→gone, detail panel→shown, same page load",
+          "evidence": "before/after screenshots"
+        },
+        {
+          "clause": "the DOM reflects the toggle, not just pixels: after a screenshot confirms render, the detail-panel nodes are present and the empty-hint absent once a value is written to page.selectedProjectId",
+          "oracle": "dom",
+          "verify": "the gated nodes' presence/absence in the DOM matches the variable state (page.<var> in the SchemaRenderer expression scope)",
+          "evidence": "the before/after DOM reads"
+        },
+        {
+          "clause": "contact-form's per-field variables bind live: typing into field_email flips the ready_hint visible (page.inquiryEmail != '') — one text input writing one page variable drives another component's visibility",
+          "oracle": "screenshot",
+          "verify": "the ready_hint appears the instant an email value is present in the input",
+          "evidence": "the ready-hint screenshot"
+        },
+        {
+          "clause": "the page-level action dispatches with RESOLVED variables: the submit button's `api` action POSTs /api/v1/forms/contact-us/submit with params resolved from the live page-variable snapshot (PageVariableActionBridge), NOT literal {{page.<var>}} strings",
+          "oracle": "network",
+          "verify": "the captured POST body's name/email/company/message equal the typed values; no field carries an unresolved '{{page.…}}' token",
+          "evidence": "the submit request body"
+        },
+        {
+          "clause": "the action's server effect is real: a new showcase_inquiry record carrying the entered fields exists after submit (ADR-0056 web-to-lead) — the page action moved data, it did not just toast",
+          "oracle": "api",
+          "verify": "GET /api/v1/data/showcase_inquiry returns a row with the submitted name/email/company/message",
+          "evidence": "the data read of the new inquiry"
+        }
+      ],
+      "negative": [
+        "a detail/ready block visible BEFORE any interaction (the variable was not initialized empty) is a FAIL — the empty state is the declared initial condition",
+        "a variable write that needs a page RELOAD to take effect is a FAIL — the whole point of runtime-live variables (ADR-0049) is immediate re-evaluation of dependent predicates",
+        "a submit that POSTs the literal {{page.inquiryName}} token (the bridge did not resolve the snapshot) is a FAIL",
+        "a 2xx submit that creates NO showcase_inquiry (the action reported success but moved nothing) is a FAIL — server truth is the oracle, not the toast"
+      ],
+      "variants": [
+        "writer: element:record_picker → record_id variable (page-variables)",
+        "writer: element:text_input → string variable (contact-form)",
+        "reader: component visibleWhen `page.<var>` (empty-state / detail gating)",
+        "reader: page action params `{{page.<var>}}` (submit POST body)"
+      ],
+      "traps": ["hydration-race", "stale-console-bundle", "automation-input"],
+      "source": [
+        "packages/spec/src/ui/page.zod.ts (PageVariableSchema — `source` is the WRITER component id, read by predicates as page.<name>; PageSchema.variables runtime-live per ADR-0049; PageComponentSchema.visibleWhen binds record/current_user/page.<var>, ADR-0089)",
+        "examples/app-showcase/src/ui/pages/page-variables.page.ts (selectedProjectId ← project_picker; empty-hint vs detail gated on page.selectedProjectId), contact-form.page.ts (four string vars ← text_inputs; submit `api` action posting {{page.<var>}} to /api/v1/forms/contact-us/submit → showcase_inquiry)",
+        "objectui: packages/components/src/renderers/layout/page.tsx (PageVariablesProvider mounts the declared variables; PageVariableActionBridge publishes the live snapshot into the action runtime so a submit resolves {{page.<var>}})",
+        "objectui: packages/react/src/SchemaRenderer.tsx (page.<var> threaded into the ExpressionEvaluator scope; visibleWhen/visibility re-evaluated on variable change)",
+        "ADR-0056 (public web-to-lead form → showcase_inquiry), ADR-0089 (visibleWhen canonical predicate)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-08", "change": "new item: the end-to-end page-variable loop (initialize empty → interactive writer updates → dependent visibleWhen re-evaluates live, no reload) and the page-level `api` action resolving {{page.<var>}} from the live snapshot to create a real showcase_inquiry — grounded in PageVariableSchema, the page-variables + contact-form sources, and objectui's PageVariablesProvider/PageVariableActionBridge", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    },
+    {
+      "id": "studio-authoring.custom-page-source-tiers",
+      "title": "Source-authored page tiers render by the RIGHT path: kind:'html' source is PARSED-never-executed (static, in-browser sdui-parser compile), kind:'react' source is EXECUTED behind its capability gate (live data + interactivity) — command-center-jsx / capability-map (html) vs crm-workbench (react)",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "mixed",
+      "personas": ["admin (seeded admin@objectos.ai) driving the published showcase app as an end user"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "seeded showcase_project rows (the react page's live KPI + <ListView> read them)",
+          "the react-pages capability ON — CAP_REACT_PAGES defaults ON; a boot with OS_PAGE_REACT=off flips it OFF (the both-sides gate check)"
+        ],
+        "knownGaps": [
+          "NO manual build step is needed to VIEW either tier in the running showcase (contra the task's guess): a kind:'html' page compiles IN-BROWSER via @object-ui/sdui-parser compile(source, manifest) at render, against a whitelist manifest built from the LIVE ComponentRegistry (packages/components/src/renderers/layout/page.tsx); a kind:'react' page is transpiled IN-BROWSER by a lazily-loaded Sucrase @object-ui/react-runtime chunk. The only build-shaped risk is the vendored /_console bundle being stale (stale-console-bundle) — a stale sdui-parser/react-runtime mis-compiles a page that is fine on a fresh build.",
+          "none of showcase_command_center_jsx / showcase_capability_map / showcase_crm_workbench is in objectui e2e/live/showcase-smoke.spec.ts's SURFACES sweep — there is no automated render-clean pin for the html/react tiers, so this item is browser-driven (not marked `automated`)."
+        ]
+      },
+      "steps": [
+        "capability-map (kind:'html', isDefault landing): open /_console/apps/showcase_app/page/showcase_capability_map; screenshot the six protocol-domain cards; confirm the compiled SchemaNode tree rendered (flex/div/a nodes with theme-token style objects), NOT the 'HTML page failed to compile' panel",
+        "command-center-jsx (kind:'html'): open /_console/apps/showcase_app/page/showcase_command_center_jsx; screenshot the KPI board (Open Tasks 128 / In Progress 47 / Completed 1,902 / Cycle Time 2.4d) and the weekly-throughput bars",
+        "prove the html tier is PARSED-NEVER-EXECUTED and STATIC: the KPI numbers are hand-authored sample copy — 128 does NOT equal GET /api/v1/data/showcase_task's count, and NO data query fires for those tiles (the page's own on-screen copy says the numbers are static sample copy)",
+        "crm-workbench (kind:'react'): open /_console/apps/showcase_app/page/showcase_crm_workbench; screenshot the workbench — the KPI strip (Total / Active) + the real <ListView> and <ObjectForm> master/detail over showcase_project",
+        "prove the react tier is EXECUTED against LIVE data: the 'Total projects' KPI equals GET /api/v1/data/showcase_project's count (the page computes it via useAdapter().find('showcase_project'), reading the QueryResult .data envelope), and a showcase_project find query fires on the network — the number is computed at render, not authored",
+        "prove react interactivity (executed handlers, not a parsed tree): click a ListView row → the ObjectForm binds THAT record (React useState); click '+ New project' → the form switches to create mode",
+        "both-sides gate: on a boot with OS_PAGE_REACT=off, re-open crm-workbench — it must render the NAMED 'React pages are disabled on this deployment' notice (CapabilityDisabledNotice), never a blank and never an executed page; the html pages still render (html is not gated). If the env toggle cannot be flipped on the stock fixture, record this clause blocked(environment)",
+        "degradation: confirm an html compile error would surface the 'HTML page failed to compile (N)' panel with the diagnostic messages, and a react runtime error the 'React page error' fallback — neither a blank page (drive via the scratch draft door if a shipped page cannot be made to fault)"
+      ],
+      "acceptance": [
+        {
+          "clause": "the renderer dispatches on `kind`: an html page renders the sdui-parser-COMPILED tree (parsed, never executed) via SchemaRenderer, and a react page renders through ReactKindPage — evidenced by the distinct surfaces each produces (html = static composed board; react = live data + interactivity)",
+          "oracle": "screenshot",
+          "verify": "capability-map/command-center-jsx render composed static boards; crm-workbench renders a data-driven interactive workbench — the two paths produce their characteristic surfaces",
+          "evidence": "the three page screenshots"
+        },
+        {
+          "clause": "the html tier is STATIC and UNEXECUTED: command-center-jsx's KPI numbers are hand-authored sample copy — they do NOT equal the data-plane counts, and NO data query fires for them (parse-never-execute, ADR-0080)",
+          "oracle": "api",
+          "verify": "the on-screen KPI (e.g. Open Tasks 128) differs from GET /api/v1/data/showcase_task's count, and the network shows no find/aggregate request backing those tiles",
+          "evidence": "the KPI screenshot + the data read (mismatch is the point) + the network trace showing no data query"
+        },
+        {
+          "clause": "the react tier is EXECUTED against live data: crm-workbench's 'Total projects' KPI equals GET /api/v1/data/showcase_project's count and a showcase_project find query fires — the value is computed at render by author JS (useAdapter().find), not authored (ADR-0081)",
+          "oracle": "api",
+          "verify": "the KPI number equals the live showcase_project count, and the network carries the find query the page's useEffect issues",
+          "evidence": "the KPI screenshot + the data read (match) + the find-query network trace"
+        },
+        {
+          "clause": "react HANDLERS run (execution, not a parsed tree): selecting a ListView row binds the ObjectForm to that record and '+ New project' switches the form to create mode — React state transitions the html tier could never express",
+          "oracle": "dom",
+          "verify": "after a screenshot confirms render, a ref-targeted row click updates the form to the selected record; the New button switches modes",
+          "evidence": "before/after screenshots + the form DOM read"
+        },
+        {
+          "clause": "the react capability gate is real and BOTH-sided: with CAP_REACT_PAGES on, crm-workbench executes; with OS_PAGE_REACT=off it renders the NAMED 'React pages are disabled on this deployment' notice — never a blank, never a bypassed execution (the html pages are unaffected)",
+          "oracle": "screenshot",
+          "verify": "the on-state executes; the off-state shows CapabilityDisabledNotice with the OS_PAGE_REACT=off text; record blocked(environment) if the toggle cannot be exercised on the stock fixture",
+          "evidence": "the on-state + off-state screenshots (or the blocked-environment note)"
+        },
+        {
+          "clause": "compile/runtime failures degrade NAMED, never blank: an html compile error is the 'HTML page failed to compile (N)' panel listing the diagnostics; a react error is the 'React page error' fallback carrying the message",
+          "oracle": "screenshot",
+          "verify": "a faulted html source shows the compile-error panel; a faulted react source shows the error fallback — a blank page for either is the failure this clause exists for",
+          "evidence": "the error-panel screenshot(s)"
+        }
+      ],
+      "negative": [
+        "an html page whose source is EXECUTED (author JS runs) rather than parsed is a security FAIL — ADR-0080's html tier is parse-never-execute; execution is the react tier's gated privilege only",
+        "a react page that executes with OS_PAGE_REACT=off (the gate bypassed) is a FAIL — the capability is the whole safety boundary for the trusted-execution tier",
+        "a react KPI stuck at 0 while the <ListView> beside it shows rows is the crm-workbench QueryResult-envelope bug regressed (reading .records instead of .data) — FAIL, cross-checked against the live count",
+        "a compile or runtime error swallowed to a blank page (no named panel) is a FAIL — the author must SEE why the page did not render"
+      ],
+      "variants": [
+        "html tier: command-center-jsx (composition of registered components with structured props) + capability-map (domain cards + out-links, isDefault landing)",
+        "react tier: crm-workbench (useAdapter + <ListView>/<ObjectForm> + React useState master/detail)"
+      ],
+      "traps": ["stale-console-bundle", "hydration-race", "single-datapoint", "automation-input"],
+      "source": [
+        "packages/spec/src/ui/page.zod.ts (PageSchema.kind = full|slotted|html|react|jsx; html = constrained JSX/HTML+Tailwind compiled by @objectstack/sdui-parser 'parse, never execute' ADR-0080; react = real React executed at render, gated by a host capability defaulting ON, disabled via OS_PAGE_REACT=off, ADR-0081; the superRefine that fails an html/react page with no `source`)",
+        "objectui: packages/components/src/renderers/layout/page.tsx (PageRenderer kind dispatch — compile(src, getJsxManifest()) + SchemaRenderer for html with the 'HTML page failed to compile' panel; ReactKindPage for react; the manifest whitelist is built from the LIVE registry's known types)",
+        "objectui: packages/components/src/renderers/layout/react-page.tsx (ReactKindPage — CAP_REACT_PAGES gate + CapabilityDisabledNotice for OS_PAGE_REACT=off; lazy Sucrase @object-ui/react-runtime transpile; useAdapter/ListView/ObjectForm scope; the 'React page error' fallback)",
+        "objectui: packages/sdui-parser/src/index.ts (compile(source, manifest) — the pure in-browser parse used at render, no build step)",
+        "examples/app-showcase/src/ui/pages/command-center-jsx.page.ts (kind:'html', static sample KPIs — 'parsed, never executed'), capability-map.page.ts (kind:'html' landing), crm-workbench.page.ts (kind:'react' — useAdapter().find reads the .data envelope, note the #… KPIs-stuck-at-0 fix)",
+        "objectui: content/docs/guide/react-pages.md (react tier: transpiled + evaluated in-app, react-pages capability, OS_PAGE_REACT=off disable)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-08", "change": "new item: the html (parse-never-execute, in-browser sdui-parser compile, static) vs react (executed at render, capability-gated, live data + interactivity) source-page tiers — the objectui renderer-path split grounded in PageRenderer's kind dispatch + react-page.tsx's gate, distinguishing command-center-jsx/capability-map (html) from crm-workbench (react); records the honest build-step finding (none needed to view — in-browser compile/transpile) as a knownGap", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    }
+  ]
+}

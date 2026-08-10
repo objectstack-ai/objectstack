@@ -443,6 +443,34 @@ describe('ReportService', () => {
       expect(all.length).toBe(2);
     });
 
+    it('unscheduleReport: a non-owner cannot delete another user\'s schedule', async () => {
+      const r = await svc.saveReport({ name: 'Mine', object: 'lead', query: {} }, CTX);
+      const s = await svc.scheduleReport({ reportId: r.id, recipients: ['x@t'] }, CTX);
+      // stranger is denied as not-found and the schedule survives untouched
+      await expect(svc.unscheduleReport(s.id, OTHER)).rejects.toThrow(/REPORT_NOT_FOUND/);
+      expect(engine._tables['sys_report_schedule'].length).toBe(1);
+      // owner can
+      await svc.unscheduleReport(s.id, CTX);
+      expect(engine._tables['sys_report_schedule'].length).toBe(0);
+    });
+
+    it('unscheduleReport: an unknown schedule id is idempotent, not a leak', async () => {
+      await expect(svc.unscheduleReport('rsch_nope', OTHER)).resolves.toBeUndefined();
+    });
+
+    it('listSchedules: a non-owner cannot see another user\'s schedules', async () => {
+      const r = await svc.saveReport({ name: 'Mine', object: 'lead', query: {} }, CTX);
+      await svc.scheduleReport({ reportId: r.id, recipients: ['x@t'] }, CTX);
+      expect((await svc.listSchedules({ reportId: r.id }, OTHER)).length).toBe(0); // stranger sees nothing
+      expect((await svc.listSchedules({ reportId: r.id }, CTX)).length).toBe(1);   // owner sees it
+    });
+
+    it('listSchedules: system context (dispatcher) still sees schedules', async () => {
+      const r = await svc.saveReport({ name: 'Mine', object: 'lead', query: {} }, CTX);
+      await svc.scheduleReport({ reportId: r.id, recipients: ['x@t'] }, CTX);
+      expect((await svc.listSchedules({ reportId: r.id }, { isSystem: true } as any)).length).toBe(1);
+    });
+
     it('dispatchDue: fails closed (no RLS bypass) when no owner resolver is configured', async () => {
       const noResolver = new ReportService({ engine: engine as any, email, clock: { now: () => now } });
       const r = await noResolver.saveReport({ name: 'A', object: 'lead', query: {} }, CTX);
@@ -470,6 +498,126 @@ describe('ReportService', () => {
       const result = await spySvc.dispatchDue();
       expect(result.fired).toBe(1);
       expect(seen).toEqual(['u1']); // resolved the owner, not a system context
+    });
+  });
+
+  // ─── #7204 — the caller envelope the report read receives ─────────
+  //
+  // The row-level consequence (a `group`-posture report under-reporting) is
+  // pinned end-to-end against a real engine + real SQL driver in
+  // `report-group-posture-scope.integration.test.ts` — that is where the claim
+  // "the report returns fewer rows than the same query interactively" is
+  // measured, because a key sitting on a context object is precisely what this
+  // defect looked like from in here. What is left for a fake engine is the
+  // structural half: WHICH keys cross, and that the crossing cannot write back.
+  describe('executeReport forwards the caller envelope, not a rebuilt subset (#7204)', () => {
+    const lastFindContext = () =>
+      (engine._tables as any) && (engine as any)._lastLeadFindContext;
+
+    beforeEach(() => {
+      const inner = engine.find.bind(engine);
+      (engine as any).find = async (object: string, options?: any) => {
+        if (object === 'lead') (engine as any)._lastLeadFindContext = options?.context;
+        return inner(object, options);
+      };
+    });
+
+    it('forwards the principal fields the projection used to drop', async () => {
+      await svc.runAdHoc({ name: 'A', object: 'lead', query: {} }, {
+        userId: 'u1',
+        tenantId: 'org_a',
+        positions: ['p1'],
+        permissions: ['perm'],
+        // Every one of these was dropped by the five-field projection.
+        accessible_org_ids: ['org_a', 'org_b'],
+        posture: 'MEMBER',
+        org_user_ids: ['u1', 'u2'],
+        systemPermissions: ['viewAllData'],
+        timezone: 'Asia/Shanghai',
+        principalKind: 'agent',
+        onBehalfOf: { userId: 'u9' },
+      } as any);
+
+      expect(lastFindContext()).toMatchObject({
+        userId: 'u1',
+        tenantId: 'org_a',
+        positions: ['p1'],
+        permissions: ['perm'],
+        accessible_org_ids: ['org_a', 'org_b'],
+        posture: 'MEMBER',
+        org_user_ids: ['u1', 'u2'],
+        systemPermissions: ['viewAllData'],
+        timezone: 'Asia/Shanghai',
+        principalKind: 'agent',
+        onBehalfOf: { userId: 'u9' },
+      });
+    });
+
+    it('does NOT forward the middleware-private `__` keys — another object\'s access depth stays behind', async () => {
+      // A REST request that touched some other object before reaching
+      // /reports/:id/run arrives with that object's depth already stamped on it,
+      // and plugin-security only OVERWRITES the stamp when it resolves
+      // permission sets for the new object. Carried across, it would widen the
+      // report's owner-match on a question it was never resolved for.
+      await svc.runAdHoc({ name: 'A', object: 'lead', query: {} }, {
+        userId: 'u1',
+        __readScope: 'all',
+        __delegatorReadScope: 'all',
+        __expandRead: true,
+        __referentialFieldClear: true,
+      } as any);
+
+      const seen = lastFindContext();
+      expect(seen.userId).toBe('u1');
+      expect(Object.keys(seen).filter((k) => k.startsWith('__'))).toEqual([]);
+    });
+
+    it('hands the engine a FRESH object — a callee stamping onto it cannot write back into the caller\'s envelope', async () => {
+      // plugin-security stamps `sc.__readScope = …` in place on whatever it is
+      // handed. Forwarding the caller's own object by reference would leave the
+      // report's depth on the REQUEST context the route goes on using.
+      const caller: any = { userId: 'u1', accessible_org_ids: ['org_a'] };
+      (engine as any).find = async (object: string, options?: any) => {
+        if (object === 'lead') {
+          (engine as any)._lastLeadFindContext = options?.context;
+          options.context.__readScope = 'all';
+        }
+        return engine._tables[object] ?? [];
+      };
+
+      await svc.runAdHoc({ name: 'A', object: 'lead', query: {} }, caller);
+
+      expect(lastFindContext()).not.toBe(caller);
+      expect(lastFindContext().__readScope).toBe('all'); // the callee did stamp
+      expect(caller.__readScope, 'the caller envelope must be untouched').toBeUndefined();
+    });
+
+    it('keeps the projection\'s defaults for an envelope that omits them', async () => {
+      // Byte-for-byte what the five-field projection produced: this change adds
+      // fields, it does not change the ones that were already there.
+      await svc.runAdHoc({ name: 'A', object: 'lead', query: {} }, { userId: 'u1' } as any);
+      expect(lastFindContext()).toMatchObject({
+        userId: 'u1', positions: [], permissions: [], isSystem: false,
+      });
+    });
+
+    it('an explicit isSystem:true still crosses (the scheduler / tooling path)', async () => {
+      await svc.runAdHoc({ name: 'A', object: 'lead', query: {} }, { isSystem: true } as any);
+      expect(lastFindContext().isSystem).toBe(true);
+    });
+
+    it('assertExportAllowed still sees the UN-projected caller context', async () => {
+      // The export axis runs before any row is read, against the caller's own
+      // envelope — the forwarding change must not have re-routed its input.
+      const seen: any[] = [];
+      const exportSvc = new ReportService({
+        engine: engine as any, email, clock: { now: () => now },
+        canExport: async (_object: string, ctx: unknown) => { seen.push(ctx); return true; },
+      });
+      const caller: any = { userId: 'u1', accessible_org_ids: ['org_a', 'org_b'] };
+      await exportSvc.runAdHoc({ name: 'A', object: 'lead', query: {}, format: 'csv' }, caller);
+      expect(seen).toHaveLength(1);
+      expect(seen[0]).toBe(caller);
     });
   });
 });

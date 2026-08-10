@@ -197,17 +197,16 @@ describe('[#5792] /notifications conforms to the schemas the catalog declares', 
             expect(seen[0]).toEqual({ read: false, type: 'deal.won', limit: 7 });
         });
 
-        it('[#6361] recorded, not endorsed: the declared `limit` DEFAULT never reaches the provider', async () => {
-            // `ListNotificationsRequestSchema.limit` is `z.number().default(20)`,
-            // but this route never parses the query through that schema — with no
-            // `limit` the domain forwards `undefined` and the provider applies its
-            // own window (50). So the declared default has never been in effect.
+        it('[#6361] the declaration no longer states a `limit` default the route never applies', async () => {
+            // FLIPPED by #6361 (maintainer ruling 2026-08-07, Option A). This pin
+            // used to record the DEFECT: `limit` was `z.number().default(20)` while
+            // the route forwarded `undefined` and the provider applied its own 50,
+            // so the declared default had never once been in effect.
             //
-            // Pinned as the measured fact it is, NOT as the desired behaviour:
-            // #6361 is the judgement call (align the declaration to 50, or wire
-            // the query through the schema so 20 takes effect). Whichever way it
-            // is ruled, this assertion is the one that must change — which is the
-            // point of pinning it rather than leaving it for the next reader.
+            // The runtime half of that measurement is UNCHANGED and is re-asserted
+            // below, because the ruled direction was the schema catching up to the
+            // implementation — not the reverse. What changed is the declaration:
+            // there is no default to be wrong about any more.
             const seen: unknown[] = [];
             const dispatcher = makeDispatcher({
                 listInbox: async (_userId: string, options: unknown) => { seen.push(options); return LIST_BODY; },
@@ -217,8 +216,52 @@ describe('[#5792] /notifications conforms to the schemas the catalog declares', 
 
             await dispatcher.handleNotification('', 'GET', undefined, {}, CTX);
 
+            // Behaviour: untouched. An omitted `limit` still reaches the provider
+            // as `undefined`, which is what lets the provider window it.
             expect(seen[0]).toEqual({ read: undefined, type: undefined, limit: undefined });
-            expect((ListNotificationsRequestSchema as any).shape.limit._zod.def.defaultValue).toBe(20);
+
+            // Declaration: `limit` is now plainly optional — no `default`, so
+            // parsing an empty query stamps no number onto it. Asserted through
+            // the PARSE rather than through `_zod.def`, so it cannot go quietly
+            // vacuous if the internal shape of a Zod default ever moves.
+            const parsedEmpty = ListNotificationsRequestSchema.parse({});
+            expect(Object.prototype.hasOwnProperty.call(parsedEmpty, 'limit')).toBe(false);
+            expect((parsedEmpty as { limit?: number }).limit).toBeUndefined();
+            // An explicit limit still parses — only the invented default is gone.
+            expect(ListNotificationsRequestSchema.parse({ limit: 7 }).limit).toBe(7);
+        });
+
+        it('[#6361] `cursor` is retired on BOTH halves, and the ROUTE still ignores it', async () => {
+            // The declaration half: tombstoned, not deleted, on request AND
+            // response (one capability, two halves — the ruled clause).
+            for (const schema of [ListNotificationsRequestSchema, ListNotificationsResponseSchema]) {
+                const refused = schema.safeParse({ notifications: [], unreadCount: 0, cursor: 'n2' });
+                expect(refused.success).toBe(false);
+                expect(refused.error!.issues.some((i) => i.path.join('.') === 'cursor')).toBe(true);
+            }
+
+            // ⚠️ THE ROUTE'S BEHAVIOUR IS UNCHANGED, deliberately, and this is
+            // the half worth pinning here. The tombstone is loud only where
+            // something PARSES — and this route parses no query at all (#3899
+            // wired the catalog's requestSchema for bodies only). So a request
+            // still carrying `cursor` is IGNORED, exactly as before: 200, three
+            // named keys read, no 400. The ruled direction was to stop declaring
+            // a filter nobody reads, NOT to start refusing traffic, and this
+            // assertion is what would catch the difference.
+            const seen: unknown[] = [];
+            const dispatcher = makeDispatcher({
+                listInbox: async (_userId: string, options: unknown) => { seen.push(options); return LIST_BODY; },
+                markRead: async () => MARK_READ_BODY,
+                markAllRead: async () => MARK_ALL_BODY,
+            });
+
+            const result = await dispatcher.handleNotification(
+                '', 'GET', undefined, { cursor: 'n2', limit: '2' }, CTX,
+            );
+
+            expect(result.response?.status).toBe(200);
+            expect(seen[0]).toEqual({ read: undefined, type: undefined, limit: 2 });
+            expect(seen[0]).not.toHaveProperty('cursor');
         });
     });
 

@@ -4,6 +4,7 @@ import { describe, it, expect } from 'vitest';
 import {
   validateAiAgentAuthoring,
   AGENT_AUTHORING_WITHDRAWN,
+  DEFAULT_AGENT_OUTSIDE_ROSTER,
 } from './validate-ai-agent-authoring.js';
 
 describe('validate-ai-agent-authoring', () => {
@@ -64,5 +65,80 @@ describe('validate-ai-agent-authoring', () => {
     expect(validateAiAgentAuthoring({ agents: 'nope' } as never)).toEqual([]);
     expect(validateAiAgentAuthoring({ agents: [null, 7] } as never)).toEqual([]);
     expect(validateAiAgentAuthoring({ agents: [{ skills: 'nope' }] } as never)).toHaveLength(1);
+  });
+
+  describe('app.defaultAgent value (issue #6041)', () => {
+    it('flags a defaultAgent value outside the platform agent roster', () => {
+      // The #5985 corpus shape: a plausible-looking custom agent name pinned
+      // directly on the app, never caught by the schema (any snake_case string
+      // parses) or by the array-scanning limb above (this app declares no
+      // `agents` at all).
+      const stack = {
+        apps: [{ name: 'crm', defaultAgent: 'sales_copilot' }],
+      };
+      const findings = validateAiAgentAuthoring(stack);
+      expect(findings).toHaveLength(1);
+      expect(findings[0]).toMatchObject({
+        severity: 'warning',
+        rule: DEFAULT_AGENT_OUTSIDE_ROSTER,
+        where: 'app "crm".defaultAgent',
+        path: 'apps[0].defaultAgent',
+      });
+      // Names the offending value.
+      expect(findings[0].message).toContain('"sales_copilot"');
+      // Names the allowed set (canonical + legacy aliases).
+      expect(findings[0].message).toContain('ask');
+      expect(findings[0].message).toContain('build');
+      expect(findings[0].message).toContain('data_chat');
+      expect(findings[0].message).toContain('metadata_assistant');
+      expect(findings[0].hint).toContain('ask');
+      expect(findings[0].hint).toContain('build');
+    });
+
+    it('passes every canonical platform agent name and every legacy alias', () => {
+      for (const defaultAgent of ['ask', 'build', 'data_chat', 'metadata_assistant']) {
+        const stack = { apps: [{ name: 'app', defaultAgent }] };
+        expect(validateAiAgentAuthoring(stack), defaultAgent).toEqual([]);
+      }
+    });
+
+    it('is silent when defaultAgent is absent, empty, or not a string', () => {
+      expect(validateAiAgentAuthoring({ apps: [{ name: 'a' }] })).toEqual([]);
+      expect(validateAiAgentAuthoring({ apps: [{ name: 'a', defaultAgent: '' }] })).toEqual([]);
+      expect(
+        validateAiAgentAuthoring({ apps: [{ name: 'a', defaultAgent: 42 }] } as never),
+      ).toEqual([]);
+      expect(validateAiAgentAuthoring({ apps: [] })).toEqual([]);
+      expect(validateAiAgentAuthoring({})).toEqual([]);
+    });
+
+    it('reports every offending app with stable paths, alongside the agents-array limb', () => {
+      const stack = {
+        agents: [{ name: 'legacy_bot' }],
+        apps: [
+          { name: 'a', defaultAgent: 'ask' },
+          { name: 'b', defaultAgent: 'rogue_one' },
+          { name: 'c', defaultAgent: 'rogue_two' },
+        ],
+      };
+      const findings = validateAiAgentAuthoring(stack);
+      expect(findings.map((f) => f.rule)).toEqual([
+        AGENT_AUTHORING_WITHDRAWN,
+        DEFAULT_AGENT_OUTSIDE_ROSTER,
+        DEFAULT_AGENT_OUTSIDE_ROSTER,
+      ]);
+      expect(findings.slice(1).map((f) => f.path)).toEqual([
+        'apps[1].defaultAgent',
+        'apps[2].defaultAgent',
+      ]);
+    });
+
+    it('tolerates junk app shapes without throwing', () => {
+      expect(validateAiAgentAuthoring({ apps: 'nope' } as never)).toEqual([]);
+      expect(validateAiAgentAuthoring({ apps: [null, 7] } as never)).toEqual([]);
+      expect(
+        validateAiAgentAuthoring({ apps: [{ defaultAgent: 'rogue' }] } as never),
+      ).toHaveLength(1);
+    });
   });
 });

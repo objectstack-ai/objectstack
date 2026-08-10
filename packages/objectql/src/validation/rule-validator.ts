@@ -190,7 +190,7 @@
 
 import { ExpressionEngine, collectCelRootIdentifiers } from '@objectstack/formula';
 import type { Expression } from '@objectstack/spec';
-import { AUDIT_PROVENANCE_FIELDS } from '@objectstack/spec/data';
+import { AUDIT_PROVENANCE_FIELDS, RUNTIME_OWNED_FIELD_TYPES } from '@objectstack/spec/data';
 import Ajv, { type ValidateFunction } from 'ajv';
 // #5029 — `format` is NOT built into ajv 8; it ships in this separate package.
 // See the `const ajv` note below for why the runtime registers it.
@@ -433,6 +433,17 @@ export type ParentBinding = Record<string, unknown> | null | undefined;
  * unbound-root branch of {@link isReadonlyWhenLocked} reachable, and the header
  * is a row of a DIFFERENT object whose declared fields this function does not
  * have.
+ *
+ * [#6457] That last clause is why the header IS materialised — just not here.
+ * A RESOLVED-but-sparse header reproduced this same trap one root over (the
+ * fault is `No such key`, not `Unknown variable`, because `parent` IS bound ⇒
+ * ordinary fail-OPEN ⇒ the declared lock is let through), and the fix went to
+ * the only place holding both the master's schema and the just-read header:
+ * `ObjectQL.resolveMasterDetailParent(s)` (`engine.ts#materializeParentHeader`),
+ * which serves this seam and the `requiredWhen` one below from one resolution.
+ * This function's own contract is unchanged — hand it a sparse header and it
+ * still fails open — and the ABSENT-parent signal above is untouched, because
+ * materialisation is only ever applied to a header row that EXISTS.
  *
  * ## Consequences, both directions (measured, not asserted)
  *
@@ -808,8 +819,9 @@ export function stripReadonlyWhenFieldsMulti(
  * historical imports and seed data may carry pre-computed totals.
  *
  * DO NOT "fix the code to match this comment" by adding `summary` here. The
- * insert-side strip ({@link stripRuntimeOwnedFields}) keys on the RAW caller
- * payload and runs in `engine.insert` AFTER the seed pass, so a plain
+ * insert-side strip ({@link stripRuntimeOwnedFields}) judges against the RAW
+ * caller payload (its keys AND their values, #6339) and runs in
+ * `engine.insert` AFTER the seed pass, so a plain
  * (non-`isSystem`, non-`preserveAudit`) import of a parent carrying
  * `task_count: 42` would lose the 42 to the strip and get no 0 from the seed
  * either — the seed already skipped that field precisely BECAUSE the caller
@@ -820,8 +832,15 @@ export function stripReadonlyWhenFieldsMulti(
  *
  * Keep this set to types whose value is (a) persisted, (b) issued by the
  * runtime, and (c) never legitimately supplied by a caller.
+ *
+ * The set itself now lives in `@objectstack/spec` (`RUNTIME_OWNED_FIELD_TYPES`,
+ * #5628) — the protocol's one statement of the ownership — because a SECOND
+ * consumer needs it: the DataProtocol create ingress, whose `readonly` strip
+ * carries a NARROWER exemption set than this module's (no `preserveAudit`), and
+ * which therefore has to recognise these types to stay out of their way. A
+ * literal copied over there is the drift `AUDIT_TIMELINE_FIELDS` below stopped
+ * paying for. This module keeps the reasoning; the membership is imported.
  */
-const RUNTIME_OWNED_FIELD_TYPES: ReadonlySet<string> = new Set(['autonumber']);
 
 /**
  * Whether the runtime owns this field's value outright — i.e. the field is
@@ -998,16 +1017,54 @@ export function stripReadonlyFields(
  * it runs before the payload is dispatched, which covers the SQL driver's
  * `supports.autonumber` path without the driver participating at all.
  *
- * Same two guards as the update strip: only keys the CALLER supplied are
- * candidates (a `beforeInsert` hook that computes the value survives), and the
- * `preserveAudit` whitelist is honoured so a historical import may reinstate the
- * legacy record numbers it is migrating. `isSystem` writes never reach here —
- * the caller gates on that, exactly as it does for the update strip.
+ * Same guards as the update strip, and — since #6339 — the same THREE of them:
+ * the CALLER must have sent the key, the key must still hold THE CALLER'S OWN
+ * VALUE, and the `preserveAudit` whitelist is honoured so a historical import
+ * may reinstate the legacy record numbers it is migrating. `isSystem` writes
+ * never reach here — the caller gates on that, exactly as it does for the
+ * update strip.
+ *
+ * ### Why `supplied` carries VALUES, not just keys (#6339)
+ *
+ * The insert-side twin of #5591, found while measuring it, and wrong for the
+ * identical reason. This strip runs AFTER `beforeInsert` (`engine.insert` calls
+ * it on the post-hook rows), so "the caller named this key" and "this key still
+ * holds the caller's value" are different facts, and only the second licenses a
+ * `delete`. With a key SET the delete took whatever value was standing there —
+ * so a `beforeInsert` hook that re-issues or normalizes a record number lost its
+ * write to any caller that had ALSO submitted that key, and the record fell back
+ * to the sequence value.
+ *
+ * Measured (objectstack#6339, real ObjectQL + in-memory driver, one object
+ * `{ title: text, code: autonumber }` and one hook writing `ctx.input.data.code`):
+ *
+ * - caller omits `code`  ⇒ committed `code` = the hook's value  (hook write lives)
+ * - caller sends `code`  ⇒ committed `code` = `"1"`             (hook write dies)
+ *
+ * The two differ in nothing but whether the caller's payload happened to carry a
+ * same-named key — and the first outcome is the one {@link
+ * runtimeOwnedStripWarning} promises IN PROSE to every hook author: "A
+ * beforeInsert/beforeUpdate hook does NOT need either — hook-written keys are
+ * not caller-supplied." The key-set judgement made that sentence true only by
+ * accident, so this is the code being brought to its own documented contract.
+ *
+ * NOT a relaxation of #5503: a caller-seeded record number that no hook rewrote
+ * is still dropped, still warns with the same text, and still reports through
+ * `onFieldsDropped` / `strictReadonlyWrites`. What changed is exclusively the
+ * case where the value being deleted was never the caller's.
+ *
+ * KNOWN LIMIT, identical to the update side's and deliberately not papered over:
+ * the snapshot is SHALLOW, so a hook that mutates a caller-supplied object IN
+ * PLACE is indistinguishable from a hook that did nothing, and the field is
+ * still stripped. That fallback is the pre-#6339 behaviour, i.e. fail-safe; a
+ * hook meaning to own a runtime-owned column should ASSIGN to it. (An
+ * `autonumber` value is a scalar in every supported shape, so this limit is
+ * theoretical here in a way it is not for the update path's `json` columns.)
  */
 export function stripRuntimeOwnedFields(
   objectSchema: { name?: string; fields?: Record<string, ConditionalFieldDef> } | undefined | null,
   data: Record<string, unknown> | undefined | null,
-  suppliedKeys: ReadonlySet<string>,
+  supplied: Readonly<Record<string, unknown>>,
   logger?: EvaluateRulesOptions['logger'],
   options?: { preserveAudit?: boolean },
 ): Record<string, unknown> | undefined | null {
@@ -1018,7 +1075,18 @@ export function stripRuntimeOwnedFields(
   for (const [name, def] of Object.entries(fields)) {
     if (!isRuntimeOwnedField(def)) continue;
     if (!(name in (result as Record<string, unknown>))) continue;
-    if (!suppliedKeys.has(name)) continue; // hook/middleware stamp — keep
+    // Own-property, never `in`: a field name is `^[a-z_][a-z0-9_]*$`, which
+    // admits `constructor` / `valueOf` — inherited from `Object.prototype` on
+    // any plain snapshot, so `in` would call a hook stamp caller-supplied and
+    // strip it.
+    if (!Object.prototype.hasOwnProperty.call(supplied, name)) continue; // hook/middleware stamp — keep
+    // [#6339] ...and it must still BE the caller's value. A hook that overwrote
+    // this key wrote a PLATFORM value, and deleting that is what sent records
+    // to the database holding a sequence number the hook had just replaced.
+    // `Object.is`, not `===`: `===` reports NaN !== NaN, which would read a
+    // caller-forged NaN as "a hook rewrote it" and KEEP the forgery — the one
+    // input where the loose operator inverts the verdict.
+    if (!Object.is((result as Record<string, unknown>)[name], supplied[name])) continue;
     if (preserveAudit && isPreservableUnderAudit(name, def)) continue; // historical import reinstates it
     if (result === data) result = { ...data };
     delete (result as Record<string, unknown>)[name];

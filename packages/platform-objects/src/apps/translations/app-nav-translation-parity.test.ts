@@ -22,7 +22,22 @@
 //
 // Setup is deliberately NOT covered here: its nav ids do not exist on the app
 // object at all until the runtime merges contributions in, so this file would
-// have nothing to walk. Those labels are gated by the coverage ratchet.
+// have nothing to walk.
+//
+// Where they ARE covered: `pnpm check:app-nav-i18n`
+// (`packages/cli/scripts/check-app-nav-i18n.mjs`), which boots the real
+// composition, merges the contributions through `applyNavContributions`, and
+// asserts the same invariant this file asserts — every nav id labelled in every
+// locale — over the merged tree.
+//
+// This line used to read "Those labels are gated by the coverage ratchet",
+// which was the #5750 defect in one sentence. The ratchet
+// (`scripts/check-i18n-coverage.mjs`) runs `os lint` over STATIC stack configs
+// and never saw a runtime-contributed id in its life; the extract config on the
+// other side named the ratchet right back. Two comments declared an owner, no
+// gate implemented one, and four Setup nav entries sat untranslated in `zh-CN`
+// under a green build. Do not re-delegate Setup to a gate that cannot walk it —
+// if this file grows a Setup case, it has to boot something.
 
 import { describe, it, expect } from 'vitest';
 import { STUDIO_APP } from '../studio.app.js';

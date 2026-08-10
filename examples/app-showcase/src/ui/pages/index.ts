@@ -79,7 +79,31 @@ export const ComponentGalleryPage = definePage({
             ],
           },
         },
-        { type: 'element:button', properties: { label: 'Create Task', actionName: 'showcase_new_task' } },
+        // The page's primary CTA. `element:button` carries an **inline** action
+        // (`action`, an InlineActionSchema) — it is NOT a by-name reference to a
+        // registered object action; that is `action:button`. This block used to
+        // author `actionName: 'showcase_new_task'`, a key `ElementButtonPropsSchema`
+        // never declared: the strip-mode parse dropped it, the renderer reads only
+        // `props.action`, and its `handleClick` opens with `if (!action) return` —
+        // so the button rendered, was clickable, and the click did nothing at all
+        // (no request, no dialog, no navigation). #6597.
+        //
+        // #6597's first fix wrote this as `type: 'modal'` + `target: 'showcase_task'`,
+        // relying on objectui `useActionModal.resolveModalTarget` resolving a string
+        // target page-first and then falling back to an OBJECT. It is now
+        // `type: 'form'` + the object's `edit` FORM view, matching the registered
+        // `NewTaskAction` of the same name (src/ui/actions/index.ts) — one action
+        // name, one shape, in one corpus.
+        //
+        // Why the change (maintainer ruling on #6739): a `type: 'modal'` target
+        // names a PAGE, only — spec TSDoc, published docs and `defineStack`'s
+        // cross-reference walk all agree, and the walk rejects a registered modal
+        // action targeting a non-page. The object fallback is consumer leniency the
+        // renderer itself labels "Back-compat" and is being retired. This line only
+        // ever built because the cross-reference walk visits `config.actions` and
+        // never an INLINE action (#6889) — so it depended on a branch under
+        // retirement and on a validation hole, both at once.
+        { type: 'element:button', properties: { label: 'Create Task', icon: 'plus', action: { name: 'showcase_new_task', type: 'form', target: 'showcase_task.edit', refreshAfter: true } } },
       ],
     },
     {

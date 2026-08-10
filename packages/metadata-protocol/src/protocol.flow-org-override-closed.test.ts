@@ -37,6 +37,22 @@
  *     automation is being shadowed, and that write is what the ADR means by
  *     "a deployment". Nothing in #6283 touches it.
  *
+ * [#6190, 2026-08-09] One clause of that second bullet has since been
+ * narrowed, and this file is where it was written down, so it is corrected
+ * here rather than left to contradict the code. The runtime-create tier stays
+ * open — a brand-new flow is still authorable — but only ENV-WIDE. An
+ * org-scoped brand-new flow is now refused too (`orgScopedWriteRefusal`),
+ * because the row it used to write is one `loadMetaFromDb` can never read
+ * back: it bound its triggers until the next restart and then stopped firing,
+ * silently. That is the defect #6190 was filed about, and the maintainer ruled
+ * on 2026-08-08 that the write is refused rather than coerced or logged. The
+ * case below that used to pin "a BRAND-NEW ORG flow still saves" now pins the
+ * two halves separately: env-wide saves, org-scoped refuses. Its own closing
+ * sentence predicted this ("If a later issue decides tenants may not author
+ * flows at all, that is a change to `allowRuntimeCreate` and it lands here,
+ * loudly") — the later issue decided something narrower than it guessed: not
+ * whether tenants may author flows, but what SCOPE such a write may claim.
+ *
  * ---------------------------------------------------------------------------
  * Reverse verification, direction predicted BEFORE running
  * ---------------------------------------------------------------------------
@@ -235,21 +251,37 @@ describe('#6283 — flow: allowOrgOverride rolled back to false', () => {
 
     // ── the half that stays open, deliberately ────────────────────────────
 
-    it('a BRAND-NEW org flow still saves — allowRuntimeCreate is a different tier', async () => {
+    it('a BRAND-NEW ENV-WIDE flow still saves — allowRuntimeCreate is a different tier', async () => {
         // Not a leak in the rollback: no artifact is being shadowed, so this
-        // is ADR-0005's "a deployment", authored through the runtime API. If a
-        // later issue decides tenants may not author flows at all, that is a
-        // change to `allowRuntimeCreate` and it lands here, loudly.
+        // is ADR-0005's "a deployment", authored through the runtime API.
+        // [#6190] Env-wide is the half that survives — see the sibling case.
         const { protocol } = makeProtocol([], 'env_prod');
 
         const result = await protocol.saveMetaItem({
             type: 'flow',
             name: 'escalate_overdue',
             item: FLOW,
-            organizationId: 'org_alpha',
         });
 
         expect(result.success).toBe(true);
+    });
+
+    it('[#6190] …but the ORG-SCOPED brand-new flow is refused — the row would be unreadable after boot', async () => {
+        // The other half of the tier, closed by the 2026-08-08 ruling on
+        // #6190. `allowRuntimeCreate` says a tenant may AUTHOR a flow; it never
+        // said the row may claim an org partition the loader cannot read. This
+        // is the write that fired all day and stopped after the restart.
+        const { protocol, rows } = makeProtocol([], 'env_prod');
+
+        await expect(
+            protocol.saveMetaItem({
+                type: 'flow',
+                name: 'escalate_overdue',
+                item: FLOW,
+                organizationId: 'org_alpha',
+            }),
+        ).rejects.toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
+        expect(rows.size).toBe(0);
     });
 
     // ── the control that makes the red half mean something ────────────────

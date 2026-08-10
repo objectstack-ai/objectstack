@@ -226,10 +226,10 @@ const result = BlueprintAppSchema.parse(data);
 | **summary** | `string` | optional | One-line description of the proposed solution |
 | **assumptions** | `string[]` | ✅ | Design assumptions made from the underspecified goal |
 | **questions** | `string[]` | optional | At most 1-2 structure-deciding questions to confirm before building |
-| **objects** | `{ name: string; label?: string; description?: string; fields: { name: string; label?: string; type: Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| … +42 more>; required?: boolean; … }[]; … }[]` | ✅ | Objects (tables) to create |
+| **objects** | `{ name: string; label?: string; description?: string; fields: object[]; … }[]` | ✅ | Objects (tables) to create |
 | **views** | `{ object: string; name: string; label?: string; type: Enum<'list' \| 'form' \| 'kanban' \| 'calendar' \| 'gallery' \| 'gantt'>; … }[]` | optional | Views to create |
-| **dashboards** | `{ name: string; label?: string; widgets?: { id: string; title?: string; object?: string; chart?: Enum<'metric' \| 'bar' \| 'line' \| 'pie' \| 'table'>; … }[] }[]` | optional | Dashboards to create |
-| **app** | `{ name: string; label?: string; icon?: string; nav?: { type: Enum<'object' \| 'dashboard'>; target: string; label?: string; icon?: string }[] }` | optional | The navigation shell (app) that surfaces the created objects/dashboards to end users |
+| **dashboards** | `{ name: string; label?: string; widgets?: object[] }[]` | optional | Dashboards to create |
+| **app** | `{ name: string; label?: string; icon?: string; nav?: object[] }` | optional | The navigation shell (app) that surfaces the created objects/dashboards to end users |
 | **seedData** | `{ object: string; records: Record<string, any>[] }[]` | optional | Suggested seed data (reported, not auto-applied in Phase C) |
 
 
@@ -244,10 +244,10 @@ const result = BlueprintAppSchema.parse(data);
 | **summary** | `string` | ✅ | One-line description of the proposed solution |
 | **assumptions** | `string[]` | ✅ | Design assumptions made from the underspecified goal |
 | **questions** | `string[] \| null` | ✅ | At most 1-2 structure-deciding questions to confirm before building, or null |
-| **objects** | `{ name: string; label: string \| null; description: string \| null; fields: { name: string; label: string \| null; type: Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| … +42 more>; required: boolean \| null; … }[] }[]` | ✅ | Objects (tables) to create |
+| **objects** | `{ name: string; label: string \| null; description: string \| null; fields: object[] }[]` | ✅ | Objects (tables) to create |
 | **views** | `{ object: string; name: string; label: string \| null; type: Enum<'list' \| 'form' \| 'kanban' \| 'calendar' \| 'gallery' \| 'gantt'> \| null; … }[] \| null` | ✅ | Views to create, or null |
-| **dashboards** | `{ name: string; label: string \| null; widgets: { id: string; title: string \| null; object: string \| null; chart: Enum<'metric' \| 'bar' \| 'line' \| 'pie' \| 'table'> \| null; … }[] \| null }[] \| null` | ✅ | Dashboards to create, or null |
-| **app** | `{ name: string; label: string \| null; icon: string \| null; nav: { type: Enum<'object' \| 'dashboard'>; target: string; label: string \| null; icon: string \| null }[] \| null } \| null` | ✅ | The navigation shell (app) that surfaces the created objects/dashboards, or null |
+| **dashboards** | `{ name: string; label: string \| null; widgets: object[] \| null }[] \| null` | ✅ | Dashboards to create, or null |
+| **app** | `{ name: string; label: string \| null; icon: string \| null; nav: object[] \| null } \| null` | ✅ | The navigation shell (app) that surfaces the created objects/dashboards, or null |
 
 
 ---

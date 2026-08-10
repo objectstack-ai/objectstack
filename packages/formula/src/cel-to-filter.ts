@@ -42,9 +42,12 @@
  *   `unresolved-variable` (the "no active org" fail-closed path).
  */
 
-import { Environment } from '@marcbachmann/cel-js';
 import type { ASTNode } from '@marcbachmann/cel-js';
 import type { FilterCondition } from '@objectstack/spec/data';
+
+import { CEL_BOUNDS_MEASURE_CAP_FACTOR, parseCelToAstWithReason } from './cel-engine';
+import type { CelBoundsOverrun } from './cel-engine';
+import { celPushdownLimitsMode } from './cel-pushdown-limits';
 
 // ---------------------------------------------------------------------------
 // Public contract
@@ -85,14 +88,112 @@ class CompileError extends Error {
   }
 }
 
-// A roots-permissive env: parsing is purely syntactic (we read `.ast`, never
-// `.check()`/`.evaluate()`), so any identifier or method call parses. Built once.
-let parseEnv: Environment | undefined;
-function getParseEnv(): Environment {
-  if (!parseEnv) {
-    parseEnv = new Environment({ unlistedVariablesAreDyn: true, enableOptionalTypes: true });
+// ---------------------------------------------------------------------------
+// The parse (#6132 — converged onto the canonical front end)
+// ---------------------------------------------------------------------------
+
+/**
+ * The pushdown path's parse.
+ *
+ * Until #6132 this module kept a **private, limitless** env of its own
+ * (`new Environment({ unlistedVariablesAreDyn: true, enableOptionalTypes: true })`,
+ * no `limits`, no stdlib, no `rewriteNullableTernary`) and read `.ast` off it.
+ * That made the RLS / sharing pushdown path the one place on the platform that
+ * answered a *different* question from `celEngine.compile()` about what parses:
+ * an 80-term conjunction, a 40-level nest and a 200-element `$in` all reached
+ * real pushdown SQL here while the interpreter refused each outright. It now
+ * parses through {@link parseCelToAstWithReason} — #4812's canonical entry, with
+ * {@link DEFAULT_LIMITS} — so "what parses" has one answer.
+ *
+ * Within the limits that convergence is behaviour-preserving, and measurably so:
+ * across the 710 sources in the pushdown corpus that both front ends parse, the
+ * only AST difference is the #3306 `rewriteNullableTernary` `dyn(…)` wrap on the
+ * three ternaries — and a ternary faults on its own `?:` node before the lowerer
+ * ever descends into a branch, so reason AND detail are byte-identical for every
+ * one of them (pinned in `cel-to-filter-parse-convergence.test.ts`).
+ *
+ * Over the limits it is NOT behaviour-preserving, which is what
+ * `cel-pushdown-limits.ts`'s dated switch is for: during 17.0.0-rc.x an
+ * over-limit predicate still compiles — off the unbounded AST the canonical
+ * entry hands back for exactly this purpose — and WARNs naming the bound and
+ * what the source measures; at v17 GA it is refused as `parse-error`, which the
+ * RLS path turns into `RLS_DENY_FILTER`.
+ *
+ * Returns the AST to lower, or the `parse-error` result to hand the caller.
+ */
+function parseForPushdown(source: string): { ast: ASTNode } | { fail: CelFilterCompileResult } {
+  const graceWindow = celPushdownLimitsMode() === 'rc-grace';
+  const parsed = parseCelToAstWithReason(source, { admitOverLimit: graceWindow });
+  if (parsed.ok) return { ast: parsed.ast };
+  if (parsed.kind === 'bounds') {
+    if (graceWindow && parsed.unboundedAst) {
+      warnOverLimitPushdown(source, parsed.overrun);
+      return { ast: parsed.unboundedAst };
+    }
+    // Fail closed. `parse-error` deliberately, not a fourth reason: it is the
+    // reason every consumer of this compiler already routes to its deny path
+    // (`RLSCompiler.compileExpression` → `null` → `RLS_DENY_FILTER`; the sharing
+    // seeder → rule not seeded), and a new reason value would be a new branch
+    // each of them does not have. WHICH bound was exceeded rides in `detail`.
+    return { fail: { ok: false, reason: 'parse-error', detail: parsed.overrun.summary } };
   }
-  return parseEnv;
+  // `empty` is unreachable here (`toSource` already rejects blank input) but is graded
+  // the same way it always was, and a syntax fault keeps its exact former
+  // detail: cel-js's rendered message, first line only.
+  return { fail: { ok: false, reason: 'parse-error', detail: parsed.message.split('\n')[0] || 'parse error' } };
+}
+
+/**
+ * Sources already WARNed about, so a policy compiled on every request warns once
+ * rather than once per row. Bounded like `cel-engine`'s rewrite memo — an
+ * unbounded set keyed by author-controlled strings is a leak.
+ */
+const warnedOverLimit = new Set<string>();
+const WARNED_OVER_LIMIT_MAX = 500;
+
+/**
+ * The console, reached through `globalThis` rather than the bare `console`
+ * global. `@objectstack/formula` compiles with neither the DOM lib nor
+ * `@types/node` — it is a pure expression package that must build for any host —
+ * so `console` has no type here, and a host that genuinely has none (a bare
+ * embedder) must degrade to silence rather than to a `ReferenceError` thrown
+ * from inside a security compiler.
+ */
+function hostConsole(): { warn?: (message: string) => void } | undefined {
+  return (globalThis as { console?: { warn?: (message: string) => void } }).console;
+}
+
+/**
+ * The 17.0.0-rc.x grace-window WARN. Names the bound that was exceeded, the
+ * platform's value for it, what the source measures, and — because this is a
+ * grace window and not a permanent posture — what will happen at v17 GA.
+ */
+function warnOverLimitPushdown(source: string, overrun: CelBoundsOverrun): void {
+  if (warnedOverLimit.has(source)) return;
+  if (warnedOverLimit.size >= WARNED_OVER_LIMIT_MAX) warnedOverLimit.clear();
+  warnedOverLimit.add(source);
+  // `limit` / `limitValue` are non-null on this path by construction: a bounds
+  // fault whose key could not be named yields no unbounded AST, so it never
+  // reaches the grace window. The fallbacks keep the sentence readable rather
+  // than printing `null` if that ever stops being true.
+  const measure = overrun.measured !== null
+    ? String(overrun.measured)
+    : overrun.limitValue === null
+      ? 'over the measurement cap'
+      : `over ${overrun.limitValue * CEL_BOUNDS_MEASURE_CAP_FACTOR} (measurement capped)`;
+  const shown = source.length > 200 ? `${source.slice(0, 197)}...` : source;
+  hostConsole()?.warn?.(
+    `[cel-to-filter] pushdown predicate exceeds the platform CEL bound ${overrun.limit ?? '(unnamed)'} ` +
+      `(limit ${overrun.limitValue ?? 'unknown'}, this predicate measures ${measure}): ${overrun.summary}. ` +
+      `It still compiles during 17.0.0-rc.x; at v17 GA it will be REFUSED (parse-error) and the ` +
+      `RLS/sharing pushdown path will fail closed (RLS_DENY_FILTER). Split it or move the logic ` +
+      `to a hook/action body before upgrading. Predicate: ${shown}`,
+  );
+}
+
+/** Test hook for the WARN memo — a suite must not inherit another's dedupe state. */
+export function __resetPushdownLimitWarnings(): void {
+  warnedOverLimit.clear();
 }
 
 /** Unwrap a CEL expression input — accepts a raw string or `{ source }`. */
@@ -120,13 +221,9 @@ export function compileCelToFilter(
 ): CelFilterCompileResult {
   const source = toSource(input);
   if (!source) return { ok: false, reason: 'parse-error', detail: 'empty expression' };
-  let ast: ASTNode;
-  try {
-    ast = getParseEnv().parse(source).ast;
-  } catch (err) {
-    return { ok: false, reason: 'parse-error', detail: (err as Error).message?.split('\n')[0] ?? 'parse error' };
-  }
-  return lowerCelAst(ast, opts, 'value');
+  const parsed = parseForPushdown(source);
+  if ('fail' in parsed) return parsed.fail;
+  return lowerCelAst(parsed.ast, opts, 'value');
 }
 
 /**
@@ -140,13 +237,9 @@ export function isPushdownableCel(
 ): { ok: true } | { ok: false; reason: CelFilterFailReason; detail: string } {
   const source = toSource(input);
   if (!source) return { ok: false, reason: 'parse-error', detail: 'empty expression' };
-  let ast: ASTNode;
-  try {
-    ast = getParseEnv().parse(source).ast;
-  } catch (err) {
-    return { ok: false, reason: 'parse-error', detail: (err as Error).message?.split('\n')[0] ?? 'parse error' };
-  }
-  const res = lowerCelAst(ast, opts, 'shape');
+  const parsed = parseForPushdown(source);
+  if ('fail' in parsed) return parsed.fail;
+  const res = lowerCelAst(parsed.ast, opts, 'shape');
   return res.ok ? { ok: true } : { ok: false, reason: res.reason, detail: res.detail };
 }
 

@@ -3,7 +3,7 @@
 import { z } from 'zod';
 
 import { lazySchema } from '../../shared/lazy-schema';
-import { strictUnknownKeyError } from '../../shared/suggestions.zod';
+import { strictObject } from '../../shared/strict-object';
 import type { DriverDefinition } from '../datasource.zod';
 import {
   driverConfigJsonSchema,
@@ -29,46 +29,41 @@ import {
 // 1. Connection Configuration
 // ==========================================================================
 
-const MONGO_CONFIG_KEYS = [
-  'url', 'host', 'port', 'database', 'username', 'password', 'authSource', 'options',
-] as const;
-
-const mongoConfigUnknownKeyError = strictUnknownKeyError({
-  surface: "this mongo datasource's config",
-  knownKeys: MONGO_CONFIG_KEYS,
-  aliases: {
-    uri: 'url',
-    connectionstring: 'url',
-    dsn: 'url',
-    hostname: 'host',
-    server: 'host',
-    dbname: 'database',
-    db: 'database',
-    user: 'username',
-    passwd: 'password',
-    pwd: 'password',
-    authdb: 'authSource',
-    authdatabase: 'authSource',
-    replicaset: 'options',
+export const MongoConfigSchema = lazySchema(() => strictObject(
+  {
+    surface: "this mongo datasource's config",
+    aliases: {
+      uri: 'url',
+      connectionstring: 'url',
+      dsn: 'url',
+      hostname: 'host',
+      server: 'host',
+      dbname: 'database',
+      db: 'database',
+      user: 'username',
+      passwd: 'password',
+      pwd: 'password',
+      authdb: 'authSource',
+      authdatabase: 'authSource',
+      replicaset: 'options',
+    },
+    guidance: {
+      pool:
+        '`pool` is not driver config — connection pooling is configured once for every driver in '
+        + "the datasource's own `pool` block, which the factory maps onto the Mongo client's "
+        + '`minPoolSize`/`maxPoolSize`. Move it next to `driver`.',
+      schemaMode: SCHEMA_MODE_BELONGS_ON_DATASOURCE,
+      readOnly: READ_ONLY_BELONGS_ON_DATASOURCE,
+      ssl:
+        '`ssl` is not a top-level mongo key. TLS is a connection-string concern here: put it in '
+        + '`url` (`?tls=true`) or in the `options` passthrough the Mongo client reads.',
+    },
+    history:
+      'Until #4410 nothing validated `datasource.config` at all — an unrecognised connection key '
+      + 'was accepted in silence and the datasource then connected to mongodb://localhost:27017 '
+      + 'rather than failing.',
   },
-  guidance: {
-    pool:
-      '`pool` is not driver config — connection pooling is configured once for every driver in '
-      + "the datasource's own `pool` block, which the factory maps onto the Mongo client's "
-      + '`minPoolSize`/`maxPoolSize`. Move it next to `driver`.',
-    schemaMode: SCHEMA_MODE_BELONGS_ON_DATASOURCE,
-    readOnly: READ_ONLY_BELONGS_ON_DATASOURCE,
-    ssl:
-      '`ssl` is not a top-level mongo key. TLS is a connection-string concern here: put it in '
-      + '`url` (`?tls=true`) or in the `options` passthrough the Mongo client reads.',
-  },
-  history:
-    'Until #4410 nothing validated `datasource.config` at all — an unrecognised connection key '
-    + 'was accepted in silence and the datasource then connected to mongodb://localhost:27017 '
-    + 'rather than failing.',
-});
-
-export const MongoConfigSchema = lazySchema(() => z.object({
+  {
   /**
    * Connection URI (standard connection string). When present it supersedes
    * `host`/`port`/`database`/`username`/`authSource` — those are only used to
@@ -111,7 +106,7 @@ export const MongoConfigSchema = lazySchema(() => z.object({
    */
   options: z.record(z.string(), z.unknown()).optional()
     .describe('Extra MongoClient options (replicaSet, tls, timeouts, …)'),
-}, { error: mongoConfigUnknownKeyError }).strict()
+})
   .describe('MongoDB Connection Configuration')
   .superRefine((cfg, ctx) => {
     if (!cfg.url && !cfg.database) {
@@ -150,7 +145,11 @@ export const getMongoConfigJsonSchema = driverConfigJsonSchema(MongoConfigSchema
  * described.
  */
 export const MongoDriverSpec = {
-  id: 'mongo',
+  // `mongodb`, not `mongo`, since #6345: the canonical driver id was renamed to
+  // the spelling both boot hosts, the `@objectstack/driver-mongodb` package and
+  // every URL scheme already used, so driver selection and config-contract
+  // selection are one string. `mongo` remains an accepted alias.
+  id: 'mongodb',
   label: 'MongoDB',
   description: 'Official MongoDB Driver for ObjectStack. Supports rich queries, aggregation, and atomic updates.',
   icon: 'database',

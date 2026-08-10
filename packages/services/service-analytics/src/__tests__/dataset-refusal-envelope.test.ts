@@ -55,7 +55,7 @@ import type {
   IAnalyticsService,
   StrategyContext,
 } from '@objectstack/spec/contracts';
-import { compileDataset } from '../dataset-compiler.js';
+import { compileDataset, UNSUPPORTED_AGGREGATES } from '../dataset-compiler.js';
 import { DatasetExecutor, resolveOrdering } from '../dataset-executor.js';
 import { NativeSQLStrategy } from '../strategies/native-sql-strategy.js';
 import { compileScopedFilterToSql } from '../read-scope-sql.js';
@@ -141,17 +141,29 @@ const REFUSALS: Array<{
   {
     name: '① dataset-compiler: aggregate outside the v1 runtime',
     listEntry: 'not supported by the v1 dataset runtime',
-    message: /measure "names" uses aggregate "string_agg" which is not supported by the v1 dataset runtime/,
-    run: () =>
-      compileDataset(
-        DatasetSchema.parse({
+    message: /measure "names" uses aggregate "probe_agg" which is not supported by the v1 dataset runtime/,
+    // This row used to be driven by `string_agg`, a real spec value this
+    // runtime could not lower. #6188 retired it (and `array_agg`) from
+    // `AggregationFunction`, so the refusal moved one layer earlier — no
+    // spec-valid dataset reaches this branch any more, and the input can no
+    // longer go through `DatasetSchema.parse`. The branch itself stays, as the
+    // landing site for the next aggregate declared ahead of this runtime, and
+    // so does this row: what it pins is the ENVELOPE, which is this file's
+    // subject and is independent of which value happens to be unlowered today.
+    run: () => {
+      UNSUPPORTED_AGGREGATES.add('probe_agg');
+      try {
+        return compileDataset({
           name: 'pipeline',
           label: 'Pipeline',
           object: 'crm_opportunity',
           dimensions: [{ name: 'stage', field: 'stage', type: 'string' }],
-          measures: [{ name: 'names', aggregate: 'string_agg', field: 'name' }],
-        }),
-      ),
+          measures: [{ name: 'names', aggregate: 'probe_agg', field: 'name' }],
+        } as never);
+      } finally {
+        UNSUPPORTED_AGGREGATES.delete('probe_agg');
+      }
+    },
   },
   {
     name: '② dataset-compiler: field traversing an undeclared relationship path',

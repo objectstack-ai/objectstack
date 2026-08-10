@@ -1,0 +1,580 @@
+{
+  "$comment": "Standing platform test checklist — area ledger. Hand-edited, append-only; validated by scripts/check-platform-checklist.mjs (pnpm check:platform-checklist). Authoring rules: docs/qa/platform-checklist/README.md · execution protocol: RUNNER.md. NOTE: AI is deliberately absent from the showcase app (ADR-0063 — platform-owned), so most items here carry explicit fixture requirements instead of assuming showcase seeds. BOUNDARY: the in-product agent runtime (`@objectstack/service-ai`) is Cloud/EE (cloud repo) — the OPEN framework serves the metadata surface, the MCP surface (packages/mcp), and honest 501s on /ai/** (route-ledger '* /ai/**' row); items below only assert what the open framework actually runs.",
+  "area": "ai",
+  "title": "AI — agents, tools, skills, MCP",
+  "items": [
+    {
+      "id": "ai.agent-tool-skill-metadata-roundtrip",
+      "title": "agent / tool / skill metadata kinds author, persist and list over the meta surface — retired keys reject with prescriptions, the closed agent kind has no runtime write door",
+      "since": "v15",
+      "status": "active",
+      "revision": 2,
+      "priority": "P1",
+      "surface": "api",
+      "personas": ["admin"],
+      "fixtures": {
+        "app": "any",
+        "requires": [
+          "a writable package to author into (AI artifacts are not seeded by the showcase — ADR-0063); files land under the registered patterns *.agent.ts / *.tool.ts / *.skill.ts (packages/spec/src/kernel/metadata-plugin.zod.ts)",
+          "an admin session for the meta reads and a fresh unauthenticated client for the anonymous-deny half"
+        ],
+        "knownGaps": ["no stock example app ships AI seeds; a minimal agent+tool+skill fixture config is needed for the full round-trip"]
+      },
+      "variants": [
+        "agent (AgentSchema requires name/label/role/instructions; surface defaults 'ask'; strictObject with aliases prompt→instructions, capabilities→skills …)",
+        "tool (ToolSchema .strict() requires name/label/description/parameters)",
+        "skill (SkillSchema requires name/label/tools; instructions optional; surface defaults 'ask')",
+        "tombstone probe: tool.permissions (removed spec 17, #3896)",
+        "tombstone probe: tool.active (removed spec 17, #3896)",
+        "tombstone probe: tool.category (removed spec 17, #3896)",
+        "tombstone probe: tool.builtIn (removed spec 17, #3896)",
+        "tombstone probe: tool.requiresConfirmation (removed 16.x, #3715 / ADR-0033 §2)",
+        "tombstone probe: agent.tools (removed spec 17, #3894 — retiredKey)",
+        "tombstone probe: agent.knowledge (removed spec 17, #3896 — retiredKey)",
+        "tombstone probe: skill.triggerPhrases (removed spec 17, #3896 — retiredKey)",
+        "guidance probe: skill.permissions / skill.trigger (never keys — guidance map, #5013)"
+      ],
+      "steps": [
+        "read the three Zod shapes FIRST and pin the requireds: AgentSchema needs name/label/role/instructions (packages/spec/src/ai/agent.zod.ts), ToolSchema needs name/label/description/parameters and is .strict() (tool.zod.ts), SkillSchema needs name/label/tools (skill.zod.ts) — if these have drifted, revise this item before running",
+        "author one valid item per kind in the writable package: defineAgent({ name: 'qa_probe_agent', label, role, instructions, skills: ['qa_probe_skill'] }), defineTool({ name: 'qa_probe_tool', label, description, parameters: { type: 'object', properties: {} } }), defineSkill({ name: 'qa_probe_skill', label, tools: ['qa_probe_tool'], instructions: 'probe instructions' }); build",
+        "author the tombstone probes from `variants` (one broken copy per retired key, e.g. tool with `permissions: []`, agent with `tools: [{...}]`, skill with `triggerPhrases: ['x']`); capture each build/parse error text verbatim",
+        "boot; sign in as admin; GET /api/v1/meta (meta.getTypes) and GET /api/v1/meta/types — capture which kinds are registered",
+        "GET /api/v1/meta/agent, /api/v1/meta/tool, /api/v1/meta/skill (route ledger: meta.getItems) and locate the three authored probes",
+        "GET /api/v1/meta/skill/qa_probe_skill (meta.getItem) and field-diff against the authored source, noting applied defaults (surface:'ask', active:true)",
+        "PUT /api/v1/meta/skill/qa_probe_skill?mode=draft with an edited copy (skill/tool are allowRuntimeCreate:true); then attempt the same runtime save for the agent kind and capture the outcome (agent is allowRuntimeCreate:false + allowOrgOverride:false — ADR-0063 §2, metadata-plugin.zod.ts)",
+        "repeat one meta list unauthenticated; capture status",
+        "POST /api/v1/ai/tools/qa_probe_tool/execute (any payload) on the open-framework boot and capture the 501 — evidence for the read-only-projection clause, NOT an expected execution"
+      ],
+      "acceptance": [
+        {
+          "clause": "each kind's valid probe parses at build and each tombstone probe is rejected LOUDLY with the retired key NAMED and its prescription attached — never silently stripped",
+          "oracle": "build",
+          "verify": "tool.permissions error contains 'promised a capability gate on tool invocation that nothing ever enforced' (TOOL_RETIRED_KEY_GUIDANCE, tool.zod.ts); agent.tools error prescribes `skills` + ADR-0064 + 'os migrate meta --from 16' (retiredKey, agent.zod.ts); skill.triggerPhrases error says phrases were never matched and routes intent to triggerConditions (skill.zod.ts); the valid trio builds clean",
+          "evidence": "per-variant error texts keyed by variant + the clean build output"
+        },
+        {
+          "clause": "the metadata registry serves all three kinds under their SINGULAR names (agent, tool, skill — AGENTS.md PD#3), with schemas resolved (BUILTIN_METADATA_TYPE_SCHEMAS)",
+          "oracle": "api",
+          "verify": "GET /api/v1/meta (and /meta/types) lists agent, tool, skill; no plural variants",
+          "evidence": "the types responses"
+        },
+        {
+          "clause": "authored items list and read back field-identical over /api/v1/meta/<kind>[/<name>], with schema defaults applied (agent.surface/skill.surface 'ask', active true)",
+          "oracle": "api",
+          "verify": "list + get round-trip for all three probes; field-diff shows every authored value plus only the documented defaults",
+          "evidence": "list/get responses + diff"
+        },
+        {
+          "clause": "the runtime write door matches the declared registry posture — BOTH sides: PUT ?mode=draft succeeds for skill (and tool), while the agent kind has NO governed runtime write path (allowRuntimeCreate:false; 'for agents, the code is the record', metadata-plugin.zod.ts — migrateStoredMetadata reports agent rows 'skipped' by design)",
+          "oracle": "api",
+          "verify": "skill draft PUT returns 200 and the draft is readable; the agent runtime save is refused/unsupported (capture the actual status), and that refusal is recorded as CORRECT, not filed as a bug",
+          "evidence": "the two PUT responses"
+        },
+        {
+          "clause": "anonymous-deny holds on the meta surface for AI kinds",
+          "oracle": "api",
+          "verify": "unauthenticated GET /api/v1/meta/agent → 401",
+          "evidence": "the 401 response"
+        },
+        {
+          "clause": "tool metadata is a READ-ONLY PROJECTION, not an execution entry point — authoring qa_probe_tool creates no runnable tool in the open framework (ToolSchema's own describe: no handler field; runtime executes a separately-registered AIToolDefinition, cloud-side)",
+          "oracle": "api",
+          "verify": "POST /api/v1/ai/tools/qa_probe_tool/execute answers the 501 capability-unavailable envelope (see ai.open-edition-honest-degradation); the run must NOT tick 'authored ⇒ callable'",
+          "evidence": "the 501 response"
+        }
+      ],
+      "negative": [
+        "any tombstone probe accepted with a clean build/parse is a FAIL — the silent strip is the exact #3896/#3820 regression these retiredKey/strict gates exist to prevent",
+        "an unauthenticated request to a meta list route succeeding is a FAIL (anonymous-deny must hold on the AI family too)"
+      ],
+      "traps": ["stale-dist"],
+      "source": [
+        "packages/spec/src/ai/agent.zod.ts (requireds, aliases, retiredKey tools/knowledge, visibility/tenantId guidance)",
+        "packages/spec/src/ai/tool.zod.ts (.strict() + TOOL_RETIRED_KEY_GUIDANCE; READ-ONLY PROJECTION note)",
+        "packages/spec/src/ai/skill.zod.ts (requireds, retiredKey triggerPhrases, permissions/trigger guidance #5013)",
+        "packages/spec/src/kernel/metadata-type-schemas.ts (agent/tool/skill registered with schemas)",
+        "packages/spec/src/kernel/metadata-plugin.zod.ts (registry rows: agent allowRuntimeCreate:false ADR-0063 §2; tool/skill true; file patterns)",
+        "packages/runtime/src/route-ledger.ts (GET /meta, GET /meta/types, GET/PUT /meta/:type/:name)",
+        "packages/spec/liveness/agent.json + tool.json + skill.json (which props are live, and that live evidence sits in cloud)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-07", "change": "initial — closes the AI hole in capability coverage (no area covered agent/tool/skill kinds)", "ref": "claude/platform-test-checklist-ocwugl" },
+        { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    },
+    {
+      "id": "ai.mcp-http-surface",
+      "title": "MCP HTTP transport (/mcp) and the public /mcp/skill endpoint gate exactly as documented: 404 when opted out, 501 when unimplemented, 401 anonymous, 403 scopeless-OAuth, full tool list when keyed",
+      "since": "v15",
+      "status": "active",
+      "revision": 2,
+      "priority": "P1",
+      "surface": "api",
+      "fixtures": {
+        "app": "any",
+        "requires": [
+          "one boot with the MCP HTTP surface at its DEFAULT (on — served unless OS_MCP_SERVER_ENABLED=false) and one boot with OS_MCP_SERVER_ENABLED=false (the #3358 sweep hit an off config and misread the refusal)",
+          "an osk_ API key minted via POST /api/v1/keys (route ledger keys.create) for the authenticated half"
+        ]
+      },
+      "variants": [
+        "OAuth scope data:read → read-family tools: list_objects, describe_object, query_records, get_record (packages/spec/src/ai/mcp.zod.ts MCP_OAUTH_SCOPE_DATA_READ)",
+        "OAuth scope data:write → write-family tools: create_record, update_record, delete_record",
+        "OAuth scope actions:execute → list_actions, run_action"
+      ],
+      "steps": [
+        "boot with OS_MCP_SERVER_ENABLED=false; GET /api/v1/mcp/skill and POST /api/v1/mcp; record status + body of both",
+        "boot with the default-on config; GET /api/v1/mcp/skill UNAUTHENTICATED; capture status, content-type, content-disposition and the markdown head",
+        "POST /api/v1/mcp/skill (wrong method); capture the 405 and its Allow header",
+        "POST /api/v1/mcp with NO credentials (an MCP initialize body); capture the 401 body and any WWW-Authenticate header",
+        "open an MCP Streamable HTTP session against /api/v1/mcp with the osk_ key: initialize, then tools/list; record the full tool-name set",
+        "if the OAuth track is live in the environment, request /mcp with an OAuth token carrying NONE of the three MCP scopes; capture the 403 + WWW-Authenticate error=\"insufficient_scope\"",
+        "capture the dispatcher-vs-hono distinction: the disabled boot's 404 comes from the gate (surface not advertised), never a hang or 500"
+      ],
+      "acceptance": [
+        {
+          "clause": "the opted-out boot answers 404 'MCP server is not enabled for this environment' on BOTH /mcp and /mcp/skill — a deliberate un-advertised surface, NOT the 501 (which means route mounted but MCP plugin missing: 'MCP server is not available')",
+          "oracle": "api",
+          "verify": "status + body of both routes on the disabled boot match packages/runtime/src/domains/mcp.ts (isMcpServerEnabled → 404; unresolvable mcp service → 501); record WHICH of the two refusals was observed",
+          "evidence": "the two responses"
+        },
+        {
+          "clause": "GET /mcp/skill serves the public SKILL.md unauthenticated on the enabled boot: 200, text/markdown; charset=utf-8, content-disposition inline; filename=\"SKILL.md\", cache-control no-store",
+          "oracle": "api",
+          "verify": "headers + markdown body head; the Connect section carries this environment's own /api/v1/mcp URL (ADR-0036 Amendment C)",
+          "evidence": "the response head + first lines of the markdown"
+        },
+        {
+          "clause": "a non-GET on /mcp/skill answers 405 with an Allow: GET header and the standard error envelope",
+          "oracle": "api",
+          "verify": "POST /mcp/skill → 405, Allow: GET, body message 'Method not allowed — use GET'",
+          "evidence": "the 405 response"
+        },
+        {
+          "clause": "an anonymous /mcp request is denied 401 BEFORE any tool runs — 'Unauthorized: a valid API key is required' (or the OAuth wording plus a WWW-Authenticate resource_metadata pointer when the OAuth track is live, RFC 9728 §5.1)",
+          "oracle": "api",
+          "verify": "status/body/headers of the anonymous POST against domains/mcp.ts's two 401 forms",
+          "evidence": "the 401 response incl. headers"
+        },
+        {
+          "clause": "a keyed MCP client completes initialize + tools/list, and the tool set is the documented principal-bound surface: list_objects, describe_object, query_records, aggregate_records, get_record, create_record, update_record, delete_record, list_actions, run_action, validate_expression",
+          "oracle": "network",
+          "verify": "tools/list names against packages/mcp/src/mcp-http-tools.ts registrations (aggregate_records may be absent only when the bridge cannot route it — graceful degradation, record which)",
+          "evidence": "the session trace + tool-name list"
+        },
+        {
+          "clause": "an OAuth token granting none of the MCP scopes is refused 403 up front with insufficient_scope naming all three scopes (data:read, data:write, actions:execute); a partial grant narrows the tool list per the variants matrix (#2698, ADR-0090 D10)",
+          "oracle": "api",
+          "verify": "403 body 'Forbidden: the access token grants none of the MCP scopes …' + WWW-Authenticate error=\"insufficient_scope\" scope=\"data:read data:write actions:execute\"; for a data:read-only token, tools/list carries the read family only",
+          "evidence": "the 403 + the narrowed tools/list"
+        }
+      ],
+      "negative": [
+        "the enabled boot must still reject tool CALLS that need auth when the session carries none — transport up ≠ authz open; a tools/call succeeding anonymously is a FAIL",
+        "reading the 501 'MCP server is not available' as 'MCP is disabled' (or vice versa) is a recording error — the two refusals separate config-off from implementation-missing and the run record must name which one it saw"
+      ],
+      "traps": ["dispatcher-vs-hono-route"],
+      "automated": { "kind": "e2e", "ref": "packages/qa/dogfood/test/showcase-mcp-http-identity.dogfood.test.ts" },
+      "source": [
+        "packages/runtime/src/domains/mcp.ts (404/501/401/403/405 branches, exact messages)",
+        "packages/spec/src/ai/mcp.zod.ts (MCP_OAUTH_SCOPES + scopesToAgentPermissionSets, ADR-0090 D10)",
+        "packages/mcp/src/mcp-http-tools.ts (registered tool set; scope → tool-family narrowing)",
+        "packages/mcp/src/plugin.ts (OS_MCP_SERVER_ENABLED default-on semantics)",
+        "packages/runtime/src/route-ledger.ts ('* /mcp/**', 'GET /mcp/skill')",
+        "packages/qa/dogfood/test/showcase-mcp-self-connection.dogfood.test.ts (#3167 self-connection pin)",
+        "#3358 §9 (the swept config was off; both sides are now explicit)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-07", "change": "initial — the #3358 sweep could not drive MCP because the config was off; both sides are now explicit", "ref": "claude/platform-test-checklist-ocwugl" },
+        { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    },
+    {
+      "id": "ai.mcp-stdio-fail-closed",
+      "title": "MCP stdio auto-start fails closed without OS_MCP_STDIO_API_KEY; with a member-bound key, reads AND aggregates honor RLS/FLS and revocation bites on the next call",
+      "since": "v16",
+      "status": "active",
+      "revision": 3,
+      "priority": "P0",
+      "surface": "cli",
+      "personas": ["restricted member API key (for the RLS half)", "admin API key (for the full-row comparison)"],
+      "fixtures": {
+        "app": "any",
+        "requires": [
+          "an OWD-private object with rows owned by two different users (the showcase task/invoice seeds qualify when run against the showcase)",
+          "two osk_ API keys: one bound to a restricted member, one to an admin (Setup → Connect an Agent, or POST /api/v1/keys)",
+          "for the aggregate half: a field on that object the restricted member cannot read (the same FLS-masked field the row/field clause relies on), plus at least one readable field to group a count by"
+        ],
+        "knownGaps": [
+          "aggregate_records is registered on the MCP transport only when the runtime routes aggregation through the ObjectQL engine (mcp-http-tools.ts registers it IFF the bridge exposes aggregate — graceful degradation, the same contract as the action bridge). The showcase runtime does route it through the engine (packages/runtime/src/domains/mcp.ts). If tools/list lacks aggregate_records on this boot, record the aggregate clauses blocked(dependency), not a fail"
+        ]
+      },
+      "steps": [
+        "start the app with the stdio transport enabled (OS_MCP_STDIO_ENABLED=true, or the plugin autoStart option) and OS_MCP_STDIO_API_KEY UNSET; capture the startup failure",
+        "start again with OS_MCP_STDIO_API_KEY=osk_unknown (a key that resolves to nothing); capture that failure",
+        "start with the restricted member's valid key; capture the principal-bound startup log line",
+        "over MCP stdio, query_records the OWD-private object and get_record a row owned by the OTHER user; record row sets and field sets",
+        "run the same two reads over REST as the same member (Bearer the same key) and as the admin key; compare",
+        "aggregate parity: over MCP stdio as the member, aggregate_records the OWD-private object with a count grouped by a readable field ({ aggregations: [{ function: 'count', alias: 'n' }], groupBy: ['<readable field>'] }); run the SAME aggregate over REST as the member and as the admin; compare the per-group counts",
+        "FLS aggregate fail-closed: over MCP stdio as the member, aggregate_records with an aggregation (or a groupBy) naming the field the member cannot read (the masked field above); capture the refusal and confirm no numeric result is returned",
+        "revoke the member key while the stdio session is up; issue one more read; capture the refusal",
+        "start once more with stdio NOT enabled and no key set; confirm a clean boot (the key is only demanded when stdio is on)"
+      ],
+      "acceptance": [
+        {
+          "clause": "enabled-but-keyless auto-start REFUSES to serve, naming the missing var and the remedy: '[MCP] The stdio transport is enabled (OS_MCP_STDIO_ENABLED / autoStart) but OS_MCP_STDIO_API_KEY is not set. … Refusing to start an unscoped stdio server (ADR-0101).'",
+          "oracle": "log",
+          "verify": "plugin.start throws /OS_MCP_STDIO_API_KEY/ (packages/mcp/src/plugin.ts); the process does not serve",
+          "evidence": "the thrown message / startup log"
+        },
+        {
+          "clause": "an unknown/revoked/expired key is rejected up front — 'OS_MCP_STDIO_API_KEY did not resolve to a valid identity (unknown / revoked / expired / owner-less). Refusing to start stdio (ADR-0101).' — never a fall-back to an anonymous-but-serving session",
+          "oracle": "log",
+          "verify": "startup with osk_unknown throws /did not resolve to a valid identity/",
+          "evidence": "the thrown message"
+        },
+        {
+          "clause": "a valid key binds the transport to a REAL principal and says so: '[MCP] stdio transport principal-bound to OS_MCP_STDIO_API_KEY identity <userId> (RLS/FLS/tenant applied)'",
+          "oracle": "log",
+          "verify": "the startup line carries the member's userId",
+          "evidence": "the log line"
+        },
+        {
+          "clause": "member-keyed MCP reads return exactly the member's REST row/field sets (RLS rows hidden, FLS fields masked), while the admin key sees the full set — both sides of the gate",
+          "oracle": "api",
+          "verify": "row-set + field-set comparison MCP-vs-REST per principal; the OTHER user's row absent for the member on both surfaces, present for admin",
+          "evidence": "the four compared reads"
+        },
+        {
+          "clause": "member-keyed MCP aggregate_records equals THAT member's REST aggregate, NOT the admin's — the group counts reconcile to the member's own RLS-scoped rows (the other user's rows are excluded from the member's counts on both surfaces; the admin's counts are strictly higher wherever the member's RLS hides rows). MCP aggregation routes through the ObjectQL engine read path so RLS always runs; the raw per-env driver is deliberately not passed (§G1 #2976)",
+          "oracle": "api",
+          "verify": "per-group count comparison MCP-vs-REST for the member matches; member counts < admin counts on the buckets the member cannot fully see (packages/runtime/src/domains/mcp.ts aggregate → callData('aggregate') resolves the engine so the security middleware runs)",
+          "evidence": "the member MCP aggregate, the member REST aggregate, and the admin REST aggregate"
+        },
+        {
+          "clause": "an aggregate whose input or groupBy names an FLS-unreadable field fails CLOSED — the FLS aggregate-INPUT gate rejects before any statistic is computed ('Field read denied', details.forbiddenFields: [<field>]); a masked field's sum/count_distinct never leaks through an alias, because result masking cannot run on aggregate output rows (they carry only aliases) — so the leak is stopped on the input (#2976)",
+          "oracle": "api",
+          "verify": "aggregate_records over the masked field errors with the field-read-denied refusal and returns no numeric result; the same aggregate over a READABLE field succeeds (and count(*) needs no field) — the gate targets the field, not the operation",
+          "evidence": "the refusal + a control aggregate over a readable field"
+        },
+        {
+          "clause": "revocation is honored on the NEXT read (the identity is re-resolved per call), failing with 'MCP stdio identity is no longer valid (key revoked or expired)'",
+          "oracle": "log",
+          "verify": "the post-revocation read errors with that message instead of serving stale authority",
+          "evidence": "the refusal"
+        },
+        {
+          "clause": "stdio disabled ⇒ no key demanded: the boot completes and logs '[MCP] Transport not auto-started …' (the HTTP surface is served per-request regardless)",
+          "oracle": "log",
+          "verify": "clean start with neither OS_MCP_STDIO_ENABLED nor a key",
+          "evidence": "the info line"
+        }
+      ],
+      "negative": [
+        "an invalid/revoked key falling back to an anonymous-but-serving session is THE fail this item exists for — any served read without a resolved principal is a P0 FAIL",
+        "a member-keyed MCP read returning rows the same member's REST read hides is a FAIL (MCP must not be a side door around RLS)",
+        "an MCP aggregate count that equals the ADMIN's total (i.e. counts rows the same member's REST read hides) is a P0 FAIL — an RLS-bypassing count is the sys_attachment-total-leak class (#2976): a bypass leaks row existence and statistics even when the individual rows stay hidden",
+        "an aggregate over an FLS-masked field returning a number instead of failing closed is a FAIL — the input gate is the only place the leak is stopped, since output masking cannot see through an alias"
+      ],
+      "traps": ["wrong-persona"],
+      "automated": { "kind": "unit", "ref": "packages/mcp/src/__tests__/plugin.test.ts" },
+      "source": [
+        "packages/mcp/src/plugin.ts (the three refusal strings + per-call re-resolution, ADR-0101)",
+        "packages/mcp/src/__tests__/plugin.test.ts ('stdio principal admission — fail-closed')",
+        "packages/runtime/src/domains/mcp.ts (the aggregate bridge routes through callData('aggregate') → the ObjectQL engine so RLS + the FLS aggregate gate always run; the raw driver is deliberately NOT passed)",
+        "packages/mcp/src/mcp-http-tools.ts (aggregate_records registration: 'Runs under the caller's permissions, row-level security and field-level security'; registered only when the bridge exposes aggregate)",
+        "packages/plugins/plugin-security/src/security-plugin.test.ts (FLS aggregate-INPUT gate: aggregating OR grouping-by an unreadable field is denied fail-closed with details.forbiddenFields; readable fields aggregate fine)",
+        "#3358 §9 (verified PASS: fail-closed guard present, reads honor RLS/FLS)",
+        "docs/plans/release-15.1-test-plan.md §G1 (#2976 — aggregate_records走 ENGINE 读路径; RLS/tenant 与 find 一致; FLS 输入门 fail-closed)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-07", "change": "initial import from #3358 §9", "ref": "#3358" },
+        { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" },
+        { "revision": 3, "date": "2026-08-08", "change": "clause-extension (§G1 #2976): member-keyed aggregate_records reconciles to the member's OWN REST aggregate (RLS parity, not the admin's), and an aggregate over an FLS-masked field fails closed on the input gate — the RLS-bypassing count is the sys_attachment-total-leak class", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    },
+    {
+      "id": "ai.mcp-run-action-exposure-gate",
+      "title": "MCP run_action requires ai.exposed (fail-closed with the prescription), filters list_actions to exposed+permitted, refuses system objects, and logs the trusted-elevation audit line",
+      "since": "v15.1",
+      "status": "active",
+      "revision": 2,
+      "priority": "P1",
+      "surface": "api",
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "the showcase's ONE ai-exposed action: showcase_portfolio_snapshot (global script action, ai: { exposed: true }, examples/app-showcase/src/ui/actions/index.ts) — the exposed side",
+          "any showcase action WITHOUT an ai block (e.g. showcase_mark_done on showcase_task) — the undeclared side",
+          "MCP reachable with an osk_ key (see ai.mcp-http-surface)"
+        ]
+      },
+      "steps": [
+        "over MCP, call list_actions (no objectName, then objectName: 'showcase_task'); record which actions appear",
+        "call run_action on the UNDECLARED action (actionName: 'showcase_mark_done', a real recordId); capture the refusal",
+        "verify the refusal left zero side effects: read the task over REST — status unchanged",
+        "call run_action on the exposed action (actionName: 'showcase_portfolio_snapshot'); capture the result payload ({ ok, scope: 'global', accounts, projects, invoices })",
+        "capture the server log for the successful call",
+        "call run_action against an action on a system object (any sys_* action name) and capture that refusal",
+        "cross-check the exposed action's counts against direct REST counts of showcase_account / showcase_project / showcase_invoice"
+      ],
+      "acceptance": [
+        {
+          "clause": "the undeclared action is rejected fail-closed with the exact prescription: \"Action 'showcase_mark_done' on 'showcase_task' is not exposed to AI — the app author must opt it in with `ai: { exposed: true, description: … }`\" (declared ≠ exposed is the gate, PD#10 discipline)",
+          "oracle": "api",
+          "verify": "the MCP error text matches actionAiExposureError (packages/runtime/src/action-execution.ts); the REST re-read shows the record untouched",
+          "evidence": "the refusal + the unchanged-record read"
+        },
+        {
+          "clause": "list_actions returns ONLY actions that are both ai-exposed and permitted to the caller — showcase_portfolio_snapshot present, showcase_mark_done absent",
+          "oracle": "api",
+          "verify": "the list_actions payload against the fixture's declared ai blocks (mcp-http-tools.ts: 'actions that are BOTH declared ai-exposed and that the caller is permitted to run')",
+          "evidence": "the list_actions response"
+        },
+        {
+          "clause": "the exposed action executes and returns its declared result, whose counts reconcile with direct REST counts",
+          "oracle": "api",
+          "verify": "run_action result {accounts, projects, invoices} equals the three REST count queries",
+          "evidence": "result + the three counts"
+        },
+        {
+          "clause": "the trusted-elevation is AUDIBLE: the server log carries \"[action-audit] MCP run_action 'showcase_portfolio_snapshot' on …— body executes TRUSTED (system-elevated context, RLS/FLS-bypassing) for user '<id>'\" naming the caller (and the on-behalf-of user for agent principals)",
+          "oracle": "log",
+          "verify": "the audit line for the successful call (action-execution.ts #2849/#3914)",
+          "evidence": "the log excerpt"
+        },
+        {
+          "clause": "system objects are refused wholesale: run_action against a sys_* object errors with the system-object guard ('… is on a system object and is not exposed via MCP'), never executes",
+          "oracle": "api",
+          "verify": "the refusal text + absence of any side effect",
+          "evidence": "the refusal"
+        }
+      ],
+      "negative": [
+        "the refusal path must leave zero side effects — a rejected call that half-executed is a FAIL",
+        "list_actions advertising an action that run_action then refuses (or vice versa) is a FAIL — the two doors enforce the SAME ai.exposed declaration (action-execution.ts: 'the REST /actions route and the MCP run_action bridge enforce the SAME declaration')"
+      ],
+      "traps": ["wrong-persona"],
+      "source": [
+        "packages/runtime/src/action-execution.ts (actionAiExposureError exact string; system-object guard; [action-audit] line; shared REST/MCP gate #3915)",
+        "packages/mcp/src/mcp-http-tools.ts (list_actions/run_action registration + exposed-and-permitted filter)",
+        "examples/app-showcase/src/ui/actions/index.ts (showcase_portfolio_snapshot — the seeded ai.exposed fixture)",
+        "docs/plans/release-15.1-test-plan.md §A9 (#2964) + §G2 (#3010/#3020 standalone action on the bridge)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-07", "change": "initial import from the 15.1 plan §A9", "ref": "claude/platform-test-checklist-ocwugl" },
+        { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    },
+    {
+      "id": "ai.mcp-validate-expression",
+      "title": "MCP validate_expression returns build-accurate errors/warnings/inferred type + in-scope context for every site variant, and fail-closes on unknown/system objects",
+      "since": "v16",
+      "status": "active",
+      "revision": 2,
+      "priority": "P2",
+      "surface": "api",
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "MCP HTTP reachable with an osk_ key (see ai.mcp-http-surface)",
+          "a seeded object with number + text + date fields to probe against (showcase_task: est_hours/title/created_at qualify)"
+        ]
+      },
+      "variants": [
+        "site: formula (record.<field> bound; inferred type returned)",
+        "site: validation (record-scoped predicate)",
+        "site: flow_condition (fields bound BARE — a record.-prefixed ref is the error here)",
+        "site: template"
+      ],
+      "steps": [
+        "over MCP, call validate_expression { objectName: 'showcase_task', expression: 'record.est_hours * 1.1', site: 'formula' } — a sound formula",
+        "call it with a BARE field ref in formula site ('est_hours * 1.1') and with an unknown field ('record.est_hourz * 1'); capture both error sets",
+        "call it with a text field misused in arithmetic ('record.title * 2'); capture the WARNING (not error)",
+        "call the flow_condition site with bare fields ('est_hours > 8') — must validate clean",
+        "call it against a nonexistent object and against a sys_* object; capture both refusals",
+        "record the inScope payload (dialect/roots/fields/functions) returned alongside each verdict"
+      ],
+      "acceptance": [
+        {
+          "clause": "the sound formula returns ok:true with an inferredType and the in-scope fields/functions — the same verdict `objectstack build` would give (the tool exists so agents self-correct BEFORE authoring, #1928)",
+          "oracle": "api",
+          "verify": "response has ok:true, inferredType present, inScope.fields includes est_hours",
+          "evidence": "the response"
+        },
+        {
+          "clause": "bare-field-in-formula and unknown-field are ERRORS with located, prescriptive text (unknown field carries a did-you-mean where close); text-in-arithmetic is a WARNING, not an error — the error/warning tiers must not blur",
+          "oracle": "api",
+          "verify": "three calls, three verdicts matching the tiers pinned in packages/mcp/src/mcp-validate-expression.test.ts",
+          "evidence": "the three responses"
+        },
+        {
+          "clause": "site changes the binding rules: bare fields are CORRECT in flow_condition and wrong in formula — the same expression flips verdict across the two sites",
+          "oracle": "api",
+          "verify": "'est_hours > 8' ok under flow_condition, error under formula",
+          "evidence": "the paired responses"
+        },
+        {
+          "clause": "unknown objects error clearly ('Object \"<name>\" not found') and system objects are refused by the fail-closed guard — the validator is schema introspection, never a data door",
+          "oracle": "api",
+          "verify": "both refusal texts; no schema of a sys_* object is leaked in the response",
+          "evidence": "the two refusals"
+        }
+      ],
+      "negative": [
+        "a validation verdict that DIFFERS from the build gate for the same expression is a FAIL — the tool's one job is build-accuracy (api-backend.formula-gates is the same engine)"
+      ],
+      "automated": { "kind": "unit", "ref": "packages/mcp/src/mcp-validate-expression.test.ts" },
+      "source": [
+        "packages/mcp/src/mcp-http-tools.ts (validate_expression registration: input schema incl. the 4-value site enum, VALIDATE_SITE_MAP, response shape)",
+        "packages/mcp/src/mcp-validate-expression.test.ts (tier pins: error vs warning vs ok, unknown object, system-object guard)",
+        "#3358 §9 (underlying validateExpression works; MCP path was blocked on the disabled transport)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-07", "change": "initial import from #3358 §9", "ref": "#3358" },
+        { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    },
+    {
+      "id": "ai.skill-instructions-mcp-prompts",
+      "title": "Authored skill instructions project onto the MCP prompts primitive (#3905) — listed with identity, fetchable by name, and NOT projected when instruction-less or inactive",
+      "since": "v17",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "fixtures": {
+        "app": "any",
+        "requires": [
+          "three authored skills in a writable package: qa_prompt_full (instructions + label + description), qa_prompt_bare (tools only, NO instructions), qa_prompt_off (instructions but active:false)",
+          "MCP HTTP reachable with an osk_ key (see ai.mcp-http-surface)"
+        ],
+        "knownGaps": [
+          "the OTHER half of a skill — tools[] / surface / triggerConditions binding — is CLOUD-RUNTIME-ONLY (#3905; skill.zod.ts says so per-key): the open framework has no agent loop to bind to, so this item deliberately does NOT test tool binding or activation; those need a cloud/EE environment"
+        ]
+      },
+      "steps": [
+        "author the three fixture skills; build; boot with MCP enabled",
+        "open an MCP session (osk_ key) and check the server's declared capabilities for prompts",
+        "prompts/list; record the projected names",
+        "prompts/get qa_prompt_full; capture the returned message body",
+        "prompts/get qa_prompt_bare (not projected) and prompts/get a wholly unknown name; capture both errors",
+        "flip qa_prompt_off to active:true, reload metadata, and re-list"
+      ],
+      "acceptance": [
+        {
+          "clause": "qa_prompt_full is listed as an MCP prompt carrying the skill's name, label (title) and description — the metadata → prompts projection is live in the OPEN framework, not just cloud",
+          "oracle": "network",
+          "verify": "prompts/list contains qa_prompt_full with the authored identity (packages/mcp/src/skill-prompts.ts projectSkillPrompt)",
+          "evidence": "the prompts/list payload"
+        },
+        {
+          "clause": "prompts/get returns the authored instructions text as the prompt body, re-read from metadata at get time",
+          "oracle": "network",
+          "verify": "the message content equals the authored instructions string",
+          "evidence": "the prompts/get payload"
+        },
+        {
+          "clause": "a skill with NO instructions is not listed at all (nothing to serve ⇒ not advertised), and an inactive skill is not projected — both absences verified, not assumed",
+          "oracle": "network",
+          "verify": "prompts/list omits qa_prompt_bare and qa_prompt_off; after activating qa_prompt_off it appears",
+          "evidence": "the before/after listings"
+        },
+        {
+          "clause": "prompts/get for a non-projected or unknown name is rejected with JSON-RPC invalid-params (-32602), not an empty success",
+          "oracle": "network",
+          "verify": "both bad gets error with code -32602 (skill-prompts.test.ts pin)",
+          "evidence": "the two error responses"
+        },
+        {
+          "clause": "when the host cannot read skill metadata the prompts capability is NOT declared — never advertised-but-empty (graceful degradation, same posture as the tool bridges)",
+          "oracle": "test",
+          "verify": "run packages/mcp/src/skill-prompts.test.ts ('declares NO prompts capability when the host cannot read skill metadata') and cite its output — do not hand-build a broken host",
+          "evidence": "the test output"
+        }
+      ],
+      "negative": [
+        "an instruction-less skill appearing in prompts/list is a FAIL — an empty prompt advertisement is the 'declared capability nothing serves' shape this projection was built to avoid",
+        "prompts/get succeeding for an inactive skill is a FAIL (active:false must withdraw the projection, unlike the retired tool.active which withdrew nothing)"
+      ],
+      "traps": ["stale-dist"],
+      "automated": { "kind": "unit", "ref": "packages/mcp/src/skill-prompts.test.ts" },
+      "source": [
+        "packages/mcp/src/skill-prompts.ts (#3905 — the projection, its narrowness, and the two-halves boundary)",
+        "packages/mcp/src/skill-prompts.test.ts (list/get/absence/-32602/capability pins)",
+        "packages/spec/src/ai/skill.zod.ts (instructions served everywhere; tools/surface/triggerConditions cloud-only)",
+        "packages/spec/liveness/skill.json (instructions/name/label/description/active live in-repo via skill-prompts.ts since 2026-08-06)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-07", "change": "new item: the open framework's one live skill consumer (#3905) had no checklist coverage", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    },
+    {
+      "id": "ai.open-edition-honest-degradation",
+      "title": "Open-framework /ai/** degrades honestly: GET /ai/agents answers the empty-catalog courtesy, every other /ai/* answers 501 with the Cloud/EE remedy sentence that discovery also reports",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "api",
+      "personas": ["admin"],
+      "fixtures": {
+        "app": "any",
+        "requires": ["a stock OPEN-framework boot — no @objectstack/service-ai registered (the default: service-ai is a private Cloud/EE package)"],
+        "knownGaps": [
+          "ModelRegistrySchema (packages/spec/src/ai/model-registry.zod.ts) and ConversationSessionSchema (conversation.zod.ts) have NO open-framework runtime consumer — /ai/models and /ai/conversations/* are served only by cloud service-ai (enumerated in cloud's ai-route-ledger.ts, #3718). This item therefore tests the HONEST REFUSAL, not those payload shapes; asserting model/conversation behavior needs a cloud/EE environment and belongs to that repo's conformance test",
+          "the ai settings manifest (packages/services/service-settings/src/manifests/ai.manifest.ts) configures the CLOUD adapter selection; it stores values in the open framework but nothing consumes them here — do not tick 'AI configured' off a saved settings form"
+        ]
+      },
+      "steps": [
+        "boot the stock open framework; sign in as admin",
+        "GET /api/v1/ai/agents; capture status + body shape",
+        "GET /api/v1/ai/models and GET /api/v1/ai/conversations; capture both",
+        "POST /api/v1/ai/chat with a minimal body; capture",
+        "GET /api/v1/discovery and extract the ai service slot's availability + message",
+        "diff the 501 body message against the discovery message"
+      ],
+      "acceptance": [
+        {
+          "clause": "GET /ai/agents answers 200 with the declared envelope carrying { agents: [] } — the deliberate courtesy (#4058) that keeps the console's per-navigation poll from logging spam, and it must be the RELOCATED payload under data (data.agents), not a bare array",
+          "oracle": "api",
+          "verify": "status 200; body data.agents is an empty ARRAY (unwrapResponse → .agents readable)",
+          "evidence": "the response"
+        },
+        {
+          "clause": "every other /ai/* route answers 501 (route mounted, implementation absent — NOT 404, NOT 503) with the exact remedy: 'Provided by @objectstack/service-ai in ObjectStack Cloud/Enterprise — no implementation ships in the open framework'",
+          "oracle": "api",
+          "verify": "/ai/models, /ai/conversations, /ai/chat all 501 with that message (REMEDY_DETAIL, packages/spec/src/system/core-services.zod.ts)",
+          "evidence": "the three responses"
+        },
+        {
+          "clause": "the 501 body and the discovery entry for the ai slot carry the SAME sentence — the one-source rule that stops the two surfaces prescribing different remedies",
+          "oracle": "api",
+          "verify": "discovery's ai slot message string-equals the 501 message (serviceUnavailableMessage is the single writer)",
+          "evidence": "the diff"
+        },
+        {
+          "clause": "anonymous-deny still precedes the degradation: an unauthenticated /ai/* request is answered by the auth gate, not by the capability answer",
+          "oracle": "api",
+          "verify": "unauthenticated GET /ai/models → 401, not 501",
+          "evidence": "the 401"
+        }
+      ],
+      "negative": [
+        "a 404 ROUTE_NOT_FOUND with the 'check discovery' hint on a mounted /ai/* route is the exact pre-#4058/#3842 failure this item pins — FAIL",
+        "ticking any AI capability as PRESENT from the 200 empty-agents courtesy (or from a saved ai settings form) is a recording error — the empty catalog IS the 'no AI here' signal"
+      ],
+      "traps": ["dispatcher-vs-hono-route"],
+      "source": [
+        "packages/runtime/src/domains/ai.ts (the /ai/agents empty-list courtesy #4058/#4053 + the shared 501 exit)",
+        "packages/runtime/src/domains/unavailable.ts (501-vs-404-vs-503 rationale; message single-sourced from spec)",
+        "packages/spec/src/system/core-services.zod.ts (REMEDY_DETAIL['ai'] exact sentence; ai slot 'optional')",
+        "packages/runtime/src/route-ledger.ts ('* /ai/**' dynamic row — routes owned by cloud; this repo cannot enumerate them)",
+        "packages/spec/src/ai/model-registry.zod.ts + conversation.zod.ts (schemas exist; no in-repo runtime consumer — the knownGaps basis)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-07", "change": "new item: pins the open/cloud AI boundary as testable behavior (courtesy list + 501 remedy + discovery parity) instead of leaving /ai/** unswept; model-registry & conversation runtime behavior recorded as knownGaps rather than invented", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    }
+  ]
+}

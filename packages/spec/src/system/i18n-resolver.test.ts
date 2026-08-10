@@ -908,7 +908,7 @@ describe('translatePage', () => {
         components: [
           {
             type: 'page:header',
-            properties: { title: 'Connect an Agent', subtitle: 'Give any MCP-capable client…', icon: 'bot' },
+            properties: { title: 'Connect an Agent', subtitle: 'Give any MCP-capable client…', actions: ['connect_agent'] },
           },
         ],
       },
@@ -926,9 +926,9 @@ describe('translatePage', () => {
     expect(out.regions[0].components[0].properties.subtitle).toBe('让任意支持 MCP 的 AI 客户端受控访问此环境。');
   });
 
-  it('preserves non-translatable header properties such as icon', () => {
+  it('preserves non-translatable header properties such as actions', () => {
     const out = translatePage(page, bundle, { locale: 'zh-CN' });
-    expect(out.regions[0].components[0].properties.icon).toBe('bot');
+    expect(out.regions[0].components[0].properties.actions).toEqual(['connect_agent']);
   });
 
   it('leaves non-header components untouched', () => {
@@ -1129,6 +1129,192 @@ describe('translatePage', () => {
       translatePage(doc, homeBundle, { locale: 'zh-CN' });
       expect(doc).toEqual(snapshot);
     });
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// #5377 — filter-preset tab labels (`objects.<o>._tabs.<tab>.label`)
+// ────────────────────────────────────────────────────────────────────────────
+
+import { resolveTabLabel } from './i18n-resolver';
+
+describe('resolveTabLabel (#5377)', () => {
+  const bundle: TranslationBundle = {
+    'zh-CN': {
+      objects: {
+        showcase_task: {
+          _tabs: { urgent: { label: '紧急' } },
+          _views: { my_open: { label: '我的待办' } },
+        },
+      },
+    },
+    en: {
+      objects: {
+        showcase_task: {
+          _tabs: { done: { label: 'Completed' } },
+          _views: { my_open: { label: 'My Open Tasks' } },
+        },
+      },
+    },
+  };
+
+  // ── the gap this closes: a tab with a `filter` and NO `view` ─────────────
+  //
+  // The reported headline (a whole tab bar in English) did not reproduce on
+  // rc.2 and is not what this fixes: a tab that carries `view` already renders
+  // its referenced view's translated label. What had no path at all was the
+  // filter-only tab — it references nothing to inherit from, `_tabs` did not
+  // exist, and `ObjectTranslationDataSchema` is strict, so a translator who
+  // invented the key had it rejected rather than ignored.
+
+  it('translates a filter-only tab — the shape that had no path at all', () => {
+    const tab = { name: 'urgent', label: 'Urgent', filter: [{ field: 'priority', operator: 'equals', value: 'urgent' }] };
+    expect(resolveTabLabel(bundle, 'showcase_task', tab, { locale: 'zh-CN' })).toBe('紧急');
+  });
+
+  it('falls back to the literal label when the bundle has no entry', () => {
+    const tab = { name: 'in_review', label: 'In Review' };
+    expect(resolveTabLabel(bundle, 'showcase_task', tab, { locale: 'zh-CN' })).toBe('In Review');
+  });
+
+  it('falls back to the tab name when there is no literal label either', () => {
+    expect(resolveTabLabel(bundle, 'showcase_task', { name: 'in_review' }, { locale: 'zh-CN' })).toBe('in_review');
+  });
+
+  // ── the pre-existing path is PRESERVED, not replaced ─────────────────────
+
+  it('reads the referenced view label for a `view` tab with no `_tabs` entry', () => {
+    const tab = { name: 'mine', label: 'Mine', view: 'my_open' };
+    expect(resolveTabLabel(bundle, 'showcase_task', tab, { locale: 'zh-CN' })).toBe('我的待办');
+  });
+
+  it('an explicit `_tabs` entry outranks the referenced view label', () => {
+    // The tab bar may deliberately name the same view differently ("Urgent"
+    // over a view called "High-priority open tasks"); the specific key wins.
+    const tab = { name: 'urgent', label: 'Urgent', view: 'my_open' };
+    expect(resolveTabLabel(bundle, 'showcase_task', tab, { locale: 'zh-CN' })).toBe('紧急');
+  });
+
+  it('an explicit `_tabs` entry in a FALLBACK locale still outranks the view label', () => {
+    // Both steps run the whole chain before the next one starts, so a `_tabs`
+    // entry that only exists in `en` beats a `zh-CN` view label. Precedence is
+    // by specificity of the key, not by position in the locale chain.
+    const tab = { name: 'done', label: 'Done', view: 'my_open' };
+    expect(resolveTabLabel(bundle, 'showcase_task', tab, { locale: 'zh-CN', fallbackChain: ['en'] }))
+      .toBe('Completed');
+  });
+
+  it('degrades to the literal when there is no bundle or no object binding', () => {
+    const tab = { name: 'urgent', label: 'Urgent' };
+    expect(resolveTabLabel(undefined, 'showcase_task', tab, { locale: 'zh-CN' })).toBe('Urgent');
+    expect(resolveTabLabel(bundle, undefined, tab, { locale: 'zh-CN' })).toBe('Urgent');
+  });
+});
+
+describe('translatePage — filter-preset tab bar (#5377)', () => {
+  const bundle: TranslationBundle = {
+    'zh-CN': {
+      objects: {
+        showcase_task: { _tabs: { in_progress: { label: '进行中' }, urgent: { label: '紧急' } } },
+      },
+    },
+  };
+
+  const triagePage = () => ({
+    name: 'showcase_task_triage',
+    label: 'Task Triage',
+    type: 'list',
+    object: 'showcase_task',
+    interfaceConfig: {
+      source: 'showcase_task',
+      userFilters: {
+        element: 'tabs',
+        showAllRecords: true,
+        tabs: [
+          { name: 'in_progress', label: 'In Progress' },
+          { name: 'urgent', label: 'Urgent', icon: 'flame' },
+          { name: 'done', label: 'Done' },
+        ],
+      },
+    },
+  });
+
+  const tabs = (doc: any) => doc.interfaceConfig.userFilters.tabs;
+
+  it('translates the tabs the bundle covers and leaves the rest literal', () => {
+    const out = translatePage(triagePage(), bundle, { locale: 'zh-CN' });
+    expect(tabs(out).map((t: any) => t.label)).toEqual(['进行中', '紧急', 'Done']);
+  });
+
+  it('keeps every other key on the tab intact', () => {
+    const out = translatePage(triagePage(), bundle, { locale: 'zh-CN' });
+    expect(tabs(out)[1].icon).toBe('flame');
+    expect(out.interfaceConfig.userFilters.element).toBe('tabs');
+    expect(out.interfaceConfig.userFilters.showAllRecords).toBe(true);
+  });
+
+  it('resolves the object from `interfaceConfig.source` before the page `object`', () => {
+    // A list page retargeted at another object keys its presets under the
+    // object whose records they filter — the same "component's own binding
+    // first" rule `_sections` follows. With the page-level binding alone this
+    // would look up `crm_lead._tabs` and find nothing.
+    const retargeted = { ...triagePage(), object: 'crm_lead' };
+    const out = translatePage(retargeted, bundle, { locale: 'zh-CN' });
+    expect(tabs(out)[0].label).toBe('进行中');
+  });
+
+  it('falls back to the page `object` when `source` is absent', () => {
+    const page = triagePage();
+    delete (page.interfaceConfig as Record<string, unknown>).source;
+    const out = translatePage(page, bundle, { locale: 'zh-CN' });
+    expect(tabs(out)[0].label).toBe('进行中');
+  });
+
+  it('leaves an inline-locale-map label alone rather than flattening it (#5728)', () => {
+    // Since the union widening a tab label may itself be multilingual. That is
+    // the author's own resolution route (`pickLocalized` picks at render time);
+    // overwriting it with a bundle miss would turn four languages into one.
+    const page = triagePage();
+    (page.interfaceConfig.userFilters.tabs as any[])[2].label = { en: 'Done', 'ja-JP': '完了' };
+    const out = translatePage(page, bundle, { locale: 'ja-JP' });
+    expect(tabs(out)[2].label).toEqual({ en: 'Done', 'ja-JP': '完了' });
+  });
+
+  it('leaves a page with no tab bar untouched', () => {
+    const plain = { name: 'p', label: 'P', regions: [] };
+    expect(translatePage(plain, bundle, { locale: 'zh-CN' })).not.toHaveProperty('interfaceConfig');
+  });
+
+  it('does not mutate the input page', () => {
+    const doc = triagePage();
+    const snapshot = JSON.parse(JSON.stringify(doc));
+    translatePage(doc, bundle, { locale: 'zh-CN' });
+    expect(doc).toEqual(snapshot);
+  });
+});
+
+describe('ObjectTranslationDataSchema._tabs (#5377)', () => {
+  it('accepts a `_tabs` entry — the key a strict schema used to reject', () => {
+    const data = TranslationDataSchema.parse({
+      objects: { showcase_task: { _tabs: { urgent: { label: '紧急' } } } },
+    });
+    expect(data.objects?.showcase_task?._tabs?.urgent?.label).toBe('紧急');
+  });
+
+  it('renames the spellings a translator reaches for first', () => {
+    const r = TranslationDataSchema.safeParse({
+      objects: { showcase_task: { _tabs: { urgent: { title: '紧急' } } } },
+    });
+    expect(r.success).toBe(false);
+    expect(JSON.stringify(r.error?.issues)).toContain('`title` → `label`');
+  });
+
+  it('still rejects an undeclared key and names the surface', () => {
+    const r = TranslationDataSchema.safeParse({
+      objects: { showcase_task: { _tabs: { urgent: { label: '紧急', tooltip: 'x' } } } },
+    });
+    expect(r.success).toBe(false);
+    expect(JSON.stringify(r.error?.issues)).toContain('this view tab translation');
   });
 });
 

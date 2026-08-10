@@ -91,6 +91,20 @@ export {
   type ResolveLocalizationInput,
 } from './resolve-authz-context.js';
 
+// #6216 (maintainer ruling 2026-08-08, Option A) — the SINGLE ExecutionContext
+// assembly shared by every transport entry point, with the anonymous face as
+// two NAMED entries (fail-closed default / explicit guest) instead of drift.
+export {
+  assembleExecutionContext,
+  assembleExecutionContextOrGuest,
+  ENTRY_EXECUTION_CONTEXT_FIELDS,
+  type EntryExecutionContextField,
+  type ExecutionContextEntryFields,
+  type ExecutionContextAssemblyInput,
+  type OAuthTokenProvenance,
+  type EntryLocalization,
+} from './assemble-execution-context.js';
+
 // ADR-0095 D2/D3 — the monotonic posture ladder: derivation from capability
 // grants + the rung→injection-rule mapping and its tested invariants.
 export {
@@ -103,7 +117,12 @@ export {
   type LadderRow,
   type LadderPrincipal,
 } from './posture-ladder.js';
-export { isAuthGateAllowlisted, evaluateAuthGate, type AuthGate } from './auth-gate.js';
+export {
+  isAuthGateAllowlisted,
+  evaluateAuthGate,
+  normalizeAuthGate,
+  type AuthGate,
+} from './auth-gate.js';
 
 // #2567 — the single anonymous-deny decision shared by every HTTP seam.
 export {
@@ -117,3 +136,11 @@ export {
 
 // ADR-0091 D1/D2 — grant validity windows, the shared resolution-time predicate.
 export { isGrantActive, isGrantExpired, type GrantValidityWindow } from './grant-validity.js';
+
+// #7284 — the `__` operation-private-key convention, the CONSUMER half of the
+// ExecutionContext lifecycle `assemble-execution-context.ts` opens. One owner
+// for the rule three packages had hand-copied (#7141 / #7145 / #7204).
+export {
+  OPERATION_PRIVATE_KEY_PREFIX,
+  withoutOperationPrivateKeys,
+} from './operation-private-keys.js';

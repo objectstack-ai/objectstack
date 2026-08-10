@@ -18,7 +18,7 @@ Enables context preservation, conversation history, and token optimization.
 
 ```typescript
 import { CodeContentSchema, ConversationAnalyticsSchema, ConversationContextSchema, ConversationMessageSchema, ConversationSessionSchema, ConversationSummarySchema, FileContentSchema, FunctionCallSchema, ImageContentSchema, MessageContentSchema, MessageContentTypeSchema, MessagePruningEventSchema, MessageRoleSchema, TextContentSchema, TokenBudgetConfigSchema, TokenBudgetStrategySchema, TokenUsageStatsSchema, ToolCallSchema } from '@objectstack/spec/ai';
-import type { ConversationAnalytics, ConversationContext, ConversationMessage, ConversationSession, ConversationSummary, FunctionCall, MessageContent, MessageContentType, MessagePruningEvent, MessageRole, TokenBudgetConfig, TokenBudgetStrategy, TokenUsageStats, ToolCall } from '@objectstack/spec/ai';
+import type { ConversationAnalytics, ConversationContext, ConversationMessage, ConversationSession, ConversationSummary, FileContent, FunctionCall, MessageContent, MessageContentType, MessagePruningEvent, MessageRole, TextContent, TokenBudgetConfig, TokenBudgetStrategy, TokenUsageStats, ToolCall } from '@objectstack/spec/ai';
 
 // Validate data
 const result = CodeContentSchema.parse(data);
@@ -118,7 +118,7 @@ const result = CodeContentSchema.parse(data);
 | **context** | `{ sessionId: string; userId?: string; agentId?: string; object?: string; … }` | ✅ |  |
 | **modelId** | `string` | optional | AI model ID |
 | **tokenBudget** | `{ maxTokens: integer; maxPromptTokens?: integer; maxCompletionTokens?: integer; reserveTokens: integer; … }` | ✅ |  |
-| **messages** | `{ id: string; timestamp: string; role: Enum<'system' \| 'user' \| 'assistant' \| 'function' \| 'tool'>; content: ({ type: 'text'; text: string; metadata?: Record<string, any> } \| { type: 'image'; imageUrl: string; detail: Enum<'low' \| 'high' \| 'auto'>; metadata?: Record<string, any> } \| { type: 'file'; fileUrl: string; mimeType: string; fileName?: string; … } \| { type: 'code'; text: string; language: string; metadata?: Record<string, any> })[]; … }[]` | ✅ |  |
+| **messages** | `{ id: string; timestamp: string; role: Enum<'system' \| 'user' \| 'assistant' \| 'function' \| 'tool'>; content: (object \| … +3 more)[]; … }[]` | ✅ |  |
 | **tokens** | `{ promptTokens: integer; completionTokens: integer; totalTokens: integer; budgetLimit: integer; … }` | optional |  |
 | **totalTokens** | `{ promptTokens: integer; completionTokens: integer; totalTokens: integer }` | optional | Total tokens across all messages |
 | **totalCost** | `number` | optional | Total cost for this session in USD |

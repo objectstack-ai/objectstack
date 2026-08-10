@@ -1,5 +1,284 @@
 # @objectstack/plugin-hono-server
 
+## 17.0.0-rc.6
+
+### Patch Changes
+
+- 1fe436d: fix(plugin-hono-server): `/auth/me/permissions` resolves position-bound grants through the canonical resolver (#6334)
+
+  On a hono host, `/api/v1/auth/me/permissions` and `/me/apps` resolved the caller
+  through a standalone resolver in `current-user-endpoints.ts` that read
+  `sys_member` + `sys_user_permission_set` — and **nothing else**. It never read
+  `sys_user_position` / `sys_position_permission_set`, so a permission set bound to
+  a **position** — the ADR-0090 D3 distribution mechanism, and how the showcase app
+  grants every persona — was invisible to these endpoints: the response carried
+  `positions: []`, omitted the set from `permissionSets`, and withheld its
+  `systemPermissions`.
+
+  That is the surface objectui's four `useCapabilityGate` gates read (toolbar, row
+  kebab, record header, bulk bar — ADR-0066 D4), while the data plane resolves
+  through SecurityPlugin's middleware on the canonical chain. So the server
+  **granted** the action and the UI **hid the button** from a user who genuinely
+  held the capability — the failure direction the fail-open design names as the
+  worse one.
+
+  A second, quieter half of the same divergence: the hand-rolled envelope published
+  membership roles under `roles`, while `ExecutionContext` — and every reader in
+  that file — calls the field `positions` (ADR-0090 D3, "formerly `roles`"). The
+  endpoint's `positions` was therefore always `[]` and those names never reached
+  `resolvePermissionSets` either, independently of the position tables.
+
+  The session lookup (the genuinely transport-specific part) stays where it is; all
+  grant aggregation now delegates to `resolveUserAuthzGrants`, the canonical
+  resolver's userId-driven core, which `@objectstack/core` exports for exactly this
+  caller shape — a surface that already knows who the principal is and needs the
+  same envelope with no HTTP request to resolve it from. Arriving with it, none of
+  it re-implemented: `sys_user_position` (null org = global, active-org match,
+  ADR-0091 validity windows), the implicit `everyone` audience anchor (ADR-0090 D5),
+  `sys_position_permission_set`, `mapMembershipRole` normalization, the
+  platform-admin derivation and posture rung, and the `ai_seat` synthesis.
+
+  No response-envelope change: `positions` / `permissionSets` / `systemPermissions`
+  / `tabPermissions` keep their names and shapes, and now carry the grants the
+  server was already enforcing.
+
+- 7cdbcbb: fix(plugin-hono-server): surface a repeated query parameter as an array, matching the platform convention (#6878)
+
+  **Behaviour change, not a refactor.** On the Hono server, a repeated query
+  parameter — `?version=1.0.0&version=2.0.0` — used to reach your handler as the
+  single string `'1.0.0'`. It now reaches it as `['1.0.0', '2.0.0']`. A
+  single-valued key is unchanged: still a plain string.
+
+  This is the ruled intent of #6878 (route 2, cli-lane seat ruling of
+  2026-08-10), not an incidental cleanup.
+
+  **Why the old behaviour was a problem.** The platform ships two `IHttpServer`
+  implementations, and they answered the same request differently. The reference
+  `NodeHttpServer` reads `url.searchParams.getAll(key)` and keeps the array; the
+  Hono adapter read `c.req.query()`, which returns only the first value per key.
+  Both satisfied the declared contract — `IHttpRequest.query` is
+  `Record< string, string | string[] >` — so neither had a bug, yet the
+  platform's answer to "what is a repeated parameter?" depended on which server
+  had booted.
+
+  The consequence was not cosmetic. A handler cannot refuse an ambiguity it
+  cannot see: #6307 found `DELETE /api/v1/packages/:id` silently narrowing a
+  destructive operation's scope from a repeated `version`, and its fix (refuse
+  repetition with a `400`) was unreachable on the Hono server because the
+  transport had already collapsed the duplicate. Duplicates now reach the
+  handler on both servers, where the rest-side gates landed in #6877 (PR #7324 —
+  63 single-valued parameter slots) and #7321 (PR #7386) refuse them explicitly.
+
+  **Both construction sites moved.** The adapter builds `IHttpRequest.query` at
+  the route-handler seam _and_ inside the `use()` middleware seam; both now go
+  through one `readQuery(c)` helper, so middleware and handlers agree.
+
+  ⚠️ **If you read query parameters off the Hono server, check your assumptions.**
+  A read point that assumed a string will now receive an array when — and only
+  when — a client repeats that parameter. `String(req.query.x)` yields `"a,b"`
+  and `Number(req.query.x)` yields `NaN` in that case. Handle the array, or
+  refuse the repetition explicitly; do not reach back for the first value, which
+  is the silent-wrong-answer shape #6878 set out to remove. The repo's own read
+  points were swept and gated before this landed.
+
+  Nothing in `packages/spec` changed: the declared union already permitted
+  arrays. What changed is the platform's answer, from "depends on the server" to
+  one answer.
+
+  `@objectstack/http-conformance` gets the matching test tightening. Its
+  cross-adapter case, added under #6878 route 1 (PR #6941) to _record_ the
+  divergence, is collapsed into the single expected shape exactly as that file's
+  own header instructed — plus a new middleware-seam case, so a half-applied
+  change to only one of the adapter's two construction sites cannot pass. The
+  single-value control case that catches an un-normalised `c.req.queries()`
+  (which returns an array for every key, single-valued ones included) stays.
+
+- Updated dependencies [3d5c090]
+- Updated dependencies [e5bd768]
+- Updated dependencies [e027b3e]
+- Updated dependencies [c2429b0]
+- Updated dependencies [445a0c2]
+- Updated dependencies [f6609e6]
+- Updated dependencies [a70358a]
+- Updated dependencies [97e7e3c]
+- Updated dependencies [8828b9e]
+- Updated dependencies [53068c1]
+- Updated dependencies [ee58392]
+- Updated dependencies [f16e54e]
+- Updated dependencies [06be54e]
+- Updated dependencies [259459d]
+- Updated dependencies [3f7f14e]
+- Updated dependencies [6968885]
+- Updated dependencies [eaed61f]
+- Updated dependencies [debe2f6]
+- Updated dependencies [97b0798]
+- Updated dependencies [43a7a8d]
+- Updated dependencies [73f69dc]
+- Updated dependencies [04c56aa]
+- Updated dependencies [b3efeb7]
+- Updated dependencies [ddd075a]
+- Updated dependencies [88154be]
+- Updated dependencies [e8dc61e]
+- Updated dependencies [2f3e793]
+- Updated dependencies [d8e8d9c]
+- Updated dependencies [94e749b]
+- Updated dependencies [ea1d916]
+- Updated dependencies [ae31a19]
+- Updated dependencies [e0f300b]
+- Updated dependencies [62b6a2f]
+- Updated dependencies [5b4780b]
+- Updated dependencies [a933452]
+- Updated dependencies [8140915]
+- Updated dependencies [7b48cf9]
+- Updated dependencies [b5404f4]
+- Updated dependencies [f764691]
+- Updated dependencies [e120a5a]
+- Updated dependencies [e650d67]
+- Updated dependencies [04476e7]
+- Updated dependencies [79228cd]
+- Updated dependencies [b3363e9]
+- Updated dependencies [2ef1807]
+- Updated dependencies [d03fe25]
+- Updated dependencies [2672f85]
+- Updated dependencies [11066f6]
+- Updated dependencies [916af17]
+- Updated dependencies [84c86fb]
+- Updated dependencies [2a2a9fb]
+- Updated dependencies [a2e157c]
+- Updated dependencies [95c4227]
+- Updated dependencies [2a61116]
+- Updated dependencies [d4df105]
+- Updated dependencies [e2798fa]
+- Updated dependencies [0fd8556]
+- Updated dependencies [74155c7]
+- Updated dependencies [6908830]
+- Updated dependencies [8b06bba]
+- Updated dependencies [4c54037]
+- Updated dependencies [0f7157b]
+- Updated dependencies [d9bef45]
+- Updated dependencies [f549a0d]
+- Updated dependencies [82da264]
+- Updated dependencies [f586f1a]
+- Updated dependencies [9b9b70f]
+- Updated dependencies [f5a9bc2]
+- Updated dependencies [881a3cc]
+- Updated dependencies [ad6317b]
+- Updated dependencies [8a88885]
+- Updated dependencies [5f7669e]
+- Updated dependencies [becbe53]
+- Updated dependencies [b127c8b]
+- Updated dependencies [a80302a]
+- Updated dependencies [474f131]
+- Updated dependencies [050cd82]
+- Updated dependencies [4d552af]
+- Updated dependencies [44d677c]
+- Updated dependencies [c32944d]
+- Updated dependencies [1dd780f]
+- Updated dependencies [c8d6f6e]
+- Updated dependencies [92a67f2]
+- Updated dependencies [9136327]
+- Updated dependencies [bf0ae99]
+- Updated dependencies [cb3b6cd]
+- Updated dependencies [73b7234]
+- Updated dependencies [d2b97c3]
+- Updated dependencies [59b794f]
+- Updated dependencies [fc3a36a]
+- Updated dependencies [69787f0]
+- Updated dependencies [5d022a1]
+- Updated dependencies [042b9ee]
+- Updated dependencies [f549a0d]
+- Updated dependencies [a36db28]
+- Updated dependencies [3f8817a]
+- Updated dependencies [a2443e3]
+- Updated dependencies [e1554b1]
+- Updated dependencies [4856789]
+- Updated dependencies [c3f4916]
+- Updated dependencies [33e0385]
+- Updated dependencies [2205363]
+- Updated dependencies [09fe58d]
+- Updated dependencies [d0a5ceb]
+- Updated dependencies [e18a162]
+- Updated dependencies [d6d1a50]
+- Updated dependencies [d127ff0]
+- Updated dependencies [9b86cf6]
+- Updated dependencies [8825a06]
+- Updated dependencies [5087ac6]
+- Updated dependencies [2d1ddf0]
+- Updated dependencies [354b00f]
+- Updated dependencies [3de535b]
+- Updated dependencies [fe2e15a]
+- Updated dependencies [c6b6bb4]
+- Updated dependencies [2f59da0]
+- Updated dependencies [8ad609c]
+- Updated dependencies [bbee302]
+- Updated dependencies [08863dd]
+- Updated dependencies [56664f5]
+- Updated dependencies [31cbe90]
+- Updated dependencies [90bbf25]
+- Updated dependencies [eb91eba]
+- Updated dependencies [42da73d]
+- Updated dependencies [643b7c7]
+- Updated dependencies [d0d5205]
+- Updated dependencies [1a15893]
+- Updated dependencies [b70e534]
+- Updated dependencies [2233a85]
+- Updated dependencies [62dd69a]
+- Updated dependencies [e15e679]
+- Updated dependencies [2ab1257]
+- Updated dependencies [4cc4fb7]
+- Updated dependencies [28d1eb7]
+- Updated dependencies [2c26040]
+- Updated dependencies [f758cec]
+- Updated dependencies [78f0be8]
+- Updated dependencies [35f7fb4]
+- Updated dependencies [a5302c7]
+- Updated dependencies [7084313]
+- Updated dependencies [91cefb8]
+- Updated dependencies [0e043d8]
+- Updated dependencies [dadd1ad]
+- Updated dependencies [2f2e63c]
+- Updated dependencies [486d526]
+- Updated dependencies [89d7b35]
+- Updated dependencies [85ec26d]
+- Updated dependencies [f6476fc]
+- Updated dependencies [4ac12ef]
+- Updated dependencies [b88f5e8]
+- Updated dependencies [42cc219]
+- Updated dependencies [d7e0b42]
+- Updated dependencies [3510e4a]
+- Updated dependencies [aa4b90d]
+- Updated dependencies [54299ca]
+- Updated dependencies [dc61def]
+- Updated dependencies [251e888]
+- Updated dependencies [183b4c4]
+- Updated dependencies [2fdb36e]
+- Updated dependencies [20526f5]
+- Updated dependencies [c5eef1d]
+- Updated dependencies [e0f300b]
+- Updated dependencies [761a0ba]
+- Updated dependencies [be87153]
+- Updated dependencies [60f0dd8]
+- Updated dependencies [a87c5cd]
+- Updated dependencies [a47f338]
+- Updated dependencies [2598216]
+- Updated dependencies [2c7e62d]
+- Updated dependencies [eb7613c]
+- Updated dependencies [ecc9110]
+- Updated dependencies [f7bd4e2]
+- Updated dependencies [361bd5b]
+- Updated dependencies [129b378]
+- Updated dependencies [88f9d94]
+- Updated dependencies [1818998]
+- Updated dependencies [09ee21c]
+- Updated dependencies [f549a0d]
+- Updated dependencies [3fc2e48]
+- Updated dependencies [e8f435c]
+- Updated dependencies [41610f6]
+  - @objectstack/spec@17.0.0-rc.6
+  - @objectstack/core@17.0.0-rc.6
+  - @objectstack/types@17.0.0-rc.6
+  - @objectstack/observability@17.0.0-rc.6
+
 ## 17.0.0-rc.5
 
 ### Patch Changes

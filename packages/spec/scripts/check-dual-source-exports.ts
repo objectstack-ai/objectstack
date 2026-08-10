@@ -48,12 +48,24 @@
  * chunk, so distinct dist declarations imply distinct source declarations; the
  * self-test pins the detector itself, and the count assertions keep a silent
  * resolution failure from reading as "clean".
+ *
+ * That precondition is enforced since #7181, and `--update` is why it matters
+ * here more than in this file's two sibling gates. #7181 was filed on the reading
+ * that all three "are check-only — none writes a tracked artifact, so none can
+ * launder a wrong baseline into a commit". This one does: `--update` REWRITES
+ * `dual-source-exports.baseline.json`, and on a stale dist it writes a partition
+ * computed from declarations that predate the edit. The ratchet then makes that
+ * self-consistent in both directions — a name that only became dual-source after
+ * the last build is written out as clean, and the plain run compares the same
+ * baseline against the same stale dist and agrees. That is #7122's laundering
+ * shape exactly, one artifact over. See lib/dist-freshness.ts.
  */
 import ts from 'typescript';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
+import { inspectDistFreshness } from './lib/dist-freshness';
 
 const PKG_DIR = resolve(fileURLToPath(new URL('.', import.meta.url)), '..');
 const BASELINE_PATH = resolve(PKG_DIR, 'dual-source-exports.baseline.json');
@@ -217,6 +229,23 @@ function selfTest(): never {
 if (SELF_TEST) selfTest();
 
 // ── Audit ────────────────────────────────────────────────────────────────────
+
+// BEFORE a single `.d.ts` is read (#7181, adopting #7122's primitive). `--update`
+// is `generate`-shaped — it writes a tracked baseline — so it gets the writing
+// damage, and the plain run gets the false-green one. Placed after `--self-test`
+// on purpose: that path builds its own fixture in a temp dir and never reads
+// `dist/`, so refusing it on a stale dist would refuse a run that is unaffected.
+const freshness = inspectDistFreshness(
+  PKG_DIR,
+  UPDATE ? 'generate' : 'check',
+  UPDATE
+    ? 'pnpm --filter @objectstack/spec exec tsx scripts/check-dual-source-exports.ts --update'
+    : 'pnpm --filter @objectstack/spec check:dual-source-exports',
+);
+if (!freshness.fresh) {
+  console.error(freshness.message);
+  process.exit(1);
+}
 
 const entries = collectEntries();
 const { findings, names, reExports } = scan(makeProgram(Object.values(entries)), entries);

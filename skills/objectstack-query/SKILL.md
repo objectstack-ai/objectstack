@@ -330,15 +330,19 @@ unique or near-unique column such as `created_at` or `id`) so
 | `min` | Minimum | `MIN(field)` |
 | `max` | Maximum | `MAX(field)` |
 | `count_distinct` | Unique count | `COUNT(DISTINCT field)` |
-| `array_agg` | Collect into array | `ARRAY_AGG(field)` |
-| `string_agg` | Concatenate strings | `STRING_AGG(field, ',')` |
 
 > ⚠️ **Driver support varies.** On SQL datasources the driver executes only
-> `count` / `sum` / `avg` / `min` / `max` and **throws** on `count_distinct`,
-> `array_agg`, and `string_agg`; the per-aggregation `distinct: true` flag is
-> also ignored there. The in-memory fallback path (driver-rest, driver-memory,
-> timezone/date-bucket fallbacks) supports all 8 functions plus `distinct`.
-> For portable queries, stick to the first five.
+> `count` / `sum` / `avg` / `min` / `max` and **throws** on `count_distinct`;
+> the per-aggregation `distinct: true` flag is also ignored there. The
+> in-memory fallback path (driver-rest, driver-memory, timezone/date-bucket
+> fallbacks) supports all six functions plus `distinct`. For portable queries,
+> stick to the first five.
+
+> **Removed in 17 (#6188).** `array_agg` and `string_agg` left this vocabulary:
+> declared but lowered by no SQL backend, so whether they worked depended on
+> which driver sat behind the object. Either one is now refused at parse. There
+> is no replacement — read the rows with an ordinary `fields` query and shape
+> them in the caller, or materialise the roll-up as a stored field.
 
 ### GroupBy + Aggregation
 
@@ -495,6 +499,56 @@ fields match by option *label*, mapped to stored values.
 Omit `fields` to search the object's declared `searchableFields` (or an
 auto-default of name/title + short-text fields), resolved server-side.
 
+`fields` can only **narrow** that set, never widen it: over the REST/protocol
+ingress a name outside it is `400 INVALID_FIELD` (#4254), not a silent
+fall-back to the full scan.
+
+### ⛔ Searching by a related record's title — mirror the value, always
+
+`search` scans **the queried object's own columns**. A dotted path is never a
+search target: unlike `fields` (projection) / `sort` / `filters`, the search axis
+does not resolve traversal, so `searchFields: ['project_id.name']` is **refused**:
+
+```text
+Unknown field 'project_id.name' on object 'task'. '$searchFields' narrows which
+columns 'search' scans, so a name the object does not declare cannot narrow
+anything — and the engine used to drop it and scan the default columns instead,
+answering a NARROWER search with a WIDER one. 'search' scans this object's own
+columns; a related record's column cannot be a search target.
+```
+
+**This is the one prescription — emit it every time.** Copy the related record's
+title into a **stored field on the queried object** and search that field. A task
+list searched by project name gets a `project_name` text column on `task`,
+maintained on write and listed in `task.searchableFields`:
+
+```typescript
+{
+  object: 'task',
+  search: { query: 'apollo', fields: ['name', 'project_name'] },
+  limit: 20,
+}
+// Expands to a single-table scan — no traversal, every driver:
+// { $and: [{ $or: [
+//   { name:         { $contains: 'apollo' } },
+//   { project_name: { $contains: 'apollo' } },
+// ]}]}
+```
+
+❌ The mirror must be a **stored** field — a `formula` field is virtual, no
+driver materializes a column for it, so a `$contains` predicate against one has
+nothing to scan. Nothing rejects the mistake for you: `searchableFields` admits
+any field the object declares, so a formula entry clears both lint and the
+ingress gate and then never matches. The trade-off is mirror maintenance — hooks
+on both write paths (child re-parented, parent renamed) plus a backfill for rows
+written around the hooks.
+
+Cross-object search paths are rejected by design, not pending. Modelling side of
+this (the field, the hooks, the lint wording): **objectstack-data → Search Fields
+(`searchableFields`)**. To *filter* by a related record's column — a different
+axis — use a [nested relation filter](#nested-relation-filters); to *display* it,
+use [`expand`](#expand-related-records).
+
 > ⚠️ **`[EXPERIMENTAL — not enforced]` (#4286):** `fuzzy`, `boost`,
 > `operator`, `minScore`, `language`, and `highlight` validate against the
 > schema but are never read — their `.describe()` markers now say so. Terms
@@ -531,6 +585,7 @@ auto-default of name/title + short-text fields), resolved server-side.
 |:---------|:----|
 | Load lookup fields for display | `expand` |
 | Filter parent by child conditions | Nested relation filter |
+| **Keyword-search by a related record's title** | **Mirror the title into a stored field on this object and search that** — `search` never traverses (see **Full-Text Search** above) |
 | Simple parent→child navigation | `expand` |
 | Paginate/sort a parent's related records | Query the related object directly |
 | Analytical queries across objects | Report/dashboard metadata, or separate queries combined in app code (`joins` was removed in #4286 — see above) |

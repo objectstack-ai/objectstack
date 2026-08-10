@@ -69,6 +69,7 @@ import { expandViewContainer } from '@objectstack/spec';
 import { hasPlatformObjectPrefix, isPlatformProvidedObjectName } from '@objectstack/spec/system';
 import { walkPageComponents } from './page-walk.js';
 import { SYSTEM_FIELDS } from './system-fields.js';
+import { viewObjectName } from './view-walk.js';
 
 export const TRANSLATION_TARGET_UNKNOWN = 'translation-target-unknown';
 export const TRANSLATION_OPTION_KEY_UNKNOWN = 'translation-option-key-unknown';
@@ -211,21 +212,26 @@ function emptyFacts(): ObjectFacts {
  * where a first pass reported ~40 correct keys as orphans:
  *
  *  1. A view record is a CONTAINER, not a view. The default list sits at
- *     `list`; the named tabs at `listViews.<key>` and `formViews.<key>`, each
- *     of which may also carry its own `name`. Both the map key and the inner
- *     `name` are accepted — authors write either, and the key is what the
- *     console renders the tab from.
+ *     `list`; the named tabs at `listViews.<key>` and `formViews.<key>`.
  *  2. The object binding lives INSIDE the container (`list.data.object`), not
  *     at the record root. A record-level lookup alone resolves to nothing on
  *     the canonical shape, which silently drops the whole record — a rule that
  *     then reports every view key the app ships.
  *
- * The default `list` is the ONE place where "read the author's `name`" was
- * wrong, and #5164 is why: the runtime does not key that view by its `name`,
- * it keys it by the identity the composer assigns. Its key therefore comes
- * from {@link defaultListViewKey} — asked of the composer, never re-derived
- * here. See that function for the three facts that live in the composer and
- * nowhere else.
+ * NOWHERE here is the author's inner `name` a `_views` key. This rule used to
+ * read it on the named branches too ("authors write either", from the HotCRM
+ * corpus) — but the composer constructs every named entry's runtime identity
+ * from the MAP KEY alone and ignores `name` entirely, so an inner `name` that
+ * diverges from its map key is a key the runtime never resolves, and #5164
+ * (ruled 2026-08-06: canonical = the runtime identity's bare key) applies to
+ * the named branches exactly as it applies to the default `list` (#6422).
+ * Every `_views` key therefore comes from the composer: the default list's
+ * via {@link defaultListViewKey}, the named entries' via {@link namedViewKeys}
+ * — asked, never re-derived. See those functions for the composer facts that
+ * live there and nowhere else (collision renames included: `formViews.default`
+ * beside a default `list` is registered as `default_2`, because the rename IS
+ * the registry key — the map key it was written under resolves to the OTHER
+ * view).
  *
  * A third thing was learned later, from the showcase (#5415): the container's
  * DEFAULT form (`form`) is a section anchor too. It is not one of the
@@ -268,14 +274,20 @@ function collectViewRecord(view: AnyRec, factsFor: (objectName: string) => Objec
   if (isRec(view.list)) addView(listBinding, defaultListViewKey(listBinding, view));
   addView(recordObject ?? listBinding, strName(view.name));
 
-  for (const key of ['listViews', 'formViews'] as const) {
-    const container = view[key];
+  const named = namedViewKeys(view);
+  for (const family of ['listViews', 'formViews'] as const) {
+    const container = view[family];
     if (!isRec(container)) continue;
-    for (const [subKey, sub] of Object.entries(container)) {
+    const registryKeys = family === 'listViews' ? named.list : named.form;
+    let at = 0;
+    for (const sub of Object.values(container)) {
+      // Advance in lockstep with the composer: it makes an item for every
+      // object-typed value (arrays included), so the index moves for each.
+      if (!sub || typeof sub !== 'object') continue;
+      const registryKey = registryKeys[at++];
       if (!isRec(sub)) continue;
       const binding = bindingOf(sub) ?? listBinding;
-      addView(binding, subKey);
-      addView(binding, strName(sub.name));
+      addView(binding, registryKey);
       addSections(sub, binding);
     }
   }
@@ -343,13 +355,53 @@ function defaultListViewKey(object: string | undefined, container: AnyRec): stri
   return item.name.startsWith(prefix) ? item.name.slice(prefix.length) : item.name;
 }
 
-/** The object a view (or one of its containers) binds to, across the shapes it is authored in. */
-function viewObjectName(view: AnyRec): string | undefined {
-  return (
-    strName(view.objectName) ??
-    strName(view.object) ??
-    (isRec(view.data) ? strName(view.data.object) : undefined)
-  );
+/**
+ * The bare `_views` keys the RUNTIME assigns to a container's NAMED entries —
+ * `listViews.<key>` / `formViews.<key>` — in authoring order per family.
+ *
+ * {@link defaultListViewKey}'s sibling, and a thin reader of the same composer
+ * (#6422, the named-branch limb of the #5164 ruling): the composer constructs
+ * each named entry's identity from the MAP KEY alone — the inner `name` is
+ * ignored — and renames on collision (`<object>.default` already claimed by
+ * the default `list` ⇒ `formViews.default` is registered as
+ * `<object>.default_2`). Both facts live in the composer and nowhere else, so
+ * both are asked of it, never re-derived. The rename matters even though the
+ * view-ref lint makes collisions a hard error: this rule must agree with the
+ * registry, not with another rule staying strict — under a collision the map
+ * key spelled by the author resolves to the OTHER view, and the renamed key is
+ * the one the bundle must spell.
+ *
+ * Alignment with the composer is positional and rests on two documented facts
+ * of `expandViewContainerWithDiagnostics`: each family expands its named map's
+ * entries FIRST (defaults are appended after), and it makes an item for every
+ * object-typed value in the map, in `Object.entries` order. So the first N
+ * items of a family are the named entries, index-aligned with the map.
+ *
+ * The object passed to the composer is a fixed probe: every identity it
+ * assigns is `${object}.${key}` with the SAME object, so the bare key —
+ * renames included — does not depend on it, and a container whose entries bind
+ * different objects still gets each key filed under its own entry's binding by
+ * the caller.
+ */
+function namedViewKeys(container: AnyRec): {
+  list: Array<string | undefined>;
+  form: Array<string | undefined>;
+} {
+  const object = 'probe';
+  const prefix = `${object}.`;
+  const bare = (name: string) => (name.startsWith(prefix) ? name.slice(prefix.length) : name);
+  const countEntries = (v: unknown) =>
+    isRec(v) ? Object.values(v).filter((e) => !!e && typeof e === 'object').length : 0;
+  const listCount = countEntries(container.listViews);
+  const formCount = countEntries(container.formViews);
+  if (!listCount && !formCount) return { list: [], form: [] };
+  const items = expandViewContainer(object, container);
+  const keysOf = (kind: 'list' | 'form', count: number) =>
+    items
+      .filter((i) => i.viewKind === kind)
+      .slice(0, count)
+      .map((i) => bare(i.name));
+  return { list: keysOf('list', listCount), form: keysOf('form', formCount) };
 }
 
 /**

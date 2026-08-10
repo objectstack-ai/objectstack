@@ -14,10 +14,11 @@
  * the metadata-driven behaviours.
  */
 import type { Hook, HookContext } from '@objectstack/spec/data';
+import { HookSchema } from '@objectstack/spec/data';
 import type { Expression } from '@objectstack/spec';
 import type { Logger } from '@objectstack/spec/contracts';
 import type { HookHandler } from './engine.js';
-import { ExpressionEngine, collectCelRootIdentifiers } from '@objectstack/formula';
+import { ExpressionEngine } from '@objectstack/formula';
 import { noopHookMetricsRecorder, type HookMetricsRecorder, type HookMetricOutcome } from './hook-metrics.js';
 import { materializeDeclaredFields } from './declared-fields.js';
 import { describeCelFault, type CelFault } from './cel-fault.js';
@@ -68,6 +69,34 @@ const noopLogger: HookDiagnosticsLogger = {
 };
 
 /**
+ * The values `HookSchema` declares for an omitted `retryPolicy` key — READ from
+ * the declaration, never restated here (#6832).
+ *
+ * `wrapDeclarativeHook` used to answer "how many times does an under-specified
+ * hook retry?" with a hand-written `?? 0`, while `hook.zod.ts` answered `3` (and
+ * `1000` for the backoff). Which number you got depended on whether the metadata
+ * had been through `HookSchema` — `defineStack` / `PUT /meta` / Studio parse and
+ * got 3, this public export and `hook-binder.ts`'s own call did not and got 0.
+ * That is verbatim the divergence #4247 removed from flow `errorHandling`, whose
+ * ruling `flow.zod.ts` still carries: **one contract, one number**. Reading the
+ * numbers out of the schema is what makes there be only one — a third key added
+ * to `hook.retryPolicy` needs no edit on this side.
+ *
+ * The value is resolved on first use, not at module load: `HookSchema` is a
+ * `lazySchema` precisely so its closures are never allocated in a process that
+ * binds no hooks.
+ */
+let declaredRetryPolicy: { maxRetries: number; backoffMs: number } | undefined;
+function retryPolicyDefaults(): { maxRetries: number; backoffMs: number } {
+  // Parsing `{}` asks the schema what an empty-but-present block means, which is
+  // exactly the question the executor has to answer. `.unwrap()` steps past the
+  // `.optional()`; the ABSENCE of the block is a different question, answered at
+  // the call site.
+  declaredRetryPolicy ??= HookSchema.shape.retryPolicy.unwrap().parse({});
+  return declaredRetryPolicy;
+}
+
+/**
  * A hook declared a `condition` and the platform could not work out its value
  * (#4775). Thrown from the condition gate, which aborts the operation.
  *
@@ -103,54 +132,69 @@ const noopLogger: HookDiagnosticsLogger = {
  * mint a third set of semantics for the same word.
  */
 /**
- * Which platform limitation made the condition unevaluable, when a limitation
- * — rather than the author — is what happened (#5037).
+ * ⛔ RETIRED — `HookConditionLimitation` and its two members
+ * (`bulk_write_previous_unbound`, `bulk_write_stored_state_unavailable`), with
+ * the `isPredicateBulkWrite` predicate and the `predicateBulkWrite` flag that
+ * produced them. #5574's engine half, ADR-0049 enforce-or-remove. Do not
+ * reintroduce any of them.
  *
- * The distinction this names is the whole point of the diagnostic: an
- * undeclared key is the AUTHOR's to fix and stays fixed, while these two are
- * the PLATFORM's. A caller that wants to tell "your hook is wrong" from "this
- * event cannot do that" — a REST layer choosing a status, a test, a Studio
- * surface — reads this field instead of matching on the message text.
+ * ## Why they existed
  *
- *   - `bulk_write_previous_unbound` — the condition names `previous` on a
- *     predicate (`multi: true`) write whose hook fires once for the whole
- *     batch, so there is no single prior record to bind;
- *   - `bulk_write_stored_state_unavailable` — the condition names a DECLARED
- *     field this write does not set, and `record` is the bare payload on such a
- *     write for the same reason (no single stored row to merge with).
+ * #5037 shipped them for a real gap: on a predicate (`multi: true`) write the
+ * `before*` phase was dispatched ONCE for the whole batch, on a context with no
+ * `input.id` and no `previous`. A condition reading `previous` was therefore
+ * unevaluable, and since #4775 unevaluable ABORTS the write — so the author got
+ * a rejection that read like a typo report for an expression that was
+ * perfectly well formed. The `limitation` discriminator existed so a caller
+ * could tell "your hook is wrong" from "this event cannot do that" without
+ * matching on message text.
  *
- * ## What #5038 retired, and what it did NOT
+ * #5038 retired them for the `after*` phase by making it per row. Addendum I
+ * kept them alive for `before*`, arguing the batch dispatch was not a version
+ * gap but what the phase IS.
  *
- * #5037 shipped these as a stopgap for the whole bulk-write surface, expiring
- * when #5038 landed the per-row contract. #5038 retires them for **after-type**
- * hooks, which now receive one single-record-shaped context per matched row —
- * `previous` bound, `record` the row's real state — so a transition condition
- * on `afterUpdate`/`afterDelete` evaluates on a bulk write exactly as authored
- * and never reaches this error.
+ * ## Why they are gone
  *
- * They stay reachable, and correct, for **before-type** hooks. A
- * `beforeUpdate`/`beforeDelete` on a predicate write fires ONCE, before any row
- * is touched, because it may still rewrite the payload — and one payload cannot
- * be edited per row. That is not a version gap that a later release closes; it
- * is what a batch-scoped event is. So the message no longer promises expiry:
- * it names the phase as the reason and points at the after-type event, which
- * per-row semantics made a route that actually works.
+ * ADR-0058 Addendum II (#5574 ruling B) reversed that argument on measured
+ * evidence and made the `before*` phase per row too. Both ends of the
+ * declaration are now empty, and this is what that was verified against on the
+ * delivering tree:
  *
- * ## Why this is not `error.code`
+ *  - **No producer.** `isPredicateBulkWrite`'s whole test was "no `input.id`
+ *    and `options.multi`". Every context the engine now dispatches on a
+ *    predicate write — both phases — arrives with `input.id` bound to its row,
+ *    so the predicate answered `false` everywhere and the branch that set both
+ *    members was unreachable. The batch-scoped `hookContext` still exists
+ *    inside `update()`/`delete()`, but it is never handed to `triggerHooks`:
+ *    the per-row loop runs whenever `hasHooksFor` is true, and when it is false
+ *    no handler runs at all. So no handler can observe one.
+ *  - **No reachable consumer.** Nothing outside this file and its own tests
+ *    ever read `.limitation` or `.predicateBulkWrite`.
  *
- * Deliberately NOT named `code`. ADR-0112 makes `error.code` a CLOSED wire
- * vocabulary — `StandardErrorCode` ∪ `ERROR_CODE_LEDGER`, both declared in
- * `packages/spec/src/api/` — and `rest-server.ts` promotes a thrown error's
- * `.code` straight onto the response envelope. Putting a `.code` here would
- * therefore mint an unregistered wire code by side effect, which is the exact
- * `declared ≠ enforced` shape this family exists to remove. If this ever needs
- * to travel on the wire it goes through the ledger, as a decision, not as a
- * property that happens to be named `code`.
+ * A discriminator with neither is not a diagnostic, it is a promise the
+ * platform has stopped keeping — the exact `declared ≠ enforced` shape
+ * ADR-0049 exists to remove. What replaced it is not a better message but the
+ * absence of the condition it described: a `previous`-reading `before*`
+ * condition on a bulk write now EVALUATES, per row, as authored. The pins live
+ * in `hook-condition-bulk-previous.test.ts`.
+ *
+ * The `HookConditionError` that carried them is NOT retired — an unevaluable
+ * or uncompilable condition still aborts the operation (#4775). Only the
+ * bulk-write branch of its diagnosis is gone.
+ *
+ * ## What did NOT change with them: no discriminator here is ever `error.code`
+ *
+ * `limitation` was deliberately not named `code`, and that rule OUTLIVES it —
+ * it governs every field this class carries now (`reason`, `fault`,
+ * `missingKey`) and any future one. ADR-0112 makes `error.code` a CLOSED wire
+ * vocabulary (`StandardErrorCode` ∪ `ERROR_CODE_LEDGER`, both declared in
+ * `packages/spec/src/api/`), and `rest-server.ts` promotes a thrown error's
+ * `.code` straight onto the response envelope. A `.code` added here would
+ * therefore mint an unregistered wire code by SIDE EFFECT — the exact
+ * `declared ≠ enforced` shape that vocabulary exists to prevent. If one of
+ * these facts ever needs to travel on the wire it goes through the ledger, as a
+ * decision, not as a property that happens to be named `code`.
  */
-export type HookConditionLimitation =
-  | 'bulk_write_previous_unbound'
-  | 'bulk_write_stored_state_unavailable';
-
 export class HookConditionError extends Error {
   override readonly name = 'HookConditionError';
   /** The hook whose declared condition could not be evaluated. */
@@ -166,13 +210,6 @@ export class HookConditionError extends Error {
   readonly fault: string;
   /** The key the expression read that the record does not carry, when known. */
   readonly missingKey?: string;
-  /** True when the operation is a predicate (`multi: true`) bulk write, whose
-   *  N matched rows have no single prior state to bind (#4800/B1). */
-  readonly predicateBulkWrite?: boolean;
-  /** The current-version limitation behind the fault, when one is the cause
-   *  rather than the authored expression (#5037). See
-   *  {@link HookConditionLimitation}. */
-  readonly limitation?: HookConditionLimitation;
 
   constructor(message: string, info: {
     hook: string;
@@ -182,8 +219,6 @@ export class HookConditionError extends Error {
     reason: 'unevaluable' | 'uncompilable';
     fault: string;
     missingKey?: string;
-    predicateBulkWrite?: boolean;
-    limitation?: HookConditionLimitation;
   }) {
     super(message);
     this.hook = info.hook;
@@ -193,8 +228,6 @@ export class HookConditionError extends Error {
     this.reason = info.reason;
     this.fault = info.fault;
     this.missingKey = info.missingKey;
-    this.predicateBulkWrite = info.predicateBulkWrite;
-    this.limitation = info.limitation;
   }
 }
 
@@ -262,11 +295,6 @@ export function wrapDeclarativeHook(
     if (expr.source && expr.source.trim()) {
       const source = expr.source;
       const check = ExpressionEngine.compile(expr);
-      // Read ONCE, off the parsed AST, whether this condition names `previous`
-      // at all (#5037) — see `conditionReadsPrevious`. Wrap time, not call
-      // time: the answer is a property of the source, and the call path is on
-      // every write of the object.
-      const readsPrevious = conditionReadsPrevious(source);
       if (check.ok) {
         conditionFn = (ctx: HookContext) => {
           // `previous` is passed through as-is: `undefined` means the binding
@@ -280,7 +308,7 @@ export function wrapDeclarativeHook(
           const r = ExpressionEngine.evaluate<boolean>(expr, { record: record ?? {}, previous });
           if (!r.ok) {
             // [#4775] Fail LOUD. Not `false` — see `HookConditionError`.
-            throw unevaluableConditionError(meta, ctx, source, r.error, declaredFieldsFor(ctx), readsPrevious);
+            throw unevaluableConditionError(meta, ctx, source, r.error);
           }
           return Boolean(r.value);
         };
@@ -309,8 +337,23 @@ export function wrapDeclarativeHook(
     }
   }
 
-  const retryMax = Math.max(0, Number(meta.retryPolicy?.maxRetries ?? 0));
-  const retryBackoffMs = Math.max(0, Number(meta.retryPolicy?.backoffMs ?? 0));
+  // `retryPolicy` is `.optional()` with NO `.default({})`, so the block's ABSENCE
+  // and its EMPTINESS are two different declarations and stay two different
+  // answers (#6832):
+  //
+  //   - no `retryPolicy` at all      → no retry policy was declared → 0 / 0, and
+  //     the parsed path agrees: `HookSchema` leaves the key `undefined`.
+  //   - `retryPolicy: {}`, or a block with only one key set → the author DID ask
+  //     for retries; each omitted key takes the value the schema declares for it.
+  //
+  // Only the second case was broken. #4247's answer — delete the executor's
+  // fallback and let the parsed default stand — does not transplant here, because
+  // the whole point is a path that never parses; and its mirror image, a bare
+  // `?? 3`, would be worse than the defect: every hook that never wrote a
+  // `retryPolicy` would start retrying three times.
+  const declaredRetry = meta.retryPolicy ? retryPolicyDefaults() : undefined;
+  const retryMax = Math.max(0, Number(meta.retryPolicy?.maxRetries ?? declaredRetry?.maxRetries ?? 0));
+  const retryBackoffMs = Math.max(0, Number(meta.retryPolicy?.backoffMs ?? declaredRetry?.backoffMs ?? 0));
   const timeoutMs = typeof meta.timeout === 'number' && meta.timeout > 0 ? meta.timeout : undefined;
   const onError = meta.onError ?? 'abort';
   // `async` is only meaningful for after* events; ignore on before* (we must
@@ -536,81 +579,26 @@ function isInsertEvent(event: unknown): boolean {
 }
 
 /**
- * Is this context a BATCH-SCOPED dispatch of a predicate (`multi: true`) write
- * — one hook call standing for N matched rows?
+ * ⛔ RETIRED with the batch-dispatch diagnosis (#5574) — see the note above
+ * `HookConditionError`. Three helpers existed only to serve it and go with it:
  *
- * Read off the same two facts the engine branches on (`input.id` absent +
- * `options.multi`), which survive into the event context: `input.options` is
- * rebuilt by `buildDriverOptions` as a COPY of the caller's bag, so `multi` is
- * still there.
- *
- * ## Why the `id` test is the whole test (#5038)
- *
- * Since the per-row contract landed, a bulk write's AFTER-hooks are dispatched
- * on one single-record-shaped context per matched row, each carrying that row's
- * `input.id`, `previous` and `result`. Those contexts therefore answer `false`
- * here — correctly, because they are not batch-scoped at all: nothing about
- * them stands for N rows. What still answers `true` is the `beforeUpdate` /
- * `beforeDelete` dispatch, which genuinely is one call for the whole batch (it
- * may rewrite the shared payload, and there is only one payload to rewrite).
- *
- * So this predicate did not need a phase test bolted on: the id it looks for is
- * exactly what per-row dispatch supplies and batch dispatch cannot.
+ *  - `isPredicateBulkWrite` — "no `input.id` and `options.multi`", i.e. is this
+ *    one hook call standing for N matched rows? No dispatch is batch-scoped
+ *    any more, so it answered `false` everywhere.
+ *  - `afterCounterpartEvent` — named the `after*` event a batch-scoped
+ *    `before*` condition should move to. That was the route out of a
+ *    limitation that no longer exists.
+ *  - `isBeforeEvent` / `conditionReadsPrevious` — the phase test and the
+ *    AST-based "does this condition name `previous`?" detection (#5037), both
+ *    consulted only inside that branch. The AST detection is worth remembering
+ *    rather than just deleting: it existed because deriving the diagnosis from
+ *    cel-js's prose (`Unknown variable: previous`) made an author-facing
+ *    message depend on an upstream library's wording. If a future diagnosis
+ *    ever needs the same fact, `collectCelRootIdentifiers`
+ *    (`@objectstack/formula`, the utility #4972's build gate uses) is the
+ *    seam — with its documented caveat that a comprehension bind variable
+ *    named `previous` reads as a reference.
  */
-function isPredicateBulkWrite(ctx: HookContext): boolean {
-  const input: any = ctx.input ?? {};
-  if (!input || typeof input !== 'object') return false;
-  if (input.id !== undefined && input.id !== null && input.id !== '') return false;
-  const options: any = input.options;
-  return Boolean(options && typeof options === 'object' && options.multi);
-}
-
-/** Hook events that fire BEFORE the write, once for the whole operation. */
-function isBeforeEvent(event: unknown): boolean {
-  return typeof event === 'string' && event.startsWith('before');
-}
-
-/**
- * The after-type event a batch-scoped `before*` condition should move to, so
- * the diagnostic can name it instead of describing one.
- */
-function afterCounterpartEvent(event: unknown): string {
-  return typeof event === 'string' && event.startsWith('before')
-    ? `after${event.slice('before'.length)}`
-    : 'after* ';
-}
-
-/**
- * Does this condition NAME `previous` at all? Answered from the parsed CEL AST
- * (#5037), not from the fault text a failed evaluation happened to produce.
- *
- * The diagnostic below has to tell "this hook reads the pre-write state, which
- * a bulk write cannot supply in this version" from "this hook has a typo".
- * Deriving that from cel-js's message (`Unknown variable: previous`) works
- * today and is kept as the fallback, but it makes an author-facing diagnosis
- * depend on an upstream library's prose: reword the fault and the batch silently
- * goes back to reporting a riddle. The AST is the same fact stated by the
- * expression itself, so the diagnosis holds whatever the evaluator says — and it
- * is available even when the fault names something ELSE the same condition also
- * reads.
- *
- * `collectCelRootIdentifiers` is the utility #4972's build gate already uses for
- * "which roots does this expression reference". Its documented caveat: a
- * comprehension bind variable (`[1,2].exists(previous, previous > 1)`) is
- * reported as a root, so a hook that names its bind variable `previous` reads as
- * a `previous` reference here. That false positive is inert by construction —
- * this answer is consulted ONLY on the error path, and such an expression binds
- * its own variable and evaluates fine, so it never reaches one. Paying for a
- * comprehension-aware walk to remove an unreachable case would be the more
- * expensive wrong call.
- *
- * A source that does not parse returns `false`: it never compiled, so it goes
- * down the `uncompilableConditionError` path and never reaches this diagnosis.
- */
-function conditionReadsPrevious(source: string): boolean {
-  const roots = collectCelRootIdentifiers(source);
-  return roots.ok ? roots.roots.includes('previous') : false;
-}
 
 /**
  * The rejection a condition that CANNOT BE EVALUATED produces (#4775).
@@ -619,148 +607,38 @@ function conditionReadsPrevious(source: string): boolean {
  * facts, same two explanatory sentences (both come out of the shared
  * `cel-fault.ts`), so an author who has met one message can read the other.
  *
- * ## The predicate-bulk-write branch (#4800 / B1, rescoped by #5038)
+ * ## What used to branch here, and why nothing does now (#5574)
  *
- * A `multi: true` write matches N rows. Its AFTER hooks now fire once PER ROW
- * on a single-record-shaped context (ADR-0058's bulk-write addendum,
- * implemented in `engine.ts`), so they never reach this branch: `previous` is
- * that row's pre-image and `record` is that row's state, and the transition
- * condition evaluates as authored.
+ * Between #5037 and #5574 this function carried a second diagnosis for the
+ * BATCH dispatch of a predicate (`multi: true`) write: that dispatch had no
+ * `input.id` and no `previous`, so a `previous`-reading condition faulted
+ * through no fault of the author's, and the message said so — naming the
+ * limitation, the phase as the reason, and the matching `after*` event as the
+ * route out.
  *
- * Its BEFORE hooks still fire ONCE for the whole batch — that is not a gap
- * waiting on a release, it is what the phase means: a `before*` hook may
- * rewrite the payload, and one `updateMany` carries one payload, so there is
- * nothing per-row to give it. For that dispatch two things the condition may
- * legitimately name are still not in hand:
+ * ADR-0058 Addendum II removed the condition being diagnosed rather than the
+ * diagnosis: a predicate write dispatches `before*` once per matched row now,
+ * each context carrying that row's `id` and `previous`, so the very expression
+ * that used to abort the batch evaluates as authored. With no dispatch left
+ * that lacks a bound `previous`, the branch had no reachable input and its two
+ * `HookConditionLimitation` members had no producer — retired under ADR-0049,
+ * see the note above `HookConditionError`.
  *
- *   - `previous` — unbound, because there is no single prior record;
- *   - a DECLARED field the payload does not set — `record` is the payload
- *     alone here, since merging it with "the" stored row would mean picking one
- *     of N, and materialising declared fields to `null` would state something
- *     false about all N.
- *
- * Both are the SAME situation and neither is an author typo, so the default
- * `No such key: previous` — which reads as "you misspelled something" — is
- * actively misleading. This branch names the batch, says why the binding is
- * missing, and gives the one route that actually works. It does NOT create an
- * exception: the write still fails (maintainer's ruling on #4800 — fail loud,
- * no exemptions), it just fails with a diagnosis instead of a riddle.
- *
- * An UNDECLARED key still routes to the ordinary typo message even on a bulk
- * write: that one IS a typo, and saying "this is a batch" about it would send
- * the author down the wrong path. When the condition reads `previous` AND
- * misspells something, the author gets both sentences — the typo is theirs to
- * fix, and the batch limitation is still waiting behind it.
- *
- * ## The rejection names a PHASE limit, not a version gap (#5038, ADR-0058)
- *
- * The 2026-08-04 ruling on #4800/#4862 settled what a bulk write MEANS: after
- * hooks and record-change flow triggers evaluate and fire PER ROW. #5037 shipped
- * this rejection as the rc-window stopgap for the gap between that contract and
- * the engine, and said so — "this retires when #5038 lands".
- *
- * #5038 has landed, and the honest message changed with it. The rejection is no
- * longer a placeholder for missing work; it is the standing answer for the one
- * dispatch that is batch-scoped by nature, the `before*` phase. So the message
- * no longer promises expiry (a promise it would now be breaking), and its FIRST
- * route is the one the contract just made real: move the condition to the
- * matching `after*` event, where it evaluates per row exactly as authored.
- *
- * ⚠️ One escape route named here was added on evidence and one was refused on
- * evidence. A record-change flow trigger IS now a real route — it subscribes to
- * these very lifecycle hooks (`trigger-record-change/src/record-change-trigger.ts`
- * → `engine.registerHook`), which is precisely why the per-row contract reaches
- * it: an `after*` record-change trigger receives the row's bound `previous` on a
- * bulk write (#4862, closed by #5038). #5037 refused to name it because at that
- * time it did not; the fact changed, so the message did. What is still NOT
- * offered is "drop `previous` from the condition" as a fix — it unblocks the
- * batch by silently turning a transition ("just became done") into a state test
- * ("is done"), which fires on rows that were already done. It is named only with
- * that cost attached.
+ * What remains is the plain diagnosis, which was always the right answer for
+ * the case that is genuinely the author's: a condition naming a key the record
+ * does not carry.
  */
 function unevaluableConditionError(
   meta: Hook,
   ctx: HookContext,
   source: string,
   error: CelFault,
-  declaredFields: Record<string, unknown> | undefined,
-  readsPrevious = false,
 ): HookConditionError {
-  const { summary, missingKey, unknownVariable, detail } = describeCelFault(error, {
+  const { summary, missingKey, detail } = describeCelFault(error, {
     what: 'condition',
     undeclaredKeyFix: "fix the hook's condition, or declare the field",
   });
   const head = `Hook '${meta.name}' could not evaluate its condition (${summary}) — operation aborted.`;
-
-  if (isPredicateBulkWrite(ctx)) {
-    const declaredMissingKey = missingKey && declaredFields
-      && Object.prototype.hasOwnProperty.call(declaredFields, missingKey)
-      ? missingKey
-      : undefined;
-    // The typo sentence, kept alongside the batch diagnosis when the fault
-    // named a key this object does not declare: that half IS the author's.
-    const typoDetail = missingKey && !declaredMissingKey ? detail : '';
-    // Does the condition read `previous`? The AST says so directly; the fault
-    // text (`Unknown variable: previous` — the ROOT is absent) is the fallback
-    // for a caller that did not pass the AST answer through.
-    const namesPrevious = readsPrevious || unknownVariable === 'previous';
-
-    // Which dispatch is this? A `before*` hook on a predicate write is the one
-    // that is batch-scoped by nature (#5038); anything else reaching here is a
-    // context that named no row despite the per-row contract, so it gets the
-    // same facts without the phase explanation.
-    const beforePhase = isBeforeEvent(ctx.event);
-    const afterEvent = afterCounterpartEvent(ctx.event);
-    const perRowSentence = beforePhase
-      ? ` A '${afterEvent}' hook on this same write does NOT have this problem: after-hooks on a` +
-        ` predicate write fire once PER MATCHED ROW, each with that row's 'previous' bound and` +
-        ` 'record' holding its real state (ADR-0058, bulk-write addendum; ruling on #4800/#4862).` +
-        ` If the condition is a TRANSITION rather than a guard on the incoming payload, move the hook` +
-        ` to '${afterEvent}' — or express it as an after-type record-change flow trigger, which rides` +
-        ` the same per-row dispatch.`
-      : ` After-hooks on a predicate write are dispatched once per matched row, each carrying that` +
-        ` row's id, 'previous' and state (ADR-0058, bulk-write addendum); this context carries no row id,` +
-        ` so it was dispatched for the batch.`;
-
-    let limitation: HookConditionLimitation | undefined;
-    let bulkDetail: string | undefined;
-    if (namesPrevious) {
-      limitation = 'bulk_write_previous_unbound';
-      bulkDetail =
-        ` The condition reads 'previous', but this is the ${beforePhase ? `'${ctx.event}'` : 'batch'} dispatch of a` +
-        ` PREDICATE bulk write (multi: true): it matches many rows and fires ONCE for the whole batch` +
-        ` — before any row is written, so it may still rewrite the shared payload — and one call has no` +
-        ` single prior record to bind.` +
-        perRowSentence +
-        ` Targeting the write at one record (update by id) also binds 'previous', so this very condition` +
-        ` evaluates as authored. Dropping 'previous' from the condition unblocks the batch too, but it` +
-        ` changes what the hook MEANS: a transition ("just became done") becomes a state test ("is done"),` +
-        ` which fires on rows that were already done.`;
-    } else if (declaredMissingKey) {
-      limitation = 'bulk_write_stored_state_unavailable';
-      bulkDetail =
-        ` '${declaredMissingKey}' IS declared on this object, but this is the` +
-        ` ${beforePhase ? `'${ctx.event}'` : 'batch'} dispatch of a PREDICATE bulk write (multi: true):` +
-        ` the stored state of the matched rows is not in hand, so 'record' carries only this write's` +
-        ` payload.` +
-        perRowSentence +
-        ` Otherwise reference only fields this write sets, or target the write at one record (update by id).`;
-    }
-    if (bulkDetail !== undefined) {
-      return new HookConditionError(`${head}${typoDetail}${bulkDetail}`, {
-        hook: meta.name,
-        object: ctx.object,
-        event: ctx.event,
-        condition: source,
-        reason: 'unevaluable',
-        fault: summary,
-        ...(missingKey ? { missingKey } : {}),
-        predicateBulkWrite: true,
-        limitation,
-      });
-    }
-  }
-
   return new HookConditionError(`${head}${detail}`, {
     hook: meta.name,
     object: ctx.object,

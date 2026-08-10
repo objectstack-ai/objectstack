@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/service-automation",
-  "version": "17.0.0-rc.5",
+  "version": "17.0.0-rc.6",
   "license": "Apache-2.0",
   "description": "Automation Service for ObjectStack — implements IAutomationService with plugin-based DAG flow execution engine",
   "type": "module",
@@ -24,8 +24,10 @@
   },
   "devDependencies": {
     "@objectstack/driver-sql": "workspace:*",
+    "@objectstack/metadata-core": "workspace:*",
     "@objectstack/objectql": "workspace:*",
     "@objectstack/plugin-security": "workspace:*",
+    "@objectstack/service-job": "workspace:*",
     "@types/node": "^26.1.2",
     "typescript": "^6.0.3",
     "vitest": "^4.1.10"

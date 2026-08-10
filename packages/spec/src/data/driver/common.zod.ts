@@ -75,6 +75,7 @@ export const READ_ONLY_BELONGS_ON_DATASOURCE =
  */
 export const DriverSslToggleSchema = z.boolean()
   .describe('Enable TLS. Certificates go in the datasource-level `ssl` block.');
+export type DriverSslToggle = z.input<typeof DriverSslToggleSchema>;
 
 /** Where the certificate-bearing form of TLS lives. */
 export const SSL_DETAIL_BELONGS_ON_DATASOURCE =

@@ -369,16 +369,24 @@ querying the related object directly.
 | `min` | Minimum value | `{ function: 'min', field: 'price', alias: 'min_price' }` |
 | `max` | Maximum value | `{ function: 'max', field: 'price', alias: 'max_price' }` |
 | `count_distinct` | Count unique values | `{ function: 'count_distinct', field: 'category', alias: 'categories' }` |
-| `array_agg` | Collect into array | `{ function: 'array_agg', field: 'tag', alias: 'all_tags' }` |
-| `string_agg` | Concatenate strings | `{ function: 'string_agg', field: 'name', alias: 'names' }` |
 
 <Callout type="warn">
-`count_distinct` / `array_agg` / `string_agg` are only fully supported on the MongoDB driver.
-The SQL drivers map only `count`/`sum`/`avg`/`min`/`max` and refuse all three as a
-**capability gap** — `501 NOT_IMPLEMENTED`, "declared but not implemented by this backend"
-— rather than as a caller mistake, because the query is spelled correctly and the gap is
-the backend's (#5907). The in-memory driver's aggregator silently returns `null` for them.
-Avoid these three on SQL- or memory-backed objects.
+`count_distinct` is not yet lowered by the SQL drivers. They map
+`count`/`sum`/`avg`/`min`/`max` and refuse it as a **capability gap** —
+`501 NOT_IMPLEMENTED`, "declared but not implemented by this backend" — rather than as a
+caller mistake, because the query is spelled correctly and the gap is the backend's
+(#5907). It works on the MongoDB driver and on the engine's in-memory fallback, and its
+SQL lowering (`COUNT(DISTINCT field)`) is scheduled.
+</Callout>
+
+<Callout type="warn">
+**Removed in 17.** `array_agg` and `string_agg` were declared here and compiled by no SQL
+backend, which left "what can this backend actually compute" unpredictable to the author.
+Both were retired (#6188, ADR-0049 enforce-or-remove): a query carrying either is now
+refused at parse with a prescription. There is no replacement in the query vocabulary —
+read the rows with an ordinary `fields` query and shape them in the caller, or materialise
+the roll-up as a stored field. `os migrate meta --from 16` rewrites affected dataset
+measures.
 </Callout>
 
 <Callout type="info">
@@ -505,6 +513,30 @@ that exists to narrow a search, silently widening it. Internal callers reaching
 `engine.find()` directly are unaffected.
 </Callout>
 
+### Searching by a related record's title — mirror the value
+
+`search` scans **the queried object's own columns**. A dotted path
+(`project_id.name`) is not a search target — unlike `fields` / `sort` / `filters`,
+the search axis does not resolve traversal, and a dotted entry is refused, not
+silently dropped:
+
+```text
+Unknown field 'project_id.name' on object 'task'. '$searchFields' narrows which
+columns 'search' scans, so a name the object does not declare cannot narrow
+anything — and the engine used to drop it and scan the default columns instead,
+answering a NARROWER search with a WIDER one. 'search' scans this object's own
+columns; a related record's column cannot be a search target.
+```
+
+The answer is a **mirror field**: copy the related record's title into a stored
+field on this object and declare *that* field searchable. A task list searched by
+project name gets a `project_name` text column on `task`, maintained on write and
+listed in `task.searchableFields`. It has to be a **stored** field — a `formula`
+field is virtual, so no driver has a column for `$contains` to scan. Cross-object
+search paths are rejected by design, not pending. Full recipe (the hooks that keep
+the mirror fresh, and the lint wording) in [Schema Design → Searching by a related
+record's title](/docs/data-modeling/schema-design#searching-by-a-related-records-title--mirror-the-value).
+
 ### Pinyin recall (Chinese deployments)
 
 When pinyin search is enabled (`OS_SEARCH_PINYIN_ENABLED` — auto-on when the stack's
@@ -557,6 +589,17 @@ const ranked = await sqlDriver.findWithWindowFunctions('employee', {
   ]
 });
 ```
+
+<Callout type="warn">
+**Pass `options.tenantId` on a multi-tenant deployment.** Like `find()`, this door is
+tenant-scoped only when the caller supplies it — the example above omits it, so it reads
+across every tenant. That is the driver layer's documented contract (seed scripts and
+cross-org tooling depend on the unscoped path), but it is a decision to make deliberately.
+
+Until #6792 the door ignored `options.tenantId` even when you *did* pass it and returned
+every tenant's rows regardless. It now routes through the driver's `applyTenantScope`
+chokepoint like every other read.
+</Callout>
 
 For request-level analytics, use `aggregations` + `groupBy`, or model rankings in
 report/dashboard metadata.

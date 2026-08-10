@@ -2,7 +2,7 @@
 
 import type { PluginContext } from '@objectstack/core';
 import { defineActionDescriptor } from '@objectstack/spec/automation';
-import type { IJobService } from '@objectstack/spec/contracts';
+import type { IJobService, JobRunOutcome } from '@objectstack/spec/contracts';
 import type { AutomationEngine, SuspendedRunStore } from '../engine.js';
 import { describeThrownForLog, type ThrownCauseMeta } from '../thrown-cause-diagnostics.js';
 
@@ -56,6 +56,13 @@ interface WaitTimerLogger {
  *    healthy timer is the durability degradation AGENTS.md's log-level rule is
  *    about (#4632), and this path was previously silent — the result was
  *    discarded by the callback without so much as a `warn`.
+ *
+ *    Since #5548 this outcome is also RESOLVED as `{ outcome: 'degraded',
+ *    reason: 'STORE_UNAVAILABLE' }`, so the job service records the run as
+ *    `degraded` rather than `success` — the log line said the shot missed, the
+ *    audit row said it succeeded. The `reason` is the short code only: the
+ *    driver's own message can be multi-line and belongs in the log record's
+ *    `meta` (#5737), not in an audit column.
  *  - **everything else** — cancel, exactly as before. Success consumed the
  *    pause; `RESUME_IN_PROGRESS` means a concurrent resume is consuming it (and
  *    #5512's `onSuspensionReleased` drops this job when it does); a machine-state
@@ -89,15 +96,26 @@ function makeWaitTimerJobHandler(
   runId: string,
   jobName: string,
   logger: WaitTimerLogger,
-): () => Promise<void> {
+): () => Promise<void | JobRunOutcome> {
   return async () => {
     // Set only on the one outcome that must NOT disarm the job. A thrown
     // `resume` leaves it false, so the `finally` still cancels.
     let keepArmed = false;
+    // #5548 — what this shot reports to the JOB service, as opposed to what it
+    // logs. `STORE_UNAVAILABLE` is the specimen the ruling names: the handler
+    // completes normally (deliberately — #5529 refused to make it throw,
+    // because a throw is the retry signal third-party `IJobService`
+    // implementations key on), so before the `JobRunOutcome` channel existed
+    // the run was recorded as `success` on an audit surface whose whole job is
+    // to say whether the work happened. Resolving `degraded` instead moves the
+    // `sys_job_run` row and nothing else: still no throw, still no retry, and
+    // the job still stays ARMED and `active` exactly as #5529 fixed it.
+    let outcome: JobRunOutcome | undefined;
     try {
       const result = await engine.resume(runId);
       if (result?.code === 'STORE_UNAVAILABLE') {
         keepArmed = true;
+        outcome = { outcome: 'degraded', reason: 'STORE_UNAVAILABLE' };
         // #5737 — the cause goes to `meta`, never into the message. This one is
         // NOT a thrown value and so does NOT go through `describeThrownForLog`:
         // `AutomationResult.error` is a STRING the engine already composed
@@ -138,6 +156,9 @@ function makeWaitTimerJobHandler(
         }
       }
     }
+    // Resolved, never thrown — the report rides the RETURN value precisely so
+    // the failure semantics of `IJobService` stay untouched (#6617).
+    return outcome;
   };
 }
 
@@ -189,8 +210,7 @@ export function registerWaitNode(engine: AutomationEngine, ctx: PluginContext): 
       category: 'logic',
       source: 'builtin',
       // Durable pause — the run suspends and resumes later (timer/signal).
-      supportsPause: true,
-      isAsync: true,
+      supportsPause: true,  // (`isAsync` stood here — retired in #6748, ADR-0049: nothing read it)
       // An external producer is *meant* to resume a signal wait, so the generic
       // route is the door (#3801). Stated rather than inherited from a default:
       // #3823 is what inheriting it costs — ADR-0044 pointed a revise edge at a

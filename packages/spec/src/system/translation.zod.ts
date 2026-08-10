@@ -10,6 +10,7 @@ import { lazySchema } from '../shared/lazy-schema';
 import { strictObject } from '../shared/strict-object';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 export const LocaleSchema = lazySchema(() => z.string().describe('BCP-47 Language Tag (e.g. en-US, zh-CN)'));
+export type Locale = z.input<typeof LocaleSchema>;
 
 /**
  * Shared history sentence for every shape in this file (#4001).
@@ -100,6 +101,13 @@ const actionTranslationSchema = (surface: string) => strictObject({
   },
 }, {
   label: z.string().optional().describe('Translated action label'),
+  // The address `useObjectLabel.actionDescription` already resolves —
+  // `objects.{object}._actions.{action}.description`, falling back to
+  // `globalActions.{action}.description` (objectui
+  // packages/i18n/src/useObjectLabel.ts:463). Declared here with #7367's
+  // `ActionSchema.description`: a bundle could not carry the string the
+  // resolver was already looking for.
+  description: z.string().optional().describe('Translated action description — the explanatory line under the title in the action\'s param dialog'),
   confirmText: z.string().optional().describe('Translated confirmation prompt'),
   successMessage: z.string().optional().describe('Translated success toast/message'),
   params: z.record(z.string(), strictObject({
@@ -221,6 +229,35 @@ export const ObjectTranslationDataSchema = lazySchema(() => strictObject({
     label: z.string().optional().describe('Translated section label'),
     description: z.string().optional().describe('Translated section description'),
   })).optional().describe('Section translations keyed by section name'),
+
+  /**
+   * Filter-preset tab translations keyed by tab name (`ViewTabSchema.name`).
+   * Convention (auto-resolved by `resolveTabLabel`):
+   *   objects.<object>._tabs.<tab_name>.label
+   *
+   * **The hole this closes (#5377).** A tab that references a saved view
+   * (`tabs[].view`) already renders a translated label — the console follows
+   * the reference and reads `_views.<view>.label`. A tab that carries only a
+   * `filter` references nothing, and there was no key to put its label in:
+   * this shape is a `strictObject`, so a translator who invented `_tabs` had it
+   * rejected rather than ignored. The tab bar then sat above a fully localized
+   * grid in the source language, with no authoring workaround.
+   *
+   * **Why it is object-scoped, next to `_views`, rather than under `pages`.**
+   * A tab is a named filter preset over one object's records — "Urgent" names a
+   * slice of tasks, which is object vocabulary in the same way a saved view's
+   * label is. It is also what makes the view-reference fallback expressible at
+   * all: both halves of `resolveTabLabel`'s chain live in one object's
+   * namespace. `_sections` is the shape precedent — those live on page
+   * components too and are addressed under their object, not their page.
+   */
+  _tabs: z.record(z.string(), strictObject({
+    surface: 'this view tab translation',
+    history: TRANSLATION_HISTORY,
+    aliases: { name: 'label', title: 'label', heading: 'label', text: 'label' },
+  }, {
+    label: z.string().optional().describe('Translated tab label'),
+  })).optional().describe('Filter-preset tab translations keyed by tab name'),
 }).describe('Translation data for a single object'));
 
 export type ObjectTranslationData = z.input<typeof ObjectTranslationDataSchema>;
@@ -476,9 +513,7 @@ const translationDataShape = () => ({
      *
      * **The key face is measured, not mirrored.** Each key below is a copy prop
      * that some component in `ComponentPropsMap` (`ui/component.zod.ts`)
-     * actually declares — every one is a plain `z.string()`/`I18nLabelSchema`,
-     * i.e. a literal with no inline `{en, zh}` form, so the bundle is its ONLY
-     * localization route:
+     * actually declares:
      *
      * | key | declared by |
      * |:---|:---|
@@ -504,6 +539,17 @@ const translationDataShape = () => ({
      * `properties` is an open record and custom component types are legal, so
      * these keys are also the route for a bespoke component that speaks the
      * same vocabulary (hotcrm's `ai_briefing` carries `title` + `description`).
+     *
+     * ⚠️ The bundle is no longer these keys' ONLY localization route (#5728).
+     * `I18nLabelSchema` — which most of them are declared as — now also accepts
+     * an inline `{ en, 'zh-CN' }` locale map, so a component's copy may already
+     * be multilingual at the authoring site. That does not narrow this face:
+     * `translatePage` writes only where the bundle actually has an entry, so an
+     * inline map the bundle does not cover is left intact rather than flattened
+     * to one language, and a bundle entry still wins where both exist. The
+     * bundle stays the route that scales (translators never open a
+     * `*.page.ts`); the inline map is the route for copy that ships with the
+     * page.
      */
     components: z.record(z.string(), strictObject({
       surface: 'this page component translation',

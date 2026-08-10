@@ -176,7 +176,7 @@ const FLOW_NODE_UNKNOWN_KEY_GUIDANCE: Record<string, Record<string, string>> = {
     },
 };
 import { runIsUnscopedUserMode, flowTouchesData } from './runtime-identity.js';
-import { isGuardRefusal } from './guard-refusal.js';
+import { isGuardRefusal, refuseNode } from './guard-refusal.js';
 import { summarizeRun, formatRunSummaryLine } from './run-summary.js';
 // #5660 — the degrade registration reports a FOREIGN failure (a third-party
 // provider factory's text), so it renders it as structured `meta` rather than
@@ -931,7 +931,8 @@ export interface SuspendedRun {
      * Registry type of the node that produced the pause (`approval`, `screen`,
      * `wait`, …), captured at suspend time. Keys the resume gate (#3801): the
      * descriptor's `resumeAuthority` decides whether a raw
-     * {@link AutomationEngine.resume} is a legitimate continuation.
+     * {@link AutomationEngine.resume} is a legitimate continuation, and a type
+     * that declares none is refused rather than assumed open (#5561).
      *
      * Recorded on the suspension rather than re-derived from the live flow so
      * the gate reflects what actually paused the run — a flow republished
@@ -1244,8 +1245,23 @@ export class AutomationEngine implements IAutomationService {
             try {
                 await this.store.save(run);
             } catch (err) {
+                // #6499 — the cause is the datasource DRIVER's own text, so it
+                // goes to the logger's STRUCTURED slot, never spliced into the
+                // message; see `forgetSuspendedRun`'s catch below for the full
+                // mechanism (#6299) — this seam is its nearest twin, on the
+                // same `SuspendedRunStore` driver.
+                //
+                // #4632 verdict: DURABILITY — the level STAYS `error`, where
+                // #4460 put it: the docblock above argues it (#4420 is this
+                // exact seam's accident). Third argument per the `Logger`
+                // contract (`error(message, error?, meta?)`); the `Error` slot
+                // stays empty on purpose (#5575).
                 this.logger.error(
-                    `[automation] failed to persist suspended run '${run.runId}' to the durable store — it is kept in memory only and will NOT be resumable after a restart: ${(err as Error).message}`,
+                    `[automation] failed to persist suspended run '${run.runId}' to the durable store — it is ` +
+                        `kept in memory only and will NOT be resumable after a restart. Fix the store failure ` +
+                        `in this record's meta.`,
+                    undefined,
+                    describeThrownForLog(err),
                 );
             }
         }
@@ -1262,6 +1278,12 @@ export class AutomationEngine implements IAutomationService {
      * its pause is over ({@link NodeExecutor.onSuspensionReleased}, #5512). It
      * therefore takes the whole {@link SuspendedRun}: the notification needs the
      * node and the correlation the executor minted, not just the id.
+     *
+     * A durable-store `delete` failure does NOT fail the consumption — the run
+     * has already left the node — but it is reported at `error`, not `warn`
+     * (#4632/#6299): the cache entry is gone while the row survives, so the run
+     * reads as terminal now and as still-suspended after a restart. See the
+     * catch below for the full verdict.
      */
     private async forgetSuspendedRun(run: SuspendedRun, reason: SuspensionReleaseReason): Promise<void> {
         this.suspendedRuns.delete(run.runId);
@@ -1269,8 +1291,51 @@ export class AutomationEngine implements IAutomationService {
             try {
                 await this.store.delete(run.runId);
             } catch (err) {
-                this.logger.warn(
-                    `[automation] failed to delete suspended run '${run.runId}' from durable store: ${(err as Error).message}`,
+                // #6299 — the cause goes to the logger's STRUCTURED slot, never
+                // spliced into the message: it is the datasource DRIVER's own
+                // failure text, we do not control how many lines it has, and
+                // `ObjectLogger.write()` adds exactly one `<ts> <LEVEL>` head
+                // per call — so a newline in it turns this ONE record into
+                // several physical lines of which only the first is greppable.
+                // The family of #5048 / #5575 / #5636 / #5661 / #5737 / #5912 /
+                // #6230, and cloud#971's shape.
+                //
+                // #4632 verdict: DURABILITY — raised from `warn` to `error`, and
+                // deliberately NOT a copy of #6230's "the level stays warn". The
+                // hot cache is dropped on the line ABOVE the try, and this
+                // method is the single choke point every consumption of a
+                // suspension passes through (resume / terminal failure /
+                // cancel), so on this path the suspension is gone in-process
+                // while the durable row SURVIVES. Every caller still reports
+                // success — `resume()` returns a successful result, `cancelRun()`
+                // returns `true`, `recordLog` writes a terminal record — and the
+                // surviving row is read straight back out after the next
+                // restart: `rearmSuspendedWaitTimers` lists it and `resume()`
+                // rehydrates it through `loadSuspendedRunStrict`'s store read,
+                // re-running a continuation that has already run. Nothing
+                // retries this delete. That is the shape the durability gate's
+                // own vocabulary already grades `error` for the metadata store
+                // (`deleteMetaItemFromLoader`, #5259: "the surviving row is read
+                // straight back out of storage … so the 'deleted' item reappears
+                // and survives every restart"). `check:durability-log-level`
+                // cannot see it HERE only because `SuspendedRunStore.delete` is
+                // not in its declared callee vocabulary — which is exactly why
+                // this level is pinned by a test instead.
+                //
+                // THIRD argument, per the `Logger` contract
+                // (`packages/spec/src/contracts/logger.ts`):
+                // `error(message, error?, meta?)`. The `Error` slot is left
+                // empty on purpose (#5575) — a raw `Error` there ships its stack
+                // trace on every record.
+                this.logger.error(
+                    `[automation] suspended run '${run.runId}' was consumed (${reason}) but could NOT be deleted from ` +
+                        `the durable store — the in-memory suspension is already gone while the durable row SURVIVES, ` +
+                        `so this run reads as terminal now and as still-suspended after the next restart, where ` +
+                        `rearmSuspendedWaitTimers lists it and resume() rehydrates it from the store and re-runs a ` +
+                        `continuation that has already run. Nothing retries this delete. Fix the store failure in this ` +
+                        `record's meta, then delete the row for '${run.runId}' by hand.`,
+                    undefined,
+                    describeThrownForLog(err),
                 );
             }
         }
@@ -1307,10 +1372,22 @@ export class AutomationEngine implements IAutomationService {
                 reason,
             });
         } catch (err) {
+            // #6499 — the thrown text is PLUGIN-SUPPLIED (the node executor's
+            // own teardown), so it goes to the structured slot; see
+            // `forgetSuspendedRun`'s catch above for the full mechanism
+            // (#6299). The message keeps the correlation handle — that is the
+            // thing an operator cleans up by hand.
+            //
+            // #4632 verdict: FUNCTIONAL — stays `warn`, per the docblock: the
+            // run continued and nothing claimed-persisted failed to land; the
+            // leftover is whatever the node armed on entry (a misleading
+            // `sys_job` row, not a broken run). `warn(message, meta?)` — meta
+            // is the SECOND argument; `warn` has no `Error` slot.
             this.logger.warn(
                 `[automation] run '${run.runId}': '${nodeType}' node '${run.nodeId}' failed to release its suspension ` +
-                    `(reason: ${reason}, correlation: ${run.correlation ?? 'none'}): ${(err as Error)?.message ?? err} — ` +
-                    `the run continued; whatever the node armed on entry may still be scheduled`,
+                    `(reason: ${reason}, correlation: ${run.correlation ?? 'none'}) — the run continued; whatever the ` +
+                    `node armed on entry may still be scheduled. The executor's own failure is in this record's meta.`,
+                describeThrownForLog(err),
             );
         }
     }
@@ -1362,10 +1439,19 @@ export class AutomationEngine implements IAutomationService {
      * exist: with `.default('any')` an omission parsed into a descriptor
      * byte-identical to an author's explicit `'any'`, so the fact was gone
      * before the engine ever saw the object. Absent now means absent, and a
-     * pausing type that leaves it absent is fail-open by omission rather than
-     * by decision — #3823 is what that costs (a revise pause standing in a
-     * service-owned position inherited `wait`'s legitimate `'any'`, and a raw
-     * resume walked past an unrecorded decision).
+     * pausing type that leaves it absent is judged by nobody's decision —
+     * #3823 is what that costs (a revise pause standing in a service-owned
+     * position inherited `wait`'s legitimate `'any'`, and a raw resume walked
+     * past an unrecorded decision).
+     *
+     * **Since #5561 step two this warning precedes a refusal, not a silence.**
+     * An omission used to resolve `'any'`, so the line was pure advice about a
+     * run-time behaviour that was already happening; it now resolves
+     * `'service'` ({@link RESUME_AUTHORITY_WHEN_UNDECLARED}), so every pause the
+     * named type creates will be refused on the generic resume route. The line
+     * says so, and says the one-line fix, because registration is the earliest
+     * moment the author can hear it — the alternative is hearing it from a user
+     * whose run will not continue.
      *
      * **What it asserts, and why that is safe here.** Only the static fact that
      * THIS descriptor omits the key — a property of the object being registered,
@@ -1373,17 +1459,18 @@ export class AutomationEngine implements IAutomationService {
      * reads no registry and draws no conclusion from anything being absent from
      * one, so it is not the shape AGENTS.md "Startup registry reads" forbids and
      * needs no seal flag (contrast {@link warnIfNodeTypeVocabularyNeverSealed},
-     * which reports a missing CALL for the same reason). Whether the omission
-     * *matters* at run time is deliberately not judged: the engine still
-     * resolves absent to `'any'` ({@link resolveResumeAuthority}), so nothing
-     * about today's behaviour changes.
+     * which reports a missing CALL for the same reason).
      *
-     * **Blind spot, stated up front:** the trigger is `supportsPause`, itself a
-     * declaration no execution path enforces (#5703) — a run pauses because
-     * `execute()` returned `suspend: true`. An executor that suspends while
-     * leaving `supportsPause` false is therefore fail-open AND silent here.
-     * `check:resume-authority-declared` catches this repo's own executors at
-     * authoring time; #5703 tracks the runtime half.
+     * **Scope, stated up front:** the trigger is `supportsPause`, so a descriptor
+     * that leaves it false is not asked this question at all. That used to be a
+     * blind spot — the executor could suspend anyway and nothing said a word
+     * (#5703) — and it is now closed at the other end instead of here:
+     * {@link refuseUndeclaredSuspension} refuses the suspension itself at the
+     * engine boundary (#6667), so the mismatch fails the run that produced it
+     * rather than parking a continuation this gate never got to warn about.
+     * A type that suspends therefore reaches this warning by the only route
+     * left — declaring `supportsPause: true`, which is when the question about
+     * `resumeAuthority` is worth asking.
      */
     private warnIfResumeAuthorityUndeclared(descriptor: ActionDescriptor): void {
         if (descriptor.supportsPause !== true) return;
@@ -1392,13 +1479,13 @@ export class AutomationEngine implements IAutomationService {
         this.resumeAuthorityOmissionWarned.add(descriptor.type);
         this.logger.warn(
             `[automation] node type '${descriptor.type}' declares supportsPause but never declares ` +
-            `resumeAuthority, so the #3801 resume gate treats every pause it creates as raw-resumable ` +
-            `through the generic route (POST /automation/:name/runs/:runId/resume) — fail-open by omission ` +
-            `rather than by decision, which is how #3823 walked past an unrecorded approval decision. ` +
+            `resumeAuthority, so the #3801 resume gate REFUSES every pause it creates on the generic route ` +
+            `(POST /automation/:name/runs/:runId/resume) — an unclaimed pause is fail-closed since #5561, ` +
+            `because the opposite guess is how #3823 walked past an unrecorded approval decision. ` +
             `Declare it on the descriptor: 'any' if that route IS the intended door (a screen's collected ` +
             `inputs, a signal wait's external producer), or 'service' if resuming is the tail of a decision ` +
-            `some service must authorize and record first. Declaring 'any' explicitly silences this and ` +
-            `changes no behaviour. Reported once per node type per engine.`,
+            `some service must authorize and record first. Declaring 'any' is what RESTORES the generic ` +
+            `route for this type. Reported once per node type per engine.`,
         );
     }
 
@@ -1506,7 +1593,21 @@ export class AutomationEngine implements IAutomationService {
             try {
                 this.triggers.get(type)?.stop(name);
             } catch (err) {
-                this.logger.warn(`Trigger '${type}' stop('${name}') failed: ${(err as Error).message}`);
+                // #6499 — the thrown text is PLUGIN-SUPPLIED (`FlowTrigger.stop`),
+                // so it goes to the structured slot; see `forgetSuspendedRun`'s
+                // catch above for the full mechanism (#6299).
+                //
+                // #4632 verdict: FUNCTIONAL — stays `warn`: nothing
+                // claimed-persisted is involved. The binding bookkeeping is
+                // dropped either way; the worst case is the trigger's own
+                // subscription staying armed, and a fired flow still lands in
+                // run history visibly, behind execute()'s own guards.
+                this.logger.warn(
+                    `Trigger '${type}' stop('${name}') failed while unregistering the trigger — the flow is ` +
+                        `unbound anyway; whatever the trigger armed for it may keep firing until the process ` +
+                        `restarts. The trigger's own failure is in this record's meta.`,
+                    describeThrownForLog(err),
+                );
             }
             this.boundFlowTriggers.delete(name);
         }
@@ -1631,15 +1732,34 @@ export class AutomationEngine implements IAutomationService {
         try {
             // A trigger-fired run's result must not vanish (2026-07-17 eval:
             // a failing record-change flow produced zero output — the failure
-            // lived only in the run-history row). Log failures at ERROR: stderr
-            // survives the CLI's boot-quiet stdout window, and a fired-but-failed
-            // automation is an operational fault. Condition-skipped runs stay
+            // lived only in the run-history row). Condition-skipped runs stay
             // quiet (execute() already debug-logs them — they are high-frequency).
+            //
+            // #6587 — `result.error` is the envelope field that carries a
+            // failing node's / driver's text VERBATIM (#5912 left it that way
+            // on purpose), so foreign newlines reach this message second-hand;
+            // it goes to the structured slot — the identical class as
+            // `bubbleToParent`'s envelope branch, on the fired-run path. See
+            // `forgetSuspendedRun`'s catch for the full mechanism (#6299).
+            //
+            // #4632 verdict: stays `error`, on its own reasoning rather than
+            // inertia. This is the fire-and-forget path: NO caller holds this
+            // result envelope, so after the failure the system looks normal
+            // from the outside — the triggering event was handled and nothing
+            // retries the run — while the flow's declared effects never
+            // landed; the only other trace is the passive run-history row.
+            // That stderr also survives the CLI's boot-quiet stdout window is
+            // stream mechanics, not the verdict.
             trigger.start(resolved.binding, (ctx: AutomationContext) =>
                 this.execute(flowName, ctx).then((result) => {
                     if (!result.success) {
                         this.logger.error(
-                            `Trigger-fired run of flow '${flowName}' failed: ${result.error ?? 'unknown error'}`,
+                            `Trigger-fired run of flow '${flowName}' failed (trigger '${resolved.triggerType}') — ` +
+                                `no caller holds this result and nothing retries the run; the terminal failure ` +
+                                `is recorded in the flow's run history, and the run's failure envelope is in ` +
+                                `this record's meta.`,
+                            undefined,
+                            { error: result.error ?? 'unknown error' },
                         );
                     }
                 }),
@@ -1647,7 +1767,21 @@ export class AutomationEngine implements IAutomationService {
             this.boundFlowTriggers.set(flowName, resolved.triggerType);
             this.logger.info(`Flow '${flowName}' bound to trigger '${resolved.triggerType}'`);
         } catch (err) {
-            this.logger.warn(`Failed to bind flow '${flowName}' to trigger '${resolved.triggerType}': ${(err as Error).message}`);
+            // #6499 — plugin-supplied thrown text (`FlowTrigger.start`) to the
+            // structured slot; see `forgetSuspendedRun`'s catch above for the
+            // full mechanism (#6299).
+            //
+            // #4632 verdict: FUNCTIONAL — stays `warn`: "a trigger is not
+            // armed" is the rule's own canonical `warn` example. The flow is
+            // visibly smaller than declared (its runs never appear), and the
+            // kernel:bootstrapped binding audit re-reports every unbound
+            // triggered flow.
+            this.logger.warn(
+                `Failed to bind flow '${flowName}' to trigger '${resolved.triggerType}' — the flow stays ` +
+                    `registered but will NOT fire on this trigger until the flow or the trigger is ` +
+                    `re-registered. The trigger's own failure is in this record's meta.`,
+                describeThrownForLog(err),
+            );
         }
     }
 
@@ -1658,7 +1792,21 @@ export class AutomationEngine implements IAutomationService {
         try {
             this.triggers.get(boundType)?.stop(flowName);
         } catch (err) {
-            this.logger.warn(`Trigger '${boundType}' stop('${flowName}') failed: ${(err as Error).message}`);
+            // #6499 — plugin-supplied thrown text (`FlowTrigger.stop`) to the
+            // structured slot; see `forgetSuspendedRun`'s catch above for the
+            // full mechanism (#6299).
+            //
+            // #4632 verdict: FUNCTIONAL — stays `warn`, same consequence shape
+            // as `unregisterTrigger`'s stop above: the binding is dropped
+            // either way, and a subscription the trigger failed to tear down
+            // fires into execute()'s own disabled/unregistered-flow guards,
+            // visibly.
+            this.logger.warn(
+                `Trigger '${boundType}' stop('${flowName}') failed while unbinding the flow — the binding is ` +
+                    `dropped anyway; whatever the trigger armed for it may keep firing until the process ` +
+                    `restarts. The trigger's own failure is in this record's meta.`,
+                describeThrownForLog(err),
+            );
         }
         this.boundFlowTriggers.delete(flowName);
     }
@@ -2308,8 +2456,25 @@ export class AutomationEngine implements IAutomationService {
                 const rows = await this.store.listHistory(flowName, limit);
                 durable = rows.map(r => this.runRecordToLogEntry(r));
             } catch (err) {
+                // #6499 — the datasource driver's text to the structured slot;
+                // see `forgetSuspendedRun`'s catch above for the full mechanism
+                // (#6299). `warn(message, meta?)` — meta is the SECOND
+                // argument; `warn` has no `Error` slot.
+                //
+                // #4632 verdict: FUNCTIONAL — stays `warn`, the same reasoning
+                // as `listSuspendedRunsDurable` below: nothing
+                // claimed-persisted failed to land — the history rows are
+                // intact — and this read feeds only the observability Runs
+                // view, which degrades to the in-memory ring buffer. The
+                // record says the shortfall out loud (#5186's invented-answer
+                // shape; its propagation remedy is a return-contract change
+                // outside #6499).
                 this.logger.warn(
-                    `[Automation] run-history read failed for '${flowName}': ${(err as Error)?.message}`,
+                    `[Automation] run-history read failed for '${flowName}' — the Runs listing DEGRADES to the ` +
+                        `in-memory ring buffer alone, so terminal runs from before the last restart (or evicted ` +
+                        `from the buffer) are missing and the caller cannot tell a short list from a complete ` +
+                        `one. The rows themselves are untouched. Fix the store failure in this record's meta.`,
+                    describeThrownForLog(err),
                 );
             }
         }
@@ -2363,8 +2528,26 @@ export class AutomationEngine implements IAutomationService {
                 const rec = await this.store.loadTerminal(runId);
                 if (rec) return this.runRecordToLogEntry(rec);
             } catch (err) {
+                // #6499 — driver text to the structured slot; see
+                // `forgetSuspendedRun`'s catch above for the full mechanism
+                // (#6299).
+                //
+                // #4632 verdict: FUNCTIONAL — stays `warn`. Nothing
+                // claimed-persisted failed to land: the terminal row, if one
+                // exists, is intact — this read degrades to `null`. What IS
+                // wrong is #5186's shape: `null` is also this method's honest
+                // "no such run", so a caller cannot tell an unreadable store
+                // from a run that never ran (plugin-approvals'
+                // `inspectStrandedRequests` counts a THROWN getRun as
+                // `undetermined` — a distinction this swallow denies it). The
+                // remedy is propagation, a return-contract change outside
+                // #6499's scope, so the record says the degradation out loud.
                 this.logger.warn(
-                    `[Automation] durable run lookup failed for '${runId}': ${(err as Error)?.message}`,
+                    `[Automation] durable run lookup failed for '${runId}' — this read DEGRADES to null, so ` +
+                        `the caller sees exactly what it would see if the run had never run and cannot tell ` +
+                        `the two apart. The terminal row, if one exists, is untouched. Fix the store failure ` +
+                        `in this record's meta.`,
+                    describeThrownForLog(err),
                 );
             }
         }
@@ -2437,10 +2620,19 @@ export class AutomationEngine implements IAutomationService {
                 // the trigger's (unresolved) identity — the data middleware applies
                 // its baseline member fallback, NOT elevation — and we warn loudly
                 // so the degraded authorization is audible rather than silent.
+                //
+                // #6499 — the resolver's thrown text (transitively the
+                // datasource's) goes to the structured slot; see
+                // `forgetSuspendedRun`'s catch above for the full mechanism
+                // (#6299). #4632 verdict: FUNCTIONAL — stays `warn`: the
+                // degradation is fail-safe as argued above, its symptom is the
+                // run's own data-op refusals/strips, and nothing
+                // claimed-persisted failed to land.
                 this.logger.warn(
                     `[runAs] flow '${flow.name}' could not resolve grants for triggering user ` +
-                    `'${runContext.userId}': ${(err as Error)?.message ?? String(err)}. Its data ops fall ` +
-                    `back to baseline member permissions (not elevated).`,
+                    `'${runContext.userId}' — its data ops fall back to baseline member permissions ` +
+                    `(not elevated). The resolver's failure is in this record's meta.`,
+                    describeThrownForLog(err),
                 );
             }
         }
@@ -2510,10 +2702,18 @@ export class AutomationEngine implements IAutomationService {
                 }
             }
         } catch (err) {
+            // #6499 — the expander's thrown text (transitively the
+            // datasource's) goes to the structured slot; see
+            // `forgetSuspendedRun`'s catch above for the full mechanism
+            // (#6299). #4632 verdict: FUNCTIONAL — stays `warn`, per the
+            // docblock: expansion is best-effort enrichment that must never
+            // break the flow it feeds, and the visible symptom is templates
+            // rendering the scalar id.
             this.logger.warn(
                 `[expand] flow '${flow.name}' could not expand lookups [${expandFields.join(', ')}] on ` +
-                `'${object}#${String(id)}': ${(err as Error)?.message ?? String(err)}. Templates referencing ` +
-                `these relations resolve to the scalar id.`,
+                `'${object}#${String(id)}' — templates referencing these relations resolve to the scalar ` +
+                `id. The expander's failure is in this record's meta.`,
+                describeThrownForLog(err),
             );
         }
     }
@@ -2545,23 +2745,24 @@ export class AutomationEngine implements IAutomationService {
         const guardRecordId = (context?.record as { id?: unknown } | undefined)?.id;
         const reentryKey = guardRecordId != null ? `${flowName}::${String(guardRecordId)}` : undefined;
         if (reentryKey && this.activeRecordFlows.has(reentryKey)) {
+            // #6654 — the record id is CALLER data (nothing schema-constrains
+            // it against newlines), so it rides the logger's structured slot,
+            // never the message; see `forgetSuspendedRun`'s catch for the full
+            // mechanism (#6299). #4632: FUNCTIONAL — stays `warn` (the run is
+            // deliberately skipped and the caller reads the skip envelope).
             this.logger.warn(
-                `[automation] flow '${flowName}' re-entered for the same record '${String(guardRecordId)}' while still running — breaking self-trigger loop. ` +
-                `Its start condition did not suppress the re-fire; if it guards on a boolean field (e.g. \`is_escalated != true\`), note booleans persist as 0/1 on SQLite/libsql and CEL \`1 != true\` is true.`,
+                `[automation] flow '${flowName}' re-entered for the same record while still running — breaking ` +
+                    `self-trigger loop; the triggering record's id is in this record's meta. Its start condition ` +
+                    `did not suppress the re-fire; if it guards on a boolean field (e.g. \`is_escalated != true\`), ` +
+                    `note booleans persist as 0/1 on SQLite/libsql and CEL \`1 != true\` is true.`,
+                { recordId: String(guardRecordId) },
             );
             return { success: true, output: { skipped: true, reason: 'reentrancy_loop_guard' } };
         }
         if (reentryKey) this.activeRecordFlows.add(reentryKey);
 
         // Initialize variable context
-        const variables = new Map<string, unknown>();
-        if (flow.variables) {
-            for (const v of flow.variables) {
-                if (v.isInput && context?.params?.[v.name] !== undefined) {
-                    variables.set(v.name, context.params[v.name]);
-                }
-            }
-        }
+        const variables = this.seedDeclaredVariables(flow, context);
         // Inject trigger record. `$record` is the canonical handle; `record` is a
         // friendlier alias so templates/conditions can write `{record.title}` and
         // `record.status`. We also flatten the record's own fields to top-level
@@ -2778,7 +2979,8 @@ export class AutomationEngine implements IAutomationService {
      * **Authorization (#3801).** This is the public door — the generic REST
      * resume route and the SDK land here — so it is gated on WHAT THE RUN IS
      * PARKED ON before any state is touched: a suspension whose node declares
-     * `resumeAuthority: 'service'` is refused unless the signal carries
+     * `resumeAuthority: 'service'` — or declares no `resumeAuthority` at all,
+     * fail-closed since #5561 — is refused unless the signal carries
      * {@link RESUME_AUTHORITY_SERVICE}. The engine's own continuations
      * (subflow delegation / up-bubble, `map` re-entry, wait-timer wake) go
      * through {@link resumeInternal} and are not re-gated — they continue work
@@ -2803,10 +3005,22 @@ export class AutomationEngine implements IAutomationService {
      * Resolves the EFFECTIVE suspension first: a run parked on a `subflow` or
      * `map` node is really waiting on a CHILD run, so the gate follows that
      * chain and judges the node the signal lands on (subflow) or would advance
-     * past (map) — see {@link LINKED_RUN_PREFIXES}. Anything it cannot resolve
-     * (unknown run, missing flow, unregistered node type) is left to
+     * past (map) — see {@link LINKED_RUN_PREFIXES}. A run it cannot resolve at
+     * all (unknown run id, nothing suspended, no resolvable node type) is left to
      * `resumeInternal`, which reports the machine-state error — the gate only
      * ever speaks to authorization.
+     *
+     * **An UNDECLARED node type is refused, not deferred** (#5561 step two). It
+     * used to be let through on the schema default's inherited `'any'`; a pause
+     * whose type never stated who may continue it is now closed until its author
+     * states it. The refusal says WHICH of the two reasons applies, because they
+     * ask opposite things of the reader: a declared `'service'` node is working
+     * exactly as designed and the caller must go through the owning service,
+     * while an undeclared one is a missing one-line declaration on a descriptor
+     * and the fix belongs to whoever registered it. Emitting the `'service'`
+     * wording for both would tell an author their node declares something it
+     * never declared — the failure mode this whole issue is about, restated as a
+     * log line.
      */
     private async refuseGatedResume(runId: string, signal?: ResumeSignal): Promise<AutomationResult | null> {
         const run = await this.resolveEffectiveSuspension(runId);
@@ -2819,27 +3033,45 @@ export class AutomationEngine implements IAutomationService {
         // decision's tail, not a way around it.
         if (signal?.[RESUME_AUTHORITY_SERVICE]) return null;
 
+        // Refusing. Which of the two reasons? A second registry walk, on the
+        // refusal path only, so the message can tell a node that deliberately
+        // declared `'service'` from one that declared nothing at all.
+        const declared = this.resolveDeclaredResumeAuthority(nodeType);
         const direct = run.runId === runId;
         const at = direct ? `'${run.nodeId}'` : `'${run.nodeId}' (linked run '${run.runId}')`;
-        this.logger.warn(
-            `[automation] refused resume of run '${runId}': parked on ${nodeType} node ${at}, which is resumable ` +
-                `only through its owning service (resumeAuthority: 'service')`,
-        );
+        const why = declared === 'service'
+            ? `which is resumable only through its owning service (resumeAuthority: 'service')`
+            : `whose type never declares resumeAuthority, so it is closed to the generic route until it does ` +
+              `(#5561) — declare resumeAuthority: 'any' on its descriptor if this route IS the intended door`;
+        this.logger.warn(`[automation] refused resume of run '${runId}': parked on ${nodeType} node ${at}, ${why}`);
+
+        // The fix, identical in both the direct and the linked-run phrasing —
+        // what has to change is a descriptor, not the call that just failed.
+        const undeclaredFix =
+            `and that node type never declares resumeAuthority, so the generic resume route is closed to the ` +
+            `pauses it creates (#5561). If that route IS the intended door — a screen's collected inputs, a ` +
+            `signal wait's external producer — declare resumeAuthority: 'any' on its action descriptor; declare ` +
+            `'service' if resuming is the tail of a decision some service must authorize and record first`;
         return {
             success: false,
             code: 'PERMISSION_DENIED',
-            error: direct
-                ? `Run '${runId}' is paused at a '${nodeType}' node, which only its owning service may resume — ` +
-                  `drive it through that service's API (e.g. an approval decision), not a raw resume`
-                : `Run '${runId}' is waiting on run '${run.runId}', which is paused at a '${nodeType}' node that ` +
-                  `only its owning service may resume — resuming here would continue past a decision that has not ` +
-                  `been made; drive it through that service's API instead`,
+            error: declared === 'service'
+                ? direct
+                    ? `Run '${runId}' is paused at a '${nodeType}' node, which only its owning service may resume — ` +
+                      `drive it through that service's API (e.g. an approval decision), not a raw resume`
+                    : `Run '${runId}' is waiting on run '${run.runId}', which is paused at a '${nodeType}' node that ` +
+                      `only its owning service may resume — resuming here would continue past a decision that has not ` +
+                      `been made; drive it through that service's API instead`
+                : direct
+                    ? `Run '${runId}' is paused at a '${nodeType}' node, ${undeclaredFix}`
+                    : `Run '${runId}' is waiting on run '${run.runId}', which is paused at a '${nodeType}' node, ` +
+                      `${undeclaredFix}`,
         };
     }
 
     /**
-     * The `resumeAuthority` in force for a node type, following a deprecated
-     * ADR-0018 alias to its canonical type.
+     * The authority a node type **declared**, following a deprecated ADR-0018
+     * alias to its canonical type — `undefined` when nothing declared one.
      *
      * An alias's descriptor is synthesized by {@link registerNodeAlias} and does
      * NOT copy the canonical's capabilities, so reading it directly would hand
@@ -2849,23 +3081,155 @@ export class AutomationEngine implements IAutomationService {
      * order the two register in. No alias of a pausing type exists today; this
      * keeps it from becoming a hole the day one does.
      *
-     * The `?? 'any'` is load-bearing in a second way since #5561: with no schema
-     * default on `resumeAuthority`, an undeclared descriptor arrives with the key
-     * absent and this is the one place that resolves it. It resolves fail-OPEN,
-     * exactly as the removed default did — step one of #5561 changed nothing
-     * here, it only made the omission audible at registration. Flipping this
-     * fallback to `'service'` is the breaking half still tracked on #5561, and
-     * it is this single expression.
+     * Split out from {@link resolveResumeAuthority} because since #5561 step two
+     * the two facts differ: a type that declared `'service'` and a type that
+     * declared nothing are both refused, but for opposite reasons, and the
+     * refusal has to say which (one is working as designed, the other is a
+     * missing one-line declaration). One walk, so the alias hop can never be
+     * implemented twice and drift.
      */
-    private resolveResumeAuthority(nodeType: string): NonNullable<ActionDescriptor['resumeAuthority']> {
+    private resolveDeclaredResumeAuthority(nodeType: string): ActionDescriptor['resumeAuthority'] {
+        return this.resolveCanonicalDescriptor(nodeType)?.resumeAuthority;
+    }
+
+    /**
+     * The descriptor whose CAPABILITY declarations govern a node type: the one
+     * registered under that type, or — when that one is a deprecated ADR-0018
+     * alias — the canonical descriptor it forwards to.
+     *
+     * The alias hop is the whole reason this is a function rather than a map
+     * lookup, and the reasoning is {@link registerNodeAlias}'s: an alias's
+     * descriptor is SYNTHESIZED, so it carries the schema defaults for every
+     * capability (`supportsPause: false`, `resumeAuthority` absent) rather than
+     * the canonical's real values. Reading it directly would make each capability
+     * gate answer "no" for the old type name — one rename away from either a hole
+     * (#5561's, if the gate fails open) or a false refusal (#6667's, if it fails
+     * closed). Resolving live rather than snapshotting at alias-registration time
+     * also keeps the answer right whichever order the two register in. No alias
+     * of a pausing type exists today; this keeps it from becoming a defect the
+     * day one does.
+     *
+     * Extracted at #6667 so the two capability gates that need the hop —
+     * {@link resolveDeclaredResumeAuthority} (who may resume) and
+     * {@link refuseUndeclaredSuspension} (may this type pause at all) — share
+     * ONE walk. Two copies of a four-line loop is exactly how one of them
+     * acquires a bound the other lacks.
+     */
+    private resolveCanonicalDescriptor(nodeType: string): ActionDescriptor | undefined {
         let descriptor = this.actionDescriptors.get(nodeType);
         for (let hop = 0; descriptor?.aliasOf && hop < AutomationEngine.MAX_ALIAS_HOPS; hop++) {
             const canonical = this.actionDescriptors.get(descriptor.aliasOf);
             if (!canonical || canonical === descriptor) break;
             descriptor = canonical;
         }
-        return descriptor?.resumeAuthority ?? 'any';
+        return descriptor;
     }
+
+    /**
+     * Refuse a suspension the node type never declared it could produce — the
+     * runtime half of `supportsPause` (#6667, from #5703).
+     *
+     * Returns a guard refusal when the node type publishes a descriptor whose
+     * (alias-resolved) `supportsPause` is not `true` and its executor just
+     * returned `suspend: true`; `null` when there is nothing to refuse.
+     *
+     * ## Why refuse rather than pause-and-log
+     *
+     * Honouring the pause and logging `error` was the alternative, and it loses
+     * on consequence. A type that leaves `supportsPause` false is, in the same
+     * breath, a type `check:resume-authority-declared` does not gate and
+     * {@link warnIfResumeAuthorityUndeclared} does not warn about — both key on
+     * `supportsPause: true` — so it almost certainly declares no
+     * `resumeAuthority` either, and since #5561 step two an undeclared authority
+     * resolves to `'service'`: the generic resume route REFUSES every pause it
+     * creates. Honouring the suspension therefore writes a durable continuation
+     * for a run that nothing can continue, and the `error` line is printed in the
+     * process that paused — hours or a restart before anyone tries to resume and
+     * gets a `PERMISSION_DENIED` that names `resumeAuthority`, not the
+     * `supportsPause` that actually caused it. That is Prime Directive #10
+     * exactly: advertising a capability (a resumable pause) the runtime does not
+     * deliver, discovered by someone who cannot connect it back.
+     *
+     * Refusing fails the run at the moment of the mistake, in the process that
+     * made it, with the failure handed to the run's own caller and NOTHING
+     * durable written — and the message names the one-line fix. It is the same
+     * direction #5561 chose for the neighbouring guess: the loud mistake is
+     * discoverable by the person who made it; the silent one is not.
+     *
+     * No log line is emitted here, deliberately. This is AGENTS.md's third legal
+     * answer under "Degradation log levels" — a failure handed to the CALLER is
+     * not a degradation, and the run's own `failed` history row already carries
+     * the message. A `logger.error` on top would fire once per execution of a
+     * mis-declared node, which is what makes `error` unreadable.
+     *
+     * ## What it does NOT judge
+     *
+     *  - **The inverse.** `supportsPause: true` on a type that never suspends is
+     *    not a mismatch: the declaration is a capability, not an obligation, and
+     *    `wait` legitimately returns without suspending when its condition is
+     *    already met.
+     *  - **Silence.** A node type that publishes NO descriptor declares nothing —
+     *    not even `false` — so there is no declaration for this gate to enforce,
+     *    and `NodeExecutor.descriptor` is optional by contract. Its pauses are
+     *    already fail-closed at the other end (#5561: an absent descriptor means
+     *    an absent `resumeAuthority`, so the generic route refuses them and says
+     *    so). Refusing here as well would delete that behaviour, which
+     *    `resume-authority-gate.test.ts`'s `bare_pause` case pins on purpose.
+     */
+    private refuseUndeclaredSuspension(nodeType: string): NodeExecutionResult | null {
+        const descriptor = this.resolveCanonicalDescriptor(nodeType);
+        // No descriptor ⇒ no declaration ⇒ nothing to enforce (see above).
+        if (!descriptor) return null;
+        if (descriptor.supportsPause === true) return null;
+        return refuseNode(
+            `node type '${nodeType}' suspended the run but its action descriptor declares ` +
+            `supportsPause: false, so the pause is refused — a run that paused here could not be ` +
+            `continued on the generic resume route anyway: a type that declares no pause declares no ` +
+            `resumeAuthority either, and an unclaimed pause is fail-closed since #5561. Declare ` +
+            `supportsPause: true on the descriptor together with the resumeAuthority the pauses need ` +
+            `('any' if POST /automation/:name/runs/:runId/resume is the intended door, 'service' if ` +
+            `resuming is the tail of a decision some service must authorize and record first) — or stop ` +
+            `returning suspend: true from execute(). This is a metadata defect, not a runtime one, so a ` +
+            `fault edge does not route it.`,
+        );
+    }
+
+    /**
+     * The `resumeAuthority` in force for a node type: what it declared, or
+     * {@link RESUME_AUTHORITY_WHEN_UNDECLARED} when it declared nothing.
+     *
+     * **The fallback is the whole of #5561 step two.** With no schema default on
+     * `resumeAuthority` (step one), an undeclared descriptor arrives with the key
+     * absent and this is the ONE place that resolves it — so this single
+     * expression is where "a pause nobody claimed" is either open to the world or
+     * closed to everyone. It used to resolve `'any'`, inherited from the schema
+     * default step one removed; it now resolves `'service'`, and a pause whose
+     * node type never stated who may continue it is refused on the generic route
+     * until its author says otherwise.
+     *
+     * That is the direction #3823 was decided in: ADR-0044 pointed a revise edge
+     * at a generic `wait`, `wait` is legitimately `'any'`, and the pause standing
+     * in a service-owned position inherited a fail-open value nobody chose. The
+     * cost of guessing wrong is asymmetric — guessing `'any'` walks past a
+     * decision nothing recorded, guessing `'service'` returns a refusal that names
+     * the one-line fix — so the guess is made in the direction that is loud
+     * instead of the direction that is silent.
+     */
+    private resolveResumeAuthority(nodeType: string): NonNullable<ActionDescriptor['resumeAuthority']> {
+        return this.resolveDeclaredResumeAuthority(nodeType) ?? AutomationEngine.RESUME_AUTHORITY_WHEN_UNDECLARED;
+    }
+
+    /**
+     * What an UNDECLARED `resumeAuthority` resolves to (#5561 step two).
+     *
+     * The single source of truth for the fail-closed default — the registration
+     * warning, the refusal message and {@link resolveResumeAuthority} all speak
+     * about the same constant rather than three copies of a string literal.
+     * `ActionDescriptorSchema.resumeAuthority` deliberately carries no Zod
+     * `.default()` (that is what makes an omission observable at all), so this is
+     * the default in every sense that matters at run time.
+     */
+    private static readonly RESUME_AUTHORITY_WHEN_UNDECLARED = 'service' as const;
 
     /** Depth bound for the subflow chain walk — a corrupt correlation cycle
      *  must not spin the gate. Far above any real nesting. */
@@ -3190,9 +3554,18 @@ export class AutomationEngine implements IAutomationService {
             const variables = new Map<string, unknown>(Object.entries(run.variables));
             const rejected = applyResumeSignal(variables, signal, run.nodeId);
             if (rejected.length) {
+                // #6654 — the rejected names are the CALLER's resume-signal
+                // keys (nothing constrains them against newlines), so they
+                // ride the structured slot, never the message; see
+                // `forgetSuspendedRun`'s catch for the full mechanism (#6299).
+                // The returned INVALID_SIGNAL envelope below is caller-facing
+                // refusal text, not a log record — it keeps naming the
+                // variables (the envelope class is ruled elsewhere).
+                // #4632: FUNCTIONAL — stays `warn`.
                 this.logger.warn(
                     `[automation] refused resume of run '${runId}': signal writes engine-internal ` +
-                        `variable(s) ${rejected.join(', ')}`,
+                        `variable(s) — the rejected names are in this record's meta.`,
+                    { rejected },
                 );
                 return {
                     success: false,
@@ -3397,10 +3770,22 @@ export class AutomationEngine implements IAutomationService {
             try {
                 return this.evaluateCondition(String(field.visibleWhen), scope);
             } catch (err) {
+                // #6499 — BOTH spliced pieces were uncontrolled: the author's
+                // own `visibleWhen` source (metadata text of any shape) and
+                // the evaluator's thrown message (`evaluateCondition` composes
+                // a deliberately multi-line one). Both go to the structured
+                // slot; see `forgetSuspendedRun`'s catch above for the full
+                // mechanism (#6299).
+                //
+                // #4632 verdict: FUNCTIONAL — stays `warn`: one field's
+                // `required` is not enforced for one submission, the resume
+                // caller reads the outcome directly, and nothing
+                // claimed-persisted is involved.
                 this.logger.warn(
                     `[automation] run '${runId}': screen field '${field.name}' has a visibleWhen that could not be ` +
-                        `evaluated (\`${field.visibleWhen}\`: ${(err as Error)?.message}) — its \`required\` is not ` +
-                        `enforced for this submission`,
+                        `evaluated — its \`required\` is not enforced for this submission. The predicate and the ` +
+                        `evaluator's failure are in this record's meta.`,
+                    { visibleWhen: String(field.visibleWhen), ...describeThrownForLog(err) },
                 );
                 return undefined;
             }
@@ -3411,9 +3796,19 @@ export class AutomationEngine implements IAutomationService {
 
         const declared = declaredScreenFieldNames(fields);
         const summary = issues.map((i) => i.message).join('; ');
+        // #6654 — the issue messages embed USER-SUBMITTED keys
+        // (`validateScreenInputs`' `Unknown screen field "…"`,
+        // screen-input-contract.ts), which nothing constrains against
+        // newlines, so the findings ride the structured slot, never the
+        // message; see `forgetSuspendedRun`'s catch for the full mechanism
+        // (#6299). The returned INVALID_SCREEN_INPUT envelope below is
+        // caller-facing refusal text, not a log record — it keeps the summary
+        // (the envelope class is ruled elsewhere). #4632: FUNCTIONAL — stays
+        // `warn`.
         this.logger.warn(
             `[automation] refused resume of run '${runId}': screen '${run.nodeId}' input violates its declared ` +
-                `field contract — ${summary}`,
+                `field contract — ${issues.length} issue(s); the field-level findings are in this record's meta.`,
+            { issues },
         );
         return {
             success: false,
@@ -3471,13 +3866,36 @@ export class AutomationEngine implements IAutomationService {
                 : this.buildSubflowResumeSignal(run.context, output);
             const parentRes = await this.resumeInternal(parentRunId, sig, false, summary);
             if (!parentRes.success) {
+                // #6499 — `parentRes.error` is the envelope field that carries
+                // a failing node's / driver's text VERBATIM (#5912 left it
+                // that way on purpose), so foreign newlines reach this message
+                // second-hand; it goes to the structured slot. See
+                // `forgetSuspendedRun`'s catch above for the full mechanism
+                // (#6299).
+                //
+                // #4632 verdict: FUNCTIONAL — stays `warn`: no false success
+                // is recorded anywhere — the parent either failed terminally
+                // (recorded in run history) or stays visibly parked and
+                // resumable — and the child's own completion, which is what
+                // its resumer was told, is genuine.
                 this.logger.warn(
-                    `[automation] subflow run '${run.runId}' completed but resuming parent '${parentRunId}' failed: ${parentRes.error}`,
+                    `[automation] subflow run '${run.runId}' completed but resuming parent '${parentRunId}' ` +
+                        `failed — the parent's failure envelope is in this record's meta.`,
+                    { error: parentRes.error ?? 'unknown error' },
                 );
             }
         } catch (err) {
+            // #6499 — thrown text to the structured slot; see
+            // `forgetSuspendedRun`'s catch above for the full mechanism
+            // (#6299). #4632 verdict: FUNCTIONAL — stays `warn`, the same
+            // consequence envelope as the branch above: the parent's
+            // suspension was either consumed with a recorded outcome or
+            // survives parked and resumable; nothing reads as success that
+            // is not.
             this.logger.warn(
-                `[automation] subflow run '${run.runId}' completed but resuming parent '${parentRunId}' threw: ${(err as Error).message}`,
+                `[automation] subflow run '${run.runId}' completed but resuming parent '${parentRunId}' ` +
+                    `threw — the thrown failure is in this record's meta.`,
+                describeThrownForLog(err),
             );
         }
     }
@@ -3515,6 +3933,11 @@ export class AutomationEngine implements IAutomationService {
      * reject edge to resume down, so the run must end, not continue. Returns
      * `false` when no suspended run exists under the id (already terminal /
      * unknown), which callers treat as idempotent success.
+     *
+     * ⚠️ An UNREADABLE durable store also lands on that `false` — the two are
+     * indistinguishable to the caller, so the run may still be parked and
+     * resumable. That path is reported at `error` (#4632/#6299) precisely
+     * because nothing above it can tell the difference; see the catch below.
      */
     async cancelRun(runId: string, reason?: string): Promise<boolean> {
         let run = this.suspendedRuns.get(runId) ?? null;
@@ -3522,8 +3945,45 @@ export class AutomationEngine implements IAutomationService {
             try {
                 run = await this.store.load(runId);
             } catch (err) {
-                this.logger.warn(
-                    `[automation] cancelRun: failed to load suspended run '${runId}' from durable store: ${(err as Error).message}`,
+                // #6299 — same family, same mechanism as `forgetSuspendedRun`
+                // above: the driver's uncontrolled text goes to the structured
+                // slot so the record stays one physical line.
+                //
+                // #4632 verdict: DURABILITY — raised from `warn` to `error`. The
+                // failed read is silently turned into "no such suspended run"
+                // and this method returns `false`, which its own contract
+                // documents as idempotent success (already terminal / unknown),
+                // so the cancellation is SKIPPED while the call reads clean. The
+                // only in-repo caller measures the cost: plugin-approvals'
+                // revise-window recall
+                // (`packages/plugins/plugin-approvals/src/approval-service.ts`)
+                // never reads the boolean at all — it only catches a THROW, and
+                // grades that throw `error` with "the run may be stranded"
+                // (#4420). A store-read failure produces precisely that stranded
+                // run WITHOUT firing that alarm: the request is marked
+                // `recalled`, the record lock is released, `resumeError` stays
+                // undefined — and the run stays parked in the store, to be
+                // re-armed and resumed by the next restart, inside a flow whose
+                // approval has already been withdrawn.
+                //
+                // This is why #6230's verdict must not be copied here.
+                // `loadSuspendedRun` is a DECLARED best-effort reader for
+                // incidental callers (a gate lookup, a screen fetch), and
+                // `resumeInternal` takes the strict form exactly where the
+                // difference matters. `cancelRun` has no strict alternative, and
+                // its degradation decides a WRITE.
+                //
+                // THIRD argument (`error(message, error?, meta?)`), `Error` slot
+                // deliberately empty (#5575).
+                this.logger.error(
+                    `[automation] cancelRun('${runId}') could not read the durable suspended-run store, so the ` +
+                        `cancellation was SKIPPED and reported as idempotent success — this call returns false, which ` +
+                        `its callers read as "no such suspended run". The run is NOT cancelled: if it is parked in the ` +
+                        `store it stays parked, and the next restart re-arms and resumes it while the caller has ` +
+                        `already recorded the cancellation. Fix the store failure in this record's meta, then re-issue ` +
+                        `cancelRun('${runId}').`,
+                    undefined,
+                    describeThrownForLog(err),
                 );
             }
         }
@@ -3598,7 +4058,47 @@ export class AutomationEngine implements IAutomationService {
                     byId.set(r.runId, { runId: r.runId, flowName: r.flowName, nodeId: r.nodeId, correlation: r.correlation });
                 }
             } catch (err) {
-                this.logger.warn(`[automation] failed to list suspended runs from durable store: ${(err as Error).message}`);
+                // #6299 — driver text to the structured slot, message one line,
+                // same as the two seams above. The SLOT differs: the `Logger`
+                // contract declares `warn(message, meta?)`, so `meta` is the
+                // SECOND argument here — `warn` has no `Error` slot, and a
+                // `meta` passed third to it is silently ignored.
+                //
+                // #4632 verdict: FUNCTIONAL — the level deliberately STAYS
+                // `warn`, and this is the one of #6299's three sites where that
+                // is the answer. Nothing the system claims to have persisted
+                // failed to land: the durable rows are intact, still resumable
+                // by id, and the next boot's `rearmSuspendedWaitTimers` still
+                // re-arms them off its OWN `store.list()` — which builtin/
+                // wait-node.ts grades `error` precisely because THAT failure
+                // breaks the promise to resume them. This one breaks no promise,
+                // so #4632's judgment question ("does something the system
+                // claims is persisted fail to land while it keeps looking
+                // healthy?") answers NO.
+                //
+                // What IS wrong here is the shape #5186 owns: an answer INVENTED
+                // for a read that failed — a silently SHORT list. That rule's
+                // remedy is propagation (rethrow, or a discriminated result),
+                // which changes this method's return contract and is outside
+                // #6299's scope, so the record has to say the shortfall out loud
+                // instead. Its scan roots (`packages/metadata`,
+                // `metadata-protocol`, `objectql`) do not reach this package, so
+                // `check:durability-log-level` reports neither rule here.
+                // Reachability is also the weakest of the three: this method has
+                // no production consumer in-repo and is not on the
+                // `AutomationService` spec contract (only the synchronous
+                // `listSuspendedRuns` is), so nothing decides anything on this
+                // list today. Raising it to `error` would alarm for the duration
+                // of an outage on a read nobody acts on — #4632's mirror-image
+                // misuse, the trap #6230 avoided.
+                this.logger.warn(
+                    `[automation] the durable suspended-run store could not be listed — this listing DEGRADES to the ` +
+                        `in-memory cache alone, so every run parked by a previous process is missing from the result ` +
+                        `and the caller cannot tell a short list from a complete one (after a restart the cache is ` +
+                        `empty, so this answers []). The runs themselves are untouched — still stored, still resumable ` +
+                        `by id. Fix the store failure in this record's meta.`,
+                    describeThrownForLog(err),
+                );
             }
         }
         // In-memory entries win — they are the freshest copy.
@@ -3707,8 +4207,39 @@ export class AutomationEngine implements IAutomationService {
                 summary: entry.summary,
             };
             void this.store.recordTerminal(record).catch((err) => {
-                this.logger.warn(
-                    `[Automation] run-history persist failed for '${entry.flowName}': ${(err as Error)?.message}`,
+                // #6499 — driver text to the structured slot; see
+                // `forgetSuspendedRun`'s catch above for the full mechanism
+                // (#6299).
+                //
+                // #4632 verdict: DURABILITY — RAISED from `warn` to `error`.
+                // This is the WRITE half of the run-history claim whose read
+                // halves (`listRuns` / `getRun` above) stay `warn`: a TERMINAL
+                // run's history row failed to land while the run itself
+                // completed and every caller reads healthy — fire-and-forget,
+                // nothing retries it, nothing upstream is told. After the next
+                // restart the run is invisible to the Runs surfaces, and the
+                // approvals sweeps read exactly that hole: `inspectStranded-
+                // Requests` (#3456) treats "no suspension + no terminal row"
+                // as a STRANDED request, so a run that actually completed is
+                // reported as lost, and `releasePendingForTerminalRuns`
+                // (#4469) treats "no terminal row" as still-alive, so a
+                // finished run's leftover pending approvals are never
+                // auto-released. A write that claims to persist did not, while
+                // the system keeps looking healthy — #4632's judgment question
+                // answers YES. `check:durability-log-level` cannot see it
+                // (`SuspendedRunStore.recordTerminal` is not in its callee
+                // vocabulary), so the level is pinned by a test instead.
+                //
+                // THIRD argument per `error(message, error?, meta?)`; the
+                // `Error` slot stays empty on purpose (#5575).
+                this.logger.error(
+                    `[Automation] run-history persist failed for terminal run '${entry.id}' of flow ` +
+                        `'${entry.flowName}' — the run finished and reads healthy everywhere, but its history ` +
+                        `row never landed and nothing retries the write, so after the next restart this run is ` +
+                        `invisible to the Runs surfaces and the approvals sweeps read it as never-finished. ` +
+                        `Fix the store failure in this record's meta.`,
+                    undefined,
+                    describeThrownForLog(err),
                 );
             });
         }
@@ -3886,11 +4417,19 @@ export class AutomationEngine implements IAutomationService {
 
     /** One warning per flow, shared by the boot audit and the post-seal path. */
     private warnUnknownNodeTypes(entry: UnknownNodeTypeAuditEntry): void {
+        // #6654 — the unknown type names are FLOW-AUTHOR metadata and the
+        // registered vocabulary is plugin-supplied (neither is
+        // schema-constrained against newlines), so both lists ride the
+        // structured slot, never the message; see `forgetSuspendedRun`'s
+        // catch for the full mechanism (#6299). The "no registered executor
+        // or descriptor" phrase is load-bearing — tests and log filters count
+        // per-flow findings by it. #4632: FUNCTIONAL — stays `warn`.
         this.logger.warn(
-            `Flow '${entry.flowName}' references node type(s) with no registered executor or descriptor: ` +
-            `${entry.unknownTypes.join(', ')}. Every plugin has started, so nothing will register them now — ` +
-            `these nodes fail at execution time with NO_EXECUTOR. Install/enable the plugin that contributes them. ` +
-            `Registered types: ${entry.knownTypes.join(', ') || '(none)'}`,
+            `Flow '${entry.flowName}' references node type(s) with no registered executor or descriptor — ` +
+                `the unknown type names and the registered vocabulary are in this record's meta. Every plugin ` +
+                `has started, so nothing will register them now — these nodes fail at execution time with ` +
+                `NO_EXECUTOR. Install/enable the plugin that contributes them.`,
+            { unknownTypes: entry.unknownTypes, knownTypes: entry.knownTypes },
         );
     }
 
@@ -4110,7 +4649,24 @@ export class AutomationEngine implements IAutomationService {
             if (useSchemaHint && result.errors.length === 0 && schemaHint) {
                 const schemaPass = validateExpression('predicate', raw as string | { dialect?: string; source?: string }, schemaHint);
                 for (const issue of [...schemaPass.errors, ...schemaPass.warnings]) {
-                    this.logger.warn(`[flow '${flowName}'] ${where}: ${issue.message}\n      source: \`${issue.source}\``);
+                    // #6499's separately-argued 14th site — the OPPOSITE cause
+                    // of the thrown-text seams: no foreign thrown value is
+                    // involved; this message simply AUTHORED a second physical
+                    // line (`\n      source: …`) into a one-record-per-call
+                    // logger, and `issue.source` is the flow AUTHOR's
+                    // expression text, whose line count is theirs (CEL is
+                    // newline-tolerant). Same downstream damage as the family
+                    // (see `forgetSuspendedRun`'s catch, #6299), same fix
+                    // shape: the message stays one line (`issue.message`
+                    // embeds at most identifier names, which cannot carry
+                    // newlines), the source moves to the structured slot.
+                    //
+                    // #4632 verdict: FUNCTIONAL — stays `warn` BY CONTRACT:
+                    // #1928 defines this advisory schema pass as logged-never-
+                    // thrown and strictly additive to registration; a finding
+                    // here must not fail or alarm a flow that registers
+                    // cleanly.
+                    this.logger.warn(`[flow '${flowName}'] ${where}: ${issue.message}`, { source: issue.source });
                 }
             }
         };
@@ -4397,6 +4953,27 @@ export class AutomationEngine implements IAutomationService {
                 throw execErr;
             }
 
+            // #6667 — declared = enforced for `supportsPause`, at the ONE seam
+            // every suspension passes through.
+            //
+            // Placed here rather than beside the `throw new FlowSuspendSignal`
+            // below on purpose: converting the mismatch into an ordinary guard
+            // refusal *before* the success bookkeeping means the run records a
+            // `failure` step for the offending node (not a `success` step
+            // followed by an unexplained failed run), sets `$error` like any
+            // other refusal, and inherits #3863's un-routability — a `fault`
+            // edge must not be able to swallow a declaration defect, since
+            // re-running the flow unchanged can never fix one.
+            //
+            // Exactly once, and nothing bypasses it: this is the only call site
+            // of any `executor.execute()` that the engine acts on — the ADR-0018
+            // alias path delegates and RETURNS its target's result here rather
+            // than suspending on its own, `resume()` re-enters through
+            // {@link executeNode}, and region bodies ({@link runRegion}) do too.
+            if (result.success && result.suspend === true) {
+                result = this.refuseUndeclaredSuspension(node.type) ?? result;
+            }
+
             if (!result.success) {
                 const errMsg = result.error ?? 'Unknown error';
                 steps.push({
@@ -4556,17 +5133,25 @@ export class AutomationEngine implements IAutomationService {
                 // #4414 — do not fall back silently. The node computed a branch
                 // and no out-edge claims it, so every out-edge is about to be
                 // considered: the guard the author wrote is not guarding.
-                const declared = allOutEdges
-                    .map(e => (e.label ? `'${e.label}'` : `(unlabelled ${e.id})`))
-                    .join(', ');
+                //
+                // #6654 — the computed branch label is potentially
+                // RECORD-DERIVED and the edge labels are FLOW-AUTHOR metadata
+                // (neither is schema-constrained against newlines), so both
+                // ride the structured slot, never the message; see
+                // `forgetSuspendedRun`'s catch for the full mechanism (#6299).
+                // #4632: FUNCTIONAL — stays `warn`.
                 this.logger.warn(
                     // `flow.name` is absent on the synthetic view `runRegion` builds.
-                    `Flow '${flow.name ?? '(region)'}' node '${node.id}' (${node.type}) selected branch ` +
-                    `'${branchLabel}', but no out-edge carries that label — out-edge labels are ` +
-                    `[${declared || 'none'}]. The branch selection is IGNORED and every out-edge is ` +
+                    `Flow '${flow.name ?? '(region)'}' node '${node.id}' (${node.type}) selected a branch, ` +
+                    `but no out-edge carries that label — the computed branch and the out-edge labels are ` +
+                    `in this record's meta. The branch selection is IGNORED and every out-edge is ` +
                     `evaluated instead, so unconditional siblings run regardless of the decision. ` +
                     `Make an out-edge's \`label\` match the branch, or mark the fallback edge ` +
                     `\`isDefault: true\`. (#4414)`,
+                    {
+                        branchLabel,
+                        outEdges: allOutEdges.map(e => ({ id: e.id, label: e.label ?? null })),
+                    },
                 );
             }
         }
@@ -5116,6 +5701,56 @@ export class AutomationEngine implements IAutomationService {
     }
 
     /**
+     * Seed a run's variable map from the flow's DECLARED variables — the one
+     * place `declared` is turned into `bound` (#4697).
+     *
+     * Two sources, in this precedence:
+     *
+     * 1. `context.params[name]`, for an `isInput` variable, when the caller
+     *    supplied it. The boundary is `!== undefined`, so an explicit `false`,
+     *    `null`, `0` or `''` is a supplied value and wins over the default —
+     *    only *absence* falls through.
+     * 2. `defaultValue`, when the declaration carries one. This is the half
+     *    that did not exist before #4697: a declared variable the caller left
+     *    out stayed **unbound**, and conditions are strict CEL, where reading
+     *    an unbound name ABORTS the predicate (`Unknown variable: X`) instead
+     *    of yielding `false`. A screen flow collecting an optional checkbox hit
+     *    exactly that — the runner returns only the fields the user touched, so
+     *    the untouched path aborted the outgoing edge and the run stopped
+     *    (hotcrm#643). The workaround was an `assignment` node per screen,
+     *    mirroring the screen field's own `defaultValue`.
+     *
+     * `defaultValue` is honoured for a NON-input variable too: params are not
+     * readable there by definition, so the default is the only thing that can
+     * bind it, and "declared means bound" would otherwise hold for half the
+     * declarations. A declaration with no `defaultValue` behaves exactly as
+     * before — existing flows are untouched.
+     *
+     * Seeding happens BEFORE the trigger record is flattened to top-level
+     * names, and that flattening skips names already present. So a declared
+     * variable — bound from a param or from its default — shadows a record
+     * field of the same name, which is the rule params already followed; a
+     * default cannot make the same name resolve from a different source
+     * depending on whether the caller passed it.
+     */
+    private seedDeclaredVariables(
+        flow: FlowParsed,
+        context?: AutomationContext,
+    ): Map<string, unknown> {
+        const variables = new Map<string, unknown>();
+        if (!flow.variables) return variables;
+        for (const v of flow.variables) {
+            const supplied = v.isInput ? context?.params?.[v.name] : undefined;
+            if (supplied !== undefined) {
+                variables.set(v.name, supplied);
+            } else if (v.defaultValue !== undefined) {
+                variables.set(v.name, v.defaultValue);
+            }
+        }
+        return variables;
+    }
+
+    /**
      * Execute a flow without triggering retry logic (used by retryExecution to prevent recursion).
      */
     private async executeWithoutRetry(
@@ -5132,14 +5767,7 @@ export class AutomationEngine implements IAutomationService {
             return { success: false, error: `Flow '${flowName}' is disabled` };
         }
 
-        const variables = new Map<string, unknown>();
-        if (flow.variables) {
-            for (const v of flow.variables) {
-                if (v.isInput && context?.params?.[v.name] !== undefined) {
-                    variables.set(v.name, context.params[v.name]);
-                }
-            }
-        }
+        const variables = this.seedDeclaredVariables(flow, context);
         if (context?.record) {
             variables.set('$record', context.record);
         }

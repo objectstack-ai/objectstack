@@ -155,13 +155,15 @@
         },
         "label": {
           "status": "dead",
-          "verifiedAt": "2026-07-30",
-          "note": "CORRECTED 2026-07-30 (was live with no evidence): no consumer in either repo — objectui's PermissionAdvancedFacets edits policies and PermissionPreview counts them, and an authoring surface echoing input is not a runtime consumer (see README §preview-renderer). Benign display metadata — deliberately NOT authorWarn'd."
+          "evidenceScope": "cross-repo",
+          "verifiedAt": "2026-08-10",
+          "note": "CORRECTED 2026-07-30 (was live with no evidence): no consumer in either repo. VERDICT RE-TESTED AND UPHELD 2026-08-10 (#7427) against the maintainer ruling that a designer preview rendering a key to a human is a runtime consumer (2026-08-10, #7131; README, 'Designer previews count as consumers'). This row is the closest structural twin of the four rows that ruling re-graded — a display `label` marked dead — so it was measured rather than assumed, and it comes out the other way. THE MEASUREMENT, at objectui @e9ab52f9: PermissionPreview IS registered for `permission` (previews/index.ts:71) and IS reachable (ResourceEditPage.tsx:949), so the preview lookup runs; but PermissionPreview.tsx:111 reads `rowLevelSecurity` only as an ARRAY and PermissionPreview.tsx:164 renders `${rls.length} RLS rules` — a COUNT. It never indexes a policy, never reads `.label`, and no policy field reaches a human through it. The 2026-07-30 wording 'PermissionPreview counts them' was exact, and counting is not rendering: the ruling turns on the VALUE being shown to a person, which is precisely what a length does not do. The other measured surface is PermissionAdvancedFacets.tsx:192-193 (reads `draft.rowLevelSecurity`, strips retired keys) and :264 (writes it back) — an authoring FORM, the 'authoring surface echoing input' the 2026-07 correction rejected, and the new ruling names previews, not edit forms. So both halves of the original closure survive it. Benign display metadata — deliberately NOT authorWarn'd. To re-open this row, the thing to look for is a preview that renders the policy's label text, not another surface that counts policies."
         },
         "description": {
           "status": "dead",
-          "verifiedAt": "2026-07-30",
-          "note": "CORRECTED 2026-07-30 (was live with no evidence): same closure as label. Benign — not authorWarn'd."
+          "evidenceScope": "cross-repo",
+          "verifiedAt": "2026-08-10",
+          "note": "CORRECTED 2026-07-30 (was live with no evidence): same closure as label. RE-TESTED AND UPHELD 2026-08-10 (#7427) with `label`, same measurement at objectui @e9ab52f9 — the permission preview counts RLS policies (PermissionPreview.tsx:164) and renders no field of any individual policy. Benign — not authorWarn'd."
         },
         "object": {
           "status": "live",
@@ -206,8 +208,9 @@
         },
         "tags": {
           "status": "dead",
-          "verifiedAt": "2026-07-30",
-          "note": "CORRECTED 2026-07-30 (was live with no evidence): no reader in either repo — governance/compliance reporting never consumes policy tags. Benign organizational metadata — not authorWarn'd."
+          "evidenceScope": "cross-repo",
+          "verifiedAt": "2026-08-10",
+          "note": "CORRECTED 2026-07-30 (was live with no evidence): no reader in either repo — governance/compliance reporting never consumes policy tags. RE-TESTED AND UPHELD 2026-08-10 (#7427) under the previews ruling (#7131), same measurement as this block's `label`: at objectui @e9ab52f9 the permission preview reads `rowLevelSecurity` as an array and renders its LENGTH (PermissionPreview.tsx:111, :164), never a policy's fields, so no tag value reaches a human there. Benign organizational metadata — not authorWarn'd."
         }
       }
     }

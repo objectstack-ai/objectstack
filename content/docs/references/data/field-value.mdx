@@ -40,11 +40,29 @@ this contract has (ADR-0104 performance budget).
 ## TypeScript Usage
 
 ```typescript
-import { AddressValueSchema, CalendarDateValueSchema, ClockTimeValueSchema, FileLikeValueSchema, FileReferenceIdValueSchema, FileValueSchema, InstantValueSchema, LocationValueSchema, ReferenceIdValueSchema } from '@objectstack/spec/data';
+import { AddressSchema, AddressValueSchema, CalendarDateValueSchema, ClockTimeValueSchema, FileLikeValueSchema, FileReferenceIdValueSchema, FileValueSchema, InstantValueSchema, LocationValueSchema, ReferenceIdValueSchema } from '@objectstack/spec/data';
+import type { Address, AddressValue, CalendarDateValue, ClockTimeValue, FileLikeValue, FileReferenceIdValue, FileValue, InstantValue, LocationValue, ReferenceIdValue } from '@objectstack/spec/data';
 
 // Validate data
-const result = AddressValueSchema.parse(data);
+const result = AddressSchema.parse(data);
 ```
+
+---
+
+## Address
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **street** | `string` | optional | Street address |
+| **city** | `string` | optional | City name |
+| **state** | `string` | optional | State/Province |
+| **postalCode** | `string` | optional | Postal/ZIP code |
+| **country** | `string` | optional | Country name or code |
+| **countryCode** | `string` | optional | ISO country code (e.g., US, GB) |
+| **formatted** | `string` | optional | Formatted address string |
+
 
 ---
 

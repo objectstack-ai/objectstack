@@ -1,5 +1,2192 @@
 # @objectstack/metadata-protocol
 
+## 17.0.0-rc.6
+
+### Major Changes
+
+- debe2f6: refactor(spec)!: `api` is code-only — withdraw a runtime create door the endpoint matcher could never read (#5488, ADR-0049 remove side)
+
+  <!-- adr-0087: registered api-runtime-create-withdrawn -->
+
+  **FROM → TO:** `PUT /api/v1/meta/api/{name}` (200 "Saved") → declare the endpoint as a
+  stack artifact (`**/*.api.ts`, or `defineStack({ apis })`) and ship it through
+  `publishPackage`. The runtime write now answers **403 `NOT_CREATABLE`**, in `?mode=draft`
+  as well as direct-active. The artifact route is **unchanged** — a `**/*.api.ts` file valid
+  before this release is valid after it, byte for byte.
+
+  `DEFAULT_METADATA_TYPE_REGISTRY`'s `api` entry declared `allowRuntimeCreate: true` and the
+  runtime never honoured it. Measured on a real showcase boot (`objectstack dev --fresh`, 47
+  plugins):
+
+  ```
+  PUT /api/v1/meta/api/e8_backdoor   → 200 {"success":true,…,"message":"Saved …"}
+  GET /api/v1/apps/showcase/backdoor → 404      (anonymous AND authenticated)
+  ```
+
+  …and **no** `[EndpointMatcher] … EXCLUDED` line anywhere in the boot log: the endpoint was
+  not gated out, it was never in the index at all. The serving criterion belongs to
+  `IMetadataService.matchEndpoint` → `EndpointMatcher` → `MetadataManager.listForIndex('api')`,
+  which reads the manager's own registry plus its registered loaders
+  (`["filesystem","memory"]` on dev/serve). A runtime write lands in `sys_metadata`, which is
+  in neither. So the declaration promised a capability that could not exist.
+
+  A declared-but-unhonoured capability is ADR-0049 false compliance, and "answers Saved, then
+  404s forever" is its most dangerous shape for the AI authors ADR-0033 targets. The
+  maintainer ruled REMOVE on 2026-08-07 rather than converge the read path: making the matcher
+  read `sys_metadata` re-opens cache, invalidation, tenancy and the ADR-0110 D3
+  miss-vs-outage distinction on a new read path, and there is no business pull for
+  Studio-authored endpoints today — 17.x serves declarative endpoints through stack artifacts,
+  which is what showcase uses (#5040 E8, LIVE).
+
+  ## The retirement kit
+
+  - **`allowRuntimeCreate: false`** on the `api` registry entry. With `allowOrgOverride`
+    already `false`, the type is now **code-only** — the `job` / `agent` / `capability` shape —
+    so the existing #5086 inlet refuses before persistence, on every kernel, with
+    `code: 'NOT_CREATABLE'`, `status: 403` and a prescription derived from the entry's own
+    `filePatterns[0]`. No new refusal mechanism was written for this.
+  - **`gateApiDraftsForPublish` is retired** (`metadata-protocol`), together with its nine
+    tests and the `PUBLISH_DRAFTS_NAMESPACE_REMEDY` string only it appended. It landed two
+    days earlier in PR #5279 and is removed **deliberately and on the record**, not lost in a
+    refactor: it gated a draft→active promotion into a state the matcher can never read, and
+    with the inlet closed no `api` draft can exist for it to judge. The in-place comment at
+    its old call site carries the reasoning.
+  - **The `metadata-plugin.zod.ts` decision block is rewritten as a recorded overturn.** It
+    used to record CODE-ONLY as "considered and rejected"; its three bullets are kept verbatim
+    with what became of each, so the reversal is auditable rather than silently contradicted.
+  - **The `api` create seed is removed** and `api` joins `KNOWN_UNSEEDED`. A pre-filled "New
+    API Endpoint" form whose save can only 403 is the UI half of the same false compliance.
+  - **Pins, not deletions.** The two #5271 tripwire pins that asserted
+    `allowRuntimeCreate: true` are **replaced** by retirement pins asserting the new verdict —
+    their comments predicted this exact consequence, and both predictions were correct. Every
+    rejection case asserts `code` **and** `status` (ADR-0112 envelope), never `toThrow()`
+    alone (#6142).
+
+  ## What did NOT change
+
+  `validateApiEndpointDeclarations` / `identityFreeEndpointGateFailure` remain the one judge
+  of what is servable, on the route that serves: the stack schema, `publishPackage` (#5189),
+  and again at load in `buildEndpointIndex` (PR #5203). ADR-0121's "publish REJECTS" ruling is
+  intact. `deleteMetaItem` stays ungated so pre-existing rows can be cleaned up, and
+  `OS_METADATA_WRITABLE=api` remains the single operator escape hatch — note it unlocks the
+  **write** only; the endpoint still will not be served, which is why it is a diagnostic
+  rather than a workaround.
+
+  **Re-entry path**, recorded by the ruling: if #2657 Part B promotes `apis` to a registered
+  type **with a real consumption path**, the flag and the publish gate come back together —
+  implementation first, declaration second.
+
+### Minor Changes
+
+- f16e54e: ADR-0029 D9: a tenant object overlay registers as its own contributor LAYER instead of splicing the packaged owner out
+
+  租户对 `object` 的定制（`sys_metadata` 行）此前以默认的 `own` 身份进入 `SchemaRegistry`。当该行的 `package_id` 与代码包所有者相同时，`registerObject` 会走"重复注册"分支把**打包的 contributor 直接摘掉**——打包定义不是被遮蔽，而是在写入时被销毁，注册表里不存在第二份副本；`loadMetaFromDb` 每次启动都无声重放这次销毁。
+
+  D9 把这个层次关系显式化：
+
+  - **第三种非拥有的 contributor 种类 `overlay`**，对基础层是替换语义。解析变成 `base = overlay ?? own`，extender 照旧叠在上面。**解析结果逐字节不变**（含 `_provenance: 'org'`）——变的只是注册表"记得"什么：打包的 owner 依然在下面。
+  - `assertSingleOwnerPerObject` **一字未改**（overlay 不是 owner），新增一类违规：孤儿 overlay（有 overlay 没有 owner）。
+  - **基础层的选择问"种类"，永远不问优先级**。`DEFAULT_OVERLAY_PRIORITY = 150` 只用于列举顺序：extender 的优先级是作者声明的，不能让某个包用 `priority: 140` 把租户的 overlay 挤出基础层。
+  - **artifact 身份改为读 owner contributor 的层**，而不是合并后的文档。这一条不是层次化改动的自然推论：合并结果按设计仍带 `_provenance: 'org'`，所以只有从 owner 层读，`isArtifactBacked` 才不再说谎。
+  - `provisionPrimary` / `provisionSearchCompanion` 的门从"是不是 `own`"改成"**是不是基础层**"，否则每个被 overlay 的对象的 `nameField` 都会变。
+  - 行上的 `package_id` 是层的**来源标记**，从来不是所有权主张：同包正常；**无包（`sys_metadata` 哨兵）予以接受**（此前的抛错是借用 `own` 槽位的副产品）；绑定到**其他包**的行在生产者侧被明确拒绝，新错误码 `OBJECT_OVERLAY_PACKAGE_MISMATCH`（422），启动时计入 `loadMetaFromDb` 的 `errors`。
+  - **迟到安装**：代码包为一个租户行已占据的对象名注册时，代码层成为 owner，租户的贡献被重新归类为它的 overlay 层——不再抛 "already owned by"，也不再把租户的定制吞掉。
+  - 删除退化为**减法**：`SchemaRegistry.removeObjectOverlay(name)` 只摘掉 overlay 层，打包 owner 原地不动，因此"恢复"根本不是一次重新注册。
+
+  **行为变化（记录在案的成本）**：谓词诚实之后，`object` 声明的 `allowOrgOverride: false` 会被**一致地**执行——对打包对象的 overlay 写入**每次**都以 `NOT_OVERRIDABLE` 拒绝，而不是只拒第一次（此前第一次被拒、并因销毁证据而让后续每次都从 `allowRuntimeCreate` 那一档混过去）。同一谓词也喂给 `deleteMetaItem` 的两档鉴权与仓库的 `assertAllowed`，所以重置该定制同样需要那道文档化的运维口子 `OS_METADATA_WRITABLE=object`——现在它必须在定制的**整个生命周期**内保持打开，而不只是第一次保存时。
+
+  `ObjectContributor.ownership` 与 `ObjectOwnershipEnum` 的联合类型因此加宽（loader 设定，永不可由作者书写），这是 `objectui` / `cloud` 消费方可见的公开类型变化。
+
+- 3028326: fix(metadata-protocol,objectql): the #4463 runtime authoring gate now runs on every kernel that has not declared itself the package author's channel (#6710)
+
+  The 26 shared author-time rules (`AUTHORING_RULES` — the same table `os validate`
+  / `os build` / `os lint` run) were gated behind
+  `if (this.environmentId === undefined) return;`. That short-circuit was meant to
+  be ADR-0005's "the package author's own bootstrap channel" carve-out, and the
+  carve-out itself is legitimate. The key was not: `environmentId` is a ROW-SCOPING
+  key, and two very different topologies leave it undefined.
+
+  **The defect.** The CLI's lightweight host-config assembler — `serve.ts`'s
+  `config.objects && !hasObjectQL` auto-register branch, which constructs
+  `new ObjectQLPlugin()` with no options — also boots with no `environmentId`.
+  That is the shape any `objectstack.config.ts` with instantiated plugins gets
+  (`isHostConfig` → `shouldBootWithLibrary === false`), including the flagship
+  showcase app. Its `PUT /api/v1/meta/*` is an **end-user** surface, so a
+  self-hosted app server ran **zero** of the 26 rules on every publish. For a
+  Studio tenant or an MCP/AI author this gate is not the weakest of four doors —
+  it is the only one, because a `sys_metadata` overlay row is never in the CLI's
+  config file and there is no `os lint` for it. Measured at boot level: the kernel
+  reports `environmentId === undefined` and #4463's own broken-CEL approval flow
+  (`record.owner ==`) runs straight past the gate into persistence.
+
+  **The fix — the channel is declared, not inferred.** A new plugin option states
+  what a kernel _is_, and gate activation reads that instead of row scope:
+
+  ```ts
+  new ObjectQLPlugin({ authoringChannel: "package-author" });
+  createMetadataProtocolPlugin({ authoringChannel: "package-author" });
+  ```
+
+  `'environment'` (the default, and what you get by omitting the option) runs the
+  rules. `'package-author'` is the ADR-0005 carve-out and belongs only on the
+  genuine control-plane assembly — the kernel installing packages on the
+  platform's own behalf. The option is threaded through `assembleMetadataProtocol`,
+  the one seam both mounts share, so the built-in and delegated (ADR-0076 Step 2)
+  mounts cannot disagree.
+
+  **Omitting it means more enforcement, never less.** That direction is the point:
+  the failure mode being designed out is a future assembly variant nobody thought
+  about silently reopening this hole, which is exactly how the host-config
+  topology got here. It is also why the option is a channel NAME and not a
+  boolean — `skipAuthoringRules: true` would be the same bytes with the opposite
+  meaning, a switch for making a red publish go away. #5086 had already retired
+  the same proxy key for the code-only refusal, for the same reason.
+
+  **What changes for you.** A kernel that serves metadata writes to end users
+  should change nothing — it now enforces the rules it always should have. A
+  kernel that genuinely is a control plane must add `authoringChannel:
+'package-author'`; until it does it runs gated in the safe direction, and the
+  existing per-write `OS_ALLOW_UNLINTED_METADATA_WRITES=1` hatch (#4463 D4)
+  degrades a refusal to a loud log. `environmentId` keeps every one of its other
+  jobs unchanged — the `environment_id` stamp and filter, the ADR-0005 overlay
+  whitelist, the #3050 authoring gate's scope, and local metadata-storage
+  provisioning. Only this one activation moved.
+
+- 11066f6: feat(spec,metadata-protocol,rest,client): the direct-mount surfaces (`packages`, `datasources/:name/external/*`) become discoverable, and the SDK follows the advertised base (#6633)
+
+  The rest surface's `/discovery` never advertised `routes.packages` — routes
+  mounted but not advertised, the unstated half of ADR-0076 D12 — so the SDK's
+  `packages.*` always fell back to the hard-coded `/api/v1/packages`; and the
+  SDK's `datasources.external.*` had no discovery mechanism at all, hard-coding
+  `/api/v1/datasources/...` in each of its five methods. On any deployment with a
+  non-default API base, both families built wrong URLs (measured in #6633).
+  Maintainer ruling 2026-08-08 (route B, prerequisite for #6306):
+
+  - **spec** (minor, additive): `ApiRoutesSchema` declares a `datasources` key —
+    the base of the federation-admin family. Optional like `mcp`: absent = not
+    mounted.
+  - **metadata-protocol** (minor, additive): `getDiscovery()` advertises
+    `routes.packages: '/api/v1/packages'` iff the `package` service is
+    registered (`serviceToRouteKey` gains the mapping; the route flows through a
+    non-slot table because `package` is not a `CoreServiceName`). `datasources`
+    is deliberately NOT advertised by this builder — the mount belongs to the
+    REST host it cannot see (same disposition as `mcp`).
+  - **rest** (minor): `/discovery` advertises `routes.packages` and
+    `routes.datasources` as projections of the RECORDED direct mounts (#5822) —
+    advertisement and mounting derive from one fact, so #6306's later mount-base
+    move carries the advertisement along by construction. Not mounted ⇒ not
+    advertised. An end-to-end parity pin (`discovery-advertised-direct-mounts.
+parity.test.ts`) drives the composed surface and goes red on any change that
+    moves only one side.
+  - **client** (patch, behavior fix): the five `datasources.external.*` methods
+    derive their base via `getRoute('datasources')` — connected clients follow
+    the advertised base; unconnected clients (or servers that advertise no
+    `datasources` key) keep building byte-identical `/api/v1/...` URLs.
+
+  No key is removed and no wire shape changes for existing deployments: servers
+  gain two advertised keys, and the SDK changes URLs only when a server
+  advertises the new keys with a non-default base.
+
+- 5e247fd: fix(metadata-protocol): a `/meta` object read serves the effective runtime schema, whichever layer answered (#6562)
+
+  `GET /api/v1/meta/object/:name` answered a **different set of fields** depending
+  on which link of its resolution chain produced the answer, for the same object:
+
+  - **registry-backed** → the schema AFTER `applySystemFields`, so it carried the
+    injected system columns — `created_at`, `created_by`, `updated_at`,
+    `updated_by`, `organization_id`, `owner_id`, `owning_business_unit_id` — even
+    when the author declared none of them;
+  - **overlay-backed** (a `sys_metadata` customization row, or a MetadataService
+    body) → the stored document VERBATIM, so every one of those columns was simply
+    absent.
+
+  Whether an object carries an overlay is invisible to the caller, so the same
+  request reported the platform's own columns or not, and nothing in the response
+  said which had happened. `/meta` is the machine-readable contract clients and AI
+  authors code against: an author reading an overlay-backed object saw no
+  `created_at` / `owner_id` / `organization_id` and reasonably concluded the
+  columns do not exist — while every one of them is real in the database,
+  filterable, orderable, and enforced read-only on write.
+
+  **Every `/meta` object read exit now serves the effective schema.** The
+  single-item read, the list, the cached/ETag branch, both draft reads and the
+  layered read's `effective` layer all report the injected columns, with the same
+  `readonly` / `system` markers the engine enforces (`owner_id` stays
+  `readonly: false` — ownership is transferable). This is the presence half of the
+  seam #4513 closed the value half of.
+
+  Three things deliberately did **not** change:
+
+  - **`?layers=1`'s `overlay` layer stays byte-verbatim.** Injection happens at the
+    read exits only, so Studio's "what you customised" diff never shows a column
+    nobody wrote. Only `effective` is injected.
+  - **A `GET` → `PUT` round-trip still persists a byte-identical body** (#4326).
+    The write path gained the strip counterpart: a field byte-identical to the
+    platform's own definition is removed again on save, so a served document handed
+    straight back stores exactly what it stored before — same checksum, same
+    history diff. A declared `owner_id` carrying the author's own label is _not_
+    the platform's definition and survives untouched.
+  - **A declared system column stays the author's.** Injection only ever adds a
+    column nobody declared; it never rewrites one that was.
+
+  Which columns an object carries is `resolveInjectedSystemColumns`
+  (`@objectstack/spec/data`, #5378) — the same derivation `applySystemFields`
+  consumes — so every opt-out (`systemFields: false`, `managedBy: 'better-auth'`,
+  `systemFields.audit`/`.tenant`, `tenancy.enabled: false`, the per-tier
+  `ownership` table, the `sys_*` namespace) is answered in one place and re-derived
+  in none. **What** each column looks like moves to `@objectstack/metadata-core`
+  (`AUDIT_FIELD_DEFS` and the three tenancy/ownership anchors, re-exported from
+  `@objectstack/objectql` so the symbols still resolve there) — the same relocation,
+  for the same dependency cycle, as the audit-governance table in #4513:
+  `@objectstack/objectql` depends on `@objectstack/metadata-protocol`, so the read
+  path could not import the definitions from the registry that provisions them.
+  One table now feeds the injection pass and the read exits, so they cannot drift.
+
+  One key is deliberately not carried onto a served document: `organization_id`'s
+  `indexed`. It is not a `FieldSchema` key — removed in the 16.x line (#2377,
+  ADR-0049) and rejected by name by the strict schema — and its only consumer is
+  `driver-mongodb`'s schema builder, which reads the registered schema and never a
+  served document. It stays at the injection site; that the registry-backed read
+  answers `_diagnostics: { valid: false }` because of it is filed as #6810.
+
+- ac244ad: fix(metadata-protocol): refuse an org-scoped write of a type that has no per-org channel (#6190)
+
+  `allowOrgOverride` and `allowRuntimeCreate` are orthogonal tiers, and the
+  runtime-create tier never consulted the ORG dimension:
+  `SysMetadataRepository.put` stamps `organization_id` on the row whatever the
+  type is. So a Studio-authored item of an `allowOrgOverride: false` type
+  persisted a per-org row the platform can never read back — `loadMetaFromDb`
+  loads env-wide rows only. The write path was strictly more permissive than the
+  read path, and the row was lost at the next restart with no log line.
+
+  Measured consequences, both silent before this change:
+
+  - **`flow`** binds its triggers for the life of the process that wrote it, then
+    stops firing after the next restart.
+  - **`object`** is worse and fails CLOSED: absent from the registry after boot
+    while its physical table still holds the data, so every record in it answers
+    404 `OBJECT_NOT_FOUND`.
+
+  `saveMetaItem` (draft and publish modes) and the draft→active promotion
+  (`publishMetaItem`, `publishPackageDrafts`) now refuse such a write with 403
+  `NOT_OVERRIDABLE` before anything is persisted, naming the organization, the
+  flag that produced the verdict, the consequence, and the two legitimate
+  alternatives (save it env-wide, or ship the per-org variant as its own
+  deployment — ADR-0005: "Per-org variants are a deployment, not an overlay").
+
+  **Which types change behaviour.** The predicate is derived from
+  `DEFAULT_METADATA_TYPE_REGISTRY`, never a hand-written list: 18 of its 27
+  entries declare `allowOrgOverride: false` with `allowRuntimeCreate: true` —
+  `object`, `field`, `hook`, `seed`, `mapping`, `page`, `app`, `action`,
+  `dataset`, `flow`, `datasource`, `external_catalog`, `doc`, `book`,
+  `permission`, `position`, `tool`, `skill`. (`api` was the 19th when the ruling
+  was made; #5488 has since withdrawn its runtime-create door entirely, so it is
+  refused as code-only before this gate is consulted.) Unaffected: `view`,
+  `dashboard`, `report`, `translation`, `email_template` (they have a per-org
+  channel and their org rows are read back on demand), plus plugin types with no
+  static registry entry, which keep today's behaviour. Env-wide writes of every
+  type are unchanged.
+
+  `OS_METADATA_WRITABLE` deliberately does **not** unlock the org dimension: it
+  unlocks the write, not the read, so honouring it here would re-open the phantom
+  in exactly the deployments most likely to have one.
+
+  **No data migration is included.** Per the maintainer ruling, rows written
+  before this gate are residue handled non-destructively — made audible by the
+  cold-boot warning and disposed of operationally. They are not rewritten or
+  deleted, and `migrateStoredMetadata` now reports them instead of rewriting
+  them, which makes that pass a second residue detector.
+
+- 89d7b35: feat(spec,metadata-protocol): the runtime authoring gate's advisory findings reach the save response (#4717)
+
+  #4463 put the shared author-time rule registry on the runtime write path — the
+  fourth door, and for a Studio tenant or an MCP/AI author the ONLY one, because a
+  `sys_metadata` overlay row is not in the CLI's config file and there is no
+  `os lint` to run against it. It gated on `error` findings only. The rest — the
+  advisory half — were produced, walked into a `console.warn` deduped once per
+  process per `type|name|rule|path`, and then went out of scope. #4715 named that
+  honestly when it shipped: running a rule and discarding its conclusion is a
+  smaller version of the hole the gate was built to close.
+
+  That case is reachable today, not theoretical. A flow whose only defect is a
+  `delete_record` node declaring `multi: true` with no `filter` yields
+  `errors = 0 / advisories = 1`: the write **succeeds**, the row persists, the
+  flow registers, and the author never learns that their nightly sweep deletes
+  every row of the object on every run.
+
+  **What changed**
+
+  - `SaveMetaItemResponseSchema` declares an OPTIONAL `advisories` array, whose
+    element is the newly-declared `RuntimeAuthoringIssueSchema` — the SAME
+    `rule` / `path` / `where` / `message` / `hint` / `severity` shape the 422
+    `invalid_metadata` envelope already carries (#4463 D3, "reuse the Zod
+    envelope"). It is declared once: `@objectstack/metadata-protocol` re-exports
+    it as its `RuntimeAuthoringIssue` instead of keeping a second hand-written
+    interface for the same six keys, so the refusal and the success channel
+    cannot drift into two dialects.
+  - `evaluateRuntimeAuthoringGate` returns a `RuntimeAuthoringVerdict`
+    (`{ error, advisories }`) instead of `Error | null`. This is an ADDED return
+    channel, not a threaded value: the success path previously returned `null` and
+    had nowhere to put a verdict at all.
+  - `saveMetaItem` attaches the advisories to its success response.
+
+  **Additive and conditional.** The key is emitted ONLY when at least one advisory
+  was raised — never as `[]` — so a clean save's response bytes are byte-for-byte
+  what they were before, and a caller that ignores the field behaves exactly as
+  today. Absence means "nothing to report", never "the gate did not run".
+
+  **`rulesRun` is deliberately NOT on the response.** The gate appends its own
+  `PLATFORM_SCHEDULE_CREATE_RECORD_ORG_MISSING` when the type is `flow`, so not
+  every id it would list resolves in the lint registry; exposing the array would
+  need the declaration to say the ids are _gate_ ids. A field can be added later,
+  not removed.
+
+  **⚠️ Save door only — the asymmetry is deliberate, not an oversight.** The gate
+  runs on BOTH write doors: `saveMetaItem` and the draft→active promotion, on
+  purpose, so `?mode=draft` followed by publish is not a bypass (#4463 D1).
+  Studio's designer uses draft-then-publish on every edit, so the publish door is
+  the dominant Studio flow and it does **not** carry this field yet. That door's
+  own response contract only just landed (#7294); carrying the advisories over is
+  tracked separately rather than bundled here, so this change stays one optional
+  field on one already-declared envelope.
+
+  Rendering the findings in Studio is the objectui half of #4717 and is queued in
+  that repo behind this change.
+
+- 9f7a7c2: fix(metadata-protocol): refuse a sort naming a `formula` field instead of dropping it silently (#6994)
+
+  The list path's SORT gate (`assertSortFieldsExist`) refuses a sort naming a field
+  the object does not have (#4226) and a dotted path that would have to cross into
+  a related record (#4256). It did **not** refuse a name that is a real,
+  non-dotted field of the object whose **type** materialises no column — a
+  `formula` field is in the object's field map, so it passed the unknown check,
+  and it carries no dot, so it passed the dotted check.
+
+  It then reached a driver that has no column for it. Re-measured on a real
+  `SqlDriver` (better-sqlite3, on-disk) driving a real `ObjectQL` engine with this
+  protocol on top, over five rows inserted `C A E B D` and a formula field
+  `sort_key` whose expression is `record.title`:
+
+  ```
+  CONTROL   orderBy title asc     -> ["A","B","C","D","E"]   a real column really sorts
+  BASELINE  no sort               -> ["C","A","E","B","D"]   insertion order
+
+  FORMULA   orderBy sort_key asc  -> ["C","A","E","B","D"]   5 rows, 200
+              its sort_key values -> ["C","A","E","B","D"]
+  FORMULA   orderBy sort_key desc -> ["C","A","E","B","D"]   byte-identical to asc
+
+  RAW SQL   order by sort_key     -> sqlite: no such column: sort_key
+  ```
+
+  `asc` and `desc` coming back identical is what makes this a dropped sort rather
+  than a coincidence: `SqlDriver.createColumn` returns early for `formula` (it is
+  virtual — computed on read, after `driver.find` has already returned), sqlite
+  answers `no such column`, and the #3821 unknown-column backstop retries the
+  query **without** the `ORDER BY`. The response even carries the values it was
+  asked to order by, out of order, under a 200 — so it contradicts the request in
+  plain view and still reports success. `sort` + `top` is how a caller asks for
+  "the latest N", which this turned into an arbitrary N.
+
+  **Now:** `400 INVALID_SORT`, naming the field and its type, and prescribing the
+  same remedy in the same words as the dotted refusal (#6924) and the SEARCH axis
+  (#6673) — denormalise onto a **stored field, written when the source changes**.
+  Precedence on this axis is `unknown` > `dotted` > unmaterializable, so both
+  older verdicts answer exactly what they answered before.
+
+  **`summary` / `rollup` is not affected** and deliberately not in the refused
+  set: a summary field gets a real, maintained `float` column and genuinely sorts.
+  The spec's `COMPUTED_VALUE_TYPES` (`formula`/`summary`/`autonumber`) is the
+  WRITE contract and is the wrong set to gate a sort with — it would refuse two
+  types that work.
+
+  **Scope.** This is an ingress gate, so it covers what reaches `findData`: the
+  REST list route, `POST /data/:object/query`, the export route, and the RPC
+  dispatcher. An internal caller that reaches `engine.find()` directly (hooks,
+  flows, reports) still gets the silent drop — closing that half means deciding
+  whether the engine refuses or keeps its documented internal-caller tolerance,
+  which is a separate contract decision and is tracked separately.
+
+  If you were sorting a list by a formula field, that sort was never applied; the
+  call now fails loudly instead of returning rows in an arbitrary order.
+
+- 1818998: feat(spec,objectql,metadata-protocol): validate-only data operation — ask for the write's verdict instead of predicting it (#6037, #4633 ruling D)
+
+  `import`'s dry run predicted the write path's verdict with a hand-copied mirror
+  of the engine's rules (`rest/src/import-coerce.ts`). A copy cannot structurally
+  keep up with the family it mirrors — ADR-0104 value shapes, `format` checks,
+  object-level `validations`, the state machine — so ruling D replaces prediction
+  with the verdict itself.
+
+  **New:** `DataProtocol.validateData(request)` returns the write path's verdict
+  for candidate rows and persists nothing.
+
+  ```ts
+  const verdict = await protocol.validateData({
+    object: "lead",
+    mode: "insert", // or 'update', which judges only supplied keys
+    data: [{ first_name: "John", email: "not-an-email" }],
+  });
+  // → { valid: false,
+  //     results: [{ valid: false, errors: [{ field: 'email', code: 'invalid_email', … }], warnings: [] }],
+  //     posture: { valueShapeStrict: true, mediaValueShapeStrict: false } }
+  ```
+
+  **Declaration and execution land together, deliberately.** `engine.validate()`
+  (objectql) calls the same `validateRecord` / `evaluateValidationRules` that
+  `insert()` calls, and `metadata-protocol` implements `validateData` on top of
+  it. Agreement between preview and write is therefore guaranteed by
+  construction, and a test asserts it directly by running both against one engine
+  in both postures. This is the ruling's own clause, not a style choice:
+  `BatchOptions.validateOnly` was retired in #4052 as a flag that promised a dry
+  run while the batch surfaces persisted regardless, so a caller previewing a
+  mutation had it EXECUTED. The new operation avoids that spelling too — the
+  tombstone still stands and still rejects `validateOnly`.
+
+  **The verdict is the target deployment's, not an absolute.** The response
+  carries the ADR-0104 `posture` it was reached under. On a self-certified
+  deployment a bad value shape is an error; on a warn-first one the same row is
+  valid and the finding appears in `warnings` with the same `code` — one finding
+  that changed buckets, not two vocabularies. An unconditionally-strict preview
+  was considered and rejected (#4633 option B): it would fail rows on every
+  un-migrated deployment that the write would have accepted, which teaches
+  authors to distrust the one gate in front of a bulk import.
+
+  Two boundaries worth knowing, both deliberate and both documented at the
+  implementation:
+
+  - **No hooks run.** `beforeInsert` fires before validation on the real path, so
+    a hook deriving a _business_ field could change a verdict this does not
+    simulate. Firing arbitrary user hooks in a preview — mail, outbound calls,
+    writes to other objects — is the #4052 defect in a new spelling, so the gap is
+    documented rather than closed. Audit/ownership stamps are `system`/`readonly`
+    and validation skips them regardless.
+  - **Warn-first admissions are not recorded as certification evidence.** The
+    `#4769` sink exists so a boot cannot certify a contract it has just written
+    against; a preview writes nothing, so recording there would let a _preview_
+    block a later migration.
+
+  Additive: `validateData` is optional on `DataProtocol`, and nothing existing
+  changes shape. `valueShapeStrictEffective` / `mediaStrictEffective` are now
+  exported from objectql's record validator so the response reports the posture
+  that actually decided the verdict rather than the raw deployment flag.
+
+  Unblocks #4633's consumption half (rest/import adopting the operation and
+  retiring the `import-coerce.ts` mirror).
+
+### Patch Changes
+
+- b3efeb7: feat(spec): `Field.autonumber` declares the field `readonly: true` (#5628)
+
+  `FieldSchema.readonly` is a **two-part** contract: "never editable in forms"
+  AND server-enforced on both write paths. #5503 closed the server half for
+  `autonumber` **by type** — a caller-supplied record number is stripped before
+  any driver sees it, flag or no flag. The form half is keyed on the **flag**, and
+  `Field.autonumber` never set it. So an authoring/rendering layer that decides
+  editability from `field.readonly` drew an editable "record number" input whose
+  value the server was already guaranteed to discard: the user types one, the
+  create succeeds, and the record comes back carrying the number the sequence
+  issued instead. Data was never at risk (that half has been enforced since
+  #5503/#5627); what was wrong is what the form told the user.
+
+  `Field.autonumber(...)` now emits `readonly: true`. The injection is applied
+  **after** the author's config, so it cannot be spread away, and the authoring
+  type rejects the one config that contradicts it — `Field.autonumber({ readonly:
+false })` is a **compile error** rather than a silently coerced value, because
+  an "editable record number" is not a state the runtime can deliver. Restating
+  `readonly: true` stays legal. A hand-written `{ type: 'autonumber' }` literal
+  (YAML/JSON metadata, or a plain object in TS) is unchanged and unaffected: it is
+  covered by the by-type server enforcement, which never depended on the flag.
+
+  Two consequences worth knowing:
+
+  - **A flow that writes an autonumber field is now caught at `os validate`.**
+    `flow-update-readonly-field` reads the static flag, so an `update_record` node
+    writing a builder-authored record number — already a silent no-op at run time
+    — is now reported at design time instead of in server WARN logs.
+  - **The historical-import exemption is unchanged**, and stays that way by
+    construction. The DataProtocol create ingress (`stripReadonlyForInsert`,
+    #3043) knows only the `isSystem` exemption, while the engine's runtime-owned
+    strip also honours `preserveAudit` (#3493 — a migration reinstating legacy
+    record numbers). Now that the field carries the flag, the ingress would have
+    deleted that value _before_ the engine could keep it, so the ingress skips
+    runtime-owned field types outright and leaves them to the engine strip, which
+    runs on every insert path (including the direct `engine.insert` callers the
+    ingress never sees). Author-declared `readonly` on every other field type is
+    stripped at the ingress exactly as wide as before.
+
+  The set backing "which types the runtime owns" is now declared once in the
+  protocol — `RUNTIME_OWNED_FIELD_TYPES`, exported from `@objectstack/spec/data`
+  — and read by both consumers (objectql's write-path strips, the DataProtocol
+  ingress) instead of each carrying its own literal.
+
+- ae31a19: fix(spec,metadata-protocol): `capability` 补齐三处注册 —— 授权面不再接受任意 JSON (#5961)
+
+  `capability` 是「enforced but undeclared」——#5271 给 `api` 关掉的那个
+  `declared ≠ enforced` 的镜像。平台早就把它当成一个 metadata kind 在用:
+  `PLURAL_TO_SINGULAR` 从 #5870 起就有 `capabilities` → `capability`,
+  `AppPlugin` 用这个名字注册 stack 声明的 capability,
+  `bootstrapDeclaredCapabilities` 再读回来 seed `sys_capability`。但三处注册表
+  里都没有它:`MetadataTypeSchema`(kind 枚举)、`BUILTIN_METADATA_TYPE_SCHEMAS`
+  (schema 解析)、`DEFAULT_METADATA_TYPE_REGISTRY`(谁可以写、怎么加载)。
+
+  后果有两条,第二条才是这个 issue 属于授权缺陷而非整洁度问题的原因:
+
+  - `getMetadataTypeSchema('capability')` 返回 `undefined`,于是 `saveMetaItem`
+    走了它自己文档化的「未注册类型 → 不校验直接存」分支,
+    `PUT /api/v1/meta/capability/:name` 接受**任意 JSON** 落进 `sys_metadata`。
+    capability 是靠**名字字符串**被解析的——授予侧 `systemPermissions`、
+    要求侧 `requiredPermissions` 都是——所以一行任意 JSON 直接落在活的授权命名
+    空间里。
+  - `isRuntimeCreateAllowed` 镜像 `getMetaTypes()` 的合成规则:没有静态注册表条目
+    的类型被当作可运行时创建。所以缺的那一行不只是「没关上门」,它**把门打开了**。
+    `/meta/types` 同步发布了这个虚构:`allowRuntimeCreate: true` + 无 schema,
+    metadata-admin 引擎据此渲染成一个 raw-JSON 文本框。
+
+  ### 改了什么
+
+  - **`BUILTIN_METADATA_TYPE_SCHEMAS['capability'] = CapabilityDeclarationSchema`**。
+    既有的 422 `invalid_metadata` 路径就此覆盖 `capability`,`/meta/types` 发出真
+    JSON Schema。
+  - **`DEFAULT_METADATA_TYPE_REGISTRY` 新增 `capability` 条目,
+    `allowRuntimeCreate: false` + `allowOrgOverride: false`**。ADR-0066 D1:包
+    DEFINE capability,权限集 GRANT,资源 REQUIRE。管理员在运行时凭空造一个
+    capability 在这个三分里没有位置——代码里不会有任何地方 require 那个名字,这行
+    只是授权命名空间里一个无人引用的授予目标。这一对标志就是 #5086 的 CODE-ONLY
+    声明,`saveMetaItem` 在**任何** kernel 上都以 403 `not_creatable` 拒绝,并从条
+    目自己的 `filePatterns[0]` 读回「该去哪儿声明」。`supportsOverlay: false`——
+    capability 只是名字/标签/scope,没有 merge 语义,而允许租户 overlay 一个包发布
+    的声明等于允许把 `scope` 从 `org` 抬成 `platform`。`loadOrder: 12` 早于
+    `permission`/`position`(15),使权限集的 `systemPermissions` 解析时 capability
+    已经存在。
+  - **`MetadataTypeSchema` 枚举补 `'capability'`**。
+  - **`CapabilityDeclarationSchema` 声明 ADR-0010 保护信封并收紧为 `.strict()`**。
+    信封是必须的:loader 对每个已注册类型都调 `applyProtection`,不声明就会 422 掉
+    loader 自己的输出(#4001 在 `permission`/`position` 上补过同一个洞)。收紧则与
+    `api` 不同——`ApiEndpointSchema` 同时是**存储行**的解析器,所以它留在
+    `STILL_STRIP`;而没有任何地方拿这个 schema 重新解析 `sys_capability` 行
+    (`bootstrapDeclaredCapabilities` 通过 `capabilityRowFields` 按名读字段),
+    所以收紧零成本,买到的是一个授权面本就该有的 declared = enforced 姿态。
+    改用 `strictObject` 书写,已知键从 shape 派生,不新增手抄键表。
+
+  **包声明通道完全没动。** `AppPlugin` 通过 `registerInMemory` 注册 stack 的
+  `capabilities[]`,文件系统 loader 按 `filePatterns` glob——两条都不经过
+  `saveMetaItem`,所以 `bootstrapDeclaredCapabilities` 依旧照常 seed。
+  `OS_METADATA_WRITABLE=capability` 仍是 ADR-0005 那唯一一道运维逃生门,而在它后面
+  写入现在由 `CapabilityDeclarationSchema` 判定(422),不再原样落盘。
+
+  ⛔ `role` / `profile` / `policy` **不搭车**:它们没有 `PLURAL_TO_SINGULAR` 映射、
+  没有声明 schema、没有读回接缝,是另一个问题,另开单。这条以断言形式钉在
+  `capability-metadata-kind.test.ts` 里,因为「capability 有了条目,邻居也该有」
+  正是下一个显而易见却错误的改动。
+
+- 53aeb02: fix(metadata-protocol): classify a failed index build from the ERROR, not its message (#6699)
+
+  `classifyIndexFailure` — the function both runtime partial-index migrations in
+  this package classify a failed `CREATE UNIQUE INDEX` with — carried its own
+  private unique-violation vocabulary and answered from the **message channel
+  only**. That made it the fifth such copy in the repo, and the one #6250's
+  inventory missed: it lives in a package none of the other four touched, so it
+  was never in that table and none of the queued follow-ups covered it.
+
+  The first arm now delegates to `@objectstack/types`' `isUniqueViolationError`
+  (#6250 / PR #6541) — the one named answer to "is this a unique-constraint
+  violation?" — and `probeThenReplaceIndex` passes it the **caught error object**
+  instead of `err.message`. A string-only swap would have compiled unchanged and
+  kept the defect: the point of the shared predicate is the `code` / `errno` /
+  `cause` channels, which unwrapping the message throws away.
+
+  **What changes at runtime.** A driver that reports the conflict on `code` or
+  `errno` while giving unhelpful prose — SQLite's `SQLITE_CONSTRAINT_UNIQUE`,
+  MySQL's `ER_DUP_ENTRY` / errno `1062`, Postgres' SQLSTATE `23505`, or the
+  condition one step down `error.cause` behind a pooled wrapper's `Write failed`
+  — was classified `failed`. It is now `conflict`, which is the verdict that
+  produces the report ADR-0120 D4 requires: the key that is not enforced, the
+  query that lists the offending rows, and the pointer at `os migrate plan`.
+  Every message-channel verdict is unchanged — the shared predicate's message
+  limb covers all three shipped dialects' prose.
+
+  **Two things deliberately preserved.** The arm order still checks the
+  duplicate-row question BEFORE the dialect question, because MySQL's duplicate
+  error mentions the key and some drivers wrap both facts in one string; and the
+  dialect arm (`unsupported`) is still this module's own message-based
+  vocabulary, since the shared predicate answers the first arm only and has no
+  opinion about dialect support.
+
+  `classifyIndexFailure`'s parameter widens from `string` to `unknown`, so every
+  existing string call still compiles and is judged exactly as before. Callers
+  holding a caught error should pass it directly rather than `err.message`.
+
+- bf32d4a: fix(metadata-protocol): the cold-boot org-scoped audit scans the LIVE metadata-type registry (#6992)
+
+  `reportUnhydratableOrgScopedRows` — the boot line that says which org-scoped
+  `sys_metadata` rows hydration walked past (#6190, PR #6600) — built its scanned
+  type list by walking `DEFAULT_METADATA_TYPE_REGISTRY`. A metadata type with no
+  entry there is registered at runtime by a plugin (`theme`, `connector`,
+  `webhook`, `sharing_rule`, `analytics_cube`, …), so it was absent from the scan
+  — while `loadMetaFromDb`'s filter (`organization_id: null`) is type-BLIND and
+  skips its org-scoped rows exactly like a `flow`'s. That family was the one
+  getting **neither** the write refusal nor the warning.
+
+  The scan now unions the declared non-org-overridable types with every **live**
+  type the registry does not declare at all, read through the same accessor
+  `getMetaTypes()` lists from (`engine.registry.getRegisteredTypes()` plus the
+  `metadata` service's) — extracted as `listLiveMetadataTypes()` so the listing
+  and the audit cannot drift into two vocabularies of "which types exist here".
+
+  Measured on a real `app-showcase` boot, at the instant the audit fires: 7 live
+  types have no registry entry (`analytics_cube`, `connector`, `data`, `package`,
+  `sharing_rule`, `theme`, `webhook`), all from the SchemaRegistry, which
+  manifests populate during kernel Phase 1 — before the audit runs in
+  `ObjectQLPlugin.start()` Phase 2. The widening is live, not defeated by boot
+  order.
+
+  **What an operator sees.** Still exactly one aggregated line per boot, same
+  `[metadata_org_scoped_unhydrated]` tag and same `type×count (names)` detail with
+  a 5-name sample cap — the widening adds segments to that line, never new lines.
+  Two wording changes carry the new family: the line no longer claims "types the
+  registry declares NOT per-org overridable" (false for a type with no
+  declaration) and instead says "types with NO per-org channel"; and each
+  plugin-registered type is marked `[plugin-registered]`, because the remediation
+  differs — a declared type's org-scoped write is refused from now on, so its rows
+  are residue that cannot grow, whereas an undeclared type's write is **not**
+  refused and the same names return after every restart until the author stops.
+
+  **The write refusal is deliberately unchanged.** `orgScopedWriteRefusal` keeps
+  its "statically-declared types only" predicate: a warning is free and should be
+  maximal, a refusal removes a capability, and widening it would extend a ruling
+  reasoned over the declared registry onto a surface nobody measured. The
+  divergence is now stated in the audit's TSDoc and pinned by a test, so it reads
+  as a decision rather than as drift.
+
+- b3363e9: feat(spec,client): declare the publish door's response — `PublishMetaItemResponseSchema` (#7294)
+
+  `POST /api/v1/meta/:type/:name/publish` has been served since long before this
+  change, and had no contract behind it: the string `PublishMetaItem` appeared
+  nowhere under `packages/spec/src/`, and the endpoint was absent from
+  `plugin-rest-api.zod.ts`'s metadata table. So `version` on the publish response
+  sat in exactly the state `version` on the _save_ response sat in before #5745 —
+  the ADR-0008 optimistic-concurrency token, the value a caller echoes back as
+  `If-Match` to get a 409 instead of a lost update, riding a public wire surface
+  with nothing declaring it. `PublishMetaItemResponse` could not be named at the
+  type level either, which is why `client.metadata.publishItem()` resolved to
+  `any`.
+
+  This carries the #5745 "declared = returned" discipline one door over, with the
+  same three artifacts the save door has:
+
+  - **`PublishMetaItemResponseSchema`** declares the FULL measured body —
+    `success` / `version` / `seq` required, `message` and the three conditional
+    side-effect receipts (`seedApplied` / `materializeApplied` /
+    `projectionApplied`) optional. Optionality is measured, not assumed: the sole
+    producer's single response literal always sets the first three, and attaches
+    each receipt only when the matching side effect ran, so an absent receipt
+    means "that side effect did not run", never "it failed".
+  - **The endpoint declaration**, so the catalog names the route it serves and
+    points at the schema. No `requestSchema`: the body's only read key is
+    `message`, taken only when already a string, so the route cannot 400 a
+    malformed body and declaring one would advertise a gate that does not run.
+  - **A producer-side conformance gate**
+    (`publish-meta-response-conformance.test.ts`), driving a real
+    `publishMetaItem` against a real ObjectQL engine through the schema across
+    the plain shape and every receipt path. A field added to the response, or
+    dropped from the schema, now turns that red instead of silently vanishing at
+    parse.
+
+  `client.metadata.publishItem()` is typed `Promise<PublishMetaItemResponse>` and
+  the type is re-exported, matching `saveItem` / `SaveMetaItemResponse`.
+
+  Also fixes a declared-≠-returned gap one layer down: `publishMetaItem`'s own
+  `Promise<...>` annotation omitted `projectionApplied` while the implementation
+  assigned it, so the method's type denied a key its callers were receiving.
+
+  No behavior change — nothing about the response body moved. This declares what
+  was already on the wire.
+
+- 2a2a9fb: fix(spec,metadata-protocol,runtime): one place decides what an unset `NODE_ENV` advertises (#5936)
+
+  A deployment whose operator never exported `NODE_ENV` must not describe itself as
+  `development` on `/discovery`: `environment` is a machine-readable field, a client
+  reads it to answer "am I talking to production?", and it may skip production warnings
+  or loosen a destructive action's confirmation on the answer. #5673 ruled that in and
+  fixed it — but only for one of the two producers, because that dispatch put
+  `packages/spec` out of scope. The other one, `MetadataProtocol.getDiscovery()` (served
+  by `@objectstack/rest`), went on answering `development` for exactly that input.
+
+  The default now lives in the shared mapper, `resolveDiscoveryEnvironment`: an absent —
+  or blank — value resolves to `production`, and both producers pass the operator's value
+  through as they read it, neither carrying a default of its own. That is what makes it
+  one decision instead of two copies, and it means the next discovery producer inherits
+  the right answer without anyone remembering to copy a line. Patching only
+  metadata-protocol would have left a second copy of the default — precisely the drift the
+  shared table was created to prevent (#4828).
+
+  "Unset" includes a blank value: `NODE_ENV=` exports an empty string, the runtime's
+  `getEnv` has always folded that into its default, and had the mapper treated blank as
+  "anything else" the two producers would have drifted again on that one input.
+
+  **#4828's rule is untouched, and it points the other way on purpose.** A value that IS
+  set but is not a spelling this repo recognises (`qa`, `preview`) still degrades to
+  `development`, so nothing ever claims `production` on a guess. Absence is not a guess —
+  it is the host declining to say.
+
+  Behaviour change to expect: a host that exports no `NODE_ENV` and serves `/discovery`
+  through `@objectstack/rest` now advertises `environment: "production"` where it
+  previously advertised `"development"`. A deployment that genuinely is development should
+  say so — `NODE_ENV=development` — which is what the runtime dispatcher has already
+  required since #5673.
+
+  The mapping table above `NODE_ENV_TO_DISCOVERY_ENVIRONMENT` is corrected in the same
+  pass: its `unset / anything else -> development` row had been false for the runtime
+  caller since #5673 and is now two rows, one per rule.
+
+- 6908830: <!-- adr-0087: registered engine-find-formula-order-by-refused -->
+
+  fix(objectql)!: `engine.find` / `engine.findOne` refuse an ORDER BY they cannot materialise (#7095)
+
+  `engine.find()` and `engine.findOne()` are a **public API**, and an `orderBy`
+  naming a `formula` field — which used to return rows successfully, in an
+  arbitrary order — now **throws `400 INVALID_SORT`**.
+
+  #6994 closed this at the REST ingress (`assertSortFieldsExist`), covering
+  everything that reaches `findData`: the list route, `POST /data/:object/query`,
+  the export route and the RPC dispatcher. A caller reaching the engine directly
+  passed through none of it. Measured on the base of this change, real `ObjectQL`
+  over a driver that really sorts:
+
+  ```
+  engine.find(o, { orderBy: [{ field: <formula>, order: 'asc'  }] }) -> C A E B D
+  engine.find(o, { orderBy: [{ field: <formula>, order: 'desc' }] }) -> C A E B D
+                                               asc === desc (byte-identical)
+  ```
+
+  A `formula` value is computed on read, so no driver materialises a column for
+  it: the ORDER BY reached the driver, found nothing, and the unknown-column
+  backstop returned the rows unordered under a success — carrying the very values
+  they were asked to be ordered by. With `limit`, "the latest N" was an arbitrary
+  N that no amount of inspecting the response could reveal.
+
+  - FROM `orderBy: [{ field: '<formula field>' }]` → TO: denormalise the value
+    onto the object (a stored field, written when the source changes) and sort by
+    that. This is the same remedy, in the same words, that the REST door has
+    prescribed since #6924 / #6994 and that the SEARCH axis prescribes since
+    #6673 — a caller refused at two doors is not sent two different ways.
+
+  **`summary` / rollup fields are NOT affected** and still sort in both
+  directions: they get a real, maintained column. The family this refuses is
+  `formula`, not "computed" — widening it to the spec's `COMPUTED_VALUE_TYPES`
+  (the _write_ contract) would break two types that work, and a control test pins
+  that.
+
+  **Who was actually reaching this.** The #7095 ruling required the internal-caller
+  tolerance to survive only behind a pinned internal path, and only if a _measured_
+  internal call site relied on it. The sweep of every in-tree `orderBy` reaching
+  the engine directly — hooks, flows, reports, queue/job adapters, sharing,
+  metadata loaders, expand sub-reads — found **none**: every hardcoded internal
+  sort names a real stored column (`created_at`, `updated_at`, `version`,
+  `priority`, `scheduled_for`, `started_at`, `next_run_at`, `recorded_at`, `id`),
+  and no shipped object in the repo declares a `formula` field at all. So **no
+  internal path shipped**, and there is no flag to opt back into the drop — a
+  negative test pins that the public options shape refuses one.
+
+  The one **author-reachable** consumer is why leaving this at ingress was not
+  tenable: a saved report's `query.orderBy` is forwarded verbatim into
+  `engine.find` by `plugin-reports`, bypassing the ingress gate entirely. A report
+  authored to sort by a formula field used to run and return an arbitrary order;
+  it now fails loudly with the remedy in the message.
+
+  **One path deliberately does NOT become a refusal.** A nested `expand` sort
+  raises this same error inside `expandRelatedRecords`, but that sub-read sits in a
+  pre-existing graceful-degradation `catch` which swallows _every_ expand failure
+  and retains the raw foreign keys. That path therefore moves from **silent** to
+  **observable** — a warning naming the field and the fix — rather than refusing.
+  Reversing that backstop is a decision about all expand failure modes (#3821) and
+  is not ridden in on this change; it is measured and pinned as-is.
+
+  **What did NOT change:** the ingress gate is untouched — same message, same
+  `unknown` > `dotted` > unmaterializable precedence, same `param` name that the
+  engine cannot know. The engine door judges only the third verdict: unknown and
+  dotted sort names still reach the driver from a direct call exactly as before,
+  because refusing those is a posture change on two further axes rather than a
+  free extension of this one. Reading a formula field, and the projection axis'
+  `SELECT *` tolerance, are also untouched.
+
+- d53bd0b: `findData`'s shared list-query normalizer now checks the ARITY of every query
+  parameter it reads, instead of coercing a repeated one blind (#7321).
+
+  `IHttpRequest.query` is `Record< string, string | string[] >` and the array arm
+  is produced by a real first-party adapter (`NodeHttpServer` hands `?x=1&x=2`
+  through as `['1','2']`). Every coercion in this normalizer was written for the
+  string arm, so a repeated parameter was coerced into a value nobody asked for
+  and served under a 200:
+
+  - `?$top=1&$top=2` → `Number(['1','2'])` is `NaN` → the driver was called with
+    `limit: NaN`. Same for `$skip` / `offset`.
+  - `?status=open&status=won` → the leftover-key bucket lowered it to
+    `where: { status: ['open','won'] }`, and a bare array is not a valid field
+    spec — it matches no row on any backend. An empty page, 200 OK.
+  - `?$search=a&$search=b`, `?$count=true&$count=false` and a repeated body
+    `object` behaved the same way, each in its own flavour.
+
+  Those are now refused with `400` / `error.code: INVALID_REQUEST` — the code this
+  same normalizer already answers for the identical condition reached the other
+  way (two SPELLINGS of one slot given different values, #4181 → #3795). A
+  one-element array is one occurrence and is unwrapped, not refused; an empty
+  array is no occurrence.
+
+  **Unchanged on purpose — this is a per-parameter judgement, not a sweep.**
+  `$select` / `select` / `fields`, `$expand` / `populate` / `expand`,
+  `$searchFields`, `$orderby` / `sort` / `orderBy`, `$filter` / `filter` /
+  `filters` / `where` (whose array arm is a FILTER AST, not a repetition),
+  `groupBy` and `aggregations` all accept the array arm on purpose and keep it
+  byte for byte. A blanket "reject repeated parameters" rule would have broken
+  every one of them.
+
+  Not reachable on today's production Hono adapter, which collapses repeated
+  parameters to the first value before any handler runs; it becomes reachable when
+  that collapse is removed (#6878 route 2).
+
+- dba7747: fix(metadata-protocol): `getUiView` 的响应体不再多发三个未声明键,与 `GetUiViewResponseSchema` 对齐
+
+  `GET /ui/view/:object/:type` 由 `getUiView` 产出、REST 层 `res.json(view)` 裸发(不套信封、不校验)。它的声明是 `GetUiViewResponseSchema`(= `ViewSchema`),但实发 body 里的 `list.object` / `form.object` / `form.label` 三个键,`ListViewSchema` / `FormViewSchema` 这两个 `strictObject` 从未声明,实测 `safeParse` 直接 `unrecognized_keys` 判红。因为 `GetUiViewResponseSchema` 在全仓没有任何运行时读者,这处分裂此前没有任何断言看得见。
+
+  **FROM → TO**
+
+  ```
+  FROM  { list: { type, object, label, columns, sort, searchableFields } }
+  TO    { object, list: { type, label, columns, sort, searchableFields } }
+
+  FROM  { form: { type, object, label, sections } }
+  TO    { object, form: { type, sections } }
+  ```
+
+  - **迁移**:读 `object` 的消费者上移一层 —— `body.list.object` / `body.form.object` 改读 `body.object`。这是**相同的值换了层级**,不是删除:`ViewSchema` 一直在容器层声明 `object`(「Object this container binds to」),成员层那份本就是冗余副本。
+  - `form.label`(原 `` `Edit ${…}` ``)**不上移、直接摘除**:它是渲染串而非元数据,任何 view schema 都没有声明过它;标题由 UI 自行拼(调用方本就知道自己请求的是哪个对象)。`list.label` **不受影响** —— `ListViewSchema` 正式声明了 `label`,保持原样。
+  - 定级 **patch** 而非 minor/major:三键的消费面实测为零 —— `client-react` 的 `useView` 把 body 当 `any` 透传(`UseMetadataResult.data: any`),objectui 全仓 `meta.getView` 零命中(其 `getView(objectName, viewId)` 走的是 `client.meta.getItem('view', …)`,另一条通路)。无编译期破坏面,无类型改判。
+  - `packages/spec` **零改动**:本次是把实现修正到既有声明,不是改声明迁就实现。
+
+  **未验面**:`cloud` 仓未在本次验证范围内(按 #5540 口径如实标注)。若该仓有直接读 `body.list.object` / `body.form.object` 的代码,需按上面的迁移上移一层;`form.label` 的读者需自行拼标题。
+
+  常驻 pin:`packages/metadata-protocol/src/protocol.ui-view-response-conformance.test.ts` —— 用**生产端真实组装路径**(实调 `getUiView`)喂 `GetUiViewResponseSchema.safeParse`,而非手拼 fixture。反向验证已跑:恢复任一多发键 → pin 转红并点名该键。
+
+- c733ae8: fix(metadata-protocol): the dialect arm of `classifyIndexFailure` walks `cause` to the same depth the conflict arm does (#6848)
+
+  `classifyIndexFailure` had two arms reading two different wrap-depths. #6699
+  moved the first arm onto `@objectstack/types`' `isUniqueViolationError`, which
+  follows `error.cause` four levels down because pool and query-builder layers
+  re-throw with the original attached. The second — the dialect arm — kept reading
+  `err.message` and stopping there.
+
+  So a dialect refusal arriving behind a wrapper (outer prose `Write failed` or
+  `pool query failed`, the actual `near "WHERE": syntax error` one step down
+  `cause`) was graded `failed` instead of `unsupported`. The private
+  `indexFailureText` helper now collects the message channel of the thrown value
+  **and** of each `cause` below it, bounded at the same `MAX_CAUSE_DEPTH` of 4 the
+  predicate uses and counted the same way (the thrown value is depth 0). The
+  dialect vocabulary itself is unchanged — only the text fed to it.
+
+  **Why the verdict matters beyond wording.** The two consumers dispose of
+  `unsupported` and `failed` differently. `view-definition-active-index.ts` treats
+  them the same (keep the previous index, report at `error`; only the wording
+  differs). But `ensureOverlayStateIndex` builds the composite **fallback lookup
+  index** on the `unsupported` branch and on no other — offered precisely because
+  a dialect that cannot take the partial form should still get the lookup. Under
+  a `failed` verdict that branch never ran, so `fallback` came back
+  `not-attempted` rather than `ensured` / `refused` and the degradation target was
+  silently never attempted.
+
+  **Dormant, not a live regression.** No driver shipped today produces the wrapped
+  shape — each hands knex's error back with the dialect text on the outer message,
+  which is why every existing case matched on the first read. This closes an
+  asymmetry before a wrapping raw-SQL driver can land on it; it is also not a
+  regression from #6699, which only made the contrast visible by deepening the
+  first arm.
+
+  Two details worth knowing if you touch this: the collected levels are joined
+  with a **newline**, never a space, because two of the dialect alternatives are
+  multi-word (`where clause`, `near "where"`) and a space would let a phrase be
+  synthesised across a wrapper boundary that no single driver wrote. And a looping
+  `cause` chain is **bounded rather than detected** — no visited set — which is
+  exactly what the predicate this mirrors does.
+
+  Arm order is unchanged and still load-bearing: a conflict reported anywhere in
+  the chain still beats a dialect refusal in the outer prose.
+
+- 30bed70: fix(metadata-protocol): a legacy env overlay on a rolled-back overlayable type can be REMOVED again (#6960)
+
+  #6483 / PR #6608 flipped `permission` / `position` / `page` / `app` / `dataset` /
+  `book` to `allowOrgOverride: false`. That closed the **write** door and
+  deliberately left the **read** path alone — `supportsOverlay` stayed `true`, so
+  an overlay row authored _before_ the rollback still merges overlay-wins and
+  still shapes the effective body.
+
+  Removing such a row was refused, at two places and on two different topologies:
+
+  - `deleteMetaItem`'s `environmentId !== undefined` branch answered
+    `403 not_overridable` **before** it ever probed for the row — so even an
+    artifact-backed item with nothing customized was refused;
+  - `SysMetadataRepository`'s delete gate refused the same removal
+    `intent: 'override-artifact'`, and that check is **topology-independent**, so
+    a control-plane kernel (no `environmentId`, which skips the first gate
+    entirely) was refused there instead.
+
+  Net effect for an environment that upgraded across the rollback while holding
+  such a row: the ordinary "Reset to package default" flow answered 403 with the
+  item still customized, and `OS_METADATA_WRITABLE` was the only documented way
+  out.
+
+  **What changes.** Per the maintainer's ruling of 2026-08-10, the **delete** side
+  moves: removing an overlay of a type whose loader merges overlays at read time
+  is allowed through the ordinary delete path, on both kernel topologies, without
+  the operator hatch. Deleting an overlay restores the code-declared state — the
+  narrowing direction, which cannot widen anything — so refusing it served no
+  security purpose while trapping the repair behind an escape hatch.
+
+  **What does NOT change, deliberately.**
+
+  - **Create and update stay refused exactly as before.** The asymmetry is the
+    ruling, not an oversight: `saveMetaItem`'s gate and `SysMetadataRepository.put`
+    are untouched, and both gates' doc comments now record why, so the asymmetry
+    is not later "fixed" into symmetry.
+  - **The `object` tier does not move.** The relaxation is keyed on the registry's
+    `supportsOverlay` flag, not on `allowOrgOverride`, so it stops at the tier
+    boundary: `object` declares `supportsOverlay: false` (its overlay registers as
+    its own contributor layer, ADR-0029 D9) and keeps refusing both verbs, which
+    is D9.6's declared cost.
+
+  Zero affected rows in the in-repo corpus today (measured at PR #6608), so this
+  is a correctness-of-contract change with no live victim.
+
+- f6e59f7: fix(metadata-protocol): the delete heal no longer unregisters an object bound to an installed package
+
+  Deleting a metadata overlay row for an `object` whose `package_id` names an installed package took the object off the whole data plane until the next restart: every CRUD call answered `OBJECT_NOT_FOUND` / 404 while the table still held the rows, and the delete receipt said `reset: true`.
+
+  `SchemaRegistry.registerObject` replaces (splices out) the same-package `own` contributor rather than shadowing it, so hydrating such a row destroys the packaged definition at write time and stamps `_provenance: 'org'`. Tier 3 of `restoreArtifactRegistryView` then consulted `isArtifactBacked` — which for an `object` is exactly that provenance — and read "not code-shipped" for an object the package still ships.
+
+  Tier 3 now also refuses when the owner contributor's package binding names a currently-installed package, and says so in the log. The binding survives the overwrite (the replacement fires only when the package ids match); the definition does not.
+
+  Known cost, deliberate: a package-bound runtime-authored object is indistinguishable from a package-shipped one by binding alone, so a genuinely deleted one stays registered until the next restart — listable, and rowless. A surplus entry is the cheap error here; a wrongly retired one 404s data CRUD for every tenant.
+
+- dbe92a7: fix(metadata-protocol): boot 重水合按行的真实 package 绑定登记对象归属(#4636 裁 B 收官)
+
+  `loadMetaFromDb` 的 object 分支从 `engine.find` 返回的行上读 `record.packageId`,而 `sys_metadata` 的列是 snake_case 的 `package_id` —— 该表达式恒为 `undefined || 'sys_metadata'`,于是每次重启都把**绑定了包**的对象 overlay 登记在 `'sys_metadata'` 哨兵下。改为读 `package_id`,与写路径、`getMetaItems`、以及相邻的非 object 分支一致。
+
+  用户可见的行为差异:归属键同时就是包过滤键(`getAllObjects(packageId)`),所以此前一个对象在**创建时**出现在自己所属包的侧边栏过滤里,**重启之后就消失**;更要紧的是重启后的第一次编辑——boot 登记 `'sys_metadata'`、保存登记 `app.<slug>`,`registerObject` 抛 `already owned by package …` 被 `applyObjectRegistryMutation` 吞成 `console.warn`,保存回 `success: true` 而内存 schema 停在重启时的版本,这一笔编辑被静默丢弃(cloud#970 的重启面)。两侧统一到真实 id 后,过滤与编辑都跨重启成立。
+
+  `@objectstack/objectql` 仅同步 `registry.ts` 中 `isTenantAuthored` 的契约注释:PR1 标注的「这半句描述的是契约,还不是代码」随本次落地摘除。
+
+- 114e727: fix(objectql,metadata-protocol): deleting a runtime-created overlay retires its registry entry, so list/get/dispatch agree (#5079)
+
+  Deleting a metadata item an admin had **created** at runtime (`DELETE
+/api/v1/meta/<type>/<name>` for a name no code package ships) removed the
+  `sys_metadata` row and reported `reset: true`, while every read surface kept
+  serving the deleted item for the life of the process: `GET /meta/<type>` still
+  enumerated it, `GET /meta/<type>/<name>` still returned its body, and the
+  ADR-0110 D3 declaration gate still resolved a declaration for it. No TTL was
+  involved — only a restart cleared it. This is the residual branch of #4432
+  ("every surface in agreement"), the mirror image of the write direction #4521
+  fixed.
+
+  **Cause.** #4521 made `saveMetaItem` write an overlay through into the engine's
+  `SchemaRegistry` under the PLAIN key, so a saved item is dispatchable and not
+  merely listable. The delete side's registry heal
+  (`restoreArtifactRegistryView`) only knew how to _un-shadow a packaged
+  artifact_: `SchemaRegistry.removeRuntimeShadow` deletes the plain key **only**
+  when a composite `<packageId>:<name>` artifact remains underneath, so that the
+  name stays resolvable. For a runtime-created item there is no artifact —
+  the row _was_ the item — so the heal declined and nothing else ever removed the
+  entry.
+
+  **Fix — at the producer, not the readers.** `restoreArtifactRegistryView` now
+  walks the layers under the deleted overlay and stops at the first one that can
+  serve the name: (1) a composite-key artifact, (2) a MetadataService baseline,
+  and (3) — new — nothing, in which case the plain-key entry is retired via the
+  new `SchemaRegistry.removeOverlayEntry(type, name)`. The registry now makes the
+  same distinction the delete receipt already makes (#5927): "reset to artifact
+  default" vs "it no longer exists".
+
+  Two boundaries are preserved deliberately:
+
+  - **A packaged artifact is never unregistered.** `removeOverlayEntry` refuses a
+    plain-key entry that is itself an artifact (`_packageId` set, not the
+    `sys_metadata` rehydration sentinel, not tenant-authored) — the same
+    predicate `getArtifactItem` applies to its own bare-key fallback — and never
+    touches composite keys. Resetting a customization of a shipped item still
+    reveals the shipped value.
+  - **An outage is not an absence (ADR-0110 D3).** The layer-2 baseline read now
+    decides whether an entry is retired, so it goes through the diagnosed read: a
+    metadata plane that could not answer stops the walk instead of retiring an
+    entry on the strength of a read that never happened.
+
+  Measured on the showcase app: before, `POST /api/v1/actions/<object>/<name>`
+  after the delete answered 404 with the _handler-miss_ wording ("… not found"),
+  because the declaration was still resolvable from the stale entry; it now
+  answers the ADR-0110 "has no declaration" 404 — byte-identical to the state
+  before the item was ever created.
+
+- 1a53a02: fix(meta): `/meta` object reads stop reporting `readonly: false` on fields the write path refuses (#4513)
+
+  `#4447` made the audit-provenance family (`created_at`, `created_by`,
+  `updated_at`, `updated_by`) engine-owned on the **write** path: the registry's
+  `applySystemFields` forces `{ readonly: true, system: true }` over a _declared_
+  audit field, and `ObjectQL.update` strips a non-system caller's write to it.
+
+  The **read** path never learned it. A `/meta` object read resolves through
+  `sys_metadata` overlay → MetadataService → SchemaRegistry, and only the last of
+  those three has been through `applySystemFields` — so an object whose built
+  artifact ships a materialized `created_at` carrying FieldSchema defaults
+  (`readonly: false`) reported that value to every client while writes to that
+  same field were being refused. Measured before the fix, all of the read exits
+  agreed with each other and disagreed with the engine:
+
+  ```
+  single  read: {"type":"datetime","label":"Created At","readonly":false}
+  list    read: {"type":"datetime","label":"Created At","readonly":false}
+  cached  read: {"type":"datetime","label":"Created At","readonly":false}
+  layered read: {"type":"datetime","label":"Created At","readonly":false}
+  ```
+
+  One field, two answers — and the machine-readable one, the only face a client
+  or an AI author writing code off `/meta` can see, was the wrong one.
+
+  **What changes.** Every `/meta` object read exit now reports the audit family
+  the way the engine enforces it. That covers the single-item read (both the
+  singular and plural type spelling), the list read, the cached/ETag branch, the
+  `?preview=draft` and `?state=draft` reads, and the layered read's `effective`
+  layer. `GET` bodies for objects that declare an audit field will show
+  `readonly: true, system: true` where they previously showed `readonly: false`
+  or omitted the keys; nothing else about the document changes, and the ETag for
+  such an object changes once.
+
+  **What deliberately does not change.**
+
+  - The layered read's `code` and `overlay` layers stay raw — showing the
+    package's declaration beside the governed `effective` value is the
+    diagnostic's whole point.
+  - `sys_metadata` still stores exactly what the author saved; the correction is
+    applied on the way out, so no phantom customization appears in the diff.
+  - An object that opts out of the audit family (`systemFields: false`,
+    `systemFields.audit: false`, `managedBy: 'better-auth'`) is untouched — the
+    engine enforces nothing there, so a read that claimed otherwise would be the
+    same lie pointing the other way.
+  - Only `readonly` and `system` are forced. Every other key an author writes —
+    `label`, `description`, `hidden`, `group`, and `type` for an external object
+    mapping a differently-typed remote column — stays theirs.
+
+  The governance table moved from `packages/objectql/src/registry.ts` to
+  `@objectstack/metadata-core` (`AUDIT_FIELD_GOVERNANCE`, plus the
+  `applyAuditFieldGovernance` normalizer the read path applies), by the same
+  criterion and for the same cycle as the `#5619` engine-dispatch predicates:
+  `@objectstack/objectql` depends on `@objectstack/metadata-protocol`, so the
+  read path cannot import the table from the registry that enforces it, and a
+  second copy would agree only until someone edited one side. `objectql`
+  re-exports the symbol from its original path, so its public API is unchanged.
+
+- 7e1b480: fix(metadata-protocol): 删除回执不再对 runtime-only 项谎称"已重置为 artifact 默认值"
+
+  `deleteMetaItem` 的四句成功回执(repository 路径两句 + legacy raw-engine 路径两
+  句)原本无条件把每一次删除都叙述成"摘掉一层 overlay、回落到 artifact 默认值"。
+  但对一个 **runtime-only** 项 —— 管理员在 Studio 里新建的 `object` / `flow` /
+  `hook`,没有任何 code package 提供同名 artifact —— 底下根本没有默认值可回落:那
+  一行就是这个项的全部,删掉之后它在任何层都不复存在。回执却把管理员指向一个从未
+  存在过的基线。
+
+  判据与 #5265 / PR #5926 在 save 侧用的是同一个:`isArtifactBacked` —— 也就是
+  `intent: 'override-artifact' | 'runtime-only'` 的来源,本方法内早已算出。新增的
+  方法级绑定**替换**了 `intent` 原来的那次 inline 调用,所以分句后 registry 读取次
+  数不增反减。
+
+  |                                     | FROM                                                                         | TO                                                       |
+  | :---------------------------------- | :--------------------------------------------------------------------------- | :------------------------------------------------------- |
+  | 覆盖了 artifact,删除即回落          | `Customization overlay deleted — <t>/<n> reset to artifact default. [seq=N]` | 逐字不变                                                 |
+  | runtime-only,删除即消失             | 同上                                                                         | `Deleted <type> '<name>' — it no longer exists. [seq=N]` |
+  | 覆盖了 artifact,本就没有 overlay 行 | `No customization overlay found for <t>/<n> — already at artifact default.`  | 逐字不变                                                 |
+  | runtime-only,本就不存在             | 同上                                                                         | `No <type> '<name>' found — nothing to delete.`          |
+
+  `success` / `reset` / `seq` 三个字段一字未动 —— `message` 没有任何消费方解析,仅
+  作展示。草稿两句(`Draft discarded — …` / `No pending draft for …`)本来就没有声
+  称过 overlay 或 reset,对两类项都为真,故逐字保留。legacy raw-engine 路径不写
+  history、不发 watch 事件,两句因此本就不带 `[seq=…]`,该差异为既有设计,分句未
+  触碰。
+
+- 725c7b0: fix(metadata-protocol): an org-scoped metadata DELETE no longer evicts the env-wide registry entry (#6780)
+
+  `restoreArtifactRegistryView` — the three-tier heal that repairs the in-memory
+  `SchemaRegistry` after an overlay-row delete — was `(type, name)`-addressed and
+  org-blind. Every tier writes the PLAIN key (`removeRuntimeShadow` drops it, the
+  layer-2 re-register rewrites it, `removeOverlayEntry` retires it), and per
+  ADR-0005 that one plain-key entry belongs to the **env-wide** row: an org-scoped
+  overlay never enters the process-wide registry at all (#6602). `deleteMetaItem`
+  called the heal on all three of its paths without passing the delete's own
+  scope, so org A resetting **its own** customization reached in and evicted the
+  entry every other org and the control plane read.
+
+  Measured before the fix on an unscoped (control-plane) kernel — the shape #5086
+  found the flagship showcase booting with:
+
+  ```
+  after env-wide save   : "Env grid"
+  after org A save      : "Env grid"     # #6602 holding — the org row stays out
+  delete receipt (org A) : { success: true, reset: true, … }
+  after org A DELETE    : undefined      # the eviction
+  rows left             : [{ name: "shared_grid", org: null, state: "active" }, …]
+  ```
+
+  The env-wide row is still in `sys_metadata`; only its registry entry is gone.
+  While it is gone, direct registry readers answer as if the item does not exist
+  — ADR-0110 D3's declaration gate, `resolveRouteActionDeclaration`, and
+  fail-closed `assertObjectRegistered` (404). One tenant's "reset my
+  customization" therefore degraded every other tenant's runtime until restart.
+  The no-row **self-heal** branch was the cheaper door still: an org that had
+  never customized anything could evict the entry with a single no-op DELETE
+  (`reset: false`, "nothing to delete") — so a gate on the delete-ful branch
+  alone would have left it open.
+
+  The scope verdict now lives INSIDE the helper as a **required**
+  `organizationId` parameter — the `hydrateOverlayIntoRegistry` shape #6602 used
+  on the register side — rather than as a test repeated at each call site. There
+  are four call sites, not the two the report named: `deleteMetaItem` has three
+  (self-heal, post-`repo.delete`, legacy raw-engine path) and `revertCommit` one.
+  A required parameter makes the next caller answer at compile time; an optional
+  one would default an omission back to "env-wide" and reinstate the hole. PR
+  #6807's call-site gate on the revert limb is now redundant-not-contradictory
+  and was folded into the argument it passes — its pin still covers the batch
+  path, and it goes red if the gate is ever removed.
+
+  **Register wide, retire narrow.** The write-through's `object` carve-out stays
+  un-org-gated and deliberately does not transfer to removal: it rests on
+  `assertObjectRegistered` failing CLOSED, so a surplus entry degrades to
+  "listable but rowless" and the next reload heals it, whereas a wrongly retired
+  entry 404s data CRUD for every tenant.
+
+  Unchanged: row-level delete behaviour (an org-scoped delete still removes the
+  org row, and the org's next read falls through to the env-wide body); the
+  env-wide delete's full three-tier walk (#6687 tier 1 un-shadowing, #5079 tier 3
+  retirement); and the kernel-scope gate, which still guards re-registration
+  only because that is a fact about the kernel, not about the row.
+
+- 4bb6f01: fix(metadata-protocol): an org-scoped overlay row no longer reaches the process-wide SchemaRegistry (#6602)
+
+  ADR-0005 (revised 2026-05) says only **env-wide** rows (`organization_id IS NULL`)
+  enter the process-wide `SchemaRegistry`; per-org overlays are served on demand and
+  never grafted into the registry every org in the process shares. The registry has
+  exactly one plain key per `(type, name)` and no org dimension to hold two orgs'
+  bodies apart, so a per-org body sitting under that key IS the other orgs' body.
+
+  Boot obeyed the rule — `loadMetaFromDb` filters `organization_id: null` and says so
+  in its own comment. Both **runtime** seams did not:
+
+  - **The write-through.** `applyRegistryWriteThrough` gated on `environmentId` alone.
+    Its TSDoc already claimed the rule ("a project-scoped row must not be registered
+    into a registry that unscoped callers share. The write must not be more permissive
+    about that than the read is") while the code said nothing about `organization_id`.
+    On an unscoped kernel a per-org `view` write hydrated straight into the registry
+    under the plain key.
+  - **The read hydration.** `getMetaItems` merges this caller's org rows into the
+    env-wide set and then hydrated the whole merged set under the same
+    `environmentId === undefined` gate — so one org-scoped listing call grafted that
+    org's bodies too, and would have undone a write-side-only fix at the next listing.
+
+  Both were observable rather than theoretical: once org A's body sat under the plain
+  key, org B's listing started from org A's body, and where the names did not collide
+  org A's item was simply **in** org B's list. Per #5086 a host config boots
+  `new ObjectQLPlugin()` with no `environmentId`, so the flagship showcase runs on
+  exactly this kernel shape.
+
+  **The fix restores the stated invariant at both seams at once, in one place.**
+  `hydrateOverlayIntoRegistry` is the single choke point all three hydration callers
+  (boot, read-side, write-through) already route through since #4521, so the row-scope
+  verdict now lives there — and its `organizationId` argument is **required**, not
+  optional: an omitted org would default to "env-wide" and reinstate the hole, while a
+  required one makes every caller state the row's scope to compile. The kernel-scope
+  gate (`environmentId === undefined`) stays with the callers, because that is a fact
+  about the kernel, not about the row.
+
+  Not changed, deliberately:
+
+  - **What org readers see.** The merged listing, `getMetaItem`'s org-preferred read,
+    and the org-scoped write itself are all untouched — this closes a registry leak,
+    never a write or a read. Per-org overlays keep working exactly as ADR-0005
+    designed them: served on demand.
+  - **#4521 read-your-writes.** An env-wide save is still dispatchable the moment it
+    lands, with no listing call in between.
+  - **The `object` branch.** An `object` is `allowOrgOverride: false` and its physical
+    table is env-wide, so the registry entry backing it is env-wide too;
+    `assertObjectRegistered` fails closed on a missing entry, so gating that branch
+    would make a runtime-created object unreachable for data CRUD rather than merely
+    un-listed. That branch has never carried the `environmentId` gate either, for the
+    same reason.
+  - **The delete chain.** `restoreArtifactRegistryView` stays `(type, name)`-addressed:
+    with both entry seams refusing org rows there is nothing org-scoped in the registry
+    for it to mis-address, so no re-keying is needed (pinned in both directions).
+
+- e39dd66: 冷启动跳过的 org 作用域元数据行不再无声消失
+
+  `loadMetaFromDb` 按 ADR-0005(2026-05 修订)只水合 `organization_id IS NULL` 的行,
+  per-org overlay 由 `getMetaItem`/`getMetaItems` 按需加载——对注册表里
+  `allowOrgOverride: true` 的类型(`view`/`dashboard`/`report` 等)这是设计本身。但对
+  **其余类型**,一条 org 作用域的行是平台根本没有 per-org 通道的行,而在此之前这个跳过
+  是**完全静默**的。
+
+  实测标本是 `flow`:它是 `allowOrgOverride: false`(#6283 / PR #6478 按 ADR-0005:57
+  回滚),同时 `allowRuntimeCreate: true`,所以租户在 Studio 里新建一条 flow 仍会写出
+  `sys_metadata.organization_id = '<org>'`——运行时 `PUT /metadata/:type/:name` 把
+  `resolveActiveOrganizationId` 透传给 `saveMetaItem`,而 `SysMetadataRepository.put`
+  对任何类型都按 `organization_id: this.organizationId` 落库。该 flow 在本进程内一直正常
+  触发(发布时写穿进了进程级 registry),下一次重启后被这条过滤器丢掉,`kernel:ready` 的
+  绑定器读的是 `getMetaItems({ type: 'flow' })`(不带 org),于是它**再也不触发,且没有任何
+  日志说它消失了**——`kernel:bootstrapped` 的 unbound 审计也看不见它(它压根没注册)。
+
+  现在冷启动会打一条聚合的 `warn`,按类型给出计数、抽样的 `name@org`,以及后果本身
+  (「A 'flow' listed here will NOT bind its triggers in this process」)和处置建议。
+  查询默认为空:两个收窄谓词(`organization_id IS NOT NULL` + 类型清单,清单由
+  `DEFAULT_METADATA_TYPE_REGISTRY` 派生而非手写)让健康部署读不到行、也不打印任何东西;
+  驱动若无法下推其中一个谓词,退化为多读几行而不是打出误报(JS 侧会复核两个谓词)。
+
+  加载行为**未改变**:这次只是把缺席变响亮。这类行到底该不该存在(写入侧拒绝 / 强制写成
+  env-wide / 让绑定器按 org 读)是 #6190 上待裁决的契约问题。
+
+- bed427f: fix(metadata-protocol): `ensureOverlayIndex` probes before it drops, and says what it could not enforce (#6418)
+
+  `sys_metadata`'s overlay-uniqueness migration ran **DROP then CREATE**:
+
+  ```text
+  DROP INDEX IF EXISTS idx_sys_metadata_overlay_active   ← always succeeds
+  CREATE UNIQUE INDEX  idx_sys_metadata_overlay_active … ← may fail
+  ```
+
+  with nothing that puts the dropped index back, and both `catch` blocks empty. On
+  the dialects that _do_ support the form (SQLite / PostgreSQL), a `CREATE` that
+  failed on existing rows therefore left the table with **no** unique index at all
+  — and no line in the log. ADR-0005 overlay uniqueness is the base of metadata
+  correctness: with two ACTIVE rows for one
+  `(type, name, organization_id, package_id)`, which one `getMetaItem` returns is
+  undefined.
+
+  The degradation branch could not save it either. It fired only when the driver's
+  message matched `/partial|where clause|syntax/i`, which duplicate-row errors
+  (`UNIQUE constraint failed` / `duplicate key value`) do not — so the one failure
+  that is about DATA fell through to a bare `// best-effort` comment. MySQL was
+  safe only by accident: `DROP INDEX IF EXISTS` is not legal MySQL, so the drop
+  failed first and the old index survived.
+
+  **The order is now probe-first**, ported from the sibling
+  `view-definition-active-index.ts` (#5839 / #6417) and extracted into a shared
+  `partial-index-probe.ts` both migrations use: build the partial UNIQUE under a
+  throwaway probe name, and only once that has demonstrably succeeded drop the
+  real name and rebuild it. On any dialect or dataset that cannot take the form,
+  whatever index was protecting the table is left exactly as it was — degraded to
+  yesterday's behaviour, never below it. Both sections get this treatment
+  (`…_overlay_active` and `…_overlay_draft`), and the two are independent so a
+  failure on one no longer decides the other.
+
+  **The empty catches are replaced by ADR-0120 D4's disposition**: classify the
+  failure, keep the previous index, name the key that is not enforced and what
+  that costs, ship the exact query that lists the offending rows, point at
+  `os migrate plan`, and let the boot continue — reported at `error`, because what
+  goes missing is an integrity guarantee the platform states it enforces while
+  everything else keeps looking healthy.
+
+  Two things deliberately do **not** change. The key spelling stays byte-identical
+  (`(type, name, organization_id, COALESCE(package_id, ''))`) — this is an
+  ordering and reporting fix, not a re-keying. And the dialect fallback stays a
+  **non-UNIQUE** composite index: one ACTIVE row and one DRAFT row for the same
+  key legitimately coexist on this table, so a full UNIQUE would reject legal
+  data. What changes about the fallback is that it is now issued additively
+  (`IF NOT EXISTS`, no preceding drop, so it can never replace a stronger index)
+  and that the report says plainly what is and is not enforced.
+
+- 252f71b: fix(metadata-protocol): a single-record update binds the row the CALLER named, not the row the body names (#6479)
+
+  `PATCH /data/:object/:id` decided which row to write **twice, differently**. The
+  protocol's `updateData` probed existence and validated `If-Match` /
+  `expectedVersion` against the path `:id`, built `{ where: { id: request.id } }`,
+  and then handed the request body to the engine verbatim — where the dispatch
+  reads the payload first, so a truthy scalar `data.id` outranks `where.id`.
+
+  So `PATCH /data/task/rec_1` with a body of `{"id":"rec_2","title":"x"}`:
+
+  - probed **rec_1** for existence (404 gate, #4435);
+  - version-checked **rec_1** against the caller's `If-Match`;
+  - **wrote rec_2**; and
+  - answered `{ id: "rec_1", record: <rec_2's readback> }` — a receipt whose two
+    halves name different rows.
+
+  rec_2 was never probed and never version-checked, so the most common client
+  shape there is — GET a record, edit a field, PUT the whole body back — performed
+  a **silent cross-row write straight past its own optimistic-concurrency check**
+  whenever the body carried another row's id (a mis-clicked list row, a stale
+  refresh, a generated client that copied the wrong field).
+
+  `updateData` now merges the path id over the payload before dispatch
+  (`{ ...request.data, id: request.id }`) — the same shape the **bulk** ingress has
+  always used for this question (`ql.update(op.object, { ...data, id }, …)`), so the
+  two ingresses give one answer instead of two. The probed row, the OCC-checked
+  row, the written row and the receipt's `id`/`record` are now the same row: the
+  one in the URL.
+
+  Nothing else moves:
+
+  - **The engine is untouched.** ObjectQL's payload-first dispatch (#5748) and its
+    by-id payload strip (#6435) are unchanged and still correct for a caller who
+    hands ObjectQL a payload and nothing else; this was a gap at the REST/protocol
+    ingress, which had already named the row.
+  - **No new rejection, no request-shape change.** A body `id` equal to the path
+    id behaves exactly as before, and a differing one is now simply overridden
+    rather than refused — `UpdateDataRequestSchema` still accepts the same bodies.
+  - **Non-record payloads pass through untouched** (`undefined`, `null`, an array),
+    so the engine's own diagnostics for a malformed call still surface unchanged.
+
+  Callers that deliberately relied on the body's `id` redirecting a
+  single-record PATCH must address the intended row in the URL instead — the bulk
+  endpoint has never honoured a body id either.
+
+- a5d2573: feat(metadata-protocol): publishing a platform-level scheduled `create_record` flow is refused on a multi-organization deployment unless it declares `organization_id` (#6285)
+
+  A scheduled flow that creates records now has to say which organization those
+  records belong to — but only where the answer matters, and only where nothing
+  else can supply it.
+
+  ## What was open
+
+  `ScheduleTrigger` builds its context as
+  `{ event: 'schedule', params: { jobId, flowName, schedule } }` — no `tenantId`.
+  PR #6153 closed the engine half of #5494 on the rule "stamp what the engine
+  KNOWS": a run whose trigger resolved an organization carries it through, and the
+  driver's tenant machinery fills `organization_id` on rows that omit it. A
+  schedule resolves none, so nothing fills anything — and the dominant production
+  shape of the whole issue is a nightly sweep, which fires on a schedule and not
+  by hand. Every row it created was born `organization_id` NULL.
+
+  That is not a cosmetic NULL. A `(organization_id, …)` unique index does not
+  constrain across NULL and an org-scoped query does not see the row, so the
+  damage is duplicate and invisible records — hotcrm#698's duplicate numbering —
+  in a stored shape no later fix can retroactively repartition.
+
+  ## What now happens
+
+  At the runtime publish gate, this exact combination is refused with the existing
+  422 `INVALID_METADATA` envelope (`code` + `status` + `issues[]`, ADR-0112):
+
+  - the deployment enforces an organization wall
+    (`postureEnforcesWall(resolveTenancyPosture())` — `group` or `isolated`,
+    ADR-0105 D1), **and**
+  - the flow is platform-level (the write carries no organization), **and**
+  - it binds to the **schedule** trigger, **and**
+  - it contains a `create_record` node, **and**
+  - that node declares no `fields.organization_id`.
+
+  Every limb's negation still publishes: a single-organization deployment, an
+  org-scoped write, any other trigger, a flow that creates nothing, and — the
+  fix an author actually applies — a node that declares
+  `config.fields.organization_id`. That key is not new: `CreateRecordConfigSchema`
+  has always carried `fields`, and #6153's fill-only stamping already guarantees
+  an author-supplied value wins over any engine fill. One issue is reported per
+  offending node, including nodes nested inside `loop` / `try_catch` / `parallel`
+  regions, each addressed at the key the author must write.
+
+  Drafts are never gated (#4463 D1) and the draft to active promotion is, so the
+  draft door is not a bypass. `OS_ALLOW_UNLINTED_METADATA_WRITES=1` degrades the
+  refusal to a loud log exactly as it does for the 26 shared rules, and
+  `os migrate meta --stored` stays carved out.
+
+  ## Where the judgement lives, and why
+
+  Runtime publish gate only; `os validate` / `os build` / `os lint` do **not**
+  judge this. Both inputs the rule needs are facts about the **deployment**, and
+  the CLI runs on a build machine — a shared rule would sentence every
+  single-organization repository on whatever `OS_TENANCY_POSTURE` happened to be
+  exported in CI. The gate's caller performs the two readings and passes them as
+  arguments, so the judgement itself stays a pure function of its inputs.
+
+  Migration note for a multi-organization deployment: an existing scheduled flow
+  keeps running untouched — the gate blocks new writes only, never stored rows —
+  but the next time one is republished it will be refused until the
+  `organization_id` is declared, which is the same edit that stops it writing
+  outside the organization partition.
+
+- 2ab1257: `preserveAudit` is an UPDATE-path exemption — the contract now says so, and a non-system INSERT that asks for it is told loudly instead of silently stripped (#6640)
+
+  `FieldSchema.readonly`'s `.describe()` promised the opt-in historical-import exemption
+  (`preserveAudit`, #3493) on **both** write paths, and
+  `docs/protocol/objectql/security.mdx` agreed. Only UPDATE ever implemented it. The
+  create-side strip lives at the DataProtocol ingress (`stripReadonlyForInsert`, #3043) and
+  has never read `preserveAudit` at all — `context.isSystem` is its only exemption — while
+  the engine's update-side strip consults `isPreservableUnderAudit`.
+
+  REST import's `treatAsHistorical` puts `preserveAudit: true` on the write context and
+  creates through `createData`, i.e. through exactly that ingress. So **one** historical
+  import kept an author-declared `readonly` business column (`closed_at`, `resolved_by`) on
+  the rows it UPDATED and silently dropped it from the rows it CREATED. The trigger is not
+  exotic: the audit family itself is `readonly: true` in the registry's `AUDIT_FIELD_DEFS`,
+  so an ordinary export→historical-import round-trip carries readonly columns on every row.
+
+  Maintainer ruling (2026-08-08), option 2 with a binding loudness rider — the enforcement
+  is the truth and the contract narrows to it:
+
+  - **Contract narrowed.** The `.describe()` text and the security doc now state the
+    exemption as UPDATE-path only. The INSERT entry keeps honouring `isSystem` alone;
+    replaying archival readonly facts on create requires a system context. Honouring
+    `preserveAudit` here instead would have handed a NON-system caller — `treatAsHistorical`
+    arrives on an ordinary REST import request — the approval/status columns #3043 exists to
+    protect, in one POST.
+  - **The ignored request stops being silent.** A non-system INSERT that requests
+    `preserveAudit` and actually loses fields now logs a `WARN` naming the object, every
+    stripped field, the UPDATE-only rule, and the `isSystem` remedy. It fires once per
+    ingress call (the union across a batch, as `mergeDroppedFieldEvents` already does), and
+    only when something was really removed — an ordinary create that never asked for the
+    exemption stays exactly as quiet as #3043 designed it.
+
+  **No behaviour change to the strip itself, and no acceptance-surface change** — the
+  accepted set is byte-identical; only the describe text, the docs, and the new warning are
+  new.
+
+  Warning rather than refusal, measured rather than assumed: `runImport` collects a per-row
+  write error into a failed row instead of aborting, so refusing at the ingress would not
+  stop a historical import — it would convert every row it CREATES into a failure while the
+  rows it updates still succeed. Measured on a throwing variant, the historical import of 2
+  new rows went from `{created: 2, errors: 0}` to `{created: 0, errors: 2}`. Breaking the
+  shipped `treatAsHistorical` flow for new rows is the condition under which the ruling names
+  the loud WARNING — strip still applied — as the containment-correct landing.
+
+- 47a4e67: fix(objectql): deleting an `object` really unregisters it — a name-addressed `SchemaRegistry.unregisterObject` (#6808)
+
+  Deleting a runtime-created `object` removed its `sys_metadata` row and left the
+  object serving. `deleteMetaItem` ends its repository delete with
+  `restoreArtifactRegistryView` (the #6687 three-tier heal), and every verb that
+  walk uses — `removeRuntimeShadow`, `registerItem`, `removeOverlayEntry` —
+  addresses `SchemaRegistry`'s generic `metadata` map. An `object` is written into
+  **two** places on the way in:
+
+  ```ts
+  registry.registerItem("object", item, "name"); // metadata map
+  registry.registerObject({ ...item, _provenance: "org" }, pkg); // objectContributors
+  ```
+
+  The heal only undid the first. Measured with the real `SysMetadataRepository`
+  over an in-memory engine:
+
+  ```
+  BEFORE delete: metadata['object'] -> ["myapp_invoice"] | objectContributors -> ["myapp_invoice"]
+  AFTER  delete: metadata['object'] -> []                | objectContributors -> ["myapp_invoice"]
+  registry.getObject('myapp_invoice')        -> STILL SERVED
+  registry.getItem('object','myapp_invoice') -> STILL SERVED   (it special-cases back to getObject)
+  ```
+
+  The surviving half is the load-bearing one. `getObject` is what the data plane
+  dispatches on (`assertObjectRegistered`, #3770), so the row was gone from
+  `sys_metadata` while the object stayed resolvable, syncable and **writable** for
+  the life of the process — a `createData` against the deleted object still
+  inserted rows. Reachable on the ordinary Studio delete path, and on
+  `revertCommit`'s soft-remove limb, which #6807 had just wired to the same heal.
+
+  There was no one-line fix because `SchemaRegistry` had no per-name object
+  removal at all: the only removal verb was `unregisterObjectsByPackage`, which is
+  addressed by PACKAGE. Routing a single delete through it would mean synthesising
+  a package identity for a runtime-created object and tearing down every sibling
+  object registered under it — a far wider blast radius than the delete the
+  operator asked for.
+
+  So `SchemaRegistry` gains the verb that was missing:
+
+  - **`unregisterObject(name, { force? })`** — removes one object's contributor
+    entry and the per-object state `registerObject` created (merged-object cache,
+    `objectRevision`). Names resolve through the same path `getObject` uses, so it
+    removes precisely the entry that was being served. Package namespaces are left
+    alone: they are per-package and shared by every object that package ships.
+  - **The ADR-0029 guard is borrowed, not re-invented.** An object still extended
+    by another package refuses loudly, naming every extender — the same judgement
+    `unregisterObjectsByPackage(force)` already encodes, with the address changed
+    from package to name. Both facts it needs (owner, extenders) were already in
+    the contributor list, so no new bookkeeping was added.
+
+  `restoreArtifactRegistryView` calls it from **tier 3 only**, and only for a name
+  that is not artifact-backed — the tier that has already established no lower
+  layer serves the name. Tiers 1 and 2 concluded a
+  packaged artifact or a MetadataService baseline still does, and an object that is
+  still served must stay registered: `assertObjectRegistered` fails CLOSED, so
+  retiring it there would turn "reset to artifact default" into a data-plane
+  outage. It also carries the same artifact refusal `removeOverlayEntry` applies
+  one line up, asked through the protocol's own `isArtifactBacked`: a code-shipped
+  object is never retired by this walk. That is not already covered by the gates in
+  front of it — the two-tier delete authorization runs only when `environmentId !==
+undefined`, and the no-row leg of a control-plane delete reaches the heal without
+  touching the repository's `assertAllowed` at all.
+
+  Because the heal runs after the repository delete has committed, an extender
+  refusal is caught and logged by name rather than propagated (the row is gone
+  either way) — and deliberately not left to the heal's silent outer `catch`, so a
+  runtime that disagrees with `sys_metadata` is visible rather than inferred.
+
+  `unregisterObjectsByPackage` keeps its signature and semantics unchanged.
+
+- 2873eb9: fix(metadata-protocol): rolling back a package-bound overlay row no longer 409s (#6215)
+
+  Every rollback of a metadata item authored inside a Studio package workspace
+  failed — and failed by blaming a concurrent edit that never happened:
+
+  ```
+  [metadata_conflict] object/myapp_invoice advanced during rollback.
+  Expected parent sha256:00ca6e72c... but current is null.
+  ```
+
+  Both user-facing paths were affected, because both are one call:
+  `rollbackMetaItem` (the per-item version-history revert) and `revertCommit`
+  (the package-commit revert) go through `SysMetadataRepository.restoreVersion`.
+  Only rows with **no** package binding — the legacy shape — rolled back at all,
+  while ADR-0070 pushes authoring toward always resolving a writable base
+  package, so the failing share was growing.
+
+  **Cause.** `restoreVersion` read the current active row package-agnostically
+  and then re-put the historical body without saying which row it meant. `put`
+  scopes its optimistic-lock lookup by package, and an unstated `packageId`
+  resolves to the _unbound_ row (`package_id IS NULL`) rather than "any package"
+  — so for a row bound to `app.<slug>` the lock looked up a row that does not
+  exist, read its parent hash as `null`, compared that against the real hash the
+  first read had just returned, and threw `ConflictError`. The mismatch was
+  between two reads of the _same_ restore, not between two writers.
+
+  **Fix.** `restoreVersion` now reads the raw active row once and takes BOTH
+  facts from it — the parent hash and the ADR-0048 `package_id` — then states
+  that binding on the write, the same way `promoteDraft` already did. The row the
+  lock is taken on is therefore, by construction, the row that gets written.
+
+  This also closes the defect's second face: had the parent check ever passed,
+  `put` would have found no row in its `IS NULL` scope and **inserted a duplicate
+  unbound row** beside the bound one instead of updating it. `sys_metadata`'s
+  partial unique index keys on `COALESCE(package_id,'')`, so a real database
+  would have accepted that duplicate.
+
+  Unchanged: package-less rows still roll back exactly as before, and a row that
+  _genuinely_ advanced between the rollback's read and its write is still refused
+  with `METADATA_CONFLICT` / 409. The refusal is narrowed to the case it always
+  claimed to report, not retired.
+
+- 271cee1: fix(metadata-protocol): a successful `revertCommit` refreshes the SchemaRegistry (#6621)
+
+  `revertCommit` persisted its change and left the running process serving the
+  body it had just reverted away. The single-item revert `rollbackMetaItem` has
+  ended its restore with a registry write-through since #4521 — "a rollback is a
+  live write like any other: the restored body must be the one the runtime
+  dispatches on immediately, not after someone lists the type" — and the batch
+  path over the same repository call had no equivalent on either limb.
+
+  Measured before the fix, real `SysMetadataRepository`, an `object` saved twice
+  (v2 adds a `due_date` field) and then reverted:
+
+  ```
+  revertCommit                          ->  { success: true, revertedCount: 1, failed: [] }
+  stored sys_metadata row fields        ->  ["name","amount"]              # reverted
+  SchemaRegistry.getObject(...) fields  ->  [...,"name","amount","due_date"]  # NOT reverted
+  ```
+
+  So the undo reported success while data CRUD kept dispatching the pre-revert
+  schema, healing only at the next restart. It is type-agnostic and older than
+  the `object` support that made it loud: an overlay `view` showed the same split
+  (stored `Cases`, registry still `Renamed`). `rollbackToPackageCommit` reverts
+  through the same loop, so a whole-package rollback could report success and
+  change nothing the running process could see.
+
+  Both limbs now refresh the registry, each reusing the seam its single-item
+  sibling already uses:
+
+  - **Restore limb** — writes the restored body through under the row's OWN
+    ownership key, read from the row before the restore (#4636; stated as the
+    `sys_metadata` sentinel instead, `registerObject` throws `already owned by
+package "app.<slug>"` into a best-effort warning and the stale body survives).
+    The row's own organization is passed per item, so an org-scoped row inherits
+    ADR-0005's rule that only env-wide rows enter the process-wide registry.
+  - **Soft-remove limb** — runs the same three-tier heal `deleteMetaItem` runs
+    after its own repository delete: an overlay that shadows a packaged artifact
+    falls back to the artifact rather than vanishing, and only a name no layer
+    serves at all is retired. A flat unregister would have deleted names a code
+    package still ships. This heal is gated to env-wide reverts: an org-scoped row
+    never entered the shared registry, so healing on its behalf would retire the
+    entry every other organization reads.
+
+  No contract change — ADR-0067 already defines what a revert leaves behind; this
+  makes the runtime agree with it without waiting for a restart.
+
+- 75e6871: fix(metadata-protocol): `revertCommit`'s soft-remove limb states its write intent per item, so a commit that CREATED an object can be reverted (#6620)
+
+  `ObjectStackProtocolImplementation.revertCommit` has two limbs. #6563 (PR #6642)
+  fixed the one that RESTORES an edited artifact, where the intent was unstated and
+  fell through to `restoreVersion`'s `?? 'override-artifact'` default. The other
+  limb — an artifact the commit CREATED, which the revert soft-removes — stated the
+  same intent as a literal constant:
+
+  ```
+  intent: 'override-artifact',
+  ```
+
+  `SysMetadataRepository.delete` opens with `this.assertAllowed(ref.type, opts.intent)`,
+  the same gate `put` uses, and it refuses every type whose registry entry is not
+  `allowOrgOverride`. `object` is exactly such a type, so every created object of a
+  reverted commit came back in `failed[]`:
+
+  ```
+  [NOT_OVERRIDABLE] 'object' is not allowOrgOverride in the registry.
+  Overlay-allowed: view, page, dashboard, app, action, report, dataset, ...
+  ```
+
+  This is the FIRST-BUILD undo — the Studio / AI flow that publishes a brand-new app
+  and then undoes it. Every object the commit created stayed behind, the call
+  answered `success: false` with a populated `failed[]`, and the package was left
+  half-reverted: its overlay-allowed items removed, its objects not.
+  `rollbackToPackageCommit` reverts through the same loop and inherited it, and
+  there the symptom was quieter still — a per-item refusal never throws, so the
+  rollback recorded the commit as reverted and answered `success: true` while the
+  created object was untouched.
+
+  The limb now derives the intent from the artifact the way the sibling DELETE
+  caller `deleteMetaItem` already does — `isArtifactBacked` gives
+  `'override-artifact'`, otherwise `'runtime-only'` — and does it **per item**,
+  because one first-build commit routinely creates a runtime object beside a
+  packaged-artifact name. All three delete/revert callers (`deleteMetaItem`,
+  `rollbackMetaItem`, both `revertCommit` limbs) now derive the same fact the same
+  way.
+
+  The repository's gate is deliberately unchanged: it is right for callers that
+  genuinely mean "override a packaged artifact", and the defect was this caller
+  never saying which of the two cases each item is. An object a code package really
+  ships still resolves to `'override-artifact'` and is still refused with
+  `NOT_OVERRIDABLE`, which is pinned alongside the fix.
+
+- e6025e9: fix(metadata-protocol): `revertCommit` states its write intent per item, so an `object` overlay can be reverted at all (#6563)
+
+  `ObjectStackProtocolImplementation.revertCommit` restored an edited artifact
+  through `repo.restoreVersion(ref, prevVersion, { actor, source, message })` — with
+  no `intent`. `SysMetadataRepository.restoreVersion` therefore fell back to its
+  `?? 'override-artifact'` default, `put` opened with
+  `assertAllowed(ref.type, opts.intent)`, and that gate refuses every type whose
+  registry entry is not `allowOrgOverride`. `object` is exactly such a type, so
+  every `object` item of a reverted commit came back in `failed[]`:
+
+  ```
+  [NOT_OVERRIDABLE] 'object' is not allowOrgOverride in the registry.
+  Overlay-allowed: view, page, dashboard, app, action, report, dataset, ...
+  ```
+
+  The package-commit undo (ADR-0067) therefore could not revert the metadata type
+  Studio and AI-built apps create most, while the same edit reverted fine one
+  artifact at a time through the version-history revert — the two user-facing
+  revert paths disagreed about what is revertable. The failure was per item, so
+  the call still answered `success` overall with a populated `failed[]`, which
+  reads as a flaky revert rather than a systematic refusal.
+  `rollbackToPackageCommit` reverts through the same loop and inherited it, and
+  there the symptom was quieter still: a per-item refusal never throws, so the
+  rollback recorded the commit as reverted and answered `success: true` while the
+  object was untouched.
+
+  `revertCommit` now derives the intent from the artifact the way its sibling
+  `rollbackMetaItem` already does — `isArtifactBacked` gives `'override-artifact'`,
+  otherwise `'runtime-only'` — and does it **per item**, because a commit is a
+  batch that routinely mixes a runtime-created object with an overlay on a
+  packaged view.
+
+  The repository's default is deliberately unchanged: it is right for callers that
+  genuinely mean "override a packaged artifact", and the defect was this caller
+  never saying which of the two cases it is. So the gate is not widened — an
+  object a code package really ships still resolves to `'override-artifact'` and
+  is still refused with `NOT_OVERRIDABLE`, which is pinned alongside the fix.
+
+- 4ac12ef: fix(spec,lint): a virtual `formula` field in `searchableFields` is refused loudly, not admitted verbatim (#6674)
+
+  #4254 closed the fail-open on the unknown-name axis: a `$searchFields` entry the
+  engine would not scan is `400 INVALID_FIELD`, never a silently widened search.
+  The same shape survived one axis over, on names that are perfectly real.
+
+  The declared branch of `resolveSearchFieldResolution` filtered entries by
+  EXISTENCE only, so a `formula` field declared in `searchableFields` entered the
+  allowed set — and the ingress gate, which reads that same set, accepted it for
+  exactly that reason. Measured on `origin/main`:
+
+  ```
+  AUTO:          {"allowed":["name","project_name"],"source":"auto"}                formula excluded
+  DECL-FORMULA:  {"allowed":["name","project_name_formula"],"source":"declared"}    admitted verbatim
+  ?search=Apollo&searchFields=project_name_formula  ->  200, 0 rows                 silent
+  ```
+
+  Zero rows is the defect. A formula value is computed on read and no driver
+  materializes a column for it (`driver-sql` `fieldHasColumn`, driver-turso's
+  "Virtual — no column"), so the `$contains` the engine expands `$search` into has
+  nothing to scan: 0 rows on driver-memory (the property is absent from the stored
+  row) and 0 rows WITH NO ERROR on driver-sql/better-sqlite3. The declaration read
+  as search coverage and delivered none.
+
+  - **`@objectstack/spec` — the deciding face.** The declared branch now filters on
+    existence AND scannability: an entry naming a virtual field is not admitted.
+    New exports `SEARCH_VIRTUAL_TYPES` (exactly `formula`, pinned) and
+    `isVirtualSearchField` — one judgment, so the resolution, the gate and the
+    linter cannot drift about which types have a column. The resolution itself
+    stays non-throwing: it is consulted on every search by internal callers that
+    never pass an ingress, which is why #4254 put the loudness at the ingress.
+  - **`@objectstack/metadata-protocol` — `400 INVALID_FIELD` with its own reason.**
+    Split out before the declared/auto branch, because both of those messages are
+    wrong for it: "outside the declared set" is false when the entry IS in the
+    list, and the auto-default's "declare `searchableFields` to choose the
+    searchable set" would instruct the author to write the declaration being
+    refused. The new message names the field, its type, that the value is computed
+    on read and never stored, and the fix (mirror onto a stored text field).
+  - **`@objectstack/lint` — a build error at authoring time**, on the object's own
+    `searchableFields` as well as a view's narrowing, under the existing
+    `searchable-field-unsearchable` rule (no new rule id). This narrows the
+    canonical surface, which #4830 had deliberately left existence-only.
+
+  The carve-out that made canonical existence-only is deliberately KEPT and pinned
+  by controls in all three packages: the dividing line is STORAGE, not search
+  quality. A `json` or `lookup` column declared in `searchableFields` is still the
+  author's choice and still executed — a `$contains` over the stored JSON text or
+  the stored foreign key. Narrow and rarely useful, but a scan that CAN match, so
+  it is neither a 400 nor a finding. Only "there is no column at all" is refused.
+
+  **Compatibility.** A corpus sweep of this repo plus `objectui` and `cloud` found
+  ZERO authored `searchableFields` naming a formula-typed field, so nothing in the
+  tree changes verdict. For an already-published object that does carry one:
+  loading is unaffected (no schema-parse change — `searchableFields` is still
+  `z.array(z.string())`, this is a resolution and enforcement rule); a plain
+  `?search=` keeps returning the SAME rows, because the dropped entry matched none
+  of them; only a request that NAMES the formula field flips from `200` with no
+  rows to `400 INVALID_FIELD` — including objectui's list search, which echoes the
+  declaration verbatim. An object whose `searchableFields` is ENTIRELY formula
+  entries filters to empty and falls through to the auto-default, exactly as an
+  all-stale declaration has since #4254; the linter reports the declaration rather
+  than leaving that swap silent.
+
+- 6443b79: fix(data): the dotted-path `400 INVALID_SORT` hint prescribes a **stored** field, not a formula (#6924)
+
+  `assertSortFieldsExist` refuses a dotted `orderBy` (`?sort=account.company_name`)
+  and then told the author how to fix it: _"Denormalise the value onto '<object>'
+  (a formula or rollup field that copies it into a real column) and sort by that."_
+  That prescription cannot be built. Following it lands the author back inside the
+  exact silent degradation the refusal had just saved them from.
+
+  Measured on a REAL `SqlDriver` (better-sqlite3) and on `InMemoryDriver`, with a
+  `formula` field named directly in `orderBy` (non-dotted, so this gate lets it
+  through):
+
+  ```
+  control   orderBy title asc     -> A B C D E      a real column really sorts
+  baseline  no sort               -> C A E B D      insertion order
+  orderBy   <formula field> asc   -> C A E B D  200 insertion order
+  orderBy   <formula field> desc  -> C A E B D  200 direction-blind
+  ```
+
+  A `formula` field is virtual — `SqlDriver.createColumn` returns early for it and
+  no column is created (sqlite answers `no such column`), the engine evaluates the
+  expression _after_ the driver returns, and the #3821 unknown-column backstop
+  retries WITHOUT the sort. The response is `200`, every row present, order
+  arbitrary: the failure mode #4226/#4256 exist to stop.
+
+  The hint now reads: _"Denormalise the value onto '<object>' (a stored field,
+  written when the source changes) and sort by that. Not a formula field: it is
+  virtual, no driver materialises a column for one, and ORDER BY on it is silently
+  dropped."_ — "stored" being the same word #6673 landed for the identical
+  correction on the search axis.
+
+  `rollup`/`summary` is dropped from the hint for a different reason, and the
+  measurement is worth recording because it contradicts the reported diagnosis: a
+  `summary` field **does** get a real, maintained column (`orderBy <summary> desc`
+  returned `E D C B A` over values `5 4 3 2 1`), so it is not unmaterializable. It
+  simply cannot do this job — a rollup aggregates CHILD records
+  (`count`/`sum`/`min`/`max`/`avg`) and so cannot carry a looked-up parent's column
+  onto the queried object.
+
+  **This overturns a recorded decision.** #4256 (closed `completed`) explicitly
+  chose the "formula or rollup" wording as its remedy for dotted-path sort, and its
+  own still-pending changeset (`sort-dotted-path-rejected.md`) describes it; that
+  file is left as the accurate record of what #4256 shipped, and this entry
+  supersedes its prescription. `content/docs/protocol/objectql/query-syntax.mdx`
+  ("Sorting on Related Fields") taught the same denormalization and is corrected in
+  the same change, so code and docs stop agreeing with each other about something
+  untrue.
+
+  Not fixed here, filed separately: the platform still accepts a **non-dotted**
+  `orderBy` naming a `formula` field and answers `200` in arbitrary order. That is
+  an engine/driver-side refusal question, not hint text.
+
+- 3d4c545: fix(metadata): `sys_view_definition` 的「活跃行唯一」真正生效——归档视图不再占用 (name, organization_id, owner) 名额
+
+  `sys_view_definition` 的 `idx_sys_view_def_active` 索引注释一直承诺「among active rows」，但这个语义从未在任何一层交付：声明面的 `partial: "state = 'active'"` 没有任何 driver 消费者（`syncDeclaredIndexes` 走 knex 的 `table.unique()`，无法表达 `WHERE`），该键已随 #5248 / #4943 退役；而与 `sys_metadata` 不同，这张表背后**没有**任何等价的运行时迁移。结果是建出来的一直是无谓词的全量 UNIQUE 索引——用户归档（或软删、重置）一个视图后，**无法再新建同名视图**，被一条自己刚扔掉的记录挡住。
+
+  现在补上运行时迁移 `ensureViewDefinitionActiveIndex`（照 `metadata-protocol` 既有的 `ensureOverlayIndex` 范式），在 `kernel:ready` 用 raw SQL 发 `CREATE UNIQUE INDEX idx_sys_view_def_active … WHERE state = 'active'`：
+
+  - **名额可回收**——归档视图不再占用名额，同名视图可以重建；
+  - **唯一性不放宽**——两条 `state='active'` 的同名同域行仍然被拒；
+  - **复用声明的索引名**——`syncDeclaredIndexes` 按名跳过，后续每次启动都不会把全量 UNIQUE 索引重新加回来；
+  - **降级只会退回今天的行为，不会更低**——迁移先用一个临时探针索引验证当前方言与数据确实能建出部分索引，成功后才替换既有索引。因此 MySQL / MariaDB（无部分索引）上原有的全量 UNIQUE 索引原样保留（归档行在该方言上仍占名额，以 `info` 记录），不会出现「旧索引已删、新索引没建成」的无约束窗口。
+
+  `metadata-core` 侧只更新了 `sys-view-definition.object.ts` 的注释：该声明现在被明确记为**降级形态**（供无部分索引的方言与不跑该迁移的宿主使用），不应删除。
+
+  已知未涵盖：`owner` 为 NULL 的共享视图与 `organization_id` 为 NULL 的环境级视图，因 SQL UNIQUE 的 NULL-distinct 语义本来就不受该索引约束。这是早于本次修复的既有缺口，本迁移只改变**行范围**（`WHERE state = 'active'`）而不动键的拼写——这也正是它严格弱于被替换的索引、因而不可能在存量数据上建失败的原因。该缺口已另单记录。
+
+- bb7cb41: fix(metadata): two same-name active SHARED views can no longer coexist — `sys_view_definition`'s active-row index gets a NULL-safe key (#6417)
+
+  #5839 / PR #6415 delivered "unique among ACTIVE rows" for `sys_view_definition`
+  as a runtime partial UNIQUE index, and deliberately changed only the index's
+  **row scope** — that is what made it strictly weaker than the index it replaced
+  and therefore incapable of failing on existing data. It also left the other
+  half of the same index broken, and pinned that gap honestly rather than closing
+  it.
+
+  SQL UNIQUE treats NULLs as mutually **distinct**. `owner` is NULL for SHARED
+  views and `organization_id` is NULL for environment-level ones, so
+  `(name, organization_id, owner)` constrained **personal views only**. Measured
+  on real SQLite over the driver's own DDL:
+
+  ```text
+  two ACTIVE personal views, same (name, org, owner) : REJECTED
+  two ACTIVE shared views    (owner NULL)            : OK   ← unconstrained
+  two ACTIVE env-level views (organization_id NULL)  : OK   ← unconstrained
+  ```
+
+  Two same-name shared views inside one tenant were therefore reachable, while
+  `name` is declared as the globally unique qualified view id (`object.viewKey`)
+  — so the view switcher, which aggregates and de-duplicates by `name`, and every
+  read path that locates a view by name, had no defined answer about which row
+  they got.
+
+  **What changes.** Per the maintainer ruling of 2026-08-08 this is now forbidden.
+  The same runtime migration materializes the key NULL-safe, folding each nullable
+  part's NULLs into one bucket that is unique among itself:
+
+  ```sql
+  CREATE UNIQUE INDEX idx_sys_view_def_active ON sys_view_definition
+    (name, COALESCE(organization_id, '__global__'), COALESCE(owner, ''))
+    WHERE state = 'active'
+  ```
+
+  Both spellings are copied from an existing in-repo precedent rather than
+  invented: `'__global__'` is ADR-0120 D3's reserved sentinel for the tenant
+  column (the driver's `GLOBAL_TENANT`), and `COALESCE(owner, '')` is
+  `ensureOverlayIndex`'s `COALESCE(package_id, '')` form for a non-tenant nullable
+  discriminator. Neither can collide with real data — an organization id may never
+  equal `'__global__'`, and an owner is a user id, never the empty string.
+  **Storage is untouched**: rows keep their NULLs, only the index folds them, so
+  `WHERE owner = ''` still matches nothing.
+
+  Unchanged: archived rows stay exempt (#5839's active-only scoping survives, on
+  shared views too), a shared view and a personal view may still share a name, and
+  so may two tenants' or two environments' rows.
+
+  **This is a tightening, so it can fail to build.** Unlike #5839, rows that
+  violate the new key exist in the wild today, precisely because nothing rejected
+  them. The migration probes before it replaces anything, and on a conflict takes
+  ADR-0120 D4's disposition: the previous index is left in place (the table is
+  never left unconstrained), the report names the key that is not enforced, ships
+  the exact `GROUP BY … HAVING COUNT(*) > 1` query that lists the offending rows,
+  points at `os migrate plan` — and the boot continues. Resolve the duplicate
+  active shared views, restart, and the tightening applies itself.
+
+  Dialects with no partial indexes (MySQL/MariaDB) keep the declared bare
+  composite, which is ADR-0120 D3's own degradation. That report is **raised from
+  `info` to `error`**: under #5839 alone the dialect lost slot recycling, a
+  functional degradation the next user hits immediately, but it now loses an
+  integrity guarantee the platform states it enforces while continuing to look
+  healthy — AGENTS.md's durability arm. The line names both gaps that stay open
+  there and the duplicate-listing query. The unclassifiable-failure arm is raised
+  with it, so the failure nobody can name is never reported more quietly than the
+  one that has a name.
+
+- 50a8d11: fix(metadata-protocol): the view-definition conflict report's remedy query now runs on PostgreSQL, not only SQLite (#6772)
+
+  `buildDuplicateProbeSql()` — the query `ensureViewDefinitionActiveIndex` ships
+  **inside** its `error`-level degradation report, as ADR-0120 D4's "name the
+  offending rows" — projected two bare columns while grouping by only their
+  `COALESCE` forms:
+
+  ```sql
+  SELECT name, organization_id, owner, COUNT(*) AS duplicate_rows
+  FROM sys_view_definition WHERE state = 'active'
+  GROUP BY name, COALESCE(organization_id, '__global__'), COALESCE(owner, '')
+  HAVING COUNT(*) > 1
+  ```
+
+  PostgreSQL requires every non-aggregated projection to appear **verbatim** in
+  `GROUP BY`; wrapped in an expression does not count. So the query an operator is
+  handed fails with
+
+  ```text
+  ERROR:  column "sys_view_definition.organization_id" must appear in the GROUP BY
+          clause or be used in an aggregate function
+  ```
+
+  on one of exactly **two** dialects that can build the partial index the report is
+  explaining. The operator copy-pastes the remedy out of an error message and gets
+  a second error instead of the conflicting rows. SQLite accepts the bare form,
+  which is why the existing real-SQLite test stayed green and the defect shipped;
+  MySQL/MariaDB reaches the same string through the `unsupported` arm.
+
+  Each folded column is now projected through its own `COALESCE` under a bucket-key
+  alias — the shape `overlay-index.ts`'s `buildOverlayDuplicateProbeSql()` already
+  uses for the sibling migration (#6770):
+
+  ```sql
+  SELECT name, COALESCE(organization_id, '__global__') AS organization_id_key,
+         COALESCE(owner, '') AS owner_key, COUNT(*) AS duplicate_rows
+  FROM sys_view_definition WHERE state = 'active'
+  GROUP BY name, COALESCE(organization_id, '__global__'), COALESCE(owner, '')
+  HAVING COUNT(*) > 1
+  ```
+
+  Every bare projection is now a bare `GROUP BY` term, so the query is legal on
+  both dialects. The projection and the `GROUP BY` are built from the same array,
+  so they cannot drift apart again. Nothing is lost by reading bucket keys instead
+  of stored values: neither sentinel can occur in real data, so
+  `organization_id_key = '__global__'` means `organization_id IS NULL` and
+  `owner_key = ''` means `owner IS NULL`.
+
+  The function's "Dialect-neutral: `COALESCE`, `GROUP BY` and `HAVING` are ANSI on
+  every engine this platform runs on" comment was true about the three constructs
+  and false about the query built from them; it now states the projection rule the
+  query has to satisfy, and why the real-SQLite test cannot see it.
+
+  No behaviour change to any index, write path or status: only the text of the
+  remedy query inside the two degradation reports.
+
+- c9bf940: fix(metadata-protocol): 对象 overlay 写路径按真实 package id 记录 registry 归属,并由服务端强制盖 `_provenance: 'org'`
+
+  `applyObjectRegistryMutation` 此前把每一次对象写入都硬编码登记在 `'sys_metadata'` 哨兵下。
+  该归属键同时就是包过滤键(`SchemaRegistry.getAllObjects(packageId)` 匹配的是
+  `contributor.packageId`),因此通过 Studio 包工作区新建的对象,在自己所属包的过滤结果里
+  一直是空的,直到有别的路径重新登记它。现在改为使用该行真实的 `package_id`;哨兵只保留
+  给「没有绑定任何包」的写入,`rollbackMetaItem` 则从行本身读出绑定(而不是从请求读)。
+
+  同一次改动里,服务端在**副本**上无条件盖 `_provenance: 'org'`,不再采信请求体里的值:
+  只搬归属键而不盖章会立刻复活 cloud#970 —— `applyProtection` 会把带包 id 且自身没有
+  provenance 的 body 默认标成 `'package'`,`getArtifactItem` 据此认定它是代码制品,
+  `object` 又声明了 `allowOrgOverride: false`,于是用户刚建好的对象在下一次保存时收到
+  `403 not_overridable`。`metadata-read-decorations.ts` 有意不剥离 `_provenance`,
+  Studio 的 GET → PUT 往返会把它原样送回,所以这个事实必须由服务端陈述。
+
+- Updated dependencies [3d5c090]
+- Updated dependencies [e5bd768]
+- Updated dependencies [e027b3e]
+- Updated dependencies [c2429b0]
+- Updated dependencies [445a0c2]
+- Updated dependencies [f6609e6]
+- Updated dependencies [a70358a]
+- Updated dependencies [97e7e3c]
+- Updated dependencies [8828b9e]
+- Updated dependencies [53068c1]
+- Updated dependencies [ee58392]
+- Updated dependencies [f16e54e]
+- Updated dependencies [06be54e]
+- Updated dependencies [259459d]
+- Updated dependencies [3f7f14e]
+- Updated dependencies [6968885]
+- Updated dependencies [eaed61f]
+- Updated dependencies [debe2f6]
+- Updated dependencies [97b0798]
+- Updated dependencies [43a7a8d]
+- Updated dependencies [73f69dc]
+- Updated dependencies [04c56aa]
+- Updated dependencies [b3efeb7]
+- Updated dependencies [ddd075a]
+- Updated dependencies [88154be]
+- Updated dependencies [e8dc61e]
+- Updated dependencies [2f3e793]
+- Updated dependencies [d8e8d9c]
+- Updated dependencies [94e749b]
+- Updated dependencies [ea1d916]
+- Updated dependencies [ae31a19]
+- Updated dependencies [b230e5e]
+- Updated dependencies [5d24f4b]
+- Updated dependencies [29b94ed]
+- Updated dependencies [07c68b0]
+- Updated dependencies [f6cd635]
+- Updated dependencies [e0f300b]
+- Updated dependencies [62b6a2f]
+- Updated dependencies [5b4780b]
+- Updated dependencies [a933452]
+- Updated dependencies [8140915]
+- Updated dependencies [7b48cf9]
+- Updated dependencies [b5404f4]
+- Updated dependencies [f764691]
+- Updated dependencies [e120a5a]
+- Updated dependencies [e9b5265]
+- Updated dependencies [e650d67]
+- Updated dependencies [121852d]
+- Updated dependencies [04476e7]
+- Updated dependencies [79228cd]
+- Updated dependencies [b3363e9]
+- Updated dependencies [d0e5537]
+- Updated dependencies [2ef1807]
+- Updated dependencies [d03fe25]
+- Updated dependencies [2672f85]
+- Updated dependencies [11066f6]
+- Updated dependencies [916af17]
+- Updated dependencies [84c86fb]
+- Updated dependencies [2a2a9fb]
+- Updated dependencies [a2e157c]
+- Updated dependencies [95c4227]
+- Updated dependencies [2a61116]
+- Updated dependencies [d4df105]
+- Updated dependencies [55da611]
+- Updated dependencies [e2798fa]
+- Updated dependencies [0fd8556]
+- Updated dependencies [74155c7]
+- Updated dependencies [6908830]
+- Updated dependencies [8b06bba]
+- Updated dependencies [4c54037]
+- Updated dependencies [0f7157b]
+- Updated dependencies [d9bef45]
+- Updated dependencies [f549a0d]
+- Updated dependencies [82da264]
+- Updated dependencies [f586f1a]
+- Updated dependencies [9b9b70f]
+- Updated dependencies [f5a9bc2]
+- Updated dependencies [881a3cc]
+- Updated dependencies [ad6317b]
+- Updated dependencies [d5e9f6e]
+- Updated dependencies [e48d861]
+- Updated dependencies [8a88885]
+- Updated dependencies [5f7669e]
+- Updated dependencies [becbe53]
+- Updated dependencies [b127c8b]
+- Updated dependencies [a80302a]
+- Updated dependencies [474f131]
+- Updated dependencies [050cd82]
+- Updated dependencies [4d552af]
+- Updated dependencies [44d677c]
+- Updated dependencies [c32944d]
+- Updated dependencies [1dd780f]
+- Updated dependencies [01fd9e1]
+- Updated dependencies [cafec0a]
+- Updated dependencies [c8d6f6e]
+- Updated dependencies [92a67f2]
+- Updated dependencies [9136327]
+- Updated dependencies [bf0ae99]
+- Updated dependencies [cb3b6cd]
+- Updated dependencies [73b7234]
+- Updated dependencies [d2b97c3]
+- Updated dependencies [59b794f]
+- Updated dependencies [fc3a36a]
+- Updated dependencies [69787f0]
+- Updated dependencies [5d022a1]
+- Updated dependencies [042b9ee]
+- Updated dependencies [f549a0d]
+- Updated dependencies [a36db28]
+- Updated dependencies [3f8817a]
+- Updated dependencies [a2443e3]
+- Updated dependencies [e1554b1]
+- Updated dependencies [4856789]
+- Updated dependencies [c3f4916]
+- Updated dependencies [33e0385]
+- Updated dependencies [2205363]
+- Updated dependencies [09fe58d]
+- Updated dependencies [d0a5ceb]
+- Updated dependencies [e18a162]
+- Updated dependencies [d6d1a50]
+- Updated dependencies [d127ff0]
+- Updated dependencies [9b86cf6]
+- Updated dependencies [8825a06]
+- Updated dependencies [4bda5f8]
+- Updated dependencies [8b82686]
+- Updated dependencies [d06b3dc]
+- Updated dependencies [a5ca08d]
+- Updated dependencies [424c510]
+- Updated dependencies [6ce10bd]
+- Updated dependencies [5087ac6]
+- Updated dependencies [7618ee8]
+- Updated dependencies [6965160]
+- Updated dependencies [ecff951]
+- Updated dependencies [2d1ddf0]
+- Updated dependencies [354b00f]
+- Updated dependencies [3de535b]
+- Updated dependencies [fe2e15a]
+- Updated dependencies [c6b6bb4]
+- Updated dependencies [2f59da0]
+- Updated dependencies [5e247fd]
+- Updated dependencies [1a53a02]
+- Updated dependencies [a954634]
+- Updated dependencies [8ad609c]
+- Updated dependencies [bbee302]
+- Updated dependencies [7c6261a]
+- Updated dependencies [08863dd]
+- Updated dependencies [1da39f5]
+- Updated dependencies [56664f5]
+- Updated dependencies [31cbe90]
+- Updated dependencies [90bbf25]
+- Updated dependencies [eb91eba]
+- Updated dependencies [42da73d]
+- Updated dependencies [643b7c7]
+- Updated dependencies [f012f55]
+- Updated dependencies [d0d5205]
+- Updated dependencies [9960cd2]
+- Updated dependencies [1a15893]
+- Updated dependencies [b70e534]
+- Updated dependencies [2233a85]
+- Updated dependencies [62dd69a]
+- Updated dependencies [e15e679]
+- Updated dependencies [2ab1257]
+- Updated dependencies [4cc4fb7]
+- Updated dependencies [28d1eb7]
+- Updated dependencies [2c26040]
+- Updated dependencies [f758cec]
+- Updated dependencies [78f0be8]
+- Updated dependencies [cd584d5]
+- Updated dependencies [35f7fb4]
+- Updated dependencies [a5302c7]
+- Updated dependencies [7084313]
+- Updated dependencies [91cefb8]
+- Updated dependencies [9bc846b]
+- Updated dependencies [0e043d8]
+- Updated dependencies [dadd1ad]
+- Updated dependencies [2f2e63c]
+- Updated dependencies [486d526]
+- Updated dependencies [ca522e9]
+- Updated dependencies [89d7b35]
+- Updated dependencies [85ec26d]
+- Updated dependencies [f6476fc]
+- Updated dependencies [4ac12ef]
+- Updated dependencies [59e9b7c]
+- Updated dependencies [b88f5e8]
+- Updated dependencies [42cc219]
+- Updated dependencies [d7e0b42]
+- Updated dependencies [3510e4a]
+- Updated dependencies [aa4b90d]
+- Updated dependencies [54299ca]
+- Updated dependencies [dc61def]
+- Updated dependencies [251e888]
+- Updated dependencies [183b4c4]
+- Updated dependencies [2fdb36e]
+- Updated dependencies [3de535b]
+- Updated dependencies [20526f5]
+- Updated dependencies [c5eef1d]
+- Updated dependencies [e0f300b]
+- Updated dependencies [761a0ba]
+- Updated dependencies [be87153]
+- Updated dependencies [8599c21]
+- Updated dependencies [60f0dd8]
+- Updated dependencies [a87c5cd]
+- Updated dependencies [a47f338]
+- Updated dependencies [2598216]
+- Updated dependencies [2c7e62d]
+- Updated dependencies [eb7613c]
+- Updated dependencies [ecc9110]
+- Updated dependencies [f7bd4e2]
+- Updated dependencies [361bd5b]
+- Updated dependencies [129b378]
+- Updated dependencies [88f9d94]
+- Updated dependencies [1818998]
+- Updated dependencies [3d4c545]
+- Updated dependencies [bb7cb41]
+- Updated dependencies [09ee21c]
+- Updated dependencies [f549a0d]
+- Updated dependencies [1bb679c]
+- Updated dependencies [3fc2e48]
+- Updated dependencies [e8f435c]
+- Updated dependencies [92e13a0]
+- Updated dependencies [ea8e849]
+- Updated dependencies [41610f6]
+  - @objectstack/spec@17.0.0-rc.6
+  - @objectstack/formula@17.0.0-rc.6
+  - @objectstack/lint@17.0.0-rc.6
+  - @objectstack/metadata-core@17.0.0-rc.6
+  - @objectstack/metadata@17.0.0-rc.6
+  - @objectstack/core@17.0.0-rc.6
+  - @objectstack/types@17.0.0-rc.6
+
 ## 17.0.0-rc.5
 
 ### Patch Changes

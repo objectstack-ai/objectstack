@@ -438,152 +438,28 @@ export async function coerceFieldValue(
   return { value: trim && typeof raw === 'string' ? raw.trim() : raw };
 }
 
-// ── required-field pre-check ───────────────────────────────────────
-
-/**
- * Engine-owned lifecycle columns the client never supplies. Mirrors
- * `record-validator.ts`'s `SKIP_FIELDS`, so the import's required pre-check and
- * the engine's insert-time required check agree on which fields the caller is
- * responsible for.
- */
-const REQUIRED_CHECK_SKIP = new Set<string>([
-  'id', 'created_at', 'created_by', 'updated_at', 'updated_by',
-]);
-
-function isBlankValue(v: unknown): boolean {
-  return v === undefined || v === null || (typeof v === 'string' && v.trim() === '');
-}
-
-/**
- * The first required field a would-be CREATE leaves unsatisfied, or `null` when
- * every required field has either a mapped value or a schema default.
- *
- * This mirrors the engine's insert-time required check (objectql
- * `record-validator.ts` + `applyFieldDefaults`) so the import's dry run predicts
- * the SAME verdict the real insert produces: a required (⇒ NOT NULL) field with
- * no default and no value fails both. Without it, dry run only reports coercion
- * errors and green-lights a row that then dies on `NOT NULL constraint failed`.
- *
- * Matches the engine's exemptions exactly — `system`/`readonly` columns, the
- * runtime-generated `autonumber`, a field carrying a `defaultValue`, and the
- * engine-owned lifecycle columns are never required of the importer. Applies to
- * CREATE only; an UPDATE touches just the supplied fields, so callers gate on
- * "will create" before calling.
- */
-export function firstMissingRequiredField(
-  data: Record<string, unknown>,
-  metaMap: Map<string, ExportFieldMeta>,
-): string | null {
-  for (const meta of metaMap.values()) {
-    if (!meta.required) continue;
-    if (meta.system || meta.readonly) continue;
-    if (meta.hasDefault) continue;
-    if (meta.type === 'autonumber') continue;
-    if (REQUIRED_CHECK_SKIP.has(meta.name)) continue;
-    if (isBlankValue(data[meta.name])) return meta.name;
-  }
-  return null;
-}
-
-// ── field-constraint pre-check ─────────────────────────────────────
-
-/**
- * Number field types the engine bound-checks with `min` / `max`, and string
- * field types it bound-checks with `minLength` / `maxLength`.
- *
- * These are the engine's OWN lists (objectql `record-validator.ts`
- * `validateOne`), deliberately NOT the spec's `NUMERIC_VALUE_TYPES` /
- * `STRING_VALUE_TYPES` — those are wider (`progress`, `summary`, `color`,
- * `signature`, …) and the engine leaves their values unchecked. Using the
- * wider sets here would make the dry run reject rows the real write accepts,
- * trading a false all-clear for a false alarm.
- */
-const BOUNDED_NUMBER_TYPES = new Set(['number', 'currency', 'percent', 'rating', 'slider']);
-const BOUNDED_STRING_TYPES = new Set([
-  'text', 'textarea', 'email', 'url', 'phone', 'password', 'markdown', 'html', 'richtext', 'code',
-]);
-
-/**
- * The first declared bound a coerced row violates, or `null` when every
- * supplied value is in range.
- *
- * Mirrors the numeric-range and string-length rules of the engine's
- * `validateRecord` — same type applicability, same comparison, same `code` and
- * `message` text — so the import's dry run predicts the verdict the real write
- * produces (framework#3956). Before this, a dry run only reported *coercion*
- * failures (a cell that isn't a number at all), so `-500` in a `min: 0` column
- * was reported valid and then rejected by the write with
- * `penalty_amount must be ≥ 0`.
- *
- * Applies to CREATE and UPDATE alike: the engine validates every supplied
- * value on both, and a value the row doesn't carry is skipped here exactly as
- * `validateOne` skips a missing one.
- *
- * NOT a complete mirror of `validateRecord`, and not meant to be — format
- * checks (email/url/phone), object-level `validations` rules, uniqueness and
- * the state machine still surface only on the real write. Closing those means
- * validating through the engine itself rather than growing this copy.
- */
-export function firstConstraintViolation(
-  data: Record<string, unknown>,
-  metaMap: Map<string, ExportFieldMeta>,
-  // Optional so existing callers keep working; supplied by the runner so a dry
-  // run's verdict reads in the same language as the real rejection (#3957).
-  ctx: Pick<CoerceContext, 'locale' | 'translate'> = {},
-): FieldCoerceError | null {
-  // Mirrors the engine's own rendering — same catalog, same label resolution —
-  // so a predicted violation and the real one are the SAME sentence.
-  const bound = (
-    meta: ExportFieldMeta,
-    code: FieldErrorCode,
-    constraint: Record<string, unknown>,
-  ): FieldCoerceError => ({
-    field: meta.name,
-    code,
-    message: renderValidationMessage(
-      {
-        messageKey: code,
-        label: meta.label?.trim() || meta.name,
-        field: meta.name,
-        params: constraint,
-      },
-      { locale: ctx.locale, translate: ctx.translate },
-    ),
-  });
-  for (const meta of metaMap.values()) {
-    if (meta.system || meta.readonly) continue;
-    if (REQUIRED_CHECK_SKIP.has(meta.name)) continue;
-    const value = data[meta.name];
-    if (isBlankValue(value)) continue; // absent → nothing to bound-check
-    const t = meta.type ?? '';
-
-    if (BOUNDED_NUMBER_TYPES.has(t)) {
-      const n = typeof value === 'number' ? value : Number(value);
-      if (!Number.isFinite(n)) continue; // a non-number is coerceRow's verdict, not ours
-      if (meta.min !== undefined && n < meta.min) {
-        return bound(meta, 'min_value', { min: meta.min });
-      }
-      if (meta.max !== undefined && n > meta.max) {
-        return bound(meta, 'max_value', { max: meta.max });
-      }
-      continue;
-    }
-
-    if (BOUNDED_STRING_TYPES.has(t)) {
-      // `String(value)` matches the engine, which stringifies a non-string
-      // (e.g. a `multiple` text cell joined by the export separator) before
-      // measuring it.
-      const s = typeof value === 'string' ? value : String(value);
-      if (meta.maxLength !== undefined && s.length > meta.maxLength) {
-        return bound(meta, 'max_length', { maxLength: meta.maxLength, actual: s.length });
-      }
-      if (meta.minLength !== undefined && s.length < meta.minLength) {
-        return bound(meta, 'min_length', { minLength: meta.minLength, actual: s.length });
-      }
-    }
-  }
-  return null;
-}
+// ── the retired pre-check mirror ───────────────────────────────────
+//
+// `firstMissingRequiredField` and `firstConstraintViolation` used to live here
+// (framework#3956): hand-copied re-implementations of the engine's required
+// check and its numeric-range / string-length rules, kept in step with
+// `record-validator.ts` by hand so the import's dry run could PREDICT the
+// verdict the real write produces.
+//
+// A copy cannot structurally keep up with the family it mirrors, and the gap
+// was measured (#4633): a CSV cell aimed at a `Field.address` passed the dry
+// run — `coerceFieldValue` routes structured value shapes through its
+// pass-through catch-all, so no verdict was formed at all — and the write then
+// rejected it with `VALIDATION_FAILED`. The same hole covered `format` checks,
+// object-level `validations`, and the state machine.
+//
+// Ruling D (maintainer, 2026-08-06) retired the mirror rather than growing it:
+// the dry run now ASKS for the verdict through `DataProtocol.validateData`
+// (#6037), which runs the same `validateRecord` / `evaluateValidationRules`
+// `insert()` runs, under the deployment's own ADR-0104 posture. See
+// `import-runner.ts`'s dry-run branch. Every verdict these two produced is
+// re-asserted through that route in `import-dryrun-parity.test.ts` — retiring
+// the mirror must not silently retire its coverage.
 
 /**
  * Coerce a whole raw row into a storage-ready record. Unknown columns (no

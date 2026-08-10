@@ -2,6 +2,7 @@
 
 import { ObjectQL } from './engine.js';
 import { assembleMetadataProtocol } from '@objectstack/metadata-protocol';
+import type { MetadataAuthoringChannel } from '@objectstack/metadata-protocol';
 import { Plugin, PluginContext } from '@objectstack/core';
 import { applyConversionsToStoredItem } from '@objectstack/spec';
 import { StorageNameMapping } from '@objectstack/spec/system';
@@ -65,6 +66,25 @@ export interface ObjectQLPluginOptions {
   hostContext?: Record<string, any>;
   /** Scope sys_metadata reads/writes to this project. */
   environmentId?: string;
+  /**
+   * [#6710] Which authoring channel this kernel's metadata writes arrive on —
+   * the explicit expression of ADR-0005's "package author's own bootstrap
+   * channel".
+   *
+   * **Leave unset on every kernel that serves `PUT /api/v1/meta/*` to end
+   * users.** The default `'environment'` runs the #4463 runtime authoring
+   * rules (the 26 shared `AUTHORING_RULES` that `os validate` / `os lint`
+   * run), which for a Studio tenant or an MCP/AI author is the ONLY
+   * author-time gate — there is no `os lint` for a `sys_metadata` overlay row.
+   *
+   * Set `'package-author'` ONLY on the genuine control-plane assembly. Before
+   * #6710 this was inferred from `environmentId === undefined`, which is a row
+   * -scoping key and not a topology signal: the CLI's host-config assembler
+   * leaves it undefined too, so the flagship showcase's own boot shape ran the
+   * gate on nothing. Omitting this option now means MORE enforcement, never
+   * less — which is the whole point of declaring it rather than deducing it.
+   */
+  authoringChannel?: MetadataAuthoringChannel;
   /**
    * Override the kernel's default plugin-start timeout for this plugin.
    * Defaults to 120000 (120s). Schema sync to a remote SQL backend
@@ -165,6 +185,12 @@ export class ObjectQLPlugin implements Plugin {
   private ql: ObjectQL | undefined;
   private hostContext?: Record<string, any>;
   private environmentId?: string;
+  /**
+   * [#6710] Declared authoring channel, forwarded to the ONE protocol
+   * assembly. `undefined` here is not "unknown" — `assembleMetadataProtocol`
+   * resolves it to `'environment'`, the gated channel.
+   */
+  private authoringChannel?: MetadataAuthoringChannel;
   private skipSchemaSync = false;
   /** Serializes reload-time schema syncs so overlapping reloads can't race DDL. */
   private reloadSchemaSync: Promise<void> = Promise.resolve();
@@ -204,6 +230,7 @@ export class ObjectQLPlugin implements Plugin {
     }
     this.hostContext = opts.hostContext ?? hostContext;
     this.environmentId = opts.environmentId;
+    this.authoringChannel = opts.authoringChannel;
     if (typeof opts.startupTimeout === 'number' && opts.startupTimeout > 0) {
       this.startupTimeout = opts.startupTimeout;
     }
@@ -292,7 +319,13 @@ export class ObjectQLPlugin implements Plugin {
       // @objectstack/metadata-protocol — this built-in mode is the
       // single-kernel convenience mount of the same code path the
       // MetadataProtocolPlugin uses (identical objects/protocol/analytics).
-      const protocolShim = assembleMetadataProtocol(ctx, this.ql, this.environmentId);
+      // [#6710] `authoringChannel` rides the same seam as `environmentId`, and
+      // an undefined one resolves to `'environment'` (gated) inside the
+      // assembly — including on the legacy positional `(ObjectQL, hostContext)`
+      // constructor path, which returns before any option is read.
+      const protocolShim = assembleMetadataProtocol(ctx, this.ql, this.environmentId, {
+        authoringChannel: this.authoringChannel,
+      });
       this.subscribeMetadataRebind(ctx, protocolShim);
     } else {
       ctx.logger.info('registerProtocol=false — protocol assembly delegated to MetadataProtocolPlugin (ADR-0076 Step 2, #2462)');
@@ -642,6 +675,30 @@ export class ObjectQLPlugin implements Plugin {
    * Removed objects are left registered until restart — same lifecycle as
    * their tables, which managed drift deliberately never drops.
    */
+  /**
+   * [ADR-0029 D9.8] Which contributor KIND a metadata-service body registers
+   * as. The SAME discriminator the two `sys_metadata` hydration seams ask, owed
+   * to these two ingest paths because they also register a reloaded body — left
+   * as an unconditional `'own'` they re-open the splice through a third door,
+   * and it is easy to miss precisely because they are about metadata-service
+   * reloads rather than about tenant overlays.
+   *
+   * Narrower than the `sys_metadata` seams' rule, and deliberately so: a row
+   * from `sys_metadata` is tenant-authored by definition, while THIS body can
+   * be either layer. A reload of the OWNER's own definition (HMR, a package
+   * re-registering its own object) must stay an `own` re-registration; it is a
+   * body that arrives under a different id, or one that says it is
+   * tenant-authored, that is a layer over the code definition.
+   */
+  private objectContributionKind(name: string, packageId: string, body: unknown): 'own' | 'overlay' {
+    const registry: any = this.ql?.registry;
+    if (typeof registry?.getPackagedObjectOwner !== 'function') return 'own';
+    const owner = registry.getPackagedObjectOwner(name);
+    if (!owner) return 'own';
+    const tenantAuthored = (body as { _provenance?: unknown } | null | undefined)?._provenance === 'org';
+    return owner.packageId === packageId && !tenantAuthored ? 'own' : 'overlay';
+  }
+
   private ingestReloadedObjects(ctx: PluginContext, payload: unknown): void {
     if (!this.ql) return;
     const objects = (payload as any)?.metadata?.objects;
@@ -652,11 +709,13 @@ export class ObjectQLPlugin implements Plugin {
       if (typeof name !== 'string' || name.length === 0) continue;
       try {
         this.ql.registry.invalidate(name);
+        const reloadPackageId = (obj as any)._packageId ?? 'metadata-service';
         this.ql.registry.registerObject(
           obj as any,
-          (obj as any)._packageId ?? 'metadata-service',
+          reloadPackageId,
           (obj as any).namespace,
-          'own',
+          // [ADR-0029 D9.8] See {@link objectContributionKind}.
+          this.objectContributionKind(name, reloadPackageId, obj),
         );
         ingested++;
       } catch (e: any) {
@@ -733,7 +792,8 @@ export class ObjectQLPlugin implements Plugin {
             fresh as any,
             packageId,
             namespace,
-            'own',
+            // [ADR-0029 D9.8] See {@link objectContributionKind}.
+            this.objectContributionKind(name, packageId, fresh),
           );
           ctx.logger.info('[ObjectQLPlugin] object metadata updated — registry refreshed', {
             name,
@@ -895,56 +955,73 @@ export class ObjectQLPlugin implements Plugin {
           }
         },
       },
-      {
-        name: 'sys_fetch_previous_update',
-        object: '*',
-        events: ['beforeUpdate'],
-        priority: 5,
-        description: 'Auto-fetch the previous record for update hooks',
-        handler: async (hookCtx: any) => {
-          if (hookCtx.input?.id && !hookCtx.previous) {
-            try {
-              const existing = await this.ql!.findOne(hookCtx.object, {
-                where: { id: hookCtx.input.id },
-                context: {
-                  positions: [],
-                  permissions: [],
-                  isSystem: true,
-                  ...(hookCtx.transaction ? { transaction: hookCtx.transaction } : {}),
-                } as any,
-              });
-              if (existing) hookCtx.previous = existing;
-            } catch (_e) {
-              // Non-fatal: some objects may not support findOne
-            }
-          }
-        },
-      },
-      {
-        name: 'sys_fetch_previous_delete',
-        object: '*',
-        events: ['beforeDelete'],
-        priority: 5,
-        description: 'Auto-fetch the previous record for delete hooks',
-        handler: async (hookCtx: any) => {
-          if (hookCtx.input?.id && !hookCtx.previous) {
-            try {
-              const existing = await this.ql!.findOne(hookCtx.object, {
-                where: { id: hookCtx.input.id },
-                context: {
-                  positions: [],
-                  permissions: [],
-                  isSystem: true,
-                  ...(hookCtx.transaction ? { transaction: hookCtx.transaction } : {}),
-                } as any,
-              });
-              if (existing) hookCtx.previous = existing;
-            } catch (_e) {
-              // Non-fatal
-            }
-          }
-        },
-      },
+      // ⛔ RETIRED — `sys_fetch_previous_update` (#5846 (a), delivered with
+      // #5574's engine half). Do not reintroduce it.
+      //
+      // It was registered here on `object: '*'` at priority 5, and on every
+      // by-id update it issued its own `ql.findOne` to bind
+      // `hookCtx.previous`, behind the guard `if (input.id && !ctx.previous)`.
+      // That guard is now PERMANENTLY FALSE: `update()` reads the prior row and
+      // binds `hookContext.previous` BEFORE dispatching `beforeUpdate` (the
+      // shape `delete()` has had since #5272), because ADR-0058 Addendum II
+      // makes the before phase a real reader of that row. A hook whose only
+      // statement is a guard that can no longer be true is not a safety net,
+      // it is a second read waiting to be rediscovered — so it goes, rather
+      // than being left in place "just in case".
+      //
+      // What it cost while it stood, measured on #5846: a single by-id update
+      // on a kernel with plugin-audit read the same row THREE times — this
+      // builtin, plugin-audit's `captureBefore`, and the engine's own gated
+      // read. Two of the three were engine reads through the full read pipeline
+      // (middleware, RLS, field masking) and neither consulted any demand gate.
+      // This change removes one and makes the engine's the single producer;
+      // `captureBefore`'s now-redundant read is the identity lane's follow-up.
+      //
+      // ⛔ RETIRED — `sys_fetch_previous_delete` (#5929, ADR-0049
+      // enforce-or-remove). Do not reintroduce it.
+      //
+      // #5846 left the measurement here rather than the hook, precisely so this
+      // retirement would not have to rediscover it. Quoted from the block above
+      // as it stood then, because it IS the argument:
+      //
+      //   `delete()` reads its pre-image when `wantsPreImage` is true, and that
+      //   gate is `hasHooksFor('beforeDelete', object) || hasHooksFor(
+      //   'afterDelete', object) || summaries`. The builtin is itself a
+      //   `beforeDelete` hook on `'*'`, so it makes the FIRST term true for
+      //   every object — and then the engine's read binds `previous` before the
+      //   builtin runs, so the builtin's own `!ctx.previous` guard is false and
+      //   it issues no `findOne`. It is circular: the builtin's only remaining
+      //   effect is to hold open the gate that makes it redundant.
+      //
+      // Verified on this branch before removing anything, because a measurement
+      // recorded on one PR is a hypothesis on the next: the engine binds
+      // `previous` ahead of `beforeDelete` on BOTH delete shapes — by-id since
+      // #5272, per matched row since #6697 — so the guard is unreachable in
+      // production, and removing the hook changes no `previous` binding
+      // anywhere. The residual shape, `!hookCtx.previous` because the engine's
+      // own read found nothing, is one where this handler's read finds nothing
+      // either (same row, same transaction, same tenant scope): it binds
+      // nothing, and `bindPreImage` deliberately leaves `previous` UNBOUND
+      // rather than fabricating `{}` (#4649/#4775).
+      //
+      // What retiring it buys, and what it does NOT buy — both worth stating so
+      // the next reader does not over-read the result:
+      //   * it makes `hasHooksFor('beforeDelete', object)` an honest question on
+      //     an objectql-only kernel, so an object with no delete-side hook and
+      //     no roll-up summary finally pays NO prior-row read on a by-id
+      //     `delete()`. That skip could never happen while this hook stood.
+      //   * it does not, on its own, make the gate false on a kernel that also
+      //     loads plugin-auth / plugin-sharing / plugin-audit: each of those
+      //     registers a delete-phase hook with no `object` (i.e. global), and
+      //     they hold the same gate open for their own reasons. Those are real
+      //     consumers with real handlers, not circular ones — the gate answering
+      //     "yes" for them is the gate working. The enumeration lives in
+      //     `engine.ts` beside `wantsPreImage`.
+      //
+      // The retired hook's own shape is replayed as an authored hook in
+      // `engine-delete-prior-read-scope.test.ts`, which measures that its guard
+      // short-circuits and it issues zero reads — so "the guard can no longer be
+      // true" stays a measurement instead of rotting into a claim.
     ];
 
     if (typeof (this.ql as any).bindHooks === 'function') {
@@ -962,7 +1039,12 @@ export class ObjectQLPlugin implements Plugin {
       }
     }
 
-    ctx.logger.debug('Audit hooks registered via binder (created_by/updated_by, previousData)');
+    // `previousData` used to be listed here as a third thing these builtins
+    // did. It is not one any more: both fetch-previous hooks are retired
+    // (#5846 update-side, #5929 delete-side) and `previous` is bound by the
+    // ENGINE on both write paths. A log line naming a producer that no longer
+    // exists is the cheapest way to send the next reader looking for it.
+    ctx.logger.debug('Audit hooks registered via binder (created_by/updated_by/created_at/updated_at/tenant_id stamping)');
   }
 
   /**

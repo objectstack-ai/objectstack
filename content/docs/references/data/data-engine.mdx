@@ -22,7 +22,7 @@ The Data Engine acts as the "Driver" layer in the Hexagonal Architecture.
 
 ```typescript
 import { BaseEngineOptionsSchema, DataEngineAggregateOptionsSchema, DataEngineAggregateRequestSchema, DataEngineCountOptionsSchema, DataEngineCountRequestSchema, DataEngineDeleteOptionsSchema, DataEngineDeleteRequestSchema, DataEngineExecuteRequestSchema, DataEngineFilterSchema, DataEngineFindOneRequestSchema, DataEngineFindRequestSchema, DataEngineInsertOptionsSchema, DataEngineInsertRequestSchema, DataEngineQueryOptionsSchema, DataEngineRequestSchema, DataEngineSortSchema, DataEngineUpdateOptionsSchema, DataEngineUpdateRequestSchema, DataEngineVectorFindRequestSchema, DroppedFieldsEventSchema, EngineAggregateOptionsSchema, EngineCountOptionsSchema, EngineDeleteOptionsSchema, EngineQueryOptionsSchema, EngineUpdateOptionsSchema } from '@objectstack/spec/data';
-import type { BaseEngineOptions, DataEngineAggregateOptions, DataEngineCountOptions, DataEngineDeleteOptions, DataEngineFilter, DataEngineInsertOptions, DataEngineQueryOptions, DataEngineRequest, DataEngineSort, DataEngineUpdateOptions, DroppedFieldsEvent, EngineAggregateOptions, EngineCountOptions, EngineDeleteOptions, EngineQueryOptions, EngineUpdateOptions } from '@objectstack/spec/data';
+import type { BaseEngineOptions, DataEngineAggregateOptions, DataEngineCountOptions, DataEngineDeleteOptions, DataEngineExecuteRequest, DataEngineFilter, DataEngineInsertOptions, DataEngineInsertRequest, DataEngineQueryOptions, DataEngineRequest, DataEngineSort, DataEngineUpdateOptions, DataEngineVectorFindRequest, DroppedFieldsEvent, EngineAggregateOptions, EngineCountOptions, EngineDeleteOptions, EngineQueryOptions, EngineUpdateOptions } from '@objectstack/spec/data';
 
 // Validate data
 const result = BaseEngineOptionsSchema.parse(data);
@@ -65,7 +65,7 @@ Options for DataEngine.aggregate operations
 | :--- | :--- | :--- | :--- |
 | **method** | `'aggregate'` | ✅ |  |
 | **object** | `string` | ✅ |  |
-| **query** | `{ context?: object; where?: Record<string, any> \| any; groupBy?: string[]; aggregations?: { function: Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct' \| 'array_agg' \| 'string_agg'>; field?: string; alias: string; distinct?: boolean; … }[]; … }` | ✅ |  |
+| **query** | `{ context?: object; where?: Record<string, any> \| any; groupBy?: string[]; aggregations?: object[]; … }` | ✅ |  |
 
 
 ---
@@ -170,7 +170,7 @@ Reference: any
 | :--- | :--- | :--- | :--- |
 | **method** | `'findOne'` | ✅ |  |
 | **object** | `string` | ✅ |  |
-| **query** | `{ context?: object; where?: Record<string, any> \| any; fields?: string[]; orderBy?: { field: string; order?: Enum<'asc' \| 'desc'> }[]; … }` | optional |  |
+| **query** | `{ context?: object; where?: Record<string, any> \| any; fields?: string[]; orderBy?: object[]; … }` | optional |  |
 
 
 ---
@@ -183,7 +183,7 @@ Reference: any
 | :--- | :--- | :--- | :--- |
 | **method** | `'find'` | ✅ |  |
 | **object** | `string` | ✅ |  |
-| **query** | `{ context?: object; where?: Record<string, any> \| any; fields?: string[]; orderBy?: { field: string; order?: Enum<'asc' \| 'desc'> }[]; … }` | optional |  |
+| **query** | `{ context?: object; where?: Record<string, any> \| any; fields?: string[]; orderBy?: object[]; … }` | optional |  |
 
 
 ---
@@ -252,7 +252,7 @@ This schema accepts one of the following structures:
 | :--- | :--- | :--- | :--- |
 | **method** | `'find'` | ✅ |  |
 | **object** | `string` | ✅ |  |
-| **query** | `{ context?: object; where?: Record<string, any> \| any; fields?: string[]; orderBy?: { field: string; order?: Enum<'asc' \| 'desc'> }[]; … }` | optional |  |
+| **query** | `{ context?: object; where?: Record<string, any> \| any; fields?: string[]; orderBy?: object[]; … }` | optional |  |
 
 ---
 
@@ -264,7 +264,7 @@ This schema accepts one of the following structures:
 | :--- | :--- | :--- | :--- |
 | **method** | `'findOne'` | ✅ |  |
 | **object** | `string` | ✅ |  |
-| **query** | `{ context?: object; where?: Record<string, any> \| any; fields?: string[]; orderBy?: { field: string; order?: Enum<'asc' \| 'desc'> }[]; … }` | optional |  |
+| **query** | `{ context?: object; where?: Record<string, any> \| any; fields?: string[]; orderBy?: object[]; … }` | optional |  |
 
 ---
 
@@ -328,7 +328,7 @@ This schema accepts one of the following structures:
 | :--- | :--- | :--- | :--- |
 | **method** | `'aggregate'` | ✅ |  |
 | **object** | `string` | ✅ |  |
-| **query** | `{ context?: object; where?: Record<string, any> \| any; groupBy?: string[]; aggregations?: { function: Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct' \| 'array_agg' \| 'string_agg'>; field?: string; alias: string; distinct?: boolean; … }[]; … }` | ✅ |  |
+| **query** | `{ context?: object; where?: Record<string, any> \| any; groupBy?: string[]; aggregations?: object[]; … }` | ✅ |  |
 
 ---
 
@@ -451,7 +451,7 @@ A write-path strip event: caller-supplied fields legally dropped from the payloa
 | :--- | :--- | :--- | :--- |
 | **object** | `string` | ✅ | Object the write targeted (resolved object name) |
 | **fields** | `string[]` | ✅ | Caller-supplied field names the engine removed from the write payload |
-| **reason** | `Enum<'readonly' \| 'readonly_when'>` | ✅ | Why the fields were dropped: static readonly (#2948) or a TRUE readonlyWhen predicate (#3042) |
+| **reason** | `Enum<'readonly' \| 'readonly_when' \| 'primary_key'>` | ✅ | Why the fields were dropped: static readonly (#2948), a TRUE readonlyWhen predicate (#3042), or the primary-key strip of a payload id the engine ruled is not an identifier (#6437) |
 
 
 ---
@@ -467,7 +467,7 @@ QueryAST-aligned options for DataEngine.aggregate operations
 | **context** | `{ userId?: string; actor?: string; attributedUserId?: string; email?: string; … }` | optional |  |
 | **where** | `Record<string, any> \| any` | optional |  |
 | **groupBy** | `string[]` | optional |  |
-| **aggregations** | `{ function: Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct' \| 'array_agg' \| 'string_agg'>; field?: string; alias: string; distinct?: boolean; … }[]` | optional |  |
+| **aggregations** | `{ function: Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct'>; field?: string; alias: string; filter?: any }[]` | optional |  |
 | **having** | `any` | optional | HAVING — filter over the aggregated rows (aggregation aliases + groupBy projections); applied engine-side after aggregation |
 | **timezone** | `string` | optional |  |
 
@@ -519,9 +519,9 @@ QueryAST-aligned query options for IDataEngine.find() operations
 | **offset** | `number` | optional |  |
 | **top** | `number` | optional |  |
 | **cursor** | `never` | optional | [REMOVED] `query.cursor` was removed in @objectstack/spec 17 (#4286, ADR-0049) — no driver ever implemented keyset pagination, so the cursor was accepted and ignored and every page came back identical (a caller looping "until hasMore is false" never terminates). Delete the key; `QueryBuilder.cursor()` was removed with it. Express the keyset as an ordinary `where` predicate on your sort key — `where: { created_at: { $gt: last.created_at } }` with the matching `orderBy` — which every driver executes with canonicalised comparands. A first-class cursor, if ever built, will be a response-minted opaque token, not this caller-built record. |
-| **search** | `{ query: string; fields?: string[]; fuzzy: boolean; operator: Enum<'and' \| 'or'>; … }` | optional |  |
+| **search** | `string \| { query: string; fields?: string[]; fuzzy: boolean; operator: Enum<'and' \| 'or'>; … }` | optional |  |
 | **searchFields** | `string[]` | optional |  |
-| **expand** | `Record<string, { object: string; fields?: string[]; where?: any; search?: string \| { query: string; fields?: string[]; fuzzy: boolean; operator: Enum<'and' \| 'or'>; … }; … }>` | optional |  |
+| **expand** | `Record<string, { object: string; fields?: string[]; where?: any; search?: string \| object; … }>` | optional |  |
 | **distinct** | `never` | optional | [REMOVED] `query.distinct` was removed in @objectstack/spec 17 (#4286, ADR-0049 / ADR-0078) — no driver ever rendered SELECT DISTINCT; the flag's only observable effect was MIS-WIRED: the REST list path treated a distinct query as not countable and silently degraded `total`/`hasMore` to a page-local estimate while still returning duplicate rows. Delete the key; `QueryBuilder.distinct()` was removed with it, and the count suppression is gone (`total` is truthful again). For unique values of one column use the SQL/memory drivers' `distinct(object, field)` door; for unique combinations, `groupBy`; for a deduplicated count, the `count_distinct` aggregation. |
 
 

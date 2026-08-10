@@ -15,12 +15,20 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { ObjectQL } from './engine.js';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
-import type { IObjectQLEngine } from '@objectstack/spec/contracts';
+import type { IDataDriver, IObjectQLEngine } from '@objectstack/spec/contracts';
 
 /**
  * A stub driver with real transaction semantics: `beginTransaction` snapshots
  * every table, `rollback` restores the snapshot wholesale, `commit` drops it —
  * a genuine rollback, small enough to assert against.
+ *
+ * Typed `IDataDriver` on purpose, not `any` (#6546). Nothing in this file parses
+ * the double through `DriverInterfaceSchema`, so `tsc` at THIS literal is the
+ * only channel that can reject a retired capability bit — and `any` switched it
+ * off. Under the annotation the retired keys tombstoned in
+ * `DriverCapabilitiesSchema` (`retiredKey()`, i.e. `never`) fail to compile
+ * here, which is the point of the tombstone: mocks get copied, and a copy of
+ * this one now inherits the diagnostic rather than the silence.
  */
 function makeSnapshotDriver() {
     const stores = new Map<string, Map<string, any>>();
@@ -40,10 +48,16 @@ function makeSnapshotDriver() {
     let nextId = 0;
     let nextTrx = 0;
 
-    const driver: any = {
+    const driver: IDataDriver = {
         name: 'snapshot',
         version: '0.0.0',
-        supports: { transactions: true },
+        // No capability bits at all, deliberately. This driver used to author
+        // `{ transactions: true }`, a key RETIRED by #4634 whose prescription is
+        // exactly this: transaction use gates on METHOD PRESENCE
+        // (`beginTransaction` below), so the bit decided nothing. The suite
+        // proves it — every transactional assertion here passes against an
+        // empty `supports`.
+        supports: {},
         async connect() { },
         async disconnect() { },
         async checkHealth() { return true; },
@@ -79,6 +93,13 @@ function makeSnapshotDriver() {
         },
         async bulkUpdate() { return []; },
         async bulkDelete() { },
+        // Required by `IDataDriver`, unreached by these tests — stubbed so the
+        // annotation above can stand. Each throws rather than returning a
+        // plausible value: a silent no-op would let a future test believe it had
+        // exercised a path this double does not model.
+        async upsert(): Promise<Record<string, unknown>> { throw new Error('snapshot driver: upsert() is not modelled'); },
+        async syncSchema() { throw new Error('snapshot driver: syncSchema() is not modelled'); },
+        async dropTable() { throw new Error('snapshot driver: dropTable() is not modelled'); },
         async beginTransaction() {
             nextTrx += 1;
             const trx = { __trx: nextTrx };
@@ -112,7 +133,7 @@ describe('atomic batchData over the real engine (ADR-0119 D4 / ADR-0034)', () =>
         d = makeSnapshotDriver();
         engine.registerDriver(d.driver, true);
         await engine.init();
-        engine.registry.registerObject({ name: 'invoice', fields: { title: { type: 'text' } } } as any);
+        engine.registry.registerObject({ name: 'invoice', fields: { title: { type: 'text' } } });
         protocol = new ObjectStackProtocolImplementation(engine as any);
     });
 
@@ -198,13 +219,44 @@ describe('atomic batchData over the real engine (ADR-0119 D4 / ADR-0034)', () =>
         for (const r of d.seen.findOne) expect(r.transaction).toBe(handle);
     });
 
+    it('gates transactions on METHOD PRESENCE, not a capability bit (#4634 / #6546)', async () => {
+        // The half of the gate that is easy to mistake for a capability bit.
+        // This driver advertises NO capabilities at all, and the transactional
+        // path below still runs end to end. Until #6546 the double authored
+        // `supports: { transactions: true }` — a key RETIRED by #4634 and
+        // tombstoned in `DriverCapabilitiesSchema` as `never` — and every
+        // assertion in this suite passed identically with it, because nothing
+        // has ever read it. `beginTransaction` being a function is the gate;
+        // the companion test below removes the method and the engine refuses.
+        expect(Object.keys(d.driver.supports)).toHaveLength(0);
+        expect(typeof d.driver.beginTransaction).toBe('function');
+
+        await protocol.batchData({
+            object: 'invoice',
+            request: {
+                operation: 'create',
+                records: [{ data: { title: 'A' } }],
+                options: { atomic: true },
+            },
+        } as any);
+
+        expect(d.seen.begin).toHaveLength(1);
+        expect(d.seen.commit).toHaveLength(1);
+    });
+
     it('refuses atomic when the driver cannot transact, and writes nothing', async () => {
         const bare = new ObjectQL();
         const plain = makeSnapshotDriver();
-        delete plain.driver.beginTransaction;
+        // The other half: remove the METHOD and the engine refuses — no bit
+        // anywhere can put the capability back. `Reflect.deleteProperty` rather
+        // than `delete` because `beginTransaction` is REQUIRED on `IDataDriver`
+        // (`delete` on a non-optional property is TS2790); identical at runtime,
+        // and it keeps the double free of casts.
+        Reflect.deleteProperty(plain.driver, 'beginTransaction');
+        expect(plain.driver.beginTransaction).toBeUndefined();
         bare.registerDriver(plain.driver, true);
         await bare.init();
-        bare.registry.registerObject({ name: 'invoice', fields: { title: { type: 'text' } } } as any);
+        bare.registry.registerObject({ name: 'invoice', fields: { title: { type: 'text' } } });
         const p = new ObjectStackProtocolImplementation(bare as any);
 
         await expect(p.batchData({
@@ -222,7 +274,7 @@ describe('ADR-0119 D1 — transaction is reachable through the contract', () => 
         const d = makeSnapshotDriver();
         engine.registerDriver(d.driver, true);
         await engine.init();
-        engine.registry.registerObject({ name: 'invoice', fields: { title: { type: 'text' } } } as any);
+        engine.registry.registerObject({ name: 'invoice', fields: { title: { type: 'text' } } });
 
         // The point of the pin is the TYPE, not the runtime: before ADR-0119 D1
         // this line could not compile — `transaction` was absent from the

@@ -27,7 +27,7 @@ import { ElementButtonPropsSchema } from './component.zod';
 
 /** The fields an inline action admits, in the order they are picked. */
 const INLINE_FIELDS = [
-  'type', 'name', 'label', 'target', 'openIn', 'method', 'params',
+  'type', 'name', 'label', 'target', 'openIn', 'method', 'params', 'bodyExtra',
   'confirmText', 'successMessage', 'errorMessage', 'refreshAfter', 'opensInNewTab',
 ] as const;
 
@@ -62,6 +62,7 @@ describe('InlineActionSchema is derived from ActionSchema, not restated', () => 
       openIn: 'new-tab' as const,
       method: 'POST' as const,
       params: [],
+      bodyExtra: { resend: true },
       confirmText: 'Sure?',
       successMessage: 'Done',
       errorMessage: 'Failed',
@@ -113,6 +114,199 @@ describe('InlineActionSchema — identity is optional, unlike a registered actio
       expect(r.success, `type "${type}" should require a target`).toBe(false);
       expect((r as { error: z.ZodError }).error.issues.some(i => i.path.join('.') === 'target')).toBe(true);
     }
+  });
+});
+
+/**
+ * #5777 — the payload key. `params` carried two fact-contracts (an
+ * `ActionParam[]` definition array in the spec, a static payload map in the
+ * live objectui runner, discriminated by `Array.isArray`); the maintainer's
+ * 2026-08-06 ruling took direction A, a SEPARATE key, and refused the
+ * same-name union. `bodyExtra` is that key — already declared on `ActionSchema`
+ * for `type:'api'` bodies, now picked onto the inline shape.
+ */
+describe('InlineActionSchema — `bodyExtra` is the payload key, `params` is not (#5777)', () => {
+  it('accepts the showcase submit button verbatim, `{{page.<var>}}` tokens included', () => {
+    // examples/app-showcase/src/ui/pages/contact-form.page.ts — the site the
+    // #5068 gate reported. Values are template tokens, not literals: the
+    // console action runtime resolves them via resolvePageVarTokens.
+    const r = InlineActionSchema.safeParse({
+      type: 'api',
+      target: '/api/v1/forms/contact-us/submit',
+      method: 'POST',
+      bodyExtra: {
+        name: '{{page.inquiryName}}',
+        email: '{{page.inquiryEmail}}',
+      },
+      successMessage: 'Thanks! We received your inquiry.',
+      refreshAfter: false,
+    });
+    expect(r.success, JSON.stringify((r as { error?: unknown }).error)).toBe(true);
+    expect((r.data as { bodyExtra: Record<string, unknown> }).bodyExtra)
+      .toEqual({ name: '{{page.inquiryName}}', email: '{{page.inquiryEmail}}' });
+  });
+
+  it('REFUSES the object form of `params`, and the refusal names `bodyExtra`', () => {
+    // The rejection assertion is the envelope this surface HAS: a schema parse
+    // reports a coded issue at a path, not an HTTP status (no route is involved
+    // in a `.safeParse`). `toThrow()`-shaped "it failed somehow" would stay
+    // green if the message regressed to the bare "expected array, received
+    // object" an author cannot act on — which is the whole defect #5777 fixes.
+    const r = InlineActionSchema.safeParse({
+      type: 'api',
+      target: '/api/v1/forms/contact-us/submit',
+      params: { name: '{{page.inquiryName}}' },
+    });
+    expect(r.success).toBe(false);
+    const issues = (r as { error: z.ZodError }).error.issues;
+    const paramsIssue = issues.find(i => i.path.join('.') === 'params');
+    expect(paramsIssue, JSON.stringify(issues)).toBeDefined();
+    expect(paramsIssue!.code).toBe('invalid_type');
+    expect((paramsIssue as unknown as { expected: string }).expected).toBe('array');
+    expect(paramsIssue!.message).toContain('bodyExtra');
+    expect(paramsIssue!.message).toContain('#5777');
+    // And it says what `params` IS, not only what it is not.
+    expect(paramsIssue!.message).toContain('DEFINITION array');
+  });
+
+  it('keeps the definition-array meaning of `params` intact', () => {
+    const r = InlineActionSchema.safeParse({
+      type: 'api',
+      target: '/api/v1/sales_order/close',
+      params: [{ name: 'reason', label: 'Reason', type: 'text' }],
+      bodyExtra: { closed_by_ui: true },
+    });
+    expect(r.success, JSON.stringify((r as { error?: unknown }).error)).toBe(true);
+    // Both keys coexist — they are different concepts, which is the ruling.
+    const data = r.data as { params: unknown[]; bodyExtra: Record<string, unknown> };
+    expect(Array.isArray(data.params)).toBe(true);
+    expect(data.bodyExtra).toEqual({ closed_by_ui: true });
+  });
+
+  it('renames `payload` onto `bodyExtra` rather than accepting a third spelling', () => {
+    // `payload: 'bodyExtra'` has been in the alias table since #5013. The pick
+    // must not lose it — an alias that survives on ActionSchema and dies on the
+    // inline shape is exactly the second-dialect drift this schema prevents.
+    const r = InlineActionSchema.safeParse({ type: 'api', target: '/x', payload: { a: 1 } });
+    expect(r.success).toBe(false);
+    const issue = (r as { error: z.ZodError }).error.issues[0]!;
+    expect(issue.code).toBe('unrecognized_keys');
+    expect(issue.message).toContain('`payload` → `bodyExtra`');
+  });
+
+  it('leaves `body` unreachable — it is the script hook body, not a payload', () => {
+    // Why the ruling's suggested name could not be taken: `body` is declared on
+    // ActionSchema and #4352's refinement rejects it alongside any non-script
+    // type. It is not picked here at all, so it is an unknown key inline.
+    const shape = inlineObject().shape;
+    expect(shape).not.toHaveProperty('body');
+    const r = InlineActionSchema.safeParse({ type: 'api', target: '/x', body: { a: 1 } });
+    expect(r.success).toBe(false);
+  });
+});
+
+/**
+ * #6828 — the THIRD meaning of `params`, and why one prescription is not enough.
+ *
+ * #5777 settled the `type:'api'` half: the object form means the request
+ * payload, and the payload moves to `bodyExtra`. It did not settle the
+ * `type:'url'` half, where objectui's `ActionRunner` read a non-array `params`
+ * as the `${param.X}` interpolation scope for `target` and `params.newTab` as a
+ * legacy new-tab flag. So between #5777 and this card the refusal told a url
+ * author to use `bodyExtra` — an api request-body key, which is not an
+ * interpolation scope and cannot carry a new-tab flag. Wrong instruction, and
+ * the exact one the maintainer's 2026-08-10 ruling on #6828 names when it
+ * retires the url meaning instead of giving it a key.
+ *
+ * Both arms are pinned, on both surfaces, by path + code + message content: a
+ * regression that drops either arm is a wrong instruction again, and the bare
+ * "expected array, received object" would keep a `toThrow()`-shaped test green.
+ */
+describe('object-form `params` prescribes per action type (#6828)', () => {
+  /** The `params` issue a parse produced, or a readable failure if it produced none. */
+  const paramsIssue = (r: { success: boolean; error?: z.ZodError }) => {
+    expect(r.success).toBe(false);
+    const issues = r.error!.issues;
+    const issue = issues.find(i => i.path.join('.') === 'params');
+    expect(issue, JSON.stringify(issues)).toBeDefined();
+    return issue!;
+  };
+
+  it("sends a `type:'url'` action to `target` interpolation and `openIn`, NOT to `bodyExtra`", () => {
+    // The shape the issue measured: the interpolation scope half. `target`
+    // already carries the token, and the scope is the only thing missing a
+    // spelling — which the ruling declines to add.
+    const r = InlineActionSchema.safeParse({
+      type: 'url',
+      target: '/x?id=${param.id}',
+      params: { id: 'abc' },
+    }) as { success: boolean; error?: z.ZodError };
+    const issue = paramsIssue(r);
+    expect(issue.code).toBe('invalid_type');
+    expect((issue as unknown as { expected: string }).expected).toBe('array');
+    expect(issue.message).toContain('`target` string');
+    expect(issue.message).toContain("openIn: 'new-tab'");
+    expect(issue.message).toContain('RETIRED, not renamed (#6828)');
+  });
+
+  it('names the retired `params.newTab` escape hatch, so the flag half has an answer too', () => {
+    // The second url reading: `executeUrl` read `params.newTab` below `openIn`
+    // in priority. `openIn` is the declared key, so this half is a plain
+    // deprecation — but only if the message says so where the author lands.
+    const r = InlineActionSchema.safeParse({
+      type: 'url',
+      target: 'https://example.com/pricing',
+      params: { newTab: true },
+    }) as { success: boolean; error?: z.ZodError };
+    const issue = paramsIssue(r);
+    expect(issue.code).toBe('invalid_type');
+    expect(issue.message).toContain('params.newTab');
+    expect(issue.message).toContain("openIn: 'new-tab'");
+  });
+
+  it("keeps the `type:'api'` arm intact — `bodyExtra` is still the payload prescription", () => {
+    // The url arm is additive. #5777's answer must not be displaced by it:
+    // the api author reaching for a payload still gets the key that holds one.
+    const r = InlineActionSchema.safeParse({
+      type: 'api',
+      target: '/api/v1/forms/contact-us/submit',
+      params: { name: '{{page.inquiryName}}' },
+    }) as { success: boolean; error?: z.ZodError };
+    const issue = paramsIssue(r);
+    expect(issue.code).toBe('invalid_type');
+    expect(issue.message).toContain('bodyExtra: { … }');
+    expect(issue.message).toContain('(#5777)');
+  });
+
+  it('guides the REGISTERED action surface identically — the field factory is shared', () => {
+    // `params` is declared once on `actionObject()`, so a registered `type:'url'`
+    // action must land on the same guidance. Pinned because a future fix that
+    // moved the branch onto `InlineActionSchema` alone would silently leave the
+    // registry surface on the api-only prescription.
+    const r = ActionSchema.safeParse({
+      name: 'open_pricing',
+      label: 'Pricing',
+      type: 'url',
+      target: '/pricing?plan=${param.plan}',
+      params: { plan: 'pro' },
+    }) as { success: boolean; error?: z.ZodError };
+    const issue = paramsIssue(r);
+    expect(issue.code).toBe('invalid_type');
+    expect(issue.message).toContain('RETIRED, not renamed (#6828)');
+    expect(issue.message).toContain('bodyExtra: { … }');
+  });
+
+  it('leaves the definition-array meaning of `params` accepted on a url action', () => {
+    // The acceptance face does not move: the array form was always the one
+    // meaning, and a url action collecting input still interpolates `${param.X}`
+    // from the dialog. This is the sanctioned spelling the message points at.
+    const r = InlineActionSchema.safeParse({
+      type: 'url',
+      target: '/api/v1/auth/sign-in/social?provider=${param.provider}',
+      params: [{ name: 'provider', label: 'Provider', type: 'text' }],
+      openIn: 'new-tab',
+    });
+    expect(r.success, JSON.stringify((r as { error?: unknown }).error)).toBe(true);
   });
 });
 
@@ -182,5 +376,37 @@ describe('element:button declares its action', () => {
       action: { type: 'teleport', target: '/x' },
     });
     expect(r.success).toBe(false);
+  });
+
+  it('carries an api payload through to parse output (#5777, end to end)', () => {
+    // The #5068 gate parses `properties` through this schema, so this is the
+    // exact call whose `component-props-invalid` finding the showcase page
+    // produced before the ruling.
+    const r = ElementButtonPropsSchema.safeParse({
+      label: 'Submit inquiry',
+      variant: 'primary',
+      action: {
+        type: 'api',
+        target: '/api/v1/forms/contact-us/submit',
+        method: 'POST',
+        bodyExtra: { name: '{{page.inquiryName}}' },
+      },
+    });
+    expect(r.success, JSON.stringify((r as { error?: unknown }).error)).toBe(true);
+    expect((r.data as { action: { bodyExtra: unknown } }).action.bodyExtra)
+      .toEqual({ name: '{{page.inquiryName}}' });
+  });
+
+  it('still reports the object form of `params` as invalid, at the props path', () => {
+    const r = ElementButtonPropsSchema.safeParse({
+      label: 'Submit inquiry',
+      action: { type: 'api', target: '/x', params: { name: '{{page.n}}' } },
+    });
+    expect(r.success).toBe(false);
+    const issue = (r as { error: z.ZodError }).error.issues
+      .find(i => i.path.join('.') === 'action.params');
+    expect(issue, JSON.stringify((r as { error: z.ZodError }).error.issues)).toBeDefined();
+    expect(issue!.code).toBe('invalid_type');
+    expect(issue!.message).toContain('bodyExtra');
   });
 });

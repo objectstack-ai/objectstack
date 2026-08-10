@@ -15,27 +15,65 @@
  *   orExpr   := andExpr ('||' andExpr)*
  *   andExpr  := unary ('&&' unary)*
  *   unary    := '!' unary | comparison
- *   compare  := primary (('===' | '!==' | '==' | '!=') primary)?
+ *   compare  := primary (('===' | '!==' | '==' | '!=' |
+ *                         '>=' | '<=' | '>' | '<') primary)?
  *   primary  := '(' orExpr ')' | string | number | true | false | null | data.<ident>
  *
- * Anything outside the grammar throws `VisibilityParseError`; callers
- * should treat that as "cannot determine visibility" and skip validation
- * for the field (lenient) rather than block the save.
+ * ## The relational operators are here because a manifest already used one
+ *
+ * `>` / `>=` / `<` / `<=` were added in #7169, not speculatively: the auth
+ * manifest ships `visible: '${data.lockout_threshold > 0}'`, the console's
+ * client-side evaluator (a `new Function(...)` over the same string) rendered
+ * it correctly, and THIS grammar refused it — so the save path threw and, under
+ * the lenient contract this header used to state, skipped the whole
+ * `lockout_duration_minutes` specifier. Measured on `origin/main`: that key
+ * declares `min: 1, max: 1440` and accepted `-5` and `99999`, while its
+ * `visible`-free sibling `rate_limit_max` was refused correctly. The two
+ * evaluators disagreeing about what parses IS the bug class this file sits in,
+ * so the server grammar catches up to the operator the manifests demonstrably
+ * reach for, with JS relational semantics — the console's — deliberately.
+ *
+ * ## Callers must fail CLOSED (#7169, maintainer ruling 2026-08-10)
+ *
+ * Anything outside the grammar throws `VisibilityParseError`. This header used
+ * to tell callers to treat that as "cannot determine visibility" and skip
+ * validation for the field, lenient. That is exactly backwards for a save-time
+ * gate: `visible` does not gate one check, it gates EVERY check on the
+ * specifier (`required`, `options`, `pattern`, `valueDomain`, the value
+ * window), so a predicate this evaluator cannot parse silently switches all of
+ * them off. A caller enforcing declared constraints MUST refuse the write and
+ * report the parse failure — see `validatePatch` in `settings-service.ts`.
  */
 
 export class VisibilityParseError extends Error {
-  constructor(expr: string, detail: string) {
-    super(`Cannot parse visibility expression "${expr}": ${detail}`);
+  constructor(
+    /** The unwrapped predicate source that failed to parse. */
+    readonly source: string,
+    /** Why it failed, without the surrounding sentence — for embedding in a caller's own message. */
+    readonly detail: string,
+  ) {
+    super(`Cannot parse visibility expression "${source}": ${detail}`);
     this.name = 'VisibilityParseError';
   }
 }
 
 type Token =
-  | { kind: 'punct'; value: '(' | ')' | '!' | '&&' | '||' | '===' | '!==' | '==' | '!=' }
+  | {
+      kind: 'punct';
+      value: '(' | ')' | '!' | '&&' | '||' | '===' | '!==' | '==' | '!=' | '>=' | '<=' | '>' | '<';
+    }
   | { kind: 'string'; value: string }
   | { kind: 'number'; value: number }
   | { kind: 'keyword'; value: boolean | null }
   | { kind: 'ref'; value: string };
+
+/**
+ * The comparison operators, longest-first so `>=` is never tokenized as `>`
+ * followed by a stray `=`. `!` is matched separately (after this list) for the
+ * same reason: `!==` and `!=` must win over the unary `!`.
+ */
+const COMPARISON_OPERATORS = ['===', '!==', '==', '!=', '>=', '<=', '>', '<'] as const;
+type ComparisonOperator = (typeof COMPARISON_OPERATORS)[number];
 
 /**
  * Unwrap the manifest forms a `visible` field can take: a bare string,
@@ -68,7 +106,7 @@ function tokenize(expr: string): Token[] {
     if (/\s/.test(ch)) { i++; continue; }
     if (ch === '(' || ch === ')') { tokens.push({ kind: 'punct', value: ch }); i++; continue; }
     let matchedOp = false;
-    for (const op of ['===', '!==', '==', '!=', '&&', '||'] as const) {
+    for (const op of [...COMPARISON_OPERATORS, '&&', '||'] as const) {
       if (expr.startsWith(op, i)) {
         tokens.push({ kind: 'punct', value: op });
         i += op.length;
@@ -150,12 +188,34 @@ export function evaluateVisibility(visible: unknown, data: Record<string, unknow
   function comparison(): unknown {
     const left = primary();
     const t = peek();
-    if (t?.kind === 'punct' && ['===', '!==', '==', '!='].includes(t.value)) {
+    if (t?.kind === 'punct' && (COMPARISON_OPERATORS as readonly string[]).includes(t.value)) {
+      const op = t.value as ComparisonOperator;
       pos++;
       const right = primary();
-      // Loose == / != are treated as strict — manifest values are
-      // primitives written by hand; the distinction never matters here.
-      return t.value === '===' || t.value === '==' ? left === right : left !== right;
+      switch (op) {
+        // Loose == / != are treated as strict — manifest values are
+        // primitives written by hand; the distinction never matters here.
+        case '===':
+        case '==':
+          return left === right;
+        case '!==':
+        case '!=':
+          return left !== right;
+        // Relational comparison uses JS semantics on the raw operands, on
+        // purpose (#7169): the console evaluates the SAME manifest string
+        // through `new Function`, and a server evaluator that disagreed with it
+        // about `data.lockout_threshold > 0` would be the very producer/consumer
+        // split this file's caller now refuses. `undefined > 0` is `false`
+        // there and `false` here.
+        case '>':
+          return (left as number) > (right as number);
+        case '>=':
+          return (left as number) >= (right as number);
+        case '<':
+          return (left as number) < (right as number);
+        case '<=':
+          return (left as number) <= (right as number);
+      }
     }
     return left;
   }

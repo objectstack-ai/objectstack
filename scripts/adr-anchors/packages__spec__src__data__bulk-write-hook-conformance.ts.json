@@ -1,0 +1,7 @@
+{
+  "file": "packages/spec/src/data/bulk-write-hook-conformance.ts",
+  "adrs": [
+    "ADR-0058"
+  ],
+  "invariant": "A predicate (`multi: true`) write dispatches lifecycle hooks PER MATCHED ROW in BOTH phases (ADR-0058 Addendum I for `after*`, Addendum II for `before*`), each context carrying that row's `previous` — the fix for a guard hook reading `previous?.x` and passing silently on every batch. The write's own payload stays BATCH-scoped: one `updateMany` carries one payload, so a `before*` rewrite applies to every matched row, N post-hook payloads cannot diverge, nothing is reconciled and no predicate write is ever split into N single-row writes (one affected count, #4639). Per-row `previous` exists so a guard can REFUSE, not so a rewrite can be aimed at one row. One ceiling (`MAX_BULK_PER_ROW_HOOK_ROWS`) governs both phases and is checked BEFORE the first dispatch; exceeding it REFUSES the write and is never downgraded to one dispatch for the batch. Per-row payload copies plus a converge-or-refuse rule were rejected on measured evidence: objectql's `'*'`-registered audit stamp reads the clock inside the per-record stamp, so rows either side of a millisecond boundary would diverge and refuse honest batches non-deterministically."
+}

@@ -5,10 +5,12 @@ import { I18nLabelSchema, AriaPropsSchema } from './i18n.zod';
 import { strictObject } from '../shared/strict-object';
 
 // ---------------------------------------------------------------------------
-// UNKNOWN-KEY POSTURE (#4001 批 15, ADR-0078) — this file is SPLIT, on a
-// measurement, and the split is the point. Five of its seven object sites are
-// closed; two are deliberately left open with the reason recorded, because
-// closing them would gate nothing.
+// UNKNOWN-KEY POSTURE (#4001 批 15 → #5583, ADR-0078) — this file is CLOSED,
+// and the ORDER it was closed in is the point. 批 15 shut five of its object
+// sites and deliberately left two open with the reason recorded, because
+// closing them would have gated nothing; #5020 supplied the missing parse and
+// #5583 then shut them. Both halves are kept below, because a later sweep
+// meeting a `no gate` verdict elsewhere needs the refusal, not just the result.
 //
 // CLOSED (real door, three measurements, 2026-08-03):
 //   `ChartConfigSchema`, `ChartAxisSchema`, `ChartSeriesSchema`,
@@ -37,20 +39,37 @@ import { strictObject } from '../shared/strict-object';
 //   dimension/measure NAMES and adds no key of its own, so the inherited key
 //   set is exactly right and no `extraKeys` entry is needed.
 //
-// STILL OPEN (`ChartAggregateSchema`, `ChartGroupBySchema`) — but no longer for
-// the reason 批 15 recorded. Their carrier is the REACT tier's
-// `<ObjectChart aggregate={…}>` prop, which had NO parse behind it; #5020 wired
-// one (`packages/lint`'s react-page publish gate now calls
+// CLOSED LAST, at #5583 (`ChartAggregateSchema`, `ChartGroupBySchema`'s object
+// arm) — and the ORDER is the record worth keeping. Their carrier is the REACT
+// tier's `<ObjectChart aggregate={…}>` prop, which had no parse behind it, so
+// 批 15 left them open rather than shipping a `.strict()` over nothing (#4583).
+// #5020 wired the parse (`packages/lint`'s react-page publish gate now calls
 // `ChartAggregateSchema.safeParse()` instead of re-deriving the vocabulary and
-// the count/field refinement by hand), so the `no gate` verdict is spent and
-// these two are ordinary `authorable` sites. What remains is the posture: both
-// are still STRIP, so an unknown key is dropped by that parse rather than
-// reported, and `groupby` / `dateGranularty` still degrade a chart silently.
-// Closing them is now a behaviour change with a gate to observe it — **#5583**,
-// which also carries the one product question this pair raises (is an ungrouped
-// single-value chart a supported shape? the renderer honours it, `groupBy` is
-// declared required, and #5020's gate reports the absence at `warning` until
-// that is answered).
+// the count/field refinement by hand), which spent the `no gate` verdict and
+// made these two ordinary `authorable` sites; #5583 then moved the POSTURE.
+// `groupby` / `fn` / `dateGranularty` are now named rejections carrying a
+// surface and a rename, and the file's ui/ row left the ledger's
+// remaining-strip map. This file is 0 strip.
+//
+// ⚠️ The product question #5583 carried is ANSWERED, and the answer is the one
+// that does NOT move this schema: **an ungrouped single-value chart is not a
+// supported `<ObjectChart>` shape**, so `groupBy` stays REQUIRED. Measured
+// rather than argued (2026-08-08): the example corpus authors exactly one
+// `<ObjectChart aggregate={…}>` and it carries `groupBy`; the single-value need
+// is served by a DIFFERENT registered block, objectui's `object-metric`
+// (`ObjectMetricWidget`), which the showcase authors seven times with
+// `aggregate: { field, function }` and no `groupBy` at all. The three
+// `schema.aggregate?.groupBy || schema.xAxisKey` reads in objectui's
+// `ObjectChart.tsx` are optional-chained on `aggregate` itself, so what they
+// serve is a chart with NO aggregate (a `data=` / `dataset=` binding) — they
+// keep option-colour resolution, the comparison merge and the drill-down filter
+// working there, and none of them makes an ungrouped aggregate draw. The one
+// path that does aggregate client-side declares `groupBy: string` REQUIRED and,
+// given `undefined`, buckets every record under `String(undefined)`. Declaring
+// the shape optional would advertise what the renderer does not deliver
+// (Prime Directive #10) and would make "forgot the category axis" a legal
+// declaration. #5020's `warning`-level tolerance therefore stays a tolerance,
+// not a blessing — see `validate-react-page-props.ts`.
 // ---------------------------------------------------------------------------
 
 /**
@@ -626,11 +645,12 @@ export const ChartConfigSchema = lazySchema(() => strictObject(
  */
 
 // ---------------------------------------------------------------------------
-// THE TWO SITES BELOW ARE STILL OPEN — and as of #5020 the reason has CHANGED.
-// Read this header as two layers: what 批 15 measured (still accurate as
-// history), and what moved since (the parse exists now; the posture does not).
+// THE TWO SITES BELOW WERE THE FILE'S LAST OPEN ONES, and they were closed in
+// TWO STEPS on purpose — parse first (#5020), posture second (#5583). Read this
+// header as three layers: what 批 15 measured (still accurate as history), what
+// #5020 moved (the parse), and what #5583 moved (the posture).
 //
-// ## What moved (#5020)
+// ## What #5020 moved: the PARSE
 //
 // Point 3 below said "nothing parses these". That is no longer true. The
 // react-page publish gate — `packages/lint/src/validate-react-page-props.ts` —
@@ -638,29 +658,36 @@ export const ChartConfigSchema = lazySchema(() => strictObject(
 // `aggregate={{…}}` literal, exactly as #5022 did for `ChartDrillDownSchema`
 // beside it, and the hand-derived `CHART_FUNCTIONS` list plus the hand-written
 // twin of the count/field refinement are DELETED: this file is the single source
-// of both again. So the ledger's `no gate` verdict is spent, and these two rows
-// are now ordinary `authorable` sites.
+// of both again. So the ledger's `no gate` verdict was spent, and these two
+// sites became ordinary `authorable` ones.
 //
-// ## What did NOT move, and why it is a separate issue
+// ## What #5583 moved: the POSTURE
 //
-// Both are still STRIP-posture, so the parse the gate now runs still DROPS an
-// unknown key instead of reporting it — `groupby` for `groupBy`,
-// `dateGranularty` for `dateGranularity` — and a chart still degrades to a
-// single ungrouped point with `build`/`validate` green. Converting them to
-// `strictObject` is now a real behaviour change with a gate that observes it,
-// which is the whole point of doing it in this order, and it is **#5583**.
-// `validate-react-page-props.test.ts` pins today's tolerance out loud so the
-// wired gate cannot be mistaken for a closed one (#4583); those pins invert
-// when #5583 lands, as do the two "still STRIPS — deliberate" pins in
-// `chart.test.ts`.
+// Both are now `strictObject`. An undeclared key is a named rejection carrying
+// the surface, the offending key and a rename — `groupby` → `groupBy`,
+// `dateGranularty` → `dateGranularity`, `fn` → `function` — instead of a silent
+// strip that left a chart drawing one ungrouped point with `build`/`validate`
+// green. The two "still STRIPS — deliberate" pins in `chart.test.ts` and the
+// companion tolerance pin in `validate-react-page-props.test.ts` INVERTED with
+// it; they are the same assertions, read from the other side.
 //
-// ⚠️ #5583 also carries the one product question this pair raises, which is NOT
-// a strictness question: `groupBy` is declared REQUIRED here and in the
-// published react-blocks type, while objectui's `ObjectChart` honours its
-// absence (`schema.aggregate?.groupBy || schema.xAxisKey`) and
-// `chartAggregateCategoryKey` in `./chart-aggregate.ts` documents the ungrouped
-// single-row result. Until that is answered, #5020's gate reports the absence at
-// `warning` rather than gating a shape the platform itself delivers.
+// ⚠️ **The zod-4 union collapse is why the lint side had to be built first, and
+// it is load-bearing here.** `groupBy` is a UNION, so an `unrecognized_keys`
+// raised inside its object arm never reaches `error.issues` on its own — the
+// whole union is reported as one `invalid_union` whose message is the bare
+// string "Invalid input", with the arm messages tucked inside `issue.errors`.
+// A consumer that renders `issue.message` verbatim shows the author nothing.
+// `packages/lint/src/zod-issue-format.ts`'s `describeIssue` unpacks the arms,
+// which is what carries this schema's named rejection to the author, and
+// `chart.test.ts` pins the raw arm shape so the two halves cannot drift apart.
+//
+// ⚠️ The product question this pair raised is ANSWERED (2026-08-08) and the
+// answer left this schema alone: `groupBy` stays REQUIRED. The measurement is
+// in the file header at the top — the ungrouped single-value need is served by
+// objectui's separate `object-metric` block, the corpus authors zero ungrouped
+// `<ObjectChart>` aggregates, and the renderer's `|| schema.xAxisKey` reads
+// serve charts with no aggregate at all rather than ungrouped ones. #5020's
+// `warning`-level tolerance therefore stays a tolerance.
 //
 // ## What 批 15 measured (the history, unchanged)
 //
@@ -704,11 +731,11 @@ export const ChartConfigSchema = lazySchema(() => strictObject(
 //
 // The batch's standing instruction — "do not convert these two to
 // `strictObject` before the parse exists, it would read as load-bearing while
-// gating nothing" — is therefore SATISFIED, not repealed. The conversion is now
-// the right next step and has its own issue (#5583). Anyone reaching this
-// paragraph from a strictness sweep should go there rather than closing these
-// two in passing: the sweep would also have to invert four pins and answer the
-// `groupBy` product question above.
+// gating nothing" — was SATISFIED rather than repealed, and #5583 then did the
+// conversion in that order. The instruction is kept here because it is the
+// reusable part: it is the reason this file's last two sites took two issues
+// and eight days instead of one commit, and it is what any later sweep meeting
+// a `no gate` verdict should do.
 // ---------------------------------------------------------------------------
 
 /**
@@ -716,9 +743,11 @@ export const ChartConfigSchema = lazySchema(() => strictObject(
  *
  * A deliberate subset of the engine's `AggregationFunction`: these are the five
  * the chart renderers implement in every path, including the client-side
- * fallback. `count_distinct` / `array_agg` / `string_agg` are engine-level
- * capabilities with no chart renderer behind them — advertising them here would
- * be a declared-but-not-delivered claim (Prime Directive #10).
+ * fallback. `count_distinct` is the one engine-level function left outside the
+ * subset — no chart renderer computes it, and advertising it here would be a
+ * declared-but-not-delivered claim (Prime Directive #10). `array_agg` and
+ * `string_agg` were named here for the same reason until #6188 retired them
+ * from the engine vocabulary outright; the subset is unchanged by that.
  */
 export const ChartAggregateFunctionSchema = lazySchema(() =>
   z.enum(['count', 'sum', 'avg', 'min', 'max']),
@@ -737,17 +766,59 @@ export const ChartAggregateFunctionSchema = lazySchema(() =>
 export const ChartGroupBySchema = lazySchema(() =>
   z.union([
     z.string().describe('Field to group by'),
-    z.object({
-      field: z.string().describe('Field to group by'),
-      dateGranularity: z
-        .enum(['day', 'week', 'month', 'quarter', 'year'])
-        .optional()
-        .describe('Bucket date values into uniform periods'),
-      alias: z
-        .string()
-        .optional()
-        .describe('Alias for the projected group value (defaults to `field`) — this becomes the category column'),
-    }),
+    strictObject(
+      {
+        surface: 'this chart groupBy',
+        history:
+          'Until #5583 an undeclared key inside the structured groupBy was dropped at parse — `dateGranularty` for `dateGranularity` cost the date bucketing silently, and the chart drew one point per raw timestamp.',
+        // The near-misses edit distance cannot reach, each anchored to a
+        // neighbouring vocabulary this protocol really uses:
+        //   `granularity` — `dateGranularity` is the only spelling in the
+        //     protocol, but the WORD an author reaches for is the bare noun
+        //     (`data/query.zod.ts`'s own `DateGranularity` type is named that
+        //     way, so the file the shape is mirrored from teaches it);
+        //   `name` — `DatasetDimension.name` is the ADR-0021 dataset path's
+        //     spelling of exactly this slot, so an author moving between the
+        //     two chart binding modes writes it;
+        //   `as` / `label` — SQL's rename keyword and the display word. `alias`
+        //     is neither, and getting it wrong is expensive: the category
+        //     column keeps the raw field name and every axis binding written
+        //     against the alias resolves to nothing.
+        //
+        // ⚠️ `dateGranularty` deliberately has NO entry: the folded edit
+        // distance already reaches it (1 against a budget of 5), and a second
+        // spelling of a probe the fallback covers is a dead entry (#5481).
+        aliases: {
+          granularity: 'dateGranularity',
+          bucket: 'dateGranularity',
+          name: 'field',
+          as: 'alias',
+          label: 'alias',
+        },
+        // Wrong-LAYER keys: real protocol words, one level out. A rename would
+        // be ledger finding 7 (steering the author at a key this shape also
+        // refuses), so they get a prescription instead. Both are keys of the
+        // ENCLOSING aggregate, which is the only shape an author can confuse
+        // this one with.
+        guidance: {
+          function:
+            '`function` belongs on the aggregate, not inside `groupBy` — write `aggregate: { function, field, groupBy: { field, dateGranularity } }`.',
+          groupBy:
+            'You are already inside `groupBy` — the structured form is `{ field, dateGranularity?, alias? }`, not a nested `groupBy`.',
+        },
+      },
+      {
+        field: z.string().describe('Field to group by'),
+        dateGranularity: z
+          .enum(['day', 'week', 'month', 'quarter', 'year'])
+          .optional()
+          .describe('Bucket date values into uniform periods'),
+        alias: z
+          .string()
+          .optional()
+          .describe('Alias for the projected group value (defaults to `field`) — this becomes the category column'),
+      },
+    ),
   ]),
 );
 
@@ -760,15 +831,57 @@ export const ChartGroupBySchema = lazySchema(() =>
  * renderer as `sum(undefined)` and render blank).
  */
 export const ChartAggregateSchema = lazySchema(() =>
-  z
-    .object({
+  strictObject(
+    {
+      surface: 'this chart aggregate',
+      history:
+        'Until #5583 an undeclared aggregate key was dropped at parse — `groupby` for `groupBy` degraded the chart to a single ungrouped point, and `fn` for `function` fell back to the default, both with `build`/`validate` fully green.',
+      // The near-misses edit distance cannot reach (the folded fallback already
+      // covers `groupby`, `Group_By` and `functoin`, so none of those appears
+      // here — a second spelling of a covered probe is a dead entry, #5481):
+      //   `fn` / `agg` / `aggregation` — this file's own header names `fn` as
+      //     one of the keys that was being dropped silently, and `aggregations`
+      //     is the word `IDataEngine.aggregate()` uses for the same slot;
+      //   `measure` / `dimension` — the ADR-0021 DATASET path's names for the
+      //     value and the category (`DatasetMeasure`, `DatasetDimension`). The
+      //     two binding modes sit on one component, so an author who has just
+      //     written a dataset chart writes them here;
+      //   `category` — what this protocol itself calls the result column
+      //     (`chartAggregateCategoryKey`), so the file teaches the word.
+      aliases: {
+        fn: 'function',
+        agg: 'function',
+        aggregation: 'function',
+        measure: 'field',
+        dimension: 'groupBy',
+        category: 'groupBy',
+      },
+      // Wrong-LAYER and retired-shape prescriptions. `dateGranularity` is the
+      // expensive one and is named in this file's header as a key that was
+      // being dropped: written BESIDE `groupBy` it does nothing, and the chart
+      // draws one point per raw timestamp.
+      guidance: {
+        dateGranularity:
+          '`dateGranularity` goes INSIDE `groupBy`, not beside it — write `groupBy: { field: "<date field>", dateGranularity: "month" }`.',
+        alias:
+          '`alias` renames the GROUP column and lives inside the structured `groupBy` node. The measure column is named after `field` (or the literal `count` for a fieldless count) and is not renameable here — see `chartAggregateResultKeys` in `./chart-aggregate.ts`.',
+        filter:
+          '`filter` is a prop on the chart itself (`<ObjectChart filter={…}>`), not part of the aggregate.',
+        objectName:
+          '`objectName` is the chart\'s own prop — the aggregate runs against it and does not name it again.',
+        measures:
+          'An inline aggregate is SINGLE-MEASURE by design (one `function` over one `field`); two measures would collide on the result column name. Multi-measure is the dataset path\'s job — bind `dataset` + `values` instead (ADR-0021 Level B, see `./chart-aggregate.ts`).',
+      },
+    },
+    {
       field: z
         .string()
         .optional()
         .describe('Field to aggregate — required for sum/avg/min/max, optional for count'),
       function: ChartAggregateFunctionSchema.describe('Aggregation function'),
       groupBy: ChartGroupBySchema.describe('Field the rows are grouped by — the chart category axis'),
-    })
+    },
+  )
     .superRefine((agg, ctx) => {
       if (agg.function !== 'count' && !agg.field) {
         ctx.addIssue({

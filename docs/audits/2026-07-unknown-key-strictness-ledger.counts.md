@@ -21,17 +21,17 @@ regenerate.
 | Measure | Value |
 |---|---|
 | Triaged directories | 5 |
-| Object sites in them | 444 |
-| Still-open (strip) sites | 185 |
-| Files carrying at least one | 29 |
+| Object sites in them | 437 |
+| Still-open (strip) sites | 181 |
+| Files carrying at least one | 27 |
 
 Remaining strip sites by class:
 
 | Bucket | Sites |
 |---|---|
-| authorable — the ruling's forced scope | 43 |
-| unresolved — needs a per-schema verdict | 33 |
-| wire / open — out of forced scope | 107 |
+| authorable — the ruling's forced scope | 40 |
+| unresolved — needs a per-schema verdict | 34 |
+| wire / open — out of forced scope | 105 |
 | no door — no carrier, ADR-0049 territory | 1 |
 | no gate — carrier live, no parse | 0 |
 | covered — no carrier, no parse, guarded at every consumer | 1 |
@@ -44,12 +44,12 @@ The `strict` column is the one the campaign schedules against; it counts both th
 
 | Dir | Sites | strict | passthrough | catchall | strip |
 |---|---|---|---|---|---|
-| `ui/` | 160 | 116 | 5 | 0 | 39 |
-| `data/` | 162 | 54 | 1 | 0 | 107 |
-| `automation/` | 75 | 49 | 0 | 0 | 26 |
+| `ui/` | 160 | 118 | 5 | 0 | 37 |
+| `data/` | 165 | 56 | 1 | 0 | 108 |
+| `automation/` | 65 | 42 | 0 | 0 | 23 |
 | `security/` | 20 | 7 | 0 | 0 | 13 |
 | `studio/` | 27 | 27 | 0 | 0 | 0 |
-| **total** | **444** | **253** | **6** | **0** | **185** |
+| **total** | **437** | **250** | **6** | **0** | **181** |
 
 ## File-level triage — site counts
 
@@ -95,20 +95,21 @@ classify and is not listed (it becomes reportable the day it grows its first sit
 | `driver/mysql.zod.ts` | 1 |
 | `driver/postgres.zod.ts` | 1 |
 | `driver/sqlite.zod.ts` | 2 |
+| `driver/turso.zod.ts` | 2 |
 | `external-catalog.zod.ts` | 4 |
 | `external-lookup.zod.ts` | 12 |
-| `field-value.zod.ts` | 2 |
-| `field.zod.ts` | 11 |
+| `field-value.zod.ts` | 3 |
+| `field.zod.ts` | 10 |
 | `filter.zod.ts` | 11 |
 | `hook-body.zod.ts` | 2 |
-| `hook.zod.ts` | 6 |
+| `hook.zod.ts` | 7 |
 | `mapping.zod.ts` | 3 |
 | `object.zod.ts` | 20 |
 | `query.zod.ts` | 5 |
 | `seed-loader.zod.ts` | 12 |
 | `seed.zod.ts` | 1 |
 | `validation.zod.ts` | 6 |
-| **total** | **162** |
+| **total** | **165** |
 
 ### `automation/` — sites
 
@@ -118,7 +119,6 @@ classify and is not listed (it becomes reportable the day it grows its first sit
 | `bpmn-interop.zod.ts` | 5 |
 | `builtin-node-config.zod.ts` | 8 |
 | `control-flow.zod.ts` | 5 |
-| `etl.zod.ts` | 10 |
 | `execution.zod.ts` | 13 |
 | `flow-function.zod.ts` | 1 |
 | `flow.zod.ts` | 11 |
@@ -128,7 +128,7 @@ classify and is not listed (it becomes reportable the day it grows its first sit
 | `state-machine.zod.ts` | 6 |
 | `time-relative-trigger.zod.ts` | 1 |
 | `webhook.zod.ts` | 1 |
-| **total** | **75** |
+| **total** | **65** |
 
 ### `security/` — sites
 
@@ -157,21 +157,20 @@ over it is here.
 
 ### `ui/` — open
 
-**39 strip of 160**, in 6 file(s).
+**37 strip of 160**, in 5 file(s).
 
 | File | Strip | Sites |
 |---|---|---|
 | `action-params.zod.ts` | 1 | 1 |
 | `app.zod.ts` | 1 | 18 |
-| `chart.zod.ts` | 2 | 8 |
 | `component.zod.ts` | 31 | 31 |
 | `view.zod.ts` | 3 | 53 |
 | `widget.zod.ts` | 1 | 1 |
-| **total** | **39** | **160** |
+| **total** | **37** | **160** |
 
 | Bucket | Sites |
 |---|---|
-| authorable — the ruling's forced scope | 34 |
+| authorable — the ruling's forced scope | 32 |
 | unresolved — needs a per-schema verdict | 0 |
 | wire / open — out of forced scope | 3 |
 | no door — no carrier, ADR-0049 territory | 1 |
@@ -180,7 +179,7 @@ over it is here.
 
 ### `data/` — open
 
-**107 strip of 162**, in 16 file(s).
+**108 strip of 165**, in 16 file(s).
 
 | File | Strip | Sites |
 |---|---|---|
@@ -193,42 +192,41 @@ over it is here.
 | `driver/memory.zod.ts` | 5 | 6 |
 | `external-catalog.zod.ts` | 4 | 4 |
 | `external-lookup.zod.ts` | 12 | 12 |
-| `field-value.zod.ts` | 1 | 2 |
-| `field.zod.ts` | 3 | 11 |
+| `field-value.zod.ts` | 2 | 3 |
+| `field.zod.ts` | 2 | 10 |
 | `filter.zod.ts` | 11 | 11 |
-| `hook.zod.ts` | 4 | 6 |
+| `hook.zod.ts` | 5 | 7 |
 | `object.zod.ts` | 1 | 20 |
 | `query.zod.ts` | 4 | 5 |
 | `seed-loader.zod.ts` | 12 | 12 |
-| **total** | **107** | **162** |
+| **total** | **108** | **165** |
 
 | Bucket | Sites |
 |---|---|
-| authorable — the ruling's forced scope | 9 |
-| unresolved — needs a per-schema verdict | 33 |
-| wire / open — out of forced scope | 65 |
+| authorable — the ruling's forced scope | 8 |
+| unresolved — needs a per-schema verdict | 34 |
+| wire / open — out of forced scope | 66 |
 | no door — no carrier, ADR-0049 territory | 0 |
 | no gate — carrier live, no parse | 0 |
 | covered — no carrier, no parse, guarded at every consumer | 0 |
 
 ### `automation/` — open
 
-**26 strip of 75**, in 5 file(s).
+**23 strip of 65**, in 4 file(s).
 
 | File | Strip | Sites |
 |---|---|---|
 | `bpmn-interop.zod.ts` | 5 | 5 |
-| `etl.zod.ts` | 3 | 10 |
 | `execution.zod.ts` | 13 | 13 |
 | `flow.zod.ts` | 1 | 11 |
 | `node-executor.zod.ts` | 4 | 4 |
-| **total** | **26** | **75** |
+| **total** | **23** | **65** |
 
 | Bucket | Sites |
 |---|---|
 | authorable — the ruling's forced scope | 0 |
 | unresolved — needs a per-schema verdict | 0 |
-| wire / open — out of forced scope | 26 |
+| wire / open — out of forced scope | 23 |
 | no door — no carrier, ADR-0049 territory | 0 |
 | no gate — carrier live, no parse | 0 |
 | covered — no carrier, no parse, guarded at every consumer | 0 |
@@ -266,11 +264,11 @@ directory rather than per file.
 | Dir | Sites |
 |---|---|
 | `ai/` | 77 |
-| `api/` | 401 |
+| `api/` | 398 |
 | `cloud/` | 83 |
 | `identity/` | 33 |
 | `integration/` | 10 |
-| `kernel/` | 319 |
+| `kernel/` | 296 |
 | `qa/` | 6 |
 | `shared/` | 20 |
-| `system/` | 367 |
+| `system/` | 362 |

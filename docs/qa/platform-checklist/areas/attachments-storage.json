@@ -1,0 +1,581 @@
+{
+  "$comment": "Standing platform test checklist — area ledger. Hand-edited, append-only; validated by scripts/check-platform-checklist.mjs (pnpm check:platform-checklist). Authoring rules: docs/qa/platform-checklist/README.md · execution protocol: RUNNER.md.",
+  "area": "attachments-storage",
+  "title": "Attachments & storage — presigned/chunked upload, signed-URL downloads, parent-derived access, sys_file lifecycle",
+  "items": [
+    {
+      "id": "attachments-storage.presigned-upload-roundtrip",
+      "title": "Authenticated presigned upload → committed sys_file → signed-URL download round-trip; anonymous upload is 401",
+      "since": "v15.1",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": ["seeded admin (admin@objectos.ai)", "anonymous (no bearer token)"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "the storage service booted with the local adapter (stock `objectstack dev` pairing) — routes mount at the default base /api/v1/storage"
+        ]
+      },
+      "steps": [
+        "as admin, POST /api/v1/storage/upload/presigned with { filename: 'qa-roundtrip.png', mimeType: 'image/png', size: <bytes>, scope: 'attachments' } and capture { uploadUrl, method, fileId, downloadUrl }",
+        "read the fresh sys_file row (GET /api/v1/data/sys_file/<fileId> as admin): status must be 'pending', owner_id must equal the admin's user id (server-stamped from the session, storage-routes.ts)",
+        "PUT the file bytes to the returned uploadUrl (local driver: PUT /api/v1/storage/_local/raw/:token — an HMAC-token capability URL, followed opaquely exactly as an S3 presigned URL would be)",
+        "POST /api/v1/storage/upload/complete with { fileId } and re-read the sys_file row: status must now be 'committed'",
+        "GET /api/v1/storage/files/<fileId>/url with the admin bearer and capture the response envelope",
+        "GET the returned signed url and compare the served bytes to the uploaded payload",
+        "GET /api/v1/storage/files/<fileId> (no /url suffix) and capture the redirect — the stable browser door 302s to the same short-lived signed URL",
+        "repeat step 1 with NO Authorization header and capture the refusal"
+      ],
+      "acceptance": [
+        {
+          "clause": "presign answers 200 with { uploadUrl, method, fileId, expiresIn, downloadUrl } and persists a status='pending' sys_file whose owner_id is the session user — a client-supplied owner never wins",
+          "oracle": "api",
+          "verify": "the presign response fields + a sys_file read showing status 'pending' and owner_id == the admin's sys_user id",
+          "evidence": "presign response + sys_file read"
+        },
+        {
+          "clause": "complete flips the sys_file status pending → committed",
+          "oracle": "api",
+          "verify": "before/after sys_file reads around POST /upload/complete",
+          "evidence": "the two reads"
+        },
+        {
+          "clause": "GET /files/:fileId/url answers the declared envelope { success: true, data: { url } } (the bare { url } retired in #3689) and the url serves back the exact uploaded bytes",
+          "oracle": "api",
+          "verify": "envelope shape check + byte-for-byte comparison of the downloaded body against the uploaded payload",
+          "evidence": "the /url response + a hash of both payloads"
+        },
+        {
+          "clause": "GET /files/:fileId (browser capability door) 302-redirects to the same signed URL — this is the value objectql stamps into file/image field payloads, so it must work verbatim in an <img src>/<a href>",
+          "oracle": "network",
+          "verify": "the response is a 302 whose Location resolves to the bytes",
+          "evidence": "the redirect trace"
+        },
+        {
+          "clause": "anonymous presigned upload is refused 401 AUTH_REQUIRED — the upload session gate is wired, not open-mode",
+          "oracle": "api",
+          "verify": "POST /upload/presigned without a bearer returns 401 with code AUTH_REQUIRED; no sys_file row is created for the attempt",
+          "evidence": "the 401 body + a sys_file count before/after"
+        }
+      ],
+      "negative": [
+        "a 2xx on the anonymous presign is a FAIL (it means the deployment is running in the bare-kernel open mode the resolver exists to close) — check the boot log for the one-time '[storage] no session resolver wired' notice before blaming the route",
+        "a downloadUrl that 404s when followed is the #3641 regression (a minted-but-unmounted URL) — FAIL, not environment"
+      ],
+      "traps": ["dispatcher-vs-hono-route"],
+      "automated": { "kind": "api", "ref": "packages/qa/dogfood/test/attachments-permission-matrix.dogfood.test.ts" },
+      "source": [
+        "docs/plans/release-15.1-test-plan.md §A12 / §C1",
+        "packages/services/service-storage/src/storage-routes.ts (upload session gate #2755, envelope #3689, 302 door)",
+        "packages/services/service-storage/src/storage-route-ledger.ts (the audited route set at the default base; _local/raw is a server-only capability URL)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-07", "change": "new item grounded in the storage route ledger + storage-routes.ts source and the #2755 dogfood matrix (upload gate, owner stamping, envelope, 302 door)", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    },
+    {
+      "id": "attachments-storage.download-authz-both-sides",
+      "title": "Gated downloads: 401 anonymous, 403 parent-invisible, signed URL for the entitled — per gating class (attachments-scope / field-owned / public_read opt-out / ungated)",
+      "since": "v15.1",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "mixed",
+      "personas": ["admin (uploader/owner)", "signed-up member who cannot read the parent record", "anonymous"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a committed attachments-scope file attached to a parent record, and a field-owned file (e.g. a receipt uploaded into showcase_invoice_line.receipt — ref_object/ref_id stamped per ADR-0104 D3 wave 2)"
+        ],
+        "knownGaps": [
+          "stock showcase's only files-enabled object (showcase_project) is public_read_write, so no stock parent is invisible to any member — the 403 deny side is proven by the pinned dogfood fixture (att_secret, private owner-scoped: fixtures/attachments-fixture.ts) or a scratch private parent, not on stock seeds",
+          "no stock seed mints an acl='public_read' attachments file (the anonymous-embed opt-out) — author one via a system write or accept the unit-test coverage in storage-routes.test.ts for that variant"
+        ]
+      },
+      "steps": [
+        "as admin, upload + attach a file to a parent record (attachments scope) and separately upload a receipt into an invoice line (field-owned; verify ref_object='showcase_invoice_line' and ref_id are stamped on its sys_file row)",
+        "GET /api/v1/storage/files/<fileId>/url with NO auth for each gated file and capture the refusals",
+        "GET the same routes as a member who cannot read the parent record (private parent per the fixture note) and capture the refusals — note the two DISTINCT deny codes",
+        "GET the same routes as the uploader/admin and follow the signed URL",
+        "compare TTLs: the gated grant uses the short downloadTtl (default 300s), not the 3600s presignedTtl — read expiry material from the minted URL/descriptor where the adapter exposes it",
+        "flip one file to acl='public_read' (system write) and GET /files/<fileId> anonymously — the opt-out must restore the stable anonymous capability URL",
+        "in the browser, open the parent record's RecordAttachmentsPanel as the denied member and capture the surfaced copy"
+      ],
+      "acceptance": [
+        {
+          "clause": "anonymous download of a gated file (attachments-scope OR field-owned) is 401 AUTH_REQUIRED",
+          "oracle": "api",
+          "verify": "both gated classes answer 401 with code AUTH_REQUIRED when no session resolves",
+          "evidence": "the two 401 bodies"
+        },
+        {
+          "clause": "an authenticated member without read access to the parent is 403, with the class-specific code: ATTACHMENT_DOWNLOAD_DENIED for attachments-scope, FILE_DOWNLOAD_DENIED for field-owned",
+          "oracle": "api",
+          "verify": "the 403 bodies carry exactly those codes (storage-routes.ts authorizeDownload); a failed authz check must deny, never fall open",
+          "evidence": "the two 403 bodies"
+        },
+        {
+          "clause": "the entitled caller (parent-visible member, or the uploader/owner who may ALWAYS download) receives a working short-lived signed URL",
+          "oracle": "api",
+          "verify": "200 { success: true, data: { url } } and the url serves the bytes; uploader bypass verified by downloading as the file's owner_id user against a parent they cannot otherwise read",
+          "evidence": "the grant + downloaded bytes"
+        },
+        {
+          "clause": "acl='public_read' opts a file back out to the stable anonymous capability URL — the explicit declaration for <img src> embedding, which cannot carry a bearer token",
+          "oracle": "api",
+          "verify": "after setting acl public_read, the anonymous GET /files/:fileId 302s to bytes instead of 401ing",
+          "evidence": "before/after anonymous responses"
+        },
+        {
+          "clause": "the browser surface renders the denial as friendly copy, not a raw error dump (objectui#2532) — the RecordAttachmentsPanel maps the fail-closed 40x codes to readable text",
+          "oracle": "screenshot",
+          "verify": "the denied member's panel shows the mapped copy (RecordAttachmentsPanel.tsx friendlyError reads both the enveloped error.code and the legacy top-level code)",
+          "evidence": "panel screenshot"
+        }
+      ],
+      "negative": [
+        "a gated file downloadable anonymously (silent success) is a FAIL — UI absence of a download button is a client courtesy; the route is the authority (ADR-0057 D10)",
+        "a deny that surfaces in the panel as 'Download failed (403)' instead of the mapped copy means the error-envelope dialect broke (#3689 note in the panel) — file it against objectui, not storage"
+      ],
+      "traps": ["wrong-persona", "dispatcher-vs-hono-route", "stale-console-bundle"],
+      "automated": { "kind": "api", "ref": "packages/qa/dogfood/test/attachments-permission-matrix.dogfood.test.ts" },
+      "source": [
+        "docs/plans/release-15.1-test-plan.md §A12 / §C1 (#2755/#2970)",
+        "packages/services/service-storage/src/storage-routes.ts (authorizeDownload: gating classes, verdict→status mapping, downloadTtl vs presignedTtl)",
+        "packages/services/service-storage/src/storage-service-plugin.ts (buildFileReadAuthorizer: owner bypass, field-owned single-parent read, fail-closed delegate)",
+        "objectui packages/app-shell/src/views/RecordAttachmentsPanel.tsx (friendly denial copy, objectui#2532)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-07", "change": "new item enumerating the download gating classes straight from authorizeDownload's source (attachments-scope / field-owned / public_read opt-out) with the exact deny codes and TTL contrast", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    },
+    {
+      "id": "attachments-storage.read-inherits-parent-rls",
+      "title": "sys_attachment reads inherit parent visibility: a restricted member sees neither rows nor counts for invisible parents",
+      "since": "v15.1",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": ["member who can read the parent record", "member who cannot read the parent record"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "attachments on a parent record that is INVISIBLE to one persona and visible to the other"
+        ],
+        "knownGaps": [
+          "stock showcase's files-enabled parent (showcase_project) is public_read_write — every member sees every project, so the invisible-parent case is not demonstrable on stock seeds; the pinned dogfood matrix proves it on its own private fixture (att_secret). A stock-seed demonstration needs a private files-enabled object added to the showcase"
+        ]
+      },
+      "steps": [
+        "seed the split: attach files to a record the restricted member cannot read (private, owned by admin) and to one they can",
+        "as the restricted member, GET /api/v1/data/sys_attachment (list scoped by parent_object + parent_id of the invisible record) and record rows AND total",
+        "as the same member, GET the invisible parent's attachment by id directly",
+        "run the same reads as the entitled member",
+        "as the restricted member, run an unscoped sys_attachment list and record which rows appear",
+        "run a count/aggregate over sys_attachment as both personas and compare totals"
+      ],
+      "acceptance": [
+        {
+          "clause": "the restricted member's list returns zero rows for the invisible parent — attachment metadata (file_name, size, parent_id) never leaks",
+          "oracle": "api",
+          "verify": "the scoped list is empty for the restricted member and non-empty for the entitled one",
+          "evidence": "both list responses"
+        },
+        {
+          "clause": "the COUNT is filtered identically to the rows — the visibility filter is a data middleware precisely so list `total` (engine.count, not the find path) cannot leak the true row count",
+          "oracle": "api",
+          "verify": "total/count for the restricted member excludes invisible-parent rows; the entitled member's count includes them",
+          "evidence": "the paired counts"
+        },
+        {
+          "clause": "a direct by-id read of an invisible parent's attachment resolves to nothing for the restricted member",
+          "oracle": "api",
+          "verify": "findOne/GET by id returns not-found/empty, not the row",
+          "evidence": "the by-id response"
+        },
+        {
+          "clause": "the filter fails CLOSED: a filter-compute failure or a pre-scan past the 2000-candidate cap excludes rows rather than leaking them, and the cap logs a warning naming the fail-closed truncation",
+          "oracle": "log",
+          "verify": "on a very broad unscoped list, either all rows resolve visibly or the '[storage] attachment read visibility' warning appears — silence plus leaked rows is the failure",
+          "evidence": "log excerpt for the broad-read case"
+        }
+      ],
+      "negative": [
+        "rows visible to the restricted member whose parent they cannot read is the #2970 info leak this item exists for — FAIL",
+        "rows filtered but `total` counting the raw table is equally a FAIL (the middleware-not-hook design note in attachment-access-hooks.ts exists because a find-hook leaves count() unfiltered)"
+      ],
+      "traps": ["wrong-persona"],
+      "automated": { "kind": "api", "ref": "packages/qa/dogfood/test/attachments-permission-matrix.dogfood.test.ts" },
+      "source": [
+        "docs/plans/release-15.1-test-plan.md §C3 (#2970)",
+        "packages/services/service-storage/src/attachment-access-hooks.ts (installAttachmentReadVisibility: middleware over find/findOne/count/aggregate, deny-all sentinel, READ_SCAN_LIMIT fail-closed cap)",
+        "packages/services/service-storage/src/attachment-read-visibility.test.ts"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-07", "change": "new item grounded in the read-visibility middleware source (count-parity rationale, fail-closed sentinel and scan cap) and the dogfood matrix clause (c)", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    },
+    {
+      "id": "attachments-storage.attach-requires-parent-edit",
+      "title": "Attaching requires EDIT on the parent record; deleting requires uploader-or-parent-editor; unscoped multi-delete is refused outright",
+      "since": "v15.1",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": ["member with EDIT on the parent", "member with READ but not EDIT on the parent", "member who uploaded the attachment", "member who is neither uploader nor parent editor"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a files-enabled parent readable-but-not-editable by one persona (the dogfood matrix builds this with its own fixture; on stock showcase, projects are public_read_write so any member can edit — the read-not-edit split needs the fixture or a sharing tweak)",
+          "plugin-sharing present (canEdit is the authority; without it the gate degrades to parent READ visibility by design)"
+        ]
+      },
+      "steps": [
+        "as the read-only member, POST /api/v1/data/sys_attachment { parent_object, parent_id, file_id, file_name, mime_type, size } against the readable-but-not-editable record and capture the refusal",
+        "as the same member, list that parent's attachments — reading must still work (read inherits parent READ, attach requires parent EDIT: two different gates)",
+        "as a parent editor, POST the same attach payload with a spoofed uploaded_by of another user and read the row back",
+        "as a member who is neither the uploader nor a parent editor, DELETE the attachment and capture the refusal",
+        "as the uploader, DELETE their own attachment on a parent they cannot edit — the uploader may always detach",
+        "issue a DELETE against /api/v1/data/sys_attachment with NO id and NO where predicate and capture the refusal"
+      ],
+      "acceptance": [
+        {
+          "clause": "attach without parent EDIT is 403 ATTACHMENT_PARENT_ACCESS — Salesforce parity (#2970 item 3): canEdit on the parent, not mere read",
+          "oracle": "api",
+          "verify": "the read-only member's insert is refused with that code, while the same member's LIST of the parent's attachments succeeds",
+          "evidence": "the 403 + the successful list"
+        },
+        {
+          "clause": "uploaded_by is server-stamped from the session — a spoofed value never wins",
+          "oracle": "api",
+          "verify": "the created row's uploaded_by equals the caller's user id, not the spoofed one",
+          "evidence": "the row read"
+        },
+        {
+          "clause": "delete is gated on uploader-or-parent-editor: the outsider gets 403 ATTACHMENT_DELETE_DENIED; the uploader succeeds even without parent edit",
+          "oracle": "api",
+          "verify": "the two delete attempts split exactly that way; a multi-delete requires EVERY matched row to pass",
+          "evidence": "both delete responses"
+        },
+        {
+          "clause": "an unscoped multi-delete (no id AND no where) is refused outright (#4757) — 'nothing was ever queried' must not read as 'nothing to authorize'",
+          "oracle": "api",
+          "verify": "the predicate-less delete returns 403 ATTACHMENT_DELETE_DENIED with the refusing-unscoped message; the table row count is unchanged",
+          "evidence": "the refusal + before/after counts"
+        },
+        {
+          "clause": "attaching to an object without enable.files is 403 FILES_DISABLED (the #2727 opt-in gate, enforced by plugin-audit alongside these hooks)",
+          "oracle": "api",
+          "verify": "an attach targeting e.g. showcase_account (no enable.files) is refused with FILES_DISABLED",
+          "evidence": "the refusal"
+        }
+      ],
+      "negative": [
+        "a successful attach by the read-only member is a FAIL even if the UI hides the upload control — the hook, not the panel, is the boundary",
+        "a rejected write that still created the sys_attachment row (verify by re-listing) is a FAIL — the rejection must be authoritative, not cosmetic"
+      ],
+      "traps": ["wrong-persona"],
+      "automated": { "kind": "api", "ref": "packages/qa/dogfood/test/attachments-permission-matrix.dogfood.test.ts" },
+      "source": [
+        "docs/plans/release-15.1-test-plan.md §A12 (attach 需 parent EDIT)",
+        "packages/services/service-storage/src/attachment-access-hooks.ts (beforeInsert canEdit gate + uploaded_by stamping; beforeDelete uploader-or-editor + #4757 unscoped refusal, MULTI_DELETE_AUTH_LIMIT fail-closed)",
+        "packages/qa/dogfood/test/attachments-permission-matrix.dogfood.test.ts (items 3, a, f; FILES_DISABLED)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-07", "change": "new item from the access-hook source: EDIT-not-read attach gate, server stamping, delete authorization matrix and the #4757 unscoped-delete refusal, each with its exact deny code", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    },
+    {
+      "id": "attachments-storage.sys-file-status-pipeline",
+      "title": "sys_file status pipeline: pending → committed → deleted (tombstone) with un-tombstone on re-attach; shared files never tombstone early",
+      "since": "v15.1",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "api",
+      "personas": ["seeded admin (admin@objectos.ai)"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "showcase_project (enable.files) with seeded projects 'Website Relaunch' and 'Data Platform' as the two attach targets"
+        ]
+      },
+      "steps": [
+        "presign an attachments-scope upload and read the sys_file row: status 'pending'",
+        "attempt GET /api/v1/storage/files/<fileId>/url while still pending and capture the refusal (downloads only serve committed files)",
+        "complete the upload; re-read: status 'committed'",
+        "attach the file to 'Website Relaunch' AND 'Data Platform' (two sys_attachment join rows over ONE file — the Salesforce ContentDocumentLink share pattern)",
+        "delete the 'Data Platform' join row and re-read sys_file: still 'committed' (a remaining reference blocks the tombstone)",
+        "delete the LAST join row and re-read: status 'deleted' with deleted_at set (the tombstone)",
+        "re-attach the same file_id to 'Website Relaunch' within the grace window and re-read: status back to 'committed', deleted_at null",
+        "verify a NON-attachments-scope file (e.g. an invoice-line receipt, scope from the field-upload path) is never tombstoned by these join-row hooks"
+      ],
+      "acceptance": [
+        {
+          "clause": "each variant of the status enum (pending / committed / deleted — the full option set declared on sys_file.status) is reached through its real transition, verified by API reads, never inferred",
+          "oracle": "api",
+          "verify": "the sequence of sys_file reads shows pending→committed on complete, committed→deleted on last-reference delete, deleted→committed on re-attach",
+          "evidence": "the read sequence, one per transition"
+        },
+        {
+          "clause": "a pending (never-completed) file is not downloadable: the download routes answer 404 FILE_NOT_FOUND for status != committed",
+          "oracle": "api",
+          "verify": "the /url GET during the pending window returns 404 with that code",
+          "evidence": "the 404 body"
+        },
+        {
+          "clause": "one file shared by two join rows survives losing one of them — deleting an attachment deletes only the join row; the tombstone fires only when the LAST reference goes",
+          "oracle": "api",
+          "verify": "sys_file still committed after the first join-row delete; deleted only after the second",
+          "evidence": "the two post-delete reads"
+        },
+        {
+          "clause": "re-attaching before the 30d grace window un-tombstones (status committed, deleted_at cleared) — the tombstone is recoverable state, not a delete",
+          "oracle": "api",
+          "verify": "post-re-attach read shows the revived row",
+          "evidence": "the read"
+        },
+        {
+          "clause": "only scope='attachments' committed files tombstone via these hooks — field-owned scopes have their own release seam (file-reference-lifecycle.ts) and must not be touched by join-row counting",
+          "oracle": "api",
+          "verify": "a non-attachments-scope file's status is unchanged by sys_attachment deletes",
+          "evidence": "before/after reads of the field-file row"
+        }
+      ],
+      "negative": [
+        "a tombstone firing while a reference remains (the shared-file case) is a FAIL — it is the exact naive cascade the join-row model exists to prevent",
+        "lifecycle bookkeeping blocking or failing the user's delete is a FAIL: the hooks are declared best-effort (fail toward retention, log-only)"
+      ],
+      "variants": ["pending", "committed", "deleted"],
+      "traps": ["wrong-panel"],
+      "automated": { "kind": "api", "ref": "packages/qa/dogfood/test/attachments-permission-matrix.dogfood.test.ts" },
+      "source": [
+        "packages/services/service-storage/src/objects/system-file.object.ts (status enum + lifecycle declaration; the variants list is that enum)",
+        "packages/services/service-storage/src/attachment-lifecycle.ts (tombstone/un-tombstone hooks, last-reference rule, attachments-scope discriminator)",
+        "#3358 §7 (sys_file detail page + status pipeline)",
+        "docs/plans/release-15.1-test-plan.md §C4 (#2755)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-07", "change": "new item: the full status pipeline as a variants matrix over the sys_file.status enum, with the shared-file and re-attach transitions from the lifecycle-hook source", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    },
+    {
+      "id": "attachments-storage.orphan-tombstone-reap",
+      "title": "The platform lifecycle sweep reaps expired tombstones and abandoned pending uploads WITH byte reclaim; sweep-time re-verification vetoes rather than losing data",
+      "since": "v15.1",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "api",
+      "personas": ["admin (setup access, drives the sweep)"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "the ability to backdate deleted_at/created timestamps past the TTLs (system writes) so the sweep selects candidates without waiting 30d/7d — the pinned dogfood suite does exactly this"
+        ]
+      },
+      "steps": [
+        "run the pinned dogfood lifecycle suite first (RUNNER rule 6 — do not hand re-prove what it pins) and capture its output",
+        "for the hand-driven spot check: tombstone a file (last join-row delete), backdate deleted_at past 30d, trigger the LifecycleService sweep, then verify the sys_file row AND its storage bytes are gone",
+        "create a pending upload, backdate past the 7d retention, sweep, verify row + best-effort bytes gone",
+        "create a tombstone, then re-add a sys_attachment reference BEHIND the hooks (system write), backdate, sweep — verify the row is un-tombstoned (committed, deleted_at null), not reaped",
+        "verify fresh tombstones (inside the window), committed rows and NULL-deleted_at rows all survive the sweep untouched"
+      ],
+      "acceptance": [
+        {
+          "clause": "each reap-guard verdict variant behaves per its declared contract: pending → bytes best-effort deleted + row confirmed; deleted with zero references and no field owner → bytes reclaimed BEFORE the row delete; deleted-but-regained-reference → un-tombstoned and vetoed; non-attachments-scope tombstone with the ADR-0104 migration gate closed → kept (vetoed, still tombstoned); byte-delete failure → vetoed and retried next sweep",
+          "oracle": "test",
+          "verify": "the dogfood lifecycle describe block ('sys_file orphan lifecycle (ADR-0057 reap guard)') passes; its cases map one-to-one onto these variants",
+          "evidence": "test run output"
+        },
+        {
+          "clause": "bytes are reclaimed before the row delete — the row is the only pointer to the bytes, so dropping it first would leak them forever",
+          "oracle": "api",
+          "verify": "after the sweep, the storage backend no longer holds the reaped key AND the sys_file row is gone; a failed byte delete leaves the row for retry (check the warn log)",
+          "evidence": "backend listing + row read + log excerpt"
+        },
+        {
+          "clause": "sweep-time re-verification is real: a reference regained behind the hooks' back (hook bypass, restore) un-tombstones instead of reaping",
+          "oracle": "api",
+          "verify": "the re-referenced file survives the sweep as committed",
+          "evidence": "post-sweep read"
+        },
+        {
+          "clause": "committed rows are immortal: nothing with status='committed' or NULL deleted_at is ever a candidate",
+          "oracle": "api",
+          "verify": "control rows are unchanged after the sweep",
+          "evidence": "control-row reads"
+        }
+      ],
+      "negative": [
+        "a reap that deletes the row but leaves the bytes (or vice versa without a veto) is a FAIL — the guard's ordering contract exists precisely for this",
+        "the sweep reaping a fresh (in-window) tombstone is a FAIL against the TTL declaration on system-file.object.ts"
+      ],
+      "variants": [
+        "pending (7d retention, bytes best-effort)",
+        "deleted + zero refs (30d TTL, bytes reclaimed then row)",
+        "deleted + regained reference (un-tombstone, veto)",
+        "deleted + field-file lineage, migration gate closed (kept, veto without un-tombstone)",
+        "byte-delete failure (veto, retry next sweep)"
+      ],
+      "traps": ["stale-dist"],
+      "automated": { "kind": "api", "ref": "packages/qa/dogfood/test/attachments-permission-matrix.dogfood.test.ts" },
+      "source": [
+        "packages/services/service-storage/src/attachment-lifecycle.ts (createSysFileReapGuard — the verdict variants are its documented branch set, incl. the ADR-0104 isCollectionOpen gate re-read each sweep)",
+        "packages/services/service-storage/src/objects/system-file.object.ts (lifecycle: ttl deleted_at+30d, retention 7d onlyWhen pending)",
+        "docs/plans/release-15.1-test-plan.md §C4 (#2755/#2970)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-07", "change": "new item: reap-guard verdict matrix enumerated from createSysFileReapGuard's source, pinned to the dogfood lifecycle suite; TTL/retention figures from the sys_file lifecycle declaration", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    },
+    {
+      "id": "attachments-storage.upload-session-abort",
+      "title": "Chunked uploads are resumable; abandoned sessions are reaped and their backend multipart uploads ABORTED before the row (the only pointer) is deleted",
+      "since": "v15.1",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "api",
+      "personas": ["seeded admin (admin@objectos.ai)"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "the four chunked routes at the default base: POST /upload/chunked, PUT /upload/chunked/:uploadId/chunk/:chunkIndex, POST /upload/chunked/:uploadId/complete, GET /upload/chunked/:uploadId/progress"
+        ],
+        "knownGaps": [
+          "the billable-stranded-parts consequence (S3 keeps initiated-but-uncompleted multipart parts invisible until AbortMultipartUpload) is only observable against a real S3 backend — stock local-adapter runs prove the session-row lifecycle and that the guard invokes abortChunkedUpload; the S3 key re-seeding path (setUploadKey on a cold sweep) is pinned by unit tests in attachment-lifecycle.test.ts, not demonstrable on local"
+        ]
+      },
+      "steps": [
+        "POST /api/v1/storage/upload/chunked { filename, mimeType, size, chunkSize } and capture { uploadId, fileId }",
+        "PUT one chunk, then GET /upload/chunked/<uploadId>/progress and record uploadedChunks/percentComplete/status ('in_progress') — progress is the first step of the SDK's resumeUpload",
+        "complete a full session on a second upload and verify its sys_upload_session row reaches status 'completed'",
+        "abandon the first session mid-flight; backdate its expires_at past the 1d TTL (system write) and trigger the lifecycle sweep",
+        "verify the abandoned session's row is reaped AND the storage adapter's abortChunkedUpload was invoked for its backend_upload_id (dogfood suite instruments this)",
+        "verify the completed session's row is reaped by the 7d terminal-status retention WITHOUT an abort attempt (an abort on a finalized multipart would NoSuchUpload-error and wedge the reap)",
+        "simulate an abort failure (test seam) and verify the row is VETOED — kept so backend_upload_id survives for the retry"
+      ],
+      "acceptance": [
+        {
+          "clause": "the chunked round-trip works over the real routes: init → chunk PUTs → progress read → complete, with the session row tracking uploadedChunks and status through the declared enum",
+          "oracle": "api",
+          "verify": "progress responses and sys_upload_session reads at each stage match the declared shape",
+          "evidence": "the progress/read sequence"
+        },
+        {
+          "clause": "an abandoned in_progress session with a backend_upload_id is reaped only AFTER a successful backend multipart abort — parts never stranded with their only pointer gone",
+          "oracle": "test",
+          "verify": "the dogfood case '(item 4 + multipart-abort guard) an abandoned chunked upload is reaped AND its uploaded parts are aborted' passes",
+          "evidence": "test run output"
+        },
+        {
+          "clause": "completed sessions (and sessions with no backend_upload_id, and adapters without abortChunkedUpload) reap WITHOUT an abort call",
+          "oracle": "test",
+          "verify": "the guard confirms those rows directly per its documented branch set",
+          "evidence": "test output / instrumented call log"
+        },
+        {
+          "clause": "an abort failure vetoes: the row survives the sweep and is retried, with the '[storage] reap guard: multipart abort failed' warning logged",
+          "oracle": "log",
+          "verify": "the veto case keeps the row and logs the retry warning",
+          "evidence": "log excerpt + row read"
+        },
+        {
+          "clause": "every sys_upload_session status enum variant (in_progress / completing / completed / failed / expired) is reachable and terminal ones fall under the 7d retention backstop",
+          "oracle": "api",
+          "verify": "status reads across the scenarios cover the enum; retention onlyWhen matches {status: {$in: [completed, failed, expired]}}",
+          "evidence": "per-variant status reads"
+        }
+      ],
+      "negative": [
+        "a sweep that deletes the session row while the backend abort failed (silent success) is a FAIL — the row's backend_upload_id is the sole pointer to the leaked multipart",
+        "an abort attempted against a COMPLETED session is a FAIL (it would NoSuchUpload-error and wedge the reap)"
+      ],
+      "variants": ["in_progress", "completing", "completed", "failed", "expired"],
+      "traps": ["stale-dist"],
+      "automated": { "kind": "api", "ref": "packages/qa/dogfood/test/attachments-permission-matrix.dogfood.test.ts" },
+      "source": [
+        "packages/services/service-storage/src/attachment-lifecycle.ts (createUploadSessionReapGuard — abort-before-reap contract, completed/no-backend confirm branches, veto-on-failure)",
+        "packages/services/service-storage/src/objects/system-upload-session.object.ts (status enum = the variants list; ttl expires_at+1d, retention 7d terminal statuses)",
+        "packages/services/service-storage/src/storage-route-ledger.ts (upload-chunked family)",
+        "docs/plans/release-15.1-test-plan.md §C4 (#2970 item 4)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-07", "change": "new item: chunked-session lifecycle + multipart-abort guard from the reap-guard source, variants pinned to the sys_upload_session status enum; S3-only consequences honestly recorded as a known gap", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    },
+    {
+      "id": "attachments-storage.inline-grid-receipt-cells",
+      "title": "Per-line Receipt upload cells in the invoice inline grid: auto-derived file column, real upload control, resolved file object in the atomic batch",
+      "since": "v15.1",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "browser",
+      "personas": ["seeded admin (admin@objectos.ai)"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "showcase_invoice_line.receipt (Field.file) and the seeded product 'Widget A' (sku WIDGET-A) for the line's product pick",
+          "the storage service live (the upload rides the console's UploadProvider adapter into /api/v1/storage)"
+        ]
+      },
+      "steps": [
+        "open /apps/showcase_app/showcase_invoice, click New, and wait for the Line Items grid's real headers (screenshot first)",
+        "verify the Receipt column auto-derived into the grid (no columns config authors it — file fields must not be dropped from auto-columns)",
+        "verify the Receipt cell is a genuine input[type=file] upload control and NOT a text input",
+        "materialize a row: pick 'Widget A' in the product lookup, set Qty 1",
+        "upload a small PNG into the row's Receipt cell and wait for the file chip carrying the file name",
+        "fill the header (name INV-QA-<ts>, pick an account, status draft) and submit while capturing the POST /api/v1/batch request",
+        "inspect the batch's showcase_invoice_line operation: the receipt value must be a RESOLVED stored-file object, and its url an absolute http(s) URL",
+        "re-open the created invoice and confirm the line's receipt renders as a chip/thumbnail, not a text value"
+      ],
+      "acceptance": [
+        {
+          "clause": "the Receipt column auto-derives from the data model into the inline grid",
+          "oracle": "dom",
+          "verify": "after the screenshot confirms render, the grid header row contains exactly one 'Receipt' th",
+          "evidence": "screenshot + header DOM excerpt"
+        },
+        {
+          "clause": "the cell is a real upload control — input[type=file] present, text input for Receipt absent (the objectui#2360 degraded-cell regression)",
+          "oracle": "dom",
+          "verify": "input[type=file] count >= 1 inside the grid; input[type=text][aria-label=Receipt] count == 0",
+          "evidence": "DOM assertion output"
+        },
+        {
+          "clause": "picking a file uploads through the storage service and shows a removable chip with the file name before submit",
+          "oracle": "network",
+          "verify": "the upload requests hit /api/v1/storage/* and the chip appears with the picked name",
+          "evidence": "upload trace + chip screenshot"
+        },
+        {
+          "clause": "the atomic /api/v1/batch carries the line with receipt as a resolved stored-file object (absolute url), not a blob or text placeholder — and the create round-trips",
+          "oracle": "network",
+          "verify": "the captured batch's showcase_invoice_line operation has receipt.name (or original_name) containing the picked filename and an http(s) url; the batch answers success",
+          "evidence": "the batch payload + response"
+        }
+      ],
+      "negative": [
+        "a text input where the upload cell should be is the exact #2360 failure — FAIL",
+        "a batch that persists a data:/blob: placeholder instead of a stored-file reference is a FAIL even if the grid looked right (ADR-0104: an inline blob is not a managed file)"
+      ],
+      "traps": ["automation-input", "hydration-race", "stale-console-bundle"],
+      "automated": { "kind": "e2e", "ref": "objectui: e2e/live/grid-file-upload.spec.ts" },
+      "source": [
+        "docs/plans/release-15.1-test-plan.md §C2 (#3051 + objectui#2585)",
+        "objectui e2e/live/grid-file-upload.spec.ts (the live pin: auto-column, input-not-text, chip, batch payload shape)",
+        "examples/app-showcase/src/data/objects/invoice.object.ts (showcase_invoice_line.receipt = Field.file, objectui#2360 note)",
+        "ADR-0059 — the FORM-side Confirm-disabled-while-uploading guard is records-forms.upload-guard-blocks-confirm; this item owns the storage/persistence side. Cross-reference, do not duplicate"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-07", "change": "new item transcribed from the live e2e pin (grid-file-upload.spec.ts) with seeded names verified (Widget A / showcase_invoice_line.receipt); ADR-0059 form-side guard cross-referenced to records-forms instead of duplicated", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    }
+  ]
+}

@@ -32,6 +32,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // #5619 sank the two predicates into a package both sides already depend on.
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
+import type { MetadataAuthoringChannel } from './protocol.js';
 
 /** The issue's body. Zod-valid: `approvers[].value` is just a string to the schema. */
 const brokenApprovalFlow = () => ({
@@ -140,10 +141,30 @@ function makeStubEngine() {
     return { engine, rows };
 }
 
-/** `environmentId` set: the gate, like every ADR-0005 authorization gate, is tenant-scoped. */
+/**
+ * A protocol on the ordinary tenant posture: an environment id AND the default
+ * (undeclared ⇒ `'environment'`) authoring channel.
+ */
 function makeProtocol() {
     const { engine, rows } = makeStubEngine();
     const protocol = new ObjectStackProtocolImplementation(engine, () => new Map(), 'env_test');
+    return { protocol: protocol as any, rows };
+}
+
+/**
+ * [#6710] The two activation inputs, driven independently. `environmentId` is
+ * row scope; `authoringChannel` is what decides whether the #4463 gate runs.
+ * Passing `undefined` for the channel exercises the constructor DEFAULT — the
+ * fail-safe direction — not an explicit `'environment'`.
+ */
+function makeProtocolOn(
+    environmentId: string | undefined,
+    authoringChannel?: MetadataAuthoringChannel,
+) {
+    const { engine, rows } = makeStubEngine();
+    const protocol = authoringChannel === undefined
+        ? new ObjectStackProtocolImplementation(engine, () => new Map(), environmentId)
+        : new ObjectStackProtocolImplementation(engine, () => new Map(), environmentId, authoringChannel);
     return { protocol: protocol as any, rows };
 }
 
@@ -259,11 +280,13 @@ describe('runtime authoring gate on saveMetaItem (#4463)', () => {
 
     // ── Scope: what the gate must NOT do ─────────────────────────────────
 
-    it('does not gate control-plane (package-author) writes', async () => {
-        // `environmentId === undefined` is the package author's own channel —
-        // the same carve-out every ADR-0005 authorization gate above it makes.
-        const { engine, rows } = makeStubEngine();
-        const protocol = new ObjectStackProtocolImplementation(engine, () => new Map()) as any;
+    it('does not gate a DECLARED package-author (control-plane) channel', async () => {
+        // The ADR-0005 carve-out itself is unchanged and still legitimate: a
+        // control-plane kernel installing a package is not an author
+        // publishing into a live tenant. What #6710 changed is that the kernel
+        // has to SAY SO — this is the one posture in the matrix below that
+        // may skip all 26 rules.
+        const { protocol, rows } = makeProtocolOn(undefined, 'package-author');
         const result = await protocol.saveMetaItem({
             type: 'flow',
             name: 'leave_approval',
@@ -333,5 +356,168 @@ describe('runtime authoring gate on saveMetaItem (#4463)', () => {
             .saveMetaItem({ type: 'flow', name: 'other_flow', item: { ...brokenApprovalFlow(), name: 'other_flow' } })
             .catch((e: any) => e);
         expect(err.status).toBe(422);
+    });
+});
+
+/**
+ * [#6710] What ACTIVATES the gate — the posture matrix.
+ *
+ * Until #6710 the answer was `environmentId !== undefined`, and the whole
+ * defect is that this key cannot tell two topologies apart: the genuine
+ * control plane and the CLI's host-config assembler
+ * (`serve.ts`'s `config.objects && !hasObjectQL` branch → `new ObjectQLPlugin()`
+ * with no options) BOTH leave it undefined, and only the first one is the
+ * package author's own channel. The second serves an end-user
+ * `PUT /api/v1/meta/*` — measured at boot level on `origin/main` @ `68feaadd6`:
+ * `protocol.environmentId === undefined` and the broken approval flow ran
+ * straight past this gate into persistence.
+ *
+ * So activation is now keyed on a DECLARED channel, and this matrix is the
+ * contract. The row that matters most is the first: **undeclared ⇒ gated**.
+ * An assembly that forgets gets more enforcement, never less.
+ */
+describe('#6710 — gate activation is keyed on the declared authoring channel', () => {
+    let warn: ReturnType<typeof vi.spyOn>;
+    beforeEach(() => {
+        warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        delete process.env.OS_ALLOW_UNLINTED_METADATA_WRITES;
+    });
+    afterEach(() => {
+        warn.mockRestore();
+        delete process.env.OS_ALLOW_UNLINTED_METADATA_WRITES;
+    });
+
+    /**
+     * `undefined` = the option omitted entirely, which is the posture every
+     * assembly that has not been told about this option is in.
+     */
+    const matrix: Array<{
+        environmentId: string | undefined;
+        channel: MetadataAuthoringChannel | undefined;
+        gated: boolean;
+        why: string;
+    }> = [
+        {
+            environmentId: undefined, channel: undefined, gated: true,
+            why: 'THE #6710 FIX — the host-config topology (serve.ts, showcase). '
+                + 'Undeclared is the gated channel: this row going green in the other '
+                + 'direction is the defect this card exists to close.',
+        },
+        {
+            environmentId: undefined, channel: 'environment', gated: true,
+            why: 'the default, stated out loud — must agree with the omitted case',
+        },
+        {
+            environmentId: undefined, channel: 'package-author', gated: false,
+            why: 'the ADR-0005 carve-out, now declared — the genuine control plane',
+        },
+        {
+            environmentId: 'env_test', channel: undefined, gated: true,
+            why: 'the ordinary tenant kernel — gated before #6710 and gated after',
+        },
+        {
+            environmentId: 'env_test', channel: 'environment', gated: true,
+            why: 'same, stated out loud',
+        },
+        {
+            environmentId: 'env_test', channel: 'package-author', gated: false,
+            why: 'the DECLARATION decides on its own. Row scope is orthogonal and is '
+                + 'deliberately not AND-ed in here: re-admitting environmentId as a '
+                + 'co-condition would put the retired proxy key back into the '
+                + 'activation judgment, and a control plane that later gained a row '
+                + 'scope would silently change gate posture. No in-repo assembly is '
+                + 'in this posture; it is pinned so the rule reads one way only.',
+        },
+    ];
+
+    for (const { environmentId, channel, gated, why } of matrix) {
+        const label = `environmentId=${environmentId ?? 'undefined'}, `
+            + `authoringChannel=${channel ?? '<omitted>'} ⇒ ${gated ? 'GATED' : 'bypassed'}`;
+
+        it(label, async () => {
+            const { protocol, rows } = makeProtocolOn(environmentId, channel);
+            const outcome = await protocol
+                .saveMetaItem({ type: 'flow', name: 'leave_approval', item: brokenApprovalFlow() })
+                .then((r: any) => ({ ok: true as const, r }))
+                .catch((e: any) => ({ ok: false as const, e }));
+
+            if (!gated) {
+                expect(outcome.ok, `${why}\nunexpected refusal: ${String((outcome as any).e?.message)}`).toBe(true);
+                expect(flowRows(rows).length).toBe(1);
+                return;
+            }
+
+            expect(outcome.ok, why).toBe(false);
+            const err = (outcome as { ok: false; e: any }).e;
+            // ADR-0112 envelope, both halves. `rejects.toThrow()` alone would
+            // stay green on any throw at all — including the engine's own
+            // "no driver available", which is exactly how the ungated
+            // host-config topology fails today.
+            expect(err.code, why).toBe('INVALID_METADATA');
+            expect(err.status, why).toBe(422);
+            expect(err.issues.map((i: any) => i.rule)).toContain('approval-expression-invalid');
+            // A gate that rejects after persisting is a log line.
+            expect(flowRows(rows), 'nothing may land on a refusal').toEqual([]);
+        });
+    }
+
+    it('the gated postures are gated by the RULES, not by a blanket refusal', async () => {
+        // Guards against the lazy fix: "gate everything undeclared" is only
+        // correct if a clean body still publishes. Both undeclared postures
+        // must accept the valid flow.
+        for (const environmentId of [undefined, 'env_test']) {
+            const { protocol, rows } = makeProtocolOn(environmentId, undefined);
+            const result = await protocol.saveMetaItem({
+                type: 'flow', name: 'leave_approval', item: validApprovalFlow(),
+            });
+            expect(result.success, `environmentId=${String(environmentId)}`).toBe(true);
+            expect(flowRows(rows).length).toBe(1);
+        }
+    });
+
+    it('D4 hatch still covers the newly-gated topology (the cross-repo window depends on it)', async () => {
+        // Until `cloud`'s control-plane-preset declares the channel, the
+        // control plane runs on the undeclared (gated) posture. The maintainer
+        // accepted that window explicitly BECAUSE this hatch exists — so the
+        // hatch has to work on precisely the posture the window puts it in:
+        // environmentId undefined, channel undeclared.
+        process.env.OS_ALLOW_UNLINTED_METADATA_WRITES = '1';
+        const { protocol, rows } = makeProtocolOn(undefined, undefined);
+
+        const result = await protocol.saveMetaItem({
+            type: 'flow', name: 'leave_approval', item: brokenApprovalFlow(),
+        });
+        expect(result.success).toBe(true);
+        expect(flowRows(rows).length).toBe(1);
+
+        const shouted = (warn.mock.calls as unknown[][])
+            .map((c) => String(c[0]))
+            .filter((m) => m.includes('OS_ALLOW_UNLINTED_METADATA_WRITES'));
+        expect(shouted.length, 'tolerated, never invisible').toBe(1);
+        expect(shouted[0]).toContain('approval-expression-invalid');
+    });
+
+    it('does not disturb the OTHER gates that legitimately read environmentId', async () => {
+        // #6710 re-keys ONE activation. The #3050 authoring gate keeps its own
+        // `environmentId !== undefined` scope check, and it must stay keyed
+        // there — that gate really is about row scope. Declaring the
+        // package-author channel must not switch it on for a control-plane
+        // kernel, and must not switch it off for a tenant one.
+        const seen: string[] = [];
+        const gate = (ctx: { type: string; name: string }) => { seen.push(`${ctx.type}/${ctx.name}`); };
+
+        const cp = makeProtocolOn(undefined, 'package-author');
+        cp.protocol.registerAuthoringGate('flow', gate);
+        await cp.protocol.saveMetaItem({ type: 'flow', name: 'leave_approval', item: validApprovalFlow() });
+        expect(seen, 'the #3050 gate stays OFF where environmentId is undefined').toEqual([]);
+
+        const tenant = makeProtocolOn('env_test', 'package-author');
+        tenant.protocol.registerAuthoringGate('flow', gate);
+        await tenant.protocol.saveMetaItem({ type: 'flow', name: 'leave_approval', item: brokenApprovalFlow() });
+        expect(
+            seen,
+            'the #3050 gate stays ON where environmentId is set, even though the '
+            + '#4463 gate was waived by the channel declaration — two gates, two keys',
+        ).toEqual(['flow/leave_approval']);
     });
 });

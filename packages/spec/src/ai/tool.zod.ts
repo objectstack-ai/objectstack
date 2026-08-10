@@ -9,6 +9,7 @@ import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 // ==========================================
 
 import { lazySchema } from '../shared/lazy-schema';
+import { strictObject } from '../shared/strict-object';
 
 /*
  * REMOVED — `ToolCategorySchema` / `ToolCategory` (#3896 audit close-out).
@@ -71,26 +72,33 @@ const TOOL_RETIRED_KEY_GUIDANCE: Record<string, string> = {
 };
 
 /**
- * Custom zod `error` for the `.strict()` ToolSchema.
+ * The standing history sentence for the tool surface, emitted LAST on every
+ * rejection — the shared template's `history` slot.
  *
- * `.strict()` matters more than usual here. Removing a key from a NON-strict
- * schema replaces one silent no-op with another: the author keeps writing
- * `requiresConfirmation: true`, zod strips it without a word, and the safety
- * flag goes on meaning nothing — the exact "silent strip" ADR-0032 / #1535
- * closed for objects. Rejecting loudly, with the prescription attached, is what
- * turns the removal into a fix instead of a rename of the problem.
+ * `.strict()` matters more than usual here, and this sentence is why. Removing
+ * a key from a NON-strict schema replaces one silent no-op with another: the
+ * author keeps writing `requiresConfirmation: true`, zod strips it without a
+ * word, and the safety flag goes on meaning nothing — the exact "silent strip"
+ * ADR-0032 / #1535 closed for objects. Rejecting loudly, with the prescription
+ * attached, is what turns the removal into a fix instead of a rename of the
+ * problem.
+ *
+ * ## Why the slot, and why it was empty before (#6805)
+ *
+ * Until #6805 this file carried a hand-written `$ZodErrorMap` instead of the
+ * shared template, and #6416/#6619 recorded the reason it could not fold: the
+ * template appends `history` unconditionally (`${message} ${history}`) and this
+ * surface emitted no trailing sentence at all. That is a statement about the
+ * TEXT, not about the template — the surface has a real history, it simply had
+ * never been written down. Writing it is what makes the fold possible, and the
+ * fold is what puts `TOOL_RETIRED_KEY_GUIDANCE` — a hand-maintained per-key
+ * retirement table, the most rot-prone content the audit exists for — under
+ * `alias-integrity.test.ts` for the first time.
  */
-const strictToolError: z.core.$ZodErrorMap = (issue) => {
-  if (issue.code !== 'unrecognized_keys') return undefined;
-  const keys = (issue as { keys?: readonly string[] }).keys ?? [];
-  const lines = keys.map((key) =>
-    TOOL_RETIRED_KEY_GUIDANCE[key] ?? `\`${key}\` is not a ToolSchema field.`,
-  );
-  return (
-    `Unrecognized key(s) on the tool definition: ${keys.map((k) => `\`${k}\``).join(', ')}.\n` +
-    lines.map((l) => `  • ${l}`).join('\n')
-  );
-};
+const TOOL_STRICT_HISTORY =
+  'Until this shape was closed an undeclared key was dropped without a word — the tool '
+  + 'still registered and still reached the LLM tool set, minus whatever the key was meant '
+  + 'to do (the #1535 silent-strip class).';
 
 /**
  * Tool Schema
@@ -121,7 +129,11 @@ const strictToolError: z.core.$ZodErrorMap = (issue) => {
  * });
  * ```
  */
-export const ToolSchema = lazySchema(() => z.object({
+export const ToolSchema = lazySchema(() => strictObject({
+  surface: 'the tool definition',
+  history: TOOL_STRICT_HISTORY,
+  guidance: TOOL_RETIRED_KEY_GUIDANCE,
+}, {
   /** Machine name (snake_case, globally unique) */
   name: z.string().regex(/^[a-z_][a-z0-9_]*$/).describe('Tool unique identifier (snake_case)'),
 
@@ -177,7 +189,7 @@ export const ToolSchema = lazySchema(() => z.object({
   // ADR-0010 — runtime protection envelope (internal — set by loader).
   ...MetadataProtectionFields,
 
-}, { error: strictToolError }).strict().describe('AI tool definition. [READ-ONLY PROJECTION — not an execution entry point] Authoring a tool as metadata does NOT make it runnable: this schema has no `implementation`/`handler` field and no framework executor loads a metadata-authored tool. The runtime executes a separately-registered `AIToolDefinition` (cloud `@objectstack/service-ai`); tool metadata is a one-way projection for Studio/discovery. Do not expect a hand-authored tool to run in the open edition (liveness audit #1878/#1892).'));
+}).describe('AI tool definition. [READ-ONLY PROJECTION — not an execution entry point] Authoring a tool as metadata does NOT make it runnable: this schema has no `implementation`/`handler` field and no framework executor loads a metadata-authored tool. The runtime executes a separately-registered `AIToolDefinition` (cloud `@objectstack/service-ai`); tool metadata is a one-way projection for Studio/discovery. Do not expect a hand-authored tool to run in the open edition (liveness audit #1878/#1892).'));
 
 export type Tool = z.input<typeof ToolSchema>;
 

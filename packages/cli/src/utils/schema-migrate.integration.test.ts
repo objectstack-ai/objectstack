@@ -78,7 +78,7 @@ describe('bootSchemaStack + migrate engine (integration)', () => {
   });
 
   it('detects the NOT NULL + legacy-unique drift, applies both, and self-verifies in-sync', async () => {
-    const stack = await bootSchemaStack({ databaseUrl: `file:${dbFile}`, projectRoot: dir });
+    const stack = await bootSchemaStack({ jsonOutput: false, databaseUrl: `file:${dbFile}`, projectRoot: dir });
     try {
       expect(stack.driver).toBeTruthy();
       expect(stack.managedTableCount).toBeGreaterThan(0);
@@ -198,7 +198,7 @@ describe('bootSchemaStack — dev-provisioned __search companions are not orphan
   });
 
   it('the migrate boot provisions the companion in metadata, so plan reports no __search drift', async () => {
-    const stack = await bootSchemaStack({ databaseUrl: `file:${dbFile}`, projectRoot: dir });
+    const stack = await bootSchemaStack({ jsonOutput: false, databaseUrl: `file:${dbFile}`, projectRoot: dir });
     try {
       expect(stack.driver).toBeTruthy();
 

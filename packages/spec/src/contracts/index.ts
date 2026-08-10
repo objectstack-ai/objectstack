@@ -25,6 +25,10 @@ export * from './queue-service.js';
 export * from './notification-service.js';
 export * from './storage-service.js';
 export * from './metadata-service.js';
+// The write→read round-trip cases every occupant of the `metadata` slot is
+// checked against (#7223) — one table, a thin driver per implementation, the
+// shape `data/filter-logic-conformance.ts` already uses for filter backends.
+export * from './metadata-service-roundtrip-conformance.js';
 export * from './auth-service.js';
 export * from './automation-service.js';
 export * from './analytics-service.js';

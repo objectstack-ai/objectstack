@@ -74,8 +74,25 @@ export async function handleShareLinksRequest(
     const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as const;
     const m = method.toUpperCase();
     const parts = subPath.replace(/^\/+/, '').split('/').filter(Boolean);
-    const ec: any = context.executionContext;
-    const callerCtx = { userId: ec?.userId as string | undefined, tenantId: ec?.tenantId as string | undefined };
+    // [#6551 / #6206 / #6430] The dispatcher's ALREADY-COMPLETE envelope,
+    // passed through WHOLE to every adjudicating service call below.
+    //
+    // `createLink` / `listLinks` / `revokeLink` are ENFORCEMENT paths — the
+    // `IShareLinkService` contract types their context parameter as the full
+    // `ExecutionContext` and says callers MUST NOT rebuild a subset of it:
+    // `accessible_org_ids` (the `group`-posture Layer 0 wall, ADR-0105 D2 —
+    // absent set DENIES), `positions` / `permissions` / `org_user_ids`
+    // (Layer 1 business RLS + the CRUD gate), `posture` (ADR-0095 D2:
+    // resolved once, carried, never re-derived) and `tabPermissions` are all
+    // read downstream, and this call site cannot know which of them the
+    // deployment's posture makes load-bearing. This used to rebuild a
+    // two-field `{ userId, tenantId }` — structural subtyping keeps that
+    // compiling, so the narrowing was invisible to tsc and every
+    // `group`-posture caller was refused links on records they read fine
+    // elsewhere (the #6206 defect, on the dispatcher face). The routes' own
+    // 401 gate below reads only `ec?.userId` — an authentication decision
+    // needs no authorization envelope.
+    const ec = context.executionContext;
 
     const headerOf = (name: string): string | undefined => {
         const h = context.request?.headers;
@@ -196,7 +213,7 @@ export async function handleShareLinksRequest(
         }
 
         // ── AUTHENTICATED: create / list / revoke ─────────────────────
-        if (!callerCtx.userId) return sendErr(401, 'UNAUTHENTICATED', 'Sign in to manage share links');
+        if (!ec?.userId) return sendErr(401, 'UNAUTHENTICATED', 'Sign in to manage share links');
 
         // POST /share-links → create
         if (parts.length === 0 && m === 'POST') {
@@ -214,7 +231,7 @@ export async function handleShareLinksRequest(
                     redactFields: b.redactFields,
                     label: b.label,
                 },
-                callerCtx,
+                ec,
             );
             // Hand-built rather than `deps.success(...)` for the 201 alone — that
             // helper hardcodes 200. Same shape the `/keys` domain builds for its
@@ -231,22 +248,57 @@ export async function handleShareLinksRequest(
                     recordId: typeof query?.recordId === 'string' ? query.recordId : undefined,
                     // Constrain to links the caller created so a guessed
                     // recordId can never enumerate another user's tokens.
-                    createdBy: callerCtx.userId,
+                    createdBy: ec.userId,
                     includeRevoked: query?.includeRevoked === 'true' || query?.includeRevoked === '1',
                 },
-                callerCtx,
+                ec,
             );
             return { handled: true, response: deps.success(links) };
         }
 
         // DELETE /share-links/:idOrToken → revoke
         if (parts.length === 1 && m === 'DELETE') {
-            await svc.revokeLink(decodeURIComponent(parts[0]), callerCtx);
+            await svc.revokeLink(decodeURIComponent(parts[0]), ec);
             return { handled: true, response: deps.success({ ok: true }) };
         }
 
         return { handled: true, response: deps.routeNotFound(`/share-links${subPath}`) };
     } catch (err: any) {
-        return sendErr(err?.status ?? 500, err?.code ?? 'INTERNAL', err?.message ?? 'Share link request failed');
+        // [#6649] The dispatcher's SHARED thrown-error mapper, not a hand-written
+        // status read. This catch used to be
+        // `sendErr(err?.status ?? 500, err?.code ?? 'INTERNAL', …)`, and the two
+        // channels it collapsed are the whole defect:
+        //
+        //  1. **Status.** The refusals that actually fly out of the enforcement
+        //     paths below carry `statusCode`, not `status`:
+        //     `PermissionDeniedError { code = 'PERMISSION_DENIED'; statusCode = 403 }`
+        //     (`plugin-security/src/errors.ts`, mirrored by runtime's own
+        //     `security/resolve-execution-context.ts`) is thrown by the security
+        //     middleware's CRUD gate when the caller's permission sets grant no
+        //     `allowRead` on the object — so `svc.createLink`'s visibility read
+        //     `engine.find(object, { context })` throws it, `ShareLinkService`
+        //     does not catch it, and it lands here. `err?.status` was `undefined`
+        //     on it, so a 403-class refusal left as a **500** while `code` read
+        //     `PERMISSION_DENIED` — an envelope that contradicts itself, and a
+        //     status many SDK/browser clients treat as retryable when the answer
+        //     is permanent. `errorFromThrown` reads `status` OR `statusCode`.
+        //  2. **Code.** The `'INTERNAL'` fallback is not registered for
+        //     `@objectstack/runtime` in `ERROR_CODE_LEDGER` — only
+        //     `service-storage` / `service-i18n` / `rest` / `plugin-sharing`
+        //     register it, and the ledger's per-package rows are provenance, so
+        //     the global union kept `ApiErrorSchema` green while this domain
+        //     emitted a code it never registered. The shared mapper leaves the
+        //     required field to `standardErrorCodeForHttpStatus` instead, which
+        //     spells the catalogued `INTERNAL_ERROR` (ADR-0112) — the same
+        //     derived code every other dispatcher exit already answers with.
+        //
+        // `ShareLinkService`'s own refusals are unaffected: its `makeError` sets
+        // `err.status` + `err.code`, which the mapper reads on the same first
+        // branch the old chain did (403 `FORBIDDEN`, 422 `SHARING_NOT_ENABLED`,
+        // …). What it adds on top is the structured `issues` / `fields` detail
+        // the `/meta` and `/actions` domains already carry through this exit —
+        // which is the point: a hand-written catch is exactly how this domain
+        // diverged from the shared mapper in the first place.
+        return { handled: true, response: deps.errorFromThrown(err, 500) };
     }
 }

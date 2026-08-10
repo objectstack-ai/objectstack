@@ -5,6 +5,7 @@ import { CronExpressionInputSchema } from '../shared/expression.zod';
 import { WebhookSchema } from '../automation/webhook.zod';
 import { ConnectorAuthConfigSchema, ConnectorInstanceAuthSchema } from '../shared/connector-auth.zod';
 import { FieldMappingSchema as BaseFieldMappingSchema } from '../shared/mapping.zod';
+import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { retiredKey } from '../shared/retired-key';
 
 /**
@@ -14,10 +15,12 @@ import { retiredKey } from '../shared/retired-key';
  * Connectors enable ObjectStack to sync data with SaaS apps, databases, file storage,
  * and message queues through a unified protocol.
  * 
- * **Positioning in the sync/integration layering** (L1 "Simple Sync" was
- * retired in #4738 — narrative-only, zero consumers; see
- * `packages/spec/docs/SYNC_ARCHITECTURE.md`):
- * - **ETL Pipeline** (automation/etl.zod.ts) - Data engineers - Aggregate 10 sources to warehouse
+ * **Positioning in the sync/integration layering** — this file is now the ONLY
+ * layer. Both layers above it were retired under ADR-0049 for the same measured
+ * reason, that no engine ever executed them: L1 "Simple Sync"
+ * (`automation/sync.zod.ts`) in #4738, and L2 "ETL Pipeline"
+ * (`automation/etl.zod.ts`) in #6414. See
+ * `packages/spec/docs/SYNC_ARCHITECTURE.md`:
  * - **Enterprise Connector** (THIS FILE) - System integrators - Full SAP integration; connector-attached sync via `syncConfig`
  * 
  * **SCOPE: Most comprehensive integration layer.**
@@ -57,7 +60,8 @@ import { retiredKey } from '../shared/retired-key';
  * (`data/mapping.zod.ts` — a string enum,
  * `none`/`constant`/`map`/`split`/`join`/`lookup`, with its settings in `params`),
  * applied row by row by the REST import path — or an ETL transformation step
- * (L2 above). Already authored the retired key? `os migrate meta --from 16` rewrites it.
+ * (L2 above). Already authored the retired key? `os migrate meta --from 16` rewrites
+ * existing sources automatically — the key itself is removed.
  *
  * ## Runtime contract — descriptor vs. registered connector (#2612)
  *
@@ -98,9 +102,11 @@ import { retiredKey } from '../shared/retired-key';
  * - Microsoft Dynamics 365 connector
  * 
  * **When to downgrade:**
- * - Data transformation only → Use {@link file://../automation/etl.zod.ts | ETL Pipeline}
- *
- * @see {@link file://../automation/etl.zod.ts} for the ETL Pipeline layer (data engineering)
+ * - Per-field value conversion on import only → the import mapping's own
+ *   `transform` (`data/mapping.zod.ts`), which the REST import path executes
+ *   row by row. (This used to point at `automation/etl.zod.ts`; L2 was retired
+ *   at #6414 for having no executor, so the pointer would have been a signpost
+ *   landing nowhere — the same defect class this header names below.)
  * 
  * ## There is no "Trigger Registry" alternative
  *
@@ -113,9 +119,11 @@ import { retiredKey } from '../shared/retired-key';
  * per-provider template cluster). The same defect class as the
  * `capabilities.readOnly` prescription #4487 corrected: a signpost must land
  * somewhere enforced. Lightweight cases are served HERE — a connector instance
- * with simple `auth` — or by `automation/etl.zod.ts` for transformation
- * pipelines. (The automation-side L1 "Simple Sync" file was itself retired as
- * a dead end of the same class in #4738.)
+ * with simple `auth`. (Both automation-side layers were themselves retired as
+ * dead ends of the same class: L1 "Simple Sync" in #4738, L2 `etl.zod.ts` in
+ * #6414. This paragraph named L2 as the transformation destination until the
+ * second retirement; a signpost that must land somewhere enforced cannot make
+ * an exception for itself.)
  */
 
 // ============================================================================
@@ -655,6 +663,7 @@ export const ConnectorActionSchema = lazySchema(() => z.object({
    */
   effect: ConnectorActionEffectSchema.optional(),
 }));
+export type ConnectorAction = z.input<typeof ConnectorActionSchema>;
 
 /**
  * Connector Trigger Definition
@@ -672,6 +681,7 @@ export const ConnectorTriggerSchema = lazySchema(() => z.object({
   type: z.enum(['polling', 'webhook']).describe('Trigger type'),
   interval: z.number().optional().describe('Polling interval in seconds'),
 }));
+export type ConnectorTrigger = z.input<typeof ConnectorTriggerSchema>;
 
 /**
  * Base Connector Schema
@@ -792,7 +802,7 @@ export const ConnectorSchema = lazySchema(() => z.object({
     'here was inert while reading like a configured cap. Delete the key. Do NOT substitute ' +
     '`shared` `RateLimitConfig` — that is the inbound limiter and would cap the wrong direction; ' +
     'until an outbound throttle exists, rate-limit at the connector provider or upstream gateway. ' +
-    'Run `os migrate meta --from 16` to rewrite it automatically.',
+    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
   ),
 
   /**
@@ -838,6 +848,36 @@ export const ConnectorSchema = lazySchema(() => z.object({
    * Custom metadata
    */
   metadata: z.record(z.string(), z.unknown()).optional().describe('Custom connector metadata'),
+
+  // ADR-0010 — runtime protection envelope (internal — set by loader).
+  //
+  // [#6362, split out of #6245] Declared for the reason `webhook.zod.ts` and
+  // `sharing.zod.ts` state for their own spreads: BOTH metadata load paths call
+  // `applyProtection` on EVERY type, so a package-loaded connector already
+  // carries these keys by the time anything re-parses it — and `/meta/connector`
+  // has re-parsed them since #6245 bound `DeclarativeConnectorEntrySchema` to
+  // that door.
+  //
+  // The failure mode here is the QUIET half of the pair, which is exactly why
+  // it outlived its two siblings. `sharing_rule` is `.strict()`, so its
+  // undeclared envelope was REJECTED — a hard 422, fixed in #6245 the moment
+  // the door was bound. This shape is a plain (non-strict) `z.object`, so it
+  // TOLERATES the envelope and returns `success` — then strips it. Tolerate is
+  // not preserve: measured on `origin/main` before this spread, a stamped
+  // catalog descriptor round-tripping through the bound schema came back having
+  // lost all seven keys (`_lock`, `_lockReason`, `_lockSource`, `_provenance`,
+  // `_packageId`, `_packageVersion`, `_lockDocsUrl`), so every consumer of
+  // `extractProtection` / `resolveLockState` downstream of a parse saw an
+  // unlocked, unattributed, org-provenance item. No error anywhere.
+  //
+  // `webhook` was measured in the same pass and needs nothing: it has carried
+  // this spread since #4001 batch 11, and all seven keys survive its
+  // round-trip. See `connector.test.ts` → 'ADR-0010 protection envelope' for
+  // the pins that hold both readings.
+  //
+  // Pure-additive and internal: every key is `_`-prefixed and optional, so no
+  // author-facing field changes and nothing that parsed before stops parsing.
+  ...MetadataProtectionFields,
 }));
 
 export type Connector = z.input<typeof ConnectorSchema>;
@@ -928,4 +968,15 @@ export {
   ConnectorInstanceAPIKeyAuthSchema,
   ConnectorInstanceBasicAuthSchema,
 } from '../shared/connector-auth.zod';
-export type { ConnectorInstanceAuth, ResolvedConnectorAuth } from '../shared/connector-auth.zod';
+export type {
+  ConnectorInstanceAuth,
+  ResolvedConnectorAuth,
+  // The four member aliases travel with the four schema consts above: each is a
+  // documented JSON Schema whose reference page lives under `integration/`, so
+  // the type has to reach the same entry point or the page's `import type` line
+  // has nothing to name (#4593).
+  ConnectorInstanceNoAuth,
+  ConnectorInstanceBearerAuth,
+  ConnectorInstanceAPIKeyAuth,
+  ConnectorInstanceBasicAuth,
+} from '../shared/connector-auth.zod';

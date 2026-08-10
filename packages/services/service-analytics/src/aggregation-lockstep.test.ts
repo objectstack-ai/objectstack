@@ -61,29 +61,58 @@ describe('aggregate vocabulary lockstep', () => {
   it('records the current split, so a vocabulary change is visible in review', () => {
     expect([...SUPPORTED_AGGREGATES].sort())
       .toEqual(['avg', 'count', 'count_distinct', 'max', 'min', 'sum']);
-    expect([...UNSUPPORTED_AGGREGATES].sort()).toEqual(['array_agg', 'string_agg']);
+    // Empty since #6188: the rejection list's two members (`array_agg`,
+    // `string_agg`) were retired from the spec instead, so the refusal moved
+    // one layer earlier — to the parse, where it carries a prescription. The
+    // split is now "everything declared is lowered", which is the state
+    // ADR-0049 asks for; this line is what makes a regression away from it
+    // visible in review.
+    expect([...UNSUPPORTED_AGGREGATES].sort()).toEqual([]);
+  });
+
+  it('the spec no longer declares the two aggregates this runtime refused', () => {
+    // The other direction of the same fact, asserted against the spec rather
+    // than against our subtraction list — so re-adding either upstream fails
+    // here even if someone also re-adds it to `UNSUPPORTED_AGGREGATES` and
+    // keeps the partition arithmetic balanced.
+    expect(AggregationFunction.options as string[]).not.toContain('array_agg');
+    expect(AggregationFunction.options as string[]).not.toContain('string_agg');
+    // Kept deliberately (maintainer ruling 2026-08-07): it takes ADR-0049's
+    // enforce leg, and this compiler already lowers it.
+    expect(AggregationFunction.options as string[]).toContain('count_distinct');
   });
 });
 
 describe('the compiler error message is derived, not restated', () => {
   it('names every supported aggregate, and none of the unsupported ones', async () => {
     const { compileDataset } = await import('./dataset-compiler.js');
+
+    // #6188 emptied `UNSUPPORTED_AGGREGATES`, so no real value reaches the
+    // refusal branch any more. The branch is still the landing site for the
+    // next aggregate the spec declares ahead of this runtime, so the probe is
+    // injected rather than dropped — testing the message's DERIVATION, which
+    // is what this suite was written for, instead of the retired member that
+    // happened to trigger it.
+    UNSUPPORTED_AGGREGATES.add('probe_agg');
     let message = '';
     try {
       compileDataset({
         name: 'agg_probe',
         object: 'showcase_task',
         dimensions: [{ name: 'status', field: 'status', type: 'string' }],
-        measures: [{ name: 'names', field: 'title', aggregate: 'string_agg' }],
+        measures: [{ name: 'names', field: 'title', aggregate: 'probe_agg' }],
       } as never);
     } catch (e) {
       message = (e as Error).message;
+    } finally {
+      UNSUPPORTED_AGGREGATES.delete('probe_agg');
     }
-    expect(message).toContain('string_agg');
+    expect(message).toContain('probe_agg');
     for (const a of SUPPORTED_AGGREGATES) {
       expect(message, `error message omits supported aggregate "${a}"`).toContain(a);
     }
-    // The prose list it replaced would have kept claiming these are supported.
-    expect(message).not.toContain('array_agg,');
+    // The prose list it replaced would have kept claiming the refused one is
+    // supported; the derived message names it only as the rejected value.
+    expect(message).not.toContain('probe_agg,');
   });
 });

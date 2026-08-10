@@ -53,6 +53,7 @@ const result = ExecutionContextSchema.parse(data);
 | **principalKind** | `Enum<'human' \| 'agent' \| 'service' \| 'guest' \| 'system'>` | optional |  |
 | **audience** | `Enum<'internal' \| 'external'>` | optional |  |
 | **posture** | `Enum<'PLATFORM_ADMIN' \| 'TENANT_ADMIN' \| 'MEMBER' \| 'EXTERNAL'>` | optional | ADR-0095 D2 posture rung — PLATFORM_ADMIN crosses the tenant wall where object posture permits; TENANT_ADMIN sees all rows in the org; MEMBER gets business RLS; EXTERNAL sees only explicitly shared rows. |
+| **authGate** | `{ code: string; message: string }` | optional | ADR-0069 authentication-policy gate: present only while the principal is blocked from protected resources until they remediate (expired password, enforced MFA), absent for every healthy session. `code` is the stable machine code the client branches on (PASSWORD_EXPIRED / MFA_REQUIRED) and `message` is what the blocked user reads; both are required because the transport seam renders them as the 403 body. AUTHENTICATION, not authorization — it suspends access entirely rather than narrowing it, and nothing in the permission/RLS path reads it, while the allow-listed remediation endpoints stay reachable. Server-constructed only, never client-supplied; a guest/anonymous principal never carries one. |
 | **onBehalfOf** | `{ userId: string; principalKind?: Enum<'human' \| 'agent' \| 'service' \| 'guest' \| 'system'> }` | optional |  |
 | **permissions** | `string[]` | ✅ |  |
 | **systemPermissions** | `string[]` | optional |  |
@@ -66,7 +67,7 @@ const result = ExecutionContextSchema.parse(data);
 | **skipAutomations** | `boolean` | optional |  |
 | **seedReplay** | `boolean` | optional |  |
 | **skipStateMachine** | `boolean` | optional |  |
-| **preserveAudit** | `boolean` | optional |  |
+| **preserveAudit** | `boolean` | optional | Historical import: preserve the ORIGINAL audit timeline for this write instead of stamping it "now" (#3493). Opt-in and server-constructed only, never client-supplied. On the UPDATE path it admits a whitelist — the audit/timestamp family (created_at / created_by / updated_at / updated_by) plus author-declared business `readonly` fields — while platform-managed `system` columns (tenancy, generated) stay stripped. On INSERT the exemption does NOT apply (#6640): a create is stripped earlier, at the DataProtocol ingress, whose only exemption is `context.isSystem`, so a non-system create carrying `preserveAudit` still has those fields stripped and is warned (WARN) that the exemption is UPDATE-only — replaying archival readonly facts on create requires a system context. Permissions / RLS / field-level security are unaffected. |
 | **oauthScopes** | `string[]` | optional |  |
 | **accessToken** | `string` | optional |  |
 | **transaction** | `any` | optional |  |

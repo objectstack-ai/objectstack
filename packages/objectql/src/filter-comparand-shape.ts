@@ -143,8 +143,21 @@ function shapePreview(value: unknown): string {
   return text.length > 60 ? `${text.slice(0, 59)}…` : text;
 }
 
-/** The wire envelope every filter refusal in the platform already uses. */
-function invalidFilterError(message: string): Error {
+/**
+ * The wire envelope every filter refusal in the platform already uses.
+ *
+ * [#7047] EXPORTED, because this package has a second filter-refusal site and a
+ * private second copy of these four lines is how the platform's refusal faces
+ * drifted in the first place. `having-filter.ts` threw a bare `new Error` for a
+ * retired or unknown operator — `code` and `status` both `undefined` — so a
+ * 400-class author error reached the client 500-shaped, on the ONE refusal face
+ * of five that no conformance table drove. It calls this now, so the two
+ * objectql refusal sites cannot answer one mistake with two envelopes.
+ *
+ * The twin outside this package is `driver-memory`'s `unsupportedFilterError`
+ * (`filter-refusal.ts`), which carries the cross-driver rationale.
+ */
+export function invalidFilterError(message: string): Error {
   const err = new Error(message) as Error & { code?: string; status?: number };
   err.code = StandardErrorCode.enum.INVALID_FILTER;
   err.status = 400;
@@ -210,14 +223,20 @@ function malformedRangeComparandError(
  *
  * Read-only and allocation-free on the overwhelmingly common path (a filter
  * with no list operator walks its own keys and returns). Runs on every engine
- * read and write, so it stays a walk rather than a schema parse:
- * `FieldOperatorsSchema` cannot be used as the gate directly because it is
- * stricter than the runtime in ways the runtime deliberately allows — `$gt` is
- * declared `number | Date | FieldReference`, while `['created_at', '>',
- * '2026-01-01']` lowers to a STRING bound that every backend accepts and that
- * the showcase apps rely on. Enforcing the whole schema here would refuse
- * working queries; this gate enforces the three declarations that the drivers
- * genuinely cannot agree on.
+ * read and write, so it stays a walk rather than a schema parse — that cost is
+ * now the whole reason, and this gate deliberately enforces only the three
+ * list declarations the drivers genuinely cannot agree on.
+ *
+ * [#5685] This paragraph used to carry a second reason: that
+ * `FieldOperatorsSchema` was "stricter than the runtime in ways the runtime
+ * deliberately allows", because `$gt` was declared `number | Date |
+ * FieldReference` while `['created_at', '>', '2026-01-01']` lowers to a STRING
+ * bound that every backend accepts and the showcase apps rely on. That was a
+ * real mismatch and it is **fixed at the source** rather than tolerated here:
+ * the four ordering slots now declare `string` too, so the observation that
+ * motivated this note no longer describes the schema. It is recorded rather
+ * than deleted because this file's workaround is part of the evidence that
+ * closed #5685 — the schema, not the runtime, was the wrong side.
  */
 export function assertListComparandShapes(
   object: string,

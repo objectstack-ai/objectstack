@@ -78,7 +78,7 @@ describe('[#4747] bootSchemaStack teardown disarms the ADR-0057 sweep', () => {
   });
 
   it('audits while the engine is live, and reads nothing once the stack is down', async () => {
-    const stack = await bootSchemaStack({ databaseUrl: `file:${dbFile}`, projectRoot: dir });
+    const stack = await bootSchemaStack({ jsonOutput: false, databaseUrl: `file:${dbFile}`, projectRoot: dir });
     // Resolved BEFORE teardown — the point is what this same instance does
     // afterwards, and service resolution post-shutdown is not the subject.
     const lifecycle = stack.kernel.getService('lifecycle') as LifecycleServiceLike;

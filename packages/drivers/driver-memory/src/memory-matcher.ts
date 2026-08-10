@@ -16,6 +16,14 @@
  * comparand is not `[min, max]` (#5328).
  */
 
+// [#5659] The Filter Protocol's boolean identity reduction, shared with
+// driver-sql, driver-mongodb and the flow linter. See `evaluate` for why a
+// record-at-a-time matcher consults a record-INDEPENDENT verdict first.
+// [#6520] `$icontains`' ASCII-only fold, defined once in the spec and shared by
+// every JS evaluation face — see `foldAsciiCase`'s docblock for why it is not
+// re-implemented per package.
+import { reduceFilterVerdict, asciiCaseInsensitiveContains } from '@objectstack/spec/data';
+
 import { assertFilterConditionShape } from './filter-refusal.js';
 
 type RecordType = Record<string, any>;
@@ -41,9 +49,34 @@ export function match(record: RecordType, filter: any): boolean {
     return evaluate(record, filter);
 }
 
+/**
+ * [#5659] The boolean identities come from the SHARED reduction; everything
+ * record-dependent is still decided here.
+ *
+ * This matcher used to answer `{ $and: [] }`, `{ $or: [] }`, `{}` and
+ * `{ $not: {} }` as a by-product of the JS it happens to be written in —
+ * `every` over an empty array is `true`, `some` is `false`, an empty node falls
+ * through to the trailing `return true`. Those four answers are not an accident
+ * of `Array.prototype`, they are a ruling (#5322/#5134) that `driver-sql` and
+ * `driver-mongodb` each spell out in a `reduceFilterNode` of their own, and
+ * "emergent from the evaluator" is not a place a ruling can be read from or
+ * held to. Asking the shared predicate makes this backend's identity answers
+ * the same OBJECT as theirs rather than a third agreeing coincidence.
+ *
+ * It is a pre-pass and not a rewrite of the loops below, because the verdict is
+ * record-independent by construction and the evaluation is not: `'clause'` —
+ * the answer for every filter that carries a real predicate — falls straight
+ * through to the untouched code. And a `'true'` verdict can only be reached by
+ * a filter whose keys are ALL combinators that resolved (a field key always
+ * contributes `'clause'`), so returning early on it skips no field constraint.
+ */
 function evaluate(record: RecordType, filter: any): boolean {
     if (!filter || Object.keys(filter).length === 0) return true;
-    
+
+    const verdict = reduceFilterVerdict(filter);
+    if (verdict === 'true') return true;
+    if (verdict === 'false') return false;
+
     // 1. Handle Top-Level Logical Operators ($and, $or, $not)
     // These usually appear at the root or nested.
     
@@ -188,8 +221,20 @@ function checkCondition(value: any, condition: any): boolean {
             case '$startsWith': 
                 if (typeof value !== 'string' || !value.startsWith(target)) return false; 
                 break;
-            case '$endsWith': 
-                if (typeof value !== 'string' || !value.endsWith(target)) return false; 
+            case '$endsWith':
+                if (typeof value !== 'string' || !value.endsWith(target)) return false;
+                break;
+            // [#6520] The case-INSENSITIVE twin of `$contains`. ASCII case only,
+            // and the fold runs on BOTH sides — `asciiCaseInsensitiveContains`
+            // is the spec's own function, shared with the five other JS faces so
+            // the fold cannot drift per package.
+            //
+            // NOT `toLowerCase()`: that folds the whole Unicode range, so `CAFÉ`
+            // would match `café` on this face and not on the SQL family, which is
+            // the divergence #6520 closed rather than a nicety (#4706 Q1 = A).
+            case '$icontains':
+                if (typeof value !== 'string' || typeof target !== 'string'
+                    || !asciiCaseInsensitiveContains(value, target)) return false;
                 break;
             case '$null':
                 // $null: true → value must be null/undefined; $null: false → value must not be null/undefined
@@ -206,13 +251,15 @@ function checkCondition(value: any, condition: any): boolean {
                 if (target === true && value != null) return false;
                 if (target === false && value == null) return false;
                 break;
-            case '$regex':
-                try {
-                    const re = new RegExp(target, condition.$options || '');
-                    if (!re.test(String(value))) return false;
-                } catch (e) { return false; }
-                break;
-
+            // [#5702] The `$regex` arm that stood here is GONE. It was the only
+            // real regex evaluator in the repo, and the reason #4706 retired the
+            // operator rather than standardising it: `new RegExp(target)` read
+            // `a.b` as a pattern (so it also matched `axb`) where every SQL
+            // backend read it as a literal, and its `catch { return false }`
+            // answered an ILLEGAL pattern with "no rows" — a silent wrong
+            // answer, not an error. Both spellings are refused by
+            // `filter-refusal.ts`'s vocabulary gate before this evaluator runs;
+            // `$icontains` is the replacement the refusal prescribes.
             default:
                 // [#5324] Unreachable through `match`: the shape gate refuses an
                 // operator this driver does not evaluate, with the same

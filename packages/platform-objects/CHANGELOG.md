@@ -1,5 +1,503 @@
 # @objectstack/platform-objects
 
+## 17.0.0-rc.6
+
+### Minor Changes
+
+- 06be54e: fix(objectql): a value admitted by an `OS_ALLOW_LAX_*` escape hatch stops released field files from being collected (#4797)
+
+  `recordDataMigrationRun`'s contract says a deployment whose data has regressed
+  since it last verified closes its own gate. That only happened when a migration
+  was re-run — nothing told the ledger when the data actually regressed.
+
+  Normally nothing has to. Once `sys_migration` records a verified ADR-0104
+  migration the write path is strict, a non-conforming value is refused, and the
+  certificate cannot go stale. **The operator escape hatches are the exception,
+  and they exist precisely to relax a deployment that has already verified.** With
+  `OS_ALLOW_MEDIA_VALUES` / `OS_ALLOW_LAX_MEDIA_VALUES` / `OS_ALLOW_LAX_VALUE_SHAPES`
+  on, a non-conforming value is admitted and persisted while the row still reads
+  `verified_at` non-null, `blocking: 0`. Turn the switch off — or let any other
+  process or machine run without it — and strict returns to reject the very data
+  this deployment stored. Meanwhile the `adr-0104-file-references` row also governs
+  reclamation of released field files, so the reap guard kept **deleting bytes** on
+  the strength of a certificate that was no longer true, with nothing in the ledger
+  saying so.
+
+  **A lax-admitted write now records a deviation.** The engine's admit path — the
+  same sink that already tallies counterexamples for #4769 — stamps
+  `sys_migration.deviation_observed_at` (plus a `deviation_detail` naming the
+  object, field, type and parse issue) on the migration whose contract the value
+  broke.
+
+  **The marker gates the irreversible path, and only that.** Authority is withdrawn
+  in proportion to reversibility:
+
+  | behaviour                                 | reversible?                 | predicate                      | while a deviation stands |
+  | ----------------------------------------- | --------------------------- | ------------------------------ | ------------------------ |
+  | strict value-shape enforcement (#3438)    | a rejected write is retried | `isDataMigrationFlagVerified`  | continues                |
+  | tombstoning a released file (#3459 PR-5b) | lifted on re-attach         | `isDataMigrationFlagVerified`  | continues                |
+  | reap guard's byte delete                  | **never**                   | `authorisesIrreversibleAction` | **refuses**              |
+
+  A certificate is not a boolean; it is authority over a set of behaviours, and the
+  two halves are withdrawn on different evidence. One admitted write is a complete
+  disproof of "nothing here violates this contract" — enough to stop deleting data
+  forever. It is _not_ evidence of the same order as the full-store scan that
+  earned the certificate, so it does not revoke it: doing that would turn an
+  explicitly temporary switch into a one-way door, forcing a full re-migration on
+  anyone who used the escape hatch once.
+
+  Recording without gating was rejected for the opposite reason — a marker no code
+  consumes is a declared-but-unenforced field, and the bytes get deleted regardless.
+
+  **Getting back to full authority is the documented route.** A real
+  `os migrate files-to-references --apply` / `os migrate value-shapes --apply` run
+  walks the whole store again, which _is_ evidence of the same order, and clears
+  the marker.
+
+  Additive and backward compatible. A `sys_migration` row written before these
+  columns existed reads as "no deviation observed", so upgrading never retroactively
+  closes a gate a deployment earned — the marker only ever closes it on an observed
+  deviation. `isDataMigrationFlagVerified` is unchanged and keeps its existing
+  consumers; the new `authorisesIrreversibleAction` (spec) and `mayActIrreversibly`
+  (platform-objects) are the stronger pair, and the reap guard is their one caller.
+
+- 5fa04fb: Point the account app's **Approvals** navigation entry at the Approvals Inbox component, and contribute an **Approvals Inbox** entry to Setup (#7234).
+
+  The entry point has not moved — the account menu still shows **Approvals** with the same
+  label and icon in every locale. Its destination has. It used to open the raw
+  `sys_approval_request` grid, which is an admin/diagnostic view of the engine's own table
+  and cannot show an approver a single decision button: every action on that object is gated
+  on `record.viewer.can_act || record.viewer.can_override`, and the `viewer` block is
+  attached only by the approvals REST path, never by the generic data API the object route
+  reads. The result was a correct-looking list of rows nobody could act on. The entry is now
+  `{ type: 'component', componentRef: 'approvals:inbox' }`, so it opens the full inbox —
+  decision actions, business vocabulary, node progress and the request drawer.
+
+  - **Account app**: `nav_account_approvals` becomes a component entry gated by
+    `requiresService: 'approvals'`, so it disappears where `plugin-approvals` is not
+    installed (the previous `requiresObject` gate does not apply to a component entry).
+  - **Setup**: `plugin-approvals` contributes a new **Approvals Inbox** entry at the top of
+    **Setup → Approvals**, above the three raw tables, which stay exactly as they were —
+    admin-gated by `manage_platform_settings` and now unambiguously the diagnostic surface.
+    Labels ship in all four locales (zh-CN 审批中心).
+  - `sys_approval_request` is no longer surfaced raw to end users anywhere.
+  - **Docs**: the approver's queue is documented as the Approvals Inbox, with a snippet for
+    mounting it in any business app — one navigation entry naming the component-registry key
+    `approvals:inbox`, never a console path.
+
+  Reaching the inbox end to end in the browser additionally requires the console pin bump,
+  tracked separately.
+
+- 60f0dd8: feat(spec,platform-objects): add `degraded` to the job status vocabulary (#7072)
+
+  `JobExecutionStatus` and the two `sys_job*` selects now carry a fifth value,
+  `degraded` — "the run finished, but its work did not happen". This is the
+  consumer-side half of the `JobRunOutcome` producer shape #6617 shipped on
+  `contracts/job-service.ts`, and it executes the 2026-08-08 maintainer ruling on
+  #5548 verbatim:
+
+  > **Vocabulary stays minimal** — one additional outcome meaning "completed
+  > without accomplishing the work". ⛔ Do not open an enum family; a second key
+  > would need its own pull.
+
+  Three declaration sites had to move together, because the two platform-object
+  selects are _enforced_ — ObjectQL's record validator refuses an
+  out-of-vocabulary `select` value with `invalid_option`, and `DbJobAdapter`
+  swallows that rejection in a best-effort `try/catch`. A value legal in the spec
+  enum but absent from the selects would therefore be a silently dropped write
+  that leaves the run row `running` forever, not a type error:
+
+  - `packages/spec/src/system/job.zod.ts` — `JobExecutionStatus`
+  - `packages/platform-objects/src/audit/sys-job-run.object.ts` — `status`
+  - `packages/platform-objects/src/audit/sys-job.object.ts` — `last_status`
+
+  **`degraded` is not a failure and never retries.** Retry and failure are driven
+  exclusively by a rejected handler promise, so a resolved
+  `{ outcome: 'degraded' }` never re-runs the job.
+
+  A degraded run's `reason` rides the existing `error` / `last_error` columns and
+  leaves `failure_count` flat — the ruling's minimal-vocabulary spirit applied to
+  columns as to enum members. The cost is recorded in the TSDoc at the enum: a
+  column labelled "Error" may carry a non-error operator note whenever
+  `status === 'degraded'`, so readers must gate on the status first.
+
+  Additive only: no existing value changed meaning, and nothing yet produces
+  `degraded` — wiring `DbJobAdapter` to map the outcome is #5548, which this
+  unblocks. Locale bundles (en / zh-CN / ja-JP / es-ES) carry the new option.
+
+### Patch Changes
+
+- 59c544d: **`member_default`'s removed wildcard was still named as live fact, and two D7 dogfood denials had gone vacuous (#6964).**
+
+  #5491 (PR #6684) removed `member_default`'s plain `'*'` object grant and ADR-0095
+  D1 retired its wildcard `tenant_isolation` RLS policy. Six live sites outside the
+  two surfaces PR #6958 already fixed still asserted one of those two facts as
+  current, and — the reason this is not only prose — two dogfood tests rested their
+  whole evidential claim on the first one.
+
+  **Prose (`platform-objects`, `qa/dogfood`, published docs).** The
+  `requiredPermissions` gates on `sys_scim_provider` and `sys_sso_provider`
+  justified themselves by an exposure that no longer exists, which invites the next
+  reader to conclude the gates are redundant. They are not: `requiredPermissions`
+  is a capability AND-gate evaluated _before_ the CRUD grant, so it denies
+  regardless of how permissive any grant is — including one an app-declared profile
+  or a customer-authored set names. `sys_sso_provider`'s `tenancy.enabled:false`
+  and `rls-multitenant`'s investigation narrative are re-premised on the ADR-0095
+  D1 Layer 0 tenant wall, which is what actually decides them now. And
+  `content/docs/permissions/index.mdx` stated the retired wildcard
+  `tenant_isolation` policy as shipped behaviour, contradicting
+  `releases/implementation-status.mdx` in the same repo; the doc now matches the
+  status page.
+
+  **The defect.** `showcase-default-profile` and `showcase-d7-default-profile`
+  proved ADR-0056 D7 with `expect(status).not.toBe(200)` on an app object,
+  justified by "`member_default` has a wildcard grant → would be 200". With the
+  wildcard gone that baseline grants nothing on app objects, so the denial became
+  the trivially expected outcome and the assertion passed _because nothing is
+  produced_ — it could no longer tell "the declared default is in force" from "no
+  default is in force at all", which is the one thing those files exist to tell.
+  Measured on a live showcase boot, one fresh sign-up per wiring: under the
+  built-in baseline `showcase_private_note` and `showcase_contact` are **403**,
+  exactly as under the declared default.
+
+  Both denial cases are replaced wholesale rather than re-worded, with an object
+  only the built-in baseline grants (`sys_user_preference`): 200 if and only if
+  `member_default` governs. The same run settles the risk that would have killed
+  that idea — a named `fallbackPermissionSet` **replaces** `member_default` rather
+  than merging additively on top of it. Reverse-verified: stripping the declared-
+  default wiring turns the new case red (200) and the positive case red (403),
+  while the deleted cases stay green — the vacuity, demonstrated directly.
+
+  No runtime behaviour changes.
+
+- d42a92f: chore(platform-objects): drop four dead `apps.setup.navigation` translation keys (#6660)
+
+  Four ids kept a Setup nav label in the hand-written locale bundles long after
+  the nav item that declared them was removed. No composition renders them, so
+  nothing was broken — but a translated key with no declaring nav item is the
+  shape `app-nav-translation-parity.test.ts` already refuses for Studio: it reads
+  as coverage. `nav_workflows` outlived its Studio menu entry in all four locales
+  the same way, and nothing said so until that reverse assertion was written.
+
+  Removed, with the reason each one is gone:
+
+  | id                       | why it has no nav item                                                                                                                 |
+  | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------- |
+  | `nav_approval_processes` | the approval process engine was retired in favour of the approval flow node (#1408, ADR-0019 P4/P5)                                    |
+  | `nav_verifications`      | `sys_verification` omits `list` from `apiMethods`                                                                                      |
+  | `nav_device_codes`       | `sys_device_code` likewise — both hold sensitive, ephemeral secrets, so a browse entry could only ever render "failed to load" (#2266) |
+  | `nav_metadata`           | moved to Studio as `nav_metadata_directory` when the Studio app was split out                                                          |
+
+  14 key/label pairs in total, not 16: `zh-CN` never carried `nav_verifications`
+  or `nav_device_codes`.
+
+  Each id was checked **individually** against a repo-wide grep for a declaring
+  `id: '<key>'` — zero hits each, against a control probe (`nav_webhooks`) that
+  returns five. That is deliberately not the same claim as a runtime diff: from a
+  single booted composition a dead key and a conditionally-contributed one are
+  indistinguishable (`plugin-auth` contributes `nav_sso_providers` only when an
+  external IdP is wired), which is why `pnpm check:app-nav-i18n` still refuses the
+  reverse direction and why this change removes exactly four named ids rather than
+  "everything the merged app did not declare".
+
+  A tombstone test pins the four so they cannot drift back in without their nav
+  item. Re-adding `nav_verifications` / `nav_device_codes` remains a security
+  decision — it means enabling `list` on the object first.
+
+- 51d74ad: fix(platform-objects): translate the Setup app's runtime-contributed navigation, and gate it on the merged app instead of a static walk (#5750)
+
+  Under `zh-CN`, four of the Setup app's ~50 sidebar entries rendered in English —
+  `Packages`, `Delegations (OOO)`, `Webhooks`, `HTTP Deliveries` — and it was not a
+  client-side fallback: the server's own merged `app` metadata carried the English
+  literals. Sitting in a screen of Chinese menu items, they read like words that
+  were simply never meant to be translated.
+
+  Two different causes, both now fixed:
+
+  - **`nav_packages` was translated in the wrong app's namespace.** A
+    `nav_packages: { label: '软件包' }` existed under `apps.studio.navigation`.
+    Setup contributes an entry with the same id (package administration is an
+    operator concern, ADR-0084) and looks it up under
+    `apps.setup.navigation.nav_packages` — a different subtree, so the lookup
+    missed and the author's `'Packages'` literal won. Both entries are legitimate;
+    the Setup one has been added and the Studio one left alone.
+  - **The other three had no translation anywhere.** `nav_approval_delegations`
+    (`@objectstack/plugin-approvals`), `nav_webhooks` and `nav_http_deliveries`
+    (`@objectstack/plugin-webhooks`) are contributed at runtime by the capability
+    plugins that own the objects, and no locale file carried a label for them.
+
+  Four more were found by the new gate below, invisible to the one-locale browser
+  session that reported this: `nav_capabilities`, `nav_settings_localization`,
+  `nav_settings_company` and `nav_datasources` were translated in `zh-CN` **only**,
+  so `ja-JP` and `es-ES` menus showed English there too. All eight ids are now
+  labelled in all four locales (`en`, `zh-CN`, `ja-JP`, `es-ES`).
+
+  **Why nothing caught it, which is the part worth keeping.** The Setup app is a
+  shell of empty group anchors whose entries arrive at runtime (ADR-0029 D7), so a
+  static walk sees none of them. Both existing gates knew this and each named the
+  _other_ as the owner: `app-nav-translation-parity.test.ts` excluded Setup and
+  deferred to "the coverage ratchet", while `platform-objects`' extract config
+  deferred the same labels to that ratchet "baselined at 0 for this package". The
+  ratchet runs `os lint` over **static** stack configs, so its 0 meant "not looked
+  at here", not "checked, clean" — and it reported OK the whole time.
+
+  A new gate closes the handoff — `pnpm check:app-nav-i18n`
+  (`packages/cli/scripts/check-app-nav-i18n.mjs`, wired into `lint.yml`). It boots
+  the real composition, merges the navigation contributions through the same
+  `applyNavContributions` path the `/api/v1/meta/app` read uses, and asserts every
+  merged nav id carries a label in every locale the platform bundle declares — so
+  the next plugin-contributed entry cannot leak the same way. It also fails when a
+  declared contributor lands no nav id at all, because fewer merged ids means
+  fewer ids checked: a contributor that silently stops contributing would
+  otherwise make the gate greener rather than redder. The two comments that
+  delegated to the ratchet now say what actually owns these labels.
+
+  No authoring change: plugin nav `label` values stay plain English literals, and
+  translations continue to live in `apps.setup.navigation` in this package.
+
+- e787608: Translate the Setup app's `nav_sso_providers` navigation entry in all four
+  locales.
+
+  `@objectstack/plugin-auth` contributes an **SSO Providers** entry into Setup's
+  Access Control group (`sys_sso_provider`, priority 250), but no locale bundle
+  carried a label for it: measured on `origin/main` `ea1d9165d`, a grep for
+  `nav_sso_providers` over `en` / `zh-CN` / `ja-JP` / `es-ES` returned **0 each**,
+  against a control probe (`nav_positions`) that returned 1 each. A deployment
+  with an external IdP wired therefore rendered `SSO Providers` in English inside
+  an otherwise fully translated Setup menu.
+
+  | locale  | label            |
+  | ------- | ---------------- |
+  | `en`    | SSO Providers    |
+  | `zh-CN` | SSO 提供方       |
+  | `ja-JP` | SSO プロバイダー |
+  | `es-ES` | Proveedores SSO  |
+
+  Each one matches that locale's existing `sys_sso_provider.pluralLabel`, since
+  the nav entry opens exactly that object's list view.
+
+  **Why no gate caught it.** `pnpm check:app-nav-i18n` (#5750) boots the real
+  composition and asserts every _merged_ Setup nav id carries a label in every
+  locale — and `plugin-auth` spreads its `navigationContributions` in only when
+  `authManager.isSsoWired()` is true. In the composition that gate boots, this
+  entry is never contributed, never merged, and so never judged; the gate's header
+  already declared that bound. This id is consequently the one Setup entry no
+  boot-time check can reach, so it is pinned by hand instead, next to the dead-key
+  tombstone (#6660) it is the converse of: one list holds ids whose label must be
+  **gone**, the other ids whose label must **stay**. Making the gate itself
+  union-aware was considered and deliberately left unbuilt — a separate
+  maintainer-facing call, not a prerequisite for labelling the ids it cannot see.
+
+- 61282f9: fix(platform-objects): `sys_setting.scope` drops the never-implemented `runtime` option (#6036)
+
+  The `scope` select declared four cascade layers while the platform only ever had
+  three. `SpecifierScopeSchema` (`packages/spec/src/system/settings-manifest.zod.ts`)
+  is `z.enum(['global', 'tenant', 'user'])`, `SettingsService` never mentions the
+  string `'runtime'` anywhere, and its `scopeRank()` switch handles only those same
+  three — so no code path could write such a row and none could read one back. The
+  sibling audit object `sys_setting_audit.scope` already declared only three. This
+  was a declared-but-unenforced value domain of the ADR-0049 kind: nobody could hit
+  it, but the next reader of the object definition would reasonably conclude the
+  platform supports a fourth scope layer.
+
+  Removed rather than implemented — there is no runtime-scope product intent, and
+  the spec enum stays the reference truth for what the cascade's layers are. A new
+  pin (`sys-setting.scope-options.test.ts`) compares the object's option list
+  against `SpecifierScopeSchema` directly, so a future divergence in either
+  direction lands as a red test instead of a second silent one.
+
+  Removal was gated on a measurement, not on the zero-write-path prediction: a real
+  engine booted over the platform objects, driven through the real
+  `/api/settings/:namespace` write path, stored 4 rows (`tenant` 3, `global` 1) and
+  **0** with `scope='runtime'` — with a positive control proving the query does
+  surface such a row when one is injected directly.
+
+  No stored data is affected and no consumer read the option, so this is a
+  definition-only correction.
+
+- Updated dependencies [3d5c090]
+- Updated dependencies [e5bd768]
+- Updated dependencies [e027b3e]
+- Updated dependencies [c2429b0]
+- Updated dependencies [445a0c2]
+- Updated dependencies [f6609e6]
+- Updated dependencies [a70358a]
+- Updated dependencies [97e7e3c]
+- Updated dependencies [8828b9e]
+- Updated dependencies [53068c1]
+- Updated dependencies [ee58392]
+- Updated dependencies [f16e54e]
+- Updated dependencies [06be54e]
+- Updated dependencies [259459d]
+- Updated dependencies [3f7f14e]
+- Updated dependencies [6968885]
+- Updated dependencies [eaed61f]
+- Updated dependencies [debe2f6]
+- Updated dependencies [97b0798]
+- Updated dependencies [43a7a8d]
+- Updated dependencies [73f69dc]
+- Updated dependencies [04c56aa]
+- Updated dependencies [b3efeb7]
+- Updated dependencies [ddd075a]
+- Updated dependencies [88154be]
+- Updated dependencies [e8dc61e]
+- Updated dependencies [2f3e793]
+- Updated dependencies [d8e8d9c]
+- Updated dependencies [94e749b]
+- Updated dependencies [ea1d916]
+- Updated dependencies [ae31a19]
+- Updated dependencies [e0f300b]
+- Updated dependencies [62b6a2f]
+- Updated dependencies [5b4780b]
+- Updated dependencies [a933452]
+- Updated dependencies [8140915]
+- Updated dependencies [7b48cf9]
+- Updated dependencies [b5404f4]
+- Updated dependencies [f764691]
+- Updated dependencies [e120a5a]
+- Updated dependencies [e650d67]
+- Updated dependencies [121852d]
+- Updated dependencies [04476e7]
+- Updated dependencies [79228cd]
+- Updated dependencies [b3363e9]
+- Updated dependencies [2ef1807]
+- Updated dependencies [d03fe25]
+- Updated dependencies [2672f85]
+- Updated dependencies [11066f6]
+- Updated dependencies [916af17]
+- Updated dependencies [84c86fb]
+- Updated dependencies [2a2a9fb]
+- Updated dependencies [a2e157c]
+- Updated dependencies [95c4227]
+- Updated dependencies [2a61116]
+- Updated dependencies [d4df105]
+- Updated dependencies [e2798fa]
+- Updated dependencies [0fd8556]
+- Updated dependencies [74155c7]
+- Updated dependencies [6908830]
+- Updated dependencies [8b06bba]
+- Updated dependencies [4c54037]
+- Updated dependencies [0f7157b]
+- Updated dependencies [d9bef45]
+- Updated dependencies [f549a0d]
+- Updated dependencies [82da264]
+- Updated dependencies [9b9b70f]
+- Updated dependencies [f5a9bc2]
+- Updated dependencies [881a3cc]
+- Updated dependencies [ad6317b]
+- Updated dependencies [8a88885]
+- Updated dependencies [5f7669e]
+- Updated dependencies [becbe53]
+- Updated dependencies [b127c8b]
+- Updated dependencies [a80302a]
+- Updated dependencies [474f131]
+- Updated dependencies [050cd82]
+- Updated dependencies [4d552af]
+- Updated dependencies [44d677c]
+- Updated dependencies [c32944d]
+- Updated dependencies [1dd780f]
+- Updated dependencies [c8d6f6e]
+- Updated dependencies [92a67f2]
+- Updated dependencies [9136327]
+- Updated dependencies [bf0ae99]
+- Updated dependencies [cb3b6cd]
+- Updated dependencies [73b7234]
+- Updated dependencies [d2b97c3]
+- Updated dependencies [59b794f]
+- Updated dependencies [fc3a36a]
+- Updated dependencies [69787f0]
+- Updated dependencies [5d022a1]
+- Updated dependencies [042b9ee]
+- Updated dependencies [f549a0d]
+- Updated dependencies [a36db28]
+- Updated dependencies [3f8817a]
+- Updated dependencies [a2443e3]
+- Updated dependencies [e1554b1]
+- Updated dependencies [4856789]
+- Updated dependencies [c3f4916]
+- Updated dependencies [33e0385]
+- Updated dependencies [2205363]
+- Updated dependencies [09fe58d]
+- Updated dependencies [d0a5ceb]
+- Updated dependencies [e18a162]
+- Updated dependencies [d127ff0]
+- Updated dependencies [9b86cf6]
+- Updated dependencies [8825a06]
+- Updated dependencies [5087ac6]
+- Updated dependencies [2d1ddf0]
+- Updated dependencies [354b00f]
+- Updated dependencies [3de535b]
+- Updated dependencies [fe2e15a]
+- Updated dependencies [c6b6bb4]
+- Updated dependencies [2f59da0]
+- Updated dependencies [5e247fd]
+- Updated dependencies [1a53a02]
+- Updated dependencies [a954634]
+- Updated dependencies [8ad609c]
+- Updated dependencies [bbee302]
+- Updated dependencies [08863dd]
+- Updated dependencies [56664f5]
+- Updated dependencies [31cbe90]
+- Updated dependencies [90bbf25]
+- Updated dependencies [eb91eba]
+- Updated dependencies [42da73d]
+- Updated dependencies [643b7c7]
+- Updated dependencies [1a15893]
+- Updated dependencies [b70e534]
+- Updated dependencies [2233a85]
+- Updated dependencies [62dd69a]
+- Updated dependencies [e15e679]
+- Updated dependencies [2ab1257]
+- Updated dependencies [4cc4fb7]
+- Updated dependencies [2c26040]
+- Updated dependencies [f758cec]
+- Updated dependencies [78f0be8]
+- Updated dependencies [35f7fb4]
+- Updated dependencies [a5302c7]
+- Updated dependencies [7084313]
+- Updated dependencies [0e043d8]
+- Updated dependencies [dadd1ad]
+- Updated dependencies [2f2e63c]
+- Updated dependencies [486d526]
+- Updated dependencies [89d7b35]
+- Updated dependencies [85ec26d]
+- Updated dependencies [f6476fc]
+- Updated dependencies [4ac12ef]
+- Updated dependencies [b88f5e8]
+- Updated dependencies [42cc219]
+- Updated dependencies [d7e0b42]
+- Updated dependencies [3510e4a]
+- Updated dependencies [aa4b90d]
+- Updated dependencies [54299ca]
+- Updated dependencies [dc61def]
+- Updated dependencies [251e888]
+- Updated dependencies [183b4c4]
+- Updated dependencies [2fdb36e]
+- Updated dependencies [20526f5]
+- Updated dependencies [c5eef1d]
+- Updated dependencies [e0f300b]
+- Updated dependencies [761a0ba]
+- Updated dependencies [be87153]
+- Updated dependencies [60f0dd8]
+- Updated dependencies [a87c5cd]
+- Updated dependencies [a47f338]
+- Updated dependencies [2598216]
+- Updated dependencies [2c7e62d]
+- Updated dependencies [eb7613c]
+- Updated dependencies [ecc9110]
+- Updated dependencies [f7bd4e2]
+- Updated dependencies [361bd5b]
+- Updated dependencies [1818998]
+- Updated dependencies [3d4c545]
+- Updated dependencies [bb7cb41]
+- Updated dependencies [09ee21c]
+- Updated dependencies [f549a0d]
+- Updated dependencies [3fc2e48]
+- Updated dependencies [e8f435c]
+- Updated dependencies [41610f6]
+  - @objectstack/spec@17.0.0-rc.6
+  - @objectstack/metadata-core@17.0.0-rc.6
+
 ## 17.0.0-rc.5
 
 ### Patch Changes

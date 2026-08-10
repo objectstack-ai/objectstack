@@ -23,7 +23,9 @@ import {
   DataEngineExecuteRequestSchema,
   DataEngineVectorFindRequestSchema,
   DataEngineRequestSchema,
+  DroppedFieldsEventSchema,
 } from './data-engine.zod';
+import { QuerySchema } from './query.zod';
 
 describe('DataEngineFilterSchema', () => {
   it('should accept simple key-value filter', () => {
@@ -373,6 +375,53 @@ describe('EngineQueryOptionsSchema', () => {
     expect(options.fields).toHaveLength(3);
     expect(options.limit).toBe(50);
     expect(options.expand!.owner.object).toBe('user');
+  });
+
+  // ── `search`: both spellings, canonical one first (#7178) ────────────
+
+  it('accepts the BARE query string — the canonical ADR-0061 D1 spelling (#7178)', () => {
+    // This is the pin that was RED before #7178: the schema declared only the
+    // structured form, so the spelling the executor actually serves, every
+    // surface sends, and `BaseQuerySchema.search` already accepts was rejected
+    // here — and every engine caller wanting it had to `as any` the whole query.
+    const options = EngineQueryOptionsSchema.parse({ search: 'acme corp' });
+    expect(options.search).toBe('acme corp');
+  });
+
+  it('still accepts the structured FullTextSearch form — the Tier-2 knobs (#7178)', () => {
+    const options = EngineQueryOptionsSchema.parse({
+      search: { query: 'acme corp', fields: ['name', 'industry'] },
+    });
+    expect(typeof options.search).toBe('object');
+    expect((options.search as { query: string }).query).toBe('acme corp');
+    expect((options.search as { fields?: string[] }).fields).toEqual(['name', 'industry']);
+  });
+
+  it('accepts search alongside searchFields, in both spellings (#7178)', () => {
+    expect(EngineQueryOptionsSchema.parse({
+      search: 'acme', searchFields: ['name'],
+    }).searchFields).toEqual(['name']);
+    expect(EngineQueryOptionsSchema.parse({
+      search: { query: 'acme' }, searchFields: ['name'],
+    }).searchFields).toEqual(['name']);
+  });
+
+  it('rejects a search that is neither a string nor a FullTextSearch (#7178)', () => {
+    // The union widens the accept face by exactly one spelling — it does not
+    // open the key to anything.
+    expect(() => EngineQueryOptionsSchema.parse({ search: 42 })).toThrow();
+    expect(() => EngineQueryOptionsSchema.parse({ search: { fields: ['name'] } })).toThrow();
+  });
+
+  it('matches BaseQuerySchema.search — the two sibling schemas agree (#7178)', () => {
+    // The whole point of the repair: what QuerySchema accepts for `search`,
+    // the engine options schema accepts too. `DriverQuery` (= Omit<QueryAST,
+    // 'object'>) is assignable to `EngineQueryOptionsParsed` again because of
+    // this, which is what lets `database-loader`'s engine branch drop its casts.
+    for (const search of ['acme corp', { query: 'acme corp', fields: ['name'] }]) {
+      expect(QuerySchema.parse({ object: 'crm_account', search })).toBeDefined();
+      expect(EngineQueryOptionsSchema.parse({ search })).toBeDefined();
+    }
   });
 
   it('rejects the removed cursor/distinct keys with the query.* prescriptions (#4286)', () => {
@@ -1018,4 +1067,38 @@ describe('Integration Tests', () => {
     expect(aggregateRequest.query.aggregations).toHaveLength(3);
   });
 
+});
+
+describe('DroppedFieldsEventSchema.reason (#3407, widened by #6437)', () => {
+  // The ACCEPTANCE surface: this enum is what validates on the protocol
+  // responses that carry `droppedFields` (`api/batch.zod.ts`,
+  // `api/protocol.zod.ts`), so the accepted set is the contract, not a label.
+  it('accepts all three reasons the write path can report', () => {
+    for (const reason of ['readonly', 'readonly_when', 'primary_key'] as const) {
+      const parsed = DroppedFieldsEventSchema.safeParse({
+        object: 'task', fields: ['id'], reason,
+      });
+      expect(parsed.success, `reason ${reason} should be accepted`).toBe(true);
+    }
+  });
+
+  it('primary_key is the value the engine reports for the ruled-non-id strip (#6262/#6433, #6435)', () => {
+    const parsed = DroppedFieldsEventSchema.parse({
+      object: 'task', fields: ['id'], reason: 'primary_key',
+    });
+    expect(parsed).toEqual({ object: 'task', fields: ['id'], reason: 'primary_key' });
+  });
+
+  it('still REJECTS a reason outside the vocabulary — widening is deliberate, not open-ended', () => {
+    // The enum grows by decision (a new legal strip class), never by a
+    // producer inventing a string. Rejection is asserted on the issue's own
+    // `code` and `path`, not on truthiness of `success`.
+    const parsed = DroppedFieldsEventSchema.safeParse({
+      object: 'task', fields: ['id'], reason: 'dispatch_ruled',
+    });
+    expect(parsed.success).toBe(false);
+    const issue = parsed.success ? undefined : parsed.error.issues[0];
+    expect(issue?.code).toBe('invalid_value');
+    expect(issue?.path).toEqual(['reason']);
+  });
 });

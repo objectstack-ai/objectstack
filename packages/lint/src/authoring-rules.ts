@@ -104,6 +104,7 @@ import { validateViewContainers } from './validate-view-containers.js';
 import { validateWidgetBindings } from './validate-widget-bindings.js';
 import { validateDashboardActionRefs } from './validate-dashboard-action-refs.js';
 import { validateFilterTokens } from './validate-filter-tokens.js';
+import { validateEmptyCombinators } from './validate-empty-combinators.js';
 import { validateReferenceIntegrity } from './reference-integrity-suite.js';
 import { validateComponentProps } from './validate-component-props.js';
 import { validateResponsiveStyles } from './validate-responsive-styles.js';
@@ -119,6 +120,7 @@ import { validateFormLayout } from './validate-form-layout.js';
 import { validateSeedReplaySafety } from './validate-seed-replay-safety.js';
 import { validateSeedStateMachine } from './validate-seed-state-machine.js';
 import { validateVisibilityPredicates } from './validate-visibility-predicates.js';
+import { validatePredicatePathRefs } from './validate-predicate-path-refs.js';
 import { validateSecurityPosture } from './validate-security-posture.js';
 import { validateOrgAxisRedLines } from './validate-org-axis-red-lines.js';
 import { validateSharingRuleEnforceability } from './validate-sharing-rule-enforceability.js';
@@ -236,7 +238,11 @@ export type AuthoringRuleTier = 'gating' | 'advisory';
  *     ADR-0087 D2 conversion (`view-visibleOn-to-visibleWhen`,
  *     `page-component-visibility-to-visibleWhen`) folds it into `visibleWhen`
  *     INSIDE `normalizeStackInput` — one layer before the tier, not during the
- *     parse. See #6318.
+ *     parse. #6318 acted on that: the alias-KEY rule this premise justified
+ *     (`visibility-alias-deprecated`) was retired, since the D2 conversion
+ *     notice already covers its whole evidence surface with better wording and
+ *     a stated retirement window. The alias-KEY half of premise 3 is therefore
+ *     no longer merely false — there is nothing left reading it.
  *
  * ## What it does buy, and why the tier stays
  *
@@ -345,6 +351,32 @@ const RUNTIME_HEAVY_SOURCE_PARSE =
  * wrong 422 there is the whole product, so P1 does not gate them — the issue's
  * own worked example, and every acceptance criterion on it, is a flow.
  */
+/**
+ * The rule judges a `views[]` conditional-visibility predicate — and every OTHER
+ * rule on that surface (the three ADR-0089 D3b rules in
+ * `validate-visibility-predicates.ts`) is CLI-only.
+ *
+ * This reason is deliberately NOT one of the three above: none of them is true
+ * here. `validatePredicatePathRefs` needs nothing but the written item — its
+ * oracle is the static `getMetadataTypeSchema` registry, not the tenant's other
+ * metadata — so the per-write snapshot IS enough, `stackKeyForType('view')`
+ * already exists, and wiring it would work today.
+ *
+ * It is not wired because a HALF-wired wall is worse than an unwired one. A
+ * Studio `view` write would then be refused for an unresolvable predicate PATH
+ * while a predicate that does not parse at all (`visibility-predicate-syntax`)
+ * and one with no root at all (`visibility-bare-identifier`) walked straight
+ * through the same door — three sibling verdicts about one predicate, one of
+ * them enforced, and no author able to predict which. The surface should move to
+ * `runtime-publish` as a FAMILY, in one measured edit, which is a decision about
+ * `views` writes rather than a rider on #7010's corpus-counted gate.
+ */
+const RUNTIME_VISIBILITY_FAMILY_IS_CLI_ONLY =
+  'Deliberate, and not a snapshot limitation: this rule needs only the written item, but every other '
+  + 'rule on the `views[]` visibility-predicate surface (validate-visibility-predicates.ts) is CLI-only. '
+  + 'Gating one of three sibling verdicts about the same predicate at the Studio door is less '
+  + 'predictable than gating none; move the family together, as one measured edit.';
+
 const RUNTIME_OBJECT_WRITES_P2 =
   'P2 (#4463): judges an object/field declaration. Object writes are the hottest metadata path in ' +
   'the product, so P1 gates `flow` first and widens once the gate has real traffic behind it.';
@@ -482,6 +514,31 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     surfaceReason: RUNTIME_NEEDS_FULL_SNAPSHOT,
     run: (stack) => validateFilterTokens(stack),
   },
+  // #5330 — the LITERAL empty combinators (`$and: []`, `$or: []`, `$not: {}`,
+  // `{}`). #5322 ruled their RUNTIME meaning to be the boolean identity, and
+  // this rule does not touch it: it refuses the literal SPELLINGS at authoring
+  // time with a per-shape prescription, which is Prime Directive #12's standard
+  // shape (reject at the producer, never tolerate at the consumer) and #5240's
+  // same-direction precedent one shape over.
+  {
+    name: 'validateEmptyCombinators',
+    tier: 'gating',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/validate-empty-combinators.ts',
+    // The one type #4463's P1 slice opened, and the one this rule most needs:
+    // a flow CRUD node's `config.filter` is where an empty combinator has the
+    // largest blast radius, and the write path is the only door an AI author
+    // uses. This rule needs NO resolution context at all — it judges the filter
+    // literal in isolation — so RUNTIME_NEEDS_FULL_SNAPSHOT does not apply to
+    // it, and widening to the other filter-carrying types (`object`, `view`,
+    // `page`, `dashboard`) is a one-line `runtimeTypes` edit once #4463 P2
+    // opens them at the gate. Making that call here would widen the gate's
+    // dispatch surface on this rule's authority, which is P2's decision.
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['flow'],
+    run: (stack) => validateEmptyCombinators(stack),
+  },
   // The reference-integrity suite (#3583 §5 D5) — itself a registry, of the
   // rules that answer "does this name resolve to anything?". It reached all
   // three commands before this file existed; it is an entry here so the two
@@ -531,9 +588,15 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   // to enforce declarations the platform does not keep. The error upgrade is a
   // separate step, once the warning-period inventory is empty.
   //
-  // #5775 has since settled its half: `displayField` is retired in favour of the
-  // `labelField` the renderer actually reads, and the rest of the keys the
-  // renderers honour are declared. #5728 and two page rewrites are what remain.
+  // #5775 settled the record picker's half: `displayField` is retired in favour
+  // of the `labelField` the renderer actually reads. Its claim that "the rest of
+  // the keys the renderers honour are declared" did NOT hold — #6776 found five
+  // more (`page:header` `recordChrome`/`showStar`/`showCopyId`,
+  // `page:accordion.variant`, and the tab strip's visual style, whose declared
+  // spelling `page:tabs.type` collided with the component node's own dispatch
+  // key and so was unauthorable in the flat and JSX carriers). All five are
+  // declared as of #6776, the last as the renamed `tabStyle`. What remains
+  // before the error upgrade is #5728 and two page rewrites.
   {
     name: 'validateComponentProps',
     tier: 'advisory',
@@ -616,10 +679,12 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   //
   // `gating` since #5762, which reviewed the file's rules as one family and
   // split them on a single question: is THIS STACK enough to know the flow is
-  // dead? Three rules answer yes and now emit `error` — a `config.timeRelative`
+  // dead? Four rules answer yes and emit `error` — a `config.timeRelative`
   // the spec's own `TimeRelativeTriggerSchema` refuses, one the engine's routing
-  // predicate cannot route at all, and a `record-*` triggerType outside the
-  // closed token grammar `triggerTypeToHookEvents` maps. None of those verdicts
+  // predicate cannot route at all, a `record-*` triggerType outside the
+  // closed token grammar `triggerTypeToHookEvents` maps, and (#6637) a
+  // `type: 'record_change'` flow whose triggerType the engine's binding resolver
+  // routes nowhere, silently demoting it to a manual flow. None of those verdicts
   // can be changed by installing a package, so there is no reading under which
   // the flow fires. `flow-trigger-unknown-object` deliberately stayed `warning`
   // (the object may come from another installed package — a hedge this rule
@@ -746,17 +811,29 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     surfaceReason: RUNTIME_NEEDS_FULL_SNAPSHOT,
     run: (stack) => validateSeedStateMachine(stack),
   },
-  // ADR-0089 D3b — deprecated visibility aliases and a mis-layered binding root,
-  // plus (#6128) the bare-identifier gate. This entry used to read "pre-parse:
-  // the schema folds `visibleOn`/`visibility` into `visibleWhen` during parse,
-  // so the alias the author wrote is gone from `result.data`". Measured false
-  // at #6073: the ADR-0087 D2 conversions do that fold INSIDE
+  // ADR-0089 D3b — a mis-layered binding root, plus (#6128) the bare-identifier
+  // gate and (#6253) the syntax gate. This entry used to read "pre-parse: the
+  // schema folds `visibleOn`/`visibility` into `visibleWhen` during parse, so
+  // the alias the author wrote is gone from `result.data`". Measured false at
+  // #6073: the ADR-0087 D2 conversions do that fold INSIDE
   // `normalizeStackInput`, one layer BEFORE this tier, so on every spec-valid
-  // alias site `visibility-alias-deprecated` reports zero here too — see #6318,
-  // which carries the per-site table and the retire-or-rewire question. The two
-  // predicate-VALUE rules (`visibility-bare-identifier`,
-  // `visibility-root-mislayered`) are unaffected: the value moves into
-  // `visibleWhen` intact and both still report on this tier.
+  // alias site the alias-KEY rule reported zero here too.
+  //
+  // #6318 closed that: `visibility-alias-deprecated` was RETIRED rather than
+  // re-anchored. Re-anchoring would have had to move this entry's input to a
+  // pre-`normalizeStackInput` value that `runAuthoringRules` does not accept —
+  // a change to this package's external input contract, and the maintainer's
+  // call, not a rule file's. Retirement is ADR-0049 (declared ≠ enforced) and
+  // costs no author a signal: the same D2 conversion already shouts through
+  // `warnConversionNotice` in `defineStack`, naming the site, the conversion and
+  // the protocol-16 retirement window — better wording than the rule ever had.
+  //
+  // Every rule left in the family judges the predicate's VALUE, and the value
+  // moves into `visibleWhen` intact, so all three report normally on this tier.
+  // The tier therefore stays `normalized` on its SURVIVING justification (a
+  // finding still reaches the author when an unrelated schema error would stop
+  // the parse — see `AuthoringRuleInputTier`), never on the retired
+  // "pre-parse evidence" one.
   //
   // `gating` since #6128: `visibility-bare-identifier` emits `error`. The two
   // ADR-0089 rules stay advisory findings within it — the tier is a property of
@@ -773,6 +850,30 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     surfaces: CLI_ONLY,
     surfaceReason: RUNTIME_NEEDS_FULL_SNAPSHOT,
     run: (stack) => validateVisibilityPredicates(stack),
+  },
+  // #7010 — the same predicate surface, one question further in. The three
+  // ADR-0089 D3b rules above judge a predicate's SHAPE (does it parse, is it
+  // rooted, is the root right for the layer) and never open the target schema,
+  // so `data.tpye == 'formula'` passes all three and still resolves to nothing.
+  // This rule resolves the PATH against the schema the form edits — the closed
+  // `getMetadataTypeSchema` key set — and is therefore immune to the CEL
+  // type-name blind spot that made #6248's gate structurally unable to catch
+  // #6254's 16 bare `type ==` predicates.
+  //
+  // Scoped to schema-bound forms (`data: { provider: 'schema', schemaId }`);
+  // the `record.*` layer is deliberately out of scope because an ObjectQL
+  // object's addressable path set is NOT closed (lookup traversal, system
+  // columns, formula outputs), and an `error` gate over an open set generates
+  // false build errors. See the rule's module note.
+  {
+    name: 'validatePredicatePathRefs',
+    tier: 'gating',
+    input: 'normalized',
+    commands: ALL,
+    source: 'packages/lint/src/validate-predicate-path-refs.ts',
+    surfaces: CLI_ONLY,
+    surfaceReason: RUNTIME_VISIBILITY_FAMILY_IS_CLI_ONLY,
+    run: (stack) => validatePredicatePathRefs(stack),
   },
   // #1874 — flow authoring anti-patterns. Advisory by default; a finding marked
   // `error` gates. Three do today: `flow-runas-unscoped` (#3760 — metadata the

@@ -1986,11 +1986,14 @@ describe('SecurityPlugin', () => {
       return harness.run(opCtx);
     };
 
-    it('PASSES an admin update of a package-managed set (ADR-0094: the write-through turns it into an env overlay)', async () => {
-      // Direction confirmed 2026-07-14: update/delete on a package row are no
-      // longer refused at this gate — the ADR-0094 write-through downstream
-      // translates them into env-scope overlay operations (customize / reset).
-      // The single-store refusal lives in the write-through itself, covered in
+    it('PASSES an admin update of a package-managed set at THIS gate (ADR-0094: the refusal is the write-through producer\'s, not this gate\'s)', async () => {
+      // update/delete on a package row are not refused at this gate — the
+      // ADR-0094 write-through downstream translates them into a metadata
+      // write, and that producer decides. Since ADR-0094 D5-R (#6483 /
+      // PR #6608) the answer for a CODE-DECLARED set is 403 NOT_OVERRIDABLE,
+      // so "the write-through turns it into an env overlay" is no longer why
+      // this passes; it passes because the gate's job is forging provenance,
+      // not overridability. The refusal is covered in
       // permission-set-projection.test.ts.
       const opCtx: any = {
         object: 'sys_permission_set', operation: 'update',

@@ -187,6 +187,15 @@ field is machine-readable — a client uses it to decide whether it is talking t
 `development`. **An unrecognised spelling** (`qa`, `preview`, `uat`) is a different case: it
 is a guess, and this field never claims production on a guess.
 
+This table is the whole answer for **every** producer of `/discovery` (#5936). The mapping
+and the unset default both live in one shared function, so the dispatcher and the
+`@objectstack/metadata-protocol` builder served by `@objectstack/rest` cannot disagree, and
+a future producer inherits the same answers without copying anything. Until #5936 the unset
+default lived at the dispatcher's own call site, so a deployment with no `NODE_ENV` was
+advertised as `production` there and `development` through `@objectstack/rest`. If you read
+`environment` from a REST-served `/discovery` and relied on the old answer, set
+`NODE_ENV=development` explicitly.
+
 Local development is unaffected: `os dev` runs `serve --dev`, which sets
 `NODE_ENV=development` in-process before the runtime loads. Anything that boots the runtime
 *without* `os dev` — a bare `os serve`, an embedded host, a hand-written container entry

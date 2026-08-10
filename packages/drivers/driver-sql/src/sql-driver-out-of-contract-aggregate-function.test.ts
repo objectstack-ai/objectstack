@@ -56,6 +56,37 @@
  * refusal was already there, only its identity was missing. The 4 green are the
  * three controls plus the declared-minus-compiled fixture guard, pinning that
  * nothing outside the refusal's identity moved.
+ *
+ * ---
+ *
+ * # [#6409] Class 2 emptied: `count_distinct` COMPILES
+ *
+ * The measurement at the top of this file is now history in one row. `LOCAL
+ * count_distinct` no longer throws at all — it lowers to `COUNT(DISTINCT x)`,
+ * the ENFORCE leg of #6188's split ruling, landed on both SQL faces in one
+ * change. The class-2 block below is flipped rather than deleted, and the
+ * distinction matters: what replaced the 501 assertions is not silence but the
+ * NEW substance —
+ *
+ * - the declared-minus-compiled set is asserted to be **empty**, positively,
+ *   so the day the spec grows a function this driver does not lower, this file
+ *   goes red rather than quietly stopping to cover anything;
+ * - `count_distinct` is asserted to **compute the right number** here, with the
+ *   dedup and the NULL exclusion both visible in the fixture, so "it stopped
+ *   refusing" cannot be mistaken for "it works";
+ * - the refusal WORDING is asserted to have lost `count_distinct` as a subject —
+ *   the "Compiled here:" list now names it.
+ *
+ * The class-1 cases are untouched: `median`, `array_agg`, `string_agg` and the
+ * miscased spellings are still names the Query Protocol does not declare, and
+ * their refusals stay verbatim. A pin is flipped only where the fact under it
+ * moved.
+ *
+ * The VALUES `count_distinct` computes, and the fact that the remote face
+ * computes the same ones, are the shared table's job
+ * (`AGGREGATION_CASES`, run by `sql-driver-aggregation-conformance.test.ts` and
+ * its remote twin). What stays here is this file's own subject: which door a
+ * name goes through, and what the refusal says when it is refused.
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
@@ -145,16 +176,26 @@ describe('[#5907] SqlDriver refuses an aggregate function it cannot compile', ()
   /** Class 1's inputs: off-contract by construction — see {@link undeclaredAst}. */
   const refusalOfUndeclared = (fn: string) => refusalOfAst(fn, undeclaredAst(fn));
 
-  /** Class 2's inputs: declared names, so the fixture is a real `QueryAST`. */
-  const refusalOfDeclared = (fn: AggregationNode['function']) =>
-    refusalOfAst(fn, declaredAst(fn));
+  // [#6409] `refusalOfDeclared` — the class-2 helper — is gone with the class.
+  // It took an `AggregationNode['function']` and there is no longer a member of
+  // that type this driver refuses, so keeping it would have been a helper with
+  // no callable input rather than a helper with no caller.
 
   // ── Class 1: the Query Protocol does not declare this name ─────────────────
 
   describe('a function name the Query Protocol never declared', () => {
     // `median` is the issue's own repro. The rest are the names a SQL-fluent
     // author reaches for that `AggregationFunction` does not declare.
-    const UNDECLARED = ['median', 'stddev', 'percentile_cont', 'group_concat'];
+    //
+    // `array_agg` / `string_agg` MOVED HERE from class 2 at #6188: the ruling
+    // retired both from `AggregationFunction`, so they are no longer "declared
+    // but not compiled by this backend" (501) — they are names the protocol
+    // does not declare (400), exactly like `group_concat` beside them. Keeping
+    // them covered on this side of the split is the point: the answer to the
+    // same input changed, and this is where that change is legible.
+    const UNDECLARED = [
+      'median', 'stddev', 'percentile_cont', 'group_concat', 'array_agg', 'string_agg',
+    ];
 
     for (const fn of UNDECLARED) {
       it(`refuses "${fn}" with INVALID_QUERY / 400`, async () => {
@@ -194,44 +235,60 @@ describe('[#5907] SqlDriver refuses an aggregate function it cannot compile', ()
 
   // ── Class 2: declared by the protocol, not compiled by this backend ────────
 
-  describe('a DECLARED function this backend cannot compile', () => {
-    // Exactly the three `AggregationFunction` declares with no SQL lowering.
-    // The TYPE is load-bearing (#4918): `AggregationNode['function']` is the
-    // declared enum, so a typo in this fixture — or a name that leaves the enum
-    // when #6188 is decided — fails `tsc` instead of quietly becoming a class-1
-    // input that still passes a class-2 assertion for the wrong reason.
-    const UNCOMPILABLE: Array<AggregationNode['function']> = [
-      'count_distinct',
-      'array_agg',
-      'string_agg',
-    ];
+  describe('[#6409] class 2 is empty — every declared function compiles here', () => {
+    // The list this block used to loop over. `count_distinct` was its last
+    // member (`array_agg`/`string_agg` left at #6188, retired rather than
+    // implemented); #6409 lowered it, so the set is empty and there is no
+    // 501-bearing input left to construct. The TYPE annotation is kept even on
+    // an empty array — it is what makes re-adding a name here a `tsc`-checked
+    // claim that the name really is declared (#4918).
+    const UNCOMPILABLE: Array<AggregationNode['function']> = [];
 
-    // Guard: the fixture is the real declared-minus-compiled set, derived rather
-    // than trusted. If the spec drops one (that decision is #6188) or this driver
-    // implements one, this fails HERE rather than leaving a case that passes
-    // because nothing is produced.
-    it('the fixture is exactly the declared-but-uncompiled set', () => {
-      const compiled = ['count', 'sum', 'avg', 'min', 'max'];
+    // The guard, now asserting the NEW fact rather than the old fixture: the
+    // declared vocabulary and this driver's compiled vocabulary are the SAME
+    // SET. It fails in both directions — the spec growing a function this
+    // driver does not lower, or this driver's table drifting away from the
+    // enum — which is exactly the pair of events that would otherwise leave
+    // this block silently covering nothing.
+    it('the declared-but-uncompiled set is EMPTY', () => {
+      const compiled = ['count', 'sum', 'avg', 'min', 'max', 'count_distinct'];
       expect([...AggregationFunction.options].filter((f) => !compiled.includes(f)).sort())
         .toEqual([...UNCOMPILABLE].sort());
+      expect(UNCOMPILABLE).toEqual([]);
     });
 
-    for (const fn of UNCOMPILABLE) {
-      it(`refuses "${fn}" with NOT_IMPLEMENTED / 501`, async () => {
-        const err = await refusalOfDeclared(fn);
-        expect(err.code).toBe('NOT_IMPLEMENTED');
-        expect(err.status).toBe(501);
-        expect(err.message.startsWith(UNCOMPILABLE_SENTENCE(fn))).toBe(true);
-        // ⛔ The author is NOT told they made a mistake — the whole point of
-        // splitting the two classes (#5345's line, applied to aggregations).
-        expect(err.message).not.toContain('is not a declared aggregate function');
-        expect(err.message).toContain('spelled');
-        expect(err.message).toContain('capability gap');
-        // The functions that DO work here, so the message is actionable.
-        expect(err.message).toContain('count, sum, avg, min, max');
-        expect(err.message).not.toContain('[sql-driver]');
-      });
-    }
+    // The substance that replaced the 501 assertion for `count_distinct`: it
+    // ANSWERS, and with the right number. `stage` is `won`/`lost` over two rows
+    // here, so the dedup is not visible in this fixture — the fixture that
+    // exercises dedup and NULL exclusion is `AGGREGATION_ROWS`, run against
+    // both SQL faces by the conformance suites. What this case pins is the
+    // DOOR: the name no longer reaches `refuseAggregateFunction` at all.
+    it('`count_distinct` goes through the compile door, not the refusal door', async () => {
+      expect(await driver.aggregate('deal', declaredAst('count_distinct', 'stage')))
+        .toEqual([{ n: 2 }]);
+    });
+
+    // The wording half of the acceptance: the refusal message no longer names
+    // `count_distinct` as unsupported. Read off a REAL refusal — the message is
+    // built from the lowering table, so this goes red the day the table and the
+    // message disagree.
+    it('the refusal message names `count_distinct` among the functions it COMPILES', async () => {
+      const err = await refusalOfUndeclared('median');
+      expect(err.message).toContain('count, sum, avg, min, max, count_distinct');
+      // ⛔ It must not be listed as a gap: that sentence belongs to class 2,
+      // which no longer has an inhabitant.
+      expect(err.message).not.toContain('count_distinct" is declared but not implemented');
+    });
+
+    // The class-2 PRODUCER is deliberately still in `sql-driver.ts` even with
+    // nothing to produce — see its docblock. This case states the consequence
+    // of that decision so the unreachable branch is not read as an oversight:
+    // the wording it would emit is still the wording #5907 ruled, and the
+    // sentence constant is still exercised.
+    it('the two refusal sentences remain distinguishable', () => {
+      expect(UNCOMPILABLE_SENTENCE('x')).not.toBe(UNDECLARED_SENTENCE('x'));
+      expect(UNCOMPILABLE_SENTENCE('x')).toContain('declared but not implemented');
+    });
   });
 
   // ── Controls: nothing but the refusal's identity moved ─────────────────────

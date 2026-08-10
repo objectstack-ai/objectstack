@@ -19,7 +19,7 @@
  *   - `mysql[2]://`             → SqlDriver (mysql2)
  *   - `mongodb[+srv]://`        → MongoDBDriver (optional `@objectstack/driver-mongodb`)
  *   - `libsql://`, `http(s)://*.turso.*` → TursoDriver (optional `@objectstack/driver-turso`)
- *   - `file:` / no scheme       → SqlDriver (better-sqlite3)
+ *   - `file:` / `sqlite://` (alias, #6469) / no scheme → SqlDriver (better-sqlite3)
  *
  * Unknown URL schemes throw — we never silently fall back to sqlite, since
  * that historically created bogus directories on disk (e.g. `mongodb:/`)
@@ -53,13 +53,23 @@
  */
 
 import { resolve as resolvePath } from 'node:path';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { z } from 'zod';
-import { readEnvWithDeprecation, stampSearchPinyinEnabled } from '@objectstack/types';
+import { stampSearchPinyinEnabled } from '@objectstack/types';
+import {
+    BUILTIN_DRIVER_IDS,
+    DATABASE_DRIVER_SELECTION_ALIASES,
+    driverHasLocalDefault,
+    resolveDatabaseDriverId,
+} from '@objectstack/spec/data';
 import type { IDatasourceDriverFactory } from '@objectstack/service-datasource';
 import { loadArtifactBundle, isHttpUrl } from './load-artifact-bundle.js';
 import { loadTursoDriverFactory } from './turso-driver-factory.js';
+import {
+    resolveProjectDatabaseUrl,
+    type ProjectDatabaseUrlSource,
+} from './resolve-project-database.js';
 
 /**
  * Resolve the ObjectStack home directory used to store cwd-independent
@@ -85,21 +95,63 @@ export function resolveObjectStackHome(): string {
 
 /**
  * The driver kinds a standalone boot can dispatch — the ONE list, and the only
- * one (#6265).
+ * one (#6265), now shared with the CLI rather than merely singular here (#6345).
  *
  * Three consumers read it and every one of them used to carry its own answer:
  * the `databaseDriver` config key (a zod enum that rejected loudly), the
  * `OS_DATABASE_DRIVER` env var (a bare `as` cast that validated nothing, so an
  * unknown value fell through the dispatch chain's trailing `else` into SQLite),
- * and the `ResolvedDriverKind` union (a hand-written third copy). They are now
- * one declaration: the union is `z.infer`red from it, the env value is parsed
- * through it, and the refusal message enumerates `.options` rather than
- * repeating them — a kind added here cannot leave a stale legal-values list
- * behind.
+ * and the `ResolvedDriverKind` union (a hand-written third copy). #6265 made
+ * them one declaration.
+ *
+ * What #6265 could not fix from inside this file is that the CLI had a FOURTH
+ * answer. This enum listed canonical spellings only, while
+ * `packages/cli/src/utils/storage-driver.ts` accepted `pg`, `mysql2`, `mongo`,
+ * `libsql`, `wasm`, `sql`, `mingo`, … — measured on `main`, **10 of 21 spellings
+ * disagreed**, so `OS_DATABASE_DRIVER=pg` booted under `os start` and was
+ * refused here. The enum's VALUES are therefore no longer written here either:
+ * they are `BUILTIN_DRIVER_IDS` from `@objectstack/spec`, the one driver
+ * vocabulary both hosts read, and the accepted spellings are that table's
+ * aliases via {@link resolveExplicitDriver}. A driver added to the spec table
+ * appears on both hosts at once, which is the only shape in which this fork
+ * cannot re-open.
  */
-export const StandaloneDatabaseDriverSchema = z.enum([
-    'sqlite', 'sqlite-wasm', 'memory', 'postgres', 'mysql', 'mongodb', 'turso',
-]);
+export const StandaloneDatabaseDriverSchema = z.enum(BUILTIN_DRIVER_IDS);
+
+/**
+ * The `databaseDriver` CONFIG key's schema — an alias-accepting front door onto
+ * {@link StandaloneDatabaseDriverSchema} (#6345).
+ *
+ * `databaseDriver` and `OS_DATABASE_DRIVER` are two spellings of one decision,
+ * so accepting `pg` from the environment and refusing it from a programmatic
+ * config would just relocate the fork this card closes to inside a single host.
+ * Both doors now resolve through the spec table's selection face and both
+ * produce a CANONICAL id, so everything downstream still branches on one value
+ * per driver.
+ */
+const DatabaseDriverSelectionSchema = z.string().transform((raw, ctx) => {
+    const id = resolveDatabaseDriverId(raw);
+    if (!id) {
+        ctx.addIssue({ code: 'custom', message: unsupportedDriverMessage(raw, 'databaseDriver') });
+        return z.NEVER;
+    }
+    return id;
+});
+
+/**
+ * The refusal for a driver selection no builtin claims — one sentence, both
+ * doors, enumerating the spellings that actually work rather than a list
+ * maintained beside them.
+ */
+function unsupportedDriverMessage(raw: string, source: 'OS_DATABASE_DRIVER' | 'databaseDriver'): string {
+    return (
+        `[StandaloneStack] Unsupported ${source} value: "${raw}". ` +
+        `Supported drivers: ${DATABASE_DRIVER_SELECTION_ALIASES.join(', ')}. ` +
+        `Booting on the SQLite default instead would silently ignore the driver you asked for ` +
+        `and write into a local database (#3276). Fix the value, or unset it ` +
+        `to let the OS_DATABASE_URL scheme select the driver.`
+    );
+}
 
 export const StandaloneStackConfigSchema = z.object({
     databaseUrl: z.string().optional(),
@@ -110,17 +162,19 @@ export const StandaloneStackConfigSchema = z.object({
      * reads, and the same pair `--database-auth-token` forwards into).
      */
     databaseAuthToken: z.string().optional(),
-    databaseDriver: StandaloneDatabaseDriverSchema.optional(),
+    databaseDriver: DatabaseDriverSelectionSchema.optional(),
     environmentId: z.string().optional(),
     artifactPath: z.string().optional(),
     /**
      * Project root directory. When set (typically by the CLI after locating
      * `objectstack.config.ts`), the default sqlite database is placed under
-     * `<projectRoot>/.objectstack/data/standalone.db` instead of the global
-     * `~/.objectstack/data/standalone.db`, and the metadata FileSystemRepository
-     * roots at `<projectRoot>/.objectstack/metadata`. This keeps per-project
-     * data scoped to the project folder so different examples / apps don't
-     * share a single database by accident.
+     * `<projectRoot>/.objectstack/data/objectstack.db` — the UNIFIED default
+     * every command resolves since #6469 (legacy `dev.db` / `standalone.db`
+     * are still compat-read, see `resolve-project-database.ts`) — instead of
+     * the global `~/.objectstack/data/objectstack.db`, and the metadata
+     * FileSystemRepository roots at `<projectRoot>/.objectstack/metadata`.
+     * This keeps per-project data scoped to the project folder so different
+     * examples / apps don't share a single database by accident.
      *
      * Both halves matter: until #4065 only the database honoured it while the
      * metadata repository still used `process.cwd()`, so a boot whose
@@ -145,6 +199,21 @@ export const StandaloneStackConfigSchema = z.object({
      * operator's live database before they have confirmed anything.
      */
     skipSeedData: z.boolean().optional(),
+    /**
+     * What this boot does when the default sqlite database file does not
+     * exist yet (#6743). `'empty-in-memory'` opens an ephemeral database
+     * instead of creating the file, and suppresses the host's `mkdir` of the
+     * state directory with it — so a read-only boot on a never-started
+     * project leaves the filesystem exactly as it found it. Defaults to
+     * `'create'`.
+     *
+     * ⚠️ READ-ONLY BOOTS ONLY. This is NOT implied by `skipSeedData` /
+     * `deferSchemaDdl`, and deliberately so: `os migrate apply` boots deferred
+     * too and then FLUSHES the deferred DDL once the operator confirms, so it
+     * needs a real file. `os migrate plan` never writes and is the caller this
+     * exists for.
+     */
+    sqliteAbsentFile: z.enum(['create', 'empty-in-memory']).optional(),
 });
 
 export type StandaloneStackConfig = z.input<typeof StandaloneStackConfigSchema>;
@@ -224,7 +293,8 @@ function detectDriverFromUrl(dbUrl: string): ResolvedDriverKind {
         `[StandaloneStack] Unsupported database URL scheme: ${dbUrl}. ` +
         `Supported schemes: memory://, postgres://, pg://, mysql://, mysql2://, ` +
         `mongodb://, mongodb+srv://, ` +
-        `libsql:// (optional @objectstack/driver-turso), file:`
+        `libsql:// (optional @objectstack/driver-turso), file: ` +
+        `(sqlite:// is accepted as an alias of file:)`
     );
 }
 
@@ -257,14 +327,47 @@ function resolveExplicitDriver(
     if (cfg.databaseDriver) return cfg.databaseDriver;
     const raw = process.env.OS_DATABASE_DRIVER?.trim();
     if (!raw) return undefined;
-    const parsed = StandaloneDatabaseDriverSchema.safeParse(raw.toLowerCase());
-    if (parsed.success) return parsed.data;
+    // #6345: the ACCEPTED SPELLINGS are the spec table's selection aliases, not
+    // this file's canonical list. Lower-casing stays for the reason #6265 gave —
+    // the CLI's reader of this same variable lower-cases — and is now redundant
+    // with `resolveDatabaseDriverId`'s own normalization rather than the only
+    // normalization there is.
+    const id = resolveDatabaseDriverId(raw);
+    if (id) return id;
+    throw new Error(unsupportedDriverMessage(raw, 'OS_DATABASE_DRIVER'));
+}
+
+/**
+ * Refuse a driver whose database lives somewhere this process cannot guess when
+ * nothing named where that is (#6345 fork 2).
+ *
+ * The URL ladder always produces SOMETHING — its last rung is the unified
+ * default file — so before this check a `postgres`/`mysql`/`mongodb`/`turso`
+ * selection with no URL anywhere was handed `file:<state dir>/data/objectstack.db`
+ * and failed inside the driver, two layers from the cause, with a message about
+ * a file for an operator who asked for a server. (The CLI's mirror of this bug
+ * guessed differently — `url: undefined` into `pg`, an invented
+ * `mongodb://localhost:27017/objectstack` — which is why the ruling makes both
+ * sides refuse instead of making the two guesses agree.)
+ *
+ * Only the FALLBACK rungs are refused. A URL that came from `--database`,
+ * `OS_DATABASE_URL`/`DATABASE_URL`/`TURSO_DATABASE_URL`, or the project's own
+ * declared default datasource is a statement about where the database is, and a
+ * `file:` DSN handed to postgres by an operator who typed it is their business,
+ * not a guess of ours.
+ */
+function assertUrlNamedForRemoteDriver(
+    driver: ResolvedDriverKind,
+    source: ProjectDatabaseUrlSource,
+): void {
+    if (driverHasLocalDefault(driver)) return;
+    if (source !== 'unified-default' && source !== 'legacy-file') return;
     throw new Error(
-        `[StandaloneStack] Unsupported OS_DATABASE_DRIVER value: "${raw}". ` +
-        `Supported drivers: ${StandaloneDatabaseDriverSchema.options.join(', ')}. ` +
-        `Booting on the SQLite default instead would silently ignore the driver you asked for ` +
-        `and write into a local database (#3276). Fix the value, or unset OS_DATABASE_DRIVER ` +
-        `to let the OS_DATABASE_URL scheme select the driver.`
+        `[StandaloneStack] The \`${driver}\` driver was selected but no database URL was given, ` +
+        `and ${driver} has no local default to fall back on — its database lives on a server or ` +
+        `endpoint this process cannot guess. Set OS_DATABASE_URL (or --database) to it. ` +
+        `Falling back to the local SQLite file instead would connect you to a database you never ` +
+        `named, and every write would land in the wrong place (#3276).`
     );
 }
 
@@ -296,15 +399,49 @@ export interface ResolvedStandaloneDatabase {
      * the side effects of building the stack.
      */
     sqliteFile: string | null;
+    /** Which priority tier resolved the URL (#6469 — shared resolution). */
+    source: ProjectDatabaseUrlSource;
+    /** Declared datasource name, when `source` is `config-datasource`. */
+    datasourceName?: string;
+    /**
+     * One loud line about a legacy-file compat-read (#6469) — surfaced by
+     * `createStandaloneStack` at boot; a caller resolving without booting
+     * (the occupancy probe) deliberately does not print it, so one command
+     * run prints it once.
+     */
+    notice?: string;
+}
+
+/**
+ * The artifact path this boot would read — `cfg.artifactPath` →
+ * `OS_ARTIFACT_PATH` → `<cwd>/dist/objectstack.json`, relative paths anchored
+ * on the cwd. ONE computation for `createStandaloneStack` (which loads the
+ * bundle from it) and `resolveStandaloneDatabase` (which consults it for the
+ * config-declared datasource tier, #6469) — two copies here would let the URL
+ * resolver read a different config than the boot loads.
+ */
+function resolveArtifactPathInput(cfg: z.output<typeof StandaloneStackConfigSchema>): string {
+    const cwd = process.cwd();
+    const input = cfg.artifactPath
+        ?? process.env.OS_ARTIFACT_PATH
+        ?? resolvePath(cwd, 'dist/objectstack.json');
+    return isHttpUrl(input)
+        ? input
+        : (input.startsWith('/') ? input : resolvePath(cwd, input));
 }
 
 /**
  * Resolve the database target WITHOUT building anything.
  *
- * Same precedence `createStandaloneStack` applies (explicit config →
- * `OS_DATABASE_URL`/`DATABASE_URL` → `TURSO_DATABASE_URL` → `OS_HOME` →
- * project root → user home), factored out so a caller can answer "which file
- * am I about to open?" first. Pure: reads env, touches no filesystem.
+ * Since #6469 the URL comes from the ONE shared resolution
+ * ({@link resolveProjectDatabaseUrl}) that `os dev` / `os start` also use:
+ * explicit config → `OS_DATABASE_URL`/`DATABASE_URL` → `TURSO_DATABASE_URL` →
+ * explicit `memory` driver → the config-declared default datasource (read from
+ * the compiled artifact) → the unified default file
+ * (`<state dir>/data/objectstack.db`, with a compat-read of the legacy
+ * `dev.db`/`standalone.db`). State-dir precedence is unchanged: `OS_HOME` →
+ * project root → user home. No longer purely env-derived: the legacy probe and
+ * the artifact consult read the filesystem (they create nothing).
  *
  * The `TURSO_DATABASE_URL` source only started meaning something in #5820: the
  * URL was read here and then rejected by `detectDriverFromUrl` as an unsupported
@@ -318,27 +455,28 @@ export interface ResolvedStandaloneDatabase {
  */
 export function resolveStandaloneDatabase(config?: StandaloneStackConfig): ResolvedStandaloneDatabase {
     const cfg = StandaloneStackConfigSchema.parse(config ?? {});
-    const url = resolveDatabaseUrl(cfg);
+    const resolution = resolveProjectDatabaseUrl({
+        explicitUrl: cfg.databaseUrl,
+        explicitDriver: cfg.databaseDriver,
+        projectRoot: cfg.projectRoot,
+        artifactPath: resolveArtifactPathInput(cfg),
+    });
+    const url = resolution.url;
     const explicitDriver = resolveExplicitDriver(cfg);
     const driver: ResolvedDriverKind = explicitDriver || detectDriverFromUrl(url);
+    // Fork 2 (#6345) — refuse before deriving a sqlite filename from a URL the
+    // selected driver was never going to open.
+    assertUrlNamedForRemoteDriver(driver, resolution.source);
     const isSqlite = driver === 'sqlite' || driver === 'sqlite-wasm';
     const filename = isSqlite ? sqliteFilenameFromUrl(url, driver) : null;
     return {
         url,
         driver,
         sqliteFile: filename && filename !== ':memory:' && !filename.startsWith(':') ? filename : null,
+        source: resolution.source,
+        ...(resolution.datasourceName ? { datasourceName: resolution.datasourceName } : {}),
+        ...(resolution.notice ? { notice: resolution.notice } : {}),
     };
-}
-
-function resolveDatabaseUrl(cfg: z.output<typeof StandaloneStackConfigSchema>): string {
-    return cfg.databaseUrl
-        ?? readEnvWithDeprecation('OS_DATABASE_URL', 'DATABASE_URL', { silent: true })?.trim()
-        ?? process.env.TURSO_DATABASE_URL?.trim()
-        ?? (process.env.OS_HOME?.trim()
-            ? `file:${resolvePath(resolveObjectStackHome(), 'data/standalone.db')}`
-            : (cfg.projectRoot
-                ? `file:${resolvePath(cfg.projectRoot, '.objectstack/data/standalone.db')}`
-                : `file:${resolvePath(resolveObjectStackHome(), 'data/standalone.db')}`));
 }
 
 /**
@@ -374,22 +512,20 @@ export async function createStandaloneStack(config?: StandaloneStackConfig): Pro
     const { DefaultDatasourcePlugin } = await import('./default-datasource-plugin.js');
     const { AppPlugin } = await import('./app-plugin.js');
 
-    const cwd = process.cwd();
     const environmentId = cfg.environmentId ?? process.env.OS_ENVIRONMENT_ID ?? 'proj_local';
-    const artifactPathInput = cfg.artifactPath
-        ?? process.env.OS_ARTIFACT_PATH
-        ?? resolvePath(cwd, 'dist/objectstack.json');
-    const artifactPath = isHttpUrl(artifactPathInput)
-        ? artifactPathInput
-        : (artifactPathInput.startsWith('/')
-            ? artifactPathInput
-            : resolvePath(cwd, artifactPathInput));
+    const artifactPath = resolveArtifactPathInput(cfg);
 
     // `databaseAuthToken` / `OS_DATABASE_AUTH_TOKEN` / `TURSO_AUTH_TOKEN` are
     // consumed by the `turso` kind below (#5820). They used to be declared here
     // and read by nobody — the same "reads it in, cannot dispatch it out" split
     // `TURSO_DATABASE_URL` had.
-    const { url: dbUrl, driver: dbDriver } = resolveStandaloneDatabase(cfg);
+    const { url: dbUrl, driver: dbDriver, notice: dbNotice } = resolveStandaloneDatabase(cfg);
+    if (dbNotice) {
+        // Legacy-file compat-read (#6469): loud, once per boot, on stderr so a
+        // `--json` command's reserved stdout stays a single parseable document.
+        // eslint-disable-next-line no-console
+        console.warn(`[StandaloneStack] ⚠ ${dbNotice}`);
+    }
 
     // Translate the database URL into the `default` datasource DEFINITION
     // (ADR-0062 D1, #3826). The stack no longer builds a driver: the definition
@@ -462,7 +598,15 @@ export async function createStandaloneStack(config?: StandaloneStackConfig): Pro
         // sqlite (better-sqlite3)
         driverId = 'sqlite';
         const filename = sqliteFilenameFromUrl(dbUrl, 'sqlite');
-        mkdirSync(resolvePath(filename, '..'), { recursive: true });
+        // The host's filesystem prep. Skipped for a read-only boot whose target
+        // does not exist (#6743): creating `<state dir>/data/` is the other half
+        // of the write side effect `os migrate plan` was leaving behind, and a
+        // `mkdir -p` here would recreate the very directory the driver is about
+        // to decline to put a file in. When the file DOES exist the directory
+        // does too, so this costs the mode nothing.
+        if (!(cfg.sqliteAbsentFile === 'empty-in-memory' && !existsSync(filename))) {
+            mkdirSync(resolvePath(filename, '..'), { recursive: true });
+        }
         driverConfig = { filename };
     } else {
         // Unreachable by construction — and making it unreachable is half the
@@ -481,7 +625,11 @@ export async function createStandaloneStack(config?: StandaloneStackConfig): Pro
     }
     const defaultDatasourcePlugin = new DefaultDatasourcePlugin(
         { driver: driverId, config: driverConfig },
-        { dev: factoryDev, ...(hostFactory ? { factory: hostFactory } : {}) },
+        {
+            dev: factoryDev,
+            ...(cfg.sqliteAbsentFile ? { sqliteAbsentFile: cfg.sqliteAbsentFile } : {}),
+            ...(hostFactory ? { factory: hostFactory } : {}),
+        },
     );
 
     const artifactBundle = await loadArtifactBundle(artifactPath, {

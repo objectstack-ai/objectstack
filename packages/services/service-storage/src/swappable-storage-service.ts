@@ -3,6 +3,8 @@
 import type {
   IStorageService,
   StorageFileInfo,
+  StorageListOptions,
+  StorageListPage,
   StorageUploadOptions,
   PresignedUploadDescriptor,
   PresignedDownloadDescriptor,
@@ -71,10 +73,23 @@ export class SwappableStorageService implements IStorageService {
     return this.inner.getInfo(key);
   }
 
-  // `list(prefix)` was removed from IStorageService in #5540 (ADR-0049
-  // enforce-or-remove; analysis #5266), so there is no contract member left to
-  // forward to. The adapters' own `list` implementations are retired
-  // separately in #5541.
+  /**
+   * Forward cursor-shaped prefix enumeration to the active adapter (#6781).
+   *
+   * ⚠️ A `nextCursor` stays valid across a `swap()` only because both shipped
+   * adapters encode the same thing — the last key, resumed in ascending key
+   * order. An adapter whose cursor means something else would resume a
+   * half-finished sweep in the wrong place, silently; that is why the cursor
+   * codec lives on the contract (`encodeStorageListCursor`) instead of in each
+   * adapter, and why a token an adapter did not issue is refused rather than
+   * treated as "start from the beginning".
+   */
+  list(prefix: string, options?: StorageListOptions): Promise<StorageListPage> {
+    if (typeof this.inner.list !== 'function') {
+      return Promise.reject(new Error('Active storage adapter does not support list()'));
+    }
+    return this.inner.list(prefix, options);
+  }
 
   getSignedUrl(key: string, expiresIn: number, options?: PresignedDownloadOptions): Promise<string> {
     if (typeof this.inner.getSignedUrl !== 'function') {

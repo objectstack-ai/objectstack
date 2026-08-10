@@ -1,7 +1,17 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
-import type { IStorageService, StorageFileInfo } from '@objectstack/spec/contracts';
+import type {
+  IStorageService,
+  StorageFileInfo,
+  StorageListOptions,
+  StorageListPage,
+} from '@objectstack/spec/contracts';
+import {
+  decodeStorageListCursor,
+  encodeStorageListCursor,
+  resolveStorageListLimit,
+} from '@objectstack/spec/contracts';
 import { SwappableStorageService } from './swappable-storage-service';
 
 class FakeAdapter implements IStorageService {
@@ -24,9 +34,28 @@ class FakeAdapter implements IStorageService {
     if (!b) throw new Error('not found');
     return { key, size: b.length, lastModified: new Date(), contentType: 'application/octet-stream' };
   }
-  // No `list(prefix)`: the contract dropped it in #5540 and the shipped adapters
-  // dropped their implementations in #5541, so a fake that still advertised one
-  // would model a surface no real adapter has.
+  /**
+   * Cursor-shaped `list` (#6781), built on the contract's own helpers — the
+   * same ones both shipped adapters use, so this fake cannot model a cursor
+   * dialect no real adapter has.
+   */
+  async list(prefix: string, options?: StorageListOptions): Promise<StorageListPage> {
+    const limit = resolveStorageListLimit(options?.limit);
+    const after = options?.cursor === undefined ? undefined : decodeStorageListCursor(options.cursor);
+    const matched = [...this.store.keys()]
+      .filter((key) => key.startsWith(prefix))
+      .filter((key) => after === undefined || key > after)
+      .sort((x, y) => (x < y ? -1 : x > y ? 1 : 0));
+    const page = matched.slice(0, limit);
+    const items = page.map((key) => ({
+      key,
+      size: this.store.get(key)!.length,
+      lastModified: new Date(0),
+    }));
+    return matched.length > limit
+      ? { items, nextCursor: encodeStorageListCursor(page[page.length - 1]!) }
+      : { items };
+  }
 }
 
 /** Adapter that omits the optional methods to exercise the proxy's
@@ -84,9 +113,45 @@ describe('SwappableStorageService', () => {
     await expect(proxy.getSignedUrl('k', 60)).rejects.toThrow(/does not support getSignedUrl/);
     await expect(proxy.getPresignedUpload('k', 60)).rejects.toThrow(/does not support getPresignedUpload/);
     await expect(proxy.initiateChunkedUpload('k')).rejects.toThrow(/does not support initiateChunkedUpload/);
+    await expect(proxy.list('k')).rejects.toThrow(/does not support list/);
   });
 
-  // The `forwards list() to the active adapter when supported` case was
-  // deleted with the proxy method it exercised (#5540): IStorageService no
-  // longer declares `list`, so there is nothing for the proxy to forward.
+  // The `forwards list() to the active adapter when supported` case was deleted
+  // with the proxy method it exercised in #5540 and is restored here with the
+  // cursor shape (#6781).
+  it('forwards list() to the active adapter, cursor and all', async () => {
+    const a = new FakeAdapter('A');
+    for (const key of ['docs/a.txt', 'docs/b.txt', 'docs/c.txt', 'images/x.png']) {
+      await a.upload(key, Buffer.from(key));
+    }
+    const proxy = new SwappableStorageService(a);
+
+    const first = await proxy.list('docs/', { limit: 2 });
+    expect(first.items.map((i) => i.key)).toEqual(['docs/a.txt', 'docs/b.txt']);
+    expect(first.nextCursor).toBeDefined();
+
+    const second = await proxy.list('docs/', { limit: 2, cursor: first.nextCursor });
+    expect(second.items.map((i) => i.key)).toEqual(['docs/c.txt']);
+    expect(second.nextCursor).toBeUndefined();
+  });
+
+  it('a cursor issued before swap() still resumes after it', async () => {
+    // Only true because the cursor codec lives on the CONTRACT rather than in
+    // each adapter. A per-adapter token would either be refused here or —
+    // worse — silently restart the sweep at key zero.
+    const a = new FakeAdapter('A');
+    const b = new FakeAdapter('B');
+    for (const key of ['k/1', 'k/2', 'k/3', 'k/4']) {
+      await a.upload(key, Buffer.from(key));
+      await b.upload(key, Buffer.from(key));
+    }
+
+    const proxy = new SwappableStorageService(a);
+    const first = await proxy.list('k/', { limit: 2 });
+    proxy.swap(b);
+    const second = await proxy.list('k/', { limit: 2, cursor: first.nextCursor });
+
+    expect(first.items.map((i) => i.key)).toEqual(['k/1', 'k/2']);
+    expect(second.items.map((i) => i.key)).toEqual(['k/3', 'k/4']);
+  });
 });

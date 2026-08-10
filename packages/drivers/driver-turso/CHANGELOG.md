@@ -1,5 +1,827 @@
 # @objectstack/driver-turso
 
+## 17.0.0-rc.6
+
+### Major Changes
+
+- 29e28a3: refactor(drivers)!: `aggregate` 的 query 参数收窄到 `DriverQuery`，并退役 `aggregate` / `func` 两个未声明别名 (#6212 批 B、#6321)
+
+  #5181（PR #6076）收窄了 `IDataDriver` 声明的六个方法，#6075（PR #6210）让五个驱动的实现跟上，#6212 批 A+E 处理了 SQL 驱动自有的另两道门。本次是同一条线上的 `aggregate`：`driver-sql`、`driver-turso` 的转发层与 `RemoteTransport` 三处，全部从 `query: any` 收到 `DriverQuery`（`@objectstack/spec/contracts`）。
+
+  `any` 在 query 参数上不是「对象名没检查」，而是**检查全关**：`where` 的 filter 方言、`groupBy` 的节点联合、`aggregations` 的节点形状——而这三样恰恰是这几个方法体读的全部内容。
+
+  ## 一、退役两个协议从未声明的别名（#6321，ADR-0049）
+
+  ```ts
+  const aggregates = query.aggregations || query.aggregate; // driver-sql
+  const funcName = agg.function || agg.func;
+  const aggregations = query?.aggregations || query?.aggregate || []; // RemoteTransport
+  const func = String(agg.function || agg.func || "");
+  ```
+
+  `QueryASTSchema` 声明的是 `aggregations`，`AggregationNodeSchema` 声明的是 `function`；`aggregate` / `func` 在 `packages/spec` 里**一个字都没有**。实测全仓唯一书写者是这两个驱动包自己的 fixture（`sql-driver-advanced` 7 处、`sql-driver-queryast` 1 处、`sqlite-wasm-driver-advanced` 7 处、`sqlite-wasm-driver-queryast` 1 处），非测试面零书写者——#4984 那一家：**fixture 拼着别名，宽容分支就永远绿着活下去，没有任何测试能在删掉它时转红**。fixture 已按已声明拼写重拼，写者归零，PD#12 与 ADR-0049 enforce-or-remove 于是把这两条 `||` 一并删掉。
+
+  顺带删掉的还有 `|| ''`：它只在**两个键都没写**时才生效，而那时这一面把名字回引成 `""`、本地面回引成 `"undefined"`，同一份越界输入两种措辞（#5240）。别名在时这条岔路够不着，删别名恰恰让它够得着，所以同一次关掉。
+
+  **迁移**：`aggregate:` → `aggregations:`，`func:` → `function:`。写旧拼写的内联字面量现在是编译错误（TS2353）；越过 `tsc` 的 JS 调用方，`aggregate:` 会静默拿不到聚合列，`func:` 则拿到已有的具名 400（`INVALID_QUERY`，#5907）。本仓实测需要改动的非测试调用点为零。
+
+  ## 二、一处真实行为改动：`RemoteTransport` 现在会编 `GroupByNode` 联合
+
+  `GroupByNodeSchema` 是 `z.union([z.string(), z.object({ field, dateGranularity?, alias? })])`，而这一层把它当 `string[]` 读。收窄后 `tsc` 直接把这条假设摆上台面（TS2322）。联合的两半状况完全不同，所以这不是一个 cast 能了事的：
+
+  - **无 granularity 的结构化条目**（`{ field: 'region' }`）是 spec 合法、且**今天就会下推到驱动**的形状：objectql 的 aggregate 派发对它一律判为「受支持」（`engine.ts` 里逐字写着 `plain {field} object is fine`），`objectql/src/secret-fields.test.ts:341` 就是这个形状的活体。本驱动的**本地面**把它编成普通的 `GROUP BY "region"`，远端面却把它插值成 `"[object Object]"`、死在标识符安全检查里——一条查询两种答案、由连接串决定，正是 #6203 那个形状，而且**是活体不是休眠**：能力位 `queryDateGranularity` 只管带 granularity 的那一半，管不到这一半。现在读 `.field`，两面收敛。
+  - **带 dateGranularity 的条目**远端确实编不出来，而这一点是**已声明**的：remote 模式发布 `queryDateGranularity: {}`，引擎据此全部落到内存分桶，因此不会下推。缺的是「绕过能力位、直连驱动」的那个调用方该得到什么答案——现在得到 ADR-0112 信封（`NOT_IMPLEMENTED` / 501），与聚合函数「协议已声明、本后端编不出」用的是同一类，而不是一句 SQL 注入告警。
+
+  `alias` **不读**，与本地面一致：`SqlDriver.aggregate` 也不读它，只在这一面读会是新的分叉而不是修复。
+
+  ## 三、`SqlDriver` 那一面的同一条件也换上了信封
+
+  `SqlDriver.aggregate` 对「本方言编不出这个 granularity」原本抛裸 `Error`（`code`/`status` 皆 `undefined` ⇒ `mapDataError` 落默认分支，一个具名能力缺口以不透明 500 到达调用方）。只给远端面加信封就会造出 #5907 花一整个 issue 才关掉的那种分叉——`TursoDriver` 由 `url` 选面，同一条件不能有两种线上身份。两面首句逐字一致（`Date bucketing by '<g>' is not supported by this backend.`），尾句各报**本面**编得出的 granularity，由一条跨包 parity 用例比对两个**运行时**消息钉住。
+
+  **消息文本变更**（可能影响按文本匹配的下游断言）：
+
+  ```
+  - SqlDriver: dateGranularity 'week' not supported on dialect 'better-sqlite3'. Engine must fall back to in-memory bucketing.
+  + Date bucketing by 'week' is not supported by this backend. Bucketed here: day, month, quarter, year (dialect 'better-sqlite3'). … (code=NOT_IMPLEMENTED, status=501)
+  ```
+
+  ## 定级依据
+
+  标 major 与 #5181 / #6075 / #6210 一致：**源码级破坏性**（调用点内联字面量、以及被删的两个别名键），加上第二、三节两处真实的运行期改动。`check:api-surface` 只记录导出的存在与否、不记录签名，所以这条说明是该变更唯一的下游载体。
+
+  `driver-sqlite-wasm` 未列入：它整个继承 `SqlDriver.aggregate`，自身源码零改动（改的只有它的 fixture 与一条断言）——与批 A+E 的处理一致。它读的是 driver-sql 的 `dist/*.d.ts`，因此验证时**必须先重建 driver-sql** 再 typecheck/test，否则是假绿。
+
+  <!-- adr-0087: registered driver-aggregate-undeclared-key-aliases-removed -->
+
+- d367f03: refactor(drivers)!: 五个驱动的 query 参数跟进 `DriverQuery`，休眠的类型谎言就此没有藏身处 (#6075)
+
+  #5181（PR #6076）把 `IDataDriver.find/findOne/count/updateMany/deleteMany/explain` 的 query 参数收窄为 `DriverQuery`（`Omit<QueryAST, 'object'>`），并在同一条 changeset 里写明：「把驱动签名一并迁到 `DriverQuery` 是后续的机械收尾」。这就是那次收尾。
+
+  在此之前，五个驱动的实现仍旧声明 `query: QueryAST`（turso 侧是 `query: any`）。**它不红，也不会红** —— 方法参数按双变比较，实现声明得比契约宽照样满足契约。但调用方现在**有权**省略 `object`，于是这些实现的类型说 `query.object` 是 `string`，运行期却可能是 `undefined`：一句休眠的谎言，没有任何门拦得住下一个照着它写代码的人。
+
+  收尾之后，「驱动读 `query.object`」直接变成编译错误：
+
+  ```ts
+  // 收窄前：编译通过，运行期可能是 undefined —— 谎言
+  // 收窄后：error TS2339: Property 'object' does not exist on type 'DriverQuery'.
+  const name = query.object;
+  ```
+
+  **零运行时改动。** 本次改的全部是类型注解：五个驱动的六个契约方法签名，以及为让类型自洽而必须跟进的少量私有辅助方法参数（mongodb 的 `buildFindOptions` / `buildSortSpec`，sql 的 `findRows` / `orderKeysFor`，turso 的 `toRemoteQuery` / `toRemoteReadQuery`，memory 的 `performAggregation`）—— 它们都只转发或读取 `where` / `orderBy` / `groupBy` 这些字段，本来就不读 `object`。turso 的几处 `query: any` 一并收紧，多拿回一批本已放弃的检查。emit 无差异，测试全绿（memory 524、mongodb 206、sql 906、sqlite-wasm 254、turso 788）。
+
+  **迁移面：删掉驱动调用字面量里的 `object:` 键**，与 #5181 是同一句话，只是现在也覆盖了直接按具体驱动类（`SqlDriver` / `MemoryDriver` / …）而非按 `IDataDriver` 取类型的调用方。编译器会逐处指出来（TS2353 `'object' does not exist in type 'DriverQuery'`）。本仓下游 25 个包实测零处需要改动，改动只落在五个驱动自己的测试里。
+
+  标 major 的依据与 #5181 一致：**源码级破坏性**（调用点内联字面量），运行时行为零变化。`check:api-surface` 只记录导出的存在与否、不记录签名，因此这条说明同样是该变更唯一的下游载体。
+
+  `aggregate` / `distinct` / `syncSchemasBatch` 不在本次范围内 —— 它们不是 `IDataDriver` 收窄的那六个方法，其中 `syncSchemasBatch` 的条目里 `object` 是被真实读取的必填键，`expand` 条目里的 `object` 同理命名的是关联对象，都不是冗余。
+
+### Minor Changes
+
+- 92a67f2: feat(drivers,spec)!: `GroupByNode.alias` is honoured by the SQL faces — one aggregate, one column key (#6401)
+
+  `GroupByNodeSchema` has declared `alias` ("Alias for the projected group
+  value", defaulting to `field`) for as long as the structured `groupBy` entry has
+  existed. Exactly one execution path read it. The result: the SAME query came
+  back with a different result-column key depending on which path the engine
+  happened to take.
+
+  ```ts
+  groupBy: [{ field: "closed_at", dateGranularity: "month", alias: "qtr" }];
+  ```
+
+  - pushed down to a driver ⇒ rows keyed **`closed_at`**
+  - run through the in-memory fallback ⇒ rows keyed **`qtr`**
+
+  And the choice between them is `engine.ts`'s
+  `allStructuredSupported && !tzRequiresInMemory` — a driver capability bit and a
+  `timezone`, neither of which the caller can see. That is the multi-face
+  consistency invariant broken in its quietest form: both answers are valid rows,
+  so nothing throws and nothing looks wrong.
+
+  **Resolved to ENFORCE**, and the leg was chosen by measurement rather than
+  taste. ADR-0049 splits on whether the feature already exists: a _dangling_
+  promise is removed, a _live_ one with a missing gate is enforced. `alias` is
+  live — three consumers read it and change behaviour
+  (`in-memory-aggregation.ts`, `MemoryDriver.performAggregation`, and
+  `chartAggregateCategoryKey`), and the publish gate _compels_ it:
+  `validate-react-page-props.ts` errors `REACT_CHART_AXIS_UNKNOWN` unless a
+  chart's category axis is bound to `alias ?? field`, telling the author in so
+  many words to "bind it to" the alias. A key the build gate makes you write is
+  not a dangling promise. The count of real non-test producers is **zero**, which
+  is what makes enforcing safe rather than what argues against it: no shipped
+  payload changes its result keys.
+
+  **What changed, on every SQL face at once** — a fix landing on one and not its
+  twin is the #6203 shape, and `TursoDriver` picks its face from `url`:
+
+  - **`driver-sql`** — both limbs of the structured `groupBy` branch project
+    `alias ?? field`: the date-bucket limb aliases the bucket expression to it,
+    and the plain limb emits `?? as ??` (only when the name actually moves — an
+    alias equal to the field emits no self-rename). `presentedOutput` is now keyed
+    by the OUTPUT column, matching how the aggregation branch beside it has always
+    worked; an aliased group value went unpresented before.
+  - **`driver-turso` REMOTE** — the same projection, `"field" AS "alias"`. The
+    alias reaches the statement as a quoted identifier and is therefore held to
+    `assertSafeIdentifier`, exactly like `field`.
+  - **`driver-sqlite-wasm`** — inherits `SqlDriver`'s compiler; covered by its own
+    conformance suite rather than by assumption.
+
+  **GROUP BY still keys on the FIELD** on every face. Only the projection is
+  renamed, so the buckets are unchanged. This is deliberate and pinned: SQLite
+  resolves output names in `GROUP BY`, so a face that grouped by the alias would
+  look correct here and diverge on a dialect that does not.
+
+  `having` needed no change and now means one thing: it is applied over the
+  aggregated row's own columns, so a filter on a group projection references the
+  alias on every path — previously the alias on one path and the field on the
+  other.
+
+  **Conformance.** `AGGREGATION_CASES` (#6409) gains a `groupByAlias` axis and two
+  cases. Their VALUES are an existing case verbatim — only the key moves — so they
+  can fail only on the key, which is the point: every wrong answer in this area is
+  a valid query returning plausible rows. `objectql`'s in-memory fallback is now
+  **enrolled** as a fourth face, answering #6409's open question ②: it is the face
+  the SQL three were converged onto, so the new behaviour would otherwise be
+  pinned against nothing, and reaching it needs no engine at all —
+  `applyInMemoryAggregation` is a pure function of rows and an AST.
+
+  **Reverse verification**, predicted before running. Reverting the in-memory face
+  to `g.field`: only the two alias cases move and only ONE fails — the degenerate
+  `alias === field` case stays green, which is why both are in the table.
+  Reverting the harness to read `c.groupBy` instead of `c.groupByAlias ?? c.groupBy`
+  — the copied-neighbour mistake: everything passes on an unmodified face, a false
+  GREEN, which is the failure mode that would have made the axis vacuous.
+
+  **Frozen drivers (#5499), measured from source, not flipped.** `driver-memory`
+  already returned `{ field, alias: node.alias ?? node.field }` and projects under
+  the alias — it had independently reached the enforce answer, so it needed no
+  alignment. `driver-mongodb` is a recorded DEBT row and the defect is wider than
+  `alias`: `buildAggregationPipeline` types `groupBy` as `string[]` and builds
+  `groupId[field] = '$' + field`, so a structured node — aliased or not — becomes
+  the literal key `"[object Object]"`. It cannot take a structured `GroupByNode`
+  at all; `mongodb-driver.ts` passes `(query as any).groupBy`, which is why `tsc`
+  never saw it. Tracked on #6814.
+
+  **Compatibility.** A caller who writes `alias` and reads the result under
+  `field` on a pushdown path will now find the value under `alias` — which is what
+  the key has always meant on the fallback path, and what the chart gate already
+  required. Callers who never write `alias` are unaffected: the emitted SQL is
+  byte-identical.
+
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing is retired: `GroupByNodeSchema.alias` keeps its declaration, its spelling and its type — it starts being HONOURED by three faces that parsed and ignored it. There is no tombstone to write and no authored metadata to rewrite, so there is no mechanical transform a migration could prescribe: every stack that validated before validates after, unchanged. The behaviour change is in the RESULT of a runtime query (a result-column key moves from `field` to `alias` on the pushdown path, converging on what the in-memory path and the chart publish gate already required), which the ledger has no channel for and no upgrader could apply a codemod to. The bang is on the changeset because callers who read that column by the field name must move, and the measured non-test producer count for the key is zero. -->
+
+- 82397b6: feat(drivers,objectql): `$regex` / `$options` are refused everywhere, and `$icontains` is implemented on the SQL family (#5702)
+
+  The driver half of the #4706 ruling. #5701 landed the contract (the vocabulary,
+  the `RETIRED_FILTER_OPERATORS` prescriptions, the shared text case-set) and
+  #5710 flipped the last live producer — `plugin-auth`'s ObjectQL adapter, which
+  emitted `$regex` on the authentication path — so the refusal can now land
+  without breaking sign-in.
+
+  **BREAKING for anyone writing `$regex` or `$options` in a filter.** Both are
+  refused on every backend with `INVALID_FILTER` / 400 and a message that names
+  the replacement. `$regex` was never a declared operator: `driver-sql` compiled
+  it to a LIKE-escaped substring (so `a.b` matched only the literal `a.b`),
+  `driver-memory` ran it as a real `RegExp` (so the same filter also matched
+  `axb`, and an _invalid_ pattern was caught and answered `false` — zero rows, in
+  silence), and `objectql`'s `having` did the same. Write `$icontains` for the
+  case-insensitive substring search this was almost always used for, `$contains`
+  for a case-sensitive one; a pattern that genuinely needs a regex has no
+  filter-level replacement.
+
+  **`$icontains` now runs on the SQL family** — `driver-sql`, `driver-sqlite-wasm`,
+  and both of `driver-turso`'s transports (the remote one does not go through
+  knex, so it needed its own). It compiles to `LOWER(col) LIKE LOWER(?) ESCAPE ?`
+  through the same `applyLike` / `pushLike` that carries the `%` / `_` / `\`
+  escaping, as a `fold` parameter rather than a second emitter — a copied emitter
+  is where the escape class would have been dropped, and an unescaped `%` matches
+  every row. An empty or non-string comparand is refused on the validating walk
+  (an empty one matches every row, which widens rather than narrows). On SQLite
+  `lower()` folds ASCII only, which IS the contract (#4706 Q1 = A): `$icontains:
+'café'` does not match `CAFÉ`.
+
+  <!-- adr-0087: registered filter-regex-options-retired -->
+
+  `driver-mongodb`'s unknown-operator arm was throwing a bare `Error` with no
+  `code` and no `status`, three lines from the helper in its own file that sets
+  `INVALID_FILTER` / 400 — a 500-shaped body for a 400-class client mistake. It
+  now speaks the same envelope as its three siblings.
+
+  Two parts of the ruling are deliberately NOT in this change and stay tracked in
+  `scripts/check-driver-conformance.mjs`'s ledger: the `$contains` family's
+  case-sensitivity (#4706 Q2 = A) needs SQLite's `LIKE` replaced by a case-exact
+  construct in the driver, the RLS lowering and the analytics lowering together,
+  or one permission rule compiles to two row sets (#6518); and `$icontains` on the
+  JS evaluation faces needs the spec vocabulary to take the operator, which cannot
+  happen before `driver-memory` has an arm for it (#6520).
+
+- 3172831: fix(drivers): text-operator case folding is the CONTRACT's answer, not the dialect's (#6518)
+
+  The `$contains` family and `$icontains` returned **different rows on different
+  databases** for the same filter, because case sensitivity was decided by whatever
+  `LIKE` happened to mean on the dialect underneath. Both directions **over-matched**
+  — they returned rows the filter excludes, which on an ADR-0021 RLS read scope is
+  over-reach rather than a loose filter (#3948):
+
+  |                              | `$contains` / `$notContains` / `$startsWith` / `$endsWith` — case-SENSITIVE (#4706 Q2 = A) | `$icontains` — folds ASCII ONLY (#4706 Q1 = A) |
+  | :--------------------------- | :----------------------------------------------------------------------------------------- | :--------------------------------------------- |
+  | SQLite / turso / sqlite-wasm | ❌ `LIKE` folds ASCII                                                                      | ✅ `lower()` is ASCII-only                     |
+  | Postgres                     | ✅ `LIKE` is case-exact                                                                    | ❌ `LOWER()` folds all of Unicode              |
+  | MySQL                        | ❌ follows the column's collation                                                          | ❌ `LOWER()` folds all of Unicode              |
+
+  Read across: **each dialect was already right on the half another one got wrong**,
+  which is why neither half could be found from one backend alone.
+
+  ## What now runs
+
+  The construct is chosen per dialect, in one emitter, so the escaping and the fold
+  stay a single code path (an unescaped wildcard is a filter bypass, P0 — #5567):
+
+  - **SQLite family → `GLOB`.** `LIKE`'s ASCII fold cannot be switched off per
+    statement (`PRAGMA case_sensitive_like` is connection-global, so one query would
+    redefine every other query on the connection), and `CAST(col AS BLOB) LIKE ?` was
+    measured to match _nothing at all_. `GLOB` is case-exact and brings its own
+    escaped class — `*`, `?`, `[` as the self-closing classes `[*]`, `[?]`, `[[]`,
+    because SQLite's grammar gives `GLOB` no `ESCAPE` clause. `$icontains` keeps
+    `lower()` on both operands, still ASCII-only.
+  - **Postgres → `LIKE`, unchanged.** Only the fold moved, from `LOWER()` to an
+    explicit `translate()` over the 26 ASCII letters. Measured on a live PostgreSQL
+    16 (ICU database): `LOWER('CAFÉ')` is `'café'` — the over-fold — while the
+    `translate()` form leaves `É` alone.
+  - **MySQL → `LIKE` over `CAST(… AS BINARY)`**, so the comparison is byte-wise and
+    no collation decides the case; `$icontains` folds byte-wise over the same binary
+    rendering, which is ASCII-only because UTF-8 is self-synchronising.
+  - **Any other client** keeps the previous `LIKE` / `LOWER()` shape — it is the only
+    form that still runs there — and is recorded as residue rather than left to be
+    discovered.
+
+  `driver-turso`'s remote transport carries the twin (it compiles filters itself and
+  inherits nothing), and the two transports are now held to the same rows by a
+  parity suite that runs the shared `FILTER_TEXT_CASES` on both.
+
+  ## Behaviour change — read this before upgrading
+
+  A filter whose comparand's case did not match the stored text used to match on
+  SQLite/turso/sqlite-wasm and may have matched on MySQL. It no longer does:
+
+  ```ts
+  // rows: { id: '1', name: 'ACME Corp' }, { id: '2', name: 'acme corp' }
+  {
+    name: {
+      $contains: "acme";
+    }
+  } // was ['1','2'] on SQLite → now ['2'] everywhere
+  {
+    name: {
+      $icontains: "acme";
+    }
+  } // ['1','2'] — unchanged, and now correct on PG/MySQL too
+  {
+    name: {
+      $icontains: "café";
+    }
+  } // was ['3','4'] on PG/MySQL → now ['4'] everywhere
+  ```
+
+  If you were relying on `$contains` to ignore case, **write `$icontains`** — that is
+  the operator for it, and it now folds the same ASCII-only range on every backend.
+  Result sets only ever get NARROWER, never wider, so a filter that was already
+  correct stays correct.
+
+  ## Why `minor` rather than `major`
+
+  No declared surface moves. `$contains` still exists, still takes the same
+  comparand, and `filter.zod.ts` is untouched — the case-sensitivity this delivers
+  was **already published** as the contract by #5701 (`FILTER_TEXT_CASES`, one
+  release earlier in this same v17 major), and the drivers were the half that had
+  not caught up. This is Prime Directive #12 applied in the direction it points:
+  declared = enforced. It is graded the way its sibling #5702/#6549 was graded for
+  the same operator family in the same rc cycle, and it registers nothing in the
+  ADR-0087 registries because it retires no authorable key.
+
+  ## What is deliberately NOT in this change
+
+  `driver-memory` and `driver-mongodb` still fold case on their query paths — they
+  are the #5499 frozen family, so their `FILTER_TEXT_CASES` cells stay honest DEBT
+  and are tracked as #6682 (case sensitivity) and #6520 (`$icontains`). The
+  `service-analytics` SQL compilers were measured already compliant: they emit
+  Postgres-shaped statements, where `LIKE` is case-exact, and that assumption is now
+  written down and pinned rather than implied.
+
+- 17a0a1e: fix(driver-turso): the remote face refuses an `auto_number` create instead of silently writing NULL (#6944)
+
+  `TursoDriver` picks its transport from `url`. Local and embedded-replica inherit
+  `SqlDriver`'s write path and issue record numbers from the persistent
+  `_objectstack_sequences` table. Remote overrides the write path to
+  `RemoteTransport`, which builds its own `INSERT` and never enters
+  `fillAutoNumberFields` — so on that face `auto_number` was only a column mapped
+  to `TEXT`, and the slot the engine deliberately leaves empty stayed empty.
+  Measured on `main` @ `2f3e79351`:
+
+  ```
+  REMOTE create      -> RESOLVED case_number=null
+  REMOTE bulkCreate  -> RESOLVED [null, null]
+  REMOTE upsert      -> RESOLVED case_number=null
+  LOCAL  create      -> RESOLVED case_number="CASE-00001"
+  ```
+
+  Nothing upstream caught it. `supports.autonumber` is `true` on this face
+  (inherited via `...super.supports`), so the engine defers generation to the
+  driver entirely and never runs its own fallback — `engine.ts` already records
+  `driver-turso` in its driver table as "inherited, no fallback path". A driver
+  face that boots and quietly fails to deliver a declared capability is the shape
+  #3724 ruled on; triage applied that ruling here on 2026-08-09 as **disposition
+  B — explicit refusal**. Implementing autonumber on the remote transport (A)
+  stays deferred for want of measured demand.
+
+  ## What changed
+
+  `TursoDriver.create` / `bulkCreate` / `upsert` now refuse, in remote mode, a
+  write that would need a record number this face cannot issue:
+
+  ```
+  NOT_IMPLEMENTED / 501
+  Object "crm_case" declares auto_number field(s) [case_number] left empty for
+  this create, and the Turso REMOTE transport does not generate record numbers. …
+  ```
+
+  `NOT_IMPLEMENTED` / 501 is the same class this package already gives an
+  aggregate function it cannot compile (#5907) or a date bucket it cannot emit
+  (#6212), for the same reason and per ADR-0112: `autonumber` is a field type
+  `@objectstack/spec` declares and this very driver's other faces generate, so the
+  caller's object definition is correct and the gap is the backend's.
+
+  The refusal is raised on `TursoDriver`, not inside `RemoteTransport`, because
+  the transport cannot see what it would need in order to decide:
+  `RemoteTransport.create(object, data)` takes no schema and caches none. The
+  driver can — `registerRemoteFieldMetadata` → `registerExternalObject` classifies
+  every field at remote schema-sync time and populates `autoNumberFields`,
+  measured live in remote mode.
+
+  ## What is deliberately NOT refused
+
+  - **A record that already carries a value in the slot.** That is the `isSystem`
+    seed replay and the `preserveAudit` historical import, which the engine
+    exempts from its strip on purpose (#5503); on this face they were, and remain,
+    written through unchanged and correctly. The generate predicate
+    (`undefined` / `null` / `''`) is `fillAutoNumberFields`' own, reused rather
+    than re-derived.
+  - **A merging upsert.** `RemoteTransport.upsert` emits
+    `INSERT … ON CONFLICT DO UPDATE`, so a row that matches keeps the number
+    already in its column — measured. Only the provably-inserting shape (no `id`,
+    no explicit conflict keys, so the transport mints a fresh id for the sole
+    merge key) is refused. An id- or conflict-key-bearing upsert that turns out to
+    insert is a known residue: classifying it needs the round trip the refusal
+    exists to avoid, and it is pinned as such in the suite.
+  - **Local and embedded-replica.** Both still generate; pinned across all three
+    faces so the refusal cannot leak onto the wrong one (#6203).
+
+  `packages/drivers/driver-turso` only. `driver-memory` / `driver-mongodb` sit
+  inside the #5499 freeze and declare no `supports.autonumber`; they take the
+  engine's own fallback path and are unrelated.
+
+### Patch Changes
+
+- e120a5a: feat(drivers): lower `count_distinct` on the SQL family (#6409)
+
+  `count_distinct` has been declared by `AggregationFunction` since the enum was
+  written, and until now no SQL backend compiled it: both faces of the SQL family
+  refused it with `NOT_IMPLEMENTED` / 501. A dashboard measure asking for a
+  deduplicated count against a SQL datasource got a capability-gap refusal for a
+  query that was already correct.
+
+  This is the ENFORCE half of #6188's split ruling (maintainer, 2026-08-07).
+  `array_agg` and `string_agg` took ADR-0049's remove leg and left the enum in
+  protocol 17 — no SQL backend compiled them and `string_agg` had no single shape
+  to lower to. `count_distinct` was deliberately kept on the other side of that
+  split, on the strength of having exactly one portable lowering. That lowering
+  now exists:
+
+  - **`driver-sql`** — `SqlDriver.aggregate` emits `count(distinct "column")`, on
+    every dialect the driver targets.
+  - **`driver-turso`** — `RemoteTransport.aggregate` emits the same, on the remote
+    path. Both faces in one change, deliberately: `TursoDriver` picks between them
+    from `url`, so a lowering that landed on one alone would mean one query
+    answering two ways depending on a connection string.
+
+  **Semantics: distinct NON-NULL values of the target column** — the standard
+  `COUNT(DISTINCT col)` answer, and the same one `objectql`'s in-memory fallback
+  and `service-analytics`'s SQL strategy already give.
+
+  **`field` is now required for `count_distinct`.** `AggregationNodeSchema` makes
+  `field` optional because `COUNT(*)` is a real spelling, but `COUNT(DISTINCT *)`
+  is a syntax error in every dialect. A `count_distinct` aggregation with no
+  `field` is refused up front with `INVALID_QUERY` / 400 and a message naming the
+  fix, rather than being sent to the database and coming back as an opaque 500.
+  Plain `count` with no `field` still means `COUNT(*)`, unchanged.
+
+  **The refusal message no longer names `count_distinct` as unsupported.** Both
+  faces build their "Compiled here:" list from their lowering table, so the
+  message now lists it among the functions that work. With this entry the declared
+  aggregate vocabulary and the SQL family's compiled vocabulary are the same set.
+
+  **New shared conformance table.** `AGGREGATION_CASES` / `AGGREGATION_ROWS`
+  (`@objectstack/spec/data`) is the standard both SQL faces are now run against —
+  values over one fixture carrying duplicates and nulls, so a lowering that lost
+  the dedup or counted NULL as a value fails on a number rather than passing a
+  SQL-string assertion. `driver-memory` and `driver-mongodb` are inside the #5499
+  freeze and are not enrolled; the table records what each would answer and why,
+  rather than omitting them.
+
+- e195092: test(verify): `checkDateBucketParity` / `checkReadCoercion` 的调用点不再 `as never`，替身的编译期检查恢复生效 (#6354)
+
+  `@objectstack/verify` 用 `BucketableDriver` / `CoercibleDriver` 两个**结构替身**表达「被测驱动确实具备这组方法」。这是一个**已发布**的契约面——仓外驱动（cloud 的 `driver-turso`）照着它实现自己的一致性测试。但全仓 **10 个**调用点无一例外把驱动 `as never` 之后再传进去，于是这件事**一次也没有被检查过**：替身存在的全部意义，被 100% 的调用点关掉了。
+
+  本次逐处删掉这 10 个 cast，一个不留：
+
+  - `packages/qa/dogfood/test/date-bucket-parity-conformance.test.ts` **6 处**（真实 `SqlDriver` / `SqliteWasmDriver` 1 处，负向控制的假驱动 5 处）
+  - `packages/drivers/driver-turso/src/date-bucket-parity.test.ts` **2 处**（`TursoDriver` 本地模式 + 那条 `week` 绊线）
+  - `packages/qa/dogfood/test/read-coercion-conformance.test.ts` **2 处**（`checkReadCoercion` 同族，同形且同样是死 cast）
+
+  **零运行时改动，零新增逃逸口**——只删不加，全程未引入任何 `as any` / `as unknown as` / `@ts-expect-error` / `as never`。三个包 typecheck 全绿：这些 cast 每一个都是死的，替身与真实驱动的形状本来就一致，被抹掉的只是**说出这件事**的能力。
+
+  代价原本是休眠的，也正因为休眠才值得修：哪天某个驱动少掉替身要求的一个方法、或替身自身长出新成员，10 个调用点一个都不会红，`checkDateBucketParity` 会在运行期抛 `driver.aggregate is not a function`，而不是在 `tsc` 里被拦下。对仓外驱动作者而言，这个替身是他们唯一能对照的形状说明书，而说明书此前从不校验。
+
+- 8825a06: drivers: `limit: 0` returns no records, on every driver and every read door
+
+  `limit: 0` was ruled in #6485 to mean **return no records**. Three of the five shipped
+  drivers did not honour it, in three different ways — and the ones that disagreed
+  returned **more** data than was requested, which on an ADR-0021 RLS read scope is
+  over-reach rather than a loose filter. Reachable since #6578: the client now puts
+  `top=0` on the wire, so the answer depended on which driver a deployment configured.
+
+  **`driver-memory` — the slice was dropped.** `find()` sliced with `if (query.limit)`,
+  truthiness, and `0` is falsy. Measured before the fix, three rows seeded:
+  `{ limit: 0 }` returned **3 of 3**, and `{ limit: 0, offset: 1 }` returned 2 — the
+  OFFSET applied and the LIMIT silently did not, which is why every paging suite stayed
+  green over it. Two more sites of the same shape in `memory-analytics.ts` (the `$limit`
+  pipeline stage and the SQL string builder) moved with it. Mingo honours `{ $limit: 0 }`
+  as zero records (measured), so presence is sufficient there.
+
+  **`driver-mongodb` — the value was forwarded faithfully, to a client that means
+  something else by it.** `buildFindOptions` already tested presence, so `0` arrived
+  exactly as written — but the MongoDB Node driver DEFINES `limit: 0` as _no limit_, so
+  the answer was still the whole collection. Fixed with an explicit short-circuit that
+  returns the empty result **before the client is consulted** (`[]` from `find`, `null`
+  from `findOne`, which had the same hole). No round trip is made for a query whose
+  answer is already known, and no future change in the upstream driver's reading of `0`
+  can move this behaviour. Deliberately `=== 0`, not `<= 0`.
+
+  **`driver-sql` — two doors disagreed with a third.** `findRows()`, the door `find()`
+  goes through, has always compiled `limit` on presence. Two others compiled it on
+  truthiness:
+
+  - `findWithWindowFunctions()` — the live window-function read door (#4286). Returns
+    rows, so this was user-visible wrong data: `{ limit: 0 }` returned the whole table.
+  - `analyzeQuery()` / `explain()` — returns a plan. It compiled `select * from "orders"`
+    where `find()` sent `... order by "id" asc limit ?`, so it explained a statement
+    other than the one that would run.
+
+  `offset` moved with `limit` at both doors for internal consistency only. That half is
+  **measured to change nothing**: knex elides a zero offset on better-sqlite3, Postgres
+  and MySQL alike. It is pinned as the no-op it is rather than reported as a fix.
+
+  **`driver-turso` remote transport — an `OFFSET` with no `LIMIT` was a syntax error.**
+  Surfaced by the new conformance control that reads with a bare offset. SQLite's grammar
+  is `LIMIT expr [OFFSET expr]`, and this compiler emitted the two clauses independently,
+  so `find(obj, { offset: N })` with no `limit` produced `near "OFFSET": syntax error` —
+  for **every** `N`, and only on the remote transport (the local half goes through knex,
+  which synthesises the `LIMIT -1` no-limit sentinel). Remote now builds the same
+  statement knex does.
+
+  Result sets only ever get **narrower**. A caller who wants every row should omit
+  `limit` rather than pass `0`.
+
+  `@objectstack/spec` gains `PAGINATION_ZERO_LIMIT_CASES`, the shared conformance
+  case-set pinning this — with controls, so "return nothing, always" cannot pass it. All
+  **five** drivers answer it, with **no DEBT rows**: future drift goes red at
+  `check:driver-conformance` rather than being discovered in production.
+
+- bee5ffe: drivers: every SQL read door routes through the tenant chokepoint (#6792)
+
+  `SqlDriver.applyTenantScope()` owns read-side tenant isolation for the whole SQL family —
+  the `tenantId` early-out, the "object has no tenant field" early-out, the NULL-org
+  platform-row rule (#2734) and the ADR-0105 D2 union posture (#3623). Its own docstring
+  said "every CRUD method routes through it". Nothing ever checked that, and it was false
+  for as long as it had existed. **Three** read doors built their query through
+  `getBuilder()` and never arrived:
+
+  - **`findWithWindowFunctions()`** — the documented #4286 window door. It returns **rows**,
+    so on a deployment where the scope would have applied (`options.tenantId` set, object
+    has a tenant field) it returned rows belonging to **every** tenant. Measured with two
+    tenants seeded plus one NULL-org platform row: `tenantId: 'org_a'` returned
+    `[a1, a2, b1, b2, p1]` here against `find()`'s `[a1, a2, p1]` — another tenant's rows,
+    handed over at the driver layer.
+  - **`analyzeQuery()` / `explain()`** — returns a **plan**, not rows, so this is a smaller
+    fix and it is made on its own merits rather than folded into the one above. It is the
+    same defect #6577 fixed on these two methods one builder line lower: a plan is only
+    worth reading if it explains the statement `find()` would actually run, and a missing
+    tenant predicate changes selectivity and therefore which index the planner picks.
+    Compiled `select * from account` where `find()` sent the `organization_id` clause.
+  - **`distinct()`** — returns one column's **values** for every tenant. This one was in no
+    card. #6792 states the opposite, listing `distinct` among the scoped call sites; the
+    13th read site is `aggregate()`. It was found by measuring the invariant rather than
+    re-reading it.
+
+  All three now call `applyTenantScope()` beside their `getBuilder()` line, the position
+  `findRows()` uses. They route through the chokepoint rather than re-deriving a predicate:
+  a local equality would silently drop NULL-org platform rows (#2734) and collapse group
+  reads to active-org reach (#3623). Both of the chokepoint's early-outs are inherited
+  unchanged, so an unscoped admin/seed read (no `tenantId`) and any object without a tenant
+  field behave exactly as before.
+
+  **The durable half is a gate, not the three lines.** `pnpm check:tenant-chokepoint`
+  (`scripts/check-tenant-chokepoint.mjs`, wired into `.github/workflows/lint.yml`) re-derives
+  the invariant from the AST across the `SqlDriver` family on every run: a method that builds
+  through `getBuilder(object, options)` must call `applyTenantScope()` on that builder, or
+  carry a written exemption. Insert builders are exempt structurally — write-side tenancy is
+  `injectTenantOnInsert` — rather than by a name list. It is keyed on the **builder** and not
+  on the method signature, because the signature criterion the card sketches ("takes
+  `(object, …, options)` and returns rows") misses `distinct` (no `query` parameter) and
+  `analyzeQuery` (returns a plan). Verified red against the pre-fix tree, red against a
+  newly-added unscoped door, and silent once that door is scoped.
+
+  The chokepoint docstring no longer asserts the invariant; it names the gate that proves it.
+
+  If you call these doors directly on a multi-tenant deployment, pass `options.tenantId` as
+  you would to `find()` — that is what now takes effect. Callers that never passed it are
+  unaffected; that remains the documented unscoped/admin path.
+
+- 939f579: drivers(sql,turso): 聚合函数拒收带上 ADR-0112 信封,并把两类条件分开措辞
+
+  `SqlDriver.mapAggregateFunc()` 与 `RemoteTransport.aggregate()` 此前对同一条件各抛一个裸
+  `Error`(`code`/`status` 皆 `undefined`),`mapDataError` 因此落默认分支——一条本该 4xx 的
+  调用方错误以不透明 500 到达客户端。两处同时改,同一信封体例、首句逐字一致(#5240):
+
+  - **协议未声明的函数名**(如 `median`)→ `INVALID_QUERY` / 400。这正是协议门
+    (`metadata-protocol` 的 `invalidQueryError`,#4254)对同一条件已经给出的码,于是
+    进程内调用方与 REST 调用方读到同一个答案。
+  - **协议已声明、本后端编不出**(`count_distinct` / `array_agg` / `string_agg`)→
+    `NOT_IMPLEMENTED` / 501。这是能力缺口而不是调用方的错(`driver-mongodb` 编得出这三个),
+    措辞明确说明查询拼写无误,不把作者说成打错字。
+
+  两面都只改拒收的身份:编得出的五个函数生成的 SQL 逐字节不变。
+
+- 67e935c: drivers(turso): remote 聚合函数名不再大小写归一化,两面只认协议声明的小写拼写 (#6203)
+
+  `TursoDriver` 按连接串 `url` 选面:本地/副本继承 `SqlDriver`,远程委派 `RemoteTransport`。
+  两面此前对聚合函数名的归一化不一致 —— remote 先 `.toLowerCase()` 再查自己的编译表,local
+  拿到什么查什么。于是同一个驱动、同一条查询,答案取决于连接串:
+
+  ```
+  COUNT   REMOTE -> RESOLVED "SELECT count(\"stage\") AS \"n\" FROM \"deal\""
+          LOCAL  -> THREW    INVALID_QUERY / 400
+  ```
+
+  本次删掉 remote 侧的 `.toLowerCase()`。`AggregationFunction` 是**大小写敏感**的 `z.enum`
+  (`AggregationFunction.parse('COUNT')` 直接抛错),`COUNT` 是协议从未声明的拼写,remote
+  多认的是一种私有方言;按契约优先(PD#12)收紧消费端,而不是把方言固化成第二套事实契约。
+
+  **升级说明(user-visible)**:remote 连接不再接受大写或混合大小写的聚合函数名。
+  `COUNT` / `Count` / `SUM` 等此前在 remote 能编出 SQL 的拼写,现在与 local 一样统一落
+  `INVALID_QUERY` / 400(「不是已声明的聚合函数」)。**作者侧修法是改用小写** —— 把
+  `aggregations[].function` 写成协议声明的 `count` / `sum` / `avg` / `min` / `max`
+  (以及已声明但本后端未实现的 `count_distinct` / `array_agg` / `string_agg`)。
+
+  经 REST/协议门进来的查询不受影响:大写拼写在 `AggregationNodeSchema` 就被拒,到不了驱动;
+  仓内亦无任何发送大写拼写的调用方。受影响的只有绕过 spec 校验、直接调用远程驱动且依赖该
+  归一化的进程内调用方。
+
+  `#5907` 落地的拒收信封(第 1 类 `INVALID_QUERY`/400、第 2 类 `NOT_IMPLEMENTED`/501、
+  按调用方原始拼写分类)与默认 alias 的拼法均未改动。
+
+- fa2d3b7: fix(driver-turso): narrow every override's `options` from `any` to `DriverOptions` (#6402)
+
+  `TursoDriver` overrides 17 methods that take an `options` argument, and every one
+  of them declared `options?: any` while the base it forwards to (`SqlDriver`, and
+  behind it the `IDataDriver` contract) declared `DriverOptions`. The keys
+  `DriverOptions` names — `bypassTenantAudit`, `tenantId`, `transaction`,
+  `accessible_org_ids`, `skipCache`, `timeout`, … — were therefore unchecked at all
+  17 doors.
+
+  The argument is #5181's, one axis over. An internal caller that misspells
+  `bypassTenantAudit` gets no runtime complaint: the typo'd key is simply never
+  read, the write proceeds unaudited, and nothing anywhere says so. `tsc` is the
+  only channel that ever objects, and `any` had switched it off. Nothing is known
+  to have gone wrong through this gap — it is closed because the door was open, not
+  because someone walked through it.
+
+  **Why all 17 at once.** The shape was character-identical across every override,
+  so narrowing a subset would read to the next person as a _verdict_ on the rest.
+  That is not hypothetical: #6075 (PR #6210) narrowed `count`'s `query` and
+  deliberately left its `options`, and #6212 batch B did the same on `aggregate` —
+  each leaving a comment saying so. Those comments are now discharged. The three
+  prior narrowings (#5181 / PR #6076, #6075 / PR #6210, #6212) each closed the
+  `query` axis; this closes the `options` axis, which had never been touched.
+
+  **Consumer impact.** Annotation-only — no runtime behaviour changes, and the full
+  monorepo typecheck is unchanged at 125/125 green, so no caller in this repo was
+  passing an off-contract value. It is a `patch` rather than a docs-only change
+  because the narrowed signatures are public: a downstream TypeScript consumer
+  holding a `TursoDriver`-typed reference and passing an `options` value that is not
+  a `DriverOptions` will now see a compile error where it previously saw none. That
+  error is the point — the value was already being ignored by the driver.
+
+- Updated dependencies [3d5c090]
+- Updated dependencies [e5bd768]
+- Updated dependencies [e027b3e]
+- Updated dependencies [c2429b0]
+- Updated dependencies [445a0c2]
+- Updated dependencies [f6609e6]
+- Updated dependencies [a70358a]
+- Updated dependencies [97e7e3c]
+- Updated dependencies [8828b9e]
+- Updated dependencies [53068c1]
+- Updated dependencies [ee58392]
+- Updated dependencies [f16e54e]
+- Updated dependencies [06be54e]
+- Updated dependencies [29e28a3]
+- Updated dependencies [259459d]
+- Updated dependencies [3f7f14e]
+- Updated dependencies [6968885]
+- Updated dependencies [eaed61f]
+- Updated dependencies [debe2f6]
+- Updated dependencies [97b0798]
+- Updated dependencies [43a7a8d]
+- Updated dependencies [73f69dc]
+- Updated dependencies [04c56aa]
+- Updated dependencies [b3efeb7]
+- Updated dependencies [ddd075a]
+- Updated dependencies [88154be]
+- Updated dependencies [db12b88]
+- Updated dependencies [6f6fec7]
+- Updated dependencies [7d1ff75]
+- Updated dependencies [e8dc61e]
+- Updated dependencies [2f3e793]
+- Updated dependencies [d8e8d9c]
+- Updated dependencies [94e749b]
+- Updated dependencies [ea1d916]
+- Updated dependencies [ae31a19]
+- Updated dependencies [e0f300b]
+- Updated dependencies [62b6a2f]
+- Updated dependencies [5b4780b]
+- Updated dependencies [a933452]
+- Updated dependencies [8140915]
+- Updated dependencies [7b48cf9]
+- Updated dependencies [b5404f4]
+- Updated dependencies [f764691]
+- Updated dependencies [e120a5a]
+- Updated dependencies [e650d67]
+- Updated dependencies [04476e7]
+- Updated dependencies [79228cd]
+- Updated dependencies [b3363e9]
+- Updated dependencies [2ef1807]
+- Updated dependencies [d03fe25]
+- Updated dependencies [2672f85]
+- Updated dependencies [11066f6]
+- Updated dependencies [916af17]
+- Updated dependencies [84c86fb]
+- Updated dependencies [2a2a9fb]
+- Updated dependencies [a2e157c]
+- Updated dependencies [95c4227]
+- Updated dependencies [2a61116]
+- Updated dependencies [d4df105]
+- Updated dependencies [d367f03]
+- Updated dependencies [45e711a]
+- Updated dependencies [465a0fa]
+- Updated dependencies [6de592c]
+- Updated dependencies [d254421]
+- Updated dependencies [e2798fa]
+- Updated dependencies [0fd8556]
+- Updated dependencies [74155c7]
+- Updated dependencies [6908830]
+- Updated dependencies [8b06bba]
+- Updated dependencies [4c54037]
+- Updated dependencies [0f7157b]
+- Updated dependencies [d9bef45]
+- Updated dependencies [f549a0d]
+- Updated dependencies [82da264]
+- Updated dependencies [f586f1a]
+- Updated dependencies [9b9b70f]
+- Updated dependencies [f5a9bc2]
+- Updated dependencies [881a3cc]
+- Updated dependencies [ad6317b]
+- Updated dependencies [8a88885]
+- Updated dependencies [5f7669e]
+- Updated dependencies [becbe53]
+- Updated dependencies [b127c8b]
+- Updated dependencies [a80302a]
+- Updated dependencies [474f131]
+- Updated dependencies [050cd82]
+- Updated dependencies [4d552af]
+- Updated dependencies [44d677c]
+- Updated dependencies [c32944d]
+- Updated dependencies [1dd780f]
+- Updated dependencies [c8d6f6e]
+- Updated dependencies [92a67f2]
+- Updated dependencies [9136327]
+- Updated dependencies [bf0ae99]
+- Updated dependencies [cb3b6cd]
+- Updated dependencies [73b7234]
+- Updated dependencies [d2b97c3]
+- Updated dependencies [59b794f]
+- Updated dependencies [fc3a36a]
+- Updated dependencies [69787f0]
+- Updated dependencies [5d022a1]
+- Updated dependencies [042b9ee]
+- Updated dependencies [f549a0d]
+- Updated dependencies [a36db28]
+- Updated dependencies [3f8817a]
+- Updated dependencies [a2443e3]
+- Updated dependencies [e1554b1]
+- Updated dependencies [4856789]
+- Updated dependencies [c3f4916]
+- Updated dependencies [33e0385]
+- Updated dependencies [2205363]
+- Updated dependencies [09fe58d]
+- Updated dependencies [d0a5ceb]
+- Updated dependencies [ef678d0]
+- Updated dependencies [e18a162]
+- Updated dependencies [d6d1a50]
+- Updated dependencies [d127ff0]
+- Updated dependencies [9b86cf6]
+- Updated dependencies [8825a06]
+- Updated dependencies [5087ac6]
+- Updated dependencies [2d1ddf0]
+- Updated dependencies [354b00f]
+- Updated dependencies [3de535b]
+- Updated dependencies [fe2e15a]
+- Updated dependencies [6146b67]
+- Updated dependencies [c6b6bb4]
+- Updated dependencies [2f59da0]
+- Updated dependencies [8ad609c]
+- Updated dependencies [bbee302]
+- Updated dependencies [08863dd]
+- Updated dependencies [56664f5]
+- Updated dependencies [31cbe90]
+- Updated dependencies [90bbf25]
+- Updated dependencies [eb91eba]
+- Updated dependencies [42da73d]
+- Updated dependencies [643b7c7]
+- Updated dependencies [d0d5205]
+- Updated dependencies [1a15893]
+- Updated dependencies [b70e534]
+- Updated dependencies [2233a85]
+- Updated dependencies [62dd69a]
+- Updated dependencies [e15e679]
+- Updated dependencies [2ab1257]
+- Updated dependencies [4cc4fb7]
+- Updated dependencies [28d1eb7]
+- Updated dependencies [2c26040]
+- Updated dependencies [f758cec]
+- Updated dependencies [78f0be8]
+- Updated dependencies [35f7fb4]
+- Updated dependencies [a5302c7]
+- Updated dependencies [82397b6]
+- Updated dependencies [7084313]
+- Updated dependencies [0e043d8]
+- Updated dependencies [dadd1ad]
+- Updated dependencies [2f2e63c]
+- Updated dependencies [486d526]
+- Updated dependencies [89d7b35]
+- Updated dependencies [85ec26d]
+- Updated dependencies [f6476fc]
+- Updated dependencies [4ac12ef]
+- Updated dependencies [b88f5e8]
+- Updated dependencies [42cc219]
+- Updated dependencies [d7e0b42]
+- Updated dependencies [3510e4a]
+- Updated dependencies [aa4b90d]
+- Updated dependencies [54299ca]
+- Updated dependencies [3264516]
+- Updated dependencies [dc61def]
+- Updated dependencies [251e888]
+- Updated dependencies [183b4c4]
+- Updated dependencies [2fdb36e]
+- Updated dependencies [62159bd]
+- Updated dependencies [d48aad5]
+- Updated dependencies [20526f5]
+- Updated dependencies [c5eef1d]
+- Updated dependencies [e0f300b]
+- Updated dependencies [761a0ba]
+- Updated dependencies [be87153]
+- Updated dependencies [60f0dd8]
+- Updated dependencies [a87c5cd]
+- Updated dependencies [a47f338]
+- Updated dependencies [bee5ffe]
+- Updated dependencies [3172831]
+- Updated dependencies [939f579]
+- Updated dependencies [2598216]
+- Updated dependencies [2c7e62d]
+- Updated dependencies [eb7613c]
+- Updated dependencies [ecc9110]
+- Updated dependencies [f7bd4e2]
+- Updated dependencies [361bd5b]
+- Updated dependencies [1818998]
+- Updated dependencies [09ee21c]
+- Updated dependencies [f549a0d]
+- Updated dependencies [3fc2e48]
+- Updated dependencies [e8f435c]
+- Updated dependencies [41610f6]
+  - @objectstack/spec@17.0.0-rc.6
+  - @objectstack/driver-sql@17.0.0-rc.6
+  - @objectstack/core@17.0.0-rc.6
+
 ## 17.0.0-rc.5
 
 ### Patch Changes

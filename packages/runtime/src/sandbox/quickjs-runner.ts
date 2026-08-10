@@ -226,7 +226,7 @@ export class QuickJSScriptRunner implements ScriptRunner {
     // closes it on commit/rollback. The execute() finally consults it to roll
     // back a transaction the body left open (threw mid-tx, or timed out before
     // its commit/rollback settled).
-    const txState: TxState = { api: null, handle: null, open: false };
+    const txState: TxState = { api: null, handle: null, open: false, owned: true };
 
     // Every host call hands the VM a `vm.newPromise()` deferred; the newPromise
     // contract requires each be `dispose()`d. On the settled path the runner
@@ -432,7 +432,14 @@ export class QuickJSScriptRunner implements ScriptRunner {
       // connection isn't leaked with a half-applied transaction. Best-effort:
       // the script result (success or the original error) is already decided;
       // a rollback failure here must not mask it.
-      if (txState.open && txState.handle != null) {
+      //
+      // Only for a transaction this runner OPENED (#6406). A JOINED one belongs
+      // to the host `engine.transaction()` that is still in flight above us:
+      // rolling it back from a VM teardown would discard writes the outer caller
+      // has not finished with. There is nothing to leak either — the connection
+      // is the outer one, and the error that cut this body off propagates to the
+      // outer owner, which decides commit vs rollback for the whole unit.
+      if (txState.open && txState.owned && txState.handle != null) {
         const apiTx = args.ctx.api as Record<string, unknown> | undefined;
         const rollback = apiTx?.rollbackTransaction;
         if (typeof rollback === 'function') {
@@ -533,10 +540,17 @@ export class QuickJSScriptRunner implements ScriptRunner {
     //
     // The handle is threaded EXPLICITLY through `txState` rather than via the
     // engine's ambient AsyncLocalStorage: the body runs across many host
-    // event-loop turns, and ALS context does not survive those `setImmediate`
-    // boundaries. While a tx is open, `installApiMethod` resolves its repository
-    // from `txState.api` (the tx-scoped ScopedContext) so every op reuses the
-    // one connection.
+    // event-loop turns with no single closure spanning begin→commit, so there
+    // is nothing to hand `txStore.run` and a transaction opened here can never
+    // be published into that store. While a tx is open, `installApiMethod`
+    // resolves its repository from `txState.api` (the tx-scoped ScopedContext)
+    // so every op reuses the one connection.
+    //
+    // Reading the store is a different matter, and is what `beginTransaction`
+    // does on the engine side to JOIN a host transaction already in flight
+    // (ADR-0067 D2, #6406) — a hook body that runs inside `engine.transaction()`
+    // must not open a second driver transaction. `txState.owned` carries that
+    // verdict back to the three close paths below.
     const apiTx = ctx.api as Record<string, unknown> | undefined;
     const installTxLeaf = (name: string, run: () => Promise<void>): void => {
       const fn = vm.newFunction(name, () => {
@@ -569,11 +583,17 @@ export class QuickJSScriptRunner implements ScriptRunner {
     installTxLeaf('__txBegin', async () => {
       if (txState.open) throw new SandboxError('nested ctx.api.transaction is not supported');
       const begin = apiTx?.beginTransaction;
+      txState.owned = true;
       if (typeof begin === 'function') {
-        const r = (await (begin as () => Promise<{ ctx: unknown; handle: unknown } | null>).call(apiTx)) ?? null;
+        const r = (await (begin as () => Promise<{ ctx: unknown; handle: unknown; owned?: boolean } | null>).call(apiTx)) ?? null;
         if (r) {
           txState.api = r.ctx as Record<string, unknown>;
           txState.handle = r.handle;
+          // ADR-0067 D2 (#6406): `begin` JOINS a host transaction that is
+          // already open rather than nesting a second driver one, and says so.
+          // Absent (a foreign `ctx.api` that predates the signal) reads as
+          // owned — the same answer this file gave before the bit existed.
+          txState.owned = r.owned !== false;
         }
       }
       // else (or null result): driver without tx support → degrade to
@@ -582,23 +602,32 @@ export class QuickJSScriptRunner implements ScriptRunner {
     });
 
     installTxLeaf('__txCommit', async () => {
-      const { handle, open } = txState;
+      const { handle, open, owned } = txState;
       txState.api = null;
       txState.handle = null;
       txState.open = false;
+      txState.owned = true;
       const commit = apiTx?.commitTransaction;
-      if (open && handle != null && typeof commit === 'function') {
+      // A JOINED transaction is committed by whoever opened it, not here
+      // (#6406): committing early would land the body's writes outside the
+      // outer caller's control and let them survive its rollback.
+      if (open && owned && handle != null && typeof commit === 'function') {
         await (commit as (h: unknown) => Promise<void>).call(apiTx, handle);
       }
     });
 
     installTxLeaf('__txRollback', async () => {
-      const { handle, open } = txState;
+      const { handle, open, owned } = txState;
       txState.api = null;
       txState.handle = null;
       txState.open = false;
+      txState.owned = true;
       const rollback = apiTx?.rollbackTransaction;
-      if (open && handle != null && typeof rollback === 'function') {
+      // Joined: abstain here too, exactly as the callback faces do (#6406).
+      // This leaf is reached from the `ctx.api.transaction` sugar's catch
+      // branch, which RE-THROWS afterwards, so the body's failure travels out
+      // to the host and the outer owner rolls the whole unit of work back.
+      if (open && owned && handle != null && typeof rollback === 'function') {
         await (rollback as (h: unknown) => Promise<void>).call(apiTx, handle);
       }
     });
@@ -756,6 +785,18 @@ interface TxState {
   api: Record<string, unknown> | null;
   handle: unknown;
   open: boolean;
+  /**
+   * Did `__txBegin` OPEN this transaction, or JOIN one the host already had
+   * open (ADR-0067 D2, #6406)? `false` means the outer caller owns the one and
+   * only commit/rollback, so every close path here abstains — the commit leaf,
+   * the rollback leaf, and the teardown cleanup in `execute`'s finally.
+   *
+   * `ScopedContext` abstains for a joined handle on its own side too, so a
+   * caller that ignored this bit still could not close someone else's
+   * transaction. Honouring it here is what makes THIS file's intent readable:
+   * the runner closes what the runner opened.
+   */
+  owned: boolean;
 }
 
 /**

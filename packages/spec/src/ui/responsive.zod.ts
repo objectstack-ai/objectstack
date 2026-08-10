@@ -120,6 +120,7 @@ export const BreakpointColumnMapSchema = lazySchema(() => strictObject(
     '2xl': z.number().min(1).max(12).optional(),
   },
 ).describe('Grid columns per breakpoint (1-12)'));
+export type BreakpointColumnMap = z.input<typeof BreakpointColumnMapSchema>;
 
 /**
  * Breakpoint Order Map Schema
@@ -141,6 +142,7 @@ export const BreakpointOrderMapSchema = lazySchema(() => strictObject(
     '2xl': z.number().optional(),
   },
 ).describe('Display order per breakpoint'));
+export type BreakpointOrderMap = z.input<typeof BreakpointOrderMapSchema>;
 
 /**
  * A bare breakpoint name written at the `responsive` LEVEL rather than inside

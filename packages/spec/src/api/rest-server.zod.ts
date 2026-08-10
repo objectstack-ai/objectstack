@@ -127,7 +127,8 @@ export const RestApiConfigSchema = lazySchema(() => z.object({
     + 'is now always denied — auth is a kernel concern, not a deployment posture. Delete the key. '
     + 'To publish something publicly, declare it: a public form view (`sharing.allowAnonymous`), a '
     + "share link, or `book.audience: 'public'` — each derives its own narrow authorization instead of "
-    + 'opening the whole data plane.',
+    + 'opening the whole data plane. '
+    + 'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
   ),
 
   /**
@@ -290,7 +291,30 @@ export const MetadataEndpointsConfigSchema = lazySchema(() => z.object({
    * Cache TTL in seconds
    */
   cacheTtl: z.number().int().default(3600).describe('Cache TTL in seconds'),
-  
+
+  /**
+   * [ADR-0106 D8] Per-caller field-level masking of the OBJECT SCHEMAS this
+   * server serves from `/meta` and `/metadata`.
+   *
+   * Default **on**: an object schema is projected onto the fields the CALLING
+   * user may read, so a field they cannot read does not appear at all — not its
+   * name, label, type, picklist options, formula, `visibleWhen` predicate,
+   * `defaultValue`, nor the `requiredPermissions` capability guarding it.
+   *
+   * `false` opts this server out and serves the full schema to every
+   * authenticated caller, as releases before ADR-0106 did. The change is
+   * **disclosure only**: the data plane masks values and refuses forbidden
+   * writes either way, and the console reads field affordances from
+   * `/auth/me/permissions`, so toggling it never changes UI correctness.
+   *
+   * Deployment-wide counterpart: `OS_ALLOW_UNMASKED_OBJECT_METADATA=1`, which
+   * also covers the runtime `/metadata` dispatcher (that path has no per-server
+   * REST config to read). Either opt-out disables the mask; neither is needed
+   * to keep it on.
+   */
+  maskObjectFields: z.boolean().default(true)
+    .describe('[ADR-0106 D8] Mask served object schemas to the caller\'s readable fields'),
+
   /**
    * Enable specific metadata endpoints
    */

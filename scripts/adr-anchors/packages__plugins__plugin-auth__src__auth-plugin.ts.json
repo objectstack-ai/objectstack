@@ -1,0 +1,7 @@
+{
+  "file": "packages/plugins/plugin-auth/src/auth-plugin.ts",
+  "adrs": [
+    "ADR-0108"
+  ],
+  "invariant": "Nothing widens the `sys_member.role` / `sys_invitation.role` selects at boot, and there is no organization-role derivation hook. The objects are registered as authored."
+}

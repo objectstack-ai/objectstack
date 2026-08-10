@@ -55,7 +55,9 @@
  * load-bearing.
  */
 
-import type { ISharingService, SharingExecutionContext } from '@objectstack/spec/contracts';
+import { withoutOperationPrivateKeys } from '@objectstack/core';
+import type { ISharingService } from '@objectstack/spec/contracts';
+import type { ExecutionContext } from '@objectstack/spec/kernel';
 
 /** Minimal engine surface these installers need — duck-typed (like
  * service-storage's attachment seams) so tests can fake it and so plugin-audit
@@ -179,18 +181,75 @@ function asIdList(id: unknown): Array<string | number> | null {
   return null;
 }
 
+/**
+ * Why this module strips the operation-private keys before forwarding an
+ * envelope — the LOCAL half of the argument.
+ *
+ * plugin-security's middleware stamps `__`-prefixed keys onto the operation
+ * context resolved for the object of the CURRENT operation, which here is
+ * `sys_comment`. Every gate in this module asks about the PARENT record's
+ * object, never about `sys_comment`, so carrying any of them across is one
+ * object's widening applied to another object's question.
+ *
+ * [#7141] The general rule — which keys those are, why they are dropped by
+ * PREFIX rather than by a name list, and why the copy is load-bearing in both
+ * directions — is `withoutOperationPrivateKeys` in `@objectstack/core`. It was
+ * hand-copied into this file, `service-storage`'s attachment kit and
+ * `plugin-reports` before #7284 gave it one owner; ⛔ import it, never re-derive
+ * it locally (`operation-private-keys.pin.test.ts` catches the fourth copy).
+ */
+
 /** The caller's ExecutionContext rides on the operation options — the session
- * snapshot lacks `permissions`, which sharing bypasses need. */
-function callerContext(ctx: any): SharingExecutionContext {
+ * snapshot lacks `permissions`, which sharing bypasses need.
+ *
+ * [#7136] Typed as the full envelope, which is what `ISharingService` declares
+ * for every parameter this value is handed to (#6523 / the #6206 ruling).
+ *
+ * [#7141] And FORWARDED as the full envelope, which is the other half of that
+ * ruling: a caller "MUST NOT rebuild a subset of it". The five-field projection
+ * this replaced (`userId` / `tenantId` / `positions` / `permissions` /
+ * `isSystem`) was doing two jobs at once, and only one of them was correct:
+ *
+ *  - dropping the middleware-private keys — CORRECT, and preserved above by
+ *    {@link withoutOperationPrivateKeys}: `return exec;` would hand
+ *    `sys_comment`'s access depth to the parent object's owner-match;
+ *  - dropping the PRINCIPAL fields — the defect. Two of them decide the
+ *    verdict the gate then trusts:
+ *    * `onBehalfOf` — `ISecurityService.hasWriteBypass`, the `modifyAllRecords`
+ *      probe `SharingService.canEdit` consults last, is documented to fail
+ *      CLOSED on a delegated context and implements that by reading exactly
+ *      `context?.onBehalfOf?.userId` (`security-plugin.ts`). Stripped, that
+ *      guard could never fire here, and a `/mcp` OAuth agent principal (which
+ *      `resolve-execution-context.ts` builds WITH the delegation link) reached
+ *      the bypass probe looking like an ordinary direct call.
+ *    * `principalKind` — `resolvePermissionSetsForContext` keys the ADR-0090
+ *      D10 rule "an agent's grants are EXACTLY its scope-derived ceiling" on
+ *      `principalKind === 'agent'`; stripped, the additive human baseline
+ *      (`member_default`) was appended to an agent's ceiling on this path, so
+ *      the sets the bypass probe evaluated were a SUPERSET of what the user
+ *      consented to.
+ *
+ *    `systemPermissions`, `accessible_org_ids`, `posture`, `audience` and
+ *    `rlsMembership` were dropped by the same projection; they are forwarded
+ *    now for the same reason — the envelope is the contract's unit.
+ *
+ * Note what deliberately did NOT change: no access DEPTH is synthesised for the
+ * parent object. Absent depth leaves the sharing owner-match at its narrowest
+ * (`own`) — the safe direction, and byte-for-byte the behaviour the projection
+ * produced.
+ *
+ * [#7144] That is now the RULED shape, not a pending question: the maintainer's
+ * ruling of 2026-08-10 keeps these gates at `own`, deliberately tighter than
+ * the parent's real edit authority. The reasoning — including the fail-open in
+ * `ISecurityService.resolveWriteScope` that makes the widening unsafe to wire
+ * today — is recorded once on the contract that owns this gate's meaning
+ * (`@objectstack/spec` — `ISharingService`, "Write DEPTH is an input the CALLER
+ * supplies"), because the `sys_attachment` kit reaches the same gate from
+ * another package; it is not restated here. */
+function callerContext(ctx: any): ExecutionContext {
   const exec = ctx?.input?.options?.context;
   if (exec && typeof exec === 'object') {
-    return {
-      userId: exec.userId,
-      tenantId: exec.tenantId,
-      positions: exec.positions,
-      permissions: exec.permissions,
-      isSystem: exec.isSystem,
-    };
+    return withoutOperationPrivateKeys(exec as Record<string, unknown>);
   }
   const s = ctx?.session ?? {};
   return { userId: s.userId, tenantId: s.tenantId ?? s.organizationId, positions: s.positions };
@@ -488,6 +547,17 @@ async function computeThreadVisibilityFilter(
 
   // 2. Per parent object, the visible id subset via the CALLER's context —
   //    the parent object's own RLS/OWD/sharing applies.
+  //
+  //    [#7141] The caller's envelope, minus the operation-private keys: this
+  //    probe reads a DIFFERENT object than the one the middleware resolved its
+  //    depth for, and `__readScope` / `__expandRead` are widening inputs that
+  //    would arrive attached to the wrong question (the security middleware
+  //    re-stamps the depth for THIS object when it resolves any set, so the
+  //    only thing dropping them can do is leave the owner-match at its
+  //    narrowest — the safe direction). Same rule as `callerContext` above.
+  const callerEnvelope = withoutOperationPrivateKeys(
+    (ctx.context ?? {}) as Record<string, unknown>,
+  );
   const visibleByObject = new Map<string, Set<string>>();
   for (const [parentObject, idSet] of byObject) {
     const ids = [...idSet];
@@ -497,7 +567,7 @@ async function computeThreadVisibilityFilter(
         where: { id: { $in: ids } },
         fields: ['id'],
         limit: ids.length,
-        context: { ...ctx.context },
+        context: { ...callerEnvelope },
       });
       visible = rows.map((r) => String(r.id)).filter(Boolean);
     } catch {

@@ -14,29 +14,12 @@ Field Type Enum
 ## TypeScript Usage
 
 ```typescript
-import { AddressSchema, CurrencyConfigSchema, CurrencyValueSchema, FieldSchema, FieldType, LocationCoordinatesSchema, SelectOptionSchema, UniqueScopeSchema } from '@objectstack/spec/data';
-import type { Address, CurrencyConfig, CurrencyValue, Field, FieldType, LocationCoordinates, SelectOption, UniqueScope } from '@objectstack/spec/data';
+import { CurrencyConfigSchema, CurrencyValueSchema, FieldSchema, FieldType, LocationCoordinatesSchema, SelectOptionSchema, UniqueScopeSchema } from '@objectstack/spec/data';
+import type { CurrencyConfig, CurrencyValue, Field, FieldType, LocationCoordinates, SelectOption, UniqueScope } from '@objectstack/spec/data';
 
 // Validate data
-const result = AddressSchema.parse(data);
+const result = CurrencyConfigSchema.parse(data);
 ```
-
----
-
-## Address
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **street** | `string` | optional | Street address |
-| **city** | `string` | optional | City name |
-| **state** | `string` | optional | State/Province |
-| **postalCode** | `string` | optional | Postal/ZIP code |
-| **country** | `string` | optional | Country name or code |
-| **countryCode** | `string` | optional | ISO country code (e.g., US, GB) |
-| **formatted** | `string` | optional | Formatted address string |
-
 
 ---
 
@@ -81,7 +64,7 @@ const result = AddressSchema.parse(data);
 | **searchable** | `boolean` | optional | Is searchable |
 | **multiple** | `boolean` | optional | Allow multiple values (Stores as Array/JSON). Applicable for select, lookup, file, image. |
 | **unique** | `boolean \| 'global' \| 'organization'` | optional | Unique constraint and its scope (ADR-0120). 'organization' = one holder per organization (NULL-safe composite with the organization key part on organization-scoped objects) — prefer this explicit spelling in new code; true = same per-organization scope (positional synonym, stays valid); 'global' = one holder across the whole installation. 'tenant'/'org' are rejected — the word is 'organization' |
-| **defaultValue** | `any` | optional | Default value |
+| **defaultValue** | `any` | optional | Default applied on INSERT when the field is omitted or null (`''` is a real value, not absence). Three legal shapes (#7127), discriminated in the engine's own order: a CEL Expression envelope `{ dialect: 'cel', source: 'today()' }` (accepted structurally; result type is a runtime concern); a runtime TOKEN — `NOW()` on `datetime`/`date`/`time` only, `current_user` on `user` or `lookup` with `reference: 'sys_user'` only, neither on a multi-value field; or a LITERAL, which must satisfy this field's own stored value contract (ADR-0104 D1 `valueSchemaFor`). Anything else is refused at parse time with a prescriptive message. |
 | **maxLength** | `number` | optional | Max character length |
 | **minLength** | `number` | optional | Min character length |
 | **precision** | `number` | optional | Total digits |
@@ -119,16 +102,16 @@ const result = AddressSchema.parse(data);
 | **visibleWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Predicate (CEL) — field is shown only when TRUE (else hidden). e.g. P`record.type == 'invoice'` |
 | **readonlyWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Predicate (CEL) — field is read-only when TRUE. e.g. P`record.status == 'paid'` |
 | **requiredWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Predicate (CEL) — field is required when TRUE. The only slot; the `conditionalRequired` alias was removed in protocol 17 (#3855). |
-| **conditionalRequired** | `never` | optional | [REMOVED] `conditionalRequired` was removed in @objectstack/spec 17 (#3855) — use `requiredWhen`. Rename the key; the value (a CEL predicate) is unchanged. Run `os migrate meta --from 16` to rewrite it automatically. |
+| **conditionalRequired** | `never` | optional | [REMOVED] `conditionalRequired` was removed in @objectstack/spec 17 (#3855) — use `requiredWhen`. Rename the key; the value (a CEL predicate) is unchanged. Run `os migrate meta --from 16` to rewrite existing sources automatically. |
 | **widget** | `string` | optional | Form widget override — names a registered field component (resolved as `field:<widget>`) to render this field instead of the `type` default. Degrades to the `type` renderer when unregistered. e.g. "object-ref", "filter-condition", "recipient-picker". |
 | **hidden** | `boolean` | optional | Hidden from default UI |
-| **readonly** | `boolean` | optional | Read-only — never editable in forms, AND server-enforced on BOTH write paths: a non-system write to this field is silently dropped from the payload on UPDATE (#2948/#3003) and on INSERT (#3043; a create can no longer directly seed e.g. `approval_status: "approved"`), symmetric with `readonlyWhen`. A stripped INSERT field still falls back to its `defaultValue`. Exempt from the strip: `isSystem` writes (seed replay, migration), and an opt-in "historical" import (`preserveAudit`, #3493) — which admits a whitelist (the audit/timestamp family plus author-declared business `readonly` fields). A normal (non-system) import is NOT system-context and still strips. |
+| **readonly** | `boolean` | optional | Read-only — never editable in forms, AND server-enforced on BOTH write paths: a non-system write to this field is silently dropped from the payload on UPDATE (#2948/#3003) and on INSERT (#3043; a create can no longer directly seed e.g. `approval_status: "approved"`), symmetric with `readonlyWhen`. A stripped INSERT field still falls back to its `defaultValue`. Exempt from the strip on BOTH paths: `isSystem` writes (seed replay, migration). Exempt on the UPDATE path ONLY: an opt-in "historical" import (`preserveAudit`, #3493) — which admits a whitelist (the audit/timestamp family plus author-declared business `readonly` fields). On INSERT the exemption does NOT apply (#6640): a non-system create that requests `preserveAudit` still has its readonly fields stripped, and is warned loudly that the exemption is UPDATE-only — replaying archival readonly facts on create requires a system context. A normal (non-system) import is NOT system-context and still strips. |
 | **requiredPermissions** | `string[]` | optional | [ADR-0066 D3] Capabilities required to read/edit this field (mask on read, deny on write; AND-gate). |
 | **ackPlaintextMasking** | `boolean` | optional | [ADR-0100] Affirm a generic `password` field's plaintext-at-rest / masked-on-read contract is intended, silencing the author-time warning (#3420). No effect on non-password fields. |
 | **system** | `boolean` | optional | Auto-injected system/audit field (e.g. created_at, updated_by, organization_id). Tools that surface system fields separately from author-declared business fields should branch on this flag. |
 | **sortable** | `boolean` | optional | Whether field is sortable in list views |
 | **inlineHelpText** | `string` | optional | Help text displayed below the field in forms |
-| **autonumberFormat** | `string` | optional | Auto-number format: literal text + `{0000}` counter, `{YYYY}`/`{MM}`/`{DD}`/`{YYYYMMDD}` date tokens (business tz), and `{field_name}` interpolation. Counter resets per rendered prefix (e.g. AD`{YYYYMMDD}``{0000}` resets daily). |
+| **autonumberFormat** | `string` | optional | Auto-number format: literal text + `{0000}` counter, `{YYYY}`/`{MM}`/`{DD}`/`{YYYYMMDD}` date tokens (business tz), and `{field_name}` interpolation. Counter resets per rendered prefix (e.g. AD`{YYYYMMDD}``{0000}` resets daily). Omitted on an `autonumber` field ⇒ the contract default `{0000}` (#6555). |
 | **externalId** | `boolean` | optional | Is external ID for upsert operations |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |

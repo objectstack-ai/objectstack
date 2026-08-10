@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/runtime",
-  "version": "17.0.0-rc.5",
+  "version": "17.0.0-rc.6",
   "license": "Apache-2.0",
   "description": "ObjectStack Core Runtime & Query Engine",
   "type": "module",
@@ -47,6 +47,7 @@
   "devDependencies": {
     "@objectstack/platform-objects": "workspace:*",
     "@objectstack/plugin-hono-server": "workspace:*",
+    "@objectstack/plugin-sharing": "workspace:*",
     "@objectstack/service-analytics": "workspace:*",
     "@objectstack/service-datasource": "workspace:*",
     "@objectstack/service-job": "workspace:*",

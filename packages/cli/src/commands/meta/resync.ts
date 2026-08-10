@@ -83,7 +83,7 @@ export default class MetaResync extends Command {
 
     let stack;
     try {
-      stack = await bootSchemaStack({ databaseUrl: flags['database-url'] });
+      stack = await bootSchemaStack({ jsonOutput: flags.json, databaseUrl: flags['database-url'] });
     } catch (error: any) {
       if (flags.json) await emitJson({ error: error.message }, 0, { compact: true });
       else printError(error.message || String(error));

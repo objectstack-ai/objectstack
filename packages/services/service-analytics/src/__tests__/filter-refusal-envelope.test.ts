@@ -154,6 +154,21 @@ const REFUSALS: Array<{
     issueBullet: false,
     addedAfter5352: '#6386',
   },
+  {
+    // [#6444] A field wrapper mixing $-operator keys with non-$ siblings.
+    // Before it, the non-$ siblings were silently DROPPED — `fieldLeaves`'s
+    // operator arm iterated `opKeys` only and returned, so
+    // `{amount: {gte: 10, $lte: 20}}` (the missing-$ typo) lost its lower
+    // bound with nothing to read. The full position list, the two-rewrite
+    // message contract and the pure-shape control groups live in
+    // `filter-normalizer-mixed-wrapper.test.ts`; this row exists so the
+    // envelope block below covers the eleventh site the way it covers the ten.
+    name: 'a mixed $/non-$ field wrapper (#6444)',
+    where: { amount: { gte: 10, $lte: 20 } },
+    message: /"amount" mixes \$-operator keys \(\$lte\) with non-\$ sibling key\(s\) "gte"/,
+    issueBullet: false,
+    addedAfter5352: '#6444',
+  },
 ];
 
 /**
@@ -290,7 +305,8 @@ describe('[#5352] every refusal carries the ADR-0112 envelope (INVALID_FILTER / 
     ]);
     expect(REFUSALS.filter((c) => c.addedAfter5352).map((c) => `${c.name} · ${c.addedAfter5352}`)).toEqual([
       'an undefined comparand (#6386) · #6386',
+      'a mixed $/non-$ field wrapper (#6444) · #6444',
     ]);
-    expect(REFUSALS).toHaveLength(10);
+    expect(REFUSALS).toHaveLength(11);
   });
 });

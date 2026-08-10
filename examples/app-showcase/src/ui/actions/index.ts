@@ -16,7 +16,10 @@ const fieldZoo = 'showcase_field_zoo';
 /**
  * Action matrix — covers every `ActionType` (script / url / flow / modal /
  * api / form) surfaced across a spread of `ActionLocation`s (toolbar, row,
- * record header/more, related list, global nav).
+ * record header/more, related list, record section) — plus two HEADLESS
+ * actions (`locations: []`), which is a declaration in its own right, not an
+ * omission: callable over REST/MCP/AI with the capability gate and audit trail
+ * intact, claiming no UI surface.
  */
 
 /**
@@ -173,15 +176,49 @@ export const LogTimeAction = defineAction({
   refreshAfter: true,
 });
 
-/** global nav command-palette action. */
+/**
+ * headless command action — "New Task" (`locations: []`).
+ *
+ * `type: 'form'` + an `<object>.<view>` FORM-view target, structurally
+ * identical to `LogTimeAction` above. It used to be `type: 'modal'` +
+ * `target: 'showcase_component_gallery'` — a command labelled "New Task" whose
+ * target named the showcase HOME PAGE, so the dispatch opened the welcome page
+ * inside a dialog with zero form controls and nothing to create a task with
+ * (#6739).
+ *
+ * The fix is the TYPE, not the target. A `type: 'modal'` target names a PAGE
+ * and only a page: the spec TSDoc (`packages/spec/src/ui/action.zod.ts`), the
+ * published docs (`content/docs/ui/actions.mdx`) and `defineStack`'s
+ * cross-reference walk (`packages/spec/src/stack.zod.ts`) all say so, and the
+ * walk REJECTS a registered modal action whose target is not a declared page —
+ * so "just point the modal at `showcase_task`" is a build error, not a fix
+ * (maintainer ruling, #6739). Opening an object's form is what `type: 'form'`
+ * is for, and it is validated: a form target pointing at a LIST view is itself
+ * a build error (#2554, see LogTimeAction).
+ *
+ * Coverage is not lost: `QuickViewAction` above is the corpus's
+ * modal-targeting-a-page specimen, and there the "open a dialog/page" semantics
+ * match its "Quick View" label.
+ *
+ * Its PLACEMENT is the separate fork of the same card. This declared
+ * `locations: ['global_nav']` until #6888 retired that value: no product
+ * surface ever rendered it, so the declaration placed the action nowhere. It is
+ * headless now — `[]`, "nowhere, deliberately" — rather than naming a location
+ * nothing serves. Nothing is stranded by that: the showcase's live "Create
+ * Task" path is the Overview page's `element:button` CTA (`../pages/index.ts`),
+ * which carries an INLINE action of the same name and is what a user actually
+ * clicks. No replacement placement was invented here — choosing one is a
+ * product decision about the showcase, not a consequence of the retirement
+ * (flagged on #6888).
+ */
 export const NewTaskAction = defineAction({
   name: 'showcase_new_task',
   label: 'New Task',
   icon: 'plus',
   objectName: task,
-  type: 'modal',
-  target: 'showcase_component_gallery',
-  locations: ['global_nav'],
+  type: 'form',
+  target: 'showcase_task.edit',
+  locations: [],
   refreshAfter: true,
 });
 
@@ -340,9 +377,13 @@ export const ArchiveTaskAction = defineAction({
  * live specimen to exercise. This is that specimen.
  *
  * The body is genuinely object-less: it counts across SEVERAL objects, so there
- * is no single record or object the action could sensibly hang off. `location`
- * is `global_nav` for the same reason — an object-less action has no row and no
- * record header to render on.
+ * is no single record or object the action could sensibly hang off. It is
+ * HEADLESS for the same reason — an object-less action has no row and no record
+ * header to render on — which `locations: []` declares outright: callable over
+ * REST/MCP/AI, with its capability gate, param contract and audit trail intact,
+ * and claiming no UI surface. It used to say `locations: ['global_nav']`, which
+ * meant the same thing in intent but named a location no renderer served;
+ * #6888 retired that value and this is the declaration it always meant.
  */
 export const PortfolioSnapshotAction = defineAction({
   name: 'showcase_portfolio_snapshot',
@@ -360,7 +401,7 @@ export const PortfolioSnapshotAction = defineAction({
     capabilities: ['api.read'],
   },
   successMessage: 'Portfolio snapshot taken.',
-  locations: ['global_nav'],
+  locations: [],
   refreshAfter: false,
   ai: {
     exposed: true,

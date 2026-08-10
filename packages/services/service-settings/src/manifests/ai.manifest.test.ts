@@ -2,6 +2,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { SettingsManifestSchema } from '@objectstack/spec/system';
+import { SettingsService } from '../settings-service.js';
 import { aiSettingsManifest, aiTestActionHandler, aiTestEmbedderActionHandler } from './ai.manifest.js';
 
 describe('aiSettingsManifest', () => {
@@ -88,6 +89,108 @@ describe('aiTestActionHandler', () => {
       values: { provider: 'anthropic', anthropic_api_key: 'sk-ant-test' },
     } as any);
     expect(r.ok).toBe(true);
+  });
+});
+
+/**
+ * #6550 — `temperature` declares a window, not a grid. Since #6199 a declared
+ * `step` binds as a value constraint on both doors, and temperature's true
+ * domain is continuous on [0, 2]: the old `step: 0.1` refused legal values
+ * (`0.15`), the same declared-narrower-than-true-domain shape the #5712 ruling
+ * corrected for timezone/currency. A slider's step feel is a UI-layer display
+ * concern, not a contract refusal; `min`/`max` describe the real domain and
+ * stay binding. #6199's grid machinery is untouched — its enforcement and
+ * tests stand for any key that still declares `step`.
+ */
+describe('aiSettingsManifest — temperature declares a window, not a grid (#6550)', () => {
+  const byKey = (k: string) => (aiSettingsManifest.specifiers as any[]).find((s) => s.key === k);
+
+  it('declares min 0 / max 2 and NO step, and that round-trips the spec parse', () => {
+    const t = byKey('temperature');
+    expect(t.min).toBe(0);
+    expect(t.max).toBe(2);
+    expect(t.step).toBeUndefined();
+    const parsed = SettingsManifestSchema.parse(aiSettingsManifest) as any;
+    const pt = parsed.specifiers.find((s: any) => s.key === 'temperature');
+    expect(pt.min).toBe(0);
+    expect(pt.max).toBe(2);
+    expect(pt.step).toBeUndefined();
+  });
+
+  it('write door: accepts 0.15 — the refusal that forced the ruling — and still 0.7', async () => {
+    // `temperature` is `visible: "${data.provider !== 'memory'}"` and the
+    // default provider is `memory`, so the patch carries a real provider (and
+    // its required key) — otherwise the TOUCH/visible contract skips the
+    // specifier entirely and this test would be green for the wrong reason.
+    const svc = new SettingsService({ env: {} });
+    svc.registerManifest(aiSettingsManifest);
+    await expect(
+      svc.setMany('ai', { provider: 'openai', openai_api_key: 'sk-test', temperature: 0.15 }),
+    ).resolves.toBeDefined();
+    expect((await svc.get('ai', 'temperature')).value).toBe(0.15);
+    // …and the values the slider emits keep working, of course.
+    await expect(
+      svc.setMany('ai', { provider: 'openai', openai_api_key: 'sk-test', temperature: 0.7 }),
+    ).resolves.toBeDefined();
+    expect((await svc.get('ai', 'temperature')).value).toBe(0.7);
+  });
+
+  it('write door: the window still binds — out-of-range values are refused in the min/max vocabulary', async () => {
+    const svc = new SettingsService({ env: {} });
+    svc.registerManifest(aiSettingsManifest);
+    await expect(
+      svc.setMany('ai', { provider: 'openai', openai_api_key: 'sk-test', temperature: 2.5 }),
+    ).rejects.toMatchObject({
+      code: 'SETTINGS_VALIDATION',
+      fields: [
+        { field: 'temperature', code: 'max_value', constraint: { min: 0, max: 2 }, value: 2.5 },
+      ],
+    });
+    await expect(
+      svc.setMany('ai', { provider: 'openai', openai_api_key: 'sk-test', temperature: -0.5 }),
+    ).rejects.toMatchObject({
+      code: 'SETTINGS_VALIDATION',
+      fields: [
+        { field: 'temperature', code: 'min_value', constraint: { min: 0, max: 2 }, value: -0.5 },
+      ],
+    });
+    // Atomic: nothing landed.
+    expect((await svc.get('ai', 'temperature')).source).toBe('default');
+  });
+
+  it('env door: OS_AI_TEMPERATURE=0.15 wins the cascade and locks the key', async () => {
+    // The mirror of the write door — #6199 judges both doors at the ONE
+    // decision point, so removing the grid frees this door too.
+    const errors: string[] = [];
+    const svc = new SettingsService({
+      env: { OS_AI_TEMPERATURE: '0.15' },
+      logger: { error: (m: string) => void errors.push(m) },
+    });
+    svc.registerManifest(aiSettingsManifest);
+    const r = await svc.get('ai', 'temperature');
+    expect(r.value).toBe(0.15);
+    expect(r.source).toBe('env');
+    expect(r.locked).toBe(true);
+    expect(r.cascadeChain?.some((e) => e.scope === 'env')).toBe(true);
+    expect(errors).toHaveLength(0);
+  });
+
+  it('env door: an out-of-window OS_AI_TEMPERATURE is still loudly ignored', async () => {
+    // The window survives the grid's removal: `2.5` sits outside `max: 2`.
+    const errors: string[] = [];
+    const svc = new SettingsService({
+      env: { OS_AI_TEMPERATURE: '2.5' },
+      logger: { error: (m: string) => void errors.push(m) },
+    });
+    svc.registerManifest(aiSettingsManifest);
+    const r = await svc.get('ai', 'temperature');
+    expect(r.value).toBe(0.7); // the manifest default, not 2.5
+    expect(r.source).toBe('default');
+    expect(r.locked).toBe(false);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain('OS_AI_TEMPERATURE');
+    expect(errors[0]).toContain('IGNORED');
+    expect(errors[0]).toContain('does NOT take effect');
   });
 });
 

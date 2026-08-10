@@ -30,6 +30,27 @@ describe('companySettingsManifest', () => {
     expect(byKey('country').pattern).toBe('^[A-Za-z]{2}$');
   });
 
+  it('country declares the iso_3166_alpha2 value domain (#6579)', () => {
+    // #5712's fourth case: the description promised ISO 3166-1 all along while
+    // `^[A-Za-z]{2}$` constrained shape only (`ZZ` and `UK` passed the write
+    // door). The declaration is what makes the promise true; `SettingsService`
+    // enforces it on both doors. The pattern STAYS — shape still speaks first.
+    const specs = companySettingsManifest.specifiers as any[];
+    const byKey = (k: string) => specs.find((s) => s.key === k);
+    expect(byKey('country').valueDomain).toBe('iso_3166_alpha2');
+    expect(byKey('country').pattern).toBe('^[A-Za-z]{2}$');
+    // Every other key stays UNDECLARED on purpose: free-text legal-identity
+    // fields, not published standards.
+    for (const s of specs.filter((x) => x.key && x.key !== 'country')) {
+      expect(s.valueDomain, `${s.key} must not declare a domain`).toBeUndefined();
+    }
+    // And the declaration round-trips the spec parse (the enum is closed —
+    // a misspelt member would throw here, not silently strip).
+    const parsed = SettingsManifestSchema.parse(companySettingsManifest) as any;
+    expect(parsed.specifiers.find((s: any) => s.key === 'country').valueDomain)
+      .toBe('iso_3166_alpha2');
+  });
+
   it('has no required fields — every key is optional for v1', () => {
     const specs = companySettingsManifest.specifiers as any[];
     for (const s of specs.filter((x) => x.key)) {

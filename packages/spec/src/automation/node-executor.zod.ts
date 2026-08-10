@@ -24,6 +24,7 @@ import { z } from 'zod';
  * Mirrors the `waitEventConfig.eventType` in flow.zod.ts.
  */
 import { lazySchema } from '../shared/lazy-schema';
+import { retiredKey } from '../shared/retired-key';
 export const WaitEventTypeSchema = lazySchema(() => z.enum([
   'timer',      // Resume after duration/datetime
   'signal',     // Resume on named signal dispatch
@@ -285,14 +286,36 @@ export const ActionDescriptorSchema = lazySchema(() => z.object({
   /**
    * Supports async pause/resume (e.g. wait, human_task).
    *
-   * **A declaration, not an enforced fact** (#5703). No execution path reads
-   * it: a run pauses because the executor's `execute()` returned
-   * `suspend: true`, and the #3801 resume gate keys on the suspended node's
-   * `resumeAuthority` alone. What it does drive is authoring-time: the designer
-   * palette, the registration warning below, and the
-   * `check:resume-authority-declared` gate. So an executor that suspends
-   * while leaving this `false` is invisible to both of those — #5703 tracks
-   * closing that seam.
+   * **Declared = enforced, since #6667** (which closed the #5703 seam). This
+   * was a declaration no execution path read until then; `AutomationEngine`
+   * now enforces it at the ONE seam every suspension passes through, so the
+   * three authoring-time consumers it always had — the designer palette, the
+   * registration warning below, and the `check:resume-authority-declared`
+   * gate — are no longer the whole of its effect.
+   *
+   * What the runtime half does, and the boundary #6667 drew deliberately:
+   *
+   *  - **Mismatch is refused.** A node type whose descriptor declares
+   *    `supportsPause: false` — or OMITS the key, which parses to the same
+   *    `false` by the default above — and whose executor returns
+   *    `suspend: true` has that suspension REFUSED. It is a guard-class
+   *    refusal: a metadata defect, not a runtime one, so a `fault` edge does
+   *    not route it, and nothing durable is written for a pause nothing could
+   *    have continued (a type declaring no pause declares no `resumeAuthority`
+   *    either, and an unclaimed pause is fail-closed since #5561).
+   *  - **The inverse is legal.** `supportsPause: true` on a type that never
+   *    suspends is not a mismatch — the declaration is a CAPABILITY, not an
+   *    obligation. `wait` legitimately returns without suspending when its
+   *    condition is already met.
+   *  - **Silence is not `false`.** An executor that publishes NO descriptor
+   *    declares nothing for this gate to enforce (`NodeExecutor.descriptor` is
+   *    optional by contract), so its pauses are not refused here; they stay
+   *    governed by #5561's resume gate, which refuses an undeclared
+   *    `resumeAuthority` at the resume end instead.
+   *
+   * Alias hop included: the descriptor consulted is the canonical one a
+   * deprecated ADR-0018 alias forwards to, never the synthesized alias
+   * descriptor carrying schema defaults.
    */
   supportsPause: z.boolean().default(false).describe('Supports async pause/resume'),
   /** Supports mid-execution cancellation. */
@@ -302,9 +325,29 @@ export const ActionDescriptorSchema = lazySchema(() => z.object({
   /** Dispatch through the ADR-0012 service-messaging outbox. */
   needsOutbox: z.boolean().default(false)
     .describe('Dispatch via service-messaging outbox (retry/idempotency/dead-letter)'),
-  /** Request/response action that suspends the flow until a reply. */
-  isAsync: z.boolean().default(false)
-    .describe('Suspends the flow awaiting an external reply'),
+  /**
+   * Tombstoned, not deleted (ADR-0104): `ActionDescriptorSchema` is not
+   * `.strict()`, so a plain deletion would let the five shipped descriptors —
+   * and every third-party one — keep writing `isAsync`, parse clean, and lose
+   * the value in silence. `retiredKey()` turns that into a rejection carrying
+   * the fix, in both channels a descriptor author meets: `tsc` (the input type
+   * is `never`) and the parse `defineActionDescriptor()` runs.
+   *
+   * Retired under ADR-0049 enforce-or-remove (#6748): a fresh three-repo
+   * measurement found ZERO readers. `isAsync` was a second, weaker spelling of
+   * the thing `supportsPause` above now enforces — and where `supportsPause`
+   * grew a runtime consumer in #6667, this one never had one to grow into, so
+   * it took the remove leg of the same ruling rather than the enforce leg.
+   */
+  isAsync: retiredKey(
+    '`ActionDescriptor.isAsync` was removed in @objectstack/spec 17 (#6748, ADR-0049) — ' +
+    'no execution path ever read it, so declaring it never made a node suspend and ' +
+    'omitting it never stopped one. Delete the key. The live mechanism is two-part: an ' +
+    'executor suspends by RETURNING `suspend: true` from `execute()`, and its descriptor ' +
+    'must declare `supportsPause: true` (plus the `resumeAuthority` its pauses need) or ' +
+    'the engine refuses that suspension (#6667). Declaring `isAsync: true` alongside ' +
+    '`supportsPause: true` was always redundant; declaring it alone was always inert.',
+  ),
 
   /**
    * The effect contract this action places on the AUTHOR-SUPPLIED code it
@@ -343,7 +386,8 @@ export const ActionDescriptorSchema = lazySchema(() => z.object({
    *
    *  - `'any'` — the caller supplies the continuation and the route is the
    *    intended door: a `screen` node's collected inputs, a `wait` node's
-   *    external signal.
+   *    external signal. **A pausing node must opt into this explicitly**; see
+   *    the omission semantics below.
    *  - `'service'` — resuming is a SIDE EFFECT of a decision some service must
    *    authorize and record first, so only that service may drive it. An
    *    `approval` node declares this: `ApprovalService.decide` enforces the
@@ -356,28 +400,39 @@ export const ActionDescriptorSchema = lazySchema(() => z.object({
    * unless the signal carries the in-process `RESUME_AUTHORITY_SERVICE`
    * marker — a symbol, so a JSON body can never carry it.
    *
-   * **Carrying no `.default()` is the point** (#5561). A default would make
-   * "the author decided `'any'`" and "the author never considered it" the same
-   * value by the time any consumer sees the descriptor: Zod fills the key
-   * inside {@link defineActionDescriptor}, so the omission becomes
-   * unrecoverable one function call after it happens — measured, not assumed
-   * (the two parses are byte-identical). That erasure is how #3823 shipped:
-   * ADR-0044 pointed a revise edge at a generic `wait`, `wait` is legitimately
-   * `'any'`, and a pause standing in a service-owned position inherited a
-   * fail-open value nobody had chosen. Absent therefore means absent, and two
-   * seams read it: `AutomationEngine.registerNodeExecutor` warns once per node
-   * type when a `supportsPause` descriptor omits it, and
-   * `check:resume-authority-declared` fails CI on an omission in this repo's
-   * own executors.
+   * **Omitting it means `'service'` — fail-closed, not `'any'`** (ADR-0044's
+   * 2026-07-28 amendment, landed in two steps on #5561). A pausing node type
+   * that never states who may continue its pauses is closed to the generic
+   * resume route until its author states it: `AutomationEngine` resolves an
+   * absent value to `'service'` (`resolveResumeAuthority`), so a raw resume of
+   * such a pause answers `PERMISSION_DENIED` with a message naming the
+   * one-line fix. **Registering a pausing node whose pause really is open to
+   * the route? Declare `resumeAuthority: 'any'` — it is an opt-in now, not an
+   * inheritance.**
    *
-   * Runtime semantics are unchanged by that: the engine still resolves an
-   * absent value to `'any'` (`resolveResumeAuthority`), so omitting it is
-   * fail-open exactly as before — loudly now instead of silently. Flipping
-   * that fallback to `'service'` (fail-closed by omission) is the breaking
-   * half, still tracked on #5561 for a version window that allows it.
+   * The field carries no Zod `.default()`, and that is what makes the rule
+   * expressible at all (step one, #5561). A default would make "the author
+   * decided `'any'`" and "the author never considered it" the same value by the
+   * time any consumer sees the descriptor: Zod fills the key inside
+   * {@link defineActionDescriptor}, so the omission became unrecoverable one
+   * function call after it happened — measured, not assumed (the two parses
+   * were byte-identical). That erasure is how #3823 shipped: ADR-0044 pointed a
+   * revise edge at a generic `wait`, `wait` is legitimately `'any'`, and a
+   * pause standing in a service-owned position inherited a fail-open value
+   * nobody had chosen. Absent now means absent, and three seams read it —
+   * `AutomationEngine.registerNodeExecutor` warns once per node type when a
+   * `supportsPause` descriptor omits it, the resume gate refuses the pauses it
+   * produces, and `check:resume-authority-declared` fails CI on an omission in
+   * this repo's own executors.
+   *
+   * The guess is made in the loud direction on purpose. Guessing `'any'` for an
+   * unclaimed pause continues a run past a decision nothing recorded and says
+   * nothing; guessing `'service'` refuses a resume and hands back the
+   * declaration that fixes it. Only one of those two mistakes is discoverable
+   * by the person who made it.
    */
   resumeAuthority: z.enum(['any', 'service']).optional()
-    .describe("Who may resume a run this node suspended: 'any' (the generic resume route) or 'service' (only the owning service, e.g. approvals). Deliberately has no default — an omission is a distinct, reportable fact, and a pausing node type that omits it is warned about at registration (#5561)"),
+    .describe("Who may resume a run this node suspended: 'any' (the generic resume route) or 'service' (only the owning service, e.g. approvals). Carries no schema default so an omission stays observable — and an omission is fail-CLOSED at run time, equivalent to 'service': a pausing node whose pause is open to the generic route must declare 'any' explicitly (#5561)"),
 
   /**
    * Runtime maturity of the capability behind this descriptor (ADR-0041 §4).

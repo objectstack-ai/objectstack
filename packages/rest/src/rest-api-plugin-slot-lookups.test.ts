@@ -33,15 +33,27 @@ const captured = vi.hoisted(() => ({ ctorArgs: [] as unknown[][] }));
 // Capture RestServer's constructor arguments without registering ~hundreds of
 // routes. Everything else in the module (RestEnvRegistry & co) stays real, so
 // the plugin's imports resolve normally.
+//
+// The double EXTENDS the real class rather than replacing it: `registerRoutes`
+// is the only expensive thing here, so it is the only thing suppressed, and
+// every other method the composition root calls stays the production one. That
+// matters beyond tidiness — the plugin also asks the instance for the API base
+// (`getApiBasePath()`, #6306), and a hand-written stub that lists only the
+// methods the plugin happened to call the day it was written turns each new
+// collaborator call into a `TypeError` here, in a file about slot WIRING that
+// has no opinion on the base. Inheriting the contract keeps this test measuring
+// its own subject. The real constructor is field assignment plus
+// `new RouteManager(server)` (a `Map`), so nothing is paid for it.
 vi.mock('./rest-server.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./rest-server.js')>();
   return {
     ...actual,
-    RestServer: class {
+    RestServer: class extends actual.RestServer {
       constructor(...args: unknown[]) {
+        super(...(args as ConstructorParameters<typeof actual.RestServer>));
         captured.ctorArgs.push(args);
       }
-      registerRoutes(): void {
+      override registerRoutes(): void {
         /* routes are not under test here */
       }
     },

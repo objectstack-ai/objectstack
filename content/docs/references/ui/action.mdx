@@ -46,7 +46,7 @@ to the field name and is used as the request-body key).
 
 ```typescript
 import { ActionSchema, ActionAiSchema, ActionLocationSchema, ActionParamSchema, ActionType, InlineActionSchema } from '@objectstack/spec/ui';
-import type { Action, ActionAi, ActionLocation, ActionParam, InlineAction } from '@objectstack/spec/ui';
+import type { Action, ActionAi, ActionLocation, ActionParam, ActionType, InlineAction } from '@objectstack/spec/ui';
 
 // Validate data
 const result = ActionSchema.parse(data);
@@ -61,41 +61,42 @@ const result = ActionSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | ✅ | Machine name (lowercase snake_case) |
-| **label** | `string` | ✅ | Display label |
+| **label** | `string \| Record<string, string>` | ✅ | Display label |
+| **description** | `string \| Record<string, string>` | optional | Explanatory line shown under the title in the action's param dialog. Carries the confirm question for an action that collects params (one dialog, not two — #7278). Not the LLM-facing `ai.description`. |
 | **objectName** | `string` | optional | Target object this action belongs to. When set, the action is auto-merged into the object's actions array by defineStack(). |
 | **icon** | `string` | optional | Icon name |
-| **locations** | `Enum<'list_toolbar' \| 'list_item' \| 'record_header' \| 'record_more' \| 'record_related' \| 'record_section' \| 'global_nav'>[]` | optional | Locations where this action is visible |
+| **locations** | `Enum<'list_toolbar' \| 'list_item' \| 'record_header' \| 'record_more' \| 'record_related' \| 'record_section'>[]` | optional | Locations where this action is visible |
 | **component** | `Enum<'action:button' \| 'action:icon' \| 'action:menu' \| 'action:group'>` | optional | Visual component override |
 | **type** | `Enum<'script' \| 'url' \| 'modal' \| 'flow' \| 'api' \| 'form'>` | optional | Action functionality type |
 | **target** | `string` | optional | URL, Script Name, Flow ID, or API Endpoint. Supports $`{param.X}` and $`{ctx.X}` interpolation. |
 | **openIn** | `Enum<'self' \| 'new-tab'>` | optional | For type:'url' — where to open `target`. 'new-tab' opens a new browser tab; 'self' navigates in place. When omitted, external/absolute URLs open in a new tab and relative URLs navigate in place. Static execution option — keep it OUT of `params` (which is user-input-collection only). |
 | **body** | `{ language: 'expression'; source: string } \| { language: 'js'; source: string; capabilities?: Enum<'api.read' \| 'api.write' \| 'api.transaction' \| 'crypto.uuid' \| 'log'>[]; timeoutMs?: integer; … }` | optional | Action body — expression (L1) or sandboxed JS (L2). Only used when type is `script`. |
-| **execute** | `never` | optional | [REMOVED] `execute` was removed in @objectstack/spec 17 (#3855) — use `target`. Rename the key; the value (a handler / flow / URL ref) is unchanged. Run `os migrate meta --from 16` to rewrite it automatically. |
-| **params** | `{ name?: string; field?: string; objectOverride?: string; label?: string; … }[]` | optional | Input parameters required from user |
+| **execute** | `never` | optional | [REMOVED] `execute` was removed in @objectstack/spec 17 (#3855) — use `target`. Rename the key; the value (a handler / flow / URL ref) is unchanged. Run `os migrate meta --from 16` to rewrite existing sources automatically. |
+| **params** | `{ name?: string; field?: string; objectOverride?: string; label?: string \| Record<string, string>; … }[]` | optional | Input parameters required from user — an ActionParam[] DEFINITION array, never a payload map (a static request body goes in `bodyExtra`). |
 | **variant** | `Enum<'primary' \| 'secondary' \| 'danger' \| 'ghost' \| 'link'>` | optional | Button visual variant for styling (primary = highlighted, danger = destructive, ghost = transparent) |
 | **order** | `number` | optional | Sort order within a location group (lower = higher). Promotes/demotes an action toward the record_header primary button; stable, so actions without `order` keep their registration order. |
-| **confirmText** | `string` | optional | Confirmation message before execution |
-| **successMessage** | `string` | optional | Success message to show after execution |
-| **errorMessage** | `string` | optional | Error message to show when the action fails (overrides the raw error). |
+| **confirmText** | `string \| Record<string, string>` | optional | Confirmation message before execution |
+| **successMessage** | `string \| Record<string, string>` | optional | Success message to show after execution |
+| **errorMessage** | `string \| Record<string, string>` | optional | Error message to show when the action fails (overrides the raw error). |
 | **refreshAfter** | `boolean` | optional | Refresh view after execution |
 | **undoable** | `boolean` | optional | Offer an Undo affordance after this single-record update action succeeds. |
-| **resultDialog** | `{ title?: string; description?: string; acknowledge?: string; format?: Enum<'qrcode' \| 'code-list' \| 'secret' \| 'text' \| 'json'>; … }` | optional | Render API response in a one-shot reveal dialog (suppresses successMessage when set). |
+| **resultDialog** | `{ title?: string \| Record<string, string>; description?: string \| Record<string, string>; acknowledge?: string \| Record<string, string>; format?: Enum<'qrcode' \| 'code-list' \| 'secret' \| 'text' \| 'json'>; … }` | optional | Render API response in a one-shot reveal dialog (suppresses successMessage when set). |
 | **visible** | `boolean \| string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate — `true`/`false` literal, CEL string, or `{dialect, source}` envelope. The action is offered when it evaluates TRUE. Omit = always visible. |
 | **requiresFeature** | `Enum<'twoFactor' \| 'passkeys' \| 'magicLink' \| 'organization' \| 'multiOrgEnabled' \| 'degradedTenancy' \| 'oidcProvider' \| 'sso' \| 'ssoEnforced' \| 'deviceAuthorization' \| … +3 more>` | optional | Public auth feature flag gating this action; lowered into `visible` at parse time. |
 | **disabled** | `boolean \| string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Disabled predicate — `true`/`false` literal, CEL string, or `{dialect, source}` envelope. The action is shown but refused when it evaluates TRUE. Omit = never disabled. |
 | **requiredPermissions** | `string[]` | optional | [ADR-0066 D4] Capabilities required to invoke this action. Enforced with 403 on the platform action route (script/flow/modal + MCP) and mirrored as a UI hide; a `type: api` action pointed at a custom endpoint must re-check it there. |
-| **shortcut** | `never` | optional | [REMOVED] `action.shortcut` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — it never triggered anything: no keydown listener feeds ActionEngine.getShortcuts(), and objectui's keyboard stack (useKeyboardShortcuts) is hand-registered and never consults action metadata. Delete the key. For a real shortcut, register the key in the Console keyboard stack and have its handler invoke the action by name. |
-| **bulkEnabled** | `never` | optional | [REMOVED] `action.bulkEnabled` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — the multi-select toolbar is driven by the LIST VIEW's `bulkActions` / `bulkActionDefs`, never by this flag, so setting it changed nothing. Delete the key and declare the action in the view's `bulkActions` instead. |
-| **ai** | `{ exposed?: boolean; description?: string; category?: Enum<'data' \| 'action' \| 'flow' \| 'integration' \| 'vector_search' \| 'analytics' \| 'utility'>; paramHints?: Record<string, { description?: string; enum?: (string \| number)[]; examples?: any[] }>; … }` | optional | AI exposure (opt-in). Set ai.exposed=true + ai.description to make this callable by agents. |
+| **shortcut** | `never` | optional | [REMOVED] `action.shortcut` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — it never triggered anything: no keydown listener feeds ActionEngine.getShortcuts(), and objectui's keyboard stack (useKeyboardShortcuts) is hand-registered and never consults action metadata. Delete the key. For a real shortcut, register the key in the Console keyboard stack and have its handler invoke the action by name. Run `os migrate meta --from 16` to rewrite existing sources automatically. |
+| **bulkEnabled** | `never` | optional | [REMOVED] `action.bulkEnabled` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — the multi-select toolbar is driven by the LIST VIEW's `bulkActions` / `bulkActionDefs`, never by this flag, so setting it changed nothing. Delete the key and declare the action in the view's `bulkActions` instead. Run `os migrate meta --from 16` to rewrite existing sources automatically. |
+| **ai** | `{ exposed?: boolean; description?: string; category?: Enum<'data' \| 'action' \| 'flow' \| 'integration' \| 'vector_search' \| 'analytics' \| 'utility'>; paramHints?: Record<string, object>; … }` | optional | AI exposure (opt-in). Set ai.exposed=true + ai.description to make this callable by agents. |
 | **recordIdParam** | `string` | optional | Body key to inject the row id into when running from a list_item context. |
 | **recordIdField** | `string` | optional | Row field whose value seeds recordIdParam. Defaults to "id". |
 | **bodyShape** | `'flat' \| { wrap: string }` | optional | Body wrapping: flat (default) or `{ wrap: key }` to nest user-collected params under a key. |
 | **method** | `Enum<'POST' \| 'PATCH' \| 'PUT' \| 'DELETE'>` | optional | HTTP method for type:"api" actions. Defaults to POST. |
-| **bodyExtra** | `Record<string, any>` | optional | Constant body fields merged into the API request (applied last; overrides user params). |
+| **bodyExtra** | `Record<string, any>` | optional | Static request-body fields for a type:"api" action, merged last (overrides user params). `{{page.<var>}}` tokens are resolved by the runtime. This — not `params` — is where a payload goes. |
 | **mode** | `Enum<'create' \| 'edit' \| 'delete' \| 'custom'>` | optional | Semantic mode of the action. |
 | **opensInNewTab** | `boolean` | optional | Open the action result in a new tab. The renderer pre-opens the tab synchronously on click (popup-blocker-safe) and navigates it to the handler's redirectUrl. |
 | **newTabUrl** | `string` | optional | Direct new-tab URL template (`{recordId}` placeholder). When set with opensInNewTab, the renderer navigates the pre-opened tab here immediately — no action POST. The endpoint must enforce auth itself. |
-| **aria** | `{ ariaLabel?: string; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
+| **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
 | **_lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Layer that set _lock (artifact \| package \| env-forced). |
@@ -149,7 +150,6 @@ const result = ActionSchema.parse(data);
 * `record_more`
 * `record_related`
 * `record_section`
-* `global_nav`
 
 
 ---
@@ -163,10 +163,10 @@ const result = ActionSchema.parse(data);
 | **name** | `string` | optional |  |
 | **field** | `string` | optional | Snake case identifier (lowercase with underscores only) |
 | **objectOverride** | `string` | optional | Snake case identifier (lowercase with underscores only) |
-| **label** | `string` | optional | Display label (plain string; i18n keys are auto-generated by the framework) |
+| **label** | `string \| Record<string, string>` | optional | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
 | **type** | `Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| 'markdown' \| 'html' \| 'richtext' \| 'number' \| 'currency' \| 'percent' \| 'date' \| … +35 more>` | optional |  |
 | **required** | `boolean` | optional |  |
-| **options** | `{ label: string; value: string; visibleWhen?: string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object } }[]` | optional |  |
+| **options** | `{ label: string \| Record<string, string>; value: string; visibleWhen?: string \| object }[]` | optional |  |
 | **placeholder** | `string` | optional |  |
 | **helpText** | `string` | optional |  |
 | **defaultValue** | `any` | optional |  |
@@ -271,14 +271,15 @@ const result = ActionSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **type** | `Enum<'script' \| 'url' \| 'modal' \| 'flow' \| 'api' \| 'form'>` | optional | Action functionality type |
 | **name** | `string` | optional | Machine name (lowercase snake_case) |
-| **label** | `string` | optional | Display label |
+| **label** | `string \| Record<string, string>` | optional | Display label |
 | **target** | `string` | optional | URL, Script Name, Flow ID, or API Endpoint. Supports $`{param.X}` and $`{ctx.X}` interpolation. |
 | **openIn** | `Enum<'self' \| 'new-tab'>` | optional | For type:'url' — where to open `target`. 'new-tab' opens a new browser tab; 'self' navigates in place. When omitted, external/absolute URLs open in a new tab and relative URLs navigate in place. Static execution option — keep it OUT of `params` (which is user-input-collection only). |
 | **method** | `Enum<'POST' \| 'PATCH' \| 'PUT' \| 'DELETE'>` | optional | HTTP method for type:"api" actions. Defaults to POST. |
-| **params** | `{ name?: string; field?: string; objectOverride?: string; label?: string; … }[]` | optional | Input parameters required from user |
-| **confirmText** | `string` | optional | Confirmation message before execution |
-| **successMessage** | `string` | optional | Success message to show after execution |
-| **errorMessage** | `string` | optional | Error message to show when the action fails (overrides the raw error). |
+| **params** | `{ name?: string; field?: string; objectOverride?: string; label?: string \| Record<string, string>; … }[]` | optional | Input parameters required from user — an ActionParam[] DEFINITION array, never a payload map (a static request body goes in `bodyExtra`). |
+| **bodyExtra** | `Record<string, any>` | optional | Static request-body fields for a type:"api" action, merged last (overrides user params). `{{page.<var>}}` tokens are resolved by the runtime. This — not `params` — is where a payload goes. |
+| **confirmText** | `string \| Record<string, string>` | optional | Confirmation message before execution |
+| **successMessage** | `string \| Record<string, string>` | optional | Success message to show after execution |
+| **errorMessage** | `string \| Record<string, string>` | optional | Error message to show when the action fails (overrides the raw error). |
 | **refreshAfter** | `boolean` | optional | Refresh view after execution |
 | **opensInNewTab** | `boolean` | optional | Open the action result in a new tab. The renderer pre-opens the tab synchronously on click (popup-blocker-safe) and navigates it to the handler's redirectUrl. |
 

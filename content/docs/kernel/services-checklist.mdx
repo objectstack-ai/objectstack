@@ -320,21 +320,33 @@ registered under their own names (`security.permissions`, `security.rls`,
 
 ## 5–6. Business Services
 
-### 5. ui Service — 5 declared methods, none routed ❌
-`listViews`, `getView`, `createView`, `updateView`, `deleteView`
+### 5. ui Service — 1 routed method ✅ (was 5 declared, none routed)
+`getUiView`
 
 <Callout type="warn">
-These five are **optional members of `ViewProtocol` that nothing implements and no
-route reaches** — `view` is a metadata type, so view CRUD goes through the metadata
-API (`/api/v1/meta`), not through them. Nothing anywhere registers the `ui` slot
-either (#4093 / #4146), so `CORE_SERVICE_PROVIDER.ui` names
-`@objectstack/metadata-protocol` rather than a `ui` plugin: the one route the `/ui`
-domain serves is `GET /api/v1/ui/view/:object[/:type]`, which calls `getUiView` on
-the **`protocol`** service that `assembleMetadataProtocol()` registers (invoked by
+Nothing anywhere registers the `ui` slot (#4093 / #4146), so `CORE_SERVICE_PROVIDER.ui`
+names `@objectstack/metadata-protocol` rather than a `ui` plugin: the one route the
+`/ui` domain serves is `GET /api/v1/ui/view/:object[/:type]`, which calls `getUiView`
+on the **`protocol`** service that `assembleMetadataProtocol()` registers (invoked by
 `ObjectQLPlugin`, or by the standalone `createMetadataProtocolPlugin()`). Without it
 the domain answers **501** with that remedy spelled out, not a generic "install a ui
 plugin".
 </Callout>
+
+#### Retired in v17: `ViewProtocol`'s five methods
+`listViews`, `getView`, `createView`, `updateView`, `deleteView` — and their ten
+Request/Response schemas — were removed in
+[#6239](https://github.com/objectstack-ai/objectstack/issues/6239) under ADR-0049
+enforce-or-remove. This checklist had recorded them as declared-and-unrouted since it
+was written; the removal makes that reading permanent instead of re-derivable. Views
+are read and written through the surfaces that always served them: the metadata API
+(`/api/v1/meta/view/:name`, `view` being a metadata type) for the stored definition,
+and `getUiView` above for the resolved render-time view.
+
+The concrete cost of leaving it declared is on the record: **#5948's issue body and its
+2026-08-07 maintainer ruling both read `GetViewResponseSchema` — this retired block,
+zero implementations — as the contract of `GET /ui/view/:object/:type`**, whose declared
+response is `GetUiViewResponseSchema`. One word apart, and identical to a grep.
 
 ### Retired in v17: the `workflow` slot
 The slot, its `IWorkflowService` contract and the three `WorkflowProtocol`
@@ -509,7 +521,7 @@ a package that cannot be installed is a dead end, which is why
 
 | Slot | State |
 |:-------|:------------|
-| **ui** | Nothing registers the slot. `ViewProtocol`'s five methods are declared and unrouted; view CRUD runs through `/api/v1/meta`, and `/api/v1/ui/view/:object` is served by the `protocol` service. |
+| **ui** | Nothing registers the slot. `ViewProtocol`'s five declared-and-unrouted methods were **retired in v17** (#6239); view CRUD runs through `/api/v1/meta`, and `/api/v1/ui/view/:object` is served by the `protocol` service. |
 | **search** | Nothing ships. Contract and engine enum exist in `@objectstack/spec` only. |
 | **ai** | Nothing in this repo — `service-ai` (chat, completion, models, conversations) is Cloud/EE. |
 | **realtime transport** | The service exists but no WebSocket/SSE route is mounted, so `routes.realtime` is deliberately never advertised. |

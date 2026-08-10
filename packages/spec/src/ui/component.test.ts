@@ -20,7 +20,7 @@ import {
   ElementRecordPickerPropsSchema,
   ElementTextInputPropsSchema,
 } from './component.zod';
-import { PageComponentSchema, PageSchema } from './page.zod';
+import { PageComponentSchema, PageSchema, ElementDataSourceSchema } from './page.zod';
 
 describe('PageHeaderProps', () => {
   it('should accept minimal header', () => {
@@ -28,7 +28,6 @@ describe('PageHeaderProps', () => {
     expect(result.title).toBe('My Page');
     expect(result.breadcrumb).toBe(true);
     expect(result.subtitle).toBeUndefined();
-    expect(result.icon).toBeUndefined();
     expect(result.actions).toBeUndefined();
   });
 
@@ -36,7 +35,6 @@ describe('PageHeaderProps', () => {
     const header = {
       title: 'Dashboard',
       subtitle: 'Overview',
-      icon: 'home',
       breadcrumb: false,
       actions: ['action-1', 'action-2'],
     };
@@ -50,28 +48,86 @@ describe('PageHeaderProps', () => {
   });
 });
 
+// #6776 — the three record-chrome switches objectui's header renderer has always
+// read (`containers.tsx:979-981`) and `PageHeaderProps` never declared. Until
+// this declaration objectui's published manifest called them legal while
+// `validateComponentProps` (#5068) called them undeclared — two platform
+// authorities disagreeing about one key (#5435), with the renderer siding with
+// the author.
+describe('PageHeaderProps recordChrome / showStar / showCopyId (#6776)', () => {
+  it('defaults all three ON — an unauthored header keeps the record chrome', () => {
+    const result = PageHeaderProps.parse({ title: 'Lead' });
+    expect(result.recordChrome).toBe(true);
+    expect(result.showStar).toBe(true);
+    expect(result.showCopyId).toBe(true);
+  });
+
+  it('accepts the console preview sample verbatim (`recordChrome: false` on a non-record page)', () => {
+    // objectui `apps/console/src/preview-samples.ts:68` — the exact shape that
+    // was reported as an undeclared key before this card.
+    const result = PageHeaderProps.parse({ title: 'Welcome to the CRM', recordChrome: false });
+    expect(result.recordChrome).toBe(false);
+  });
+
+  it('accepts the star and copy-id switches independently', () => {
+    const result = PageHeaderProps.parse({ title: 'Lead', showStar: false, showCopyId: false });
+    expect(result.showStar).toBe(false);
+    expect(result.showCopyId).toBe(false);
+    // Still a record header — only the two chips inside it are off.
+    expect(result.recordChrome).toBe(true);
+  });
+
+  it('rejects a non-boolean rather than silently stripping it', () => {
+    expect(() => PageHeaderProps.parse({ title: 'Lead', recordChrome: 'false' })).toThrow();
+    expect(() => PageHeaderProps.parse({ title: 'Lead', showStar: 'no' })).toThrow();
+  });
+});
+
+// #6946 — the header icon, retired by maintainer ruling 2026-08-09
+// (objectui#3829 route (c)). objectui resolves `icon` only per header ACTION;
+// the header's own bag is never asked for one, and the registration publishes
+// no `icon` input. Four in-repo pages authored it and none ever drew it.
+describe('PageHeaderProps icon is retired (#6946)', () => {
+  it('rejects the retired `icon` with its prescription', () => {
+    expect(() => PageHeaderProps.parse({ title: 'Connect an Agent', icon: 'bot' }))
+      .toThrow(/`icon`.*removed.*`recordChrome`/s);
+  });
+
+  it('does not materialize the retired `icon` on a clean parse', () => {
+    expect(PageHeaderProps.parse({ title: 'Connect an Agent' })).not.toHaveProperty('icon');
+  });
+
+  // The live half of the same key name, one component over: `page:header`
+  // DOES read `actions` off its props bag and keeps it. A strip scoped by key
+  // name rather than by component type would have taken this with it.
+  it('keeps `actions`, which the header renderer does read', () => {
+    expect(PageHeaderProps.parse({ title: 'Lead', actions: ['convert_lead'] }).actions)
+      .toEqual(['convert_lead']);
+  });
+});
+
 describe('PageTabsProps', () => {
   it('should accept valid tabs with defaults', () => {
     const tabs = {
       items: [{ label: 'Tab 1', children: [] }],
     };
     const result = PageTabsProps.parse(tabs);
-    expect(result.type).toBe('line');
+    expect(result.tabStyle).toBe('line');
     expect(result.position).toBe('top');
     expect(result.items).toHaveLength(1);
   });
 
   it('should accept tabs with all options', () => {
     const tabs = {
-      type: 'card' as const,
+      tabStyle: 'card' as const,
       position: 'left' as const,
       items: [{ label: 'Tab 1', icon: 'settings', children: ['child1'] }],
     };
     expect(() => PageTabsProps.parse(tabs)).not.toThrow();
   });
 
-  it('should reject invalid type enum', () => {
-    expect(() => PageTabsProps.parse({ type: 'invalid', items: [] })).toThrow();
+  it('should reject invalid tabStyle enum', () => {
+    expect(() => PageTabsProps.parse({ tabStyle: 'invalid', items: [] })).toThrow();
   });
 
   it('should reject tabs without items', () => {
@@ -119,6 +175,64 @@ describe('PageTabsProps', () => {
   });
 });
 
+// #6776 — the tab strip's visual style moves from `type` to `tabStyle`.
+//
+// This is an acceptance-face change in BOTH directions, so both are pinned: the
+// new key is accepted, and the old one is REFUSED BY NAME with the prescription
+// rather than being stripped in silence (the retiredKey contract). The reason
+// the concept had to change spelling at all is structural, not aesthetic: a
+// props key named `type` collides with the page component's own dispatch key,
+// which is why objectui's `SchemaRenderer.tsx:253,264` refuses to hoist
+// `properties.type` and why `sdui-parser`'s `BASE_PROPS` (`validate.ts:20-30`)
+// skips it before any validation runs.
+describe('PageTabsProps tabStyle — renamed from `type` (#6776)', () => {
+  it('accepts the three declared styles under the new key', () => {
+    for (const tabStyle of ['line', 'card', 'pill'] as const) {
+      expect(PageTabsProps.parse({ tabStyle, items: [] }).tabStyle).toBe(tabStyle);
+    }
+  });
+
+  it('rejects the retired `type` with the rename prescription', () => {
+    // Not `.toThrow()` alone: an undeclared key on this non-strict schema would
+    // be stripped silently, and a bare throw assertion cannot tell the two
+    // apart. The message IS the migration doc, so it is what gets asserted.
+    expect(() => PageTabsProps.parse({ type: 'card', items: [] }))
+      .toThrow(/`type`.*removed.*`tabStyle`/s);
+  });
+
+  it('does not materialize the retired `type` on a clean parse', () => {
+    expect(PageTabsProps.parse({ tabStyle: 'card', items: [] })).not.toHaveProperty('type');
+  });
+
+  it('still refuses a value outside the enum under the new key', () => {
+    expect(() => PageTabsProps.parse({ tabStyle: 'underline', items: [] })).toThrow();
+  });
+});
+
+// #6776 — `page:accordion.variant`, read at objectui `containers.tsx:734` and
+// visible on screen (`flush` draws the divider, `card` leaves the border to the
+// panel's own content), declared nowhere until now.
+describe('PageAccordionProps variant (#6776)', () => {
+  const accordion = ComponentPropsMap['page:accordion'];
+
+  it('defaults to `flush` — the renderer default, now stated in the contract', () => {
+    const result = accordion.parse({ items: [] }) as { variant?: string };
+    expect(result.variant).toBe('flush');
+  });
+
+  it('accepts the `card` opt-in the renderer invites authors to write', () => {
+    const result = accordion.parse({
+      items: [{ label: 'Details', children: [] }],
+      variant: 'card',
+    }) as { variant?: string };
+    expect(result.variant).toBe('card');
+  });
+
+  it('rejects a variant outside the two the renderer branches on', () => {
+    expect(() => accordion.parse({ items: [], variant: 'bordered' })).toThrow();
+  });
+});
+
 // #5775 — the two tab-item keys the renderer honours and the schema did not
 // declare. `value` is the load-bearing one: it is the `?tab=` token, and the
 // index-derived fallback (`tab-<i>`) silently points at a different tab as soon
@@ -163,7 +277,6 @@ describe('PageCardProps', () => {
     const card = {
       title: 'Info Card',
       bordered: false,
-      actions: ['edit', 'delete'],
       children: ['component1'],
       footer: ['footer-component'],
     };
@@ -192,6 +305,20 @@ describe('PageCardProps', () => {
 
   it('does not materialize the retired `body` on a clean parse', () => {
     expect(PageCardProps.parse({ children: [] })).not.toHaveProperty('body');
+  });
+
+  // #6946 — the card's action list, retired by maintainer ruling 2026-08-09
+  // (objectui#3829 route (c)). `PageCardRenderer` builds its `<Card>` from
+  // title/bordered/children/footer and has no actions area; the objectui
+  // registration publishes no `actions` input either. The prescription points
+  // at composition, which is what actually renders.
+  it('rejects the retired `actions` with the composition prescription', () => {
+    expect(() => PageCardProps.parse({ title: 'Shortcuts', actions: ['new_task'] }))
+      .toThrow(/`actions`.*removed.*`children`.*`footer`/s);
+  });
+
+  it('does not materialize the retired `actions` on a clean parse', () => {
+    expect(PageCardProps.parse({ title: 'Shortcuts', children: [] })).not.toHaveProperty('actions');
   });
 });
 
@@ -225,7 +352,6 @@ describe('RecordDetailsProps', () => {
   it('should accept empty with defaults', () => {
     const result = RecordDetailsProps.parse({});
     expect(result.columns).toBe('2');
-    expect(result.layout).toBe('auto');
     expect(result.sections).toBeUndefined();
   });
 
@@ -241,7 +367,6 @@ describe('RecordDetailsProps', () => {
   // `hideFields` key was silently stripped.
   it('accepts the showcase section shape verbatim (project-detail.page.ts:49)', () => {
     const details = {
-      layout: 'custom' as const,
       sections: [
         { label: 'Overview', columns: 2, fields: ['name', 'account', 'owner', 'status'] },
         { label: 'Financials', columns: 2, fields: ['budget', 'spent'] },
@@ -288,7 +413,7 @@ describe('RecordDetailsProps', () => {
   });
 
   it('rejects the retired ID-list form rather than silently half-reading it', () => {
-    const r = RecordDetailsProps.safeParse({ layout: 'custom', sections: ['overview'] });
+    const r = RecordDetailsProps.safeParse({ sections: ['overview'] });
     expect(r.success).toBe(false);
     expect(r.success === false && r.error.issues[0].code).toBe('invalid_type');
     expect(r.success === false && r.error.issues[0].path).toEqual(['sections', 0]);
@@ -310,6 +435,31 @@ describe('RecordDetailsProps', () => {
       sections: [{ label: 'Audit', fields: ['created_at', 'updated_at'] }],
     });
     expect(result.hideFields).toEqual(hideFields);
+  });
+
+  // #6946 — the mode selector whose two declared modes were never implemented,
+  // retired by maintainer ruling 2026-08-09 (objectui#3818). Unlike the other
+  // two keys in that ruling this one WAS read — against `inline`/`compact`,
+  // values this enum never permitted — so both legal values took the same
+  // branch and the key selected nothing.
+  it('rejects the retired `layout` with its prescription', () => {
+    expect(() => RecordDetailsProps.parse({ layout: 'custom' }))
+      .toThrow(/`layout`.*removed.*`sections`.*`highlightFields`/s);
+    // The declared default is refused too — `auto` was never distinguishable
+    // from `custom` or from omitting the key.
+    expect(() => RecordDetailsProps.parse({ layout: 'auto' }))
+      .toThrow(/`layout`.*removed/s);
+  });
+
+  it('does not materialize the retired `layout` on a clean parse', () => {
+    expect(RecordDetailsProps.parse({ sections: [{ label: 'Overview', fields: ['name'] }] }))
+      .not.toHaveProperty('layout');
+  });
+
+  // The live half of the same key name, one component over.
+  it('leaves `record:highlights` layout alone — a different, honoured key', () => {
+    expect(RecordHighlightsProps.parse({ fields: ['status'], layout: 'horizontal' }).layout)
+      .toBe('horizontal');
   });
 });
 
@@ -843,6 +993,77 @@ describe('Interactive Elements — element:record_picker', () => {
     expect(props).not.toHaveProperty('displayField');
     expect(props).not.toHaveProperty('searchFields');
     expect(props).not.toHaveProperty('multiple');
+  });
+
+  // ── #6276 — the flat `sort` / `limit` shorthands ─────────────────────────
+  // The renderer resolves four keys through one pattern
+  // (`ds.<k> ?? props.<k>`); after #5775 two of the four flat spellings were
+  // declared and two were not. These pin the other two, in BOTH halves of what
+  // a declaration buys: the key is retained (not stripped into silence) and the
+  // VALUE is judged (a wrong shape is rejected by name rather than dropped).
+  it('retains the flat `sort` shorthand — declared, not stripped (#6276)', () => {
+    const props = ElementRecordPickerPropsSchema.parse({
+      object: 'showcase_project',
+      sort: [{ field: 'created_at', order: 'desc' }],
+    });
+    expect(props.sort).toEqual([{ field: 'created_at', order: 'desc' }]);
+  });
+
+  it('retains the flat `limit` shorthand — declared, not stripped (#6276)', () => {
+    const props = ElementRecordPickerPropsSchema.parse({ object: 'showcase_project', limit: 20 });
+    expect(props.limit).toBe(20);
+  });
+
+  // The exact ADR-0078 trap the issue reported: an author who infers
+  // `properties.limit: 20` from the declared `object`/`filter` spelling used to
+  // get the renderer's default 50 with zero diagnostics, because the key was
+  // stripped before anything could read it.
+  it('rejects a non-integer / non-positive `limit` by name (#6276)', () => {
+    expect(() => ElementRecordPickerPropsSchema.parse({ object: 'a', limit: 0 })).toThrow(/limit/);
+    expect(() => ElementRecordPickerPropsSchema.parse({ object: 'a', limit: -5 })).toThrow(/limit/);
+    expect(() => ElementRecordPickerPropsSchema.parse({ object: 'a', limit: 2.5 })).toThrow(/limit/);
+    expect(() => ElementRecordPickerPropsSchema.parse({ object: 'a', limit: 'ten' })).toThrow(/limit/);
+  });
+
+  it('rejects a malformed `sort` by name (#6276)', () => {
+    // A bare field name — the shape an author reaches for when the key is
+    // undeclared and nothing has ever told them otherwise.
+    expect(() => ElementRecordPickerPropsSchema.parse({ object: 'a', sort: 'created_at' }))
+      .toThrow(/sort/);
+    // Right container, wrong direction vocabulary.
+    expect(() => ElementRecordPickerPropsSchema.parse({
+      object: 'a',
+      sort: [{ field: 'created_at', order: 'descending' }],
+    })).toThrow(/sort/);
+    // Right container, missing the required half of the pair.
+    expect(() => ElementRecordPickerPropsSchema.parse({ object: 'a', sort: [{ field: 'created_at' }] }))
+      .toThrow(/sort/);
+  });
+
+  // The shorthand IS the `dataSource` key, so one value must parse identically
+  // through both doors. This is what stops the flat spelling drifting into a
+  // third sort dialect (the ledger's `report.zod.ts` row records three already).
+  it('parses `sort` / `limit` identically to `dataSource` (one shape, two spellings) (#6276)', () => {
+    const sort = [{ field: 'name', order: 'asc' as const }];
+    const viaProps = ElementRecordPickerPropsSchema.parse({ object: 'a', sort, limit: 25 });
+    const viaDataSource = ElementDataSourceSchema.parse({ object: 'a', sort, limit: 25 });
+    expect(viaProps.sort).toEqual(viaDataSource.sort);
+    expect(viaProps.limit).toEqual(viaDataSource.limit);
+    // …and the same rejections on the same values.
+    expect(ElementRecordPickerPropsSchema.safeParse({ object: 'a', limit: 0 }).success)
+      .toBe(ElementDataSourceSchema.safeParse({ object: 'a', limit: 0 }).success);
+    expect(ElementRecordPickerPropsSchema.safeParse({ object: 'a', sort: 'name' }).success)
+      .toBe(ElementDataSourceSchema.safeParse({ object: 'a', sort: 'name' }).success);
+  });
+
+  // The renderer's `?? 50` is a RENDERER fallback, deliberately not a schema
+  // default: `.default(50)` would materialize a limit on every parsed picker
+  // and turn an unset key into an authored one (and would then have to be kept
+  // in sync with objectui by hand).
+  it('does not default `limit` — the 50 is the renderer fallback (#6276)', () => {
+    const props = ElementRecordPickerPropsSchema.parse({ object: 'a' });
+    expect(props.limit).toBeUndefined();
+    expect(props.sort).toBeUndefined();
   });
 });
 

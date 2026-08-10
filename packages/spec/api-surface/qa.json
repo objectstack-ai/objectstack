@@ -4,10 +4,13 @@
   "exports": [
     "TestAction (type)",
     "TestActionSchema (const)",
+    "TestActionType (type)",
     "TestActionTypeSchema (const)",
     "TestAssertion (type)",
     "TestAssertionSchema (const)",
+    "TestAssertionType (type)",
     "TestAssertionTypeSchema (const)",
+    "TestContext (type)",
     "TestContextSchema (const)",
     "TestScenario (type)",
     "TestScenarioSchema (const)",

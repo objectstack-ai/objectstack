@@ -1,5 +1,425 @@
 # @objectstack/example-todo
 
+## 4.0.92-rc.5
+
+### Patch Changes
+
+- 3d89777: fix(example-todo): a normal user can mark a task complete again — `completed_date` is stamped by the hook instead of demanded from the caller (#7036)
+
+  `examples/app-todo` shipped two declarations on `todo_task` that could not both hold on
+  the update path, so the app's headline action was unsatisfiable by construction.
+
+  **Before.** `completed_date` is `Field.datetime({ readonly: true })`, and `readonly` is a
+  two-part contract: never editable in forms, **and** a non-system caller's write to it is
+  stripped from the payload on the update path. The same object then declares a validation
+  rule, `completed_date_required`, refusing any record whose `status` is `completed` while
+  `completed_date` is blank. The strip runs first, so a payload carrying both keys lost
+  `completed_date` and was then rejected for missing it. Measured against the real object on
+  a real kernel:
+
+  ```
+  update status+completed_date (user ctx):  REJECTED -> Completed date is required when status is Completed
+  update status only           (user ctx):  REJECTED -> Completed date is required when status is Completed
+  update status+completed_date (isSystem):  OK
+  insert already-completed:                 OK
+  ```
+
+  Both escapes are non-user paths — an elevated write bypasses the strip, and a create may
+  legitimately seed a read-only column. Every ordinary user update was refused, which made
+  the app's own `completeTask` and `massCompleteTasks` handlers fail every time they ran.
+
+  **After.** The column is server-owned, so the server writes it. `task.hook.ts` gains a
+  `beforeUpdate` leg that stamps `completed_date` on the transition into `completed` and
+  clears it on the transition back out; `completeTask` and `massCompleteTasks` now send
+  `status` alone. A one-key user-context update completes the task and persists the stamp.
+
+  This works because the readonly strip is deliberately narrow rather than because it is
+  bypassed: it runs _after_ the before-hooks and deletes a key only when the caller supplied
+  it **and** it still holds the caller's own value (`stripReadonlyFields`, the
+  `suppliedValues` snapshot plus the `Object.is` identity check). A value a hook wrote is a
+  platform value and survives — including when the caller echoed the same key back, which is
+  what a whole-record form PUT does. The stamp is therefore written unconditionally: leaving
+  a caller-supplied value in place would leave the caller's own value on the key, and the
+  strip would delete it.
+
+  `completed_date_required` stays, and is now the assertion that the stamp actually
+  happened — if the hook is ever unregistered or its transition guard breaks, the write is
+  refused loudly instead of committing a completed task with no completion date.
+
+  **Two related repairs the fix required.**
+
+  - The hook was never registered. `task_logic` was not in `defineStack({ hooks })`, and
+    `collectBundleHooks` reads that array and nothing else, so the whole file was dead
+    metadata: it type-checked, it read as wired, and it never ran. Both sibling example apps
+    already declare `hooks: allHooks`; `app-todo` now does too.
+  - Both existing legs read the record off `ctx.input` rather than `ctx.input.data`.
+    `HookContext.input` is an envelope — `{ data, options }` on insert, `{ id, data, options }`
+    on update — so `ctx.input.priority = 'normal'` set a key no write path reads. The insert
+    defaults and the after-update branches had never had any effect; they do now. The
+    after-update logging also moved from `console` to the kernel logger reached through
+    `ctx.ql`, so it honours the configured log level.
+
+  Reopening a completed task clears `completed_date`, documented in the object and hook
+  metadata: the field means "when this task was completed", so a task that is not completed
+  must not carry a stale one. An edit that carries no `status` is not treated as a reopen.
+
+- cc05304: fix(example-todo): `task_completion`'s recurrence branch computes a real next due date — it wrote a literal `DATEADD(...)` string the driver refused (#7037)
+
+  `examples/app-todo`'s `TaskCompletionFlow` spawned the next occurrence of a recurring task
+  with
+
+  ```
+  due_date: 'DATEADD({completedTask.due_date}, {completedTask.recurrence_interval}, "{completedTask.recurrence_type}")'
+  ```
+
+  **Two independent faults, stacked.** `DATEADD` exists nowhere in the platform — not a CEL
+  builtin, not registered by `packages/formula` under any casing. And a `create_record`
+  node's `fields` values are TEMPLATE-interpolated, never evaluated: the `{…}` holes are
+  filled and the surrounding text passes through verbatim. So what reached the engine was
+  the literal string `DATEADD(2026-08-10, 1, "daily")`, and the field's own coercion refused
+  it with `Due Date must be a valid date (ISO-8601)`, failing the whole run.
+
+  **Reachability changed with #6882; the defect did not.** While the flow was unbound the
+  node never executed and the dead function text was inert. Armed, every completion of a
+  _recurring_ task produced a failed run, so the recurrence feature the node exists for had
+  never once worked.
+
+  **Why the repair is a `script` node and not a better expression.** No flow node evaluates
+  a value-producing expression. The builtin vocabulary's only expression slots are
+  PREDICATES (`config.condition`, `edge.condition`, `decision.conditions[].expression`,
+  `screen.fields[].visibleWhen`) and `flow-template` REFERENCES (`loop.collection`,
+  `map.collection`) — the ledger is `FLOW_NODE_EXPRESSION_PATHS` in
+  `@objectstack/spec/automation` — and an `assignment` node interpolates rather than
+  evaluates. The next due date therefore has to be computed _before_ the create node runs.
+
+  A `compute_next_due_date` `script` node now calls `computeNextTaskDueDate`, registered
+  through `defineStack({ functions })` — the pure-function shape (#1870, #4396) that
+  `showcase_task_completed` already uses: it takes `input`, returns the date, and
+  `create_next_task` persists it by reading the whole-string token `{nextDueDate}`. The
+  function handles all four authored cadences (daily / weekly / monthly / yearly × interval),
+  clamps a monthly shift to the target month's last day exactly as `@objectstack/formula`'s
+  `addMonths` does — so the app cannot teach a recurrence semantic that disagrees with the
+  platform's own formula function — and refuses an unknown `recurrence_type` or an interval
+  `min: 1` forbids instead of guessing a cadence.
+
+  The non-recurring path is unchanged: the `check_recurring` gate still routes straight to
+  `end`, skipping both nodes.
+
+  New suite `test/task-recurrence.test.ts` drives the app's real metadata, real object and
+  real function registry through a real kernel over sqlite: the spawned task's `due_date` is
+  asserted for daily / weekly / monthly completions, and a reverse fixture rebuilt from the
+  live flow shows the pre-fix shape — any function-call text left in a `create_record` field
+  value — still failing inside `create_next_task` with the date refusal, and notably _not_
+  with "no function named …", because nothing ever tried to call one. A class-level guard
+  asserts no write node in any of the app's flows leaves function-call text in a field value.
+
+- 6dd3c25: fix(example-todo): `task_completion` is a real record-change flow again — it bound to nothing and gated on a key nothing reads (#6882)
+
+  `examples/app-todo`'s `TaskCompletionFlow` declared `type: 'record_change'` and then
+  declared neither key that arms one. It was 1 of the 34 authored flows across the three
+  bundled apps, and the only dead one.
+
+  **Two faults on one start node, both silent.**
+
+  1. **No `triggerType` at all.** `AutomationEngine.resolveTriggerBinding` claims a
+     record-change flow only when the authored token starts with `record-`. With the key
+     absent every later branch missed too (`timeRelative`, `config.schedule`,
+     `flow.type === 'schedule'`, `flow.type === 'api'`), the method returned `undefined`,
+     and `activateFlowTrigger` returned without binding. The flow declared itself
+     record-triggered and was, at runtime, a manual flow that never fired.
+  2. **The predicate was written to `triggerCondition`.** The trigger gate is
+     `config.condition` — the key the binding copies and `execute()` evaluates. A node
+     `config` is an open slot by design (ADR-0018), so the misspelling parsed silently.
+     Fixing (1) alone would have been _worse_ than dead: the flow would have fired on every
+     update of every task.
+
+  **Why no channel reported it.** `getTriggerBindingAudit` — the platform's own silent-miss
+  surface, and the source for both the automation plugin's `kernel:bootstrapped` warn loop
+  and the CLI startup summary's `unbound` list — opens with `if (!resolved) continue`,
+  reading "no binding" as "manual/screen flow, nothing to bind". So the missing key did not
+  _add_ a diagnostic; it removed the flow from every diagnostic channel there is. The only
+  trace anywhere was the startup banner counting one more flow registered than bound, with
+  no name and no reason.
+
+  **The repair.** `triggerType: 'record-after-update'` plus the predicate moved to
+  `config.condition` as `status == "completed" && previous.status != "completed"` — the
+  shape `showcase_task_completed` already uses for this exact semantic. `-after-update`
+  rather than `-after-write` on purpose: "marked as complete" is a transition, and the
+  insert leg has no `previous` to transition from — `previous` binds to `null` there, and
+  `previous.status` against `null` aborts the whole CEL predicate with `No such key:
+status` rather than answering false.
+
+  A third fault surfaced the moment the flow could run: `get_task` filtered on `{taskId}`,
+  an `isInput` variable nothing ever bound (a record-change run seeds `params` from the
+  triggering record, which carries `id`, not `taskId`), so the first armed run failed with
+  "1 filter condition(s) resolved to nothing and were dropped from the query". It now reads
+  `{record.id}`, the handle every other record-change flow in the corpus uses, and the dead
+  declaration is gone.
+
+  `@objectstack/example-todo` also runs its own vitest suite now (`vitest run`, as
+  `app-crm` and `app-showcase` already do) instead of `objectstack test`, which is a
+  Quality-Protocol runner that needs a live server and matched no `qa/*.test.json` here —
+  so the package's test files had never executed in CI.
+
+- Updated dependencies [3d5c090]
+- Updated dependencies [e5bd768]
+- Updated dependencies [e027b3e]
+- Updated dependencies [c2429b0]
+- Updated dependencies [445a0c2]
+- Updated dependencies [f6609e6]
+- Updated dependencies [a70358a]
+- Updated dependencies [97e7e3c]
+- Updated dependencies [8828b9e]
+- Updated dependencies [53068c1]
+- Updated dependencies [ee58392]
+- Updated dependencies [f16e54e]
+- Updated dependencies [06be54e]
+- Updated dependencies [259459d]
+- Updated dependencies [3f7f14e]
+- Updated dependencies [6968885]
+- Updated dependencies [eaed61f]
+- Updated dependencies [debe2f6]
+- Updated dependencies [97b0798]
+- Updated dependencies [ad878e7]
+- Updated dependencies [43a7a8d]
+- Updated dependencies [73f69dc]
+- Updated dependencies [04c56aa]
+- Updated dependencies [3028326]
+- Updated dependencies [4c5df00]
+- Updated dependencies [b3efeb7]
+- Updated dependencies [ddd075a]
+- Updated dependencies [88154be]
+- Updated dependencies [fe2dfa1]
+- Updated dependencies [6f6fec7]
+- Updated dependencies [e8dc61e]
+- Updated dependencies [2f3e793]
+- Updated dependencies [d8e8d9c]
+- Updated dependencies [94e749b]
+- Updated dependencies [ea1d916]
+- Updated dependencies [f7d80f4]
+- Updated dependencies [ae31a19]
+- Updated dependencies [e0f300b]
+- Updated dependencies [ec3dfd7]
+- Updated dependencies [466c503]
+- Updated dependencies [10c4ea9]
+- Updated dependencies [62b6a2f]
+- Updated dependencies [5b4780b]
+- Updated dependencies [a933452]
+- Updated dependencies [8140915]
+- Updated dependencies [7b48cf9]
+- Updated dependencies [b5404f4]
+- Updated dependencies [f764691]
+- Updated dependencies [e120a5a]
+- Updated dependencies [e650d67]
+- Updated dependencies [121852d]
+- Updated dependencies [04476e7]
+- Updated dependencies [79228cd]
+- Updated dependencies [b3363e9]
+- Updated dependencies [2ef1807]
+- Updated dependencies [d03fe25]
+- Updated dependencies [2672f85]
+- Updated dependencies [11066f6]
+- Updated dependencies [916af17]
+- Updated dependencies [84c86fb]
+- Updated dependencies [2a2a9fb]
+- Updated dependencies [86e6f6c]
+- Updated dependencies [a2e157c]
+- Updated dependencies [95c4227]
+- Updated dependencies [2a61116]
+- Updated dependencies [d4df105]
+- Updated dependencies [55da611]
+- Updated dependencies [d367f03]
+- Updated dependencies [e2798fa]
+- Updated dependencies [e2798fa]
+- Updated dependencies [0fd8556]
+- Updated dependencies [6fde910]
+- Updated dependencies [9c82b89]
+- Updated dependencies [74155c7]
+- Updated dependencies [742a6a5]
+- Updated dependencies [6908830]
+- Updated dependencies [8b06bba]
+- Updated dependencies [b7d3be4]
+- Updated dependencies [2a0d65e]
+- Updated dependencies [4c54037]
+- Updated dependencies [0f7157b]
+- Updated dependencies [d9bef45]
+- Updated dependencies [f549a0d]
+- Updated dependencies [82da264]
+- Updated dependencies [f586f1a]
+- Updated dependencies [9b9b70f]
+- Updated dependencies [f5a9bc2]
+- Updated dependencies [881a3cc]
+- Updated dependencies [ad6317b]
+- Updated dependencies [8a88885]
+- Updated dependencies [5f7669e]
+- Updated dependencies [becbe53]
+- Updated dependencies [b127c8b]
+- Updated dependencies [a80302a]
+- Updated dependencies [474f131]
+- Updated dependencies [050cd82]
+- Updated dependencies [4d552af]
+- Updated dependencies [44d677c]
+- Updated dependencies [c32944d]
+- Updated dependencies [1dd780f]
+- Updated dependencies [c8d6f6e]
+- Updated dependencies [92a67f2]
+- Updated dependencies [9136327]
+- Updated dependencies [bf0ae99]
+- Updated dependencies [edb4af0]
+- Updated dependencies [f09a2e7]
+- Updated dependencies [cb3b6cd]
+- Updated dependencies [73b7234]
+- Updated dependencies [d2b97c3]
+- Updated dependencies [59b794f]
+- Updated dependencies [db59e9c]
+- Updated dependencies [fc3a36a]
+- Updated dependencies [69787f0]
+- Updated dependencies [5d022a1]
+- Updated dependencies [042b9ee]
+- Updated dependencies [55011af]
+- Updated dependencies [f549a0d]
+- Updated dependencies [a36db28]
+- Updated dependencies [3f8817a]
+- Updated dependencies [a2443e3]
+- Updated dependencies [e1554b1]
+- Updated dependencies [53ef057]
+- Updated dependencies [4856789]
+- Updated dependencies [c3f4916]
+- Updated dependencies [33e0385]
+- Updated dependencies [2205363]
+- Updated dependencies [09fe58d]
+- Updated dependencies [d0a5ceb]
+- Updated dependencies [e18a162]
+- Updated dependencies [d127ff0]
+- Updated dependencies [c804f19]
+- Updated dependencies [9b86cf6]
+- Updated dependencies [c51ffa5]
+- Updated dependencies [8825a06]
+- Updated dependencies [5087ac6]
+- Updated dependencies [2d1ddf0]
+- Updated dependencies [354b00f]
+- Updated dependencies [3de535b]
+- Updated dependencies [fe2e15a]
+- Updated dependencies [dbe92a7]
+- Updated dependencies [6146b67]
+- Updated dependencies [c6b6bb4]
+- Updated dependencies [4f3d232]
+- Updated dependencies [5c2716b]
+- Updated dependencies [2f59da0]
+- Updated dependencies [114e727]
+- Updated dependencies [5e247fd]
+- Updated dependencies [1a53a02]
+- Updated dependencies [73648ba]
+- Updated dependencies [1507ba3]
+- Updated dependencies [a954634]
+- Updated dependencies [8ad609c]
+- Updated dependencies [bbee302]
+- Updated dependencies [7c6261a]
+- Updated dependencies [08863dd]
+- Updated dependencies [1da39f5]
+- Updated dependencies [56664f5]
+- Updated dependencies [31cbe90]
+- Updated dependencies [bf42e76]
+- Updated dependencies [90bbf25]
+- Updated dependencies [eb91eba]
+- Updated dependencies [8fbed3b]
+- Updated dependencies [42da73d]
+- Updated dependencies [643b7c7]
+- Updated dependencies [bfe689b]
+- Updated dependencies [9960cd2]
+- Updated dependencies [1a15893]
+- Updated dependencies [b70e534]
+- Updated dependencies [b295e4b]
+- Updated dependencies [2233a85]
+- Updated dependencies [de43f94]
+- Updated dependencies [62dd69a]
+- Updated dependencies [e15e679]
+- Updated dependencies [2ab1257]
+- Updated dependencies [4cc4fb7]
+- Updated dependencies [2c26040]
+- Updated dependencies [f758cec]
+- Updated dependencies [1bb5a56]
+- Updated dependencies [1fa224a]
+- Updated dependencies [3fb42d2]
+- Updated dependencies [78f0be8]
+- Updated dependencies [35f7fb4]
+- Updated dependencies [a5302c7]
+- Updated dependencies [82397b6]
+- Updated dependencies [4df747c]
+- Updated dependencies [7084313]
+- Updated dependencies [47a4e67]
+- Updated dependencies [91cefb8]
+- Updated dependencies [9bc846b]
+- Updated dependencies [0e043d8]
+- Updated dependencies [4fedb11]
+- Updated dependencies [dadd1ad]
+- Updated dependencies [2f2e63c]
+- Updated dependencies [486d526]
+- Updated dependencies [f8fe47e]
+- Updated dependencies [89d7b35]
+- Updated dependencies [6155c3c]
+- Updated dependencies [d13f627]
+- Updated dependencies [a841151]
+- Updated dependencies [85ec26d]
+- Updated dependencies [f6476fc]
+- Updated dependencies [4ac12ef]
+- Updated dependencies [1788e19]
+- Updated dependencies [b88f5e8]
+- Updated dependencies [42cc219]
+- Updated dependencies [d7e0b42]
+- Updated dependencies [0996899]
+- Updated dependencies [378d8b1]
+- Updated dependencies [3510e4a]
+- Updated dependencies [aa4b90d]
+- Updated dependencies [54299ca]
+- Updated dependencies [1f6ed16]
+- Updated dependencies [dc61def]
+- Updated dependencies [251e888]
+- Updated dependencies [183b4c4]
+- Updated dependencies [2fdb36e]
+- Updated dependencies [62159bd]
+- Updated dependencies [3de535b]
+- Updated dependencies [cca11e9]
+- Updated dependencies [cfb549d]
+- Updated dependencies [20526f5]
+- Updated dependencies [c5eef1d]
+- Updated dependencies [e0f300b]
+- Updated dependencies [761a0ba]
+- Updated dependencies [d86815e]
+- Updated dependencies [be87153]
+- Updated dependencies [60f0dd8]
+- Updated dependencies [a87c5cd]
+- Updated dependencies [a47f338]
+- Updated dependencies [bee5ffe]
+- Updated dependencies [e13fd91]
+- Updated dependencies [3172831]
+- Updated dependencies [2bd4e5e]
+- Updated dependencies [2598216]
+- Updated dependencies [2c7e62d]
+- Updated dependencies [eb7613c]
+- Updated dependencies [68f5ecc]
+- Updated dependencies [ecc9110]
+- Updated dependencies [f7bd4e2]
+- Updated dependencies [361bd5b]
+- Updated dependencies [bd5fc38]
+- Updated dependencies [1818998]
+- Updated dependencies [09ee21c]
+- Updated dependencies [f549a0d]
+- Updated dependencies [3fc2e48]
+- Updated dependencies [e8f435c]
+- Updated dependencies [41610f6]
+- Updated dependencies [c9bf940]
+- Updated dependencies [a682670]
+  - @objectstack/spec@17.0.0-rc.6
+  - @objectstack/objectql@17.0.0-rc.6
+  - @objectstack/runtime@17.0.0-rc.6
+  - @objectstack/client@17.0.0-rc.6
+  - @objectstack/metadata@17.0.0-rc.6
+  - @objectstack/driver-sqlite-wasm@17.0.0-rc.6
+  - @objectstack/mcp@17.0.0-rc.6
+  - @objectstack/knowledge-memory@17.0.0-rc.6
+  - @objectstack/service-knowledge@17.0.0-rc.6
+
 ## 4.0.92-rc.4
 
 ### Patch Changes

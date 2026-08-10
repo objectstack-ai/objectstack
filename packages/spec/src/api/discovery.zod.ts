@@ -2,6 +2,10 @@
 
 import { z } from 'zod';
 import { HttpMethod } from '../shared/http.zod';
+// [#6287] Type-only: erased at compile time, so this carries no runtime edge
+// from `api/` to `cloud/`. It is what makes the NODE_ENV fold table provably
+// total over the environment taxonomy rather than total by inspection.
+import type { EnvironmentType } from '../cloud/environment.zod';
 
 /**
  * Service Status Enum
@@ -178,6 +182,59 @@ export const ApiRoutesSchema = lazySchema(() => z.object({
   /** Base URL for Package Management */
   packages: z.string().optional().describe('e.g. /api/v1/packages'),
 
+  /**
+   * Base URL for the datasource federation-admin family — the base under
+   * which the external-datasource routes (`{datasources}/:name/external/*`,
+   * ADR-0015 §6.2: tables / draft / import / refresh-catalog / validate) are
+   * mounted.
+   *
+   * Declared by #6633 (route B toward #6306): the SDK's
+   * `datasources.external.*` methods hard-coded `/api/v1/datasources` with no
+   * discovery mechanism at all, so any deployment on a non-default base
+   * (`apiPath`, or a programmatic `basePath`/`version`) had the whole family
+   * pinned to a convention the server had moved away from. With the key
+   * declared, a host that mounts the family advertises WHERE, and the SDK
+   * follows — falling back to the `/api/v1/datasources` convention when
+   * unadvertised.
+   *
+   * `optional`, not `nullable` — same reasoning as `mcp`: the key is ABSENT
+   * when no federation surface is mounted. The runtime dispatcher serves no
+   * `/datasources` domain, so it must never advertise one (ADR-0076 D12), and
+   * the `getDiscovery()` builder in `metadata-protocol` emits nothing here
+   * either — the mount belongs to the REST host, which that builder cannot
+   * see. The one producer that CAN answer truthfully is the REST discovery
+   * endpoint, which derives the value from its recorded direct mounts.
+   */
+  datasources: z.string().optional().describe(
+    'e.g. /api/v1/datasources — base for the datasources/:name/external/* federation-admin family; '
+    + 'absent when no host mounts it'
+  ),
+
+  /**
+   * Base URL for the transactional-email surface — the base under which
+   * `POST {email}/send` is mounted.
+   *
+   * Declared by #6714 (replicating the #6633 / `datasources` precedent): the
+   * SDK's `email.send` hard-coded `/api/v1/email/send`, while the REST
+   * server's `registerEmailEndpoints` mounts under `getApiBasePath()` and
+   * therefore already follows `apiPath` — so on any `apiPath` deployment the
+   * stock client's email.send was a live 404, not a latent gap. With the key
+   * declared, the host that mounts the surface advertises WHERE, and the SDK
+   * follows — falling back to the `/api/v1/email` convention when
+   * unadvertised.
+   *
+   * `optional`, not `nullable` — same reasoning as `datasources`: the key is
+   * ABSENT when no email surface is mounted. The runtime dispatcher serves no
+   * `/email` domain, so it must never advertise one (ADR-0076 D12), and the
+   * `getDiscovery()` builder in `metadata-protocol` emits nothing here either
+   * — the mount belongs to the REST host, which that builder cannot see. The
+   * one producer that CAN answer truthfully is the REST discovery endpoint,
+   * which projects the value from its recorded route registrations.
+   */
+  email: z.string().optional().describe(
+    'e.g. /api/v1/email — base for the email/send endpoint; absent when no host mounts it'
+  ),
+
   // `workflow` was removed here (#4451, v17): no host ever mounted a workflow
   // surface and nothing ever registered the slot (ADR-0115 Evidence 5), so no
   // builder could truthfully populate the field. State machines are enforced
@@ -311,20 +368,104 @@ export type DiscoveryEnvironment = z.input<typeof DiscoveryEnvironmentSchema>;
  * | `development`, `dev`    | `development`  | exact / short spelling |
  * | `test`                  | `development`  | ephemeral developer-class run (vitest/CI), not a provisioned pre-production copy |
  * | `staging`               | `sandbox`      | pre-production and production-LIKE; certainly not `production`, and `sandbox` is the enum's pre-production member |
- * | unset / anything else   | `development`  | preserves the pre-existing `getEnv('NODE_ENV', 'development')` default, and never CLAIMS production on a guess |
+ * | `preview`               | `sandbox`      | a PROVISIONED environment (own database, hostname, plan tier, per-environment RBAC), not a developer's machine — same class as `staging` (#6287) |
+ * | `trial`                 | `sandbox`      | a provisioned environment holding an evaluating customer's real business data; developer-class would understate it (#6287) |
+ * | unset / blank           | `production`   | the host declined to say; every other reader of that absence already says `production`, and of the two ways to be wrong, calling a real production deployment `development` is the dangerous one (#5673, #5936) |
+ * | anything else           | `development`  | an unrecognised spelling is a GUESS, and this function never claims `production` on a guess (#4828) |
  *
- * The last row is the safety-relevant one: an unknown spelling degrades to
- * `development`, so this function can never advertise `production` for an
- * environment it failed to recognise.
+ * The last two rows carry the whole safety argument, and they point opposite
+ * ways on purpose. An unrecognised spelling (`qa`, `uat`) degrades to
+ * `development`, so nothing here ever advertises `production` for an
+ * environment it failed to recognise. **Absence is not a guess** — it is the
+ * host declining to answer, and the conservative response to that is
+ * `production`: `environment` is machine-readable, and a client may skip
+ * production warnings or loosen a destructive action's confirmation on it.
+ *
+ * ## `preview` and `trial` are a THIRD case — declared, not absent, not a guess (#6287)
+ *
+ * Until #6287 those two reached `development` through the `??` fallback rather
+ * than through a decision, so this table declared five of the seven
+ * `EnvironmentTypeSchema` members and let the other two fall off the end. That
+ * is the same shape the two rows above exist to separate: the fallback answers
+ * for spellings this repo has never heard of, and a first-class member of our
+ * OWN taxonomy is not one of those. It is neither the host declining to answer
+ * nor a guess — it is a bucket we ship, and where it folds is ours to state.
+ *
+ * Both fold to `sandbox`, and the reasoning is the same for each:
+ *
+ * 1. **What they are here.** In this repo's taxonomy an environment is a
+ *    provisioned runtime container — isolated database, canonical hostname,
+ *    plan tier, per-environment RBAC (`cloud/environment.zod.ts`). A `preview`
+ *    or `trial` environment is that, not an ephemeral developer-class run. The
+ *    `development` bucket is reserved for the machine-and-CI class (`development`,
+ *    `dev`, `test`); `sandbox` is the enum's provisioned pre-production member,
+ *    which is what these two are.
+ * 2. **Posture, in the tightening direction.** `trial` in particular holds an
+ *    evaluating customer's real business data. `environment` is read to decide
+ *    whether to soften a destructive action's confirmation, so answering
+ *    `development` there understates the posture — the same *kind* of error the
+ *    unset row was flipped to avoid (#5673, #5936), one bucket down. Neither is
+ *    `production`: they are by definition not the customer's production
+ *    deployment, and claiming otherwise would make the flag's one question
+ *    ("am I talking to production?") answer wrongly in the other direction.
+ * 3. **It keeps the author's distinction.** An operator who tags an environment
+ *    `preview` had `development` and `test` available and did not pick them.
+ *    Folding `preview` onto `development` erases the only information that
+ *    choice carried; folding it onto `sandbox` preserves it as far as a
+ *    three-member enum can.
+ *
+ * The unset row moved from `development` to `production` in #5673 (maintainer
+ * ruling 2026-08-06) and moved HERE, into the shared mapper, in #5936 (ruling
+ * 2026-08-07, direction 1). #5673 could only reach its own producer — the
+ * runtime dispatcher, which flipped the default at its call site — so the
+ * second producer (`getDiscovery()` in `@objectstack/metadata-protocol`, served
+ * by `@objectstack/rest`) went on passing a genuinely absent `NODE_ENV` in and
+ * answering `development`. One default in one place is what stops that: a
+ * producer cannot forget to copy a line it never has to write, so the next
+ * discovery producer inherits the right answer.
+ *
+ * "Unset" includes a **blank** value, not only an absent one. `NODE_ENV=`
+ * exports an empty string, and the runtime's `getEnv('NODE_ENV', …)` has always
+ * folded that into its default (it tests with `||`). Had this treated blank as
+ * "anything else" the two producers would have drifted again on exactly that
+ * input — the drift this consolidation exists to end.
+ *
+ * ## The taxonomy half of this table is EXHAUSTIVE, and tsc keeps it so (#6287)
+ *
+ * The seven `EnvironmentTypeSchema` rows are grouped behind a
+ * `satisfies Record<EnvironmentType, DiscoveryEnvironment>`: adding a bucket to
+ * that enum without deciding where it folds does not compile, and a key that is
+ * not a member does not compile either. The operator shorthands (`prod`, `dev`)
+ * sit outside that group precisely so the check stays writable — they are
+ * convenience spellings, not members.
+ *
+ * It is a COMPILE-time check rather than a runtime assertion because a runtime
+ * one cannot see this defect: the fallback and three of the seven rows all
+ * produce `'development'`, so calling `resolveDiscoveryEnvironment` returns an
+ * indistinguishable answer whether a row exists or the `??` invented it. A
+ * runtime exhaustiveness test would have passed on the exact state #6287
+ * reported. `tsc` compares the KEY SET, which is the actual claim. The negative
+ * control for it lives in `discovery.test.ts`.
  */
 const NODE_ENV_TO_DISCOVERY_ENVIRONMENT: Readonly<Record<string, DiscoveryEnvironment>> = {
-  production: 'production',
+  // The seven declared `EnvironmentTypeSchema` buckets. The `satisfies` is the
+  // gate described above: every member must appear, and nothing that is not a
+  // member may (#6287).
+  ...({
+    production: 'production',
+    sandbox: 'sandbox',
+    development: 'development',
+    test: 'development',
+    staging: 'sandbox',
+    preview: 'sandbox',
+    trial: 'sandbox',
+  } satisfies Record<EnvironmentType, DiscoveryEnvironment>),
+
+  // Operator convenience spellings — deliberately OUTSIDE the block above,
+  // because they are not taxonomy members and folding them in would make the
+  // exhaustiveness check unwritable.
   prod: 'production',
-  sandbox: 'sandbox',
-  staging: 'sandbox',
-  development: 'development',
   dev: 'development',
-  test: 'development',
 };
 
 /**
@@ -335,12 +476,27 @@ const NODE_ENV_TO_DISCOVERY_ENVIRONMENT: Readonly<Record<string, DiscoveryEnviro
  * `serviceUnavailableMessage` / `inProcessServiceMessage` live in
  * `@objectstack/spec/system` rather than in each builder.
  *
- * @param raw the operator-supplied value, typically `process.env.NODE_ENV`
+ * **The unset default is part of the mapping, not the caller's business**
+ * (#5936). Callers pass the operator's value through as they read it and pass
+ * nothing when the operator set nothing; they do not substitute a default of
+ * their own. A caller that supplies one is re-opening the drift this function
+ * exists to close.
+ *
+ * @param raw the operator-supplied value, typically `process.env.NODE_ENV`;
+ *   `undefined`, `null` and a blank string all mean "the host did not say"
  * @returns a value guaranteed to satisfy {@link DiscoveryEnvironmentSchema}
  */
 export function resolveDiscoveryEnvironment(raw?: string | null): DiscoveryEnvironment {
-  if (typeof raw !== 'string') return 'development';
-  return NODE_ENV_TO_DISCOVERY_ENVIRONMENT[raw.trim().toLowerCase()] ?? 'development';
+  const spelling = typeof raw === 'string' ? raw.trim().toLowerCase() : '';
+  if (spelling === '') return 'production';
+  // [#6287] The fallback's ONE remaining job: a spelling that is not a declared
+  // `EnvironmentType` member and not an operator shorthand — `qa`, `uat`, a
+  // typo. It no longer silently answers for members of our own taxonomy; the
+  // table above is total over them and `tsc` keeps it that way, so a future
+  // bucket cannot reach this line by being forgotten. Keep it: `NODE_ENV` is an
+  // arbitrary operator string, so "anything else" is a real input class, and
+  // degrading it to `development` is what stops a guess claiming `production`.
+  return NODE_ENV_TO_DISCOVERY_ENVIRONMENT[spelling] ?? 'development';
 }
 
 // ============================================================================

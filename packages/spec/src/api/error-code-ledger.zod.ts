@@ -16,10 +16,48 @@
  * envelope conformance suites — which fails CI. That friction is the point
  * (ADR-0112: "no silent fourth state" for error codes, per ADR-0049/0078).
  *
+ * ## Scope: THIS ledger registers framework packages only (#4805)
+ *
+ * Every owner key below is a package published from this repository, and that
+ * is a RULE — not an accident of the current list, and not something a reader
+ * should have to infer by scanning the package names. A downstream product
+ * repo (`objectstack-ai/cloud`, or any product built on the platform) does
+ * **not** register its codes here. It maintains its OWN ledger, in its own
+ * repo, and composes the validation itself:
+ *
+ * 1. **shape** — `envelopeViolations(body)` (`contract.zod.ts`), and
+ * 2. **vocabulary** — `code ∈ StandardErrorCode ∪ <its own ledger>`, which
+ *    `makeApiErrorSchema(<its own ledger>)` (`contract.zod.ts`) gives as a
+ *    single parse instead of the two-step assertion.
+ *
+ * The deployed wire vocabulary stays closed and checkable either way — which
+ * is what ADR-0112's "no silent fourth state" asks for. It never asked for
+ * every entry to live physically in one file.
+ *
+ * Why federated rather than admitting downstream entries (maintainer ruling on
+ * #4805, 2026-08-03, re-confirmed 2026-08-09; raised from cloud#930/#944):
+ *
+ * - **A commercial vocabulary does not belong in an Apache-2.0 spec.** The
+ *   codes worth registering are precisely the product-specific ones (billing
+ *   and plan-gating states, control-plane provisioning refusals), and
+ *   registering them here would have the OSS spec enumerate a closed-source
+ *   product's states under package names absent from this distribution.
+ * - **Cadence mismatch breeds bypass.** A downstream code arrives with a
+ *   downstream feature; making each one cost a cross-repo PR plus a pin bump
+ *   pushes authors toward reusing a semantically wrong existing code, which is
+ *   less visible than inventing one.
+ *
+ * The corollary for THIS file: a PR adding an owner key for a package that is
+ * not published from this repository is out of scope by construction — the
+ * fix for that need is a ledger in the owning repo, composed as above. The
+ * one thing a downstream repo must NOT do is emit a code registered nowhere:
+ * that is the silent fourth state, wherever the ledger lives.
+ *
  * ## Registering a new code
  *
- * Add it to your package's entry (create the entry if your package has none),
- * SCREAMING_SNAKE (`^[A-Z][A-Z0-9_]*$` — lint-enforced by
+ * Add it to your package's entry (create the entry if your package has none —
+ * a framework package; see the scope rule above if yours ships from another
+ * repo), SCREAMING_SNAKE (`^[A-Z][A-Z0-9_]*$` — lint-enforced by
  * `error-code-ledger.test.ts`), with a trailing `//` comment when the name
  * alone doesn't carry the meaning. Prefer a domain prefix for anything not
  * self-evidently global (`ATTACHMENT_*`, `REPORT_*`, `SETTINGS_*`). If the
@@ -153,6 +191,7 @@ export const ERROR_CODE_LEDGER = {
     'ERR_FILE_CONSTRAINT',
     'ERR_FILE_REFERENCE_COPY',
     'FILE_DOWNLOAD_DENIED',
+    'FILE_FIELD_BULK_WRITE_REFUSED', // a multi/predicate update wrote a file id into a file-class field (#7102)
     'FILE_NOT_FOUND',
     'INTERNAL',
     'INVALID_REQUEST',
@@ -228,6 +267,7 @@ export const ERROR_CODE_LEDGER = {
     'NOT_ATTEMPTED',              // atomic data-batch row never ran — an earlier row's failure aborted the batch (#4793)
     'NOT_CREATABLE',
     'NOT_OVERRIDABLE',
+    'OBJECT_OVERLAY_PACKAGE_MISMATCH',  // [ADR-0029 D9.9] object overlay row bound to a package that does not own the object
     'ROLLED_BACK',                // atomic data-batch row was written, then undone by the batch rollback (#4793)
     'UNSUPPORTED_QUERY_PARAM',
     'VALIDATION_FAILED',
@@ -246,7 +286,7 @@ export const ERROR_CODE_LEDGER = {
     'ERR_BULK_RESULT_MISMATCH',
     'ERR_DATASOURCE_UNAVAILABLE',
     'ERR_DRIVER_CONNECT',
-    'ERR_READONLY_FIELD_REJECTED', // strictReadonlyWrites: the write would strip read-only fields, so it was refused (#5126)
+    'ERR_READONLY_FIELD_REJECTED', // strictReadonlyWrites: the write would strip caller-supplied fields, so it was refused (#5126; since #6437 that covers the primary_key strip too — one code, `drops` carries the per-reason breakdown)
     'ERR_SUMMARY_RECOMPUTE',
     'VALIDATION_FAILED',
   ],

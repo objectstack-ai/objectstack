@@ -36,12 +36,14 @@ export const ModifyFieldOperation = z.object({
   fieldName: z.string().describe('Name of the field to modify'),
   changes: z.record(z.string(), z.unknown()).describe('Partial field definition updates')
 }).describe('Modify properties of an existing field');
+export type ModifyFieldOperation = z.input<typeof ModifyFieldOperation>;
 
 export const RemoveFieldOperation = z.object({
   type: z.literal('remove_field'),
   objectName: z.string().describe('Target object name'),
   fieldName: z.string().describe('Name of the field to remove')
 }).describe('Remove a field from an existing object');
+export type RemoveFieldOperation = z.input<typeof RemoveFieldOperation>;
 
 export const CreateObjectOperation = z.object({
   type: z.literal('create_object'),
@@ -53,17 +55,20 @@ export const RenameObjectOperation = z.object({
   oldName: z.string().describe('Current object name'),
   newName: z.string().describe('New object name')
 }).describe('Rename an existing object');
+export type RenameObjectOperation = z.input<typeof RenameObjectOperation>;
 
 export const DeleteObjectOperation = z.object({
   type: z.literal('delete_object'),
   objectName: z.string().describe('Name of the object to delete')
 }).describe('Delete an existing object');
+export type DeleteObjectOperation = z.input<typeof DeleteObjectOperation>;
 
 export const ExecuteSqlOperation = z.object({
   type: z.literal('execute_sql'),
   sql: z.string().describe('Raw SQL statement to execute'),
   description: z.string().optional().describe('Human-readable description of the SQL')
 }).describe('Execute a raw SQL statement');
+export type ExecuteSqlOperation = z.input<typeof ExecuteSqlOperation>;
 
 // Union of all possible operations
 export const MigrationOperationSchema = lazySchema(() => z.discriminatedUnion('type', [
@@ -82,6 +87,7 @@ export const MigrationDependencySchema = lazySchema(() => z.object({
   migrationId: z.string().describe('ID of the migration this depends on'),
   package: z.string().optional().describe('Package that owns the dependency migration')
 }).describe('Dependency reference to another migration that must run first'));
+export type MigrationDependency = z.input<typeof MigrationDependencySchema>;
 
 export const ChangeSetSchema = lazySchema(() => z.object({
   id: z.string().uuid().describe('Unique identifier for this change set'),
@@ -196,6 +202,10 @@ export const DataMigrationFlagSchema = lazySchema(() => z.object({
     .describe('Advisory findings from the last run (external URLs, stale owners, …) — cost storage or need a modelling decision, never block the gate'),
   details: z.string().optional()
     .describe('JSON-encoded counts from the last run, for diagnostics'),
+  deviation_observed_at: z.string().datetime().nullable().optional()
+    .describe('When this deployment last ADMITTED a value the verified contract rejects, via an OS_ALLOW_LAX_* escape hatch. Does not clear verified_at — it withdraws the irreversible half of what the certificate authorises (#4797)'),
+  deviation_detail: z.string().nullable().optional()
+    .describe('JSON-encoded first counterexample behind deviation_observed_at (object, field, type, parse issue), for diagnostics'),
 }).describe('Deployment-level record that a data migration ran here and its self-check passed — the evidence gate consumers read instead of the platform version'));
 export type DataMigrationFlag = z.input<typeof DataMigrationFlagSchema>;
 
@@ -209,6 +219,62 @@ export type DataMigrationFlag = z.input<typeof DataMigrationFlagSchema>;
 export function isDataMigrationFlagVerified(flag: DataMigrationFlag | null | undefined): boolean {
   if (!flag) return false;
   return flag.verified_at != null && flag.verified_at !== '' && flag.blocking === 0;
+}
+
+/**
+ * Has this deployment admitted a value its own verified contract rejects,
+ * since that contract was last verified (#4797)?
+ *
+ * The counterexample arrives through an operator escape hatch —
+ * `OS_ALLOW_LAX_MEDIA_VALUES` / `OS_ALLOW_LAX_VALUE_SHAPES` — which exist
+ * precisely to relax a deployment that has ALREADY verified. So the window is
+ * real: the value is admitted and persisted, the ledger still reads
+ * `verified_at` non-null with `blocking: 0`, and the moment the switch goes
+ * off (or another process runs without it) strict returns and the same data
+ * starts being rejected. The certificate was true when it was written and is
+ * false now, and nothing in the ledger said so.
+ *
+ * Recorded on its own column rather than by clearing `verified_at`, because a
+ * single admitted write is not the same evidence as a failed full scan.
+ * Overturning a scan of the whole store on one observation is the wrong order
+ * of magnitude, and it would turn an explicitly temporary switch into a
+ * one-way door: one use of the escape hatch would force a full re-migration.
+ */
+export function hasObservedDeviation(flag: DataMigrationFlag | null | undefined): boolean {
+  if (!flag) return false;
+  return flag.deviation_observed_at != null && flag.deviation_observed_at !== '';
+}
+
+/**
+ * Does a flag row authorise an IRREVERSIBLE action — deleting bytes that
+ * cannot be brought back (#4797)?
+ *
+ * A certificate is not a boolean; it is authority over a *set of behaviours*,
+ * and the two halves of that set are withdrawn on different evidence. So there
+ * are two arbiters, not one:
+ *
+ *  - {@link isDataMigrationFlagVerified} authorises the RECOVERABLE half —
+ *    strict value-shape enforcement (#3438), tombstoning a released file into
+ *    its grace window (#3459). Every one of those is undoable: a rejected
+ *    write is retried, a tombstone is lifted on re-attach.
+ *  - this one authorises the UNRECOVERABLE half — the reap guard's byte
+ *    delete. It requires everything the first requires AND that no deviation
+ *    has been observed since the certificate was earned.
+ *
+ * The asymmetry is the whole design. An admitted counterexample is enough to
+ * stop deleting data forever; it is NOT enough to overturn a full-store scan,
+ * so the recoverable behaviours keep running and the operator's escape hatch
+ * keeps being an escape hatch rather than a one-way door. A real
+ * `os migrate … --apply` re-run — a fresh scan of everything, which is
+ * evidence of the same order as the certificate — clears the marker and
+ * restores the irreversible half.
+ *
+ * A marker with no consumer would be worse than nothing: the ledger would
+ * declare a fact ("this deployment deviated") that no code acts on, while the
+ * bytes get deleted exactly as before. This function is that consumer.
+ */
+export function authorisesIrreversibleAction(flag: DataMigrationFlag | null | undefined): boolean {
+  return isDataMigrationFlagVerified(flag) && !hasObservedDeviation(flag);
 }
 
 // --- Migration journal (ADR-0119 D2, #4617) ---

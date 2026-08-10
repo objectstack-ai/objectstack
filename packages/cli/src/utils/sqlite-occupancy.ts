@@ -6,11 +6,22 @@
  * `os migrate apply` used to gate only on `--allow-destructive` and the `[y/N]`
  * prompt. Neither says anything about *occupancy*: the overwhelmingly common
  * shape of a dev machine is a `pnpm dev` server holding the same
- * `.objectstack/data/standalone.db` open while the operator runs a migration in
- * another terminal. What that costs is not a swapped-out file — the SQLite
+ * `.objectstack/data/objectstack.db` open while the operator runs a migration
+ * in another terminal. What that costs is not a swapped-out file — the SQLite
  * column-op rebuild swaps tables *inside* the file, in one transaction — it is
  * `SQLITE_BUSY` mid-migration, stale prepared statements in the live server,
  * and schema-cookie churn under its feet.
+ *
+ * That scenario was FALSE under the pre-#6469 defaults, and this comment used
+ * to assert it anyway: `pnpm dev` (`os dev`) held `dev.db` while `os migrate`
+ * opened `standalone.db`, so under default configuration the two never
+ * contended for one file and this guard could not fire in its own primary
+ * scenario (it still worked when an explicit `OS_DATABASE_URL` pointed both at
+ * one file). #6469 unified all three commands on ONE resolution —
+ * `<state dir>/data/objectstack.db`, legacy files compat-read — so the dev
+ * server and a migration in another terminal now genuinely open the same file
+ * by default, and the scenario above is real again. The probes themselves are
+ * filename-parametric and needed no change.
  *
  * ## Two independent signals, because neither covers the ground alone
  *

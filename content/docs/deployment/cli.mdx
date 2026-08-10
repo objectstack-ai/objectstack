@@ -131,7 +131,7 @@ os dev --database file:./data/test.db --auth-secret $(openssl rand -hex 32)
 |---|---|---|
 | `-a, --artifact <path\|url>` | `OS_ARTIFACT_PATH` | Boot a pre-built artifact directly; **skips auto-compile** |
 | `-d, --database <url>` | `OS_DATABASE_URL` | `file:…` / `libsql://` / `postgres://` / `mongodb://` / `memory://` |
-| `--database-driver <kind>` | `OS_DATABASE_DRIVER` | Force `sqlite` \| `turso` \| `postgres` \| `mongodb` \| `memory` |
+| `--database-driver <kind>` | `OS_DATABASE_DRIVER` | Force `sqlite` \| `sqlite-wasm` \| `turso` \| `postgres` \| `mysql` \| `mongodb` \| `memory` |
 | `--database-auth-token <t>` | `OS_DATABASE_AUTH_TOKEN` | libsql/Turso token |
 | `--auth-secret <s>` | `OS_AUTH_SECRET` | Override the dev-fallback secret |
 | `--environment-id <id>` | `OS_ENVIRONMENT_ID` | Environment identifier (default `env_local`) |
@@ -320,7 +320,7 @@ os start
 |---|---|---|
 | `-a, --artifact <path\|url>` | `OS_ARTIFACT_PATH` | File path or `http(s)://` URL to the compiled artifact |
 | `-d, --database <url>` | `OS_DATABASE_URL` | `file:…` / `libsql://` / `postgres://` / `mongodb://` / `memory://` |
-| `--database-driver <kind>` | `OS_DATABASE_DRIVER` | Force `sqlite` \| `turso` \| `postgres` \| `mongodb` \| `memory` when the URL is ambiguous |
+| `--database-driver <kind>` | `OS_DATABASE_DRIVER` | Force `sqlite` \| `sqlite-wasm` \| `turso` \| `postgres` \| `mysql` \| `mongodb` \| `memory` when the URL is ambiguous |
 | `--database-auth-token <token>` | `OS_DATABASE_AUTH_TOKEN` | Auth token for libsql/Turso |
 | `--auth-secret <secret>` | `OS_AUTH_SECRET` / `AUTH_SECRET` | Secret for `@objectstack/plugin-auth`. If neither the flag nor the env var is set, `os start` **auto-generates one** and persists it at `<home>/auth-secret` |
 | `--home <dir>` | `OS_HOME` | Home directory for persistent state (default `<cwd>/.objectstack` when an `objectstack.config.ts` is present, otherwise `~/.objectstack`) |
@@ -1020,6 +1020,21 @@ os test --url http://localhost:4000    # Custom server URL
 os test --token my-api-key            # With authentication
 ```
 
+Each file is validated against `TestSuiteSchema` **before it runs**. A suite that
+does not match is refused at load time, naming the file and every offending path,
+and counts as one failed suite — the rest of the glob still runs. This is what
+stops a malformed suite from reporting success: a misspelled `steps` key used to
+produce a scenario that passed having executed nothing.
+
+An assertion the runner **cannot evaluate** fails, it does not pass. `contains`
+is defined over an array (membership) and a string (substring); point it at
+anything else — most often a `field` path the response does not carry, because it
+was misspelled or the shape moved — and it fails, naming the field, the operator
+and the runtime type it actually found. Until #7256 that case fell out of the
+switch and reported ✅, so a `contains` against a missing path was a test that
+silently deleted itself. Assert absence with `is_null`; compare a scalar with
+`equals`.
+
 #### `os doctor`
 
 Checks your development environment and reports issues:
@@ -1045,6 +1060,7 @@ os doctor -v        # Show fix suggestions for warnings
 | `os login` | Sign in and store credentials in `~/.objectstack/credentials.json` |
 | `os whoami` | Show the current authenticated user |
 | `os logout` | Revoke the server session and clear local credentials |
+| `os cloud login` | Sign in to ObjectStack Cloud (the hosted package registry) and store credentials in `~/.objectstack/cloud.json` |
 
 #### `os register`
 
@@ -1078,6 +1094,62 @@ For CI and other non-interactive contexts, pass email/password directly:
 os login --email user@example.com --password secret
 ```
 
+##### `os login --json` is NDJSON — the one exception
+
+Every other ObjectStack command writes **exactly one JSON document** to stdout
+under `--json`, so `JSON.parse(<entire stdout>)` is the way to read it.
+`os login` is the single declared exception: its `--json` output is **NDJSON**,
+one compact JSON document per line. **Parse it line by line.**
+
+The reason is the device flow: it is two events at two points in time, and the
+verification URL is only useful to a script *before* the user authorizes. So the
+CLI emits it as its own record immediately, then a second record when the poll
+resolves:
+
+```console
+$ os login --json --no-browser
+{"device_code":"…","user_code":"WXYZ-1234","verification_uri":"https://…/activate","verification_uri_complete":"https://…/activate?user_code=WXYZ-1234","expires_in":600}
+{"success":true,"email":"user@example.com","userId":"usr_01H…"}
+```
+
+Read the first record, show the user the URL, then block on the next line:
+
+```bash
+os login --json --no-browser | while IFS= read -r line; do
+  echo "$line" | jq -r 'if .verification_uri_complete then "Approve at: \(.verification_uri_complete)" else "Signed in as \(.email)" end'
+done
+```
+
+Every record is one line, on every path — the `--email`/`--password` result and
+the failure payload (`{"success":false,"error":"…"}`) included, since a failure
+can arrive *after* the verification-URL record has already been written. Records
+that report failure also set exit code `1`.
+
+Before this was declared, `os login --json` wrote a compact record followed by a
+pretty-printed one, which parsed as neither a single document nor as NDJSON.
+
+##### `--json` is non-interactive: it refuses rather than prompting
+
+`--json` has one audience, a program, so it never asks a question. If a `--json`
+run has no `--email` and no `--password` to work from and cannot use the device
+flow, it does not fall back to a prompt — it emits one record and exits `1`:
+
+```console
+$ os login --json --url https://api.example.com < /dev/null
+{"success":false,"error":"email and password are required in a non-interactive shell"}
+$ echo $?
+1
+```
+
+The same applies when only one of the two is supplied, which is the usual shape
+of the mistake: a CI step whose `--password` secret interpolated and whose
+`--email` did not gets that record, not a `Password: ` prompt.
+
+Without `--json`, `os login` still prompts on a pipe as before. What changed for
+that path is the ending: if stdin reaches end of input before a prompt is
+answered, the command reports it and exits `1`, rather than being torn down by
+Node with an exit code the CLI does not define.
+
 #### `os logout`
 
 Logout calls `POST /api/v1/auth/sign-out` before deleting local credentials, so
@@ -1086,6 +1158,65 @@ the server-side session is revoked as well.
 ```bash
 os logout
 ```
+
+#### `os cloud login`
+
+Signs you in to **ObjectStack Cloud** — the hosted package registry — rather
+than to a runtime instance. It is the credential `os package publish` and the
+marketplace commands use, and it lands in its own file
+(`~/.objectstack/cloud.json`), separate from `os login`'s
+`~/.objectstack/credentials.json`.
+
+```bash
+os cloud login
+os cloud login --no-browser
+os cloud login --url https://cloud.example.com   # self-hosted control plane
+os cloud login --email me@acme.com --password secret   # CI
+```
+
+Like `os login`, in an interactive terminal it uses the browser-based device
+flow: it prints a one-time verification URL and polls until you approve. If
+cloud credentials already exist it exits successfully with "Already logged in";
+pass `--force` to re-authenticate.
+
+##### `os cloud login --json` is NDJSON — the same exception as `os login`
+
+Every other ObjectStack command writes **exactly one JSON document** to stdout
+under `--json`, so `JSON.parse(<entire stdout>)` is the way to read it. The two
+device-flow login commands — `os login` and `os cloud login` — are the declared
+exceptions, and they are the **same** exception: `--json` output is **NDJSON**,
+one compact JSON document per line. **Parse it line by line.**
+
+The reason is the device flow: it is two events at two points in time, and the
+verification URL is only useful to a script *before* the user authorizes. So the
+CLI emits it as its own record immediately, then a second record when the poll
+resolves:
+
+```console
+$ os cloud login --json --no-browser
+{"device_code":"…","user_code":"WXYZ-1234","verification_uri":"https://…/activate","verification_uri_complete":"https://…/activate?user_code=WXYZ-1234","expires_in":600}
+{"success":true,"email":"user@example.com","userId":"usr_01H…","url":"https://cloud.objectos.ai"}
+```
+
+Read the first record, show the user the URL, then block on the next line:
+
+```bash
+os cloud login --json --no-browser | while IFS= read -r line; do
+  echo "$line" | jq -r 'if .verification_uri_complete then "Approve at: \(.verification_uri_complete)" else "Signed in as \(.email)" end'
+done
+```
+
+Every record is one line, on every path — the `--email`/`--password` result, the
+"already logged in" notice, and the failure payload
+(`{"success":false,"error":"…"}`) included, since a failure can arrive *after*
+the verification-URL record has already been written. Records that report a
+login failure also set exit code `1`.
+
+Before this was declared, `os cloud login --json` emitted a single document and
+**never handed the verification URL to a consumer at all** — formally valid
+JSON that withheld the one thing device flow exists to give a script. The
+device-authorization record's fields are spelled exactly as `os login --json`
+spells them, so one consumer reads both commands.
 
 ### Cloud Environments
 

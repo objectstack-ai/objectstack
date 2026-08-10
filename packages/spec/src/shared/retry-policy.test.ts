@@ -76,6 +76,47 @@ describe('RetryPolicy is a single declaration across entries (#4661)', () => {
       expect(parse).toThrow(/backoffMs/);
     }
   });
+
+  // The tombstone STRING is not documentation. `shared/retired-key.ts` says so
+  // in its own words — "an agent bumping `@objectstack/spec` sees THIS string,
+  // not our docs site" — which makes its enumeration of carrying surfaces
+  // contract, not prose. It went stale exactly once and in the worst direction:
+  // it kept listing "an ETL pipeline's `retry`" after #6414 deleted the whole L2
+  // layer, so the one message guaranteed to reach an upgrading author named a
+  // fourth place to write `backoffMs` on which `tsc` now reports TS2724/TS2305
+  // (#6630). Nothing could see that: every pre-existing assertion on this string
+  // matched `/backoffMs/` or `/retryDelayMs/`, i.e. the prescription, never the
+  // enumeration. Pin the enumeration in BOTH directions.
+  //
+  // Note on the assertion shape: there is no ADR-0112 `code`/`status` envelope
+  // to assert here. `retiredKey()` is a Zod `never` whose issue carries the
+  // guidance as its `message`, so for this rejection class the wording IS the
+  // whole contract (#5240) and the message is the only thing worth asserting.
+  it('the tombstone enumerates exactly the surfaces that still carry the policy (#6630)', () => {
+    const result = RetryPolicySchema.safeParse({ retryDelayMs: 500 });
+    expect(result.success).toBe(false);
+    const message = result.error!.issues.map((issue) => issue.message).join('\n');
+
+    // Every surface that builds from `retryPolicyShape()` today, spelled the way
+    // an author writes it. A prescription naming a scope NARROWER than the truth
+    // is the #4964 defect (a real surface left out reads as "not converged").
+    for (const live of ['`job.retryPolicy`', "`try_catch` node's `retry`", '`flow.errorHandling`']) {
+      expect(message, `the prescription must still name ${live}`).toContain(live);
+    }
+
+    // ...and nothing retired. Wider than the truth is the #6630 defect: the
+    // export absence is pinned in `automation/sync-retirement.test.ts`, so a
+    // surface named here that cannot be imported there is a signpost to a
+    // compile error.
+    expect(
+      message,
+      'the prescription must not point at a surface #6414 retired',
+    ).not.toMatch(/\bETL\b/i);
+
+    // None of the above may be bought by weakening the prescription itself.
+    expect(message).toContain('Rename the key to `backoffMs`');
+    expect(message).toContain('os migrate meta --from 16');
+  });
 });
 
 describe('RetryPolicySchema — converged shape', () => {
@@ -117,6 +158,12 @@ describe('RetryPolicySchema — converged shape', () => {
  * a surviving dialect after a completed convergence reads as reviewed-and-kept
  * rather than missed.
  *
+ * `ETLPipeline.retry` no longer exists: the whole L2 ETL layer was retired at
+ * #6414 for having no executor. Its convergence is kept in this history
+ * deliberately — the two dialects were found by asking the concept-level
+ * question, and that is the instrument this block still is, whatever it happens
+ * to be pointed at today.
+ *
  * This block asks the concept-level question directly, against the four
  * surfaces that carry a retry policy. It is deliberately a PARSE comparison
  * rather than a source or `.shape` inspection: it is blind to how a surface
@@ -136,22 +183,20 @@ describe('every retry surface carries ONE contract (#4661, #4964, #4962)', () =>
     name: 'f', label: 'F', type: 'autolaunched' as const,
     nodes: [{ id: 'n1', type: 'start', label: 'S' }], edges: [],
   };
-  const minimalPipeline = {
-    name: 'p', label: 'P',
-    source: { type: 'api' as const, connector: 'sf', config: {} },
-    destination: { type: 'database' as const, connector: 'pg', config: {} },
-  };
-
-  /** The parsed retry region of each surface, given an EMPTY authored block. */
+  // ⚠️ THREE surfaces became TWO at #6414, and the subtraction is the reason
+  // this comment exists. `etlPipeline.retry` — the third encoding this block was
+  // written to catch (#4962) — left with the whole L2 ETL layer, retired for
+  // having no executor at all. The remaining two are the real ones, and the
+  // block's guarantee is unchanged: a FOURTH surface added without wiring
+  // `retryPolicyShape()` still fails here. What would NOT be caught, and is
+  // worth stating rather than discovering: a surface that never gets added,
+  // because a vocabulary with no engine behind it is invisible to a parse
+  // comparison. That is the ADR-0049 question, not this block's.
   const surfaces = (): ReadonlyArray<readonly [string, Record<string, unknown>]> => [
     ['job.retryPolicy / try_catch retry', RetryPolicySchema.parse({}) as Record<string, unknown>],
     [
       'flow.errorHandling',
       Automation.FlowSchema.parse({ ...minimalFlow, errorHandling: {} }).errorHandling as Record<string, unknown>,
-    ],
-    [
-      'etlPipeline.retry',
-      Automation.ETLPipelineSchema.parse({ ...minimalPipeline, retry: {} }).retry as Record<string, unknown>,
     ],
   ];
 
@@ -166,7 +211,8 @@ describe('every retry surface carries ONE contract (#4661, #4964, #4962)', () =>
   it('applies the same defaults everywhere — including the opt-in count of 0', () => {
     // The half no gate can see: `authorable-surface.json` compares key sets and
     // a default is not a key. `ETLPipeline.retry` defaulted the count to 3
-    // until #4962 while every sibling defaulted 0, and nothing failed.
+    // until #4962 while every sibling defaulted 0, and nothing failed. (That
+    // surface is gone as of #6414; the blind spot it demonstrated is not.)
     for (const [label, parsed] of surfaces()) {
       for (const [key, value] of Object.entries(POLICY_DEFAULTS)) {
         expect(parsed[key], `${label}.${key} must default to ${value}`).toBe(value);
@@ -174,22 +220,24 @@ describe('every retry surface carries ONE contract (#4661, #4964, #4962)', () =>
     }
   });
 
-  it('retires the two pre-17 spellings wherever they were legal', () => {
-    // `retryDelayMs` (automation base delay) and `maxAttempts` (the ETL count).
-    // Both tombstoned rather than deleted, so the rejection carries the rename
-    // instead of a bare "unrecognized key" — or, on the non-strict surfaces, a
-    // silent strip back to the default.
+  it('retires the pre-17 spelling wherever it was legal', () => {
+    // `retryDelayMs`, the automation base delay: tombstoned rather than
+    // deleted, so the rejection carries the rename instead of a bare
+    // "unrecognized key" — or, on the non-strict surfaces, a silent strip back
+    // to the default.
+    //
+    // The ETL half of this test asserted the `maxAttempts` -> `maxRetries`
+    // tombstone on `ETLPipeline.retry`. It is deleted rather than re-pointed at
+    // another surface, because the tombstone went with the shape that carried
+    // it (#6414 absorbed #4962's conversion entry for exactly this reason): with
+    // no `retry` block to author the key INTO, a prescription for it is a
+    // message nobody can receive. Re-spelling this case onto `flow` would have
+    // duplicated the assertion above while looking like preserved coverage.
     const flowRetired = Automation.FlowSchema.safeParse({
       ...minimalFlow, errorHandling: { strategy: 'retry', maxRetries: 2, retryDelayMs: 500 },
     });
     expect(flowRetired.success).toBe(false);
     expect(JSON.stringify(flowRetired.error!.issues)).toMatch(/backoffMs/);
-
-    const etlRetired = Automation.ETLPipelineSchema.safeParse({
-      ...minimalPipeline, retry: { maxAttempts: 3 },
-    });
-    expect(etlRetired.success).toBe(false);
-    expect(JSON.stringify(etlRetired.error!.issues)).toMatch(/maxRetries/);
   });
 
   it('accepts a policy authored once and pasted onto any surface', () => {
@@ -206,6 +254,5 @@ describe('every retry surface carries ONE contract (#4661, #4964, #4962)', () =>
     expect(Automation.FlowSchema.safeParse({
       ...minimalFlow, errorHandling: { strategy: 'retry', ...policy },
     }).success).toBe(true);
-    expect(Automation.ETLPipelineSchema.safeParse({ ...minimalPipeline, retry: policy }).success).toBe(true);
   });
 });

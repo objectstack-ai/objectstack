@@ -32,11 +32,14 @@
  * authored in the wild. The table below names the field-bearing props
  * explicitly; an unknown component type is SKIPPED silently, never flagged.
  *
- * The table also covers shapes the props schemas do not yet describe but real
- * pages authored anyway (they pass only because `properties` is unvalidated):
- * `record:details` `sections[].fields[]` and `hideFields[]`, and the record
- * picker's `labelField`. Linting the schema's shape alone would find nothing on
- * the actual corpus.
+ * The table once also covered shapes the props schemas did not describe but
+ * real pages authored anyway (`record:details` `sections[].fields[]` /
+ * `hideFields[]`, the record picker's `labelField`). #5611 and #5775 settled
+ * those the other way — the delivered shape got declared — so today every prop
+ * this table names is a live (non-retired) key on its `ComponentPropsMap`
+ * schema, and `component-field-specs-liveness.test.ts` pins that: a future
+ * retirement that forgets this table turns that test red instead of leaving a
+ * tombstoned key listed here as if it were still-valid spelling (#6629).
  *
  * ── Shared with the react page surface ──────────────────────────────────
  *
@@ -174,8 +177,21 @@ export const COMPONENT_FIELD_SPECS: Readonly<Record<string, ComponentFieldSpec>>
   'element:number': { props: ['field'] },
   'element:filter': { props: ['fields'] },
   'element:form': { props: ['fields'] },
-  // The schema says `displayField`; real pages author `labelField`. Accept both.
-  'element:record_picker': { props: ['displayField', 'labelField', 'searchFields'] },
+  // `labelField` is the one field-bearing prop this element declares. Its former
+  // companions `displayField` (renamed to `labelField`, ADR-0087 D2) and
+  // `searchFields` (deleted, ADR-0049) were retired in #5775 and are
+  // `retiredKey()` tombstones on `ElementRecordPickerPropsSchema` — so no
+  // spec-conformant page carries either, and this rule's job (resolve a field
+  // NAME against the object) is not the question a retired key raises (#6629).
+  //
+  // A non-conformant page that writes one anyway is not left unattended: the
+  // #5068 props gate reports the key with its rename/delete prescription. That
+  // gate is advisory and CLI-only and lives in a different registry
+  // (`authoring-rules`) from this suite, so it neither precedes nor suppresses
+  // this rule — what these two entries actually added was a SECOND finding,
+  // saying a field named by a key that no longer exists does not exist either.
+  // The prescription is the useful half; this half was noise on top of it.
+  'element:record_picker': { props: ['labelField'] },
 };
 
 /**

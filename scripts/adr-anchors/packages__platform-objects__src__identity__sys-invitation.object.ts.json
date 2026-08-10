@@ -1,0 +1,8 @@
+{
+  "file": "packages/platform-objects/src/identity/sys-invitation.object.ts",
+  "adrs": [
+    "ADR-0105",
+    "ADR-0108"
+  ],
+  "invariant": "`role` mirrors `sys_member.role` (the value that lands there on acceptance). Capability rides in the `positions` placement field, authorized against the issuer's adminScope."
+}

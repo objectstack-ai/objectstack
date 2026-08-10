@@ -52,6 +52,7 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
+import type { EngineQueryOptions } from '@objectstack/spec/data';
 import { ObjectQL } from './engine.js';
 
 const projectObject = {
@@ -78,6 +79,28 @@ const taskObject = {
         // auto-default excludes by TYPE, which is its own rejection.
         notes: { name: 'notes', label: 'Notes', type: 'textarea' as const },
         estimate: { name: 'estimate', label: 'Estimate', type: 'number' as const },
+        // [#6994] The two "calculated" types that sort DIFFERENTLY, side by
+        // side, so the gate below is pinned on both edges at once.
+        //
+        // `sort_key` is virtual: no driver emits a column for a `formula`, its
+        // value is computed after `driver.find` returns, and an ORDER BY on it
+        // is dropped — the defect this axis' third verdict refuses. Its
+        // expression is `record.title`, so the value is VISIBLY the sort key
+        // the caller asked for, which is what makes the silent version so bad.
+        //
+        // `subtask_total` is not: `summary` gets a real, maintained float
+        // column (`SqlDriver.createColumn` → `table.float`) and genuinely
+        // sorts. It is the control that fails if this gate is ever widened to
+        // the spec's `COMPUTED_VALUE_TYPES` (`formula`/`summary`/`autonumber`),
+        // which is the WRITE contract and would refuse two working types.
+        sort_key: {
+            name: 'sort_key', label: 'Sort key', type: 'formula' as const,
+            expression: 'record.title', returnType: 'text' as const,
+        },
+        subtask_total: {
+            name: 'subtask_total', label: 'Subtask total', type: 'summary' as const,
+            summaryOperations: { object: 'showcase_task', field: 'estimate', function: 'sum' as const },
+        },
     },
 };
 
@@ -162,7 +185,20 @@ function makeStubDriver() {
             const sorted = applySort(matched, ast?.orderBy);
             const from = typeof ast?.offset === 'number' ? ast.offset : 0;
             const page = typeof ast?.limit === 'number' ? sorted.slice(from, from + ast.limit) : sorted.slice(from);
-            return project(page, ast?.fields);
+            // [#6994] Rows are COPIED out, as every real driver hands back rows
+            // it materialised from the wire rather than references into its own
+            // storage. Without this the double leaks engine-side mutation back
+            // into "the database": `applyFormulaPlan` writes each formula value
+            // onto the record it is given, so one read of an object carrying a
+            // `formula` field PERSISTED that value into the store, and the next
+            // read found a column no driver has and really sorted by it.
+            //
+            // Measured, and the reason this is a fix and not a preference: on a
+            // real `SqlDriver` (better-sqlite3) `orderBy <formula> asc` and
+            // `desc` come back BYTE-IDENTICAL, both in insertion order. Through
+            // this double they came back reversed on the second call. The
+            // double was contradicting the driver it stands in for.
+            return project(page, ast?.fields).map((r) => ({ ...r }));
         },
         async findOne(object: string, ast: any) {
             const rows = await this.find(object, ast);
@@ -215,8 +251,8 @@ describe('#4226 — sort / select / expand on the list path (real ObjectQL engin
         stores = made.stores;
         engine.registerDriver(driver, true);
         await engine.init();
-        engine.registry.registerObject(projectObject as any, 'test-package');
-        engine.registry.registerObject(taskObject as any, 'test-package');
+        engine.registry.registerObject(projectObject, 'test-package');
+        engine.registry.registerObject(taskObject, 'test-package');
         protocol = new ObjectStackProtocolImplementation(engine);
 
         stores.set('showcase_project', new Map([
@@ -232,6 +268,13 @@ describe('#4226 — sort / select / expand on the list path (real ObjectQL engin
                 parent_id: letter === 'A' ? null : 't_A',
                 owner_id: 'usr_1',
                 created_at: '2026-07-30T00:00:00.000Z',
+                // [#6994] A permutation chosen so the summary control cannot
+                // hold vacuously: C=2 A=5 E=1 B=4 D=3 orders as `E C D B A`
+                // ascending and `A B D C E` descending, and neither matches
+                // insertion order (`C A E B D`) NOR title order (`A B C D E`).
+                // A control that agreed with either would pass against a driver
+                // that ignored `orderBy` entirely.
+                subtask_total: [2, 5, 1, 4, 3][i],
             });
         });
         stores.set('showcase_task', tasks);
@@ -450,9 +493,34 @@ describe('#4226 — sort / select / expand on the list path (real ObjectQL engin
             });
     });
 
-    it('the dotted rejection names the relationship it tried to cross and prescribes the fix', async () => {
-        await expect(protocol.findData({ object: 'showcase_task', query: { sort: 'project_id.name' } }))
-            .rejects.toThrow(/follows the relationship 'project_id'[\s\S]*formula or rollup/);
+    it('the dotted rejection names the relationship it tried to cross and prescribes a STORED field', async () => {
+        // [#6924] The prescription is part of the contract, not decoration: a
+        // refusal that hands the author an unbuildable fix is the same dead end
+        // as no hint at all. #4256 chose "a formula or rollup field that copies
+        // it into a real column"; measured on a REAL SqlDriver (better-sqlite3)
+        // and on InMemoryDriver, `orderBy` naming a `formula` field answers 200
+        // with the rows in INSERTION order, identically for asc and desc — no
+        // column exists, so the #3821 backstop retries without the sort. That
+        // is the exact silent degradation this gate exists to stop, so the old
+        // hint routed the author back into it.
+        const err: any = await protocol
+            .findData({ object: 'showcase_task', query: { sort: 'project_id.name' } })
+            .then(() => null, (e: unknown) => e);
+        expect(err).toBeTruthy();
+        // ADR-0112 envelope — a rejection case asserts code AND status, not
+        // merely that something was thrown.
+        expect(err.status).toBe(400);
+        expect(err.code).toBe('INVALID_SORT');
+        expect(err.message).toMatch(/follows the relationship 'project_id'/);
+        // The remedy must be a STORED field — #6673's vocabulary for the same
+        // correction on the SEARCH axis, deliberately the same word here.
+        expect(err.message).toMatch(/a stored field/);
+        // ...and the old prescription must be gone, not merely joined.
+        expect(err.message).not.toMatch(/formula or rollup/);
+        // `formula` may still appear — but only as the named trap, never as the
+        // thing to build. This is what separates the fix from a reword that
+        // keeps the dead end in a subordinate clause.
+        expect(err.message).toMatch(/Not a formula field/);
     });
 
     it('a dotted path under a non-reference head is refused on the same axis, minus the relationship claim', async () => {
@@ -483,6 +551,284 @@ describe('#4226 — sort / select / expand on the list path (real ObjectQL engin
         await expect(protocol.findData({
             object: 'showcase_task', query: { sort: '-project_id.created_at', top: 2 },
         })).rejects.toMatchObject({ status: 400, code: 'INVALID_SORT', field: 'project_id.created_at' });
+    });
+
+    // ─────────────────────────────────────────────────────────────
+    // SORT — [#6994] a KNOWN, NON-DOTTED field whose TYPE materialises
+    // no column. The last shape on this axis that still degraded silently.
+    // ─────────────────────────────────────────────────────────────
+
+    it('a summary field still sorts, in both directions — the family is `formula`, not "computed"', async () => {
+        // CONTROL, and the one that matters most here: `summary` is computed
+        // too, and it is NOT in this family. It gets a real maintained column
+        // (`table.float`) and orders correctly — measured on a real SqlDriver
+        // in #6924 (`orderBy <summary> desc` -> E D C B A over 5 4 3 2 1).
+        //
+        // This is what fails if the gate is ever widened from "materialises no
+        // column" to the spec's `COMPUTED_VALUE_TYPES`
+        // (`formula`/`summary`/`autonumber`) — that set is the WRITE contract
+        // ("never client-written") and refusing a sort with it would break two
+        // types that work.
+        expect(titles(await protocol.findData({ object: 'showcase_task', query: { sort: 'subtask_total' } })))
+            .toEqual(['E', 'C', 'D', 'B', 'A']);
+        expect(titles(await protocol.findData({ object: 'showcase_task', query: { sort: '-subtask_total' } })))
+            .toEqual(['A', 'B', 'D', 'C', 'E']);
+    });
+
+    it.each([
+        ['bare string', { sort: 'sort_key' }],
+        ['descending', { sort: '-sort_key' }],
+        ['second of two', { sort: 'title,sort_key' }],
+        ['string array', { orderBy: ['sort_key'] }],
+        ['SortNode array', { orderBy: [{ field: 'sort_key', order: 'desc' }] }],
+        ['direction map', { orderBy: { sort_key: 'desc' } }],
+        ['OData spelling', { $orderby: 'sort_key' }],
+        ['with top — the "latest N" footgun', { sort: '-sort_key', top: 2 }],
+    ])('sorting by a formula field is a 400, not insertion order — %s', async (_label, query) => {
+        // `sort_key` is a REAL field of this object, so it is in `gate.known`
+        // and passed the #4226 unknown check; it carries no dot, so it passed
+        // the #4256 check as well. It then reached a driver with no column for
+        // it. Measured on a real `SqlDriver` (better-sqlite3) + real `ObjectQL`
+        // + this protocol, on the base of the branch that added this test:
+        //
+        //   FORMULA  orderBy sort_key asc  -> ["C","A","E","B","D"]  5 rows, 200
+        //     its sort_key values          -> ["C","A","E","B","D"]
+        //   FORMULA  orderBy sort_key desc -> ["C","A","E","B","D"]
+        //   RAW SQL  order by sort_key     -> sqlite: no such column: sort_key
+        //
+        // `asc` and `desc` byte-identical is what makes it a DROPPED sort
+        // rather than a coincidence, and the response carrying the very values
+        // it was asked to order by, out of order, is what makes it invisible.
+        await expect(protocol.findData({ object: 'showcase_task', query }))
+            .rejects.toMatchObject({
+                status: 400,
+                code: 'INVALID_SORT',
+                field: 'sort_key',
+                object: 'showcase_task',
+            });
+    });
+
+    it('the formula rejection names the type and prescribes the SAME stored field the dotted one does', async () => {
+        const err: any = await protocol
+            .findData({ object: 'showcase_task', query: { sort: 'sort_key' } })
+            .then(() => null, (e: unknown) => e);
+        expect(err).toBeTruthy();
+        // ADR-0112 envelope — a rejection case asserts code AND status, never
+        // merely that something was thrown.
+        expect(err.status).toBe(400);
+        expect(err.code).toBe('INVALID_SORT');
+        // It must say WHICH type, or the author cannot tell this apart from a
+        // typo — the whole reason it needs its own verdict.
+        expect(err.message).toMatch(/a formula field on 'showcase_task'/);
+        expect(err.message).toMatch(/computed on read/);
+        // One vocabulary across the doors: #6924 fixed the dotted hint to
+        // prescribe "a stored field, written when the source changes", and
+        // #6673 says "a stored text field" on the SEARCH axis. An author
+        // refused on two axes must not be sent two different ways.
+        expect(err.message).toMatch(/a stored field, written when the source changes/);
+        // ...and it must never prescribe the thing it is refusing.
+        expect(err.message).not.toMatch(/formula or rollup/);
+    });
+
+    it('the three refusals agree word-for-word on the remedy', async () => {
+        // Pins the AGREEMENT itself rather than each wording separately: this
+        // goes red if any door's remedy is reworded without the others, which
+        // is exactly how #4256 and #6673 drifted apart in the first place.
+        //
+        // [#7095] Three doors now, not two: the engine's own boundary emits the
+        // same sentence as the two ingress verdicts. It is the whole reason the
+        // engine door duplicates the prose instead of importing it —
+        // `metadata-protocol` is assembled FROM an engine, so the engine cannot
+        // import from it without inverting the layering. This pin is what keeps
+        // the duplication honest.
+        const remedy = /Denormalise the value onto 'showcase_task' \(a stored field, written when the source changes\) and sort by that\./;
+        const dotted: any = await protocol
+            .findData({ object: 'showcase_task', query: { sort: 'project_id.name' } })
+            .then(() => null, (e: unknown) => e);
+        const formula: any = await protocol
+            .findData({ object: 'showcase_task', query: { sort: 'sort_key' } })
+            .then(() => null, (e: unknown) => e);
+        const direct: any = await engine
+            .find('showcase_task', { orderBy: [{ field: 'sort_key', order: 'asc' }] })
+            .then(() => null, (e: unknown) => e);
+        expect(dotted.message).toMatch(remedy);
+        expect(formula.message).toMatch(remedy);
+        expect(direct.message).toMatch(remedy);
+    });
+
+    it.each([
+        ['unknown beats formula', { sort: 'no_such_field,sort_key' }, 'no_such_field'],
+        ['dotted beats formula', { sort: 'sort_key,project_id.name' }, 'project_id.name'],
+    ])('precedence is unknown > dotted > unmaterializable — %s', async (_label, query, field) => {
+        // Identity error first, then shape, then type — the same order the
+        // expand gate uses (`unknown` > `not-a-reference`). Deliberate, and
+        // pinned so it stays a decision rather than an accident: the two older
+        // verdicts keep answering exactly what they answered before this gate
+        // grew a third one.
+        await expect(protocol.findData({ object: 'showcase_task', query }))
+            .rejects.toMatchObject({ status: 400, code: 'INVALID_SORT', field });
+    });
+
+    // ─────────────────────────────────────────────────────────────
+    // [#7095] THE HOLE THIS FILE USED TO RECORD, now closed.
+    //
+    // Until #7095 the test below was `RECORD OF A KNOWN HOLE`: it asserted that
+    // `engine.find` returned INSERTION_ORDER for both `asc` and `desc`, and
+    // said in as many words that it should go red the day the engine grew this
+    // refusal. This is that day, and this is that test, inverted.
+    //
+    // Ruled 2026-08-10 on #7095: an ORDER BY the engine cannot materialise is a
+    // 4xx with guidance prose at the PUBLIC boundary, never a silent drop. The
+    // internal-caller tolerance was to survive only behind a pinned internal
+    // path and only if a measured internal call site relied on it — the sweep
+    // found NONE (see the changeset), so no internal path exists and the pins
+    // below include a negative one saying so.
+    // ─────────────────────────────────────────────────────────────
+
+    it('a real column still sorts through `engine.find` — the control this refusal needs', async () => {
+        // FIRST, because every rejection pin under it is vacuous against an
+        // engine whose sort is simply broken. The direct path must still SORT.
+        const asc = await engine.find('showcase_task', { orderBy: [{ field: 'title', order: 'asc' }] });
+        const desc = await engine.find('showcase_task', { orderBy: [{ field: 'title', order: 'desc' }] });
+        expect(asc.map((r: any) => r.title)).toEqual(['A', 'B', 'C', 'D', 'E']);
+        expect(desc.map((r: any) => r.title)).toEqual(['E', 'D', 'C', 'B', 'A']);
+        // And a `summary` field still sorts here too — the family is `formula`,
+        // not "computed". This is what goes red if the engine door is ever
+        // widened to the spec's `COMPUTED_VALUE_TYPES` (the WRITE contract).
+        const bySummary = await engine.find('showcase_task', { orderBy: [{ field: 'subtask_total', order: 'asc' }] });
+        expect(bySummary.map((r: any) => r.title)).toEqual(['E', 'C', 'D', 'B', 'A']);
+    });
+
+    // Typed as the contract rather than asserted through it: these three sorts
+    // are perfectly well-formed `SortNode[]` — it is the FIELD they name that
+    // the engine refuses, not their shape. An `as any` here would erase the one
+    // channel that enforces `{ field, order }` on a direct engine call
+    // (`query-options/no-any-erasure`, #4674/#4918), and would have hidden the
+    // very `direction`-vs-`order` mistake that rule exists to catch.
+    const REFUSED_SORTS: Array<[string, NonNullable<EngineQueryOptions['orderBy']>]> = [
+        ['ascending', [{ field: 'sort_key', order: 'asc' }]],
+        ['descending', [{ field: 'sort_key', order: 'desc' }]],
+        ['second of two', [{ field: 'title', order: 'asc' }, { field: 'sort_key', order: 'asc' }]],
+    ];
+
+    it.each(REFUSED_SORTS)('`engine.find` REFUSES a formula ORDER BY instead of dropping it — %s', async (_label, orderBy) => {
+        // The public boundary, reached directly — no protocol, no ingress gate.
+        // This is the exact call that answered 200-in-insertion-order before
+        // #7095, for both directions, byte-identically.
+        await expect(engine.find('showcase_task', { orderBy }))
+            .rejects.toMatchObject({
+                status: 400,
+                code: 'INVALID_SORT',
+                field: 'sort_key',
+                object: 'showcase_task',
+            });
+    });
+
+    it('`engine.findOne` refuses it too — there `orderBy` decides WHICH record', async () => {
+        // Worse than find's arbitrary order: `findOne` applies `limit: 1`, so a
+        // dropped sort returns a DIFFERENT record, and it looks as legitimate
+        // as the right one. `where` is present so this is the sort verdict and
+        // not `requireFindOnePredicate` answering first.
+        await expect(engine.findOne('showcase_task', {
+            where: { status: 'open' },
+            orderBy: [{ field: 'sort_key', order: 'desc' }],
+        })).rejects.toMatchObject({
+            status: 400,
+            code: 'INVALID_SORT',
+            field: 'sort_key',
+            object: 'showcase_task',
+        });
+    });
+
+    it('the engine refusal names the field, the type and the fix — guidance prose, not just a throw', async () => {
+        const err: any = await engine
+            .find('showcase_task', { orderBy: [{ field: 'sort_key', order: 'asc' }] })
+            .then(() => null, (e: unknown) => e);
+        expect(err).toBeTruthy();
+        // ADR-0112 envelope — a rejection case asserts code AND status.
+        expect(err.status).toBe(400);
+        expect(err.code).toBe('INVALID_SORT');
+        // It must name the entry point, or a caller who never wrote a query
+        // parameter cannot tell which door refused them.
+        expect(err.message).toMatch(/ObjectQL\.find\('showcase_task'\)/);
+        expect(err.message).toMatch(/a formula field on 'showcase_task'/);
+        expect(err.message).toMatch(/computed on read/);
+        // ...and it must never prescribe the thing it is refusing.
+        expect(err.message).not.toMatch(/formula or rollup/);
+    });
+
+    it('an `expand` sub-read raises the refusal, which the expand backstop downgrades to a warning', async () => {
+        // MEASURED, not assumed, and it is the one place the refusal does not
+        // reach the caller as a 4xx. A nested `expand` sort is forwarded into
+        // `expandRelatedRecords`' own `this.find(...)`, which never passes
+        // through `assertSortFieldsExist` — so the engine door IS what fires
+        // there. But that sub-read sits inside a pre-existing graceful-
+        // degradation `catch` ("if expand fails, keep original IDs") which
+        // swallows EVERY expand failure, this one included:
+        //
+        //   WARN Failed to expand relationship field; retaining foreign key IDs
+        //        { field: 'parent_id', error: "ObjectQL.find('showcase_task') sorts by
+        //          'sort_key', a formula field … Denormalise the value onto … " }
+        //
+        // So the outcome here improves from SILENT (a wrongly-ordered expansion,
+        // no signal at all) to OBSERVABLE (a warning carrying the field name and
+        // the fix) — but it is not a refusal, and this pin says so rather than
+        // implying #7095 closed it. Reversing that catch is the #3821-family
+        // swallow, a separate contract decision on every expand failure mode,
+        // deliberately NOT ridden in on this card. Tracked as follow-up.
+        const rows: any = await engine.find('showcase_task', {
+            expand: { parent_id: { orderBy: [{ field: 'sort_key', order: 'asc' }] } },
+        });
+        // The call succeeds and the FK ids are retained UNEXPANDED — that is
+        // the backstop's contract, and what makes this observable-not-refused.
+        expect(rows).toHaveLength(5);
+        expect(rows.filter((r: any) => typeof r.parent_id === 'object' && r.parent_id !== null)).toHaveLength(0);
+        expect(rows.some((r: any) => r.parent_id === 't_A')).toBe(true);
+        // CONTROL — a real column in the same nested position really does
+        // expand, so the assertion above is about the refusal and not about
+        // expand being broken for every sort.
+        const ok: any = await engine.find('showcase_task', {
+            expand: { parent_id: { orderBy: [{ field: 'title', order: 'asc' }] } },
+        });
+        expect(ok.some((r: any) => typeof r.parent_id === 'object' && r.parent_id !== null)).toBe(true);
+    });
+
+    it('NEGATIVE PIN — no internal path exists to opt back into the drop', async () => {
+        // §The ruling allowed a pinned INTERNAL path only if a measured internal
+        // call site relied on the tolerance. The #7095 sweep found none, so no
+        // such path shipped — and this pin is what keeps one from being added
+        // quietly on the PUBLIC options shape, which the ruling forbids outright.
+        //
+        // `rejectUnknownEngineOptions` refuses any option key not in
+        // ENGINE_FIND_OPTION_KEYS, so a flag smuggled onto the public bag is a
+        // refusal about the OPTION, never a tolerated sort. (That refusal is a
+        // plain `Error` with no `status` — it is #4371's option-shape door, not
+        // the ADR-0112 wire envelope — so this asserts the message, which is
+        // what a caller reaching for such a flag would actually be told.)
+        for (const smuggled of ['allowUnmaterializedSort', 'internal', '__internal', 'tolerateDroppedSort']) {
+            // `as unknown as EngineQueryOptions`, never a bare `as any`: this
+            // input is DELIBERATELY off-contract — that is the whole subject of
+            // the assertion — so the cast names the contract being bypassed and
+            // greps as an intentional act, while the rest of the call stays
+            // type-checked (#4918's prescription for exactly this case).
+            await expect(engine.find('showcase_task', {
+                orderBy: [{ field: 'sort_key', order: 'asc' }],
+                [smuggled]: true,
+            } as unknown as EngineQueryOptions)).rejects.toThrow(new RegExp(`does not recognise option.*'${smuggled}'`));
+        }
+        // And the tolerance really is gone rather than merely unreachable: the
+        // shape the old hole answered 200 for now throws.
+        await expect(engine.find('showcase_task', { orderBy: [{ field: 'sort_key', order: 'asc' }] }))
+            .rejects.toMatchObject({ code: 'INVALID_SORT' });
+    });
+
+    it('a formula field is still SELECTABLE and still computed — only the ORDER BY is refused', async () => {
+        // The blast radius, pinned: #7095 narrows one axis. Reading a formula
+        // field, and the projection tolerance the ingress docblock describes,
+        // are untouched — a refusal that also stopped formulas being returned
+        // would be a much larger change wearing this one's clothes.
+        const rows = await engine.find('showcase_task', { fields: ['id', 'title', 'sort_key'] });
+        expect(rows.map((r: any) => r.sort_key).sort()).toEqual(['A', 'B', 'C', 'D', 'E']);
     });
 
     // ─────────────────────────────────────────────────────────────
@@ -805,9 +1151,9 @@ describe('#4254 — searchFields / groupBy / aggregations on the list path (real
         delete (driver as any).aggregate;
         engine.registerDriver(driver, true);
         await engine.init();
-        engine.registry.registerObject(projectObject as any, 'test-package');
-        engine.registry.registerObject(taskObject as any, 'test-package');
-        engine.registry.registerObject(memoObject as any, 'test-package');
+        engine.registry.registerObject(projectObject, 'test-package');
+        engine.registry.registerObject(taskObject, 'test-package');
+        engine.registry.registerObject(memoObject, 'test-package');
         protocol = new ObjectStackProtocolImplementation(engine);
 
         const tasks = new Map<string, Record<string, unknown>>();
@@ -1245,5 +1591,190 @@ describe('#4254 — searchFields / groupBy / aggregations on the list path (real
             .rejects.toMatchObject({ status: 400, code: 'INVALID_QUERY' });
         await expect(lenient.findData({ object: 'legacy_object', query: { search: 'a', searchFields: 42 } }))
             .rejects.toMatchObject({ status: 400, code: 'INVALID_FIELD' });
+    });
+});
+
+/**
+ * [#6674] The known-but-VIRTUAL axis — the fail-open #4254 closed one axis over,
+ * surviving where the name is real.
+ *
+ * #4254 refuses a `$searchFields` entry the engine would not scan. A `formula`
+ * field slipped through the one gap that judgment had: the DECLARED branch
+ * admitted any entry that EXISTS, so declaring a formula field put it in the
+ * allowed set, and the gate — reading that same set — accepted it. Measured on
+ * `origin/main` before this change:
+ *
+ * ```
+ * AUTO:          {"allowed":["name","project_name"],"source":"auto"}           formula excluded
+ * DECL-FORMULA:  {"allowed":["name","project_name_formula"],"source":"declared"}  admitted verbatim
+ * ?search=Apollo&searchFields=project_name_formula -> 200, 0 rows              silent
+ * ```
+ *
+ * Zero rows is the whole defect: a formula value is computed on read, so no
+ * driver materializes a column for `$contains` to scan — 0 rows on
+ * driver-memory (the property is absent from the stored row) and 0 rows WITH NO
+ * ERROR on driver-sql/better-sqlite3. The declaration reads as search coverage
+ * and delivers none, which is the "an unapplied filter must not look like a
+ * satisfied one" family (#3948) with the sign that matters here: the caller
+ * asked to search a column and got a well-formed empty answer.
+ *
+ * Refused now, with its own message, because BOTH neighbouring messages are
+ * wrong for it: "outside the declared set" is false (it may be IN the list),
+ * and the auto-default's "declare `searchableFields` to choose the searchable
+ * set" would instruct the author to write the very declaration being refused.
+ */
+describe('#6674 — a virtual formula field named in searchFields (real ObjectQL engine)', () => {
+    let engine: ObjectQL;
+    let protocol: ObjectStackProtocolImplementation;
+    let stores: Map<string, Map<string, Record<string, unknown>>>;
+
+    /** Declares a formula field searchable — the card's shape exactly. */
+    const virtualObject = {
+        name: 'showcase_virtual',
+        label: 'Virtual',
+        searchableFields: ['name', 'project_name_formula'],
+        fields: {
+            id: { name: 'id', label: 'ID', type: 'text' as const, primaryKey: true },
+            name: { name: 'name', label: 'Name', type: 'text' as const },
+            project_name_formula: {
+                name: 'project_name_formula', label: 'Project (formula)',
+                type: 'formula' as const, expression: "record.name + ' · Apollo'",
+            },
+        },
+    };
+
+    /** No declaration at all — the auto-default branch of the same question. */
+    const autoObject = {
+        name: 'showcase_auto_virtual',
+        label: 'Auto Virtual',
+        fields: {
+            id: { name: 'id', label: 'ID', type: 'text' as const, primaryKey: true },
+            name: { name: 'name', label: 'Name', type: 'text' as const },
+            label_formula: {
+                name: 'label_formula', label: 'Label (formula)',
+                type: 'formula' as const, expression: 'record.name',
+            },
+        },
+    };
+
+    const ids = (r: any): string[] => r.records.map((x: any) => x.id);
+
+    beforeEach(async () => {
+        engine = new ObjectQL();
+        const made = makeStubDriver();
+        stores = made.stores;
+        engine.registerDriver(made.driver, true);
+        await engine.init();
+        engine.registry.registerObject(virtualObject as any, 'test-package');
+        engine.registry.registerObject(autoObject as any, 'test-package');
+        protocol = new ObjectStackProtocolImplementation(engine);
+
+        // The stored row carries `name` only. That IS the fixture's point: the
+        // formula's computed value would contain "Apollo", and the column that
+        // would have to hold it does not exist.
+        stores.set('showcase_virtual', new Map([
+            ['v1', { id: 'v1', name: 'Widget' }],
+            ['v2', { id: 'v2', name: 'Apollo Widget' }],
+        ]));
+        stores.set('showcase_auto_virtual', new Map([['a1', { id: 'a1', name: 'Widget' }]]));
+    });
+
+    it('CONTROL — the declared NON-virtual entry still narrows and still matches', async () => {
+        // Non-vacuity for every rejection below: the same object, the same
+        // declaration, one entry over, answers rows. A conformance block that
+        // only asserted refusals would pass just as happily with search broken.
+        expect(ids(await protocol.findData({
+            object: 'showcase_virtual', query: { search: 'Apollo', searchFields: 'name' },
+        }))).toEqual(['v2']);
+        // …and with no override at all, the search still runs over the surviving
+        // declared entry. Stock compatibility: an already-published object whose
+        // `searchableFields` names a formula field keeps answering plain
+        // searches, over the same rows as before, because the dropped entry
+        // matched nothing anyway.
+        expect(ids(await protocol.findData({
+            object: 'showcase_virtual', query: { search: 'Apollo' },
+        }))).toEqual(['v2']);
+    });
+
+    it('the DECLARED formula entry is refused — 400 INVALID_FIELD, not 200 with no rows', async () => {
+        await expect(protocol.findData({
+            object: 'showcase_virtual',
+            query: { search: 'Apollo', searchFields: 'project_name_formula' },
+        })).rejects.toMatchObject({
+            status: 400, code: 'INVALID_FIELD',
+            field: 'project_name_formula', object: 'showcase_virtual',
+        });
+        await expect(protocol.findData({
+            object: 'showcase_virtual',
+            query: { search: 'Apollo', searchFields: 'project_name_formula' },
+        })).rejects.toThrow(/is a virtual 'formula' field and cannot be searched/);
+        // The message must name WHY (no stored column) and the fix (a stored
+        // mirror) — the refusal is only useful if the author can act on it.
+        await expect(protocol.findData({
+            object: 'showcase_virtual',
+            query: { search: 'Apollo', searchFields: 'project_name_formula' },
+        })).rejects.toThrow(/computed on read and never stored/);
+        await expect(protocol.findData({
+            object: 'showcase_virtual',
+            query: { search: 'Apollo', searchFields: 'project_name_formula' },
+        })).rejects.toThrow(/Mirror the computed value onto a stored text field/);
+    });
+
+    it('the objectui echo — the whole declaration, formula entry included — is refused', async () => {
+        // The path this actually reaches production on: objectui's list search
+        // sends `$searchFields: schema.searchableFields` verbatim, so the object
+        // that declares a formula field 400s its own toolbar search. That is the
+        // blast radius the corpus count bounds, and it is why the message says
+        // the declaration is what to fix.
+        await expect(protocol.findData({
+            object: 'showcase_virtual',
+            query: { search: 'Apollo', searchFields: ['name', 'project_name_formula'] },
+        })).rejects.toMatchObject({ status: 400, code: 'INVALID_FIELD', field: 'project_name_formula' });
+        await expect(protocol.findData({
+            object: 'showcase_virtual',
+            query: { search: 'Apollo', searchFields: ['name', 'project_name_formula'] },
+        })).rejects.toThrow(/searchableFields' declares it/);
+    });
+
+    it('an UNDECLARED formula field gets the same reason, not the auto-default advice', async () => {
+        // Before #6674 this fell to the auto-default branch, whose message ends
+        // "Declare 'searchableFields' on the object to choose the searchable set
+        // explicitly" — advice that, followed, produces exactly the declaration
+        // the case above refuses. The virtual reason is checked BEFORE the
+        // source split for that reason.
+        await expect(protocol.findData({
+            object: 'showcase_auto_virtual', query: { search: 'x', searchFields: 'label_formula' },
+        })).rejects.toMatchObject({ status: 400, code: 'INVALID_FIELD', field: 'label_formula' });
+        await expect(protocol.findData({
+            object: 'showcase_auto_virtual', query: { search: 'x', searchFields: 'label_formula' },
+        })).rejects.toThrow(/is a virtual 'formula' field/);
+        await expect(protocol.findData({
+            object: 'showcase_auto_virtual', query: { search: 'x', searchFields: 'label_formula' },
+        })).rejects.not.toThrow(/choose the searchable set explicitly/);
+    });
+
+    it('CONTROL — the #4254 axes are untouched: unknown, stale and unsearchable keep their messages', async () => {
+        // The neighbour must not regress. Three distinct reasons, three
+        // distinct messages, all still reached.
+        await expect(protocol.findData({
+            object: 'showcase_virtual', query: { search: 'x', searchFields: 'no_such_field' },
+        })).rejects.toThrow(/Unknown field 'no_such_field'/);
+
+        engine.registry.registerObject({
+            name: 'showcase_mixed',
+            label: 'Mixed',
+            searchableFields: ['title', 'ghost'],
+            fields: {
+                id: { name: 'id', label: 'ID', type: 'text', primaryKey: true },
+                title: { name: 'title', label: 'Title', type: 'text' },
+                estimate: { name: 'estimate', label: 'Estimate', type: 'number' },
+            },
+        } as any, 'test-package');
+        await expect(protocol.findData({
+            object: 'showcase_mixed', query: { search: 'x', searchFields: 'ghost' },
+        })).rejects.toThrow(/declared in 'searchableFields' but does not exist/);
+        await expect(protocol.findData({
+            object: 'showcase_mixed', query: { search: 'x', searchFields: 'estimate' },
+        })).rejects.toThrow(/declares 'searchableFields'/);
     });
 });

@@ -89,6 +89,32 @@ export type { PoolUnsupportedDriverId } from './datasource-pool-support.js';
 
 // Host glue: dev driver factory + fail-closed secret binder.
 export { createDefaultDatasourceDriverFactory } from './default-datasource-driver-factory.js';
+// The OPTIONAL libSQL/Turso package and its install command, plus the
+// missing-package message this factory raises (#7314) — exported so the answer
+// to "how do I install it" has one declaration a host can read rather than a
+// sentence to re-type. `@objectstack/runtime`'s host loader keeps its own equal
+// pair today; it depends on this package, so converging onto these is a legal
+// import direction whenever that lane takes it up.
+export {
+  TURSO_DRIVER_PACKAGE,
+  TURSO_DRIVER_INSTALL_COMMAND,
+  missingTursoDriverMessage,
+} from './default-datasource-driver-factory.js';
+// The other two OPTIONAL driver packages this factory can be asked for, and the
+// messages it raises when they are absent (#7385) — same seam as the libSQL pair
+// above, because the three arms answer one class of problem and had answered it
+// at two different qualities: `turso` stated the install command, the
+// consequence and the refusal, while `sqlite-wasm` and `mongodb` stated only the
+// fault. Exported for the same reason: a host rendering its own remedy reads one
+// declaration instead of re-typing a command.
+export {
+  SQLITE_WASM_DRIVER_PACKAGE,
+  SQLITE_WASM_DRIVER_INSTALL_COMMAND,
+  missingSqliteWasmDriverMessage,
+  MONGODB_DRIVER_PACKAGE,
+  MONGODB_DRIVER_INSTALL_COMMAND,
+  missingMongodbDriverMessage,
+} from './default-datasource-driver-factory.js';
 // The "adopt a host-built driver instance" seam (ADR-0062 D1, #3826) — for
 // driver kinds outside open-core (cloud turso) and pooled instances whose
 // lifecycle outlives one kernel; keeps the connect + failure verdict on the

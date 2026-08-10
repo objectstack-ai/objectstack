@@ -37,6 +37,10 @@
 //
 //   node scripts/check-type-check-coverage.mjs                # structural, sub-second
 //   node scripts/check-type-check-coverage.mjs --re-measure   # + runs tsc per ledger entry
+//   node scripts/check-type-check-coverage.mjs --re-measure --lower
+//                                    # + writes each measured number back into
+//                                    #   the ledger below (#6376). Needs the
+//                                    #   workspace built -- see BUILT CLOSURE.
 //   node scripts/check-type-check-coverage.mjs --self-test
 //
 // Invariants, per workspace package (the root workspace package included --
@@ -106,6 +110,40 @@
 //               graduation candidate, and graduating is still a deliberate PR
 //               (add the `typecheck` script, delete the entry -- COVERED and
 //               RECONCILED are what force the pair).
+//
+//               THE SURPLUS (#6376). That asymmetry has a price, and it is not
+//               bookkeeping: the gap between a recorded number and a smaller
+//               measured one is a live PERMISSION ALLOWANCE. Nothing else reads
+//               these layers. A DEBT entry exists ONLY where no `typecheck`
+//               script does (RECONCILED forbids both at once) and a TEST_DEBT
+//               entry ONLY where no tsconfig the typecheck script invokes reads
+//               the tests -- so for EVERY entry in both ledgers, this number is
+//               the sole gatekeeper of the layer it measures, and while the gap
+//               is open any regression smaller than it lands green.
+//
+//               Not a hypothesis. driver-mongodb recorded 43 while measuring 10:
+//               #6210 had narrowed six contract methods and retired 33 errors,
+//               and nothing lowered the entry. Reverting `aggregate(object,
+//               query: DriverQuery)` back to `QueryAST` measured 12 -- and
+//               12 < 43, so the only gate that could pin that signature stayed
+//               silent. PR #6356 lowered the entry to 10; the same reversion
+//               then reported +2 and went red. Read it as the sentence it is:
+//               A LEGITIMATE IMPROVEMENT SILENTLY MUTED THE NEXT PERSON'S PIN.
+//
+//               So the surplus is now REPORTED -- per entry and as a total, on
+//               every green re-measure -- because an allowance nobody can see is
+//               the part that does the damage. Measured on main @ 1818998: 11 of
+//               34 entries carried a combined surplus of 310 raw errors, 15% of
+//               everything the two ledgers record, with 199 of it in a single
+//               entry (plugin-approvals, 547 recorded / 348 measured). What this
+//               gate deliberately does NOT do is make a surplus red: the ruling
+//               above stands and an improvement still lands green. What it does
+//               instead is make closing one FREE -- `--lower` writes the
+//               measured numbers back into the ledger, so flattening an entry
+//               never requires a human to type a measured number. Whether the
+//               surplus should additionally be enforced is #6376's open
+//               question, not this paragraph's, and the cost of guessing it is
+//               argued there.
 //
 //               What drifts is not only the NUMBER but the note's COMPOSITION:
 //               service-automation's note named `engine.test.ts:2547/2577` as
@@ -309,10 +347,6 @@ const DEBT = {
     errors: 11,
     note: 'all code-tier (TS2554 wrong arity x10, TS2552).',
   },
-  '@objectstack/rest': {
-    errors: 2,
-    note: 'code-tier 2 (TS2345).',
-  },
   '@objectstack/service-analytics': {
     errors: 10,
     note: 'code-tier 9 (TS2339 x7, TS7053 x2) + 1 noise (TS6133). Re-measured 10 at e8db1a230, up from 7 '
@@ -469,12 +503,16 @@ const TEST_DEBT = {
       + '`GET /meta/:type/:name` envelope convergence). Nothing else in the package moved.',
   },
   '@objectstack/rest': {
-    errors: 163,
-    note: 'TS2835 x67 (NodeNext extensions), TS7006 x57, TS2554 x13, TS2550 x10. Also in DEBT. Measured '
+    errors: 155,
+    note: 'TS2835 x67 (NodeNext extensions), TS7006 x57, TS2554 x13, TS2550 x10 (composition as counted at '
+      + '153; not re-tallied by class at the 155 below). Graduated from DEBT in #6905 -- this TEST_DEBT '
+      + 'entry is now the sole gate on the package\'s test layer (src moved to `turbo run typecheck`). '
+      + 'Measured '
       + '105 -> 136 (5ab08428) -> 143 (77adf29, hours later the same day) -> 153 (e8db1a230). Read the '
       + 'top-of-ledger NodeNext note before sizing this one: TS2835 and the implicit-any pile it causes '
       + 'are 124 of the 153, and '
-      + 'they are one repair, not 124. Of the latest +10, 8 are attributable to three test files this '
+      + 'they are one repair, not 124. Of the +10 that then bumped 153 to a bootstrap-margin RECORDED 163, '
+      + '8 are attributable to three test files that '
       + 'window added -- rest-meta-save-receipt-envelope.test.ts x4 (#5265 / PR #5926), '
       + 'meta-item-envelope.test.ts x2 (#5563 / PR #5895), '
       + 'analytics-dataset-unlisted-refusal-envelope.test.ts x2; the remaining 2 landed in files that '
@@ -483,9 +521,14 @@ const TEST_DEBT = {
       + 'fastest-moving entry in either ledger, and it is '
       + 'the one that proved the gate works: #5278\'s own PR went red in CI on it, because a `pull_request` '
       + 'run builds the branch MERGED INTO main and three rest-touching PRs had landed since the sweep. A '
-      + 'ledger number is always a number about a moment. RECORDED 163 is a bootstrap margin (+10 over 153 '
-      + 'measured at e8db1a230 and re-confirmed at 153 an hour later at 77c7c884b) -- tighten via the ℹ '
-      + 'hint immediately after landing (#5278 option A).',
+      + 'ledger number is always a number about a moment. RECORDED 163 stood as that bootstrap margin (+10 '
+      + 'over 153 measured at e8db1a230 and re-confirmed at 153 an hour later at 77c7c884b) until #6939 '
+      + '(a surplus finding filed right after the #6905 DEBT graduation) re-measured tsc at 155 -- an 8-error '
+      + 'surplus the margin had been silently absorbing, and #7038 caught the note\'s "Also in DEBT." sentence '
+      + 'going stale in the same graduation. Lowered 163 -> 155 at 55da611 (#6939, #7038): RECORDED now '
+      + 'equals the exact measurement, no margin, so the next new error here goes red immediately -- a '
+      + 'bootstrap margin can be re-established deliberately later if that slack is wanted again '
+      + '(#5278 option A).',
   },
   '@objectstack/plugin-auth': {
     errors: 131,
@@ -1067,6 +1110,138 @@ const TSC_SETUP_ERROR = /\berror TS(5058|5083|6053|18003|5012)\b/;
 /** Temp project used to lift a tsconfig's own test exclusion. Never committed. */
 const REMEASURE_CONFIG = 'tsconfig.debt-remeasure.json';
 const REMEASURE_ISSUE = 'https://github.com/objectstack-ai/objectstack/issues/5278';
+const SURPLUS_ISSUE = 'https://github.com/objectstack-ai/objectstack/issues/6376';
+
+// ---------------------------------------------------------------------------
+// BUILT CLOSURE -- the precondition every number in both ledgers is measured
+// under, and until #6376 the only one nothing checked.
+//
+// tsc resolves a workspace import through the DEPENDENCY'S BUILT `dist/*.d.ts`,
+// never through its sources (no `paths` mapping exists anywhere in this repo).
+// So an unbuilt closure does not make the measurement fail -- it makes it
+// MEAN SOMETHING ELSE, and `--re-measure` used to record the result either way.
+// Measured on packages/lint at 1818998, same tree, same commit, twice:
+//
+//   closure built    19  (TS7006 x11, TS2835 x4, TS6059 x4)
+//   closure unbuilt  147 (TS2307 x71 -- cannot find module -- then the cascade
+//                         it causes: TS7006 x38, TS18046 x20, ...)
+//
+// 7.7x, and NEITHER run printed a warning. The direction is not fixed either:
+// an unresolved import degrades every symbol it names to `any`, which INVENTS
+// TS2307/TS7006 while ERASING the structural mismatches (TS2345/TS2322) that
+// are usually the real debt -- driver-mongodb's 33 TS2345 were exactly such
+// mismatches and would have measured 0 against an unbuilt `@objectstack/spec`.
+// So a stale closure can hand an entry a number far above its truth (a false
+// red, loud) or far below it (a false ceiling, silent, and the ledger would
+// then be tightened onto a number nobody can reproduce).
+//
+// This is not theoretical bookkeeping: on 2026-08-08 three readings of ONE
+// entry (`@objectstack/lint`) were in circulation between parallel agents in a
+// single day -- 19, 39 and 147 -- and the ledger's whole discipline is
+// "recorded vs measured". A quantity that is not reproducible cannot carry a
+// policy. lint.yml already builds the closure before invoking this gate; what
+// was missing is that NOTHING SAID SO, so a local run silently measured a
+// different world. Now it refuses instead.
+//
+// Deliberately a PRECONDITION (does each workspace dependency have a built type
+// entry point on disk?) rather than a scan of tsc's output for TS2307: several
+// ledger entries legitimately RECORD unresolved-module errors as part of their
+// debt -- the workspace root's note names TS2307 x17 -- and a gate that cannot
+// tell a recorded defect from a broken measurement would refuse the very
+// entries it exists to measure.
+// ---------------------------------------------------------------------------
+
+/**
+ * Every root-export type entry point a manifest declares, from `types` /
+ * `typings` and from any `exports` condition naming a declaration file. Pure
+ * over the manifest so the self-test can pin the shapes this workspace actually
+ * uses (a flat `types`, a conditional `exports` map, a package that declares
+ * none at all -- `@objectstack/console` publishes a prebuilt artifact and has
+ * no type entry point, and must never read as "unbuilt").
+ *
+ * @param {Record<string, unknown>} manifest
+ * @returns {string[]}
+ */
+function declaredTypeEntries(manifest) {
+  const found = new Set();
+  const collect = (node, depth) => {
+    if (depth > 6 || node == null) return;
+    if (typeof node === 'string') {
+      if (/\.d\.[cm]?ts$/.test(node)) found.add(node.replace(/^\.\//, ''));
+      return;
+    }
+    if (typeof node !== 'object') return;
+    for (const value of Object.values(node)) collect(value, depth + 1);
+  };
+  for (const key of ['types', 'typings']) collect(manifest[key], 0);
+  collect(manifest.exports, 0);
+  return [...found].sort();
+}
+
+/**
+ * Which workspace packages in the ledgered packages' dependency closure have no
+ * built type entry point. Pure over a described graph -- `built` is decided by
+ * the caller's fs read -- so the traversal (transitive, cycle-safe, and blind to
+ * a package that declares no type entry at all) is pinned without a filesystem.
+ *
+ * The ROOTS themselves are never reported: measuring a package reads its own
+ * SOURCES, so its own `dist` is irrelevant to its own number. A root appears
+ * only when some other ledgered package depends on it, which is the case where
+ * its `dist` really is the input.
+ *
+ * @param {string[]} roots ledgered package names
+ * @param {Map<string, {deps: string[], typeEntries: string[], built: boolean}>} graph
+ * @returns {string[]} sorted names
+ */
+function unbuiltClosure(roots, graph) {
+  const unbuilt = new Set();
+  const seen = new Set();
+  const visit = (name) => {
+    if (seen.has(name)) return;
+    seen.add(name);
+    const node = graph.get(name);
+    if (!node) return; // not a workspace member -- node_modules, not our build
+    if (node.typeEntries.length > 0 && !node.built) unbuilt.add(name);
+    for (const dep of node.deps) visit(dep);
+  };
+  for (const root of roots) {
+    for (const dep of graph.get(root)?.deps ?? []) visit(dep);
+  }
+  return [...unbuilt].sort();
+}
+
+/**
+ * The observed build graph: every workspace member, its `workspace:` deps
+ * (runtime, dev and peer -- a hidden test layer imports all three) and whether
+ * any type entry point it declares exists on disk.
+ *
+ * @param {Array<{name: string, dir: string}>} packages
+ * @returns {Map<string, {deps: string[], typeEntries: string[], built: boolean}>}
+ */
+function workspaceBuildGraph(packages) {
+  const graph = new Map();
+  for (const pkg of packages) {
+    let manifest;
+    try {
+      manifest = JSON.parse(readFileSync(join(ROOT, pkg.dir, 'package.json'), 'utf8'));
+    } catch {
+      continue;
+    }
+    const deps = [];
+    for (const field of ['dependencies', 'devDependencies', 'peerDependencies']) {
+      for (const [name, range] of Object.entries(manifest[field] ?? {})) {
+        if (typeof range === 'string' && range.startsWith('workspace:')) deps.push(name);
+      }
+    }
+    const typeEntries = declaredTypeEntries(manifest);
+    graph.set(pkg.name, {
+      deps: [...new Set(deps)].sort(),
+      typeEntries,
+      built: typeEntries.some((entry) => existsSync(join(ROOT, pkg.dir, entry))),
+    });
+  }
+  return graph;
+}
 
 /** @param {string} output */
 function countTscErrors(output) {
@@ -1156,6 +1331,30 @@ function measureTestDebt(dir) {
 function measureLedgers(packages, rootName, state) {
   const dirOf = new Map(packages.map((p) => [p.name, p.dir]));
   dirOf.set(rootName, ''); // the workspace root is a member like any other
+
+  // BUILT CLOSURE, checked ONCE for the whole ledger rather than per entry: an
+  // unbuilt dependency invalidates every number that resolves through it, so
+  // there is nothing useful to report entry by entry, and 34 sequential tsc
+  // runs against the wrong world is four minutes spent measuring nothing.
+  const ledgered = [...new Set([...Object.keys(state.debt), ...Object.keys(state.testDebt)])]
+    .filter((name) => dirOf.has(name));
+  const unbuilt = unbuiltClosure(ledgered, workspaceBuildGraph(packages));
+  if (unbuilt.length > 0) {
+    throw new Error(
+      `--re-measure cannot run: ${unbuilt.length} workspace dependenc(ies) of the ledgered packages have `
+        + `no built type entry point on disk -- ${unbuilt.join(', ')}.\n`
+        + `Every number in DEBT and TEST_DEBT is measured with tsc resolving workspace imports through each `
+        + `dependency's built \`dist/*.d.ts\`, so measuring now would not fail, it would silently measure a `
+        + `DIFFERENT WORLD: packages/lint reports 19 with its closure built and 147 without (TS2307 x71 plus `
+        + `the implicit-any cascade), same tree, same commit. The error is unbounded in BOTH directions -- an `
+        + `unresolved import invents TS2307/TS7006 and erases the structural mismatches that are usually the `
+        + `real debt -- so a number recorded from here is not this package's debt and must not enter the `
+        + `ledger (${SURPLUS_ISSUE}).\n`
+        + `Build the closure first, exactly as lint.yml does before this step:\n`
+        + `  pnpm exec turbo run build --filter='./packages/*' --filter='./packages/*/*'`,
+    );
+  }
+
   const measurements = [];
   for (const [name, entry] of Object.entries(state.debt)) {
     const dir = dirOf.get(name);
@@ -1174,13 +1373,26 @@ function measureLedgers(packages, rootName, state) {
  * MEASURED's verdict, pure over already-taken measurements so the self-test
  * pins the semantics without running a compiler.
  *
+ * `surplus` is the sum of every entry's `recorded - actual`, and it is the
+ * number #6376 is about: not "how stale is the bookkeeping" but "how many
+ * regressions can land in these layers without this gate saying anything".
+ * Reported, never red -- see the SURPLUS paragraph at the top of this file for
+ * why the direction of that ruling is deliberate, and `--lower` for the way out
+ * that costs an improvement nothing.
+ *
  * @param {Array<{ledger: string, name: string, recorded: number, actual: number}>} measurements
- * @returns {{problems: string[], notes: string[]}}
+ * @returns {{problems: string[], notes: string[], surplus: number, surplusEntries: number}}
  */
 function evaluateMeasurements(measurements) {
   const problems = [];
   const notes = [];
+  let surplus = 0;
+  let surplusEntries = 0;
   for (const m of measurements) {
+    if (m.actual < m.recorded) {
+      surplus += m.recorded - m.actual;
+      surplusEntries++;
+    }
     if (m.actual > m.recorded) {
       problems.push(
         `${m.name}: ${m.ledger} records ${m.recorded} raw tsc error(s), \`tsc --noEmit\` now reports ` +
@@ -1195,17 +1407,110 @@ function evaluateMeasurements(measurements) {
       notes.push(
         `${m.name}: ${m.ledger} records ${m.recorded}, and tsc now reports 0 -- graduation candidate. ` +
           `Onboard it (add \`"typecheck": "tsc --noEmit"\`, or drop the test exclusion, and delete the ` +
-          `ledger entry in the same PR).`,
+          `ledger entry in the same PR). \`--lower\` deliberately leaves this one alone: 0 is not a lower ` +
+          `ceiling, it is a graduation, and an entry recording 0 fails the structural half of this gate.`,
       );
     } else if (m.actual < m.recorded) {
       notes.push(
         `${m.name}: ${m.ledger} records ${m.recorded}, tsc now reports ${m.actual} ` +
           `(-${m.recorded - m.actual}) -- the entry can be lowered. Not an error: an improvement must not ` +
-          `have to pay a bookkeeping toll to land.`,
+          `have to pay a bookkeeping toll to land. But the gap is not bookkeeping while it is open: nothing ` +
+          `else reads this layer, so ${m.recorded - m.actual} new error(s) can land here and this gate will ` +
+          `report success (${SURPLUS_ISSUE} -- driver-mongodb's 33 swallowed a whole signature reversion). ` +
+          `Close it with \`pnpm check:type-check-debt --lower\`, which writes the measured number for you.`,
       );
     }
   }
-  return { problems, notes };
+  return { problems, notes, surplus, surplusEntries };
+}
+
+/**
+ * Which entries `--lower` may rewrite, and which it must not. Pure, because the
+ * "must not" half is the part that is easy to get wrong: an entry measuring 0 is
+ * a GRADUATION (delete the entry and add the script -- a deliberate PR), and
+ * writing 0 into the ledger would fail COVERED/TESTS_COVERED on the very next
+ * run, turning a free improvement into a broken tree.
+ *
+ * @param {Array<{ledger: string, name: string, recorded: number, actual: number}>} measurements
+ * @returns {{lowerings: Array<{ledger: string, name: string, from: number, to: number}>, graduations: string[]}}
+ */
+function plannedLowerings(measurements) {
+  const lowerings = [];
+  const graduations = [];
+  for (const m of measurements) {
+    if (m.actual >= m.recorded) continue;
+    if (m.actual <= 0) {
+      graduations.push(`${m.name} (${m.ledger})`);
+      continue;
+    }
+    lowerings.push({ ledger: m.ledger, name: m.name, from: m.recorded, to: m.actual });
+  }
+  return { lowerings, graduations };
+}
+
+/**
+ * The span of one ledger's object literal in this file's own source. Anchored on
+ * `\n};` rather than brace-matched: a `note` is a single-line string
+ * concatenation, so it can contain a brace but never a line that STARTS a
+ * closing one -- and a parser that can be fooled by prose is the wrong tool for
+ * rewriting the file the prose lives in.
+ *
+ * @returns {{start: number, end: number} | null}
+ */
+function ledgerBlockRange(source, ledgerName) {
+  const start = source.indexOf(`const ${ledgerName} = {`);
+  if (start === -1) return null;
+  const end = source.indexOf('\n};', start);
+  if (end === -1) return null;
+  return { start, end };
+}
+
+/**
+ * AUTO-LOWERING (#6376). Rewrites `errors:` downward for the named entries, in
+ * this file's own ledger source, and reports what it refused to touch instead of
+ * guessing. The point is not convenience: the measured number is only knowable
+ * by running the compiler against a built closure, so a human typing it is a
+ * human copying a number out of an environment that may not be the one CI
+ * measures in. The tool that took the measurement is the only honest author of
+ * the number.
+ *
+ * Notes are deliberately NOT rewritten. Raising a count demands a rewritten
+ * composition (the invariant above says so, and says why); lowering one leaves a
+ * note describing a pile LARGER than what exists, which misleads in the safe
+ * direction -- and inventing a composition for errors that are gone would be the
+ * exact sin that rule was written against.
+ *
+ * @param {string} source
+ * @param {Array<{ledger: string, name: string, from: number, to: number}>} lowerings
+ * @returns {{source: string, applied: string[], skipped: string[]}}
+ */
+function lowerLedgerEntries(source, lowerings) {
+  const applied = [];
+  const skipped = [];
+  let out = source;
+  for (const l of lowerings) {
+    const block = ledgerBlockRange(out, l.ledger);
+    if (!block) {
+      skipped.push(`${l.name}: no \`const ${l.ledger} = {\` block in ${SELF}`);
+      continue;
+    }
+    const text = out.slice(block.start, block.end);
+    const pattern = new RegExp(`('${l.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}'\\s*:\\s*\\{[\\s\\S]*?errors:\\s*)(\\d+)`);
+    const match = text.match(pattern);
+    if (!match) {
+      skipped.push(`${l.name}: no \`errors:\` found under its ${l.ledger} entry`);
+      continue;
+    }
+    if (Number(match[2]) !== l.from) {
+      // The file moved under the measurement. Refusing is the only safe answer:
+      // writing anyway would record a number measured against a different tree.
+      skipped.push(`${l.name}: ${l.ledger} reads ${match[2]}, not the measured-against ${l.from} -- re-measure`);
+      continue;
+    }
+    out = out.slice(0, block.start) + text.replace(pattern, `$1${l.to}`) + out.slice(block.end);
+    applied.push(`${l.ledger} ${l.name}: ${l.from} -> ${l.to}`);
+  }
+  return { source: out, applied, skipped };
 }
 
 /** The observed non-fixture state. */
@@ -1561,6 +1866,57 @@ function selfTest() {
       ],
       problems: [/grew: DEBT records 3/],
       notes: [/shrank: DEBT records 9, tsc now reports 8/],
+      surplus: 1,
+    },
+    // #6376, THE CASUALTY, as measured on driver-mongodb rather than as a
+    // parable. These two cases are ONE scenario at two ceilings, and the pair is
+    // the whole issue: the tree is identical, the regression is identical, and
+    // only the recorded number decides whether this gate speaks.
+    //
+    // Read the first case for what it is -- a CHARACTERISATION of a live
+    // allowance, not a regression test of a fix. It asserts that the gate says
+    // NOTHING about a 12-error regression, because 12 < 43. That is today's
+    // deliberate behaviour (an improvement must not pay a toll), and it is
+    // pinned here so it is a decision on the record instead of an accident: if
+    // the surplus is ever made red, THIS is the assertion that flips, and the
+    // second case is what it must flip to.
+    {
+      label: '#6376 — a regression SMALLER than the surplus is invisible: 12 errors under a stale 43-ceiling',
+      measurements: [{ ledger: 'TEST_DEBT', name: 'driver-mongodb', recorded: 43, actual: 12 }],
+      problems: [],
+      notes: [/driver-mongodb: TEST_DEBT records 43, tsc now reports 12 \(-31\).*31 new error\(s\) can land here/s],
+      surplus: 31,
+    },
+    {
+      label: '#6376 — the same regression against the flattened ceiling is red: PR #6356 is why 10, not 43',
+      measurements: [{ ledger: 'TEST_DEBT', name: 'driver-mongodb', recorded: 10, actual: 12 }],
+      problems: [/driver-mongodb: TEST_DEBT records 10 raw tsc error\(s\).*now reports 12 \(\+2\)/s],
+      notes: [],
+      surplus: 0,
+    },
+    {
+      label: '#6376 — the surplus total is the allowance, summed over shrunk entries only',
+      measurements: [
+        { ledger: 'TEST_DEBT', name: 'approvals', recorded: 547, actual: 348 },
+        { ledger: 'TEST_DEBT', name: 'lint', recorded: 42, actual: 19 },
+        { ledger: 'DEBT', name: 'exact', recorded: 5, actual: 5 },
+        { ledger: 'DEBT', name: 'grew', recorded: 3, actual: 9 },
+      ],
+      problems: [/grew: DEBT records 3/],
+      notes: [/approvals: TEST_DEBT records 547/, /lint: TEST_DEBT records 42/],
+      surplus: 222,
+      surplusEntries: 2,
+    },
+    {
+      label: '#6376 — an exactly-calibrated ledger reports no allowance at all',
+      measurements: [
+        { ledger: 'DEBT', name: 'a', recorded: 91, actual: 91 },
+        { ledger: 'TEST_DEBT', name: 'b', recorded: 467, actual: 467 },
+      ],
+      problems: [],
+      notes: [],
+      surplus: 0,
+      surplusEntries: 0,
     },
   ];
   for (const c of driftCases) {
@@ -1569,11 +1925,13 @@ function selfTest() {
       got.problems.length === c.problems.length &&
       got.notes.length === c.notes.length &&
       c.problems.every((rx, i) => rx.test(got.problems[i])) &&
-      c.notes.every((rx, i) => rx.test(got.notes[i]));
+      c.notes.every((rx, i) => rx.test(got.notes[i])) &&
+      (c.surplus === undefined || got.surplus === c.surplus) &&
+      (c.surplusEntries === undefined || got.surplusEntries === c.surplusEntries);
     if (!ok) {
       failures.push(
         `evaluateMeasurements — ${c.label}: expected ${c.problems.length} problem(s) / ${c.notes.length} note(s) ` +
-          `matching, got ${JSON.stringify(got)}`,
+          `matching${c.surplus === undefined ? '' : ` / surplus ${c.surplus}`}, got ${JSON.stringify(got)}`,
       );
     }
   }
@@ -1609,6 +1967,181 @@ function selfTest() {
     if (got !== c.expect) failures.push(`countTscErrors — ${c.label}: expected ${c.expect}, got ${got}`);
   }
 
+  // BUILT CLOSURE (#6376). The precondition is only worth having if it can tell
+  // "this package publishes no types" from "this package was never built" --
+  // confusing those two either refuses every run (console has no type entry) or
+  // refuses none.
+  const typeEntryCases = [
+    { label: 'a flat `types` entry', manifest: { types: 'dist/index.d.ts' }, expect: ['dist/index.d.ts'] },
+    {
+      label: 'conditional exports contribute every declaration file they name',
+      manifest: {
+        types: 'dist/index.d.ts',
+        exports: { '.': { import: { types: './dist/index.d.mts' }, require: { types: './dist/index.d.ts' } } },
+      },
+      expect: ['dist/index.d.mts', 'dist/index.d.ts'],
+    },
+    { label: 'a package that publishes no types declares none', manifest: { exports: { './package.json': './package.json' } }, expect: [] },
+    { label: 'runtime entry points are not type entry points', manifest: { main: 'dist/index.js', module: 'dist/index.mjs' }, expect: [] },
+  ];
+  for (const c of typeEntryCases) {
+    const got = declaredTypeEntries(c.manifest);
+    if (JSON.stringify(got) !== JSON.stringify(c.expect)) {
+      failures.push(`declaredTypeEntries — ${c.label}: expected ${JSON.stringify(c.expect)}, got ${JSON.stringify(got)}`);
+    }
+  }
+
+  // The graph below is shared by the next two cases ON PURPOSE, and they are a
+  // PAIR: a "nothing is reported" assertion passes vacuously over an empty
+  // measurement set, so the same 4-package graph is asserted twice -- once
+  // fully built (exactly 0 reported) and once with a single `built` flag
+  // flipped (exactly 1 reported, by name). The second is what proves the first
+  // was measuring something.
+  const built = (deps, isBuilt = true) => ({ deps, typeEntries: ['dist/index.d.ts'], built: isBuilt });
+  const closureGraph = (specBuilt) => new Map([
+    ['ledgered', built(['spec', 'formula'])],
+    ['spec', built([], specBuilt)],
+    ['formula', built(['spec'])],
+    ['untouched', built([], false)], // unbuilt, but nothing in the closure needs it
+  ]);
+  const closureCases = [
+    { label: 'a fully built closure reports nothing, over a graph of 4 packages', roots: ['ledgered'], graph: closureGraph(true), expect: [] },
+    { label: 'flipping one dependency to unbuilt reports exactly that one', roots: ['ledgered'], graph: closureGraph(false), expect: ['spec'] },
+    {
+      label: 'a transitive dependency counts — the closure is walked, not just the direct deps',
+      roots: ['ledgered'],
+      graph: new Map([['ledgered', built(['formula'])], ['formula', built(['spec'])], ['spec', built([], false)]]),
+      expect: ['spec'],
+    },
+    {
+      label: 'a ledgered package\'s OWN dist is irrelevant to its OWN number',
+      roots: ['ledgered'],
+      graph: new Map([['ledgered', built([], false)]]),
+      expect: [],
+    },
+    {
+      label: 'but it IS reported when another ledgered package depends on it',
+      roots: ['a', 'ledgered'],
+      graph: new Map([['a', built(['ledgered'])], ['ledgered', built([], false)]]),
+      expect: ['ledgered'],
+    },
+    {
+      label: 'a package that declares no type entry point is never unbuilt',
+      roots: ['ledgered'],
+      graph: new Map([['ledgered', built(['console'])], ['console', { deps: [], typeEntries: [], built: false }]]),
+      expect: [],
+    },
+    {
+      label: 'a dependency cycle terminates instead of hanging the gate',
+      roots: ['ledgered'],
+      graph: new Map([['ledgered', built(['a'])], ['a', built(['b'])], ['b', built(['a'], false)]]),
+      expect: ['b'],
+    },
+    {
+      label: 'a dependency outside the workspace is npm\'s problem, not the build\'s',
+      roots: ['ledgered'],
+      graph: new Map([['ledgered', built(['zod'])]]),
+      expect: [],
+    },
+  ];
+  for (const c of closureCases) {
+    const got = unbuiltClosure(c.roots, c.graph);
+    if (JSON.stringify(got) !== JSON.stringify(c.expect)) {
+      failures.push(`unbuiltClosure — ${c.label}: expected ${JSON.stringify(c.expect)}, got ${JSON.stringify(got)}`);
+    }
+  }
+
+  // AUTO-LOWERING (#6376). What it refuses matters more than what it writes.
+  const planCases = [
+    {
+      label: 'a shrunk entry is lowered to its measurement',
+      measurements: [{ ledger: 'DEBT', name: 'a', recorded: 52, actual: 42 }],
+      lowerings: [{ ledger: 'DEBT', name: 'a', from: 52, to: 42 }],
+      graduations: [],
+    },
+    { label: 'a grown entry is never lowered', measurements: [{ ledger: 'DEBT', name: 'a', recorded: 3, actual: 7 }], lowerings: [], graduations: [] },
+    { label: 'an exact entry is left alone', measurements: [{ ledger: 'DEBT', name: 'a', recorded: 3, actual: 3 }], lowerings: [], graduations: [] },
+    {
+      label: 'an entry measuring 0 is a graduation, not a lowering — writing 0 would fail the structural gate',
+      measurements: [{ ledger: 'TEST_DEBT', name: 'a', recorded: 4, actual: 0 }],
+      lowerings: [],
+      graduations: ['a (TEST_DEBT)'],
+    },
+  ];
+  for (const c of planCases) {
+    const got = plannedLowerings(c.measurements);
+    if (JSON.stringify(got.lowerings) !== JSON.stringify(c.lowerings) || JSON.stringify(got.graduations) !== JSON.stringify(c.graduations)) {
+      failures.push(`plannedLowerings — ${c.label}: expected ${JSON.stringify(c)}, got ${JSON.stringify(got)}`);
+    }
+  }
+
+  // The rewriter, against a fixture shaped like this file's own ledgers --
+  // including the two traps they really contain: ONE package name that appears
+  // in BOTH ledgers with different numbers (`@objectstack/rest` is 2 in DEBT and
+  // 163 in TEST_DEBT), and a `note` whose PROSE contains the word it is
+  // searching for.
+  const ledgerFixture = [
+    'const DEBT = {',
+    "  '@objectstack/rest': {",
+    '    errors: 2,',
+    "    note: 'code-tier 2. An earlier sweep read errors: 99 here, which is prose and not the field.',",
+    '  },',
+    "  '@objectstack/other': { errors: 5, note: 'x' },",
+    '};',
+    '',
+    'const TEST_DEBT = {',
+    "  '@objectstack/rest': { errors: 163, note: 'y' },",
+    '};',
+    '',
+  ].join('\n');
+  const rewriteCases = [
+    {
+      label: 'lowers the entry in the NAMED ledger, leaving the same name in the other ledger untouched',
+      lowerings: [{ ledger: 'TEST_DEBT', name: '@objectstack/rest', from: 163, to: 144 }],
+      applied: 1,
+      skipped: 0,
+      assert: (out) => /const DEBT[\s\S]*'@objectstack\/rest': \{\n    errors: 2,/.test(out)
+        && /const TEST_DEBT[\s\S]*'@objectstack\/rest': \{ errors: 144,/.test(out),
+    },
+    {
+      label: 'the field is the first `errors:` under the name — prose inside the note is not a field',
+      lowerings: [{ ledger: 'DEBT', name: '@objectstack/rest', from: 2, to: 1 }],
+      applied: 1,
+      skipped: 0,
+      assert: (out) => /errors: 1,/.test(out) && /read errors: 99 here/.test(out),
+    },
+    {
+      label: 'refuses when the file no longer reads the number the measurement was taken against',
+      lowerings: [{ ledger: 'DEBT', name: '@objectstack/other', from: 9, to: 4 }],
+      applied: 0,
+      skipped: 1,
+      assert: (out) => out === ledgerFixture,
+    },
+    {
+      label: 'refuses an entry that is not in that ledger rather than writing somewhere plausible',
+      lowerings: [{ ledger: 'DEBT', name: '@objectstack/absent', from: 3, to: 1 }],
+      applied: 0,
+      skipped: 1,
+      assert: (out) => out === ledgerFixture,
+    },
+    {
+      label: 'an empty plan leaves the source byte-identical',
+      lowerings: [],
+      applied: 0,
+      skipped: 0,
+      assert: (out) => out === ledgerFixture,
+    },
+  ];
+  for (const c of rewriteCases) {
+    const got = lowerLedgerEntries(ledgerFixture, c.lowerings);
+    if (got.applied.length !== c.applied || got.skipped.length !== c.skipped || !c.assert(got.source)) {
+      failures.push(
+        `lowerLedgerEntries — ${c.label}: expected ${c.applied} applied / ${c.skipped} skipped and the ` +
+          `documented source, got ${JSON.stringify({ applied: got.applied, skipped: got.skipped })}`,
+      );
+    }
+  }
+
   if (failures.length) {
     console.error(`✗ check:type-check-coverage --self-test — ${failures.length} failure(s)\n`);
     for (const f of failures) console.error('  • ' + f);
@@ -1617,7 +2150,9 @@ function selfTest() {
   console.log(
     `✓ check:type-check-coverage --self-test — ${cases.length} semantic case(s) + ` +
       `${namedCases.length + coverCases.length + derivedCases.length} observation case(s) + ` +
-      `${driftCases.length + countCases.length} re-measure case(s) hold.`,
+      `${driftCases.length + countCases.length} re-measure case(s) + ` +
+      `${typeEntryCases.length + closureCases.length} built-closure case(s) + ` +
+      `${planCases.length + rewriteCases.length} auto-lowering case(s) hold.`,
   );
 }
 
@@ -1659,9 +2194,34 @@ console.log(
 if (process.argv.includes('--re-measure')) {
   const started = Date.now();
   const measurements = measureLedgers(packages, root.name, state);
-  const { problems: drift, notes } = evaluateMeasurements(measurements);
+  const { problems: drift, notes, surplus, surplusEntries } = evaluateMeasurements(measurements);
   const elapsed = ((Date.now() - started) / 1000).toFixed(1);
   for (const n of notes) console.log('  ℹ ' + n);
+
+  // AUTO-LOWERING. Opt-in, like the `--update` on this repo's other two
+  // ratchets, and run BEFORE the drift verdict so a tree that has both a
+  // regression and a surplus still gets the surplus closed in the same lap.
+  if (process.argv.includes('--lower')) {
+    const { lowerings, graduations } = plannedLowerings(measurements);
+    const file = join(ROOT, SELF);
+    const { source, applied, skipped } = lowerLedgerEntries(readFileSync(file, 'utf8'), lowerings);
+    if (applied.length > 0) writeFileSync(file, source);
+    console.log(
+      `\ncheck-type-check-coverage --lower: ${applied.length} ledger entr(ies) lowered to their measurement.`,
+    );
+    for (const a of applied) console.log('  ↓ ' + a);
+    for (const s of skipped) console.log('  ! ' + s);
+    for (const g of graduations) {
+      console.log(`  ! ${g} measures 0 -- not lowered: that is a graduation, and it is a deliberate PR.`);
+    }
+    if (applied.length > 0) {
+      console.log(
+        `  Review and commit ${SELF}. Each \`note\` still describes the LARGER pile it was written for; ` +
+          `rewrite the ones you can attribute, and leave the rest rather than inventing a composition.`,
+      );
+    }
+  }
+
   if (drift.length) {
     console.error(`\ncheck-type-check-coverage --re-measure: ${drift.length} ledger entr(ies) drifted upward\n`);
     for (const p of drift) console.error('  • ' + p);
@@ -1671,5 +2231,15 @@ if (process.argv.includes('--re-measure')) {
   console.log(
     `check-type-check-coverage --re-measure: OK — ${measurements.length} ledger entr(ies) re-measured ` +
       `in ${elapsed}s, ${measuredTotal} raw tsc error(s) total, none above its recorded number.`,
+  );
+  // Printed on a GREEN run, on purpose. This is the one number the old summary
+  // could not have told you: how much silence the ledger is currently buying
+  // (#6376). Zero is the goal and `--lower` is one command away from it.
+  console.log(
+    surplusEntries === 0
+      ? `  surplus: none — every entry sits exactly at its measurement, so any new error is red.`
+      : `  surplus: ${surplus} raw error(s) across ${surplusEntries} entr(ies) sit BELOW their recorded ` +
+        `ceiling — that many regressions can land in layers no other gate reads without this one saying ` +
+        `anything (${SURPLUS_ISSUE}). Close it with \`pnpm check:type-check-debt --lower\`.`,
   );
 }

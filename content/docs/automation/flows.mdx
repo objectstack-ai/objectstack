@@ -336,7 +336,10 @@ Two things worth knowing:
 
 - **Give a `required` boolean a `defaultValue`.** An untouched checkbox holds no
   value at all, which counts as unanswered — without `defaultValue: false` the
-  user cannot express "no" by leaving it clear.
+  user cannot express "no" by leaving it clear. Mirror it on the **flow
+  variable** as well ([`defaultValue`](#defaultvalue--declaring-a-variable-is-not-the-same-as-binding-it)):
+  the client returns only the fields the user touched, so on the untouched path
+  the name is never bound and a downstream condition reading it aborts the run.
 - **A broken predicate fails open** (the field stays visible) rather than hiding
   an input the flow may be waiting on. `registerFlow()` does check the predicate
   as bare CEL — a `{var}` template or a syntax error is a loud registration
@@ -493,16 +496,26 @@ The resume route is generic, so **the node the run is parked on** decides
 whether a raw resume is a legitimate continuation. Every action descriptor
 carries a `resumeAuthority`:
 
-- **`'any'`** (the default — `screen`, `wait`, your own pausing nodes): the
-  caller supplies the continuation and the route is the intended door.
-- **`'service'`** (`approval`): continuing is a *side effect* of a decision
-  that some service must authorize and record first, so only that service may
-  drive it. `ApprovalService.decide` enforces the approver slate, writes the
-  `sys_approval_action` row, mirrors the status field — **then** resumes.
+- **`'any'`** (`screen`, `wait`): the caller supplies the continuation and the
+  route is the intended door.
+- **`'service'`** (`approval`, `approval_revise`): continuing is a *side effect*
+  of a decision that some service must authorize and record first, so only that
+  service may drive it. `ApprovalService.decide` enforces the approver slate,
+  writes the `sys_approval_action` row, mirrors the status field — **then**
+  resumes.
 
-A resume of a `'service'` pause through the route answers **403** and changes
-nothing: the request stays pending and the run stays parked, so the real
-decision can still land. (Before this gate a raw resume walked the `approve`
+<Callout type="warn">
+  **There is no default — an omission means `'service'`.** A pausing node type
+  whose descriptor never declares `resumeAuthority` is closed to the generic
+  route: its pauses answer **403** with a message naming the missing field. If
+  the route *is* the intended door for your node, declare
+  `resumeAuthority: 'any'` explicitly. This is an opt-in, not an inheritance —
+  a pause nobody claimed is one nobody authorized.
+</Callout>
+
+A resume of a `'service'` (or undeclared) pause through the route answers **403**
+and changes nothing: the request stays pending and the run stays parked, so the
+real decision can still land. (Before this gate a raw resume walked the `approve`
 edge with no decision recorded, leaving the `sys_approval_request` row and the
 run permanently disagreeing.)
 
@@ -570,9 +583,12 @@ action with no `params` is untouched:
 - `signal.output`, which is the node-*output* namespace of the approval-style
   resume envelope rather than the screen's collected-values channel.
 
-Registering a pausing node of your own? Declare `resumeAuthority: 'service'` on
-its descriptor when the decision to continue belongs to your service rather
-than to whoever holds the run id.
+Registering a pausing node of your own? **Declare `resumeAuthority` — the field
+is not optional in practice.** Use `'any'` when whoever holds the run id is
+meant to supply the continuation (a screen's inputs, a signal wait's external
+producer), and `'service'` when the decision to continue belongs to your service
+rather than to whoever holds the run id. Declaring neither leaves your pauses
+refused on the generic route, and the engine warns about it at registration.
 
 ### Parallel approvals — one aggregating node, not two pauses
 
@@ -938,6 +954,7 @@ variables: [
   { name: 'input_id', type: 'text', isInput: true, isOutput: false },
   { name: 'result', type: 'object', isInput: false, isOutput: true },
   { name: 'counter', type: 'number', isInput: false, isOutput: false },
+  { name: 'createOpportunity', type: 'boolean', isInput: true, defaultValue: false },
 ]
 ```
 
@@ -947,6 +964,96 @@ variables: [
 | `type` | `string` | `'text'`, `'number'`, `'boolean'`, `'object'`, `'list'` |
 | `isInput` | `boolean` | Available as input parameter |
 | `isOutput` | `boolean` | Available as output parameter |
+| `defaultValue` | `unknown` | Bound at run start when no parameter supplies one — this is what makes the declaration a guarantee. Optional |
+
+### `defaultValue` — declaring a variable is not the same as binding it
+
+Without `defaultValue`, a declaration is documentation. The engine binds an
+`isInput` variable **only** when the caller actually passed it
+(`params[name] !== undefined`), so every path that omits the parameter leaves
+the name unbound — and an unbound name in a condition does not read as `false`,
+it **aborts the predicate and stops the run**.
+
+Declare the default and the name is bound on every path:
+
+{/* os:check */}
+```typescript
+import { defineFlow } from '@objectstack/spec/automation';
+
+export const LeadConversion = defineFlow({
+  name: 'lead_conversion',
+  label: 'Lead Conversion',
+  type: 'screen',
+  variables: [
+    // Bound to `false` on every path the caller leaves it out of.
+    { name: 'createOpportunity', type: 'boolean', isInput: true, defaultValue: false },
+  ],
+  nodes: [
+    { id: 'start', type: 'start', label: 'Start' },
+    { id: 'end', type: 'end', label: 'End' },
+  ],
+  edges: [{ id: 'e1', source: 'start', target: 'end' }],
+});
+```
+
+The rules, all three worth knowing:
+
+- **A supplied parameter always wins** — including a falsy one. The boundary is
+  `!== undefined`, so `false`, `null`, `0` and `''` are answers, not absences,
+  and only a genuinely missing parameter falls through to the default.
+- **A non-input variable takes its default too.** `isInput: false` means no
+  parameter can reach the name, so the default is the only thing that can bind
+  it.
+- **A declared variable shadows a trigger-record field of the same name** —
+  whether it was bound from a parameter or from its default. That is the rule a
+  parameter already followed; extending it to defaults is what keeps a name from
+  resolving out of a different source depending on whether the caller passed it.
+
+The case this exists for is a screen that collects something optional. The
+client returns only the fields the user actually touched, so an untouched
+checkbox arrives as nothing at all — and the edge reading it aborts. Give the
+variable a `defaultValue` mirroring the screen field's own, and the untouched
+path routes:
+
+```typescript
+variables: [
+  { name: 'createOpportunity', type: 'boolean', isInput: true, defaultValue: false },
+],
+nodes: [
+  { id: 'collect', type: 'screen', label: 'Conversion Details', config: {
+      fields: [{ name: 'createOpportunity', label: 'Create Opportunity?',
+                 type: 'boolean', defaultValue: false }],
+  } },
+],
+edges: [
+  { id: 'e_no', source: 'collect', target: 'skip', condition: 'createOpportunity == false' },
+]
+```
+
+The value is **not** checked against the declared `type` — `type` is an open
+string, so there is no vocabulary to check against. It behaves like every other
+`defaultValue` on the authoring surface.
+
+<Callout type="warn">
+**Reading a variable that might be unbound: only the `vars.`-scoped guard
+works.** Conditions are strict CEL, and `has()` is not the escape hatch it looks
+like — measured on the live evaluator (and pinned as a test):
+
+| expression | `X` unbound | `X = null` | `X = {}` | `X = {f: 1}` |
+| :--- | :--- | :--- | :--- | :--- |
+| `X.f == 1` | **aborts** `Unknown variable: X` | **aborts** `No such key: f` | **aborts** | `true` |
+| `has(X.f)` | **aborts** `Unknown variable: X` | `false` | `false` | `true` |
+| `has(vars.X)` | `false` | `true` | `true` | `true` |
+
+So the natural spelling `has(X.f)` fails on exactly the case it was written for,
+and `has(vars.X) && X.f == 1` is the guard that holds (CEL short-circuits, so
+the right-hand read never runs on the unbound leg).
+
+Reach for `defaultValue` first anyway. A guard says "unanswered means no" inside
+the predicate and leaves the run's shape depending on what the client happened
+to send; a default removes the unbound state, and every later reader of the flow
+can see it in the declaration.
+</Callout>
 
 ## Error Handling
 
@@ -960,9 +1067,12 @@ errorHandling: {
 }
 ```
 
-The retry knobs are the **one** retry policy the platform has (`RetryPolicySchema`),
-shared with `job.retryPolicy`, a `try_catch` node's `retry` and an ETL pipeline's
-`retry`. A spelling learned on any one of them is correct on all of them.
+The retry knobs are the converged `RetryPolicySchema` contract — one declaration,
+shared by exactly **three** surfaces: this block, `job.retryPolicy` and a
+`try_catch` node's `retry`. A spelling learned on any one of those three is
+correct on the other two. An ETL pipeline's `retry` was a fourth until 17.0.0
+retired the whole ETL layer (#6414); there is no longer a pipeline to author it
+on, and every removed `ETL*` name fails at `tsc`.
 
 <Callout type="warn">
   **17.0.0 breaking:** the base delay here was `retryDelayMs` and is now
@@ -981,6 +1091,16 @@ shared with `job.retryPolicy`, a `try_catch` node's `retry` and an ETL pipeline'
 
 `maxRetries` counts the **re-runs**, not the total attempts: `maxRetries: 2`
 runs the flow up to three times.
+
+Retry blocks *outside* those three surfaces are separate contracts, and they
+differ in the numbers more than in the words. A hook's `retryPolicy` carries two
+keys only (`maxRetries`, `backoffMs` — no `backoffMultiplier`, `maxRetryDelayMs`
+or `jitter`) and defaults `maxRetries` to `3`, where this block defaults it to
+`0`. A connector's `retryConfig` counts attempts the other way round: its
+`maxAttempts` **includes** the first attempt, so `maxAttempts: 3` is
+`maxRetries: 2` here, and it spells the delays `initialDelayMs` / `maxDelayMs`.
+Carry values between them by meaning — renaming the key alone changes how many
+times the work runs.
 
 ### `strategy: 'retry'` has to say how many times
 
@@ -1126,7 +1246,10 @@ curl -b cookies.txt -X POST \
 **Passing inputs.** Declare variables with `isInput: true`, then send them in
 `params` under the same names — only declared inputs are bound. `recordId` and
 `objectName` are lifted into `params` for you (plus an `<objectName>Id` alias),
-and `event` defaults to `'manual'`.
+and `event` defaults to `'manual'`. A param you *omit* leaves the variable
+unbound unless its declaration carries a
+[`defaultValue`](#defaultvalue--declaring-a-variable-is-not-the-same-as-binding-it);
+a param you send explicitly always wins, `false` and `null` included.
 
 **Identity.** The caller's identity (user, positions, permissions, tenant) is
 forwarded into the run, so a `runAs: 'user'` flow executes under that caller's

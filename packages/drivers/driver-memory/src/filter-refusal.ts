@@ -30,7 +30,7 @@
  * vocabulary; it does not get to drop what falls outside it.
  */
 
-import { FILTER_OPERATORS, LOGICAL_OPERATORS } from '@objectstack/spec/data';
+import { FILTER_OPERATORS, LOGICAL_OPERATORS, RETIRED_FILTER_OPERATORS } from '@objectstack/spec/data';
 import { StandardErrorCode } from '@objectstack/spec/api';
 
 /**
@@ -148,18 +148,39 @@ export function emptyFieldConstraintError(field: string, path: string): Error {
  * `convertConditionToMongo`'s alias fold) — a list written out here would agree
  * with the spec on the day it was typed and never again.
  *
- * Two additions the spec's list does not carry, both deliberate and both
- * pre-existing behaviour rather than new capability:
+ * ## [#5702] The two additions are GONE — nothing is added any more
  *
- * - **`$regex`** — not in `FILTER_OPERATORS`, but really produced: plugin-auth's
- *   ObjectQL adapter emits `{ field: { $regex: value } }` for a `contains`
- *   search. `driver-sql` compiles it (to a substring LIKE), `objectql`'s
- *   `having` allows it, and this driver's matcher implements it. Refusing it
- *   here would break a live producer.
- * - **`$options`** — the regex-flags companion `memory-matcher` reads
- *   (`new RegExp(target, condition.$options)`) and `objectql`'s `having` skips
- *   for the same reason. It is a modifier of `$regex`, not a predicate of its
- *   own.
+ * This set used to be `[...FILTER_OPERATORS, '$regex', '$options']`. Both extra
+ * members existed for one reason, recorded here verbatim at the time: *"Refusing
+ * it here would break a live producer"* — plugin-auth's ObjectQL adapter emitted
+ * `{ field: { $regex: value } }` for better-auth's `contains` search, on the
+ * AUTHENTICATION path.
+ *
+ * That producer was flipped to `$contains` by #5710 (PR #5812), and a whole-repo
+ * scan on `origin/main` found no other: every surviving `$regex` occurrence is a
+ * consumer arm, a retirement prescription, or a refusal assertion. The reason the
+ * two members existed is therefore gone, and #4706 retired both spellings — so
+ * they are refused here like any other undeclared operator, with the spec's
+ * prescription attached (see {@link retiredFilterOperatorError}).
+ *
+ * ## [#6520] `$icontains` arrives here by DERIVATION, and that is the risk
+ *
+ * This set is `FILTER_OPERATORS` itself, so #6520 adding `$icontains` to the
+ * spec admitted it here with no edit to this file. That is the property #5701
+ * measured and warned about: while the matcher had no arm, admission alone
+ * turned a loud refusal into `match({ name: 'zzz' }, { name: { $icontains:
+ * 'acme' } }) === true` — the predicate dropped, every row matched, which on an
+ * RLS read scope is a permission bypass rather than a degraded filter (#3948).
+ *
+ * So the arms and the word list HAD to land in one PR, and #6520 did that:
+ * `memory-matcher.ts` and `memory-driver.ts` both carry a `$icontains` case, and
+ * `memory-analytics.ts` lowers it too. Re-verified by deleting the matcher's arm
+ * on the #6520 branch — with the name admitted, the reference matcher answered
+ * EVERY row, which is the measurement, not a prediction.
+ *
+ * The lesson for the next operator is the ordering rather than this name: an
+ * entry in `FILTER_OPERATORS` is a claim that this driver evaluates it, and this
+ * file will make that claim on the spec's behalf whether or not it is true.
  *
  * Everything else is refused. That includes the mingo operators this driver used
  * to hand through by accident (`$elemMatch`, `$size`, `$type`, `$mod`, `$where`,
@@ -168,8 +189,6 @@ export function emptyFieldConstraintError(field: string, path: string): Error {
  */
 export const SUPPORTED_FIELD_OPERATORS: ReadonlySet<string> = new Set<string>([
   ...FILTER_OPERATORS,
-  '$regex',
-  '$options',
 ]);
 
 /** The vocabulary as it appears in a refusal message, in declaration order. */
@@ -418,24 +437,53 @@ export function nonBooleanNullComparandError(field: string, value: unknown, path
 }
 
 /**
- * [#5324] `$options` without the `$regex` it modifies.
+ * [#5702] A RETIRED filter operator in a field constraint.
  *
- * `$options` is in {@link SUPPORTED_FIELD_OPERATORS} as a MODIFIER, not a
- * predicate — it carries the regex flags (`memory-matcher` reads it as
- * `new RegExp(target, condition.$options)`, and objectql's `having` skips it for
- * the same reason). On its own it is not a filter at all, and the two faces
- * proved it: mingo raised `unknown query operator $options` — uncoded, the very
- * escape #5324 is about — while the matcher ignored it and matched EVERY row.
- * Allowlisting the key without requiring its partner would have left exactly one
- * operator still leaking out of the envelope.
+ * Distinct from {@link unknownFieldOperatorError} on purpose, and the
+ * distinction is the author's: `$sounds_like` is a name that never meant
+ * anything, while `$regex` and `$options` are names this driver ANSWERED — with
+ * a real `RegExp`, the only regex evaluator in the repo — until #4706 retired
+ * them. Handing that author the fifteen-name vocabulary list is true and
+ * useless; what they need is `$icontains`.
+ *
+ * The prescription is `RETIRED_FILTER_OPERATORS[op].why`, printed VERBATIM. The
+ * spec table exists precisely so `driver-sql`, this driver, `driver-turso`'s
+ * remote transport, `driver-mongodb` and `objectql`'s `having` stop each writing
+ * their own sentence about one retirement (#5701).
+ *
+ * This subsumes the `$options`-with-no-`$regex` refusal #5324 added
+ * (`danglingRegexOptionsError`, deleted with this change): while `$options` was
+ * an allowlisted MODIFIER, a dangling one needed its own gate; now that both
+ * spellings are refused outright there is no shape left for that gate to catch,
+ * and the message it printed — which taught the reader to write
+ * `{ "$regex": "abc", "$options": "i" }` — would be prescribing the retired form.
+ *
+ * `siblings` are the other keys of the SAME field constraint, and every retired
+ * one among them is named too — `{ $regex: '^acme', $options: 'i' }` is ONE
+ * mistake with ONE fix, and a message naming only the key iteration reached
+ * first would send its author back for a second round-trip on the other.
+ *
+ * Returns `null` when `op` is not retired, so the caller falls through to the
+ * ordinary unknown-operator refusal in one expression.
  */
-export function danglingRegexOptionsError(field: string, path: string): Error {
+export function retiredFilterOperatorError(
+  op: string,
+  field: string,
+  path: string,
+  siblings: readonly string[] = [],
+): Error | null {
+  const guidance = RETIRED_FILTER_OPERATORS[op];
+  if (!guidance) return null;
+  const replacement = guidance.to ? ` Write "${guidance.to}" instead.` : '';
+  const alsoRetired = siblings.filter((key) => key !== op && RETIRED_FILTER_OPERATORS[key]);
+  const also = alsoRetired.length
+    ? ` The same field constraint also carries the retired ` +
+      `${alsoRetired.map((key) => `"${key}"`).join(', ')} — one "${guidance.to}" replaces the whole ` +
+      `shape, so this is ONE mistake with ONE fix, not one per key.`
+    : '';
   return unsupportedFilterError(
-    `Operator "$options" on field "${field}" at ${path} has no "$regex" to modify. "$options" ` +
-      `carries the flags of a regex predicate (e.g. { "${field}": { "$regex": "abc", "$options": "i" } }); ` +
-      `it is not a predicate on its own. It is refused rather than ignored because the two ` +
-      `evaluation paths answered it differently — one raised an uncoded engine error, the other ` +
-      `matched every row (#5324).`,
+    `Filter operator "${op}" on field "${field}" at ${path} is RETIRED and is no longer evaluated ` +
+      `by this driver.${replacement} ${guidance.why}${also}`,
   );
 }
 
@@ -564,7 +612,13 @@ function assertFieldConstraintShape(
   const keys = Object.keys(spec);
   if (!keys.some((key) => key.startsWith('$'))) return;
   for (const op of keys) {
-    if (!SUPPORTED_FIELD_OPERATORS.has(op)) throw unknownFieldOperatorError(op, field, path);
+    if (!SUPPORTED_FIELD_OPERATORS.has(op)) {
+      // [#5702] A RETIRED spelling gets the prescription; anything else gets
+      // the vocabulary. Checked in this order because `$regex` satisfies both
+      // descriptions ("not supported" and "retired") and only the second one
+      // tells its author what to write.
+      throw retiredFilterOperatorError(op, field, path, keys) ?? unknownFieldOperatorError(op, field, path);
+    }
     // [#5345] Declared, but not by THIS face. Checked before the comparand-shape
     // rules below so a `$between` a face cannot compile is reported as
     // unsupported-here rather than as a malformed range the face would refuse
@@ -582,10 +636,46 @@ function assertFieldConstraintShape(
     if (op === '$null' && typeof spec[op] !== 'boolean') {
       throw nonBooleanNullComparandError(field, spec[op], `${path}.$null`);
     }
+    // [#6520] `$icontains`' comparand is a NON-EMPTY string, the third
+    // comparand-shape rule and the twin of `driver-sql`'s
+    // `icontainsComparandError` — deliberately the same two rejections in one
+    // check, because they are one mistake at one position.
+    if (op === '$icontains' && (typeof spec[op] !== 'string' || spec[op] === '')) {
+      throw icontainsComparandError(field, spec[op], `${path}.$icontains`);
+    }
   }
-  // `$options` is the one entry in the vocabulary that is a modifier rather than
-  // a predicate, so it is the one that needs a companion.
-  if (keys.includes('$options') && !keys.includes('$regex')) throw danglingRegexOptionsError(field, path);
+  // [#5702] The `$options`-without-`$regex` companion check that stood here is
+  // GONE. It was needed while `$options` was an allowlisted MODIFIER — a key the
+  // vocabulary accepted but which is not a predicate on its own. Both spellings
+  // are retired now, so the loop above refuses either of them on sight and there
+  // is no surviving shape for a companion rule to judge. See
+  // {@link retiredFilterOperatorError}.
+}
+
+/**
+ * [#6520] `$icontains` received a comparand that is not a non-empty string.
+ *
+ * Word for word `driver-sql`'s `icontainsComparandError`, and deliberately so:
+ * #3948 made the backends agree that an uncompilable filter is a refusal rather
+ * than a silent match-everything, and a suite that swaps this driver for SQL has
+ * to see the same refusal for the same input. Two rejections, one constructor,
+ * because they are one mistake at the comparand position:
+ *
+ * - **non-string** — `StringOperatorSchema` declares `$icontains: z.string()`,
+ *   so coercing `42` to `"42"` would answer a query nobody wrote;
+ * - **empty string** — every row contains the empty substring, so the predicate
+ *   constrains nothing. A dropped predicate WIDENS a result set, and on an RLS
+ *   read scope that is a permission bypass rather than a degraded filter.
+ */
+function icontainsComparandError(field: string, value: unknown, path: string): Error {
+  const shown = typeof value === 'string' ? `""` : JSON.stringify(value) ?? String(value);
+  return unsupportedFilterError(
+    `Operator "$icontains" on field "${field}" at ${path} requires a NON-EMPTY string comparand, ` +
+      `received ${shown}. "$icontains" is a case-insensitive LITERAL substring search, so its ` +
+      `comparand is the text to look for — an empty one matches every row (a predicate that ` +
+      `constrains nothing), and a non-string one would have to be coerced into text this query ` +
+      `never asked for.`,
+  );
 }
 
 /**

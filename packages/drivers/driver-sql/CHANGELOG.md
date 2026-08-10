@@ -1,5 +1,1295 @@
 # @objectstack/driver-sql
 
+## 17.0.0-rc.6
+
+### Major Changes
+
+- 29e28a3: refactor(drivers)!: `aggregate` 的 query 参数收窄到 `DriverQuery`，并退役 `aggregate` / `func` 两个未声明别名 (#6212 批 B、#6321)
+
+  #5181（PR #6076）收窄了 `IDataDriver` 声明的六个方法，#6075（PR #6210）让五个驱动的实现跟上，#6212 批 A+E 处理了 SQL 驱动自有的另两道门。本次是同一条线上的 `aggregate`：`driver-sql`、`driver-turso` 的转发层与 `RemoteTransport` 三处，全部从 `query: any` 收到 `DriverQuery`（`@objectstack/spec/contracts`）。
+
+  `any` 在 query 参数上不是「对象名没检查」，而是**检查全关**：`where` 的 filter 方言、`groupBy` 的节点联合、`aggregations` 的节点形状——而这三样恰恰是这几个方法体读的全部内容。
+
+  ## 一、退役两个协议从未声明的别名（#6321，ADR-0049）
+
+  ```ts
+  const aggregates = query.aggregations || query.aggregate; // driver-sql
+  const funcName = agg.function || agg.func;
+  const aggregations = query?.aggregations || query?.aggregate || []; // RemoteTransport
+  const func = String(agg.function || agg.func || "");
+  ```
+
+  `QueryASTSchema` 声明的是 `aggregations`，`AggregationNodeSchema` 声明的是 `function`；`aggregate` / `func` 在 `packages/spec` 里**一个字都没有**。实测全仓唯一书写者是这两个驱动包自己的 fixture（`sql-driver-advanced` 7 处、`sql-driver-queryast` 1 处、`sqlite-wasm-driver-advanced` 7 处、`sqlite-wasm-driver-queryast` 1 处），非测试面零书写者——#4984 那一家：**fixture 拼着别名，宽容分支就永远绿着活下去，没有任何测试能在删掉它时转红**。fixture 已按已声明拼写重拼，写者归零，PD#12 与 ADR-0049 enforce-or-remove 于是把这两条 `||` 一并删掉。
+
+  顺带删掉的还有 `|| ''`：它只在**两个键都没写**时才生效，而那时这一面把名字回引成 `""`、本地面回引成 `"undefined"`，同一份越界输入两种措辞（#5240）。别名在时这条岔路够不着，删别名恰恰让它够得着，所以同一次关掉。
+
+  **迁移**：`aggregate:` → `aggregations:`，`func:` → `function:`。写旧拼写的内联字面量现在是编译错误（TS2353）；越过 `tsc` 的 JS 调用方，`aggregate:` 会静默拿不到聚合列，`func:` 则拿到已有的具名 400（`INVALID_QUERY`，#5907）。本仓实测需要改动的非测试调用点为零。
+
+  ## 二、一处真实行为改动：`RemoteTransport` 现在会编 `GroupByNode` 联合
+
+  `GroupByNodeSchema` 是 `z.union([z.string(), z.object({ field, dateGranularity?, alias? })])`，而这一层把它当 `string[]` 读。收窄后 `tsc` 直接把这条假设摆上台面（TS2322）。联合的两半状况完全不同，所以这不是一个 cast 能了事的：
+
+  - **无 granularity 的结构化条目**（`{ field: 'region' }`）是 spec 合法、且**今天就会下推到驱动**的形状：objectql 的 aggregate 派发对它一律判为「受支持」（`engine.ts` 里逐字写着 `plain {field} object is fine`），`objectql/src/secret-fields.test.ts:341` 就是这个形状的活体。本驱动的**本地面**把它编成普通的 `GROUP BY "region"`，远端面却把它插值成 `"[object Object]"`、死在标识符安全检查里——一条查询两种答案、由连接串决定，正是 #6203 那个形状，而且**是活体不是休眠**：能力位 `queryDateGranularity` 只管带 granularity 的那一半，管不到这一半。现在读 `.field`，两面收敛。
+  - **带 dateGranularity 的条目**远端确实编不出来，而这一点是**已声明**的：remote 模式发布 `queryDateGranularity: {}`，引擎据此全部落到内存分桶，因此不会下推。缺的是「绕过能力位、直连驱动」的那个调用方该得到什么答案——现在得到 ADR-0112 信封（`NOT_IMPLEMENTED` / 501），与聚合函数「协议已声明、本后端编不出」用的是同一类，而不是一句 SQL 注入告警。
+
+  `alias` **不读**，与本地面一致：`SqlDriver.aggregate` 也不读它，只在这一面读会是新的分叉而不是修复。
+
+  ## 三、`SqlDriver` 那一面的同一条件也换上了信封
+
+  `SqlDriver.aggregate` 对「本方言编不出这个 granularity」原本抛裸 `Error`（`code`/`status` 皆 `undefined` ⇒ `mapDataError` 落默认分支，一个具名能力缺口以不透明 500 到达调用方）。只给远端面加信封就会造出 #5907 花一整个 issue 才关掉的那种分叉——`TursoDriver` 由 `url` 选面，同一条件不能有两种线上身份。两面首句逐字一致（`Date bucketing by '<g>' is not supported by this backend.`），尾句各报**本面**编得出的 granularity，由一条跨包 parity 用例比对两个**运行时**消息钉住。
+
+  **消息文本变更**（可能影响按文本匹配的下游断言）：
+
+  ```
+  - SqlDriver: dateGranularity 'week' not supported on dialect 'better-sqlite3'. Engine must fall back to in-memory bucketing.
+  + Date bucketing by 'week' is not supported by this backend. Bucketed here: day, month, quarter, year (dialect 'better-sqlite3'). … (code=NOT_IMPLEMENTED, status=501)
+  ```
+
+  ## 定级依据
+
+  标 major 与 #5181 / #6075 / #6210 一致：**源码级破坏性**（调用点内联字面量、以及被删的两个别名键），加上第二、三节两处真实的运行期改动。`check:api-surface` 只记录导出的存在与否、不记录签名，所以这条说明是该变更唯一的下游载体。
+
+  `driver-sqlite-wasm` 未列入：它整个继承 `SqlDriver.aggregate`，自身源码零改动（改的只有它的 fixture 与一条断言）——与批 A+E 的处理一致。它读的是 driver-sql 的 `dist/*.d.ts`，因此验证时**必须先重建 driver-sql** 再 typecheck/test，否则是假绿。
+
+  <!-- adr-0087: registered driver-aggregate-undeclared-key-aliases-removed -->
+
+- d367f03: refactor(drivers)!: 五个驱动的 query 参数跟进 `DriverQuery`，休眠的类型谎言就此没有藏身处 (#6075)
+
+  #5181（PR #6076）把 `IDataDriver.find/findOne/count/updateMany/deleteMany/explain` 的 query 参数收窄为 `DriverQuery`（`Omit<QueryAST, 'object'>`），并在同一条 changeset 里写明：「把驱动签名一并迁到 `DriverQuery` 是后续的机械收尾」。这就是那次收尾。
+
+  在此之前，五个驱动的实现仍旧声明 `query: QueryAST`（turso 侧是 `query: any`）。**它不红，也不会红** —— 方法参数按双变比较，实现声明得比契约宽照样满足契约。但调用方现在**有权**省略 `object`，于是这些实现的类型说 `query.object` 是 `string`，运行期却可能是 `undefined`：一句休眠的谎言，没有任何门拦得住下一个照着它写代码的人。
+
+  收尾之后，「驱动读 `query.object`」直接变成编译错误：
+
+  ```ts
+  // 收窄前：编译通过，运行期可能是 undefined —— 谎言
+  // 收窄后：error TS2339: Property 'object' does not exist on type 'DriverQuery'.
+  const name = query.object;
+  ```
+
+  **零运行时改动。** 本次改的全部是类型注解：五个驱动的六个契约方法签名，以及为让类型自洽而必须跟进的少量私有辅助方法参数（mongodb 的 `buildFindOptions` / `buildSortSpec`，sql 的 `findRows` / `orderKeysFor`，turso 的 `toRemoteQuery` / `toRemoteReadQuery`，memory 的 `performAggregation`）—— 它们都只转发或读取 `where` / `orderBy` / `groupBy` 这些字段，本来就不读 `object`。turso 的几处 `query: any` 一并收紧，多拿回一批本已放弃的检查。emit 无差异，测试全绿（memory 524、mongodb 206、sql 906、sqlite-wasm 254、turso 788）。
+
+  **迁移面：删掉驱动调用字面量里的 `object:` 键**，与 #5181 是同一句话，只是现在也覆盖了直接按具体驱动类（`SqlDriver` / `MemoryDriver` / …）而非按 `IDataDriver` 取类型的调用方。编译器会逐处指出来（TS2353 `'object' does not exist in type 'DriverQuery'`）。本仓下游 25 个包实测零处需要改动，改动只落在五个驱动自己的测试里。
+
+  标 major 的依据与 #5181 一致：**源码级破坏性**（调用点内联字面量），运行时行为零变化。`check:api-surface` 只记录导出的存在与否、不记录签名，因此这条说明同样是该变更唯一的下游载体。
+
+  `aggregate` / `distinct` / `syncSchemasBatch` 不在本次范围内 —— 它们不是 `IDataDriver` 收窄的那六个方法，其中 `syncSchemasBatch` 的条目里 `object` 是被真实读取的必填键，`expand` 条目里的 `object` 同理命名的是关联对象，都不是冗余。
+
+- 62159bd: refactor(driver-sql)!: `SqlDriver.distinct` 的第三参收成裸 `FilterCondition`，一个静默返回全集的写法就此编译不过 (#6320)
+
+  `distinct` 不在 `IDataDriver` 上，所以 #5181（PR #6076）与 #6075（PR #6210）的收窄都没走到它，#6212 批 A+E（#6355）收的是 `analyzeQuery` / `findWithWindowFunctions`，也没覆盖它。它的方法体一直说得很清楚——`applyFilters(builder, filters)` 拿的是**实参本身**，因此它要的是 `find()` 放在 `query.where` 里的那个值，**不是 query 信封**；`filters?: any` 只是没把这句话写进类型里。
+
+  ```ts
+  // 收窄前后都成立，一处调用点都不用改
+  await driver.distinct("orders", "product", { status: "completed" });
+  ```
+
+  **收窄真正买到的东西，是实测出来的，不是推断的。** 三行数据（`Laptop`/`Mouse` 为 `completed`，`Ghost` 为 `pending`），逐个形状喂给 `distinct('orders','product', …)`：
+
+  | 第三参                       | 收窄前                             | 收窄后       |
+  | :--------------------------- | :--------------------------------- | :----------- |
+  | `{ status: 'completed' }`    | 返回 `["Laptop","Mouse"]`          | 不变         |
+  | 省略                         | 返回全集                           | 不变         |
+  | `'completed'`（标量）        | **编译通过，返回全集**             | **编译错误** |
+  | `{ object, where }`（信封）  | 抛 `INVALID_FILTER` / 400          | 不变         |
+  | `['status','=','completed']` | 抛 `INVALID_FILTER` / 400（#5158） | 不变         |
+
+  第三行就是本次消掉的那一格：一个真心想问「completed 订单里有哪些商品」的调用，编译通过，然后拿到**每一个**商品。`applyFilters` 对「真值但非对象、非数组」的 filter 不发射任何谓词（该方法尾注写着这件事），于是过滤条件被整条丢掉。方向是**放宽**——这正是 #6320 与 #5234 同族的那类「静默错答案」。
+
+  **有一格是任何类型都关不上的，本次如实写进注释而不是假装关上了。** `FilterCondition` 的键**就是字段名**，所以它是开放映射（`[key: string]: any`）：`{ object, where }` 在结构上是一个完全合法的 filter——约束两个分别叫 `object` 和 `where` 的列。没有任何注解能把它和正当 filter 分开。#6320 提出的「让反向错配也编译不过」在这个参数上**不可达**，实测确认；能拿到的保证是**运行期响亮失败**：信封里的 `where` 是对象，而没有任何比较值可以是对象，于是 `assertCompilableComparand` 抛 `INVALID_FILTER` / 400。这半边 driver-sql 从来就不是静默的；`driver-memory` 那半边（裸 filter 交给它会静默返回全集）留在 #5499 冻结面内，本次不碰。
+
+  **零运行时改动**：非测试改动 100% 是一个类型注解加一段注释，无逻辑、无行为、无 emit 差异。
+
+  **逐处复核了全部 14 个调用点**（本单正文记的是 3 处，实测偏低）：driver-sql 11 处、driver-sqlite-wasm 3 处、driver-turso 0 处；其中真正传第三参的是 4 处（driver-sql 2 + driver-sqlite-wasm 2），全部本来就写的裸 filter，**零报错、零 fixture 改动**。
+
+  **driver-sqlite-wasm 也标 major**：`SqliteWasmDriver extends SqlDriver` 且不覆写 `distinct`，所以它**已发布的 `.d.ts`** 里这个方法的签名同样收窄，它的使用者看到的是同一个变化。该包读的是 driver-sql 构建后的 `dist/*.d.ts` 而非源码，是一处已知门禁盲区，本次用「往参数类型里临时塞一个调用方不可能满足的成员、重建、看调用点是否逐一变红」证明它确实读到了新 d.ts：driver-sql 6 处红、driver-sqlite-wasm 3 处红，与预判逐一相符。
+
+  ### 迁移
+
+  调用点若把**标量**（或任何非 `FilterCondition` 值）交给第三参，编译器会指出来：
+
+  ```
+  error TS2345: Argument of type 'string' is not assignable to parameter of type 'FilterCondition'.
+  ```
+
+  改法是把它写成它本来就该是的裸 filter 对象（`'completed'` → `{ status: 'completed' }`）。⚠️ 这类调用点在收窄前拿到的是**未过滤的全集**，所以这不是一次等价改写：修完之后返回值会变，而变化后的那个才是调用方本来想要的答案。本仓零处这样的调用点。
+
+  ⚠️ 无类型的 JS 调用方**既不会拿到编译错误、也不会有任何行为变化**（本次零运行时改动）。对他们而言，上面那条是「你一直没在过滤」的**唯一通知渠道** —— 这也是本次记台账条目的理由，见下。
+
+  <!-- adr-0087: registered driver-sql-distinct-bare-filter-typed -->
+
+- d48aad5: refactor(driver-sql)!: `analyzeQuery` / `findWithWindowFunctions` 不再吃 `any`，窗口门自带扁平形类型 (#6212 批 A+E)
+
+  #5181（PR #6076）收窄了 `IDataDriver` 声明的六个方法，#6075（PR #6210）让五个驱动的实现跟上。收尾漏下的是**驱动自有、不在 `IDataDriver` 上**的那批查询门：它们同样吃 query AST，签名却是 `any`。本次处理 SQL 驱动的两个。
+
+  `any` 在 query 参数上不是「对象名没检查」，而是**检查全关**：`where` 的 filter 方言、`orderBy` 的 sort node 形状、`limit`/`offset` 是不是数字，全部被抹掉——而这两个方法体读的恰恰就是这些字段。`$like` 当年就是从同一个口子活到运行时的（cloud#1030、cloud#1053 实测 20 处）。
+
+  **`analyzeQuery` → `DriverQuery`。** 它是 `explain()` 的实现体，而 `explain()` 本来就声明 `DriverQuery` 并一行转发过来——收窄前这一对是自相矛盾的：契约门声明 AST，它背后的实现声明 `any`。方法体只读 `fields` / `where` / `orderBy` / `limit` / `offset`，全在 `DriverQuery` 内，因此这是一次纯注解：driver-sql 与 driver-sqlite-wasm 实测零报错、零 fixture 改动。
+
+  **`findWithWindowFunctions` → 驱动本地的扁平形类型**，新导出 `SqlWindowFunctionQuery` / `SqlWindowFunctionSpec`：
+
+  ```ts
+  import type { SqlWindowFunctionQuery } from "@objectstack/driver-sql";
+
+  const ranked = await sqlDriver.findWithWindowFunctions("employee", {
+    windowFunctions: [
+      {
+        function: "rank",
+        alias: "salary_rank",
+        partitionBy: ["department"],
+        orderBy: [{ field: "salary", order: "desc" }],
+      },
+    ],
+  });
+  ```
+
+  它**不能**标 `DriverQuery`：`query.windowFunctions` 在 spec 是 `retiredKey()` 墓碑（#4286），`QueryAST['windowFunctions']` 解析为 `undefined`，标上去会让这道门自己已发布文档里的载荷编译不过。类型因此写成 `Omit<DriverQuery, 'windowFunctions'> & { windowFunctions?: SqlWindowFunctionSpec[] }`——契约那一半照旧受检，驱动私有那一半由驱动自己声明。
+
+  类型放在驱动层、**不进 `packages/spec`**，是接着 #4286 的判断往下走：那次删掉 `WindowFunctionNodeSchema` 的理由正是它声明了 `field` / `over` / `frame` 这些门从不读的成员；再往 spec 加一套窗口词汇就是反悔那个判断。spec 的删除注记与 `migrations/registry.ts` 的迁移处方里逐字写着的 `{ function, alias, partitionBy?, orderBy? }`，就是这个类型的出处，三处必须始终说同一句话。请求面的墓碑**没有**被重新打开：`analyzeQuery('o', { windowFunctions: [...] })` 依然是编译错误。
+
+  **顺带（#6212 批 F）**：`@objectstack/verify` 的 `BucketableDriver.aggregate` 从 `query: unknown` 收到 `DriverQuery`。这是一个**已发布**的结构替身，cloud 的 driver-turso 照着它实现——声明 `unknown` 不叫「最小」，叫没检查，并且放任该文件里两处 AST 字面量各自把对象名多写一遍（#5181 的那种冗余）。同时删掉一处 `as never`：那个 cast 只是因为字面量推断把 `'count'` 放宽成了 `string`，注上类型就不需要它了。这里**不预断**驱动自身 `aggregate` 参数类型的收窄（#6212 批 B，排在 #6203 之后）——方法参数按双变比较，驱动那边声明 `any`、`QueryAST` 还是收窄后的类型，都照样满足这个替身。
+
+  **零运行时改动**，全部是类型注解与两处冗余键的删除（实测全仓驱动无一读 `query.object`）。测试：driver-sql 935、driver-sqlite-wasm 254、driver-turso 804、verify 17、dogfood 520 全绿。
+
+  **迁移面**：直接调用这两道门的嵌入方，把内联字面量里编译器指出来的键改对即可（TS2353）。本仓实测非测试生产者为零，两道门只有各自驱动包的测试在用，零处需要改动。标 major 的依据与 #5181 / #6075 一致：**源码级破坏性**（调用点内联字面量与 `BucketableDriver` 的导出形状），运行时行为零变化；`check:api-surface` 只记录导出的存在与否、不记录签名，所以这条说明是该变更唯一的下游载体。
+
+### Minor Changes
+
+- 92a67f2: feat(drivers,spec)!: `GroupByNode.alias` is honoured by the SQL faces — one aggregate, one column key (#6401)
+
+  `GroupByNodeSchema` has declared `alias` ("Alias for the projected group
+  value", defaulting to `field`) for as long as the structured `groupBy` entry has
+  existed. Exactly one execution path read it. The result: the SAME query came
+  back with a different result-column key depending on which path the engine
+  happened to take.
+
+  ```ts
+  groupBy: [{ field: "closed_at", dateGranularity: "month", alias: "qtr" }];
+  ```
+
+  - pushed down to a driver ⇒ rows keyed **`closed_at`**
+  - run through the in-memory fallback ⇒ rows keyed **`qtr`**
+
+  And the choice between them is `engine.ts`'s
+  `allStructuredSupported && !tzRequiresInMemory` — a driver capability bit and a
+  `timezone`, neither of which the caller can see. That is the multi-face
+  consistency invariant broken in its quietest form: both answers are valid rows,
+  so nothing throws and nothing looks wrong.
+
+  **Resolved to ENFORCE**, and the leg was chosen by measurement rather than
+  taste. ADR-0049 splits on whether the feature already exists: a _dangling_
+  promise is removed, a _live_ one with a missing gate is enforced. `alias` is
+  live — three consumers read it and change behaviour
+  (`in-memory-aggregation.ts`, `MemoryDriver.performAggregation`, and
+  `chartAggregateCategoryKey`), and the publish gate _compels_ it:
+  `validate-react-page-props.ts` errors `REACT_CHART_AXIS_UNKNOWN` unless a
+  chart's category axis is bound to `alias ?? field`, telling the author in so
+  many words to "bind it to" the alias. A key the build gate makes you write is
+  not a dangling promise. The count of real non-test producers is **zero**, which
+  is what makes enforcing safe rather than what argues against it: no shipped
+  payload changes its result keys.
+
+  **What changed, on every SQL face at once** — a fix landing on one and not its
+  twin is the #6203 shape, and `TursoDriver` picks its face from `url`:
+
+  - **`driver-sql`** — both limbs of the structured `groupBy` branch project
+    `alias ?? field`: the date-bucket limb aliases the bucket expression to it,
+    and the plain limb emits `?? as ??` (only when the name actually moves — an
+    alias equal to the field emits no self-rename). `presentedOutput` is now keyed
+    by the OUTPUT column, matching how the aggregation branch beside it has always
+    worked; an aliased group value went unpresented before.
+  - **`driver-turso` REMOTE** — the same projection, `"field" AS "alias"`. The
+    alias reaches the statement as a quoted identifier and is therefore held to
+    `assertSafeIdentifier`, exactly like `field`.
+  - **`driver-sqlite-wasm`** — inherits `SqlDriver`'s compiler; covered by its own
+    conformance suite rather than by assumption.
+
+  **GROUP BY still keys on the FIELD** on every face. Only the projection is
+  renamed, so the buckets are unchanged. This is deliberate and pinned: SQLite
+  resolves output names in `GROUP BY`, so a face that grouped by the alias would
+  look correct here and diverge on a dialect that does not.
+
+  `having` needed no change and now means one thing: it is applied over the
+  aggregated row's own columns, so a filter on a group projection references the
+  alias on every path — previously the alias on one path and the field on the
+  other.
+
+  **Conformance.** `AGGREGATION_CASES` (#6409) gains a `groupByAlias` axis and two
+  cases. Their VALUES are an existing case verbatim — only the key moves — so they
+  can fail only on the key, which is the point: every wrong answer in this area is
+  a valid query returning plausible rows. `objectql`'s in-memory fallback is now
+  **enrolled** as a fourth face, answering #6409's open question ②: it is the face
+  the SQL three were converged onto, so the new behaviour would otherwise be
+  pinned against nothing, and reaching it needs no engine at all —
+  `applyInMemoryAggregation` is a pure function of rows and an AST.
+
+  **Reverse verification**, predicted before running. Reverting the in-memory face
+  to `g.field`: only the two alias cases move and only ONE fails — the degenerate
+  `alias === field` case stays green, which is why both are in the table.
+  Reverting the harness to read `c.groupBy` instead of `c.groupByAlias ?? c.groupBy`
+  — the copied-neighbour mistake: everything passes on an unmodified face, a false
+  GREEN, which is the failure mode that would have made the axis vacuous.
+
+  **Frozen drivers (#5499), measured from source, not flipped.** `driver-memory`
+  already returned `{ field, alias: node.alias ?? node.field }` and projects under
+  the alias — it had independently reached the enforce answer, so it needed no
+  alignment. `driver-mongodb` is a recorded DEBT row and the defect is wider than
+  `alias`: `buildAggregationPipeline` types `groupBy` as `string[]` and builds
+  `groupId[field] = '$' + field`, so a structured node — aliased or not — becomes
+  the literal key `"[object Object]"`. It cannot take a structured `GroupByNode`
+  at all; `mongodb-driver.ts` passes `(query as any).groupBy`, which is why `tsc`
+  never saw it. Tracked on #6814.
+
+  **Compatibility.** A caller who writes `alias` and reads the result under
+  `field` on a pushdown path will now find the value under `alias` — which is what
+  the key has always meant on the fallback path, and what the chart gate already
+  required. Callers who never write `alias` are unaffected: the emitted SQL is
+  byte-identical.
+
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing is retired: `GroupByNodeSchema.alias` keeps its declaration, its spelling and its type — it starts being HONOURED by three faces that parsed and ignored it. There is no tombstone to write and no authored metadata to rewrite, so there is no mechanical transform a migration could prescribe: every stack that validated before validates after, unchanged. The behaviour change is in the RESULT of a runtime query (a result-column key moves from `field` to `alias` on the pushdown path, converging on what the in-memory path and the chart publish gate already required), which the ledger has no channel for and no upgrader could apply a codemod to. The bang is on the changeset because callers who read that column by the field name must move, and the measured non-test producer count for the key is zero. -->
+
+- 82397b6: feat(drivers,objectql): `$regex` / `$options` are refused everywhere, and `$icontains` is implemented on the SQL family (#5702)
+
+  The driver half of the #4706 ruling. #5701 landed the contract (the vocabulary,
+  the `RETIRED_FILTER_OPERATORS` prescriptions, the shared text case-set) and
+  #5710 flipped the last live producer — `plugin-auth`'s ObjectQL adapter, which
+  emitted `$regex` on the authentication path — so the refusal can now land
+  without breaking sign-in.
+
+  **BREAKING for anyone writing `$regex` or `$options` in a filter.** Both are
+  refused on every backend with `INVALID_FILTER` / 400 and a message that names
+  the replacement. `$regex` was never a declared operator: `driver-sql` compiled
+  it to a LIKE-escaped substring (so `a.b` matched only the literal `a.b`),
+  `driver-memory` ran it as a real `RegExp` (so the same filter also matched
+  `axb`, and an _invalid_ pattern was caught and answered `false` — zero rows, in
+  silence), and `objectql`'s `having` did the same. Write `$icontains` for the
+  case-insensitive substring search this was almost always used for, `$contains`
+  for a case-sensitive one; a pattern that genuinely needs a regex has no
+  filter-level replacement.
+
+  **`$icontains` now runs on the SQL family** — `driver-sql`, `driver-sqlite-wasm`,
+  and both of `driver-turso`'s transports (the remote one does not go through
+  knex, so it needed its own). It compiles to `LOWER(col) LIKE LOWER(?) ESCAPE ?`
+  through the same `applyLike` / `pushLike` that carries the `%` / `_` / `\`
+  escaping, as a `fold` parameter rather than a second emitter — a copied emitter
+  is where the escape class would have been dropped, and an unescaped `%` matches
+  every row. An empty or non-string comparand is refused on the validating walk
+  (an empty one matches every row, which widens rather than narrows). On SQLite
+  `lower()` folds ASCII only, which IS the contract (#4706 Q1 = A): `$icontains:
+'café'` does not match `CAFÉ`.
+
+  <!-- adr-0087: registered filter-regex-options-retired -->
+
+  `driver-mongodb`'s unknown-operator arm was throwing a bare `Error` with no
+  `code` and no `status`, three lines from the helper in its own file that sets
+  `INVALID_FILTER` / 400 — a 500-shaped body for a 400-class client mistake. It
+  now speaks the same envelope as its three siblings.
+
+  Two parts of the ruling are deliberately NOT in this change and stay tracked in
+  `scripts/check-driver-conformance.mjs`'s ledger: the `$contains` family's
+  case-sensitivity (#4706 Q2 = A) needs SQLite's `LIKE` replaced by a case-exact
+  construct in the driver, the RLS lowering and the analytics lowering together,
+  or one permission rule compiles to two row sets (#6518); and `$icontains` on the
+  JS evaluation faces needs the spec vocabulary to take the operator, which cannot
+  happen before `driver-memory` has an arm for it (#6520).
+
+- 3264516: fix(driver-sql,service-analytics)!: 两类无意义比较对象不再编译成「静默空谓词」——`$in`/`$nin` 的对象成员与 LIKE 族的对象比较值一律拒收 (#5234)
+
+  两个形状此前都**编译通过、执行、并给出一个作者没写过的答案**,而且没有任何东西记录这件事:
+
+  | filter                             | 改前                                                                                   | 改后                                               |
+  | ---------------------------------- | -------------------------------------------------------------------------------------- | -------------------------------------------------- |
+  | `{status: {$in: ['a', {foo: 1}]}}` | 该成员绑不上任何行,查询答得**就像第二个成员从没被写过**                                | `INVALID_FILTER` / 400,点名 `index 1`              |
+  | `{status: {$nin: [{foo: 1}]}}`     | `NOT IN ('[object Object]')` —— **一行都没排除**,作者写下的排除悄悄没发生              | 同上                                               |
+  | `{name: {$contains: {}}}`          | `LIKE '%[object Object]%'` —— 对一行文本恰好是 `[object Object]` 的记录,**真的命中了** | `INVALID_FILTER` / 400,点名 `StringOperatorSchema` |
+  | `{name: {$notContains: {}}}`       | 反过来:为一个没人记录的理由**排除了一条真实记录**                                      | 同上                                               |
+
+  #5041(PR #5223)在 `assertCompilableComparand` 的头注释里把这两个形状写为 "Deliberately NOT
+  extended",理由是它们 fail-closed(只收窄结果集)、比 #5041 实测的裸 `TypeError` 低一级。**实测下来这
+  两条理由都不成立**:`$nin` / `$notContains` 方向是**放宽**(该排除的没排除,在 read-scope 下即 #5347 /
+  #5324 判过的 over-reach);而 `$contains: {}` 给的从来不是「零行」,是**错行**。
+
+  ## 三份实现一起动,否则修完仍是方言
+
+  同一个 `String()` 宽容在本仓有多份;只收紧 `driver-sql` 会变成「哪个面接的就是哪个答案」——
+  #5146 / #5332 / #5567 各花一轮消掉的那类分叉。守卫因此落在**每个包自己的收口点**,而不是三个发射器:
+
+  - **`driver-sql`** —— `assertCompilableComparand`,#5041 已有的那一个门。
+  - **`service-analytics` 的 `where` 门** —— `filter-normalizer.ts` 的 `fieldLeaves`。它是本包**唯一**的
+    leaf 生产者,所以一处拒收同时覆盖三个消费方:`NativeSQLStrategy`(真正执行的语句)、
+    `ObjectQLStrategy.generateSql`(`/analytics/sql` 回显)与 `ObjectQLStrategy.convertFilter`(引擎路径)。
+    这个顺序是关键而非顺手:`convertFilter` 是**生产者**,在那里 `String()` 会把对象洗成一个类型完全正确
+    的 `'[object Object]'` 字符串交给驱动,下游再严格的驱动也永远看不到它该严格的那个形状。
+  - **`service-analytics` 的 read-scope 门** —— `read-scope-sql.ts` 的 `compileOperator`,它编译的
+    `FilterCondition` 不经过上面那个门。
+
+  `like-pattern.ts` 与 `applyLike` 里的 `String(value)` **原样保留**:它们不再是缺陷所在,因为门前已经没有
+  渲染不出来的值能到达。两包的谓词由 `like-metacharacter-escape.test.ts` 逐值互锁——正是该文件已经用来锁
+  转义表达式的同一套办法。
+
+  ## 围栏是 allow-list,而且每一条都是实测后决定的
+
+  抄 `driver-turso` `RemoteTransport` 的形状(cloud#1004 / #1058):deny-list 会把下一个被发明出来的值形状
+  悄悄放进来,这正是那个 bug 熬过第一次修复的原因。顺带说明,**turso 自 #1058 起就已经拒收这两个形状**,
+  所以本地 SQLite 与远程 SQLite 此前对同一条查询给的是不同答案;本次改动把它们收敛到一起。
+
+  留在围栏内的(逐条实测,不是假设):
+
+  - **数字 / 布尔 / `null`**:`{$contains: 5}` → `%5%`、`{$contains: null}` → `%null%` 在 `driver-sql`、
+    `driver-memory` 与 analytics 两个面上**今天答案一致**,#5526 还专门把 `null` 这条钉住了。拒收它们是在
+    **破坏**一致,不是建立一致——所以只拒**对象**。
+  - **`Date`**:turso 的 allow-list 把它作为唯一的对象转换保留,拒收会重新叉开本地与远程。
+  - **binary**:`$in` 成员照收(`isBindableComparand` 与写路径 `formatInput` 同一套分类),LIKE 拒收——它
+    绑得上但渲染不出作者想要的东西。这就是两个谓词而不是一个带 flag 的原因。
+  - **`undefined`**:不可授权(JSON 没有 `undefined`),analytics 门按 #5526 / #5332 归一为 `null` 而非拒收;
+    在 `driver-sql` 拒收它会**造出**一个分歧而不是消除一个,故照旧。
+
+  被拒的**数组**是本次唯一一个「拒收即消分叉」的形状:`{name: {$contains: ['al','be']}}` 在 `read-scope-sql`
+  (与 `driver-sql`)绑 `%al,be%`,在 analytics 的 `where` 门却绑 `%al%`(它读 `values[0]`,后面的成员被
+  静默丢弃)。同一个包对同一条 filter 有两个答案,两个门现在都拒。
+
+  ## 作者需要知道的迁移
+
+  这两个形状本来就没有能用的读法——`filter.zod.ts` 的 `StringOperatorSchema` 早就把 LIKE 族比较数声明为
+  `z.string()`,本次只是让声明变成强制(Prime Directive #12,declared = enforced)。改后它们答 400 而不是
+  一个错答案;把比较数换成字面值即可。`{$eq: {…}}` **不在本次范围**,仍按 `toSqlBindValue` 绑 JSON(#5526
+  钉住的行为)。
+
+- 3172831: fix(drivers): text-operator case folding is the CONTRACT's answer, not the dialect's (#6518)
+
+  The `$contains` family and `$icontains` returned **different rows on different
+  databases** for the same filter, because case sensitivity was decided by whatever
+  `LIKE` happened to mean on the dialect underneath. Both directions **over-matched**
+  — they returned rows the filter excludes, which on an ADR-0021 RLS read scope is
+  over-reach rather than a loose filter (#3948):
+
+  |                              | `$contains` / `$notContains` / `$startsWith` / `$endsWith` — case-SENSITIVE (#4706 Q2 = A) | `$icontains` — folds ASCII ONLY (#4706 Q1 = A) |
+  | :--------------------------- | :----------------------------------------------------------------------------------------- | :--------------------------------------------- |
+  | SQLite / turso / sqlite-wasm | ❌ `LIKE` folds ASCII                                                                      | ✅ `lower()` is ASCII-only                     |
+  | Postgres                     | ✅ `LIKE` is case-exact                                                                    | ❌ `LOWER()` folds all of Unicode              |
+  | MySQL                        | ❌ follows the column's collation                                                          | ❌ `LOWER()` folds all of Unicode              |
+
+  Read across: **each dialect was already right on the half another one got wrong**,
+  which is why neither half could be found from one backend alone.
+
+  ## What now runs
+
+  The construct is chosen per dialect, in one emitter, so the escaping and the fold
+  stay a single code path (an unescaped wildcard is a filter bypass, P0 — #5567):
+
+  - **SQLite family → `GLOB`.** `LIKE`'s ASCII fold cannot be switched off per
+    statement (`PRAGMA case_sensitive_like` is connection-global, so one query would
+    redefine every other query on the connection), and `CAST(col AS BLOB) LIKE ?` was
+    measured to match _nothing at all_. `GLOB` is case-exact and brings its own
+    escaped class — `*`, `?`, `[` as the self-closing classes `[*]`, `[?]`, `[[]`,
+    because SQLite's grammar gives `GLOB` no `ESCAPE` clause. `$icontains` keeps
+    `lower()` on both operands, still ASCII-only.
+  - **Postgres → `LIKE`, unchanged.** Only the fold moved, from `LOWER()` to an
+    explicit `translate()` over the 26 ASCII letters. Measured on a live PostgreSQL
+    16 (ICU database): `LOWER('CAFÉ')` is `'café'` — the over-fold — while the
+    `translate()` form leaves `É` alone.
+  - **MySQL → `LIKE` over `CAST(… AS BINARY)`**, so the comparison is byte-wise and
+    no collation decides the case; `$icontains` folds byte-wise over the same binary
+    rendering, which is ASCII-only because UTF-8 is self-synchronising.
+  - **Any other client** keeps the previous `LIKE` / `LOWER()` shape — it is the only
+    form that still runs there — and is recorded as residue rather than left to be
+    discovered.
+
+  `driver-turso`'s remote transport carries the twin (it compiles filters itself and
+  inherits nothing), and the two transports are now held to the same rows by a
+  parity suite that runs the shared `FILTER_TEXT_CASES` on both.
+
+  ## Behaviour change — read this before upgrading
+
+  A filter whose comparand's case did not match the stored text used to match on
+  SQLite/turso/sqlite-wasm and may have matched on MySQL. It no longer does:
+
+  ```ts
+  // rows: { id: '1', name: 'ACME Corp' }, { id: '2', name: 'acme corp' }
+  {
+    name: {
+      $contains: "acme";
+    }
+  } // was ['1','2'] on SQLite → now ['2'] everywhere
+  {
+    name: {
+      $icontains: "acme";
+    }
+  } // ['1','2'] — unchanged, and now correct on PG/MySQL too
+  {
+    name: {
+      $icontains: "café";
+    }
+  } // was ['3','4'] on PG/MySQL → now ['4'] everywhere
+  ```
+
+  If you were relying on `$contains` to ignore case, **write `$icontains`** — that is
+  the operator for it, and it now folds the same ASCII-only range on every backend.
+  Result sets only ever get NARROWER, never wider, so a filter that was already
+  correct stays correct.
+
+  ## Why `minor` rather than `major`
+
+  No declared surface moves. `$contains` still exists, still takes the same
+  comparand, and `filter.zod.ts` is untouched — the case-sensitivity this delivers
+  was **already published** as the contract by #5701 (`FILTER_TEXT_CASES`, one
+  release earlier in this same v17 major), and the drivers were the half that had
+  not caught up. This is Prime Directive #12 applied in the direction it points:
+  declared = enforced. It is graded the way its sibling #5702/#6549 was graded for
+  the same operator family in the same rc cycle, and it registers nothing in the
+  ADR-0087 registries because it retires no authorable key.
+
+  ## What is deliberately NOT in this change
+
+  `driver-memory` and `driver-mongodb` still fold case on their query paths — they
+  are the #5499 frozen family, so their `FILTER_TEXT_CASES` cells stay honest DEBT
+  and are tracked as #6682 (case sensitivity) and #6520 (`$icontains`). The
+  `service-analytics` SQL compilers were measured already compliant: they emit
+  Postgres-shaped statements, where `LIKE` is case-exact, and that assumption is now
+  written down and pinned rather than implied.
+
+### Patch Changes
+
+- ddd075a: refactor(spec,objectql,driver-sql): the autonumber counter readback is one shared pure function, beside the renderer it inverses (#6560)
+
+  `packages/spec` gains `readAutonumberCounter(value, prefix, suffix)`, the declared
+  inverse of `renderAutonumber`, and both consumers call it instead of holding their
+  own copy.
+
+  **Why the inverse belongs where the composition already lives.** `renderAutonumber`
+  composes `prefix + zero-padded(seq) + suffix` and its file header states it is
+  "shared by the ObjectQL engine and the SQL driver so both paths render identical
+  record numbers". PR #6553 (#6468) had to teach both seeding paths to read a counter
+  back out of a stored value — and landed that reading as two hand-written copies of
+  the same four lines, one in `packages/objectql`, one in
+  `packages/drivers/driver-sql`. That is the exact shape of the defect those copies
+  were fixing: two independent readings of one composition rule had already drifted
+  into two _different_ wrong answers over one dataset (`001-2026` read as `2026` by
+  the engine and `12026` by the driver), so the record-number band a tenant received
+  depended on which driver happened to run, and numbers burned that way cannot be
+  reclaimed. A cross-package `runtime` parity test caught the drift once; it does not
+  force a future single-side edit to run it.
+
+  **What moved and what did not.** Only the ANCHORED rule — the one both sides must
+  apply identically — is now spec's: the counter is the digit run at the start of
+  what follows the rendered `prefix`, after stripping the rendered `suffix` when the
+  value carries it (stripped when it matches, never required to match, since one
+  counter spans the years a dynamic suffix renders). Out-of-scope values read as
+  `undefined`, which also gives the SQL driver back its JS-side re-check of a `LIKE`
+  that matched looser than `startsWith` under a case-insensitive collation.
+
+  The UNANCHORED case (neither affix declared) stays per-side, because the two sides
+  deliberately differ there and #6553 preserved both byte-for-byte: the engine reads
+  the last digit run, the driver concatenates every digit. Spec returns `undefined`
+  rather than pick one — a shared contract that claimed an agreement which does not
+  exist would be worse than no shared contract. Each side documents its own fallback
+  at its own call site.
+
+  **Zero behaviour change.** Every call site keeps its existing guards and its
+  existing result for every input; the `packages/runtime` cross-side parity suite that
+  pins the two seeding paths against each other is unmodified and passes as-is, which
+  is the evidence the semantics moved without changing. Per the maintainer's ruling on
+  #6560 (2026-08-08, twice, re-confirmed 2026-08-10): a non-authorable export — no
+  Zod, no new vocabulary, no acceptance-face change — so this is api-surface
+  bookkeeping plus two call-site swaps.
+
+- db12b88: refactor(driver-sql): read the autonumber default from the contract instead of a hardcoded fallback (#7263)
+
+  Execution half 3/3 of the maintainer's route-3 ruling on #6555. `{0000}` is now a
+  declared contract default (`DEFAULT_AUTONUMBER_FORMAT`, landed with
+  `resolveAutonumberFormat` in `@objectstack/spec/data`), so this driver stops
+  writing the default down for itself.
+
+  Two sites in `sql-driver.ts` — `initObjects` and the external-object
+  registration path — each spelled the same four lines by hand:
+
+  ```ts
+  const rawFmt =
+    typeof field.autonumberFormat === "string" && field.autonumberFormat
+      ? field.autonumberFormat
+      : typeof field.format === "string" && field.format
+      ? field.format
+      : "";
+  const fmt = rawFmt || "{0000}";
+  ```
+
+  Both are now `const fmt = resolveAutonumberFormat(field);`. That is the whole
+  change: one symbol added to an import this file already had, no new dependency,
+  and the `#1603` comment about honouring both spellings retired to the resolver's
+  own docstring, which carries it.
+
+  **Behaviour-neutral, by construction and by measurement.** `resolveAutonumberFormat`'s
+  precedence — canonical `autonumberFormat`, then the `format` shorthand, then the
+  declared default, with anything that is not a **non-empty string** counting as
+  undeclared — was deliberately taken from these very lines, including their
+  truthiness rule (not the engine's `??`). A differential check over 484 field
+  documents, spanning both spellings across 22 value shapes (absent key,
+  `undefined`, `null`, `''`, non-empty strings, numbers, booleans, `NaN`, arrays,
+  objects, a boxed `String`, `Symbol`, function, `BigInt`), found the old
+  expressions and the resolver returning the identical string in every case —
+  `format: ''`, `autonumberFormat: ''` and the non-string values included, not just
+  the happy path.
+
+  Compatibility note, per the ruling: choosing {0000} keeps stored driver-sql data
+  undisturbed; engine-fallback deployments flip from bare 1 to 0001 for newly
+  issued numbers. Counter continuity itself is unaffected (#6468 pinned it).
+
+  The engine half of the same ruling is #7262; #6555 stays open until it lands, so
+  a format-less field still renders `0001` on SQL and a bare `1` on the engine's
+  in-memory fallback until then. This half moves neither.
+
+- 6f6fec7: fix(objectql,driver-sql): 自增号播种按声明的 `suffix` 定位计数器,两侧收敛到同一答案 (#6468)
+
+  `autonumberFormat` 允许序号槽 `{0..0}` **后面**还有 token —— `renderAutonumber`
+  专门返回 `suffix`,其契约就是 `prefix + zero-padded(seq) + suffix`。这类格式渲染
+  出的值**序号不在串尾**:`{000}-{YYYY}` 渲染成 `001-2026`,是很常见的单号写法。
+
+  两侧的播种解析却都假定「串尾的数字就是计数器」,而且各错各的:
+
+  - 引擎兜底播种 `seedAutonumber()` 取整串的**最后一个**数字段 —— 读到的是年份。
+    库里三行 `001-2026`/`002-2026`/`003-2026`(真实计数器 3)把计数器播种成 **2026**,
+    下一个发出的号直接跳到 `2027-2026`;
+  - driver-sql 的 `scanMaxNumericTail()` 把 tail 里**所有**数字拼接后 `parseInt` ——
+    同样三行读成 **12026**,下一个号是 `12027-2026`。
+
+  于是**同一份元数据、同一批行,换个驱动号段就不一样**;中间跳过的号已经烧掉,事后
+  无法回收。只修一侧会把「两个不同的错误答案」变成「一个对一个错」,跨驱动仍不一致,
+  所以两侧同 PR 修。
+
+  **修法:两侧解析器尊重已声明的 `prefix`/`suffix`。** 两个字符串都由调用方从
+  `renderAutonumber` 的返回值取得后传入 —— 两侧都不再自行理解格式,driver-sql 只收
+  参数(`getNextSequenceValue` 仅多转发一个位置参数,序列逻辑本身未动):
+
+  - **prefix / suffix 任一非空 ⇒ 计数器「有锚」**:取 prefix 之后的**首个**数字段,
+    并在该行确实带有声明的 suffix 时先把它去掉;
+  - **两者皆空 ⇒ 「无锚」**:各自的既有读法**逐字保留**(引擎取整串最后一个数字段,
+    driver-sql 拼接全部数字)—— 无 `{0..0}` 槽的格式渲染的就是串尾裸计数器,而早于
+    格式存在的历史值根本没有锚可依。
+
+  **suffix 只在匹配时剥离,绝不要求匹配。** `{000}-{YYYY}` 的计数器 scope 是渲染后的
+  **prefix**(此处为空),即全局一个计数器、只有显示的年份在变,所以去年的 `007-2025`
+  持有计数器 7,必须计入。把 suffix 下推成 `like '%-2026'` 会把这些行整批漏掉、播种
+  **低于**真实 max —— 那正是 #6249 修掉的重复单号伤害,自己再造一遍。因此 SQL 谓词
+  保持 `like 'prefix%'`,suffix 只在 JS 侧逐行使用。
+
+  无后缀格式(`D-{0000}`、`{0000}`)两侧本来就正确,行为不变并已 pin 住;#6467 的
+  播种扫描结构未触碰。
+
+- 7d1ff75: fix(driver-sql): re-seed a stale autonumber counter instead of burning a number per failed create (#5495)
+
+  `getNextSequenceValue` bootstraps a counter from the data-table `MAX` exactly
+  once, in its `if (!existing)` branch; after that the data table is never
+  consulted again. Any row landing by a path that bypasses `fillAutoNumberFields`
+  — an `isSystem` seed replay, a `preserveAudit` historical import (both
+  strip-exempt under #5503 and keeping their explicit numbers), or direct SQL —
+  therefore never raises the sequence, and once the counter sits below `MAX` it is
+  permanently behind. Every subsequent create collided, burned a number and failed
+  the request, until the counter had ground past the seeded range one 409 at a
+  time. That is the "one-time storm per database" the filing reported from
+  HotCRM's 17.0 GA sweep: 25 consecutive `409 UNIQUE_VIOLATION`s with the
+  attempted number climbing by one per failure.
+
+  Measured on `main` @ `86e6f6c`, counter seeded at 10 with rows 11–39 landed by a
+  bypass path: **29 caller-visible 409s before a create succeeded** at
+  `CASE-00040` on attempt 30. After this change the same fixture serves
+  `CASE-00040` on the caller's **first** attempt, and `last_value` reaches 40 by
+  one re-seed rather than 29 burns.
+
+  `create()` now re-seeds the counter from the data-table `MAX` and retries
+  (bounded, 3 attempts) — but only when it can _prove_ the collision was that
+  counter's.
+
+  **Why the proof is not the conflicting column.** The obvious predicate ("retry
+  when the conflicting column is this autonumber field") needs
+  `uniqueViolationColumn()` (#6544) to name a column, and on a tenanted autonumber
+  it never does — for two independent reasons, both measured and both pinned by
+  tests. The filing's own message is a composite
+  (`UNIQUE constraint failed: crm_case.organization_id, crm_case.case_number`),
+  which that export refuses by contract; and what this repo builds today is
+  narrower still — ADR-0120 D3 makes the index
+  `(COALESCE(organization_id,'__global__'), field)`, an _expression_ index, on
+  which SQLite reports `UNIQUE constraint failed: index 'uniq_…'` and names no
+  column at all. The "column not determinable" limb is not an edge case on this
+  path; it is the only limb that ever runs there.
+
+  All three of `uniqueViolationColumn()`'s states are handled explicitly, because
+  collapsing any two of them silently is how a real 409 gets eaten:
+
+  1. a column is named and it is one this driver generated → re-seed and retry;
+  2. a column is named and it is not → the duplicate is on a value the **caller**
+     supplied, so the original error is rethrown untouched;
+  3. no column is determinable → decided from the **data**, not the message: if
+     the value this driver just generated is already present in the same tenant
+     partition the counter covers, the collision was the counter's. If it is not,
+     the error is rethrown. One indexed lookup, on the failure path only — the
+     happy path is unchanged.
+
+  No fifth dialect word-list: the judgement is `isUniqueViolationError` +
+  `uniqueViolationColumn` from `@objectstack/types`, per Prime Directive #12 and
+  the #5841 precedent. The re-seed's `MAX` scan is deliberately not wrapped in a
+  `catch`, so a read failure propagates instead of being folded into `0` or a
+  stale value (#6114's rule, #5979's family).
+
+  Retrying is confined to the no-caller-transaction case. Inside a caller's
+  transaction the sequence `UPDATE` shares that transaction and rolls back with
+  the refused `INSERT`, so no number is burned (measured), and on Postgres a
+  constraint failure aborts the transaction outright — the caller owns that retry.
+
+  The `getNextSequenceValue` docstring is reconciled rather than left to
+  contradict the code: a rolled-back insert burning a number is still by design,
+  and that sentence used to read as though it also covered a _persistently
+  failing_ insert, which was the defect.
+
+  Inherited by `TursoDriver` (local/replica) and `SqliteWasmDriver`, each pinned
+  by its own test rather than assumed from the base class (#6203). Turso's
+  **remote** transport is unaffected in both directions: it overrides `create` and
+  never enters `fillAutoNumberFields`, so it has neither the defect nor the fix.
+
+- e120a5a: feat(drivers): lower `count_distinct` on the SQL family (#6409)
+
+  `count_distinct` has been declared by `AggregationFunction` since the enum was
+  written, and until now no SQL backend compiled it: both faces of the SQL family
+  refused it with `NOT_IMPLEMENTED` / 501. A dashboard measure asking for a
+  deduplicated count against a SQL datasource got a capability-gap refusal for a
+  query that was already correct.
+
+  This is the ENFORCE half of #6188's split ruling (maintainer, 2026-08-07).
+  `array_agg` and `string_agg` took ADR-0049's remove leg and left the enum in
+  protocol 17 — no SQL backend compiled them and `string_agg` had no single shape
+  to lower to. `count_distinct` was deliberately kept on the other side of that
+  split, on the strength of having exactly one portable lowering. That lowering
+  now exists:
+
+  - **`driver-sql`** — `SqlDriver.aggregate` emits `count(distinct "column")`, on
+    every dialect the driver targets.
+  - **`driver-turso`** — `RemoteTransport.aggregate` emits the same, on the remote
+    path. Both faces in one change, deliberately: `TursoDriver` picks between them
+    from `url`, so a lowering that landed on one alone would mean one query
+    answering two ways depending on a connection string.
+
+  **Semantics: distinct NON-NULL values of the target column** — the standard
+  `COUNT(DISTINCT col)` answer, and the same one `objectql`'s in-memory fallback
+  and `service-analytics`'s SQL strategy already give.
+
+  **`field` is now required for `count_distinct`.** `AggregationNodeSchema` makes
+  `field` optional because `COUNT(*)` is a real spelling, but `COUNT(DISTINCT *)`
+  is a syntax error in every dialect. A `count_distinct` aggregation with no
+  `field` is refused up front with `INVALID_QUERY` / 400 and a message naming the
+  fix, rather than being sent to the database and coming back as an opaque 500.
+  Plain `count` with no `field` still means `COUNT(*)`, unchanged.
+
+  **The refusal message no longer names `count_distinct` as unsupported.** Both
+  faces build their "Compiled here:" list from their lowering table, so the
+  message now lists it among the functions that work. With this entry the declared
+  aggregate vocabulary and the SQL family's compiled vocabulary are the same set.
+
+  **New shared conformance table.** `AGGREGATION_CASES` / `AGGREGATION_ROWS`
+  (`@objectstack/spec/data`) is the standard both SQL faces are now run against —
+  values over one fixture carrying duplicates and nulls, so a lowering that lost
+  the dedup or counted NULL as a value fails on a number rather than passing a
+  SQL-string assertion. `driver-memory` and `driver-mongodb` are inside the #5499
+  freeze and are not enrolled; the table records what each would answer and why,
+  rather than omitting them.
+
+- 45e711a: fix(driver-sql): `bulkCreate` and `upsert` re-seed a stale autonumber counter instead of burning the whole batch (#6943)
+
+  #5495 taught `create()` to re-seed a stale autonumber counter and retry instead
+  of burning one number per failed insert. `bulkCreate()` and `upsert()` call the
+  same `fillAutoNumberFields` and did not get that fix. They are not, however, the
+  same defect as each other — measured on `main` @ `c8ff269`, on a fresh database
+  with seeded rows above the counter (the one-time-storm repro constraint #5495
+  established):
+
+  **`upsert` is `create()`'s old shape exactly.** Single row, so a stale counter
+  costs it one burned number per call: `last_value` walked 1 → 2 → 3 across two
+  refused upserts. Its `ON CONFLICT (mergeKeys) DO UPDATE` absorbs a conflict on
+  the merge key only; the tenanted autonumber lives under a _different_ unique
+  index, so that violation is still raised and still reaches the caller.
+
+  **`bulkCreate` is worse.** Each row reserves its number in its own committed
+  transaction and the batch then goes in as ONE insert, so a single colliding row
+  burns _every_ number the batch reserved and fails the whole request:
+
+  | 3-row `bulkCreate`, counter at 10, rows 11–39 already present | before                | after                   |
+  | :------------------------------------------------------------ | :-------------------- | :---------------------- |
+  | caller-visible failures                                       | both calls threw      | **0**                   |
+  | rows written                                                  | **0**                 | 3                       |
+  | `last_value`                                                  | 10 → 13, then 13 → 16 | 10 → 42, by one re-seed |
+
+  And it is the worst path to leave without recovery: framework#2678 made
+  `bulkCreate` the common case for seed/import, and seed/import is exactly what
+  _creates_ the staleness — an `isSystem` replay or a `preserveAudit` import keeps
+  its explicit numbers and never enters `fillAutoNumberFields` (#5495/#5503).
+
+  Both paths now reuse #5495's machinery unchanged — `collidingAutoNumberReservations`
+  for the three-state routing, `autoNumberValueExists` for the data-based
+  discriminator (the conflicting column is never determinable for a tenanted
+  autonumber), and the forward-only `resyncSequenceToDataMax`. A collision that is
+  not provably this counter's is still rethrown untouched, so a duplicate on a
+  value the caller supplied still reaches them as its own error.
+
+  **Batch semantics are unchanged, and that is a measurement rather than a
+  choice.** `insert(rows[])` is a single statement, so the batch was already
+  all-or-nothing — the failed batch above left the table exactly as it found it.
+  Re-issuing and retrying the whole batch therefore preserves the existing
+  contract: no partial success is introduced, no transaction is opened, and no
+  "does a failed row roll back its siblings" question arises, because siblings
+  already fail together. Per-row retry inside the batch was rejected for the
+  opposite reason — it would have had to split the one statement into N and invent
+  partial success where none existed.
+
+  One thing the batch may not borrow from `create()`: `create()` keeps a
+  reservation that did not collide, to avoid burning a second number. A batch
+  cannot. One that straddles the seeded range has its low rows collide and its
+  high rows not, and re-issuing only the collided ones would hand them numbers
+  _above_ the kept ones — an intra-batch duplicate the driver would have
+  manufactured itself. Re-issue is therefore per counter: every row drawn from a
+  counter that went stale is re-issued, and counters that did not go stale keep
+  their values, so a co-tenant's rows in the same batch are undisturbed.
+
+  As with #5495, retrying is confined to the no-caller-transaction case. Inside a
+  caller's transaction the sequence `UPDATE` rolls back with the refused `INSERT`,
+  so nothing is burned and there is nothing to repair (measured on both paths), and
+  on Postgres a constraint failure aborts the transaction outright. The caller owns
+  that retry.
+
+  `TursoDriver` (local/replica) and `SqliteWasmDriver` inherit both fixes, each
+  pinned by its own test rather than assumed from the base class — Turso
+  _overrides_ `bulkCreate`/`upsert` to route remote traffic away, so inheritance
+  there is a routing fact, not a class fact. Turso's remote transport builds its
+  own INSERT and generates no autonumber at all, so it neither has this defect nor
+  receives this fix (that gap is #6944).
+
+- 465a0fa: fix(driver-sql): refuse scalar-comparison operators on JSON/multi-value columns with 400 `INVALID_FILTER` instead of answering a silently wrong result
+
+  A `multiple: true` field — and every other `JSON_COLUMN_TYPES` field — is stored by this driver as a **JSON TEXT** column. The equality family lowered straight to SQL against that text with no column-type consultation, so a filter naming such a column compiled, ran, and returned a wrong answer with a `200`.
+
+  **Behaviour change (user-visible).** On a row whose `members` holds `["U1","U2"]`:
+
+  | filter                          | before                                               | after                |
+  | ------------------------------- | ---------------------------------------------------- | -------------------- |
+  | `{members:{$in:[U1]}}`          | `200`, **0 rows**                                    | `400 INVALID_FILTER` |
+  | `{members:{$eq:U1}}`            | `200`, **0 rows**                                    | `400 INVALID_FILTER` |
+  | `{members: U1}` (bare equality) | `200`, **0 rows**                                    | `400 INVALID_FILTER` |
+  | `{members:{$nin:[U1]}}`         | `200`, **the row it was asked to EXCLUDE** ⚠️        | `400 INVALID_FILTER` |
+  | `{members:{$ne:U1}}`            | `200`, **the row it was asked to exclude** ⚠️        | `400 INVALID_FILTER` |
+  | `{members:{$lte:U1}}`           | `200`, **1 row** (lexicographic, on the leading `[`) | `400 INVALID_FILTER` |
+  | `{members:{$contains:U1}}`      | `200`, 1 row                                         | **unchanged**        |
+
+  **`$nin` is why this is a fix and not a documented footgun.** `members not in ('U1')` is TRUE — the stored text genuinely is not equal to that id — so "exclude these" compiled to "return everything". `$in` fails **closed** (fewer rows than exist, bad but narrowing); `$nin` and `$ne` fail **OPEN**, so any exclusion built on them silently stops filtering and the failure direction is _widening_. A downstream delete-guard written as `plans.find({ where: { assignees: { $in: memberIds } } })` therefore never fired once since it shipped, threw nothing, logged nothing, and type-checked — and a `200` with `[]` is byte-identical to a query that legitimately matched nothing, so no caller had anything to key on.
+
+  **What is refused:** `$eq`, `$ne`, `$gt`, `$gte`, `$lt`, `$lte`, `$in`, `$nin`, `$between`, the bare `{ field: value }` spelling, and the infix spellings the normalised emitter also answers (`=`, `<>`, `in`, `nin`, `not_in`, `notin`, …) — on any column this driver stores as JSON, i.e. `field.multiple` arrays **and** the structured-JSON types (`address`, `location`, `composite`, the file-metadata and multi-option types). The structured-JSON half is included because the mechanism is the JSON-text storage rather than the array-ness: `{address:{$nin:['Beijing']}}` showed the identical fail-open inversion.
+
+  The refusal names the operator, the field, why the column cannot answer it, states that the filter **was not applied**, and prescribes the working spelling. It carries the same ADR-0112 envelope as the unknown-operator refusal (`INVALID_FILTER` / 400), on every face that lowers a filter: `find`, `findOne`, `count`, `aggregate`, `distinct`, and the where-clauses of `updateMany` / `deleteMany`.
+
+  **What does NOT change:** `$contains`, `$notContains`, `$startsWith`, `$endsWith`, `$icontains` — the `LIKE` family matches the serialization as text, and `$contains` (or an `$or` of `$contains` for any-of) is the working membership spelling this refusal points at. `$null` / `$exists` also keep working: the column's presence is a well-formed question whatever it holds. Filters on scalar columns are untouched, and a table this driver was never told about (no registered field types) is unaffected — the gate fires only where the column is KNOWN to be JSON.
+
+  Giving array columns a real membership operator (`$overlaps` / `$containsAny`) is a separate question about the closed `FILTER_OPERATORS` set and is deliberately not answered here.
+
+- 6de592c: fix(driver-sql): judge unique violations with the shared predicate, so a Postgres index build over dirty data no longer takes the boot down (#6543)
+
+  `syncDeclaredIndexes` has a branch whose whole job is to keep a database
+  BOOTING when existing rows violate a NULL-safe unique it was asked to create
+  (the #5030 defect made data): the constraint is logged at `error` as not
+  enforced, and the ADR-0120 D4 drift pre-flight reports the exact conflicting
+  rows. Taking the process down instead would brick the deployment.
+
+  It decided whether it was looking at that case with a private inline regex over
+  the stringified message — `unique constraint failed|duplicate entry|duplicate
+key value`, the fourth hand-written spelling of this question #6250
+  inventoried. That read one of the two channels drivers use, and on the DDL path
+  the missing channel is the whole answer for one shipped dialect:
+
+  | dialect  | `CREATE UNIQUE INDEX` over duplicate rows says           | old regex  |
+  | :------- | :------------------------------------------------------- | :--------- |
+  | SQLite   | `UNIQUE constraint failed: product.code`                 | matched    |
+  | MySQL    | `ER_DUP_ENTRY: Duplicate entry 'DUP' for key 'uniq_…'`   | matched    |
+  | Postgres | `could not create unique index "uniq_…"`, SQLSTATE 23505 | **missed** |
+
+  Postgres does not reuse its DML phrasing for an index build: `duplicate key
+value violates unique constraint` is what a conflicting INSERT says, while a
+  conflicting index BUILD says `could not create unique index "…"` and puts the
+  verdict on `error.code` (SQLSTATE `23505`) with the offending tuple on
+  `error.detail`. None of the three message limbs appear in it — so on Postgres
+  the branch never fired, and a database with legacy duplicates failed to start
+  rather than booting with the constraint reported as unenforced.
+
+  Both discriminators in this file now call `isUniqueViolationError` from
+  `@objectstack/types`, passing the **error object** rather than a pre-stringified
+  message, so `code`, `errno` and the `cause` chain are read alongside `message`:
+
+  - the #5030 boot-survival branch above;
+  - the negative limb of the MySQL functional-key-part fallback in
+    `createNullSafeUniqueIndex`, which used a bare `/duplicate/i` to avoid
+    degrading a conflict into a "this server rejects functional key parts"
+    verdict — a message-only exclusion that did not fire on the `errno`-only
+    shape mysql2 can hand back.
+
+  `patch` rather than `minor`: no API changes, and the message spellings that
+  were recognised before are a strict subset of what the predicate recognises, so
+  nothing that was absorbed before is absorbed differently now. The site's own
+  business logic — the `nullSafe.size > 0` guard that keeps this absorption
+  scoped to the NULL-safe case, and the "already exists" race arm that runs ahead
+  of it — is unchanged.
+
+- d254421: fix(driver-sql): a merge-path `upsert` no longer rewrites an existing row's autonumber (#7011)
+
+  Measured on a completely healthy counter, single row throughout:
+
+  ```
+  create                      → CASE-00001    last_value 1
+  upsert same id (1st time)   → CASE-00002    last_value 2
+  upsert same id (2nd time)   → CASE-00003    last_value 3
+  ```
+
+  `fillAutoNumberFields` reserves a number before the statement knows whether it
+  will insert or merge, and the autonumber column sat in `mergeColumns` — so
+  every `ON CONFLICT … DO UPDATE` wrote the freshly reserved number over the
+  row's existing one, silently replacing an externally visible business
+  identifier the caller never asked to change.
+
+  Per the triage ruling on the card: an autonumber is an **immutable business
+  identifier once assigned**. `auto_number` columns are now excluded from the
+  merge column list, exactly like `created_at` (both are insert-only facts about
+  the row's birth). After the fix the same sequence keeps `CASE-00001` through
+  both upserts. The exclusion is unconditional — an explicit autonumber value in
+  the upsert payload does not renumber an existing row on the merge branch
+  either; `update()` writes what it is given and remains the deliberate
+  renumbering path. Insert-path upserts still assign fresh numbers, and every
+  non-autonumber column (including `updated_at`) merges as before.
+
+  Deliberately out of scope (#6943's reseed family): the reservation itself still
+  happens before insert-vs-merge is known, so a merge-only upsert still consumes
+  one sequence value per call — now a permanent gap in the sequence rather than a
+  rewrite of the row (measured post-fix: row keeps `CASE-00001`, `last_value`
+  walks 1 → 2 → 3, the next inserted row gets `CASE-00004`).
+
+  Covered faces: `SqliteWasmDriver` inherits `upsert` unchanged; `TursoDriver`
+  local/replica routes its override to `super` — both pinned by their own tests.
+  Turso remote (`RemoteTransport.upsert`) never enters `fillAutoNumberFields` and
+  has neither the defect nor the fix. Rows already renumbered by past merges
+  cannot be restored from the driver side.
+
+- ef678d0: fix(driver-sql): a failed index read is an error, not an empty index list (#7332)
+
+  `SqlDriver.introspectIndexes` wrapped its **entire** dialect dispatch — the
+  SQLite, Postgres and MySQL branches alike — in one bare `catch {}` and then
+  returned its accumulator in whatever half-built state it had reached. The caller
+  could not tell _"this table genuinely has no such index"_ from _"the read failed
+  and I am guessing"_.
+
+  Drift detection consumed that same function. `diffManagedIndexes` takes its
+  declared-index-missing branch on exactly that input, so a transient failure —
+  SQLITE_BUSY, a WAL read landing mid-flush, any I/O hiccup — was not surfaced as
+  an error. It was laundered into a confident, specific and **false** report:
+
+  ```
+  product: metadata declares index 'idx_product_code' (code) but the database
+  has no such index — run "os migrate apply" to create it.
+  ```
+
+  …about an index that was there the whole time.
+
+  **The swallow is kept where its justification holds, and only there.** That
+  justification — _"let creation handle conflicts"_ — is sound at
+  `getExistingIndexNames`, whose caller `syncDeclaredIndexes` corrects an
+  optimistic wrong reading by attempting the create and absorbing the
+  "already exists" error; a throw there would take a whole boot down on a
+  transient read. Detection has no such backstop, and inherited the swallow only
+  because #3728 wired a second consumer onto the same function. `introspectIndexes`
+  therefore now **throws by default** and takes an explicit
+  `{ onFailure: 'partial' }` opt-in, which the creation seam passes and nothing
+  else does.
+
+  **What changes for you.** Nothing on the creation path: boot still tolerates a
+  failed index read and still converges the schema. On the detection path, a
+  failure that was previously invisible is now reported as one — `os migrate plan`
+  and `os migrate apply` print it and exit non-zero instead of rendering a plan
+  built on a partial reading, and boot-time drift handling logs
+  `could not introspect '<table>' for drift detection` (a handler
+  `reconcileAndWarnDrift` already carried) instead of a false drift warning. This
+  matches the sibling read in the same detect path, `introspectColumns`, which has
+  never swallowed.
+
+  Measured, and worth stating plainly: no consumer ever acted **destructively** on
+  the false reading. Dropping entries from the physical list is monotone — the
+  `replace_unique_index`, `drop_index` and `recreate_index` remedies all require an
+  index to be _present_, so a short read can only ever remove a destructive
+  proposal, never arm one. The defect was a confidently wrong report, not a
+  dangerous one.
+
+- 8825a06: drivers: `limit: 0` returns no records, on every driver and every read door
+
+  `limit: 0` was ruled in #6485 to mean **return no records**. Three of the five shipped
+  drivers did not honour it, in three different ways — and the ones that disagreed
+  returned **more** data than was requested, which on an ADR-0021 RLS read scope is
+  over-reach rather than a loose filter. Reachable since #6578: the client now puts
+  `top=0` on the wire, so the answer depended on which driver a deployment configured.
+
+  **`driver-memory` — the slice was dropped.** `find()` sliced with `if (query.limit)`,
+  truthiness, and `0` is falsy. Measured before the fix, three rows seeded:
+  `{ limit: 0 }` returned **3 of 3**, and `{ limit: 0, offset: 1 }` returned 2 — the
+  OFFSET applied and the LIMIT silently did not, which is why every paging suite stayed
+  green over it. Two more sites of the same shape in `memory-analytics.ts` (the `$limit`
+  pipeline stage and the SQL string builder) moved with it. Mingo honours `{ $limit: 0 }`
+  as zero records (measured), so presence is sufficient there.
+
+  **`driver-mongodb` — the value was forwarded faithfully, to a client that means
+  something else by it.** `buildFindOptions` already tested presence, so `0` arrived
+  exactly as written — but the MongoDB Node driver DEFINES `limit: 0` as _no limit_, so
+  the answer was still the whole collection. Fixed with an explicit short-circuit that
+  returns the empty result **before the client is consulted** (`[]` from `find`, `null`
+  from `findOne`, which had the same hole). No round trip is made for a query whose
+  answer is already known, and no future change in the upstream driver's reading of `0`
+  can move this behaviour. Deliberately `=== 0`, not `<= 0`.
+
+  **`driver-sql` — two doors disagreed with a third.** `findRows()`, the door `find()`
+  goes through, has always compiled `limit` on presence. Two others compiled it on
+  truthiness:
+
+  - `findWithWindowFunctions()` — the live window-function read door (#4286). Returns
+    rows, so this was user-visible wrong data: `{ limit: 0 }` returned the whole table.
+  - `analyzeQuery()` / `explain()` — returns a plan. It compiled `select * from "orders"`
+    where `find()` sent `... order by "id" asc limit ?`, so it explained a statement
+    other than the one that would run.
+
+  `offset` moved with `limit` at both doors for internal consistency only. That half is
+  **measured to change nothing**: knex elides a zero offset on better-sqlite3, Postgres
+  and MySQL alike. It is pinned as the no-op it is rather than reported as a fix.
+
+  **`driver-turso` remote transport — an `OFFSET` with no `LIMIT` was a syntax error.**
+  Surfaced by the new conformance control that reads with a bare offset. SQLite's grammar
+  is `LIMIT expr [OFFSET expr]`, and this compiler emitted the two clauses independently,
+  so `find(obj, { offset: N })` with no `limit` produced `near "OFFSET": syntax error` —
+  for **every** `N`, and only on the remote transport (the local half goes through knex,
+  which synthesises the `LIMIT -1` no-limit sentinel). Remote now builds the same
+  statement knex does.
+
+  Result sets only ever get **narrower**. A caller who wants every row should omit
+  `limit` rather than pass `0`.
+
+  `@objectstack/spec` gains `PAGINATION_ZERO_LIMIT_CASES`, the shared conformance
+  case-set pinning this — with controls, so "return nothing, always" cannot pass it. All
+  **five** drivers answer it, with **no DEBT rows**: future drift goes red at
+  `check:driver-conformance` rather than being discovered in production.
+
+- 6146b67: `os migrate plan` no longer creates a database on a project that has never been started (#6743)
+
+  `migrate plan` is a dry run, and since #3917 it has reported the boot-time
+  create-table DDL and the artifact seed instead of performing them. It still
+  brought the database file itself into existence, though: SQLite creates the
+  file at open, so a `plan` in a fresh project left behind a 0-table
+  `.objectstack/data/objectstack.db` — a write side effect from a read-only
+  command, and one that erased the only signal ("no database file yet") by which
+  the next command can tell a never-started project from a started one.
+
+  A missing SQLite target is now opened as an empty in-memory database instead of
+  being created. **The plan output is unchanged**, deliberately: a database with
+  zero tables is exactly what a freshly created empty file is, so "every table
+  needs creating" — the true and useful answer for a new project — still prints,
+  and the `Database:` line still names the real target path rather than the
+  in-memory stand-in.
+
+  New driver capability, additive and off by default:
+  `SqlDriverConfig.sqliteAbsentFile` (`'create'` | `'empty-in-memory'`, default
+  `'create'`). Every existing caller keeps SQLite's own create-if-absent
+  behaviour. It is threaded to the driver as a host-composition option
+  (`createDefaultDatasourceDriverFactory`, `DefaultDatasourcePlugin`,
+  `createStandaloneStack`), not as an authorable `datasource.config` key — a
+  datasource must not be able to declare itself into never persisting.
+
+  `os migrate apply` deliberately does **not** use it: it boots deferred too, but
+  flushes the deferred DDL after confirmation and needs a real file to flush into.
+
+- 3510e4a: refactor(spec,drivers,lint): one implementation of the filter identity reduction (#5659)
+
+  `{ $and: [] }` matches every row, `{ $or: [] }` matches none, `{}` is a TRUE
+  disjunct that absorbs its `$or`, `{ $not: {} }` is FALSE. That is a ruling
+  (#5322/#5134) pinned for every backend by the four identity cases in
+  `FILTER_LOGIC_CASES` — and it was implemented four times over: `reduceFilterNode`
+  in `driver-sql`, the same function again in `driver-mongodb`, the
+  `every`/`some`/truthiness algebra of `driver-memory`'s matcher, and nearly a
+  fifth hand-written copy inside `@objectstack/lint`, which declined to write one
+  and filed this issue instead.
+
+  **New in `@objectstack/spec` (`@objectstack/spec/data`): `reduceFilterVerdict`**,
+  beside the case table that proves it. It answers `'true' | 'false' | 'clause'`
+  for a filter node and never throws on its own; each backend's own refusals — the
+  undeclared `$`-combinator and the `undefined` comparand in `driver-sql`, the
+  query-level keys and the `$null` comparand in `driver-mongodb` — are passed in as
+  `FilterVerdictHooks` and are invoked from exactly the positions they were invoked
+  from before. `reduceFilterKeyVerdict` answers the same question for one key, which
+  is what both SQL and MongoDB emitters consult while walking a node.
+
+  **No behaviour changes in the three drivers.** The move is mechanical: the shared
+  algebra replaces each private copy, the refusals stay where they were, and the
+  `FILTER_LOGIC_CASES` conformance suites are green on both sides of the change —
+  including the SQL-inheriting `driver-sqlite-wasm` and `driver-turso`.
+
+  **`@objectstack/lint` gains two warnings it was structurally blind to.** The
+  `multi: true` unbounded-bulk-write rule (#5482) asked "does this filter have zero
+  keys", so a `delete_record` bounded by `filter: { $and: [] }` or
+  `filter: { $or: [{}] }` — a whole-object write by the ruling every driver executes
+  — passed silently. It now asks the reduction, and it warns about both while
+  staying quiet on `{ $or: [] }` and `{ $not: {} }`, which match nothing. The
+  message names the shape it saw (`a filter that REDUCES TO TRUE ({"$and":[]})`)
+  rather than calling a non-empty filter "empty".
+
+  If you have a flow declaring a bulk write bounded by one of those two shapes, the
+  lint will now tell you so — the write was already unbounded at run time; only the
+  feedback is new.
+
+- bee5ffe: drivers: every SQL read door routes through the tenant chokepoint (#6792)
+
+  `SqlDriver.applyTenantScope()` owns read-side tenant isolation for the whole SQL family —
+  the `tenantId` early-out, the "object has no tenant field" early-out, the NULL-org
+  platform-row rule (#2734) and the ADR-0105 D2 union posture (#3623). Its own docstring
+  said "every CRUD method routes through it". Nothing ever checked that, and it was false
+  for as long as it had existed. **Three** read doors built their query through
+  `getBuilder()` and never arrived:
+
+  - **`findWithWindowFunctions()`** — the documented #4286 window door. It returns **rows**,
+    so on a deployment where the scope would have applied (`options.tenantId` set, object
+    has a tenant field) it returned rows belonging to **every** tenant. Measured with two
+    tenants seeded plus one NULL-org platform row: `tenantId: 'org_a'` returned
+    `[a1, a2, b1, b2, p1]` here against `find()`'s `[a1, a2, p1]` — another tenant's rows,
+    handed over at the driver layer.
+  - **`analyzeQuery()` / `explain()`** — returns a **plan**, not rows, so this is a smaller
+    fix and it is made on its own merits rather than folded into the one above. It is the
+    same defect #6577 fixed on these two methods one builder line lower: a plan is only
+    worth reading if it explains the statement `find()` would actually run, and a missing
+    tenant predicate changes selectivity and therefore which index the planner picks.
+    Compiled `select * from account` where `find()` sent the `organization_id` clause.
+  - **`distinct()`** — returns one column's **values** for every tenant. This one was in no
+    card. #6792 states the opposite, listing `distinct` among the scoped call sites; the
+    13th read site is `aggregate()`. It was found by measuring the invariant rather than
+    re-reading it.
+
+  All three now call `applyTenantScope()` beside their `getBuilder()` line, the position
+  `findRows()` uses. They route through the chokepoint rather than re-deriving a predicate:
+  a local equality would silently drop NULL-org platform rows (#2734) and collapse group
+  reads to active-org reach (#3623). Both of the chokepoint's early-outs are inherited
+  unchanged, so an unscoped admin/seed read (no `tenantId`) and any object without a tenant
+  field behave exactly as before.
+
+  **The durable half is a gate, not the three lines.** `pnpm check:tenant-chokepoint`
+  (`scripts/check-tenant-chokepoint.mjs`, wired into `.github/workflows/lint.yml`) re-derives
+  the invariant from the AST across the `SqlDriver` family on every run: a method that builds
+  through `getBuilder(object, options)` must call `applyTenantScope()` on that builder, or
+  carry a written exemption. Insert builders are exempt structurally — write-side tenancy is
+  `injectTenantOnInsert` — rather than by a name list. It is keyed on the **builder** and not
+  on the method signature, because the signature criterion the card sketches ("takes
+  `(object, …, options)` and returns rows") misses `distinct` (no `query` parameter) and
+  `analyzeQuery` (returns a plan). Verified red against the pre-fix tree, red against a
+  newly-added unscoped door, and silent once that door is scoped.
+
+  The chokepoint docstring no longer asserts the invariant; it names the gate that proves it.
+
+  If you call these doors directly on a multi-tenant deployment, pass `options.tenantId` as
+  you would to `find()` — that is what now takes effect. Callers that never passed it are
+  unaffected; that remains the documented unscoped/admin path.
+
+- 939f579: drivers(sql,turso): 聚合函数拒收带上 ADR-0112 信封,并把两类条件分开措辞
+
+  `SqlDriver.mapAggregateFunc()` 与 `RemoteTransport.aggregate()` 此前对同一条件各抛一个裸
+  `Error`(`code`/`status` 皆 `undefined`),`mapDataError` 因此落默认分支——一条本该 4xx 的
+  调用方错误以不透明 500 到达客户端。两处同时改,同一信封体例、首句逐字一致(#5240):
+
+  - **协议未声明的函数名**(如 `median`)→ `INVALID_QUERY` / 400。这正是协议门
+    (`metadata-protocol` 的 `invalidQueryError`,#4254)对同一条件已经给出的码,于是
+    进程内调用方与 REST 调用方读到同一个答案。
+  - **协议已声明、本后端编不出**(`count_distinct` / `array_agg` / `string_agg`)→
+    `NOT_IMPLEMENTED` / 501。这是能力缺口而不是调用方的错(`driver-mongodb` 编得出这三个),
+    措辞明确说明查询拼写无误,不把作者说成打错字。
+
+  两面都只改拒收的身份:编得出的五个函数生成的 SQL 逐字节不变。
+
+- Updated dependencies [3d5c090]
+- Updated dependencies [e5bd768]
+- Updated dependencies [e027b3e]
+- Updated dependencies [c2429b0]
+- Updated dependencies [445a0c2]
+- Updated dependencies [f6609e6]
+- Updated dependencies [a70358a]
+- Updated dependencies [97e7e3c]
+- Updated dependencies [8828b9e]
+- Updated dependencies [53068c1]
+- Updated dependencies [ee58392]
+- Updated dependencies [f16e54e]
+- Updated dependencies [06be54e]
+- Updated dependencies [259459d]
+- Updated dependencies [3f7f14e]
+- Updated dependencies [6968885]
+- Updated dependencies [eaed61f]
+- Updated dependencies [debe2f6]
+- Updated dependencies [97b0798]
+- Updated dependencies [43a7a8d]
+- Updated dependencies [73f69dc]
+- Updated dependencies [04c56aa]
+- Updated dependencies [b3efeb7]
+- Updated dependencies [ddd075a]
+- Updated dependencies [88154be]
+- Updated dependencies [e8dc61e]
+- Updated dependencies [2f3e793]
+- Updated dependencies [d8e8d9c]
+- Updated dependencies [94e749b]
+- Updated dependencies [ea1d916]
+- Updated dependencies [ae31a19]
+- Updated dependencies [e0f300b]
+- Updated dependencies [62b6a2f]
+- Updated dependencies [5b4780b]
+- Updated dependencies [a933452]
+- Updated dependencies [8140915]
+- Updated dependencies [7b48cf9]
+- Updated dependencies [b5404f4]
+- Updated dependencies [f764691]
+- Updated dependencies [e120a5a]
+- Updated dependencies [e650d67]
+- Updated dependencies [04476e7]
+- Updated dependencies [79228cd]
+- Updated dependencies [b3363e9]
+- Updated dependencies [2ef1807]
+- Updated dependencies [d03fe25]
+- Updated dependencies [2672f85]
+- Updated dependencies [11066f6]
+- Updated dependencies [916af17]
+- Updated dependencies [84c86fb]
+- Updated dependencies [2a2a9fb]
+- Updated dependencies [a2e157c]
+- Updated dependencies [95c4227]
+- Updated dependencies [2a61116]
+- Updated dependencies [d4df105]
+- Updated dependencies [e2798fa]
+- Updated dependencies [0fd8556]
+- Updated dependencies [74155c7]
+- Updated dependencies [6908830]
+- Updated dependencies [8b06bba]
+- Updated dependencies [4c54037]
+- Updated dependencies [0f7157b]
+- Updated dependencies [d9bef45]
+- Updated dependencies [f549a0d]
+- Updated dependencies [82da264]
+- Updated dependencies [f586f1a]
+- Updated dependencies [9b9b70f]
+- Updated dependencies [f5a9bc2]
+- Updated dependencies [881a3cc]
+- Updated dependencies [ad6317b]
+- Updated dependencies [8a88885]
+- Updated dependencies [5f7669e]
+- Updated dependencies [becbe53]
+- Updated dependencies [b127c8b]
+- Updated dependencies [a80302a]
+- Updated dependencies [474f131]
+- Updated dependencies [050cd82]
+- Updated dependencies [4d552af]
+- Updated dependencies [44d677c]
+- Updated dependencies [c32944d]
+- Updated dependencies [1dd780f]
+- Updated dependencies [c8d6f6e]
+- Updated dependencies [92a67f2]
+- Updated dependencies [9136327]
+- Updated dependencies [bf0ae99]
+- Updated dependencies [cb3b6cd]
+- Updated dependencies [73b7234]
+- Updated dependencies [d2b97c3]
+- Updated dependencies [59b794f]
+- Updated dependencies [fc3a36a]
+- Updated dependencies [69787f0]
+- Updated dependencies [5d022a1]
+- Updated dependencies [042b9ee]
+- Updated dependencies [f549a0d]
+- Updated dependencies [a36db28]
+- Updated dependencies [3f8817a]
+- Updated dependencies [a2443e3]
+- Updated dependencies [e1554b1]
+- Updated dependencies [4856789]
+- Updated dependencies [c3f4916]
+- Updated dependencies [33e0385]
+- Updated dependencies [2205363]
+- Updated dependencies [09fe58d]
+- Updated dependencies [d0a5ceb]
+- Updated dependencies [e18a162]
+- Updated dependencies [d6d1a50]
+- Updated dependencies [d127ff0]
+- Updated dependencies [9b86cf6]
+- Updated dependencies [8825a06]
+- Updated dependencies [5087ac6]
+- Updated dependencies [2d1ddf0]
+- Updated dependencies [354b00f]
+- Updated dependencies [3de535b]
+- Updated dependencies [fe2e15a]
+- Updated dependencies [c6b6bb4]
+- Updated dependencies [2f59da0]
+- Updated dependencies [8ad609c]
+- Updated dependencies [bbee302]
+- Updated dependencies [08863dd]
+- Updated dependencies [56664f5]
+- Updated dependencies [31cbe90]
+- Updated dependencies [90bbf25]
+- Updated dependencies [eb91eba]
+- Updated dependencies [42da73d]
+- Updated dependencies [643b7c7]
+- Updated dependencies [d0d5205]
+- Updated dependencies [1a15893]
+- Updated dependencies [b70e534]
+- Updated dependencies [2233a85]
+- Updated dependencies [62dd69a]
+- Updated dependencies [e15e679]
+- Updated dependencies [2ab1257]
+- Updated dependencies [4cc4fb7]
+- Updated dependencies [28d1eb7]
+- Updated dependencies [2c26040]
+- Updated dependencies [f758cec]
+- Updated dependencies [78f0be8]
+- Updated dependencies [35f7fb4]
+- Updated dependencies [a5302c7]
+- Updated dependencies [7084313]
+- Updated dependencies [91cefb8]
+- Updated dependencies [0e043d8]
+- Updated dependencies [dadd1ad]
+- Updated dependencies [2f2e63c]
+- Updated dependencies [486d526]
+- Updated dependencies [89d7b35]
+- Updated dependencies [85ec26d]
+- Updated dependencies [f6476fc]
+- Updated dependencies [4ac12ef]
+- Updated dependencies [b88f5e8]
+- Updated dependencies [42cc219]
+- Updated dependencies [d7e0b42]
+- Updated dependencies [3510e4a]
+- Updated dependencies [aa4b90d]
+- Updated dependencies [54299ca]
+- Updated dependencies [dc61def]
+- Updated dependencies [251e888]
+- Updated dependencies [183b4c4]
+- Updated dependencies [2fdb36e]
+- Updated dependencies [20526f5]
+- Updated dependencies [c5eef1d]
+- Updated dependencies [e0f300b]
+- Updated dependencies [761a0ba]
+- Updated dependencies [be87153]
+- Updated dependencies [60f0dd8]
+- Updated dependencies [a87c5cd]
+- Updated dependencies [a47f338]
+- Updated dependencies [2598216]
+- Updated dependencies [2c7e62d]
+- Updated dependencies [eb7613c]
+- Updated dependencies [ecc9110]
+- Updated dependencies [f7bd4e2]
+- Updated dependencies [361bd5b]
+- Updated dependencies [129b378]
+- Updated dependencies [88f9d94]
+- Updated dependencies [1818998]
+- Updated dependencies [09ee21c]
+- Updated dependencies [f549a0d]
+- Updated dependencies [3fc2e48]
+- Updated dependencies [e8f435c]
+- Updated dependencies [41610f6]
+  - @objectstack/spec@17.0.0-rc.6
+  - @objectstack/core@17.0.0-rc.6
+  - @objectstack/types@17.0.0-rc.6
+  - @objectstack/observability@17.0.0-rc.6
+
 ## 17.0.0-rc.5
 
 ### Patch Changes

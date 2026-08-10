@@ -24,31 +24,25 @@ export interface ExportFieldMeta {
   displayField?: string;
   /** Field holds multiple values (an array), e.g. a `multiple: true` lookup. */
   multiple?: boolean;
-  // The following four drive the import path's required-field pre-check
-  // (import-runner.ts). They mirror the engine's insert-time validation
-  // (objectql record-validator.ts) so a dry run can predict a NOT NULL /
-  // required failure instead of green-lighting a row the real insert rejects.
-  // Unused by the export path (formatting only reads type/options/reference).
-  /** Field is required — a value (or default) must exist on insert. */
-  required?: boolean;
-  /** Engine-owned column the client never supplies (never required of import). */
-  system?: boolean;
-  /** Read-only column the client never supplies (never required of import). */
-  readonly?: boolean;
-  /** Field declares a `defaultValue` the engine applies on insert (satisfies required). */
-  hasDefault?: boolean;
-  // The bounds below drive the import path's field-constraint pre-check
-  // (import-coerce.ts `firstConstraintViolation`), mirroring the engine's
-  // `validateRecord` so a dry run predicts a range/length rejection instead of
-  // green-lighting a row the real write then fails (framework#3956).
-  /** Lower bound for numeric fields. */
-  min?: number;
-  /** Upper bound for numeric fields. */
-  max?: number;
-  /** Minimum character count for string fields. */
-  minLength?: number;
-  /** Maximum character count for string fields. */
-  maxLength?: number;
+  // Every key above is a PRESENTATION key: each one is read to turn a storage
+  // value into a readable cell (or a readable cell back into a storage value).
+  //
+  // ── retired: the eight constraint keys (#6536) ──────────────────────
+  //
+  // `required` / `system` / `readonly` / `hasDefault` / `min` / `max` /
+  // `minLength` / `maxLength` used to sit here. They were added for the import
+  // dry run's hand-copied pre-check mirror (`firstMissingRequiredField` /
+  // `firstConstraintViolation`, framework#3956); #4633 ruling D retired that
+  // mirror (PR #6532) — the dry run now asks the engine for its verdict through
+  // `DataProtocol.validateData`, which reads the object's own schema. That left
+  // all eight computed on every import and read by nothing, so ADR-0049
+  // enforce-or-remove retires them rather than leaving a constraint vocabulary
+  // standing next to the presentation one with no enforcer behind it.
+  //
+  // They were never a source of truth: `buildFieldMetaMap` derived each one
+  // from the very `schema` its caller passed in, so a caller that wants a
+  // field's constraints reads them off that schema (`fields[name].required`, …)
+  // — the same place the engine reads them.
 }
 
 /**
@@ -142,17 +136,6 @@ export function buildFieldMetaMap(schema: unknown): Map<string, ExportFieldMeta>
       reference: typeof f.reference === 'string' ? f.reference : undefined,
       displayField: typeof f.displayField === 'string' ? f.displayField : undefined,
       multiple: f.multiple === true,
-      required: f.required === true,
-      system: f.system === true,
-      readonly: f.readonly === true,
-      // Mirror the engine's `applyFieldDefaults` gate (`f.defaultValue == null`
-      // ⇒ no default): any non-null default — literal, expression object, or the
-      // `current_user` token — counts as satisfying a required field.
-      hasDefault: f.defaultValue != null,
-      min: typeof f.min === 'number' ? f.min : undefined,
-      max: typeof f.max === 'number' ? f.max : undefined,
-      minLength: typeof f.minLength === 'number' ? f.minLength : undefined,
-      maxLength: typeof f.maxLength === 'number' ? f.maxLength : undefined,
     });
   }
   return map;

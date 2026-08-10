@@ -116,3 +116,70 @@ describe('classifyFilterToken', () => {
     }
   });
 });
+
+/**
+ * #5586 — recognition is placeholder-by-INTENT, not by well-formed token name.
+ *
+ * Recognition used to be the token-NAME grammar (`[a-zA-Z0-9_]+`), so every
+ * placeholder carrying a non-word character classified as `null` — "not a
+ * placeholder" — and was handed to the data engine to be compared as a literal
+ * string. That is the silent-wrong-rows outcome the classification exists to
+ * abolish, and it hit the author backwards: `{TODAY}` was refused by name while
+ * `{TODAY()}` quietly returned the wrong rows.
+ */
+describe('classifyFilterToken — brace-wrapped by intent (#5586)', () => {
+  // Each of these is a shape an author reaches for when migrating from another
+  // system's macro syntax: call syntax, kebab-case, natural language, a dotted
+  // path. All four used to classify as `null`.
+  it.each([
+    ['{TODAY()}', 'TODAY()'],
+    ['{current-user-id}', 'current-user-id'],
+    ['{30 days ago}', '30 days ago'],
+    ['{user.id}', 'user.id'],
+  ])('%s is an UNKNOWN token, not a literal', (value, token) => {
+    expect(classifyFilterToken(value)).toEqual({ kind: 'unknown', token, suggestion: undefined });
+  });
+
+  it('recognises the `${…}` prefix variant of a wide shape too', () => {
+    expect(classifyFilterToken('${TODAY()}')).toEqual({
+      kind: 'unknown',
+      token: 'TODAY()',
+      suggestion: undefined,
+    });
+  });
+
+  it('does not tolerate padding — the canonical spelling carries none', () => {
+    // Refused loudly rather than trimmed: a lenient consumer here would make
+    // `{ current_user_id }` legal on this surface and illegal on every other
+    // one that spells the vocabulary out.
+    expect(classifyFilterToken('{ current_user_id }')).toEqual({
+      kind: 'unknown',
+      token: ' current_user_id ',
+      suggestion: undefined,
+    });
+  });
+
+  it('still resolves the canonical spelling and still refuses the near miss', () => {
+    // Regression guards for the two poles the widening sits between.
+    expect(classifyFilterToken('{today}')).toEqual({ kind: 'date-macro', token: 'today' });
+    expect(classifyFilterToken('{TODAY}')).toEqual({
+      kind: 'unknown',
+      token: 'TODAY',
+      suggestion: undefined,
+    });
+  });
+
+  // The widening is "ONE whole pair of braces around the WHOLE value". These
+  // shapes are not that, and each stays a literal by explicit decision rather
+  // than by emergent regex behaviour.
+  it.each([
+    ['a{b}c', 'braces mid-value — ordinary text that happens to contain a brace pair'],
+    ['{a}{b}', 'two pairs — not one wrapped token'],
+    ['{{x}}', 'nested pairs — not one wrapped token'],
+    ['{}', 'empty braces — there is no token to name in a diagnostic'],
+    ['{a}b', 'a wrapped head with a trailing literal'],
+    ['x{a}', 'a literal head with a wrapped tail'],
+  ])('%s stays a plain literal (%s)', (value) => {
+    expect(classifyFilterToken(value)).toBeNull();
+  });
+});

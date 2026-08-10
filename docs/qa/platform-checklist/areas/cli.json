@@ -1,0 +1,511 @@
+{
+  "$comment": "Standing platform test checklist — area ledger. Hand-edited, append-only; validated by scripts/check-platform-checklist.mjs (pnpm check:platform-checklist). Authoring rules: docs/qa/platform-checklist/README.md · execution protocol: RUNNER.md.",
+  "area": "cli",
+  "title": "CLI — os dev/build/migrate/verify boot & exit-code contracts, scaffold first-run, flag/command error UX",
+  "items": [
+    {
+      "id": "cli.dev-boot-contract",
+      "title": "os dev boots to healthy with a loginable seeded admin, honest DB selection, reported port shifts, and a staleness warning",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P0",
+      "surface": "cli",
+      "personas": ["operator (local shell)"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a free non-default port (lsof -nP -iTCP:<port> -sTCP:LISTEN empty first — dogfood skill §0) and a scratch DB path under /tmp/<run>/"
+        ]
+      },
+      "steps": [
+        "from examples/app-showcase run `objectstack dev --ui --seed-admin -p <port> -d file:/tmp/<run>/data.db` and capture the full boot log (Environment ID / Artifact / Database key-values print at boot)",
+        "poll `curl -s -m3 -o /dev/null -w '%{http_code}' http://localhost:<port>/api/v1/health` until 200, then GET /api/v1/ready; open /_console/ and sign in as admin@objectos.ai / admin123",
+        "stop; restart the SAME command against the SAME DB but with `--admin-password changed99`; attempt login with the ORIGINAL password (the seed is empty-DB-only and must not overwrite)",
+        "stop; in a scratch dir with NO objectstack.config.ts and no --artifact, run `os dev; echo $?` and capture the message",
+        "back in the app dir with the server DOWN, touch a src file so it is newer than dist/objectstack.json, boot WITHOUT --compile, and capture the staleness warning block",
+        "with instance A still running, boot instance B on the same requested port and capture the '↪ server bound to port <actual> (requested <requested>)' line",
+        "run once with NONE of --database/--fresh/env-db set and record the printed Database line (must be the project-anchored file:<cwd>/.objectstack/data/dev.db); then run with `--fresh` and record the '🧪 Fresh OS_HOME' tempdir line and its deletion on exit",
+        "capture `echo $?` after every terminated invocation"
+      ],
+      "acceptance": [
+        {
+          "clause": "the boot reaches health: /api/v1/health answers 200 and /api/v1/ready succeeds, with the console served at /_console when --ui is passed",
+          "oracle": "api",
+          "verify": "the health poll flips to 200 within the probe budget; ready returns success; /_console/ serves the login page",
+          "evidence": "curl outputs + console screenshot"
+        },
+        {
+          "clause": "--seed-admin provisions the FIXED well-known dev admin (admin@objectos.ai / admin123) loginable via the real auth endpoint, and the seed is idempotent — a later boot with a different --admin-password does NOT overwrite the existing account",
+          "oracle": "api",
+          "verify": "login succeeds with the original credentials after the changed-password restart (flag contract: 'only acts on a zero-user DB, never overwrites an existing account')",
+          "evidence": "the two auth responses"
+        },
+        {
+          "clause": "DB selection honors the resolveDefaultDevDbUrl matrix: with nothing chosen, dev defaults to the PERSISTENT project-anchored sqlite file (.objectstack/data/dev.db) — never the serve default of :memory: that wipes work on restart",
+          "oracle": "log",
+          "verify": "the printed Database key-value per variant matches the matrix (default file path; -d url; --fresh tempdir; env url; memory driver imposes no file default)",
+          "evidence": "the per-variant Database boot lines"
+        },
+        {
+          "clause": "--fresh isolates OS_HOME-keyed state in an auto-deleted tempdir — and the evidence must NOT claim isolation for app-declared cwd-relative paths, which survive by documented design (#5594, e.g. the showcase-external datasource file)",
+          "oracle": "log",
+          "verify": "the Fresh OS_HOME line names a tempdir; the dir is gone after exit; any surviving .objectstack/data/showcase_external.db is annotated as the documented #5594 carve-out, not filed as a bug",
+          "evidence": "boot line + post-exit directory listings"
+        },
+        {
+          "clause": "a busy requested port auto-shifts AND is reported — the actually-bound port is printed, never silently different",
+          "oracle": "log",
+          "verify": "instance B prints '↪ server bound to port <actual> (requested <requested>)' (the IPC objectstack:listening channel exists so the parent can print the truth)",
+          "evidence": "the log line + a health probe on the actual port"
+        },
+        {
+          "clause": "a stale artifact is called out at boot: when dist/objectstack.json is older than the sources, the boot warns loudly, names the newest source and the remedy — and still boots (warn, never gate — #5148)",
+          "oracle": "log",
+          "verify": "the '⚠ … is OLDER than your sources — this boot serves the STALE build' block prints with the newest-source path and the fix line; the server still comes up",
+          "evidence": "the warning block + subsequent healthy boot"
+        },
+        {
+          "clause": "negative: no config and no artifact exits 1 with the remedy ('Run in a directory with objectstack.config.ts, pass --artifact <path|url>, or run from the monorepo root.') — never a hang, never a silent 0",
+          "oracle": "log",
+          "verify": "echo $? prints 1 and stderr carries the remedy line",
+          "evidence": "captured stderr + exit code"
+        }
+      ],
+      "negative": [
+        "a dev boot that wipes an existing dev DB when the user chose nothing (a regression to the :memory: serve default) is the FAIL the persistent default exists for",
+        "an auto-shifted port that is not reported (URL printed for the requested port while the server bound elsewhere) is a FAIL"
+      ],
+      "variants": [
+        "default: file:<cwd>/.objectstack/data/dev.db (persistent, imposed only when nothing else chosen)",
+        "--database <url> (explicit; no default imposed)",
+        "--fresh (ephemeral tempdir OS_HOME; implies --seed-admin)",
+        "OS_DATABASE_URL / DATABASE_URL env (env wins over the default)",
+        "--database-driver memory / OS_DATABASE_DRIVER=memory (explicit in-memory; no file default)"
+      ],
+      "traps": ["stale-dist", "stale-console-bundle", "shared-browser-tab"],
+      "source": [
+        "packages/cli/src/commands/dev.ts (resolveDefaultDevDbUrl matrix; --fresh coverage note #5594; seed-admin idempotency contract; IPC bound-port report; #5148 staleness warning + rebuild-restart coordinator)",
+        ".claude/skills/dogfood-verification/SKILL.md §0–§1 (port isolation, health probe, fixed admin creds, /_console layout)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-07", "change": "new area item: the os dev boot contract read directly out of dev.ts (DB-selection matrix as variants, seed idempotency, port-shift reporting, #5148 staleness warning, #5594 fresh-isolation carve-out) plus the dogfood skill's boot shapes", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    },
+    {
+      "id": "cli.build-own-contract",
+      "title": "os build's own contract: exit 0/1 only, located errors for schema and author-time rule failures, artifact + stats output, warnings never flip the exit",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "build",
+      "personas": ["operator (local shell)"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a scratch copy of a known-good app config (scaffolded blank app or a worktree copy of examples/app-showcase) so deliberate breakage never touches shared fixtures"
+        ]
+      },
+      "steps": [
+        "on the clean config run `os build; echo $?` and capture the summary (metadata stats, Artifact path/size)",
+        "run `os build --json` and capture the success payload",
+        "break the schema: give one field an impossible shape (e.g. delete its type) and run `os build; echo $?` — capture the located Zod error",
+        "break an author-time rule: author a flow whose Approval node approver expression does not parse (the #4409 worked example that once built green while os lint rejected it) and run `os build; echo $?`",
+        "re-run both failing builds with --json and capture the failure payloads",
+        "restore the config, add one UNDECLARED authoring key (the #3786 advisory class) and run `os build; echo $?` — the warning prints, the build passes",
+        "confirm `os build` and `os compile` produce identical behavior on the same input (build is the documented alias)"
+      ],
+      "acceptance": [
+        {
+          "clause": "success: exit 0, dist/objectstack.json written, and the summary reports metadata stats + artifact size; --json answers { success: true, output, size, stats, warnings, conversions, duration }",
+          "oracle": "build",
+          "verify": "echo $? is 0, the artifact file exists and parses, and the --json payload carries the declared keys",
+          "evidence": "exit code + artifact listing + the JSON payload"
+        },
+        {
+          "clause": "a schema violation fails the build with exit 1 and a LOCATED error naming the failing path — never a bare 'validation failed'",
+          "oracle": "build",
+          "verify": "the formatted Zod error names the object/field path of the deliberate break; echo $? is 1",
+          "evidence": "the error output + exit code"
+        },
+        {
+          "clause": "author-time rule failures exit 1 and every finding carries where/message/hint/rule/path — and ALL failing rules report at once, not first-failure-only",
+          "oracle": "build",
+          "verify": "the #4409 registry output for the broken-approver fixture shows the located finding with its rule id and hint ('the build is the command that SHIPS' — it must be no weaker than validate/lint)",
+          "evidence": "the rule-failure output + exit code"
+        },
+        {
+          "clause": "--json failure and advisory shapes match os validate --json (same warnings/conversions keys) — the #3782 parity class: the two surfaces must not disagree about what an author is told",
+          "oracle": "log",
+          "verify": "the failure payload is { success: false, … issues } and success payloads carry warnings + conversions under the same keys validate emits",
+          "evidence": "the paired --json payloads"
+        },
+        {
+          "clause": "exit codes are exactly 0 or 1 (the CliExitCode union) — never a count, never a duration",
+          "oracle": "build",
+          "verify": "echo $? across all runs is only ever 0 or 1 (the type that pins the #4873 class for every emitJson caller)",
+          "evidence": "the collected exit codes"
+        },
+        {
+          "clause": "advisories never flip the exit: the undeclared-authoring-key build warns visibly AND exits 0 — both sides of the warn/fail line",
+          "oracle": "build",
+          "verify": "the #3786 warning block prints, the artifact is written, echo $? is 0",
+          "evidence": "warning output + exit code + artifact"
+        }
+      ],
+      "negative": [
+        "exit 0 with no artifact written, or nonzero on the clean config, is a FAIL",
+        "the DEEP gate content (date-arithmetic formula errors, retired-key tombstones) is api-backend.formula-gates / api-backend.enforce-or-remove-authoring-gates — cite pinned passes there; this item owns only the build's OWN exit/error/output contract"
+      ],
+      "traps": ["stale-dist"],
+      "source": [
+        "packages/cli/src/commands/compile.ts (the full gate pipeline: Zod parse, #4409 author-time rule registry, #3786 unknown-key advisory, --json shapes, #3782 conversion-notice parity) + build.ts (alias)",
+        "packages/cli/src/utils/format.ts (CliExitCode = 0 | 1 — the narrowed exit-code slot)",
+        "api-backend.formula-gates, api-backend.enforce-or-remove-authoring-gates (gate content — cross-referenced, not duplicated)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-07", "change": "new item: the build command's own contract (exit-code discipline, located schema + rule errors, --json parity, advisory both-sides) read from compile.ts, with the gate-content items cross-referenced instead of re-proven", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    },
+    {
+      "id": "cli.migrate-plan-apply-json",
+      "title": "os migrate: bare command is a read-only plan, apply is safe-by-default, re-runs are idempotent, and --json exits 0 on success (#4873)",
+      "since": "v15",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "cli",
+      "personas": ["operator (local shell)"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a scratch app + persistent sqlite DB whose base schema was synced by one prior `os dev` boot (plan itself defers DDL since #3917, so the tables must pre-exist), e.g. -d file:/tmp/<run>/migrate.db"
+        ]
+      },
+      "steps": [
+        "boot the scratch app once with `os dev -d file:/tmp/<run>/migrate.db` so the base schema exists; stop it",
+        "add a new field to one object in the config and `os build`; run bare `os migrate` twice — both runs must print the SAME pending add-column plan and mutate nothing",
+        "run `os migrate plan --json; echo $?` and capture the payload ({ database, managedTables, total, changes, pending })",
+        "run `os migrate apply --yes; echo $?` and capture the applied list; then `os migrate plan` again (expect in-sync) and `os migrate apply --json --yes; echo $?` (expect message in_sync) — the idempotent re-run",
+        "remove a field from the config + `os build`; run `os migrate apply --yes` WITHOUT --allow-destructive (the drop must be SKIPPED with a warning), then with `--allow-destructive --yes` (applied)",
+        "with the dev server booted and holding the DB, run `os migrate apply --yes; echo $?` (expect the busy refusal, exit 1, without --force) and `os migrate plan` (proceeds with a warning — a plan writes nothing either way)",
+        "run `os migrate apply --json` WITHOUT --yes on a pending change: the payload must say confirmation_required with the pass--yes hint and mutate nothing",
+        "the #4873 pair: on the scratch DB run `os migrate recorded-by --json; echo $?` and `os migrate resume --json; echo $?`"
+      ],
+      "acceptance": [
+        {
+          "clause": "bare `os migrate` is the dry-run plan and NEVER mutates: boot-time DDL is deferred and the artifact seed suppressed (#3917), so two consecutive plans report identical drift and the physical schema is unchanged",
+          "oracle": "log",
+          "verify": "the two plan outputs match; a schema dump (or third plan) after them equals the first",
+          "evidence": "the two plan outputs + schema check"
+        },
+        {
+          "clause": "plan --json emits the declared shape and exits 0",
+          "oracle": "log",
+          "verify": "payload carries database/managedTables/total/changes/pending; echo $? is 0",
+          "evidence": "payload + exit code"
+        },
+        {
+          "clause": "#4873 exit-code honesty: EVERY migrate subcommand with --json exits 0 on success — never the elapsed-ms leak (recorded-by/resume once passed timer.elapsed() into the exit-code slot, so the shell saw duration & 0xFF: a different bogus nonzero on every successful run)",
+          "oracle": "log",
+          "verify": "echo $? after plan/apply/recorded-by/resume --json successes is exactly 0; the CliExitCode 0|1 type now makes the mistake a compile error",
+          "evidence": "the collected exit codes per subcommand"
+        },
+        {
+          "clause": "apply is safe-by-default: a destructive change is SKIPPED with an explicit warning until --allow-destructive, then applied with it — both sides captured",
+          "oracle": "log",
+          "verify": "the drop appears under skipped (with the re-run hint) on the first apply and under applied on the --allow-destructive run",
+          "evidence": "the two apply outputs"
+        },
+        {
+          "clause": "idempotent re-run: after a successful apply, plan reports in-sync ('nothing to migrate') and apply --json answers message in_sync with exit 0",
+          "oracle": "log",
+          "verify": "the post-apply plan prints the in-sync success line; the JSON re-apply payload is { …, message: 'in_sync' } and echo $? is 0",
+          "evidence": "outputs + exit codes"
+        },
+        {
+          "clause": "a busy database refuses apply (exit 1) without --force, while plan proceeds with only a warning — the read/write asymmetry is deliberate",
+          "oracle": "log",
+          "verify": "apply against the server-held DB exits 1 naming the occupancy; plan against the same DB completes with the busy warning",
+          "evidence": "both outputs + exit codes"
+        },
+        {
+          "clause": "--json is non-interactive: a mutating apply without --yes reports confirmation_required + the hint and performs NO change",
+          "oracle": "log",
+          "verify": "the payload says confirmation_required, hint 'pass --yes'; a follow-up plan still shows the pending change",
+          "evidence": "payload + follow-up plan"
+        }
+      ],
+      "negative": [
+        "an apply that performs a drop WITHOUT --allow-destructive is the FAIL the safe-by-default split exists for",
+        "exit 0 from a refused (busy) apply, or ANY nonzero exit from a successful --json run, is a FAIL — exit codes are the load-bearing CI contract here"
+      ],
+      "variants": [
+        "plan (default of the bare command)",
+        "apply",
+        "resume",
+        "recorded-by",
+        "meta",
+        "files-to-references",
+        "summary-nulls",
+        "value-shapes"
+      ],
+      "traps": ["stale-dist"],
+      "automated": { "kind": "unit", "ref": "packages/cli/src/utils/format.exit-code.test.ts" },
+      "source": [
+        "packages/cli/src/commands/migrate/index.ts + plan.ts (#2186 bare-command-is-plan; #3917 enforced never-mutates; occupancy warning) + apply.ts (--allow-destructive / --force / --yes / in_sync)",
+        "packages/cli/src/utils/format.ts (CliExitCode narrows the emitJson exit slot — the #4873 fix, commit 83df2fd)",
+        "packages/cli/src/commands/migrate/ (the eight registered subcommands enumerated as variants)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-07", "change": "new item: the migrate topic's read-only/apply/idempotency contract from plan.ts+apply.ts, with #4873 --json exit-code honesty as a load-bearing clause pinned to format.exit-code.test.ts and the subcommand set enumerated from src/commands/migrate/", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    },
+    {
+      "id": "cli.verify-verdict-exit-mapping",
+      "title": "objectstack verify: verdict vocabulary is closed, exit is nonzero exactly on failure verdicts, and the inconclusive split (needs-fixture/skipped) never fails the run",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "cli",
+      "personas": ["operator (local shell)"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": ["examples/app-showcase as the verified app (its config is the stock target)"],
+        "knownGaps": [
+          "no stock fixture ships a GUARANTEED-failing app, so the exit-1 side of the hardFailures mapping must be staged (point --app at a scratch config engineered to produce a fidelity gap or 5xx create) — record how it was staged in the evidence rather than skipping the side silently"
+        ]
+      },
+      "steps": [
+        "from examples/app-showcase run `objectstack verify --json > report.json; echo $?`",
+        "assert every results[].status in report.json is one of the six declared verdicts, and recompute the summary counts from results[] (they must reconcile)",
+        "recompute hardFailures = createFailed + readFailed + fidelityGaps (+ rls holes when --rls ran) from the report and compare to the exit code",
+        "run `objectstack verify --rls --json; echo $?` (the RLS proofs boot a SEPARATE fresh stack by design — unique-constraint collisions with the fidelity phase would silently skip objects)",
+        "run `OS_TENANCY_POSTURE=isolated objectstack verify --json` and capture either multiTenant:true in the payload or the hard boot error — never a quiet single-org run (#5262)",
+        "stage the fail side per the knownGap and capture `echo $?` (expect 1) alongside the failing report",
+        "capture the human-format run too (`objectstack verify`) and check the ✓/✗ banner agrees with the recomputed hardFailures"
+      ],
+      "acceptance": [
+        {
+          "clause": "the verdict vocabulary is closed: every per-object status is exactly one of verified | fidelity-gaps | create-failed | read-failed | skipped | needs-fixture",
+          "oracle": "log",
+          "verify": "scan results[].status in the JSON report against the six-member union in packages/verify/src/verify.ts",
+          "evidence": "report.json"
+        },
+        {
+          "clause": "exit code is nonzero EXACTLY when hardFailures > 0, where hardFailures = createFailed + readFailed + fidelityGaps + rlsHoles — recomputed from the report, never trusted from the banner",
+          "oracle": "log",
+          "verify": "echo $? is 0 when the recomputed sum is 0 and 1 when it is positive (the staged failing run)",
+          "evidence": "exit codes paired with recomputed sums"
+        },
+        {
+          "clause": "the inconclusive split is honored: a 400 VALIDATION_FAILED on the auto-derived record is classified needs-fixture (a fixture gap, not a platform finding) and does NOT fail the run; a 5xx is create-failed and DOES",
+          "oracle": "log",
+          "verify": "needs-fixture and skipped counts are excluded from hardFailures in the report vs exit-code comparison; the classification comment in verify.ts is the contract",
+          "evidence": "report excerpt showing needs-fixture objects on an exit-0 run"
+        },
+        {
+          "clause": "--rls runs its proofs on a separate fresh stack and any hole fails the run",
+          "oracle": "log",
+          "verify": "the --rls report includes the rls section; rls.summary.holes participates in hardFailures",
+          "evidence": "the --rls report + exit code"
+        },
+        {
+          "clause": "#5262 posture honesty: a walled OS_TENANCY_POSTURE (isolated|group) makes verify boot org-scoped, or hard-fail when the enterprise runtime is missing — NEVER a quiet single-org pass that under-verifies ('a verifier that under-verifies reports success it never established')",
+          "oracle": "log",
+          "verify": "the payload shows multiTenant:true OR the run errors loudly; multiTenant:false under a walled posture is the pinned regression",
+          "evidence": "the posture run's payload or error"
+        }
+      ],
+      "negative": [
+        "exit 0 while the report carries fidelityGaps > 0 (or any create/read failure) is a FAIL of the verifier's own honesty contract",
+        "a quiet single-org boot under a walled posture is the #5262 regression (third recurrence of the shape: cloud#1020, #5233) — FAIL"
+      ],
+      "variants": [
+        "verified",
+        "fidelity-gaps (hard failure)",
+        "create-failed (hard failure)",
+        "read-failed (hard failure)",
+        "needs-fixture (inconclusive — never fails)",
+        "skipped (inconclusive — never fails)"
+      ],
+      "traps": ["stale-dist", "wrong-persona"],
+      "automated": { "kind": "unit", "ref": "packages/cli/src/commands/verify-tenancy-posture.test.ts" },
+      "source": [
+        "packages/cli/src/commands/verify.ts (hardFailures sum, exit contract, resolveVerifyMultiTenant / #5262 / ADR-0105 D1, separate RLS stack rationale)",
+        "packages/verify/src/verify.ts (the six-member status union; 400-VALIDATION_FAILED→needs-fixture vs 5xx→create-failed classification)",
+        "packages/verify/src/rls.ts (#1994 class: you can't write what you can't read)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-07", "change": "new item: verdict-to-exit-code mapping read from verify.ts + verify.ts (verdict union), with the inconclusive split and the #5262 posture-honesty negative as load-bearing clauses; the unstageable always-failing fixture recorded as a knownGap", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    },
+    {
+      "id": "cli.scaffold-first-run",
+      "title": "The published first-run closes: create-objectstack scaffold → install → validate → build → boot → health, with the skills boundary holding",
+      "since": "v15",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "mixed",
+      "personas": ["new user (published-registry consumer)"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": ["npm registry reachability (the whole point is the PUBLISHED path, not the repo checkout)"],
+        "knownGaps": [
+          "during an RC window the repo version is unpublished and `latest` points at the previous major, so the protocol-major handshake refuses the artifact — that refusal is the ADR-0087 D1 gate WORKING on a skew the fallback introduced (#4894); record it in evidence, do not fail the item for it"
+        ]
+      },
+      "steps": [
+        "in a scratch dir: `npx -y create-objectstack@latest qa-first-run -t blank --skip-skills`",
+        "cd qa-first-run && npm install --no-fund --no-audit; echo $?",
+        "npm run validate; echo $? — then npm run build; echo $?",
+        "boot from the artifact exactly as the workflow does: `npx os start --artifact ./dist/objectstack.json --port 8080 > server.log 2>&1 &`, poll /api/v1/health up to 60s, then `curl -fsS http://localhost:8080/api/v1/ready`",
+        "repeat scaffold + validate + build across the template matrix (variants) — remote templates always ship build; run validate where the script exists",
+        "skills boundary probe: in a fresh scaffold run `npx -y skills add <objectstack checkout>/skills --all --copy` and compare the installed set to the curated skills/ catalog; then list repo-root discovery and assert no internal skill (dogfood-verification) surfaces",
+        "capture server.log for any boot error"
+      ],
+      "acceptance": [
+        {
+          "clause": "scaffold → install → validate → build → boot → health closes with every step exit 0, health 200 and ready succeeding",
+          "oracle": "api",
+          "verify": "the per-step exit codes are 0 and the two probes succeed against the booted artifact",
+          "evidence": "step exit codes + curl outputs + server.log"
+        },
+        {
+          "clause": "every published template validates and builds — per-variant, no template inferred from a sibling",
+          "oracle": "build",
+          "verify": "validate (where present) and build exit 0 for each of the six templates",
+          "evidence": "per-template exit codes"
+        },
+        {
+          "clause": "the scaffolded artifact boots via os start --artifact: the ADR-0087 D1 protocol-major handshake ACCEPTS a coherent scaffold — and when the RC-window skew applies, it REFUSES with the named engines.protocol mismatch instead of booting wrong",
+          "oracle": "log",
+          "verify": "either the healthy boot, or the exact '✗ package … targets protocol ^N … but this runtime is protocol M' refusal recorded as the gate working (#4894)",
+          "evidence": "server.log excerpt"
+        },
+        {
+          "clause": "the skills boundary holds: the installed set equals the curated skills/ catalog and repo-root discovery surfaces NO internal skill (the 15.1 third-party-eval leak, pinned in the workflow)",
+          "oracle": "log",
+          "verify": "set-equality against the curated catalog; grep for dogfood-verification in the discovery listing comes back empty",
+          "evidence": "the installed-set diff + discovery listing"
+        },
+        {
+          "clause": "negative: a server that never becomes healthy within the probe budget is a FAIL carrying server.log — not a retry-until-green",
+          "oracle": "log",
+          "verify": "on timeout the run records the failure with the full server.log, mirroring the workflow's '::error::server never became healthy' branch",
+          "evidence": "server.log on any failure"
+        }
+      ],
+      "negative": [
+        "an internal skill appearing in a scaffolded project is the exact leak the boundary step exists for — FAIL",
+        "a template that builds only from the repo checkout but not from the registry is the #2908 class this whole item guards"
+      ],
+      "variants": ["blank", "todo", "compliance", "content", "contracts", "procurement"],
+      "traps": ["stale-dist"],
+      "automated": { "kind": "ci", "ref": ".github/workflows/scaffold-e2e.yml" },
+      "source": [
+        ".github/workflows/scaffold-e2e.yml (#2908 — the scaffold→install→validate→build→boot→health lane, the registry-canary template matrix, the skills-boundary assertions, the #4894 RC-window fallback)",
+        "packages/create-objectstack (the scaffolder under test)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-07", "change": "new item: the published first-run experience mirrored step-for-step from scaffold-e2e.yml, template matrix as variants, RC-window protocol refusal recorded as gate-working instead of failure", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    },
+    {
+      "id": "cli.flag-command-error-ux",
+      "title": "Wrong flags and unknown commands error with usage and a nonzero exit — never silently ignored, never executed anyway",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "cli",
+      "personas": ["operator (local shell)"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": ["any directory — the probes must not depend on a valid app config, since parse errors fire before command bodies run"]
+      },
+      "steps": [
+        "`os migrate plan --frobnicate; echo $?` — capture stderr, and assert the command body never ran (no 'Migrate · plan' header, no 'Booting schema stack' line)",
+        "`os dev --log-level bogus; echo $?` — an enum-valued flag with an out-of-set value",
+        "`os frobnicate; echo $?` — an unknown top-level command",
+        "`os environments frobnicate; echo $?` — an unknown subcommand of a registered topic",
+        "`os --help; echo $?` and `os migrate --help; echo $?` — the help side must exit 0",
+        "sweep the registered surface: for every variant run `os <name> --help; echo $?` and record exit code + presence of a USAGE block",
+        "collect all outputs and exit codes into one evidence table"
+      ],
+      "acceptance": [
+        {
+          "clause": "an unknown flag errors NAMING the flag (oclif: 'Nonexistent flag: --frobnicate') with a help pointer, exits nonzero (oclif parse errors exit 2) — and the command body never runs",
+          "oracle": "log",
+          "verify": "stderr names --frobnicate and points at --help; echo $? is nonzero; the plan header/boot line is absent from the output",
+          "evidence": "captured stderr + exit code + absence check"
+        },
+        {
+          "clause": "an out-of-set value for an enum flag errors listing the allowed set, exit nonzero",
+          "oracle": "log",
+          "verify": "the --log-level bogus error enumerates debug|info|warn|error|fatal|silent; echo $? is nonzero",
+          "evidence": "stderr + exit code"
+        },
+        {
+          "clause": "an unknown command or topic-subcommand errors 'command … not found' with exit nonzero — never treated as a default command (this CLI ships help+plugins only, no not-found suggester: a typo is a hard error, not a did-you-mean prompt)",
+          "oracle": "log",
+          "verify": "both the top-level and topic probes error naming the unknown command; echo $? is nonzero for each",
+          "evidence": "the two stderr captures + exit codes"
+        },
+        {
+          "clause": "--help exits 0 with a usage block for the root and for EVERY registered command and topic — per-variant, none inferred",
+          "oracle": "log",
+          "verify": "the sweep records exit 0 + a USAGE section for all 30 variants",
+          "evidence": "the sweep's exit-code/usage table"
+        }
+      ],
+      "negative": [
+        "a parse error that still executes the command (output shows the command ran after the flag error) is the silent-ignore FAIL this item exists for",
+        "exit 0 on any unknown-flag/unknown-command probe is a FAIL even if an error message printed"
+      ],
+      "variants": [
+        "build",
+        "compile",
+        "create",
+        "dev",
+        "diff",
+        "doctor",
+        "explain",
+        "generate",
+        "info",
+        "init",
+        "lint",
+        "login",
+        "logout",
+        "register",
+        "serve",
+        "start",
+        "test",
+        "validate",
+        "verify",
+        "whoami",
+        "cloud (topic)",
+        "data (topic)",
+        "datasource (topic)",
+        "db (topic)",
+        "environments (topic)",
+        "i18n (topic)",
+        "meta (topic)",
+        "migrate (topic)",
+        "package (topic)",
+        "plugin (topic)"
+      ],
+      "source": [
+        "packages/cli/src/commands/ (the 20 top-level commands + 10 topics enumerated as variants — oclif pattern discovery per package.json oclif.commands)",
+        "packages/cli/package.json (oclif.plugins = help + plugins only — no not-found plugin, so unknown commands hard-error)",
+        "@oclif/core parse contract (Nonexistent flag / enum FailedFlagValidation / command-not-found, exit 2)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-07", "change": "new item: flag/command error UX with the full registered command surface enumerated from src/commands/ as variants, and never-executed-anyway as the load-bearing negative", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    }
+  ]
+}

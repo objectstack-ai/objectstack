@@ -143,7 +143,109 @@ re-verify rather than back-filling guesses. **For objectui-side evidence, pin
 the commit** (`objectui @732b1bf`) — `action.undoable`'s reader line numbers had
 already drifted by 28 lines one day after the issue citing them was filed.
 
+### `producer` — a consumer is only HALF the call graph (#4837)
+
+`live` means **authoring the property changes runtime behaviour**. A cited
+consumer proves something *reads* the key. It does not prove the read has an
+effect, because a read can depend on a second input that nobody supplies.
+
+`seed.json` marked `Seed.env` **live**, evidence `seed-loader.ts` line 91, note
+*"filterByEnv drops datasets whose env list excludes the running
+environment."* Every word of that was checkable against the file, and the
+verdict was still false:
+
+> Line 91 really did call `filterByEnv(request.seeds, config.env)`. But none of
+> the **six** call sites that build a `SeedLoaderRequest` — app boot, per-org
+> replay, hot reload, package apply, draft publish, marketplace install — ever
+> passed `env`. So `config.env` was permanently `undefined`, `filterByEnv`
+> returned its input on its first line, and `dataset.env` was **never read at
+> all**. The evidence pointed at the consumer; the property was dead at the
+> **producer**.
+
+The unit test made it worse rather than better: `seed-loader.test.ts` has always
+had a passing `should handle environment filtering` case — because the test
+supplies `config.env` itself. The mechanism was correct throughout; only the
+wiring was missing, and the ledger and the test both looked exclusively at the
+mechanism. This is the shape Prime Directive #10 already names in another
+context: **a `case` label is not enforcement; check the call site** (#3106).
+
+Hence the criterion:
+
+> When a property's runtime effect depends on a **second input that some
+> producer must supply**, a `live` verdict requires evidence on the producer
+> side too. Cite it in `producer`.
+
+```jsonc
+"env": {
+  "status": "live",
+  "evidence": "packages/metadata-protocol/src/seed-loader.ts:191 (filterByEnv drops …)",
+  "producer": "packages/metadata-protocol/src/seed-loader.ts:174 — load() resolves the comparison environment itself (resolveEnvConfig), rather than trusting a caller to pass it"
+}
+```
+
+`producer` resolves through **the same resolver as `evidence`** — repo-rooted
+paths must exist or CI fails; cross-repo paths are attributed and counted. A
+call-site claim nothing can falsify is precisely what this field exists to
+remove, so it does not get a weaker standard than the pointer it completes.
+
+Which entries need one. The risk is highest for **optional config with a
+default**: those always "have a value" in the type system and can still be
+`undefined` at runtime.
+
+| Shape | Needs `producer`? |
+|---|---|
+| The consumer reads the authored value directly (`hook.priority` orders hooks) | no — the author IS the producer |
+| The consumer compares the authored value against something a caller supplies (`seed.env`) | **yes** — cite who supplies it |
+| The consumer reads it out of an options/config object built elsewhere (`job.timeout`) | **yes** — cite the threading site |
+| The property is `dead` | no — there is nothing to produce |
+
+Absence never fails CI (most of the ledger predates the field, and back-filling
+guesses is the sin this records). `pnpm check:liveness --producer-gap` prints
+every `live` entry citing a consumer only — an upper bound on the debt, to be
+triaged with the table above rather than read as a defect list. A **malformed**
+value does fail.
+
+### `evidenceScope` — how wide the last look actually was (#4895)
+
+Four measured verdicts were reached by searching **this repo only**, and
+published as though they covered every consumer:
+
+| # | Verdict | What the search missed |
+|---|---|---|
+| 1 | `app.homePageId` tombstoned "no shell ever read it" | objectui's `AppContent.resolveLandingRoute()` had been reading it all along (corrected in #4709) |
+| 2 | `flow.nodes.children.position` marked live, "designer canvas layout" | the designer wrote its own `ui:{x,y}` and **nothing** read `position` — a false *live*, the opposite direction |
+| 3 | `HttpMethod` reported unused | the scan matched only `import … from` |
+| 4 | `Notification` / `NotificationConfig` removed on "zero importers" | objectui re-exported them with `export … from`, and the real consumers imported from `@object-ui/types` — **two hops**, so even a scan covering `export … from` misses it while it matches on the spec specifier |
+
+Case 4 is the one that decides the method: **no amount of text or specifier
+matching is sufficient**. A negative cross-repo claim has to follow the resolved
+symbol graph through re-export chains, or it is a guess with a citation. Every
+barrel package adds a blind spot, and the renderer repo is all barrels.
+
+`evidenceScope` records what was actually done, as data:
+
+| Value | Means |
+|---|---|
+| `in-repo` | the call graph was closed inside this repo only |
+| `cross-repo` | a named foreign realm was walked too — say **which**, in the evidence, and **pin the commit** (`objectui @c2fd1223`): `action.undoable`'s reader line numbers drifted 28 lines in one day (#3714) |
+
+Absent = scope undeclared, a worklist row rather than a failure; the field is
+younger than nearly every entry. A value outside the vocabulary FAILS, the same
+asymmetry as `verifiedAt` — a value the parser cannot read would silently exempt
+that entry from every future sweep.
+
+⚠️ Neither `cross-repo` value in the tree today covers **`cloud`**: the closed
+runtime is not reachable from an open-source checkout, so a `cross-repo` claim
+means "the realms named in the evidence", never "everywhere".
+
 ### ⚠️ An authoring/preview renderer is NOT a runtime consumer
+
+> **Scope narrowed 2026-08-10 (#7131) — read the next section with this one.** What
+> follows holds for a property that claims to **do** something: gate, bind, route,
+> filter, enforce. It does *not* settle a property whose declared effect is simply
+> to **be shown**, where the render is not a stand-in for the behaviour but *is* the
+> behaviour. None of the thirteen re-verifications below is reopened by that split —
+> all thirteen are behavioural keys.
 
 `live` means **authoring the property changes runtime behaviour**. A Studio
 `*.form.ts` input or a `metadata-admin/previews/*Preview.tsx` panel merely
@@ -185,6 +287,58 @@ understated entry does have a cost: `undoable` sat behind a "declared but NOT
 enforced" warning for a month while it worked, which is an invitation to skip a
 shipped feature. Erring toward `dead` is the right default *and* a debt to
 re-verify.
+
+### Designer previews count as consumers (maintainer ruling, 2026-08-10, #7131)
+
+The section above is the *over-claim* guard. It also produced an under-claim, and
+the maintainer settled it directly:
+
+> **Maintainer ruling (2026-08-10, directed in session `session_01BPWqbmEFU8gJepBJTHESXd`): previews count as consumers.**
+>
+> A designer preview that renders a key to a human is a runtime consumer — the ledger's "no runtime consumer" verdict must include metadata-admin preview read points. The affected docs-shaped rows (`job.label`/`job.description`, `translation.label`/`.name`) re-grade from dead to live, and the ledger methodology note records the principle so the next sweep asks the question mechanically.
+
+**The mechanical rule, for the next sweep.** Before writing `"no runtime
+consumer"` — or any wording that means it — **enumerate the metadata-admin preview
+read points** for the type, in objectui, and say what you found. The population is
+small, enumerable, and registered by type name, so this is a lookup and not a
+search:
+
+```bash
+# 1. does this type have a preview at all?
+git -C ../objectui grep -n "registerMetadataPreview('<type>'" origin/main
+# 2. what does that preview read off the draft?
+git -C ../objectui show origin/main:packages/app-shell/src/views/metadata-admin/previews/<X>Preview.tsx \
+  | grep -n 'd\.<key>'
+```
+
+An absent preview is a finding to record, not a step to skip — "the type has no
+registered preview" is exactly the sentence a later sweep needs, and it is the one
+`translation.label`'s superseded *"no runtime consumer **in this repo**"* was
+missing. That hedge was never false; the cross-repo look simply was not taken,
+which is the blind spot `evidenceScope` (#4895) exists to expose.
+
+**Why this does not contradict the section above.** The two rules divide on what
+the property claims, not on what the surface is:
+
+| The property's declared effect | Does a preview render settle it? |
+|---|---|
+| **Display** — docs-shaped annotation, `label` / `description` / a title fallback | **Yes.** Being shown to a human is the whole of the claimed effect. There is no second layer where the "real" consumer would live, so the preview is not standing in for anything. |
+| **Behaviour** — gates, bindings, routes, filters, permissions | **No.** The 2026-07 sweep's verdict stands unchanged: 10 of 13 preview-cited entries were wrong. A panel echoing `shortcut` back is not a keybinding, and echoing `permissions` back is not a gate. |
+
+So the failure the section above records — a preview citation used as evidence
+that *something acts on* the value — is untouched. What is corrected is the
+opposite move: taking a preview's **absence from the search** as proof that
+*nothing reads* the value, for a key whose only job was ever to be read by a
+person.
+
+**What `live` does and does not mean on a re-graded row.** `job.label` is `live`
+because a human sees it in the designer; the scheduler still stores name/schedule
+only, and the row says so. A re-grade is **not** an ADR-0033 change: these four
+rows are docs-shaped, deliberately KEPT, and still not `authorWarn`'d — nothing
+about enforce-or-remove moves. Cite the preview the way any cross-repo evidence is
+cited: realm marker, pinned objectui commit, and a `producer` naming the
+`registerMetadataPreview` call plus the surface that resolves it — a preview no
+registry hands a draft to is a read point that never runs.
 
 ### How to verify a claim without fooling yourself
 
@@ -522,10 +676,15 @@ over-share.
   silently. Same "pure + unit-tested" reasoning as `orphans.mts`, for the same reason.
 - `../scripts/liveness/check-empty-state.mts` — the empty-state gate (above);
   `empty-state-registry.mts` is its source of truth.
+- `../scripts/liveness/producer.mts` — the `producer` / `evidenceScope` fold
+  (#4837 / #4895). Pure + unit-tested for the same reason as `orphans.mts`: on
+  the shipped ledgers these checks are almost entirely quiet, so a green gate
+  proves nothing about whether they can fire.
 
 ```bash
 pnpm --filter @objectstack/spec check:liveness               # run the gate
 tsx packages/spec/scripts/liveness/check-liveness.mts --dump field   # inventory a type (seeding aid)
+tsx packages/spec/scripts/liveness/check-liveness.mts --producer-gap # live entries citing a consumer only
 ```
 
 CI: `.github/workflows/spec-liveness-check.yml` runs on PRs touching `packages/spec/**`.
@@ -545,7 +704,23 @@ The governed set is `GOVERNED` at the top of `check-liveness.mts`. To add a type
    RecordDetailView had been gating the History tab on it the whole time (#2707).
 4. Add the type to `GOVERNED`; confirm the gate is green.
 
-## Current state — 27 governed types (complete registry coverage)
+## Current state — 30 governed types (complete registry coverage)
+
+> **This heading is now checked** (#7257). `check:liveness` reconciles the table
+> against `GOVERNED` in both directions — a governed type with no row fails, a row
+> no `GOVERNED` entry backs fails, and `N` must equal both the row count *and*
+> `GOVERNED.length`. Until that landed the number was the count of ROWS, not of
+> governed types, and the two agreed only by coincidence: `api` and `capability`
+> were governed, ledgered and counted by the gate for days with no row here, under
+> a heading that still said coverage was complete. Prose cannot fail a build — the
+> same sentence this file spends 500 lines making true one level down (#4956), and
+> the last claim in it that was still riding on a human reading the file.
+>
+> The two missing rows were back-filled in the same change, from the seeding PRs'
+> own measurements rather than from the counts — see `api` and `capability` at the
+> foot of the table. What the gate deliberately does **not** check is the part
+> that made #7257 worth filing rather than fixing on the spot: the Notes cell is
+> hand-written measurement, and a manufactured one is worse than a missing row.
 
 **The counting method for this table is the gate's own report** —
 `check-liveness.mts --json`, `types.<type>.byStatus` — decided in #4488 after
@@ -562,12 +737,24 @@ count columns are **never hand-edited** — regenerate:
 
 ```bash
 cd packages/spec && npx tsx scripts/liveness/check-liveness.mts --json | python3 -c "
-import json,sys
+import json,re,sys
 r = json.load(sys.stdin)
+have = set(re.findall(r'^\|\s*([a-z][a-z0-9_]*)\s*\|', open('liveness/README.md').read().split('## Current state')[-1], re.M))
+NEW = ' **NO ROW YET (#7257) — write this Notes cell from the seeding PR measurement, never from a guess** |'
 for t, v in r['types'].items():
     b = v['byStatus']
-    print(f\"| {t} | {b.get('live',0)} | {b.get('experimental',0)} | {b.get('dead',0)} | {b.get('planned',0)} |\")"
+    row = f\"| {t} | {b.get('live',0)} | {b.get('experimental',0)} | {b.get('dead',0)} | {b.get('planned',0)} |\"
+    print(row + ('' if t in have else NEW))"
 ```
+
+The snippet reads the table back as well as the report, so **a governed type with
+no row prints a skeleton** instead of silently not being printed next to 29
+siblings that are. That is the omission made visible at REGENERATION time; the
+gate above makes it visible at CI time. Both were needed: `api` and `capability`
+survived because the only reader who could have noticed was a human comparing two
+lists by eye, and the count columns get regenerated far more often than the row
+set gets audited. The skeleton stops at the count columns on purpose — it prints
+a marker where the Notes cell goes, never a guess at what belongs there.
 
 | Type | live | exp | dead | planned | Notes |
 |---|---|---|---|---|---|
@@ -584,10 +771,9 @@ for t, v in r['types'].items():
 | dataset | 27 | – | 0 | – | `measures.certified` (declared-but-unenforced governance flag) REMOVED in 16.0 (#2377) |
 | page | 16 | – | – | 1 | fully live + one planned |
 | view | 79 | 0 | 4 | – | list/form drilled via `children` (#2998 Track B); list.{responsive,performance} + form.{defaultSort,aria} REMOVED 2026-07-30 (#3896 close-out sweep — list aria/data stay live); **form.data was that sweep's one CORRECTION** — the removal attempt broke the build (`defineForm` writes `data.provider='schema'` onto every metadata form, `metadata-protocol` serves it), so it stands `live` with re-verified evidence; form.{buttons,defaults} live (framework#1894 / #2998); audit-era DEAD lines superseded by re-verification; level-2 dead residue (userActions.buttons, addRecord.mode/formView, tabs[].order) noted on parents — one drill level only |
-
 | report | 21 | 0 | 0 | – | dataset-bound (ADR-0021); the aria/performance LEDGER entries were stale — the keys left the schema in the report-liveness close-out; deleted 2026-07-30 as hygiene. Audit-era `chart` DEAD superseded (framework#1890 / #3441) |
-| dashboard | 33 | 0 | 8 | – | ADR-0021 dataset widgets (#3251; DashboardWidgetSchema `.strict()`); `aria`/`performance` (and widget `performance` + PerformanceConfigSchema) REMOVED 2026-07-30 (#3896 close-out sweep — no renderer applied any of them); audit-era `globalFilters`/`dateRange` DEAD superseded (framework#2501) | **#4956**: `widgets` DRILLED — the row jumps 20 → 41 classified because all 22 widget-level keys enter the count at once. They had never been classified at all: the entry carried one blanket `live` plus a `note` asserting they were classified "in the DashboardWidgetSchema subtree", and no such subtree existed in any of the 28 ledger files. That gap, not any evidence, is what carried `widgets[].responsive` through the #3896 sweep that removed both its sibling `widgets[].performance` and its literal namesake `view.responsive` — `view` is drilled, so `list.responsive` got asked and went out. New dead 6 = `responsive` (retired #4876/#4995, tombstone keeps the row) + `colorVariant` + `actionUrl`/`actionType`/`actionIcon` + `aria`. The action trio is the sharpest: no renderer draws a per-widget action button at all (every `actionUrl` read in DashboardRenderer is scoped to `header.actions[]`), yet `validate-dashboard-action-refs.ts` enforces reference integrity on it and its docblock calls it "the per-widget button" — a lint guarding an affordance that does not exist. `requiresService` is the counter-example worth remembering: dead by every objectui measurement, and LIVE server-side (`filterDashboardForUser`, ADR-0057 D10) — judging a widget key from the renderer repo alone would have retired an enforced gate. `compareTo` is `live` on ONE path only (inline object-provider charts); on the ADR-0021 dataset path the string arms are dropped and `{ offset }` throws in the executor |
-| query | 16 | 1 | 4 | – | **not a metadata type** — the REQUEST surface (`QuerySchema`: client SDK QueryBuilder output; the `POST /data/:object/query` body), governed via `SPEC_ONLY_SCHEMAS` (#4286). The gate's one-level walk resolves 1 experimental; the 7 marker-experimental search affordances sit one level deeper, below the walk — resolved from `[EXPERIMENTAL — not enforced]` describe markers, not ledger entries (search `fuzzy`/`operator`/`boost`/`minScore`/`language`/`highlight` + `aggregations[].filter` — declared engine affordances no executor receives). The #4286 sweep closed out same-release: `having` ENFORCED 2026-07-31 (engine-side post-aggregation filter, both paths; was finding 1); dead 4 = the tombstoned removals `joins`/`windowFunctions`/`cursor`/`distinct` — REMOVED 2026-07-31 (retiredKey keeps each in the walked shape so the rows stay; protocol-17 semantic migrations; the JoinNode + WindowFunctionNode clusters and the `QueryBuilder.cursor()`/`.distinct()` producers deleted with their keys; `distinct`'s mis-wired REST count suppression deleted too — finding 2) |
+| dashboard | 34 | 0 | 7 | – | ADR-0021 dataset widgets (#3251; DashboardWidgetSchema `.strict()`); `aria`/`performance` (and widget `performance` + PerformanceConfigSchema) REMOVED 2026-07-30 (#3896 close-out sweep — no renderer applied any of them); audit-era `globalFilters`/`dateRange` DEAD superseded (framework#2501) | **#4956**: `widgets` DRILLED — the row jumps 20 → 41 classified because all 22 widget-level keys enter the count at once. They had never been classified at all: the entry carried one blanket `live` plus a `note` asserting they were classified "in the DashboardWidgetSchema subtree", and no such subtree existed in any of the 28 ledger files. That gap, not any evidence, is what carried `widgets[].responsive` through the #3896 sweep that removed both its sibling `widgets[].performance` and its literal namesake `view.responsive` — `view` is drilled, so `list.responsive` got asked and went out. New dead 6 = `responsive` (retired #4876/#4995, tombstone keeps the row) + `colorVariant` + `actionUrl`/`actionType`/`actionIcon` + `aria`. The action trio is the sharpest: no renderer draws a per-widget action button at all (every `actionUrl` read in DashboardRenderer is scoped to `header.actions[]`), yet `validate-dashboard-action-refs.ts` enforces reference integrity on it and its docblock calls it "the per-widget button" — a lint guarding an affordance that does not exist. `requiresService` is the counter-example worth remembering: dead by every objectui measurement, and LIVE server-side (`filterDashboardForUser`, ADR-0057 D10) — judging a widget key from the renderer repo alone would have retired an enforced gate. `compareTo` is `live` on ONE path only (inline object-provider charts); on the ADR-0021 dataset path the string arms are dropped and `{ offset }` throws in the executor. **#6774** moves the row 33/8 → 34/7: `colorVariant` CORRECTED dead → live 2026-08-09, the enforce leg of #5010 ruling B landing from the renderer side (objectui#3359 / PR objectui#3799, absorbed by pin `09987b68`). Worth reading beside `requiresService` above, because it is the same lesson from the other end — that row warns against judging a widget key from the renderer repo alone, and this one is a `dead` verdict that was correct in this repo AND correct in the renderer repo on the day it was measured, and stopped being either when a cross-repo decision was implemented. A ledger row is a claim with a timestamp; `verifiedAt` is what makes the claim re-askable. It also empties the dashboard warn set, so the author-side lint now says nothing about any widget key — `dashboard` stays in the lint's TYPE_COLLECTIONS all the same (the `webhook`/`email_template` resolved state) |
+| query | 15 | 1 | 5 | 0 | **not a metadata type** — the REQUEST surface (`QuerySchema`: client SDK QueryBuilder output; the `POST /data/:object/query` body), governed via `SPEC_ONLY_SCHEMAS` (#4286). The gate's one-level walk resolves 1 experimental; the 7 marker-experimental search affordances sit one level deeper, below the walk — resolved from `[EXPERIMENTAL — not enforced]` describe markers, not ledger entries (search `fuzzy`/`operator`/`boost`/`minScore`/`language`/`highlight` + `aggregations[].filter` — declared engine affordances no executor receives). The #4286 sweep closed out same-release: `having` ENFORCED 2026-07-31 (engine-side post-aggregation filter, both paths; was finding 1); dead 4 = the tombstoned removals `joins`/`windowFunctions`/`cursor`/`distinct` — REMOVED 2026-07-31 (retiredKey keeps each in the walked shape so the rows stay; protocol-17 semantic migrations; the JoinNode + WindowFunctionNode clusters and the `QueryBuilder.cursor()`/`.distinct()` producers deleted with their keys; `distinct`'s mis-wired REST count suppression deleted too — finding 2). **#6815** adds the 5th dead: `aggregations[].distinct` REMOVED 2026-08-09 (live → dead, `-1` live). It is the one member of this ledger the #4286 sweep could not have caught with the question it asked — that sweep looked for keys NO executor reads, and this one had a reader: the objectql in-memory fallback deduplicated before applying the function while all five other faces (driver-sql, driver-turso, driver-mongodb, driver-memory, service-analytics' `AGGREGATE_SQL`) ignored it, so one query answered two plausible NUMBERS depending on which backend served it. The lesson for the next audit is the question, not the key: a per-key `live` verdict is only as good as the count of faces it was measured across, and this row's 2026-07-31 evidence (`in-memory-aggregation.ts:167,204-206`) was TRUE and still the wrong verdict. `count_distinct` is the surviving spelling (enforce leg, #6409) |
 | datasource | 30 | 0 | 0 | 0 | seeded 2026-08-01 (#4487) — the **highest dead ratio of any governed type** (20 of 43), and it was ungoverned until now, which is not a coincidence: #4410/#4465/#4481 found six inert keys here by hand, two security-shaped (`schemaMode` left an external DB constructible as `managed` with DDL ungated; `ssl` configured nothing while looking configured). Dead set = `capabilities.*` (all 11 — the engine gates pushdown on the runtime driver's `supports.*` object, a non-overlapping vocabulary), `healthCheck.*` (3 — nothing schedules a datasource probe; the 20 `healthCheck` hits in the repo all belong to the PLUGIN health monitor and other surfaces), `retryPolicy.*` (4 — `retryPolicy` IS enforced on `hook` and `job`, which is what makes this one read alive; the shapes differ), `external.label`, `external.requirePermission`. **`capabilities.readOnly` is the one to know**: it reads as a safety switch, gates nothing, and two shipped prescriptions pointed authors at it until #4487 — `external.allowWrites: false` is the enforced write gate. `config` is a `z.record`, so its per-driver keys sit outside the walk (recorded in the entry's note, not silently skipped) **批 A CLOSED 2026-08-02 (#4583)**: the `capabilities` block — 11 flags, every one dead and authorWarn'd — was REMOVED rather than bridged; pushdown comes from the runtime driver's own `supports.*`, so there was nothing to connect it to. Its rows are deleted (strict-removal route), which is why dead falls 20 → 9. `readOnly` was the reason the audit was worth doing: it read as a safety switch, gated nothing, and had already been MOVED twice toward somewhere it might be enforced (#4410, #4465) — the shipped CRM example called a datasource a read replica on the strength of it while the datasource took writes. Removing it does NOT hand the author a working alternative: `external.allowWrites` only gates FEDERATED datasources, so a managed one has no read-only gate at all (#4584). Remaining 9 = healthCheck ×3 + retryPolicy ×4 + external ×2, batches B/C/D of #4583 **BATCHES B/C/D CLOSED 2026-08-02 — datasource now has ZERO dead properties**, down from the 20 it was seeded with (the highest dead ratio of any governed type). `retryPolicy` ×4 and `healthCheck` ×3 went as whole blocks, `external.label` / `external.requirePermission` as keys. None was bridgeable: each already had a different LIVE mechanism doing the job — the boot policy, the driver handle's on-demand `ping()`/`checkHealth()`, the top-level `label`, and ordinary permission sets + RLS. The `retryPolicy` rejection deliberately refuses to offer a rename: `hook`/`job` retryPolicy ARE enforced but spell the delay `backoffMs`, and that inconsistency is itself the evidence nothing read the datasource one (#4488's sharpest trap) |
 | webhook | 11 | 0 | 0 | – | **not a registered metadata type** — governed via the gate's spec-only schema override (`SPEC_ONLY_SCHEMAS`), not `getMetadataTypeSchema`; folding it onto the registry is the #3490 reassessment. This row once read 0/1/16 ("the ENTIRE authoring surface is dead", #3461) and both halves of that were CLOSED same-quarter: #3489 built the materializer bridge (authored `webhooks:` entries now land as `sys_webhook` dispatcher rows) and #3494 pruned the aspirational props outright — so the surviving surface is fully live. Kept in the table as the worked example that a dead verdict is a worklist entry, not a tombstone: enforce-or-remove resolved this one by ENFORCING |
 | app | 45 | – | 9 | – | seeded 2026-08-01 (#4488). Dead 9 = the seven #4142 `retiredKey` tombstones (version/aria/objects/apis/sharing/embed/mobileNavigation — rows stay while the tombstones hold the keys in the walked shape) + `homePageId` (#4667 tombstone — the landing IS the first nav item; root landing follows `isDefault` routing) + `areas.description` (benign, docs-shaped, kept and not warned). RETIRED 17.0.0 (#4509, rows deleted — the selector schema is strict): selector `includeAll` (deliberately DISOBEYED, not merely unread — selectors are mandatory-scope and an "All" row would clear the scope, leaking system metadata through Studio's package filter; STUDIO_APP authored it against a renderer that ignored it) and `placement` (no renderer read it; "topbar" placed nothing). Nav walk covers the union's `object` variant; other variants hand-verified live, and the `actionDef` dispatch gap closed in #4509 | **#4651**: the **fail-open area gates** `areas.visible` / `areas.requiredPermissions` — this ledger's most important app finding — are REMOVED, rows DELETED (strict removal; retained rows would report ORPHAN). They were not merely unread: `filterAppForUser` never reads `item.areas` at all and the shell renders every area, so a "hidden" or permission-gated area was served to everyone, while the identically named per-ITEM and per-APP keys ARE enforced. Route B (remove) over route A (enforce): enforcing needs semantics decided first (does filtering an area remove its items everywhere? does the server bind `user` for area CEL?), which the 17.0.0 window could not hold. Boundary unchanged and still recorded on `areas.navigation`: per-item gating inside an area is shell-side only. **#4667**: `homePageId` TOMBSTONED (row stays — retiredKey keeps it in the walked shape) and `areas.order` row DELETED (strict removal); `areas.order` read alive because the per-ITEM `order` really is sorted (NavigationRenderer.tsx:1154) while no renderer ever sorted areas. |
@@ -598,7 +784,10 @@ for t, v in r['types'].items():
 | mapping | 14 | – | 0 | – | seeded 2026-08-01 (#4488) at 8/11 live; **0 dead since #4509** retired the three that were not. The import half (#2611) is loudly enforced — unsupported transforms/formats are 400s, `mode`/`upsertKey` default the request, the wizard picker renders `label`. RETIRED 17.0.0: `extractQuery` (authorWarn — "for export only" promised an export path no exporter implements) + `errorPolicy`/`batchSize`, which were dead AND **unwarnable** (schema defaults materialize at parse, so presence ≠ authored — `_authorWarnSkipped`, the non-boolean instance of the default(true) rule). That unwarnability is why they went out in the 17.0.0 window rather than after a deprecation cycle: removal was the only channel that could ever reach the author. Rows DELETED, not tombstoned — MappingSchema is strict, so the keys left the walked shape |
 | seed | 5 | – | 0 | – | seeded 2026-08-01 (#4488). Fully live via SeedLoaderService on both doors (boot/per-org replay + runtime-draft publish). `records` is the z.record walk boundary: the keys an author writes are the target object's fields, governed by that object's own definitions — recorded in the entry, not silently skipped |
 | translation | 17 | – | 2 | – | seeded 2026-08-01 (#4488) — after fixing the walker: the registered schema is a z.preprocess pipe (#3778 retired-dialect guard) whose transform side the unwrap always took, so the type was literally unwalkable. 10 of 11 groups live across spec resolvers, REST localization, objectui client resolvers and plugin-audit (whose composed-key `t()` calls make `messages` easy to mis-verify as dead). Dead 1 = `validationMessages` (authorWarn): nothing resolves it, and #3778's own legacy-key migration table steers `errors:` authors into it — a shipped false signpost, the capabilities.readOnly shape | **#4667**: `validationMessages` REMOVED (row deleted) — removed from the shared translationDataShape(), so it retired at BOTH doors at once, closing the item-only asymmetry #3778's original guard had. #3778's own `errors` guidance was rewritten in the same change: it had been steering authors INTO this dead group. |
+| qa | 4 | – | 5 | – | seeded 2026-08-10 (#6247) — **not a metadata type**: `TestSuiteSchema` is the FILE surface of the shipped `os test` command (`qa/*.test.json`), governed through the same `SPEC_ONLY_SCHEMAS` override as `query`/`webhook`/`validation`. It is in the table as the clearest worked example of a **false `dead` measurement**: #6247 reported the whole domain declared-but-inert on a grep that scanned only `*Schema` identifiers, and every consumer here reads the **type** names (`QA.TestSuite`, `QA.TestStep`, `QA.TestAction`) — so an entire execution chain (core's `TestRunner` + `HttpTestAdapter`, published via `export * as QA`, driven by a documented CLI command) read as zero consumers, and a retire ruling was issued on it before being withdrawn. The `evidenceScope` table one section up says no amount of specifier matching is sufficient for a negative claim; this is the same lesson for **identifier** matching. What was really wrong was narrower and real: the type was the contract and the schema had no `parse` site, so the CLI's `JSON.parse(content) as QA.TestSuite` cast admitted anything — ENFORCED in the same change (`TestSuiteSchema.safeParse` at the load site, pinned). Dead 5 = `name` (the file name is the suite identity; the CLI prints `path.basename`), `scenarios.name` (describe() says "for test reports"; every report carries `scenarioId` instead), `scenarios.description` (docs-shaped, kept), and the two on the enforce-or-remove worklist — `scenarios.tags` promises filtering that `os test`'s two flags cannot express, and `scenarios.requires` declares param/plugin preconditions nothing checks, so a suite naming a missing plugin runs anyway and fails as an unexplained HTTP error. Neither carries `authorWarn` and the omission is deliberate (`_authorWarnSkipped`): the lint walks stack **collections**, a QA suite is a loose file in no stack, so a warn flag here would emit nothing — a silent no-op inside the mechanism built to catch silent no-ops |
 | validation | 15 | 0 | 3 | 0 | seeded 2026-08-01 (#4488). The ADR-0020 carrier: the evaluator honors active/events/priority/severity/type/condition/message (the zod header's "only reads type/condition/…" prose is STALE — trust the ledger). Dead 3 = label/description/tags, declared governance metadata, kept unmarked. Union walk boundary recorded: only base + `script` keys walked; per-variant keys are governed by the evaluator's tests, not ledger rows. **No longer a registered metadata kind** — #4509 retired it under ADR-0088 (a standalone rule had no object-binding key and every variant is `.strict()`, so it bound to nothing and gated no write; a state machine authored that way saved cleanly and did nothing). The rule VOCABULARY is untouched and fully live via `object.validations[]`, so the ledger keeps governing it through the gate's spec-only override, alongside `webhook` and `query`. The contrast with the two bridges in the same batch is the point: enforce-or-remove picked ENFORCE where the feature existed and only the wiring was missing, and REMOVE where the shape itself could not carry the feature |
+| api | 25 | 0 | 0 | 2 | seeded 2026-08-04 (#5271, part of #5206; PR #5312) — **not a metadata type until that same change made it one**, which is the row's point: governance and registration landed together, the treatment `datasource` did not get (#4487) and paid for with six inert keys found by hand. What #5206 measured before the fix: `api` was in neither `DEFAULT_METADATA_TYPE_REGISTRY` nor `BUILTIN_METADATA_TYPE_SCHEMAS`, so `saveMetaItem`'s `resolveOverlaySchema('api', …)` → `getMetadataTypeSchema('api')` returned `undefined` and took its own documented branch — an unregistered type is stored **unvalidated** — while `getMetaTypes()` could not enumerate the type at all, so Studio rendered neither list nor form. That issue names the shape precisely and it is the inverse of this ledger's usual one: **enforced but undeclared** (the matcher was already indexing these entries, #5089), where `dead` is declared-but-unenforced. The seeding pass classified 27 keys — live 25 / planned 2 / dead 0 — each cited `file:line` at the consumer layer that reads it: the MATCHER (`packages/metadata/src/endpoint-matcher.ts`) indexes `name`/`path`/`method`; the EXECUTOR (`packages/runtime/src/endpoint-executor.ts`) dispatches on `type` and reads `target`/`objectParams`; the POLICY chain (`packages/runtime/src/endpoint-policy.ts` + `security/inbound-rate-limit.ts`) enforces `authRequired`/`rateLimit`/`cacheTtl`; the MAPPING layer (`packages/runtime/src/api-mapping.ts`) applies `inputMapping`/`outputMapping`; and OpenAPI enrichment (`packages/rest/src/openapi-endpoints.ts`) emits `summary`/`description`. Timing was the reason it was cheap: #5040's E-series had built every one of those consumers and all of it was on main, so each key had a real evidence path rather than a promise. **Planned 2 = `inputMapping.transform` + `outputMapping.transform`, and `planned` rather than `dead` is load-bearing**: `dead` here means parsed with no consumer — a silent no-op — and these are the opposite, parsed and then LOUDLY REFUSED at publish (`endpoint-publish-gate.ts` mappingGate) and again at runtime, because no transformation-function registry exists anywhere in the platform. An author who writes one is told so and told what to do instead, so there is nothing for enforce-or-remove to chase; they stay in the vocabulary because admitting them needs a function registry **and** a sandbox ruling (#5040 §3.4), which is a design decision, not a key to quietly delete. Zero dead |
+| capability | 12 | 0 | 0 | 0 | seeded 2026-08-08 (#5961; PR #6540) — `CapabilityDeclarationSchema`, the DECLARATION side of ADR-0066 D1's three-way separation: packages DEFINE a capability, permission sets GRANT it via `systemPermissions`, resources REQUIRE it via `requiredPermissions`. **The gate's 12 and the seeding PR's 5 are the same measurement at two granularities** — PR #6540 call-graph-closed **5 authorable properties**, every one to a real reader in `packages/plugins/plugin-security/src/bootstrap-declared-capabilities.ts` (the one consumer that turns a declaration into a `sys_capability` row), all `live`, with no `PENDING_GOVERNANCE` debt recorded; the other 7 are the ADR-0010 protection-envelope keys the gate auto-classifies `live` and which carry `null` verdicts in the file, exactly as on `permission`/`position`. The same worked example as `api` above and PR #6540 says so in those words — **enforced but undeclared**, the mirror of the hole #5271 closed. What #5961 measured: absent from `DEFAULT_METADATA_TYPE_REGISTRY`, `BUILTIN_METADATA_TYPE_SCHEMAS` and `HAND_CRAFTED_SCHEMAS`, so `isRuntimeCreateAllowed()` took its no-static-entry fallback (permanently true) and `saveMetaItem` its no-schema branch — `PUT /api/v1/meta/capability/:name` accepted **arbitrary JSON** onto an authorization surface whose names `systemPermissions`/`requiredPermissions` resolve by string, while `/meta/types` synthesised a false `allowRuntimeCreate: true` descriptor Studio drew a raw-JSON create form from. #5870 did not open that path (the write gate reads the registry, not the item store); it only made the type visible in `getMetaTypes()`, and both the issue and this row say so to stop the next reader filing it as a regression. Landed as ruling A on ADR-0066 D1's own authority: `allowRuntimeCreate: false` **and** `allowOrgOverride: false`, the second self-judged inside the ruling's rationale and flagged for veto — a tenant overlay of a package declaration would lift `scope` from `org` to `platform`, which is the one field on this type that is an escalation rather than display. Its reverse verification is worth copying: deleting the registry entry gave 7 red / 3 green and measured something **sharper than predicted** — a garbage payload turned 422 rather than resolving, i.e. the schema binding is a real second line of defence behind the registry row, not a restatement of it; deleting the schema binding alone gave exactly 3 red. `packageId` is the one key that reads oddly: deliberately a FALLBACK, not the primary, since #5870 added `capabilities` to the ObjectQL stamped-collection list so `_packageId` now reaches a declaration and wins — it stays `live` because the fallback branch still decides materialization for any declaration arriving unstamped. Zero dead |
 
 The `dead` set across types is the enforce-or-remove worklist (ADR-0049); every
 misleading entry carries `authorWarn` so authors hear about it at compile time

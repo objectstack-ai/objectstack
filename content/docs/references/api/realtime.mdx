@@ -13,7 +13,7 @@ description: Realtime protocol schemas
 
 ```typescript
 import { RealtimeConfigSchema, RealtimeEventSchema, RealtimeEventType, RealtimePresenceSchema, SubscriptionSchema, SubscriptionEventSchema, TransportProtocol } from '@objectstack/spec/api';
-import type { RealtimeConfig, RealtimeEvent, RealtimeEventType, RealtimePresence, Subscription, TransportProtocol } from '@objectstack/spec/api';
+import type { RealtimeConfig, RealtimeEvent, RealtimeEventType, RealtimePresence, Subscription, SubscriptionEvent, TransportProtocol } from '@objectstack/spec/api';
 
 // Validate data
 const result = RealtimeConfigSchema.parse(data);
@@ -29,7 +29,7 @@ const result = RealtimeConfigSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **enabled** | `boolean` | ✅ | Enable realtime synchronization |
 | **transport** | `Enum<'websocket' \| 'sse' \| 'polling'>` | ✅ | Transport protocol |
-| **subscriptions** | `{ id: string; events: { type: Enum<'record.created' \| 'record.updated' \| 'record.deleted' \| 'field.changed'>; object?: string; filters?: any }[]; transport: Enum<'websocket' \| 'sse' \| 'polling'>; channel?: string }[]` | optional | Default subscriptions |
+| **subscriptions** | `{ id: string; events: object[]; transport: Enum<'websocket' \| 'sse' \| 'polling'>; channel?: string }[]` | optional | Default subscriptions |
 
 
 ---

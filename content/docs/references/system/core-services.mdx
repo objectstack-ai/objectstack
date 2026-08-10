@@ -20,8 +20,8 @@ This registry is used by the `ObjectKernel` and `HttpDispatcher` to:
 ## TypeScript Usage
 
 ```typescript
-import { CoreServiceName, KernelServiceMapSchema, ServiceConfigSchema, ServiceCriticalitySchema, ServiceStatusSchema } from '@objectstack/spec/system';
-import type { CoreServiceName } from '@objectstack/spec/system';
+import { CoreServiceName, KernelServiceMapSchema, KernelServiceStatusSchema, ServiceConfigSchema, ServiceCriticalitySchema } from '@objectstack/spec/system';
+import type { CoreServiceName, KernelServiceMap, KernelServiceStatus, ServiceConfig, ServiceCriticality } from '@objectstack/spec/system';
 
 // Validate data
 const result = CoreServiceName.parse(data);
@@ -55,6 +55,22 @@ const result = CoreServiceName.parse(data);
 
 ---
 
+## KernelServiceStatus
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `Enum<'metadata' \| 'data' \| 'auth' \| 'file-storage' \| 'search' \| 'cache' \| 'queue' \| 'automation' \| 'analytics' \| 'realtime' \| 'job' \| 'notification' \| 'ai' \| 'i18n' \| 'ui'>` | ✅ |  |
+| **enabled** | `boolean` | ✅ |  |
+| **status** | `Enum<'running' \| 'stopped' \| 'degraded' \| 'initializing'>` | ✅ |  |
+| **version** | `string` | optional |  |
+| **provider** | `string` | optional | Implementation provider (e.g. "s3" for storage) |
+| **features** | `string[]` | optional | List of supported sub-features |
+
+
+---
+
 ## ServiceConfig
 
 ### Properties
@@ -75,22 +91,6 @@ const result = CoreServiceName.parse(data);
 * `required`
 * `core`
 * `optional`
-
-
----
-
-## ServiceStatus
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **name** | `Enum<'metadata' \| 'data' \| 'auth' \| 'file-storage' \| 'search' \| 'cache' \| 'queue' \| 'automation' \| 'analytics' \| 'realtime' \| 'job' \| 'notification' \| 'ai' \| 'i18n' \| 'ui'>` | ✅ |  |
-| **enabled** | `boolean` | ✅ |  |
-| **status** | `Enum<'running' \| 'stopped' \| 'degraded' \| 'initializing'>` | ✅ |  |
-| **version** | `string` | optional |  |
-| **provider** | `string` | optional | Implementation provider (e.g. "s3" for storage) |
-| **features** | `string[]` | optional | List of supported sub-features |
 
 
 ---

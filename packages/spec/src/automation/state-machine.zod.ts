@@ -130,6 +130,7 @@ export const GuardRefSchema = lazySchema(() => z.union([
     },
   ),
 ]));
+export type GuardRef = z.input<typeof GuardRefSchema>;
 
 // --- Core Structure ---
 
@@ -256,6 +257,7 @@ export const StateNodeSchema: z.ZodType<StateNodeConfig, StateNodeConfig> = z.la
     ).optional(),
   },
 ));
+export type StateNode = z.input<typeof StateNodeSchema>;
 
 /**
  * Top-Level State Machine Definition

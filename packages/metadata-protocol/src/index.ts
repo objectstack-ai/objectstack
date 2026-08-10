@@ -6,7 +6,11 @@ export { ObjectStackProtocolImplementation, ConcurrentUpdateError, normalizeView
 // instead of minting a second not-found shape. See `recordNotFoundError`.
 export { recordNotFoundError } from './protocol.js';
 export { createMetadataProtocolPlugin, assembleMetadataProtocol } from './plugin.js';
-export type { MetadataProtocolPluginOptions } from './plugin.js';
+export type { MetadataProtocolPluginOptions, AssembleMetadataProtocolOptions } from './plugin.js';
+// [#6710] The declared authoring channel — the explicit expression of ADR-0005's
+// "package author's own bootstrap channel", replacing the `environmentId ===
+// undefined` proxy the #4463 gate used to key its activation off.
+export type { MetadataAuthoringChannel } from './protocol.js';
 
 // [#5839] `sys_view_definition`'s active-row uniqueness, delivered as a runtime
 // partial-UNIQUE migration (the `ensureOverlayIndex` paradigm, for the one other

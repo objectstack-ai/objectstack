@@ -1,5 +1,385 @@
 # @objectstack/service-settings
 
+## 17.0.0-rc.6
+
+### Patch Changes
+
+- eb1b231: Remove `step: 0.1` from the `ai.temperature` specifier (#6550). Since #6199 a declared `step` binds as a value constraint on both doors, and temperature's true domain is continuous on [0, 2]: the 0.1 grid refused legal values — `PUT /api/settings/ai` with `temperature: 0.15` was rejected and `OS_AI_TEMPERATURE=0.15` was loudly ignored. Both now work; `min: 0` / `max: 2` stay and keep binding (out-of-window values are still refused in the min/max vocabulary). #6199's grid machinery is untouched and still enforces any key that declares `step`.
+- 0b63b56: `company.country` adopts the `iso_3166_alpha2` value domain (#6579), the fourth case of the hole #5712 closed on localization: `pattern: '^[A-Za-z]{2}$'` constrains shape only, so `ZZ` (assigned to nobody) and `UK` (a CLDR alias, not an ISO 3166-1 code) passed the write door while the description promised ISO 3166-1. Both doors now judge membership against the explicit 249-code list (`invalid_value` with `constraint: { valueDomain: 'iso_3166_alpha2' }` on save; loud ignore on `OS_COMPANY_COUNTRY`). The pattern stays — a shape breach still speaks first as `invalid_format`. Deliberate tightening, same as #5712: membership is exact uppercase, so lowercase spellings like `us` are now refused.
+- 861ee32: The settings env door now enforces declared `pattern` constraints (#6580). An
+  `OS_*` override whose value the specifier's `pattern` rejects is loudly
+  reported (`error` log, once per var+value) and ignored — the key resolves from
+  the next cascade layer and is not locked — exactly the #5204 contract the
+  option-table, value-window/step and valueDomain families already honor. The
+  write gate's judgment is hoisted into shared helpers (`declaredPattern` /
+  `firstPatternMiss`) called by both doors, so `PUT /api/settings/:ns` behavior
+  is unchanged byte-for-byte (same `invalid_format` envelope, same tolerance for
+  uncompilable pattern declarations) and the two doors can no longer drift.
+  Family ordering agrees between doors: options → pattern → valueDomain → bounds.
+- babddf6: fix(service-settings): localization's declared standards are the enforcement boundary — `valueDomain` enforced on both doors (#5712)
+
+  `localization.timezone` promised "IANA zone" and `localization.currency` promised
+  "ISO 4217 code", but since #5131 the write path treated their curated 17/9-entry
+  `options` tables as exhaustive, and since #5204 the env path agreed — so
+  `PUT /api/settings/localization` with `timezone: 'Europe/Zurich'` (or
+  `currency: 'CHF'`) was refused with `invalid_option`, and
+  `OS_LOCALIZATION_TIMEZONE=Europe/Zurich` was ignored, despite both being values
+  every `Intl`-based consumer downstream handles. Maintainer ruling (2026-08-06,
+  reading 1): the curated tables are UI convenience lists; the boundary is the
+  standard's membership.
+
+  The manifest now declares the merged spec vocabulary (#5933 / `SpecifierValueDomainSchema`)
+  on the three keys that promised a standard all along — `timezone: 'iana_time_zone'`,
+  `currency: 'iso_4217_currency'`, and `default_country: 'iso_3166_alpha2'` (third
+  case of the same hole: `^[A-Za-z]{2}$` admits `ZZ`) — and `SettingsService`
+  enforces a declared domain at the one decision point per door:
+
+  - **Write door** (`validatePatch`): a domain-bearing specifier skips the
+    exhaustive-options check and judges the standard's membership instead, after
+    `pattern` (shape and membership narrow independently; the shape breach is the
+    coarser fact and speaks first). A breach is `invalid_value` with
+    `constraint: { valueDomain }` — no `FieldErrorCode` member names a
+    standard-domain breach, and `invalid_option` would misname the set that was
+    consulted.
+  - **Env door** (`effectiveEnvOverride`): the same membership judgment, so a
+    garbage override is loudly reported and ignored (falls back down the cascade,
+    pins nothing — #5204's contract, unchanged) while a legal one wins the cascade
+    and locks the key.
+
+  Membership definitions follow the spec's pinned TSDoc: `iana_time_zone` is the
+  `Intl.DateTimeFormat` probe (NOT `Intl.supportedValuesOf('timeZone')`, whose
+  CLDR subset omits `UTC`, `Asia/Kolkata` and `Europe/Kyiv`); `iso_4217_currency`
+  is `Intl.supportedValuesOf('currency')`; `iso_3166_alpha2` is an explicit list
+  of the 249 officially assigned codes (no standard-library oracle exists —
+  `Intl.DisplayNames` names `ZZ` and `UK`).
+
+  A specifier that declares no `valueDomain` is byte-for-byte unchanged: #5131's
+  exhaustive-options semantics stay in force for registry-backed tables such as
+  `mail.provider` / `sms.provider`, pinned by regression tests on both doors.
+
+- 4afdd3e: fix(service-settings): 写入路径与 env 路径执行 settings 声明的 `step` 网格 (#6199)
+
+  `step` 是 `SpecifierSchema` 五个值约束里的**第五个**,也是最后一个只声明不执行的。
+  #5932(PR #6201)补齐 `min`/`max`/`minLength`/`maxLength` 之后,`step` 在
+  `packages/services/service-settings/src/` 里仍是**零读取点**:superRefine 不校验它,
+  写入路径不读它,env 路径不读它。
+
+  **为什么判定为「值约束」而不是「纯 UI 提示」。** issue 提了两种读法,定论取自 schema
+  自己的写法:`step` 与 `min`/`max` 声明在**同一段** `/** number / slider: numeric
+bounds and step. */` 注释之下,即它是按「界」被作者写下的,而 #5932 的裁决(声明了
+  的界就必须绑定)随之传递。另一种读法(它只是 `input[type=number]` 上下箭头的步进,
+  从不表达「其他值非法」)经核查不成立:落地时 `step` 在本仓库与 `objectui` 中**没有
+  任何消费者**——没有渲染器读它。按那种读法,这个键就是在为一个并不存在的渲染器表达
+  「呈现」,那正是 ADR-0049 的洞,而不是 UI affordance。
+
+  **修法与 #5932 同形,是同一族的第五个成员:**
+
+  - `step` 挂进 `DeclaredBounds` 与 `firstRangeViolation`,因此它按构造同时到达两扇门
+    ——写入路径(`validatePatch`)与 env 路径(`effectiveEnvOverride` 这**一个**判定点)
+    ——不可能成为「只在一侧执行」的下一个键。
+  - 越界发码表里现有的 `invalid_value`(ADR-0114:「rejected for a reason no other
+    member names」)。码表里没有任何成员命名「网格」,而码表是刻意封闭的;
+    `rest-server.ts` 早已把 Zod 的 `not_multiple_of` 映射到同一个成员,即同一条件从另一
+    个方向到达时的同一裁决。⛔ `packages/spec` 未改动。
+  - 沿用 #5131 / #5932 的 **TOUCH 闸门**:只校验本次 patch 触及的键。网格在产品生命
+    周期里会被**放粗**(0.05 的滑杆改声明成 0.1),持有旧值的工作区必须仍能编辑无关设置。
+
+  **锚点(anchor)约定:** 值须落在 `min + k * step` 上;未声明 `min` 时锚点取 `0`。
+  这是 HTML step-base 约定,也是声明读起来的唯一自洽含义 —— `min: 1, step: 2` 指的是
+  **奇数**,而不是偶数;一律锚 0 会把这个 specifier 整个反转。`constraint` 同时带
+  `step` 与(声明了的话)`min`,客户端据此自行重建网格。
+
+  **容差规则:** 网格判定为 `|value - nearest| <= max(|value|, |anchor|, |step|) * 1e-9`,
+  其中 `nearest = anchor + round((value - anchor) / step) * step`。精确取模是错的 ——
+  二进制浮点下 `0.7 / 0.1` 是 `6.999999999999999`、`1.2 / 0.1` 是 `11.999999999999998`,
+  而这两个都是控制台滑杆自己会发出的值。容差取**相对**而非绝对:绝对量随操作数变化,
+  `1e-9` 在 `step: 1e-6` 上会宽到三分之一步长,在 `max: 1048576` 上又比一个 ULP 还紧。
+  `1e-9` 落在两类误差之间:double 的相对精度约 `2.2e-16`,几步算术累积约 `1e-15`,比这
+  个界低六个数量级;而真正的越格差一小截步长(`0.15` 在 `0.1` 网格上差 `0.05`,相对
+  `3e-1`),比它高八个数量级。比较在**值域**而非倍数域进行,以免容差的含义随网格粗细改变。
+  剩余存疑的方向也是刻意的:本闸门是对「昨天什么都收」的收紧,所以在算术确实分辨不出时
+  (量级大到网格比 double 自身间距还细)判**收**。
+
+  **非正的 `step` 声明不构成网格。** `step: 0`(`anchor + k * 0` 是一个点)、负值、
+  非有限值一律**不记录网格**,与「option-bearing specifier 没有 options 表」同一处置:
+  无可执行者,行为不变,永不拒写。这与 #5204 的注册期姿态一致 —— 注册**报告**、从不
+  拒绝 —— 而这里没有可报告的:声明了不可能网格的 manifest 既不拒写也不误配部署,它只是
+  没有约束住,和其余没声明 `step` 的 specifier 处境完全相同。
+
+  **已知后果,裁决时已接受:** 全仓库唯一的 `step` 声明是 `ai.manifest.ts` 的
+  `temperature`(`min: 0, max: 2, step: 0.1`)。执行之后 `0.15` 被拒。这是该声明按其
+  字面绑定,而不是本闸门的缺陷;这份声明本身是否该改(若 `0.15` 应当合法,则该 manifest
+  应声明更细的 `step` 或不声明),属于 manifest 属主的问题。
+
+- 9566c38: fix(service-settings): 写入路径与 env 路径执行 settings 声明的 min / max / minLength / maxLength (#5932)
+
+  `SpecifierSchema` 从存在起就声明了五类值约束 —— `pattern` / `min` / `max` /
+  `minLength` / `maxLength` —— 而 `SettingsService.validatePatch` 只读其中一类。
+  另外四个在整个写入路径上**没有任何读取点**:已发布的 manifest 里 42 个
+  specifier 声明了取值窗口,每一个都只是装饰。
+
+  落点最重的是 `auth.password_min_length`。它声明 `min: 6`,控制台的数字框也按这个
+  下限渲染,而 `PUT /api/settings/auth` 会接受 `1`(以及负数)并存下来,better-auth
+  的口令策略随后照这个值执行。也就是说,声明是唯一一个宣称「存在下限」的东西,却没有
+  任何一层在守它 —— 正是 Prime Directive #10 的正面形状。`ai.manifest.ts` 的六项
+  (temperature / max_tokens / timeout 等)同理。
+
+  **修法与 #5131(options 表)同形,是同一族的第三个成员:**
+
+  - `validatePatch` 补一个取值窗口分支,发既有码表里的 `FieldError`(ADR-0114 D2):
+    `min_value` / `max_value` / `min_length` / `max_length` —— 与
+    `record-validator.ts` 对同一类越界发出的码一致。`constraint` 带**完整窗口**
+    (`{ min, max }`,长度类再带 `actual`),客户端据此自行组织文案,不必解析我方
+    英文句子。⛔ `packages/spec` 未改动:约束早已声明,码表现有即够用。
+  - 沿用 #5131 的 **TOUCH 闸门**:只校验本次 patch 触及的键。取值窗口在产品生命周期里
+    会被**收紧**(口令下限从 6 提到 8),窗口下方的老工作区必须仍能编辑它无关的设置,
+    只在重写该键时才被告知。
+  - env 侧走 `effectiveEnvOverride` 这**一个**判定点,与 options 表同处,复用同一组
+    比较函数 —— #5204 的成因就是同一比较有两份实现并各自漂移。因此
+    `OS_AUTH_PASSWORD_MIN_LENGTH=1` 与写入路径得到同一个裁决:该 override 不生效、
+    不贡献 cascade 条目、不锁定该键,并在注册时打出一条(且仅一条)`error` 日志。
+
+  **刻意不做的判断:** 取值窗口只裁决**可比较的值** —— `min`/`max` 只看数字(含经
+  JSON / 表单往返变成字符串的数字),`minLength`/`maxLength` 只看字符串。布尔、数组、
+  对象不做强制转换(`Number(true)` 是 1、`Number([])` 是 0):值的**形状**是
+  `invalid_type`,属于另一个约束、另一个负责人,在这里发明裁决会拒掉本检查从未被要求
+  过问的写入。空值仍归 `required` 管。
+
+  约束的读取以**声明**为准,而不是以 specifier 的 `type` 为准 —— 与旁边按类型收口的
+  options 检查不同,这个差异是 spec 定的:`SpecifierSchema` 的 superRefine 把 options
+  表**绑定**到 `select`/`radio`/`multiselect` 三型,却没有把四个窗口键绑定到任何类型。
+  在这里自拟一份类型清单,正是 options 注释警告的「第三份会漂移的清单」,并且会把本
+  issue 原样复制到下一层:窗口键声明在清单外的类型上,照样解析、照样渲染、照样不执行。
+
+- d538647: fix(service-settings): refuse a save whose `visible` predicate cannot be evaluated, instead of silently skipping the field's `required` gate (#7169)
+
+  **Before:** a settings specifier whose `visible` predicate the save-time
+  evaluator could not parse was skipped entirely — `validatePatch` answered the
+  parse failure with `catch { continue }`. Because `visible` is the gate every
+  other check hangs off, that `continue` switched off `required`, `options`,
+  `pattern`, `valueDomain` **and** the value window on that key at once, silently
+  and permanently, with no diagnostic anywhere. A half-filled provider form saved
+  clean.
+
+  **After:** the write is refused. `setMany` throws `SettingsValidationError`
+  (`SETTINGS_VALIDATION`, HTTP 400) carrying one `FieldError` per offending
+  specifier — `code: 'invalid_value'`, the parse reason in `message`, and the
+  predicate itself under `constraint.visible`, so a client can name which
+  expression refused without parsing prose. Refusal is **unconditional**, not
+  gated on the patch touching the key: the console posts only its dirty keys, so a
+  touch gate would never fire on the incident this fixes. All-null patches
+  (namespace reset) still return before the check, so a namespace whose manifest
+  is broken can always be cleared.
+
+  This is the interim stop-the-bleed half of the maintainer's 2026-08-10 ruling on
+  #7169. The declaration/implementation gap it stems from is still open:
+  `packages/spec` types both settings `visible` slots as `ExpressionInputSchema`,
+  which labels their contents **CEL**, while this service evaluates a hand-rolled
+  JS-ish subset. Measured over the 94 `visible` predicates in the bundled
+  manifests, wiring CEL into evaluation would break 93 of them and narrowing the
+  declared type would break 1 — see the PR for the numbers. Narrowing is
+  recommended and lands separately in `packages/spec`.
+
+  **Also fixed, and load-bearing for the above:** the evaluator now supports the
+  relational operators `>`, `>=`, `<`, `<=`, with the same JS semantics the
+  console's client-side evaluator applies to the same strings. The auth manifest
+  already shipped `visible: '${data.lockout_threshold > 0}'`, which this grammar
+  refused — so on the old fail-open path `auth.lockout_duration_minutes` accepted
+  `-5` and `99999` against its declared `min: 1, max: 1440`. That window is
+  enforced again.
+
+- Updated dependencies [3d5c090]
+- Updated dependencies [e5bd768]
+- Updated dependencies [e027b3e]
+- Updated dependencies [c2429b0]
+- Updated dependencies [445a0c2]
+- Updated dependencies [f6609e6]
+- Updated dependencies [a70358a]
+- Updated dependencies [97e7e3c]
+- Updated dependencies [8828b9e]
+- Updated dependencies [53068c1]
+- Updated dependencies [ee58392]
+- Updated dependencies [f16e54e]
+- Updated dependencies [06be54e]
+- Updated dependencies [259459d]
+- Updated dependencies [3f7f14e]
+- Updated dependencies [6968885]
+- Updated dependencies [eaed61f]
+- Updated dependencies [debe2f6]
+- Updated dependencies [97b0798]
+- Updated dependencies [5fa04fb]
+- Updated dependencies [43a7a8d]
+- Updated dependencies [73f69dc]
+- Updated dependencies [04c56aa]
+- Updated dependencies [b3efeb7]
+- Updated dependencies [ddd075a]
+- Updated dependencies [88154be]
+- Updated dependencies [e8dc61e]
+- Updated dependencies [2f3e793]
+- Updated dependencies [d8e8d9c]
+- Updated dependencies [94e749b]
+- Updated dependencies [ea1d916]
+- Updated dependencies [ae31a19]
+- Updated dependencies [e0f300b]
+- Updated dependencies [62b6a2f]
+- Updated dependencies [5b4780b]
+- Updated dependencies [a933452]
+- Updated dependencies [8140915]
+- Updated dependencies [7b48cf9]
+- Updated dependencies [b5404f4]
+- Updated dependencies [f764691]
+- Updated dependencies [e120a5a]
+- Updated dependencies [e650d67]
+- Updated dependencies [04476e7]
+- Updated dependencies [79228cd]
+- Updated dependencies [b3363e9]
+- Updated dependencies [2ef1807]
+- Updated dependencies [d03fe25]
+- Updated dependencies [2672f85]
+- Updated dependencies [11066f6]
+- Updated dependencies [916af17]
+- Updated dependencies [84c86fb]
+- Updated dependencies [2a2a9fb]
+- Updated dependencies [a2e157c]
+- Updated dependencies [95c4227]
+- Updated dependencies [2a61116]
+- Updated dependencies [d4df105]
+- Updated dependencies [e2798fa]
+- Updated dependencies [0fd8556]
+- Updated dependencies [74155c7]
+- Updated dependencies [6908830]
+- Updated dependencies [8b06bba]
+- Updated dependencies [4c54037]
+- Updated dependencies [0f7157b]
+- Updated dependencies [d9bef45]
+- Updated dependencies [f549a0d]
+- Updated dependencies [82da264]
+- Updated dependencies [f586f1a]
+- Updated dependencies [9b9b70f]
+- Updated dependencies [f5a9bc2]
+- Updated dependencies [881a3cc]
+- Updated dependencies [ad6317b]
+- Updated dependencies [8a88885]
+- Updated dependencies [5f7669e]
+- Updated dependencies [becbe53]
+- Updated dependencies [b127c8b]
+- Updated dependencies [a80302a]
+- Updated dependencies [474f131]
+- Updated dependencies [050cd82]
+- Updated dependencies [4d552af]
+- Updated dependencies [44d677c]
+- Updated dependencies [c32944d]
+- Updated dependencies [1dd780f]
+- Updated dependencies [c8d6f6e]
+- Updated dependencies [92a67f2]
+- Updated dependencies [9136327]
+- Updated dependencies [bf0ae99]
+- Updated dependencies [cb3b6cd]
+- Updated dependencies [73b7234]
+- Updated dependencies [d2b97c3]
+- Updated dependencies [59b794f]
+- Updated dependencies [fc3a36a]
+- Updated dependencies [69787f0]
+- Updated dependencies [5d022a1]
+- Updated dependencies [042b9ee]
+- Updated dependencies [f549a0d]
+- Updated dependencies [a36db28]
+- Updated dependencies [3f8817a]
+- Updated dependencies [a2443e3]
+- Updated dependencies [e1554b1]
+- Updated dependencies [4856789]
+- Updated dependencies [c3f4916]
+- Updated dependencies [33e0385]
+- Updated dependencies [2205363]
+- Updated dependencies [09fe58d]
+- Updated dependencies [d0a5ceb]
+- Updated dependencies [e18a162]
+- Updated dependencies [d6d1a50]
+- Updated dependencies [d127ff0]
+- Updated dependencies [9b86cf6]
+- Updated dependencies [8825a06]
+- Updated dependencies [5087ac6]
+- Updated dependencies [2d1ddf0]
+- Updated dependencies [354b00f]
+- Updated dependencies [3de535b]
+- Updated dependencies [fe2e15a]
+- Updated dependencies [c6b6bb4]
+- Updated dependencies [59c544d]
+- Updated dependencies [2f59da0]
+- Updated dependencies [8ad609c]
+- Updated dependencies [bbee302]
+- Updated dependencies [08863dd]
+- Updated dependencies [56664f5]
+- Updated dependencies [31cbe90]
+- Updated dependencies [90bbf25]
+- Updated dependencies [eb91eba]
+- Updated dependencies [42da73d]
+- Updated dependencies [643b7c7]
+- Updated dependencies [d0d5205]
+- Updated dependencies [1a15893]
+- Updated dependencies [b70e534]
+- Updated dependencies [2233a85]
+- Updated dependencies [62dd69a]
+- Updated dependencies [e15e679]
+- Updated dependencies [2ab1257]
+- Updated dependencies [4cc4fb7]
+- Updated dependencies [28d1eb7]
+- Updated dependencies [2c26040]
+- Updated dependencies [f758cec]
+- Updated dependencies [78f0be8]
+- Updated dependencies [35f7fb4]
+- Updated dependencies [a5302c7]
+- Updated dependencies [7084313]
+- Updated dependencies [91cefb8]
+- Updated dependencies [0e043d8]
+- Updated dependencies [dadd1ad]
+- Updated dependencies [2f2e63c]
+- Updated dependencies [486d526]
+- Updated dependencies [89d7b35]
+- Updated dependencies [85ec26d]
+- Updated dependencies [f6476fc]
+- Updated dependencies [4ac12ef]
+- Updated dependencies [b88f5e8]
+- Updated dependencies [42cc219]
+- Updated dependencies [d42a92f]
+- Updated dependencies [51d74ad]
+- Updated dependencies [d7e0b42]
+- Updated dependencies [3510e4a]
+- Updated dependencies [aa4b90d]
+- Updated dependencies [54299ca]
+- Updated dependencies [dc61def]
+- Updated dependencies [251e888]
+- Updated dependencies [183b4c4]
+- Updated dependencies [2fdb36e]
+- Updated dependencies [e787608]
+- Updated dependencies [20526f5]
+- Updated dependencies [c5eef1d]
+- Updated dependencies [e0f300b]
+- Updated dependencies [761a0ba]
+- Updated dependencies [61282f9]
+- Updated dependencies [be87153]
+- Updated dependencies [60f0dd8]
+- Updated dependencies [a87c5cd]
+- Updated dependencies [a47f338]
+- Updated dependencies [2598216]
+- Updated dependencies [2c7e62d]
+- Updated dependencies [eb7613c]
+- Updated dependencies [ecc9110]
+- Updated dependencies [f7bd4e2]
+- Updated dependencies [361bd5b]
+- Updated dependencies [129b378]
+- Updated dependencies [88f9d94]
+- Updated dependencies [1818998]
+- Updated dependencies [09ee21c]
+- Updated dependencies [f549a0d]
+- Updated dependencies [3fc2e48]
+- Updated dependencies [e8f435c]
+- Updated dependencies [41610f6]
+  - @objectstack/spec@17.0.0-rc.6
+  - @objectstack/platform-objects@17.0.0-rc.6
+  - @objectstack/core@17.0.0-rc.6
+  - @objectstack/types@17.0.0-rc.6
+
 ## 17.0.0-rc.5
 
 ### Patch Changes

@@ -150,9 +150,16 @@ describe('buildEndpointIndex', () => {
   // What remains true, and is what this case now pins: a stored row carries
   // BOTH the ADR-0010 envelope (declared ⇒ survives) and the metadata layer's
   // own bookkeeping (`packageId` / `state`, written by `MetadataManager` and
-  // NOT endpoint vocabulary ⇒ stripped). That split is the measured reason
-  // `api` sits on the #4001 campaign's STILL_STRIP list: closing this shape
-  // would make every stored row unparseable here.
+  // NOT endpoint vocabulary ⇒ never reaches the body parse).
+  //
+  // [#5309] The REASON the bookkeeping is gone changed, and that is the whole
+  // point of the split. It used to be the schema's unknown-key STRIPPING that
+  // ate it — which is why `api` could not leave #4001's STILL_STRIP list
+  // (#5271 measured it: closing the shape made every stored row fail with
+  // `unrecognized_keys: ['packageId', 'state']`). Now `peelStoredEnvelope`
+  // takes the envelope off BEFORE `ApiEndpointSchema` sees anything, so this
+  // case passes on a strict schema too. `stored-envelope.test.ts` pins the peel
+  // itself; the cases below pin it end to end through the index.
   it('keeps the ADR-0010 envelope and strips the metadata layer’s bookkeeping', () => {
     const index = buildEndpointIndex(
       [{
@@ -176,6 +183,86 @@ describe('buildEndpointIndex', () => {
     expect(body._lock).toBe('no-overlay');
     expect(body).not.toHaveProperty('packageId');
     expect(body).not.toHaveProperty('state');
+  });
+});
+
+// ── [#5309] The stored ENVELOPE / authored BODY split ──────────────────────
+//
+// These pin the peel where it matters — through the index — rather than only
+// in `stored-envelope.test.ts`. The measurement they exist to protect: with
+// `ApiEndpointSchema` flipped to `strictObject` (a local probe, never
+// committed — that flip is #5384's), a stored row used to fail with
+// `unrecognized_keys: ['packageId', 'state']` and its route answered 404. It
+// no longer can, because the envelope never reaches the schema.
+describe('#5309 — the envelope never reaches the body parse', () => {
+  /** Every bookkeeping key `publishPackage` stamps onto a published row. */
+  const publishEnvelope = {
+    packageId: 'com.objectstack.showcase',
+    package: 'com.objectstack.showcase',
+    state: 'active',
+    version: 3,
+    publishedAt: '2026-08-08T00:00:00.000Z',
+    publishedBy: 'usr_admin',
+    publishedDefinition: { name: 'list_tasks', path: '/api/v1/apps/showcase/tasks' },
+  };
+
+  it('indexes a FLAT published row and hands back a body carrying no bookkeeping', () => {
+    const logger = makeLogger();
+    const index = buildEndpointIndex([{ ...endpoint(), ...publishEnvelope }], logger);
+
+    const hit = index.get('GET /api/v1/apps/showcase/tasks');
+    expect(hit, 'a published row must index through the split').toBeDefined();
+    // The declaration survives whole …
+    expect(hit!.name).toBe('list_tasks');
+    expect(hit!.target).toBe('showcase_task');
+    // … the schema default is still materialized (contract, not incidental) …
+    expect(hit!.authRequired).toBe(true);
+    // … and not one bookkeeping key is on the answer.
+    const body = hit as unknown as Record<string, unknown>;
+    for (const key of Object.keys(publishEnvelope)) {
+      expect(body, `envelope key '${key}' leaked into the endpoint body`).not.toHaveProperty(key);
+    }
+    expect(logger.error).not.toHaveBeenCalled();
+  });
+
+  it('indexes a WRAPPED publish envelope off its `metadata` body', () => {
+    // `{ name, packageId, state, metadata: {…} }` is the envelope shape
+    // `publishPackage` gates (`data.metadata ?? data`) and `revertPackage`
+    // writes. This index is now the same reader: before the split it parsed the
+    // OUTER object, found no `path`/`method`, and excluded a row publish had
+    // just accepted — the two doors disagreeing about what the document is.
+    const logger = makeLogger();
+    const index = buildEndpointIndex(
+      [{ name: 'list_tasks', packageId: 'com.objectstack.showcase', state: 'active', metadata: endpoint() }],
+      logger,
+    );
+
+    const hit = index.get('GET /api/v1/apps/showcase/tasks');
+    expect(hit, 'a publish envelope must index off its body').toBeDefined();
+    expect(hit!.name).toBe('list_tasks');
+    expect(logger.error).not.toHaveBeenCalled();
+  });
+
+  it('names an unparseable WRAPPED row by its envelope `name`, not `<unnamed>`', () => {
+    const logger = makeLogger();
+    const index = buildEndpointIndex(
+      [{ name: 'broken_ep', packageId: 'com.objectstack.showcase', metadata: { path: '/api/v1/apps/showcase/x' } }],
+      logger,
+    );
+
+    expect(index.size).toBe(0);
+    expect(logger.error).toHaveBeenCalledTimes(1);
+    expect(logger.error.mock.calls[0][0]).toContain('broken_ep');
+  });
+
+  it('leaves an authored declaration — no envelope at all — byte-identical', () => {
+    const authored = endpoint();
+    const before = structuredClone(authored);
+    const index = buildEndpointIndex([authored], makeLogger());
+
+    expect(index.get('GET /api/v1/apps/showcase/tasks')).toBeDefined();
+    // The peel is a VIEW: it must never mutate the row it was handed.
+    expect(authored).toEqual(before);
   });
 });
 

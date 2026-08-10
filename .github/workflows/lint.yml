@@ -94,8 +94,36 @@ jobs:
       - name: Engine query-options erasure ratchet
         run: pnpm check:query-options-erasure
 
-      # Raw control-byte guard (#3127 / #4890 / #5157 / #5460). Scans every
-      # tracked TEXT file for a raw ASCII control byte and fails on any hit.
+      # @objectstack/verify stand-in erasure guard (#6399). The third and
+      # narrowest member of the two above. `checkReadCoercion` /
+      # `checkDateBucketParity` take their driver STRUCTURALLY
+      # (`CoercibleDriver` / `BucketableDriver`) so an out-of-tree driver —
+      # cloud's driver-turso in remote mode — runs the identical contract
+      # without importing a concrete driver type; that parameter type IS the
+      # compile-time half of the conformance, and an assertion on the argument
+      # deletes it for that call site while looking like a call that has it.
+      # #6354 / PR #6396 is the bill: ten `as never` casts, every call site of
+      # both helpers, all of them dead, sitting over a check that was provably
+      # alive — and no gate rang for either fact.
+      #
+      # The ESLint rule (`verify-stand-in/no-asserted-driver-argument`) blocks
+      # the assertion. This step is the half that stops the rule going dead: it
+      # reconciles the guarded set against what packages/verify actually exports
+      # in BOTH directions — so a third stand-in check cannot arrive unguarded
+      # and a stale entry cannot rot — and COUNTS the call sites it reached, so
+      # a rename or a moved import surfaces as a census that fell instead of as
+      # a green run over nothing. `pnpm lint` alone cannot tell "clean tree"
+      # from "matched nothing". Runs its own --self-test first.
+      - name: "@objectstack/verify stand-in erasure guard"
+        run: pnpm check:verify-stand-in
+
+      # Raw control-byte guard (#3127 / #4890 / #5157 / #5460 / #6984). Scans
+      # every TEXT file git knows about for a raw ASCII control byte and fails on
+      # any hit. Since #6984 the scan set is the index PLUS untracked-but-not-
+      # ignored working-tree files, so a locally-authored file is covered before
+      # it is staged; here that widening is a no-op, because a workflow checks out
+      # a commit and has no untracked files at all (the step's summary line says
+      # so — it names both halves, and the untracked one reads 0 in CI).
       # WHICH bytes are in the set and WHY each is rejected are stated and argued
       # once, in the gate script's header — `scripts/check-nul-bytes.mjs`. That
       # header is authoritative and this comment cites it rather than restating it
@@ -109,6 +137,29 @@ jobs:
       # header for why. Authors must write the unicode escape instead of the byte.
       - name: Raw control-byte guard
         run: pnpm check:nul-bytes
+
+      # Stack-collection enumerations vs the schema (#6242). `stack.zod.ts`
+      # decides which collections a stack may declare; eight other enumerations
+      # of that same set are hand-maintained (the map-format list, the
+      # plural→singular map, the artifact category enum, ObjectQL's two
+      # registration loops, the artifact-ingest field map, the runtime's
+      # app-payload probe, the showcase coverage manifest) and nothing compared
+      # any of them to the schema. Each drift instance has been fixed one line at
+      # a time before, always after a missing key silently dropped a collection.
+      # A deviation is legal here only as a waiver row carrying its reason.
+      - name: Stack-collection enumerations answerable to stack.zod.ts
+        run: pnpm check:stack-collection-maps
+
+      # pm-dispatch SKILL.md line ratchet (#7341 / #5925 item 7): the PM skill
+      # is read in full by every seat session and every Routine fire, so its
+      # size is a per-round tax on the whole fleet. The #7341 extraction moved
+      # long incident narratives to .claude/skills/pm-dispatch/references/
+      # (append-only case law, loaded on demand); this shrink-only ceiling
+      # keeps them from growing back. Ceiling discipline — lower freely, raise
+      # only with a maintainer ruling quoted in the raising PR — is stated in
+      # the script's header, which is authoritative.
+      - name: PM skill line ratchet
+        run: pnpm check:pm-skill-ratchet
 
       # Docs/skills authoring guard (#2035 / ADR-0059): TS code blocks in
       # Markdown/MDX are not type-checked or ESLinted, so skills/ and
@@ -158,9 +209,25 @@ jobs:
       # That incident reversed three accepted ADRs with a patch-level changeset,
       # and the mechanism was simply that the edited file never mentioned them —
       # so the author could not have known. Presence check only; the invariant
-      # travels in the failure message (scripts/adr-anchors.json).
-      - name: ADR anchors (governed code names its decision)
+      # travels in the failure message (scripts/adr-anchors/, one file per anchor since #6957).
+      #
+      # Since #5992 the same script also audits the premise the anchors rest on:
+      # an ADR number names exactly ONE decision. Three numbers were each claimed
+      # by two unrelated records (0010/0019/0057) — grandfathered on an explicit
+      # shrink-only allowlist in the script, so a FOURTH collision goes red here.
+      # The `--self-test` in the pnpm script provokes that red path on synthetic
+      # directories every run, because a collision is rare enough that nobody
+      # would otherwise see the gate fail before it mattered.
+      - name: ADR anchors + number uniqueness (governed code names its decision)
         run: pnpm check:adr-anchors
+
+      # NOTE: the standing platform test checklist (docs/qa/platform-checklist/)
+      # is validated by `pnpm check:platform-checklist`, but by MAINTAINER
+      # DECISION it is NOT wired into CI — it runs on a periodic manual cadence
+      # (before a release / after a large platform surface lands), not on every
+      # PR. The checklist is a QA ledger, not a code gate; keeping it out of the
+      # per-PR path means an unrelated PR is never blocked by checklist drift.
+      # Run it by hand: `pnpm check:platform-checklist`. See that dir's README.
 
       # #3280/#3290 org-identifier guard: `organizationId` is the blessed
       # developer-facing name for the caller's active org in hook/action bodies;
@@ -306,6 +373,48 @@ jobs:
       - name: objectui pin-changeset digest guard
         run: pnpm check:objectui-changeset
 
+      # Changeset-family gate self-tests (#6509). The SELF-TEST halves only —
+      # the real scans stay in pr-automation.yml's `changeset-check`, and the
+      # split is the whole point of this step.
+      #
+      # Why they moved here. `check-empty-changeset.mjs` and
+      # `check-adr-0087-registration.mjs` were called from exactly one place in
+      # the repository: the `changeset-check` job, which a PR carrying
+      # `skip-changeset` is exempted from WHOLESALE (job-level `if:` plus the two
+      # per-step label reads). And "this PR edits a CI-internal script" is the
+      # textbook `skip-changeset` case — such a PR releases nothing, so by the
+      # workflow's own prescription it takes the label. The consequence is the
+      # exact inversion of #4690: a PR that edits these two checkers is the PR
+      # most likely to skip their own fixtures.
+      #
+      # Not hypothetical, and not this card's own reasoning either. PR #6876
+      # (#5620, merged) added FIVE consumer assertions to
+      # `check-empty-changeset.mjs` that never executed once on its own CI: it
+      # carried `skip-changeset`, so on run 31289894461 the step
+      # `Reject an empty-frontmatter changeset added by this PR` — the only thing
+      # that runs `--self-test` — reports `conclusion: skipped`. Every assertion
+      # in that PR was verified locally and by nothing else.
+      #
+      # This step is deliberately UNCONDITIONAL. No `if:`, no label read, no
+      # paths filter: an exemption is precisely what the two self-tests must not
+      # have, or the gap simply moves. That property is not left to prose —
+      # `check-empty-changeset.mjs`'s own consumer block asserts this step's
+      # shape (present, unguarded, self-test halves only), so removing or
+      # conditioning it reds the very check it was removing.
+      #
+      # Why the SELF-TEST halves only, and not `pnpm check:empty-changeset`:
+      # that script chains the real scan, whose verdict is a function of the
+      # PR's DIFF and therefore needs `$MERGE_BASE`. This job has no branch
+      # point, so a real scan here would fall back to reading stock — which is
+      # #6129, "judge the author for what main gained while their PR was open",
+      # in the direction of a false RED. The self-test halves have no such
+      # dependency: measured, both pass with REPO_ROOT pointing at a directory
+      # that is not a git repository at all. They build their own throwaway
+      # repos in $TMPDIR and read two files (this workflow and
+      # pr-automation.yml). ~0.8s + ~5.0s.
+      - name: Changeset-family gate self-tests
+        run: pnpm check:changeset-gate-self-tests
+
       # Release-notes drift guard: the platform is one version-locked train, so
       # every released @objectstack/spec major must have a curated, navigable
       # release page at content/docs/releases/v<major>.mdx. Catches the gap that
@@ -384,6 +493,32 @@ jobs:
       - name: Shard attestation gate
         run: pnpm check:shard-attestation
 
+      # Required-context name pin (#6865). A GitHub required status check is
+      # matched BY CHECK-RUN NAME, and a job's check-run name is its `name:`
+      # value — so eight job `name:` literals across this file and ci.yml are
+      # branch-protection contract, and until now nothing asserted them.
+      # Renaming one is a one-line edit whose consequence is silent and
+      # repo-wide: the old context never reports again (permanent pending, which
+      # wedges the PR and the queue), or it gets dropped from the settings to
+      # unwedge things and every gate that job carries degrades to advisory.
+      # That second shape is #5617 — PR #5584 merged with THIS job red for 19
+      # minutes, and four more merges repeated it the same night. ci.yml states
+      # the contract in prose in eight places and check:shard-attestation
+      # asserts the two aggregate gates' job IDS; neither pins a name literal,
+      # and this file had neither. The pin also holds each enrolled job to the
+      # shapes that let a bare name report at all (no matrix, no
+      # continue-on-error) and each enrolled workflow to the triggers a required
+      # context needs (`merge_group`, and a `pull_request` with no `paths:`) —
+      # the machine-readable form of #5617's audit exclusions. It deliberately
+      # does NOT judge job-level `if:`: four of the enrolled ci.yml jobs carry a
+      # filter-driven `if:` by design (#4928), and a skipped job still publishes
+      # a context. ⚠️ It cannot verify the required SET itself — Settings →
+      # Rulesets is unreadable from every agent seat (403) — so it asserts the
+      # repo-side half only, and the script's header says so at length.
+      # Reads two YAML files; sub-second.
+      - name: Required-context name pin
+        run: pnpm check:required-contexts
+
       # #4248 packaging-hygiene guard. Without a `files` whitelist npm packs the
       # whole package directory, and 20 of the 49 publishable packages declared
       # none — so consumers installed TypeScript sources, unit tests and build
@@ -417,6 +552,32 @@ jobs:
       - name: Engine test-double contract gate
         run: pnpm check:engine-double-contract
 
+      # Paired kernel-hook pin gate (#5282, from #5170 / #5257 / #5274). The two
+      # kernels — ObjectKernel (production) and LiteKernel (vitest / serverless /
+      # edge) — run the same plugin code and the same hook vocabulary, but do NOT
+      # share a class: ObjectKernel does not extend ObjectKernelBase, so each
+      # keeps its own hooks map. #5282 shared the two dispatch LOOPS
+      # (packages/core/src/hook-dispatch.ts); this gate covers what sharing them
+      # cannot: three consecutive bugs were all "one hook name means opposite
+      # things on the two kernels" (kernel:ready swallowed on one side and fatal
+      # on the other; kernel:listening swallowing a failed server.listen() behind
+      # a cheerful "Bootstrap complete"; kernel:shutdown skipping every destroy()
+      # in the other direction), and each was caught by a human noticing the
+      # asymmetry. What held the kernels together afterwards was a pair of
+      # hand-written tests — a convention, not a mechanism: a fifth lifecycle
+      # hook gets no pairing automatically and nothing goes red when it is
+      # missing. So every kernel:* hook DISPATCHED in packages/core/src must be
+      # named in a test title in BOTH kernel.test.ts and lite-kernel.test.ts, and
+      # a missing pair fails naming the hook and the side that lacks it.
+      # Subscriptions (ctx.hook) are deliberately not dispatches. Static AST over
+      # five files, no build needed, so it belongs in this job. Runs its own
+      # --self-test first: the detector can be broken while every hook is fine,
+      # and a scan that stops matching would report OK while reading nothing
+      # (#4868's family). Measured against main's corpus before being pinned
+      # here: 4 dispatched hooks, 0 problems.
+      - name: Paired kernel-hook pin gate
+        run: pnpm check:kernel-hook-pairs
+
       # Resume-authority declaration gate (#5561, from #3823). The #3801 resume
       # gate keys on the SUSPENDED NODE, so it covers a pausing node type exactly
       # when that type's author remembered to declare `resumeAuthority`. #3823 is
@@ -434,6 +595,36 @@ jobs:
       # while reading nothing (#4868's family).
       - name: Resume-authority declaration gate
         run: pnpm check:resume-authority-declared
+
+      # driver-memory census gate (#6664, from #5704 / #5499). #5499 froze
+      # investment in `@objectstack/driver-memory`; #5704 migrated the project's
+      # test backends to sqlite `:memory:` and ruled that one test file keeps the
+      # driver on purpose. The programme's enforcement was a PROSE CENSUS — a
+      # sentence in that file claiming it was the only permanent test consumer in
+      # the repository, backed by #5704/#5784 renaming every look-alike local stub
+      # to `makeStubDriver` so a grep would land on real consumers only. The grep
+      # is a good handle; the sentence describing what it should find is not. It
+      # expired silently the first time the hand-edit step was skipped: #6468
+      # (PR #6553) added a second importer with no ruling block, named nowhere in
+      # the census it invalidated, and the two ways that misleads are opposite —
+      # delete the other file's schemaless arm as a "leftover", or take it as
+      # implicitly covered so a THIRD arrival is never disposed of either. The
+      # census is now a ledger (scripts/driver-memory-census.ledger.json) with a
+      # gate reading it: every module binding and every package.json declaration
+      # must be ledgered, every ledger entry must still be live, each ruled file
+      # must still carry its ruling markers, and — the half a sentence can never
+      # do for itself — each must state the ruled COUNT verbatim, so changing the
+      # set makes both sentences fail until they are rewritten. Static AST over
+      # tracked sources (positions, not text: a comment naming the package and the
+      # bundler externals entry in packages/runtime/tsup.config.ts are mentions,
+      # not arrivals), no build needed, so it belongs in this job. Runs its own
+      # --self-test first: the detector can be broken while the census is fine,
+      # and a scan that stops matching would report OK while reading nothing
+      # (#4868's family — DISCOVERED refuses an empty scan for that reason).
+      # It polices the retirement programme's bookkeeping; it is not investment in
+      # the driver, which stays frozen under #5499.
+      - name: driver-memory census gate
+        run: pnpm check:driver-memory-census
 
       # Merge-driver wiring gate (#6008, from #4675 / #4868). `merge=os-regen`
       # is what stops generator-owned artifacts (spec-changes.json, the ADR-0087
@@ -479,6 +670,44 @@ jobs:
       # (#4868's family).
       - name: Spec type-alias convention gate (ADR-0122)
         run: pnpm check:spec-parsed-alias
+
+      # Read-side tenant chokepoint gate (#6792, from #3724 / #6577).
+      # `SqlDriver.applyTenantScope()` owns read-side tenant isolation for the
+      # whole SQL family — the tenantId early-out, the no-tenant-field early-out,
+      # the NULL-org platform-row rule (#2734) and the ADR-0105 D2 union posture
+      # (#3623). Its own docstring claimed "every CRUD method routes through it".
+      # Nothing checked that, and it was FALSE for as long as it had existed:
+      # three doors built through `getBuilder()` and never arrived —
+      # `findWithWindowFunctions` (ROWS: a caller passing `tenantId` got every
+      # tenant's rows, measured `[a1,a2,b1,b2,p1]` against `find()`'s
+      # `[a1,a2,p1]`), `analyzeQuery`/`explain` (a PLAN for a statement `find()`
+      # would not run — the same defect #6577 fixed on these methods one builder
+      # line lower), and `distinct` (every tenant's values for one column).
+      #
+      # The third is the argument for gating rather than fixing. It was in NO
+      # card: #6792 asserts the opposite — that `distinct` is among the 13 scoped
+      # sites — and the triage comment and two rounds of measurement all
+      # inherited that sentence without re-deriving it. The 13th read site is
+      # `aggregate()`. Two of the three doors were found by a human reading the
+      # file for another reason; the third was found only by measuring, which is
+      # the thing a prose invariant can never do for itself.
+      #
+      # Keyed on the BUILDER, not the method signature. #6792 sketches "every
+      # method taking `(object, …, options)` and returning rows"; that criterion
+      # is measurably too narrow — `distinct(object, field, filters, options)`
+      # takes no query and `analyzeQuery` returns a plan, so it misses two of the
+      # three. `getBuilder()` is the single constructor of every statement this
+      # driver sends, so every builder is classified and one that cannot be
+      # classified is an error, never a default (#4690's family). Insert builders
+      # are exempt structurally, not by name: write-side tenancy is
+      # `injectTenantOnInsert`.
+      #
+      # Static AST over three files, no build needed, so it belongs in this job.
+      # Runs its own --self-test first, in both directions — the detector can be
+      # broken while every door is fine, and a scan that stops matching would
+      # report OK while reading nothing.
+      - name: Read-side tenant chokepoint gate
+        run: pnpm check:tenant-chokepoint
 
   typecheck:
     name: TypeScript Type Check
@@ -678,6 +907,28 @@ jobs:
       - name: Check the protocol upgrade guide is regenerated with the ADR-0087 registries
         run: pnpm --filter @objectstack/spec check:upgrade-guide
 
+      # The #4796 declaration-origin baseline. `export-origins/` records which
+      # SOURCE DECLARATION every public entry point exports under every name, and
+      # seventeen export-surface pin tests compare against it instead of each
+      # building their own `ts.createProgram` inside a vitest case (~55s of
+      # compilation per CI lap, and a non-deterministic timeout that ejected six
+      # unrelated PRs from the merge queue in one night).
+      #
+      # A comparison is only as good as the thing compared, so THIS STEP IS WHAT
+      # THOSE PINS MEAN. Without it a hand-edited or stale artifact would let
+      # every one of them report success over a fiction — the dormant-gate shape
+      # #4642 named. It belongs in this job for the same reason `check:docs`
+      # does: no paths filter, required status check, so it cannot go dormant on
+      # exactly the spec-only PRs that move the export surface.
+      #
+      # Reads `src/` via tsx and needs no build, so it runs before the workspace
+      # build and fails in ~3s. The self-test in front of it pins the resolver's
+      # own two edges (a re-export must read as ONE declaration; two declarations
+      # sharing a name must NOT) — a broken resolver would otherwise write a
+      # confidently wrong baseline and this step would agree with it.
+      - name: Check the export-origins baseline resolves as recorded
+        run: pnpm --filter @objectstack/spec check:export-origins
+
       # The authorable KEY surface — what a metadata author may write, which for
       # this platform is the third-party API. `api-surface/` records exported
       # names and `api-surface-signatures.json` hashes factory types as TypeScript
@@ -783,8 +1034,49 @@ jobs:
       - name: Check SKILL.md compatibility declarations match the workspace majors
         run: pnpm check:skill-compatibility
 
+      # The fourth gate over the .claude/ file tree, and the first to read
+      # .claude/agents/ at all (#6803). An agent definition that declares no `model:`
+      # INHERITS the dispatching session's model, so the role's tier is set by whoever
+      # dispatched it and when — a property of the caller's ambient state rather than
+      # of the role. Measured cost: four devs dispatched from one smaller-model session
+      # all died on the same shared quota wall, three leaving uncommitted and wholly
+      # ungated work in their worktrees (#6686). The failure is batched, and invisible
+      # to the dispatcher, whose pre-dispatch checks never ask what model the batch runs.
+      #
+      # The caller-side half of this rule already existed and did not hold: pm-dispatch
+      # SKILL.md §5 has said 'pass `model: "opus"` on every dev dispatch' since before
+      # that incident, and a seat that had read it still dispatched twelve agents in a
+      # row without passing it. That is why the assertion is over the DEFINITION, which
+      # holds regardless of caller compliance, rather than more prose at the call site.
+      #
+      # It asserts PRESENCE, never which tier — the tier is maintainer policy (#6803
+      # puts changing it out of scope), and a policy change should not have to edit a
+      # gate to land. `model: inherit` stays legal for a role that genuinely follows its
+      # caller, but only with a written justification the script re-checks against the
+      # live file, so a deliberate inherit is a recorded decision and a silent one is red.
+      #
+      # Same job and same reasons as its neighbours: no paths filter and required, so it
+      # cannot go dormant on exactly the PR that breaks it — and a `.claude/**` filter
+      # would blind it to the PR that adds a new agent definition anywhere else.
+      - name: Check every agent definition declares a model
+        run: pnpm check:agent-model-declared
+
       - name: Check the react-blocks contract is in sync with the spec
         run: pnpm --filter @objectstack/spec check:react-blocks
+
+      # The shipped `objectstack.manifest.json` files declare TemplateManifestSchema
+      # as their `$schema`, and until #7319 nothing read that claim: both consumers
+      # take the file as raw JSON (create-objectstack does not depend on the spec at
+      # all), so the schema and the artifact drifted twice without a red build —
+      # #6861's silently stripped `namespace`, then a required `manifestId` the blank
+      # template has never carried. One parse per shipped manifest closes the class.
+      #
+      # Reads `src/` and the template trees, so it needs no build and belongs in this
+      # pre-build group with the other source audits. No paths filter and required,
+      # for the standard reason: a filter on packages/create-objectstack/** would go
+      # dormant on exactly the PR that tightens the schema instead.
+      - name: Check every shipped template manifest satisfies TemplateManifestSchema
+        run: pnpm --filter @objectstack/spec check:template-manifests
 
       # Example apps are AI-authoring reference templates; a red typecheck is a
       # bad signal to copy from. tsup transpiles them without a full typecheck,
@@ -971,6 +1263,24 @@ jobs:
       # Runs the built CLI over each config, so it also belongs after the build.
       - name: Check no new untranslated declared labels
         run: pnpm check:i18n-coverage
+
+      # The THIRD i18n question, and the one neither step above can answer
+      # (#5750). Both of them read STATIC declarations; the Setup app declares a
+      # shell of empty group anchors and gets its ~50 menu entries at RUNTIME
+      # from SETUP_NAV_CONTRIBUTIONS and from the capability plugins that own the
+      # underlying objects (ADR-0029 D7). So those labels were covered by
+      # nothing: the extract config deferred them to the ratchet, the parity test
+      # deferred them to the ratchet, and the ratchet walks static configs. Four
+      # of them were untranslated in `zh-CN` while every gate reported green.
+      #
+      # This one boots the real composition, merges the contributions the same
+      # way the `/api/v1/meta/app` read path does, and asserts every merged nav
+      # id carries a label in every locale the platform bundle declares.
+      #
+      # Imports the BUILT output of ten workspace packages, so it belongs here
+      # with the other post-build consumer gates.
+      - name: Check runtime-merged app navigation is translated in every locale
+        run: pnpm check:app-nav-i18n
 
       # Seed the shared Turbo cache from main only (see the restore step above).
       - name: Save Turbo cache (main only)

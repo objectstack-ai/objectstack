@@ -510,3 +510,49 @@ describe('resolveExecutionContext — ADR-0090 D10 agent principal (OAuth on /mc
   });
 });
 
+
+describe('#6216 — this face keeps the EXPLICIT GUEST entry, and its own named inputs', () => {
+  // The maintainer ruling of 2026-08-08 (Option A) converged the dispatcher and
+  // REST assemblies onto one shared module with two named entries, and is
+  // explicit that NEITHER surface changes runtime behaviour. The frozen
+  // transcription parity matrix lives beside the assembler
+  // (`packages/core/src/security/assemble-execution-context.test.ts`); these
+  // pins are the same claim measured through THIS resolver, where a wiring
+  // mistake (the wrong entry, a per-face input dropped) would actually show.
+
+  it('a sessionless request still yields the WHOLE guest envelope, key set included', async () => {
+    const ctx = await resolveExecutionContext(makeOpts([], {}));
+    // Exact, not a subset: taking the fail-closed default entry here by mistake
+    // would return no context at all, and picking up an authenticated-only
+    // field would be a behaviour change in the other direction.
+    expect(ctx).toEqual({
+      positions: ['guest'],
+      permissions: [],
+      systemPermissions: [],
+      isSystem: false,
+      principalKind: 'guest',
+      org_user_ids: [],
+      accessible_org_ids: [],
+    });
+  });
+
+  it('carries the session bearer as accessToken — the divergence REST names as withheld', async () => {
+    // `ExecutionContext.accessToken` reaches hooks as `session.accessToken`
+    // (`objectql/engine.ts` buildSession). This face has always carried it and
+    // still does; the REST face passes `accessToken: undefined` on the record.
+    const authService = {
+      api: {
+        getSession: async () => ({ user: { id: 'u1' }, session: { token: 'sess_tok_rt' } }),
+      },
+    };
+    const ctx = await resolveExecutionContext({
+      getService: async (name: string) => (name === 'auth' ? authService : undefined),
+      getQl: async () => makeQl([]),
+      request: { headers: {} },
+    } as any);
+
+    expect(ctx.userId).toBe('u1');
+    expect(ctx.principalKind).toBe('human');
+    expect(ctx.accessToken).toBe('sess_tok_rt');
+  });
+});

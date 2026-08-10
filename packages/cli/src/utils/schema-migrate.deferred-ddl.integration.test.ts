@@ -100,7 +100,7 @@ describe('bootSchemaStack({ deferSchemaDdl }) — the boot writes nothing (#3917
     expect(before.tables).toEqual(['defer_widget']);
     expect(before.widgetColumns).toEqual(['created_at', 'id', 'name', 'updated_at']);
 
-    const stack = await bootSchemaStack({ databaseUrl: `file:${dbFile}`, deferSchemaDdl: true, projectRoot: dir });
+    const stack = await bootSchemaStack({ jsonOutput: false, databaseUrl: `file:${dbFile}`, deferSchemaDdl: true, projectRoot: dir });
     try {
       const after = await inspect();
       // The core assertion: boot created no table, added no column, wrote no
@@ -128,7 +128,7 @@ describe('bootSchemaStack({ deferSchemaDdl }) — the boot writes nothing (#3917
   }, 60_000);
 
   it('flushSchemaDdl performs exactly the work that was reported', async () => {
-    const stack = await bootSchemaStack({ databaseUrl: `file:${dbFile}`, deferSchemaDdl: true, projectRoot: dir });
+    const stack = await bootSchemaStack({ jsonOutput: false, databaseUrl: `file:${dbFile}`, deferSchemaDdl: true, projectRoot: dir });
     try {
       const pending = stack.pendingSchemaWork;
       const performed = await stack.flushSchemaDdl();
@@ -142,7 +142,7 @@ describe('bootSchemaStack({ deferSchemaDdl }) — the boot writes nothing (#3917
 
       // A second boot finds nothing left to do.
       await stack.shutdown();
-      const again = await bootSchemaStack({ databaseUrl: `file:${dbFile}`, deferSchemaDdl: true, projectRoot: dir });
+      const again = await bootSchemaStack({ jsonOutput: false, databaseUrl: `file:${dbFile}`, deferSchemaDdl: true, projectRoot: dir });
       try {
         expect(again.pendingSchemaWork).toEqual([]);
       } finally {
@@ -155,7 +155,7 @@ describe('bootSchemaStack({ deferSchemaDdl }) — the boot writes nothing (#3917
   }, 60_000);
 
   it('without the flag, the boot syncs as it always did', async () => {
-    const stack = await bootSchemaStack({ databaseUrl: `file:${dbFile}`, projectRoot: dir });
+    const stack = await bootSchemaStack({ jsonOutput: false, databaseUrl: `file:${dbFile}`, projectRoot: dir });
     try {
       expect(stack.pendingSchemaWork).toEqual([]);
       const after = await inspect();

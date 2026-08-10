@@ -1,10 +1,13 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
+import { execFileSync } from 'node:child_process';
+
 import { z } from 'zod';
 import { describe, expect, it } from 'vitest';
 
 import { lazySchema } from './lazy-schema';
 import { strictObject } from './strict-object';
+import { keySetMatches } from './suggestions.zod';
 
 const WidgetSchema = lazySchema(() =>
   strictObject(
@@ -246,6 +249,133 @@ describe('message order — the fix comes before the history (#5955)', () => {
 });
 
 /**
+ * The set-keyed `guidance` form (#6619) — one prescription shared by a named
+ * key family, the vocabulary the three hand-written `$ZodErrorMap`s needed
+ * before they could fold into this template at all.
+ *
+ * A second shape on a shared template is where accidental precedence bugs
+ * live, so the resolution rules are pinned here as behaviour rather than left
+ * to the docblock:
+ *
+ *   1. an exact `guidance` entry ALWAYS wins over any set;
+ *   2. among sets, declaration order wins;
+ *   3. a set match suppresses the rename channel for that key;
+ *   4. a set speaks once per message, at the first key that matched it.
+ */
+describe('strictObject guidanceSets — the set-keyed prescription channel (#6619)', () => {
+  const HISTORY = 'Until #4001 these were dropped silently.';
+  const SetSchema = lazySchema(() =>
+    strictObject(
+      {
+        surface: 'this set surface',
+        history: HISTORY,
+        guidance: {
+          // Deliberately ALSO a member of `legacySet` below: the exact entry
+          // must win (rule 1), so this text — not the set's — answers `alpha`.
+          alpha: '`alpha` has its own exact prescription.',
+        },
+        guidanceSets: [
+          {
+            name: 'legacySet',
+            keys: ['alpha', 'beta', 'gamma'],
+            prescription: 'The legacy family was retired — use `replacement`.',
+          },
+          {
+            name: 'overlapSet',
+            // `beta` is also in legacySet; declaration order (rule 2) decides.
+            keys: ['beta', 'delta'],
+            prescription: 'The overlap family answer.',
+          },
+          {
+            name: 'patternSet',
+            keys: /^exp(ort|erimental)/,
+            examples: ['exportMode', 'experimentalFlag'],
+            prescription: 'Export/experimental knobs live in `replacement`.',
+          },
+        ],
+      },
+      {
+        name: z.string(),
+        replacement: z.string().optional(),
+      },
+    ),
+  );
+
+  const messageFor = (body: Record<string, unknown>) => {
+    const r = SetSchema.safeParse({ name: 'x', ...body });
+    expect(r.success).toBe(false);
+    return r.error!.issues[0]!.message;
+  };
+
+  it('answers a set member with the set prescription, as a bullet, ahead of the history', () => {
+    const m = messageFor({ beta: 1 });
+    expect(m.startsWith('Unrecognized key(s) on this set surface: `beta`.')).toBe(true);
+    expect(m).toContain('\n  • The legacy family was retired — use `replacement`.');
+    expect(m.endsWith(` ${HISTORY}`)).toBe(true);
+  });
+
+  it('rule 1 — an exact guidance entry always wins over a set that also claims the key', () => {
+    const m = messageFor({ alpha: 1 });
+    expect(m).toContain('`alpha` has its own exact prescription.');
+    expect(m).not.toContain('The legacy family was retired');
+  });
+
+  it('rule 2 — among sets, declaration order decides', () => {
+    // `beta` is a member of BOTH sets; the first declared set answers.
+    const m = messageFor({ beta: 1 });
+    expect(m).toContain('The legacy family was retired');
+    expect(m).not.toContain('The overlap family answer.');
+    // The second set is not dead — its unshared member still reaches it.
+    expect(messageFor({ delta: 1 })).toContain('The overlap family answer.');
+  });
+
+  it('rule 3 — a set match suppresses the rename channel for that key', () => {
+    // `gamma` is within edit distance of nothing declared, but make the point
+    // on a key that IS: `replacment` (no set) gets a rename, while a set
+    // member never does — matched means answered.
+    expect(messageFor({ replacment: 'x' })).toContain('`replacment` → `replacement`');
+    expect(messageFor({ gamma: 1 })).not.toContain('Did you mean');
+  });
+
+  it('rule 4 — a set speaks once per message, however many members are written', () => {
+    const m = messageFor({ beta: 1, gamma: 1 });
+    expect(m.split('The legacy family was retired')).toHaveLength(2);
+  });
+
+  it('rules compose in one message: exact + two sets + a rename, each exactly once', () => {
+    const m = messageFor({ alpha: 1, beta: 1, delta: 1, replacment: 'x' });
+    expect(m).toContain('`alpha` has its own exact prescription.');
+    expect(m).toContain('The legacy family was retired');
+    expect(m).toContain('The overlap family answer.');
+    expect(m).toContain('`replacment` → `replacement`');
+    expect(m.endsWith(` ${HISTORY}`)).toBe(true);
+    // Bullets appear in KEY order (alpha, beta, delta), not set-declaration
+    // order — the set's bullet sits at the first key that matched it.
+    expect(m.indexOf('exact prescription')).toBeLessThan(m.indexOf('legacy family'));
+    expect(m.indexOf('legacy family')).toBeLessThan(m.indexOf('overlap family'));
+  });
+
+  it('the pattern form answers spellings nobody enumerated', () => {
+    for (const key of ['exportMode', 'experimentalFlag', 'exportTarget']) {
+      expect(messageFor({ [key]: 1 }), key).toContain('Export/experimental knobs live in `replacement`.');
+    }
+    // …and does not claim keys outside itself.
+    expect(messageFor({ zz: 1 })).not.toContain('Export/experimental knobs');
+  });
+
+  it('keySetMatches is stateless even on a /g pattern', () => {
+    // `RegExp#test` advances `lastIndex` on a sticky/global regex, making the
+    // same key alternate between matched and unmatched on repeated parses.
+    // `keySetMatches` uses `String#search`, which restores `lastIndex` by
+    // spec — asserted directly so a refactor back to `.test()` fails here.
+    const set = { name: 's', keys: /vis/g, prescription: 'p' } as const;
+    expect(keySetMatches(set, 'visibleWhenn')).toBe(true);
+    expect(keySetMatches(set, 'visibleWhenn')).toBe(true);
+    expect(keySetMatches(set, 'visibleWhenn')).toBe(true);
+  });
+});
+
+/**
  * Never suggest a key the schema cannot accept.
  *
  * `retiredKey` declares a removed key as `z.never().optional()` so the removal
@@ -349,4 +479,48 @@ describe('strictObject — the error map is lazy, so cycles cannot break it', ()
     Schema.safeParse({ a: 'x', bogus: 1 });
     expect(aliasesRead).toBe(1);
   });
+});
+
+// ============================================================================
+// #5593 — this module survives being entered FIRST in its own import cycle.
+//
+// `strictObject` is called at MODULE SCOPE by schemas that sit inside the
+// `field.zod` ↔ `suggestions.zod` ↔ `strict-object` cycle, so under
+// `OS_EAGER_SCHEMAS=1` it can run while this module is still initializing.
+// Everything it touches on the way in must therefore be reachable from the
+// first instruction of module evaluation — which rules out a module-level
+// `const` for the declaration registry, and is why `declarationStore()` is a
+// hoisted `function` declaration.
+//
+// ⚠️ Why this needs its own subprocess rather than an ordinary assertion:
+// `lazySchema` defers construction behind a Proxy, so a normal `vitest run`
+// never evaluates a schema at import time and the hazard is invisible. #5593
+// shipped the regression and the ordinary suite stayed green — what caught it
+// was CI's `check-test-completeness` gate noticing that
+// `automation/flow-region-cycle.test.ts` was counted and never reported,
+// because ITS subprocess died at import with `ReferenceError: Cannot access
+// 'DECLARATIONS' before initialization` and vitest could not even format the
+// stack. Two guards, one hazard: that file states the cycle it protects
+// (#4415), this one states the rule this module has to keep.
+//
+// The entry point is deliberately `data/field.zod.ts` — the module whose
+// own module-scope `strictObject(…)` call is the one that lands here
+// mid-initialization — reached through a module that pulls THIS file first.
+// ============================================================================
+describe('#5593 — eager construction with this module entered first', () => {
+  it('does not throw at import time under OS_EAGER_SCHEMAS=1', () => {
+    const barrel = new URL('../automation/index.ts', import.meta.url).href;
+    const run = (): string =>
+      execFileSync(
+        process.execPath,
+        ['--import', 'tsx', '--input-type=module', '-e',
+          `import ${JSON.stringify(barrel)};
+           console.log('ok');`],
+        { env: { ...process.env, OS_EAGER_SCHEMAS: '1' }, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] },
+      ).trim();
+    expect(
+      run(),
+      'a module-level `const` in strict-object.ts is in its TDZ here — use a hoisted function',
+    ).toBe('ok');
+  }, 60_000);
 });

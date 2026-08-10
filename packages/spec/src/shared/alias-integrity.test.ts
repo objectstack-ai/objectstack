@@ -31,9 +31,12 @@
  *    no source-literal reader can see, so the target check has to be suppressed
  *    for most of the interesting schemas. `.shape` sees them.
  * 2. **Assembled tables.** Ten call sites build `aliases` (or `surface`) from
- *    something other than a literal — `data/field.zod.ts`, `ui/theme.zod.ts`,
- *    `automation/etl.zod.ts` and others. The AST reads those as empty and
- *    reports them clean.
+ *    something other than a literal — `data/field.zod.ts`, `ui/theme.zod.ts`
+ *    and others. The AST reads those as empty and reports them clean.
+ *    (`automation/etl.zod.ts` was one of the ten when this was measured; the
+ *    whole L2 layer was retired at #6414, which is why the count above is kept
+ *    as the measurement it was rather than silently decremented — the argument
+ *    is about the AST's blind spot, and it does not get weaker by one file.)
  * 3. **Colliding surfaces.** `'this field group'` names two different schemas
  *    (`data/object.zod.ts`, `studio/object-designer.zod.ts`), so the surface
  *    string is not a key and the hand-map silently judges one against the
@@ -67,37 +70,48 @@
  * and separators, a second spelling of one probe is **never** reachable. It is
  * dead either way; it is only sometimes also a defect.
  *
- * ## The second batch: tables that never had a shape (#5483)
+ * ## The second batch: tables that never had a shape (#5483 → #5593)
  *
- * `strictObject` is not the only way to get an alias table. The 44 call sites
- * that predate the helper call `strictUnknownKeyError` directly and hand it a
- * **hand-transcribed `knownKeys` array**, so there is no `.shape` to judge them
- * against and no `strictObject` construction to register them. They were
- * outside all three claims above.
+ * `strictObject` used not to be the only way to get an alias table. Forty-four
+ * call sites predated the helper and called `strictUnknownKeyError` directly,
+ * handing it a **hand-transcribed `knownKeys` array** — so there was no `.shape`
+ * to judge them against, and they sat outside all three claims above.
  *
- * They are judged now, from a second registry the factory itself fills
- * (`alias-table-registry.ts`) — no call site was touched, which is what keeps
- * the migration in #5593 a separable change rather than one this guard has
- * already half-done. What that buys differs sharply by claim:
+ * #5483 shipped a transitional guard: a second registry the factory itself
+ * filled, so those tables were judged *somehow* without a single call site being
+ * edited. What it could buy differed sharply by claim — claims 1 and 2 were
+ * answered against the TRANSCRIPTION, so a drifted array dragged both answers
+ * with it, while claim 3 lost nothing (an `aliasProbe` collision is a property
+ * of the table alone, and that sweep came back clean at 52 tables).
  *
- * - claims 1 and 2 are answered against the **transcription**. If the array has
- *   drifted from the schema it describes, both answers inherit the drift. That
- *   gap is exactly what `strictObject` abolishes and only migration closes.
- * - claim 3 loses **nothing**: an `aliasProbe` collision is a property of the
- *   table alone. These 44 were not "measured clean" on it — #5481 postdates the
- *   measurement recorded in #5483, so they were *unmeasured*. Now they are
- *   measured, and the sweep comes back clean at 52 tables.
+ * **#5593 migrated all 44 and deleted the registry.** The two weak answers are
+ * now strong ones: every table in this repo is judged against the shape its
+ * error map actually reads, including the "alias target must not be a tombstone"
+ * half that a flat `knownKeys` array cannot express at all. Two consequences
+ * worth naming, because both were predicted as failures and one of them was not:
  *
- * Claim 2 did not come back clean, and the finding is filed rather than fixed
- * here: `ui/app.zod.ts` shares four "start expanded" aliases across all nine
- * navigation-item variants while `expanded` is declared on `group` alone, so on
- * the other eight the suggestion names a key that variant also rejects (#5555).
- * Pinned shrink-only below, structurally, because the fix rewrites author-facing
- * message text in a call site this transitional guard may not touch.
+ * - `VARIANT_LEGAL_GUIDANCE` — #5483's exemption for the `children` prescription
+ *   that is legally silent on the two nav variants declaring `children` — is
+ *   **deleted, by a fix rather than a move**: `ui/app.zod.ts` now files that
+ *   prescription only on the seven variants where it can fire, which a
+ *   transcription-shaped table could not distinguish. Same demotion-not-tolerance
+ *   move #5555 made on the "start expanded" aliases one field over.
+ * - `PROSE_ALIAS_TARGETS` **moved instead of dying**, and that is a correction to
+ *   the migration's own forecast. The exemption existed because seven nav alias
+ *   targets are deliberately prose (`type: 'dashboard' (with dashboardName)`)
+ *   rather than key names; migrating the family did not make them key names, so
+ *   claim 2 met the same 93 entries from the shape side and the tolerance had to
+ *   come with it. It is strictly stronger where it now sits — judged against
+ *   `.shape`, with the same staleness test — but it is one exemption this
+ *   campaign did not get to delete.
  *
- * The shrink-only ratchet also survives unchanged, because what it discourages
- * — a NEW direct call site, carrying a fresh second copy of a key list — is
- * exactly as undesirable as it was before these tables gained a guard.
+ * ## The ratchet inverted: `strictUnknownKeyError` is now internal-only in-repo
+ *
+ * The old shrink-only ratchet (`<= 44` direct call sites) is a **hard zero**:
+ * the factory stays PUBLISHED for external callers, but inside `packages/spec`
+ * the only caller is `strictObject`. A new direct call site would mint a fresh
+ * second copy of a key list and land outside the shape-backed audit, so it fails
+ * here rather than being counted.
  */
 
 import fs from 'node:fs';
@@ -108,12 +122,8 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import ts from 'typescript';
 
 import { aliasProbe } from './alias-probe';
-import {
-  directAliasTableOverflow,
-  directAliasTables,
-  type DirectAliasTableDeclaration,
-} from './alias-table-registry';
 import { acceptsNothing, strictObjectDeclarations, type StrictObjectDeclaration } from './strict-object';
+import { keySetMatches } from './suggestions.zod';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SPEC_SRC = path.resolve(HERE, '..');
@@ -249,9 +259,6 @@ function force(root: unknown, seen: Set<unknown>): void {
 /** Every declaration built by the forcing walk, de-duplicated by content. */
 let SURFACES: StrictObjectDeclaration[] = [];
 
-/** The same, for tables that reached `strictUnknownKeyError` directly (#5483). */
-let DIRECT: DirectAliasTableDeclaration[] = [];
-
 beforeAll(async () => {
   const seen = new Set<unknown>();
   for (const file of MODULES) {
@@ -266,6 +273,14 @@ beforeAll(async () => {
   // A factory (`actionObject()`) called by two schemas runs its `strictObject`
   // twice, registering two declarations from ONE call site. Same table, same
   // shape, same verdict — collapse them so a failure is reported once.
+  //
+  // The key includes the SHAPE's key list, not just the surface and aliases,
+  // because `ui/app.zod.ts`'s navigation family is the opposite case: one
+  // `navItemSurface(variant)` factory feeding nine `strictObject` calls whose
+  // tables are genuinely different (same surface template, different shape,
+  // different cross-variant aliases). Collapsing on surface alone would judge
+  // one of the nine and silently drop eight — the shape is what tells the two
+  // situations apart.
   const unique = new Map<string, StrictObjectDeclaration>();
   for (const d of strictObjectDeclarations()) {
     unique.set(
@@ -274,25 +289,6 @@ beforeAll(async () => {
     );
   }
   SURFACES = [...unique.values()];
-
-  // Same collapse for the direct batch, and for the same reason: the nav-item
-  // factory in `ui/app.zod.ts` is ONE call site that runs nine times (once per
-  // `type` variant), and each variant is a genuinely different table — same
-  // surface template, different `knownKeys`, different cross-variant aliases —
-  // so the key has to include the key list, not just the surface and aliases.
-  const uniqueDirect = new Map<string, DirectAliasTableDeclaration>();
-  for (const d of directAliasTables()) {
-    uniqueDirect.set(
-      JSON.stringify([
-        d.options.surface,
-        d.options.aliases ?? {},
-        d.options.guidance ? Object.keys(d.options.guidance).sort() : [],
-        [...d.options.knownKeys].sort(),
-      ]),
-      d,
-    );
-  }
-  DIRECT = [...uniqueDirect.values()];
 }, 180_000);
 
 // ---------------------------------------------------------------------------
@@ -311,12 +307,15 @@ interface CallSite {
 }
 
 /**
- * The two helper spellings, and where each keeps its options literal.
- * `strictObject(options, shape)` vs `strictUnknownKeyError(options)`.
+ * Where the helper keeps its options literal — `strictObject(options, shape)`.
+ *
+ * A one-entry map since #5593 retired the `strictUnknownKeyError(options)`
+ * spelling from this package. Kept as a map rather than inlined because the
+ * arity is the load-bearing part (the scan reads `arguments[0]`), and a second
+ * helper would arrive with a different one.
  */
 const CALLEES = {
   strictObject: 2,
-  strictUnknownKeyError: 1,
 } as const;
 
 function callSites(file: string, callee: keyof typeof CALLEES): CallSite[] {
@@ -373,12 +372,108 @@ function callSites(file: string, callee: keyof typeof CALLEES): CallSite[] {
 const CALL_SITES = MODULES.flatMap((f) => callSites(f, 'strictObject'));
 
 /**
- * The pre-helper wiring's call sites (#5483) — the helper modules excluded, so
- * `strictObject`'s own internal call is not mistaken for one of them.
+ * Sites where a module hands a zod shape an `{ error: … }` of its own that
+ * decides **`unrecognized_keys`** — the structural signature of a hand-written
+ * unknown-key error map (#6805).
+ *
+ * The criterion is the class's own definition, in two conjuncts, and BOTH are
+ * load-bearing:
+ *
+ * 1. **Attached.** The map is passed as `error` in the params object of a
+ *    `z.<factory>(…)` call — the construction-time wiring that makes it *this
+ *    shape's* unknown-key voice. A map that is never attached to a shape has no
+ *    alias/guidance table for a registry to judge, so it is not what #6416
+ *    named. Two live specimens prove the conjunct is doing work rather than
+ *    decorating the sentence: `shared/error-map.zod.ts`'s `objectStackErrorMap`
+ *    *does* decide `unrecognized_keys`, but it is a per-parse map a CALLER
+ *    passes to `safeParse` (a generic "check for typos" fallback carrying no
+ *    per-key content), and `carriesUnknownKey` in the same file only *reads*
+ *    `issue.code` to rank union branches. Neither is a per-schema table, and
+ *    the first draft of this scan flagged both.
+ * 2. **Deciding `unrecognized_keys`.** Judged by the code the map branches on,
+ *    never by its name. `data/field.zod.ts`'s `uniqueScopeError` is attached
+ *    exactly this way — `z.union([…], { error: uniqueScopeError })` — and is
+ *    NOT in the class, because it answers `invalid_union`, a value-level
+ *    verdict `strictObject`'s guidance channel does not address.
+ *
+ * AST rather than text throughout, which is the other load-bearing choice: the
+ * literal `'unrecognized_keys'` appears in PROSE all over this package
+ * (including in the pins that call this function), and a comment is not a node
+ * this walk visits.
  */
-const DIRECT_CALL_SITES = MODULES
-  .filter((f) => !HELPER_MODULES.has(path.relative(SPEC_SRC, f)))
-  .flatMap((f) => callSites(f, 'strictUnknownKeyError'));
+interface HandwrittenMapSite { readonly line: number; readonly name: string }
+
+function scanSource(file: string, text: string): HandwrittenMapSite[] {
+  const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
+
+  /** True when `node`'s subtree compares something to `'unrecognized_keys'`. */
+  const decidesUnknownKeys = (node: ts.Node): boolean => {
+    let found = false;
+    const walk = (n: ts.Node): void => {
+      if (found) return;
+      if (
+        (ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n))
+        && n.text === 'unrecognized_keys'
+      ) { found = true; return; }
+      ts.forEachChild(n, walk);
+    };
+    walk(node);
+    return found;
+  };
+
+  // Module-scope `const x = …` / `function x() {}`, so an `{ error: x }` can be
+  // resolved back to the body it names. Same-module only: a map imported from
+  // elsewhere is judged where it is DECLARED, by this same scan over that file.
+  const declarations = new Map<string, ts.Node>();
+  const collect = (node: ts.Node): void => {
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer) {
+      declarations.set(node.name.text, node.initializer);
+    } else if (ts.isFunctionDeclaration(node) && node.name) {
+      declarations.set(node.name.text, node);
+    }
+    ts.forEachChild(node, collect);
+  };
+  collect(source);
+
+  const sites: HandwrittenMapSite[] = [];
+  const visit = (node: ts.Node): void => {
+    // `z.object(…)`, `z.union(…)`, `z.never(…)`, … — a zod FACTORY call, which
+    // is where a params object binds a map to a shape. Deliberately not any
+    // `{ error: … }` anywhere: `schema.safeParse(data, { error: map })` is a
+    // caller's choice for one parse, not a property of the shape.
+    if (
+      ts.isCallExpression(node)
+      && ts.isPropertyAccessExpression(node.expression)
+      && ts.isIdentifier(node.expression.expression)
+      && node.expression.expression.text === 'z'
+    ) {
+      for (const arg of node.arguments) {
+        if (!ts.isObjectLiteralExpression(arg)) continue;
+        for (const p of arg.properties) {
+          if (!ts.isPropertyAssignment(p)) continue;
+          if (!ts.isIdentifier(p.name) || p.name.text !== 'error') continue;
+          const init = p.initializer;
+          // An identifier is resolved to its declaration; an inline function is
+          // its own body. A CALL (`strictObjectError(options, shape)`) is the
+          // shared template being invoked — the opposite of hand-written — and
+          // its body lives in a helper module this scan does not read.
+          const body = ts.isIdentifier(init) ? declarations.get(init.text) : init;
+          if (!body || !decidesUnknownKeys(body)) continue;
+          sites.push({
+            line: source.getLineAndCharacterOfPosition(p.getStart()).line + 1,
+            name: ts.isIdentifier(init) ? init.text : '(inline)',
+          });
+        }
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  return sites;
+}
+
+const handwrittenMapSites = (file: string): HandwrittenMapSite[] =>
+  scanSource(file, fs.readFileSync(file, 'utf8'));
 
 // ---------------------------------------------------------------------------
 // 1. Coverage — the walk reached every table the source declares
@@ -417,26 +512,57 @@ describe('alias integrity — coverage', () => {
     expect(unreached, 'these alias tables are not reachable from any module export, so nothing judges them').toEqual([]);
   });
 
-  it('the surface this gate can only judge by transcription only ever shrinks', () => {
-    // `strictObject` is not the only way to get an alias table: the pre-helper
-    // wiring calls `strictUnknownKeyError` directly with a hand-transcribed
-    // `knownKeys` array. Since #5483 those tables ARE judged — the factory
-    // registers them and the block below reads them — so this number is no
-    // longer a measure of what nothing watches. It measures what is watched
-    // with the WEAKER instrument: three claims, two of them answered against
-    // the transcription rather than the shape, so a drifted array drags both
-    // answers with it and this file cannot tell.
+  it('NOTHING in packages/spec calls `strictUnknownKeyError` directly any more (#5593)', () => {
+    // This was a shrink-only ratchet at 44 — the pre-helper wiring, which hands
+    // the factory a hand-transcribed `knownKeys` array instead of a shape.
+    // #5593 migrated the last of them, so it is a hard ZERO and the assertion
+    // changed meaning with the number: it no longer measures "how much of this
+    // gate runs on the weaker instrument", it forbids the weaker instrument.
     //
-    // Which leaves the ratchet meaning exactly what it always meant. Migrating
-    // one call site to `strictObject` is free and moves it to the shape-backed
-    // half; adding a NEW one mints a fresh second copy of a key list and fails
-    // here, forcing the choice to be deliberate. The batched migration that
-    // takes this to 0 is #5593.
-    const uncovered = MODULES.filter((f) => !HELPER_MODULES.has(path.relative(SPEC_SRC, f))).flatMap((f) => {
+    // Not a style rule. A direct call site is a second copy of a key list, and
+    // the two claims that matter most — "is this alias key really unknown here"
+    // and "is this alias target really a key this shape accepts" — can only be
+    // answered against a transcription, which inherits every drift. The
+    // tombstone half of the second claim cannot be answered at all: a flat
+    // string array has no schemas in it. `strictObject` derives the list from
+    // the shape, so there is nothing left to drift.
+    //
+    // `strictUnknownKeyError` stays PUBLISHED for external callers (it is in
+    // `api-surface.json` under `./shared`); this is a rule about THIS package.
+    const direct = MODULES.filter((f) => !HELPER_MODULES.has(path.relative(SPEC_SRC, f))).flatMap((f) => {
       const source = fs.readFileSync(f, 'utf8');
       return [...source.matchAll(/\bstrictUnknownKeyError\s*\(/g)].map(() => path.relative(SPEC_SRC, f));
     });
-    expect(uncovered.length).toBeLessThanOrEqual(44);
+    expect(
+      direct.sort(),
+      'build the shape with `strictObject(options, shape)` instead — see the header of `strict-object.ts`',
+    ).toEqual([]);
+  });
+
+  it("the nav-item factory built one table per variant, and `data/object.zod.ts`'s reached the walk", () => {
+    // Two coverage facts #5483's direct-call block used to carry, kept because
+    // both name a mechanism that can break silently, and both moved into the
+    // shape-backed registry at #5593 rather than disappearing with it.
+    //
+    // (a) `ui/app.zod.ts`'s nine navigation branches share ONE
+    //     `navItemSurface(variant)` options factory. Nine variants in, nine
+    //     tables out — the count IS the coverage, and it is the assertion that
+    //     fails if the de-duplication above ever collapses them onto one.
+    const navTables = SURFACES.filter((s) => PROSE_TARGET_SURFACE.test(s.options.surface));
+    expect(navTables.length, 'one strict branch per nav-item `type`').toBe(9);
+
+    // (b) `data/object.zod.ts` used to build its error map on FIRST USE, to
+    //     step around a temporal dead zone, and needed a synthetic-issue poke in
+    //     `force()` to register at all. #5593 removed the deferral — moving
+    //     `UNKNOWN_KEY_GUIDANCE` above the shape is what replaced it, because
+    //     `strictObject` evaluates its options at construction — so this is now
+    //     an ordinary registration. Asserted anyway: if the declaration order
+    //     ever gets shuffled back, the module crashes under `OS_EAGER_SCHEMAS=1`
+    //     and this names the schema that did it.
+    expect(
+      SURFACES.map((s) => s.options.surface),
+      "`data/object.zod.ts`'s table did not register — check the declaration order of UNKNOWN_KEY_GUIDANCE",
+    ).toContain('this object');
   });
 
   it('the runtime walk sees tables the AST provably cannot read', () => {
@@ -474,6 +600,63 @@ const entry = (s: StrictObjectDeclaration, written: string, target: string): str
   return `${where} — "${s.options.surface}": \`${written}\` -> \`${target}\``;
 };
 
+/**
+ * Alias targets that are deliberately **prose, not a key name** — the only
+ * place in `packages/spec` where that is true, and an explicit allowlist rather
+ * than a relaxed criterion because the two are not the same promise.
+ *
+ * `ui/app.zod.ts` builds one table per navigation-item `type`, and the
+ * commonest nav mistake is not a typo: it is `dashboardName` written on a `url`
+ * item — a real key, on the wrong variant. Naming a key there would be wrong
+ * twice over (the key IS spelled correctly, and writing it is still not enough
+ * without the matching `type`), so the target is a sentence:
+ *
+ *     Did you mean `dashboardname` → `type: 'dashboard' (with dashboardName)`?
+ *
+ * Enumerated, not pattern-matched, and paired with the surface family that owns
+ * them, so a new prose target anywhere — including a second one on this very
+ * surface — fails the target criterion and has to be argued for here. The
+ * staleness test below is the other half: an entry nothing uses is deleted, so
+ * this list cannot quietly outlive the tables it excuses.
+ *
+ * The seventh entry arrived by that route. #5555 fixed the defect this gate
+ * found — the four "start expanded" spellings redirecting to `expanded` on the
+ * eight variants that lack it — and the fix is precisely a demotion from bare
+ * key name to prose, so the tolerance that pinned it was deleted and this list
+ * grew by one. It is one string for four alias keys because they share a single
+ * answer: the key you want lives on `group`.
+ *
+ * ⚠️ **Written for the direct-call guard at #5483, MOVED here at #5593 — and the
+ * move is the correction worth reading.** The migration forecast that this
+ * exemption would "lose its basis and go red, and should be deleted rather than
+ * rewritten", on the reasoning that its precondition was the tables still being
+ * in the direct registry. That reasoning was about where the tables were judged;
+ * the FACT it excuses is a property of the tables themselves, and migrating them
+ * did not turn seven sentences into key names. Measured on the migration: claim
+ * 2 below met the same seven targets from the shape side, 93 entries across the
+ * variants, so the exemption came with them. It is strictly stronger here — the
+ * criterion it relaxes is now `target in shape` rather than
+ * `knownKeys.includes(target)` — but it is the one exemption #5593 did not get
+ * to delete. Its sibling, `VARIANT_LEGAL_GUIDANCE`, genuinely died: that one was
+ * excusing a limitation of the transcription, and the shape-backed form let
+ * `ui/app.zod.ts` file the prescription only where it can fire.
+ */
+const PROSE_ALIAS_TARGETS: ReadonlySet<string> = new Set([
+  "type: 'object' (with objectName)",
+  "type: 'page' (with pageName)",
+  "type: 'url' (with url)",
+  "type: 'dashboard' (with dashboardName)",
+  "type: 'report' (with reportName)",
+  "type: 'component' (with componentRef)",
+  "type: 'group' (with expanded)",
+]);
+
+/** The surface family the prose targets are allowed on, and nowhere else. */
+const PROSE_TARGET_SURFACE = /^this `[a-z]+` navigation item$/;
+
+const isProseTarget = (surface: string, target: string): boolean =>
+  PROSE_TARGET_SURFACE.test(surface) && PROSE_ALIAS_TARGETS.has(target);
+
 describe('alias integrity — every table is a true claim about its schema', () => {
   it('no alias key is itself a declared key (a dead entry that can never fire)', () => {
     // An alias is consulted only from the `unrecognized_keys` path. A key the
@@ -495,12 +678,34 @@ describe('alias integrity — every table is a true claim about its schema', () 
     // the alias table is consulted BEFORE that fallback and bypasses the filter
     // entirely. Pointing an alias at a tombstone is ledger finding 12 exactly —
     // the author is told to write the one key guaranteed to be rejected next.
+    //
+    // `extraKeys` counts as accepted, and the reason is the base/extension
+    // boundary rather than leniency: strictness and the error map RIDE
+    // `.extend()`, so a module-private base's table is consulted on a shape it
+    // does not itself declare (`security/sharing.zod.ts`'s base names `type` /
+    // `condition`, which only `CriteriaSharingRuleSchema` declares — and that
+    // extension is the only surface anything parses). `extraKeys` is the field
+    // `strictObject` provides for exactly that, and the suggester already reads
+    // it as a candidate, so refusing it here would forbid a pattern the helper
+    // documents. It IS the weaker half of this claim — an author-asserted key
+    // rather than a shape-backed one — which is why it is named in the failure
+    // text below and kept to the extension case.
     const broken: string[] = [];
     for (const s of SURFACES) {
       const shape = s.shape;
+      const extra = new Set(s.options.extraKeys ?? []);
       for (const [written, target] of Object.entries(s.options.aliases ?? {})) {
+        // The one sanctioned exception, enumerated above: a nav-item target
+        // that is a SENTENCE about the `type`, because the key the author wrote
+        // is spelled correctly and only the variant is wrong.
+        if (isProseTarget(s.options.surface, target)) continue;
+        if (extra.has(target)) continue;
         if (!(target in shape)) {
-          broken.push(`${entry(s, written, target)} — \`${target}\` is not declared here`);
+          broken.push(
+            `${entry(s, written, target)} — \`${target}\` is not declared here`
+            + ' (declare it, retarget the alias, or — only if the table rides `.extend()`'
+            + ' onto a surface that DOES declare it — name it in `extraKeys`)',
+          );
         } else if (acceptsNothing(shape[target])) {
           broken.push(`${entry(s, written, target)} — \`${target}\` is a tombstone; it accepts nothing`);
         }
@@ -536,6 +741,268 @@ describe('alias integrity — every table is a true claim about its schema', () 
     expect(collisions.sort()).toEqual([]);
   });
 
+  it('every prose-target exemption is still load-bearing', () => {
+    // An allowlist nobody reaches is the silent pass-through this exemption was
+    // written to avoid, one release later. If a nav variant is reworded or
+    // retired, the stale entries surface here instead of quietly widening what
+    // the target criterion above will forgive.
+    const used = new Set<string>();
+    for (const s of SURFACES) {
+      if (!PROSE_TARGET_SURFACE.test(s.options.surface)) continue;
+      for (const target of Object.values(s.options.aliases ?? {})) {
+        if (PROSE_ALIAS_TARGETS.has(target)) used.add(target);
+      }
+    }
+    expect([...PROSE_ALIAS_TARGETS].filter((x) => !used.has(x)).sort()).toEqual([]);
+  });
+
+  it('no guidance SET member is itself a declared key, and no two entries claim one key (#6619)', () => {
+    // The set-keyed guidance form arrived with #6619's fold of the three
+    // hand-written `$ZodErrorMap`s — maps that, being hand-rolled, no registry
+    // saw and nothing judged (#6416's blind spot). Folding them in is only
+    // worth it if the sets are held to the same claims the exact channel is:
+    //
+    // - an enumerated member the shape DECLARES is dead — a declared key never
+    //   reaches the `unrecognized_keys` path (tombstones included: writing one
+    //   raises `invalid_type` from its `z.never()`, not `unrecognized_keys`);
+    // - a member also filed under exact `guidance` is unreachable for that key
+    //   (the exact entry always wins — pinned in `strict-object.test.ts`), so
+    //   the overlap is at best dead weight and at worst a wrong claim;
+    // - two enumerated sets sharing a member means declaration order decides
+    //   which prescription the author sees. The precedence is pinned, but no
+    //   in-repo table gets to DEPEND on a tie-break being read correctly.
+    const broken: string[] = [];
+    for (const s of SURFACES) {
+      const declared = new Set(Object.keys(s.shape));
+      const exact = new Set(Object.keys(s.options.guidance ?? {}));
+      const seen = new Map<string, string>();
+      for (const set of s.options.guidanceSets ?? []) {
+        if (set.keys instanceof RegExp) continue; // judged in the pattern test below
+        for (const member of set.keys) {
+          if (declared.has(member)) {
+            broken.push(`"${s.options.surface}": set \`${set.name}\` lists \`${member}\`, which is declared here`);
+          }
+          if (exact.has(member)) {
+            broken.push(`"${s.options.surface}": set \`${set.name}\` lists \`${member}\`, which exact guidance already answers`);
+          }
+          const prior = seen.get(member);
+          if (prior && prior !== set.name) {
+            broken.push(`"${s.options.surface}": \`${member}\` is claimed by both \`${prior}\` and \`${set.name}\``);
+          }
+          seen.set(member, set.name);
+        }
+      }
+    }
+    expect(broken.sort()).toEqual([]);
+  });
+
+  it('every pattern-keyed set carries examples that really match it and are really rejected (#6619)', () => {
+    // A pattern is an OPEN family, so the dead-entry question cannot be asked
+    // of its membership the way it is of a list — the visibility pattern
+    // deliberately also matches the canonical `visibleWhen`, which the shape
+    // declares and which therefore never arrives at the map. What CAN be
+    // asked, and is: the spellings the pattern was written for really match it
+    // (a pattern typo fails here), and none of them is a key the shape
+    // declares (a pattern fully shadowed by the shape is a phantom check).
+    const broken: string[] = [];
+    for (const s of SURFACES) {
+      for (const set of s.options.guidanceSets ?? []) {
+        if (!(set.keys instanceof RegExp)) continue;
+        const examples = set.examples ?? [];
+        if (examples.length === 0) {
+          broken.push(`"${s.options.surface}": pattern set \`${set.name}\` carries no examples — nothing anchors what it is for`);
+          continue;
+        }
+        const declared = new Set(Object.keys(s.shape));
+        for (const example of examples) {
+          if (!keySetMatches(set, example)) {
+            broken.push(`"${s.options.surface}": \`${set.name}\` example \`${example}\` does not match its own pattern`);
+          }
+          if (declared.has(example)) {
+            broken.push(`"${s.options.surface}": \`${set.name}\` example \`${example}\` is a declared key — it can never reach the map`);
+          }
+        }
+      }
+    }
+    expect(broken.sort()).toEqual([]);
+  });
+
+  it('the three #6416 hand-written maps are FOLDED and judged here — the blind spot stays closed (#6619)', () => {
+    // The reason #6619 existed: `strictVisibilityError`,
+    // `strictWidgetAnalyticsError` and `strictTenancyError` were hand-rolled
+    // `$ZodErrorMap`s, so their alias pointers and prescriptions registered in
+    // NO registry — unmeasured rather than clean. This assertion is the
+    // closure itself: the three surfaces are declarations this file walks, and
+    // their prescriptions ride channels every test above judges. Reverting any
+    // of them to a hand-written map fails HERE, loudly, instead of quietly
+    // re-opening the blind spot.
+    const bySurface = new Map(SURFACES.map((s) => [s.options.surface, s]));
+
+    const visibility = [...SURFACES].filter((s) => s.options.surface === 'this view/page schema');
+    // Three call sites share the options: FormFieldBase (via strictObjectError),
+    // FormSection, PageComponent — distinct shapes, so distinct declarations.
+    expect(visibility.length).toBeGreaterThanOrEqual(3);
+    for (const v of visibility) {
+      expect(v.options.guidanceSets?.map((g) => g.name)).toContain('VISIBILITY_KEY_PATTERN');
+    }
+
+    const widget = bySurface.get('this dashboard widget');
+    expect(widget, 'DashboardWidgetSchema no longer declares through strictObject').toBeDefined();
+    expect(widget!.options.guidanceSets?.map((g) => g.name)).toEqual([
+      'LEGACY_WIDGET_ANALYTICS_KEYS',
+      'QUARANTINED_WIDGET_KEYS',
+      'WIDGET_DRILL_NEAR_KEYS',
+    ]);
+
+    const tenancy = bySurface.get('`tenancy`');
+    expect(tenancy, 'TenancyConfigSchema no longer declares through strictObject').toBeDefined();
+    expect(Object.keys(tenancy!.options.guidance ?? {}).sort()).toEqual(['crossTenantAccess', 'strategy']);
+  });
+
+  it('the two maps #6619 MISSED are folded and judged here too (#6805)', () => {
+    // #6619's inventory was two short, and both survivors were the same shape
+    // as the three above — `unrecognized_keys` prescription tables attached to
+    // a `.strict()` object through `{ error: … }`, seen by no registry. The
+    // one that mattered is `strictToolError`: it carried
+    // `TOOL_RETIRED_KEY_GUIDANCE`, a hand-maintained PER-KEY retirement table,
+    // which is the most rot-prone content this audit exists for (the #6756 /
+    // #6758 sweep found live prescriptions pointing at keys that no longer
+    // exist, in tables nothing was judging either).
+    //
+    // Recorded as its own case rather than folded into the one above, so the
+    // two closures stay separately readable: #6619 closed the instances #6416
+    // NAMED, #6805 closed the two it missed, and the class pin below closes the
+    // shape so there is no third round.
+    const bySurface = new Map(SURFACES.map((s) => [s.options.surface, s]));
+
+    const tool = bySurface.get('the tool definition');
+    expect(tool, 'ToolSchema no longer declares through strictObject').toBeDefined();
+    expect(Object.keys(tool!.options.guidance ?? {}).sort()).toEqual([
+      'active', 'builtIn', 'category', 'permissions', 'requiresConfirmation',
+    ]);
+
+    const capabilities = bySurface.get('`enable`');
+    expect(capabilities, 'ObjectCapabilities no longer declares through strictObject').toBeDefined();
+    expect(Object.keys(capabilities!.options.guidance ?? {}).sort()).toEqual(['mru', 'trash']);
+  });
+
+  it('NO module outside the shared helpers writes its own `unrecognized_keys` map (#6805)', () => {
+    // The class, not the instances. Both closure pins above name surfaces, so
+    // each only holds the line it was written for — #6416 named three, and the
+    // inventory that produced the number was two short. A pin over the SHAPE
+    // cannot be two short: any new hand-rolled unknown-key map fails here on
+    // arrival, whatever it is called and whatever surface it closes.
+    //
+    // ⚠️ Scoped to `unrecognized_keys` DELIBERATELY, and this is the whole
+    // discrimination. `data/field.zod.ts`'s `uniqueScopeError` is a
+    // `$ZodErrorMap` too and is NOT in this class: it branches on
+    // `invalid_union`, a VALUE-level verdict, which `strictObject`'s guidance
+    // channel does not address and could not absorb. A blanket "no error maps
+    // outside the helpers" rule would have to carry an exemption for it, and an
+    // exemption is exactly the seam an inventory drifts through. Judged by the
+    // `issue.code` the map decides on, never by its name.
+    //
+    // Adjacent to #6635 (a general "a retirement updated some mentions and not
+    // others" gate) and deliberately not it: that one compares PROSE mentions
+    // of a retired symbol against each other and catches a table whose
+    // prescriptions have gone stale; this one is structural and catches a
+    // guidance channel that never entered a registry. Neither subsumes the
+    // other — after this fold, `TOOL_RETIRED_KEY_GUIDANCE` is visible to the
+    // audit and could still name a key that no longer exists, which is #6635's
+    // to find and this pin is silent about.
+    // ⚠️ Scanned over EVERY module, `HELPER_MODULES` included — deliberately no
+    // exemption. The direct-call ratchet above needs one because
+    // `strictUnknownKeyError`'s own definition is a call site of itself; this
+    // criterion needs none, because the helper does not hand a shape a
+    // hand-written map either: `strict-object.ts`'s one
+    // `z.object(shape, { error: … })` passes a CALL to the shared factory, and
+    // a call is exactly what "not hand-written" looks like. Measured, not
+    // assumed — an exemption that excuses nothing reads as coverage for a case
+    // nobody checked, which is the failure mode of the inventory this pin
+    // replaces.
+    const offenders = MODULES
+      .flatMap((f) => handwrittenMapSites(f)
+        .map((s) => `${path.relative(SPEC_SRC, f)}:${s.line} — \`${s.name}\``));
+
+    expect(
+      offenders.sort(),
+      'build the shape with `strictObject(options, shape)` and put the prescriptions in '
+      + '`guidance` / `guidanceSets` — a hand-rolled map registers in no registry, so its '
+      + 'aliases and prescriptions are unmeasured rather than clean (#6416/#6619/#6805)',
+    ).toEqual([]);
+  });
+
+  it('…and that scan is alive: the pre-fold shape is found, prose and the two out-of-class maps are not (#6805)', () => {
+    // Anti-vacuity for the verdict above, which asserts that a search came back
+    // EMPTY — the shape that passes just as well when the instrument is dead.
+    // Four controls, each closing a different way it could be.
+    //
+    // Note what is NOT a control here: "the helper modules light up". Under an
+    // earlier, coarser criterion (the bare `'unrecognized_keys'` literal) they
+    // did, and that reading was the reason the first draft also flagged
+    // `objectStackErrorMap`. The tightened criterion asks whether a shape was
+    // handed a hand-written map, which the helper never does — so the honest
+    // liveness evidence is (a) below, a fresh file the scan has never seen.
+    //
+    // (a) it recognises the class in a file it has never seen. The specimen is
+    //     `strictToolError` and its wiring as they stood on `main` immediately
+    //     before this PR folded them, so what is pinned is the real thing
+    //     rather than a stylised stand-in — this is the exact source the
+    //     verdict must never let back in.
+    const specimen = `
+      const strictToolError: z.core.$ZodErrorMap = (issue) => {
+        if (issue.code !== 'unrecognized_keys') return undefined;
+        const keys = (issue as { keys?: readonly string[] }).keys ?? [];
+        return \`Unrecognized key(s): \${keys.join(', ')}.\`;
+      };
+      export const ToolSchema = z.object({
+        name: z.string(),
+      }, { error: strictToolError }).strict();
+    `;
+    expect(scanSource('specimen.ts', specimen)).toEqual([{ line: 9, name: 'strictToolError' }]);
+
+    // (b) it is not a grep. This package's docblocks discuss
+    //     `unrecognized_keys` by name constantly — including the pin above —
+    //     and prose is not a map. A text scan would flag every one of them, and
+    //     the verdict would have needed an allowlist, which is the maintenance
+    //     shape this pin exists to avoid.
+    const prose = `
+      /** The alias table is consulted from the unrecognized_keys path only. */
+      // A guidance entry answers an 'unrecognized_keys' issue.
+      export const NOT_A_MAP = 1;
+    `;
+    expect(scanSource('prose.ts', prose)).toEqual([]);
+
+    // (c) the ATTACHMENT conjunct earns its place. `objectStackErrorMap`
+    //     decides `unrecognized_keys` and is deliberately out of class: it is a
+    //     per-parse map a caller passes to `safeParse`, with one generic "check
+    //     for typos" sentence and no per-key content, so there is no table for
+    //     a registry to judge. The first draft of this scan — literal presence
+    //     alone — flagged it and its neighbour `carriesUnknownKey` (a reader,
+    //     not a map). Recorded as a MEASURED negative rather than an exemption:
+    //     if that file ever does attach a per-schema map, this control does not
+    //     protect it.
+    const errorMap = path.join(SPEC_SRC, 'shared/error-map.zod.ts');
+    const errorMapSource = fs.readFileSync(errorMap, 'utf8');
+    expect(errorMapSource, 'objectStackErrorMap no longer decides unknown keys — re-point this control')
+      .toContain("issue.code === 'unrecognized_keys'");
+    expect(handwrittenMapSites(errorMap)).toEqual([]);
+
+    // (d) the CODE conjunct earns its place, on the live specimen #6805's card
+    //     named as out of class. `uniqueScopeError` is attached exactly the way
+    //     the class is — `z.union([…], { error: uniqueScopeError })` — so the
+    //     scan reaches it and declines it on `issue.code` alone. That is the
+    //     discrimination made by the instrument rather than by an exemption,
+    //     which is what keeps "do not sweep it in" from decaying into a name.
+    const field = path.join(SPEC_SRC, 'data/field.zod.ts');
+    const fieldSource = fs.readFileSync(field, 'utf8');
+    expect(fieldSource, 'uniqueScopeError is no longer attached — re-point this control')
+      .toContain('error: uniqueScopeError,');
+    expect(fieldSource, 'uniqueScopeError no longer branches on invalid_union — re-read the class')
+      .toContain("issue.code !== 'invalid_union'");
+    expect(handwrittenMapSites(field)).toEqual([]);
+  });
+
   it('no guidance key is itself a declared key (the same dead entry, other channel)', () => {
     // `guidance` is consulted from the same `unrecognized_keys` path, so a
     // prescription filed under a key the shape DECLARES is unreachable in
@@ -552,256 +1019,5 @@ describe('alias integrity — every table is a true claim about its schema', () 
       }
     }
     expect(dead.sort()).toEqual([]);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// 3. The same claims over the tables that never had a shape (#5483)
-// ---------------------------------------------------------------------------
-
-/**
- * Alias targets that are deliberately **prose, not a key name** — the only
- * place in `packages/spec` where that is true, and an explicit allowlist rather
- * than a relaxed criterion because the two are not the same promise.
- *
- * `ui/app.zod.ts` builds one table per navigation-item `type`, and the
- * commonest nav mistake is not a typo: it is `dashboardName` written on a `url`
- * item — a real key, on the wrong variant. Naming a key there would be wrong
- * twice over (the key IS spelled correctly, and writing it is still not enough
- * without the matching `type`), so the target is a sentence:
- *
- *     Did you mean `dashboardname` → `type: 'dashboard' (with dashboardName)`?
- *
- * Enumerated, not pattern-matched, and paired with the surface family that owns
- * them, so a new prose target anywhere — including a second one on this very
- * surface — fails the target criterion and has to be argued for here. The
- * staleness test below is the other half: an entry nothing uses is deleted, so
- * this list cannot quietly outlive the tables it excuses.
- *
- * The seventh entry arrived by that route. #5555 fixed the defect this gate
- * found — the four "start expanded" spellings redirecting to `expanded` on the
- * eight variants that lack it — and the fix is precisely a demotion from bare
- * key name to prose, so the tolerance that pinned it was deleted and this list
- * grew by one. It is one string for four alias keys because they share a single
- * answer: the key you want lives on `group`.
- */
-const PROSE_ALIAS_TARGETS: ReadonlySet<string> = new Set([
-  "type: 'object' (with objectName)",
-  "type: 'page' (with pageName)",
-  "type: 'url' (with url)",
-  "type: 'dashboard' (with dashboardName)",
-  "type: 'report' (with reportName)",
-  "type: 'component' (with componentRef)",
-  "type: 'group' (with expanded)",
-]);
-
-/** The surface family the prose targets are allowed on, and nowhere else. */
-const PROSE_TARGET_SURFACE = /^this `[a-z]+` navigation item$/;
-
-const isProseTarget = (surface: string, target: string): boolean =>
-  PROSE_TARGET_SURFACE.test(surface) && PROSE_ALIAS_TARGETS.has(target);
-
-/*
- * The shrink-only tolerance that used to sit here (`isPinnedExpandedDefect`,
- * 32 occurrences) is GONE, not relaxed: #5555 fixed the defect it pinned.
- *
- * It held the four "start expanded" spellings that `NAV_ITEM_ALIASES` redirected
- * to `expanded` on all nine nav variants, while `expanded` is declared on `group`
- * alone — so on the other eight the redirect named a key that variant also
- * rejected (ledger finding 7's second rejection, from the campaign built to end
- * it). The fix moved those four into the per-variant assembly: `group` keeps the
- * bare key name, the other eight answer with prose, so the seventh entry in
- * PROSE_ALIAS_TARGETS above is where this debt went. Claim 2 below now judges
- * the family with no tolerance at all — a re-introduction lands in `broken`.
- */
-
-/**
- * Guidance filed once for a table stamped nine times, legal on two of them.
- *
- * `children` really is declared on the `object` and `group` nav variants, so
- * the prescription "`children` is only meaningful on a `group` item…" correctly
- * never fires there — it is written for the other seven, where it does. That is
- * a criterion meeting a variant family, not a dead entry: the shape-backed half
- * of this gate judges one authored table against one shape, and here one
- * authored table is stamped against nine.
- *
- * Exempted rather than pinned as debt because there is nothing to fix — no
- * author is misinformed and no prescription is lost. Enumerated by
- * `(surface, key)` so it cannot cover a second guidance entry that IS dead.
- */
-const VARIANT_LEGAL_GUIDANCE: ReadonlySet<string> = new Set([
-  'this `object` navigation item::children',
-  'this `group` navigation item::children',
-]);
-
-/** `file:line — "surface": \`written\` -> \`target\``, for the direct batch. */
-const directEntry = (d: DirectAliasTableDeclaration, written: string, target: string): string => {
-  const site = DIRECT_CALL_SITES.find(
-    (c) => c.surface === d.options.surface
-      && Object.entries(c.aliases).every(([k, v]) => d.options.aliases?.[k] === v),
-  );
-  const where = site ? `${site.file}:${site.line}` : '(location unresolved)';
-  return `${where} — "${d.options.surface}": \`${written}\` -> \`${target}\``;
-};
-
-describe('alias integrity — direct `strictUnknownKeyError` tables (#5483)', () => {
-  it('the direct call sites really registered (self-test before the verdict)', () => {
-    // Same guard as the shape-backed half: state the scale before the verdict,
-    // so a registration that silently stopped working reads as a failure and
-    // not as forty-four clean tables.
-    expect(DIRECT_CALL_SITES.length).toBeGreaterThanOrEqual(40);
-    // One call site (the nav-item factory) runs nine times, so the registry is
-    // legitimately LARGER than the source count. It can never be smaller
-    // without a table having gone unjudged.
-    expect(DIRECT.length).toBeGreaterThanOrEqual(DIRECT_CALL_SITES.length);
-    expect(DIRECT.some((d) => Object.keys(d.options.aliases ?? {}).length > 0)).toBe(true);
-    // The registry is capped (it is filled by a PUBLISHED factory — see
-    // `alias-table-registry.ts`). Overflow would mean judging a prefix.
-    expect(directAliasTableOverflow(), 'the direct registry overflowed; raise CAPACITY').toBe(0);
-  });
-
-  it('every direct call site with an alias table was reached at runtime', () => {
-    const bySurface = new Map<string, DirectAliasTableDeclaration[]>();
-    for (const d of DIRECT) {
-      const list = bySurface.get(d.options.surface) ?? [];
-      list.push(d);
-      bySurface.set(d.options.surface, list);
-    }
-    const unreached: string[] = [];
-    for (const site of DIRECT_CALL_SITES) {
-      if (!site.hasAliases) continue;
-      const candidates = site.surface ? (bySurface.get(site.surface) ?? []) : DIRECT;
-      const matched = candidates.some((d) =>
-        Object.entries(site.aliases).every(([k, v]) => d.options.aliases?.[k] === v));
-      if (!matched) unreached.push(`${site.file}:${site.line} (${site.surface ?? 'assembled surface'})`);
-    }
-    expect(unreached, 'these alias tables never reached the registry, so nothing judges them').toEqual([]);
-  });
-
-  it('the deferred error maps were forced too', () => {
-    // `data/object.zod.ts` builds its map on FIRST USE, to step around a
-    // temporal dead zone. Nothing in this file parses anything, so without the
-    // synthetic-issue poke in `force()` that table never registers.
-    //
-    // Measured, not assumed: deleting the poke turns this red AND the coverage
-    // check above (that site's `surface` and alias entries are both literals,
-    // so the AST can see it and report it unreached). Two failures for one
-    // cause — so this assertion is not what makes the poke's absence *visible*,
-    // it is what makes it legible. "`this object` is missing" names the
-    // mechanism; "some site at object.zod.ts:962 is unreached" sends the next
-    // reader looking for a walk bug that is not there.
-    expect(
-      DIRECT.map((d) => d.options.surface),
-      "`data/object.zod.ts`'s deferred map did not register — did the forcing poke stop working?",
-    ).toContain('this object');
-  });
-
-  it('the nav-item factory registered one table per variant', () => {
-    // The one direct site the AST reads as an empty assembled table: both its
-    // surface (a template) and its aliases (spreads) are computed. Nine
-    // variants in, nine tables out — the count is the coverage.
-    const navTables = DIRECT.filter((d) => PROSE_TARGET_SURFACE.test(d.options.surface));
-    expect(navTables.length).toBe(9);
-  });
-
-  it('no alias key is itself a known key (a dead entry that can never fire)', () => {
-    // Claim 1, answered against the transcribed `knownKeys` rather than a
-    // shape. Weaker — a key list that has drifted from its schema drags the
-    // answer with it — but it is the list the SUGGESTER reads, so a hit here is
-    // a real dead entry either way.
-    const dead: string[] = [];
-    for (const d of DIRECT) {
-      const known = new Set(d.options.knownKeys);
-      for (const [written, target] of Object.entries(d.options.aliases ?? {})) {
-        if (known.has(written)) {
-          dead.push(`${directEntry(d, written, target)} — \`${written}\` is a known key here`);
-        }
-      }
-    }
-    expect(dead.sort()).toEqual([]);
-  });
-
-  it('every alias target is a key the table claims to accept', () => {
-    // Claim 2. The tombstone half of the shape-backed version has no analogue
-    // here: `knownKeys` is a flat array with no schemas in it, so "this target
-    // is declared but accepts nothing" is invisible until the call site
-    // migrates (#5593).
-    const broken: string[] = [];
-    for (const d of DIRECT) {
-      const known = new Set(d.options.knownKeys);
-      for (const [written, target] of Object.entries(d.options.aliases ?? {})) {
-        if (known.has(target) || isProseTarget(d.options.surface, target)) continue;
-        broken.push(`${directEntry(d, written, target)} — \`${target}\` is not a known key here`);
-      }
-    }
-    // No tolerance: #5555 closed the last one (see the note above
-    // `VARIANT_LEGAL_GUIDANCE`), so every direct table answers this claim
-    // outright — including the nav family that used to carry the 32.
-    expect(broken.sort()).toEqual([]);
-  });
-
-  it('every prose-target exemption is still load-bearing', () => {
-    // An allowlist nobody reaches is the silent pass-through this exemption was
-    // written to avoid, one release later. If a nav variant is reworded, or the
-    // family migrates to `strictObject`, the stale entries surface here instead
-    // of quietly widening what claim 2 will forgive.
-    const used = new Set<string>();
-    for (const d of DIRECT) {
-      if (!PROSE_TARGET_SURFACE.test(d.options.surface)) continue;
-      for (const target of Object.values(d.options.aliases ?? {})) {
-        if (PROSE_ALIAS_TARGETS.has(target)) used.add(target);
-      }
-    }
-    expect([...PROSE_ALIAS_TARGETS].filter((t) => !used.has(t)).sort()).toEqual([]);
-  });
-
-  it('no two alias keys in one table collapse onto the same probe (#5481)', () => {
-    // Claim 3, and the only one that loses NOTHING for lack of a shape: the
-    // probe reads the alias table alone. This dimension was never measured on
-    // these 44 tables — #5481 postdates #5483's "measured clean" note, which
-    // covered the other two claims — so this assertion is the measurement, not
-    // a re-statement of one.
-    const collisions: string[] = [];
-    for (const d of DIRECT) {
-      const byProbe = new Map<string, string[]>();
-      for (const key of Object.keys(d.options.aliases ?? {})) {
-        byProbe.set(aliasProbe(key), [...(byProbe.get(aliasProbe(key)) ?? []), key]);
-      }
-      for (const [probe, keys] of byProbe) {
-        if (keys.length < 2) continue;
-        const written = keys.map((k) => `\`${k}\` -> \`${d.options.aliases?.[k]}\``).join(', ');
-        collisions.push(
-          `${directEntry(d, keys[0], d.options.aliases?.[keys[0]] ?? '?')} — ${keys.length} keys share the probe \`${probe}\`: ${written}`
-          + ` — only \`${d.options.aliases?.[keys[keys.length - 1]]}\` survives`,
-        );
-      }
-    }
-    expect(collisions.sort()).toEqual([]);
-  });
-
-  it('no guidance key is itself a known key (the same dead entry, other channel)', () => {
-    const dead: string[] = [];
-    for (const d of DIRECT) {
-      const known = new Set(d.options.knownKeys);
-      for (const written of Object.keys(d.options.guidance ?? {})) {
-        if (!known.has(written)) continue;
-        if (VARIANT_LEGAL_GUIDANCE.has(`${d.options.surface}::${written}`)) continue;
-        dead.push(`"${d.options.surface}": guidance for \`${written}\`, which is a known key here`);
-      }
-    }
-    expect(dead.sort()).toEqual([]);
-  });
-
-  it('every variant-legal guidance exemption is still load-bearing', () => {
-    // Same staleness rule the prose targets get: an exemption nobody reaches is
-    // deleted, not left widening what the criterion above forgives.
-    const reached = new Set<string>();
-    for (const d of DIRECT) {
-      const known = new Set(d.options.knownKeys);
-      for (const written of Object.keys(d.options.guidance ?? {})) {
-        if (known.has(written)) reached.add(`${d.options.surface}::${written}`);
-      }
-    }
-    expect([...VARIANT_LEGAL_GUIDANCE].filter((e) => !reached.has(e)).sort()).toEqual([]);
   });
 });

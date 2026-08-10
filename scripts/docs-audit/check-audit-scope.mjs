@@ -245,19 +245,35 @@ export function findGuardrailRow(agentsMd) {
   );
 }
 
-/** The prefix the workflow actually routes on. */
-export function parseReleaseOwnedPrefix(source) {
+/**
+ * The prefix a consumer actually routes on.
+ *
+ * `label` names the file being parsed, because there is now more than one consumer:
+ * the audit workflow (read-only channel, #4920) and the drift-check mapper (read-only
+ * SECTION in its PR comment, #6893). Both hold their own literal copy — the workflow
+ * because it is evaluated in a sandbox VM that cannot import, the mapper because a
+ * shared module importable by only one of the two would leave the other unanchored.
+ * `checkReleaseOwned` below is what keeps every copy equal to AGENTS.md's guardrail row.
+ */
+export function parseReleaseOwnedPrefix(source, label = WORKFLOW_REL) {
   const m = source.match(/const RELEASE_OWNED_PREFIX = '([^']*)'/);
   if (!m) {
     throw new Error(
-      `${WORKFLOW_REL}: no \`const RELEASE_OWNED_PREFIX = '...'\` declaration. That constant is ` +
-        `how the workflow tells release-owned pages (read-only, findings only) from editable ones; ` +
-        `without it every page in scope is editable, including ${RELEASE_OWNED_PREFIX}** — the ` +
-        `collision #4920 was filed for. Restore it.`,
+      `${label}: no \`const RELEASE_OWNED_PREFIX = '...'\` declaration. That constant is ` +
+        `how it tells release-owned pages (read-only) from editable ones; without it every ` +
+        `page it reports is editable, including ${RELEASE_OWNED_PREFIX}** — the collision ` +
+        `#4920 was filed for, and the one #6893 hit again in the drift comment. Restore it.`,
     );
   }
   return m[1];
 }
+
+/**
+ * Every file that holds its own literal copy of the release-owned prefix. Adding a
+ * consumer means adding it here — that is the whole cost of the "copies, anchored"
+ * shape, and it is cheaper than the alternative #4851 billed us for.
+ */
+const RELEASE_OWNED_CONSUMERS = [WORKFLOW_REL, 'scripts/docs-audit/affected-docs.mjs'];
 
 /**
  * Run the workflow the way it really runs — free globals, stub agents — and report
@@ -521,14 +537,21 @@ async function checkReleaseOwned(source, derived) {
     process.exit(1);
   }
 
-  const prefix = parseReleaseOwnedPrefix(source);
-  if (prefix !== RELEASE_OWNED_PREFIX) {
-    console.error(
-      `✗ ${WORKFLOW_REL}: RELEASE_OWNED_PREFIX is "${prefix}", but ${AGENTS_REL} marks\n` +
-        `  "${RELEASE_OWNED_PREFIX}" RELEASE-OWNED. The workflow would review the wrong set of pages\n` +
-        `  read-only — and edit the release notes it no longer recognises.\n`,
-    );
-    process.exit(1);
+  // Every consumer's literal copy must equal the guardrail row's path. One drifting
+  // copy is silent by construction: the file keeps running, it just protects a set of
+  // pages the repo no longer marks read-only.
+  for (const rel of RELEASE_OWNED_CONSUMERS) {
+    const consumerSource = rel === WORKFLOW_REL ? source : readFileSync(join(REPO_ROOT, rel), 'utf8');
+    const prefix = parseReleaseOwnedPrefix(consumerSource, rel);
+    if (prefix !== RELEASE_OWNED_PREFIX) {
+      console.error(
+        `✗ ${rel}: RELEASE_OWNED_PREFIX is "${prefix}", but ${AGENTS_REL} marks\n` +
+          `  "${RELEASE_OWNED_PREFIX}" RELEASE-OWNED. It would treat the wrong set of pages as\n` +
+          `  read-only — the audit would edit release notes it no longer recognises (#4920), and\n` +
+          `  the drift comment would list them as ordinary work (#6893).\n`,
+      );
+      process.exit(1);
+    }
   }
 
   // The pages must still BE in scope. Zero of them is not "nothing to protect": it is

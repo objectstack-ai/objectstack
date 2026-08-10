@@ -1,5 +1,808 @@
 # Changelog — @objectstack/service-analytics
 
+## 17.0.0-rc.6
+
+### Minor Changes
+
+- 3f8817a: feat(spec,drivers,objectql,analytics,formula): `$icontains` reaches every JS evaluation face (#6520)
+
+  The other half of #5702. That change implemented `$icontains` on the SQL family
+  and correctly left the spec's `FILTER_OPERATORS` alone; this one adds the
+  operator to that array and gives every remaining evaluation face an arm, in ONE
+  change, because those two steps cannot be separated.
+
+  **Why one PR.** `FILTER_OPERATORS` is not a word list, it is a runtime allowlist:
+  `driver-memory`'s shape gate derives from it, and its matcher's `default:` arm
+  assumes the gate already refused anything unimplemented. Measured on a branch
+  that added the name early (#5701): the gate stopped refusing, the matcher fell
+  through, and `match({ name: 'zzz' }, { name: { $icontains: 'acme' } })` returned
+  `true` — the predicate silently dropped, every row matched. A dropped predicate
+  does not narrow a query, it WIDENS it, and on an RLS read scope that is a
+  permission bypass rather than a degraded feature (#3948). So the word list
+  travels with the evaluators or not at all.
+
+  **What now answers it**, all folding the same domain: `driver-memory` (query
+  path, reference matcher, and the analytics/cube face), `driver-mongodb`,
+  `objectql`'s `having`, `@objectstack/formula`'s `matchesFilterCondition` (the RLS
+  write-side `check`), and `service-analytics`' three SQL compilers (the RLS
+  lowering, the native-SQL strategy, and the `/analytics/sql` echo).
+
+  **The fold is ASCII-only, and that is the contract, not an implementation
+  detail** (#4706 Q1 = A). `$icontains: 'café'` does not match `CAFÉ`. Every face
+  reads one shared definition — `foldAsciiCase` /
+  `asciiCaseInsensitiveContains` / `asciiCaseInsensitiveRegexSource`, new exports
+  on `@objectstack/spec/data` — because the two obvious per-package spellings are
+  both wrong in the same direction: `toLowerCase()` folds the whole Unicode range,
+  and so does a `RegExp` built with the `i` flag. SQLite folds ASCII only and three
+  of the five drivers are SQLite underneath, so a Unicode fold on a JS face would
+  re-open exactly the divergence the ruling closed. The pattern-binding faces
+  (mingo, mongo) therefore emit one `[Aa]` character class per ASCII letter and
+  pass NO flags; mongo's `$icontains` is the one arm in its family that does not
+  set `$options: 'i'`.
+
+  The comparand keeps the rules its SQL twin has: matched LITERALLY (`%`, `_` and
+  regex metacharacters are ordinary characters), and refused when empty or
+  non-string — an empty comparand matches every row, which is a predicate that
+  constrains nothing.
+
+  **User-visible effect.** A filter using `$icontains` now behaves the same on the
+  in-memory double and on SQL, so an app whose tests run on one and whose
+  production runs the other stops getting two answers from one filter. Downstream,
+  #5814 (better-auth `Where.mode: 'insensitive'`) no longer hits a 400 on the
+  memory double.
+
+  Not changed, and still tracked: the `$contains` family still folds Unicode on
+  `driver-memory`'s query path and `driver-mongodb` (#6682) — both remain DEBT rows
+  in `scripts/check-driver-conformance.mjs`, now naming one open requirement each
+  instead of two. `formula`'s unknown-operator posture stays a silent, fail-closed
+  `false` (it governs a write-side check, where an unevaluable condition denies
+  rather than widens); the decision and its limits are documented on
+  `matches-filter.ts`, and no operator the spec DECLARES is answered that way any
+  more.
+
+- 3264516: fix(driver-sql,service-analytics)!: 两类无意义比较对象不再编译成「静默空谓词」——`$in`/`$nin` 的对象成员与 LIKE 族的对象比较值一律拒收 (#5234)
+
+  两个形状此前都**编译通过、执行、并给出一个作者没写过的答案**,而且没有任何东西记录这件事:
+
+  | filter                             | 改前                                                                                   | 改后                                               |
+  | ---------------------------------- | -------------------------------------------------------------------------------------- | -------------------------------------------------- |
+  | `{status: {$in: ['a', {foo: 1}]}}` | 该成员绑不上任何行,查询答得**就像第二个成员从没被写过**                                | `INVALID_FILTER` / 400,点名 `index 1`              |
+  | `{status: {$nin: [{foo: 1}]}}`     | `NOT IN ('[object Object]')` —— **一行都没排除**,作者写下的排除悄悄没发生              | 同上                                               |
+  | `{name: {$contains: {}}}`          | `LIKE '%[object Object]%'` —— 对一行文本恰好是 `[object Object]` 的记录,**真的命中了** | `INVALID_FILTER` / 400,点名 `StringOperatorSchema` |
+  | `{name: {$notContains: {}}}`       | 反过来:为一个没人记录的理由**排除了一条真实记录**                                      | 同上                                               |
+
+  #5041(PR #5223)在 `assertCompilableComparand` 的头注释里把这两个形状写为 "Deliberately NOT
+  extended",理由是它们 fail-closed(只收窄结果集)、比 #5041 实测的裸 `TypeError` 低一级。**实测下来这
+  两条理由都不成立**:`$nin` / `$notContains` 方向是**放宽**(该排除的没排除,在 read-scope 下即 #5347 /
+  #5324 判过的 over-reach);而 `$contains: {}` 给的从来不是「零行」,是**错行**。
+
+  ## 三份实现一起动,否则修完仍是方言
+
+  同一个 `String()` 宽容在本仓有多份;只收紧 `driver-sql` 会变成「哪个面接的就是哪个答案」——
+  #5146 / #5332 / #5567 各花一轮消掉的那类分叉。守卫因此落在**每个包自己的收口点**,而不是三个发射器:
+
+  - **`driver-sql`** —— `assertCompilableComparand`,#5041 已有的那一个门。
+  - **`service-analytics` 的 `where` 门** —— `filter-normalizer.ts` 的 `fieldLeaves`。它是本包**唯一**的
+    leaf 生产者,所以一处拒收同时覆盖三个消费方:`NativeSQLStrategy`(真正执行的语句)、
+    `ObjectQLStrategy.generateSql`(`/analytics/sql` 回显)与 `ObjectQLStrategy.convertFilter`(引擎路径)。
+    这个顺序是关键而非顺手:`convertFilter` 是**生产者**,在那里 `String()` 会把对象洗成一个类型完全正确
+    的 `'[object Object]'` 字符串交给驱动,下游再严格的驱动也永远看不到它该严格的那个形状。
+  - **`service-analytics` 的 read-scope 门** —— `read-scope-sql.ts` 的 `compileOperator`,它编译的
+    `FilterCondition` 不经过上面那个门。
+
+  `like-pattern.ts` 与 `applyLike` 里的 `String(value)` **原样保留**:它们不再是缺陷所在,因为门前已经没有
+  渲染不出来的值能到达。两包的谓词由 `like-metacharacter-escape.test.ts` 逐值互锁——正是该文件已经用来锁
+  转义表达式的同一套办法。
+
+  ## 围栏是 allow-list,而且每一条都是实测后决定的
+
+  抄 `driver-turso` `RemoteTransport` 的形状(cloud#1004 / #1058):deny-list 会把下一个被发明出来的值形状
+  悄悄放进来,这正是那个 bug 熬过第一次修复的原因。顺带说明,**turso 自 #1058 起就已经拒收这两个形状**,
+  所以本地 SQLite 与远程 SQLite 此前对同一条查询给的是不同答案;本次改动把它们收敛到一起。
+
+  留在围栏内的(逐条实测,不是假设):
+
+  - **数字 / 布尔 / `null`**:`{$contains: 5}` → `%5%`、`{$contains: null}` → `%null%` 在 `driver-sql`、
+    `driver-memory` 与 analytics 两个面上**今天答案一致**,#5526 还专门把 `null` 这条钉住了。拒收它们是在
+    **破坏**一致,不是建立一致——所以只拒**对象**。
+  - **`Date`**:turso 的 allow-list 把它作为唯一的对象转换保留,拒收会重新叉开本地与远程。
+  - **binary**:`$in` 成员照收(`isBindableComparand` 与写路径 `formatInput` 同一套分类),LIKE 拒收——它
+    绑得上但渲染不出作者想要的东西。这就是两个谓词而不是一个带 flag 的原因。
+  - **`undefined`**:不可授权(JSON 没有 `undefined`),analytics 门按 #5526 / #5332 归一为 `null` 而非拒收;
+    在 `driver-sql` 拒收它会**造出**一个分歧而不是消除一个,故照旧。
+
+  被拒的**数组**是本次唯一一个「拒收即消分叉」的形状:`{name: {$contains: ['al','be']}}` 在 `read-scope-sql`
+  (与 `driver-sql`)绑 `%al,be%`,在 analytics 的 `where` 门却绑 `%al%`(它读 `values[0]`,后面的成员被
+  静默丢弃)。同一个包对同一条 filter 有两个答案,两个门现在都拒。
+
+  ## 作者需要知道的迁移
+
+  这两个形状本来就没有能用的读法——`filter.zod.ts` 的 `StringOperatorSchema` 早就把 LIKE 族比较数声明为
+  `z.string()`,本次只是让声明变成强制(Prime Directive #12,declared = enforced)。改后它们答 400 而不是
+  一个错答案;把比较数换成字面值即可。`{$eq: {…}}` **不在本次范围**,仍按 `toSqlBindValue` 绑 JSON(#5526
+  钉住的行为)。
+
+### Patch Changes
+
+- 259459d: refactor(spec)!: retire `array_agg` / `string_agg` from `AggregationFunction` — `count_distinct` deliberately kept (#6188, ADR-0049)
+
+  `AggregationFunction` declared eight functions; the SQL family compiles five.
+  `SqlDriver.mapAggregateFunc` and the Turso `RemoteTransport.aggregate` each lower
+  `count`/`sum`/`avg`/`min`/`max` and route everything else to one refusal, so
+  three of the eight were declared-but-unenforced against the backends this
+  platform targets — and, worse, the _set_ each backend implemented was different,
+  so "which aggregations can I use" had no answer an author could read off the
+  schema.
+
+  What makes these two sharper than an ordinary inert declaration is that another
+  package had to carry a denylist for them. `service-analytics` subtracted
+  `array_agg` and `string_agg` by name in `UNSUPPORTED_AGGREGATES`, because
+  without that subtraction they reached the Cube strategy's `default` and came
+  back as `COUNT(*)` — **a row count in place of the value the author asked for**,
+  with no error and no log (objectui#2945).
+
+  **The three unlowered functions were SPLIT, not retired as a block** (maintainer
+  ruling, 2026-08-07):
+
+  - **`count_distinct` STAYS** and takes ADR-0049's _enforce_ leg. It is a
+    dashboard staple with one portable lowering (`COUNT(DISTINCT x)`), and
+    `service-analytics` lowers it already; the SQL-driver implementation follows
+    on its own card. Its declaration leads its implementation here by decision,
+    not by drift.
+  - **`array_agg` / `string_agg` take the _remove_ leg.** Display conveniences
+    with no measured pull, and `string_agg` never had one shape to lower to at
+    all: the delimiter is a second argument in PostgreSQL, a `SEPARATOR` clause in
+    MySQL and a differently named function in SQL Server.
+
+  FROM → TO, both authoring surfaces:
+
+  | Was                                                                         | Now                                                                                                                                       |
+  | :-------------------------------------------------------------------------- | :---------------------------------------------------------------------------------------------------------------------------------------- |
+  | `aggregations: [{ function: 'array_agg', field: 'tag', alias: 'tags' }]`    | no replacement — read the rows with an ordinary `fields` query and shape them in the caller, or materialise the roll-up as a stored field |
+  | `aggregations: [{ function: 'string_agg', field: 'name', alias: 'names' }]` | as above                                                                                                                                  |
+  | `measures: [{ name: 'tags', aggregate: 'array_agg', field: 'tag' }]`        | delete the measure — `compileDataset` already refused it by name, so it never produced a number                                           |
+
+  The retirement kit:
+
+  - This is an enum **VALUE** retirement, so there is no `retiredKey()` tombstone:
+    the enum's own error map carries the prescription, keyed on the received value
+    so that only the two spellings which used to be legal are told they "were
+    removed" (the `crypto.hash` / `HookBodyCapability` precedent, #4391). A
+    mis-spelling still gets zod's list of the legal functions. For the same reason
+    nothing lands in `RETIRED_KEYS_BY_MAJOR` and the four surface ratchets are
+    byte-identical — no def and no authorable key changed.
+  - **ADR-0087 D2 conversion + D3 chain step**
+    (`dataset-measure-array-string-agg-removed`): `os migrate meta --from 16`
+    drops any `dataset.measures[]` declaring a retired aggregate, plus any derived
+    measure the drop strands, with a notice each. The measure is dropped rather
+    than stripped down because one with neither `aggregate` nor `derived` fails
+    the dataset's own refinement — a conversion whose output cannot parse is worse
+    than none.
+  - **D3 semantic entry** (`query-array-string-agg-retired`) for
+    `QueryAST.aggregations[].function`: a request surface, never stored, so there
+    is no source for the chain to rewrite and callers move their own queries.
+  - The engine's in-memory fallback (`@objectstack/objectql`) drops its arms for
+    both functions — a `switch` case on a value the enum no longer has does not
+    type-check, and a dead arm is how a retired vocabulary returns by accident.
+  - `service-analytics`' `UNSUPPORTED_AGGREGATES` is now **empty and kept**: it is
+    half of an arithmetic the lockstep suite enforces (`SUPPORTED = spec
+vocabulary − this`), which is what stops the next aggregate added to the spec
+    from silently reaching that `COUNT(*)` default.
+
+  **Behaviour that actually changes** — this is the rare narrowing that removes
+  reachable behaviour, and it is worth stating plainly: on `driver-mongodb` and on
+  the engine's in-memory fallback these two DID compute. A raw QueryAST
+  aggregation against those backends returned an array or a joined string and will
+  now be refused at parse. That unpredictability is precisely what the ruling
+  ended — an aggregation that worked on one backend and failed on another is not a
+  capability — and both of those backends are inside the #5499 freeze. Their code
+  is untouched; it is simply no longer reachable through a spec-valid request. On
+  the dataset path nothing changes: `compileDataset` refused both by name already.
+
+  <!-- adr-0087: registered query-array-string-agg-retired, dataset-measure-array-string-agg-removed -->
+
+- 2bc1876: fix(service-analytics): refuse a dotted `measures` entry loudly instead of aggregating the base column (#5918)
+
+  **Observable behaviour change.** An analytics query whose `measures` entry
+  carries a dot that is not the cube-name qualifier — `owner.region_count_distinct`,
+  `total.sum` — now answers `400 INVALID_FIELD` naming the entry **as the request
+  spelled it**. Some of these queries used to succeed.
+
+  That is the point: succeeding is what was wrong with them. The auto-inference
+  path minted a measure by dropping the first segment of any dotted entry, so on
+  an object that happened to carry a same-named column the query ran
+
+  ```
+  SELECT COUNT(DISTINCT region) AS "owner.region_count_distinct" FROM "crm_account"
+  ```
+
+  — no JOIN, no error, a response column labelled with a relation attribute and a
+  number that came from the base table. The caller could not tell from the result
+  that it was wrong. Where the object had no same-named column it degraded to the
+  #4437 gate's `400 INVALID_FIELD`, which was honest about what reached SQL
+  (`aggregates field 'score'`) but named a string nobody had written; the caller
+  had sent `owner.score_sum`.
+
+  `measures` was the fourth and last mint site of the punctuation #5739 sorted
+  out on `dimensions` / `where` / `timeDimensions`. It is ruled the other way, and
+  deliberately so: `lookupMember`'s relation-traversal tier is dimension-only, so a
+  dotted measure has no correct traversal answer to converge on. A refusal is the
+  honest answer, and it costs nothing that was working. Maintainer ruling,
+  2026-08-07.
+
+  Both a genuine traversal intent (`owner.amount_sum`) and a plain typo
+  (`total.sum`) get this refusal. They are lexically indistinguishable on this
+  path, and separating them would need field metadata the ad-hoc path does not
+  have. A real relation-traversal measure (`SUM("owner"."amount")` + LEFT JOIN)
+  would be a capability with its own justification, not a side effect of a strip.
+
+  The refusal is applied at both places a Metric is minted from a request
+  spelling — the ad-hoc mint and the suffix-augmentation mint for a cube that is
+  already registered — because the ad-hoc path registers what it infers, so the
+  very same query reaches the second one from the second request onwards.
+
+  Unchanged: the `<cube>.` qualifier (`crm_account.region_count_distinct`) is
+  still stripped and still runs; bare measures (`region_count_distinct`, `count`,
+  `created_at_max`) are untouched; a cube's own declared measure is authored, not
+  minted, so a Cube whose measure names a related column in its `sql` still
+  compiles the JOIN — which is the supported way to aggregate across a
+  relationship; and dotted **dimensions** still traverse, per #5739.
+
+  **Migration.** Aggregate one of the object's own fields
+  (`<field>_sum` / `_avg` / `_min` / `_max` / `_count_distinct`), or declare a Cube
+  whose measure names the related column. The refusal message says both, and names
+  the entry you sent.
+
+- 1d0faa7: fix(service-analytics): postgres 的「缺列」措辞不再被判为「缺源」(#6035)
+
+  数据集查询的降级路径靠驱动措辞判断「后端表没挂载」,从而把控件渲染成空网格而不是 500。
+  它的判据 `isMissingSourceError` 自己的文档写明范围**只含缺表/缺对象,不含列/语法错误——
+  后者要保持硬失败,好让真正的查询 bug 浮上来**。有一条 postgres 措辞按构造违反了这条承诺:
+
+  ```
+  column "label" of relation "acct" does not exist        (SQLSTATE 42703)
+  ```
+
+  它内部**逐字包含**一整段合法的缺表措辞 `relation "acct" does not exist`。#5717 把 postgres
+  那一支从「同时含两个词的任意句子」收紧为锚定真实缺表措辞后,这条依然命中——它必然命中,因为它
+  字面上**就是**那段措辞。所以任何对「这句话是不是在说某个 relation 不存在」的收紧都排除不掉它,
+  只有**先问更具体的问题**才可以:修法是一个**判定顺序**(先摘掉缺列措辞,再做缺源判定),而不是
+  一个更好的正则。
+
+  两种后果都是错的,而具体触发哪一种只取决于措辞里那个关系名是否恰好是数据集自己的对象:
+
+  - 名字是**被 JOIN 的表** → 报出一条响亮但**虚假**的跨数据源拓扑错误,把一个拼写错误说成数据源
+    布局问题;
+  - 名字是**数据集自己的对象** → 控件降级成空网格,只留一条 warn,拼错的列名不会告诉任何人。
+
+  两半现在都作为回归钉住。判定顺序抄 `rest-server.ts` 的 `mapDataError` 自 #5352 起就在用的先例
+  (它同样先摘出这条措辞,于是 REST 面回答 `400 INVALID_FIELD` 而不是 `404`),用的是同一条正则
+  而不是它的第二种方言——两个面不该对「postgres 什么时候在说 column」给出不同答案。兄弟函数
+  `missingSourceRelation` 做同样的前置摘除:实测在修改前它对这条措辞回答 `sys_team`,只修其一会让
+  「是不是缺了什么」与「缺的是什么」相互矛盾,而那正是 #5717 在这一支上刚消除的分歧。
+
+  **这不修线上事故,而是让判据与它自己的文档一致。** analytics 是只读面,而 postgres 在 SELECT
+  下的未知列措辞是 `column "bogus" does not exist`(不含 `relation`,本来就不命中);
+  `column … of relation …` 是 INSERT/UPDATE/ALTER 措辞。价值在于:这条分歧不再依赖「读路径不产生该
+  措辞」这个假设活着——哪天有任何写形状语句、驱动改措辞、或多包一层 `cause` 把它送到这个 catch
+  面前,它会被正确分类,而不是被静默吞掉。
+
+  #5717 量过的 13 条仓内真实措辞全部重新钉住,并且是**按调用方可观测的结果**(空网格 / 拓扑拒收 /
+  原样上抛)钉的,而不是按私有判据的布尔值——实测 **13 条里只有 1 条改判**,就是缺列那条,其余 12
+  条(三个驱动家族的措辞、框架的 not-registered 信号、本包自己的拒收)逐条不变。
+
+- 8e2bbba: fix(service-analytics): `compareTo` 在「日期维度本身就是网格维度」时把比较桶键平移回当期 (#6007)
+
+  趋势图 + 同比是 `compareTo` 最常见的形状:日期维度既写进 `selection.dimensions`
+  (它就是图表的时间轴),又被 `compareTo` 用作锚点。这个形状下比较趟从来没有对齐过。
+
+  比较趟查询的是**平移后**的窗口,所以它的行按平移后的桶键落地;而
+  `mergeByDimensions` 按 `selection.dimensions` 元组建键 —— `2025-01` 不等于
+  `2026-01`,于是**没有一条**比较行合并得进去,全部作为新行追加。两趟各自只报告了自己
+  那一半,`fillEmptyGroups` 把另一半填成自信的 `0`,再加上平移后的桶键坐在网格里,而它们
+  落在调用方筛选窗口之外。一个 2 桶窗口的「今年 vs 去年同期」回来是这样的:
+
+  ```
+  [{"close_date":"2025-01","opp_count__compare":5,"opp_count":0},
+   {"close_date":"2025-02","opp_count__compare":7,"opp_count":0},
+   {"close_date":"2026-01","opp_count":1,"opp_count__compare":0},
+   {"close_date":"2026-02","opp_count":2,"opp_count__compare":0}]
+  ```
+
+  四行、每行一个 0、两行在窗口外;期望是 2 行 × 2 列。
+
+  **修法(维护者裁决 2026-08-07,方向 1):合并之前,把每个比较桶键用当期的说法重述一遍。**
+  上例现在返回 `[{close_date:'2026-01',opp_count:1,opp_count__compare:5},
+{close_date:'2026-02',opp_count:2,opp_count__compare:7}]`。
+
+  - `previousYear` —— 窗口是按日历年平移的,所以逆运算就是按日历年往前推一年:对桶自己的
+    首日做平移再重新分桶。`2025-01` → `2026-01`、`2025-Q1` → `2026-Q1`、
+    `2025-W03` → `2026-W03`。它刻意是 `shiftRange` 那套年运算的精确逆运算(含
+    `setUTCFullYear` 的溢出行为),窗口与桶键因此不可能对「一年」有两种理解。
+  - `previousPeriod` —— 任意天数窗口没有日历对应物,所以按**桶序(bucket ordinal)**对齐:
+    上一窗口的第 n 个桶对上本窗口的第 n 个桶,n 各自从自己窗口的起点数起。序号由**日历**算出
+    而不是数组下标,所以本期网格里某个桶没有数据(存在空档)不会让其后每个桶都错位一格。
+
+  **响应形状不变** —— 仍然是 `<measure>__compare` 列,行仍然是网格维度元组,所以消费端
+  (objectui#3337 正在收敛的那条契约)不受影响。
+
+  不确定时一律**保持原样**(即改动前的行为),而不是猜:空桶(两条聚合路径上键都是 `null`,
+  两趟本来就互相合并)、未分桶的日期维度(分组的是原始时间戳,不是桶键)、以及平移回来落在
+  当期窗口之外的桶(两个等长的天数窗口可以切出不同的桶数)。
+
+  范围严格限定在坏掉的那个形状:锚点必须是**网格维度**(仅作窗口的锚点两趟都不是列,#5688
+  之后本来就对齐)且必须**被分桶**。两趟通过同一个 `granularityOf` 读取桶大小,所以这里重述
+  的桶大小按构造就是查询分组用的桶大小。
+
+- ab54608: fix(service-analytics): a dataset `label` written as an inline locale map reaches the wire resolved, instead of being dropped (#6761)
+
+  `I18nLabelSchema` has authorized two forms of a display label since #5728: a
+  plain string, and an inline locale map `{ en: 'Owner', 'zh-CN': '负责人' }`. The
+  analytics producer only understood the first one, so a dataset written the way
+  the schema documents came back with **no label at all**:
+
+  | dataset declares                            | `fields[]` carried, before |
+  | ------------------------------------------- | -------------------------- |
+  | `label: 'Owner'`                            | `label: 'Owner'`           |
+  | `label: { en: 'Owner', 'zh-CN': '负责人' }` | _(no `label` key)_         |
+  | _(no label)_                                | _(no `label` key)_         |
+
+  Measured identically on both strategies. All three renderers that read
+  `fields[].label` first — `DatasetWidget`, `DatasetPreview`,
+  `DatasetReportRenderer` — then fell back to humanizing the raw key, so a Chinese
+  deployment authoring exactly what the spec documents got English-ish machine
+  names for its column headers.
+
+  One layer earlier, `dataset-compiler` substituted the machine **name** for the
+  same map (`typeof d.label === 'string' ? d.label : d.name`), which additionally
+  made `/analytics/meta` publish `title: 'owner'` as a _display title_ — a face
+  that lied rather than one that was merely bare.
+
+  Both are fixed by calling the shared `I18nLabel → string` resolver
+  (`resolveI18nLabel`, `@objectstack/spec`, #6765), which is pinned in its own
+  package to rule parity with objectui's `pickLocalized`. Nothing is
+  re-implemented here: the maintainer's ruling on #6761 chose one shared resolver
+  precisely so the two ends cannot answer the same authored map differently.
+
+  **The wire is unchanged.** `AnalyticsResult.fields[].label` is still
+  `string | undefined` on both ends — this resolves _to_ a string rather than
+  widening the contract, so no consumer changes and no map can reach a renderer
+  that would print `[object Object]`.
+
+  **Which locale each site uses:**
+
+  - `queryDataset`'s two field-enrichment sites resolve at
+    `ExecutionContext.locale` — the per-request BCP-47 tag derived from the
+    caller's `Accept-Language`, falling back to the workspace `localization`
+    setting. Both sites read one hoisted value, so a single response cannot mix
+    two audiences.
+  - `dataset-compiler` resolves with **no** locale, i.e. the resolver's documented
+    nullish answer `en`. A compiled Cube is a registry artifact shared by every
+    later reader, and `getMeta()` — the `/analytics/meta` face — takes no
+    execution context at all; baking a request locale there would make
+    `/analytics/meta` answer whoever queried last.
+
+  **Nothing is invented on a miss.** A label the resolver cannot resolve (an
+  absent label, or an empty map) writes no `label` key on the wire at all — a
+  placeholder would permanently pre-empt the real label under the downstream
+  `if (field.label == null)` guard. In the compiler, where `Metric.label` /
+  `Dimension.label` are required strings, the machine-name fallback is unchanged
+  from before; it never reaches `fields[]`, so it cannot pre-empt anything either.
+
+- 6fde910: fix(objectql,service-analytics): report the datasource an object is actually on, not the one it declares (#5288)
+
+  Analytics' `getObjectDatasource` probe read `getObject(name).datasource` — the
+  object's **declared** value, which is step 1 of the five `ObjectQL.getDriver`
+  resolves by. `ObjectSchema.datasource` carries `.default('default')`, and
+  `'default'` means "no explicit binding, keep looking" inside the engine, so
+  every object placed by a `datasourceMapping` rule, by the ADR-0057 §3.6
+  lifecycle split, or by its package's `defaultDatasource` answered `'default'`
+  and was read out here as "the primary DB".
+
+  `sys_audit_log` is the live specimen: `lifecycle.class: 'audit'` puts it on the
+  `telemetry` datasource with nothing declared to read. So #5033's query-time
+  diagnostic — whose entire job is to NAME the database a table is missing from —
+  named the wrong one:
+
+  ```
+  before: table "account" is not on datasource "default",   which is where its base object "sys_audit_log" lives
+  after:  table "account" is not on datasource "telemetry", which is where its base object "sys_audit_log" lives
+  ```
+
+  **New engine accessor — `ObjectQL.resolveEffectiveDatasource(objectName)`.** The
+  public, name-only face of the resolution order `getDriver` already routes by,
+  extracted so the order exists exactly once (the same argument that produced
+  `resolveMappedDatasource` in #4462: a second, shorter copy of a routing order
+  drifts by one step, silently). `getDriver` now consumes the same resolver and
+  keeps every existing behaviour — precedence, the refusal to fall through to the
+  default store when a declared or mapped datasource has no live driver, and both
+  of its diagnostics.
+
+  It answers `undefined` when nothing binds the object anywhere and it simply
+  rides the deployment's default driver. That is deliberate and unchanged from
+  what consumers already documented: the default driver keeps its natural name
+  (#3826), so that name identifies a driver rather than a datasource anyone bound
+  the object to. `getDefaultDriverName()` is still there for callers that want it.
+
+  Analytics' probe now asks the engine instead of the declaration; the routing
+  rules are **not** re-implemented on the analytics side. #5115's compile-time
+  cross-datasource join gate keeps its predicate exactly as written — what changed
+  is that its input can now answer for objects bound by a mapping rule, by the
+  lifecycle split, or by a package default, so a join between two bound
+  datasources is refused at registration instead of exploding at query time. A
+  join from a bound object to one that merely rides the deployment default is
+  still not decidable at compile time and remains the query-time diagnostic's
+  business.
+
+- 49f208b: fix(analytics): an `undefined` comparand in an analytics `where` is refused (400 `INVALID_FILTER`), not read seven different ways
+
+  **Observable behaviour change.** A `where` key whose value is `undefined` used to
+  compile — in seven different ways, depending on where it sat. It is now refused
+  with `INVALID_FILTER` / 400, the envelope every other refusal at this door
+  already carries.
+
+  The three that mattered WIDENED the query, which is the failure mode
+  `filter-normalizer.ts` forbids in its own body ("NEVER drop: a missing predicate
+  does not narrow the query, it WIDENS it"), while its entry line did exactly that:
+
+  | `where`                        | used to normalize to             | reading                                                  |
+  | ------------------------------ | -------------------------------- | -------------------------------------------------------- |
+  | `{d: undefined}`               | `null`                           | the WHOLE filter dropped — the query ran **unfiltered**  |
+  | `{stage: 'won', d: undefined}` | `stage equals 'won'`             | the `d` conjunct vanished in silence                     |
+  | `{$not: {d: undefined}}`       | `NOT (d set)`                    | `d IS NULL` — a predicate the author never wrote         |
+  | `{d: {$eq: undefined}}`        | `d equals [null]`                | a value comparison, **not** `$eq: null`'s null predicate |
+  | `{d: {$gt: undefined}}`        | `d gt [null]`                    | ditto                                                    |
+  | `{d: {$in: [undefined]}}`      | `d in [null]`                    | ditto                                                    |
+  | `{d: {$ne: undefined}}`        | `d notSet OR d notEquals [null]` | ditto                                                    |
+
+  The direction is silently **wrong results** — an analytics figure, a report
+  total, an aggregate, wrong with nothing to read — **not** a permission bypass:
+  read scope is compiled by a different door (`read-scope-sql.ts`) and never passed
+  through here, so a caller still saw only rows it was entitled to, just more of
+  them than it asked for.
+
+  **What to change if this refuses your filter.** `undefined` cannot cross JSON, so
+  neither REST door can carry it — this only reaches in-process callers of
+  `AnalyticsService.query({ where })` that spread a possibly-absent value into the
+  filter object (`{ owner_id: ctx.user?.id }`). Two repairs, both stated by the
+  error message:
+
+  - meant the null predicate → write `{ field: null }` or `{ field: { $null: true } }`;
+  - the value is genuinely absent → **omit the key**, which is the same "no
+    constraint" without the ambiguity.
+
+  Inside stored metadata, the platform's own answer to "scope this to the current
+  user" is unaffected and was already fail-closed: a `{current_user_id}`
+  placeholder resolves through `resolveFilterTokens`, which raises
+  `FILTER_TOKEN_UNRESOLVED` / 400 rather than emitting `undefined`.
+
+  ⛔ **`null` does not move.** `{d: null}`, `{$eq: null}`, `{$ne: null}`,
+  `{$null: …}`, `{$exists: …}` and `$contains: null` keep their exact lowering —
+  `null` is a declared comparand and is the null predicate. `$null` / `$exists`
+  carry a declared boolean flag rather than a comparand and are likewise untouched.
+
+- 2604d34: fix(analytics): a field constraint mixing `$` operators with non-`$` sibling keys is refused (400 `INVALID_FILTER`), not silently narrowed to its operators
+
+  **Observable behaviour change.** A `where` field wrapper that carries `$`-operator
+  keys and non-`$` keys at once used to compile its operators and silently DROP
+  every non-`$` sibling. It is now refused with `INVALID_FILTER` / 400, the
+  envelope every other refusal at this door already carries. Ruled Option A
+  (refuse) on #6444, 2026-08-08; Option B (flattening the siblings as nested
+  paths) was rejected because it would compile the likely-real cause — a dropped
+  `$` — into a predicate on a non-existent member such as `amount.gte`.
+
+  | `where`                                   | used to normalize to      | reading                                             |
+  | ----------------------------------------- | ------------------------- | --------------------------------------------------- |
+  | `{d: {$eq: 1, nested: 'x'}}`              | `d equals [1]`            | the `nested` conjunct vanished in silence           |
+  | `{amount: {gte: 10, $lte: 20}}`           | `amount lte 20`           | the missing-`$` typo: the lower bound silently gone |
+  | `{$not: {d: {$null: true, nested: 'x'}}}` | `NOT(d set AND d notSet)` | a contradiction that negates to TRUE — every row    |
+
+  Every row WIDENED the query — a dropped conjunct returns rows the author
+  excluded, with nothing to read (the #3650 family this module refuses everywhere
+  else). Unlike #6386's `undefined` comparand, this shape survives JSON, so it can
+  sit in stored dashboard / report / dataset metadata as well as in-process
+  callers of `AnalyticsService.query({ where })`.
+
+  **What to change if this refuses your filter.** The message names the offending
+  key(s) and both repairs, because the shape has two readings this door cannot
+  tell apart:
+
+  - an operator missing its `$` was meant → spell it with the prefix
+    (`gte` → `$gte`: `{ "amount": { "$gte": 10, "$lte": 20 } }`);
+  - a nested-relation member was meant → give it a wrapper of its own with no `$`
+    siblings (`{ "d": { "nested": "x" } }` compiles to the member `d.nested`) and
+    AND it with the operator constraint explicitly via `$and`.
+
+  ⛔ **The two pure shapes do not move.** A wrapper that is all `$`-operators
+  compiles exactly as before (`{amount: {$gte: 10, $lte: 20}}` stays the AND of
+  its bounds), and a wrapper that is all non-`$` keys keeps flattening to the
+  dotted member (`{d: {nested: 'x'}}` → `d.nested`). `$null` / `$exists` flag
+  semantics, the `null` comparand rulings (#5332 / #5526) and the sibling door
+  `read-scope-sql.ts` — which has always failed closed on this shape — are
+  untouched.
+
+- 3cc8676: fix(analytics): read scope 里非布尔的 `$null` / `$exists` 比较数改为拒收，不再按真值性编成相反的谓词 (#6387)
+
+  **⚠️ 行为变更。** `compileScopedFilterToSql` 遇到 `$null` / `$exists` 上的非布尔比较数，从「按 JS 真值性归入两个声明答案之一、静默编出合法 SQL」改为 `READ_SCOPE_COMPILE_FAILED` / **500** 拒收。今天靠这个静默翻转在跑的 read scope，从此会响亮地失败。
+
+  ## 实测到的毛病
+
+  发射器读的是 `val ? … : …` —— **真值性**，不是 `@objectstack/spec` `FieldOperatorsSchema` 声明的 `z.boolean()`。在 `5faa23ca3` 上直接调 `compileScopedFilterToSql`，alias `t`：
+
+  | read scope                           | 编译结果                     |                           |
+  | ------------------------------------ | ---------------------------- | ------------------------- |
+  | `{ owner_id: { $null: "false" } }`   | `"t"."owner_id" IS NULL`     | ⛔ 与作者写的意思**相反** |
+  | `{ owner_id: { $null: "true" } }`    | `"t"."owner_id" IS NULL`     |                           |
+  | `{ owner_id: { $null: 0 } }`         | `"t"."owner_id" IS NOT NULL` |                           |
+  | `{ owner_id: { $null: null } }`      | `"t"."owner_id" IS NOT NULL` |                           |
+  | `{ owner_id: { $null: undefined } }` | `"t"."owner_id" IS NOT NULL` |                           |
+  | `{ owner_id: { $exists: "false" } }` | `"t"."owner_id" IS NOT NULL` | ⛔ 与作者写的意思**相反** |
+  | `{ owner_id: { $exists: 0 } }`       | `"t"."owner_id" IS NULL`     |                           |
+  | `{ owner_id: { $exists: "no" } }`    | `"t"."owner_id" IS NOT NULL` |                           |
+
+  两行 ⛔ 是要害：字符串 `"false"` 是**真值**，于是它落在它被写下来所要表达的 `false` 的**对面** —— `{ $exists: "false" }` 写来表示「没有 owner 的行」，编出来是「**有** owner 的行」。这与 #6125 那一格方向相反：那边是 fail-**closed**（匹配零行、只是安静），这边是**加宽** —— admit 了策略要排除的行，出现在一个自述「A read-scope predicate must never be silently dropped、fail-closed」的模块里。
+
+  ## 修法
+
+  按 #5347（`$null`）/ #5369（`$exists`）在 `driver-sql` 面确立的先例，理由逐字适用：非布尔比较数**按声明拒收**，不做强转。闸落在 `compileField`，紧挨 #6125 的 `undefined` 闸 —— 两道闸的作用域互不相交（那一道按名字跳过这两个算子），所以谁也盖不住谁的措辞。
+
+  两个算子**共用一条措辞**（#5240「一个条件一种措辞」），只有算子名与 `path` 不同：`driver-sql` 给孪生实现两条措辞，是因为各自要指名**自己**发射器默认倒向哪边；本模块只有一条规则（真值性）同时管着两个算子，两者失败方式完全一样，所以一条措辞才是诚实的写法。测试里有一条断言把「只有这两处不同」钉死。
+
+  信封沿用本模块自述的那一个（`READ_SCOPE_COMPILE_FAILED` / 500），不是 #5347 的 `INVALID_FILTER` / 400：read scope 由平台自己从 CEL 与库存 metadata 编出来，报 400 等于让调用方去修一个他既没写、也改不动的东西。继承的是**处置**（拒收），不是信封。
+
+  极性表**同 PR 一起改**：`nullValueSatisfiesOperator` 的 `$null` / `$exists` 两臂从真值性（`Boolean(value)` / `!value`）改为恒等（`value === true` / `value === false`）。每张极性表钉的是它**自己**发射器的拼写（#5146 / #5298），只改发射器不改表，不变量会安静地断在定义处。这条差异消失后，本编译器与 `driver-sql` 的同名表第一次逐臂一致。
+
+  ## ⚠️ 触达性：实测结论是**库存 metadata 走不通**
+
+  定级依据是测量，不是立单时的措辞。`{ $null: <非布尔> }` **无法**从库存 metadata 走到本编译器，三道闸各自独立关死：`RowLevelSecurityPolicySchema` 把 `using` / `check` 声明为 `z.string()`（CEL 谓词，不是 FilterCondition），存对象直接被拒；CEL 下降只在两处发射 `$null` 且比较数是**硬编码布尔**（`== null` → `{$null: true}`，`!= null` → `{$null: false}`），`$exists` 一次都不发射；绕开 schema 塞裸对象会在 `sqlPredicateToCel` 里抛错，被 `getReadFilter` 的 catch 变成 `RLS_DENY_FILTER`。其余 read scope 生产者（Layer 0 租户过滤、`plugin-sharing` 的 `buildReadFilter`、controlled-by-parent、deny 哨兵）压根不含这两个算子。
+
+  **仍然开着的那条**：`getReadScope` 是 `AnalyticsPluginOptions` 上有文档的公开扩展点，宿主自带的 read scope（来自 JSON 配置或没走类型检查的 JS）与本编译器之间没有任何闸 —— 本单也确认了 `plugin-security` 全路径无 `FilterConditionSchema` / `safeParse`。所以：今天不从库存 metadata 触达，但没有任何结构性的东西挡住下一个生产者。在编译器处拒收，才让「声明为布尔」等于「强制为布尔」，与谁写这条 scope 无关。
+
+  ## ⛔ 一字未动的邻居
+
+  - **合法布尔**：`$null: true/false`、`$exists: true/false` 的 SQL 逐字节不变（`IS NULL` 下降正是 RLS 用来圈无主行的写法，也是 CEL 唯一能产出的四种形状）。有自己的对照组回归 pin。
+  - **比较数位置上的 `null`**：`{ d: null }`、`{ $eq: null }`、`{ $ne: null }`、`$in: [null]` 等 #6125 的 `NULL_CONTROL` 全部保持绿。
+  - `driver-sql` / `driver-turso`（#5347 / #5369 已落地）、`packages/spec`（声明已是 `z.boolean()`）、以及本包的 `where` 门 `strategies/filter-normalizer.ts` 均未触碰。
+
+- e15bf7e: fix(analytics): read scope 里的 `undefined` 比较数改为拒收，不再编成绑了 `undefined` 的合法 SQL (#6125)
+
+  **⚠️ 行为变更。** `compileScopedFilterToSql` 遇到比较数位置上的 `undefined`，从「编出合法 SQL、绑一个 `undefined`、匹配零行、零日志」改为 `READ_SCOPE_COMPILE_FAILED` / **500** 拒收。
+
+  ## 实测到的毛病
+
+  #6050 于 2026-08-07 裁定（B 案）：比较数位置的 `undefined` 一律拒收，并落在了**已证实可触达**的 `driver-sql` / `driver-turso` 两面。#6125 在同一轮把仓内其余求值面逐格实测，同一个形状拿到五种读法；本条改的是其中一格 —— `service-analytics` 的 `read-scope-sql.ts`。在 `d8e8d9cbc` 上把本次拒收关掉复测，alias `t`、字段 `d`，四格与 #6125 正文表一致：
+
+  | read scope                    | 编译结果                                      | 绑定表        |
+  | ----------------------------- | --------------------------------------------- | ------------- |
+  | `{ d: undefined }`            | `"t"."d" = ?`                                 | `[undefined]` |
+  | `{ d: { $gt: undefined } }`   | `"t"."d" > ?`                                 | `[undefined]` |
+  | `{ d: { $in: [undefined] } }` | `"t"."d" IN (?)`                              | `[undefined]` |
+  | `{ $not: { d: undefined } }`  | `NOT (("t"."d" IS NOT NULL AND "t"."d" = ?))` | `[undefined]` |
+
+  绑定表里是 JS 的 `undefined` 本身，不是 `null`：`applyReadScope`（`native-sql-strategy.ts`）在把 `?` 改写成 `$N` 时原样 `push(scopeParams[i])`。所以 NULL 是**驱动**对一个 JS `undefined` 的读法 —— 同一格在不肯猜的驱动上则是一句裸 `Undefined binding(s)` 崩溃。一次绑定、两种败法，取决于数据源恰好挂的是哪个驱动，这正是它该在编译器处拒收、而不是在某一个消费者处修补的理由。
+
+  方向与 #6050 不同，如实记：那边是**越权**（`{ owner_id: ctx.user?.id }` 在 Turso remote 上编成 `IS NULL`，匹配全环境行）；这边是 fail-**closed** —— 匹配零行，永远不会多给行。所以它不是潜伏的权限绕过，#6125 也没有按那个级别定级。之所以照样拒收：一个「答了没人问的问题、且一条日志都不报」的 read scope，与一个真的生效了的 read scope 在外部完全无法区分。本次改动的价值就是把沉默变成响亮。
+
+  ## 修法
+
+  一道闸落在 `compileField` 的开头 —— 在 `quoteIdent` 之后（不安全标识符是注入向量，保留它自己的措辞与优先级），在任何 `bind()` 之前。
+
+  拒收的**位置**逐个清点，因为「比较数」是位置而不是类型：直接比较数（`{ d: undefined }`）、单值算子的比较数（`$eq`/`$ne`/`$gt`/`$gte`/`$lt`/`$lte` 与 LIKE 族）、列表算子数组的**成员**（`$in`/`$nin`/`$between`）。四格共用**一条**措辞，只有 `path` 不同（#5240「一个条件，一种措辞」）。
+
+  信封沿用本模块自述的那一个（`READ_SCOPE_COMPILE_FAILED` / 500），不是 #6050 的 `INVALID_FILTER` / 400：read scope 的 filter 由平台自己从 CEL 与库存 metadata 编译而来，不是调用方输入 —— 报 400 等于让调用方去修一个他既没写、也改不动的东西。消息里指名要修的是**生产者**（管理员写的共享规则 / 权限集、它的 CEL 下降、或进程内拼这条 FilterCondition 的代码），并按 #5367 只进日志、不进响应体。
+
+  三个位置**故意不扫**，各自因为本模块已经用更贴切的诊断拒了它：`$null` / `$exists`（比较数是声明的布尔量，不是比较数位置）、直接位置上的裸数组（`compileField` 整体拒「用 `{ $in: [...] }`」）、以及约束对象里的非 `$` 键（那是嵌套关系，改写成 `null` 一样编不过 —— 这一条是与 `driver-sql` 孪生实现的唯一有意分歧，来自本模块拒收嵌套关系，而不是对 #6050 的另一种读法）。
+
+  ## ⛔ `null` 一字未动
+
+  `{ d: null }` / `{ $eq: null }` → `IS NULL`；`{ $ne: null }` → `IS NOT NULL`；`$null` / `$exists`、`$in: [null]`、`$nin: [null]`、`$between: [null, 5]`、`$contains: null`（`%null%`，#5526）、以及 `$not` 下的各式 —— SQL 与绑定表逐字节不变。这是本次改动唯一可能造成伤害的方向（模块里每张极性表都只用一个 `===` 把 `null` 与 `undefined` 分开），所以它有自己的对照组回归 pin。
+
+  ## 刻意不动的邻居
+
+  - ⛔ `@objectstack/formula` 把同一个 `undefined` 读作「这个键在记录里不存在」—— 那是**第三种语义**，不是第三个 bug 拼写，也正是 #5299 在争的问题。在这里顺手改掉等于替 #5299 拍板。
+  - ⛔ `driver-memory` / `driver-mongodb` 维持 #5499 投入冻结，只 pin 不改。后果是本编译器与 `driver-memory` 在这一格上从此不一致 —— 这是裁决接受的代价，解冻时一并还，账记在 #6125。
+  - ⛔ `driver-sql` / `driver-turso` 已由 #6050 落地，未触碰。
+
+- 91cefb8: refactor(types,rest,metadata,analytics): Postgres 的 `"x" of relation "y"` 短语收归一处，三个包不再各修一遍同一个超串洞（#6615）
+
+  Postgres 把「关系内部某个子对象」的失败写成 `column "label" of relation "sys_team" does not exist`——里面**逐字包含**一句合法的「表不存在」短语 `relation "sys_team" does not exist`，含义却相反：关系正因为存在才被点名。任何对「这句话是不是在说表没了」的正则收紧都消不掉这个匹配，短语确实在里面；唯一的修法是**先问更具体的问题**。所以修的是**顺序**，不是模式。
+
+  正因为如此，这个短语被分三次教给了这个仓库，分属三个包、三个 PR，其中两次是在别处已经踩过同一个洞之后：`@objectstack/rest` 的 `mapDataError`（#5352）、`@objectstack/service-analytics` 的缺列扣除（#6035 / PR #6346）、`@objectstack/metadata` 的 `MISSING_TABLE.excludes`（#6347 / PR #6613）。本次把它收进 `@objectstack/types`，与 `isUniqueViolationError`（#6250）和 `isModuleNotFoundError`（framework#3265）同一个理由与同一个位置。
+
+  **两种宽度，故意保留成两个导出。** 三个消费者要的并不是同一条正则，差别也不是随手写的，而是**每个站点哪个方向的误差是安全的**：
+
+  - `matchMissingColumnOfRelation(message)` —— 严格提取器，锚定 Postgres 的 errmsg 模板 `column "%s" of relation "%s" does not exist`，返回列名。`rest` 用它把 42703 答成 `400 INVALID_FIELD` 而不是 `404`；`service-analytics` 用它在分类前扣除缺列。这两处**过宽**会把真正缺失的表变成硬失败、回退 #5033 刻意保留的宽容，**漏匹配**只是让消息含糊一点——所以必须严格。
+  - `isRelationSubObjectPhrase(message)` —— 宽检测器，丢掉 `column` / `[a-z0-9_]+` / `does not exist` 三个锚点：任意子对象、任意带引号标识符、任意判词。`metadata` 用它做排除。这一处**过宽**只会把良性判定变成响亮判定，**漏匹配**却会让 `event_seq` 从 1 重新开始、撞进一张已有行的历史表——方向正好相反。
+
+  把两者合并成一条正则，无论哪种宽度胜出都会对其中一个调用方是错的；这是卡片记录在案的风险，两个导出即为此而设，理由是承重的而非风格的。仓库里第四份拷贝（`service-analytics` 测试内用于守护 fixture 的那条正则）同时收编：它本是为「两张面孔别对不上」而写，却把断言打在其中一面的私有复述上，因而正是它要防的漂移。
+
+  行为逐字保持不变：搬进来的两条模式与原站点逐字节相同。`@objectstack/service-analytics` 因此新增一条对 `@objectstack/types` 的依赖边——这是本次唯一的依赖变化，构造上无环（`@objectstack/types` 只依赖 `@objectstack/spec`，后者无仓内依赖），且仓库 73 个包中已有 25 个、16 个 service 中已有 5 个携带同一条边。
+
+- Updated dependencies [3d5c090]
+- Updated dependencies [e5bd768]
+- Updated dependencies [e027b3e]
+- Updated dependencies [c2429b0]
+- Updated dependencies [445a0c2]
+- Updated dependencies [f6609e6]
+- Updated dependencies [a70358a]
+- Updated dependencies [97e7e3c]
+- Updated dependencies [8828b9e]
+- Updated dependencies [53068c1]
+- Updated dependencies [ee58392]
+- Updated dependencies [f16e54e]
+- Updated dependencies [06be54e]
+- Updated dependencies [259459d]
+- Updated dependencies [3f7f14e]
+- Updated dependencies [6968885]
+- Updated dependencies [eaed61f]
+- Updated dependencies [debe2f6]
+- Updated dependencies [97b0798]
+- Updated dependencies [43a7a8d]
+- Updated dependencies [73f69dc]
+- Updated dependencies [04c56aa]
+- Updated dependencies [b3efeb7]
+- Updated dependencies [ddd075a]
+- Updated dependencies [88154be]
+- Updated dependencies [e8dc61e]
+- Updated dependencies [2f3e793]
+- Updated dependencies [d8e8d9c]
+- Updated dependencies [94e749b]
+- Updated dependencies [ea1d916]
+- Updated dependencies [ae31a19]
+- Updated dependencies [e0f300b]
+- Updated dependencies [62b6a2f]
+- Updated dependencies [5b4780b]
+- Updated dependencies [a933452]
+- Updated dependencies [8140915]
+- Updated dependencies [7b48cf9]
+- Updated dependencies [b5404f4]
+- Updated dependencies [f764691]
+- Updated dependencies [e120a5a]
+- Updated dependencies [e650d67]
+- Updated dependencies [04476e7]
+- Updated dependencies [79228cd]
+- Updated dependencies [b3363e9]
+- Updated dependencies [2ef1807]
+- Updated dependencies [d03fe25]
+- Updated dependencies [2672f85]
+- Updated dependencies [11066f6]
+- Updated dependencies [916af17]
+- Updated dependencies [84c86fb]
+- Updated dependencies [2a2a9fb]
+- Updated dependencies [a2e157c]
+- Updated dependencies [95c4227]
+- Updated dependencies [2a61116]
+- Updated dependencies [d4df105]
+- Updated dependencies [e2798fa]
+- Updated dependencies [0fd8556]
+- Updated dependencies [74155c7]
+- Updated dependencies [6908830]
+- Updated dependencies [8b06bba]
+- Updated dependencies [4c54037]
+- Updated dependencies [0f7157b]
+- Updated dependencies [d9bef45]
+- Updated dependencies [f549a0d]
+- Updated dependencies [82da264]
+- Updated dependencies [f586f1a]
+- Updated dependencies [9b9b70f]
+- Updated dependencies [f5a9bc2]
+- Updated dependencies [881a3cc]
+- Updated dependencies [ad6317b]
+- Updated dependencies [8a88885]
+- Updated dependencies [5f7669e]
+- Updated dependencies [becbe53]
+- Updated dependencies [b127c8b]
+- Updated dependencies [a80302a]
+- Updated dependencies [474f131]
+- Updated dependencies [050cd82]
+- Updated dependencies [4d552af]
+- Updated dependencies [44d677c]
+- Updated dependencies [c32944d]
+- Updated dependencies [1dd780f]
+- Updated dependencies [c8d6f6e]
+- Updated dependencies [92a67f2]
+- Updated dependencies [9136327]
+- Updated dependencies [bf0ae99]
+- Updated dependencies [cb3b6cd]
+- Updated dependencies [73b7234]
+- Updated dependencies [d2b97c3]
+- Updated dependencies [59b794f]
+- Updated dependencies [fc3a36a]
+- Updated dependencies [69787f0]
+- Updated dependencies [5d022a1]
+- Updated dependencies [042b9ee]
+- Updated dependencies [f549a0d]
+- Updated dependencies [a36db28]
+- Updated dependencies [3f8817a]
+- Updated dependencies [a2443e3]
+- Updated dependencies [e1554b1]
+- Updated dependencies [4856789]
+- Updated dependencies [c3f4916]
+- Updated dependencies [33e0385]
+- Updated dependencies [2205363]
+- Updated dependencies [09fe58d]
+- Updated dependencies [d0a5ceb]
+- Updated dependencies [e18a162]
+- Updated dependencies [d6d1a50]
+- Updated dependencies [d127ff0]
+- Updated dependencies [9b86cf6]
+- Updated dependencies [8825a06]
+- Updated dependencies [5087ac6]
+- Updated dependencies [2d1ddf0]
+- Updated dependencies [354b00f]
+- Updated dependencies [3de535b]
+- Updated dependencies [fe2e15a]
+- Updated dependencies [c6b6bb4]
+- Updated dependencies [2f59da0]
+- Updated dependencies [8ad609c]
+- Updated dependencies [bbee302]
+- Updated dependencies [08863dd]
+- Updated dependencies [56664f5]
+- Updated dependencies [31cbe90]
+- Updated dependencies [90bbf25]
+- Updated dependencies [eb91eba]
+- Updated dependencies [42da73d]
+- Updated dependencies [643b7c7]
+- Updated dependencies [d0d5205]
+- Updated dependencies [1a15893]
+- Updated dependencies [b70e534]
+- Updated dependencies [2233a85]
+- Updated dependencies [62dd69a]
+- Updated dependencies [e15e679]
+- Updated dependencies [2ab1257]
+- Updated dependencies [4cc4fb7]
+- Updated dependencies [28d1eb7]
+- Updated dependencies [2c26040]
+- Updated dependencies [f758cec]
+- Updated dependencies [78f0be8]
+- Updated dependencies [35f7fb4]
+- Updated dependencies [a5302c7]
+- Updated dependencies [7084313]
+- Updated dependencies [91cefb8]
+- Updated dependencies [0e043d8]
+- Updated dependencies [dadd1ad]
+- Updated dependencies [2f2e63c]
+- Updated dependencies [486d526]
+- Updated dependencies [89d7b35]
+- Updated dependencies [85ec26d]
+- Updated dependencies [f6476fc]
+- Updated dependencies [4ac12ef]
+- Updated dependencies [b88f5e8]
+- Updated dependencies [42cc219]
+- Updated dependencies [d7e0b42]
+- Updated dependencies [3510e4a]
+- Updated dependencies [aa4b90d]
+- Updated dependencies [54299ca]
+- Updated dependencies [dc61def]
+- Updated dependencies [251e888]
+- Updated dependencies [183b4c4]
+- Updated dependencies [2fdb36e]
+- Updated dependencies [20526f5]
+- Updated dependencies [c5eef1d]
+- Updated dependencies [e0f300b]
+- Updated dependencies [761a0ba]
+- Updated dependencies [be87153]
+- Updated dependencies [60f0dd8]
+- Updated dependencies [a87c5cd]
+- Updated dependencies [a47f338]
+- Updated dependencies [2598216]
+- Updated dependencies [2c7e62d]
+- Updated dependencies [eb7613c]
+- Updated dependencies [ecc9110]
+- Updated dependencies [f7bd4e2]
+- Updated dependencies [361bd5b]
+- Updated dependencies [129b378]
+- Updated dependencies [88f9d94]
+- Updated dependencies [1818998]
+- Updated dependencies [09ee21c]
+- Updated dependencies [f549a0d]
+- Updated dependencies [3fc2e48]
+- Updated dependencies [e8f435c]
+- Updated dependencies [41610f6]
+  - @objectstack/spec@17.0.0-rc.6
+  - @objectstack/core@17.0.0-rc.6
+  - @objectstack/types@17.0.0-rc.6
+
 ## 17.0.0-rc.5
 
 ### Patch Changes

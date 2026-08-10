@@ -111,20 +111,33 @@ describe('SqlDriver — contains escapes LIKE metacharacters (P0-3)', () => {
     await knex.destroy();
   });
 
-  it('a "%" value matches only rows containing a literal %, not every row', async () => {
-    const r = await driver.find('docs', { where: { title: { $contains: '%' } } });
-    expect(r.map((x: any) => x.id)).toEqual(['1']);
-  });
+  /**
+   * [#5702] Swept over BOTH operators `applyLike` now serves.
+   *
+   * `$icontains` reaches the identical escaping through a new `fold` parameter
+   * of that method, which wraps both operands in SQL `LOWER()`. Adding the fold
+   * as a parameter rather than as a second emitter is what makes the character
+   * class shared code — but "shared" is a claim, and this axis is what checks
+   * it: a fold written as its own emitter would have re-derived the pattern
+   * without the `%`/`_`/`\` class, and an unescaped `%` matches EVERY row (the
+   * P0-3 bypass this describe block is named after) on the newer operator only.
+   */
+  for (const op of ['$contains', '$icontains'] as const) {
+    it(`${op}: a "%" value matches only rows containing a literal %, not every row`, async () => {
+      const r = await driver.find('docs', { where: { title: { [op]: '%' } } });
+      expect(r.map((x: any) => x.id)).toEqual(['1']);
+    });
 
-  it('a "_" value matches only rows containing a literal _, not any single char', async () => {
-    const r = await driver.find('docs', { where: { title: { $contains: '_' } } });
-    expect(r.map((x: any) => x.id)).toEqual(['3']);
-  });
+    it(`${op}: a "_" value matches only rows containing a literal _, not any single char`, async () => {
+      const r = await driver.find('docs', { where: { title: { [op]: '_' } } });
+      expect(r.map((x: any) => x.id)).toEqual(['3']);
+    });
 
-  it('an ordinary substring still matches normally', async () => {
-    const r = await driver.find('docs', { where: { title: { $contains: 'sale' } } });
-    expect(r.map((x: any) => x.id)).toEqual(['1']);
-  });
+    it(`${op}: an ordinary substring still matches normally`, async () => {
+      const r = await driver.find('docs', { where: { title: { [op]: 'sale' } } });
+      expect(r.map((x: any) => x.id)).toEqual(['1']);
+    });
+  }
 });
 
 // ── The driver axis (#5589, ADR-0053 D-A3) ──────────────────────────────────
@@ -237,16 +250,27 @@ function declareLikeEscapeSweep(cell: DialectCell): void {
       expect(String(rows[0]?.title)).toBe('C:\\logs');
     });
 
-    for (const c of LIKE_ESCAPE_CASES) {
-      it(c.name, async () => {
-        const rows = await driver.find(LIKE_TABLE, {
-          where: { title: { $contains: c.value } },
+    // [#5702] The OPERATOR axis, crossed with the dialect axis this sweep
+    // already had. `$icontains` compiles `LOWER(??) LIKE LOWER(?) ESCAPE ?`, so
+    // every claim this file makes about the escape's survival across a wire
+    // protocol — mysql2's client-side interpolation of the bound `ESCAPE`,
+    // Postgres's `standard_conforming_strings`, the backslash surviving the
+    // server lexer — has to be re-decided with the operands wrapped in a
+    // function call. The expectations are identical because the escaping is:
+    // the comparands here are symbols and lower-case ASCII, so the fold changes
+    // which SQL is emitted, never which rows are right.
+    for (const op of ['$contains', '$icontains'] as const) {
+      for (const c of LIKE_ESCAPE_CASES) {
+        it(`${op}: ${c.name}`, async () => {
+          const rows = await driver.find(LIKE_TABLE, {
+            where: { title: { [op]: c.value } },
+          });
+          const got = rows
+            .map((r: any) => String(r.id))
+            .sort((x: string, y: string) => x.localeCompare(y));
+          expect(got, c.note).toEqual([...c.expected]);
         });
-        const got = rows
-          .map((r: any) => String(r.id))
-          .sort((x: string, y: string) => x.localeCompare(y));
-        expect(got, c.note).toEqual([...c.expected]);
-      });
+      }
     }
   });
 }

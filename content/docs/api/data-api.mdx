@@ -128,6 +128,7 @@ corrupts something the earlier axes do not:
 | `?search=alpha&searchFields=title` | scans only `title` |
 | `?search=alpha&searchFields=no_such_field` | `400 INVALID_FIELD` |
 | `?search=alpha&searchFields=amount` | `400 INVALID_FIELD` — real field, but not searchable |
+| `?search=alpha&searchFields=project_id.name` | `400 INVALID_FIELD` — search scans this object's own columns; mirror the related title instead (see below) |
 | `groupBy: ["status"]` | one bucket per status value |
 | `groupBy: ["no_such_field"]` | `400 INVALID_FIELD` |
 | `aggregations: [{function:"sum", field:"amount", alias:"total"}]` | the real total |
@@ -143,6 +144,18 @@ corrupts something the earlier axes do not:
   `searchableFields`), and a `searchableFields` entry that names no field (a
   stale declaration — the bug is on the object, and clients that echo the
   declaration verbatim are told so).
+
+  A **dotted path** (`project_id.name`) is the typo case with its own hint:
+  `search` scans this object's own columns, so a related record's column can
+  never be a search target, and the search axis does not resolve traversal the
+  way `$select` / `$orderby` / `$filter` do. To search by a related record's
+  title, **mirror** that title into a stored field on this object and declare
+  *that* field searchable — a task list searched by project name carries a
+  `project_name` text column on `task`, maintained on write and listed in
+  `task.searchableFields`. It must be a stored field: a `formula` field is
+  virtual, so no driver has a column for `$contains` to scan. Cross-object
+  search paths are rejected by design, not pending — see
+  [Schema Design → Searching by a related record's title](/docs/data-modeling/schema-design#searching-by-a-related-records-title--mirror-the-value).
 - **`groupBy`** — an unknown column projected `null` for every row, so all
   rows fell into **one bucket** whose count is the true row count:
   structurally perfect, indistinguishable from a column that really holds a

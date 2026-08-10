@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/plugin-security",
-  "version": "17.0.0-rc.5",
+  "version": "17.0.0-rc.6",
   "license": "Apache-2.0",
   "description": "Security Plugin for ObjectStack — RBAC, RLS, and Field-Level Security Runtime",
   "main": "dist/index.js",
@@ -24,6 +24,7 @@
     "@objectstack/spec": "workspace:*"
   },
   "devDependencies": {
+    "@objectstack/metadata-core": "workspace:*",
     "@objectstack/plugin-sharing": "workspace:*",
     "@types/node": "^26.1.2",
     "typescript": "^6.0.3",

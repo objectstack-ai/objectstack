@@ -1,8 +1,13 @@
 import { readFileSync } from 'node:fs';
 
 import { describe, it, expect } from 'vitest';
+// #6713 — the residual-root table below is generated from the REAL baseline, not
+// a copy of it: "a future `SCOPE_ROOTS` member is covered for free" is the whole
+// argument for the allowlist, and a hand-copied list would go green on exactly
+// the root the rule never saw.
+import { SCOPE_ROOTS } from '@objectstack/formula';
 import { ExpressionInputSchema, ObjectStackSchema } from '@objectstack/spec';
-import { FieldSchema, ObjectSchema } from '@objectstack/spec/data';
+import { FieldSchema, ObjectSchema, SelectOptionSchema } from '@objectstack/spec/data';
 import { SharingRuleSchema } from '@objectstack/spec/security';
 
 import { validateStackExpressions } from './validate-expressions.js';
@@ -139,6 +144,16 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
     expect(issues[0].message).toMatch(/config\.template/);
     expect(issues[0].message).toMatch(/`notify` node/);
     expect(issues[0].message).toMatch(/os migrate meta --from 16/);
+    // #7030 — house sentence (#6856 route D): names the TOOL's behaviour, never
+    // the retired key's fate. This branch can DELETE the key outright
+    // (`template`/`recipients`/`variables`/`script`), so "rewrite it" reads two
+    // ways ("it" = the key vs. "it" = your sources) while "rewrite existing
+    // sources" has one antecedent. Pinned here AND class-wide in
+    // `retired-key-migrate-sentence.test.ts` (widened to `packages/lint/src`).
+    expect(issues[0].message).toMatch(
+      /Run `os migrate meta --from 16` to rewrite existing sources automatically\.$/,
+    );
+    expect(issues[0].message).not.toMatch(/rewrite it automatically/);
   });
 
   it('tells a shorthand actionType exactly where its name belongs', () => {
@@ -631,6 +646,660 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
         expect(issues).toHaveLength(2);
         expect(issues.map((i) => i.where.replace(/.* field 'qty' /, '')).sort())
           .toEqual(['readonlyWhen', 'requiredWhen']);
+      });
+    });
+
+    /**
+     * ── `current_user` is a per-SURFACE verdict, not a missing root (#6290) ───
+     *
+     * `@objectstack/formula`'s `SCOPE_ROOTS` now declares `current_user`
+     * (ADR-0068 D1's canonical spelling, which `buildScope` really mounts and
+     * which `introspectScope` already advertised). That deliberately removes
+     * the field-level rejection's OLD cause — an omission in a global baseline,
+     * doing a per-surface job by accident, and prescribing
+     * "Write `record.current_user`" while it did so: a shape that binds on no
+     * layer, so an author who obeyed the message ended up worse off.
+     *
+     * The verdict itself is not removed. It moves to the surface that owns it,
+     * with the prescriptions that exist — and the two surfaces now disagree on
+     * purpose, because their evaluators disagree (#6146):
+     *
+     *   field level  → `evalFieldPredicate`: `record` + `previous` + `parent`.
+     *                  `current_user` unbound ⇒ fault ⇒ fail-OPEN ⇒ rejected here.
+     *   option level → `resolveCascadingOptions` against the host predicate
+     *                  scope, which binds `current_user` ⇒ accepted.
+     */
+    describe('`current_user` at field level vs option level (#6290)', () => {
+      const gated = "'admin' in current_user.positions";
+
+      it('still REJECTS a field-level `visibleWhen` that reads `current_user`', () => {
+        const issues = validateStackExpressions({
+          objects: [{
+            name: 'showcase_deal',
+            fields: { amount: { type: 'number', visibleWhen: gated } },
+          }],
+        });
+        const hit = issues.filter((i) => i.where.includes("field 'amount' visibleWhen"));
+        expect(hit).toHaveLength(1);
+        expect(hit[0]!.severity).toBe('error');
+      });
+
+      /**
+       * The prescription is the half this issue was filed for. Asserted as a
+       * NEGATIVE plus three positives, because "the message changed" is not the
+       * property that matters — "the message names a shape that actually binds"
+       * is. `record.current_user` is the shape that binds nowhere.
+       */
+      it('prescribes surfaces that exist — and never `record.current_user`', () => {
+        const [issue] = validateStackExpressions({
+          objects: [{
+            name: 'showcase_deal',
+            fields: { amount: { type: 'number', visibleWhen: gated } },
+          }],
+        }).filter((i) => i.where.includes('visibleWhen'));
+        expect(issue!.message).not.toContain('record.current_user');
+        // 1. what actually goes wrong, in the direction it goes wrong
+        expect(issue!.message).toMatch(/falls back to VISIBLE/);
+        // 2. the one `*When` surface that binds `current_user`
+        expect(issue!.message).toMatch(/option's own `visibleWhen`/);
+        // 3. the surface that hides a whole field by role — FLS on a permission
+        //    set (`PermissionSetSchema.fields`, `permission.zod.ts:455`)
+        expect(issue!.message).toMatch(/readable: false/);
+      });
+
+      it('rejects it on `readonlyWhen` / `requiredWhen` too — same evaluator, same unbound root', () => {
+        const issues = validateStackExpressions({
+          objects: [{
+            name: 'showcase_deal',
+            fields: {
+              amount: { type: 'number', readonlyWhen: gated },
+              note: { type: 'text', requiredWhen: gated },
+            },
+          }],
+        });
+        expect(issues.filter((i) => /current_user/.test(i.message)).map((i) => i.where.replace(/.*· /, '')).sort())
+          .toEqual(["field 'amount' readonlyWhen", "field 'note' requiredWhen"]);
+      });
+
+      /**
+       * The pin for the legal usage. Shape copied from
+       * `examples/app-showcase/src/data/objects/cascading-select.object.ts:85`,
+       * the role-gated option that has been shipping since ADR-0068 and had
+       * never met this rule — because until #6290 nothing walked options at all.
+       */
+      it('ACCEPTS the showcase role-gated OPTION — per-option binds `current_user`', () => {
+        const issues = validateStackExpressions({
+          objects: [{
+            name: 'showcase_cascading_select',
+            fields: {
+              tier: {
+                type: 'select',
+                options: [
+                  { label: 'Standard', value: 'standard', default: true },
+                  { label: 'Restricted (admin only)', value: 'restricted', visibleWhen: gated },
+                ],
+              },
+            },
+          }],
+        });
+        expect(issues).toHaveLength(0);
+      });
+
+      it('accepts the cascading (record-scoped) options from the same showcase field', () => {
+        const issues = validateStackExpressions({
+          objects: [{
+            name: 'showcase_cascading_select',
+            fields: {
+              country: { type: 'select', options: [{ label: 'China', value: 'cn' }] },
+              province: {
+                type: 'select',
+                dependsOn: ['country'],
+                options: [
+                  { label: 'Zhejiang', value: 'zj', visibleWhen: "record.country == 'cn'" },
+                  { label: 'California', value: 'ca', visibleWhen: "record.country == 'us'" },
+                ],
+              },
+            },
+          }],
+        });
+        expect(issues).toHaveLength(0);
+      });
+    });
+
+    /**
+     * ── The ADR-0068 aliases get the SAME field-level verdict (#6585) ────────
+     *
+     * D1 makes `user` and `ctx.user` aliases of `current_user` — `buildScope`
+     * hangs one `EvalUser` reference on all three spellings — so the semantic
+     * error above is the same error under any of them. #6584's first cut
+     * matched only the canonical spelling: `'admin' in user.positions` and
+     * `'admin' in ctx.user.positions` sailed through in silence (both roots
+     * have always been in `SCOPE_ROOTS`, so the bare-ref check never fired
+     * either), and which spelling the author picked decided whether they got a
+     * diagnostic. These tests close that fork and pin its edges.
+     *
+     * `ctx` is pinned WHOLE-ROOT deliberately: at field level `buildScope`
+     * never creates `ctx` at all (it exists only when the evaluation carries a
+     * user, which no field-level site passes), so `ctx.locale` faults exactly
+     * like `ctx.user.id`. The other side of that decision is pinned too —
+     * `ctx.user` on an ACTION `visible` (ActionEngine's surface, where `ctx`
+     * genuinely binds — the platform's own `sys_user` actions ship it) must
+     * stay accepted.
+     */
+    describe('`user` / `ctx.user` aliases at field level (#6585)', () => {
+      const slots = ['visibleWhen', 'readonlyWhen', 'requiredWhen'] as const;
+
+      it.each(slots)('rejects `user` on %s — same object as `current_user`, same unbound surface', (slot) => {
+        const issues = validateStackExpressions({
+          objects: [{
+            name: 'showcase_deal',
+            fields: { amount: { type: 'number', [slot]: "'admin' in user.positions" } },
+          }],
+        });
+        const hit = issues.filter((i) => i.where === `object 'showcase_deal' · field 'amount' ${slot}`);
+        expect(hit).toHaveLength(1);
+        expect(hit[0]!.severity).toBe('error');
+        // The message names the spelling the author WROTE — a diagnostic that
+        // talks about `current_user` to an author who typed `user` sends them
+        // hunting for text that is not in their file.
+        expect(hit[0]!.message).toMatch(/`\w+` reads `user`/);
+      });
+
+      it.each(slots)('rejects `ctx.user` on %s', (slot) => {
+        const issues = validateStackExpressions({
+          objects: [{
+            name: 'showcase_deal',
+            fields: { amount: { type: 'number', [slot]: "'admin' in ctx.user.positions" } },
+          }],
+        });
+        const hit = issues.filter((i) => i.where === `object 'showcase_deal' · field 'amount' ${slot}`);
+        expect(hit).toHaveLength(1);
+        expect(hit[0]!.severity).toBe('error');
+        expect(hit[0]!.message).toMatch(/`\w+` reads `ctx`/);
+      });
+
+      /**
+       * The whole-root half of the `ctx` decision: a `ctx` read that never
+       * touches `.user` is just as unbound at field level — `buildScope` only
+       * creates the root when a user is carried, and no field-level site
+       * carries one — so it must not slip through a `.user`-form-only match.
+       */
+      it('rejects a bare-`ctx` NON-user read too — the root itself is unbound at field level', () => {
+        const issues = validateStackExpressions({
+          objects: [{
+            name: 'showcase_deal',
+            fields: { amount: { type: 'number', visibleWhen: "ctx.locale == 'en'" } },
+          }],
+        });
+        const hit = issues.filter((i) => i.where.includes("field 'amount' visibleWhen"));
+        expect(hit).toHaveLength(1);
+        expect(hit[0]!.message).toMatch(/`visibleWhen` reads `ctx`/);
+      });
+
+      it.each(["'admin' in user.positions", "'admin' in ctx.user.positions"])(
+        'gives %s the SAME prescriptions as the canonical spelling — no per-spelling fork',
+        (predicate) => {
+          const [issue] = validateStackExpressions({
+            objects: [{
+              name: 'showcase_deal',
+              fields: { amount: { type: 'number', visibleWhen: predicate } },
+            }],
+          }).filter((i) => i.where.includes('visibleWhen'));
+          // Same three prescriptions the #6290 message test pins for
+          // `current_user`, plus the same direction-of-failure sentence.
+          expect(issue!.message).toMatch(/falls back to VISIBLE/);
+          expect(issue!.message).toMatch(/option's own `visibleWhen`/);
+          expect(issue!.message).toMatch(/readable: false/);
+          expect(issue!.message).not.toContain('record.current_user');
+        },
+      );
+
+      /**
+       * The whole-root widening makes root-vs-MEMBER discrimination newly
+       * load-bearing: `record.user_id` and `record.ctx_key` name the very
+       * strings this rule now rejects, but as MEMBERS of `record` — and
+       * `collectCelRootIdentifiers` drops member names by design. A rule that
+       * confused the two would reject the single most ordinary predicate an
+       * author writes (an owner check), which is the failure mode that would
+       * make this widening worse than the hole it closes.
+       */
+      it('does NOT trip on a `record` MEMBER merely spelled like one of the roots', () => {
+        const issues = validateStackExpressions({
+          objects: [{
+            name: 'showcase_deal',
+            fields: {
+              user_id: { type: 'text' },
+              ctx_key: { type: 'text' },
+              amount: {
+                type: 'number',
+                visibleWhen: "record.user_id != '' && record.ctx_key == 'x'",
+              },
+            },
+          }],
+        });
+        expect(issues).toHaveLength(0);
+      });
+
+      /**
+       * The widening is FIELD-level only. Option-level `visibleWhen` resolves
+       * against the host predicate scope, where `buildScope` mounts the SAME
+       * user object under every ADR-0068 spelling — so an option predicate is
+       * legal under the aliases exactly as it is under `current_user`.
+       */
+      it('still ACCEPTS an option-level `visibleWhen` spelling the `user` alias', () => {
+        const issues = validateStackExpressions({
+          objects: [{
+            name: 'showcase_cascading_select',
+            fields: {
+              tier: {
+                type: 'select',
+                options: [
+                  { label: 'Standard', value: 'standard', default: true },
+                  { label: 'Restricted', value: 'restricted', visibleWhen: "'admin' in user.positions" },
+                ],
+              },
+            },
+          }],
+        });
+        expect(issues).toHaveLength(0);
+      });
+
+      /**
+       * The blast-radius pin the #6585 measurement was for: `ctx` IS
+       * ActionEngine's predicate root, and the platform's own metadata ships
+       * `ctx.user` action predicates (`sys-user.object.ts` "visible:
+       * record.id == ctx.user.id", `sys-invitation.object.ts`). The field-level
+       * rejection must not leak onto the action surface.
+       */
+      it('still ACCEPTS `ctx.user` on an action `visible` — ActionEngine binds `ctx`', () => {
+        const issues = validateStackExpressions({
+          objects: [{
+            name: 'sys_user',
+            fields: { email: { type: 'text' } },
+            actions: [{
+              // The exact shape `packages/platform-objects/src/identity/
+              // sys-user.object.ts:291` ships (`id` is a registry-injected
+              // column, so the field-existence pass resolves it too).
+              name: 'change_password',
+              type: 'script',
+              visible: 'record.id == ctx.user.id',
+            }],
+          }],
+        });
+        expect(issues).toHaveLength(0);
+      });
+    });
+
+    /**
+     * ── Denylist → ALLOWLIST, and the residual roots it uncovers (#6713) ─────
+     *
+     * #6584 matched one root, #6585 three. The truth is a three-item WHITELIST
+     * — `record` / `previous` / `parent` — pinned by three independent anchors
+     * (server `rule-validator.ts` binds, objectui's five field-level call sites,
+     * objectui's authoring `FIELD_RULE_ROOTS`). Everything else in `SCOPE_ROOTS`
+     * was equally unbound, equally faulting, and equally SILENT: a declared root
+     * resolves in the strict env, so the bare-reference check never fired on it
+     * either, and the denylist did not know it.
+     *
+     * These tests are written against the IMPORTED `SCOPE_ROOTS`, not a copy of
+     * it, because "a future root is covered for free" is the whole argument for
+     * the allowlist and a hand-copied list in the test would assert the opposite
+     * of what it claims — it would go green on a root the rule never saw.
+     */
+    describe('field-level `*When` roots are an ALLOWLIST over SCOPE_ROOTS (#6713)', () => {
+      /** The three the surface really binds. Everything else must be rejected. */
+      const BOUND = ['record', 'previous', 'parent'] as const;
+      const RESIDUAL = SCOPE_ROOTS.filter((r) => !(BOUND as readonly string[]).includes(r));
+
+      const fieldIssues = (predicate: string, slot = 'visibleWhen') =>
+        validateStackExpressions({
+          objects: [{
+            name: 'showcase_deal',
+            fields: {
+              amount: { type: 'number' },
+              // Declared so the field-existence pass has no verdict of its own
+              // on the comprehension-macro case below.
+              tags: { type: 'text' },
+              gate: { type: 'text', [slot]: predicate },
+            },
+          }],
+        }).filter((i) => i.where === `object 'showcase_deal' · field 'gate' ${slot}`);
+
+      it('the residual set is non-empty and much larger than the denylist it replaces', () => {
+        // Guards the table below from going vacuous: if `SCOPE_ROOTS` ever
+        // shrank to the three bound roots there would be nothing to reject and
+        // every `it.each` case would silently disappear.
+        expect(RESIDUAL.length).toBeGreaterThan(20);
+        // The three the old denylist held — a small minority of what is unbound.
+        expect(RESIDUAL).toEqual(expect.arrayContaining(['current_user', 'user', 'ctx']));
+      });
+
+      it.each(RESIDUAL)('rejects `%s` on a field-level `visibleWhen` — unbound at this surface', (root) => {
+        const hit = fieldIssues(`${root}.some_key == 'x'`);
+        expect(hit).toHaveLength(1);
+        expect(hit[0]!.severity).toBe('error');
+        expect(hit[0]!.message).toContain(`\`visibleWhen\` reads \`${root}\``);
+      });
+
+      it.each(BOUND)('ACCEPTS `%s` — the three roots the evaluators really bind', (root) => {
+        // `visibleWhen` on purpose: `parent` on `readonlyWhen`/`requiredWhen`
+        // meets the separate #4889/#4977 master-detail gate, which is a
+        // different rule with a different verdict and would confuse this pin.
+        expect(fieldIssues(`${root}.amount > 0`)).toHaveLength(0);
+      });
+
+      /**
+       * The two named cases #6713 called out as credible author typos rather
+       * than theoretical members of the residual set.
+       */
+      it('rejects `os.user.id` — ADR-0068 D1\'s FOURTH user spelling, the one #6585 left', () => {
+        const hit = fieldIssues("os.user.id == '1'");
+        expect(hit).toHaveLength(1);
+        expect(hit[0]!.message).toContain('`visibleWhen` reads `os`');
+      });
+
+      it('rejects `data` — the LEGAL root of this same key on a METADATA form', () => {
+        const hit = fieldIssues("data.type == 'select'");
+        expect(hit).toHaveLength(1);
+        expect(hit[0]!.message).toContain('`visibleWhen` reads `data`');
+      });
+
+      /**
+       * The partition, both halves. The rule judges `SCOPE_ROOTS` membership,
+       * NOT strict-env declaredness — and that is a measured distinction, not a
+       * style choice: the strict env also declares CEL's TYPE names, so
+       * `type(record.x) == string` reports `string` as a root that resolves.
+       * A declaredness oracle would reject that legitimate predicate.
+       */
+      it('leaves a BARE field reference to the bare-reference check — one issue, not two', () => {
+        const hit = validateStackExpressions({
+          objects: [{
+            name: 'showcase_deal',
+            fields: { status: { type: 'text' }, gate: { type: 'text', visibleWhen: "status == 'x'" } },
+          }],
+        }).filter((i) => i.where.includes("field 'gate' visibleWhen"));
+        expect(hit).toHaveLength(1);
+        expect(hit[0]!.message).toMatch(/bare reference `status`/);
+        // …and NOT the allowlist rule's wording, which prescribes the wrong fix
+        // for a bare field.
+        expect(hit[0]!.message).not.toContain('binds only `record`');
+      });
+
+      it('does NOT reject a CEL TYPE name used as a value — `type(record.x) == string`', () => {
+        // `collectCelRootIdentifiers` reports `string` as a top-level id and the
+        // strict env declares it, so a declaredness-based rule WOULD reject this
+        // legal predicate. SCOPE_ROOTS membership is what separates the two.
+        expect(fieldIssues('type(record.amount) == string')).toHaveLength(0);
+      });
+
+      it('does NOT reject a comprehension-macro variable', () => {
+        expect(fieldIssues("record.tags.all(t, t != '')")).toHaveLength(0);
+      });
+
+      /**
+       * Root-vs-MEMBER discrimination, re-pinned at allowlist width. #6585
+       * pinned `record.user_id` / `record.ctx_key`; the allowlist rejects ~20
+       * more names, so the number of ordinary field names that LOOK like a
+       * rejected root grows with it. Confusing the two would reject the most
+       * ordinary predicates an author writes.
+       */
+      it('does NOT trip on `record` MEMBERS merely spelled like residual roots', () => {
+        const issues = validateStackExpressions({
+          objects: [{
+            name: 'showcase_deal',
+            fields: {
+              data_source: { type: 'text' },
+              os_version: { type: 'text' },
+              vars_count: { type: 'number' },
+              trigger_key: { type: 'text' },
+              gate: {
+                type: 'text',
+                visibleWhen:
+                  "record.data_source != '' && record.os_version != '' && " +
+                  "record.vars_count > 0 && record.trigger_key == 'x'",
+              },
+            },
+          }],
+        });
+        expect(issues).toHaveLength(0);
+      });
+
+      it('reports ONE root per slot, preferring the canonical user spelling', () => {
+        // Two rejected roots in one predicate. The tie-break is documented
+        // (user roots first, canonical first) so the message is stable rather
+        // than dependent on AST walk order.
+        const hit = fieldIssues("data.type == 'select' && 'admin' in current_user.positions");
+        expect(hit).toHaveLength(1);
+        expect(hit[0]!.message).toContain('reads `current_user`');
+      });
+    });
+
+    /**
+     * ── The prescription tiers by ROOT (#6713 axis 2) ────────────────────────
+     *
+     * The pre-#6713 prescriptions are user-oriented because the pre-#6713
+     * denylist held only user roots. Answering `data.type == 'select'` with
+     * "move it to the option's `visibleWhen`" answers a question nobody asked.
+     */
+    describe('prescription tiers by root (#6713)', () => {
+      const messageFor = (predicate: string, slot = 'visibleWhen') =>
+        validateStackExpressions({
+          objects: [{
+            name: 'showcase_deal',
+            fields: { amount: { type: 'number' }, gate: { type: 'text', [slot]: predicate } },
+          }],
+        }).filter((i) => i.where === `object 'showcase_deal' · field 'gate' ${slot}`)[0]!.message;
+
+      it.each(['current_user', 'user', 'ctx', 'os'])(
+        'user root `%s` keeps the two USER prescriptions plus the `record` rewrite',
+        (root) => {
+          const m = messageFor(`'admin' in ${root}.positions`);
+          expect(m).toMatch(/option's own `visibleWhen`/);
+          expect(m).toMatch(/readable: false/);
+          expect(m).toMatch(/rewrite the predicate against `record`/);
+        },
+      );
+
+      it('`data` gets the metadata-form explanation — and NOT the user prescriptions', () => {
+        const m = messageFor("data.type == 'select'");
+        expect(m).toMatch(/METADATA form/);
+        expect(m).toMatch(/`record\.<field>`/);
+        // The half this tier exists for: the user-oriented advice is absent,
+        // because it answers a question this author did not ask.
+        expect(m).not.toMatch(/option's own `visibleWhen`/);
+        expect(m).not.toMatch(/readable: false/);
+      });
+
+      it.each(['vars', 'trigger', 'context', 'input'])(
+        'general root `%s` gets the rewrite prescription, not the user one',
+        (root) => {
+          const m = messageFor(`${root}.step_one == 'done'`);
+          expect(m).toMatch(/bound at OTHER evaluation sites/);
+          expect(m).toMatch(/Rewrite the predicate against `record`/);
+          expect(m).not.toMatch(/readable: false/);
+          expect(m).not.toMatch(/METADATA form/);
+        },
+      );
+    });
+
+    /**
+     * ── The causal sentence tiers by SLOT (#6716) ────────────────────────────
+     *
+     * One sentence used to serve all three slots: "the predicate faults and
+     * falls back to VISIBLE, leaving the field the test was meant to hide
+     * showing for everyone". It is precise for exactly one of them. All three
+     * cells re-measured for this change, at BOTH ends of each slot:
+     *
+     *   visibleWhen  client `fallback: true` ⇒ VISIBLE; server never evaluates
+     *                a FIELD-level `visibleWhen` at all (`hasFieldRules` gates
+     *                on `requiredWhen || readonlyWhen || option visibility`).
+     *                ⇒ the old sentence was RIGHT here.
+     *   readonlyWhen server `isReadonlyWhenLocked` ⇒ LOCKED (#4889's carve-out,
+     *                whose trigger IS the unbound-root case) and
+     *                `stripReadonlyWhenFields` deletes the value from the
+     *                payload; client `fallback: false` ⇒ editable. The two ends
+     *                fault in OPPOSITE directions and ADR-0057 D10 gives it to
+     *                the server. ⇒ the old sentence was BACKWARDS here.
+     *   requiredWhen server logs the unbound root and `continue`s (#4977 did not
+     *                copy the carve-out); client `fallback: false`. Both ends
+     *                fail open and neither is about visibility. ⇒ the old
+     *                sentence named the wrong PROPERTY here.
+     *
+     * Honest note on the reverse direction: reverting the per-slot map cannot
+     * turn the `visibleWhen` assertions red, because the shared sentence WAS the
+     * `visibleWhen` one. The load-bearing pins are therefore the two negative
+     * assertions on `readonlyWhen` / `requiredWhen` — those are what a revert
+     * fails.
+     */
+    describe('per-slot causal sentence (#6716)', () => {
+      const messageFor = (slot: string) =>
+        validateStackExpressions({
+          objects: [{
+            name: 'showcase_deal',
+            fields: { gate: { type: 'text', [slot]: "'admin' in current_user.positions" } },
+          }],
+        }).filter((i) => i.where === `object 'showcase_deal' · field 'gate' ${slot}`)[0]!.message;
+
+      it('`visibleWhen` — fail-OPEN to visible, the one slot the shared sentence fitted', () => {
+        const m = messageFor('visibleWhen');
+        expect(m).toMatch(/falls back to VISIBLE/);
+        expect(m).toMatch(/showing for everyone/);
+      });
+
+      it('`readonlyWhen` — says LOCKED, and never says the field stays visible', () => {
+        const m = messageFor('readonlyWhen');
+        expect(m).toMatch(/LOCKED/);
+        expect(m).toMatch(/#4889/);
+        // The defect this card was filed for. The server treats the field as
+        // locked and drops the write; telling the author it is "showing for
+        // everyone" inverts both the urgency and the troubleshooting direction.
+        expect(m).not.toMatch(/falls back to VISIBLE/);
+        expect(m).not.toMatch(/showing for everyone/);
+      });
+
+      it('`readonlyWhen` — names the client/server disagreement, not just the server verdict', () => {
+        // ADR-0057 D10: the form renders the field editable (`fallback: false`)
+        // while the server locks it. An author who only reads "LOCKED" cannot
+        // reconcile that with the editable input in front of them.
+        const m = messageFor('readonlyWhen');
+        expect(m).toMatch(/OPPOSITE directions/);
+        expect(m).toMatch(/editable/);
+      });
+
+      it('`requiredWhen` — says the requirement is never enforced, not anything about visibility', () => {
+        const m = messageFor('requiredWhen');
+        expect(m).toMatch(/never enforced/);
+        expect(m).toMatch(/saves with the field empty/);
+        expect(m).not.toMatch(/VISIBLE/);
+        expect(m).not.toMatch(/showing for everyone/);
+      });
+
+      it('no two slots share a causal sentence', () => {
+        const clause = (slot: string) => messageFor(slot).split(' is unbound here, so ')[1]!;
+        const clauses = ['visibleWhen', 'readonlyWhen', 'requiredWhen'].map(clause);
+        expect(new Set(clauses).size).toBe(3);
+      });
+
+      /**
+       * The per-slot axis is orthogonal to the per-root axis: a `data` typo on
+       * `readonlyWhen` needs the metadata-form prescription AND the locked-field
+       * consequence. A message-per-combination design would have dropped one.
+       */
+      it('the two axes compose — `data` on `readonlyWhen` carries both halves', () => {
+        const m = validateStackExpressions({
+          objects: [{
+            name: 'showcase_deal',
+            fields: { gate: { type: 'text', readonlyWhen: "data.type == 'select'" } },
+          }],
+        }).filter((i) => i.where.includes("field 'gate' readonlyWhen"))[0]!.message;
+        expect(m).toMatch(/LOCKED/);            // slot axis
+        expect(m).toMatch(/METADATA form/);      // root axis
+      });
+    });
+
+    /**
+     * ── The option-level traversal itself (#6290 half 3) ────────────────────
+     *
+     * Accepting `current_user` at the option level cannot be the only evidence
+     * the walk runs — an absent walk accepts everything. These are the findings
+     * the walk PRODUCES; delete the loop and every one of them disappears.
+     */
+    describe('per-option `visibleWhen` is walked at all (#6290)', () => {
+      const optionIssues = (visibleWhen: unknown) => validateStackExpressions({
+        objects: [{
+          name: 'shop_item',
+          fields: {
+            country: { type: 'text' },
+            tier: {
+              type: 'select',
+              options: [{ label: 'Restricted', value: 'restricted', visibleWhen }],
+            },
+          },
+        }],
+      });
+
+      it('flags a BARE field reference in an option predicate', () => {
+        const issues = optionIssues("country == 'cn'");
+        expect(issues).toHaveLength(1);
+        expect(issues[0]!.where).toBe("object 'shop_item' · field 'tier' option 'restricted' visibleWhen");
+        expect(issues[0]!.message).toMatch(/bare reference `country`/);
+      });
+
+      it('flags a reference to a field the object does not declare', () => {
+        const issues = optionIssues("record.no_such_field == 'cn'");
+        expect(issues).toHaveLength(1);
+        expect(issues[0]!.message).toMatch(/no_such_field/);
+      });
+
+      it('flags a syntactically broken option predicate', () => {
+        const issues = optionIssues("record.country == 'cn'  &&&");
+        expect(issues).toHaveLength(1);
+        expect(issues[0]!.severity).toBe('error');
+      });
+
+      it('flags a template-dialect option predicate (wrong dialect for a bare-CEL slot)', () => {
+        const issues = optionIssues('{{ record.country }}');
+        expect(issues).toHaveLength(1);
+      });
+
+      /**
+       * The finding is located by the option's `value`, not by its index, so an
+       * author with eight options is told WHICH one to edit. The index fallback
+       * exists for a valueless option (which the schema rejects, but the rule
+       * runs on pre-parse stacks too and must not report `option 'undefined'`).
+       */
+      it('locates each finding by the offending option, one finding per option', () => {
+        const issues = validateStackExpressions({
+          objects: [{
+            name: 'shop_item',
+            fields: {
+              tier: {
+                type: 'select',
+                options: [
+                  { label: 'Ok', value: 'ok', visibleWhen: "record.kind == 'a'" },
+                  { label: 'Bad', value: 'bad', visibleWhen: "kind == 'a'" },
+                  { label: 'Worse', value: 'worse', visibleWhen: "other == 'b'" },
+                ],
+              },
+              kind: { type: 'text' },
+            },
+          }],
+        });
+        expect(issues.map((i) => i.where.replace(/.*· field 'tier' /, ''))).toEqual([
+          "option 'bad' visibleWhen",
+          "option 'worse' visibleWhen",
+        ]);
+      });
+
+      it('is silent on options that carry no predicate at all', () => {
+        expect(validateStackExpressions({
+          objects: [{
+            name: 'shop_item',
+            fields: {
+              tier: { type: 'select', options: [{ label: 'A', value: 'a' }, { label: 'B', value: 'b', default: true }] },
+            },
+          }],
+        })).toHaveLength(0);
       });
     });
 
@@ -1192,7 +1861,8 @@ describe('null-guard gate (#4763)', () => {
     // flattened scope (this gate never resolves a bare identifier — only
     // `record.<f>`/`previous.<f>`, and the engine binds both roots
     // unconditionally). It is that `record-change-trigger.ts` seeds the flow's
-    // record as `{ ...inputDoc, ...after }` with no `materializeDeclaredFields`,
+    // record as `{ ...(inputData ?? {}), ...after }` (spelled `inputDoc` until
+    // #5671 dropped that alias read) with no `materializeDeclaredFields`,
     // so a declared column the write never mentioned is an ABSENT key — and on
     // an absent key the `!= null` this gate prescribes faults exactly like the
     // comparison it was meant to guard.
@@ -1441,6 +2111,15 @@ const READ_SURFACES: Array<{ receiver: string; expected: string[]; declaredBy: s
     declaredBy: 'ExpressionInputSchema',
     keys: () => shapeKeysOf(ExpressionInputSchema),
   },
+  {
+    // [#6290] Per-option `visibleWhen` — the option surface had no traversal at
+    // all until then, so it enters the guard with its first two reads. `value`
+    // only locates the finding; `visibleWhen` is the predicate being checked.
+    receiver: 'opt',
+    expected: ['value', 'visibleWhen'],
+    declaredBy: 'SelectOptionSchema',
+    keys: () => Object.keys(SelectOptionSchema.shape),
+  },
 ];
 
 /**
@@ -1474,7 +2153,11 @@ describe('validateStackExpressions — reads only keys the spec declares (meta-t
 
   it('the field receiver reads only declared keys — the tracked debt is now empty (#5026)', () => {
     const read = keysReadOff('f');
-    expect(read).toEqual(['expression', 'name', 'readonlyWhen', 'requiredWhen']);
+    // `options` joined in #6290 — the per-option `visibleWhen` traversal. It is
+    // a LITERAL `f.options` read on purpose, for the same reason the two
+    // `*When` slots below are literal: an `(f as AnyRec).options` cast would
+    // have hidden the new surface from this very scan.
+    expect(read).toEqual(['expression', 'name', 'options', 'readonlyWhen', 'requiredWhen']);
     const declared = Object.keys(FieldSchema.shape);
     const tracked = TRACKED_UNDECLARED_READS.filter((t) => t.receiver === 'f').map((t) => t.key);
     expect(tracked).toEqual([]);

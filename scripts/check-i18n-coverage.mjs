@@ -33,6 +33,21 @@
 // build step with the other consumer gates. `--self-test` does not: it drives the
 // pure classifiers against recorded samples, no build and no CLI.
 //
+// WHAT THIS GATE CANNOT SEE, stated because two other comments once assumed it
+// could (#5750). It lints STATIC stack configs, so it measures exactly what a
+// config DECLARES. Metadata assembled at RUNTIME is outside it by construction —
+// most consequentially the Setup app's navigation, which is a shell of empty
+// group anchors filled in by `SETUP_NAV_CONTRIBUTIONS` and by capability
+// plugins (ADR-0029 D7). `platform-objects`' extract config and
+// `app-nav-translation-parity.test.ts` each excluded those labels and named the
+// other side as the owner; the ratchet's 0 for this package was "not looked at
+// here", and four Setup nav ids sat untranslated in `zh-CN` under a green run of
+// this very script. That half now has its own gate — `pnpm check:app-nav-i18n`
+// (`packages/cli/scripts/check-app-nav-i18n.mjs`), which boots the composition
+// and judges the merged app. Do not extend this script to cover it: the two ask
+// different questions of different inputs, and folding a kernel boot into an
+// `os lint` loop would make neither readable.
+//
 // That requirement is now CHECKED, not merely declared (#5862). It used to be the
 // sentence above and nothing else, and in an installed-but-unbuilt worktree the
 // gate answered with an uncaught exception plus a node stack:

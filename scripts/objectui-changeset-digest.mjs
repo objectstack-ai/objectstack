@@ -146,6 +146,24 @@
 // `packages/*/src/**` with no changeset fails). Until it lands, this is the only
 // place the class is visible at all; after it lands, this list goes quiet on its
 // own, because there will be nothing to name.
+//
+// WHY THE ARTIFACT CARRIES AN UNANSWERED ADR-0087 MARKER (#6494)
+// --------------------------------------------------------------
+// #6099 made this script DECLARE breaking changes (`**BREAKING**`), and #6148's
+// gate requires every declared-breaking changeset to state an ADR-0087
+// disposition. The first pin bump after #6289 hit exactly that (PR #6476), was
+// patched by hand — and a hand-patched marker in a GENERATED file survives only
+// until the next bump rewrites it. The recurrence condition is objectui's
+// standing practice, not an edge case: its release window bans `major`, so
+// breaking changes arrive as `minor` plus a body annotation, which is precisely
+// what this script now recognises.
+//
+// So the artifact carries the QUESTION. `<!-- adr-0087: TODO … -->` is a marker
+// the gate parses, refuses, and reports as unanswered — the operator answers it
+// at bump time, in writing, every time. The generator never picks a disposition:
+// #6148's whole design is that the gate does not answer for you, and a generator
+// that answers for you is the same hole with a different author. The argument in
+// full, including the two rejected alternatives, is at `ADR_0087_SCAFFOLD`.
 
 import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -197,6 +215,36 @@ function git(cwd, args, { captureStderr = false } = {}) {
  * the two live specimens puts it in the last), so `body` carries the whole text
  * for `hasBreakingAnnotation` to scan.
  *
+ * The entry regex is deliberately the SAME shape the three changeset GATES use
+ * (`check-changeset-no-major.mjs`, `check-empty-changeset.mjs`,
+ * `check-adr-0087-registration.mjs`), and `check-empty-changeset.mjs`'s
+ * self-test asserts all four are byte-identical (#7004). This file is the fourth
+ * carrier and the one #7004's report did not name; it reads objectui's
+ * changesets rather than this repo's, so its stake is the release RECORD, not a
+ * gate: a bump entry the regex cannot see makes the changeset read
+ * "release-nothing" and drops the commit from the digest entirely — which is
+ * #4731's harm exactly, arrived at through the parser instead of a type filter.
+ *
+ * WHERE THE FENCE MAY START (#7044). The entry regex was aligned in #7004; the
+ * OTHER row of the same dialect table was not. This parser required the opening
+ * fence on line 1 (`lines[0]?.trim() === '---'`) long after #6923 taught the
+ * three gates to skip leading blank lines first — so a changeset opening with a
+ * single blank line declared, here, nothing at all. Measured with
+ * `@changesets/parse@0.4.3` on 2026-08-10, the version this repo resolves:
+ *
+ *   input                                  | @changesets/parse | this file (before)
+ *   ---------------------------------------|-------------------|-------------------
+ *   `---\n"@object-ui/layout": major\n---`  | major             | major
+ *   one leading blank line, then the same   | major             | NOTHING
+ *   two leading blank lines                 | major             | NOTHING
+ *   a leading whitespace-only line          | major             | NOTHING
+ *
+ * changesets honours the bump; this file dropped the commit out of the digest
+ * and, worse, handed the raw frontmatter text back as the `summary`. So it now
+ * carries the same preamble the three gates carry, byte for byte —
+ * `check-empty-changeset.mjs`'s self-test asserts that agreement across all four
+ * on this row too, which is what stops the fourth carrier drifting again.
+ *
  * @param {string} text
  * @returns {{ packages: Record<string, string>, summary: string, body: string }}
  */
@@ -205,14 +253,18 @@ export function parseChangeset(text) {
   /** @type {Record<string, string>} */
   const packages = {};
   let i = 0;
-  if (lines[0]?.trim() === '---') {
-    i = 1;
+  while (i < lines.length && lines[i].trim() === '') i++; // tolerate leading blank lines
+  if (lines[i]?.trim() === '---') {
+    i++;
     for (; i < lines.length; i++) {
       if (lines[i].trim() === '---') {
         i++;
         break;
       }
-      const m = /^\s*["']?([^"':]+)["']?\s*:\s*([A-Za-z]+)\s*$/.exec(lines[i]);
+      if (/^\s*#/.test(lines[i])) continue; // a whole-line YAML comment declares nothing
+      // "<name>": <bump>   |   '<name>': <bump>   |   <name>: <bump>
+      // with an optionally quoted bump value and an optional trailing ` # comment`.
+      const m = /^\s*["']?([^"':]+)["']?\s*:\s*["']?([A-Za-z]+)["']?(?:\s+#.*)?\s*$/.exec(lines[i]);
       if (m && LEVEL_RANK[m[2].toLowerCase()]) packages[m[1].trim()] = m[2].toLowerCase();
     }
   }
@@ -334,6 +386,86 @@ export const BREAKING_MARKER = '**BREAKING**';
 export function markBreaking(text) {
   if (OPENS_WITH_BREAKING_LABEL.test(text)) return text;
   return `${BREAKING_MARKER} — ${text}`;
+}
+
+/**
+ * The ADR-0087 disposition SCAFFOLD — a question, never an answer (#6494).
+ *
+ * `scripts/check-adr-0087-registration.mjs` (#6148) requires every changeset
+ * that DECLARES a breaking change to carry exactly one `adr-0087:` disposition
+ * marker. From #6099 onward this script declares one as soon as an upstream
+ * entry is annotated — and that is objectui's ORDINARY shape, not an exotic
+ * one: its release window bans `major` (`scripts/check-changeset-no-major.mjs`),
+ * so a breaking change ships as `minor` plus the author's own body annotation,
+ * which is exactly what `hasBreakingAnnotation` above finds. Measured on the
+ * range PR #6476 bumped: 24 changesets, 2 of them annotated-breaking. So the
+ * gate's red is the COMMON case on any substantive pin bump, and a marker
+ * patched in by hand lives exactly until the next bump regenerates the file.
+ *
+ * Hence a placeholder that the gate STILL JUDGES:
+ *
+ *   * `TODO` parses as neither `registered ...` nor `not-required (...) ...`,
+ *     so the gate reports `unparseable disposition: "TODO …"` and stays RED.
+ *     Present-but-unanswered reads differently from absent, and it lands the
+ *     gate's own fix-it block listing the four accepted forms.
+ *   * It is ONE marker. Two would produce a different red ("N markers -- exactly
+ *     one disposition is expected") that names the tooling instead of the
+ *     question, so nothing else in the emitted body may spell `adr-0087:`.
+ *   * It says NOTHING about which disposition applies. Writing `not-required
+ *     (...)` here — even the category that is usually right — would make this
+ *     script perform the judgement #6148 exists to extract from a human, and it
+ *     would then be written unread on every bump forever. That gate's whole
+ *     design is that it never answers for you; a generator that answers for you
+ *     is the same hole with a different author.
+ *
+ * An HTML comment for the reason the gate's own header gives: a changeset body
+ * is copied VERBATIM into CHANGELOG.md, so the marker must render as nothing for
+ * end users while staying fully visible in the diff, in `git grep` and in the
+ * gate's log.
+ */
+export const ADR_0087_SCAFFOLD =
+  '<!-- adr-0087: TODO — the pin bump cannot answer this; a human must (objectstack#6494) -->';
+
+/**
+ * Will `check-adr-0087-registration.mjs` judge THIS ARTIFACT as declaring a
+ * breaking change? Read the artifact we actually rendered, not our belief about
+ * it — the scaffold has to appear on exactly the files that gate will judge.
+ *
+ * That gate's `breakingDeclaration()` unions three signals, and this mirrors the
+ * two a generated console changeset can ever raise:
+ *
+ *   1. a `major` bump in the frontmatter — reachable here in RC pre-mode and via
+ *      `CONSOLE_BUMP=major`, and it arms the gate ON ITS OWN, with no marker
+ *      anywhere in the body.
+ *   2. `**BREAKING` (or a `BREAKING CHANGE:` line) in the body.
+ *   3. a conventional-commit `!` on the summary line — UNREACHABLE, deliberately
+ *      not mirrored: the first line of the emitted file is this script's own
+ *      fixed sentence (`Console (objectui) refreshed to …`) and the gate's
+ *      pattern `^[a-z]+(\([^)]*\))?!:` is case-sensitive, so nothing this
+ *      generator writes can start it.
+ *
+ * Why the RENDERED body rather than the `breaking` count: the two nearly agree,
+ * and the gap runs one way. `breaking > 0` always renders `**BREAKING**` (the ⚠️
+ * note restates the marker by construction), so the count implies the signal;
+ * the converse can fail. An entry whose own summary carries an emphasis run too
+ * long for `BREAKING_EMPHASIS_LABEL`'s 48-character tail is NOT counted breaking
+ * here, yet its text reaches the rendered line where the gate's looser
+ * `/\*\*BREAKING/` matches it. Reading the artifact closes that by construction
+ * instead of by agreement between two predicates.
+ *
+ * Why the gate's own function is not imported: it would put the release-critical
+ * bump path one rename away from failing, and the claim being pinned is about
+ * ANOTHER script's verdict -- only that script's own run settles it. (The gate's
+ * former top-level CLI dispatch, which made any import execute the gate, was
+ * entry-guarded in #6566; the coupling reason stands on its own.) The agreement
+ * is pinned in the self-test instead, which runs the real gate as a child
+ * process over a real temp repository.
+ *
+ * @param {{ bump: string, body: string }} artifact
+ */
+export function artifactDeclaresBreaking({ bump, body }) {
+  if (bump === 'major') return true;
+  return /\*\*BREAKING/i.test(body) || /^\s*BREAKING[ -]CHANGE/mi.test(body);
 }
 
 /**
@@ -561,7 +693,7 @@ export function classifyRange({ objectuiRoot, from, to }) {
 /**
  * Build the digest for a range.
  *
- * @returns {{ bump: string, declaredLevel: string|null, breaking: number, breakingByLevel: number, breakingByAnnotation: number, releasing: Array<object>, releaseNothing: number, noChangeset: number, noChangesetCommits: Array<object>, changesetsAdded: number, absentAtTo: number, totalCommits: number, downgradedMajor: boolean, body: string }}
+ * @returns {{ bump: string, declaredLevel: string|null, breaking: number, breakingByLevel: number, breakingByAnnotation: number, releasing: Array<object>, releaseNothing: number, noChangeset: number, noChangesetCommits: Array<object>, changesetsAdded: number, absentAtTo: number, totalCommits: number, downgradedMajor: boolean, adr0087Scaffold: boolean, body: string }}
  */
 export function buildDigest({
   objectuiRoot,
@@ -715,13 +847,27 @@ export function buildDigest({
     }
   }
 
-  const body = [
+  const rendered = [
     accounting,
     '',
     ...lines,
     ...(notes.length ? ['', ...notes] : []),
     ...(undeclared.length ? ['', ...undeclared] : []),
   ].join('\n');
+
+  // --- #6494: the artifact carries the ADR-0087 QUESTION, never its answer ---
+  // A changeset that declares breaking must carry a disposition marker (#6148),
+  // and THIS changeset is generated: a marker written by hand survives exactly
+  // until the next pin bump rewrites the file, which is how PR #6476's answer
+  // was already scheduled to disappear. So the generator emits the question and
+  // leaves it deliberately unanswered — see ADR_0087_SCAFFOLD.
+  //
+  // Zero-suppressed against the gate's own subject: on an artifact the gate does
+  // not judge, an unanswered marker would sit there unjudged forever and teach
+  // the next reader that this marker is decoration. It appears exactly where it
+  // is enforced.
+  const adr0087Scaffold = artifactDeclaresBreaking({ bump, body: rendered });
+  const body = adr0087Scaffold ? `${rendered}\n\n${ADR_0087_SCAFFOLD}` : rendered;
 
   return {
     bump,
@@ -737,6 +883,7 @@ export function buildDigest({
     absentAtTo,
     totalCommits,
     downgradedMajor,
+    adr0087Scaffold,
     body,
   };
 }
@@ -827,6 +974,21 @@ function main(argv) {
       `→ ${digest.absentAtTo} of ${digest.changesetsAdded} changeset(s) added in this range ` +
         `no longer exist at ${short} — a release consumes the changesets it ships; ` +
         `each was read from the commit that added it, so the account above is complete.`,
+    );
+  }
+
+  // #6494: the one line the operator running the bump must act on. It goes to
+  // stderr beside the accounting, which is where a `BUMP="$(…)"` caller lets it
+  // through — the shell driver captures stdout only. Saying it here is not the
+  // enforcement (the gate is); it is what stops the operator discovering the red
+  // one push later, and it names the marker so the fix is a search away.
+  if (digest.adr0087Scaffold) {
+    console.error(
+      `→ this changeset DECLARES a breaking change, so it carries an UNANSWERED ADR-0087 ` +
+        `disposition placeholder. Replace the \`adr-0087: TODO\` marker in ` +
+        `${out ?? 'the changeset'} with the real disposition before you push: ` +
+        `\`Check Changeset\` rejects the placeholder on purpose, and the generator cannot ` +
+        `answer it for you (objectstack#6494).`,
     );
   }
 
@@ -1623,6 +1785,269 @@ function selfTest() {
         !allDeclared.body.includes('_(no changeset)_') &&
         !allDeclared.body.includes('declared nowhere'),
       allDeclared.body,
+    );
+
+    // --- #6494: the ADR-0087 disposition scaffold ---------------------------
+    // The gate's own marker pattern (check-adr-0087-registration.mjs:416),
+    // copied rather than imported: that module's CLI dispatch is top-level, so
+    // importing it would RUN the gate. The copy is belt-and-braces — the REAL
+    // gate binary judges a real artifact in the round trip below, and that, not
+    // this regex, is the authority on what the marker means.
+    const markersIn = (text) =>
+      [...text.matchAll(/<!--\s*adr-0087\s*:\s*([\s\S]*?)-->/g)].map((m) =>
+        m[1].replace(/\s+/g, ' ').trim(),
+      );
+
+    // A range with NOTHING breaking in it, forced to `major` the way
+    // `CONSOLE_BUMP=major` does. The frontmatter alone is a breaking declaration
+    // to the gate, so this is the artifact a `breaking > 0` proxy would miss.
+    const majorOverride = buildDigest({
+      objectuiRoot: ui5,
+      frameworkRoot: fwPlain,
+      from: base5,
+      to: head5,
+      bumpOverride: 'major',
+    });
+
+    check(
+      '#6494 an artifact that DECLARES breaking carries EXACTLY ONE adr-0087 marker',
+      annotated.adr0087Scaffold === true &&
+        markersIn(annotated.body).length === 1 &&
+        annotated.body.includes(ADR_0087_SCAFFOLD) &&
+        digest.adr0087Scaffold === true &&
+        markersIn(digest.body).length === 1,
+      annotated.body,
+    );
+    check(
+      '#6494 the marker is a PLACEHOLDER — it names no disposition at all',
+      // Both legal forms must MISS it, or the generator would have answered the
+      // question on the human's behalf — the one thing #6148 forbids.
+      (markersIn(annotated.body)[0] ?? '').startsWith('TODO') &&
+        !/^registered\b/i.test(markersIn(annotated.body)[0] ?? '') &&
+        !/^not-required\b/i.test(markersIn(annotated.body)[0] ?? ''),
+      markersIn(annotated.body)[0],
+    );
+    check(
+      '#6494 a `major` FRONTMATTER alone arms the gate — the scaffold follows it there',
+      // The gate declares breaking on the frontmatter ALONE, with no marker in
+      // the body, so a `breaking > 0` proxy would have missed this artifact.
+      majorOverride.bump === 'major' &&
+        majorOverride.breaking === 0 &&
+        !/\*\*BREAKING/i.test(majorOverride.body) &&
+        majorOverride.adr0087Scaffold === true &&
+        markersIn(majorOverride.body).length === 1,
+      majorOverride.body,
+    );
+    check(
+      '#6494 a NON-breaking artifact carries no marker at all (negative polarity)',
+      // Declared as negative polarity: deleting the emission also produces no
+      // marker, so this cannot go red under that ablation. It pins a DIFFERENT
+      // regression — a marker on an artifact the gate never judges, which would
+      // sit unanswered forever and teach the next reader to ignore it. The three
+      // positive guards keep it from passing for the vacuous reason (an empty or
+      // unbuilt body would satisfy "no marker" just as well).
+      allDeclared.releasing.length === 2 &&
+        allDeclared.breaking === 0 &&
+        allDeclared.bump === 'minor' &&
+        allDeclared.adr0087Scaffold === false &&
+        markersIn(allDeclared.body).length === 0,
+      allDeclared.body,
+    );
+    check(
+      '#6494 the flag, the rendered marker and the gate criterion agree on EVERY fixture',
+      [digest, plain, overridden, capped, annotated, named, named2, released, allDeclared, majorOverride].every(
+        (d) =>
+          d.adr0087Scaffold === (markersIn(d.body).length === 1) &&
+          d.adr0087Scaffold === (d.bump === 'major' || /\*\*BREAKING/i.test(d.body)),
+      ),
+      [digest, plain, overridden, capped, annotated, named, named2, released, allDeclared, majorOverride]
+        .map((d) => `${d.bump}/${d.adr0087Scaffold}/${markersIn(d.body).length}`)
+        .join(' '),
+    );
+
+    // --- #6494 THE ROUND TRIP, through the REAL gate ------------------------
+    // The claim "the gate recognises this as present-but-unanswered" is about
+    // ANOTHER script, so nothing short of that script's own verdict settles it.
+    // A throwaway repo carrying the gate's required inputs (#4690: it refuses to
+    // report a verdict without them) plus a COPY of the gate, so its REPO_ROOT
+    // resolves here — the same idiom the bump-objectui.sh run above uses.
+    const gateRepo = join(tmp, 'fw-gate');
+    mkdirSync(gateRepo, { recursive: true });
+    const gg = (...args) => git(gateRepo, args);
+    const gw = (rel, text) => {
+      mkdirSync(dirname(join(gateRepo, rel)), { recursive: true });
+      writeFileSync(join(gateRepo, rel), text);
+    };
+    gg('init', '-q', '-b', 'main');
+    gg('config', 'user.email', 'selftest@objectstack.ai');
+    gg('config', 'user.name', 'self test');
+    gg('config', 'commit.gpgsign', 'false');
+    const LEDGER_ENTRY = (id) =>
+      `export const X = {\n  semantic: [\n    {\n      id: '${id}',\n      surface: 's',\n    },\n  ],\n};\n`;
+    gw('packages/spec/src/migrations/registry.ts', LEDGER_ENTRY('old-entry-one'));
+    gw('packages/spec/src/conversions/registry.ts', LEDGER_ENTRY('a-conversion'));
+    gw(
+      'packages/spec/spec-changes.json',
+      `${JSON.stringify({ perMajor: [{ to: 17, migrated: [{ migrationId: 'old-entry-one' }] }] }, null, 2)}\n`,
+    );
+    // One declared-breaking changeset in STOCK (committed at base, so it is not
+    // in the judged diff) — the gate's convention-rot assertion needs its
+    // breaking detector to match something.
+    gw('.changeset/stock-breaking.md', '---\n"@objectstack/spec": major\n---\n\nstock\n\n**BREAKING** something\n');
+    gw(
+      'scripts/check-adr-0087-registration.mjs',
+      readFileSync(join(__dirname, 'check-adr-0087-registration.mjs'), 'utf8'),
+    );
+    gg('add', '-A');
+    gg('commit', '-q', '-m', 'base');
+    const gateBase = gg('rev-parse', 'HEAD').trim();
+
+    // The range is the #6099 fixture: `minor` + the author's own annotation,
+    // objectui's ORDINARY breaking shape and the one that reopens this every bump.
+    const gateCs = join(gateRepo, '.changeset', `console-${head2.slice(0, 12)}.md`);
+    const generated = spawnSync(
+      process.execPath,
+      [selfPath, '--objectui-root', ui2, '--framework-root', gateRepo, '--from', base2, '--to', head2, '--out', gateCs],
+      { encoding: 'utf8' },
+    );
+    gg('add', '-A');
+    gg('commit', '-q', '-m', 'chore(console): bump objectui pin');
+    const runGate = () =>
+      spawnSync(process.execPath, [join(gateRepo, 'scripts', 'check-adr-0087-registration.mjs'), '--base', gateBase], {
+        encoding: 'utf8',
+        cwd: gateRepo,
+      });
+
+    const gateRed = runGate();
+    check(
+      '#6494 ROUND TRIP (red): the REAL gate reads the marker and refuses it as UNANSWERED',
+      generated.status === 0 &&
+        gateRed.status !== 0 &&
+        // The EXACT verdict, not merely "it is red": present-but-unparseable is a
+        // different fact from absent, and only the first one proves the scaffold
+        // reached the gate at all.
+        /but unparseable disposition: "TODO/.test(gateRed.stderr) &&
+        gateRed.stderr.includes(`console-${head2.slice(0, 12)}.md`) &&
+        gateRed.stderr.includes('<!-- adr-0087: not-required (no-migration-prescription) why -->'),
+      `generator=${generated.status} gate=${gateRed.status}\n${gateRed.stderr}`,
+    );
+    check(
+      '#6494 the operator is told at BUMP time, not one push later',
+      generated.stderr.includes('UNANSWERED ADR-0087') && generated.stderr.includes('adr-0087: TODO'),
+      generated.stderr,
+    );
+
+    // The other half. Same file, same range, same generator — only the human's
+    // answer is added, and the gate's verdict flips. A red that no answer can
+    // clear would be a broken gate, not a scaffold.
+    //
+    // The replacement is CHECKED before it is committed, and the commit allows an
+    // empty tree. Found while reverse-verifying this group: with the emission
+    // ablated there is no placeholder to replace, so the write was a no-op, `git
+    // commit` exited 1 on a clean tree and threw — the whole self-test died with
+    // a raw `execFileSync` stack instead of naming a failed check. An ablation is
+    // exactly when the next reader needs a NAME, not a stack trace.
+    const answered = readFileSync(gateCs, 'utf8').replace(
+      ADR_0087_SCAFFOLD,
+      '<!-- adr-0087: not-required (already-registered old-entry-one) the pinned frontend range carries no spec surface beyond that entry -->',
+    );
+    check(
+      '#6494 the answer replaces the placeholder IN PLACE — one marker before, one after',
+      answered !== readFileSync(gateCs, 'utf8') &&
+        !answered.includes('adr-0087: TODO') &&
+        markersIn(answered).length === 1,
+      answered.slice(-400),
+    );
+    writeFileSync(gateCs, answered);
+    gg('add', '-A');
+    gg('commit', '-q', '--allow-empty', '-m', 'answer the ADR-0087 question');
+    const gateGreen = runGate();
+    check(
+      '#6494 ROUND TRIP (green): a real disposition written in that same place clears it',
+      gateGreen.status === 0 &&
+        gateGreen.stdout.includes(
+          '✓ check-adr-0087-registration: 1 declared-breaking changeset(s), each carrying an ADR-0087 disposition.',
+        ),
+      `status=${gateGreen.status}\n${gateGreen.stdout}\n${gateGreen.stderr}`,
+    );
+    // ---- #7004: the frontmatter shapes the old entry anchor hid ------------
+    //
+    // This file is the FOURTH carrier of the family's entry regex and the one
+    // #7004's report did not name. Its consequence is neither a false green nor
+    // a false red but a silent DROP: an entry the regex cannot see makes the
+    // changeset read `release-nothing`, so the commit leaves the digest — the
+    // #4731 harm, reached through the parser instead of through a type filter.
+    // Worst, as ever, for breaking changes, which is the one class that must
+    // never vanish from a release record.
+    //
+    // Predicted direction on reverse verification: restoring the old anchor
+    // (`([A-Za-z]+)\s*$`) turns C1-C5 red (packages goes `{}`) and C6 red in the
+    // other direction (a phantom package named `# note`).
+    const pkgsOf = (block) => JSON.stringify(parseChangeset(`---\n${block}\n---\n\nsummary\n`).packages);
+    check('#7004 C1 a trailing YAML comment still declares its package', pkgsOf('"@object-ui/layout": major # keep') === '{"@object-ui/layout":"major"}', pkgsOf('"@object-ui/layout": major # keep'));
+    check('#7004 C2 a trailing comment after a tab', pkgsOf('"@object-ui/layout": minor\t# keep') === '{"@object-ui/layout":"minor"}', pkgsOf('"@object-ui/layout": minor\t# keep'));
+    check('#7004 C3 a double-quoted bump value', pkgsOf('"@object-ui/layout": "major"') === '{"@object-ui/layout":"major"}', pkgsOf('"@object-ui/layout": "major"'));
+    check('#7004 C4 a single-quoted bump value with a comment', pkgsOf('"@object-ui/layout": \'minor\' # keep') === '{"@object-ui/layout":"minor"}', pkgsOf('"@object-ui/layout": \'minor\' # keep'));
+    check(
+      '#7004 C5 a commented entry beside an uncommented one — BOTH survive',
+      pkgsOf('"@object-ui/a": major # keep\n"@object-ui/b": patch') === '{"@object-ui/a":"major","@object-ui/b":"patch"}',
+      pkgsOf('"@object-ui/a": major # keep\n"@object-ui/b": patch'),
+    );
+    check(
+      '#7004 C6 a whole-line comment containing a colon is NOT a package (it used to parse as one named `# note`)',
+      pkgsOf('# note: major\n"@object-ui/real": patch') === '{"@object-ui/real":"patch"}',
+      pkgsOf('# note: major\n"@object-ui/real": patch'),
+    );
+    check(
+      '#7004 C7 control — the same shape with an unknown bump word still declares nothing, so C1-C6 are about the entry regex and not about LEVEL_RANK being bypassed',
+      pkgsOf('"@object-ui/layout": enormous # keep') === '{}',
+      pkgsOf('"@object-ui/layout": enormous # keep'),
+    );
+
+    // ---- #7044: WHERE the fence is allowed to start ------------------------
+    //
+    // The other row of the same dialect table. #6923 taught the three gates to
+    // skip leading blank lines before the fence; this fourth carrier kept
+    // requiring it on line 1, and #7004's alignment pass did not touch the row.
+    // Same consequence as the block above and by the same mechanism — a silent
+    // DROP — but reached without any entry being malformed at all: the entries
+    // are perfect, the parser simply never enters the block.
+    //
+    // Measured with @changesets/parse@0.4.3 (the version this repo resolves) on
+    // 2026-08-10: every D-fixture below is read by changesets as a real `major`.
+    // So a miss here is a breaking change vanishing from the release record —
+    // #4731's stated "single class that must never vanish".
+    //
+    // Predicted direction on reverse verification: restoring `lines[0]?.trim()
+    // === '---'` (with `i = 1`) turns D1-D4 red with `packages` going `{}`, and
+    // turns D5 red in the other direction — the raw frontmatter comes back as
+    // the summary text. D6/D7 are the controls and stay green in both worlds,
+    // which is what makes D1-D5 statements about the preamble rather than about
+    // a fixture that parses as nothing either way.
+    const CS_MAJOR = '---\n"@object-ui/layout": major\n---\n\nDrop PageNodeRenderer.\n';
+    const parsedPkgs = (text) => JSON.stringify(parseChangeset(text).packages);
+    check('#7044 D1 one leading blank line before the fence', parsedPkgs('\n' + CS_MAJOR) === '{"@object-ui/layout":"major"}', parsedPkgs('\n' + CS_MAJOR));
+    check('#7044 D2 two leading blank lines', parsedPkgs('\n\n' + CS_MAJOR) === '{"@object-ui/layout":"major"}', parsedPkgs('\n\n' + CS_MAJOR));
+    check('#7044 D3 a leading WHITESPACE-ONLY line (the preamble trims, it does not test for empty)', parsedPkgs('   \n' + CS_MAJOR) === '{"@object-ui/layout":"major"}', parsedPkgs('   \n' + CS_MAJOR));
+    check(
+      '#7044 D4 a leading blank line with CRLF endings — the two dialect rows compose',
+      parsedPkgs('\r\n---\r\n"@object-ui/layout": major # keep\r\n---\r\n\r\nbody\r\n') === '{"@object-ui/layout":"major"}',
+      parsedPkgs('\r\n---\r\n"@object-ui/layout": major # keep\r\n---\r\n\r\nbody\r\n'),
+    );
+    check(
+      '#7044 D5 the SUMMARY is the body, not the frontmatter — the old anchor handed back the raw fence text',
+      parseChangeset('\n' + CS_MAJOR).summary === 'Drop PageNodeRenderer.',
+      JSON.stringify(parseChangeset('\n' + CS_MAJOR).summary),
+    );
+    check(
+      '#7044 D6 control — the identical text WITHOUT the leading blank line parses the same, so D1-D5 are about the blank line and nothing else',
+      parsedPkgs(CS_MAJOR) === '{"@object-ui/layout":"major"}' && parseChangeset(CS_MAJOR).summary === 'Drop PageNodeRenderer.',
+      `${parsedPkgs(CS_MAJOR)} / ${JSON.stringify(parseChangeset(CS_MAJOR).summary)}`,
+    );
+    check(
+      '#7044 D7 control — skipping blanks did NOT make the parser fence-less: a leading blank line over an UNFENCED file still declares nothing, and its body survives whole',
+      parsedPkgs('\n"@object-ui/layout": major\n') === '{}' && parseChangeset('\n"@object-ui/layout": major\n').body === '"@object-ui/layout": major',
+      `${parsedPkgs('\n"@object-ui/layout": major\n')} / ${JSON.stringify(parseChangeset('\n"@object-ui/layout": major\n').body)}`,
     );
   } finally {
     rmSync(tmp, { recursive: true, force: true });

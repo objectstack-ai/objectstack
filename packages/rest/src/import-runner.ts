@@ -1,10 +1,12 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { randomUUID } from 'node:crypto';
-import { coerceRow, firstMissingRequiredField, firstConstraintViolation, type RefResolver, type RefMatch } from './import-coerce.js';
+import { coerceRow, type RefResolver, type RefMatch } from './import-coerce.js';
 import type { ExportFieldMeta } from './export-format.js';
-import { renderValidationMessage, type ValidationMessageTranslator } from '@objectstack/spec/system';
+import type { ValidationMessageTranslator } from '@objectstack/spec/system';
+import type { ValidateDataIssue, ValidateDataRequest, ValidateDataResponse } from '@objectstack/spec/api';
 import { bulkWrite, withTransientRetry, defaultIsTransientError, type BulkWriteRowResult } from '@objectstack/core';
+import { isUniqueViolationError, uniqueViolationColumn } from '@objectstack/types';
 
 /**
  * import-runner — the shared row-processing core for bulk import.
@@ -21,6 +23,20 @@ import { bulkWrite, withTransientRetry, defaultIsTransientError, type BulkWriteR
  * one `p.createData` call per row — see framework#2678. A protocol that
  * doesn't implement `createManyData` falls back to the original per-row
  * `createData` path unchanged.
+ *
+ * ## The dry run asks; it does not predict (#4633 ruling D)
+ *
+ * A dry run's contract is that it reports the verdict the real write produces.
+ * It used to keep that promise with a hand-copied mirror of a slice of the
+ * engine's rules (`import-coerce.ts`), which structurally could not cover the
+ * rest of the family — measured on a `Field.address`, where the dry run formed
+ * no verdict at all and the write answered `VALIDATION_FAILED`.
+ *
+ * So the dry-run branch below calls {@link ImportProtocolLike.validateData}
+ * (#6037) instead: the engine runs the same `validateRecord` /
+ * `evaluateValidationRules` `insert()` runs, under this deployment's own
+ * ADR-0104 posture, and persists nothing. Agreement is by construction rather
+ * than by a copy kept in step by hand.
  */
 
 export type ImportAction = 'created' | 'updated' | 'skipped' | 'failed';
@@ -33,6 +49,14 @@ export interface ImportRowResult {
   field?: string;
   error?: string;
   code?: string;
+  /**
+   * Findings this deployment ADMITS rather than rejects — today, ADR-0104
+   * value shapes under a warn-first posture (#4633). The row is `ok`: the
+   * write stores it and logs the same complaint. Present on dry-run rows,
+   * where they are the difference between "this row is fine" and "this row is
+   * fine HERE"; a real write has no equivalent channel to report them on.
+   */
+  warnings?: ValidateDataIssue[];
 }
 
 /** Running tallies handed to {@link RunImportOptions.onProgress}. */
@@ -86,6 +110,22 @@ export interface ImportProtocolLike {
    * rows.
    */
   insertManyData?(args: { object: string; records: any[]; context?: any; environmentId?: string }): Promise<{ outcomes: Array<{ ok: boolean; record?: any; error?: unknown }> }>;
+  /**
+   * Validate-only (#6037 — #4633 ruling D). The write path's verdict on a
+   * candidate row, with nothing persisted. The dry run routes through THIS
+   * rather than re-deriving a verdict of its own.
+   *
+   * Optional for the same reason it is optional on `DataProtocol`: it is
+   * additive to a shipped contract. A protocol that omits it is not handed a
+   * substitute — the runner does not fabricate a verdict from a copy of the
+   * engine's rules, which is the defect this replaced. That is a capability
+   * gate, not leniency, and it is the honest answer for a protocol whose write
+   * is not the engine's write at all: plugin-auth's identity import creates
+   * users through better-auth, so an engine-derived preview would report
+   * findings ITS write never produces — a false alarm dressed as coverage.
+   * Such a dry run reports coercion + create/update/skip resolution only.
+   */
+  validateData?(args: ValidateDataRequest & { context?: any; environmentId?: string }): Promise<ValidateDataResponse>;
 }
 
 export interface RunImportOptions {
@@ -138,10 +178,12 @@ export interface RunImportOptions {
    */
   captureUndo?: boolean;
   /**
-   * `II18nService.t`-compatible lookup so this runner's own messages (the
-   * required-field pre-check, cell coercion) resolve a deployment's
-   * `validation.field.*` overrides — the same hook the engine gets (#3957). The
-   * locale itself rides `context.locale`.
+   * `II18nService.t`-compatible lookup so this runner's own messages (cell
+   * coercion) resolve a deployment's `validation.field.*` overrides — the same
+   * hook the engine gets (#3957). The locale itself rides `context.locale`.
+   * Validation verdicts are rendered by the engine, on both halves, so they
+   * need no hook here: the dry run's sentences come back already rendered
+   * from `validateData` and the write's from `ValidationError`.
    */
   translate?: ValidationMessageTranslator;
 }
@@ -165,6 +207,14 @@ function bareColumn(raw: string): string {
 }
 
 /**
+ * The sentence used when the row conflicts but no column is determinable
+ * (#6544). Deliberately the same wording `mapDataError` puts in the 409
+ * `UNIQUE_VIOLATION` body, so the importer and the API say one thing about one
+ * condition rather than two.
+ */
+const UNNAMED_CONFLICT = 'A record with this value already exists.';
+
+/**
  * Turn a raw write error into a message safe to hand back to the importer.
  *
  * Driver / query-builder errors (knex et al.) embed the *entire* failing SQL
@@ -173,18 +223,32 @@ function bareColumn(raw: string): string {
  * verbatim is both unreadable and an information disclosure of the schema
  * (framework#3566). This maps the common constraint failures to human wording
  * and, as a backstop, never lets a raw SQL statement escape to the client.
+ *
+ * The unique-violation verdict and the conflicting column both come from
+ * `@objectstack/types` (#6544). This site used to carry its own three-dialect
+ * regex chain — one of the four private vocabularies #6250 inventoried, which
+ * between them disagreed about MySQL. Two consequences of adopting the shared
+ * pair, both intended:
+ *
+ *  - the verdict widens: a conflict recognised only by a channel the old chain
+ *    did not read (Postgres' bare constraint name, for one) now gets conflict
+ *    wording instead of falling through to the SQL backstop; and
+ *  - the *naming* narrows: `uniqueViolationColumn` refuses to answer with an
+ *    index name, so **MySQL rows no longer name a column** — they used to name
+ *    the index (`for key 'idx_email_unique'`) as if it were one, pointing the
+ *    user at a field that does not exist. See that function's doc comment.
  */
 export function sanitizeRowError(raw: unknown): string {
   const msg = typeof raw === 'string' ? raw.trim() : '';
   if (!msg) return 'Row failed';
 
-  // UNIQUE — surface the offending column (it maps to a user-facing import
-  // column, so naming it is helpful, not a schema leak).
-  const unique =
-    /unique constraint failed:\s*([^\s,)]+)/i.exec(msg) ??          // sqlite
-    /duplicate entry .* for key '([^']+)'/i.exec(msg) ??            // mysql
-    /duplicate key value violates unique constraint.*?[Kk]ey \(([^)]+)\)/is.exec(msg); // postgres
-  if (unique) return `A record with this ${bareColumn(unique[1])} already exists.`;
+  // UNIQUE — surface the offending column when the dialect determinably named
+  // one (it maps to a user-facing import column, so naming it is helpful, not a
+  // schema leak); otherwise say so generically rather than guess.
+  if (isUniqueViolationError(msg)) {
+    const column = uniqueViolationColumn(msg);
+    return column ? `A record with this ${column} already exists.` : UNNAMED_CONFLICT;
+  }
 
   // NOT NULL — a required value is missing.
   const notNull = /not null constraint failed:\s*([^\s,)]+)/i.exec(msg);
@@ -203,10 +267,35 @@ export function sanitizeRowError(raw: unknown): string {
   return msg.slice(0, 300);
 }
 
+/**
+ * A row report built from a write failure.
+ *
+ * When the failure is the engine's `ValidationError` it carries `fields[]` —
+ * the same `{ field, code, message }` triple `validateData` reports — and the
+ * row report is built from it rather than from the wrapper. Two reasons, and
+ * the second is the load-bearing one (#4633):
+ *
+ *  1. It names the offending COLUMN, which is what an import UI highlights. A
+ *     bare `VALIDATION_FAILED` with no `field` made the caller re-read the
+ *     sentence to find out which cell to fix.
+ *  2. It is the same shape the dry run now reports, so the two halves agree
+ *     on `field` and `code`, not merely on "this row failed". Before, a
+ *     `min: 0` violation was `min_value` on the dry run and `VALIDATION_FAILED`
+ *     on the write — an agreement gap hidden inside a report that looked right.
+ *
+ * `code` therefore speaks one vocabulary across the whole row report: the
+ * field-level catalog (ADR-0114) that `coerceRow`'s cell failures already use.
+ */
 function toFailedResult(rowNo: number, err: unknown): ImportRowResult {
-  const code = (err as any)?.code ?? 'IMPORT_ROW_FAILED';
-  const message = sanitizeRowError((err as any)?.message);
-  return { row: rowNo, ok: false, action: 'failed', error: message, code };
+  const e = err as { code?: unknown; message?: unknown; fields?: unknown } | null | undefined;
+  const fields = Array.isArray(e?.fields) ? (e.fields as Array<{ field?: unknown; code?: unknown }>) : [];
+  const first = fields[0];
+  const code = first?.code ?? e?.code ?? 'IMPORT_ROW_FAILED';
+  const message = sanitizeRowError(e?.message);
+  return {
+    row: rowNo, ok: false, action: 'failed', error: message, code: String(code),
+    ...(first?.field != null && first.field !== '' ? { field: String(first.field) } : {}),
+  };
 }
 
 /** Upper bound on rows in one createManyData batch (framework#2678 suggests 100-500). */
@@ -340,6 +429,50 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
     // Default off: a normal import walks the FSM and auto-stamps as usual.
     ...(treatAsHistorical ? { skipStateMachine: true, preserveAudit: true } : {}),
   };
+
+  /**
+   * The dry run's verdict for one coerced row — asked of the engine, never
+   * derived here (#4633 ruling D). `null` means this protocol offers no
+   * validate-only operation, so no engine verdict exists to report; the caller
+   * falls back to the coercion + resolution verdict it already has rather than
+   * inventing one.
+   *
+   * Runs on EVERY dry run, whatever `runAutomations` says. The write's
+   * `beforeInsert` hooks fire before validation and could in principle derive
+   * a field this reports on — a boundary #6037 documents and deliberately does
+   * not close, because firing user-authored hooks (mail, outbound calls,
+   * writes to other objects) inside a preview is the retired `validateOnly`
+   * defect in a new spelling. Gating on `!runAutomations` instead would leave
+   * the DEFAULT dry run (`runAutomations` has defaulted to true since #2922)
+   * with no validation at all, which is the false all-clear this card exists
+   * to close.
+   */
+  const previewVerdict = async (
+    data: Record<string, any>,
+    mode: 'insert' | 'update',
+  ): Promise<NonNullable<ValidateDataResponse['results']>[number] | null> => {
+    if (typeof p.validateData !== 'function') return null;
+    const res = await p.validateData({
+      object: objectName, data, mode,
+      // The SAME context the write would carry, so a historical import's
+      // `skipStateMachine` and the caller's locale reach validation here
+      // exactly as they reach it on the write path.
+      context: writeCtx,
+      ...(environmentId ? { environmentId } : {}),
+    });
+    return res?.results?.[0] ?? null;
+  };
+
+  /**
+   * Compose a row's `error` from the engine's findings the way
+   * `ValidationError` composes its own message — author-written rule text when
+   * there is one, `field (code)` otherwise, joined by `; `. Presentation only:
+   * the verdict and every sentence in it come from the engine. It is spelled
+   * out here because `validateData` returns structured findings rather than a
+   * rendered message, and the two halves must read identically.
+   */
+  const composeValidationMessage = (issues: ValidateDataIssue[]): string =>
+    issues.map((f) => (f.message?.trim() ? f.message : `${f.field} (${f.code})`)).join('; ') || 'Validation failed';
 
   // Sparse-indexed by row position `i` (not push-only): CREATE rows are
   // resolved immediately but their write is deferred to a later batch flush,
@@ -592,54 +725,33 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
             const willUpdate = existing && typeof existing === 'object';
             const willCreate = !willUpdate && (writeMode === 'insert' || writeMode === 'upsert');
 
-            // Required-field pre-check (CREATE only). Give dry run the same
-            // verdict the real insert produces — a required (⇒ NOT NULL) field
-            // with no default and no value fails both — instead of reporting
-            // success for a row that then dies on `NOT NULL constraint failed`.
-            // Shared by both paths so they stay identical (and a real insert
-            // gets a readable `<field> is required` instead of a raw driver
-            // error). Skipped when automations run: a beforeInsert hook may
-            // populate a required field, so we defer to the engine's own
-            // validation rather than false-reject here.
-            const requiredMiss =
-              willCreate && !runAutomations ? firstMissingRequiredField(data, metaMap) : null;
-
-            if (requiredMiss) {
-              errCount++;
-              // Same catalog the engine's own required-check renders from, so a
-              // pre-check verdict and a real rejection read identically (#3957).
-              results[i] = {
-                row: rowNo, ok: false, action: 'failed', field: requiredMiss, code: 'required',
-                error: renderValidationMessage(
-                  {
-                    messageKey: 'required',
-                    label: metaMap.get(requiredMiss)?.label?.trim() || requiredMiss,
-                    field: requiredMiss,
-                  },
-                  { locale: context?.locale, translate: messageTranslator },
-                ),
-              };
-            } else if (!willUpdate && !willCreate) {
+            if (!willUpdate && !willCreate) {
               // update mode, no match → skip.
               skipped++;
               results[i] = { row: rowNo, ok: true, action: 'skipped', code: 'NO_MATCH' };
             } else if (dryRun) {
-              // Field-constraint pre-check — DRY RUN ONLY (framework#3956).
-              // The write path is already covered: the engine's own
-              // `validateRecord` runs there (after beforeInsert hooks) and
-              // produces this exact message, so re-checking here would only add
-              // a pre-hook copy that could reject a row a hook would have made
-              // legal. The dry run has no such backstop — without this it
-              // reported `ok: true` for a row the very same endpoint then
-              // failed with `VALIDATION_FAILED`.
-              const violation = firstConstraintViolation(data, metaMap, { locale: context?.locale, translate: messageTranslator });
-              if (violation) {
+              // Ask the engine for the verdict this row would get (#4633).
+              // The write path needs no counterpart: `validateRecord` runs
+              // there for real, after the hooks, and the row report is built
+              // from the very same findings by `toFailedResult`.
+              const verdict = await previewVerdict(data, willUpdate ? 'update' : 'insert');
+              if (verdict && !verdict.valid) {
                 errCount++;
-                results[i] = { row: rowNo, ok: false, action: 'failed', field: violation.field, code: violation.code, error: violation.message };
+                const first = verdict.errors[0];
+                results[i] = {
+                  row: rowNo, ok: false, action: 'failed',
+                  ...(first?.field ? { field: first.field } : {}),
+                  code: first?.code ?? 'VALIDATION_FAILED',
+                  error: composeValidationMessage(verdict.errors),
+                };
               } else {
                 okCount++;
-                if (willUpdate) { updated++; results[i] = { row: rowNo, ok: true, action: 'updated', id: String((existing as any).id ?? '') || undefined }; }
-                else { created++; results[i] = { row: rowNo, ok: true, action: 'created' }; }
+                // A warn-first deployment ADMITS some findings; the row is ok
+                // because the write would store it, and the complaint rides
+                // along so "accepted for now" is visible rather than silent.
+                const admitted = verdict?.warnings?.length ? { warnings: verdict.warnings } : {};
+                if (willUpdate) { updated++; results[i] = { row: rowNo, ok: true, action: 'updated', id: String((existing as any).id ?? '') || undefined, ...admitted }; }
+                else { created++; results[i] = { row: rowNo, ok: true, action: 'created', ...admitted }; }
               }
             } else if (willUpdate) {
               const target = existing as Record<string, any>;

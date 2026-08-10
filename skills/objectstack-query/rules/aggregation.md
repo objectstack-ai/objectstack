@@ -12,16 +12,20 @@ Guide for building ObjectStack aggregation queries.
 | `min` | `MIN(field)` | Minimum value | Yes |
 | `max` | `MAX(field)` | Maximum value | Yes |
 | `count_distinct` | `COUNT(DISTINCT field)` | Count unique values | Yes |
-| `array_agg` | `ARRAY_AGG(field)` | Collect values into array | Yes |
-| `string_agg` | `STRING_AGG(field, ',')` | Concatenate string values | Yes |
 
 > ⚠️ **Driver support varies.** On SQL datasources the driver executes only
 > `count` / `sum` / `avg` / `min` / `max` and **throws** (`Unsupported
-> aggregate function`) on `count_distinct`, `array_agg`, and `string_agg`;
-> the per-aggregation `distinct: true` flag is also ignored there. The
-> in-memory aggregation path (driver-rest, driver-memory, timezone/
-> date-bucket fallbacks) supports all 8 functions plus `distinct`. For
-> portable queries, stick to the first five.
+> aggregate function`) on `count_distinct`; the per-aggregation
+> `distinct: true` flag is also ignored there. The in-memory aggregation path
+> (driver-rest, driver-memory, timezone/date-bucket fallbacks) supports all six
+> functions plus `distinct`. For portable queries, stick to the first five.
+
+> **Removed in 17 (#6188).** `array_agg` and `string_agg` are no longer part of
+> the vocabulary — they were declared and lowered by no SQL backend, so a query
+> using them succeeded or failed depending on which driver happened to be
+> behind the object. A query carrying either is refused at parse. There is no
+> replacement: read the rows with an ordinary `fields` query and shape them in
+> the caller, or materialise the roll-up as a stored field.
 
 ## Basic Aggregation
 
@@ -79,10 +83,18 @@ aggregations (never bucket by hand in app code):
 - Granularities: `day`, `week`, `month`, `quarter`, `year` (weeks are
   ISO-8601, starting Monday).
 - Optional `alias` renames the projected group value:
-  `{ field: 'closed_at', dateGranularity: 'quarter', alias: 'quarter' }`.
+  `{ field: 'closed_at', dateGranularity: 'quarter', alias: 'quarter' }`
+  puts the bucket under `quarter` instead of `closed_at`. **The alias renames
+  the projected COLUMN only** — grouping still keys on the field, so the buckets
+  themselves are unchanged. Read the result under `alias ?? field`, and reference
+  that same name from `having`.
 - The engine pushes bucketing down to the driver (`DATE_TRUNC` etc.) when
   the dialect supports that granularity, and transparently falls back to
-  in-memory bucketing otherwise — results are correct either way.
+  in-memory bucketing otherwise — results are correct either way, **including
+  the column keys** (#6401: until then the SQL drivers ignored `alias`, so an
+  aliased group came back under the field name when the query was pushed down
+  and under the alias when it fell back — decided by a capability bit and the
+  `timezone`, neither of which the caller can see).
 
 ## HAVING Clause
 

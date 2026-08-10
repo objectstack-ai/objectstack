@@ -6,6 +6,17 @@
  * registry sync), the data-door write-through middleware, and the boot
  * reconciliation/backfill pass. The package door stays covered in
  * bootstrap-declared-permissions.test.ts.
+ *
+ * [#6858 / ADR-0094 D5-R] `makeProtocol` models ADR-0005's TIER GATE, which
+ * this suite used to be blind to: `permission` is `allowOrgOverride: false`
+ * since #6483 (PR #6608), so a metadata write whose (type, name) is backed by
+ * a code ARTIFACT is refused 403 `NOT_OVERRIDABLE`, while an artifact-free
+ * name rides `allowRuntimeCreate: true` and still lands. PR #6608 recorded the
+ * blind spot in its own body — "its own suite stubs `saveMetaItem`, so this
+ * file is where that behaviour is actually pinned against the real gate" —
+ * which is exactly why four cases here kept asserting the RETIRED overlay
+ * direction and stayed green: the stub could not refuse. They are triaged
+ * below, each one individually.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -84,6 +95,31 @@ function makeProtocol(ql: any, declared: Record<string, any> = {}) {
       projector = fn;
     },
     async saveMetaItem(req: { type: string; name: string; item: any; actor?: string }) {
+      // [#6858 / ADR-0094 D5-R] ADR-0005's tier gate, first — ahead of schema
+      // validation, exactly as `protocol.ts` orders it. `declared` IS this
+      // stub's artifact registry, so `declared[name] !== undefined` is the
+      // `isArtifactBacked` fact the production gate reads (never the record's
+      // `managed_by` column). The refusal is topology-independent: the
+      // protocol gate fires when `environmentId` is set, and
+      // `SysMetadataRepository.assertAllowed` refuses the `override-artifact`
+      // intent on every other kernel — pinned in
+      // metadata-protocol/src/protocol.adr0005-org-override-rollback.test.ts.
+      //
+      // `deleteMetaItem` below deliberately does NOT model a gate: its
+      // artifact-backed refusal sits inside `environmentId !== undefined`
+      // with no repository-level twin, so the answer is topology-dependent
+      // and a single modelled verdict here would be a fabrication. It stays
+      // pinned where the real gate can be reached (the protocol suite above,
+      // and packages/qa/dogfood/test/two-doors-permission.dogfood.test.ts).
+      if (declared[req.name] !== undefined) {
+        const err: any = new Error(
+          `[not_overridable] Metadata item 'permission/${req.name}' is provided by a code package `
+          + 'and the type has not opted into per-org overlay writes (allowOrgOverride=false).',
+        );
+        err.code = 'NOT_OVERRIDABLE';
+        err.status = 403;
+        throw err;
+      }
       // [#4669] The REAL `PermissionSetSchema`, exactly as `saveMetaItem` runs
       // it (metadata-protocol/src/protocol.ts → `resolveOverlaySchema`), same
       // `[invalid_metadata]` 422 envelope. Without this the mock accepts any
@@ -297,9 +333,12 @@ describe('upsertEnvPermissionSet (ADR-0094 — record is a pure projection)', ()
   });
 
   it('projects onto a PACKAGE-OWNED row (overlay customization) while preserving its provenance', async () => {
-    // Direction confirmed 2026-07-14: an env overlay of a packaged set is the
-    // platform's standard ADR-0005 customization — the record follows the
-    // effective body; the package still owns the row.
+    // Unit-level shape, unchanged by ADR-0094 D5-R: handed a body for a
+    // package-owned row, this function projects the facets and preserves the
+    // provenance. What D5-R retired is the CLAIM about where that body comes
+    // from — an env overlay of a packaged set is no longer a supported
+    // customization channel (#6483 / PR #6608); see the D5-R lifecycle block
+    // below for the refusal this projector now sits behind.
     const ql = makeQl();
     ql.permRows.push({ id: 'ps_pkg', name: 'organization_admin', managed_by: 'package', package_id: 'com.example.crm', system_permissions: '["pkg"]' });
     const r = await upsertEnvPermissionSet(ql, envBody());
@@ -408,36 +447,82 @@ describe('registerPermissionSetProjection', () => {
   });
 });
 
-// ── Package-set customization via overlay (ADR-0094, direction 2026-07-14) ──
+// ── Package-set customization (ADR-0094 D5-R — the 2026-07-14 direction is
+//    RETIRED; what survives is the `allowRuntimeCreate` tier) ───────────────
 
-describe('package-owned set customization lifecycle (env overlay)', () => {
-  it('a Studio env-scope save on a PACKAGE name customizes the record and keeps provenance', async () => {
+/** Seed an env-scope overlay row directly — a LEGACY overlay, authored before
+ *  the #6483 rollback closed the write door. `saveMetaItem` can no longer mint
+ *  one for an artifact-backed name, but `supportsOverlay: true` is unchanged,
+ *  so rows that already exist still merge overlay-wins at read time. */
+const seedLegacyOverlay = (ql: any, name: string, body: any) => {
+  ql.metaRows.push({
+    id: `meta_${name}`, type: 'permission', name, state: 'active',
+    organization_id: null, metadata: JSON.stringify(body),
+  });
+};
+
+describe('package-owned set customization lifecycle (ADR-0094 D5-R)', () => {
+  it('an env-scope save on an ARTIFACT-BACKED package name is REFUSED (403 NOT_OVERRIDABLE) — no overlay, record untouched', async () => {
+    // Was: "a Studio env-scope save on a PACKAGE name customizes the record
+    // and keeps provenance" — the 2026-07-14 direction. #6483 rolled
+    // `permission` back to `allowOrgOverride: false` and #6609 ruling A
+    // accepted the tightening, so the write this case used to assert is the
+    // write production now refuses. Rejection-class: the ENVELOPE is the
+    // claim (`code` AND `status`), because a bare "it threw" would stay green
+    // on a stub that threw for any other reason.
     const ql = makeQl();
     const declaredBody = envBody({ systemPermissions: ['pkg.baseline'] });
     (ql as any).registry = { listItems: (t: string) => (t === 'permission' ? [declaredBody] : []) };
     const protocol = makeProtocol(ql, { organization_admin: declaredBody });
     registerPermissionSetProjection(protocol, { ql });
     ql.permRows.push({ id: 'ps_pkg', name: 'organization_admin', managed_by: 'package', package_id: 'com.example.crm', system_permissions: '["pkg.baseline"]' });
+
+    await expect(
+      protocol.saveMetaItem({ type: 'permission', name: 'organization_admin', item: envBody({ systemPermissions: ['customized'] }) }),
+    ).rejects.toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
+
+    expect(ql.metaRows.length, 'refused, not "refused after writing" — no phantom overlay row').toBe(0);
+    const row = ql.permRows[0];
+    expect(JSON.parse(row.system_permissions), 'the record still projects the shipped declaration').toEqual(['pkg.baseline']);
+    expect(row.customized, 'nothing was customized').toBeFalsy();
+  });
+
+  it('a package row MATERIALIZED through the metadata door is still customizable — the surviving allowRuntimeCreate tier', async () => {
+    // The boundary #6608 measured UNAFFECTED, and the reason D5-R names a
+    // surviving NEIGHBOUR rather than a re-route: this row is
+    // `managed_by:'package'` like the one above, but its DEFINITION lives in
+    // `sys_metadata` (authored + published through the metadata door,
+    // ADR-0070), so no artifact backs it and the write rides
+    // `allowRuntimeCreate`. It is a direct edit of the one stored
+    // definition — there is no code layer for it to be an overlay OF.
+    const ql = makeQl();
+    const protocol = makeProtocol(ql, {}); // no artifact registry entry
+    registerPermissionSetProjection(protocol, { ql });
+    ql.permRows.push({ id: 'ps_mat', name: 'organization_admin', managed_by: 'package', package_id: 'com.example.crm', system_permissions: '["materialized.baseline"]' });
 
     await protocol.saveMetaItem({ type: 'permission', name: 'organization_admin', item: envBody({ systemPermissions: ['customized'] }) });
 
     const row = ql.permRows[0];
     expect(JSON.parse(row.system_permissions)).toEqual(['customized']);
-    expect(row.managed_by).toBe('package');
+    expect(row.managed_by, 'the package still owns the row').toBe('package');
     expect(row.package_id).toBe('com.example.crm');
-    expect(row.customized, 'package row now carries an overlay → flagged customized').toBe(true);
   });
 
-  it('deleting the overlay RESETS the package record to its declared baseline', async () => {
+  it('a LEGACY overlay (authored before the rollback) still projects, and deleting it still RESETS to the declaration', async () => {
+    // `supportsOverlay: true` was not touched by #6483 — only the WRITE flag
+    // was. A row that already exists keeps merging overlay-wins, so the
+    // reset invariant still has to hold for it. Seeded directly because the
+    // write door that used to mint it is closed.
     const ql = makeQl();
     const declaredBody = envBody({ systemPermissions: ['pkg.baseline'] });
     (ql as any).registry = { listItems: (t: string) => (t === 'permission' ? [declaredBody] : []) };
     const protocol = makeProtocol(ql, { organization_admin: declaredBody });
     registerPermissionSetProjection(protocol, { ql });
     ql.permRows.push({ id: 'ps_pkg', name: 'organization_admin', managed_by: 'package', package_id: 'com.example.crm', system_permissions: '["pkg.baseline"]' });
+    seedLegacyOverlay(ql, 'organization_admin', envBody({ systemPermissions: ['legacy.overlay'] }));
 
-    await protocol.saveMetaItem({ type: 'permission', name: 'organization_admin', item: envBody({ systemPermissions: ['customized'] }) });
-    expect(JSON.parse(ql.permRows[0].system_permissions)).toEqual(['customized']);
+    await projectPermissionMutation(protocol, { ql }, { type: 'permission', name: 'organization_admin', state: 'active', organizationId: null });
+    expect(JSON.parse(ql.permRows[0].system_permissions), 'the legacy overlay still wins at read time').toEqual(['legacy.overlay']);
 
     await protocol.deleteMetaItem({ type: 'permission', name: 'organization_admin' });
     const row = ql.permRows[0];
@@ -628,8 +713,12 @@ describe('createPermissionSetWriteThrough (data door → metadata store)', () =>
     const declared = { organization_admin: envBody({ systemPermissions: ['declared.only'] }) };
     const protocol = makeProtocol(ql, declared);
     registerPermissionSetProjection(protocol, { ql });
-    // env overlay shadows the declaration; record projected from the overlay
-    await protocol.saveMetaItem({ type: 'permission', name: 'organization_admin', item: envBody({ systemPermissions: ['overlaid'] }) });
+    // [#6858] A LEGACY env overlay shadows the declaration — seeded directly
+    // because `saveMetaItem` can no longer mint one for an artifact-backed
+    // name (ADR-0094 D5-R). The invariant under test is unchanged: the record
+    // is projected from the overlay, and the data-door delete resets it.
+    seedLegacyOverlay(ql, 'organization_admin', envBody({ systemPermissions: ['overlaid'] }));
+    await projectPermissionMutation(protocol, { ql }, { type: 'permission', name: 'organization_admin', state: 'active', organizationId: null });
     expect(JSON.parse(ql.permRows[0].system_permissions)).toEqual(['overlaid']);
     const mw = makeMiddleware(ql, protocol);
     const nextCalled = await run(mw, {
@@ -640,7 +729,15 @@ describe('createPermissionSetWriteThrough (data door → metadata store)', () =>
     expect(JSON.parse(ql.permRows[0].system_permissions)).toEqual(['declared.only']); // …reset to the declaration
   });
 
-  it('UPDATE of a PACKAGE-OWNED set becomes an env overlay; the record keeps its provenance', async () => {
+  it('UPDATE of an ARTIFACT-BACKED set surfaces the producer\'s 403 to the caller (write point :794 — left to 403 loudly)', async () => {
+    // Was: "UPDATE of a PACKAGE-OWNED set becomes an env overlay" — the
+    // retired D5 direction. This is the ONE of the four production write
+    // points that the #6483 rollback actually closes, and the card's design
+    // question was what to do with it. Decision (ADR-0094 D5-R): leave it to
+    // the producer. The middleware still TRANSLATES the write; the protocol's
+    // ADR-0005 tier gate refuses it; the middleware neither pre-empts the
+    // refusal (it would need a second copy of `isArtifactBacked` — Prime
+    // Directive #8) nor swallows it. The caller hears the envelope.
     const ql = makeQl();
     const declaredBody = envBody({ name: 'crm_rep', systemPermissions: ['pkg.baseline'] });
     (ql as any).registry = { listItems: (t: string) => (t === 'permission' ? [declaredBody] : []) };
@@ -651,19 +748,89 @@ describe('createPermissionSetWriteThrough (data door → metadata store)', () =>
       system_permissions: '["pkg.baseline"]',
     });
     const mw = makeMiddleware(ql, protocol);
+    await expect(
+      run(mw, {
+        object: 'sys_permission_set', operation: 'update', context: userCtx,
+        data: { id: 'ps_pkg', system_permissions: '["customized"]' },
+      }),
+    ).rejects.toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
+
+    expect(ql.metaRows.length, 'no overlay was minted by the refused edit').toBe(0);
+    const row = ql.permRows[0];
+    expect(JSON.parse(row.system_permissions), 'the record still shows the shipped declaration').toEqual(['pkg.baseline']);
+    expect(row.managed_by).toBe('package');
+  });
+
+  it('UPDATE of a package row MATERIALIZED through the metadata door still lands (the surviving tier)', async () => {
+    // The other half of the boundary — same `managed_by:'package'` row shape,
+    // no artifact behind the name, so the write rides `allowRuntimeCreate`
+    // and the data door keeps working. Without this the case above would also
+    // pass on a harness that could not write ANYTHING through the middleware.
+    const ql = makeQl();
+    const protocol = makeProtocol(ql, {}); // no artifact registry entry
+    registerPermissionSetProjection(protocol, { ql });
+    ql.permRows.push({
+      id: 'ps_mat', name: 'crm_rep', managed_by: 'package', package_id: 'com.example.crm',
+      system_permissions: '["materialized.baseline"]',
+    });
+    const mw = makeMiddleware(ql, protocol);
     const opCtx: any = {
       object: 'sys_permission_set', operation: 'update', context: userCtx,
-      data: { id: 'ps_pkg', system_permissions: '["customized"]' },
+      data: { id: 'ps_mat', system_permissions: '["customized"]' },
     };
     const nextCalled = await run(mw, opCtx);
-    expect(nextCalled).toBe(false);
-    // The customization lives in the metadata overlay…
+    expect(nextCalled, 'the driver write is still skipped — the record is projector-owned').toBe(false);
     expect(JSON.parse(ql.metaRows[0].metadata).systemPermissions).toEqual(['customized']);
-    // …the record projects it, and the package still owns the row.
     const row = ql.permRows[0];
     expect(JSON.parse(row.system_permissions)).toEqual(['customized']);
-    expect(row.managed_by).toBe('package');
+    expect(row.managed_by, 'the package still owns the row').toBe('package');
     expect(row.package_id).toBe('com.example.crm');
+  });
+
+  it('INSERT of a name that shadows a code-declared set surfaces the 403 too (write point :752)', async () => {
+    // Reachable when a declaration ships but its record was never
+    // materialized: the duplicate-name probe finds no row, so the insert
+    // proceeds to `saveMetaItem` on an artifact-backed name. Fail-closed and
+    // unswallowed, same disposition as the UPDATE above.
+    const ql = makeQl();
+    const declaredBody = envBody({ name: 'crm_rep' });
+    const protocol = makeProtocol(ql, { crm_rep: declaredBody });
+    registerPermissionSetProjection(protocol, { ql });
+    const mw = makeMiddleware(ql, protocol);
+    await expect(
+      run(mw, {
+        object: 'sys_permission_set', operation: 'insert', context: userCtx,
+        data: { name: 'crm_rep', label: 'Shadow', object_permissions: JSON.stringify({ crm_lead: { allowRead: true } }) },
+      }),
+    ).rejects.toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
+    expect(ql.permRows.length, 'no record was created by the refused insert').toBe(0);
+    expect(ql.metaRows.length).toBe(0);
+  });
+
+  it('RESTORE reports a refused re-author on the durability channel instead of throwing (write point :713)', async () => {
+    // The deliberate asymmetry. `restore` runs AFTER the engine has already
+    // un-trashed the row, so throwing would leave the caller with a restored
+    // record and a failed request; the write point catches and reports on the
+    // durability channel (#4632) instead. Pinned with an artifact-backed name
+    // so the refusal is the ADR-0005 one — the scenario is narrow (a packaged
+    // definition cannot be trashed through the data door at all), which is
+    // why the DISPOSITION, not the frequency, is what this case fixes.
+    const ql = makeQl();
+    const declaredBody = envBody({ name: 'crm_rep' });
+    const protocol = makeProtocol(ql, { crm_rep: declaredBody });
+    const errors: any[] = [];
+    const mw = createPermissionSetWriteThrough({
+      ql, getProtocol: () => protocol,
+      logger: { error: (m: string, e?: Error) => errors.push({ m, e }), info: () => {}, warn: () => {} },
+    });
+    ql.permRows.push({ id: 'ps_r', name: 'crm_rep', managed_by: 'user' });
+    const nextCalled = await run(mw, {
+      object: 'sys_permission_set', operation: 'restore', options: { where: { id: 'ps_r' } }, context: userCtx,
+    });
+    expect(nextCalled, 'the engine un-trash still runs').toBe(true);
+    expect(errors.length, 'the failure is reported, not swallowed').toBe(1);
+    expect(errors[0].e).toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
+    expect(errors[0].m).toContain('NOT re-authored into metadata');
   });
 
   it('DELETE of a customized PACKAGE set removes the overlay and resets to the declared baseline', async () => {
@@ -674,8 +841,12 @@ describe('createPermissionSetWriteThrough (data door → metadata store)', () =>
     registerPermissionSetProjection(protocol, { ql });
     ql.permRows.push({ id: 'ps_pkg', name: 'crm_rep', managed_by: 'package', package_id: 'com.example.crm', system_permissions: '["pkg.baseline"]' });
     const mw = makeMiddleware(ql, protocol);
-    // customize first
-    await run(mw, { object: 'sys_permission_set', operation: 'update', context: userCtx, data: { id: 'ps_pkg', system_permissions: '["customized"]' } });
+    // [#6858] The overlay is LEGACY (pre-rollback) and seeded directly — the
+    // data-door edit that used to mint it now answers 403 (ADR-0094 D5-R).
+    // The invariant under test is untouched: "delete" lifts the overlay and
+    // the record resets to the shipped declaration.
+    seedLegacyOverlay(ql, 'crm_rep', envBody({ name: 'crm_rep', systemPermissions: ['customized'] }));
+    await projectPermissionMutation(protocol, { ql }, { type: 'permission', name: 'crm_rep', state: 'active', organizationId: null });
     expect(JSON.parse(ql.permRows[0].system_permissions)).toEqual(['customized']);
     // "delete" = reset
     const nextCalled = await run(mw, { object: 'sys_permission_set', operation: 'delete', options: { where: { id: 'ps_pkg' } }, context: userCtx });
@@ -739,6 +910,30 @@ describe('reconcilePermissionSetProjection', () => {
     // second run: the overlay now exists — nothing to backfill again
     const out2 = await reconcilePermissionSetProjection(protocol, { ql });
     expect(out2.backfilledIntoMetadata).toBe(0);
+  });
+
+  it('[#6858] the backfill never targets an ARTIFACT-BACKED name — write point :928 cannot reach the tier gate', async () => {
+    // The measured half of ADR-0094 D5-R's "3 of the 4 write points were
+    // already on the surviving tier". The backfill runs only for records
+    // whose name has NO metadata presence at all; a code-declared name has a
+    // declared body, so the branch is not entered and no `saveMetaItem` is
+    // issued. Asserted on the write LEDGER (`protocol.saves`) rather than on
+    // the absence of a throw: "it did not fail" would also be true if the
+    // gate had simply accepted the write.
+    const ql = makeQl();
+    const declaredBody = envBody({ name: 'crm_rep', systemPermissions: ['pkg.baseline'] });
+    (ql as any).registry = { listItems: (t: string) => (t === 'permission' ? [declaredBody] : []) };
+    const protocol = makeProtocol(ql, { crm_rep: declaredBody });
+    ql.permRows.push({
+      id: 'ps_pkg_env', name: 'crm_rep', managed_by: 'admin', active: true,
+      label: 'CRM Rep', system_permissions: '["pkg.baseline"]',
+    });
+
+    const out = await reconcilePermissionSetProjection(protocol, { ql });
+
+    expect(protocol.saves.length, 'no metadata write was attempted for a declared name').toBe(0);
+    expect(out.backfilledIntoMetadata).toBe(0);
+    expect(out.backfillFailed, 'and therefore nothing could be refused').toBe(0);
   });
 
   it('[#4669] a row carrying the `active` STORAGE COLUMN backfills instead of failing spec validation', async () => {

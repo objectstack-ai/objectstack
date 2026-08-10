@@ -10,5 +10,5 @@
     "outDir": "./dist",
     "rootDir": "."
   },
-  "include": ["src/**/*", "objectstack.config.ts"]
+  "include": ["src/**/*", "objectstack.config.ts", "test/**/*"]
 }

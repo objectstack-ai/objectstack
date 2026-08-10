@@ -14,9 +14,9 @@
 # Ported from objectui's hook of the same name (objectstack-ai/objectui#3452, filed there
 # as objectui#3435) — the logic below is deliberately kept case-for-case identical to it so
 # the two repos' guards cannot drift; only issue references, example paths and the package
-# name in the self-test are localised. objectui additionally runs guard-shared-stash.sh on
-# the same matcher; this repo has no such hook, so the Bash matcher is created here rather
-# than joined (that gap is tracked separately — see #5790's closing observation).
+# name in the self-test are localised. The Bash matcher this hook created is now shared
+# with guard-shared-stash.sh, mirrored here from objectui in the same way (#5742) — the
+# gap #5790's closing observation recorded is closed; both hooks run on this one matcher.
 #
 # The rule and the escape hatch are deliberately the SAME as guard-main-checkout.sh's:
 # OS_ALLOW_MAIN_EDITS=1. One rule, one hatch — a second variable would just be another

@@ -180,6 +180,107 @@ describe('engine filter placeholders (framework#3582)', () => {
     expect(seen.findAst?.where).toEqual({ title: 'acme {x} deal', owner: 'usr_2' });
   });
 
+  /**
+   * #5586 — the read path is where the bypass was measured, so it is pinned
+   * here and not only at the resolver.
+   *
+   * A placeholder carrying a non-word character was not recognised as a token,
+   * so it rode the AST all the way to the driver and was compared as a literal
+   * string. On the issue's four-row fixture `due_date < '{TODAY()}'` returned
+   * 4 rows where `due_date < '{today}'` returned the 2 genuinely overdue ones
+   * — wrong rows, no error, indistinguishable from a correct answer.
+   */
+  describe('non-word placeholder shapes refuse before the driver (#5586)', () => {
+    it.each([
+      ['{TODAY()}', 'TODAY()'],
+      ['{current-user-id}', 'current-user-id'],
+      ['{30 days ago}', '30 days ago'],
+      ['{user.id}', 'user.id'],
+      ['${TODAY()}', 'TODAY()'],
+    ])('find(): %s throws and the driver is never reached', async (value, token) => {
+      const { driver } = makeDriver();
+      const ql = await makeEngine(driver);
+
+      let err: any;
+      try {
+        await ql.find('deal', { where: { close_date: { $lt: value } }, context: CTX });
+      } catch (e) {
+        err = e;
+      }
+
+      // The specific identity, not the bare fact of a rejection: the point of
+      // the fix is WHICH error the caller gets, and a `rejects.toThrow()` here
+      // would stay green on a driver-level blow-up.
+      expect(err?.name).toBe('UnknownFilterTokenError');
+      expect(err?.code).toBe('FILTER_TOKEN_UNKNOWN');
+      expect(err?.status).toBe(400);
+      expect(err?.token).toBe(token);
+      expect(err?.message).toContain(`{${token}}`);
+      expect(driver.find).not.toHaveBeenCalled();
+    });
+
+    it('find(): the word-character near miss `{TODAY}` still throws', async () => {
+      // Control for the widening: the shape that already refused must keep
+      // refusing with the same identity.
+      const { driver } = makeDriver();
+      const ql = await makeEngine(driver);
+
+      let err: any;
+      try {
+        await ql.find('deal', { where: { close_date: { $lt: '{TODAY}' } }, context: CTX });
+      } catch (e) {
+        err = e;
+      }
+      expect(err?.name).toBe('UnknownFilterTokenError');
+      expect(err?.token).toBe('TODAY');
+      expect(driver.find).not.toHaveBeenCalled();
+    });
+
+    it('find(): `{today}` still resolves to a concrete date', async () => {
+      const { driver, seen } = makeDriver();
+      const ql = await makeEngine(driver);
+
+      await ql.find('deal', { where: { close_date: { $lt: '{today}' } }, context: CTX });
+
+      expect(seen.findAst?.where?.close_date?.$lt).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    });
+
+    it.each(['{a}{b}', '{{x}}', '{}', 'a{b}c'])(
+      'find(): %s is not ONE wrapped token and reaches the driver as a literal',
+      async (value) => {
+        // Pinned deliberately: recognition is one brace pair around the whole
+        // value. These shapes are ordinary text and must not start throwing.
+        const { driver, seen } = makeDriver();
+        const ql = await makeEngine(driver);
+
+        await ql.find('deal', { where: { title: value }, context: CTX });
+
+        expect(seen.findAst?.where).toEqual({ title: value });
+      },
+    );
+
+    it('delete(multi): the write path refuses the same shape before deleting', async () => {
+      // The verb-parity property #3810 established: one filter, one row set.
+      // A widened `delete` is the most expensive place for a silent literal.
+      const { driver } = makeDriver();
+      const ql = await makeEngine(driver);
+
+      let err: any;
+      try {
+        await ql.delete('deal', {
+          where: { close_date: { $lt: '{TODAY()}' } }, multi: true, context: CTX,
+        } as any);
+      } catch (e) {
+        err = e;
+      }
+      expect(err?.name).toBe('UnknownFilterTokenError');
+      expect(err?.code).toBe('FILTER_TOKEN_UNKNOWN');
+      expect(err?.token).toBe('TODAY()');
+      expect(driver.deleteMany).not.toHaveBeenCalled();
+      expect(driver.delete).not.toHaveBeenCalled();
+    });
+  });
+
   // ── Write path (framework#3810) ────────────────────────────────────────
   // The evaluator originally reached only find/findOne/count/aggregate, so the
   // SAME filter selected different rows depending on the verb: `find` matched

@@ -18,7 +18,7 @@
 import { z } from 'zod';
 
 import { lazySchema } from '../../shared/lazy-schema';
-import { strictUnknownKeyError } from '../../shared/suggestions.zod';
+import { strictObject } from '../../shared/strict-object';
 import {
   driverConfigJsonSchema,
   DriverSslToggleSchema,
@@ -28,51 +28,46 @@ import {
   SSL_DETAIL_BELONGS_ON_DATASOURCE,
 } from './common.zod';
 
-const MYSQL_CONFIG_KEYS = [
-  'url', 'host', 'port', 'database', 'username', 'password', 'ssl', 'autoMigrate',
-] as const;
-
-const mysqlConfigUnknownKeyError = strictUnknownKeyError({
-  surface: "this mysql datasource's config",
-  knownKeys: MYSQL_CONFIG_KEYS,
-  aliases: {
-    hostname: 'host',
-    server: 'host',
-    dbname: 'database',
-    db: 'database',
-    schema: 'database',
-    user: 'username',
-    passwd: 'password',
-    pwd: 'password',
-    connectionstring: 'url',
-    dsn: 'url',
-    uri: 'url',
-    sslmode: 'ssl',
-    tls: 'ssl',
-    usessl: 'ssl',
+export const MysqlConfigSchema = lazySchema(() => strictObject(
+  {
+    surface: "this mysql datasource's config",
+    aliases: {
+      hostname: 'host',
+      server: 'host',
+      dbname: 'database',
+      db: 'database',
+      schema: 'database',
+      user: 'username',
+      passwd: 'password',
+      pwd: 'password',
+      connectionstring: 'url',
+      dsn: 'url',
+      uri: 'url',
+      sslmode: 'ssl',
+      tls: 'ssl',
+      usessl: 'ssl',
+    },
+    guidance: {
+      pool:
+        '`pool` is not driver config — connection pooling is configured once for every driver in '
+        + "the datasource's own `pool` block. Move it next to `driver`.",
+      schemaMode: SCHEMA_MODE_BELONGS_ON_DATASOURCE,
+      readOnly: READ_ONLY_BELONGS_ON_DATASOURCE,
+      ca: SSL_DETAIL_BELONGS_ON_DATASOURCE,
+      cert: SSL_DETAIL_BELONGS_ON_DATASOURCE,
+      key: SSL_DETAIL_BELONGS_ON_DATASOURCE,
+      rejectUnauthorized: SSL_DETAIL_BELONGS_ON_DATASOURCE,
+      charset:
+        '`charset` is not honoured: the factory builds the mysql2 connection from the keys listed '
+        + 'here only. Put it in the `url` as a query parameter (`?charset=utf8mb4`) so the client '
+        + 'actually receives it.',
+    },
+    history:
+      'Until #4410 nothing validated `datasource.config` at all — an unrecognised connection key '
+      + 'was accepted in silence and the datasource then connected on the client defaults '
+      + '(localhost:3306) rather than failing.',
   },
-  guidance: {
-    pool:
-      '`pool` is not driver config — connection pooling is configured once for every driver in '
-      + "the datasource's own `pool` block. Move it next to `driver`.",
-    schemaMode: SCHEMA_MODE_BELONGS_ON_DATASOURCE,
-    readOnly: READ_ONLY_BELONGS_ON_DATASOURCE,
-    ca: SSL_DETAIL_BELONGS_ON_DATASOURCE,
-    cert: SSL_DETAIL_BELONGS_ON_DATASOURCE,
-    key: SSL_DETAIL_BELONGS_ON_DATASOURCE,
-    rejectUnauthorized: SSL_DETAIL_BELONGS_ON_DATASOURCE,
-    charset:
-      '`charset` is not honoured: the factory builds the mysql2 connection from the keys listed '
-      + 'here only. Put it in the `url` as a query parameter (`?charset=utf8mb4`) so the client '
-      + 'actually receives it.',
-  },
-  history:
-    'Until #4410 nothing validated `datasource.config` at all — an unrecognised connection key '
-    + 'was accepted in silence and the datasource then connected on the client defaults '
-    + '(localhost:3306) rather than failing.',
-});
-
-export const MysqlConfigSchema = lazySchema(() => z.object({
+  {
   /**
    * Connection URI, passed to `mysql2` as-is when present.
    * Format: `mysql://[user[:password]@][host][:port]/[dbname][?params]`
@@ -105,7 +100,7 @@ export const MysqlConfigSchema = lazySchema(() => z.object({
 
   /** Dev-only, loosen-only schema self-heal (#2186). */
   autoMigrate: SqlAutoMigrateSchema.optional(),
-}, { error: mysqlConfigUnknownKeyError }).strict()
+})
   .describe('MySQL / MariaDB connection configuration')
   .superRefine((cfg, ctx) => {
     if (!cfg.url && !cfg.database) {

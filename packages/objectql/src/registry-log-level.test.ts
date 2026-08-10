@@ -22,8 +22,8 @@ describe('SchemaRegistry log-level gating (#3420)', () => {
   afterEach(() => { delete process.env.OS_REGISTRY_LOG; });
 
   const reRegisterSameOwner = (r: SchemaRegistry) => {
-    r.registerObject({ name: 'sys_thing', fields: {} } as any, 'com.acme.app', 'sys', 'own');
-    r.registerObject({ name: 'sys_thing', fields: {} } as any, 'com.acme.app', 'sys', 'own');
+    r.registerObject({ name: 'sys_thing', fields: {} }, 'com.acme.app', 'sys', 'own');
+    r.registerObject({ name: 'sys_thing', fields: {} }, 'com.acme.app', 'sys', 'own');
   };
 
   it('at the default (info) level, re-registering an owned object is silent — no warn, no debug', () => {

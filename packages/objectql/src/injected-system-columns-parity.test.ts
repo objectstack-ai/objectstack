@@ -96,7 +96,11 @@ describe('[#5378] resolveInjectedSystemColumns ↔ applySystemFields parity', ()
     }
     const mt = applySystemFields({ name: 'crm_contact', fields: fields() } as any, { multiTenant: true });
     const st = applySystemFields({ name: 'crm_contact', fields: fields() } as any, { multiTenant: false });
-    expect((mt.fields as any).organization_id.indexed).toBe(true);
-    expect((st.fields as any).organization_id.indexed).toBe(false);
+    // [#6810] The index moved from a field-level `indexed` boolean — never a
+    // `FieldSchema` key — to the object's `indexes[]`. The property this test
+    // guards is unchanged: the flag moves the INDEX, never the column set.
+    expect((mt as any).indexes).toEqual([{ fields: ['organization_id'] }]);
+    expect((st as any).indexes).toBeUndefined();
+    expect((mt.fields as any).organization_id).toEqual((st.fields as any).organization_id);
   });
 });

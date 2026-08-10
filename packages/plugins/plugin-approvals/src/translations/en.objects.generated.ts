@@ -41,11 +41,11 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "Status",
         help: "Lifecycle state of the request",
         options: {
-          pending: "pending",
-          approved: "approved",
-          rejected: "rejected",
-          recalled: "recalled",
-          returned: "returned"
+          pending: "Pending",
+          approved: "Approved",
+          rejected: "Rejected",
+          recalled: "Recalled",
+          returned: "Returned"
         }
       },
       current_step: {

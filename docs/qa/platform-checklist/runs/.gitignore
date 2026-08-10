@@ -1,0 +1,12 @@
+# Test RESULTS do not live in the repo. A run record and its evidence are
+# artifacts of one execution against one build — they are output, not source,
+# and committing them would turn a version-controlled contract into a dumping
+# ground of dated PNGs. Only this directory's README (the record FORMAT) and
+# this .gitignore are tracked.
+#
+# Where results go instead: the executing environment (CI artifact, the runner's
+# workspace) or the sweep's tracking issue / an external QA store. The checklist
+# in areas/ is the durable source; a run is a transient assertion about a build.
+*
+!.gitignore
+!README.md

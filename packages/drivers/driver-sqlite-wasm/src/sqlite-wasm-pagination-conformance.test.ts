@@ -22,12 +22,17 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import {
+  type DriverOptions,
   PAGINATION_ALL_IDS,
   PAGINATION_CASES,
   PAGINATION_ROWS,
   PAGINATION_UNORDERED_CASES,
+  PAGINATION_ZERO_LIMIT_CASES,
 } from '@objectstack/spec/data';
 import { SqliteWasmDriver } from './index.js';
+
+/** Shared read options — a named const so no call site casts its own (#4674). */
+const READ_OPTIONS: DriverOptions = { bypassTenantAudit: true };
 
 describe('driver-sqlite-wasm — paged reads are a partition of the result set', () => {
   let driver: SqliteWasmDriver;
@@ -45,7 +50,7 @@ describe('driver-sqlite-wasm — paged reads are a partition of the result set',
       },
     ]);
     for (const row of PAGINATION_ROWS) {
-      await driver.create('ticket', { ...row }, { bypassTenantAudit: true } as any);
+      await driver.create('ticket', { ...row }, { bypassTenantAudit: true });
     }
   });
 
@@ -59,7 +64,7 @@ describe('driver-sqlite-wasm — paged reads are a partition of the result set',
       const page = await driver.find(
         'ticket',
         { ...(orderBy ? { orderBy: [...orderBy] } : {}), limit: pageSize, offset } as any,
-        { bypassTenantAudit: true } as any,
+        { bypassTenantAudit: true },
       );
       seen.push(...page.map((r: any) => String(r.id)));
     }
@@ -79,7 +84,7 @@ describe('driver-sqlite-wasm — paged reads are a partition of the result set',
       const whole = await driver.find(
         'ticket',
         { orderBy: [...testCase.orderBy] } as any,
-        { bypassTenantAudit: true } as any,
+        { bypassTenantAudit: true },
       );
       expect(paged).toEqual(whole.map((r: any) => String(r.id)));
     });
@@ -102,7 +107,23 @@ describe('driver-sqlite-wasm — paged reads are a partition of the result set',
   }
 
   it('leaves an UNPAGED unordered read alone — no sort is imposed on a caller who asked for none', async () => {
-    const rows = await driver.find('ticket', {} as any, { bypassTenantAudit: true } as any);
+    const rows = await driver.find('ticket', {} as any, { bypassTenantAudit: true });
     expect(rows.map((r: any) => r.id)).toEqual(PAGINATION_ROWS.map((r) => r.id));
+  });
+
+  /**
+   * `limit: 0` means "return no records" (#6485/#6577). Inherited from
+   * `SqlDriver.findRows()`, which has always compiled `limit` on presence — but
+   * "inherits, therefore fine" is the assumption this whole file exists to
+   * disprove, and the sql.js dialect binds the LIMIT placeholder itself. A
+   * dialect that mis-bound a zero would fail in no other suite in the repo.
+   */
+  describe('`limit: 0` returns no records', () => {
+    for (const testCase of PAGINATION_ZERO_LIMIT_CASES) {
+      it(testCase.name, async () => {
+        const rows = await driver.find('ticket', { ...testCase.query }, READ_OPTIONS);
+        expect(rows).toHaveLength(testCase.expectedRowCount);
+      });
+    }
   });
 });

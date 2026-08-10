@@ -5,6 +5,7 @@ import {
   installFileReferenceHooks,
   FileReferenceCopyError,
   FileConstraintError,
+  FileFieldBulkWriteError,
   type FileReferenceEngine,
 } from './file-reference-lifecycle.js';
 
@@ -108,8 +109,18 @@ type Engine = ReturnType<typeof fakeEngine>;
 /** Drive an engine-shaped insert: beforeInsert → driver write → afterInsert,
  * with the same ctx object throughout and `input.data` as the persisted row
  * (exactly what engine.ts hands the driver). */
+/**
+ * [#6966] The engine's dispatch marker as a single-record write carries it.
+ * A hand-built context without one already reads as "not a per-row dispatch",
+ * so stating it here changes no verdict — it makes the per-row driver's marker
+ * a visible difference rather than a hidden one.
+ */
+function recordDispatch(scope: Record<string, unknown> = {}) {
+  return { mode: 'record' as const, index: 0, scope };
+}
+
 async function driveInsert(engine: Engine, object: string, data: Record<string, unknown>, id: string) {
-  const ctx: any = { object, event: 'beforeInsert', input: { data } };
+  const ctx: any = { object, event: 'beforeInsert', input: { data }, dispatch: recordDispatch() };
   await engine.trigger('beforeInsert', ctx);
   const row = { ...(ctx.input.data as Record<string, unknown>), id };
   (engine.tables[object] ??= []).push(row);
@@ -120,7 +131,7 @@ async function driveInsert(engine: Engine, object: string, data: Record<string, 
 }
 
 async function driveUpdate(engine: Engine, object: string, id: string, data: Record<string, unknown>) {
-  const ctx: any = { object, event: 'beforeUpdate', input: { id, data } };
+  const ctx: any = { object, event: 'beforeUpdate', input: { id, data }, dispatch: recordDispatch() };
   await engine.trigger('beforeUpdate', ctx);
   const row = (engine.tables[object] ?? []).find((r) => String(r.id) === String(id));
   if (row) Object.assign(row, ctx.input.data);
@@ -130,22 +141,126 @@ async function driveUpdate(engine: Engine, object: string, id: string, data: Rec
   return row;
 }
 
-async function driveDelete(engine: Engine, object: string, input: any) {
-  const ctx: any = { object, event: 'beforeDelete', input };
-  await engine.trigger('beforeDelete', ctx);
-  const where = input?.options?.where;
-  if (input?.id != null) {
-    const ids = typeof input.id === 'object' ? input.id.$in : [input.id];
-    engine.tables[object] = (engine.tables[object] ?? []).filter(
-      (r) => !ids.some((i: unknown) => String(i) === String(r.id)),
-    );
-  } else if (where) {
-    engine.tables[object] = (engine.tables[object] ?? []).filter(
-      (r) => !Object.entries(where).every(([k, v]) => r[k] === v),
-    );
+/**
+ * Drive an engine-shaped PREDICATE (`multi: true`) update — the per-row
+ * fan-out `engine.update` actually performs (`engine.ts`, the `isPredicatePath`
+ * branch).
+ *
+ * [#7102] Sibling of {@link driveDelete}'s predicate path, and modelled on the
+ * same two engine methods:
+ *
+ *  - `dispatchPerRowBeforeHooks` — one `beforeUpdate` per matched row, on a
+ *    single-record-shaped context carrying THAT row's `input.id` and
+ *    `previous`, the SHARED batch payload as `input.data` (read fresh and
+ *    written back per row, ADR-0058 Addendum II D3), the caller's `options`
+ *    (`multi`/`where` still visible in the before phase), and one `scope`
+ *    identity across every dispatch of both phases;
+ *  - `buildPerRowAfterContexts` — one `afterUpdate` per matched row, whose
+ *    `input.data` is a shallow COPY of the payload and whose `result` is
+ *    `row ⊕ payload`.
+ *
+ * The driver write between them is ONE `SET` clause applied to every matched
+ * row, which is the whole subject of #7102: the payload the driver persists is
+ * batch-scoped, so whatever id it holds lands in all N rows.
+ */
+async function driveMultiUpdate(
+  engine: Engine,
+  object: string,
+  where: Record<string, unknown>,
+  data: Record<string, unknown>,
+) {
+  const rows = (engine.tables[object] ?? []).filter((r) =>
+    Object.entries(where).every(([k, v]) => r[k] === v),
+  );
+  const options = { multi: true, where };
+  const scope: Record<string, unknown> = {};
+  const preImages = rows.map((r) => ({ ...r }));
+
+  // ── before phase: per row, over ONE shared payload ───────────────
+  const batchInput: any = { data, options };
+  for (let i = 0; i < rows.length; i++) {
+    const ctx: any = {
+      object,
+      event: 'beforeUpdate',
+      input: { id: rows[i].id, data: batchInput.data, options },
+      previous: preImages[i],
+      dispatch: { mode: 'per-row' as const, index: i, scope },
+    };
+    await engine.trigger('beforeUpdate', ctx);
+    batchInput.data = ctx.input.data; // D3 accumulate half
   }
-  ctx.event = 'afterDelete';
-  await engine.trigger('afterDelete', ctx);
+
+  // ── the driver write: ONE SET clause, every matched row ──────────
+  for (const row of rows) Object.assign(row, batchInput.data);
+
+  // ── after phase: per row ─────────────────────────────────────────
+  for (let i = 0; i < rows.length; i++) {
+    const ctx: any = {
+      object,
+      event: 'afterUpdate',
+      input: { id: rows[i].id, data: { ...batchInput.data }, options },
+      previous: preImages[i],
+      result: { ...preImages[i], ...batchInput.data },
+      dispatch: { mode: 'per-row' as const, index: i, scope },
+    };
+    await engine.trigger('afterUpdate', ctx);
+  }
+  return rows;
+}
+
+/**
+ * Drive an engine-shaped delete.
+ *
+ * [#6966] A `where`-shaped delete is driven the way the engine has actually
+ * driven it since #5038/#5574 — the doomed rows are matched FIRST, then
+ * `beforeDelete` and `afterDelete` each fire once per matched row on a
+ * single-record-shaped context carrying that row's `input.id` and the
+ * `dispatch` marker, with one `scope` object shared by all of them.
+ *
+ * This driver used to model the pre-#5574 batch dispatch instead: ONE context
+ * with no `id`, carrying only `options.where`. The engine stopped producing
+ * that shape two releases ago, so the release-on-multi-delete case below was
+ * passing against a dispatch that no longer exists.
+ */
+async function driveDelete(engine: Engine, object: string, input: any) {
+  const where = input?.options?.where;
+  const byId = input?.id != null;
+  const doomed = byId
+    ? (() => {
+        const ids = typeof input.id === 'object' ? input.id.$in : [input.id];
+        return (engine.tables[object] ?? []).filter((r) => ids.some((i: unknown) => String(i) === String(r.id)));
+      })()
+    : where
+      ? (engine.tables[object] ?? []).filter((r) => Object.entries(where).every(([k, v]) => r[k] === v))
+      : [];
+
+  const drop = () => {
+    const gone = new Set(doomed.map((r) => String(r.id)));
+    engine.tables[object] = (engine.tables[object] ?? []).filter((r) => !gone.has(String(r.id)));
+  };
+
+  if (byId) {
+    // Single-id path: ONE context, reused across the pair, `mode: 'record'`.
+    const ctx: any = { object, event: 'beforeDelete', input, dispatch: recordDispatch() };
+    await engine.trigger('beforeDelete', ctx);
+    drop();
+    ctx.event = 'afterDelete';
+    await engine.trigger('afterDelete', ctx);
+    return;
+  }
+
+  // Predicate path: per-row fan-out, one shared scope, fresh context per row.
+  const scope: Record<string, unknown> = {};
+  const rowCtx = (event: string, row: any, index: number) => ({
+    object,
+    event,
+    input: { id: row.id, options: input?.options },
+    previous: row,
+    dispatch: { mode: 'per-row' as const, index, scope },
+  });
+  for (let i = 0; i < doomed.length; i++) await engine.trigger('beforeDelete', rowCtx('beforeDelete', doomed[i], i));
+  drop();
+  for (let i = 0; i < doomed.length; i++) await engine.trigger('afterDelete', rowCtx('afterDelete', doomed[i], i));
 }
 
 function install(engine: Engine, storage: any = fakeStorage()) {
@@ -282,7 +397,7 @@ describe('File Reference Ownership (ADR-0104 D3 wave 2)', () => {
       });
     });
 
-    it('releases via the beforeDelete stash for a where-shaped multi delete', async () => {
+    it('releases every row of a where-shaped multi delete, in ONE release pass', async () => {
       const engine = fakeEngine({
         files: [
           file({ ref_object: 'product', ref_id: 'p1', ref_field: 'image' }),
@@ -300,6 +415,19 @@ describe('File Reference Ownership (ADR-0104 D3 wave 2)', () => {
       await driveDelete(engine, 'product', { options: { where: { archived: true } } });
 
       expect(engine.tables.sys_file.every((f) => f.ref_id === null)).toBe(true);
+
+      // [#6966] Both rows released by ONE `sys_file` lookup over an `$in`, not
+      // one lookup per row. The per-row `afterDelete` fan-out is what made the
+      // naive spelling N queries; `dispatch.index === 0` plus the ids the
+      // `before` phase collected onto the shared scope is what collapses it.
+      const ownershipReads = engine.calls.filter((c) => c.op === 'find' && c.object === 'sys_file');
+      expect(ownershipReads).toHaveLength(1);
+      expect(ownershipReads[0].arg).toMatchObject({ ref_id: { $in: ['p1', 'p2'] } });
+
+      // And nothing re-queried the deleted object to learn its ids: the engine
+      // already handed them over row by row. (The pre-#6966 hook ran one
+      // `engine.find(object, { where })` here.)
+      expect(engine.calls.filter((c) => c.op === 'find' && c.object === 'product')).toHaveLength(0);
     });
 
     it('releases the old file and claims the new one when a field is swapped', async () => {
@@ -567,6 +695,207 @@ describe('File Reference Ownership (ADR-0104 D3 wave 2)', () => {
       // and hand its read authorisation to a different parent record.
       expect(engine.tables.sys_file[0]).toMatchObject({ ref_id: 'p1', ref_field: 'image' });
       expect(logger.warn).toHaveBeenCalled();
+    });
+  });
+
+  // ── Predicate (multi) update writing a file field — #7102 ────────
+  //
+  // The defect: one payload, one `SET` clause, N matched rows, so a file id
+  // written through a predicate update lands in every one of them while at
+  // most one record can own it. Refused in `beforeUpdate`, before the driver.
+  //
+  // The refusal cases assert `code` AND `status` (the ADR-0112 envelope), never
+  // a bare `rejects.toThrow()`: the pre-#7102 code ALSO leaves this write in a
+  // bad state without throwing anything, so "it threw" is not the fact under
+  // test — "it refused with a code the REST layer can answer 400 on" is.
+  describe('predicate update writing a file field (#7102)', () => {
+    const threeArchived = () => ({
+      files: [file({ ref_object: 'product', ref_id: 'p0', ref_field: 'image' })],
+      records: {
+        product: [
+          { id: 'p1', archived: true },
+          { id: 'p2', archived: true },
+          { id: 'p3', archived: true },
+        ],
+      },
+    });
+
+    it('refuses with the ADR-0112 envelope (FILE_FIELD_BULK_WRITE_REFUSED / 400)', async () => {
+      const engine = fakeEngine(threeArchived());
+      install(engine);
+
+      await expect(
+        driveMultiUpdate(engine, 'product', { archived: true }, { image: 'file_a' }),
+      ).rejects.toMatchObject({
+        code: 'FILE_FIELD_BULK_WRITE_REFUSED',
+        status: 400,
+      });
+    });
+
+    it('is a FileFieldBulkWriteError naming the object and the offending fields', async () => {
+      const engine = fakeEngine(threeArchived());
+      install(engine);
+
+      const err = await driveMultiUpdate(engine, 'product', { archived: true }, { image: 'file_a' })
+        .then(() => null)
+        .catch((e) => e);
+
+      expect(err).toBeInstanceOf(FileFieldBulkWriteError);
+      expect(err.object).toBe('product');
+      expect(err.fields).toEqual(['image']);
+      expect(err.message).toContain("'product.image'");
+    });
+
+    it('writes nothing, reads nothing and copies nothing — it refuses before the driver', async () => {
+      const engine = fakeEngine(threeArchived());
+      const { storage } = install(engine);
+
+      await expect(
+        driveMultiUpdate(engine, 'product', { archived: true }, { image: 'file_a' }),
+      ).rejects.toMatchObject({ code: 'FILE_FIELD_BULK_WRITE_REFUSED' });
+
+      // No record took the id — the whole point of refusing in the BEFORE
+      // phase rather than reconciling afterwards.
+      expect(engine.tables.product.map((r) => r.image)).toEqual([undefined, undefined, undefined]);
+      // The original owner is untouched and no copy row was minted.
+      expect(engine.tables.sys_file).toHaveLength(1);
+      expect(engine.tables.sys_file[0]).toMatchObject({ id: 'file_a', ref_id: 'p0' });
+      expect(storage.download).not.toHaveBeenCalled();
+      expect(storage.upload).not.toHaveBeenCalled();
+      // And it costs no I/O at all: the verdict is decided from the payload and
+      // the engine's dispatch marker, so not even the `sys_file` lookup runs.
+      expect(engine.calls.filter((c) => c.object === 'sys_file')).toHaveLength(0);
+    });
+
+    it('refuses on the FIRST row, so the remaining dispatches never run', async () => {
+      const engine = fakeEngine(threeArchived());
+      install(engine);
+      const seen: unknown[] = [];
+      // A second beforeUpdate handler, registered after ours, records how many
+      // per-row dispatches got through. One — the refusal aborts the fan-out.
+      engine.registerHook('beforeUpdate', (ctx: any) => {
+        seen.push(ctx?.dispatch?.index);
+      });
+
+      await expect(
+        driveMultiUpdate(engine, 'product', { archived: true }, { image: 'file_a' }),
+      ).rejects.toMatchObject({ code: 'FILE_FIELD_BULK_WRITE_REFUSED' });
+
+      expect(seen).toEqual([]);
+    });
+
+    it('refuses a multiple:true field carrying ids, and names it', async () => {
+      const engine = fakeEngine(threeArchived());
+      install(engine);
+
+      const err = await driveMultiUpdate(
+        engine,
+        'product',
+        { archived: true },
+        { gallery: ['file_a', 'file_b'] },
+      )
+        .then(() => null)
+        .catch((e) => e);
+
+      expect(err).toMatchObject({ code: 'FILE_FIELD_BULK_WRITE_REFUSED', status: 400 });
+      expect(err.fields).toEqual(['gallery']);
+    });
+
+    // ── What is deliberately NOT refused ──────────────────────────
+    //
+    // The refusal is scoped to an id TOKEN reaching a file-class field,
+    // because that is the only shape that produces the shared id. Widening it
+    // to "any write that mentions a file field" would take away three writes
+    // that own nothing and are correct per row today.
+
+    it('still clears a file field in bulk, releasing each row its OWN file', async () => {
+      const engine = fakeEngine({
+        files: [
+          file({ ref_object: 'product', ref_id: 'p1', ref_field: 'image' }),
+          file({ id: 'file_b', ref_object: 'product', ref_id: 'p2', ref_field: 'image' }),
+        ],
+        records: {
+          product: [
+            { id: 'p1', image: 'file_a', archived: true },
+            { id: 'p2', image: 'file_b', archived: true },
+          ],
+        },
+      });
+      install(engine);
+
+      await driveMultiUpdate(engine, 'product', { archived: true }, { image: null });
+
+      // Nothing is shared here — each row released the file its own slot owned.
+      expect(engine.tables.sys_file.map((f) => [f.id, f.ref_id])).toEqual([
+        ['file_a', null],
+        ['file_b', null],
+      ]);
+    });
+
+    it('still writes a non-token value (an external URL) in bulk', async () => {
+      const engine = fakeEngine({
+        files: [file({ ref_object: 'product', ref_id: 'p1', ref_field: 'image' })],
+        records: { product: [{ id: 'p1', image: 'file_a', archived: true }] },
+      });
+      const { storage } = install(engine);
+
+      await driveMultiUpdate(
+        engine,
+        'product',
+        { archived: true },
+        { image: 'https://cdn.example.com/a.png' },
+      );
+
+      expect(engine.tables.product[0].image).toBe('https://cdn.example.com/a.png');
+      // The file the slot used to own is released, exactly as a single-record
+      // replacement would — no ownership was ever shared.
+      expect(engine.tables.sys_file[0]).toMatchObject({ id: 'file_a', ref_id: null });
+      expect(storage.download).not.toHaveBeenCalled();
+    });
+
+    it('still runs a bulk update that touches no file field, at zero sys_file cost', async () => {
+      const engine = fakeEngine({
+        files: [file({ ref_object: 'product', ref_id: 'p1', ref_field: 'image' })],
+        records: { product: [{ id: 'p1', image: 'file_a', name: 'old', archived: true }] },
+      });
+      install(engine);
+
+      await driveMultiUpdate(engine, 'product', { archived: true }, { name: 'new' });
+
+      expect(engine.tables.product[0]).toMatchObject({ name: 'new', image: 'file_a' });
+      expect(engine.tables.sys_file[0]).toMatchObject({ ref_id: 'p1', ref_field: 'image' });
+      expect(engine.calls.filter((c) => c.object === 'sys_file')).toHaveLength(0);
+    });
+
+    it('leaves an object with no file-class fields alone on a bulk write', async () => {
+      const engine = fakeEngine({
+        files: [file()],
+        records: { tag: [{ id: 't1', label: 'x', archived: true }] },
+      });
+      install(engine);
+
+      await driveMultiUpdate(engine, 'tag', { archived: true }, { label: 'file_a' });
+
+      expect(engine.tables.tag[0].label).toBe('file_a');
+      expect(engine.calls.filter((c) => c.object === 'sys_file')).toHaveLength(0);
+    });
+
+    it('leaves the SINGLE-record path byte-identical: the same write still copies and claims', async () => {
+      // The contrast case. Same payload, same already-owned file, one record
+      // instead of a predicate — this is the write the refusal must not touch.
+      const engine = fakeEngine({
+        files: [file({ ref_object: 'product', ref_id: 'p1', ref_field: 'image' })],
+        records: { product: [{ id: 'p1', image: 'file_a' }, { id: 'p2', archived: true }] },
+      });
+      const { storage } = install(engine);
+
+      const row = await driveUpdate(engine, 'product', 'p2', { image: 'file_a' });
+
+      expect(row!.image).not.toBe('file_a');
+      expect(storage.upload).toHaveBeenCalledTimes(1);
+      expect(engine.tables.sys_file[0]).toMatchObject({ id: 'file_a', ref_id: 'p1' });
+      const copy = engine.tables.sys_file.find((f) => f.id === row!.image)!;
+      expect(copy).toMatchObject({ ref_object: 'product', ref_id: 'p2', ref_field: 'image' });
     });
   });
 

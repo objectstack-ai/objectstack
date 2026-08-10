@@ -66,6 +66,10 @@ export * from './translation.zod';
 export * from './i18n-resolver';
 // Localized templates for the built-in field-validation messages (#3957).
 export * from './validation-message';
+// Localized templates for OPERATION-level data refusals (#7307) — a write the
+// engine declines as a whole, which names no field the caller supplied and so
+// cannot honestly live under `validation.field.*`.
+export * from './operation-message';
 export * from './translation-typegen';
 export * from './translation-skeleton';
 export * from './collaboration.zod';

@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
-import { strictUnknownKeyError } from '../shared/suggestions.zod';
+import { strictObject } from '../shared/strict-object';
 
 // Retired token prescription. Declared with `//` (never `/** */`) and ABOVE the
 // capability enum's JSDoc on purpose — see the placement note below: build-docs
@@ -18,7 +18,7 @@ const CRYPTO_HASH_RETIRED =
   + 'in the host (a Connector recipe, or an engine-side hook) instead. If you need hashing in '
   + 'a body, reopen it through the capability admission process — implementation first, the '
   + 'declaration lands with the implementation. '
-  + 'Run `os migrate meta --from 16` to rewrite it automatically.';
+  + 'Run `os migrate meta --from 16` to rewrite existing sources automatically.';
 
 /**
  * Capability tokens a script body may request.
@@ -86,47 +86,9 @@ export type HookBodyCapability = z.input<typeof HookBodyCapability>;
  * Keep declarations that carry JSDoc below the first exported symbol here.
  */
 
-/** Keys {@link ExpressionBodySchema} declares (drift-guarded by hook-body.test.ts). */
-const EXPRESSION_BODY_KEYS = ['language', 'source'] as const;
-
-/** Keys {@link ScriptBodySchema} declares (drift-guarded by hook-body.test.ts). */
-const SCRIPT_BODY_KEYS = ['language', 'source', 'capabilities', 'timeoutMs', 'memoryMb'] as const;
-
 const L2_ONLY_ON_L1 =
   'is an L2 key — it only applies to `language: "js"`. An expression body is a pure '
   + 'formula: it performs no IO, so it has nothing to grant and no sandbox to bound.';
-
-const expressionBodyUnknownKeyError = strictUnknownKeyError({
-  surface: 'this expression (L1) hook body',
-  knownKeys: EXPRESSION_BODY_KEYS,
-  aliases: { expression: 'source', formula: 'source', code: 'source', script: 'source' },
-  guidance: {
-    capabilities: `\`capabilities\` ${L2_ONLY_ON_L1}`,
-    timeoutMs: `\`timeoutMs\` ${L2_ONLY_ON_L1}`,
-    memoryMb: `\`memoryMb\` ${L2_ONLY_ON_L1}`,
-  },
-  history: 'Until #4001 these were dropped silently.',
-});
-
-const scriptBodyUnknownKeyError = strictUnknownKeyError({
-  surface: 'this sandboxed JS (L2) hook body',
-  knownKeys: SCRIPT_BODY_KEYS,
-  aliases: {
-    capability: 'capabilities',
-    caps: 'capabilities',
-    permissions: 'capabilities',
-    timeout: 'timeoutMs',
-    timeoutms: 'timeoutMs',
-    memory: 'memoryMb',
-    memorymb: 'memoryMb',
-    code: 'source',
-    script: 'source',
-    body: 'source',
-  },
-  history:
-    'Until #4001 these were dropped silently — the body still ran, just not under the '
-    + 'limits or grants that were written.',
-});
 
 /**
  * L1 — Pure expression body.
@@ -139,11 +101,22 @@ const scriptBodyUnknownKeyError = strictUnknownKeyError({
  * { "language": "expression", "source": "input.amount > 1000 && input.status == 'open'" }
  * ```
  */
-export const ExpressionBodySchema = z.object({
+export const ExpressionBodySchema = strictObject(
+  {
+    surface: 'this expression (L1) hook body',
+    aliases: { expression: 'source', formula: 'source', code: 'source', script: 'source' },
+    guidance: {
+      capabilities: `\`capabilities\` ${L2_ONLY_ON_L1}`,
+      timeoutMs: `\`timeoutMs\` ${L2_ONLY_ON_L1}`,
+      memoryMb: `\`memoryMb\` ${L2_ONLY_ON_L1}`,
+    },
+    history: 'Until #4001 these were dropped silently.',
+  },
+  {
   language: z.literal('expression'),
   /** Formula-engine expression. Pure, side-effect-free. */
   source: z.string().min(1).describe('Formula expression source'),
-}, { error: expressionBodyUnknownKeyError }).strict().describe('L1 expression body — pure formula, no IO');
+}).describe('L1 expression body — pure formula, no IO');
 export type ExpressionBody = z.input<typeof ExpressionBodySchema>;
 
 /**
@@ -201,7 +174,26 @@ export type ExpressionBody = z.input<typeof ExpressionBodySchema>;
  * }
  * ```
  */
-export const ScriptBodySchema = z.object({
+export const ScriptBodySchema = strictObject(
+  {
+    surface: 'this sandboxed JS (L2) hook body',
+    aliases: {
+      capability: 'capabilities',
+      caps: 'capabilities',
+      permissions: 'capabilities',
+      timeout: 'timeoutMs',
+      timeoutms: 'timeoutMs',
+      memory: 'memoryMb',
+      memorymb: 'memoryMb',
+      code: 'source',
+      script: 'source',
+      body: 'source',
+    },
+    history:
+      'Until #4001 these were dropped silently — the body still ran, just not under the '
+      + 'limits or grants that were written.',
+  },
+  {
   language: z.literal('js'),
   /** Function body source (NOT a full module — no top-level imports). */
   source: z.string().min(1).describe('Function body source'),
@@ -221,7 +213,7 @@ export const ScriptBodySchema = z.object({
    * Subject to engine support (isolated-vm enforces, quickjs approximates).
    */
   memoryMb: z.number().int().positive().max(256).optional().describe('Per-invocation memory cap (MB)'),
-}, { error: scriptBodyUnknownKeyError }).strict().describe('L2 sandboxed JS body — runs inside an isolated VM with declared capabilities');
+}).describe('L2 sandboxed JS body — runs inside an isolated VM with declared capabilities');
 export type ScriptBody = z.input<typeof ScriptBodySchema>;
 /** Post-parse shape of {@link ScriptBody} — defaults applied, transforms run (ADR-0122). */
 export type ScriptBodyParsed = z.infer<typeof ScriptBodySchema>;

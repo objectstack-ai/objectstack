@@ -1,5 +1,308 @@
 # @objectstack/console
 
+## 17.0.0-rc.6
+
+### Minor Changes
+
+- 19d8948: Console (objectui) refreshed to `09987b680d53`. Frontend changes in this range:
+
+  Derived from the changesets objectui declared over the range — 41 releasing of 45 changesets added across 57 non-merge commits; omitted: 4 release-nothing changesets, 13 commits carrying no changeset (they ship no package code).
+
+  - **minor** — **BREAKING** — `ApproveOutcome` / `RejectOutcome` are now derived from `@objectstack/spec` instead of hand-transcribed (objectui#3783). Same failure class #3220 cleared from the same file for `P… (objectui `d9ce38529`)
+  - **minor** — **BREAKING** — Retire the `capability-multiselect` field widget name, which existed only on the docs-site registration path and which nothing ever stamped (objectui#3308, ADR-0049 enforce-or-rem… (objectui `ecae40064`)
+  - **patch** — `record:details` section editor now offers the `name` i18n anchor (objectui `2937bcf7d`)
+  - **patch** — 相关列表 Add 选择器兑现 `add.picker.filter`:作者限定的候选范围现在真的生效 (objectui `c2ecbaed9`)
+  - **patch** — The plan card's "Building…" badge follows the console UI locale, like every other label on it (objectui#3837) (objectui `b3439f420`)
+  - **patch** — `record:related_list`: an `add` without `add.picker` no longer takes the whole related list down. (objectui `acc34c57b`)
+  - **patch** — 修复 `objectui dev` 生成的临时 app 的 CSS 管线:整套从 Tailwind 3 迁到 Tailwind 4 (objectui `8277053bd`)
+  - **patch** — Backfill the last 17 missing locale keys and both remaining template-key families, emptying the call-site key ratchet (objectui#3546, slice seven — final) (objectui `f9faa7d62`)
+  - **patch** — `preview.draftBar` speaks one second person in `es` — the draft-preview banner no longer switches from tú to usted when a Spanish user publishes (#3844) (objectui `b750823f0`)
+  - **patch** — An empty `disabled` predicate no longer refuses to run the action (objectui#3848) (objectui `56ff0916e`)
+  - **patch** — Give `@object-ui/react-runtime`'s React peer range an upper bound: `peerDependencies.react` narrows from `>=18` to `^18.0.0 || ^19.0.0`, the spelling the other 30 react peers in t… (objectui `d11996ea5`)
+  - **patch** — 回填 `perm` + `home` 两命名空间 14 个缺失语言 key,十个语言包补齐(#3546 切片六) (objectui `e64a52ec3`)
+  - **patch** — `disabled: ''` no longer greys out the remaining five action surfaces (objectui#3849) (objectui `f0a625aa7`)
+  - **patch** — Generated temp apps now declare every package they import, at ranges anchored to this repo (objectui `c32323e1e`)
+  - **patch** — An action declaring `disabled: ''` is no longer greyed out forever (objectui#3842) (objectui `993336f7c`)
+  - **patch** — Backfill the `marketplace` and `preview` namespaces' 37 missing locale keys plus the `marketplace.disclosure.runtime.` template-key family (objectui#3546, slice five) (objectui `844d17fc9`)
+  - **patch** — Four spec keys the renderers already honoured are now discoverable from the published `inputs` (objectui `aca561a77`)
+  - **patch** — Export `hasDeclaredVisibilityGate` from the package barrel (objectui#3835) (objectui `d3e738af8`)
+  - **patch** — Server-declared actions declaring `visible: false` are now hidden instead of rendered as live buttons (objectui#3835) (objectui `d3e738af8`)
+  - **patch** — Backfill the `console` namespace's 41 missing locale keys plus the `console.ai.group.` template family (objectui#3546, slice four) (objectui `f5f874491`)
+  - **patch** — Grid row actions: the inline button budget is now spent on the primaries that actually render (objectui `14c59c0b9`)
+  - **patch** — `action:bar` member actions declaring `visible: false` are now hidden instead of rendered (objectui `794c497c5`)
+  - **patch** — Remove the scaffold's unused pinned icon dependency, and make its generated schema interface reachable (objectui `c85268256`)
+  - **patch** — Action-face member actions declaring `visible: false` are now hidden instead of rendered (objectui `b5980f471`)
+  - **patch** — data-objectstack: pass the server's `drillRanges` date-bucket drill scope through `queryDataset` (restores date drill-through) (objectui `376567890`)
+  - **patch** — `record:details` 的 `sections` 输入说明改为从 spec 形状派生的对象形,不再教已被退役的「Section IDs」 (objectui `4178d5a2e`)
+  - **patch** — data-objectstack: type `queryDataset`'s result `fields[]` as the spec's `AnalyticsResult.fields[]` element instead of a hand-written copy (objectui `d83f6b3de`)
+  - **patch** — Backfill the auth family's 54 missing locale keys — `auth` 26 + `oauth` 16 + `acceptInvitation` 12 (objectui#3546, slice three) (objectui `7864f0340`)
+  - **patch** — Row actions declaring `visible: false` are now hidden instead of rendered (objectui `97b63d761`)
+  - **patch** — `parseAiQuotaError` now reads the AI quota refusal code from all three shapes the cloud 429 producers use, instead of only the flat `error`-holds-the-code dialect. (objectui `2a54e860c`)
+  - **patch** — console: hold the environment list's create CTA with a skeleton until entitlements resolve, instead of showing a label that is about to be overwritten (objectui#3482, part of clou… (objectui `0ef94cae1`)
+  - **patch** — Dataset-bound metric cards honour their declared `colorVariant` (objectui#3359, objectstack#5010 ruling B) (objectui `c4c0ac897`)
+  - **patch** — Record page header action predicates now speak CEL, like every other action surface (objectui `e24d767e4`)
+  - **patch** — `record:highlights` publishes the `readonly` entry key, so an AI author can discover it from the manifest (objectui `7b3e04820`)
+  - **patch** — Fix saved list-view preferences never reading back (density, column widths, sort, hidden columns, inline edit) (objectui `7e2b7e94c`)
+  - **patch** — `BulkActionParam.options` entries now accept the widget config the renderer already forwards (objectui `d229dfa7b`)
+  - **patch** — Ask the view composer for a container's view identities instead of deriving `list.name || 'list'`, so the default list view's translated label resolves (objectui `b691f060e`)
+  - **patch** — Record detail pages: a header ⟳ that refreshes the record, its related lists and its tab counts in place — no browser reload (objectui `54233b14a`)
+  - **patch** — Resolve `_views` translation keys by the bare view name only — the prefixed full name is no longer a second candidate (objectui `32413ec24`)
+  - **patch** — Action params that inherit a field's options now keep the keys that field declared (objectui `fbc23e094`)
+  - **patch** — fix(plugin-grid): don't render a row "⋮" trigger that opens an empty menu (objectui `1a33b1aba`)
+
+  ⚠️ 2 of these carry a breaking change: 2 by the author's own breaking annotation in the changeset body — objectui declares no `major` inside a launch window (`scripts/check-changeset-no-major.mjs`). Each is marked **BREAKING** in the list above — read them before compiling the release record.
+
+  **In this console build, declared nowhere** — objectui merged 13 commits in this range with no `.changeset/*.md`. The code is inside the pin above and ships here, but nothing upstream declared them, so they appear in no objectui CHANGELOG and in no entry above. Listed by subject rather than counted, because a count cannot tell a dependency bump from a form-behaviour change (objectstack#6174); the upstream gate that would prevent this is objectui#3387.
+
+  - _(no changeset)_ docs(layout): page-header 的 Responsive Behavior 按 PageHeader 现状改写 Spacing 一行 (#3902) (#3915) (objectui `09987b680`)
+  - _(no changeset)_ docs(layout): align PageHeader Styling/Container with the code and make its demo use the component (#3786, #3787) (#3905) (objectui `50fa3766e`)
+  - _(no changeset)_ docs(scripts): 删除 scripts/README.md —— 一份无门禁覆盖、无入站链接的第二份清单 (#3882) (objectui `47f607854`)
+  - _(no changeset)_ fix(test): runner 的包级 test 入口指回仓根配置,不再落到 app 的 vite.config (#3746) (#3869) (objectui `39136cccb`)
+  - _(no changeset)_ ci(skills): skills 指南正文反引号里的仓内路径上门禁,豁免走双向陈旧检测的 baseline (#3735) (#3864) (objectui `74370641d`)
+  - _(no changeset)_ docs(ROADMAP): P1.12.3 / P1.16 九条同源漂移按现实改写 (#3738) (#3858) (objectui `6402e253f`)
+  - _(no changeset)_ docs(skills): console-development.md 顶部注记的搬家归因改成 04-21→04-23 的 commit 链,cccdf84d7 降为其中一步 (#3737) (#3856) (objectui `6422aa891`)
+  - _(no changeset)_ fix(scripts): check-i18n-en-drift 的显式 base 提为权威,解析不出即失败 (#3766) (#3821) (objectui `32bd84236`)
+  - _(no changeset)_ docs(layout): page-header 两处文档按组件实读收敛到 subtitle,删掉不存在的 breadcrumbs (#3785) (objectui `f9d70a72e`)
+  - _(no changeset)_ docs(ci): 去掉 check-lint-coverage.mjs 头注里的 object-ui 规则点数,并把守卫扩到该文件 (#3279) (#3784) (objectui `4028adfc3`)
+  - _(no changeset)_ fix(docs): 按清单校正 9 行 peer 陈述,并把断言加宽到整个 Peer Dependencies 区块 (#3750) (#3779) (objectui `00b9451d8`)
+  - _(no changeset)_ ci(changeset): 改了发版包 src/ 却没带 changeset 的 PR 一律失败,空 frontmatter 为显式豁免 (#3387) (#3769) (objectui `a4f837c7d`)
+  - _(no changeset)_ docs(hooks): guard-shared-stash header says 32 self-test cases, with the counting rule (#3721) (#3763) (objectui `dbc44b4be`)
+
+  <!-- adr-0087: not-required (no-migration-prescription) Neither break reaches a consumer of @objectstack/console, which publishes objectui's built SPA and exports no objectui type. capability-multiselect was registered only on registerFields(), whose sole caller is objectui's docs site, so the name was unreachable on the live registerAllFields() path and a field still carrying it degrades to its declared type renderer — the defined behaviour for an unregistered widget, with permission-facet-link unchanged as what is actually stamped. ApproveOutcome/RejectOutcome narrow a TypeScript type exported by @object-ui/plugin-chatbot, a package objectstack neither publishes nor re-exports; the removed ApproveOutcome.id was already undefined at runtime, so no shipped behaviour changes and there is nothing for the ledger to prescribe. -->
+
+  objectui range: `b1204af0a1f7...09987b680d53`
+
+- 379b749: Console (objectui) refreshed to `0cf8f0f70d10`. Frontend changes in this range:
+
+  Derived from the changesets objectui declared over the range — 24 releasing of 24 changesets added across 66 non-merge commits; omitted: 42 commits carrying no changeset (they ship no package code).
+
+  - **minor** — **BREAKING** — Reclaim the natural names `GestureType` and `GestureConfig` (objectui#3363). (objectui `e6fdbdcc4`)
+  - **minor** — **BREAKING** — Track the `@objectstack` family at `17.0.0-rc.5` (objectui#3560). (objectui `48132f7e6`)
+  - **patch** — metadata-admin: name the offending key when only one union member ever read the value (objectui `be9cd38ac`)
+  - **patch** — System Hub: a card count that failed to load no longer renders as `0` (objectui `c1a18ed99`)
+  - **patch** — Count System Hub's Organizations card through `sys_organization`, the object the framework actually registers — it asked for `sys_org`, which does not exist, so the card read `0`… (objectui `278f57c36`)
+  - **patch** — metadata-admin: name the offending column when `config.columns` is rejected (objectui `949b2f147`)
+  - **patch** — Declare the retired `system/{users,organizations,roles,positions}` console URLs as redirects onto the framework-owned system objects (objectui#3655). (objectui `9961df297`)
+  - **patch** — Point the last four navigation producers at the canonical metadata-admin routes instead of the deprecated `component/metadata` alias, removing a redirect hop from each (objectui#3… (objectui `d2fd044b7`)
+  - **patch** — `view.readonlyTooltip` — the tooltip on a view tab's read-only lock — is retranslated in the eight packs (ja/ko/de/fr/es/pt/ru/ar) that still described the retired "duplicate to c… (objectui `33526fd51`)
+  - **patch** — Send the console host's legacy URL redirects straight to the canonical metadata-admin routes instead of routing them through the deprecated `component/metadata/resource` alias (ob… (objectui `7883c0250`)
+  - **patch** — Match the built-in pseudo-routes on whole path segments, so a mistyped app name can no longer render a different app (objectui#3638). (objectui `5f752a089`)
+  - **patch** — Make the zero-app console's "Object Manager" / "Datasources" entries resolve, and give that branch a not-found screen instead of a blank one (objectui#3610). (objectui `fa3ba5bf1`)
+  - **patch** — Point the four remaining "Settings" senders at the system hub `/apps/setup/system` instead of the bare `/apps/setup` (objectui#3611). (objectui `6b3d47b34`)
+  - **patch** — Render the `/home` Administration group as a real group, so its nine system-administration entries are reachable (objectui#3609). (objectui `13b72c740`)
+  - **patch** — `console.objectView.systemViewReadonly` and `console.objectView.expandToPage` are translated in the eight packs that stored English for them, so a Japanese, Korean, German, French… (objectui `4dcd52abe`)
+  - **patch** — metadata-admin: restore per-field diagnostics when editing an invalid stored `view` (objectui `c993ff26a`)
+  - **patch** — Point the "System Settings" entries at the system hub `/apps/setup/system` instead of the bare `/apps/setup` (objectui#3590). (objectui `d1be43673`)
+  - **patch** — Converge dashboard widget `compareTo` on the executor's `{ kind, dimension? }` contract, and make the dataset path actually render a comparison (objectui `4bc6c2340`)
+  - **patch** — metadata-admin no longer false-rejects a stored `view` that has been pinned or reordered. The editor's live client-side validation judged BOTH the create and the edit draft with t… (objectui `4cf76ce45`)
+  - **patch** — The organization-management console is translatable. The 90 keys under `organization.*` — the org layout and its tabs, the members list, the whole invitation flow, organization se… (objectui `42ae5c62a`)
+  - **patch** — Complete `packages/runner/vite.config.ts`'s workspace alias table to the full transitive import closure, so `@object-ui/runner` boots and builds from the monorepo sources without… (objectui `03f25f7a3`)
+  - **patch** — Runner in-app navigation now carries the current query string across to the pushed URL instead of `pushState`-ing a bare path. Opening the Runner with `?api=<base>` and clicking a… (objectui `04fb8b8ab`)
+  - **patch** — The no-apps empty state's "Create Your First App" CTA now opens the app-creation flow instead of silently bouncing the user back to the landing page. It called `navigate('/create-… (objectui `9089d8503`)
+  - **patch** — The five locale keys behind #3546's eight no-fallback `t()` call sites are now defined in all ten packs, so the built-in-view toasts, the activity-timeline source link, the wizard… (objectui `6d762da7a`)
+
+  ⚠️ 2 of these carry a breaking change: 2 by the author's own breaking annotation in the changeset body — objectui declares no `major` inside a launch window (`scripts/check-changeset-no-major.mjs`). Each is marked **BREAKING** in the list above — read them before compiling the release record.
+
+  **In this console build, declared nowhere** — objectui merged 42 commits in this range with no `.changeset/*.md`. The code is inside the pin above and ships here, but nothing upstream declared them, so they appear in no objectui CHANGELOG and in no entry above. Listed by subject rather than counted, because a count cannot tell a dependency bump from a form-behaviour change (objectstack#6174); the upstream gate that would prevent this is objectui#3387.
+
+  - _(no changeset)_ docs(ROADMAP): P1.12 Routes/Tests 两条 PermissionManagementPage 记录按现实改写 (#3704) (#3714) (objectui `0cf8f0f70`)
+  - _(no changeset)_ test(scripts): gate version literals written into docs prose (#3711) (objectui `36bf20235`)
+  - _(no changeset)_ test(app-shell): pin what `invalid_value` at a union node means, and decline the relaxation (#3706) (objectui `f1310e40f`)
+  - _(no changeset)_ fix(react-runtime,sdui-parser,console): 补上三包声明了 MIT 却从未随包发布的许可证文本,并加门禁封死该类 (#3696, #3702) (#3703) (objectui `2267d6399`)
+  - _(no changeset)_ docs(ROADMAP): rewrite P1.12.2 + Permission Management to the post-#3673/#3699 reality (#3700) (#3705) (objectui `35e84b65f`)
+  - _(no changeset)_ test(scripts): 棘轮陈旧消息按实际成因分句,覆盖全部三条退休路径 (#3674) (#3701) (objectui `45cdd4cb4`)
+  - _(no changeset)_ chore(console): remove the orphaned SystemObjectViewPage + systemObjects dead code (#3672) (#3699) (objectui `b19f54f39`)
+  - _(no changeset)_ docs(cli): point the Node row at root engines, drop the ghost spec compatibility row (#3698) (objectui `d46b40324`)
+  - _(no changeset)_ docs(plugin-tree): add the `## License` section the other 36 published READMEs carry (#3664) (#3695) (objectui `3e601773e`)
+  - _(no changeset)_ docs(packages): retire the dead release-metadata §Compatibility block from 36 package READMEs (#3688) (objectui `4747344da`)
+  - _(no changeset)_ fix(cli,create-plugin): drop the `templates` files entry neither package has ever had (#3665) (#3687) (objectui `dcff16e06`)
+  - _(no changeset)_ docs(ci): type-check 作业行补两道 i18n 门禁,并把该表的钉粒度降到步骤级 (#3653) (#3683) (objectui `9cd84de2e`)
+  - _(no changeset)_ docs(agents): 补一条 prettier 假红护栏(#3682) (#3684) (objectui `074ec53d6`)
+  - _(no changeset)_ chore(deps): remove the unwired prettier devDependency (#3657) (#3681) (objectui `f953b5884`)
+  - _(no changeset)_ docs(runner): 按实测闭合 §Features 插件断言,三处 main.tsx 订正为 App.tsx (#3619) (#3652) (#3676) (objectui `0fcd57199`)
+  - _(no changeset)_ chore(deps): Bump mermaid from 11.16.0 to 11.16.1 (#3675) (objectui `2ce5c31f0`)
+  - _(no changeset)_ feat(scripts): en 文案改动必须由九个译文包同批跟改的门禁 (#3650) (#3659) (objectui `880e06905`)
+  - _(no changeset)_ docs(scripts): 按真实机制改写两处 Lychee 门禁描述,并删掉 judgeHref 重复注释 (#3587) (#3648) (#3656) (objectui `f4b828857`)
+  - _(no changeset)_ test(app-shell): 把 MetadataRedirectStub 同步回宿主实现,并用整链断言钉住转录真实性 (#3661) (#3671) (objectui `e98702190`)
+  - _(no changeset)_ test(scripts): gate that package.json `files` entries exist on disk (#3663) (#3667) (objectui `fe4d4da37`)
+  - _(no changeset)_ docs(runner): 把 README 两处开放集合的插件措辞按实测闭合 (#3632) (#3644) (objectui `c6acd7b8f`)
+  - _(no changeset)_ test(filter-parity): 给两处 spec 词表减法加排除项存活棘轮 (#3628) (#3640) (objectui `1e635d654`)
+  - _(no changeset)_ fix(plugin-tree): ship the MIT LICENSE the package.json files field already declares (#3647) (#3662) (objectui `dae1ac41e`)
+  - _(no changeset)_ docs(runner): §vite.config.ts 改写为指路真实文件 + 点名两个承重不变量 (#3643) (#3651) (objectui `93c261992`)
+  - _(no changeset)_ feat(scripts): check-doc-links 扫描面第四扩 packages/\*/README.md,并付清入场价的 11 条死链 (#3622) (#3649) (objectui `0d5da5394`)
+  - _(no changeset)_ docs(runner): §Add Custom Routes 改写为指向 Add Custom Schemas 的元数据路由说明 (#3618) (#3646) (objectui `54dd7ec1f`)
+  - _(no changeset)_ docs(runner): 删掉 Best Practices 里复活的环境变量配置面 (#3617) (#3633) (objectui `d9a03fe9a`)
+  - _(no changeset)_ docs(runner): README §Features 的 Hot Reload 按两个 loader 分路限定 (#3620) (#3634) (objectui `8098c8585`)
+  - _(no changeset)_ fix(docs,scripts): 清掉 9 条包 README 死链,并让链接门禁认站内绝对 URL (#3603) (#3629) (objectui `0e4ea07b2`)
+  - _(no changeset)_ test(types): drop 37 spec-retired DROPPED_SCHEMA_EXPORTS rows, add liveness ratchet (#3601) (#3623) (objectui `2904a7cd3`)
+  - _(no changeset)_ docs(runner): README §Development Workflow 按两个 loader 的真相改写第 1、3 步 (#3604) (#3621) (objectui `8d5418e59`)
+  - _(no changeset)_ docs(runner): 删掉 runner.mdx 的幽灵目录与「内置示例 schema」断言,重写 Package Information (#3577) (#3616) (objectui `616353ad1`)
+  - _(no changeset)_ docs(contributing): 按真实 root scripts 重写三条死的开发服务器命令 (#3596) (#3615) (objectui `ee3b42021`)
+  - _(no changeset)_ feat(scripts): check-doc-links 扫描面第三扩 CONTRIBUTING/ROADMAP/docs (#3572) (#3589) (objectui `6632114bc`)
+  - _(no changeset)_ docs(runner): 删掉 README 两处虚构能力面,修正 404 文档链接 (#3576) (#3602) (objectui `622c23082`)
+  - _(no changeset)_ docs(contributing): 按现状改写文档目录说明,站点源是 content/docs/ (#3584) (#3597) (objectui `74387e314`)
+  - _(no changeset)_ chore(scripts): remove dead start-app.mjs, fix stale MetadataLoader comment (#3591) (objectui `39477b03b`)
+  - _(no changeset)_ docs(contributing): 按现状改写链接门禁分工,换掉三条死的"正确示例"路由 (#3570) (#3585) (objectui `7a1a449c8`)
+  - _(no changeset)_ docs(runner): 记录 `api` 查询参数这一真实的元数据加载配置面 (#3537) (#3581) (objectui `632c07c5b`)
+  - _(no changeset)_ fix(tsconfig): 根 tsconfig.node.json 加 noEmit,堵住全仓排放 (#3574) (objectui `c35fed098`)
+  - _(no changeset)_ docs: 修正 CONTRIBUTING.md / ROADMAP.md 的 3 条死链 (#3545) (#3571) (objectui `d126607dc`)
+  - _(no changeset)_ fix(fields): 编辑弹窗 datetime/date 字段回显存量值 (#3565) (objectui `b785a77b3`)
+
+  objectui range: `7dfbeb704e1e...0cf8f0f70d10`
+
+  <!-- adr-0087: not-required (already-registered dashboard-widget-action-aria-removed) 本条目声明的两处破坏都落在 objectui 自家 npm 包的 TypeScript 导出面（@object-ui/types / core / react / mobile 的类型重命名与 re-export 移除），而 @objectstack/console 发布的是按 pin SHA 构建的冻结 SPA 产物、不转发这些类型入口，所以没有需要新登记的元数据迁移。区间内唯一触及元数据作者面的处方是 dashboard.widgets[] 的 actionUrl/actionType/actionIcon/aria 改为具名报错并附 os migrate meta --from 16 —— 那是 objectstack 自己 protocol-17 的改动，已由 packages/spec/src/conversions/registry.ts 的 dashboard-widget-action-aria-removed 登记（surface 逐字覆盖这四个键，toMajor 17，带 apply 与 fixture），并列在 packages/spec/src/migrations/registry.ts step17 的 conversionIds 中；该条目在 merge base 上即已存在，本 PR 未新增任何台账条目。 -->
+
+- 7fa2aae: Console (objectui) refreshed to `8aad9fd50b16`. Frontend changes in this range:
+
+  Derived from the changesets objectui declared over the range — 61 releasing of 61 changesets added across 67 non-merge commits; omitted: 6 commits carrying no changeset (they ship no package code).
+
+  - **minor** — Build and publish `@object-ui/fields/style.css` — the subpath the package has always declared and never shipped (objectui `b19162d62`)
+  - **minor** — fix(timeline): the timeline binds to the date axis the view actually declares (#3129) (objectui `bd863fe49`)
+  - **minor** — Give composite and grouped field widgets a real accessible name: the form renderer now associates its label by IDREF for widgets that declare `labelling: 'group'`, instead of emit… (objectui `c3b01a71c`)
+  - **minor** — `PageComponentSchema.dataSource` now reaches every object-bound block, not just `list-view` — and `element:record_picker` stops discarding `view` (objectstack#6953). (objectui `5bfaabde0`)
+  - **minor** — **BREAKING** — fields: remove the docs-demo registration path (`registerFields` + `createFieldRenderer`), and host the docs field examples in a real form (objectui `65bb513dc`)
+  - **patch** — Action-face predicates written against the canonical `record.` root now evaluate (objectui `8aad9fd50`)
+  - **patch** — The console no longer reads `/meta/*` before it knows whether it has a session, and a failed request now says which request failed (objectui `41d602274`)
+  - **patch** — Run `sys_approval_request`'s server-declared decision actions on the business record page, and retire the hard-coded two-button approval path (objectui#3055). (objectui `99782f961`)
+  - **patch** — The inbox popover now spells out what the bell badge is made of (objectui `8c60819a6`)
+  - **patch** — `page:card` publishes `children` instead of the retired `body`, and `page:section` / `page:footer` / `page:sidebar` publish the `children` slot they render (objectui `0ef9dfd8b`)
+  - **patch** — Register `approvals:inbox` as a component ref, and stop sending Home's "pending approvals" card into the setup app (objectstack#7231). (objectui `28c38567b`)
+  - **patch** — Create forms now open with the object schema's declared `defaultValue`s (objectui `f0c9a9042`)
+  - **patch** — Fix `objectui init` scaffolding an app that renders neither components nor styles. (objectui `85fb95bf5`)
+  - **patch** — `objectui doctor` now diagnoses Tailwind 4 instead of Tailwind 3 (objectui `59df371f7`)
+  - **patch** — `objectui init` now versions the project it scaffolds against the CLI that wrote it, and stops writing a `tailwind.config.js` Tailwind 4 never reads. (objectui `0a09793f2`)
+  - **patch** — The Studio RLS editor no longer authors the retired `rowLevelSecurity[].priority` key (objectstack#7130) (objectui `5419f552a`)
+  - **patch** — Studio's widget config panel no longer authors the retired `actionUrl` widget key (objectui `c1e1e6b41`)
+  - **patch** — Resolve a `select` field declared `multiple: true` to the `field:multiselect` widget, so the object form's visible label actually names the chip picker it renders (objectui#3986). (objectui `11c1e71e8`)
+  - **patch** — Name the `InspectorComboField` trigger: the visible label now owns it, and an anonymous combo no longer compiles (objectui#3997). (objectui `1037e1a3f`)
+  - **patch** — `object-timeline` and `record:line_items` now apply the filter / sort / row cap they are given, so a named `dataSource.view` narrows them instead of contributing nothing (objectui `523be4820`)
+  - **patch** — `plugin-map` 加载时不再向控制台打印 `Registering object-map...` (objectui `9ad21b6c4`)
+  - **patch** — `navigation-renderer` 的 `items` 声明为 `required: true` —— 校验器不再放过必崩的节点 (objectui `f3b2874e1`)
+  - **patch** — Group-labelled field widgets now consume the host label's IDREF in their readonly and zero-option states, so the visible label names something there too (objectui `c97a45e8c`)
+  - **patch** — The `div` deprecation notice is now reported once per module load, not once per render (objectui#3965) (objectui `0fa5e4da9`)
+  - **patch** — Metadata-admin inspectors: the shared text / number / select field labels now name their control (objectui `dffeeefb7`)
+  - **patch** — Built-in `select` fields: the form's label, validation message and required state now reach the control (objectui `0cbdca888`)
+  - **patch** — `PageComponentSchema.dataSource` now reaches the remaining object-bound public blocks: `object-gantt` / `object-timeline` / `object-map` / `object-pivot` / `object-master-detail-f… (objectui `022002aba`)
+  - **patch** — Page block inspector: the input hints inside the properties panel follow the session's language (objectui `65d6c0783`)
+  - **patch** — `BulkActionDialog` required params: the control now announces the required state, and the visual `*` stays out of its accessible name (objectui `18c42c65f`)
+  - **patch** — `registerLayout()` 的 `inputs` 声明面与渲染器实现对齐 —— 校验器不再对正确写法报假诊断 (objectui `6bd6a4d76`)
+  - **patch** — A form-hosted `multiselect` field is now NAMED by its visible label. It was the residual of objectui#3961: that issue's probe audited six widgets and fixed them, and re-running th… (objectui `d8a0be424`)
+  - **patch** — fix(metadata-admin): page block inspector chrome follows the locale (objectui `708aaf8e4`)
+  - **patch** — `record:related_list` — the declared `filter` reaches the query, and the Add button answers to the same gate as its dialog (objectui `c4768a760`)
+  - **patch** — `ActionParamDialog` boolean params: the dialog now owns the control id, so the checkbox is named once instead of twice (objectui `cdc0e44c8`)
+  - **patch** — Blank predicates and non-predicate values are no longer gates, at the last three entries that still judged them (objectui#3955, objectui#3957, objectui#3960) (objectui `0109f5418`)
+  - **patch** — `page-header` 注册补 `isContainer: true` —— 校验器不再对文档承诺的 children 写法报 `not-a-container` (objectui `82f8dfffd`)
+  - **patch** — Page block inspector: the PROPERTIES panel's curated field labels now follow the session locale instead of always rendering English (objectui `62c644168`)
+  - **patch** — An empty predicate is no longer a declared gate anywhere (objectui#3850, objectui#3862) (objectui `ab3ad4f3f`)
+  - **patch** — fix(fields): `BooleanField` uses the control id its host hands down, so a boolean field's visible label is really associated with the switch (objectui `ea41a595a`)
+  - **patch** — `de` approvals inbox no longer shows two quote typographies on one screen (objectui `69becd2d1`)
+  - **patch** — `ChartContainer`'s min-size fallback survives a consumer-supplied `style` (objectstack#7026) (objectui `a7e39a8b2`)
+  - **patch** — `grid.import.transform` is now translated in ko / de / fr / es / pt / ru / ar instead of served as English (objectui `b14ab3afe`)
+  - **patch** — `UserFilters` preset tab buttons no longer submit an enclosing form; all six buttons declare `type="button"` (objectui `cb5e32d73`)
+  - **patch** — `@object-ui/layout` no longer tells bundlers it has no side effects while registering components at load time (objectui#3899) (objectui `876e3f74e`)
+  - **patch** — fix(core): stop re-wrapping an already-`${…}` predicate, so action-face `visible` / `disabled` finally honour it (objectui#3871) (objectui `1d723e30c`)
+  - **patch** — `grid.import` saved-mapping copy is now translated in ko / de / fr / es / pt / ru / ar instead of served as English (objectui `ac2139ccd`)
+  - **patch** — metadata-admin: an unresolvable visibility-predicate path now fails OPEN, loudly (objectstack#6936) (objectui `ebb579dbb`)
+  - **patch** — Dashboard metadata's `chartConfig` presentation keys now take effect for the first time (objectui `230ffd875`)
+  - **patch** — fix(actions): forward `bodyShape` end-to-end so a declared body wrap is honoured (objectui `c2fd1223a`)
+  - **patch** — Context selectors: picking an option the instant the dropdown fills no longer snaps back to the first one (objectui `2c632d94e`)
+  - **patch** — `datetime` action params are usable in the Console for the first time — the dialog now POSTs the zoned ISO instant the platform requires instead of a shape the validator rejects (objectui `d518a905a`)
+  - **patch** — `PageComponentSchema.dataSource` is now consumed instead of discarded — a `list-view` page component can reference a **saved view by name** for the first time, and writing the bin… (objectui `e06810eed`)
+  - **patch** — `address` widget: the ZIP box now reads and writes `postalCode`, the part name the platform stores (objectui `0186cdc26`)
+  - **patch** — `userFilters` tabs: the `allowAddTab` button now adds a tab instead of doing nothing (objectstack#5236) (objectui `cf5be4ec2`)
+  - **patch** — `percent` / `progress` cells now give the NUMBER shrink priority over the decorative bar (objectstack#5066) (objectui `f4b97c85a`)
+  - **patch** — German pack: the 20 values that closed the German opening quote with an ASCII straight quote now close it with `“` (objectui `5e524950d`)
+  - **patch** — fix(actions): forward `bodyExtra` end-to-end through the action chain (objectui `7e5bb5d4e`)
+  - **patch** — Make metadata-form visibility predicates work again in the Setup/Studio admin engine: `SchemaForm` now reads the canonical `visibleWhen` key, falling back to the deprecated `visib… (objectui `7a197e7c5`)
+  - **patch** — Honour all three `AppContextSelectorSchema.persist` values in app context selectors: `'query'` (the default) writes and reads the URL query parameter only, `'session'` writes and… (objectui `d86b41ced`)
+  - **patch** — The AI plan / confirm cards send the agent text in the CONVERSATION's language, not the console UI's (objectui#3896) (objectui `99ba5fbd7`)
+  - **patch** — `condition: false` now actually prevents the action from executing (objectui#3872) (objectui `67198776b`)
+
+  ⚠️ 1 of these carries a breaking change: 1 by the author's own breaking annotation in the changeset body — objectui declares no `major` inside a launch window (`scripts/check-changeset-no-major.mjs`). Each is marked **BREAKING** in the list above — read them before compiling the release record.
+
+  **In this console build, declared nowhere** — objectui merged 6 commits in this range with no `.changeset/*.md`. The code is inside the pin above and ships here, but nothing upstream declared them, so they appear in no objectui CHANGELOG and in no entry above. Listed by subject rather than counted, because a count cannot tell a dependency bump from a form-behaviour change (objectstack#6174); the upstream gate that would prevent this is objectui#3387.
+
+  - _(no changeset)_ docs(guide): teach the Tailwind 4 CSS-first setup on theming / troubleshooting / quick-start (#4060) (objectui `eda7fe984`)
+  - _(no changeset)_ fix(schema-catalog): grid 示例的列数键 cols → columns —— 3/4 列示例不再静默渲染成 2 列 (#4001) (#4008) (objectui `34a00bf29`)
+  - _(no changeset)_ fix(scripts): decide test type-check coverage from the resolved tsconfig program, not from text (#4004) (objectui `94d1d8294`)
+  - _(no changeset)_ fix(site): Schema Catalog 卡片外壳去 button 化,示例预览不再嵌套按钮 (#3903) (#3964) (objectui `53b7b88af`)
+  - _(no changeset)_ docs(layout): align app-shell Header Bar / Content Area numbers with AppShell.tsx (#3914) (#3945) (objectui `fd6dd2d61`)
+  - _(no changeset)_ fix(site): Playground 注册 layout 组件，并删掉两个非依赖的 transpilePackages 死条目 (#3942) (objectui `137a1121d`)
+
+  <!-- adr-0087: not-required (no-migration-prescription) The one declared-breaking entry in this range is objectui `65bb513dc`, which removes two TypeScript exports from the `@object-ui/fields` npm package — `registerFields()` and `createFieldRenderer()`, a docs-demo-only registration wrapper whose only caller was objectui's own documentation site. Nothing about it reaches an ObjectStack author: `@objectstack/console` publishes a frozen prebuilt SPA (`files: ["dist", …]`, and its sole `exports` entry is `./package.json`), so it forwards no `@object-ui/fields` module entry point and neither removed export is reachable through this package at all. No `packages/spec` schema, authorable metadata key or protocol surface changes in the range, so there is no metadata rewrite for `objectstack migrate meta` to prescribe and therefore no ADR-0087 ledger entry to write or to name. The retired-key items elsewhere in the list above (`rowLevelSecurity[].priority` via objectstack#7130, the `actionUrl` widget key, `page:card`'s `body` slot) run the other way: they are objectui CEASING to author keys that ObjectStack retired and registered in its own PRs, so they add no prescription here either. This bump adds no ledger entry and claims none. -->
+
+  objectui range: `09987b680d53...8aad9fd50b16`
+
+- 24d22f4: Console (objectui) refreshed to `92c0b1f403f7`. Frontend changes in this range:
+
+  Derived from the changesets objectui declared over the range — 13 releasing of 16 changesets added across 29 non-merge commits; omitted: 3 release-nothing changesets, 13 commits carrying no changeset (they ship no package code).
+
+  - **minor** — `DatasetResultField` is now `@objectstack/spec`'s `AnalyticsResult.fields[]` element itself, not a hand-written restatement of it (objectui `e9011318f`)
+  - **minor** — fix(fields,plugin-form): stop the inline child grid from collapsing `datetime`/`time` columns onto the `date` control (objectui `1bd6faa61`)
+  - **patch** — `ObjectChart`'s category option-color / dimension-label probe now rides the host's authenticated fetch (`SchemaRendererContext.apiFetch`) instead of the bare global `fetch`. (objectui `bcd3e0219`)
+  - **patch** — Align 43 inline `defaultValue` strings with the `en` pack, and make the call-site gate enforce it (objectui#3810) (objectui `297534b78`)
+  - **patch** — Fix `objectui init`'s scaffold failing its own `npm run build`, and put the third generator under the real `tsc` gate (objectui `64cda47e7`)
+  - **patch** — `element:record_picker.filter` is now discoverable from the published `inputs` (objectui `bfdf3d419`)
+  - **patch** — Make the generated temp app pass the strict `tsconfig.json` the generator writes beside it, and gate it with a real `tsc` (objectui `9b9fa4961`)
+  - **patch** — List row Edit/Delete, bulk delete and related-list CRUD now run the caller's own permission, not just the object's API exposure (objectui#4096) (objectui `aeb8424ba`)
+  - **patch** — metadata-admin: wire client-side Zod validation for `sharing_rule`, `translation` and `connector` (objectui#3561) (objectui `877385a76`)
+  - **patch** — `evalRowPredicate`: the fail-closed report now names the engine's failure reason, and the ROW always wins over host scope (objectui#3792, objectui#3796) (objectui `6bb454ac0`)
+  - **patch** — Move the generator templates' dependency ranges onto the repo's current ones (objectui `c29ceffb8`)
+  - **patch** — A required field whose `defaultValue` is a runtime token is submittable from a create form (objectui `8497579db`)
+  - **patch** — `object-grid` publishes the filter key it actually reads: `filter`, singular (objectui#4041) (objectui `9154d9e90`)
+
+  **In this console build, declared nowhere** — objectui merged 13 commits in this range with no `.changeset/*.md`. The code is inside the pin above and ships here, but nothing upstream declared them, so they appear in no objectui CHANGELOG and in no entry above. Listed by subject rather than counted, because a count cannot tell a dependency bump from a form-behaviour change (objectstack#6174); the upstream gate that would prevent this is objectui#3387.
+
+  - _(no changeset)_ docs(data-objectstack): document the real headless surface, not a phantom React API (#4129) (objectui `92c0b1f40`)
+  - _(no changeset)_ fix(scripts): rewrite demo imports by usage, and clear the 106 stale ones (#4116) (objectui `e9ab52f90`)
+  - _(no changeset)_ docs(data-objectstack): describe the real dependency contract, not a peer one (#3781) (#4127) (objectui `1b6188d41`)
+  - _(no changeset)_ chore: release packages (#3598) (objectui `cfeb378b5`)
+  - _(no changeset)_ fix(console-starter): close the vite alias table over its real import graph (#4103) (objectui `0af9826ab`)
+  - _(no changeset)_ chore(deps-dev): bump the dev-dependencies group across 1 directory with 7 updates (#4088) (objectui `1592b2124`)
+  - _(no changeset)_ test(e2e): the console smoke test asserts a boot state the app actually settles in (#4086) (#4095) (objectui `361dfdc01`)
+  - _(no changeset)_ chore(deps): bump next from 16.2.12 to 16.3.0 (#4094) (objectui `47737ecb3`)
+  - _(no changeset)_ chore(deps): bump lucide-react from 1.28.0 to 1.29.0 (#4091) (objectui `a49a3a008`)
+  - _(no changeset)_ chore(deps): bump shiki from 4.3.1 to 4.4.2 (#4090) (objectui `ed5964304`)
+  - _(no changeset)_ chore(deps): bump maplibre-gl from 6.1.0 to 6.2.0 (#4092) (objectui `9920ae2d3`)
+  - _(no changeset)_ chore(deps): bump react-hook-form in the react group (#4089) (objectui `49396b524`)
+  - _(no changeset)_ chore(deps): bump the patch-updates group with 10 updates (#4087) (objectui `d897b74bc`)
+
+  objectui range: `8aad9fd50b16...92c0b1f403f7`
+
+### Patch Changes
+
+- 0c49b50: Console (objectui) refreshed to `b1204af0a1f7`. Frontend changes in this range:
+
+  Derived from the changesets objectui declared over the range — 8 releasing of 8 changesets added across 22 non-merge commits; omitted: 14 commits carrying no changeset (they ship no package code).
+
+  - **patch** — Anchor the scaffold's build-side `devDependencies` to this repo's real toolchain, and pin the whole generated manifest against drift (objectui `e473b6c29`)
+  - **patch** — fix(data-table): don't render a row overflow ("⋮") trigger that opens an empty menu (objectui `7ed3360dc`)
+  - **patch** — Show the `compareTo` comparison in a dataset pivot cross-tab instead of dropping it (objectui `02eb44490`)
+  - **patch** — data-objectstack: type `queryDataset(selection)` as the spec's `DatasetSelection` instead of a hand-written copy (objectui `5f08c052d`)
+  - **patch** — Point the `sys-objects` navigation entries at the canonical metadata-admin route instead of the `system/metadata/object` alias, removing a redirect hop from each click (objectui#3… (objectui `b7b05da7f`)
+  - **patch** — create-plugin: make the scaffolded plugin's own test suite runnable (objectui `f4f42b4ae`)
+  - **patch** — Accept React 19 in `@object-ui/plugin-report`'s peer range, the last UI package still declaring React 18 alone (objectui#3690). (objectui `3b1f888e5`)
+  - **patch** — Point System Hub's Permissions card — both its link and its count — at `sys_permission_set`, closing the last of the five `system/*` navigation targets (objectui#3655). (objectui `cc95c2c31`)
+
+  **In this console build, declared nowhere** — objectui merged 14 commits in this range with no `.changeset/*.md`. The code is inside the pin above and ships here, but nothing upstream declared them, so they appear in no objectui CHANGELOG and in no entry above. Listed by subject rather than counted, because a count cannot tell a dependency bump from a form-behaviour change (objectstack#6174); the upstream gate that would prevent this is objectui#3387.
+
+  - _(no changeset)_ docs(create-plugin): 按 route B 收缩到不漂移的部分,产物一律指向 buildPluginFiles() (#3715) (#3760) (objectui `b1204af0a`)
+  - _(no changeset)_ test(scripts): assert every peer-line restatement against its own manifest (#3717) (#3751) (objectui `0c28a0720`)
+  - _(no changeset)_ fix(runner): 删掉 vite 别名表里指向不存在包目录的 data-objectql 条目 (#3747) (objectui `5a297c3cd`)
+  - _(no changeset)_ docs(ci): delete the unpinned .github/WORKFLOWS.md duplicate inventory, move what was true into the pinned guide page (#3724) (#3745) (objectui `28364bdd9`)
+  - _(no changeset)_ ci(docs): fail OPEN when the Build Docs path gate cannot compute its diff (#3723) (#3744) (objectui `b1a67e0f6`)
+  - _(no changeset)_ docs(skills): point console-development.md's 13 relocated symbols at their real paths (#3730) (#3734) (objectui `8ad6070fb`)
+  - _(no changeset)_ docs(ROADMAP): P1.12/P1.16 的 MetadataManagerPage 铺与 Total 计数按现实改写 (#3712) (#3732) (objectui `3835d121c`)
+  - _(no changeset)_ docs(skills): rewrite console-development.md to the post-cccdf84d reality and sync its eval (#3713) (#3729) (objectui `4e93e40d7`)
+  - _(no changeset)_ docs: 清偿 #3711 门禁记账里属这三单的 8 处版本失真,并同步收缩 ledger (#3726) (objectui `fbf7d6d01`)
+  - _(no changeset)_ docs(runner): Error Boundaries 一条改为可达的 SchemaErrorBoundary (#3635) (#3725) (objectui `b887282cb`)
+  - _(no changeset)_ fix(fields): echo stored date values in the sub-grid's native date cells (#3718) (objectui `918888a30`)
+  - _(no changeset)_ docs(console): drop the objectstack.config.ts ghost, the dead app-creation entries, and the routing-table overreach (#3580) (objectui `15a0d366b`)
+  - _(no changeset)_ test(app-shell): 同步 pseudoRouteSegments 里的第二份 MetadataRedirectStub,并用整链断言钉住 (#3669) (#3691) (objectui `ae3bd96a1`)
+  - _(no changeset)_ ci: subscribe the four gate workflows to merge_group, and move ci/lint path filtering into the jobs (#3523 steps 1-2) (#3722) (objectui `f710fc4e3`)
+
+  objectui range: `0cf8f0f70d10...b1204af0a1f7`
+
 ## 17.0.0-rc.5
 
 ### Patch Changes

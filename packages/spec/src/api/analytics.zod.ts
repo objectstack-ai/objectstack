@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
-import { AnalyticsQuerySchema, CubeSchema } from '../data/analytics.zod';
+import { AnalyticsQuerySchema } from '../data/analytics.zod';
 import { BaseResponseSchema } from './contract.zod';
 import { retiredKey } from '../shared/retired-key';
 
@@ -88,13 +88,73 @@ export const GetAnalyticsMetaRequestSchema = lazySchema(() => z.object({
 }));
 
 /**
+ * A measure or dimension as `GET /analytics/meta` publishes it — the discovery
+ * projection, not the authoring definition.
+ *
+ * `name` is CUBE-QUALIFIED (`"<cube>.<key>"`), which is the form
+ * `/analytics/query` expects back in `measures[]` / `dimensions[]`; the
+ * unqualified key it was defined under is not published. `title` carries the
+ * definition's `label`, so it is the display name a dashboard renders.
+ *
+ * Deliberately narrower than the authoring definitions (`MetricSchema` /
+ * `DimensionSchema` in `data/analytics.zod.ts`): `sql`, `filters`,
+ * `description`, `granularities` and `format` are dropped by the projection and
+ * are NOT reachable through this endpoint (#6442).
+ *
+ * Module-local, and NOT exported as its own named schema: `CubeMeta` in
+ * `contracts/analytics-service.ts` is already THE name for this shape, so a
+ * second exported name would be the permanent synonym ADR-0122 D3 forbids AND a
+ * new dual-source export. `analytics.test.ts` binds the two at compile time.
+ */
+const cubeMetaMemberShape = () => z.object({
+  name: z.string().describe('Cube-qualified member name, `"<cube>.<key>"` — the spelling `/analytics/query` accepts'),
+  type: z.string().describe(
+    'Aggregation type for a measure (`AggregationMetricType`) or data type for a '
+    + 'dimension (`DimensionType`). Declared as a string rather than either enum '
+    + 'because the projection copies the value through verbatim and this one '
+    + 'shape serves both member kinds.',
+  ),
+  title: z.string().optional().describe('Display label, projected from the definition\'s `label`'),
+});
+
+/**
  * Meta Response
- * Returns available cubes, metrics, and dimensions.
+ *
+ * Describes the body `GET /api/v1/analytics/meta` actually returns: `data` is a
+ * BARE ARRAY of the `CubeMeta` discovery projection — not `{ cubes: Cube[] }`
+ * (#6442, ruled by the maintainer 2026-08-08 as "narrow the declaration").
+ *
+ * The previous declaration described a shape the endpoint has never served, in
+ * either implementation: `AnalyticsService.getMeta`
+ * (`service-analytics/src/analytics-service.ts`) and its `driver-memory` twin
+ * (`memory-analytics.ts`) both answer `Promise< CubeMeta[] >`, and
+ * `runtime/src/domains/analytics.ts` hands that array to `success()` verbatim,
+ * so it lands directly under `data`. A client written against the old
+ * declaration read `data.cubes` and got `undefined`; a client that validated a
+ * live response against this schema failed outright. `packages/spec` stated
+ * both shapes itself — the TS contract
+ * (`contracts/analytics-service.ts`, `getMeta(): Promise< CubeMeta[] >`) already
+ * agreed with the runtime, and this schema was the lone outlier.
+ *
+ * Zero runtime change: the wire body is untouched, only its declaration moves.
+ *
+ * **Return path if more keys are ever needed** (recorded with the ruling): add
+ * the key to the projection above — additive and backwards compatible. ⛔ Do NOT
+ * widen this endpoint back to full `CubeSchema` definitions: that would publish
+ * each cube's `sql` to every client, a capability expansion with no measured
+ * consumer pulling it.
  */
 export const AnalyticsMetadataResponseSchema = lazySchema(() => BaseResponseSchema.extend({
-  data: z.object({
-    cubes: z.array(CubeSchema).describe('Available cubes'),
-  }),
+  data: z.array(z.object({
+    name: z.string().describe('Cube name'),
+    title: z.string().optional().describe('Human-readable cube title'),
+    measures: z.array(cubeMetaMemberShape()).describe('Measures this cube accepts in `/analytics/query`'),
+    dimensions: z.array(cubeMetaMemberShape()).describe('Dimensions this cube accepts in `/analytics/query`'),
+  })).describe(
+    'Available cubes, each as the `CubeMeta` discovery projection — the cube name, '
+    + 'its title, and the measures/dimensions a client may name in a query. A bare '
+    + 'array: there is no `cubes` wrapper object, and no cube `sql` is published.',
+  ),
 }));
 
 // ==========================================
@@ -116,3 +176,4 @@ export type AnalyticsMetadataResponseParsed = z.infer<typeof AnalyticsMetadataRe
 export type AnalyticsSqlResponse = z.input<typeof AnalyticsSqlResponseSchema>;
 /** Post-parse shape of {@link AnalyticsSqlResponse} — defaults applied, transforms run (ADR-0122). */
 export type AnalyticsSqlResponseParsed = z.infer<typeof AnalyticsSqlResponseSchema>;
+export type GetAnalyticsMetaRequest = z.input<typeof GetAnalyticsMetaRequestSchema>;

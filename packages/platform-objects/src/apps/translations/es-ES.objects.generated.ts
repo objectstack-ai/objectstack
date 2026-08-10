@@ -2343,7 +2343,8 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
           success: "Correcto",
           failed: "Fallido",
           timeout: "Tiempo de espera agotado",
-          running: "En ejecución"
+          running: "En ejecución",
+          degraded: "Degradado"
         }
       },
       last_error: {
@@ -2380,7 +2381,8 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
           running: "En ejecución",
           success: "Correcto",
           failed: "Fallido",
-          timeout: "Tiempo de espera agotado"
+          timeout: "Tiempo de espera agotado",
+          degraded: "Degradado"
         }
       },
       started_at: {
@@ -2931,8 +2933,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         options: {
           global: "Global",
           tenant: "Inquilino",
-          user: "Usuario",
-          runtime: "Tiempo de ejecución"
+          user: "Usuario"
         }
       },
       user_id: {
@@ -3139,6 +3140,14 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       details: {
         label: "Details (JSON)",
         help: "JSON-encoded counts from the last run, for diagnostics."
+      },
+      deviation_observed_at: {
+        label: "Deviation Observed At",
+        help: "When this deployment last ADMITTED a value its own verified contract rejects, through an OS_ALLOW_LAX_* escape hatch. Deliberately does NOT clear verified_at: it withdraws only the irreversible half of what the certificate authorises — byte deletion stops, validation and tombstoning continue. Cleared by the next apply-mode run."
+      },
+      deviation_detail: {
+        label: "Deviation Detail (JSON)",
+        help: "JSON-encoded first counterexample behind deviation_observed_at (object, field, type, parse issue), so an operator can find the value that closed the irreversible gate."
       },
       created_at: {
         label: "Created At"

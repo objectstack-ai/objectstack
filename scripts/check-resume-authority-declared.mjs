@@ -26,8 +26,15 @@
 // Until #5561 the omission was not merely unnoticed, it was UNOBSERVABLE:
 // `ActionDescriptorSchema.resumeAuthority` carried `.default('any')`, so
 // `defineActionDescriptor` filled the key and produced a descriptor
-// byte-identical to an explicit `'any'`. #5561 removed that default, which is
-// what lets both this gate and the engine's registration warning exist.
+// byte-identical to an explicit `'any'`. #5561 step one removed that default,
+// which is what lets both this gate and the engine's registration warning exist.
+//
+// #5561 step two then flipped what an omission MEANS at run time: an undeclared
+// pausing type resolves to `'service'`, so the generic route refuses its pauses
+// instead of walking them. That raises this gate's stakes rather than changing
+// its rule -- an omission that used to ship a silent hole now ships a node whose
+// runs cannot be continued by the route its author probably intended. The rule
+// is still "state your intent"; the finding text names the new consequence.
 //
 // ## Why a repo gate ALONGSIDE the registration warning
 //
@@ -54,20 +61,26 @@
 //
 // ## What it cannot see (stated up front, not discovered later)
 //
-//   1. `supportsPause` is itself a declaration no execution path enforces
-//      (objectstack#5703): a run pauses because the executor's `execute()`
-//      returned `suspend: true`. An executor that suspends while leaving
-//      `supportsPause` false is fail-open and invisible BOTH here and to the
-//      registration warning. Keying on the author's own literal is what makes
-//      this gate decidable without a call graph; #5703 tracks the runtime half.
+//   1. An executor that suspends while leaving `supportsPause` false is invisible
+//      here and to the registration warning alike -- both key on the author's own
+//      literal, which is what makes this gate decidable without a call graph.
+//      That used to mean such an executor shipped a fail-open pause (#5703); as
+//      of objectstack#6667 the ENGINE refuses the suspension at its boundary
+//      instead, so the mismatch fails the run that produced it and the reader
+//      hears it from the run that broke rather than from this gate. The division
+//      of labour is deliberate: this gate judges declarations at authoring time,
+//      the engine judges behaviour at run time, and neither can see the other's
+//      subject.
 //   1b. **Test fixtures are deliberately out of scope.** The subject here is the
 //      SHIPPED node vocabulary — descriptors a real engine registers in a real
 //      deployment. A fixture registers into a throwaway engine and ships to
 //      nobody, and more decisively: an undeclared pausing descriptor is exactly
 //      what the registration warning's own tests must construct
-//      (`resume-authority-declaration.test.ts`), so gating fixtures would make
-//      the mechanism this gate co-exists with untestable. Three such fixtures
-//      exist today and all three are deliberate. (Note this is the mirror of
+//      (`resume-authority-declaration.test.ts`), and since step two so must the
+//      resume gate's own tests (`resume-authority-gate.test.ts`, which pins that
+//      an undeclared pause is refused). Gating fixtures would make both
+//      mechanisms untestable; every such fixture in the tree is deliberate and
+//      constructs the omission on purpose. (Note this is the mirror of
 //      `check-engine-double-contract.mjs`, which scans ONLY tests: each gate's
 //      scope is its subject, not a repo-wide sweep.)
 //   2. Descriptors assembled dynamically -- spread from a variable, built by a
@@ -233,13 +246,13 @@ function audit(scanRoots = DEFAULT_SCAN_ROOTS) {
       const named = d.type ? `'${d.type}'` : `the descriptor at line ${d.line}`;
       errors.push(
         `DECLARED: ${file}:${d.line} — node type ${named} declares supportsPause: true but never `
-          + 'declares resumeAuthority, so the #3801 resume gate treats every pause it creates as '
-          + 'raw-resumable through the generic resume route. Add the field to the descriptor: '
-          + "resumeAuthority: 'any' if that route IS the intended door (a screen's collected inputs, "
-          + "a signal wait's external producer), or 'service' if resuming is the tail of a decision "
-          + 'some service must authorize and record first (an approval). Both values are accepted here '
-          + '— only the silence is the finding, because an inherited value is one nobody chose, which '
-          + 'is how #3823 walked past an unrecorded approval decision.',
+          + 'declares resumeAuthority, so the #3801 resume gate REFUSES every pause it creates on the '
+          + 'generic resume route (an unclaimed pause is fail-closed since #5561 step two). Add the '
+          + "field to the descriptor: resumeAuthority: 'any' if that route IS the intended door (a "
+          + "screen's collected inputs, a signal wait's external producer), or 'service' if resuming is "
+          + 'the tail of a decision some service must authorize and record first (an approval). Both '
+          + 'values are accepted here — only the silence is the finding, because an inherited value is '
+          + 'one nobody chose, which is how #3823 walked past an unrecorded approval decision.',
       );
     }
   }
@@ -289,10 +302,10 @@ function report({ list = false, scanRoots = DEFAULT_SCAN_ROOTS } = {}) {
   if (errors.length) {
     for (const e of errors) console.error(`  x ${e}`);
     console.error(
-      '\nNote: supportsPause is itself a declaration nothing enforces at run time (#5703) — a run '
-        + 'pauses because execute() returned suspend: true. An executor that suspends while leaving '
-        + 'supportsPause false is fail-open and invisible to this gate AND to the engine\'s '
-        + 'registration warning; #5703 tracks that half.\n',
+      '\nNote: a run pauses because execute() returned suspend: true, not because a descriptor said '
+        + 'so. An executor that suspends while leaving supportsPause false is invisible to this gate '
+        + "AND to the engine's registration warning — since #6667 the engine refuses that suspension "
+        + 'at its boundary, so the mismatch fails the run instead of parking an unresumable one.\n',
     );
     console.error(`check-resume-authority-declared: ${errors.length} problem(s).\n`);
     process.exit(1);
@@ -308,7 +321,8 @@ function report({ list = false, scanRoots = DEFAULT_SCAN_ROOTS } = {}) {
   }
   console.log(
     `check-resume-authority-declared: OK — every pausing descriptor declares its resume authority `
-      + `(${declared}/${pausing}). supportsPause itself stays unenforced at run time (#5703).\n`,
+      + `(${declared}/${pausing}). A suspension from a type that declares supportsPause: false is `
+      + `refused by the engine at run time (#6667), not by this gate.\n`,
   );
 }
 

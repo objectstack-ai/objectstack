@@ -83,6 +83,11 @@
  * ```
  */
 
+// [#6615] The Postgres `"x" of relation "y"` phrase, owned once — see the
+// module docblock in `@objectstack/types` for the superstring hole it closes
+// and for why the exclusion's width deliberately differs from the extractor's.
+import { isRelationSubObjectPhrase } from '@objectstack/types';
+
 /** One "which errors mean X?" vocabulary, in the three forms drivers use. */
 interface DriverErrorSignature {
     /** `error.code` — Postgres SQLSTATE, or mysql2's symbolic name. */
@@ -91,6 +96,28 @@ interface DriverErrorSignature {
     readonly errnos: ReadonlySet<number>;
     /** `error.message` — the only signal SQLite-family drivers give. */
     readonly message: RegExp;
+    /**
+     * Optional **front-exclusion**, evaluated before any positive test (#6347).
+     *
+     * A message test can never exclude a *superstring*: once a legal phrase for
+     * X appears inside a longer phrase that means NOT-X, no amount of widening
+     * the X regex removes the match — the phrase really is in there. The only
+     * repair is to recognise the not-X shape first and stop. So this is a
+     * separate channel rather than another alternation in {@link message}.
+     */
+    readonly excludes?: {
+        /** SQLSTATEs / driver codes that positively mean "**not** this case". */
+        readonly codes: ReadonlySet<string>;
+        /**
+         * Message shapes that carry a legal match for this case as a substring.
+         *
+         * A predicate rather than a `RegExp` since #6615, so this channel can be
+         * satisfied by a shared, named question from `@objectstack/types` instead
+         * of a pattern this file owns alone. The phrase it tests is the same one
+         * `@objectstack/rest` and `@objectstack/service-analytics` read.
+         */
+        readonly matchesMessage: (message: string) => boolean;
+    };
 }
 
 /**
@@ -132,6 +159,27 @@ const ALREADY_EXISTS: DriverErrorSignature = {
  * 1" would be the wrong answer against a table that may be full of rows. So the
  * message test demands the word table/relation next to the phrase rather than
  * the phrase alone, and the code set carries only the table-scoped SQLSTATEs.
+ *
+ * That was not enough on its own, and #6347 is why. Postgres has **two**
+ * missing-column phrasings, one per direction:
+ *
+ * | path | phrase | SQLSTATE | matched the message test? |
+ * |:---|:---|:---|:---|
+ * | read (`SELECT`) | `column "bogus" does not exist` | 42703 | no |
+ * | write (`INSERT`/`UPDATE`/`ALTER`) | `column "label" of relation "sys_team" does not exist` | 42703 | **yes** |
+ *
+ * The write-path phrase contains a complete, legal missing-table phrase —
+ * `relation "sys_team" does not exist` — as a substring, so the table-scoped
+ * test above matched it and answered *benign* about an error the docblock two
+ * paragraphs up already named as one that must stay loud. The same holds for
+ * every other sub-object of a relation Postgres phrases this way, e.g.
+ * `constraint "uq_x" of relation "sys_team" does not exist` (42704). And
+ * code-first does not rescue it: {@link matchesDriverError} is a sequential OR,
+ * so a `code: '42703'` error simply falls past the two code lines and is
+ * decided by the message.
+ *
+ * Hence {@link DriverErrorSignature.excludes}: the not-a-table shapes are
+ * recognised FIRST, and recognition ends the question with `false`.
  */
 const MISSING_TABLE: DriverErrorSignature = {
     codes: new Set([
@@ -146,18 +194,66 @@ const MISSING_TABLE: DriverErrorSignature = {
      */
     message:
         /no such table|relation ["'`][^"'`]+["'`] does not exist|table ["'`][^"'`]+["'`] doesn'?t exist|unknown table/i,
+    excludes: {
+        /**
+         * Exactly the three SQLSTATEs the docblock above already names as
+         * must-stay-loud neighbours of `does not exist`. They are listed here
+         * rather than merely trusted to miss the message test, because two of
+         * them (42703 columns, 42704 constraints/triggers) have a phrasing that
+         * *does* hit it, and because a code is a fact where prose is a guess.
+         *
+         * Postgres-shaped on purpose: measured, neither MySQL
+         * (`Unknown column 'label' in 'field list'`) nor SQLite
+         * (`no such column: bogus`, `table t has no column named label`)
+         * phrases a sub-object failure so that a missing-table phrase falls out
+         * of it, so there is nothing there to exclude. Adding their codes would
+         * be surface with no defect behind it.
+         */
+        codes: new Set([
+            '42703', // undefined_column
+            '42704', // undefined_object — constraint, trigger, role, type, …
+            '3D000', // invalid_catalog_name — `database "x" does not exist`
+        ]),
+        /**
+         * `«sub-object» "x" of relation "y" …` — Postgres' phrasing for a
+         * failure about something *inside* a relation, which therefore says the
+         * relation itself is present. The two in-repo siblings that carry this
+         * phrase are `mapDataError` (`packages/rest`, #5352) and
+         * `service-analytics`'s missing-column subtraction (#6035/PR #6346).
+         *
+         * [#6615] All three now read one home — `@objectstack/types` — instead
+         * of three hand-kept copies, so the phrase can no longer be taught to
+         * the repo a fourth time or drift in one package only. The **width**
+         * difference that used to justify the copy is preserved and is the
+         * reason the home exports two functions rather than one: those two
+         * *extract* the column name to phrase a better error, so a miss costs a
+         * vaguer message; this one *excludes*, so a miss restores the
+         * corruption. {@link isRelationSubObjectPhrase} is therefore the wider
+         * question — it drops their `column`/`[a-z0-9_]+`/`does not exist`
+         * anchors: any sub-object, any quoted identifier, any verdict.
+         * Over-matching here only ever converts a benign verdict into a loud
+         * one, which is the direction this whole module already errs in.
+         */
+        matchesMessage: isRelationSubObjectPhrase,
+    },
 };
 
 /** How far to follow an `error.cause` chain — drivers wrap, but not deeply. */
 const MAX_CAUSE_DEPTH = 4;
 
 /**
- * The single matcher both predicates run on: code, then errno, then message,
- * then one step down the `cause` chain.
+ * The single matcher both predicates run on: exclusions, then code, then errno,
+ * then message, then one step down the `cause` chain.
  *
  * Unrecognised is always `false` — a benign verdict must be *earned*, never
  * defaulted to, because a false "benign" corrupts data while a false "real"
  * costs one error line.
+ *
+ * The exclusion runs at every node and, when it fires, returns `false` **without
+ * descending into `cause`** (#6347). Two reasons, both the conservative
+ * direction: an error that positively identifies as "a column of an existing
+ * relation" *is* that error, whatever it wraps; and stopping can only ever
+ * subtract benign verdicts, never add one.
  */
 function matchesDriverError(
     error: unknown,
@@ -166,7 +262,10 @@ function matchesDriverError(
 ): boolean {
     if (error === null || error === undefined || depth > MAX_CAUSE_DEPTH) return false;
 
-    if (typeof error === 'string') return signature.message.test(error);
+    if (typeof error === 'string') {
+        if (signature.excludes?.matchesMessage(error)) return false;
+        return signature.message.test(error);
+    }
     if (typeof error !== 'object') return false;
 
     const err = error as {
@@ -175,6 +274,12 @@ function matchesDriverError(
         message?: unknown;
         cause?: unknown;
     };
+
+    const excludes = signature.excludes;
+    if (excludes) {
+        if (typeof err.code === 'string' && excludes.codes.has(err.code)) return false;
+        if (typeof err.message === 'string' && excludes.matchesMessage(err.message)) return false;
+    }
 
     if (typeof err.code === 'string' && signature.codes.has(err.code)) return true;
     if (typeof err.errno === 'number' && signature.errnos.has(err.errno)) return true;
@@ -207,6 +312,10 @@ export function isSchemaAlreadyExistsError(error: unknown, depth = 0): boolean {
  * rows may well exist and simply were not seen; those return `false` and the
  * caller must report the consequence and give up rather than compute an answer
  * from data it never read (#4825).
+ *
+ * A failure about a **column** of a relation is never this case, in either of
+ * Postgres' two phrasings — the relation is right there in the message because
+ * it exists (#6347). See {@link MISSING_TABLE}'s `excludes`.
  *
  * @param error - The value thrown by a driver/engine read (`find`, `findOne`, …).
  * @param depth - Internal `cause`-chain recursion counter; callers pass nothing.

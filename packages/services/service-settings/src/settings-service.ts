@@ -7,6 +7,7 @@ import type {
   SettingsNamespacePayload,
   SettingsActionResult,
   SpecifierScope,
+  SpecifierValueDomain,
   SettingsChangeEvent,
   SettingsChangeHandler,
   SettingsUnsubscribe,
@@ -29,7 +30,17 @@ import {
   UnknownKeyError,
   UnknownNamespaceError,
 } from './settings-service.types.js';
-import { evaluateVisibility, referencedKeys } from './visibility-eval.js';
+import {
+  firstRejectedDomainMember,
+  knownValueDomain,
+  valueDomainPhrasing,
+} from './value-domains.js';
+import {
+  evaluateVisibility,
+  referencedKeys,
+  visibilitySource,
+  VisibilityParseError,
+} from './visibility-eval.js';
 
 const DEFAULT_OBJECT = 'sys_setting';
 
@@ -112,27 +123,101 @@ function firstRejectedOption(allowed: string[], value: unknown): { value: unknow
 }
 
 /**
- * The value bounds a specifier declares — `min`/`max` (numeric window) and
- * `minLength`/`maxLength` (string length window), as `SpecifierSchema` spells
- * them (#5932).
+ * The value bounds a specifier declares — `min`/`max` (numeric window),
+ * `step` (numeric grid) and `minLength`/`maxLength` (string length window), as
+ * `SpecifierSchema` spells them (#5932, #6199).
  */
 interface DeclaredBounds {
   min?: number;
   max?: number;
+  /**
+   * The grid spacing, from the `step` declared under `SpecifierSchema`'s
+   * "numeric bounds and step" comment (#6199). Only ever set to a FINITE
+   * POSITIVE number — see {@link declaredBounds} for why a `0`, a negative or a
+   * non-finite `step` declares no grid at all rather than an impossible one.
+   */
+  step?: number;
   minLength?: number;
   maxLength?: number;
 }
 
 /** A breached bound, in the form both call sites need to report it. */
 interface RangeViolation {
-  /** `FieldErrorCode`, ADR-0114 — the member that mirrors the breached property. */
-  code: 'min_value' | 'max_value' | 'min_length' | 'max_length';
-  /** `range` (numeric window) or `length` (character window) — picks the prose. */
-  kind: 'range' | 'length';
+  /**
+   * `FieldErrorCode`, ADR-0114 — the member that mirrors the breached property.
+   *
+   * The window codes are the property's own name (`min` → `min_value`). A grid
+   * breach has no such member, so it takes `invalid_value`, the catalog's
+   * declared slot for "rejected for a reason no other member names" — the same
+   * verdict `rest-server.ts` already reaches for Zod's `not_multiple_of`, which
+   * is this exact condition arriving from the other direction. Inventing a
+   * `not_multiple_of` member would be a `packages/spec` change, and the catalog
+   * is closed on purpose.
+   */
+  code: 'min_value' | 'max_value' | 'min_length' | 'max_length' | 'invalid_value';
+  /**
+   * `range` (numeric window), `step` (numeric grid) or `length` (character
+   * window) — picks the prose at both call sites.
+   */
+  kind: 'range' | 'step' | 'length';
   /** The declared window in machine form, for `FieldError.constraint`. */
   constraint: Record<string, unknown>;
   /** The declared window in prose (`min 6, max 64`), for the env log line. */
   declared: string;
+}
+
+/**
+ * Relative slack allowed when deciding whether a value sits ON the declared
+ * grid, as a fraction of the magnitudes involved (#6199).
+ *
+ * A grid check is `value === anchor + k * step` for some integer `k`, and in
+ * binary floating point that equation is almost never exactly true for the
+ * decimal grids people actually declare. `ai.temperature` declares `step: 0.1`;
+ * `0.7 / 0.1` is `6.999999999999999`, not `7`, so an exact modulo would reject
+ * a value the manifest's own default neighbourhood is made of. The tolerance is
+ * RELATIVE rather than absolute because the absolute error scales with the
+ * operands: at `step: 1e-6` an absolute `1e-9` would be a third of a step wide,
+ * and at `max: 1048576` (`ai.max_tokens`) it would be tighter than one ULP.
+ *
+ * `1e-9` sits deliberately between the two errors it must separate. A double
+ * carries ~2.2e-16 of relative precision, so a handful of arithmetic steps
+ * accumulate ~1e-15 at worst — six orders of magnitude of headroom below this
+ * bound. A genuine off-grid value is off by a fraction of a step: `0.15` on a
+ * `0.1` grid misses by `0.05`, which is `3e-1` relative — eight orders of
+ * magnitude above it. Nothing real lands in the gap.
+ *
+ * The direction of the remaining doubt is deliberate too. This gate is a
+ * TIGHTENING of a path that accepted everything yesterday, so where the
+ * arithmetic genuinely cannot tell (a value so large the grid is finer than the
+ * double's own spacing there), it accepts. Rejecting a legitimate write is the
+ * expensive mistake; letting one absurd-magnitude value through is not.
+ */
+const STEP_GRID_TOLERANCE = 1e-9;
+
+/**
+ * True when `value` sits on the grid `anchor + k * step` for some integer `k`,
+ * within {@link STEP_GRID_TOLERANCE} (#6199).
+ *
+ * The ANCHOR is the declared `min` when there is one, else `0` — the HTML
+ * step-base convention, and the one the vocabulary itself points at: `step`
+ * lives under `SpecifierSchema`'s `min`/`max` comment, and a `slider` declaring
+ * `min: 1, step: 2` means the odd numbers, not the even ones. Nothing in this
+ * repo declares a different base; the only other `multipleOf`-shaped rule
+ * anywhere (Zod's, mapped in `rest-server.ts`) is anchored at 0, which is the
+ * same convention with no `min` declared.
+ *
+ * The comparison happens in the VALUE domain, not the multiplier domain:
+ * `Math.abs(k - Math.round(k))` would measure the error as a fraction of a
+ * step, so its meaning would change with the grid's fineness. Measuring
+ * `value` against the nearest grid point keeps the tolerance a property of the
+ * numbers, which is what the floating-point error is a property of.
+ */
+function isOnStepGrid(value: number, anchor: number, step: number): boolean {
+  const k = Math.round((value - anchor) / step);
+  if (!Number.isFinite(k)) return true; // cannot judge — accept, per the posture above
+  const nearest = anchor + k * step;
+  const scale = Math.max(Math.abs(value), Math.abs(anchor), Math.abs(step));
+  return Math.abs(value - nearest) <= scale * STEP_GRID_TOLERANCE;
 }
 
 /**
@@ -144,8 +229,8 @@ interface RangeViolation {
  * superRefine *ties* an option table to exactly `select`/`radio`/`multiselect`
  * (it rejects those three without one), so "types that must declare a table"
  * and "types whose value is checked against it" are the same set and no third
- * list can drift. It ties `min`/`max`/`minLength`/`maxLength` to nothing —
- * doc comments say `number`/`slider` and `text`/`textarea`, but the schema
+ * list can drift. It ties `min`/`max`/`step`/`minLength`/`maxLength` to nothing
+ * — doc comments say `number`/`slider` and `text`/`textarea`, but the schema
  * accepts them on any specifier and only checks their ordering. Inventing a
  * type list here would therefore BE the third list, and it would recreate this
  * issue one level down: a `min` authored on a type not on my list would parse,
@@ -153,9 +238,23 @@ interface RangeViolation {
  * declared. The value's SHAPE decides applicability instead (see
  * {@link firstRangeViolation}), which is exactly how the `pattern` branch in
  * `validatePatch` has always worked.
+ *
+ * `step` (#6199) is admitted on a STRICTER test than the window bounds: finite
+ * AND positive. A window bound of `0` or `-3` is a perfectly meaningful window;
+ * a `step` of `0` or `-0.1` is not a grid at all — `anchor + k * 0` is a single
+ * point and a negative spacing names the same grid as its absolute value while
+ * reading as an author error. Such a declaration therefore records NO grid,
+ * which is the same disposition this function already gives a non-finite bound
+ * and the same one `registerManifest` gives an option-bearing specifier with no
+ * table: nothing to enforce, unchanged behaviour, never a refused write. It is
+ * also the posture #5204 settled for the declaration audit one level up —
+ * registration REPORTS, it never refuses — and there is nothing to report here,
+ * because a manifest that declares an impossible grid rejects no writes and
+ * misconfigures no deployment; it merely fails to constrain, which is exactly
+ * where every other specifier without a `step` already sits.
  */
 function declaredBounds(spec: {
-  min?: unknown; max?: unknown; minLength?: unknown; maxLength?: unknown;
+  min?: unknown; max?: unknown; step?: unknown; minLength?: unknown; maxLength?: unknown;
 }): DeclaredBounds | null {
   const out: DeclaredBounds = {};
   let any = false;
@@ -165,6 +264,10 @@ function declaredBounds(spec: {
       out[k] = v;
       any = true;
     }
+  }
+  if (typeof spec.step === 'number' && Number.isFinite(spec.step) && spec.step > 0) {
+    out.step = spec.step;
+    any = true;
   }
   return any ? out : null;
 }
@@ -204,14 +307,21 @@ function numericValue(value: unknown): number | null {
  * open a second implementation of the same comparison.
  *
  * A value that is not comparable against a declared window is left alone (a
- * non-numeric value under `min`/`max`, a non-string under
+ * non-numeric value under `min`/`max`/`step`, a non-string under
  * `minLength`/`maxLength`). Check ordering mirrors `record-validator.ts`'s
  * equivalent branches so the two report the same bound for the same value; a
  * value can breach only one side of a well-ordered window anyway, and
  * `SpecifierSchema` rejects `min > max` at parse time.
+ *
+ * The grid (`step`, #6199) is judged AFTER the window it lives inside, so a
+ * value that is both out of range and off grid is reported as out of range.
+ * That ordering is not cosmetic: the window is the coarser, more actionable
+ * fact, and `validatePatch` emits at most one `FieldError` per key — telling an
+ * author that `temperature: 40` misses the 0.1 grid, while true, buries that it
+ * is twenty times the declared maximum.
  */
 function firstRangeViolation(bounds: DeclaredBounds, value: unknown): RangeViolation | null {
-  const { min, max, minLength, maxLength } = bounds;
+  const { min, max, step, minLength, maxLength } = bounds;
 
   if (typeof min === 'number' || typeof max === 'number') {
     const n = numericValue(value);
@@ -229,6 +339,23 @@ function firstRangeViolation(bounds: DeclaredBounds, value: unknown): RangeViola
       if (typeof max === 'number' && n > max) {
         return { code: 'max_value', kind: 'range', constraint, declared };
       }
+    }
+  }
+
+  if (typeof step === 'number') {
+    const n = numericValue(value);
+    // The anchor is the declared `min` when there is one, else 0 — see
+    // {@link isOnStepGrid}. It travels in `constraint` alongside `step` because
+    // a client cannot reconstruct the grid from the spacing alone, and the
+    // specifier it came from may declare no `min` at all.
+    const anchor = typeof min === 'number' ? min : 0;
+    if (n !== null && !isOnStepGrid(n, anchor, step)) {
+      return {
+        code: 'invalid_value',
+        kind: 'step',
+        constraint: { step, ...(typeof min === 'number' ? { min } : {}) },
+        declared: anchor === 0 ? `step ${step}` : `step ${step} from ${anchor}`,
+      };
     }
   }
 
@@ -253,6 +380,68 @@ function firstRangeViolation(bounds: DeclaredBounds, value: unknown): RangeViola
   }
 
   return null;
+}
+
+/**
+ * A declared `pattern` in enforceable form (#6580): the source string as the
+ * manifest spelled it (for `FieldError.constraint` and the env log line) and
+ * the compiled `RegExp`. Compiled once and shared safely — `new RegExp(source)`
+ * takes no flags here, and a flagless RegExp's `test()` is stateless
+ * (`lastIndex` only advances under `g`/`y`).
+ */
+interface DeclaredPattern {
+  source: string;
+  re: RegExp;
+}
+
+/**
+ * The `pattern` this specifier declares as something enforceable, or `null`
+ * when it declares none — where "none" deliberately includes a declaration
+ * that does not compile.
+ *
+ * The invalid-RegExp tolerance is the write gate's own, hoisted verbatim: the
+ * `validatePatch` branch has always answered an uncompilable `pattern` with
+ * `re = undefined` ("invalid manifest pattern — don't block writes"), and it
+ * is the same disposition {@link declaredBounds} gives an impossible `step`
+ * (#6199): such a manifest rejects no values and misconfigures no deployment,
+ * it merely fails to constrain. Because BOTH doors obtain the declaration
+ * through this one function, the tolerance can no longer drift between them.
+ */
+function declaredPattern(pattern: unknown): DeclaredPattern | null {
+  if (typeof pattern !== 'string') return null;
+  try {
+    return { source: pattern, re: new RegExp(pattern) };
+  } catch {
+    return null; // invalid manifest pattern — nothing to enforce, never a refusal
+  }
+}
+
+/**
+ * The value, wrapped, when it is a string the declared pattern does not admit;
+ * `null` when the pattern has nothing to say about it.
+ *
+ * ONE comparison, shared by both paths that produce an effective value — the
+ * save path ({@link SettingsService.validatePatch}) and the env path
+ * ({@link SettingsService.effectiveEnvOverride}) — for the reason #5204 is on
+ * file and #5932's triage turned into a ruling: the same comparison living in
+ * one door only is how `PUT /api/settings/:ns` came to refuse the very value
+ * an `OS_*` override slid straight through (#6580). `pattern` was the last
+ * declared constraint family judged on one door.
+ *
+ * A non-string value is left alone: a `pattern` constrains character shape, so
+ * the value's SHAPE decides applicability — exactly how the write gate's
+ * branch has always behaved (`typeof value === 'string'`), and the same
+ * posture, same sentence, as `firstRangeViolation`'s length window. Policing
+ * the value's type is a different constraint (`invalid_type`) with a different
+ * owner.
+ *
+ * Returns a WRAPPER rather than a boolean for symmetry with
+ * {@link firstRejectedOption}: the caller reports the offending value, and the
+ * wrapper is the shape every family hands back at both call sites.
+ */
+function firstPatternMiss(declared: DeclaredPattern, value: unknown): { value: string } | null {
+  if (typeof value !== 'string') return null;
+  return declared.re.test(value) ? null : { value };
 }
 
 interface RegisteredManifest {
@@ -280,7 +469,8 @@ interface RegisteredManifest {
   optionTables: Map<string, string[]>;
   /**
    * Declared value bounds for every specifier that declares at least one of
-   * `min` / `max` / `minLength` / `maxLength`, keyed by specifier key (#5932).
+   * `min` / `max` / `step` / `minLength` / `maxLength`, keyed by specifier key
+   * (#5932, #6199).
    *
    * Precomputed for the same reason and read the same way as `optionTables`:
    * `get()` is the hottest path, and an ABSENT key means "this specifier
@@ -288,6 +478,29 @@ interface RegisteredManifest {
    * than "an empty window", which would reject everything.
    */
   bounds: Map<string, DeclaredBounds>;
+  /**
+   * Declared standard value domains (#5712), keyed by specifier key —
+   * recorded only for the domains this side can enforce (see
+   * `knownValueDomain`).
+   *
+   * Precomputed for the same reason and read the same way as `optionTables`:
+   * an ABSENT key means "no domain declared" — for an option-bearing type the
+   * #5131 exhaustive-options check stays the boundary, byte-for-byte unchanged
+   * behaviour — while a PRESENT key moves the enforcement boundary onto the
+   * standard's membership and degrades `options` to a UI convenience list.
+   */
+  valueDomains: Map<string, SpecifierValueDomain>;
+  /**
+   * Declared, compilable `pattern` for every specifier that has one (#6580),
+   * keyed by specifier key.
+   *
+   * Precomputed for the same reason and read the same way as `optionTables`:
+   * `get()` is the hottest path, and an ABSENT key means "nothing to enforce"
+   * — no pattern declared, or a declaration that does not compile (the write
+   * gate's own tolerance, see {@link declaredPattern}) — rather than "an
+   * impossible pattern", which would reject everything.
+   */
+  patterns: Map<string, DeclaredPattern>;
 }
 
 /**
@@ -441,6 +654,8 @@ export class SettingsService {
     const defaults = new Map<string, unknown>();
     const optionTables = new Map<string, string[]>();
     const bounds = new Map<string, DeclaredBounds>();
+    const valueDomains = new Map<string, SpecifierValueDomain>();
+    const patterns = new Map<string, DeclaredPattern>();
     const defaultScope = manifest.scope ?? 'tenant';
     for (const spec of manifest.specifiers) {
       if (!spec.key || LAYOUT_ONLY_TYPES.has(spec.type)) continue;
@@ -449,9 +664,24 @@ export class SettingsService {
       if (typeof spec.default !== 'undefined') defaults.set(spec.key, spec.default);
       // Declared bounds are recorded wherever they are declared — see
       // `declaredBounds` for why this is keyed on the declaration and the
-      // option table is keyed on the type (#5932).
+      // option table is keyed on the type (#5932), and why a `step` that is not
+      // a finite positive spacing records no grid at all (#6199).
       const declared = declaredBounds(spec);
       if (declared) bounds.set(spec.key, declared);
+      // A declared standard value domain (#5712). `knownValueDomain` filters to
+      // the members this side can enforce: `registerManifest` takes manifests
+      // as given (no Zod pass), and a misspelt domain on a hand-built manifest
+      // must fall back to unchanged behaviour — for an option-bearing type
+      // that is the #5131 exhaustive table — rather than either an
+      // unenforceable claim or an accept-everything hole.
+      const domain = knownValueDomain((spec as { valueDomain?: unknown }).valueDomain);
+      if (domain) valueDomains.set(spec.key, domain);
+      // The declared `pattern`, compiled once (#6580). `declaredPattern`
+      // carries the write gate's own tolerance — an uncompilable declaration
+      // records nothing to enforce — so an absent entry means unchanged
+      // behaviour at both call sites, never "reject everything".
+      const pattern = declaredPattern(spec.pattern);
+      if (pattern) patterns.set(spec.key, pattern);
       if (OPTION_BEARING_TYPES.has(spec.type)) {
         // A manifest with no option table cannot say what is legal. The spec
         // refuses that shape at parse time, but `registerManifest` takes
@@ -472,6 +702,8 @@ export class SettingsService {
       actions,
       optionTables,
       bounds,
+      valueDomains,
+      patterns,
     });
     this.auditEnvOverrides(manifest.namespace);
   }
@@ -497,10 +729,16 @@ export class SettingsService {
     const reg = this.registry.get(namespace);
     if (!reg) return;
     // Only the keys that declare something enforceable can be rejected, so only
-    // they are worth walking: an option table (#5131/#5204) or a value window
-    // (#5932). `effectiveEnvOverride` does the judging (and the reporting); the
-    // value it returns is of no interest here.
-    const enforceable = new Set([...reg.optionTables.keys(), ...reg.bounds.keys()]);
+    // they are worth walking: an option table (#5131/#5204), a value window
+    // (#5932), a standard value domain (#5712) or a pattern (#6580).
+    // `effectiveEnvOverride` does the judging (and the reporting); the value it
+    // returns is of no interest here.
+    const enforceable = new Set([
+      ...reg.optionTables.keys(),
+      ...reg.bounds.keys(),
+      ...reg.valueDomains.keys(),
+      ...reg.patterns.keys(),
+    ]);
     for (const key of enforceable) {
       this.effectiveEnvOverride(reg, namespace, key);
     }
@@ -534,7 +772,15 @@ export class SettingsService {
    * env half came to disagree with the save half in the first place. Both
    * families are judged at this one point, by the same helpers the save path
    * calls, and both produce the same verdict — an override that is not in force
-   * contributes no value and pins nothing.
+   * contributes no value and pins nothing. #6199 folded `step` into that same
+   * family rather than opening a third branch: it rides `DeclaredBounds` and
+   * `firstRangeViolation`, so it arrives on both paths at once by construction
+   * and cannot be the next constraint that is enforced on one door only.
+   * #6580 closed the set out: `pattern`, the LAST declared constraint family
+   * still judged on one door only, now arrives through the same shared helper
+   * the save path calls ({@link firstPatternMiss}), in the same family order
+   * the save path applies — options → pattern → valueDomain → bounds — so the
+   * two doors report the same family for the same value.
    */
   private effectiveEnvOverride(
     reg: RegisteredManifest,
@@ -547,15 +793,64 @@ export class SettingsService {
 
     const value = coerceEnvValue(envRaw, reg.defaults.get(key));
 
-    // A key with no declared table has nothing to enforce — unchanged behaviour.
-    const allowed = reg.optionTables.get(key);
-    if (allowed) {
-      const rejected = firstRejectedOption(allowed, value);
+    // Families are judged in the SAME order `validatePatch` judges them —
+    // options (when no domain is declared) → pattern → valueDomain → bounds —
+    // so a value that breaks several declarations is rejected for the same
+    // reason at both doors, not just rejected at both (#6580).
+    //
+    // A declared standard value domain (#5712) REPLACES the option table as
+    // the membership boundary: the standard's membership is what the override
+    // is judged against, and `options` is a UI convenience list this door does
+    // not consult. Judged here — the ONE decision point — for the reason #5204
+    // is on file: the same comparison in two places is how the env half came to
+    // disagree with the save half in the first place.
+    const domain = reg.valueDomains.get(key);
+    if (!domain) {
+      // A key with no declared table has nothing to enforce — unchanged
+      // behaviour (#5131's exhaustive-options semantics, untouched when no
+      // domain is declared).
+      const allowed = reg.optionTables.get(key);
+      if (allowed) {
+        const rejected = firstRejectedOption(allowed, value);
+        if (rejected) {
+          this.reportRejectedEnvOverride(reg, namespace, key, envName, rejected.value, {
+            what: 'is not a declared option for',
+            detail: `Allowed values: ${allowed.join(', ')}.`,
+            fix: 'one of the allowed values',
+          });
+          return null;
+        }
+      }
+    }
+
+    // The declared `pattern` (#6580) — the last declared constraint family
+    // that was judged on one door only. Judged by the same helper the save
+    // path calls ({@link firstPatternMiss}), in the same position it holds
+    // there: after the option table, before the domain membership and the
+    // value window. A key with no compilable pattern has nothing to enforce
+    // ({@link declaredPattern} — the write gate's invalid-RegExp tolerance,
+    // shared by construction).
+    const pattern = reg.patterns.get(key);
+    if (pattern) {
+      const miss = firstPatternMiss(pattern, value);
+      if (miss) {
+        this.reportRejectedEnvOverride(reg, namespace, key, envName, miss.value, {
+          what: 'does not match the declared pattern for',
+          detail: `Allowed values: strings matching /${pattern.source}/.`,
+          fix: 'a value matching the declared pattern',
+        });
+        return null;
+      }
+    }
+
+    if (domain) {
+      const rejected = firstRejectedDomainMember(domain, value);
       if (rejected) {
+        const { member, example } = valueDomainPhrasing(domain);
         this.reportRejectedEnvOverride(reg, namespace, key, envName, rejected.value, {
-          what: 'is not a declared option for',
-          detail: `Allowed values: ${allowed.join(', ')}.`,
-          fix: 'one of the allowed values',
+          what: `is not a valid ${member} for`,
+          detail: `Allowed values: any ${member} (e.g. '${example}').`,
+          fix: `a valid ${member}`,
         });
         return null;
       }
@@ -566,11 +861,22 @@ export class SettingsService {
     if (bounds) {
       const breach = firstRangeViolation(bounds, value);
       if (breach) {
-        this.reportRejectedEnvOverride(reg, namespace, key, envName, value, {
-          what: `is outside the declared ${breach.kind} for`,
-          detail: `Allowed ${breach.kind}: ${breach.declared}.`,
-          fix: `a value within the allowed ${breach.kind}`,
-        });
+        // A grid breach gets its own three fragments rather than being forced
+        // through the window template (#6199): "is outside the declared step"
+        // and "a value within the allowed step" are both false descriptions of
+        // what happened — the value can sit squarely inside every declared
+        // bound and still miss the grid, which is the whole point of the check.
+        this.reportRejectedEnvOverride(reg, namespace, key, envName, value, breach.kind === 'step'
+          ? {
+            what: 'does not sit on the declared step grid for',
+            detail: `Allowed values: ${breach.declared}.`,
+            fix: 'a value on the declared step grid',
+          }
+          : {
+            what: `is outside the declared ${breach.kind} for`,
+            detail: `Allowed ${breach.kind}: ${breach.declared}.`,
+            fix: `a value within the allowed ${breach.kind}`,
+          });
         return null;
       }
     }
@@ -1081,12 +1387,28 @@ export class SettingsService {
    * - `required` + visible + empty → rejected.
    * - `pattern` (text fields) + non-empty value that mismatches → rejected.
    * - `options` (`select`/`radio`/`multiselect`) + non-empty value outside
-   *   the declared table → rejected (`invalid_option`).
+   *   the declared table → rejected (`invalid_option`) — unless the specifier
+   *   declares a `valueDomain`, which moves the boundary (next bullet).
+   * - `valueDomain` (#5712) + non-empty value that is not a member of the
+   *   declared standard → rejected (`invalid_value`). The domain REPLACES the
+   *   option table as the membership boundary: `options` degrades to a UI
+   *   convenience list, so a value outside `options` but inside the domain is
+   *   accepted. Judged AFTER `pattern` — shape and membership narrow
+   *   independently and a value must satisfy both, but the shape breach is the
+   *   coarser, more actionable fact (same one-error-per-key ordering argument
+   *   as window-before-grid).
    * - `min` / `max` / `minLength` / `maxLength` + non-empty value outside the
    *   declared window → rejected (`min_value` / `max_value` / `min_length` /
    *   `max_length`, #5932).
-   * - All-null patches (namespace reset) and unparseable visibility
-   *   expressions skip validation rather than block the write.
+   * - `step` + non-empty numeric value that misses the declared grid
+   *   (`min + k * step`, or `k * step` where no `min` is declared) → rejected
+   *   (`invalid_value`, #6199).
+   * - All-null patches (namespace reset) skip validation rather than block the
+   *   write.
+   * - A `visible` predicate `evaluateVisibility` cannot parse → the write is
+   *   REFUSED (`invalid_value`, #7169). See §Unparseable `visible` below for
+   *   why this one is not lenient like its neighbours, and why it carries no
+   *   TOUCH gate.
    *
    * The TOUCH gate is what keeps the options check from being a regression
    * for existing workspaces: a value that pre-dates a manifest's current
@@ -1104,6 +1426,39 @@ export class SettingsService {
    * At most one `FieldError` per offending key: every branch above `continue`s
    * once it has spoken, so a client is handed the first constraint the value
    * broke rather than a pile it must rank itself.
+   *
+   * ## Unparseable `visible` — the one branch that fails CLOSED (#7169)
+   *
+   * Maintainer ruling, 2026-08-10: *"save-time validation must refuse a
+   * `visible` predicate the actual evaluator cannot parse — a silent skip of
+   * the `required` gate is the worst failure class this repo names."*
+   *
+   * Until then this branch read `catch { continue; // stay lenient }`, and the
+   * `continue` skipped the **whole specifier**. That is the asymmetry that
+   * justifies breaking ranks with the lenient neighbours listed above: an
+   * uncompilable `pattern` or a missing `options` table disables ONE check on
+   * ONE key, and the rest of the specifier is still judged. `visible` is the
+   * gate every other check hangs off, so an unparseable one switches off
+   * `required`, `options`, `pattern`, `valueDomain` and the value window at
+   * once — invisibly, with no diagnostic anywhere, for as long as the manifest
+   * stands.
+   *
+   * **No TOUCH gate here, deliberately.** The gate above exists for stored
+   * VALUES that pre-date a manifest's current constraints — data a workspace
+   * cannot fix from a settings page it would be locked out of. This is not a
+   * value fault: the defect is in the MANIFEST, it is the same for every
+   * workspace running that code, and the fix is a one-line edit by whoever
+   * ships the manifest. Gating it on touch would hide it again in exactly the
+   * shape #7169 measured — the console posts only its dirty keys, so a
+   * half-filled form never touches the empty `required` field whose predicate
+   * is broken, and the refusal would never fire on the incident it exists for.
+   * Resets still work: an all-null patch returns before this loop, so a
+   * namespace whose manifest is broken can always be cleared.
+   *
+   * The predicate source travels in `constraint.visible` and is NOT redacted
+   * for `encrypted` keys, unlike the value-bearing branches below: a `visible`
+   * expression is manifest content that `GET /api/settings/:ns` already serves
+   * to the console in full. It is the author's own text, never a stored secret.
    */
   private async validatePatch(
     namespace: string,
@@ -1140,21 +1495,48 @@ export class SettingsService {
       const type = String(spec.type ?? '');
       if (!key || LAYOUT_ONLY_TYPES.has(type)) continue;
 
+      const label = typeof spec.label === 'string' ? spec.label : key;
+
       let visible = true;
       let deps: string[] = [];
       if (typeof spec.visible !== 'undefined') {
         try {
           visible = evaluateVisibility(spec.visible, data);
           deps = referencedKeys(spec.visible);
-        } catch {
-          continue; // can't determine visibility — stay lenient
+        } catch (err) {
+          // Fail CLOSED (#7169) — see §Unparseable `visible` in the doc comment
+          // above for the ruling, the asymmetry with the lenient branches, and
+          // why there is no TOUCH gate on this one.
+          const source = visibilitySource(spec.visible) ?? String(spec.visible);
+          const detail = err instanceof VisibilityParseError
+            ? err.detail
+            : err instanceof Error ? err.message : String(err);
+          errors.push({
+            field: key,
+            // `invalid_value` is ADR-0114's declared slot for "rejected for a
+            // reason no other member names" — the same reading #5712 and #6199
+            // took. Nothing in the closed catalog names a manifest-side
+            // declaration fault, and inventing a member for one service's
+            // manifest format is precisely the friction that catalog is for.
+            code: 'invalid_value',
+            message:
+              `${label} declares a visibility predicate this service cannot evaluate: ${detail}. ` +
+              `The write is refused rather than accepted with this field's declared constraints ` +
+              `silently unenforced — fix the manifest's \`visible\` expression.`,
+            label,
+            // The predicate as a discrete value, so a client can name WHICH
+            // expression refused without parsing the sentence (`FieldError.
+            // constraint`, ADR-0114). Spelled `visible` — the manifest property
+            // it comes from — like every other constraint key here.
+            constraint: { visible: source },
+          });
+          continue;
         }
       }
       if (!visible) continue;
       if (!patchKeys.has(key) && !deps.some((d) => patchKeys.has(d))) continue;
 
       const value = data[key];
-      const label = typeof spec.label === 'string' ? spec.label : key;
       const empty =
         value === null || typeof value === 'undefined' ||
         (typeof value === 'string' && value.trim() === '');
@@ -1169,6 +1551,15 @@ export class SettingsService {
         continue;
       }
 
+      // A declared standard value domain (#5712) moves the enforcement
+      // boundary off the option table: `options` is a UI convenience list for
+      // a domain-bearing specifier, so the exhaustive check below is skipped
+      // and the domain's membership is judged instead (after `pattern`, in its
+      // own branch). `knownValueDomain` filters to enforceable members, so a
+      // misspelt domain on a hand-built manifest leaves the #5131 semantics
+      // in force rather than opening an accept-everything hole.
+      const domain = knownValueDomain(spec.valueDomain);
+
       // A `select`/`radio`/`multiselect` value must be a member of the option
       // table the manifest declares. Until this check existed the `options`
       // list was a front-end convention only — the console dropdown emitted
@@ -1176,7 +1567,7 @@ export class SettingsService {
       // so a script, a migration or AI-authored bootstrap code could write
       // `provider: 'sendgrid'` into a namespace that has no such provider and
       // the write would succeed silently, leaving each consumer to improvise.
-      if (!empty && OPTION_BEARING_TYPES.has(type)) {
+      if (!empty && OPTION_BEARING_TYPES.has(type) && !domain) {
         const allowed = declaredOptionValues(spec.options);
         // A manifest with no option table cannot say what is legal. The spec
         // refuses that shape at parse time, but `registerManifest` takes
@@ -1212,14 +1603,13 @@ export class SettingsService {
         }
       }
 
-      if (!empty && typeof spec.pattern === 'string' && typeof value === 'string') {
-        let re: RegExp | undefined;
-        try {
-          re = new RegExp(spec.pattern);
-        } catch {
-          re = undefined; // invalid manifest pattern — don't block writes
-        }
-        if (re && !re.test(value)) {
+      // Shared with the env path (#6580) — see `firstPatternMiss` for the
+      // string-shape applicability and `declaredPattern` for the
+      // invalid-RegExp tolerance (unchanged: an uncompilable manifest pattern
+      // never blocks writes).
+      if (!empty) {
+        const declared = declaredPattern(spec.pattern);
+        if (declared && firstPatternMiss(declared, value)) {
           const hint = typeof spec.description === 'string' ? ` ${spec.description}` : '';
           errors.push({
             field: key,
@@ -1228,7 +1618,45 @@ export class SettingsService {
             label,
             // The declared pattern, so a client can format its own message
             // rather than parsing ours (`FieldError.constraint`, ADR-0114).
-            constraint: { pattern: spec.pattern },
+            constraint: { pattern: declared.source },
+          });
+          continue;
+        }
+      }
+
+      // A declared standard value domain is enforced at save time (#5712).
+      // `pattern` has already spoken above — shape and membership narrow
+      // independently and a value must satisfy both — so what arrives here is
+      // shape-valid, and the question is purely whether the standard's
+      // membership admits it (`Mars/Olympus` is a shape-valid time zone that
+      // does not exist; `ZZ` matches `^[A-Za-z]{2}$` and is assigned to
+      // nobody). No `FieldErrorCode` member names a standard-domain breach, so
+      // it takes `invalid_value` — the catalog's declared slot for "rejected
+      // for a reason no other member names" (ADR-0114), the same verdict the
+      // step grid reached in #6199. `invalid_option` would be a lie about
+      // which set was consulted: the declared options are exactly the list a
+      // domain-bearing value may legitimately be outside of.
+      if (!empty && domain) {
+        const rejected = firstRejectedDomainMember(domain, value);
+        if (rejected) {
+          const offending = rejected.value;
+          const { member, example } = valueDomainPhrasing(domain);
+          // Same redaction rule as `invalid_option`, same reason: a domain
+          // member is not a secret, but `encrypted` is authorable on any
+          // specifier and this message travels back through the API and into
+          // logs.
+          const secret = reg.encryptedKeys.has(key);
+          const got = secret ? '' : ` Received '${String(offending)}'.`;
+          errors.push({
+            field: key,
+            code: 'invalid_value',
+            message: `${label} must be a valid ${member} (e.g. '${example}').${got}`,
+            label,
+            // The declared domain, spelled by the property it comes from
+            // (`FieldError.constraint`, ADR-0114), so a client can branch on
+            // WHICH membership refused without parsing the sentence.
+            constraint: { valueDomain: domain },
+            ...(secret ? {} : { value: String(offending) }),
           });
           continue;
         }
@@ -1245,6 +1673,17 @@ export class SettingsService {
       // (and negatives): the value reaches better-auth's password policy and
       // is honoured there, so the declaration was the only thing claiming a
       // floor existed and nothing was holding it.
+      //
+      // `step` (#6199) is the fifth and last of the value constraints
+      // `SpecifierSchema` declares, and it joins the family here rather than
+      // getting a branch of its own. The reading that settles it is the
+      // schema's own: `step` sits under the SAME "numeric bounds and step"
+      // comment as `min`/`max`, so it is authored as a bound and a declared
+      // bound binds. Read the other way — a pure `input[type=number]` arrow
+      // increment — it would have to have a UI consumer to be doing anything,
+      // and it has none: `step` had zero read points anywhere in this repo or
+      // in `objectui` when this branch was written, which is a declaration
+      // enforcing nothing rather than a declaration enforcing presentation.
       if (!empty) {
         const bounds = declaredBounds(spec);
         const breach = bounds ? firstRangeViolation(bounds, value) : null;
@@ -1259,7 +1698,9 @@ export class SettingsService {
             code: breach.code,
             message: breach.kind === 'length'
               ? `${label} must be within the declared length (${breach.declared}).${got}`
-              : `${label} must be within the declared range (${breach.declared}).${got}`,
+              : breach.kind === 'step'
+                ? `${label} must line up with the declared step (${breach.declared}).${got}`
+                : `${label} must be within the declared range (${breach.declared}).${got}`,
             label,
             // The declared window as discrete values, so a client composes its
             // own sentence instead of parsing ours (`FieldError.constraint`,

@@ -286,6 +286,52 @@
  * (#5526) keep their exact lowering, pinned as a control group in
  * `filter-normalizer-undefined-comparand.test.ts`.
  *
+ * # A field wrapper cannot MIX $-operators with non-$ members (#6444)
+ *
+ * The value-independent sibling of the #6386 defect, in the same function, ruled
+ * Option A (refuse) by the maintainer on 2026-08-08. A field constraint object
+ * that carries `$`-operator keys AND non-`$` keys at once used to compile its
+ * operators and silently DROP every non-`$` sibling — `fieldLeaves`'s
+ * `if (opKeys.length > 0) { …; return out; }` arm never looked at them, and the
+ * nested-relation flatten sits after that early return. Measured on
+ * `origin/main` (`1a53a0253`):
+ *
+ *   | `where`                            | normalized to                    | reading |
+ *   |---|---|---|
+ *   | `{d: {$eq: 1, nested: 'x'}}`       | `d equals [1]`                   | the `nested` conjunct vanished in silence |
+ *   | `{amount: {gte: 10, $lte: 20}}`    | `amount lte 20`                  | the missing-`$` typo: the LOWER BOUND silently gone |
+ *   | `{$not: {d: {$null: true, nested: 'x'}}}` | `NOT(d set AND d notSet)` | a contradiction that negates to TRUE — EVERY row |
+ *
+ * Row two is the likeliest producer — a dropped `$` is a canonical agent typo —
+ * and row three is the strangest: the #5146 guard was computed while the sibling
+ * still existed (`requireValue`), the sibling then vanished inside
+ * `fieldLeaves`, and the surviving conjunction was contradictory, so the
+ * negation widened to the whole dataset. All three WIDEN — the #3650 failure
+ * mode the note at {@link MONGO_TO_CUBE_OP}'s miss branch forbids in this very
+ * function.
+ *
+ * The refusal is {@link mixedFieldWrapperError} via
+ * {@link assertUnmixedFieldWrapper}, in this module's one envelope
+ * (`INVALID_FILTER` / 400, #5352). The message must do one thing more than the
+ * module's other refusals: the shape has TWO legitimate repairs answering two
+ * intents this module cannot tell apart — an operator missing its `$`
+ * (`gte` → `$gte`) and a nested-relation member that needs a wrapper of its own
+ * — so the message names the offending key(s) and shows BOTH rewrites (ruling
+ * requirement, #6444).
+ *
+ * Option B — flattening the non-`$` siblings as nested paths next to the
+ * operators — was REJECTED by the same ruling: it would compile the likely-real
+ * cause (a dropped `$`) into a predicate on a non-existent member `amount.gte`,
+ * turning a diagnosable mistake into a harder one.
+ *
+ * ⛔ What does not move: a wrapper that is ALL non-`$` keys keeps flattening to
+ * the dotted member (`{d: {nested: 'x'}}` → `d.nested`); a wrapper that is ALL
+ * `$`-operators compiles exactly as before; `$null` / `$exists` flag semantics
+ * (#5526 / #5332 / #5347) and {@link comparand} are untouched. The sibling door
+ * `read-scope-sql.ts` already fails closed on this exact shape
+ * (`compileField`'s non-`$`-key check) and is not touched — this change makes
+ * the two doors give one answer.
+ *
  * Row-result cover: `filter-operator-coverage.test.ts` for the operator
  * vocabulary, `native-sql-filter-logic-conformance.test.ts`, which runs the
  * SHARED combinator table (`FILTER_LOGIC_CASES`, #3774) that the SQL compiler,
@@ -294,9 +340,11 @@
  * deliberately does not carry (NULL handling, boolean identities),
  * `filter-array-lowering.test.ts` for the array door (#5334),
  * `filter-value-type-fidelity.test.ts` for what each comparand TYPE binds on both
- * consumers (#5526, carrying #5528's cases forward as end-to-end assertions), and
+ * consumers (#5526, carrying #5528's cases forward as end-to-end assertions),
  * `filter-normalizer-undefined-comparand.test.ts` for the `undefined` refusal and
- * its `null` control group (#6386).
+ * its `null` control group (#6386), and
+ * `filter-normalizer-mixed-wrapper.test.ts` for the mixed `$`/non-`$` wrapper
+ * refusal and its pure-shape control groups (#6444).
  */
 
 import { isFilterAST, parseFilterAST, VALID_AST_OPERATORS } from '@objectstack/spec/data';
@@ -366,6 +414,10 @@ const MONGO_TO_CUBE_OP: Record<string, string> = {
   $notContains: 'notContains',
   $startsWith: 'startsWith',
   $endsWith: 'endsWith',
+  // [#6520] The case-INSENSITIVE twin, ASCII fold only. A separate cube operator
+  // rather than a flag on `contains`, because the two compile to different SQL
+  // and one name would make the renderers guess which was meant.
+  $icontains: 'icontains',
 };
 
 /**
@@ -660,6 +712,98 @@ function assertDefinedComparands(field: string, spec: unknown): void {
 }
 
 /**
+ * [#6444, ruled Option A on 2026-08-08] A field wrapper mixing `$`-operator
+ * keys with non-`$` sibling keys.
+ *
+ * ONE wording whatever the mix (#5240 — one condition, one wording); only the
+ * field and the two key lists vary, because only those do. Where this message
+ * has to do MORE than the module's other refusals: the shape has two
+ * legitimate repairs answering two different intents, and the module cannot
+ * tell which one the author held — that inability is exactly why the shape is
+ * refused rather than read. So the message must present BOTH (ruling
+ * requirement):
+ *
+ *   - an OPERATOR missing its `$` — the canonical agent typo
+ *     `{amount: {gte: 10, $lte: 20}}` — repaired by the prefixed spelling
+ *     (`"gte" → "$gte"`);
+ *   - a NESTED-RELATION member that strayed into an operator wrapper —
+ *     repaired by giving it a wrapper of its own (`{ "d": { "nested": … } }`
+ *     compiles to the member `d.nested`), ANDed with the operator constraint
+ *     explicitly, since one JSON object cannot spell the same field key twice.
+ *
+ * Option B — flattening the sibling as a nested path beside the operators —
+ * was rejected by the same ruling: it would compile the missing-`$` typo into
+ * a predicate on a non-existent member `amount.gte`, converting a diagnosable
+ * mistake into a harder one.
+ */
+function mixedFieldWrapperError(field: string, opKeys: string[], nonOpKeys: string[]): Error {
+  const offending = nonOpKeys.map((k) => `"${k}"`).join(', ');
+  const rewrites = nonOpKeys.map((k) => `"${k}" → "$${k}"`).join(', ');
+  const example = nonOpKeys[0];
+  return invalidFilterError(
+    `[analytics] "${field}" mixes $-operator keys (${opKeys.join(', ')}) with non-$ sibling key(s) ` +
+    `${offending} in ONE field constraint — refusing to compile this filter. A $-prefixed key is an ` +
+    `OPERATOR and a bare key is a NESTED-RELATION member; the two readings of ${offending} lead to ` +
+    `different predicates and this module cannot tell which was meant, so any silent choice is a ` +
+    `guess. If an operator missing its "$" was meant — the usual authoring slip — spell it with the ` +
+    `prefix: ${rewrites}, as in { "${field}": { "$${example}": ... } }. If a nested-relation member ` +
+    `was meant, give it a wrapper of its OWN with no $ siblings — { "${field}": { "${example}": ... } } ` +
+    `compiles to the member "${field}.${example}" — and AND it with the operator constraint ` +
+    `explicitly: { "$and": [{ "${field}": { "$op": ... } }, { "${field}": { "${example}": ... } }] }. ` +
+    `This shape used to compile by silently DROPPING every non-$ sibling, and a dropped conjunct ` +
+    `does not narrow the query, it WIDENS it: the chart included rows the author excluded, with ` +
+    `nothing to read (#3650's failure mode, which this module refuses everywhere else). The sibling ` +
+    `door in this package (read-scope-sql.ts) already fails closed on this exact shape — one shape, ` +
+    `one answer (#6444).`,
+  );
+}
+
+/**
+ * [#6444] Refuse ONE field wrapper that mixes `$`-operator keys with non-`$`
+ * sibling keys — the value-independent sibling of {@link assertDefinedComparands}.
+ *
+ * What made the mix silent: {@link fieldLeaves}'s operator arm iterates
+ * `opKeys` only and returns, and the nested-relation flatten sits after that
+ * early return — so with even one `$` key present, every non-`$` sibling was
+ * simply never visited. Dropping a conjunct WIDENS (#3650), and inside a `$not`
+ * it did worse than widen by one conjunct: {@link nullGuardForFieldSpec} judged
+ * the wrapper while the sibling still existed (a non-`$` key never satisfies
+ * {@link operatorIsNullTotal}, so the disposition was `requireValue` or
+ * `allowNull`, never `none`), the sibling then vanished here, and for a
+ * null-predicate operator the surviving guard was CONTRADICTORY —
+ * `{$not: {d: {$null: true, nested: 'x'}}}` compiled to `NOT(d set AND d
+ * notSet)`, which is TRUE for every row. That same never-`none` fact is what
+ * guarantees the #5146 rewrite carries a mixed wrapper to this gate by
+ * reference instead of swallowing it — pinned in
+ * `filter-normalizer-mixed-wrapper.test.ts`'s rewrite block.
+ *
+ * ## Ordering against the neighbouring gates
+ *
+ * Runs in {@link fieldLeaves}'s wrapper arm, after the #5240 zero-operator
+ * refusal (disjoint by construction: `{}` has no keys of either kind) and
+ * after {@link assertDefinedComparands} at the function's entry — so
+ * `{d: {$eq: undefined, nested: 'x'}}` is refused as an undefined comparand,
+ * not as a mix. Both are refusals in the same envelope, so the REST face
+ * answers 400 either way; the ordering is pinned as a measured fact, not a
+ * contract.
+ *
+ * ## What is deliberately not judged here
+ *
+ * A wrapper that is ALL `$`-operators or ALL non-`$` members passes untouched —
+ * this gate moves the refusal set by exactly the mixed shape. Whether a non-`$`
+ * KEY is a real member of the modeled object is the schema's question at a
+ * different layer, not this compiler's.
+ */
+function assertUnmixedFieldWrapper(field: string, wrapper: Record<string, unknown>): void {
+  const keys = Object.keys(wrapper);
+  const opKeys = keys.filter((k) => k.startsWith('$'));
+  if (opKeys.length === 0) return;
+  const nonOpKeys = keys.filter((k) => !k.startsWith('$'));
+  if (nonOpKeys.length === 0) return;
+  throw mixedFieldWrapperError(field, opKeys, nonOpKeys);
+}
+
+/**
  * Compile one `field: value | { $op: … }` entry into its leaves.
  *
  * Multiple operators on one field AND together — the rule
@@ -700,6 +844,12 @@ function fieldLeaves(key: string, raw: unknown): NormalizedFilterNode[] {
         `shape refused on every backend.`,
       );
     }
+    // [#6444] A wrapper mixing $-operator keys with non-$ siblings is refused
+    // BEFORE the operator arm below gets to iterate `opKeys` only and return —
+    // that early return is exactly how the non-$ siblings used to vanish. See
+    // {@link assertUnmixedFieldWrapper} for the two-intent message contract and
+    // the `$not` interaction.
+    assertUnmixedFieldWrapper(key, wrapper);
     const opKeys = Object.keys(wrapper).filter((k) => k.startsWith('$'));
     if (opKeys.length > 0) {
       for (const opKey of opKeys) {

@@ -2,7 +2,7 @@
 
 import type { Plugin, PluginContext } from '@objectstack/core';
 import { resolveLocalizationContext } from '@objectstack/core';
-import type { IDataEngine, ISharingService } from '@objectstack/spec/contracts';
+import type { IDataEngine, II18nService, ISharingService } from '@objectstack/spec/contracts';
 import { SysAuditLog, SysActivity, SysComment } from './objects/index.js';
 // `sys_notification` was parked here "until that [ADR-0030] migration lands".
 // It has landed, so the contribution moved to @objectstack/service-messaging —
@@ -61,7 +61,7 @@ export class AuditPlugin implements Plugin {
     if (typeof (ctx as any).hook === 'function') {
       (ctx as any).hook('kernel:ready', async () => {
         try {
-          const i18n = ctx.getService<any>('i18n');
+          const i18n = ctx.getService<II18nService>('i18n');
           if (i18n && typeof i18n.loadTranslations === 'function') {
             const { AuditTranslations } = await import('./translations/index.js');
             for (const [locale, data] of Object.entries(AuditTranslations)) {

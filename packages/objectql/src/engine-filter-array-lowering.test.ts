@@ -29,19 +29,21 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import type {
   EngineAggregateOptions,
   EngineCountOptions,
-  EngineQueryOptionsParsed,
+  EngineQueryOptions,
 } from '@objectstack/spec/data';
 import { ObjectQL } from './engine.js';
 
 /**
  * [#4918] `FilterArray` on `where` is off-contract BY DECLARATION, and these
- * tests exist to drive it: `EngineQueryOptionsParsed.where` is a `FilterCondition` /
+ * tests exist to drive it: `EngineQueryOptions.where` is a `FilterCondition` /
  * `Record< string, unknown >`, which an array is not assignable to, because
  * `FilterArray` is INPUT-ONLY authoring sugar the spec deliberately excludes
  * (#5285). So a test that hands the engine one has to say so, and
- * `as unknown as EngineQueryOptionsParsed` is how: it names the contract being
+ * `as unknown as EngineQueryOptions` is how: it names the contract being
  * bypassed, keeps the rest of the call type-checked, and greps as an
- * intentional act — none of which a bare `as any` does.
+ * intentional act — none of which a bare `as any` does. (#6300 flipped the
+ * find/findOne parameter from `EngineQueryOptionsParsed` to the author-state
+ * `EngineQueryOptions`; the cast target follows the contract it names.)
  *
  * Deliberately NOT used for the malformed-COMPARAND cases below
  * (`{ stage: { $nin: 'won' } }`). Those are ordinary objects that `tsc`
@@ -49,8 +51,8 @@ import { ObjectQL } from './engine.js';
  * reason the runtime gate this file pins has to exist. Erasing them would hide
  * that they are type-legal, which is the point.
  */
-const asFilterArrayQuery = (where: unknown): EngineQueryOptionsParsed =>
-  ({ where }) as unknown as EngineQueryOptionsParsed;
+const asFilterArrayQuery = (where: unknown): EngineQueryOptions =>
+  ({ where }) as unknown as EngineQueryOptions;
 
 const deal = {
   name: 'deal',
@@ -155,7 +157,7 @@ describe('Door 2 lowers FilterArray to FilterCondition before the driver (#5158)
     engine = new ObjectQL();
     engine.registerDriver(rec.driver, true);
     await engine.init();
-    engine.registry.registerObject(deal as any);
+    engine.registry.registerObject(deal);
     await engine.insert('deal', { id: 'd1', stage: 'won', amount: 10, owner_id: 'u1' });
     await engine.insert('deal', { id: 'd2', stage: 'lost', amount: 20, owner_id: 'u2' });
     await engine.insert('deal', { id: 'd3', stage: 'won', amount: 30, owner_id: 'u1' });
@@ -517,10 +519,12 @@ describe('Door 2 lowers FilterArray to FilterCondition before the driver (#5158)
   it('a scalar on a NON-collection operator is untouched', async () => {
     await engine.find('deal', asFilterArrayQuery([['stage', '!=', 'won']]));
     expect(lastWhere()).toEqual({ stage: { $ne: 'won' } });
-    // String bounds on a range comparison stay legal — `FieldOperatorsSchema`
-    // declares `$gt` as number|Date|FieldReference, but ISO strings are what the
-    // showcase apps send and every backend accepts. This gate enforces the
-    // three list declarations, not the whole schema.
+    // String bounds on a range comparison stay legal, and since #5685 the
+    // declaration agrees: `FieldOperatorsSchema` now declares `$gt` as
+    // number|Date|string|FieldReference, matching the ISO strings the showcase
+    // apps send and every backend accepts. This gate still enforces only the
+    // three list declarations, not the whole schema — for cost, not because the
+    // schema disagrees.
     await engine.find('deal', asFilterArrayQuery([['stage', '>', '2026-01-01']]));
     expect(lastWhere()).toEqual({ stage: { $gt: '2026-01-01' } });
   });

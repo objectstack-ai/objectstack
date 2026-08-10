@@ -527,4 +527,117 @@ describe('[#5567] analytics LIKE compilers escape their comparand', () => {
       expect(sql).toMatch(/name LIKE \$\d+ ESCAPE \$\d+/);
     });
   });
+
+  /**
+   * [#6518] The dialect assumption `like-pattern.ts` now writes down, made
+   * FALSIFIABLE.
+   *
+   * #6518 moved the driver family off a plain `LIKE` — SQLite's folds ASCII
+   * case, MySQL's follows its collation, and #4706 Q2 = A rules the family
+   * case-SENSITIVE — while these three compilers kept `LIKE`. That is correct
+   * only because what they emit is Postgres-shaped, and on Postgres `LIKE` IS
+   * case-exact. A comment saying so rots silently; this block goes red.
+   *
+   * Two claims, and both have to hold for the file's reasoning to survive:
+   *
+   *   1. the emitted statement really is Postgres-shaped (`$N` placeholders,
+   *      `"double quoted"` identifiers) — so a change that started emitting for
+   *      SQLite or MySQL trips here first;
+   *   2. the `$contains` family compiles CASE-EXACTLY — no `ILIKE`, no
+   *      `LOWER()`, no fold of any kind wrapped around either operand.
+   *
+   * On `read-scope-sql.ts`'s output the second claim is a permission boundary,
+   * not a filter preference: a wider predicate there is ADR-0021 read-scope
+   * over-reach (#3948).
+   */
+  describe('[#6518] the case-sensitivity assumption these compilers rest on', () => {
+    const TEXT_FAMILY = ['$contains', '$notContains', '$startsWith', '$endsWith'] as const;
+
+    it('read-scope-sql compiles the family case-EXACTLY — no ILIKE, no fold', () => {
+      for (const op of TEXT_FAMILY) {
+        const { sql } = compileScopedFilterToSql(
+          { name: { [op]: 'Admin' } } as FilterCondition,
+          'person',
+        );
+        expect(sql, op).toMatch(/LIKE/);
+        expect(sql, op).not.toMatch(/ILIKE|LOWER\s*\(|lower\s*\(|translate\s*\(|GLOB/);
+      }
+    });
+
+    it('read-scope-sql emits `?` for its consumers to renumber, and quotes identifiers', () => {
+      const { sql, params } = compileScopedFilterToSql(
+        { name: { $contains: 'Admin' } } as FilterCondition,
+        'person',
+      );
+      // `?` here, `$N` after the consumers rewrite it — the shape both
+      // `applyReadScope` and `generateSql` depend on, and the reason the escape
+      // character can be a bound value rather than a per-dialect literal.
+      expect(sql).toContain('?');
+      expect(sql).toContain('"person"."name"');
+      expect(params).toEqual(['%Admin%', LIKE_ESCAPE_CHAR]);
+    });
+
+    it('both executing compilers number their placeholders Postgres-style', async () => {
+      const native = await new NativeSQLStrategy().generateSql(query({ name: { $contains: 'x' } }), nativeCtx);
+      const echo = await new ObjectQLStrategy().generateSql(query({ name: { $contains: 'x' } }), echoCtx);
+      for (const [label, sql] of [['native', native.sql], ['echo', echo.sql]] as const) {
+        expect(sql, label).toMatch(/\$\d+/);
+        // `?` is SQLite's and MySQL's placeholder. Its appearance would mean the
+        // statement stopped being Postgres-shaped, which is exactly the premise
+        // `like-pattern.ts`'s #6518 section says to re-open.
+        expect(sql, label).not.toMatch(/[^$\w]\?/);
+        expect(sql, label).not.toMatch(/ILIKE|LOWER\s*\(/);
+      }
+    });
+
+    /**
+     * [#6520] This case used to pin `$icontains` as REFUSED at both doors — the
+     * state #6518 deliberately left it in, because implementing it belonged with
+     * the vocabulary admission rather than with a driver-lane case-folding fix.
+     * #6520 did that, so the case is REPLACED rather than re-spelled: an
+     * assertion that the operator throws would now be pinning a refusal that no
+     * longer exists, and it would keep passing for the wrong reason if the arm
+     * were deleted in one compiler but not the other.
+     *
+     * What it pins instead is the property the refusal was standing in for —
+     * that the predicate is EMITTED, folded on BOTH sides, and folded with the
+     * construct the ruling names.
+     */
+    it('$icontains compiles at both doors, folding ASCII on both sides', async () => {
+      const scoped = compileScopedFilterToSql(
+        { name: { $icontains: 'admin' } } as FilterCondition, 'person',
+      );
+      const native = await new NativeSQLStrategy().generateSql(
+        query({ name: { $icontains: 'admin' } }), nativeCtx,
+      );
+
+      for (const [label, sql] of [['scoped', scoped.sql], ['native', native.sql]] as const) {
+        // BOTH sides: folding only the comparand matches just the rows that were
+        // already lower-case — a wrong row set that looks like a working filter.
+        expect(sql.match(/translate\(/g) ?? [], label).toHaveLength(2);
+        expect(sql, label).toContain('LIKE');
+        expect(sql, label).toContain("'ABCDEFGHIJKLMNOPQRSTUVWXYZ'");
+        // NOT `LOWER()`: Postgres folds Unicode with it, and the contract is
+        // ASCII-only (#4706 Q1 = A). This is the same assertion the neighbouring
+        // Postgres-shape case makes, aimed at the one operator that folds.
+        expect(sql, label).not.toMatch(/LOWER\s*\(|ILIKE/i);
+      }
+      // The comparand is still ESCAPED and its ESCAPE character still bound —
+      // the fold rides ON TOP of the literal-comparand rule, it does not replace
+      // it (this file's whole subject).
+      expect(scoped.params).toEqual(['%admin%', '\\']);
+      expect(native.params).toEqual(['%admin%', '\\']);
+    });
+
+    /**
+     * [#6520] The comparand rule survives the new arm: `$icontains` is a
+     * LITERAL substring search, so a `%` in the comparand is a percent sign.
+     */
+    it('$icontains escapes LIKE metacharacters like its case-exact twin', () => {
+      const { params } = compileScopedFilterToSql(
+        { name: { $icontains: '100%' } } as FilterCondition, 'person',
+      );
+      expect(params).toEqual(['%100\\%%', '\\']);
+    });
+  });
 });

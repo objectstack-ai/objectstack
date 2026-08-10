@@ -141,25 +141,37 @@ describe('[#4770] hook condition evaluates against stored ⊕ payload', () => {
     expect(calls).toEqual([]);
   });
 
-  it('fabricates nothing when the prior row is not in hand (predicate bulk update)', async () => {
+  it('fabricates nothing when the prior row is not in hand (context with no `previous`)', async () => {
     const calls: string[] = [];
     const { logger } = captureLogger();
-    // A `multi: true` update fetches no single prior row, so the persisted
-    // state is unknown. Defaulting `done` to null here would not materialise an
-    // absent value — it would contradict N stored rows. #4775: the condition is
-    // therefore unevaluable, and unevaluable now aborts the write.
+    // The invariant is unchanged and is the whole point of this file: with no
+    // stored row in hand, `record` is NOT made total. Defaulting `done` to null
+    // would not materialise an absent value — it would contradict whatever is
+    // actually stored. #4775: the condition is unevaluable, and unevaluable
+    // ABORTS the operation.
+    //
+    // ⚠️ The message this used to match (`/PREDICATE bulk write/`) is gone with
+    // #5574. This context — no id, `multi: true`, no `previous` — was the batch
+    // dispatch of a predicate write, and the engine no longer builds one: a
+    // predicate write dispatches `before*` per matched row with `previous`
+    // bound (ADR-0058 Addendum II). So the special diagnosis had no reachable
+    // input and was retired under ADR-0049; what a hand-fabricated context gets
+    // now is the plain one.
     const wrapped = wrapDeclarativeHook(
       makeHook('record.done == null', calls),
       (async () => { calls.push('ran'); }) as any,
       { logger },
     );
 
-    await expect(
-      wrapped(makeCtx({
-        previous: undefined,
-        input: { data: { status: 'x' }, options: { multi: true } },
-      } as any)),
-    ).rejects.toThrow(/PREDICATE bulk write/);
+    const err = await wrapped(makeCtx({
+      previous: undefined,
+      input: { data: { status: 'x' }, options: { multi: true } },
+    } as any)).then(() => null, (e) => e);
+
+    expect(err).toBeInstanceOf(Error);
+    expect(err.reason).toBe('unevaluable');
+    expect(err.message).not.toContain('PREDICATE bulk write');
+    // Nothing was fabricated and the handler never ran — the gate is before it.
     expect(calls).toEqual([]);
   });
 
@@ -312,7 +324,7 @@ describe('[#4770] showcase repro — showcase_audit_task_completion over a real 
     const { driver } = makeStubDriver();
     engine.registerDriver(driver, true);
     await engine.init();
-    engine.registry.registerObject(taskObject as any);
+    engine.registry.registerObject(taskObject);
 
     audited = [];
     warn = vi.fn();

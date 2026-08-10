@@ -134,6 +134,271 @@ export type SpecifierHandlerParsed = z.infer<typeof SpecifierHandlerSchema>;
 export const SpecifierScopeSchema = z.enum(['global', 'tenant', 'user']);
 export type SpecifierScope = z.input<typeof SpecifierScopeSchema>;
 
+/**
+ * Closed vocabulary of **standard value domains** a specifier's value may be
+ * drawn from (#5933, the spec half of #5712).
+ *
+ * A specifier that declares `valueDomain` says: *the legal values for this key
+ * are the members of this published standard*, and that membership — not the
+ * `options` table — is the enforcement boundary. See {@link Specifier} for the
+ * authoring semantics; enforcement itself lives in `service-settings`
+ * (Prime Directive #2 — the spec declares, it does not execute).
+ *
+ * The vocabulary is closed and deliberately small: a member earns its place by
+ * a metadata key that actually needs it, not by being a standard that exists.
+ * Each member below carries the **definition of membership** the enforcing side
+ * must implement, because "the IANA time zone database" and "what this Node
+ * happens to enumerate" are measurably different sets, and picking the wrong
+ * one rejects legal values.
+ *
+ * - `iana_time_zone` — an IANA/tzdb zone identifier (`UTC`, `Asia/Kolkata`,
+ *   `Europe/Kyiv`). **Membership is the `Intl.DateTimeFormat` probe**
+ *   (construct with `{ timeZone: value }`, catch `RangeError`) — the definition
+ *   already used by `isValidTimeZone` in
+ *   `packages/core/src/security/resolve-authz-context.ts` and by
+ *   `localization.manifest.test.ts`.
+ *   NOT `Intl.supportedValuesOf('timeZone')`: measured on the repo's Node 22
+ *   baseline it returns 418 CLDR *canonical* names and omits `UTC` (this
+ *   platform's own declared default), `Asia/Kolkata` (a curated option in the
+ *   shipped localization manifest), `Europe/Kyiv`, `Asia/Ho_Chi_Minh`,
+ *   `US/Eastern` and `GMT`. Testing membership against that list rejects values
+ *   every runtime accepts.
+ * - `iso_4217_currency` — an ISO 4217 alphabetic currency code (`USD`, `CHF`).
+ *   Here `Intl.supportedValuesOf('currency')` IS usable: measured 162 entries
+ *   on the same baseline, admitting `CHF` and all nine curated localization
+ *   options while rejecting `XYZ`. Known gaps are the recently assigned `VED`
+ *   and the metal/fund codes (`XAU`, `XDR`, …) — widen the definition
+ *   deliberately if a deployment needs one, but never fall back to a regex.
+ * - `iso_3166_alpha2` — an ISO 3166-1 alpha-2 country code (`US`, `GB`, `CN`).
+ *   There is no standard-library oracle for this one: measured,
+ *   `Intl.DisplayNames(…, { type: 'region' }).of()` returns a distinct name for
+ *   `ZZ` ("Unknown Region" — the exact value this domain exists to reject) and
+ *   for `UK` (a CLDR alias that is not an ISO 3166-1 code), so "the name
+ *   differs from the input" is not a membership test. The enforcing side must
+ *   carry an explicit alpha-2 code list; that list does not live here, because
+ *   `packages/spec` holds no data tables (Prime Directive #2).
+ */
+export const SpecifierValueDomainSchema = z.enum([
+  'iana_time_zone',
+  'iso_4217_currency',
+  'iso_3166_alpha2',
+]);
+export type SpecifierValueDomain = z.input<typeof SpecifierValueDomainSchema>;
+
+// ---------------------------------------------------------------------------
+// `visible` — the settings visibility grammar (NOT CEL)
+// ---------------------------------------------------------------------------
+
+/**
+ * Comparison operators, longest-first so `>=` is never read as `>` plus a
+ * stray `=`, and `!==` / `!=` win over the unary `!`. Mirrors
+ * `COMPARISON_OPERATORS` in `visibility-eval.ts`.
+ */
+const VISIBILITY_COMPARISON_OPERATORS = ['===', '!==', '==', '!=', '>=', '<=', '>', '<'] as const;
+
+/**
+ * The prescription every refusal carries. Stated as the grammar rather than
+ * as "invalid", because the author's next question is always "then what DO I
+ * write?" — and the honest answer is short enough to print.
+ */
+const VISIBILITY_GRAMMAR_PRESCRIPTION =
+  'A settings `visible` predicate is not CEL: it is read by the save-time evaluator in ' +
+  '`@objectstack/service-settings`, whose grammar is closed — a single root `data` with ' +
+  'one-level member access (`data.some_key`), the operators `||` `&&` `!` and ' +
+  '`===` `!==` `==` `!=` `>=` `<=` `>` `<`, parentheses, and string / number / `true` / ' +
+  '`false` / `null` literals. The whole predicate may be wrapped in `${...}`, and both a ' +
+  'bare string and a `{ dialect, source }` envelope are accepted. Rewrite CEL membership ' +
+  'as an `||` chain (`${data.x === \'a\' || data.x === \'b\'}`); function calls, macros and ' +
+  'member paths deeper than one level have no equivalent here.';
+
+/** Thrown while walking a predicate; never escapes this module. */
+class VisibilityGrammarViolation extends Error {}
+
+const violate = (detail: string): never => {
+  throw new VisibilityGrammarViolation(detail);
+};
+
+/**
+ * Unwrap the three authored forms into the raw predicate source — the exact
+ * unwrapping `visibilitySource()` performs before evaluating. Mirroring it
+ * matters: `'${a} && ${b}'` starts with `${` and ends with `}`, so BOTH sides
+ * strip it to `a} && ${b` and refuse, rather than one side quietly repairing
+ * an expression the other cannot read.
+ */
+function unwrapVisibilitySource(value: unknown): string | undefined {
+  let src: string | undefined;
+  if (typeof value === 'string') src = value;
+  else if (value && typeof value === 'object' && typeof (value as { source?: unknown }).source === 'string') {
+    src = (value as { source: string }).source;
+  }
+  if (src === undefined) return undefined;
+  const trimmed = src.trim();
+  if (trimmed.startsWith('${') && trimmed.endsWith('}')) return trimmed.slice(2, -1).trim();
+  return trimmed;
+}
+
+/**
+ * Leaves (`data.x`, `'lit'`, `42`, `true`) are collapsed to one token kind:
+ * the evaluator's `primary()` treats them identically, so distinguishing them
+ * here could only make this side accept a different set than that side.
+ */
+type VisibilityToken = { kind: 'punct'; value: string } | { kind: 'value' };
+
+function tokenizeVisibility(expr: string): VisibilityToken[] {
+  const tokens: VisibilityToken[] = [];
+  let i = 0;
+  while (i < expr.length) {
+    const ch = expr[i];
+    if (/\s/.test(ch)) { i++; continue; }
+    if (ch === '(' || ch === ')') { tokens.push({ kind: 'punct', value: ch }); i++; continue; }
+    const op = [...VISIBILITY_COMPARISON_OPERATORS, '&&', '||'].find(o => expr.startsWith(o, i));
+    if (op) { tokens.push({ kind: 'punct', value: op }); i += op.length; continue; }
+    if (ch === '!') { tokens.push({ kind: 'punct', value: '!' }); i++; continue; }
+    if (ch === "'" || ch === '"') {
+      let j = i + 1;
+      while (j < expr.length && expr[j] !== ch) j += expr[j] === '\\' && j + 1 < expr.length ? 2 : 1;
+      if (j >= expr.length) violate('unterminated string');
+      tokens.push({ kind: 'value' });
+      i = j + 1;
+      continue;
+    }
+    if (/[0-9]/.test(ch)) {
+      const m = /^[0-9]+(\.[0-9]+)?/.exec(expr.slice(i))!;
+      tokens.push({ kind: 'value' });
+      i += m[0].length;
+      continue;
+    }
+    if (/[A-Za-z_]/.test(ch)) {
+      const word = /^[A-Za-z_][A-Za-z0-9_.]*/.exec(expr.slice(i))![0];
+      if (word === 'true' || word === 'false' || word === 'null') {
+        tokens.push({ kind: 'value' });
+      } else if (word.startsWith('data.')) {
+        // One level only: `data.a.b` and `data.` are both out.
+        if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(word.slice('data.'.length))) {
+          violate(`unsupported reference "${word}" — the only root is \`data\`, with exactly one level of member access`);
+        }
+        tokens.push({ kind: 'value' });
+      } else {
+        violate(`unsupported identifier "${word}" — the only root is \`data\``);
+      }
+      i += word.length;
+      continue;
+    }
+    violate(`unexpected character "${ch}"`);
+  }
+  return tokens;
+}
+
+/**
+ * Parse-only walk of the same recursive descent `evaluateVisibility` runs:
+ *
+ *   orExpr  := andExpr ('||' andExpr)*
+ *   andExpr := unary ('&&' unary)*
+ *   unary   := '!' unary | compare
+ *   compare := primary (COMPARISON primary)?
+ *   primary := '(' orExpr ')' | literal | data.<ident>
+ *
+ * Returns the failure detail, or `undefined` when the source is in grammar.
+ */
+function visibilityGrammarViolation(src: string): string | undefined {
+  try {
+    const tokens = tokenizeVisibility(src);
+    let pos = 0;
+    const eat = (value: string): boolean => {
+      const t = tokens[pos];
+      if (t?.kind === 'punct' && t.value === value) { pos++; return true; }
+      return false;
+    };
+
+    const primary = (): void => {
+      const t = tokens[pos];
+      if (!t) violate('unexpected end of expression');
+      if (t.kind === 'punct' && t.value === '(') {
+        pos++;
+        orExpr();
+        if (!eat(')')) violate('missing closing parenthesis');
+        return;
+      }
+      if (t.kind !== 'value') violate(`unexpected token "${t.value}"`);
+      pos++;
+    };
+    const compare = (): void => {
+      primary();
+      const t = tokens[pos];
+      if (t?.kind === 'punct' && (VISIBILITY_COMPARISON_OPERATORS as readonly string[]).includes(t.value)) {
+        pos++;
+        primary();
+      }
+    };
+    const unary = (): void => { if (eat('!')) unary(); else compare(); };
+    const andExpr = (): void => { unary(); while (eat('&&')) unary(); };
+    function orExpr(): void { andExpr(); while (eat('||')) andExpr(); }
+
+    orExpr();
+    if (pos !== tokens.length) violate('trailing tokens');
+    return undefined;
+  } catch (err) {
+    if (err instanceof VisibilityGrammarViolation) return err.message;
+    throw err;
+  }
+}
+
+/**
+ * `visible` on a settings manifest is **not** CEL, and this schema says so.
+ *
+ * Every other `visible` / `visibleWhen` in the spec is
+ * `ExpressionInputSchema` — a bare string normalised to `dialect: 'cel'` and
+ * handed to `@objectstack/formula`. The settings manifest slot never was:
+ * its only evaluators are the console's client-side `new Function(...)` over
+ * the raw string and, since #7169, the server-side `evaluateVisibility` in
+ * `packages/services/service-settings/src/visibility-eval.ts`, which
+ * implements a deliberately tiny closed grammar. The two spellings are not
+ * compatible in either direction — the bundled manifests are written with
+ * `===` / `!==`, which CEL does not have.
+ *
+ * #7169 measured the corpus and the maintainer ruled on 2026-08-10: 94
+ * `visible` predicates across the 10 bundled manifests, of which routing them
+ * through CEL would break 93, while narrowing the declaration to the grammar
+ * actually evaluated breaks 0. So the declaration moves, not the evaluator
+ * (and not `ExpressionInputSchema`, which #7071 settled stays CEL-only —
+ * "each protocol keeps its own spelling").
+ *
+ * What this buys: an author who writes real CEL (`data.x in ['a','b']`,
+ * `size(data.y) > 0`, `data.a.b == 1`) is refused **here**, at publish/parse,
+ * with a message naming the grammar that would work — instead of authoring a
+ * predicate that every gate accepts and that then fails the tenant's next
+ * save. PR #7310's save-time refusal stays as defense in depth: this slot is
+ * the producer-side check, that one is the consumer-side check, and they are
+ * pinned against each other in
+ * `packages/services/service-settings/src/settings-visibility-declaration.pin.test.ts`.
+ *
+ * The wire shape is untouched — bare string and `{ dialect, source }`
+ * envelope are both still accepted, and the bare string still normalises to
+ * the canonical envelope. Only the set of accepted `source` strings narrows.
+ *
+ * An `ast`-only envelope is passed through — the AST is opaque at this layer,
+ * and the evaluator reads `source`.
+ */
+const SettingsVisibilityInputSchema = ExpressionInputSchema.superRefine((value, ctx) => {
+  const source = unwrapVisibilitySource(value);
+  // `undefined` is an `ast`-only envelope; `''` is `"${}"`, which the
+  // evaluator answers with `true` rather than a parse error. Neither reaches
+  // the grammar walk there, so neither reaches it here.
+  if (!source) return;
+  const detail = visibilityGrammarViolation(source);
+  if (detail === undefined) return;
+  ctx.addIssue({
+    code: z.ZodIssueCode.custom,
+    message: `Unsupported \`visible\` predicate "${source}": ${detail}. ${VISIBILITY_GRAMMAR_PRESCRIPTION}`,
+  });
+});
+
+/** Shared `.describe()` — the grammar, named, on both slots that carry it. */
+const VISIBILITY_DESCRIBE_GRAMMAR =
+  'Grammar is NOT CEL: root `data` with one-level member access, `||` `&&` `!`, ' +
+  '`===` `!==` `==` `!=` `>=` `<=` `>` `<`, parentheses and string/number/bool/null ' +
+  'literals, optionally wrapped in `${...}`; bare string or `{ dialect, source }` envelope.';
+
 // ---------------------------------------------------------------------------
 // Specifier schema (the unit of UI in a manifest)
 // ---------------------------------------------------------------------------
@@ -179,8 +444,14 @@ export const SpecifierSchema = lazySchema(() => z.object({
    * Visibility expression evaluated against the live namespace value map
    * (e.g. "${data.provider === 'smtp'}"). Hidden specifiers are not
    * rendered AND their values are not validated.
+   *
+   * Not CEL — see {@link SettingsVisibilityInputSchema}. `visible` is the
+   * gate every other check on this specifier hangs off (`required`,
+   * `options`, `pattern`, `valueDomain`, the value window), so a predicate
+   * the evaluator cannot read is refused at parse rather than at save.
    */
-  visible: ExpressionInputSchema.optional().describe('Visibility expression'),
+  visible: SettingsVisibilityInputSchema.optional()
+    .describe(`Visibility expression evaluated against the namespace value map, e.g. \`\${data.provider === 'smtp'}\`. Hidden specifiers are not rendered and their values are not validated. ${VISIBILITY_DESCRIBE_GRAMMAR}`),
 
   /** Mark the field required (renderer + server-side validation). */
   required: z.boolean().default(false).describe('Required field'),
@@ -231,6 +502,41 @@ export const SpecifierSchema = lazySchema(() => z.object({
   /** Options for `select` / `radio` / `multiselect`. */
   options: z.array(SpecifierOptionSchema).optional().describe('Options for select/radio/multiselect'),
 
+  /**
+   * Declares that this key's legal values are the members of a published
+   * standard — see {@link SpecifierValueDomainSchema} for the vocabulary and
+   * for each domain's definition of membership.
+   *
+   * **Declaring it moves the enforcement boundary.** When `valueDomain` is
+   * present, the standard's membership is what a write is judged against, and
+   * `options` degrades to a **UI convenience list**: a curated dropdown of the
+   * values worth suggesting, no longer an exhaustive statement of what is
+   * legal. A value outside `options` but inside the domain is accepted.
+   *
+   * When `valueDomain` is ABSENT nothing changes: `options` remains exhaustive
+   * and the save path rejects anything the table does not list (#5131). That is
+   * the right shape for tables the platform itself backs — `mail.provider`,
+   * `sms.provider` — where "legal" means "this deployment ships an adapter for
+   * it", not "some registrar published it". Do not add `valueDomain` to those.
+   *
+   * `pattern` / `minLength` / `maxLength` still apply and still narrow: they
+   * constrain the *shape* of the string, the domain constrains its
+   * *membership*. A value must satisfy both. Reach for `valueDomain` precisely
+   * where `pattern` cannot help — `^[A-Za-z]{2}$` admits `ZZ`, and
+   * `Mars/Olympus` is a shape-valid time zone that does not exist.
+   *
+   * Only meaningful on value-bearing, string-valued specifiers (`text`,
+   * `select`, `radio`, `multiselect`); the parse refuses it on layout-only
+   * specifiers, which carry no value to judge. For a `select`, `options` is
+   * still required — a dropdown needs something to draw.
+   *
+   * The check itself runs in `service-settings` on the write path (#5712);
+   * `packages/spec` only declares the domain.
+   */
+  valueDomain: SpecifierValueDomainSchema
+    .optional()
+    .describe('Standard value domain enforced on write (options degrade to a UI suggestion list)'),
+
   /** `number` / `slider`: numeric bounds and step. */
   min: z.number().optional(),
   max: z.number().optional(),
@@ -268,6 +574,17 @@ export const SpecifierSchema = lazySchema(() => z.object({
       code: z.ZodIssueCode.custom,
       path: ['key'],
       message: `Specifier of type '${spec.type}' must not declare a 'key'.`,
+    });
+  }
+  // A value domain judges a VALUE, so a specifier that carries none cannot
+  // declare one. Caught here rather than left to the renderer because a
+  // `valueDomain` on a `group` is a silent no-op otherwise — declared and never
+  // enforced, which is the shape Prime Directive #10 exists to refuse.
+  if (spec.valueDomain && !SPECIFIERS_REQUIRING_KEY.has(spec.type)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['valueDomain'],
+      message: `Specifier of type '${spec.type}' carries no value, so it must not declare a 'valueDomain'.`,
     });
   }
   // select/radio/multiselect require options.
@@ -390,8 +707,13 @@ export const SettingsManifestSchema = lazySchema(() => z.object({
   /** The ordered list of specifiers that make up the page. */
   specifiers: z.array(SpecifierSchema).min(1).describe('Page contents (ordered)'),
 
-  /** Visibility predicate for the whole manifest (e.g. license gate). */
-  visible: ExpressionInputSchema.optional().describe('Whole-manifest visibility'),
+  /**
+   * Visibility predicate for the whole manifest (e.g. license gate).
+   * Same grammar as the specifier-level slot — not CEL, see
+   * {@link SettingsVisibilityInputSchema}.
+   */
+  visible: SettingsVisibilityInputSchema.optional()
+    .describe(`Whole-manifest visibility. ${VISIBILITY_DESCRIBE_GRAMMAR}`),
 
   /**
    * Feature flag key that gates the manifest. When set, the renderer

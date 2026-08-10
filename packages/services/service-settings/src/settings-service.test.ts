@@ -7,8 +7,12 @@ import { NoopCryptoAdapter } from './crypto-adapter.js';
 import { mailSettingsManifest, mailTestActionHandler } from './manifests/mail.manifest.js';
 import { aiSettingsManifest } from './manifests/ai.manifest.js';
 import { authSettingsManifest } from './manifests/auth.manifest.js';
+import { localizationSettingsManifest } from './manifests/localization.manifest.js';
+import { companySettingsManifest } from './manifests/company.manifest.js';
 import { brandingSettingsManifest } from './manifests/branding.manifest.js';
 import { featureFlagsSettingsManifest } from './manifests/feature-flags.manifest.js';
+import { builtinSettingsManifests } from './manifests/index.js';
+import { evaluateVisibility, visibilitySource } from './visibility-eval.js';
 import { SettingsManifestSchema } from '@objectstack/spec/system';
 
 describe('reference manifests are spec-valid', () => {
@@ -1371,6 +1375,368 @@ describe('SettingsService — env overrides are checked against declared windows
   });
 });
 
+/**
+ * #6199 — `step`, the fifth and last of `SpecifierSchema`'s value constraints,
+ * is enforced on the same two paths as the other four.
+ *
+ * The reading that settles it is the schema's own. `step` is declared under the
+ * SAME "numeric bounds and step" doc comment as `min`/`max`, so it is authored
+ * as a BOUND, and #5932's ruling — a declared bound binds — transfers with it.
+ * The competing reading, that `step` is only
+ * an `input[type=number]` arrow increment and never says other values are
+ * illegal, was checked and does not survive contact: `step` had ZERO read
+ * points at the time this landed — nothing in `packages/services/
+ * service-settings`, nothing anywhere else in this repo, and nothing in
+ * `objectui` — so under that reading the key would be enforcing presentation
+ * for a renderer that does not exist. A declaration with no consumer at all is
+ * the ADR-0049 hole, not a UI affordance.
+ *
+ * The consequence was real and was accepted at ruling time: `ai.temperature`
+ * then declared `min: 0, max: 2, step: 0.1`, so `0.15` — a perfectly sensible
+ * temperature for the model behind it — was refused. The manifest owner's
+ * question that ruling left open was answered by #6550: the grid came OFF the
+ * ai manifest (temperature's true domain is continuous on [0, 2]), so the
+ * fixtures below are synthetic step-declaring specifiers. The machinery they
+ * pin is unchanged and still binds any key that declares `step`; the real ai
+ * manifest's post-#6550 behaviour is pinned in `manifests/ai.manifest.test.ts`.
+ */
+describe('SettingsService — the declared step grid is enforced at save time (#6199)', () => {
+  /**
+   * Three shapes the grid arrives in: with a window (the `ai.temperature`
+   * shape), with no window at all, and anchored somewhere other than zero.
+   */
+  const gridManifest = {
+    namespace: 'grid',
+    version: 1,
+    label: 'Grid',
+    scope: 'tenant',
+    readPermission: 'setup.access',
+    writePermission: 'setup.access',
+    specifiers: [
+      { type: 'slider', key: 'temperature', label: 'Temperature', required: false,
+        default: 0.7, min: 0, max: 2, step: 0.1 },
+      { type: 'number', key: 'bare', label: 'Bare', required: false, step: 5 },
+      { type: 'number', key: 'odd', label: 'Odd', required: false, min: 1, max: 9, step: 2 },
+    ],
+  } as any;
+
+  const gridService = () => {
+    const svc = new SettingsService({ env: {} });
+    svc.registerManifest(gridManifest);
+    return svc;
+  };
+
+  it('refuses a value that misses the grid, naming the step', async () => {
+    const svc = gridService();
+    await expect(svc.setMany('grid', { temperature: 0.15 })).rejects.toMatchObject({
+      code: 'SETTINGS_VALIDATION',
+      fields: [
+        {
+          field: 'temperature',
+          // No `FieldErrorCode` member names a grid breach, so it takes
+          // `invalid_value` — the catalog's declared slot for "rejected for a
+          // reason no other member names" (ADR-0114). The same verdict
+          // `rest-server.ts` already reaches for Zod's `not_multiple_of`, which
+          // is this exact condition arriving from the other direction.
+          code: 'invalid_value',
+          label: 'Temperature',
+          // The spacing AND its anchor: a client cannot reconstruct the grid
+          // from the step alone, and this specifier's base is its `min`.
+          constraint: { step: 0.1, min: 0 },
+          value: 0.15,
+        },
+      ],
+    });
+    // Atomic: the rejected batch persisted nothing.
+    expect((await svc.get('grid', 'temperature')).source).toBe('default');
+  });
+
+  it('accepts the decimal multiples binary floating point cannot represent exactly', async () => {
+    // THE reason an exact modulo is the wrong implementation. Not every decimal
+    // multiple misses — `2 / 0.1` and `0.2 / 0.1` happen to land exactly — which
+    // is precisely what makes the trap dangerous: it fires on SOME values of a
+    // grid and not others, so a naive check looks correct until an author picks
+    // the wrong temperature. The two pinned below are values the console's own
+    // slider emits, and `n % step === 0` refuses both.
+    expect(0.7 / 0.1).not.toBe(7);  // 6.999999999999999
+    expect(1.2 / 0.1).not.toBe(12); // 11.999999999999998
+    // The tolerance is relative (1e-9 of the magnitudes involved) — six orders
+    // of magnitude above the ~1e-15 a few double operations accumulate, and
+    // eight below the 3e-1 relative miss of a genuinely off-grid `0.15`.
+    const svc = gridService();
+    for (const v of [0, 0.1, 0.2, 0.3, 0.1 + 0.2, 0.7, 0.9, 1.1, 1.2, 1.9, 2]) {
+      await expect(
+        svc.setMany('grid', { temperature: v }),
+        `${v} sits on the 0.1 grid and must be accepted`,
+      ).resolves.toBeDefined();
+    }
+  });
+
+  it('refuses the off-grid neighbours of those same values', async () => {
+    // The other half of the tolerance pin: it must still be a check. Each of
+    // these is a half-step away from a legal value, not a rounding artefact.
+    const svc = gridService();
+    for (const v of [0.05, 0.15, 0.25, 0.75, 1.99]) {
+      await expect(
+        svc.setMany('grid', { temperature: v }),
+        `${v} misses the 0.1 grid and must be refused`,
+      ).rejects.toMatchObject({
+        code: 'SETTINGS_VALIDATION',
+        fields: [{ field: 'temperature', code: 'invalid_value' }],
+      });
+    }
+  });
+
+  it('anchors the grid at the declared min, not at zero', async () => {
+    // The HTML step-base convention, and the only one that makes the
+    // declaration mean what it reads as: `min: 1, step: 2` names the ODD
+    // numbers. Anchoring at 0 regardless would invert this specifier entirely
+    // — it would accept exactly the values the author excluded.
+    const svc = gridService();
+    for (const v of [1, 3, 5, 9]) {
+      await expect(svc.setMany('grid', { odd: v }), `${v} is on the min-anchored grid`)
+        .resolves.toBeDefined();
+    }
+    for (const v of [2, 4, 8]) {
+      await expect(svc.setMany('grid', { odd: v }), `${v} is off the min-anchored grid`)
+        .rejects.toMatchObject({
+          fields: [{ field: 'odd', code: 'invalid_value', constraint: { step: 2, min: 1 } }],
+        });
+    }
+  });
+
+  it('falls back to a zero anchor when the specifier declares no min', async () => {
+    const svc = gridService();
+    await expect(svc.setMany('grid', { bare: 0 })).resolves.toBeDefined();
+    await expect(svc.setMany('grid', { bare: 15 })).resolves.toBeDefined();
+    await expect(svc.setMany('grid', { bare: -10 })).resolves.toBeDefined();
+    await expect(svc.setMany('grid', { bare: 12 })).rejects.toMatchObject({
+      // No `min` was declared, so none travels in the constraint either — the
+      // client is told the spacing and nothing invented.
+      fields: [{ field: 'bare', code: 'invalid_value', constraint: { step: 5 } }],
+    });
+  });
+
+  it('reports the WINDOW before the grid when a value breaches both', async () => {
+    // `validatePatch` emits at most one `FieldError` per key, so the ordering
+    // decides what the author is told. The window is the coarser, more
+    // actionable fact: `temperature: 40` is twenty times the declared maximum,
+    // and answering "it misses the 0.1 grid" — true, and useless — would bury
+    // that.
+    const svc = gridService();
+    await expect(svc.setMany('grid', { temperature: 40.05 })).rejects.toMatchObject({
+      fields: [{ field: 'temperature', code: 'max_value', constraint: { min: 0, max: 2 } }],
+    });
+    await expect(svc.setMany('grid', { temperature: -0.05 })).rejects.toMatchObject({
+      fields: [{ field: 'temperature', code: 'min_value' }],
+    });
+  });
+
+  it('checks the grid only when the patch TOUCHES the key', async () => {
+    // The #5131/#5932 gate, inherited for the same reason and one more: a grid
+    // gets COARSENED over a product's life (a 0.05 slider re-declared at 0.1),
+    // and a workspace holding a value that was legal when it was written must
+    // still be able to edit its unrelated settings.
+    const svc = new SettingsService({ env: {} });
+    svc.registerManifest({
+      ...gridManifest,
+      specifiers: gridManifest.specifiers.map((s: any) =>
+        s.key === 'temperature' ? { ...s, step: 0.05 } : s,
+      ),
+    } as any);
+    await svc.setMany('grid', { temperature: 0.15 });
+    svc.registerManifest(gridManifest); // the coarsened grid
+
+    // The stale value is still there …
+    expect((await svc.get('grid', 'temperature')).value).toBe(0.15);
+    // … and a patch that never mentions it is not rejected on its account.
+    await expect(svc.setMany('grid', { bare: 10 })).resolves.toBeDefined();
+    expect((await svc.get('grid', 'bare')).value).toBe(10);
+    // Only re-writing the key itself is refused.
+    await expect(svc.setMany('grid', { temperature: 0.15 })).rejects.toMatchObject({
+      fields: [{ field: 'temperature', code: 'invalid_value' }],
+    });
+    // And a reset still clears it — an all-null patch is never blocked.
+    await expect(svc.resetNamespace('grid')).resolves.toBeGreaterThan(0);
+    expect((await svc.get('grid', 'temperature')).value).toBe(0.7); // back to the default
+  });
+
+  it('compares a number that arrived as a string, so a form post is not enforced-as-transport', async () => {
+    const svc = gridService();
+    await expect(svc.setMany('grid', { temperature: '0.2' })).resolves.toBeDefined();
+    await expect(svc.setMany('grid', { temperature: '0.15' })).rejects.toMatchObject({
+      fields: [{ field: 'temperature', code: 'invalid_value' }],
+    });
+  });
+
+  it('leaves a value it cannot compare alone — that is a different constraint', async () => {
+    // Same posture the window check takes: the value's SHAPE is `invalid_type`'s
+    // business. `Number(true)` is 1 and `Number([])` is 0, so coercing here
+    // would invent a grid verdict about a shape this check never judges.
+    const svc = gridService();
+    await expect(svc.setMany('grid', { temperature: true })).resolves.toBeDefined();
+    await expect(svc.setMany('grid', { temperature: 'warm' })).resolves.toBeDefined();
+    await expect(svc.setMany('grid', { temperature: [] })).resolves.toBeDefined();
+    await expect(svc.setMany('grid', { temperature: { v: 0.15 } })).resolves.toBeDefined();
+    // Empty is `required`'s business, not the grid's.
+    await expect(svc.setMany('grid', { temperature: null })).resolves.toBeDefined();
+  });
+
+  it('treats a step that is not a positive spacing as no grid at all', async () => {
+    // `anchor + k * 0` is a single point, and a negative spacing names the same
+    // grid as its absolute value while reading as an author error. Neither is a
+    // grid, so neither records one — the same disposition an option-bearing
+    // specifier with no table gets. Registration REPORTS and never refuses
+    // (#5204); an impossible grid has nothing to report, because it rejects no
+    // write and misconfigures no deployment.
+    const svc = new SettingsService({ env: {} });
+    svc.registerManifest({
+      namespace: 'nogrid', version: 1, label: 'No grid', scope: 'tenant',
+      readPermission: 'setup.access', writePermission: 'setup.access',
+      specifiers: [
+        { type: 'number', key: 'zero', label: 'Zero', step: 0 },
+        { type: 'number', key: 'negative', label: 'Negative', step: -0.1 },
+        { type: 'number', key: 'nan', label: 'NaN', step: Number.NaN },
+        // A bad step must not swallow the window declared beside it.
+        { type: 'number', key: 'windowed', label: 'Windowed', min: 0, max: 10, step: 0 },
+      ],
+    } as any);
+    for (const key of ['zero', 'negative', 'nan']) {
+      await expect(svc.setMany('nogrid', { [key]: 3.14159 }), `${key} declares no grid`)
+        .resolves.toBeDefined();
+    }
+    await expect(svc.setMany('nogrid', { windowed: 3.14159 })).resolves.toBeDefined();
+    await expect(svc.setMany('nogrid', { windowed: 99 })).rejects.toMatchObject({
+      fields: [{ field: 'windowed', code: 'max_value' }],
+    });
+  });
+
+  it('never echoes the off-grid value for an encrypted specifier', async () => {
+    // Same rule as `invalid_option` and the window codes, same reason: a grid is
+    // not a secret, but `encrypted` is authorable on any specifier and this
+    // message travels back through the API and into logs.
+    const svc = new SettingsService({ env: {} });
+    svc.registerManifest({
+      namespace: 'vaultgrid', version: 1, label: 'Vault grid', scope: 'tenant',
+      readPermission: 'setup.access', writePermission: 'setup.access',
+      specifiers: [
+        { type: 'number', key: 'shard', label: 'Shard', encrypted: true, min: 0, step: 100 },
+      ],
+    } as any);
+    const err = await svc.setMany('vaultgrid', { shard: 12345 }).catch((e) => e);
+    expect(err.code).toBe('SETTINGS_VALIDATION');
+    expect(err.fields[0]).toMatchObject({ field: 'shard', code: 'invalid_value' });
+    expect(err.fields[0].value).toBeUndefined();
+    expect(err.message).not.toContain('12345');
+    // The grid still travels, so the caller learns what to do.
+    expect(err.fields[0].constraint).toMatchObject({ step: 100, min: 0 });
+  });
+
+  // Until #6550 this block also pinned the one real declaration the gate
+  // bound: `ai.temperature`'s `step: 0.1` refusing `0.15`. That ruling took
+  // the grid off the ai manifest (temperature's true domain is continuous),
+  // so the real-manifest pin MOVED with the declaration — both doors'
+  // post-#6550 behaviour is pinned in `manifests/ai.manifest.test.ts`, and
+  // the grid machinery keeps binding through the synthetic fixtures above.
+});
+
+/**
+ * #6199, env half — the grid is judged at the ONE decision point
+ * (`effectiveEnvOverride`), for the reason #5204 is on file: the same
+ * comparison in two places is how the env half came to disagree with the save
+ * half in the first place. `step` rides `DeclaredBounds` and
+ * `firstRangeViolation`, so it reaches both doors by construction.
+ *
+ * The fixture is synthetic since #6550 took the grid off `ai.temperature`
+ * (this machinery needs a step-declaring key to bind, and the repo no longer
+ * ships one); it keeps the exact shape `ai.temperature` had at ruling time.
+ * The real ai manifest's env door is pinned in `manifests/ai.manifest.test.ts`.
+ */
+describe('SettingsService — env overrides are checked against the declared step grid (#6199)', () => {
+  const gridEnvManifest = {
+    namespace: 'gridenv',
+    version: 1,
+    label: 'Grid env',
+    scope: 'global',
+    readPermission: 'setup.access',
+    writePermission: 'setup.access',
+    specifiers: [
+      { type: 'slider', key: 'temperature', label: 'Temperature', required: false,
+        default: 0.7, min: 0, max: 2, step: 0.1 },
+    ],
+  } as any;
+
+  const spyLogger = () => {
+    const errors: string[] = [];
+    return { errors, logger: { error: (m: string) => void errors.push(m) } };
+  };
+
+  it('ignores an off-grid OS_GRIDENV_TEMPERATURE and resolves the manifest default instead', async () => {
+    const { errors, logger } = spyLogger();
+    const svc = new SettingsService({ env: { OS_GRIDENV_TEMPERATURE: '0.15' }, logger });
+    svc.registerManifest(gridEnvManifest);
+
+    const r = await svc.get('gridenv', 'temperature');
+    expect(r.value).toBe(0.7); // the manifest default, not 0.15
+    expect(r.source).toBe('default');
+    // Not in force, so it pins nothing either — read and write agree.
+    expect(r.locked).toBe(false);
+    expect(r.cascadeChain?.some((e) => e.scope === 'env')).toBe(false);
+
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain('OS_GRIDENV_TEMPERATURE');
+    // The grid breach gets its OWN sentence, not the window template: the value
+    // sits squarely inside `min 0, max 2`, so "is outside the declared step"
+    // would be a false description of what happened.
+    expect(errors[0]).toContain('does not sit on the declared step grid');
+    expect(errors[0]).toContain('step 0.1');
+    expect(errors[0]).toContain('IGNORED');
+    expect(errors[0]).toContain('does NOT take effect');
+  });
+
+  it('an on-grid override still wins at the top of the cascade and locks the key', async () => {
+    // The regression pin for the untouched path — the check must not turn into
+    // "env never applies to a stepped key". `1.2` is another float trap:
+    // `1.2 / 0.1` is `11.999999999999998`.
+    const { errors, logger } = spyLogger();
+    const svc = new SettingsService({ env: { OS_GRIDENV_TEMPERATURE: '1.2' }, logger });
+    svc.registerManifest(gridEnvManifest);
+
+    const r = await svc.get('gridenv', 'temperature');
+    expect(r.value).toBe(1.2);
+    expect(r.source).toBe('env');
+    expect(r.locked).toBe(true);
+    expect(errors).toHaveLength(0);
+  });
+
+  it('reports the misconfiguration at registration, and says it ONCE', async () => {
+    const { errors, logger } = spyLogger();
+    const svc = new SettingsService({ env: { OS_GRIDENV_TEMPERATURE: '0.15' }, logger });
+    expect(errors).toHaveLength(0);
+    svc.registerManifest(gridEnvManifest);
+    expect(errors).toHaveLength(1);
+    for (let i = 0; i < 5; i++) await svc.get('gridenv', 'temperature');
+    await svc.getNamespace('gridenv');
+    expect(errors).toHaveLength(1);
+  });
+
+  it('a REJECTED override pins nothing — the key stays editable', async () => {
+    // The `locked` coherence rule #5204 established, extended to the grid for
+    // free BECAUSE both are judged at the one point: a key configurable by
+    // nothing (env ignored, UI refused) would be a lockout only an env edit
+    // could clear.
+    const { logger } = spyLogger();
+    const svc = new SettingsService({ env: { OS_GRIDENV_TEMPERATURE: '0.15' }, logger });
+    svc.registerManifest(gridEnvManifest);
+
+    expect((await svc.get('gridenv', 'temperature')).locked).toBe(false);
+    await expect(svc.setMany('gridenv', { temperature: 0.9 })).resolves.toBeDefined();
+    const after = await svc.get('gridenv', 'temperature');
+    expect(after.value).toBe(0.9);
+    expect(after.source).toBe('global'); // the fixture is `scope: 'global'`
+  });
+});
+
 describe('SettingsService — user-scoped values', () => {
   it('isolates writes by ctx.userId', async () => {
     const svc = new SettingsService({ env: {} });
@@ -1596,5 +1962,621 @@ describe('SettingsService — Phase 3 sys_secret + crypto provider + audit', () 
     expect(h2.version).toBe(h1.version + 1);
     expect(h2.ciphertext).not.toBe(h1.ciphertext);
     expect(await provider.decrypt(h2, ctx)).toBe('hello');
+  });
+});
+
+/**
+ * #5712 — a declared `valueDomain` moves the enforcement boundary onto the
+ * standard's membership, save-time half.
+ *
+ * The 2026-08-06 ruling (reading 1): the curated `options` tables on
+ * `localization.timezone` / `localization.currency` are UI convenience lists;
+ * the boundary is the STANDARD domain (IANA / ISO 4217). #5131's
+ * exhaustive-options semantics survive untouched wherever no domain is
+ * declared — that regression pin lives in this block too, because the
+ * registry-backed tables (`mail.provider`, `sms.provider`) are exactly the
+ * shape that must NOT loosen.
+ */
+describe('SettingsService — a declared valueDomain is the save-time boundary (#5712)', () => {
+  const localizationService = () => {
+    const svc = new SettingsService({ env: {} });
+    svc.registerManifest(localizationSettingsManifest);
+    return svc;
+  };
+
+  it("accepts the card's own repro: Europe/Zurich and CHF through the write door", async () => {
+    const svc = localizationService();
+    await expect(
+      svc.setMany('localization', { timezone: 'Europe/Zurich', currency: 'CHF' }),
+    ).resolves.toBeDefined();
+    expect((await svc.get('localization', 'timezone')).value).toBe('Europe/Zurich');
+    expect((await svc.get('localization', 'currency')).value).toBe('CHF');
+  });
+
+  it('accepts the probe edges supportedValuesOf would have rejected', async () => {
+    // The #5933 trap, exercised end to end: `UTC` is the manifest's own
+    // default, `Asia/Kolkata` a curated option, `Europe/Kyiv` the current
+    // IANA spelling ICU still lists under its old name.
+    const svc = localizationService();
+    for (const tz of ['UTC', 'Asia/Kolkata', 'Europe/Kyiv']) {
+      await expect(
+        svc.setMany('localization', { timezone: tz }),
+        `${tz} is a legal IANA zone and must be accepted`,
+      ).resolves.toBeDefined();
+    }
+  });
+
+  it('still accepts every curated option value on both keys', async () => {
+    // Degrading `options` to a suggestion list must not reject anything the
+    // dropdown itself offers.
+    const svc = localizationService();
+    const specs = localizationSettingsManifest.specifiers as any[];
+    for (const key of ['timezone', 'currency']) {
+      for (const opt of specs.find((s) => s.key === key).options) {
+        await expect(
+          svc.setMany('localization', { [key]: opt.value }),
+          `curated ${key} option ${opt.value} must stay accepted`,
+        ).resolves.toBeDefined();
+      }
+    }
+  });
+
+  it('refuses garbage loudly, with the code and the domain in the constraint', async () => {
+    const svc = localizationService();
+    for (const tz of ['Mars/Olympus', 'ZZ']) {
+      await expect(svc.setMany('localization', { timezone: tz })).rejects.toMatchObject({
+        code: 'SETTINGS_VALIDATION',
+        fields: [
+          {
+            field: 'timezone',
+            // No `FieldErrorCode` member names a standard-domain breach, so it
+            // takes `invalid_value` — the catalog's slot for "rejected for a
+            // reason no other member names" (ADR-0114), the #6199 precedent.
+            // NOT `invalid_option`: the declared options are exactly the list
+            // a domain-bearing value may legitimately be outside of.
+            code: 'invalid_value',
+            label: 'Default timezone',
+            constraint: { valueDomain: 'iana_time_zone' },
+            value: tz,
+          },
+        ],
+      });
+    }
+    await expect(svc.setMany('localization', { currency: 'XYZ' })).rejects.toMatchObject({
+      code: 'SETTINGS_VALIDATION',
+      fields: [
+        { field: 'currency', code: 'invalid_value', constraint: { valueDomain: 'iso_4217_currency' } },
+      ],
+    });
+    // Atomic: nothing landed.
+    expect((await svc.get('localization', 'timezone')).source).toBe('default');
+  });
+
+  it('default_country: the domain refuses what the pattern admits (#5712 third case)', async () => {
+    const svc = localizationService();
+    // In the domain, outside any curated list — accepted.
+    await expect(svc.setMany('localization', { default_country: 'CH' })).resolves.toBeDefined();
+    // Shape-valid, assigned to nobody: `ZZ` passes `^[A-Za-z]{2}$`, the domain
+    // refuses it. `UK` is the CLDR alias that is not an ISO 3166-1 code.
+    for (const cc of ['ZZ', 'UK']) {
+      await expect(svc.setMany('localization', { default_country: cc })).rejects.toMatchObject({
+        fields: [
+          { field: 'default_country', code: 'invalid_value', constraint: { valueDomain: 'iso_3166_alpha2' } },
+        ],
+      });
+    }
+    // Shape breach still speaks FIRST, in `pattern`'s own vocabulary — the
+    // coarser, more actionable fact (the window-before-grid ordering argument).
+    await expect(svc.setMany('localization', { default_country: 'ZZZ' })).rejects.toMatchObject({
+      fields: [{ field: 'default_country', code: 'invalid_format' }],
+    });
+  });
+
+  it('a specifier WITHOUT valueDomain keeps exhaustive options — the #5131 regression pin', async () => {
+    // The registry-backed shape (`mail.provider`, `sms.provider`): its table
+    // IS the supported set, and declaring no domain must keep it that way,
+    // byte-for-byte. Pinned on the mail manifest itself plus a localization
+    // key that deliberately declares no domain.
+    const svc = new SettingsService({ env: {} });
+    svc.registerManifest(mailSettingsManifest);
+    await expect(svc.setMany('mail', { provider: 'sendgrid' })).rejects.toMatchObject({
+      code: 'SETTINGS_VALIDATION',
+      fields: [{ field: 'provider', code: 'invalid_option' }],
+    });
+
+    const loc = localizationService();
+    await expect(loc.setMany('localization', { first_day_of_week: 'thursday' })).rejects.toMatchObject({
+      code: 'SETTINGS_VALIDATION',
+      fields: [{ field: 'first_day_of_week', code: 'invalid_option' }],
+    });
+  });
+
+  it('an unenforceable domain on a hand-built manifest falls back to #5131, not to accept-everything', async () => {
+    // `registerManifest` takes manifests as given (no Zod pass). A misspelt
+    // domain must leave the exhaustive-options check in force — the safe side
+    // of the fork — never open the select to arbitrary strings.
+    const svc = new SettingsService({ env: {} });
+    svc.registerManifest({
+      namespace: 'typo', version: 1, label: 'Typo', scope: 'tenant',
+      readPermission: 'setup.access', writePermission: 'setup.access',
+      specifiers: [
+        { type: 'select', key: 'zone', label: 'Zone', required: false,
+          valueDomain: 'iana_timezone', // not a vocabulary member
+          options: [{ value: 'UTC', label: 'UTC' }] },
+      ],
+    } as any);
+    await expect(svc.setMany('typo', { zone: 'UTC' })).resolves.toBeDefined();
+    await expect(svc.setMany('typo', { zone: 'Europe/Zurich' })).rejects.toMatchObject({
+      fields: [{ field: 'zone', code: 'invalid_option' }],
+    });
+  });
+
+  it('judges a multiselect element-wise against the domain', async () => {
+    // No shipped manifest authors this shape yet; covered anyway because the
+    // alternative is that the first one to do so re-opens the hole (the same
+    // reason OPTION_BEARING_TYPES covers radio/multiselect).
+    const svc = new SettingsService({ env: {} });
+    svc.registerManifest({
+      namespace: 'multi', version: 1, label: 'Multi', scope: 'tenant',
+      readPermission: 'setup.access', writePermission: 'setup.access',
+      specifiers: [
+        { type: 'multiselect', key: 'currencies', label: 'Currencies', required: false,
+          valueDomain: 'iso_4217_currency',
+          options: [{ value: 'USD', label: 'USD' }] },
+      ],
+    } as any);
+    await expect(svc.setMany('multi', { currencies: ['USD', 'CHF'] })).resolves.toBeDefined();
+    await expect(svc.setMany('multi', { currencies: ['USD', 'XYZ'] })).rejects.toMatchObject({
+      fields: [{ field: 'currencies', code: 'invalid_value', value: 'XYZ' }],
+    });
+  });
+
+  it('never echoes the rejected value for an encrypted specifier', async () => {
+    // Same redaction rule as `invalid_option` and the #6199 grid, same reason.
+    const svc = new SettingsService({ env: {} });
+    svc.registerManifest({
+      namespace: 'vaultdom', version: 1, label: 'Vault domain', scope: 'tenant',
+      readPermission: 'setup.access', writePermission: 'setup.access',
+      specifiers: [
+        { type: 'text', key: 'region_code', label: 'Region code', encrypted: true,
+          valueDomain: 'iso_3166_alpha2' },
+      ],
+    } as any);
+    const err = await svc.setMany('vaultdom', { region_code: 'ZZ' }).catch((e) => e);
+    expect(err.code).toBe('SETTINGS_VALIDATION');
+    expect(err.fields[0]).toMatchObject({ field: 'region_code', code: 'invalid_value' });
+    expect(err.fields[0].value).toBeUndefined();
+    expect(err.message).not.toContain('ZZ');
+    // The domain still travels, so the caller learns what to do.
+    expect(err.fields[0].constraint).toMatchObject({ valueDomain: 'iso_3166_alpha2' });
+  });
+
+  it('checks the domain only when the patch TOUCHES the key', async () => {
+    // The #5131/#5932/#6199 gate, inherited by construction: a stored value
+    // that pre-dates enforcement must not lock the workspace out of its
+    // unrelated settings.
+    const svc = new SettingsService({ env: {} });
+    // Register a domain-less shape of the manifest, store a value the domain
+    // would refuse, then swap the real (domain-bearing) manifest in.
+    svc.registerManifest({
+      ...localizationSettingsManifest,
+      specifiers: (localizationSettingsManifest.specifiers as any[]).map((s) =>
+        s.key === 'timezone' ? { ...s, valueDomain: undefined, options: [...s.options, { value: 'Mars/Olympus', label: 'Mars' }] } : s,
+      ),
+    } as any);
+    await svc.setMany('localization', { timezone: 'Mars/Olympus' });
+    svc.registerManifest(localizationSettingsManifest);
+
+    // The stale value is still there …
+    expect((await svc.get('localization', 'timezone')).value).toBe('Mars/Olympus');
+    // … and a patch that never mentions it is not rejected on its account.
+    await expect(svc.setMany('localization', { currency: 'CHF' })).resolves.toBeDefined();
+    // Only re-writing the key itself is refused.
+    await expect(svc.setMany('localization', { timezone: 'Mars/Olympus' })).rejects.toMatchObject({
+      fields: [{ field: 'timezone', code: 'invalid_value' }],
+    });
+  });
+});
+
+/**
+ * #5712, env half — the domain is judged at the ONE decision point
+ * (`effectiveEnvOverride`), for the reason #5204 is on file: the same
+ * comparison in two places is how the env half came to disagree with the save
+ * half in the first place. Loud error + fallback, never silent (#5204's
+ * contract, unchanged).
+ */
+describe('SettingsService — env overrides are judged against the declared valueDomain (#5712)', () => {
+  const spyLogger = () => {
+    const errors: string[] = [];
+    return { errors, logger: { error: (m: string) => void errors.push(m) } };
+  };
+
+  it("honors the card's env repro: OS_LOCALIZATION_TIMEZONE=Europe/Zurich wins the cascade", async () => {
+    const { errors, logger } = spyLogger();
+    const svc = new SettingsService({ env: { OS_LOCALIZATION_TIMEZONE: 'Europe/Zurich' }, logger });
+    svc.registerManifest(localizationSettingsManifest);
+
+    const r = await svc.get('localization', 'timezone');
+    expect(r.value).toBe('Europe/Zurich');
+    expect(r.source).toBe('env');
+    expect(r.locked).toBe(true);
+    expect(errors).toHaveLength(0);
+  });
+
+  it('honors OS_LOCALIZATION_CURRENCY=CHF the same way', async () => {
+    const { errors, logger } = spyLogger();
+    const svc = new SettingsService({ env: { OS_LOCALIZATION_CURRENCY: 'CHF' }, logger });
+    svc.registerManifest(localizationSettingsManifest);
+
+    const r = await svc.get('localization', 'currency');
+    expect(r.value).toBe('CHF');
+    expect(r.source).toBe('env');
+    expect(errors).toHaveLength(0);
+  });
+
+  it('ignores garbage loudly and resolves the next cascade layer instead', async () => {
+    const { errors, logger } = spyLogger();
+    const svc = new SettingsService({ env: { OS_LOCALIZATION_TIMEZONE: 'Mars/Olympus' }, logger });
+    svc.registerManifest(localizationSettingsManifest);
+
+    const r = await svc.get('localization', 'timezone');
+    expect(r.value).toBe('UTC'); // the manifest default, not the garbage
+    expect(r.source).toBe('default');
+    // Not in force, so it pins nothing either — read and write agree (#5204).
+    expect(r.locked).toBe(false);
+    expect(r.cascadeChain?.some((e) => e.scope === 'env')).toBe(false);
+
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain('OS_LOCALIZATION_TIMEZONE');
+    expect(errors[0]).toContain('is not a valid IANA time zone identifier');
+    expect(errors[0]).toContain("Rejected value: 'Mars/Olympus'");
+    expect(errors[0]).toContain('IGNORED');
+    expect(errors[0]).toContain('does NOT take effect');
+  });
+
+  it('rejects OS_LOCALIZATION_CURRENCY=XYZ loudly, once, at registration', async () => {
+    const { errors, logger } = spyLogger();
+    const svc = new SettingsService({ env: { OS_LOCALIZATION_CURRENCY: 'XYZ' }, logger });
+    expect(errors).toHaveLength(0);
+    svc.registerManifest(localizationSettingsManifest);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain('ISO 4217');
+    for (let i = 0; i < 5; i++) await svc.get('localization', 'currency');
+    expect(errors).toHaveLength(1); // said ONCE (#5204 dedupe)
+  });
+
+  it('a REJECTED override pins nothing — the key stays editable', async () => {
+    const { logger } = spyLogger();
+    const svc = new SettingsService({ env: { OS_LOCALIZATION_TIMEZONE: 'Mars/Olympus' }, logger });
+    svc.registerManifest(localizationSettingsManifest);
+
+    expect((await svc.get('localization', 'timezone')).locked).toBe(false);
+    await expect(svc.setMany('localization', { timezone: 'Europe/Zurich' })).resolves.toBeDefined();
+    expect((await svc.get('localization', 'timezone')).value).toBe('Europe/Zurich');
+  });
+
+  it('env door for a domain-less select keeps exhaustive options — the #5131/#5204 regression pin', async () => {
+    const { errors, logger } = spyLogger();
+    const svc = new SettingsService({ env: { OS_LOCALIZATION_DATE_FORMAT: 'DD>MM>YYYY' }, logger });
+    svc.registerManifest(localizationSettingsManifest);
+
+    const r = await svc.get('localization', 'date_format');
+    expect(r.value).toBe('YYYY-MM-DD'); // the default — the override is not in force
+    expect(r.source).toBe('default');
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain('is not a declared option for');
+  });
+
+  it('env door checks default_country membership too — the third case, both doors', async () => {
+    const { errors, logger } = spyLogger();
+    const svc = new SettingsService({
+      env: { OS_LOCALIZATION_DEFAULT_COUNTRY: 'ZZ' }, logger,
+    });
+    svc.registerManifest(localizationSettingsManifest);
+
+    const r = await svc.get('localization', 'default_country');
+    expect(r.value).toBe('US'); // the manifest default
+    expect(r.source).toBe('default');
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain('ISO 3166-1');
+
+    // And a legal non-default is honored.
+    const { logger: okLogger, errors: okErrors } = spyLogger();
+    const ok = new SettingsService({ env: { OS_LOCALIZATION_DEFAULT_COUNTRY: 'CH' }, logger: okLogger });
+    ok.registerManifest(localizationSettingsManifest);
+    expect((await ok.get('localization', 'default_country')).value).toBe('CH');
+    expect(okErrors).toHaveLength(0);
+  });
+});
+
+/**
+ * #6579 — `company.country` adopts `iso_3166_alpha2`, the fourth case of the
+ * hole #5712 closed on localization: the description promised ISO 3166-1 all
+ * along while `^[A-Za-z]{2}$` constrained shape only, so `ZZ` (assigned to
+ * nobody) and `UK` (a CLDR alias, not an ISO 3166-1 code) passed the write
+ * door. Same enforcement machinery, same verdicts — these pins only cover the
+ * adoption, not the machinery (that lives in the #5712 blocks above).
+ */
+describe('SettingsService — company.country adopts iso_3166_alpha2 (#6579)', () => {
+  const companyService = () => {
+    const svc = new SettingsService({ env: {} });
+    svc.registerManifest(companySettingsManifest);
+    return svc;
+  };
+
+  it('write door: admits an assigned code, refuses ZZ/UK with the domain in the constraint', async () => {
+    const svc = companyService();
+    await expect(svc.setMany('company', { country: 'CH' })).resolves.toBeDefined();
+    expect((await svc.get('company', 'country')).value).toBe('CH');
+    for (const cc of ['ZZ', 'UK']) {
+      await expect(svc.setMany('company', { country: cc })).rejects.toMatchObject({
+        code: 'SETTINGS_VALIDATION',
+        fields: [
+          {
+            field: 'country',
+            code: 'invalid_value',
+            label: 'Country',
+            constraint: { valueDomain: 'iso_3166_alpha2' },
+            value: cc,
+          },
+        ],
+      });
+    }
+  });
+
+  it('shape breach still speaks first, in the pattern vocabulary', async () => {
+    // `pattern` stays on the specifier: shape and membership narrow
+    // independently, and the shape verdict is the coarser, more actionable
+    // fact (the same window-before-grid ordering argument as #5712).
+    const svc = companyService();
+    await expect(svc.setMany('company', { country: 'ZZZ' })).rejects.toMatchObject({
+      fields: [{ field: 'country', code: 'invalid_format' }],
+    });
+  });
+
+  it('pins the deliberate tightening: lowercase `us` moves from pattern-accept to domain-reject', async () => {
+    // Before the adoption `^[A-Za-z]{2}$` admitted `us`; domain membership is
+    // exact uppercase, as ISO 3166-1 spells its codes — the same tightening
+    // #5712 recorded for `localization.default_country`. No in-repo runtime
+    // reader consumes `company.country` today, so the risk grade matches.
+    const svc = companyService();
+    await expect(svc.setMany('company', { country: 'us' })).rejects.toMatchObject({
+      fields: [
+        { field: 'country', code: 'invalid_value', constraint: { valueDomain: 'iso_3166_alpha2' } },
+      ],
+    });
+  });
+
+  it('env door judges OS_COMPANY_COUNTRY against the domain too — both doors move together', async () => {
+    // Domain membership ONLY: the env door does not enforce `pattern` for
+    // company keys — that gap is #6580's card, deliberately untouched here.
+    const errors: string[] = [];
+    const svc = new SettingsService({
+      env: { OS_COMPANY_COUNTRY: 'ZZ' },
+      logger: { error: (m: string) => void errors.push(m) },
+    });
+    svc.registerManifest(companySettingsManifest);
+
+    const r = await svc.get('company', 'country');
+    // Not in force: `country` declares no default, so the read resolves to the
+    // empty default layer rather than the rejected override.
+    expect(r.source).toBe('default');
+    expect(r.value).toBeNull();
+    expect(r.locked).toBe(false);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain('OS_COMPANY_COUNTRY');
+    expect(errors[0]).toContain('ISO 3166-1');
+
+    // And a legal member is honored.
+    const okErrors: string[] = [];
+    const ok = new SettingsService({
+      env: { OS_COMPANY_COUNTRY: 'CH' },
+      logger: { error: (m: string) => void okErrors.push(m) },
+    });
+    ok.registerManifest(companySettingsManifest);
+    const okR = await ok.get('company', 'country');
+    expect(okR.value).toBe('CH');
+    expect(okR.source).toBe('env');
+    expect(okErrors).toHaveLength(0);
+  });
+});
+
+/**
+ * #7169 — an unparseable `visible` predicate REFUSES the save.
+ *
+ * The producer/consumer split: `packages/spec`'s `settings-manifest.zod.ts`
+ * types both visibility slots as `ExpressionInputSchema`, which normalizes a
+ * bare string to `{ dialect: 'cel', source }` — so the spec LABELS these values
+ * CEL. `visibility-eval.ts` is not CEL. An author writing the dialect the spec
+ * declares got a `VisibilityParseError`, and `validatePatch` used to answer it
+ * with `catch { continue }` — skipping the whole specifier, so `required`,
+ * `options`, `pattern`, `valueDomain` and the value window all stopped being
+ * enforced on that key, with no diagnostic anywhere.
+ *
+ * Maintainer ruling (2026-08-10): fail closed at save time. These cases pin
+ * that, and they are written to go RED on the fail-open implementation —
+ * restoring `catch { continue }` turns every one of them into an accepted
+ * write. A `rejects.toThrow()`-shaped assertion could not do that (the
+ * fail-open path throws nothing at all), so each asserts the ADR-0112/0114
+ * envelope the surface actually emits: `code: 'SETTINGS_VALIDATION'` on the
+ * error, `code: 'invalid_value'` on the field entry, and the offending
+ * predicate under `constraint.visible`. The matching HTTP `status` (400) is
+ * pinned at the route boundary in `settings-routes.test.ts`, which is where
+ * this surface's status lives.
+ */
+describe('SettingsService — unparseable `visible` fails closed (#7169)', () => {
+  /** A manifest whose `api_key` predicate is CEL the evaluator cannot parse. */
+  function celService(): SettingsService {
+    const svc = new SettingsService({ env: {} });
+    svc.registerManifest({
+      namespace: 'celns',
+      label: 'CEL namespace',
+      specifiers: [
+        { type: 'select', key: 'provider', label: 'Provider',
+          options: [{ value: 'openai', label: 'OpenAI' }, { value: 'memory', label: 'Memory' }] },
+        // CEL membership via the stdlib — the exact spelling `ExpressionInputSchema`
+        // declares is legal, and the grammar reports `unsupported identifier "in"`.
+        { type: 'text', key: 'api_key', label: 'API key', required: true,
+          visible: "${data.provider in ['openai']}" },
+      ],
+    } as any);
+    return svc;
+  }
+
+  it('refuses the write and names the predicate', async () => {
+    const svc = celService();
+    const err = await svc.setMany('celns', { provider: 'openai', api_key: 'sk-live' }).catch((e) => e);
+    expect(err.code).toBe('SETTINGS_VALIDATION');
+    expect(err.fields).toEqual([
+      expect.objectContaining({
+        field: 'api_key',
+        code: 'invalid_value',
+        label: 'API key',
+        constraint: { visible: "data.provider in ['openai']" },
+      }),
+    ]);
+    // The parse reason travels in the sentence, so the author is told WHAT to fix.
+    expect(err.fields[0].message).toContain('unsupported identifier "in"');
+    expect(err.fields[0].message).toContain('visible');
+  });
+
+  it('fires on the half-filled form that never touches the broken key — the incident', async () => {
+    // The console posts only its dirty keys, so the empty `required` field is
+    // absent from the patch. This is the case a TOUCH gate would let through,
+    // and it is the one #7169 measured: fail-open, the save lands clean with
+    // `api_key` empty and `required` never consulted.
+    const svc = celService();
+    const err = await svc.setMany('celns', { provider: 'openai' }).catch((e) => e);
+    expect(err.code).toBe('SETTINGS_VALIDATION');
+    expect(err.fields[0]).toMatchObject({ field: 'api_key', code: 'invalid_value' });
+    // Nothing was persisted — the batch is atomic.
+    expect((await svc.get('celns', 'provider')).source).toBe('default');
+  });
+
+  it('refuses a predicate rooted anywhere but `data`, which carries no deps to gate on', async () => {
+    // `referencedKeys` is a `data.<ident>` scan, so a `record.`-rooted predicate
+    // yields no dependencies at all. Nothing about the patch can make this key
+    // look relevant, which is why the refusal is unconditional.
+    const svc = new SettingsService({ env: {} });
+    svc.registerManifest({
+      namespace: 'rootns',
+      label: 'Root namespace',
+      specifiers: [
+        { type: 'text', key: 'unrelated', label: 'Unrelated' },
+        { type: 'text', key: 'gated', label: 'Gated', required: true,
+          visible: "${record.status == 'open'}" },
+      ],
+    } as any);
+    const err = await svc.setMany('rootns', { unrelated: 'x' }).catch((e) => e);
+    expect(err.code).toBe('SETTINGS_VALIDATION');
+    expect(err.fields[0]).toMatchObject({
+      field: 'gated',
+      code: 'invalid_value',
+      constraint: { visible: "record.status == 'open'" },
+    });
+  });
+
+  it('still lets a broken namespace be RESET — the escape hatch', async () => {
+    // An all-null patch returns before the specifier loop, so a workspace whose
+    // manifest carries a bad predicate is never locked out of clearing it.
+    const svc = celService();
+    await expect(svc.resetNamespace('celns')).resolves.toBeGreaterThanOrEqual(0);
+    await expect(svc.setMany('celns', { provider: null, api_key: null })).resolves.toBeDefined();
+  });
+
+  it('leaves parseable predicates alone', async () => {
+    // Control: the same manifest with the grammar's own spelling. `==` IS in the
+    // grammar, so plain CEL that stays inside it was never affected.
+    const svc = new SettingsService({ env: {} });
+    svc.registerManifest({
+      namespace: 'okns',
+      label: 'OK namespace',
+      specifiers: [
+        { type: 'select', key: 'provider', label: 'Provider',
+          options: [{ value: 'openai', label: 'OpenAI' }, { value: 'memory', label: 'Memory' }] },
+        { type: 'text', key: 'api_key', label: 'API key', required: true,
+          visible: "${data.provider == 'openai'}" },
+      ],
+    } as any);
+    await expect(svc.setMany('okns', { provider: 'memory' })).resolves.toBeDefined();
+    await expect(svc.setMany('okns', { provider: 'openai' })).rejects.toMatchObject({
+      code: 'SETTINGS_VALIDATION',
+      fields: [expect.objectContaining({ field: 'api_key', code: 'required' })],
+    });
+  });
+
+  it('reports every broken specifier, not just the first', async () => {
+    const svc = new SettingsService({ env: {} });
+    svc.registerManifest({
+      namespace: 'twobad',
+      label: 'Two bad',
+      specifiers: [
+        { type: 'text', key: 'a', label: 'A', visible: '${data.x.map(y => y)}' },
+        { type: 'text', key: 'b', label: 'B', visible: '${window.location}' },
+      ],
+    } as any);
+    const err = await svc.setMany('twobad', { a: '1' }).catch((e) => e);
+    expect(err.fields.map((f: any) => f.field)).toEqual(['a', 'b']);
+    expect(err.fields.every((f: any) => f.code === 'invalid_value')).toBe(true);
+  });
+});
+
+/**
+ * #7169 — the in-repo instance of the same fail-open, and its repair.
+ *
+ * `auth.lockout_duration_minutes` declares `min: 1, max: 1440` and carries
+ * `visible: '${data.lockout_threshold > 0}'`. The grammar had no relational
+ * operator, so on `origin/main` the predicate threw, `catch { continue }`
+ * skipped the specifier, and the declared window was enforced on nobody —
+ * measured: `-5` and `99999` both saved clean, while the `visible`-free sibling
+ * `rate_limit_max` was refused correctly by the same branch.
+ */
+describe('auth lockout window is enforced again (#7169)', () => {
+  function authService(): SettingsService {
+    const svc = new SettingsService({ env: {} });
+    svc.registerManifest(authSettingsManifest);
+    return svc;
+  }
+
+  it('enforces min/max once the lockout is switched on', async () => {
+    await expect(
+      authService().setMany('auth', { lockout_threshold: 5, lockout_duration_minutes: 99999 }),
+    ).rejects.toMatchObject({
+      code: 'SETTINGS_VALIDATION',
+      fields: [expect.objectContaining({ field: 'lockout_duration_minutes', code: 'max_value' })],
+    });
+    await expect(
+      authService().setMany('auth', { lockout_threshold: 5, lockout_duration_minutes: -5 }),
+    ).rejects.toMatchObject({
+      fields: [expect.objectContaining({ field: 'lockout_duration_minutes', code: 'min_value' })],
+    });
+    await expect(
+      authService().setMany('auth', { lockout_threshold: 5, lockout_duration_minutes: 30 }),
+    ).resolves.toBeDefined();
+  });
+
+  it('still skips the window while the field is genuinely hidden', async () => {
+    // `lockout_threshold: 0` disables the lockout, so the duration field is not
+    // rendered and not validated — the predicate now EVALUATES to false instead
+    // of failing to parse, which is a different reason for the same outcome and
+    // the one the manifest intended.
+    await expect(
+      authService().setMany('auth', { lockout_threshold: 0, lockout_duration_minutes: 99999 }),
+    ).resolves.toBeDefined();
+  });
+
+  it('every bundled manifest predicate parses, so no builtin namespace is refused', async () => {
+    // The corpus measurement, kept as a regression: 94 `visible` predicates
+    // across the 10 bundled manifests, and a fail-closed save path means any
+    // one of them falling outside the grammar bricks writes to its namespace.
+    for (const manifest of builtinSettingsManifests as Array<Record<string, any>>) {
+      for (const spec of manifest.specifiers ?? []) {
+        if (typeof spec.visible === 'undefined') continue;
+        expect(
+          () => evaluateVisibility(spec.visible, {}),
+          `${manifest.namespace}.${spec.key ?? '(layout)'}: ${visibilitySource(spec.visible)}`,
+        ).not.toThrow();
+      }
+    }
   });
 });

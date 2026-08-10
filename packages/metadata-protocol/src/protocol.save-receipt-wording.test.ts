@@ -41,7 +41,7 @@
  * `protocol.code-only-types.test.ts` — the receipt is built INSIDE
  * `saveMetaItem`, so a harness that mocks `saveMetaItem` cannot see it.
  */
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 // [#5619] The producer's OWN write-verb dispatch decisions (#4550 delete /
 // #5480 update). Imported from `@objectstack/metadata-core`, never from
 // `@objectstack/objectql`: objectql DEPENDS ON this package, so that import
@@ -49,6 +49,7 @@ import { describe, expect, it } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
 import { ObjectStackProtocolImplementation } from './protocol.js';
+import { resetEnvWritableMetadataTypes } from './sys-metadata-repository.js';
 
 interface Row {
     id: string;
@@ -163,14 +164,20 @@ describe('#5265 — a save receipt names what was actually written', () => {
         for (const type of Object.keys(OVERLAYLESS_PROBES)) {
             expect(OVERLAYLESS_RUNTIME_WRITABLE, `${type} left the overlay-less set`).toContain(type);
         }
-        // #6283 — the override-artifact case at the bottom of this file needs a
-        // type that is BOTH overlay-less and per-org overridable. `flow` played
-        // that part until its `allowOrgOverride` was rolled back to `false`
-        // (ADR-0005:57); `action` is the surviving member. Pinned from the
-        // registry so a further flip re-opens the case instead of silently
-        // turning it into an untested `NOT_OVERRIDABLE`.
-        const action = DEFAULT_METADATA_TYPE_REGISTRY.find((e) => e.type === 'action');
-        expect(action).toMatchObject({ supportsOverlay: false, allowOrgOverride: true });
+        // #6283 → #6483 — the override-artifact case at the bottom of this
+        // file needs a type that is BOTH overlay-less and per-org overridable.
+        // `flow` played that part until #6283 rolled its `allowOrgOverride`
+        // back to `false` (ADR-0005:57); `action` inherited it until #6483
+        // rolled back the remaining nine unratified `true` flags — `action`'s
+        // overlay-less-yet-overridable pairing was the #6190 phantom shape
+        // exactly, the very thing being closed. The population is now EMPTY
+        // by ruling, and pinned empty: a future registry edit that mints a
+        // new member re-opens the statically-reachable case below instead of
+        // silently landing an untested pairing.
+        const overlaylessYetOverridable = DEFAULT_METADATA_TYPE_REGISTRY
+            .filter((e) => e.supportsOverlay === false && e.allowOrgOverride)
+            .map((e) => e.type);
+        expect(overlaylessYetOverridable).toEqual([]);
     });
 
     // ── runtime-only: nothing was overlaid, so nothing may claim it was ──
@@ -192,16 +199,25 @@ describe('#5265 — a save receipt names what was actually written', () => {
     }
 
     it('an org-scoped runtime-only save names the org, not an overlay', async () => {
+        // [#6190, 2026-08-09] Re-spelled from `hook` to `view`. The claim is
+        // about the RECEIPT — "(org=…)" rather than the overlay phrasing — and
+        // the receipt does not vary by type. What changed is which types can
+        // reach this receipt at all: since the #6190 ruling an org-scoped write
+        // requires a type that declares `allowOrgOverride`, and the
+        // overlay-less-yet-overridable population is empty by ruling (see the
+        // population pin above). `view` is runtime-only here for the reason the
+        // case below states — no artifact was shipped at this name — so this
+        // still measures a RUNTIME-ONLY org-scoped save, not an overlay.
         const { protocol } = makeProtocol();
 
         const result = await protocol.saveMetaItem({
-            type: 'hook', name: 'rc5_acct', item: OVERLAYLESS_PROBES.hook,
+            type: 'view', name: 'rc5_probe_view', item: VIEW,
             organizationId: 'org_alpha',
         });
 
         expect(result.message).not.toContain('customization overlay');
         expect(result.message).toBe(
-            `Saved hook 'rc5_acct' (org=org_alpha, state=active) [seq=${result.seq}]`,
+            `Saved view 'rc5_probe_view' (org=org_alpha, state=active) [seq=${result.seq}]`,
         );
     });
 
@@ -277,25 +293,32 @@ describe('#5265 — a save receipt names what was actually written', () => {
     });
 
     it('an overlay of a packaged ACTION — supportsOverlay:false, and still an override', async () => {
-        // The mirror of the first block, and the sharpest case in this file.
-        // `action` sits in the overlay-less population above (`supportsOverlay:
-        // false`) yet is `allowOrgOverride: true`, so a packaged action really
-        // can be overridden at runtime — and then the overlay sentence is the
-        // true one. A receipt decided by `supportsOverlay` would get this
-        // exactly backwards; one decided by artifact backing gets it right.
+        // The mirror of the first block, and the sharpest case in this file:
+        // when an overlay-less type IS overridden over a packaged artifact,
+        // the overlay sentence is the true one. A receipt decided by
+        // `supportsOverlay` would get this exactly backwards; one decided by
+        // artifact backing gets it right.
         //
         // (`object` cannot stand in here: it is `allowOrgOverride: false`, so
         // `SysMetadataRepository.assertAllowed` refuses an `override-artifact`
         // write with `[NOT_OVERRIDABLE]` before any receipt is built. Measured,
         // not assumed — this case was written against `object` first.)
         //
-        // The specimen was `flow` until #6283 rolled flow's `allowOrgOverride`
-        // back to `false` (ADR-0005:57 — automation carries execution
-        // side-effects, so a per-org variant is a deployment, not an overlay).
-        // A REPLACEMENT rather than a re-spelling: with the flag off, `flow`
-        // joined `object` in the sentence above and can no longer reach a
-        // receipt at all. `action` is the surviving member of the pairing this
-        // case needs, and the premise pin below reads it from the registry.
+        // The specimen was `flow` until #6283 rolled its `allowOrgOverride`
+        // back to `false` (ADR-0005:57), then bare `action` until #6483
+        // rolled back the remaining nine unratified flags — no statically
+        // registered type pairs overlay-less with overridable anymore (the
+        // premise pin above holds the population empty). The pairing is
+        // still REACHABLE, through the ONE documented door that remains:
+        // `OS_METADATA_WRITABLE` (ADR-0005's operator escape hatch), which
+        // both `isOverlayAllowed` and the repository's `assertAllowed`
+        // consult. So this case runs `action` behind that hatch — the
+        // receipt wording it pins is exactly what an operator who unlocked
+        // a type would see.
+        process.env.OS_METADATA_WRITABLE = 'action';
+        ObjectStackProtocolImplementation.resetEnvWritableCache();
+        resetEnvWritableMetadataTypes();
+
         const { protocol } = makeProtocol([{ type: 'action', name: 'rc5_acct' }]);
 
         const result = await protocol.saveMetaItem({
@@ -305,6 +328,14 @@ describe('#5265 — a save receipt names what was actually written', () => {
         expect(result.message).toBe(
             `Saved customization overlay (env-wide, state=active) — type=action, name=rc5_acct [seq=${result.seq}]`,
         );
+    });
+
+    afterEach(() => {
+        // The escape-hatch case above must not leak `action` writability into
+        // its neighbours — both memoised caches, or the second run lies.
+        delete process.env.OS_METADATA_WRITABLE;
+        ObjectStackProtocolImplementation.resetEnvWritableCache();
+        resetEnvWritableMetadataTypes();
     });
 
     // ── the boundary this message crosses (#5423) ─────────────────────────

@@ -9,6 +9,7 @@ import os from 'os';
 import path from 'path';
 import { printHeader, printKV, printStep, printError } from '../utils/format.js';
 import { redactConnectionUrl } from '../utils/connection-display.js';
+import { databaseDriverFlag } from '../utils/database-driver-flag.js';
 import {
   DEV_WATCH_IGNORED,
   ServeRestartCoordinator,
@@ -16,38 +17,43 @@ import {
   formatMtimeGap,
 } from '../utils/dev-restart.js';
 import { readEnvWithDeprecation, isMcpServerEnabled } from '@objectstack/types';
+import type { ResolvedProjectDatabaseUrl } from '@objectstack/runtime';
 
 /**
- * Resolve the persistent default database URL for `objectstack dev`.
+ * Resolve the database URL for `objectstack dev` — dev's flag surface mapped
+ * onto the ONE shared resolution (`resolveProjectDatabaseUrl`, #6469) that
+ * `os start` and `os migrate` resolve through too. Priority: `--database` /
+ * `--fresh`'s ephemeral file → `OS_DATABASE_URL` / `DATABASE_URL` /
+ * `TURSO_DATABASE_URL` → explicit in-memory driver (`--database-driver memory`
+ * / `OS_DATABASE_DRIVER=memory`) → the config-declared default datasource →
+ * the unified default `<state dir>/data/objectstack.db` (legacy `dev.db` /
+ * `standalone.db` still compat-read, with the loud `notice` line).
  *
- * `dev` should keep your work between restarts — the historical serve default
+ * `dev` keeps a persistent default on purpose — the historical serve default
  * of `:memory:` wipes all data (and AI-authored metadata) on every restart,
- * which makes local app-building unusable. So when the user has NOT chosen a
- * database another way, default to a project-anchored sqlite file at
- * `<cwd>/.objectstack/data/dev.db` (gitignored, per-project).
+ * which makes local app-building unusable.
  *
- * Returns `undefined` (i.e. "don't impose a default") when the user already
- * selected a database, so the existing resolution wins:
- *   - `--database <url>` flag
- *   - `--fresh` (its own ephemeral temp DB)
- *   - `OS_DATABASE_URL` / `DATABASE_URL` env
- *   - an explicit in-memory driver (`--database-driver memory` or
- *     `OS_DATABASE_DRIVER=memory`)
+ * This wrapper is dev's ONE resolution seam (pinned, together with start's and
+ * migrate's, by `unified-db-resolution.pin.test.ts`): it maps inputs, it never
+ * re-implements any fallback. The runtime import is lazy so oclif's
+ * import-every-command startup (#5726) does not pay for the runtime graph.
  */
-export function resolveDefaultDevDbUrl(opts: {
+export async function resolveDevDatabase(opts: {
   databaseFlag?: string;
   freshDbUrl?: string;
   databaseDriverFlag?: string;
   env: Record<string, string | undefined>;
   cwd: string;
-}): string | undefined {
-  if (opts.databaseFlag || opts.freshDbUrl) return undefined;
-  const envDbUrl = (opts.env.OS_DATABASE_URL ?? opts.env.DATABASE_URL)?.trim();
-  if (envDbUrl) return undefined;
-  const forcedMemory =
-    opts.databaseDriverFlag === 'memory' || opts.env.OS_DATABASE_DRIVER?.trim() === 'memory';
-  if (forcedMemory) return undefined;
-  return `file:${path.join(opts.cwd, '.objectstack', 'data', 'dev.db')}`;
+  artifactPath?: string;
+}): Promise<ResolvedProjectDatabaseUrl> {
+  const { resolveProjectDatabaseUrl } = await import('@objectstack/runtime');
+  return resolveProjectDatabaseUrl({
+    explicitUrl: opts.databaseFlag ?? opts.freshDbUrl,
+    explicitDriver: opts.databaseDriverFlag,
+    env: opts.env,
+    projectRoot: opts.cwd,
+    artifactPath: opts.artifactPath,
+  });
 }
 
 export default class Dev extends Command {
@@ -98,10 +104,12 @@ export default class Dev extends Command {
       char: 'd',
       description: 'Database URL: file:./db.sqlite | libsql://... | postgres://... | mongodb://... | memory:// (overrides $OS_DATABASE_URL)',
     }),
-    'database-driver': Flags.string({
-      description: 'Force driver kind: sqlite | turso | postgres | mongodb | memory (overrides $OS_DATABASE_DRIVER)',
-      options: ['sqlite', 'turso', 'postgres', 'mongodb', 'memory'],
-    }),
+    // Enforced allowlist, not a help string — see `utils/database-driver-flag.ts`.
+    // Both the choices and the enumerated list in the description come from the
+    // shared driver table (#6969), so this declaration and `start.ts`'s cannot
+    // drift from each other or from the table; `database-driver-allowlist.pin.test.ts`
+    // (#6860) still pins the agreement with `resolveStorageDefinition`.
+    'database-driver': databaseDriverFlag('Force driver kind'),
     'database-auth-token': Flags.string({
       description: 'Auth token for libsql/Turso connections (overrides $OS_DATABASE_AUTH_TOKEN / $TURSO_AUTH_TOKEN)',
     }),
@@ -228,7 +236,7 @@ export default class Dev extends Command {
       // Creates a unique scratch dir that owns the state this command can
       // actually place, and nothing more. What it covers, exactly:
       //   - the dev SQLite DB the CLI resolves for the run
-      //     (OS_HOME → <home>/data/dev.db, published as OS_DATABASE_URL),
+      //     (OS_HOME → <home>/data/objectstack.db, published as OS_DATABASE_URL),
       //   - the storage-service uploads root, published on the settings
       //     service's own env name OS_STORAGE_LOCAL_ROOT (#4968),
       //   - any other state a plugin keys off OS_HOME.
@@ -262,7 +270,9 @@ export default class Dev extends Command {
       if (flags.fresh) {
         freshHome = fs.mkdtempSync(path.join(os.tmpdir(), 'objectstack-dev-'));
         fs.mkdirSync(path.join(freshHome, 'data'), { recursive: true });
-        freshDbUrl = `file:${path.join(freshHome, 'data', 'dev.db')}`;
+        // The unified default filename (#6469) — the same name every command
+        // resolves, just anchored on this run's ephemeral OS_HOME.
+        freshDbUrl = `file:${path.join(freshHome, 'data', 'objectstack.db')}`;
         freshStorageRoot = path.join(freshHome, 'uploads');
         fs.mkdirSync(freshStorageRoot, { recursive: true });
         printKV('Fresh OS_HOME', freshHome, '🧪');
@@ -292,23 +302,31 @@ export default class Dev extends Command {
       // idempotent (empty-DB only) and never overwrites an existing account.
       const seedAdmin = flags['seed-admin'] ?? true;
 
-      // Default `dev` to a PERSISTENT, project-anchored sqlite database so
-      // AI-authored metadata and records survive restarts. The historical
-      // serve default is `:memory:`, which silently wipes everything on every
-      // restart — fine for throwaway demos, but it makes local app-building
-      // unusable (build an app, restart, it's gone). See {@link resolveDefaultDevDbUrl}
-      // for the opt-out matrix (--fresh / --database / OS_DATABASE_URL / memory driver).
-      const defaultDevDb = resolveDefaultDevDbUrl({
+      // Resolve the database through the ONE shared resolution (#6469) —
+      // `os dev`, `os start` and `os migrate` all land on the same URL for the
+      // same project directory. `dev` keeps a PERSISTENT default on purpose:
+      // the historical serve default is `:memory:`, which silently wipes
+      // everything on every restart — fine for throwaway demos, but it makes
+      // local app-building unusable (build an app, restart, it's gone). See
+      // {@link resolveDevDatabase} for the priority ladder.
+      const resolvedDb = await resolveDevDatabase({
         databaseFlag: flags.database,
         freshDbUrl,
         databaseDriverFlag: flags['database-driver'],
         env: process.env,
         cwd: process.cwd(),
+        artifactPath,
       });
-      if (defaultDevDb) {
-        fs.mkdirSync(path.dirname(defaultDevDb.replace(/^file:/, '')), { recursive: true });
+      if (resolvedDb.notice) {
+        // Legacy-file compat-read — one loud line naming the file being read
+        // and how to converge on the unified default. Never an interactive
+        // prompt (CI-safe), never silent (#6469).
+        console.log(chalk.yellow(`  ⚠ ${resolvedDb.notice}`));
       }
-      const effectiveDb = flags.database ?? freshDbUrl ?? defaultDevDb;
+      if (resolvedDb.source === 'unified-default') {
+        fs.mkdirSync(path.dirname(resolvedDb.url.replace(/^file:/, '')), { recursive: true });
+      }
+      const effectiveDb = resolvedDb.url;
       const localEnv: NodeJS.ProcessEnv = {
         ...process.env,
         OS_ENVIRONMENT_ID: environmentId,
@@ -318,14 +336,14 @@ export default class Dev extends Command {
         ...(seedAdmin && flags['admin-password'] ? { OS_SEED_ADMIN_PASSWORD: flags['admin-password'] } : {}),
         ...(freshHome ? { OS_HOME: freshHome } : {}),
         ...(freshStorageRoot ? { OS_STORAGE_LOCAL_ROOT: freshStorageRoot } : {}),
-        ...(effectiveDb ? { OS_DATABASE_URL: effectiveDb } : {}),
+        OS_DATABASE_URL: effectiveDb,
         ...(flags['database-driver'] ? { OS_DATABASE_DRIVER: flags['database-driver'] } : {}),
         ...(flags['database-auth-token'] ? { OS_DATABASE_AUTH_TOKEN: flags['database-auth-token'] } : {}),
         ...(flags['auth-secret'] ? { OS_AUTH_SECRET: flags['auth-secret'] } : {}),
       };
       printKV('Environment ID', environmentId, '🎯');
       printKV('Artifact', isUrl ? artifactPath : path.relative(process.cwd(), artifactPath), '📦');
-      if (effectiveDb) printKV('Database', redactConnectionUrl(effectiveDb), '🗄️');
+      printKV('Database', redactConnectionUrl(effectiveDb), '🗄️');
 
       const port = flags.port ?? readEnvWithDeprecation('OS_PORT', 'PORT', { silent: true });
       const binPath = process.argv[1];

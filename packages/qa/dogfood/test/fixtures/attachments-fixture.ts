@@ -16,10 +16,11 @@
 //                 user's attachments on it).
 //   att_nofiles — NO enable.files: the #2727 opt-in gate (FILES_DISABLED).
 //
-// No custom SecurityPlugin: a fresh signUp member falls back to the real
-// `member_default` wildcard-CRUD set — exactly the posture the issue's
-// permission matrix questions (the gates under test are the ones layered on
-// TOP of that wildcard).
+// A fresh signUp member falls back to the fixture's OWN permissive baseline
+// (`att_fixture_baseline` below) — exactly the posture the issue's permission
+// matrix questions (the gates under test are the ones layered on TOP of that
+// wildcard). Before #5491 the same posture arrived implicitly from the
+// platform's `member_default`; it is now declared here.
 
 import { defineStack } from '@objectstack/spec';
 import { ObjectSchema, Field } from '@objectstack/spec/data';
@@ -91,9 +92,40 @@ export const attachmentManagerSet: PermissionSet = PermissionSetSchema.parse({
 });
 
 /** SecurityPlugin carrying the platform defaults + the fixture's domain set. */
+
+/**
+ * [#5491] The permissive baseline this matrix runs on, now DECLARED by the
+ * fixture instead of inherited from the platform.
+ *
+ * Until #5491 the platform's `member_default` shipped
+ * `objects['*'] = {allowRead, allowCreate, allowEdit}` and union-merged it into
+ * every authenticated member, so this fixture got the posture for free — and the
+ * header above says so in as many words. That wildcard is exactly what the
+ * maintainer removed (2026-08-07): as a PLATFORM baseline it erased app-declared
+ * explicit-allow gates on three axes.
+ *
+ * Re-declaring it HERE is not the same thing and is not a re-opening. It is one
+ * fixture modelling one deliberately permissive app, which is the posture the
+ * matrix questions: every gate under test is layered ON TOP of a wildcard that
+ * by itself scopes nothing, so removing the wildcard would delete the matrix's
+ * premise rather than migrate it. `allowDelete` stays absent — the delete bit is
+ * what the domain set below adds, and that contrast is half of what the matrix
+ * measures.
+ */
+export const attFixtureBaselineSet: PermissionSet = PermissionSetSchema.parse({
+  name: 'att_fixture_baseline',
+  label: 'Fixture baseline — the wildcard posture this matrix questions',
+  objects: {
+    '*': { allowRead: true, allowCreate: true, allowEdit: true },
+  },
+});
+
 export function attachmentsFixtureSecurity(): SecurityPlugin {
   return new SecurityPlugin({
-    defaultPermissionSets: [...securityDefaultPermissionSets, attachmentManagerSet],
+    defaultPermissionSets: [...securityDefaultPermissionSets, attFixtureBaselineSet, attachmentManagerSet],
+    // [#5491] The platform baseline no longer grants objects, so the fixture's
+    // own permissive baseline is what a grant-less signUp member falls back to.
+    fallbackPermissionSet: attFixtureBaselineSet.name,
   });
 }
 

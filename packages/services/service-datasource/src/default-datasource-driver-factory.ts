@@ -15,7 +15,8 @@
  *   - `sqlite` / `sqlite3`             → `@objectstack/driver-sql` (better-sqlite3)
  *   - `sqlite-wasm` / `wasm-sqlite`    → `@objectstack/driver-sqlite-wasm` (pure-JS)
  *   - `mysql` / `mysql2`               → `@objectstack/driver-sql` (client `mysql2`)
- *   - `mongo` / `mongodb`              → `@objectstack/driver-mongodb` (peer dep)
+ *   - `mongodb` / `mongo`              → `@objectstack/driver-mongodb` (peer dep)
+ *   - `turso` / `libsql`               → `@objectstack/driver-turso` (peer dep)
  *   - `memory` / `inmemory`            → `@objectstack/driver-memory` (ephemeral,
  *     per-datasource — see {@link buildMemoryConfig})
  *
@@ -30,6 +31,16 @@
  * Anything else returns `supports() === false`, so the admin service degrades
  * gracefully (testConnection → `{ ok: false }`, create skips hot pool reg).
  *
+ * `turso` joined in #6345, and it HAD to: `supports()` is
+ * `resolveKind() !== undefined`, so the moment turso became a builtin id this
+ * factory started claiming it. Without an arm the claim would have been answered
+ * by the trailing `memory` fall-through — a libSQL datasource silently built as
+ * an ephemeral in-process store, which is the #3276 class with a new spelling.
+ * The arm is the same shape `mongodb` and `sqlite-wasm` already use, since all
+ * three ride in optional packages. The trailing fall-through is gone too: the
+ * last arm is now an explicit `memory` case with an exhaustiveness throw after
+ * it, so the NEXT builtin cannot inherit the same trap.
+ *
  * SECURITY: the cleartext `spec.secret` is used only to open the connection and
  * is never persisted or logged here.
  */
@@ -42,6 +53,7 @@ import type {
   DatasourceDriverHandle,
 } from './contracts/index.js';
 import { assertDatasourcePoolSupported } from './datasource-pool-support.js';
+import type { SqliteAbsentFileMode } from '@objectstack/driver-sql';
 
 /**
  * Driver-id resolution comes from the spec since #4410 — this file used to keep
@@ -58,6 +70,237 @@ type ResolvedKind = BuiltinDriverId;
 
 function resolveKind(driverId: string): ResolvedKind | undefined {
   return resolveDriverId(driverId);
+}
+
+/**
+ * The optional package that provides the libSQL/Turso driver, and the exact
+ * command an operator runs to install it.
+ *
+ * Declared as constants rather than left inline so the pin test asserts the
+ * COMMAND rather than a sentence shape, and so a host that wants to render the
+ * remedy itself has one place to read it from. `@objectstack/runtime` currently
+ * declares its own equal pair (`TURSO_DRIVER_PACKAGE` /
+ * `TURSO_DRIVER_INSTALL_COMMAND` in `turso-driver-factory.ts`); converging the
+ * two onto these is a runtime-lane change — runtime already depends on this
+ * package, so that import direction is the legal one, while the reverse is not
+ * (#7314).
+ */
+export const TURSO_DRIVER_PACKAGE = '@objectstack/driver-turso';
+
+/** @see {@link TURSO_DRIVER_PACKAGE} */
+export const TURSO_DRIVER_INSTALL_COMMAND = `npm install ${TURSO_DRIVER_PACKAGE}`;
+
+/**
+ * What this factory says when the OPTIONAL libSQL driver package is absent
+ * (#7314).
+ *
+ * Until #7314 this arm said only *"turso driver requested but
+ * @objectstack/driver-turso is not installed (…)"* — the fault and nothing
+ * else. The host loader (`@objectstack/runtime`'s `loadTursoDriverFactory`,
+ * single owner since #6268) has answered the SAME missing package with the
+ * install command, the consequence and the reason for refusing since #5602, so
+ * an operator who booted with a libSQL url was told how to fix it while an
+ * admin who added the identical datasource in Setup was not. One missing
+ * package, two qualities of answer, decided by which door the request came
+ * through.
+ *
+ * Two deliberate differences from the host loader's wording, because this arm
+ * serves different doors — a datasource created in Setup, `testConnection`, a
+ * declared NON-default datasource — rather than a `default` that a host boots:
+ *
+ *  - It names the datasource, like the url-less refusal in the same arm, since
+ *    here there may be several and only one of them is libSQL.
+ *  - It does NOT mention `OS_DATABASE_URL` / `--database`. Those select the
+ *    HOST's `default` datasource and would do nothing for the datasource that
+ *    actually failed — advice that sends the reader to a knob which cannot
+ *    affect their problem is the `connect-failure-remedy.ts` failure (#5794) in
+ *    a new spelling. One fix, stated once, and no escape hatch named.
+ *
+ * The underlying import error is interpolated at the END and in full. That is
+ * load-bearing beyond context: this re-throw drops the original `code`, so
+ * `isUnbuiltWorkspaceFailure` (via `isModuleNotFoundError`) can only recognise
+ * an unbuilt/uninstalled workspace from the `Cannot find package` /
+ * `Cannot find module` TEXT it carries — the same reason the `sqlite-wasm` and
+ * `mongodb` arms interpolate theirs.
+ */
+export function missingTursoDriverMessage(args: { datasource?: string; cause: unknown }): string {
+  const cause = args.cause instanceof Error ? args.cause.message : String(args.cause);
+  return (
+    `datasource '${args.datasource ?? 'default'}': a libSQL/Turso datasource was requested, but the `
+    + `driver package ${TURSO_DRIVER_PACKAGE} is not installed. Install it next to the server that `
+    + `opens this datasource:\n\n    ${TURSO_DRIVER_INSTALL_COMMAND}\n\n`
+    + `(pnpm add ${TURSO_DRIVER_PACKAGE} / yarn add ${TURSO_DRIVER_PACKAGE}.) It is an OPTIONAL `
+    + 'package, so a default install stays free of @libsql/client and its native bindings. This '
+    + 'refuses rather than falling back to another engine: a silent fallback would open an empty '
+    + 'local database that accepts writes while your libSQL data stays untouched, and every write '
+    + `would land in the wrong database. Import error: ${cause}`
+  );
+}
+
+/**
+ * One optional driver package, as much of it as an operator needs to be told
+ * when it turns out to be absent (#7385).
+ *
+ * The two prose fields are per-engine and are NOT decoration. #7384 wrote the
+ * libSQL wording around a REMOTE database being shadowed by a local one — true
+ * for libSQL, true for mongo, and false for `sqlite-wasm`, which has no remote
+ * to shadow. Copying that sentence onto the other arms would have produced a
+ * remedy that reads well and lies, so each arm states its own consequence and
+ * its own reason for being an optional install.
+ */
+interface OptionalDriverPackage {
+  /** Noun phrase for what was asked for: *"a MongoDB datasource"*. */
+  readonly requested: string;
+  /** @see {@link TURSO_DRIVER_PACKAGE} */
+  readonly packageName: string;
+  /** @see {@link TURSO_DRIVER_INSTALL_COMMAND} */
+  readonly installCommand: string;
+  /** Completes *"It is an OPTIONAL package, …"* — what a default install is spared. */
+  readonly optionalBecause: string;
+  /**
+   * Completes *"This refuses rather than falling back to another engine: …"* —
+   * what would actually happen to this engine's data if it did fall back.
+   */
+  readonly consequence: string;
+}
+
+/**
+ * The shared shape of "the optional driver package for this arm is not here"
+ * (#7385), generalised from the libSQL wording #7314 landed.
+ *
+ * All three of `sqlite-wasm`, `mongodb` and `turso` ride in optional packages,
+ * and until #7314 all three answered an absent one with the fault and nothing
+ * else. #7314 fixed the libSQL arm; an admin who added a mongo datasource in
+ * Setup still got the strictly worse answer, decided by nothing but which
+ * driver they picked. This builder is what makes "same class of problem, same
+ * quality of answer" a property of the file rather than of whoever edits an arm
+ * next.
+ *
+ * Every discipline point #7384 landed under is kept, because each was a fix for
+ * a measured failure rather than a style choice:
+ *
+ *  - **Name the datasource.** Several may be declared and only one of them is
+ *    this engine; the url-less refusal in the `turso` arm names it too.
+ *  - **Name exactly one fix, and no escape hatch.** No `OS_DATABASE_URL` /
+ *    `--database` (they select the HOST's `default` datasource and can do
+ *    nothing for the one that actually failed) and no
+ *    `OS_ALLOW_DRIVER_CONNECT_FAILURE` (it would only hide a package that does
+ *    not exist). Naming an escape hatch is how it gets used — the
+ *    `connect-failure-remedy.ts` failure (#5794).
+ *  - **Interpolate the import error at the END and in full.** Load-bearing
+ *    beyond context: these arms re-throw a NEW Error and so drop the original
+ *    `code`, leaving `isUnbuiltWorkspaceFailure` (via `isModuleNotFoundError`)
+ *    able to recognise a half-built checkout only from the `Cannot find
+ *    package` / `Cannot find module` TEXT this message carries. Drop it and a
+ *    contributor with an unbuilt worktree is told to install a package they
+ *    already have.
+ *
+ * `missingTursoDriverMessage` is deliberately left as its own function rather
+ * than re-expressed through this builder: it merged hours before this change
+ * and its wording is pinned by #7384's own tests, so converging it is a
+ * behaviour-preserving edit with nothing to gain today. The parity test asserts
+ * all three answers share this skeleton, which is what makes that convergence a
+ * one-line change whenever the lane wants it.
+ */
+function missingDriverPackageMessage(
+  driver: OptionalDriverPackage,
+  args: { datasource?: string; cause: unknown },
+): string {
+  const cause = args.cause instanceof Error ? args.cause.message : String(args.cause);
+  return (
+    `datasource '${args.datasource ?? 'default'}': ${driver.requested} was requested, but the `
+    + `driver package ${driver.packageName} is not installed. Install it next to the server that `
+    + `opens this datasource:\n\n    ${driver.installCommand}\n\n`
+    + `(pnpm add ${driver.packageName} / yarn add ${driver.packageName}.) It is an OPTIONAL `
+    + `package, ${driver.optionalBecause}. This refuses rather than falling back to another `
+    + `engine: ${driver.consequence}. Import error: ${cause}`
+  );
+}
+
+/**
+ * The optional package that provides the WASM SQLite driver, and the exact
+ * command an operator runs to install it.
+ *
+ * Optional from THIS package's side, which is the side that matters here:
+ * `@objectstack/service-datasource` declares it in `devDependencies` only, so a
+ * host that installs this service on its own does not get it. Hosts that go
+ * through `@objectstack/runtime` or `@objectstack/cli` DO get it as a hard
+ * dependency — for them the reachable case is a half-built workspace, whose
+ * `Cannot find module` text `isUnbuiltWorkspaceFailure` re-routes to
+ * `pnpm install && pnpm build` further down the stack.
+ *
+ * @see {@link TURSO_DRIVER_PACKAGE} for why these are constants and not inline.
+ */
+export const SQLITE_WASM_DRIVER_PACKAGE = '@objectstack/driver-sqlite-wasm';
+
+/** @see {@link SQLITE_WASM_DRIVER_PACKAGE} */
+export const SQLITE_WASM_DRIVER_INSTALL_COMMAND = `npm install ${SQLITE_WASM_DRIVER_PACKAGE}`;
+
+/**
+ * The optional package that provides the MongoDB driver, and the exact command
+ * an operator runs to install it.
+ *
+ * `@objectstack/service-datasource` declares it in `devDependencies` only and
+ * `@objectstack/runtime` carries it as an `optionalDependencies` entry, so
+ * `--omit=optional` and a direct install of this service both reach the missing
+ * package path. (`@objectstack/cli` depends on it outright.)
+ *
+ * @see {@link TURSO_DRIVER_PACKAGE} for why these are constants and not inline.
+ */
+export const MONGODB_DRIVER_PACKAGE = '@objectstack/driver-mongodb';
+
+/** @see {@link MONGODB_DRIVER_PACKAGE} */
+export const MONGODB_DRIVER_INSTALL_COMMAND = `npm install ${MONGODB_DRIVER_PACKAGE}`;
+
+/**
+ * What this factory says when the OPTIONAL WASM SQLite package is absent
+ * (#7385).
+ *
+ * The consequence clause is this arm's own. `sqlite-wasm` has no remote
+ * database for a local one to shadow, so #7384's "your libSQL data stays
+ * untouched" would be false here; what a fallback would actually cost is either
+ * the durability the datasource asked for (the memory driver accepts writes and
+ * drops them at shutdown, #4083) or the whole point of picking WASM in the
+ * first place (the native `better-sqlite3` addon this id exists to avoid).
+ */
+export function missingSqliteWasmDriverMessage(args: { datasource?: string; cause: unknown }): string {
+  return missingDriverPackageMessage(
+    {
+      requested: 'a WASM SQLite datasource',
+      packageName: SQLITE_WASM_DRIVER_PACKAGE,
+      installCommand: SQLITE_WASM_DRIVER_INSTALL_COMMAND,
+      optionalBecause: 'so an install that pulls in only this service stays free of the sql.js WASM build',
+      consequence:
+        'stepping down to the in-process memory driver would accept every write and drop it at '
+        + 'shutdown, leaving the file this datasource names empty, and stepping down to the native '
+        + 'better-sqlite3 build would need exactly the native addon a WASM datasource is chosen to '
+        + 'avoid',
+    },
+    args,
+  );
+}
+
+/**
+ * What this factory says when the OPTIONAL MongoDB package is absent (#7385).
+ *
+ * This arm's consequence IS the libSQL one in substance — a remote server
+ * shadowed by something local — because mongo, like libSQL, is a database this
+ * process connects to rather than one it opens.
+ */
+export function missingMongodbDriverMessage(args: { datasource?: string; cause: unknown }): string {
+  return missingDriverPackageMessage(
+    {
+      requested: 'a MongoDB datasource',
+      packageName: MONGODB_DRIVER_PACKAGE,
+      installCommand: MONGODB_DRIVER_INSTALL_COMMAND,
+      optionalBecause: 'so a default install stays free of the mongodb Node.js client',
+      consequence:
+        'a silent fallback would open a local database that accepts writes while the MongoDB server '
+        + 'this datasource points at stays untouched, and every write would land in the wrong '
+        + 'database',
+    },
+    args,
+  );
 }
 
 /**
@@ -320,6 +563,23 @@ export interface DefaultDatasourceDriverFactoryOptions {
    * failure is NOT silently swapped for a different engine (fail-closed).
    */
   dev?: boolean;
+  /**
+   * What a `sqlite` construction does when its file does not exist (#6743).
+   * `'empty-in-memory'` opens an ephemeral database instead of creating the
+   * file — for hosts that only READ (`os migrate plan`). Defaults to
+   * `'create'`, so no existing host changes behaviour.
+   *
+   * A host-composition option rather than a datasource `config` key on
+   * purpose: it describes what THIS BOOT is allowed to do, not a property of
+   * the datasource, and `SqliteConfigSchema` is strict — an authorable key
+   * here would invite `objectstack.config.ts` to declare a database that
+   * silently never persists.
+   *
+   * Applies to the `sqlite` kind only. `sqlite-wasm` is constructed directly
+   * from a filename and is deliberately left alone; every other kind connects
+   * to a server that this process cannot bring into existence anyway.
+   */
+  sqliteAbsentFile?: SqliteAbsentFileMode;
 }
 
 export function createDefaultDatasourceDriverFactory(
@@ -392,6 +652,7 @@ export function createDefaultDatasourceDriverFactory(
           dev: options.dev,
           ...(schemaMode ? { schemaMode } : {}),
           ...(autoMigrate ? { autoMigrate } : {}),
+          ...(options.sqliteAbsentFile ? { sqliteAbsentFile: options.sqliteAbsentFile } : {}),
         });
         return toHandle(resolved.driver, () => sqlServerVersion(resolved.driver, 'sqlite'));
       }
@@ -406,9 +667,11 @@ export function createDefaultDatasourceDriverFactory(
         try {
           ({ SqliteWasmDriver } = await import('@objectstack/driver-sqlite-wasm' as any));
         } catch (err: any) {
-          throw new Error(
-            `sqlite-wasm driver requested but @objectstack/driver-sqlite-wasm is not installed (${err?.message ?? err}).`,
-          );
+          // Until #7385 this said only "sqlite-wasm driver requested but
+          // @objectstack/driver-sqlite-wasm is not installed (…)" — the fault
+          // and no next step, while the `turso` arm below has stated the
+          // command, the consequence and the refusal since #7314.
+          throw new Error(missingSqliteWasmDriverMessage({ datasource: spec.name, cause: err }));
         }
         const conn = buildSqlConnection(spec, 'better-sqlite3') as { filename?: string };
         const filename = conn.filename ?? ':memory:';
@@ -432,14 +695,16 @@ export function createDefaultDatasourceDriverFactory(
         return toHandle(driver);
       }
 
-      if (kind === 'mongo') {
+      if (kind === 'mongodb') {
         let MongoDBDriver: any;
         try {
           ({ MongoDBDriver } = await import('@objectstack/driver-mongodb' as any));
         } catch (err: any) {
-          throw new Error(
-            `mongodb driver requested but @objectstack/driver-mongodb is not installed (${err?.message ?? err}).`,
-          );
+          // Same generalisation as the `sqlite-wasm` arm above (#7385): this
+          // said "mongodb driver requested but @objectstack/driver-mongodb is
+          // not installed (…)" and stopped, so an admin who added a mongo
+          // datasource in Setup was told less than one who added a libSQL one.
+          throw new Error(missingMongodbDriverMessage({ datasource: spec.name, cause: err }));
         }
         // `options` (the MongoClient passthrough) and the datasource's `pool`
         // block reach the client since #4410 — the driver has always read
@@ -455,17 +720,101 @@ export function createDefaultDatasourceDriverFactory(
         return toHandle(driver);
       }
 
-      // memory — ephemeral per datasource unless the author opts into
-      // persistence, and then into a destination of its own (#4083).
-      //
-      // `spec.pool` is not read here and never was: `InMemoryDriver` opens no
-      // connection, so there is nothing for one to size. It used to be dropped
-      // in silence; since #5931 the guard above rejects it, which is why this
-      // arm needs no pool handling of its own rather than merely having none.
-      const { InMemoryDriver } = await import('@objectstack/driver-memory');
-      return toHandle(new InMemoryDriver(buildMemoryConfig(spec)));
+      if (kind === 'turso') {
+        // libSQL/Turso (#6345). Lazy + caught exactly like `mongodb` and
+        // `sqlite-wasm` above: all three ship in optional packages, and a driver
+        // being an optional INSTALL has never meant it lacks a contract.
+        //
+        // This arm exists because `supports()` is `resolveKind() !== undefined`.
+        // Giving turso a config contract made it a `BuiltinDriverId`, so the
+        // factory began claiming it; before this arm that claim was answered by
+        // the trailing `memory` fall-through, i.e. a libSQL datasource built as
+        // an ephemeral in-process store that reports success and loses every
+        // write (#3276). The CLI and standalone stack still INJECT their own
+        // turso factory for the `default` datasource (#5602's host-factory
+        // seam), which wins over this one; this arm is what serves every OTHER
+        // door — a runtime datasource created in Setup, `testConnection`, a
+        // declared non-default datasource.
+        //
+        // The missing-package message states the install command, the
+        // consequence and the refusal — the same quality of answer the host
+        // loader has given since #5602, which this arm did not (#7314). The
+        // typed `MissingDriverPackageError` the host raises is deliberately NOT
+        // mirrored here: that class lives in `@objectstack/runtime`, which
+        // DEPENDS on this package, so importing it would invert the dependency,
+        // and declaring a second same-named class is precisely the identity
+        // hazard #6268 closed (`serve.ts` decides fatality with `instanceof`).
+        let TursoDriver: any;
+        try {
+          ({ TursoDriver } = await import('@objectstack/driver-turso' as any));
+        } catch (err: any) {
+          throw new Error(missingTursoDriverMessage({ datasource: spec.name, cause: err }));
+        }
+        const url = typeof cfg.url === 'string' ? cfg.url.trim() : '';
+        if (!url) {
+          // `TursoConfigSchema.url` is required, so the authoring and wizard
+          // gates already refuse this. A stored row written before #6345 had no
+          // gate at all, and refusing here is the difference between a named
+          // failure and `@libsql/client` opening something unexpected.
+          throw new Error(
+            `datasource '${spec.name ?? 'default'}': the turso driver needs a libSQL url in its `
+            + 'config (e.g. libsql://my-db.turso.io or file:./data/objectstack.db).',
+          );
+        }
+        const driver = new TursoDriver({
+          url,
+          ...(typeof cfg.authToken === 'string' && cfg.authToken ? { authToken: cfg.authToken } : {}),
+          ...(typeof cfg.encryptionKey === 'string' && cfg.encryptionKey
+            ? { encryptionKey: cfg.encryptionKey }
+            : {}),
+          ...(typeof cfg.concurrency === 'number' ? { concurrency: cfg.concurrency } : {}),
+          ...(typeof cfg.syncUrl === 'string' && cfg.syncUrl ? { syncUrl: cfg.syncUrl } : {}),
+          ...(cfg.sync && typeof cfg.sync === 'object' ? { sync: cfg.sync } : {}),
+          ...(typeof cfg.timeout === 'number' ? { timeout: cfg.timeout } : {}),
+          ...(typeof cfg.mode === 'string' ? { mode: cfg.mode } : {}),
+          ...(schemaMode ? { schemaMode } : {}),
+        });
+        return toHandle(driver, () => sqlServerVersion(driver, 'sqlite'));
+      }
+
+      if (kind === 'memory') {
+        // memory — ephemeral per datasource unless the author opts into
+        // persistence, and then into a destination of its own (#4083).
+        //
+        // `spec.pool` is not read here and never was: `InMemoryDriver` opens no
+        // connection, so there is nothing for one to size. It used to be dropped
+        // in silence; since #5931 the guard above rejects it, which is why this
+        // arm needs no pool handling of its own rather than merely having none.
+        const { InMemoryDriver } = await import('@objectstack/driver-memory');
+        return toHandle(new InMemoryDriver(buildMemoryConfig(spec)));
+      }
+
+      // Every `BuiltinDriverId` must have an arm above (#6345). Until then this
+      // was `memory`'s implicit position: an id the spec table knew and this
+      // switch did not silently became an in-process store that accepted writes
+      // and lost them. `kind` is `never` here, so adding a builtin without an
+      // arm is a TYPE error at build time and a named refusal at run time —
+      // never a different engine.
+      return assertEveryBuiltinDriverHasAnArm(kind);
     },
   };
+}
+
+/**
+ * The exhaustiveness stop for {@link createDefaultDatasourceDriverFactory}'s
+ * dispatch — see the comment at its only call site.
+ *
+ * Takes `never`, so it cannot be reached while every builtin has an arm; it
+ * still throws rather than returning, because the type guarantee is erased at
+ * run time and a stale published `@objectstack/spec` beside a newer consumer is
+ * exactly the case that would reach it.
+ */
+function assertEveryBuiltinDriverHasAnArm(kind: never): never {
+  throw new Error(
+    `Driver id '${String(kind)}' is a built-in with a config contract but has no construction arm `
+    + 'in the shared datasource driver factory. This is a platform bug — refusing rather than '
+    + 'falling back, because falling back would build a different engine than the one requested.',
+  );
 }
 
 /** Best-effort server version via a raw query; swallows everything. */

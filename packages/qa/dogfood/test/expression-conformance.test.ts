@@ -2,9 +2,12 @@
 //
 // ADR-0058 D7 — the Expression Surface Conformance ledger is a CHECKED artifact.
 // Refactored onto the reusable ADR-0060 `checkLedger` helper: one call asserts
-// the shared invariants AND the ratchet (re-discover every ExpressionInputSchema
-// field in packages/spec/src + the RLS using/check predicates; fail if any is
-// unclassified). The expression-specific invariants (mode/dialect/fail-policy,
+// the shared invariants AND the ratchet (re-discover every expression-declaring
+// field in packages/spec/src — see EXPRESSION_INPUT_SCHEMAS — plus the RLS
+// using/check predicates; fail if any is unclassified). Discovery is by SCHEMA
+// NAME, so a slot that moves to a narrower schema leaves the scan unless that
+// schema is registered: #7327 is the worked example. The
+// expression-specific invariants (mode/dialect/fail-policy,
 // compile rows name the canonical compiler) stay here.
 
 import { describe, expect, it } from 'vitest';
@@ -20,7 +23,26 @@ const SPEC_SRC = join(REPO_ROOT, 'packages/spec/src');
 
 const MODES = new Set(['compile', 'interpret']);
 const FAIL_POLICIES = new Set(['compile-error', 'fail-closed', 'fail-soft-log', 'throw']);
-const DIALECTS = new Set(['cel', 'cron', 'template', 'js']);
+// `settings-visibility` is not one of the spec's `ExpressionDialect` members on
+// purpose (#7327): it is a closed non-CEL grammar with its own evaluator, and
+// the ledger's job is to say what a surface IS, not what its schema used to
+// claim. See the `settings-visibility` row.
+const DIALECTS = new Set(['cel', 'cron', 'template', 'js', 'settings-visibility']);
+
+/**
+ * Schemas that DECLARE an expression surface. `ExpressionInputSchema` is the
+ * shared one; a slot whose accepted grammar is narrower gets its own schema and
+ * must be listed here too, or the ratchet silently stops watching it.
+ *
+ * That is not hypothetical — it is how this scan behaves by construction, and
+ * #7327 hit it: narrowing the settings `visible` slots off `ExpressionInputSchema`
+ * dropped them out of discovery and turned their ledger entry stale. A new
+ * narrowed alias belongs in this list on the same commit that introduces it.
+ */
+const EXPRESSION_INPUT_SCHEMAS = ['ExpressionInputSchema', 'SettingsVisibilityInputSchema'];
+const DECLARES_EXPRESSION = new RegExp(
+  String.raw`^\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*:\s*(?:${EXPRESSION_INPUT_SCHEMAS.join('|')})\b`,
+);
 
 /** Re-discover every expression surface in the spec — the SAME scan the ledger encodes. */
 function discoverSurfaces(): Set<string> {
@@ -34,7 +56,7 @@ function discoverSurfaces(): Set<string> {
       else if (ent.isFile() && ent.name.endsWith('.zod.ts')) {
         const rel = relative(SPEC_SRC, p);
         for (const line of readFileSync(p, 'utf8').split('\n')) {
-          const m = line.match(/^\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*:\s*ExpressionInputSchema\b/);
+          const m = line.match(DECLARES_EXPRESSION);
           if (m) found.add(`${rel}:${m[1]}`);
         }
       }

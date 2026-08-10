@@ -22,12 +22,11 @@ import type {
 import { SysMetadataObject, SysMetadataHistoryObject } from '@objectstack/metadata-core';
 import { applyConversionsToStoredItem } from '@objectstack/spec';
 import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
-import type { IDataDriver, IDataEngine } from '@objectstack/spec/contracts';
+import type { IDataDriver, IDataEngine, DriverQuery } from '@objectstack/spec/contracts';
 import type { MetadataLoader } from './loader-interface.js';
 import { calculateChecksum } from '../utils/metadata-history-utils.js';
 import { LRUCache } from '../utils/lru-cache.js';
 import { isMissingTableError, isSchemaAlreadyExistsError } from '../utils/schema-sync-errors.js';
-import { addSysMetadataOverlayIndex } from '../migrations/add-sys-metadata-overlay-index.js';
 import { migrateProjectIdToEnvironmentId } from '../migrations/migrate-project-id-to-environment-id.js';
 
 /**
@@ -226,25 +225,43 @@ export class DatabaseLoader implements MetadataLoader {
   // Internal CRUD helpers (driver vs engine)
   // ==========================================
 
-  private async _find(table: string, query: Record<string, unknown>): Promise<Record<string, unknown>[]> {
+  // NOTE (#6231, closed out by #7178): BOTH branches below now take `query`
+  // unchanged and uncast. `DriverQuery` is `Omit<QueryAST, 'object'>`, so the
+  // object name travels as argument one only — that was always enough for the
+  // driver branch. The ENGINE branch used to carry `as any`, for one reason:
+  // `EngineQueryOptionsSchema.search` admitted only the structured
+  // `FullTextSearchSchema`, while `QueryAST.search` (hence `DriverQuery`) also
+  // admits the bare query string that ADR-0061 D1 calls the canonical Tier-1
+  // spelling and that the engine actually serves, so `DriverQuery` was not
+  // assignable to `EngineQueryOptionsParsed`. #7178 aligned the two schemas;
+  // the casts are now genuinely vestigial and are gone, which restores real
+  // `where`/`orderBy`/`fields` checking on the metadata main read path — this
+  // schema is not `.strict()`, so an unknown key here is SILENTLY DROPPED
+  // (`check:query-options-erasure`'s own rationale) and the erased type was
+  // the only thing standing between a typo and that silence.
+  //
+  // If a future edit makes one of these stop compiling, the honest fix is to
+  // reconcile the two schemas again — not to reinstate the cast.
+
+  private async _find(table: string, query: DriverQuery): Promise<Record<string, unknown>[]> {
     if (this.engine) {
-      return this.engine.find(table, query as any);
+      return this.engine.find(table, query);
     }
-    return this.driver!.find(table, { object: table, ...query } as any);
+    return this.driver!.find(table, query);
   }
 
-  private async _findOne(table: string, query: Record<string, unknown>): Promise<Record<string, unknown> | null> {
+  private async _findOne(table: string, query: DriverQuery): Promise<Record<string, unknown> | null> {
     if (this.engine) {
-      return this.engine.findOne(table, query as any);
+      return this.engine.findOne(table, query);
     }
-    return this.driver!.findOne(table, { object: table, ...query } as any);
+    return this.driver!.findOne(table, query);
   }
 
-  private async _count(table: string, query: Record<string, unknown>): Promise<number> {
+  private async _count(table: string, query: DriverQuery): Promise<number> {
     if (this.engine) {
-      return this.engine.count(table, query as any);
+      return this.engine.count(table, query);
     }
-    return this.driver!.count(table, { object: table, ...query } as any);
+    return this.driver!.count(table, query);
   }
 
   private async _create(table: string, data: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -323,9 +340,16 @@ export class DatabaseLoader implements MetadataLoader {
     // When using engine, schema sync is handled by ObjectQL startup
     if (this.engine) {
       this.schemaReady = true;
-      // Best-effort: also ensure the overlay-uniqueness index.
-      // The engine-managed driver may still benefit from a partial UNIQUE
-      // INDEX (ADR-0005). Failures are swallowed by the migration itself.
+      // ⚠️ This loader does NOT build `idx_sys_metadata_overlay_active` (#6771).
+      // It used to, with the pre-ADR-0048 key, and because every producer uses
+      // `IF NOT EXISTS` the first one to run claimed the name for good. On this
+      // engine path nothing has synced `sys_metadata` yet, so that producer was
+      // the one most likely to win — and it installed a key the platform
+      // retired. Overlay uniqueness has exactly two owners now, both correctly
+      // keyed: `metadata-protocol`'s `ensureMetadataOverlayIndexes` (the
+      // partial, NULL-safe form) and, for stacks without it, the declaration in
+      // `metadata-core`'s `sys-metadata.object.ts` that ObjectQL's own startup
+      // materializes through `syncDeclaredIndexes`.
       try {
         const engineAny = this.engine as any;
         let driver: IDataDriver | undefined =
@@ -342,10 +366,22 @@ export class DatabaseLoader implements MetadataLoader {
         if (driver) {
           // v5.0 forward migration: project_id → environment_id (idempotent).
           await migrateProjectIdToEnvironmentId(driver).catch(() => undefined);
-          await addSysMetadataOverlayIndex(driver);
         }
-      } catch {
-        // ignore — index is an optimization, not a correctness invariant
+      } catch (error) {
+        // ADR-0120 D4: never block the boot, never swallow it either (#6771 —
+        // this catch was empty). Resolving a raw-SQL driver off the engine is
+        // the only thing left that can throw here, and when it does the
+        // `project_id` → `environment_id` forward migration did NOT run: rows
+        // written before v5.0 keep the old column and read back as if the
+        // field were unset.
+        console.warn(
+          `[Metadata] Could not resolve a raw-SQL driver from the engine for \`${this.tableName}\` — ` +
+            `the project_id→environment_id forward migration was SKIPPED. Legacy rows (if any) keep the ` +
+            `pre-v5.0 column and read back as unset. Metadata reads and writes are otherwise unaffected. ` +
+            `Re-run it explicitly with \`migrateProjectIdToEnvironmentId(driver)\` from ` +
+            `\`@objectstack/metadata/migrations\` once the datasource is reachable.`,
+          error,
+        );
       }
       return;
     }
@@ -403,12 +439,16 @@ export class DatabaseLoader implements MetadataLoader {
     } catch {
       // ignore — migration is best-effort on bootstrap
     }
-    // Apply ADR-0005 partial UNIQUE INDEX (best-effort, idempotent)
-    try {
-      await addSysMetadataOverlayIndex(this.driver!);
-    } catch {
-      // ignore — index is optimization
-    }
+    // ⚠️ No overlay-index DDL is issued from here (#6771). `syncSchema` above
+    // already materialized the DECLARED `idx_sys_metadata_overlay_active` from
+    // `sys-metadata.object.ts` with the CURRENT ADR-0048 discriminator
+    // `(type, name, organization_id, package_id)`; measured on real SQLite, the
+    // producer that used to sit here found the name taken and no-opped —
+    // while still reporting `status: 'created'`. Its one non-no-op window was
+    // the benign "already exists" path above, where `syncSchema` threw before
+    // creating the declared indexes: there it installed the RETIRED key
+    // `(…, environment_id, scope)`, and `syncDeclaredIndexes` skips by name, so
+    // nothing ever repaired it. See the tombstone in `../migrations/index.ts`.
   }
 
   /**

@@ -171,6 +171,44 @@ function readRouteParams(c: any): Record<string, string> {
 }
 
 /**
+ * The request's query parameters, with a REPEATED key surfacing as an array
+ * and a single-valued key as a plain string (#6878, route 2).
+ *
+ * `c.req.query()` — what both construction sites used before — returns only the
+ * FIRST value per key, so `?version=1.0.0&version=2.0.0` reached a handler as
+ * `'1.0.0'` and the ambiguity was gone before anyone could refuse it. The
+ * reference `NodeHttpServer` in `packages/qa/http-conformance` never collapsed:
+ * it reads `url.searchParams.getAll(key)` and keeps the array. One request
+ * therefore had two answers depending on which server booted, which is what
+ * #6878 measured and what the cli-lane seat ruled (2026-08-10) to resolve in
+ * this direction — the handler must be able to SEE the ambiguity in order to
+ * reject it, per #6307's landed `readSingleQueryValue` direction.
+ *
+ * ⚠️ The normalisation is NOT optional. `c.req.queries()` returns an array for
+ * EVERY key, single-valued ones included (measured on hono@4.12.x:
+ * `{ version: ['1.0.0','2.0.0'], single: ['9'] }`), so a bare swap would have
+ * silently turned every existing single-value read point on this adapter into
+ * an array. PR #6941 left a control case in
+ * `packages/qa/http-conformance/src/query-multiplicity.conformance.test.ts`
+ * that fails on exactly that mistake — keep it green.
+ *
+ * Built with `Object.fromEntries` rather than dynamic property writes
+ * (`obj[key] = …`): the keys come straight off the wire, and `?__proto__=…`
+ * through a dynamic write is remote property injection. `fromEntries` creates
+ * own data properties only. Same reasoning, same shape, as the reference
+ * adapter's query block.
+ */
+function readQuery(c: any): Record<string, string | string[]> {
+    const all: Record<string, string[]> = c.req.queries() ?? {};
+    return Object.fromEntries(
+        Object.entries(all).map(([key, values]) => [
+            key,
+            values.length > 1 ? values : values[0],
+        ]),
+    ) as Record<string, string | string[]>;
+}
+
+/**
  * Hono Implementation of IHttpServer
  */
 export class HonoHttpServer implements IHttpServer {
@@ -296,7 +334,7 @@ export class HonoHttpServer implements IHttpServer {
 
         const req = {
             params: readRouteParams(c),
-            query: c.req.query(),
+            query: readQuery(c),
             body,
             headers: rawHeaders,
             method: c.req.method,
@@ -740,7 +778,7 @@ export class HonoHttpServer implements IHttpServer {
             const headers = c.req.header() as Record<string, string>;
             const req = {
                 params: {},
-                query: c.req.query(),
+                query: readQuery(c),
                 // Deliberately absent — see the `use()` contract above.
                 body: undefined,
                 headers,

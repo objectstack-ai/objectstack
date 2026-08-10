@@ -70,9 +70,9 @@ Canonical cross-paradigm action/node descriptor (ADR-0018)
 | **supportsCancellation** | `boolean` | ✅ | Supports cancellation |
 | **supportsRetry** | `boolean` | ✅ | Supports retry on failure |
 | **needsOutbox** | `boolean` | ✅ | Dispatch via service-messaging outbox (retry/idempotency/dead-letter) |
-| **isAsync** | `boolean` | ✅ | Suspends the flow awaiting an external reply |
+| **isAsync** | `never` | optional | [REMOVED] `ActionDescriptor.isAsync` was removed in @objectstack/spec 17 (#6748, ADR-0049) — no execution path ever read it, so declaring it never made a node suspend and omitting it never stopped one. Delete the key. The live mechanism is two-part: an executor suspends by RETURNING `suspend: true` from `execute()`, and its descriptor must declare `supportsPause: true` (plus the `resumeAuthority` its pauses need) or the engine refuses that suspension (#6667). Declaring `isAsync: true` alongside `supportsPause: true` was always redundant; declaring it alone was always inert. |
 | **handlerContract** | `Enum<'none' \| 'pure'>` | ✅ | Effect contract for author-supplied code this action invokes: 'none' (invokes none) or 'pure' (must not write — it returns a value and the flow graph persists it) |
-| **resumeAuthority** | `Enum<'any' \| 'service'>` | optional | Who may resume a run this node suspended: 'any' (the generic resume route) or 'service' (only the owning service, e.g. approvals). Deliberately has no default — an omission is a distinct, reportable fact, and a pausing node type that omits it is warned about at registration (#5561) |
+| **resumeAuthority** | `Enum<'any' \| 'service'>` | optional | Who may resume a run this node suspended: 'any' (the generic resume route) or 'service' (only the owning service, e.g. approvals). Carries no schema default so an omission stays observable — and an omission is fail-CLOSED at run time, equivalent to 'service': a pausing node whose pause is open to the generic route must declare 'any' explicitly (#5561) |
 | **maturity** | `Enum<'ga' \| 'beta' \| 'reserved'>` | ✅ | Runtime maturity: ga (shipped), beta, or reserved (contract only — designers grey this out) |
 | **source** | `Enum<'builtin' \| 'plugin'>` | ✅ | builtin = platform baseline; plugin = third-party contributed |
 | **deprecated** | `boolean` | ✅ | Deprecated alias kept for back-compat |

@@ -114,8 +114,11 @@ describe('parseCelToAst — parity with celEngine.compile (#4812)', () => {
 
   it.each(SYNTAX_REJECTED)('rejects exactly what compile() rejects at parse: %s', (source) => {
     // The parity claim is the accept/reject verdict itself. `compile`'s error
-    // *classification* is asserted separately below — cel-js does not phrase
-    // every syntax fault the same way, and `classifyError` reads the phrasing.
+    // *classification* is asserted separately below, and is now independent of
+    // wording: `classifyError` reads the thrown error's TYPE (`instanceof
+    // ParseError`), not its phrasing — the keyword table it used to consult was
+    // closed for parse faults by #6133 / PR #6202 and deleted outright by
+    // #6223 / PR #6677.
     expect(parseCelToAst(source)).toBeNull();
     expect(celEngine.compile(source).ok).toBe(false);
   });
@@ -132,15 +135,26 @@ describe('parseCelToAst — parity with celEngine.compile (#4812)', () => {
     expect((parseCelToAst(source) as unknown as { checkedType?: unknown }).checkedType).toBeUndefined();
   });
 
-  it('classifies the common syntax fault as `parse`', () => {
-    const compiled = celEngine.compile('record.budget >');
+  // Both wordings, because the pair used to disagree and the disagreement was
+  // the whole point of this test. cel-js phrases a dangling operator as
+  // `Unexpected token: EOF` and an unbalanced delimiter as `Expected RPAREN,
+  // got EOF` (both measured on cel-js 8.0.0, unchanged); when `classifyError`
+  // matched /parse|unexpected|syntax/i the second wording missed every keyword
+  // and a genuine syntax fault reached the author graded `runtime`. #6133 /
+  // PR #6202 replaced that arm with `err instanceof ParseError`, so the grade no
+  // longer depends on which of the two an author happens to write.
+  //
+  // The exhaustive per-wording matrix lives in `cel-error-classification.test.ts`
+  // (#6133); these two are pinned HERE because this suite's `SYNTAX_REJECTED`
+  // list is what claims they are parse faults, and a list that says `parse`
+  // while the engine says otherwise is the drift #6678 was filed for.
+  it.each([
+    ['dangling operator', 'record.budget >'],
+    ['unbalanced delimiter', '((record.a)'],
+  ])('classifies a %s as `parse`', (_label, source) => {
+    const compiled = celEngine.compile(source);
     expect(compiled.ok).toBe(false);
     if (!compiled.ok) expect(compiled.error.kind).toBe('parse');
-    // NOT asserted for `((record.a)`: cel-js phrases an unbalanced delimiter as
-    // `Expected RPAREN, got EOF`, which `classifyError`'s
-    // /parse|unexpected|syntax/i does not match, so a genuine syntax fault is
-    // reported to the author as `runtime`. Pre-existing, out of scope for #4812,
-    // filed separately — asserting it here would enshrine it.
   });
 
   it.each(PARSES_BUT_FAILS_CHECK)(

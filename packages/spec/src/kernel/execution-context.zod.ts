@@ -147,6 +147,42 @@ export const ExecutionContextSchema = lazySchema(() => z.object({
   posture: AuthzPostureSchema.optional(),
 
   /**
+   * [ADR-0069] The AUTHENTICATION-policy gate posture resolved for this
+   * request's session — present only while the principal is blocked from
+   * protected resources by a policy they must remediate (expired password,
+   * enforced MFA). Absent for every healthy session, which is the normal case.
+   *
+   * Computed ONCE per session in the auth `customSession` enrichment
+   * (`AuthManager.computeAuthGate` → `user.authGate`), lifted onto the envelope
+   * by the transport entry point, and consumed at the transport seam:
+   * REST's `enforceAuth` answers `403 { code, message }` on a non-allow-listed
+   * path. Both keys are required because the sole producer always sets both,
+   * and `code` is the stable machine code the client branches on
+   * (`PASSWORD_EXPIRED` / `MFA_REQUIRED`) while `message` is what the user reads.
+   *
+   * AUTHENTICATION, not authorization — orthogonal to {@link posture} and to
+   * `permissions`/`positions`: it does not narrow what the principal may do, it
+   * suspends their access entirely until they remediate, while the allow-listed
+   * remediation endpoints stay reachable (`isAuthGateAllowlisted`,
+   * `@objectstack/core`). Nothing in the permission/RLS path reads it.
+   *
+   * Server-constructed only, never client-supplied — exactly like
+   * {@link isSystem}. A guest/anonymous principal never carries one: there is
+   * no authenticated session for a policy gate to attach to.
+   *
+   * Declared here (#7280) because it was previously written onto the envelope
+   * behind an `as any` and was therefore invisible to the closed entry field set
+   * (#6216) — the one gate whose job is to stop a context field reaching one
+   * transport and missing another.
+   */
+  authGate: z.object({
+    /** Stable machine code, e.g. `PASSWORD_EXPIRED` / `MFA_REQUIRED`. */
+    code: z.string(),
+    /** Human-facing message explaining what must be remediated. */
+    message: z.string(),
+  }).optional().describe('ADR-0069 authentication-policy gate: present only while the principal is blocked from protected resources until they remediate (expired password, enforced MFA), absent for every healthy session. `code` is the stable machine code the client branches on (PASSWORD_EXPIRED / MFA_REQUIRED) and `message` is what the blocked user reads; both are required because the transport seam renders them as the 403 body. AUTHENTICATION, not authorization — it suspends access entirely rather than narrowing it, and nothing in the permission/RLS path reads it, while the allow-listed remediation endpoints stay reachable. Server-constructed only, never client-supplied; a guest/anonymous principal never carries one.'),
+
+  /**
    * [ADR-0090 D10 — P1 shape] Delegation link for agent/service principals
    * acting on behalf of a user. Agent effective permission = the agent's own
    * grants ∩ the delegator's grants (confused-deputy prevention; enforced
@@ -353,7 +389,7 @@ export const ExecutionContextSchema = lazySchema(() => z.object({
    * field-level security are unaffected: this changes only which audit/readonly
    * values the runtime overwrites, never who may write the record.
    */
-  preserveAudit: z.boolean().optional(),
+  preserveAudit: z.boolean().optional().describe('Historical import: preserve the ORIGINAL audit timeline for this write instead of stamping it "now" (#3493). Opt-in and server-constructed only, never client-supplied. On the UPDATE path it admits a whitelist — the audit/timestamp family (created_at / created_by / updated_at / updated_by) plus author-declared business `readonly` fields — while platform-managed `system` columns (tenancy, generated) stay stripped. On INSERT the exemption does NOT apply (#6640): a create is stripped earlier, at the DataProtocol ingress, whose only exemption is `context.isSystem`, so a non-system create carrying `preserveAudit` still has those fields stripped and is warned (WARN) that the exemption is UPDATE-only — replaying archival readonly facts on create requires a system context. Permissions / RLS / field-level security are unaffected.'),
 
   /**
    * OAuth 2.1 scopes granted to the access token that authenticated this

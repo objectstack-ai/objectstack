@@ -23,10 +23,28 @@
  * boundaries the fix must not cross: a genuinely absent declaration still
  * resolves to nothing (ADR-0110's 404 stands), and a `draft` save is still
  * not live.
+ *
+ * ── #5079 — the same invariant in the DELETE direction ──
+ *
+ * The second describe block below is the mirror image, and it lives in this
+ * file on purpose: the two directions are one invariant ("every surface in
+ * agreement", #4432), and splitting them across two suites is how they drift.
+ * #5079 measured the residual on `origin/main`: after `DELETE
+ * /api/v1/meta/action/<name>` of a runtime-CREATED overlay, the row was gone
+ * from `sys_metadata` and yet `GET /meta/action` kept listing it, `GET
+ * /meta/action/<name>` kept serving its body, and `resolveRouteActionDeclaration`
+ * kept resolving it — for the life of the process, no TTL involved.
+ *
+ * The lagging cache is the same `SchemaRegistry`, from the other end: #4521's
+ * write-through puts a runtime-created overlay under the PLAIN key, and the
+ * delete's registry heal (`restoreArtifactRegistryView`) only knew how to
+ * un-shadow a packaged artifact — `removeRuntimeShadow` declines when there
+ * is none, which for a runtime-created item is always. Nothing else ever
+ * removed the entry.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { ObjectStackProtocolImplementation, resetEnvWritableMetadataTypes } from '@objectstack/metadata-protocol';
 import { SchemaRegistry } from '@objectstack/objectql';
 import { resolveRouteActionDeclaration, type ActionExecutionDeps } from './action-execution.js';
 
@@ -181,6 +199,18 @@ describe('#4521 — read-your-writes between saveMeta and the dispatch path', ()
         // `<packageId>:<name>` key and the overlay is a plain-key shadow, which
         // `restoreArtifactRegistryView` removes on delete. Pinned here because
         // the write-through is what makes that separation load-bearing.
+        //
+        // #6483 rolled `action`'s `allowOrgOverride` back to `false`
+        // (ADR-0005: page/app/action are ❌ in the amendment table), so
+        // overriding this PACKAGED action needs the one documented door that
+        // remains — the `OS_METADATA_WRITABLE` operator escape hatch. The
+        // shadow/restore machinery pinned here is exactly what an operator
+        // behind the hatch exercises. (Every other case in this file writes
+        // brand-new names, which ride `allowRuntimeCreate` untouched.)
+        process.env.OS_METADATA_WRITABLE = 'action';
+        (ObjectStackProtocolImplementation as any).resetEnvWritableCache();
+        resetEnvWritableMetadataTypes();
+
         registry.registerItem('action', { name: 'shipped_probe', label: 'Shipped', type: 'script', target: 'showcase.shipped' }, 'name', 'showcase');
         expect((await resolve('shipped_probe')).action?.label).toBe('Shipped');
 
@@ -189,6 +219,14 @@ describe('#4521 — read-your-writes between saveMeta and the dispatch path', ()
 
         await protocol.deleteMetaItem({ type: 'action', name: 'shipped_probe' });
         expect((await resolve('shipped_probe')).action?.label).toBe('Shipped');
+    });
+
+    afterEach(() => {
+        // The escape-hatch case must not leak `action` writability into its
+        // neighbours — both memoised caches, or the next case lies.
+        delete process.env.OS_METADATA_WRITABLE;
+        (ObjectStackProtocolImplementation as any).resetEnvWritableCache();
+        resetEnvWritableMetadataTypes();
     });
 
     it('a DRAFT save is not dispatchable — drafts never leak into the live registry', async () => {
@@ -201,5 +239,197 @@ describe('#4521 — read-your-writes between saveMeta and the dispatch path', ()
         const { action } = await resolve('draft_probe');
         expect(action).toBeUndefined();
         expect(registry.getItem('action', 'draft_probe')).toBeUndefined();
+    });
+});
+
+describe('#5079 — list / get / dispatch agree immediately after deleteMeta', () => {
+    let registry: SchemaRegistry;
+    let engine: any;
+    let protocol: ObjectStackProtocolImplementation;
+    let ql: any;
+    let deps: ActionExecutionDeps;
+    let requestContext: any;
+
+    beforeEach(() => {
+        registry = new SchemaRegistry({ multiTenant: false });
+        registry.registerObject(OBJECT_DEF as any, 'showcase');
+        engine = makeEngine(registry);
+        protocol = new ObjectStackProtocolImplementation(engine);
+        ql = {
+            registry,
+            getSchema: (name: string) => (name === OBJECT_DEF.name ? OBJECT_DEF : undefined),
+        };
+        deps = {
+            resolveService: (async () => undefined) as any,
+            getObjectQL: async () => ql,
+        } as ActionExecutionDeps;
+        requestContext = { request: {} } as any;
+    });
+
+    const saveAction = (item: any, mode?: 'draft' | 'publish') =>
+        protocol.saveMetaItem({
+            type: 'action',
+            name: item.name,
+            item,
+            ...(mode ? { mode } : {}),
+        });
+
+    /** The three surfaces #4432 requires to agree, read in one go. */
+    const surfaces = async (actionName: string) => {
+        const listed = await protocol.getMetaItems({ type: 'action' });
+        const fetched = await protocol.getMetaItem({ type: 'action', name: actionName });
+        const dispatch = await resolveRouteActionDeclaration(deps, requestContext, {
+            ql,
+            objectName: OBJECT_DEF.name,
+            actionName,
+        });
+        return {
+            listedNames: (listed.items as any[]).map((i) => i?.name),
+            item: fetched.item as any,
+            declaration: dispatch.action as any,
+            degraded: dispatch.degraded,
+        };
+    };
+
+    it('a runtime-created overlay vanishes from list AND get AND dispatch in the same step', async () => {
+        // The #5079 repro, protocol-level: PUT a name nothing ships, confirm
+        // all three surfaces agree it EXISTS, delete it, confirm all three
+        // agree it does not — with no listing call, no reload and no TTL wait
+        // in between.
+        await saveAction({
+            name: 'rg_clean',
+            label: 'RG Clean',
+            objectName: 'showcase_task',
+            type: 'script',
+            target: 'showcase.probe',
+        });
+
+        const before = await surfaces('rg_clean');
+        expect(before.listedNames).toContain('rg_clean');
+        expect(before.item?.label).toBe('RG Clean');
+        expect(before.declaration?.name).toBe('rg_clean');
+
+        const deleted = await protocol.deleteMetaItem({ type: 'action', name: 'rg_clean' });
+        expect(deleted.success).toBe(true);
+        expect(deleted.reset).toBe(true);
+        // #5927 — nothing is shipped under this name, so the receipt says the
+        // item is gone rather than "reset to artifact default". The registry
+        // must now make the same statement.
+        expect(deleted.message).toContain('no longer exists');
+
+        const after = await surfaces('rg_clean');
+        // Pre-fix ALL THREE of these still carried the deleted overlay: the
+        // listing enumerated it, the single-item read served its body, and the
+        // ADR-0110 D3 gate resolved a declaration for it — so `POST
+        // /actions/showcase_task/rg_clean` 404ed with the handler-miss wording
+        // ("… not found") instead of "has no declaration".
+        expect(after.listedNames).not.toContain('rg_clean');
+        expect(after.item).toBeUndefined();
+        expect(after.declaration).toBeUndefined();
+        // A miss, not an outage (ADR-0110 D3) — the store answered.
+        expect(after.degraded).toBeFalsy();
+        // And the row really is gone, so the surfaces are not merely agreeing
+        // with each other about a stale copy. (`state` is a `sys_metadata`
+        // column the append-only history rows do not carry, so this counts
+        // live overlays only.)
+        const overlayRows = await engine.find('sys_metadata', {
+            where: { type: 'action', name: 'rg_clean', state: 'active' },
+        });
+        expect(overlayRows).toHaveLength(0);
+    });
+
+    it('deleting the LAST overlay of a type leaves an empty listing, not a ghost', async () => {
+        await saveAction({ name: 'only_one', label: 'Only', objectName: 'showcase_task', type: 'script', target: 'showcase.probe' });
+        expect((await surfaces('only_one')).listedNames).toEqual(['only_one']);
+
+        await protocol.deleteMetaItem({ type: 'action', name: 'only_one' });
+        expect((await surfaces('only_one')).listedNames).toEqual([]);
+    });
+
+    afterEach(() => {
+        // The escape-hatch case below must not leak `action` writability into
+        // its neighbours — both memoised caches, or the next case lies.
+        delete process.env.OS_METADATA_WRITABLE;
+        (ObjectStackProtocolImplementation as any).resetEnvWritableCache();
+        resetEnvWritableMetadataTypes();
+    });
+
+    it('an ARTIFACT-backed delete resets to the shipped value — it does not retire the name', async () => {
+        // The boundary the #5079 fix must not cross. `removeRuntimeShadow`
+        // still owns this case; `removeOverlayEntry` must never reach it, or a
+        // "reset to artifact default" would delete the artifact instead of
+        // revealing it.
+        //
+        // #6483 rolled `action`'s `allowOrgOverride` back to `false`
+        // (ADR-0005: page/app/action are ❌ in the amendment table), so
+        // overriding this PACKAGED action needs the one documented door that
+        // remains — the `OS_METADATA_WRITABLE` operator escape hatch, exactly
+        // as the sibling `#4521` case above does. (Every other case in this
+        // block writes brand-new names, which ride `allowRuntimeCreate`
+        // untouched, so only this one needs the hatch.)
+        process.env.OS_METADATA_WRITABLE = 'action';
+        (ObjectStackProtocolImplementation as any).resetEnvWritableCache();
+        resetEnvWritableMetadataTypes();
+
+        registry.registerItem(
+            'action',
+            { name: 'shipped_probe', label: 'Shipped', type: 'script', target: 'showcase.shipped' },
+            'name',
+            'showcase',
+        );
+        await saveAction({ name: 'shipped_probe', label: 'Customized', objectName: 'showcase_task', type: 'script', target: 'showcase.probe' });
+        expect((await surfaces('shipped_probe')).item?.label).toBe('Customized');
+
+        const deleted = await protocol.deleteMetaItem({ type: 'action', name: 'shipped_probe' });
+        expect(deleted.message).toContain('reset to artifact default');
+
+        const after = await surfaces('shipped_probe');
+        expect(after.listedNames).toContain('shipped_probe');
+        expect(after.item?.label).toBe('Shipped');
+        expect(after.declaration?.label).toBe('Shipped');
+    });
+
+    it('discarding a DRAFT leaves the live overlay listed and dispatchable', async () => {
+        // A draft discard is not a retirement. `restoreArtifactRegistryView`
+        // is skipped for `state: 'draft'`, so the active entry must survive —
+        // pinned because the #5079 step 3 is the first thing in this method
+        // that can make an entry disappear entirely.
+        await saveAction({ name: 'live_probe', label: 'Live', objectName: 'showcase_task', type: 'script', target: 'showcase.probe' });
+        await saveAction({ name: 'live_probe', label: 'Pending', objectName: 'showcase_task', type: 'script', target: 'showcase.probe' }, 'draft');
+
+        await protocol.deleteMetaItem({ type: 'action', name: 'live_probe', state: 'draft' });
+
+        const after = await surfaces('live_probe');
+        expect(after.listedNames).toContain('live_probe');
+        expect(after.item?.label).toBe('Live');
+        expect(after.declaration?.label).toBe('Live');
+    });
+
+    it('deleting one overlay does not retire its namesake in another type', async () => {
+        // `removeOverlayEntry` is addressed by (type, name); a `flow` named
+        // `twin` must survive the delete of the `action` named `twin`.
+        await saveAction({ name: 'twin', label: 'Action Twin', objectName: 'showcase_task', type: 'script', target: 'showcase.probe' });
+        await protocol.saveMetaItem({
+            type: 'flow',
+            name: 'twin',
+            item: { name: 'twin', label: 'Flow Twin', type: 'autolaunched', nodes: [], edges: [] },
+        });
+
+        await protocol.deleteMetaItem({ type: 'action', name: 'twin' });
+
+        expect((await protocol.getMetaItems({ type: 'action' })).items).toHaveLength(0);
+        expect(((await protocol.getMetaItems({ type: 'flow' })).items as any[]).map((i) => i?.name)).toContain('twin');
+    });
+
+    it('deleting a name that was never written removes nothing it did not own', async () => {
+        // The `!current` self-heal branch calls the same registry heal. A
+        // no-op delete must stay a no-op for every other item.
+        await saveAction({ name: 'keeper', label: 'Keeper', objectName: 'showcase_task', type: 'script', target: 'showcase.probe' });
+
+        const deleted = await protocol.deleteMetaItem({ type: 'action', name: 'never_written' });
+        expect(deleted.success).toBe(true);
+        expect(deleted.reset).toBe(false);
+
+        expect((await surfaces('keeper')).listedNames).toEqual(['keeper']);
     });
 });

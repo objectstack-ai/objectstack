@@ -3,6 +3,16 @@
 import { z } from 'zod';
 import { retiredKey } from '../shared/retired-key';
 import { FieldType } from '../data/field.zod';
+// #6970 — the authoring gate on `defaultValue` runs the SAME value contract the
+// dispatcher runs at submit, through the shared `defaultValue` discriminator
+// module (#7127 — one module, two consumers; the literal-check core lives
+// there). Imported file-directly (never via a barrel): `default-value-shape`
+// and `field-value.zod` reach only `shared/` + `data/` + `system/`, and
+// `action-params.zod` only `data/` + `api/` + `shared/`, so none can close a
+// cycle back to `ui/`.
+import { MULTI_CAPABLE_TYPES, isMultiValueField } from '../data/field-value.zod';
+import { checkLiteralDefaultValue } from '../data/default-value-shape';
+import { isActionParamValuePresent } from './action-params.zod';
 import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
 import { ExpressionInputSchema } from '../shared/expression.zod';
 import { I18nLabelSchema, AriaPropsSchema } from './i18n.zod';
@@ -49,20 +59,6 @@ import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
  * to the field name and is used as the request-body key).
  */
 import { lazySchema } from '../shared/lazy-schema';
-
-/**
- * Keys `ActionParamSchema` declares.
- *
- * Kept beside the schema rather than derived from `.shape`: the schema body is
- * allocated lazily (see `lazySchema`), and the error map below has to name a
- * canonical key *while* that first parse is still in flight. `action.zod.test.ts`
- * asserts every entry here is really accepted, so the list cannot rot silently.
- */
-const ACTION_PARAM_KEYS = [
-  'name', 'field', 'objectOverride', 'label', 'type', 'required', 'options',
-  'placeholder', 'helpText', 'defaultValue', 'multiple', 'accept', 'maxSize',
-  'reference', 'defaultFromRow', 'visible', 'requiresFeature',
-] as const;
 
 /**
  * Semantic near-misses — a different **word** for the same intent, usually
@@ -164,16 +160,15 @@ const actionParamOptionUndeclaredAnywhere = (key: 'icon' | 'disabled'): string =
   + `\`SelectOptionMetadata\` type, which no metadata path populates and no widget reads. An `
   + `action param's options are \`{ label, value, visibleWhen }\`; drop the key.`;
 
-const actionParamUnknownKeyError = strictUnknownKeyError({
-  surface: 'this action param',
-  knownKeys: ACTION_PARAM_KEYS,
-  aliases: ACTION_PARAM_KEY_ALIASES,
-  history:
-    'Until #3405 these were dropped silently — the param still parsed, so a mis-spelled ' +
-    'config shipped as a control that quietly ignored it.',
-});
-
-export const ActionParamSchema = lazySchema(() => z.object({
+export const ActionParamSchema = lazySchema(() => strictObject(
+  {
+    surface: 'this action param',
+    aliases: ACTION_PARAM_KEY_ALIASES,
+    history:
+      'Until #3405 these were dropped silently — the param still parsed, so a mis-spelled ' +
+      'config shipped as a control that quietly ignored it.',
+  },
+  {
   /** Request-body key. Defaults to `field` when `field` is set. */
   name: z.string().optional(),
   /** Reference an existing object field for label/type/validation/options. */
@@ -331,7 +326,19 @@ export const ActionParamSchema = lazySchema(() => z.object({
   placeholder: z.string().optional(),
   /** Help/description override. */
   helpText: z.string().optional(),
-  /** Default value for the dialog input. */
+  /**
+   * Default value for the dialog input — prefilled into the control when the
+   * dialog opens, and SUBMITTED VERBATIM if the user does not touch the field
+   * (objectui `ActionParamDialog` seeds its state with `p.defaultValue` and
+   * resolves no tokens against it).
+   *
+   * Because it is submitted verbatim it must satisfy this param's own value
+   * contract — the shape checked below through the SAME `valueSchemaFor` the
+   * dispatcher runs at submit. This is a LITERAL, not an expression surface:
+   * unlike a FIELD's `defaultValue`, which the ObjectQL engine resolves for
+   * runtime tokens (`current_user`, CEL `today()`; ROADMAP §M9.9b), nothing on
+   * the action-param path interprets this value.
+   */
   defaultValue: z.unknown().optional(),
   /**
    * Widget config for inline params (field-backed params inherit these from
@@ -385,7 +392,7 @@ export const ActionParamSchema = lazySchema(() => z.object({
    * enum-checked and the gate/registry stay in lockstep.
    */
   requiresFeature: z.enum(PUBLIC_AUTH_FEATURE_NAMES).optional().describe('Public auth feature flag gating this param; lowered into `visible` at parse time.'),
-}, { error: actionParamUnknownKeyError }).strict().refine(
+}).refine(
   (p) => Boolean(p.name) || Boolean(p.field),
   { message: 'ActionParam requires either "name" or "field"' },
 ).refine(
@@ -398,12 +405,74 @@ export const ActionParamSchema = lazySchema(() => z.object({
     message:
       'ActionParam with type "lookup"/"master_detail" requires "reference" (the target object) when declared inline — without it the param dialog degrades to a raw record-id text input. Set `reference: \'<object>\'`, or use a field-backed param (`{ field: \'<lookup_field>\' }`) to inherit it.',
   },
-).transform((p, ctx) => lowerRequiresFeature(p, ctx)));
+).superRefine((p, ctx) => {
+  // #6970 — an authored `defaultValue` is checked against the param's OWN
+  // declared value contract, through the SAME `valueSchemaFor` the dispatcher
+  // runs at submit (ADR-0104 D2, `validateActionParams`). One rule set, two
+  // moments: whatever the dispatcher would refuse from a user is refused from
+  // an AUTHOR, at the moment it is written.
+  //
+  // The gap this closes: `defaultValue` was `z.unknown()`, so a default that
+  // can never satisfy its own param parsed clean, prefilled the control, and
+  // 400'd at submit on a field the user never touched — with a message naming
+  // the param but not the author's default as the cause. `datetime` is the
+  // loudest instance (a human-readable wall clock, `2026-08-10T15:00`, which
+  // `datetime-local` happily displays and `InstantValueSchema` refuses) but the
+  // hole was every type: `number` + `'abc'`, `select` + a non-member, a
+  // `multiple` param + a scalar. That is the "AI writes it wrong in bulk and
+  // nothing says so" shape ADR-0078 / ADR-0049 exist to prevent.
+  //
+  // Checked ONLY where the declaration can answer the question — see the two
+  // skips below. An authoring gate that guessed at what a field-backed param
+  // inherits would reject valid metadata, which is worse than the silence it
+  // replaces.
+  if (!isActionParamValuePresent(p.defaultValue)) return;
+  // `type` is the param's own override; absent it is inherited from the
+  // referenced field at runtime and is not visible here (the same "leaves the
+  // value shape open" default `validateActionParams` applies to an
+  // unresolvable type).
+  if (!p.type) return;
+
+  // The whole present value goes down the LITERAL branch — deliberately no
+  // `discriminateDefaultValueShape` here. An action param's default is a pure
+  // literal (the dialog seeds it verbatim; `serializeParamValues` resolves
+  // nothing), so a runtime-token or envelope SPELLING is judged as the literal
+  // it would be at submit — the parity pin at the bottom of
+  // `action-param-default-value.test.ts` is the contract. The stance is
+  // recorded in `default-value-shape.ts`'s module note (#7127).
+  const def = { type: p.type, multiple: p.multiple, options: p.options };
+  const verdict = checkLiteralDefaultValue(def, p.defaultValue);
+  if (verdict.ok) return;
+
+  // ARITY is knowable only when the param states it. A field-backed param
+  // inherits `multiple` from its field, so `{ field: 'owners', type: 'user',
+  // defaultValue: ['a','b'] }` is a legal declaration whose array default this
+  // gate must not call wrong. When the param is field-backed AND silent on
+  // `multiple` AND the type is one whose arity `multiple` decides, accept
+  // either arity and check only the ELEMENT shape.
+  if (p.field && p.multiple === undefined && MULTI_CAPABLE_TYPES.has(p.type)) {
+    if (checkLiteralDefaultValue({ ...def, multiple: !isMultiValueField(def) }, p.defaultValue).ok) return;
+  }
+
+  const detail = verdict.detail ?? 'invalid value';
+  const key = p.name ?? p.field ?? '<unnamed>';
+  ctx.addIssue({
+    code: 'custom',
+    path: ['defaultValue'],
+    message:
+      `Action param "${key}" (${p.type}): the default ${JSON.stringify(p.defaultValue)} cannot `
+      + `satisfy this param's own value contract — ${detail}. The dialog would PREFILL this value `
+      + 'and the submit would then be refused with that same message (ADR-0104 D2), for a field the '
+      + 'user never touched — so the 400 names the param but not this default, which is the real '
+      + "cause. Write the default in the param's declared value shape, or drop `defaultValue`.",
+  });
+}).transform((p, ctx) => lowerRequiresFeature(p, ctx)));
 
 /**
  * Action type enum values.
  */
 export const ActionType = z.enum(['script', 'url', 'modal', 'flow', 'api', 'form']);
+export type ActionType = z.input<typeof ActionType>;
 
 /**
  * Action types that require a `target` field.
@@ -449,6 +518,26 @@ const TARGET_REQUIRED_TYPES: ReadonlySet<string> = new Set(
  * Note: The action name is the configuration ID. JavaScript function names can use camelCase,
  * but the metadata ID must be lowercase snake_case.
  */
+// Retired-VALUE prescription. Declared with `//` (never `/** */`) and ABOVE the
+// enum's JSDoc deliberately: `build-docs.ts` takes a doc comment adjacent to the
+// declaration as the reference entry's blurb, so a `/** */` here would displace
+// the location table below. (House style set by the `crypto.hash` /
+// `HookBodyCapability` and `array_agg` / `AggregationFunction` enum-value
+// retirements — `data/hook-body.zod.ts`, `data/query.zod.ts`.)
+const GLOBAL_NAV_RETIRED =
+  '`global_nav` was removed from `ACTION_LOCATIONS` in @objectstack/spec 17 (#6888, ADR-0049 '
+  + 'enforce-or-remove) — no running-app surface ever rendered it. The console command palette '
+  + '(`⌘K`) builds its groups from nav items, objects, dashboards, pages, reports, recent items '
+  + 'and record search; it reads no action metadata at all, so an action declaring this location '
+  + 'never reached a user. The only thing that DID draw it was the Studio designer, which '
+  + 'previewed a command-palette frame for a surface the product does not have — an authoring '
+  + 'tool teaching authors to write dead metadata (ADR-0078). Place the action on a location a '
+  + 'renderer serves (`list_toolbar`, `list_item`, `record_header`, `record_more`, '
+  + '`record_related`, `record_section`), or — for an action that deliberately has no UI home, '
+  + 'such as an object-less one invoked over REST/MCP/AI — declare it headless with '
+  + '`locations: []`, which keeps its capability gate, param contract and audit trail. '
+  + 'Run `os migrate meta --from 16` to rewrite existing sources automatically.';
+
 /**
  * Action Location — where an action is allowed to surface in the UI.
  *
@@ -465,7 +554,23 @@ const TARGET_REQUIRED_TYPES: ReadonlySet<string> = new Set(
  * - `record_related`  — actions on a related list section inside a record.
  * - `record_section`  — actions surfaced inside a body section/tab of a record
  *                       (e.g. a Security tab grouping change-password, 2FA, etc.).
- * - `global_nav`      — global navigation/command-palette level actions.
+ *
+ * `global_nav` was REMOVED in 17 (#6888, maintainer ruling 2026-08-09). It had
+ * been declared here since the vocabulary was written and no product surface
+ * ever served it: the console's ⌘K palette composes its groups from nav items,
+ * objects, dashboards, pages, reports, recent items and record search, and
+ * references no action metadata. Four of the five references to the value in
+ * the whole UI repo were the Studio designer — which drew the author a mock
+ * "⌘K · Command palette" frame, promising a rendering the product cannot do
+ * (the ADR-0078 declares-renders-does-nothing shape, arriving through the
+ * location vocabulary rather than through a missing key). Retired rather than
+ * implemented: no user has asked for command-palette actions and the only two
+ * declarers were our own showcase corpus, so wiring the palette would have been
+ * capability expansion with no pull. This is an enum VALUE, not a key, so there
+ * is no `retiredKey()` tombstone — the prescription lives on the enum's own
+ * error map above, keyed on `issue.input` so that only the spelling which used
+ * to be legal is told it "was removed". An object-less action's honest
+ * declaration is `locations: []` (headless), not a location nothing renders.
  */
 export const ACTION_LOCATIONS = [
   'list_toolbar',
@@ -474,10 +579,15 @@ export const ACTION_LOCATIONS = [
   'record_more',
   'record_related',
   'record_section',
-  'global_nav',
 ] as const;
 
-export const ActionLocationSchema = z.enum(ACTION_LOCATIONS);
+export const ActionLocationSchema = z.enum(ACTION_LOCATIONS, {
+  // Only the spelling that USED to be legal gets the retirement message.
+  // Telling the author of `globalnav` that their value "was removed" would
+  // misinform, so everything else keeps zod's own enum error, which already
+  // lists the legal locations. (`array_agg` / `crypto.hash` precedent.)
+  error: (issue) => (issue.input === 'global_nav' ? GLOBAL_NAV_RETIRED : undefined),
+});
 export type ActionLocation = z.input<typeof ActionLocationSchema>;
 
 /**
@@ -709,6 +819,35 @@ const actionObject = () => strictObject({
   /** Display label */
   label: I18nLabelSchema.describe('Display label'),
 
+  /**
+   * Explanatory line shown in the action's PARAM DIALOG, under the title.
+   *
+   * The renderer half already exists and predates this key: objectui's
+   * `ActionParamDialog` renders it as the dialog's `DialogDescription`
+   * (`objectui packages/app-shell/src/views/ActionParamDialog.tsx:215`, falling
+   * back to the generic `actionDialog.description` string), fed by
+   * `actionDescription(objectName, actionName, action.description)` from two
+   * independent handlers — `useConsoleActionRuntime.tsx:206` and
+   * `RecordDetailView.tsx:586`. The resolver
+   * (`objectui packages/i18n/src/useObjectLabel.ts:463`) reads
+   * `objects.{object}._actions.{action}.description`, falls back to
+   * `globalActions.{action}.description`, then to this literal. Until #7367 no
+   * producer could reach any of it: this shape refused the key.
+   *
+   * **Use it for the question the dialog is asking.** An action that collects
+   * params and ALSO sets `confirmText` shows the user two dialogs for one
+   * decision — the confirm, then the param prompt. The maintainer's 2026-08-10
+   * ruling on #7278 is to carry the confirm question here instead: one
+   * condition, one wording, one dialog, nothing sent until its own Confirm.
+   * `confirmText` stays correct for a param-LESS action, where the confirm IS
+   * the only dialog.
+   *
+   * **Not `ai.description`.** That one is the LLM-facing tool contract
+   * (≥40 chars, required when `ai.exposed`); this one is human-facing dialog
+   * copy and is never sent to a model.
+   */
+  description: I18nLabelSchema.optional().describe('Explanatory line shown under the title in the action\'s param dialog. Carries the confirm question for an action that collects params (one dialog, not two — #7278). Not the LLM-facing `ai.description`.'),
+
   /** Target object this action belongs to (optional, snake_case) */
   objectName: z.string().regex(/^[a-z_][a-z0-9_]*$/).optional().describe('Target object this action belongs to. When set, the action is auto-merged into the object\'s actions array by defineStack().'),
   
@@ -822,11 +961,70 @@ const actionObject = () => strictObject({
   execute: retiredKey(
     '`execute` was removed in @objectstack/spec 17 (#3855) — use `target`. ' +
     'Rename the key; the value (a handler / flow / URL ref) is unchanged. ' +
-    'Run `os migrate meta --from 16` to rewrite it automatically.',
+    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
   ),
   
-  /** User Input Requirements */
-  params: z.array(ActionParamSchema).optional().describe('Input parameters required from user'),
+  /**
+   * User Input Requirements — the **parameter DEFINITION array** rendered as a
+   * dialog before the action runs. `ActionParam[]`, never a values map.
+   *
+   * The distinction is load-bearing and was, until #5777, only implicit. A
+   * `type:'api'` author reaches for `params` expecting the REQUEST PAYLOAD —
+   * `params: { name: '{{page.inquiryName}}' }` — because "params" reads like
+   * "what I send". That is a different concept living under the same name:
+   * definitions describe fields to COLLECT, a payload is data to SEND. The
+   * static payload key is {@link bodyExtra}, and the two shapes are disjoint
+   * (array vs object), which is exactly why the confusion survived — every
+   * consumer could tell them apart with `Array.isArray`, so nobody had to.
+   *
+   * The maintainer's 2026-08-06 ruling on #5777 took direction A (a separate
+   * key, no same-name union), so this key keeps ONE meaning and the object form
+   * is REFUSED here — with a message that names `bodyExtra` rather than the
+   * bare "expected array, received object" an author cannot act on. Sources
+   * still carrying the object form are rewritten at load by the
+   * `inline-action-api-params-to-body-extra` conversion (ADR-0087 D2).
+   *
+   * **The api prescription is not universal, which #6828 measured and the
+   * maintainer's 2026-08-10 ruling closed.** On a `type:'url'` action the
+   * object form meant a THIRD thing again — objectui's `ActionRunner` read a
+   * non-array `params` as the `${param.X}` interpolation scope for `target`,
+   * and `params.newTab` as a legacy new-tab flag. Sending that author to
+   * `bodyExtra` is a wrong instruction: an api request-body key is not an
+   * interpolation scope (the same asymmetry is why the conversion above guards
+   * on `type === 'api'` — rewriting a url action's object `params` would be
+   * lossy, and ADR-0087 D2 requires losslessness). The ruling **retired** the
+   * url meaning rather than giving it a key: the scope is already expressible
+   * as `target`-string interpolation, and the flag is already {@link openIn}.
+   * So the refusal below prescribes per action type — `bodyExtra` for `api`,
+   * the sanctioned url spellings for `url` — and nothing new enters the
+   * vocabulary. A future authorable interpolation-scope key needs a spec
+   * proposal that demonstrates pull, not a third arm of this one.
+   *
+   * The branch is stated IN THE TEXT rather than selected at runtime because
+   * zod cannot see a sibling from a property-level error map: the map receives
+   * only `{ code, expected, input, inst, path }` for the offending value, and
+   * an object-level `.check()`/`.superRefine()` — which would see `type` — is
+   * skipped once a property has already failed (probed on zod 4.4.3). Reading
+   * `type` here would mean restructuring `ActionSchema` behind a
+   * `z.preprocess`, which erases `z.input<typeof ActionSchema>` (the authoring
+   * type `defineAction` publishes) — a far larger change than the guidance
+   * defect warrants, and one that moves surfaces this issue must not move.
+   */
+  params: z.array(ActionParamSchema, {
+    error: (iss) => (
+      iss.code === 'invalid_type'
+        && iss.input !== null
+        && typeof iss.input === 'object'
+        && !Array.isArray(iss.input)
+        ? "`params` is the parameter DEFINITION array (fields collected from the user before the action runs), not a values map. "
+          + "For a `type:'api'` action's static request body — including `{{page.<var>}}` tokens — use `bodyExtra: { … }` instead (#5777). "
+          + "For a `type:'url'` action there is nowhere to move it to, by decision: put static values straight into the `target` string "
+          + "(`${param.X}` interpolates a value collected by the params dialog, `${ctx.X}` one from the action context), and open a new tab with "
+          + "`openIn: 'new-tab'`. The url-side readings of an object `params` — a static `${param.X}` scope, and `params.newTab` — are RETIRED, not renamed (#6828). "
+          + 'Expected an array of ActionParam, received an object.'
+        : undefined
+    ),
+  }).optional().describe('Input parameters required from user — an ActionParam[] DEFINITION array, never a payload map (a static request body goes in `bodyExtra`).'),
   
   /** Visual Style */
   variant: z.enum(['primary', 'secondary', 'danger', 'ghost', 'link']).optional().describe('Button visual variant for styling (primary = highlighted, danger = destructive, ghost = transparent)'),
@@ -978,13 +1176,15 @@ const actionObject = () => strictObject({
     'it never triggered anything: no keydown listener feeds ActionEngine.getShortcuts(), and ' +
     "objectui's keyboard stack (useKeyboardShortcuts) is hand-registered and never consults " +
     'action metadata. Delete the key. For a real shortcut, register the key in the Console ' +
-    'keyboard stack and have its handler invoke the action by name.',
+    'keyboard stack and have its handler invoke the action by name. ' +
+    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
   ),
   bulkEnabled: retiredKey(
     '`action.bulkEnabled` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — ' +
     'the multi-select toolbar is driven by the LIST VIEW\'s `bulkActions` / `bulkActionDefs`, ' +
     'never by this flag, so setting it changed nothing. Delete the key and declare the action ' +
-    "in the view's `bulkActions` instead.",
+    "in the view's `bulkActions` instead. " +
+    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
   ),
 
   /**
@@ -1032,8 +1232,26 @@ const actionObject = () => strictObject({
    * `bodyExtra: { resend: true }` on a resend-invitation action that reuses
    * better-auth's `invite-member` endpoint. Applied after user-collected
    * params and `recordIdParam` so constants always win.
+   *
+   * **This is the static-payload key for `type:'api'`, on registered AND inline
+   * actions alike** (#5777). `params` is the parameter DEFINITION array and
+   * carries no payload; the ruled direction A gave the payload its own key
+   * rather than unioning two meanings onto one name. The name is not new and is
+   * deliberately not new: `body` is already taken on this schema (the `script`
+   * action's L1/L2 hook body, and the #4352 refinement rejects it alongside any
+   * other `type`, so it could never carry an api payload), and `payload` is
+   * already an ALIAS pointing here — written in the table above by #5013 for
+   * exactly that reason. So an author who writes `payload: {…}` is renamed onto
+   * this key, and one who writes `body: {…}` on a `type:'api'` action is
+   * rejected by the refinement that owns that name.
+   *
+   * Values are not required to be literals: objectui's console action runtime
+   * runs `resolvePageVarTokens` over this record, so `{{page.<var>}}` tokens
+   * resolve against the live page-variable snapshot the same way they do for a
+   * collected-params body. That is what makes it the correct home for a
+   * pure-SDUI form submit (`examples/app-showcase/.../contact-form.page.ts`).
    */
-  bodyExtra: z.record(z.string(), z.unknown()).optional().describe('Constant body fields merged into the API request (applied last; overrides user params).'),
+  bodyExtra: z.record(z.string(), z.unknown()).optional().describe('Static request-body fields for a type:"api" action, merged last (overrides user params). `{{page.<var>}}` tokens are resolved by the runtime. This — not `params` — is where a payload goes.'),
   /**
    * Semantic mode hint — UI / runtime can use this to pick confirm copy,
    * default variants, success messaging. Pure metadata; no runtime branching.
@@ -1203,6 +1421,25 @@ export function normalizeInlineAction(value: unknown): unknown {
  * page button running an inline sandboxed script is a separate decision. Widen
  * this when a renderer widens, not before — a declared field no renderer reads
  * is the failure this schema exists to stop.
+ *
+ * **`bodyExtra` is the one field picked AHEAD of its renderer, knowingly**
+ * (#5777, maintainer ruling 2026-08-06). It is the only authorized way for an
+ * inline `type:'api'` action to carry a static request payload: `params` is the
+ * parameter DEFINITION array and the ruling refused a same-name union, so
+ * without this pick the inline shape has no payload key at all — the cost the
+ * issue's option C names. The pick is therefore what makes the ruled direction
+ * A reachable from a page, and it is deliberately taken before objectui's half.
+ *
+ * The divergence that buys, stated rather than hidden: objectui's
+ * `element:button` renderer builds an explicit forward list
+ * (`packages/components/src/renderers/basic/elements.tsx`) that does not yet
+ * include `bodyExtra`, so between this landing and that follow-up an inline
+ * `bodyExtra` validates, publishes, and is dropped one hop before the runner.
+ * The runner and the console `apiHandler` below it already read the key — the
+ * missing hop is the forward list alone. Direction of the window: spec accepts
+ * ahead of the renderer, never the reverse. Tracked as the objectui card the
+ * ruling splits out under `Blocked-by:` this change; the general rule above is
+ * unchanged for every other field.
  */
 export const InlineActionSchema = lazySchema(() => z.preprocess(
   normalizeInlineAction,
@@ -1214,6 +1451,7 @@ export const InlineActionSchema = lazySchema(() => z.preprocess(
     openIn: true,
     method: true,
     params: true,
+    bodyExtra: true,
     confirmText: true,
     successMessage: true,
     errorMessage: true,

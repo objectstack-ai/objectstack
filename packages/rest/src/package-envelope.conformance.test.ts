@@ -35,7 +35,7 @@
  * spread — which is what makes `unwrapResponse` able to return it.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { BaseResponseSchema, envelopeViolations } from '@objectstack/spec/api';
 import type { RouteHandler } from '@objectstack/spec/contracts';
 import { registerPackageRoutes } from './package-routes.js';
@@ -67,7 +67,17 @@ function mount(svc: Svc, options: any = {}) {
     listen: async () => {},
     close: async () => {},
   } as any;
-  registerPackageRoutes(server, svc as any, '/api/v1', options);
+  // [#7033 / #7023] The package routes now carry an authorization gate. These
+  // envelope cases are about RESPONSE SHAPE, so the caller is stubbed to clear
+  // the gate (holding both the read and write capability); a test can override
+  // `resolveExecutionContext` to exercise the gate itself. The gate itself is
+  // pinned in the `packages authz` describe at the bottom of this file.
+  registerPackageRoutes(server, svc as any, '/api/v1', {
+    resolveExecutionContext: async () => ({
+      userId: 'u_pkg', systemPermissions: ['manage_metadata', 'studio.access', 'setup.access'],
+    }),
+    ...options,
+  });
   return routes;
 }
 
@@ -341,6 +351,30 @@ describe('packages envelope (#3843) — error bodies', () => {
     expect(body.data.packages).toHaveLength(1);
   });
 
+  it('a repeated `?version=` is refused identically on both verbs (#6307)', async () => {
+    // The rule is one rule, so the two verbs must answer the SAME code, status
+    // and message — two answers for one parameter would be a new inconsistency.
+    const get = await drive(
+      mount({ get: async () => ({ id: 'com.acme.crm', manifest: MANIFEST }) }),
+      'GET',
+      `${PKGS}/:id`,
+      { params: { id: 'com.acme.crm' }, query: { version: ['1.0.0', '2.0.0'] } },
+    );
+    const del = await drive(
+      mount({ delete: async () => ({ success: true }) }),
+      'DELETE',
+      `${PKGS}/:id`,
+      { params: { id: 'com.acme.crm' }, query: { version: ['1.0.0', '2.0.0'] } },
+    );
+    expect(get.status).toBe(400);
+    expect(del.status).toBe(400);
+    expect(get.body).toEqual(del.body);
+    expect(get.body.error.code).toBe('VALIDATION_ERROR');
+    expect(get.body.error.message).toContain('"version"');
+    expect(envelopeViolations(get.body)).toEqual([]);
+    expect(BaseResponseSchema.safeParse(get.body).success).toBe(true);
+  });
+
   it('a partial uninstall keeps its per-item detail under `error.details`', async () => {
     const { body } = await drive(
       mount({}, {
@@ -361,5 +395,157 @@ describe('packages envelope (#3843) — error bodies', () => {
     expect(body.error.details.failed).toHaveLength(1);
     expect(body.error.details.cleanups).toHaveLength(1);
   });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// packages authz (#7033 / #7023) — the REST TRANSPORT's own gate
+// ══════════════════════════════════════════════════════════════════════════════
+//
+// `/packages` has TWO HTTP transports: the runtime dispatcher domain
+// (`runtime/src/domains/packages.ts`, pinned in `packages-capability-gate.test.ts`)
+// AND this `@objectstack/rest` direct-mount registrar — a SEPARATE handler body
+// which, in the production stack, registers FIRST, so for the four routes it
+// declares (`POST /publish`, `GET /`, `GET /:id`, `DELETE /:id`) it is the
+// transport production actually serves. Its gate (`refusePackageRequest`)
+// therefore needs its OWN pins — gating only the dispatcher would leave these
+// four open, the exact one-transport gap #6603/#7019 paid for on `/meta`.
+//
+// Reverse check for this block: delete `refusePackageRequest`'s body and every
+// case below goes red. The `mount` helper above injects a gate-clearing caller
+// (the envelope suites want response SHAPE, not the gate), so these cases mount
+// their OWN resolver — anonymous, zero-cap, wrong-cohort, right-cohort, system,
+// and the fail-closed (no resolver) path.
+//
+// Rejections assert `status` AND `code` (ADR-0112). This direct-mount surface
+// DECLARES the wrapped BaseResponseSchema envelope — every body goes through
+// sendOk/sendError, and `check:route-envelope` pins the module at zero
+// hand-written bodies — so BOTH refusals are wrapped: the 401 anonymous floor is
+// `{ success:false, error:{ code:'UNAUTHENTICATED' } }` and the 403 capability
+// refusal `{ success:false, error:{ code:'FORBIDDEN' } }` (the sibling `/meta`
+// REST gate's code, in this surface's own wrapper).
+describe('packages authz (#7033 / #7023) — REST transport gate', () => {
+  /** A service whose four methods are spies, so "the target never ran" is an
+   * assertion, not an inference. */
+  const spySvc = () => ({
+    publish: vi.fn(async () => ({ success: true })),
+    list: vi.fn(async () => [{ id: 'com.acme.crm', manifest: MANIFEST }]),
+    get: vi.fn(async () => ({ id: 'com.acme.crm', manifest: MANIFEST })),
+    delete: vi.fn(async () => ({ success: true })),
+  });
+  /** Mount with an EXPLICIT resolver (pass `undefined` to prove fail-closed). */
+  const gated = (svc: any, resolver: any) => mount(svc, { resolveExecutionContext: resolver });
+  const asCaller = (caps: string[]) => async () => ({ userId: 'u_portal', systemPermissions: caps });
+  const asSystem = () => async () => ({ isSystem: true });
+  const anonResolver = async () => undefined; // guest — no identity resolved at all
+
+  type RouteShape = { method: string; path: string; body?: any; req?: Record<string, any>; spy: (s: any) => any };
+  const PUBLISH: RouteShape = { method: 'POST', path: `${PKGS}/publish`, body: { manifest: MANIFEST, metadata: { author: 'acme' } }, spy: (s) => s.publish };
+  const DELETE_ONE: RouteShape = { method: 'DELETE', path: `${PKGS}/:id`, req: { params: { id: 'com.acme.crm' }, query: { version: '1.0.0' } }, spy: (s) => s.delete };
+  const LIST: RouteShape = { method: 'GET', path: PKGS, spy: (s) => s.list };
+  const GET_ONE: RouteShape = { method: 'GET', path: `${PKGS}/:id`, req: { params: { id: 'com.acme.crm' } }, spy: (s) => s.get };
+  const WRITE = [PUBLISH, DELETE_ONE];
+  const READ = [LIST, GET_ONE];
+  const label = (r: RouteShape) => `${r.method} ${r.path}`;
+  const reqOf = (r: RouteShape) => ({ ...(r.body !== undefined ? { body: r.body } : {}), ...(r.req ?? {}) });
+
+  // ── the domain-wide anonymous floor — every route, both cohorts ──
+  for (const r of [...WRITE, ...READ]) {
+    it(`401s an anonymous ${label(r)} (UNAUTHENTICATED) and never touches the service`, async () => {
+      const svc = spySvc();
+      const c = await drive(gated(svc, anonResolver), r.method, r.path, reqOf(r));
+      expect(c.status).toBe(401);
+      // Wrapped BaseResponseSchema envelope — this surface's declared shape.
+      expect(c.body.success).toBe(false);
+      expect(c.body.error.code).toBe('UNAUTHENTICATED');
+      expect(r.spy(svc)).not.toHaveBeenCalled();
+    });
+
+    it(`fails CLOSED (401), not open, when no resolver is wired on ${label(r)}`, async () => {
+      const svc = spySvc();
+      const c = await drive(gated(svc, undefined), r.method, r.path, reqOf(r));
+      expect(c.status).toBe(401);
+      expect(r.spy(svc)).not.toHaveBeenCalled();
+    });
+  }
+
+  // ── write cohort: `manage_metadata`, exactly the /meta write key ──
+  for (const r of WRITE) {
+    it(`403s a zero-capability caller on ${label(r)} (nested FORBIDDEN) and the service never runs`, async () => {
+      const svc = spySvc();
+      const c = await drive(gated(svc, asCaller([])), r.method, r.path, reqOf(r));
+      expect(c.status).toBe(403);
+      expect(c.body.error.code).toBe('FORBIDDEN');
+      expect(c.body.error.message).toContain('manage_metadata');
+      expect(r.spy(svc)).not.toHaveBeenCalled();
+    });
+
+    it(`403s a READ-only caller (studio.access + setup.access) on ${label(r)} — the write key is a different set`, async () => {
+      const svc = spySvc();
+      const c = await drive(gated(svc, asCaller(['studio.access', 'setup.access'])), r.method, r.path, reqOf(r));
+      expect(c.status).toBe(403);
+      expect(c.body.error.code).toBe('FORBIDDEN');
+      expect(r.spy(svc)).not.toHaveBeenCalled();
+    });
+
+    it(`lets a manage_metadata caller through on ${label(r)}`, async () => {
+      const svc = spySvc();
+      const c = await drive(gated(svc, asCaller(['manage_metadata'])), r.method, r.path, reqOf(r));
+      expect(c.status).not.toBe(403);
+      expect(c.status).not.toBe(401);
+      expect(r.spy(svc)).toHaveBeenCalled();
+    });
+
+    it(`lets an isSystem caller through on ${label(r)}`, async () => {
+      const svc = spySvc();
+      const c = await drive(gated(svc, asSystem()), r.method, r.path, reqOf(r));
+      expect(c.status).not.toBe(403);
+      expect(c.status).not.toBe(401);
+      expect(r.spy(svc)).toHaveBeenCalled();
+    });
+  }
+
+  // ── read cohort: the ADR-0106 D4 set `studio.access` / `setup.access` ──
+  for (const r of READ) {
+    it(`403s a zero-capability caller on ${label(r)} (nested FORBIDDEN) and the service never runs`, async () => {
+      const svc = spySvc();
+      const c = await drive(gated(svc, asCaller([])), r.method, r.path, reqOf(r));
+      expect(c.status).toBe(403);
+      expect(c.body.error.code).toBe('FORBIDDEN');
+      expect(c.body.error.message).toContain('studio.access');
+      expect(r.spy(svc)).not.toHaveBeenCalled();
+    });
+
+    it(`403s a WRITE-only caller (manage_metadata) on ${label(r)} — the read cohort is a different set`, async () => {
+      const svc = spySvc();
+      const c = await drive(gated(svc, asCaller(['manage_metadata'])), r.method, r.path, reqOf(r));
+      expect(c.status).toBe(403);
+      expect(c.body.error.code).toBe('FORBIDDEN');
+      expect(r.spy(svc)).not.toHaveBeenCalled();
+    });
+
+    it(`lets a studio.access caller read ${label(r)}`, async () => {
+      const svc = spySvc();
+      const c = await drive(gated(svc, asCaller(['studio.access'])), r.method, r.path, reqOf(r));
+      expect(c.status).not.toBe(403);
+      expect(c.status).not.toBe(401);
+      expect(r.spy(svc)).toHaveBeenCalled();
+    });
+
+    it(`lets a setup.access caller read ${label(r)}`, async () => {
+      const svc = spySvc();
+      const c = await drive(gated(svc, asCaller(['setup.access'])), r.method, r.path, reqOf(r));
+      expect(c.status).not.toBe(403);
+      expect(c.status).not.toBe(401);
+      expect(r.spy(svc)).toHaveBeenCalled();
+    });
+
+    it(`lets an isSystem caller read ${label(r)}`, async () => {
+      const svc = spySvc();
+      const c = await drive(gated(svc, asSystem()), r.method, r.path, reqOf(r));
+      expect(c.status).not.toBe(403);
+      expect(c.status).not.toBe(401);
+      expect(r.spy(svc)).toHaveBeenCalled();
+    });
+  }
 });
 

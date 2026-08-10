@@ -568,6 +568,80 @@ describe('MessagingService — inbox read API (ADR-0030)', () => {
         expect(receipts[0]).toMatchObject({ id: 'r_concurrent', state: 'read' });
     });
 
+    it('markRead converges when the conflict arrives wrapped in a cause chain (#6542)', async () => {
+        // Pool and query-builder layers re-throw with the driver error attached
+        // as `cause`. The retired local isUniqueViolation() read only the
+        // top-level code/message, judged this wrapper "not a conflict", and
+        // rethrew — markRead logged the failure and reported readCount 0 with
+        // the receipt stuck at `delivered`. The shared isUniqueViolationError
+        // (@objectstack/types, #6250) follows the bounded cause chain, so the
+        // race fallback now converges exactly as it does for a bare driver
+        // error. This is the ONE behaviour change of the migration, in the
+        // direction the call site wants: a wrapped conflict is still a conflict.
+        const engine = inboxEngine({
+            inbox: [{ id: 'm1', user_id: 'u1', notification_id: 'n1', title: 'A', created_at: '1' }],
+        });
+        const realInsert = engine.insert.bind(engine);
+        let raced = false;
+        engine.insert = async (object: string, row: any) => {
+            if (object === 'sys_notification_receipt' && !raced) {
+                raced = true;
+                engine.store.sys_notification_receipt.push({
+                    id: 'r_concurrent', notification_id: 'n1', user_id: 'u1', channel: 'inbox', state: 'delivered',
+                });
+                // The wrapper's own text deliberately matches neither the codes
+                // nor the message substrings the predicate knows — only the
+                // attached driver error carries the conflict signal.
+                const wrapper = new Error('receipt insert failed (pool retry exhausted)');
+                (wrapper as Error & { cause?: unknown }).cause = {
+                    code: '23505',
+                    message: 'duplicate key value violates unique constraint "sys_notification_receipt_notification_id_user_id_channel_key"',
+                };
+                throw wrapper;
+            }
+            return realInsert(object, row);
+        };
+        const svc = new MessagingService({ logger, getData: () => engine });
+
+        const res = await svc.markRead('u1', ['n1']);
+        expect(res).toEqual({ success: true, readCount: 1 });
+        const receipts = engine.store.sys_notification_receipt;
+        expect(receipts).toHaveLength(1); // converged, not duplicated
+        expect(receipts[0]).toMatchObject({ id: 'r_concurrent', state: 'read' });
+    });
+
+    it.each([
+        ['postgres', { code: '23505', message: 'duplicate key value violates unique constraint "sys_notification_receipt_uniq"' }],
+        ['mysql', { code: 'ER_DUP_ENTRY', errno: 1062, message: "Duplicate entry 'n1-u1-inbox' for key 'sys_notification_receipt_uniq'" }],
+        ['sqlite', { message: 'UNIQUE constraint failed: sys_notification_receipt.notification_id, sys_notification_receipt.user_id, sys_notification_receipt.channel' }],
+    ])('markRead race fallback is unchanged for a plain (unwrapped) %s conflict (#6542)', async (_dialect, shape) => {
+        // Pin that the migration onto the shared predicate did not move any
+        // verdict the old local copy already gave: a bare three-dialect driver
+        // error still converges identically.
+        const engine = inboxEngine({
+            inbox: [{ id: 'm1', user_id: 'u1', notification_id: 'n1', title: 'A', created_at: '1' }],
+        });
+        const realInsert = engine.insert.bind(engine);
+        let raced = false;
+        engine.insert = async (object: string, row: any) => {
+            if (object === 'sys_notification_receipt' && !raced) {
+                raced = true;
+                engine.store.sys_notification_receipt.push({
+                    id: 'r_concurrent', notification_id: 'n1', user_id: 'u1', channel: 'inbox', state: 'delivered',
+                });
+                throw Object.assign(new Error(shape.message), shape);
+            }
+            return realInsert(object, row);
+        };
+        const svc = new MessagingService({ logger, getData: () => engine });
+
+        const res = await svc.markRead('u1', ['n1']);
+        expect(res).toEqual({ success: true, readCount: 1 });
+        const receipts = engine.store.sys_notification_receipt;
+        expect(receipts).toHaveLength(1);
+        expect(receipts[0]).toMatchObject({ id: 'r_concurrent', state: 'read' });
+    });
+
     it('markAllRead flips every unread message and leaves already-read ones', async () => {
         const engine = inboxEngine({
             inbox: [

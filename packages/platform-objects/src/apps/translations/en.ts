@@ -58,6 +58,12 @@ export const en: TranslationData = {
         nav_system_overview: { label: 'System Overview' },
 
         // Apps / Marketplace
+        // `nav_packages` is a SETUP entry (package administration is an
+        // operator concern — ADR-0084), distinct from the same-id entry under
+        // `apps.studio.navigation`. Two apps carrying one nav id is normal;
+        // each app resolves its own subtree, so the studio copy never answers
+        // for this one. Its absence here was #5750's first cause.
+        nav_packages: { label: 'Packages' },
         nav_marketplace_browse: { label: 'Browse Marketplace' },
         nav_marketplace_installed: { label: 'Installed Apps' },
         nav_cloud_connection: { label: 'Cloud Connection' },
@@ -72,19 +78,37 @@ export const en: TranslationData = {
 
         // Access Control
         nav_positions: { label: 'Positions' },
+        nav_capabilities: { label: 'Capabilities' },
         nav_permission_sets: { label: 'Permission Sets' },
         nav_sharing_rules: { label: 'Sharing Rules' },
         nav_record_shares: { label: 'Record Shares' },
+        // `nav_sso_providers` is contributed by `@objectstack/plugin-auth` only
+        // when the external-IdP RP is wired (`OS_SSO_ENABLED`, or the cloud
+        // per-env `planAllowsSso`), so it is the one Setup entry
+        // `pnpm check:app-nav-i18n` structurally cannot judge: that gate boots
+        // ONE composition, and a contribution gated off in it is never merged
+        // and therefore never checked (see the gate header's bound #1). Its
+        // absence here was invisible for exactly that reason (#6659) — a
+        // deployment with SSO wired showed `SSO Providers` in English inside an
+        // otherwise translated menu. The pin that keeps this row honest lives
+        // in `setup-nav-dead-key-tombstone.test.ts`. Wording follows the
+        // object's own `pluralLabel` per locale (`sys_sso_provider`), since the
+        // entry opens that object's list view.
+        nav_sso_providers: { label: 'SSO Providers' },
         nav_api_keys: { label: 'API Keys' },
         nav_connect_agent: { label: 'Connect an Agent' },
 
-        // Approvals
-        nav_approval_processes: { label: 'Processes' },
+        // Approvals. `nav_approvals_inbox` is the working surface (#7234); the
+        // three below it are the engine's raw tables, kept as the admin view.
+        nav_approvals_inbox: { label: 'Approvals Inbox' },
         nav_approval_requests: { label: 'Requests' },
         nav_approval_actions: { label: 'Action History' },
+        nav_approval_delegations: { label: 'Delegations (OOO)' },
 
         // Configuration
         nav_settings_hub: { label: 'All Settings' },
+        nav_settings_localization: { label: 'Localization' },
+        nav_settings_company: { label: 'Company' },
         nav_settings_mail: { label: 'Email' },
         nav_settings_branding: { label: 'Branding' },
         nav_settings_auth: { label: 'Authentication' },
@@ -102,14 +126,27 @@ export const en: TranslationData = {
         nav_audit_logs: { label: 'Audit Logs' },
         nav_notifications: { label: 'Notifications' },
 
+        // Integrations — every entry here is contributed at RUNTIME by the
+        // capability plugin that owns the object (ADR-0029 K2), so it exists on
+        // no static walk of SETUP_APP. `pnpm check:app-nav-i18n` is what keeps
+        // this block honest; see that gate's header for why (#5750).
+        nav_webhooks: { label: 'Webhooks' },
+        nav_http_deliveries: { label: 'HTTP Deliveries' },
+        nav_datasources: { label: 'Datasources' },
+
         // Advanced
+        //
+        // No `nav_verifications` / `nav_device_codes` here on purpose:
+        // `sys_verification` and `sys_device_code` omit `list` from their
+        // `apiMethods`, so `setup-nav.contributions.ts` deliberately declares
+        // no browse entry for them (#2266). Nor `nav_metadata` — that entry
+        // moved to Studio as `nav_metadata_directory`. Re-adding a label here
+        // means re-adding the nav item first; the tombstone in
+        // `setup-nav-dead-key-tombstone.test.ts` states the whole rule (#6660).
         nav_oauth_apps: { label: 'OAuth Applications' },
         nav_jwks: { label: 'Signing Keys (JWKS)' },
-        nav_verifications: { label: 'Verifications' },
-        nav_device_codes: { label: 'Device Codes' },
         nav_accounts: { label: 'Identity Links' },
         nav_user_preferences: { label: 'User Preferences' },
-        nav_metadata: { label: 'All Metadata' },
       },
     },
     studio: {

@@ -1,0 +1,471 @@
+{
+  "$comment": "Standing platform test checklist — area ledger. Hand-edited, append-only; validated by scripts/check-platform-checklist.mjs (pnpm check:platform-checklist). Authoring rules: docs/qa/platform-checklist/README.md · execution protocol: RUNNER.md.",
+  "area": "search",
+  "title": "Record search — $search executor, field scoping, RLS composition, pinyin recall, freshness",
+  "items": [
+    {
+      "id": "search.cross-field-object-search",
+      "title": "$search is a server-resolved cross-field match: terms AND-ed, fields OR-ed, case-insensitive, select labels mapped to values",
+      "since": "v15",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": ["seeded admin (admin@objectos.ai)"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "the seeded accounts: Northwind (industry 'retail', name does NOT contain 'retail'), Acme Retail (name-hit control), Contoso (cross-term control) — examples/app-showcase/src/data/seed/index.ts"
+        ]
+      },
+      "steps": [
+        "POST /api/v1/data/showcase_account/query with { search: 'retail' } and record the returned names",
+        "verify the premise before ticking anything: Northwind's NAME must not contain 'retail' (else the multi-field claim proves nothing)",
+        "POST the same search narrowed with { search: 'retail', searchFields: ['industry'] } — Northwind must still return, positively pinning the hit to the industry field",
+        "POST { search: 'Retail' } (capitalized label) — the select label→value mapping must still match the stored 'retail' value",
+        "POST { search: 'retail northwind' } (terms AND across different fields of one row) and { search: 'retail contoso' } (terms that no single row satisfies)",
+        "capture every response body as the evidence set"
+      ],
+      "acceptance": [
+        {
+          "clause": "a term matching only a non-name field returns the row: 'retail' returns Northwind via industry, and the same search restricted to ['industry'] still returns it",
+          "oracle": "api",
+          "verify": "Northwind present in both responses; its name verified not to contain the term (premise guard)",
+          "evidence": "the two response bodies"
+        },
+        {
+          "clause": "fields are OR-ed within one query: the unrestricted 'retail' search also returns the name-hit control (Acme Retail) alongside the industry hit",
+          "oracle": "api",
+          "verify": "both Northwind and a name-containing-'retail' account appear in one result set",
+          "evidence": "the response body"
+        },
+        {
+          "clause": "matching is case-insensitive and select labels map to option values: 'Retail' (label case) matches rows storing the value 'retail'",
+          "oracle": "api",
+          "verify": "the capitalized search still returns Northwind (optionValuesMatching + raw-value $contains fallback)",
+          "evidence": "the response body"
+        },
+        {
+          "clause": "whitespace-separated terms AND: every term must hit some field of the SAME row — 'retail northwind' matches, 'retail contoso' returns neither Northwind nor Contoso",
+          "oracle": "api",
+          "verify": "the two multi-term responses split exactly that way",
+          "evidence": "the two response bodies"
+        }
+      ],
+      "negative": [
+        "'retail contoso' returning Contoso (terms OR-ed instead of AND-ed) is a FAIL against the declared matching semantics",
+        "an empty result for 'retail' means the executor silently dropped $search — the exact pre-ADR-0061 no-op this surface replaced; FAIL, not thin data"
+      ],
+      "variants": [
+        "multi-term AND",
+        "cross-field OR",
+        "case-insensitive $contains",
+        "select label→value mapping"
+      ],
+      "traps": ["seed-data-thin", "dispatcher-vs-hono-route"],
+      "automated": { "kind": "api", "ref": "packages/qa/dogfood/test/showcase-search.dogfood.test.ts" },
+      "source": [
+        "packages/qa/dogfood/test/search-conformance.ledger.ts (rows search-executor, search-select-label-mapping — the variants list is the enforced behavior set)",
+        "packages/objectql/src/search-filter.ts (matching semantics: terms AND-ed, fields OR-ed, case-insensitive, label mapping)",
+        "packages/objectql/src/engine.ts expandSearchOnAst (the executor site the ledger names)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-07", "change": "new item transcribed from the search-conformance ledger and its HTTP-level dogfood proof, seeded names (Northwind/Acme Retail/Contoso) verified in the showcase seed", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    },
+    {
+      "id": "search.field-scoped-narrowing",
+      "title": "$searchFields narrows and can never widen; a name outside the searchable set is 400 INVALID_FIELD at the ingress, never silently dropped",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": ["seeded admin (admin@objectos.ai)"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": ["the same seeded accounts as search.cross-field-object-search"]
+      },
+      "steps": [
+        "POST /api/v1/data/showcase_account/query { search: 'retail', searchFields: ['name'] } — the industry-only hit (Northwind) must drop out",
+        "POST { search: 'retail', searchFields: ['industry'] } — Northwind must remain (narrowing to the right field keeps the hit)",
+        "POST { search: 'retail', searchFields: ['no_such_field'] } and capture the refusal",
+        "POST { search: 'retail', searchFields: ['annual_revenue'] } (a REAL field outside the searchable set — numbers are not searchable-textual) and capture the refusal",
+        "POST { search: 'zhangwei', searchFields: ['__search'] } against showcase_contact — the hidden companion column must be refusable/invisible to overrides, not a client-nameable widening lever",
+        "GET the OData spelling too: /api/v1/data/showcase_account?$search=retail&$searchFields=name — the protocol layer normalizes both spellings to the same executor"
+      ],
+      "acceptance": [
+        {
+          "clause": "narrowing works: restricted to ['name'], the industry-matched row disappears; restricted to ['industry'], it stays",
+          "oracle": "api",
+          "verify": "the two narrowed responses split exactly that way",
+          "evidence": "both response bodies"
+        },
+        {
+          "clause": "the override can only narrow — a $searchFields name the object cannot scan is 400 INVALID_FIELD at the REST ingress (#4254), for typos AND for real-but-unsearchable fields alike",
+          "oracle": "api",
+          "verify": "both bad-override requests answer 400 with code INVALID_FIELD; neither silently returns the unnarrowed superset",
+          "evidence": "the two refusal bodies"
+        },
+        {
+          "clause": "the hidden __search companion is invisible to overrides and to responses: naming it in $searchFields is refused, and no record body ever echoes a __search value",
+          "oracle": "api",
+          "verify": "the ['__search'] override is refused; record payloads from any search carry no __search key",
+          "evidence": "the refusal + a sampled record body"
+        },
+        {
+          "clause": "both wire spellings (bare search/searchFields in the query POST body, $search/$searchFields on GET) reach the same executor with the same verdicts",
+          "oracle": "api",
+          "verify": "the GET spelling reproduces the POST results and refusals",
+          "evidence": "paired responses"
+        }
+      ],
+      "negative": [
+        "a bad $searchFields that answers 200 with unnarrowed rows is the widening leak #4254 closed — a projection typo returns extra columns, a search typo returns extra ROWS; FAIL",
+        "silent dropping of the override (200, results identical to the unrestricted search) is equally a FAIL — refusal must be loud"
+      ],
+      "traps": ["dispatcher-vs-hono-route"],
+      "automated": { "kind": "api", "ref": "packages/qa/dogfood/test/showcase-search.dogfood.test.ts" },
+      "source": [
+        "packages/qa/dogfood/test/search-conformance.ledger.ts (row search-fields-override: intersection + ingress gate, #4254)",
+        "packages/metadata-protocol/src/protocol.ts (assertSearchFieldsAreSearchable — 400 INVALID_FIELD; $-spelling normalization)",
+        "packages/objectql/src/search-filter.ts (resolveSearchFields intersection; companion excluded from resolution — 'invisible to $searchFields overrides and to clients')"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-07", "change": "new item from the conformance ledger's override row and the #4254 ingress-gate source, including the companion-invisibility clause from search-filter.ts", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    },
+    {
+      "id": "search.rls-both-personas",
+      "title": "Search honors RLS both ways: a restricted member gets no hits — and no total leakage — from rows they cannot see; the entitled persona finds the same rows",
+      "since": "v15",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": ["seeded admin (sees all invoices)", "signed-up member bound to the contributor position (invoice_own_rows RLS: owner == current_user.email)"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "seeded invoices INV-1001..INV-1008 with owner emails (ada@example.com / linus@example.com / grace@example.com) none of which belong to the test member",
+          "a signed-up member holding the contributor position — positions are seeded, users are not: sign the member up, then bind contributor (sys_user_position) before the run"
+        ],
+        "knownGaps": [
+          "the seeded owner emails are metadata-only (users cannot be seeded; they sign up) — no stock login exists for ada@example.com, so the 'restricted member owns SOME rows' side is produced by having the member CREATE an invoice of their own (contributors hold allowCreate), not by borrowing a seeded owner"
+        ]
+      },
+      "steps": [
+        "premise guard first: as the contributor-bound member, GET /api/v1/data/showcase_invoice/<id-of-INV-1003> — it must be invisible (else the search verdict proves nothing)",
+        "as the member, POST /api/v1/data/showcase_invoice/query { search: 'INV-1003' } and record records + total",
+        "as admin, run the identical search — INV-1003 must return (the entitled side of the same gate)",
+        "as the member, create their own invoice (POST /api/v1/data/showcase_invoice, name 'INV-QA-RLS') and search for it — their own rows must remain findable",
+        "as the member, run a broad paged search { search: 'INV', limit: 2 } and record records/total/hasMore across pages",
+        "compare the member's paged totals against their full visible row set"
+      ],
+      "acceptance": [
+        {
+          "clause": "the restricted member's search returns zero hits for rows their RLS hides, while the identical admin search returns them — both sides of the gate, same query",
+          "oracle": "api",
+          "verify": "member: records []; admin: INV-1003 present; the by-id premise guard confirmed invisibility first",
+          "evidence": "the paired responses + premise read"
+        },
+        {
+          "clause": "no count leakage: a searched list's total/hasMore derive from the caller-scoped result set — with `search` present the protocol computes a page-local total from the RLS-filtered find (it never runs a raw count for searched lists), and engine.count itself rides the same read middleware (#2737)",
+          "oracle": "api",
+          "verify": "the member's paged totals reconcile exactly with the rows they can enumerate; no response reveals the true 8-row population",
+          "evidence": "the paged responses + reconciliation table"
+        },
+        {
+          "clause": "the restriction is subtractive, not a blackout: the member still finds rows they own ('INV-QA-RLS' returns for its creator)",
+          "oracle": "api",
+          "verify": "the member's own-row search hits",
+          "evidence": "the response"
+        },
+        {
+          "clause": "search rides the engine read path, so the RLS composition is structural: $search only ANDs a filter into ast.where before the security middlewares scope it — verified black-box by the persona split above, not assumed",
+          "oracle": "api",
+          "verify": "the persona-split evidence set is complete (deny + allow + own-rows); cite expandSearchOnAst + the middleware ordering as the mechanism, the responses as the proof",
+          "evidence": "the full evidence set"
+        }
+      ],
+      "negative": [
+        "any hit (or any total inflation) for the restricted member from an invisible row is an RLS bypass — P1 FAIL, reproduce twice and file",
+        "running the deny side as admin proves nothing (wrong-persona trap): the guard check must run as the non-privileged member"
+      ],
+      "traps": ["wrong-persona", "seed-data-thin"],
+      "source": [
+        "examples/app-showcase/src/security/permission-sets.ts (invoice_own_rows: owner == current_user.email, positions ['contributor'])",
+        "examples/app-showcase/src/data/seed/index.ts (INV-1001..1008 owner spread; 'ada sees INV-1001/1002's lines but never linus's INV-1003')",
+        "packages/objectql/src/engine.ts (expandSearchOnAst ANDs into ast.where; count() rides the read middleware — the #2737 total-leak fix)",
+        "packages/metadata-protocol/src/protocol.ts (searched lists: countable = search == null → page-local total from the scoped find)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-07", "change": "new item: RLS × $search both-personas contract; total-leakage clause grounded in the protocol's page-local total for searched lists and the #2737 count middleware fix, persona provisioning gap recorded honestly", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    },
+    {
+      "id": "search.pinyin-flag-both-sides",
+      "title": "Pinyin recall is gated end-to-end by OS_SEARCH_PINYIN_ENABLED: on, latin pinyin (full + initials) hits CJK names; off, it does not — while CJK terms keep matching",
+      "since": "v15.1",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "mixed",
+      "personas": ["seeded admin (admin@objectos.ai)"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "seeded CJK rows: contact 张伟 (zhangwei@huaning.example) and account 华宁科技 — placed in the seed precisely so pinyin recall is demonstrable out of the box",
+          "the showcase i18n config (supportedLocales includes zh-CN), which makes the flag default ON: unset OS_SEARCH_PINYIN_ENABLED + any zh-* locale → enabled, stamped into the env at serve boot",
+          "an environment lever for the OFF side: restart the server with OS_SEARCH_PINYIN_ENABLED=false (an explicit value always beats the locale-derived default — truthy is exactly 1/true/on/yes; anything else explicit disables)"
+        ]
+      },
+      "steps": [
+        "on the stock boot (flag auto-ON via zh-CN locale), POST /api/v1/data/showcase_contact/query { search: 'zhangwei' } — full pinyin must return 张伟",
+        "POST { search: 'zw' } — initials must return 张伟",
+        "POST { search: '张' } — the CJK original must return 张伟 (source-column hit, no companion involved)",
+        "POST /api/v1/data/showcase_account/query { search: 'huaning' } and { search: 'hnkj' } — both must return 华宁科技",
+        "confirm the seeded rows were companion-backfilled on this very boot (rows written by seeds BEFORE hook binding are reconciled by the kernel:bootstrapped backfill — no restart needed) by checking the boot log for the backfill, then verify in the browser that the list quick-search / ⌘K / lookup picker send the same $search and hit",
+        "restart the server with OS_SEARCH_PINYIN_ENABLED=false and re-run the same queries",
+        "capture the boot log line proving the plugin went inert"
+      ],
+      "acceptance": [
+        {
+          "clause": "flag ON: every latin recall variant hits — full pinyin (zhangwei → 张伟), initials (zw → 张伟), and the account forms (huaning / hnkj → 华宁科技) — each verified per-variant against the API",
+          "oracle": "api",
+          "verify": "one query per variant, each returning the seeded CJK row",
+          "evidence": "per-variant response bodies"
+        },
+        {
+          "clause": "the recall is additive and scoped to the display/name field: only the resolved display field feeds the companion; other fields are searched via their source columns directly",
+          "oracle": "api",
+          "verify": "a latin term matching a NON-name CJK field does not gain pinyin recall (e.g. company 华宁科技 on a contact whose name is latin) — matches come only where the source column or the name-fed companion matches",
+          "evidence": "the contrast query"
+        },
+        {
+          "clause": "flag OFF (explicit false, restart): 'zhangwei'/'zw' no longer return 张伟 — the companion is gone from the schema view and the filter never ORs it — while '张' still matches via the source column",
+          "oracle": "api",
+          "verify": "the same three queries after the flagged restart split exactly that way, with no errors",
+          "evidence": "post-restart response bodies"
+        },
+        {
+          "clause": "OFF is inert end-to-end, not half-disabled: the plugin logs 'OS_SEARCH_PINYIN_ENABLED is off — inert' (no hooks, no backfill, pinyin-pro never imported) — the ADR-0049 no-half-state design: column provisioning and population share the SINGLE decision point resolveSearchPinyinEnabled",
+          "oracle": "log",
+          "verify": "the boot log carries the inert line and no backfill activity",
+          "evidence": "boot log excerpt"
+        },
+        {
+          "clause": "seeded (pre-hook) rows are recallable on the FIRST boot: the kernel:bootstrapped backfill reconciles rows written before/around hook binding, and existing deployments' stale rows after a restart (#3027 / 15.1 plan G9)",
+          "oracle": "api",
+          "verify": "the flag-ON queries above succeed on a fresh boot without any manual rebuild; the backfill ran per the boot log",
+          "evidence": "fresh-boot query results + log"
+        }
+      ],
+      "negative": [
+        "with the flag off, a 500 or error on latin searches is a FAIL — disabling must degrade to no-recall, not to breakage",
+        "with the flag on, 'zw' matching NOTHING while 'zhangwei' matches means the initials normalizer regressed — per-variant verification exists precisely so one form cannot stand in for the other"
+      ],
+      "variants": [
+        "full pinyin (zhangwei → 张伟)",
+        "initials (zw → 张伟)",
+        "CJK original (张 → 张伟; flag-independent)",
+        "account full pinyin (huaning → 华宁科技)",
+        "account initials (hnkj → 华宁科技)",
+        "flag OFF contrast (latin forms miss, CJK still hits)"
+      ],
+      "traps": ["stale-dist", "seed-data-thin"],
+      "source": [
+        "packages/types/src/env.ts (resolveSearchPinyinEnabled — explicit env wins, truthy set {1,true,on,yes}; unset derives from zh-* locales; stampSearchPinyinEnabled at boot)",
+        "packages/plugins/plugin-pinyin-search/src/pinyin-search-plugin.ts (inert-when-off, before-save hooks, kernel:bootstrapped backfill)",
+        "packages/objectql/src/search-companion.ts (__search companion: display-field-only materialization, FLS/secret eligibility gate)",
+        "packages/objectql/src/search-filter.ts (each latin term ORs { __search: { $contains: term } } — purely additive)",
+        "examples/app-showcase/src/data/seed/index.ts (张伟/华宁科技 seeded for exactly this demo) + examples/app-showcase/objectstack.config.ts (supportedLocales ['en','zh-CN'])",
+        "docs/plans/release-15.1-test-plan.md E5/G9 (#3027/#3034)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-07", "change": "new item: both sides of the pinyin flag with toggle semantics read from resolveSearchPinyinEnabled's source (explicit-wins + zh-locale default), recall variants pinned to the seeded CJK rows, backfill contract from the plugin source", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    },
+    {
+      "id": "search.freshness-and-empty",
+      "title": "Search reflects create/update/delete immediately (query-time expansion, no async index) and a no-hit search degrades to a clean empty result, never an error",
+      "since": "v15",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "mixed",
+      "personas": ["seeded admin (admin@objectos.ai)"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": ["write access to showcase_account (admin) for the probe records"]
+      },
+      "steps": [
+        "POST /api/v1/data/showcase_account { name: 'Zephyr Search Probe', status: 'prospect' } and IMMEDIATELY POST /api/v1/data/showcase_account/query { search: 'zephyr' }",
+        "rename the record to 'Quasar Search Probe' (PATCH) and immediately search 'quasar' AND 'zephyr'",
+        "create a CJK probe contact (name '搜索测试', any email) and immediately search its full pinyin ('sousuoceshi') — the companion recomputes in the SAME save (before-save hook), so no restart may be needed",
+        "delete the probe records and immediately re-run their searches",
+        "POST { search: 'qqqzzz-no-such-term' } and record the full response envelope",
+        "in the browser, type the same no-hit term into the Accounts list quick-search; screenshot the result and capture the console"
+      ],
+      "acceptance": [
+        {
+          "clause": "a just-created record is findable in the immediately-following search — Tier-1 $search is a query-time WHERE expansion over the live table (no separate index, no async pipeline), so API-path writes are read-your-writes",
+          "oracle": "api",
+          "verify": "the create→search sequence hits with zero wait/retry",
+          "evidence": "the timestamped request pair"
+        },
+        {
+          "clause": "an update is reflected immediately and completely: the new term matches, the OLD term stops matching",
+          "oracle": "api",
+          "verify": "post-rename, 'quasar' hits and 'zephyr' misses",
+          "evidence": "both responses"
+        },
+        {
+          "clause": "a deleted record stops being findable immediately",
+          "oracle": "api",
+          "verify": "post-delete searches return no probe rows",
+          "evidence": "the responses"
+        },
+        {
+          "clause": "pinyin freshness rides the same write: the __search companion is recomputed by before-save hooks in the SAME save when the display field changes — a freshly created CJK row is pinyin-findable without any restart. The ONLY deferred path is hook-bypassing writes (direct driver/system writes, rows predating the flag), reconciled at the next boot's kernel:bootstrapped backfill or an explicit rebuildSearchCompanion — that is the actual consistency contract, not instant-for-everything",
+          "oracle": "api",
+          "verify": "the fresh CJK probe hits by full pinyin immediately; the deferred-path caveat is recorded in the evidence, not glossed",
+          "evidence": "the CJK probe responses + the caveat note"
+        },
+        {
+          "clause": "a no-hit search is a clean success: 200 with records [] and total 0 in the declared envelope — never a 4xx/5xx, never an error body",
+          "oracle": "api",
+          "verify": "the no-hit response envelope",
+          "evidence": "the response body"
+        },
+        {
+          "clause": "the browser renders a designed empty state for a no-hit quick-search — no error toast, no console error, no stale previous rows",
+          "oracle": "screenshot",
+          "verify": "screenshot after settle shows the empty state; console capture is clean",
+          "evidence": "screenshot + console log"
+        }
+      ],
+      "negative": [
+        "any wait-and-retry needed for an API-created row to become findable contradicts the query-time-expansion design — investigate as a FAIL (or a driver seam), never normalize it into the steps",
+        "a no-hit search answering an error envelope (or the browser toasting one) is a FAIL — absence of results is a result"
+      ],
+      "traps": ["hydration-race", "shared-browser-tab"],
+      "source": [
+        "packages/objectql/src/search-filter.ts + packages/objectql/src/engine.ts expandSearchOnAst ($search → $or of $contains ANDed into ast.where at query time — no index artifact for latin search)",
+        "packages/plugins/plugin-pinyin-search/src/pinyin-search-plugin.ts (before-save recompute = write-through; kernel:bootstrapped backfill + rebuildSearchCompanion = the deferred reconcile paths)",
+        "packages/qa/dogfood/test/search-conformance.ledger.ts (Tier 2 external engines deliberately absent — there is no FTS index to be stale)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-07", "change": "new item: freshness contract stated from source (query-time expansion ⇒ read-your-writes; pinyin companion write-through with boot-backfill for hook-bypassing writes) instead of assuming an index; clean no-hit behavior on both surfaces", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    },
+    {
+      "id": "search.console-global-search",
+      "title": "The console global search — ⌘K palette, header Search button, and /search page — drives ONE path (GET /api/v1/search): hits group under object headings, RLS hides invisible rows, Enter opens the record, empty input shows recents",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "mixed",
+      "personas": [
+        "seeded admin (admin@objectos.ai — sees all)",
+        "signed-up member bound to the contributor position (invoice_own_rows RLS — the same restricted persona as search.rls-both-personas)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "the objectui console (app-shell) with CommandPaletteProvider — the ⌘K/Ctrl+K accelerator, the header Search button, and the ?palette=1/?cmdk=1 deep-link all drive the SAME idempotent open (ADR-0054 C1/C3)",
+          "the seeded CJK/pinyin rows 张伟 (zhangwei@huaning.example) and 华宁科技 (examples/app-showcase/src/data/seed/index.ts) so a CJK/pinyin query has a real hit; the search service (pinyin full-text plugin) installed so GET /api/v1/search resolves",
+          "seeded invoices INV-1001..INV-1008 (owner spread ada/linus/grace) and a signed-up member bound to the contributor position (sys_user_position) so the RLS-parity side has an invisible row (INV-1003) to prove absence — provisioned exactly as in search.rls-both-personas"
+        ],
+        "knownGaps": [
+          "the /_console bundle is vendored and may be stale — verify the palette/page behavior against current objectui app-shell or a fresh build (stale-console-bundle, RUNNER §2)",
+          "when the search plugin is ABSENT, searchAll's GET /api/v1/search answers 404 and useRecordSearch degrades to the per-object find({ $search }) fanout — record WHICH path served from the network trace rather than assuming the global endpoint"
+        ]
+      },
+      "steps": [
+        "sign in as admin in the console; open the palette with ⌘K (Cmd/Ctrl+K), screenshot it (data-testid overlay:command-palette), then close and re-open it via the header Search button (data-testid action:command-palette:open) — confirm the SAME overlay opens (idempotent, ADR-0054 C1)",
+        "with the input EMPTY (after visiting a couple of records first to populate recents), confirm the palette shows the 'Recently viewed' group and fires NO search request",
+        "type a seeded CJK/pinyin query (e.g. 'zhangwei', '张', or 'huaning') and capture the network request — confirm it is GET /api/v1/search?q=<term> (searchAll), and capture the returned hits",
+        "screenshot the settled palette and confirm record hits are grouped under per-object headings (issue #3371); read the DOM only after the screenshot",
+        "press Enter on the top hit (ref-targeted select, not a coordinate click) and confirm navigation to /apps/<app>/<object>/record/<id> and the record page renders",
+        "from the palette's 'Open full search' item (navigates to <baseUrl>/search), or directly at /apps/<app>/search?q=<term>, repeat the query on the SearchResultsPage and confirm record hits grouped by object plus nav matches; also run a no-hit query and confirm the designed empty state",
+        "RLS parity: as the restricted member, run GET /api/v1/search?q=INV-1003 (the row their RLS hides) and the same in the palette; then as admin run the identical query — capture both persona responses",
+        "capture the browser console for the whole session"
+      ],
+      "acceptance": [
+        {
+          "clause": "one open path: ⌘K, Ctrl+K, the header Search button (action:command-palette:open), and the ?palette=1/?cmdk=1 deep-link all open the SAME idempotent palette overlay (ADR-0054 C1/C3) — calling open when already open is a no-op, not a toggle-closed",
+          "oracle": "dom",
+          "verify": "each affordance yields the overlay:command-palette overlay and the URL carries the palette param; DOM checked only after a screenshot confirms the overlay rendered",
+          "evidence": "screenshots of the palette opened by each affordance + the URL param"
+        },
+        {
+          "clause": "the palette calls the platform global-search endpoint: a seeded query issues GET /api/v1/search?q=<term> (searchAll), not merely the per-object find({ $search }) fanout — captured on the wire; if the search plugin is absent, the honest fallback is the fanout and the run records which path served",
+          "oracle": "network",
+          "verify": "the request trace shows GET /api/v1/search?q= for the typed query (or, plugin-absent, the per-object find fanout — named explicitly)",
+          "evidence": "the search request trace"
+        },
+        {
+          "clause": "CJK/pinyin recall reaches grouped hits: 'zhangwei' / '张' / 'huaning' returns the seeded CJK record(s), listed under the object's heading — record hits grouped per object (#3371), not a flat undifferentiated list",
+          "oracle": "network",
+          "verify": "the /api/v1/search response carries the CJK hit; the palette renders it under its object heading (screenshot confirms the grouping before any DOM read)",
+          "evidence": "the search response + the grouped-palette screenshot"
+        },
+        {
+          "clause": "Enter navigates to the record: selecting the top hit routes to /apps/<app>/<object>/record/<id> and the record page renders — the palette is a navigator, not a dead list",
+          "oracle": "screenshot",
+          "verify": "post-Enter the record page for the selected hit is on screen at the expected route (ref-targeted select rules out the automation-input trap)",
+          "evidence": "the record-page screenshot + the resolved URL"
+        },
+        {
+          "clause": "empty input shows recents, not results: with a blank query the palette shows the 'Recently viewed' group (cloud-synced via sys_user_preference) and fires NO record-search request (minLength 2 guards the wire)",
+          "oracle": "network",
+          "verify": "no GET /api/v1/search fires for empty/1-char input; the recents group renders in the empty state",
+          "evidence": "the request-absence trace + the recents screenshot"
+        },
+        {
+          "clause": "RLS parity both personas: the restricted member's global search returns NO hit for a row their RLS hides (INV-1003) while the identical admin query returns it — the /search path rides the same read scope as /data (parity with search.rls-both-personas); UI absence is a courtesy, the server response is the authority",
+          "oracle": "api",
+          "verify": "GET /api/v1/search?q=INV-1003 as the member yields no INV-1003 hit and leaks no count of it; as admin it returns INV-1003",
+          "evidence": "the paired persona responses"
+        },
+        {
+          "clause": "the /search full page uses the same global-search path and empty-state: SearchResultsPage fires the same searchAll (GET /api/v1/search) and groups record hits by object; a no-hit query renders the designed empty state with no error toast or console error",
+          "oracle": "network",
+          "verify": "the page's search request is GET /api/v1/search?q=; the no-hit query yields the empty state, not an error envelope",
+          "evidence": "the page search trace + the empty-state screenshot + clean console"
+        }
+      ],
+      "negative": [
+        "ANY invisible-row hit for the restricted member (or a leaked count of it) is an RLS bypass — P1 FAIL, reproduce twice and file (mirrors search.rls-both-personas)",
+        "record hits rendered flat with no per-object heading regresses #3371 — a FAIL against the grouped-results contract",
+        "an empty input firing a search request, or showing stale prior results instead of recents, is a FAIL",
+        "Enter selecting a hit but not navigating is a FAIL — but rule out the automation-input trap first (ref-targeted select, not a coordinate click) before recording it",
+        "running the deny side as admin proves nothing (wrong-persona): the RLS check must run as the non-privileged member"
+      ],
+      "variants": [
+        "open via ⌘K (Cmd+K)",
+        "open via Ctrl+K",
+        "open via the header Search button (action:command-palette:open)",
+        "open via the ?palette=1 / ?cmdk=1 deep-link",
+        "surface: ⌘K palette",
+        "surface: /search SearchResultsPage"
+      ],
+      "traps": ["stale-console-bundle", "hydration-race", "wrong-persona", "automation-input"],
+      "source": [
+        "objectui packages/app-shell/src/chrome/CommandPalette.tsx (⌘K palette: useRecordSearch, record hits grouped by object #3371, recents empty-state, onSelect navigate to /<object>/record/<id>, 'Open full search' → <baseUrl>/search, overlay data-testid overlay:command-palette)",
+        "objectui packages/app-shell/src/context/CommandPaletteProvider.tsx (ADR-0054 C1/C3: ⌘K/Ctrl+K accelerator, ?palette=1/?cmdk=1 via useUrlOverlay, idempotent openCommandPalette)",
+        "objectui packages/app-shell/src/layout/AppHeader.tsx (header Search button data-testid action:command-palette:open / open-mobile → openCommandPalette, ADR-0054 C1)",
+        "objectui packages/app-shell/src/views/SearchResultsPage.tsx (/apps/:appName/search — same searchAll path, record hits grouped by object + nav matches, designed empty state)",
+        "objectui packages/react/src/hooks/useRecordSearch.ts (prefers dataSource.searchAll → GET /api/v1/search; per-object find({ $search }) fanout fallback when searchAll is absent)",
+        "objectui packages/data-objectstack/src/index.ts (searchAll → GET /api/v1/search?q=, returns { query, hits }; 404 → empty when the search plugin is absent)",
+        "packages/rest/src/rest-route-ledger.ts (GET /api/v1/search, family search, source route-manager, client search) + packages/metadata-protocol/src/protocol.ts (searchAll backing)",
+        "search.rls-both-personas (the RLS × $search read-path mechanism this item reuses) and search.cross-field-object-search (the /data $search path this item is DISTINCT from — this tests the console global-search UI + the /search route)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-08", "change": "new item: console global-search UI (⌘K palette + header button ADR-0054 C1 + /search page) over GET /api/v1/search — object-grouped hits, RLS parity, Enter-navigates, empty-shows-recents; grounded in objectui app-shell + the framework search route ledger", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    }
+  ]
+}

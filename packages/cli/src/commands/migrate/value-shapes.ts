@@ -134,6 +134,7 @@ export default class MigrateValueShapes extends Command {
     let stack;
     try {
       stack = await bootSchemaStack({
+        jsonOutput: flags.json,
         databaseUrl: flags['database-url'],
         extraPlugins: await buildDataMigrationPlugins(),
       });

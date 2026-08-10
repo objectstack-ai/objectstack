@@ -1,5 +1,634 @@
 # @objectstack/plugin-sharing
 
+## 17.0.0-rc.6
+
+### Minor Changes
+
+- dadd1ad: refactor(spec,plugin-sharing): retire the exported `SharingExecutionContext` type (#7218)
+
+  <!-- adr-0087: registered sharing-execution-context-retired -->
+
+  **BREAKING — public surface removal.** `SharingExecutionContext` is deleted from
+  `@objectstack/spec` (`contracts/sharing-service`) and from
+  `@objectstack/plugin-sharing`, which re-exported it. Both `api-surface/` and
+  `export-origins/` snapshots are regenerated accordingly.
+
+  This is the deferred deletion recorded when #7070 split the convergence in two.
+  #6523 / PR #7068 converged 36 contract signatures onto the full
+  `resolveAuthzContext` envelope (`ExecutionContext`), applying the #6206 ruling —
+  enforcement adjudicates on the whole envelope, never a per-site subset. The
+  consumer halves then re-annotated the implementations: PR #7140 (identity:
+  `plugin-sharing`, `plugin-audit`) and PR #7206 (services: `plugin-approvals`,
+  `plugin-reports`). Both landed with the type still exported, because it is
+  DEFINED in `packages/spec` and that package's retirement is the spec seat's to
+  make. Nothing declares it any more, so it goes.
+
+  **Migration.** Anyone who imported `SharingExecutionContext` from either package
+  should import `ExecutionContext` from `@objectstack/spec` instead — the type the
+  contracts have declared since #7068. The old shape was six optional fields, all
+  of which exist on the envelope with the same names and types, so a value that
+  satisfied the retired type already satisfies `ExecutionContext`; only the
+  spelling of the annotation changes.
+
+  **No runtime behaviour changes.** The type was erased at compile time and no
+  signature's accepted shape moved: the contracts already took the wide envelope.
+
+  **What the retirement did NOT remove — the reason to read the pins.** Deleting
+  the type does not make re-narrowing a compile error. Structural subtyping still
+  accepts a six-field context where the envelope is expected, so the boundary is
+  held by the declared parameter type plus the pins, exactly as before. The three
+  `exec-context-annotation.pin.ts` files (`plugin-sharing`, `plugin-approvals`,
+  `plugin-reports`) told their failure story as "the parameter narrows back to
+  `SharingExecutionContext`", which a deletion would have quietly hollowed out.
+  Each now keeps the retired six-field shape as a local, non-exported SPECIMEN
+  type and refutes every enforcement parameter against it by type identity, so a
+  re-narrowing under ANY name is red — alongside the fresh-literal
+  excess-property checks they already carried. `sharing-service.test.ts` in
+  `packages/spec` is re-anchored the same way, and its "twin unchanged in shape"
+  case becomes a "twin stays retired" case. The narrative the retired type's doc
+  block carried (the measured `(context as any).posture` specimen, and why tsc
+  cannot police this) moves to the module doc of `contracts/sharing-service`,
+  which the contracts and pins now point at.
+
+- 54299ca: feat(sharing): `ISharingService` 的每行写判定补三态 —— 放行 / 不表态 / 拒绝(#6428)
+
+  #5492 的维护者裁决(2026-08-07,B 案)分两步兑现两种已声明的写扩权,本次是 **step 1:
+  契约与默认实现**。plugin-security 前像门的 provenance 分层合成是 step 2,本次一行未动。
+
+  **为什么二态不够(实测,不是推演)。** `canEdit()` 用同一个 `true` 表达了两件事 ——
+  「我有依据放行」与「本服务对这一行根本不设门」。对只**追加**一道门的调用方(sharing
+  中间件、`sys_attachment` 父记录门、ADR-0055 master 判定)这没问题:`true` = 「我不拦
+  你」。对让这个答案去**顶替另一个权威的地板**的调用方就是 fail-open —— #5492 的 E2 实验
+  把前像写门委托给 `canEdit()` 后,在**没有 `owner_id` 列**的对象上,普通成员跨 creator
+  的 UPDATE 变成 `ok: true`(main 上是 403),因为平台的 `created_by` 所有权地板正是这类
+  对象唯一的行级写门,而一个「不表态」的 `true` 把它盖掉了。
+
+  **新增契约面**(`@objectstack/spec/contracts`):
+
+  - `SharingWriteVerdict = 'allow' | 'abstain' | 'deny'` —— 闭合联合,普通 TS 类型
+    (非 zod 派生,不进 ADR-0122 的 pin 计数)。
+  - `ISharingService.checkEdit()` / `checkDelete()` —— 三态主形态,动作边界照 ADR-0111 D3
+    继承:`edit` 级共享让 `checkEdit` 答 `allow`、同一行 `checkDelete` 仍答 `deny`;两者
+    的 `abstain` 集合完全相同(两道门对「哪些对象由共享设门」意见一致,只在动词上分歧)。
+
+  **兼容:`canEdit()` / `canDelete()` 原样保留,语义零漂移。** 它们被定义为三态的
+  **投影** `verdict !== 'deny'` —— 从前对 public / 无 owner 字段 / bypass 对象返回的那个
+  `true`,现在落在 `abstain` 上,投影回来仍是 `true`。真值表逐分支被测试钉住(9 个分支
+  × 两个动词),因为 `resolveSharingCanEdit`(plugin-security)与 `sys_attachment` 父记录
+  门读的正是这一列,翻掉任何一格都是本 PR 未触及的包里的静默权限变更。
+
+  **fail-closed 落点:查询失败是 `deny`,永远不是 `abstain`。** 两者对合成方是相反的指令
+  (`abstain` 把这一行交给另一个权威,`deny` 就地终结),把失败读成「没有意见」正是造出上述
+  fail-open 的那个混淆。默认实现把所有权查询与共享查询整段包在 fail-closed 分支里,并
+  `logger.error` 记名,不静默吞。
+
+  **行为变化(一处,方向收紧)**:引擎查询抛错时,`canEdit`/`canDelete` 从**向外抛**改为
+  返回 `false`。两个既有调用点本来就在自己那侧 catch 成 `false`(`resolveSharingCanEdit`
+  的 #5386 fail-closed、attachment hook 的降级读),所以对它们是同一结果;其余调用点由
+  「异常中止写入」变成「403 拒绝写入」,严格不更宽松。
+
+  **解锁**:#5492 step 2 的前像门可以按 provenance 分层合成 —— `abstain` 回落平台所有权
+  地板、`allow` 按声明顶替地板、`deny` 维持拒绝 —— 而不必在 security 侧重算一份
+  owner/depth/share/bypass(那会是同一契约的第二份实现)。#5491 与 #5492 同批落地。
+
+### Patch Changes
+
+- db59e9c: hooks: drop the last three `doc` / `previousDoc` alias reads on a hook context — read the engine's own keys only
+
+  Behaviour is unchanged: every one of these limbs guarded against a producer that
+  has never existed, so none of them could be reached.
+
+  - `service-storage` attachment lifecycle read `ctx.result ?? ctx.input.doc ?? ctx.input.data`
+  - `plugin-sharing` primary-BU projection read `(ctx.input.data ?? ctx.input.doc).user_id`
+  - `runtime`'s hook sandbox read `engineCtx.input ?? engineCtx.doc` and `engineCtx.previous ?? engineCtx.previousDoc`
+
+  Every ObjectQL write context spells the payload `data` — measured and pinned by
+  `hook-input-shape-contract.test.ts` in `@objectstack/objectql` ("insert carries
+  `data` — never `doc`", #5273). The top-level pair is the same family one level
+  up: `HookContextSchema` declares `input` / `result` / `previous` and neither a
+  `doc` nor a `previousDoc`, and `engine.ts` — the sole producer of a HookContext
+  — builds neither. The limbs survived only because the old `HookContext.input`
+  contract table documented insert as `{ doc, options }`; that table was corrected
+  in #5668, and the same alias was removed from `trigger-record-change` in #5671.
+  These are the remainder (#5906), removed rather than left as a second de-facto
+  contract (PD #12).
+
+- fc3a36a: fix(spec,objectql,sharing,storage): a hook can tell a per-row bulk dispatch from a single-record write again (#6966)
+
+  A predicate (`multi: true`) write dispatches its lifecycle hooks **once per
+  matched row** — `after*` since #5038, `before*` since #5574 — on a context
+  deliberately indistinguishable from a single-id write's, so a handler written
+  for one record works unchanged on a batch. That indistinguishability is the
+  feature, and it also erased the only signal several handlers had.
+
+  Before #5574 a bulk `before*` fired once with `input.id` present-but-`undefined`,
+  so "`input.id` is empty" meant "this call stands for N rows". Guards across the
+  platform were written on it. Every one of them **silently inverted** rather than
+  failing: a per-row context has an id, so the guard now answers "single write" for
+  every row of a batch. Two further assumptions broke with it — that the engine
+  reuses one `HookContext` across a write's before/after pair, and that `after*`
+  work keyed on the write's row set runs once.
+
+  ### New: `HookContext.dispatch`
+
+  The engine now states the fact rather than leaving it to be inferred:
+
+  ```ts
+  ctx.dispatch; // { mode: 'record' | 'per-row', index: number, scope: object } | undefined
+  ```
+
+  - `mode` — `'record'` when the call is the caller's whole write; `'per-row'`
+    when it is one of N.
+  - `index` — position in the fan-out. `index === 0` is how a handler does
+    batch-scoped work once instead of N times.
+  - `scope` — scratch shared by **every** dispatch of one write, both phases, same
+    object identity. This is the seam handlers used to get by stashing on the
+    context itself, which only ever worked because a single-id write reuses one
+    context across its pair.
+
+  Bound at every write dispatch site — insert, update, delete, both phases.
+  Optional, and an absent marker reads as "not a per-row dispatch", so a handler
+  reads `ctx.dispatch?.mode === 'per-row'` and existing code keeps its behaviour.
+  Reads carry no marker: a read has no fan-out.
+
+  It is deliberately **not** the `isPredicateBulkWrite` discriminator #5574
+  retired. That one was removed under ADR-0049 for having neither a producer nor a
+  reachable consumer — it inferred "bulk" from `input.id` and `options.multi` at
+  the consumer, which is exactly what `asScalarId` stays unexported to prevent
+  (#4434 / #4550). This one is produced by the engine at the point the dispatch
+  ladder is decided, and the platform's own handlers read it.
+
+  ### Behaviour fixed
+
+  **Sharing rules and the record-share cascade (`@objectstack/plugin-sharing`).**
+  The `before*` hook stashes the write's affected row set for the `after*` hook to
+  act on. On a predicate write that stash was landing on a per-row context the
+  `after` phase never saw, so `readAffectedRows` answered `resolve-failed` and both
+  subscribers took their safe branch: every bulk update or delete on a ruled object
+  revoked **all** of that object's rule grants and queued a full asynchronous
+  re-grant — once per matched row, with the repeats racing each other's re-grants.
+  Access was never widened (the trade is the ruling's "over-granting is an
+  incident, under-granting is a wobble" direction), but a bounded write now takes
+  the bounded path again: the rows are unioned as the engine hands them over, the
+  cap still applies to the union, and the `after*` work runs once per write.
+
+  **File-reference ownership (`@objectstack/service-storage`).** The `beforeDelete`
+  hook that pre-resolved ids for a `where`-shaped delete was dead on every path,
+  and `afterDelete` was falling back to one `sys_file` lookup **per row** where the
+  batch fits one `$in`. Both are fixed by the marker, and the pre-resolution query
+  is gone entirely — the engine has already matched the rows and hands them over.
+  The `beforeUpdate` copy-on-claim pass no longer runs once per row against a
+  batch-scoped payload, which also removes a row-conditioned rewrite of a shared
+  `SET` clause (out of contract under ADR-0058 Addendum II D3).
+
+  No authored metadata changes, and no write's result, event or return contract
+  changes.
+
+- 8e13ca8: fix(plugin-sharing): share-link 路由把完整授权信封交给 enforcement,修复 `group` 姿态下建链恒 403(#6206,裁决 A 案的消费半边)
+
+  `SharingServicePlugin` 的 share-link 路由此前在 `resolveAuthzContext` 之后重新
+  拼一个四字段对象(`userId` / `tenantId` / `positions` / `permissions`),而这个
+  对象被原样当作 enforcement context 喂进 `engine.find` —— 即 [Finding-2]
+  「只能为你自己看得见的记录建链接」那道可见性校验。被丢在半路的是
+  `accessible_org_ids`、`org_user_ids`、`systemPermissions`、`posture`、
+  `tabPermissions`。
+
+  实害(已复现,非仅代码读出):`group` 租户姿态下 `accessible_org_ids` 就是
+  Layer 0 那堵墙(ADR-0105 D2),集合缺席即判否(fail closed)。于是可见性校验
+  查不到任何行,建链接对**调用方本来读得到的记录**返回
+  `403 FORBIDDEN: Not permitted to share <object>/<id>` —— 一个已发布姿态上,
+  已发布功能完全不可用。`single` 姿态(默认)不读该字段,行为不变。
+
+  改法按维护者 2026-08-07 的 A 案裁决(契约半边 #6430 / PR #6511 已落):信封
+  **整个**透传(`{ ...authz, isSystem: false }`),不再逐字段挑选 —— 逐字段挑选正是
+  这条缝出问题的方式,也是下一个新增授权维度会再次漏掉的地方。`posture` 随上下文
+  流动、不在 enforcement 处重推(ADR-0095 D2)。窄类型 `ShareLinkExecutionContext`
+  保留,但只服务路由自己的 401 判定(认证与否),不再出现在任何裁决路径上。
+
+  `ShareLinkService.createLink` / `revokeLink` / `listLinks` 与 `canManageShares`
+  探针的参数类型随之收成完整 `ExecutionContext`,与 #6511 落地的契约一致。
+
+- 3415a61: refactor(plugin-sharing,plugin-audit): enforcement implementations annotate the full `ExecutionContext` (#7136)
+
+  The consumer half of #6523. That change converged 36 contract signatures onto
+  the complete `resolveAuthzContext` envelope, applying the #6206 ruling —
+  enforcement adjudicates on the whole envelope, never a per-site subset. The
+  implementations behind those contracts still annotated their own parameters
+  with `SharingExecutionContext`, the six-field shape the contracts used to name,
+  so nothing they could _read_ had widened.
+
+  `SharingService`, `SharingRuleService`, the sharing exec-context seam and
+  plugin-audit's comment-access gates now declare `ExecutionContext` on all 27 of
+  those parameters — plus the two return types that produce the contexts feeding
+  them — and the casts the narrow annotation forced are gone:
+
+  - `exec-context-seam.testkit.ts` resolved a REAL context and then had to force
+    it into the narrow type — `{ ...authz, isSystem: false } as unknown as
+SharingExecutionContext`. It now returns what it resolved, so a drift in
+    `resolveAuthzContext`'s output reaches the tests that trust this seam instead
+    of being absorbed by a double cast.
+  - `SharingRuleService`'s system context is typed as the envelope and passed as
+    itself, retiring `SYSTEM_CTX as any` at all 10 of its call sites — an erasure
+    on an enforcement input switches checking off for the whole argument, not
+    just for the readonly-array mismatch that provoked it.
+  - The `(context as any).userId` / `.tenantId` reads in `SharingService` now read
+    declared fields.
+
+  **No runtime behaviour changes.** The values were always complete — this
+  family's damage was type-side — so every gate answers exactly what it answered
+  before. Method parameters only WIDEN what they accept, so no caller is affected.
+
+  Two casts are deliberately kept, and are now documented where they sit:
+  `__readScope` / `__writeScope` are private keys plugin-security's middleware
+  stamps onto the context it forwards and are not fields of the envelope, and
+  `organizationId` is not on the envelope at all — that spelling has its own
+  history (#5858 / `check:org-identifier`) and was held out of this change.
+
+  Because a re-narrowed annotation would compile, ship and pass every test in
+  these packages, the convergence is pinned by a new compile-time module,
+  `exec-context-annotation.pin.ts`: it hands each enforcement parameter a fresh
+  literal naming envelope-only fields (`posture`, `accessible_org_ids`,
+  `org_user_ids`), which TypeScript's excess-property check rejects the moment a
+  parameter narrows back, plus negative cases so a parameter erased to `any`
+  cannot pass either.
+
+- 17688fe: fix(sharing): the by-id write gate defers to an app-authored RLS widener instead of hard-refusing (#5493)
+
+  HotCRM's 17.0 GA acceptance sweep declared two RLS update-wideners on one
+  profile and measured one of them working. On the junction object
+  `crm_campaign_member` a non-owner PATCH returned 200; on `crm_campaign` the
+  identical shape returned 403 `FORBIDDEN: insufficient privileges to update
+crm_campaign`. That sentence is the sharing middleware's, not the row gate's
+  `(row-level security)` — so the refusal landed **before** RLS was consulted and
+  the declared widener was never asked.
+
+  The discriminator was never "carries sharing rules". It is whether **record
+  sharing enforces on the object at all**: `checkEdit` abstains — and `canEdit`
+  therefore answers `true`, letting the write through to RLS — when the effective
+  sharing model is `public` (which `controlled_by_parent` maps onto) or when the
+  schema has no `owner_id` field. A junction lands in that set; an ordinary owned
+  business object does not. Same declaration, opposite outcome, split by a
+  property no author writes down.
+
+  Row-level write authority is ONE composite determination (maintainer ruling on
+  #5492), so the middleware no longer ends the decision by itself. Before it
+  hard-refuses a **by-id** update or delete, it asks the security service's
+  `ISecurityService.checkAuthoredRowWrite` — the fail-closed verdict landed by
+  #5493 step 1 (PR #6841) — whether an **app-authored** (non-floor) row-level
+  policy admits this row for this operation. `admit` retracts this authority's
+  refusal and hands the row to the security pre-image gate, which composes per
+  #6684/#5492 and makes the final row decision. It does not authorize anything on
+  its own.
+
+  Everything else is unchanged, deliberately:
+
+  - **The guarded surface does not shrink.** A member with no authored policy, no
+    share and no bypass is still refused; a read-level share still never widens a
+    write; an `edit`-level share still widens update and not delete (ADR-0111 D3),
+    and an update-only authored widener does not open delete either — the verb is
+    threaded through to the verdict, not collapsed.
+  - **Fail-closed on every non-`admit` outcome.** No security service (a
+    deployment without `@objectstack/plugin-security`), a service predating the
+    method, a throwing probe, a principal-less context, an on-behalf-of context
+    (ADR-0090 D10) and any unrecognised verdict all leave today's refusal
+    byte-for-byte intact. The probe is reached through the same structural
+    late-binding this plugin already uses for `hasWriteBypass`; no runtime
+    dependency on `plugin-security` is introduced.
+  - **A creator who is no longer the owner gets nothing back.** The platform's own
+    ownership floor (`created_by == current_user.id`, shipped on the additive
+    `member_default` baseline) matches a record transferred away from its creator,
+    so a deferral keyed on "the composed RLS admits this row" would return
+    transferred records to former creators. The verdict is provenance-aware and
+    abstains there; the deferral does not widen it.
+  - **The bulk path is untouched** — it composes a filter rather than a verdict,
+    and is tracked separately (#6736).
+  - **Objects with no owner field are untouched** (#6698): sharing abstains, the
+    gate never refuses, so the deferral is never reached and the platform
+    `created_by` write floor remains their only row-level write gate.
+
+- fd6572b: feat(plugin-sharing): an `isSystem` write batch that materialises zero sharing grants now says so, once (#6783)
+
+  The sharing-rule record-write hooks skip `isSystem` sessions, so a seed run — or
+  any internal write batch — lands rows on an object an **active** sharing rule
+  covers and creates no `sys_record_share` rows at all. The skip is correct: the
+  `kernel:bootstrapped` backfill reconciles every rule and `evaluateRule` is
+  idempotent, so the state heals. What was wrong is that nothing said so.
+
+  hotcrm#640 is the specimen: a fresh install with 9 active sharing rules, 9
+  accounts matching their criteria, users holding the right positions — and an
+  empty `sys_record_share`. Every visible layer said "configured". The only way to
+  learn that the seed path had skipped materialisation was to query the table,
+  find it empty, and read `plugin-sharing`'s source.
+
+  **What changed.** The two skips that drop grant materialisation — `afterInsert`
+  and `afterUpdate` — now emit one INFO line naming the behaviour and both
+  remedies:
+
+  ```
+  [sharing-rule] sharing materialisation skipped for isSystem writes; re-evaluate rules or restart to backfill
+  ```
+
+  with the object and the active rules on it as metadata.
+
+  **One line per batch, not per row.** The notice is latched per object per hook
+  binding generation, so a seed batch writing 500 rows produces exactly one line.
+  The defect being fixed is silence; a per-row flood would be the same defect with
+  a different symptom. The latch re-arms with the binding — `bindRuleRebindTriggers`
+  re-binds the package on every `sys_sharing_rule` write — so a changed rule set
+  gets its own notice instead of inheriting the previous generation's silence.
+
+  **INFO, not warn or error**, deliberately: the behaviour is correct and
+  self-healing, and warning about a subsystem working as designed is how operators
+  learn to ignore it.
+
+  Deliberately unchanged:
+
+  - **The skip itself.** No write now materialises grants that did not before, and
+    no `sys_record_share` row is created, updated or revoked by this change.
+  - **No new switch or flag.** The notice is unconditional.
+  - **`afterDelete` stays silent.** A delete skips _revocation_, not
+    materialisation, and the remedy the line names cannot repair that class:
+    `evaluateRule` iterates records that still exist, so neither re-evaluating a
+    rule nor restarting can reach a grant whose record is gone. That class belongs
+    to the record-delete share cascade and the boot orphan sweep.
+
+  The line is a statement about the write path, not a claim that grants were owed —
+  whether a given seeded row satisfies a rule's criteria is exactly the query the
+  skip exists to avoid, so answering it here would cost the skip its purpose.
+
+- 2465133: fix(plugins): sweep the service-lookup erasures out of the plugin composition roots, and fix the two alias-only HTTP reads it exposed (#4251 B5)
+
+  Batch B5 of the #4251 sweep: the seven remaining `packages/plugins/*` composition
+  roots. 35 lookup sites that had been erased to `any` now carry the slot's
+  contract, so the compiler checks what each plugin actually calls on the service
+  it resolved. The ratchet drops 143 sites / 32 files to 108 / 25.
+
+  **Two real defects, both of the shape this sweep exists to find.** Approvals'
+  actionable-link pages (ADR-0043) and sharing's public share-link REST routes each
+  read the HTTP server under `http-server` _only_ — the deprecated alias. The
+  ledger records `http.server` as canonical and as the only name present on every
+  provider path: `runtime.ts`'s `config.server` path registers no alias at all. On
+  that path both lookups threw, the surrounding `catch` swallowed it, and the
+  routes silently never mounted — approval e-mail action links 404'd and the
+  share-link surface was absent, with nothing in the log to say so. Both reads are
+  now canonical-first with the alias as fallback, each name in its own `try`
+  because `getService` throws on an empty slot (so `a() ?? b()` inside one `try`
+  never reaches `b` — the same correction #4393 made in metadata and
+  cloud-connection).
+
+  Typing choices follow the batch method: pure data-plane consumers take the
+  narrow contract (`IDataEngine` in reports), consumers that bind hook or
+  middleware seams take the engine seen whole (`IObjectQLEngine` in approvals,
+  sharing and pinyin-search), and slots with no contract get a **named** local
+  surface rather than `any` — plugin-email's `MailSettingsSurface`, and the
+  surfaces the consuming packages already declared (`ApprovalMessagingSurface`,
+  `SharingSecurityProbe`, `ReportEmail`). A named surface that omits a member
+  still makes the compiler name every call site; `any` says nothing.
+
+  No behaviour change beyond the two alias reads. No contract changes.
+
+- Updated dependencies [3d5c090]
+- Updated dependencies [e5bd768]
+- Updated dependencies [e027b3e]
+- Updated dependencies [c2429b0]
+- Updated dependencies [445a0c2]
+- Updated dependencies [f6609e6]
+- Updated dependencies [a70358a]
+- Updated dependencies [97e7e3c]
+- Updated dependencies [8828b9e]
+- Updated dependencies [53068c1]
+- Updated dependencies [ee58392]
+- Updated dependencies [f16e54e]
+- Updated dependencies [06be54e]
+- Updated dependencies [259459d]
+- Updated dependencies [3f7f14e]
+- Updated dependencies [6968885]
+- Updated dependencies [eaed61f]
+- Updated dependencies [debe2f6]
+- Updated dependencies [97b0798]
+- Updated dependencies [5fa04fb]
+- Updated dependencies [ad878e7]
+- Updated dependencies [43a7a8d]
+- Updated dependencies [73f69dc]
+- Updated dependencies [04c56aa]
+- Updated dependencies [3028326]
+- Updated dependencies [b3efeb7]
+- Updated dependencies [ddd075a]
+- Updated dependencies [88154be]
+- Updated dependencies [fe2dfa1]
+- Updated dependencies [6f6fec7]
+- Updated dependencies [e8dc61e]
+- Updated dependencies [2f3e793]
+- Updated dependencies [d8e8d9c]
+- Updated dependencies [94e749b]
+- Updated dependencies [ea1d916]
+- Updated dependencies [ae31a19]
+- Updated dependencies [b230e5e]
+- Updated dependencies [5d24f4b]
+- Updated dependencies [29b94ed]
+- Updated dependencies [07c68b0]
+- Updated dependencies [f6cd635]
+- Updated dependencies [e0f300b]
+- Updated dependencies [10c4ea9]
+- Updated dependencies [62b6a2f]
+- Updated dependencies [5b4780b]
+- Updated dependencies [a933452]
+- Updated dependencies [8140915]
+- Updated dependencies [7b48cf9]
+- Updated dependencies [b5404f4]
+- Updated dependencies [f764691]
+- Updated dependencies [e120a5a]
+- Updated dependencies [e9b5265]
+- Updated dependencies [e650d67]
+- Updated dependencies [04476e7]
+- Updated dependencies [79228cd]
+- Updated dependencies [b3363e9]
+- Updated dependencies [2ef1807]
+- Updated dependencies [d03fe25]
+- Updated dependencies [2672f85]
+- Updated dependencies [11066f6]
+- Updated dependencies [916af17]
+- Updated dependencies [84c86fb]
+- Updated dependencies [2a2a9fb]
+- Updated dependencies [a2e157c]
+- Updated dependencies [95c4227]
+- Updated dependencies [2a61116]
+- Updated dependencies [d4df105]
+- Updated dependencies [55da611]
+- Updated dependencies [e2798fa]
+- Updated dependencies [0fd8556]
+- Updated dependencies [6fde910]
+- Updated dependencies [9c82b89]
+- Updated dependencies [74155c7]
+- Updated dependencies [742a6a5]
+- Updated dependencies [6908830]
+- Updated dependencies [8b06bba]
+- Updated dependencies [b7d3be4]
+- Updated dependencies [2a0d65e]
+- Updated dependencies [4c54037]
+- Updated dependencies [0f7157b]
+- Updated dependencies [d9bef45]
+- Updated dependencies [f549a0d]
+- Updated dependencies [82da264]
+- Updated dependencies [f586f1a]
+- Updated dependencies [9b9b70f]
+- Updated dependencies [f5a9bc2]
+- Updated dependencies [881a3cc]
+- Updated dependencies [ad6317b]
+- Updated dependencies [d5e9f6e]
+- Updated dependencies [8a88885]
+- Updated dependencies [5f7669e]
+- Updated dependencies [becbe53]
+- Updated dependencies [b127c8b]
+- Updated dependencies [a80302a]
+- Updated dependencies [474f131]
+- Updated dependencies [050cd82]
+- Updated dependencies [4d552af]
+- Updated dependencies [44d677c]
+- Updated dependencies [c32944d]
+- Updated dependencies [1dd780f]
+- Updated dependencies [cafec0a]
+- Updated dependencies [c8d6f6e]
+- Updated dependencies [92a67f2]
+- Updated dependencies [9136327]
+- Updated dependencies [bf0ae99]
+- Updated dependencies [edb4af0]
+- Updated dependencies [f09a2e7]
+- Updated dependencies [cb3b6cd]
+- Updated dependencies [73b7234]
+- Updated dependencies [d2b97c3]
+- Updated dependencies [59b794f]
+- Updated dependencies [fc3a36a]
+- Updated dependencies [69787f0]
+- Updated dependencies [5d022a1]
+- Updated dependencies [042b9ee]
+- Updated dependencies [55011af]
+- Updated dependencies [f549a0d]
+- Updated dependencies [a36db28]
+- Updated dependencies [3f8817a]
+- Updated dependencies [a2443e3]
+- Updated dependencies [e1554b1]
+- Updated dependencies [53ef057]
+- Updated dependencies [4856789]
+- Updated dependencies [c3f4916]
+- Updated dependencies [33e0385]
+- Updated dependencies [2205363]
+- Updated dependencies [09fe58d]
+- Updated dependencies [d0a5ceb]
+- Updated dependencies [e18a162]
+- Updated dependencies [d6d1a50]
+- Updated dependencies [d127ff0]
+- Updated dependencies [c804f19]
+- Updated dependencies [9b86cf6]
+- Updated dependencies [8825a06]
+- Updated dependencies [5087ac6]
+- Updated dependencies [6965160]
+- Updated dependencies [2d1ddf0]
+- Updated dependencies [354b00f]
+- Updated dependencies [3de535b]
+- Updated dependencies [fe2e15a]
+- Updated dependencies [dbe92a7]
+- Updated dependencies [c6b6bb4]
+- Updated dependencies [59c544d]
+- Updated dependencies [2f59da0]
+- Updated dependencies [114e727]
+- Updated dependencies [5e247fd]
+- Updated dependencies [1a53a02]
+- Updated dependencies [1507ba3]
+- Updated dependencies [8ad609c]
+- Updated dependencies [bbee302]
+- Updated dependencies [08863dd]
+- Updated dependencies [56664f5]
+- Updated dependencies [31cbe90]
+- Updated dependencies [bf42e76]
+- Updated dependencies [90bbf25]
+- Updated dependencies [eb91eba]
+- Updated dependencies [42da73d]
+- Updated dependencies [643b7c7]
+- Updated dependencies [bfe689b]
+- Updated dependencies [d0d5205]
+- Updated dependencies [1a15893]
+- Updated dependencies [b70e534]
+- Updated dependencies [2233a85]
+- Updated dependencies [de43f94]
+- Updated dependencies [62dd69a]
+- Updated dependencies [e15e679]
+- Updated dependencies [2ab1257]
+- Updated dependencies [4cc4fb7]
+- Updated dependencies [28d1eb7]
+- Updated dependencies [2c26040]
+- Updated dependencies [f758cec]
+- Updated dependencies [3fb42d2]
+- Updated dependencies [78f0be8]
+- Updated dependencies [35f7fb4]
+- Updated dependencies [a5302c7]
+- Updated dependencies [82397b6]
+- Updated dependencies [4df747c]
+- Updated dependencies [7084313]
+- Updated dependencies [47a4e67]
+- Updated dependencies [91cefb8]
+- Updated dependencies [9bc846b]
+- Updated dependencies [0e043d8]
+- Updated dependencies [4fedb11]
+- Updated dependencies [dadd1ad]
+- Updated dependencies [2f2e63c]
+- Updated dependencies [486d526]
+- Updated dependencies [89d7b35]
+- Updated dependencies [d13f627]
+- Updated dependencies [a841151]
+- Updated dependencies [85ec26d]
+- Updated dependencies [f6476fc]
+- Updated dependencies [4ac12ef]
+- Updated dependencies [1788e19]
+- Updated dependencies [b88f5e8]
+- Updated dependencies [42cc219]
+- Updated dependencies [d42a92f]
+- Updated dependencies [51d74ad]
+- Updated dependencies [d7e0b42]
+- Updated dependencies [3510e4a]
+- Updated dependencies [aa4b90d]
+- Updated dependencies [54299ca]
+- Updated dependencies [1f6ed16]
+- Updated dependencies [dc61def]
+- Updated dependencies [251e888]
+- Updated dependencies [183b4c4]
+- Updated dependencies [2fdb36e]
+- Updated dependencies [e787608]
+- Updated dependencies [20526f5]
+- Updated dependencies [c5eef1d]
+- Updated dependencies [e0f300b]
+- Updated dependencies [761a0ba]
+- Updated dependencies [d86815e]
+- Updated dependencies [61282f9]
+- Updated dependencies [be87153]
+- Updated dependencies [60f0dd8]
+- Updated dependencies [a87c5cd]
+- Updated dependencies [a47f338]
+- Updated dependencies [e13fd91]
+- Updated dependencies [2bd4e5e]
+- Updated dependencies [2598216]
+- Updated dependencies [2c7e62d]
+- Updated dependencies [eb7613c]
+- Updated dependencies [ecc9110]
+- Updated dependencies [f7bd4e2]
+- Updated dependencies [361bd5b]
+- Updated dependencies [129b378]
+- Updated dependencies [88f9d94]
+- Updated dependencies [1818998]
+- Updated dependencies [09ee21c]
+- Updated dependencies [f549a0d]
+- Updated dependencies [3fc2e48]
+- Updated dependencies [e8f435c]
+- Updated dependencies [41610f6]
+- Updated dependencies [c9bf940]
+- Updated dependencies [a682670]
+  - @objectstack/spec@17.0.0-rc.6
+  - @objectstack/objectql@17.0.0-rc.6
+  - @objectstack/platform-objects@17.0.0-rc.6
+  - @objectstack/formula@17.0.0-rc.6
+  - @objectstack/core@17.0.0-rc.6
+  - @objectstack/types@17.0.0-rc.6
+
 ## 17.0.0-rc.5
 
 ### Patch Changes

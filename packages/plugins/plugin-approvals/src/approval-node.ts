@@ -24,7 +24,10 @@ import {
   APPROVAL_NODE_TYPE,
   type ApprovalNodeConfig,
 } from '@objectstack/spec/automation';
-import type { SharingExecutionContext } from '@objectstack/spec/contracts';
+// [#7135] The full `resolveAuthzContext` envelope — what
+// `IApprovalService.openNodeRequest` declares for its context parameter since
+// #6523 (the #6206 ruling: no per-site subset contracts).
+import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { ApprovalService } from './approval-service.js';
 import { registerApprovalReviseNode } from './approval-revise-node.js';
 
@@ -55,7 +58,7 @@ interface MinimalLogger {
   warn?: (msg: any, ...rest: any[]) => void;
 }
 
-const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as const;
+const SYSTEM_CTX: ExecutionContext = { isSystem: true, positions: [], permissions: [] };
 
 /**
  * Rebuild the nested object the engine's CEL conditions see from the flow's
@@ -111,8 +114,7 @@ export function registerApprovalNode(
       paradigms: ['flow'],
       source: 'plugin',
       // Human decision: the run suspends here awaiting an external reply.
-      supportsPause: true,
-      isAsync: true,
+      supportsPause: true,  // (`isAsync` stood here — retired in #6748, ADR-0049: nothing read it)
       // #3801: this pause is NOT resumable through the generic run-resume
       // route. Continuing an approval is a side effect of a DECISION, and the
       // decision is the thing that must be authorized (the approver slate),
@@ -170,9 +172,20 @@ export function registerApprovalNode(
         }, {
           ...SYSTEM_CTX,
           userId: context?.userId,
+          // [#7135] ⚠️ This assertion SURVIVES the annotation widening, and it
+          // is `as ExecutionContext` rather than the `as unknown as
+          // SharingExecutionContext` double cast it replaces. The sole reason
+          // a cast is still needed is `organizationId`, which is not a field
+          // of the envelope at ALL — that spelling has its own history (#5858
+          // / `check:org-identifier`) and was explicitly held out of this
+          // change (#7070), so removing the key here would be a RUNTIME change
+          // belonging to that card. Dropping the second hop matters: `as
+          // unknown as` erases the value entirely, while a single assertion
+          // still requires the literal to be comparable to the envelope, so a
+          // `userId: 42` here is once again a compile error.
           organizationId: context?.organizationId,
           tenantId: context?.tenantId,
-        } as unknown as SharingExecutionContext);
+        } as ExecutionContext);
 
         // #3447 P2: empty slate + onEmptyApprovers: 'auto_approve' — nobody to
         // ask, no request row. Complete (don't suspend) straight down the

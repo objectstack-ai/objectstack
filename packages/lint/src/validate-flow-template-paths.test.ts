@@ -32,7 +32,7 @@ function flowWith(notify: AnyRec, objectName = 'crm_lead'): AnyRec {
         name: 'notify_lead',
         type: 'record_change',
         nodes: [
-          { id: 'start', type: 'start', config: { objectName, triggerType: 'record-created' } },
+          { id: 'start', type: 'start', config: { objectName, triggerType: 'record-after-create' } },
           { id: 'n1', type: 'notify', notify },
         ],
       },
@@ -117,7 +117,7 @@ describe('validateFlowTemplatePaths', () => {
           name: 'external',
           type: 'record_change',
           nodes: [
-            { id: 'start', type: 'start', config: { objectName: 'sys_user', triggerType: 'record-created' } },
+            { id: 'start', type: 'start', config: { objectName: 'sys_user', triggerType: 'record-after-create' } },
             { id: 'n1', type: 'notify', notify: { title: '{record.anything.deep}', body: 'x' } },
           ],
         },
@@ -158,7 +158,7 @@ describe('validateFlowTemplatePaths', () => {
           name: 'typed_start',
           type: 'record_change',
           nodes: [
-            { id: 'start', type: 'start', start: { objectName: 'crm_lead', triggerType: 'record-created' } },
+            { id: 'start', type: 'start', start: { objectName: 'crm_lead', triggerType: 'record-after-create' } },
             { id: 'n1', type: 'notify', notify: { title: '{record.crm_account.name}', body: 'x' } },
           ],
         },
@@ -176,7 +176,7 @@ describe('validateFlowTemplatePaths', () => {
           name: 'webhook',
           type: 'record_change',
           nodes: [
-            { id: 'start', type: 'start', config: { objectName: 'crm_lead', triggerType: 'record-created' } },
+            { id: 'start', type: 'start', config: { objectName: 'crm_lead', triggerType: 'record-after-create' } },
             { id: 'h1', type: 'http', http: { url: 'https://x.test/{record.full_naem}', method: 'GET' } },
           ],
         },
@@ -197,7 +197,7 @@ describe('validateFlowTemplatePaths', () => {
             {
               id: 'start',
               type: 'start',
-              config: { objectName: 'crm_lead', triggerType: 'record-created', expand: ['crm_account'] },
+              config: { objectName: 'crm_lead', triggerType: 'record-after-create', expand: ['crm_account'] },
             },
             { id: 'n1', type: 'notify', notify: { title: 'From {record.crm_account.name}', body: 'x' } },
           ],
@@ -218,7 +218,7 @@ describe('validateFlowTemplatePaths', () => {
             {
               id: 'start',
               type: 'start',
-              config: { objectName: 'crm_lead', triggerType: 'record-created', expand: ['target_channels'] },
+              config: { objectName: 'crm_lead', triggerType: 'record-after-create', expand: ['target_channels'] },
             },
             { id: 'n1', type: 'notify', notify: { title: 'From {record.crm_account.name}', body: 'x' } },
           ],
@@ -247,7 +247,7 @@ describe('validateFlowTemplatePaths', () => {
             name: 'crud_flow',
             type: 'record_change',
             nodes: [
-              { id: 'start', type: 'start', config: { objectName: 'crm_lead', triggerType: 'record-created' } },
+              { id: 'start', type: 'start', config: { objectName: 'crm_lead', triggerType: 'record-after-create' } },
               { id: 'c1', type, config },
             ],
           },
@@ -330,7 +330,7 @@ describe('validateFlowTemplatePaths', () => {
               {
                 id: 'start',
                 type: 'start',
-                config: { objectName: 'crm_lead', triggerType: 'record-created', expand: ['crm_account'] },
+                config: { objectName: 'crm_lead', triggerType: 'record-after-create', expand: ['crm_account'] },
               },
               {
                 id: 'c1',
@@ -360,7 +360,7 @@ describe('validateFlowTemplatePaths', () => {
           name: 'guarded',
           type: 'record_change',
           nodes: [
-            { id: 'start', type: 'start', config: { objectName: 'crm_lead', triggerType: 'record-created' } },
+            { id: 'start', type: 'start', config: { objectName: 'crm_lead', triggerType: 'record-after-create' } },
             { id: 'guard', type: 'try_catch', label: 'Guard', config: container },
           ],
         },
@@ -399,7 +399,7 @@ describe('validateFlowTemplatePaths', () => {
             name: 'looped',
             type: 'record_change',
             nodes: [
-              { id: 'start', type: 'start', config: { objectName: 'crm_lead', triggerType: 'record-created' } },
+              { id: 'start', type: 'start', config: { objectName: 'crm_lead', triggerType: 'record-after-create' } },
               {
                 id: 'each',
                 type: 'loop',

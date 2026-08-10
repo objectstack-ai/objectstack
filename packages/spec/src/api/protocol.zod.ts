@@ -23,6 +23,15 @@ import { RealtimePresenceSchema, TransportProtocol } from './realtime.zod';
 import { ObjectPermissionSchema, EffectiveObjectPermissionSchema, FieldPermissionSchema } from '../security/permission.zod';
 import { ActionDescriptorSchema } from '../automation/node-executor.zod';
 import { TranslationDataSchema } from '../system/translation.zod';
+// #5950 / #5882 — the ADR-0010 read-side protection envelope both metadata-item
+// responses publish. Same three vocabularies the resolver filters against, so a
+// value this spec cannot name is a value the resolver would have dropped.
+import {
+  MetadataLockSchema,
+  MetadataLockSourceSchema,
+  MetadataProvenanceSchema,
+} from '../kernel/metadata-protection.zod';
+import { MetadataValidationResultSchema } from '../kernel/metadata-plugin.zod';
 import {
   ListPackagesRequestSchema,
   ListPackagesResponseSchema,
@@ -229,12 +238,226 @@ export const GetMetaItemRequestSchema = lazySchema(() => z.object({
 }));
 
 /**
+ * ADR-0010 read-side protection envelope — the flags a metadata READ publishes
+ * alongside the document, all derived from one `resolveLockState()` call.
+ *
+ * These are the UN-prefixed, envelope-level counterparts of the `_lock` /
+ * `_provenance` fields `MetadataProtectionFields` splices into the document
+ * itself: the document stores `_lock`, and the read RESOLVES it into `lock`
+ * plus the three `editable` / `deletable` / `resettable` verdicts Studio
+ * renders affordances from (ADR-0010 §5), so no consumer re-implements the
+ * lock algebra.
+ *
+ * Shared by {@link GetMetaItemResponseSchema} and
+ * {@link GetMetaItemLayeredResponseSchema} — both are produced by the SAME
+ * `resolveLockState` call in `metadata-protocol`, so a mixin is what keeps the
+ * two declarations from drifting apart key by key. Module-local on purpose: it
+ * is a shape these two responses share, not a new public vocabulary.
+ *
+ * Every key is optional HERE and tightened per-response where the producer
+ * guarantees presence — see each schema's note. Optionality is measured, not
+ * assumed: the six `lockReason` … `packageVersion` keys are spread only when
+ * `!== undefined` (they read off `_`-prefixed document fields that are
+ * themselves optional), so they are conditional on EVERY path.
+ */
+const MetadataProtectionEnvelopeFields = {
+  lock: MetadataLockSchema.optional().describe(
+    'Resolved lock verdict for this item (ADR-0010 §3.3). `none` means unlocked; '
+    + '`no-overlay` / `no-delete` / `full` refuse the corresponding write with '
+    + '403 `ITEM_LOCKED`. Resolved from the document\'s `_lock`, with the packaged '
+    + 'artifact winning over any org overlay.',
+  ),
+  lockReason: z.string().optional().describe(
+    'Human-readable explanation shown next to a refused write. Present only when '
+    + 'the resolved item declares `_lockReason`.',
+  ),
+  lockSource: MetadataLockSourceSchema.optional().describe(
+    'Which layer asserted the lock. Present only when the resolved item declares '
+    + '`_lockSource`.',
+  ),
+  lockDocsUrl: z.string().optional().describe(
+    'Documentation link surfaced beside `lockReason`. Present only when the '
+    + 'resolved item declares `_lockDocsUrl`.',
+  ),
+  provenance: MetadataProvenanceSchema.optional().describe(
+    'Where the item came from (package | org | env-forced). Present only when the '
+    + 'resolved item declares `_provenance`.',
+  ),
+  packageId: z.string().optional().describe(
+    'Owning package machine id. Present only when the resolved item declares '
+    + '`_packageId`.',
+  ),
+  packageVersion: z.string().optional().describe(
+    'Owning package version. Present only when the resolved item declares '
+    + '`_packageVersion`.',
+  ),
+  editable: z.boolean().optional().describe(
+    'Whether an overlay write is permitted — false iff `lock` is `no-overlay` or '
+    + '`full`. A derived verdict: do not recompute it from `lock` client-side.',
+  ),
+  deletable: z.boolean().optional().describe(
+    'Whether deleting the overlay is permitted — false iff `lock` is `no-delete` '
+    + 'or `full`.',
+  ),
+  resettable: z.boolean().optional().describe(
+    'Whether the item can be reset to its packaged default — true iff it is '
+    + 'artifact-backed, i.e. there is a baseline to reset TO.',
+  ),
+} as const;
+
+/**
  * Get Metadata Item Response
+ *
+ * Describes the FULL body `GET /api/v1/meta/:type/:name` can return, not the
+ * three-key subset it used to claim (#5950 — the read-side twin of the write-side
+ * gap #5745 closed on {@link SaveMetaItemResponseSchema}).
+ *
+ * The declaration stopped at `{ type, name, item }` while the uncached branch
+ * served ten more keys: the ADR-0010 protection envelope, spread onto the wire
+ * verbatim by the REST layer (`rest-server.ts`'s `translateMetaEnvelope` does
+ * `{ ...envelope, item }`). `lock` in particular is the read half of the ADR-0008
+ * optimistic-concurrency story the write half already declares — so an SDK caller
+ * typed against this response could not see it, and reading it meant a cast, the
+ * consumer-side tolerance this repo rejects by Prime Directive #12.
+ *
+ * **Why every protection key is optional, measured rather than assumed.** This
+ * route reaches a body by two branches and they publish different amounts:
+ *
+ * - **cached** (`getMetaItemCached`, THE DEFAULT — `enableCache` defaults to
+ *   `true`): the REST layer rebuilds the envelope as `{ type, name, item }` and
+ *   deliberately resolves NO lock — it is the fast published-value path and
+ *   never consults the lock resolver (`rest-server.ts`, the `cachedEnvelope`
+ *   note). All ten keys are ABSENT.
+ * - **uncached** (`getMetaItem`): `lock`, `editable`, `deletable` and
+ *   `resettable` are always set; the other six appear only when the resolved
+ *   document carries the corresponding `_`-prefixed field.
+ *
+ * So `optional` here means "this deployment/branch did not publish it", NEVER
+ * "unlocked" — a consumer that needs the OCC carriers must read the uncached
+ * path and must not read absence as `lock: 'none'`. Declaring them required
+ * would make the default deployment's own response fail its own contract, which
+ * is the #5563 defect in mirror image.
+ *
+ * ⚠️ This is a DECLARATION change only — zero runtime behaviour is altered. That
+ * lock presence depends on a server-side cache setting is a separate, larger
+ * question (#5950 says so explicitly) and is deliberately NOT decided here.
  */
 export const GetMetaItemResponseSchema = lazySchema(() => z.object({
   type: z.string().describe('Metadata type name'),
   name: z.string().describe('Item name'),
   item: z.unknown().describe('Metadata item definition'),
+  ...MetadataProtectionEnvelopeFields,
+}));
+
+/**
+ * Get Metadata Item — LAYERED Response
+ *
+ * The body of `GET /api/v1/meta/:type/:name/layers`: a three-layer diagnostic
+ * projection that shows the packaged baseline, the tenant's customization row
+ * and the merged result SIDE BY SIDE, which is what drives Studio's
+ * "code default vs override vs effective" comparison tabs.
+ *
+ * **Why this is a separate schema on a separate path** (#5882, ruled B by the
+ * maintainer 2026-08-06). This projection used to be reached by putting
+ * `?layers=true` on the ordinary read, so one route answered two unrelated
+ * resource representations while `packages/spec` declared only one of them —
+ * anything generating a client from the route table (SDK annotations, codegen,
+ * an AI-written integration) produced a parser that was simply wrong for the
+ * flagged call. Collapsing the three layers into
+ * {@link GetMetaItemResponseSchema}'s single `item` was never an option: seeing
+ * the layers apart IS the diagnostic. The rejected alternative was teaching the
+ * route declaration to express "two shapes, chosen by query flag"; that adds a
+ * new primitive every future tool must understand, and conditional response
+ * selection is precisely where codegen and AI clients go wrong. One path, one
+ * response shape — so the projection got its own path.
+ *
+ * The `?layers=` flag still answers this same body during its deprecation
+ * window, marked with `Deprecation` / `Link` response headers.
+ *
+ * **Required vs optional, measured against the producer.** Unlike the ordinary
+ * read there is exactly ONE producer path here (`getMetaItemLayered`; the
+ * layered view deliberately skips the cache), so the four resolved verdicts
+ * `lock` / `editable` / `deletable` / `resettable` are ALWAYS set and are
+ * required below. The six conditional protection keys stay optional for the
+ * same reason they are optional on the ordinary read.
+ */
+export const GetMetaItemLayeredResponseSchema = lazySchema(() => z.object({
+  type: z.string().describe('Metadata type name (canonical singular)'),
+  name: z.string().describe('Item name'),
+  code: z.unknown().describe(
+    'LAYER 1 — the packaged artifact baseline exactly as shipped, before any '
+    + 'tenant customization. `null` when no artifact ships this item (it exists '
+    + 'only as an overlay).',
+  ),
+  overlay: z.unknown().describe(
+    'LAYER 2 — the stored customization row ALONE, not merged with `code`. '
+    + '`null` when this tenant has not customized the item.',
+  ),
+  overlayScope: z.enum(['org', 'env']).nullable().describe(
+    'Which scope the `overlay` row was read from — `org` for a tenant overlay, '
+    + '`env` for an environment-level one. `null` exactly when `overlay` is null.',
+  ),
+  effective: z.unknown().describe(
+    'LAYER 3 — the merged result, i.e. the value an ordinary '
+    + '`GET /meta/:type/:name` would return under `item`. `null` when the item '
+    + 'resolves to nothing at all.',
+  ),
+  _diagnostics: MetadataValidationResultSchema.optional().describe(
+    'Load-time spec-validation verdict for `effective`, so the Studio edit page '
+    + 'can raise invalid-metadata banners and inline field errors without a '
+    + 'second round trip. ABSENT for metadata types that register no Zod schema '
+    + '(function / service / router) — absence means "no opinion", never "valid".',
+  ),
+  ...MetadataProtectionEnvelopeFields,
+  // The four resolved verdicts are unconditional on this single-producer path —
+  // tightened from the mixin's optional baseline. See the note above.
+  lock: MetadataLockSchema.describe(
+    'Resolved lock verdict (ADR-0010 §3.3), artifact winning over overlay. Always '
+    + 'present on this path.',
+  ),
+  editable: z.boolean().describe('Whether an overlay write is permitted. Always present on this path.'),
+  deletable: z.boolean().describe('Whether deleting the overlay is permitted. Always present on this path.'),
+  resettable: z.boolean().describe('Whether the item can be reset to its packaged default. Always present on this path.'),
+}));
+
+/**
+ * One finding from the #4463 runtime authoring gate — the fourth door.
+ *
+ * The gate runs the SHARED author-time rule registry (`@objectstack/lint`'s
+ * `AUTHORING_RULES`, the same table `os validate` / `os build` / `os lint` run)
+ * over a body about to go `active`, and partitions its findings by severity.
+ * The `error` half becomes the 422 `invalid_metadata` envelope's `issues[]`;
+ * the rest are ADVISORY — they do not block the write, and #4463 D3 decided
+ * they ride the 2xx response instead of being discarded.
+ *
+ * This is that ONE element shape, declared once and used by both halves, which
+ * is the whole point of D3's "reuse the Zod envelope": a consumer reads the
+ * same six keys whether the verdict arrived on a refusal or on a success.
+ * `@objectstack/metadata-protocol` re-exports this type as its
+ * `RuntimeAuthoringIssue` rather than declaring a second interface (#4717).
+ */
+export const RuntimeAuthoringIssueSchema = lazySchema(() => z.object({
+  rule: z.string().describe(
+    'Stable diagnostic rule id (`flow-multi-write-unfiltered`, '
+    + '`approval-expression-invalid`, …). Machine-readable and stable across '
+    + 'releases — the key a renderer groups or suppresses by.',
+  ),
+  path: z.string().describe(
+    'Config path inside the SUBMITTED body (`flows[0].nodes[1].config.multi`), '
+    + 'so an editor can jump to the offending key. May be empty when the '
+    + 'finding is about the item as a whole.',
+  ),
+  where: z.string().describe(
+    'Human-readable location — `flow "leave_approval" · node "approve"`. Prose '
+    + 'for a person; use `path` for anything mechanical.',
+  ),
+  message: z.string().describe('What is wrong, in the rule author\'s own words.'),
+  hint: z.string().describe('How to fix it.'),
+  severity: z.enum(['error', 'warning', 'info']).describe(
+    'How the gate treated this finding. `error` means the write was REFUSED '
+    + '(these appear on the 422, never on a 2xx); `warning` / `info` are '
+    + 'advisory — the write succeeded and the finding is FYI.',
+  ),
 }));
 
 /**
@@ -303,7 +526,139 @@ export const SaveMetaItemResponseSchema = lazySchema(() => z.object({
     + 'never thrown, so a caller that needs the read model to be live must check '
     + '`projectionApplied.success` rather than rely on the 200.',
   ),
+  advisories: z.array(RuntimeAuthoringIssueSchema).optional().describe(
+    'Non-gating findings from the #4463 runtime authoring gate — the same '
+    + 'shared author-time rules `os validate` / `os build` / `os lint` run, '
+    + 'applied to this body on its way to `active`. The write SUCCEEDED; these '
+    + 'are what the gate has to say about it anyway (#4717, closing #4463 D3). '
+    + 'Present ONLY when at least one advisory was raised — an empty array is '
+    + 'never emitted, so a clean save\'s response bytes are unchanged and '
+    + 'absence means "nothing to report", never "the gate did not run". '
+    + 'Advisory by construction: every entry has `severity` `warning` or '
+    + '`info`, because an `error` finding refuses the write and arrives as the '
+    + '422 `invalid_metadata` envelope instead of here. A caller that ignores '
+    + 'this key behaves exactly as before. Runtime-only: the CLI surfaces the '
+    + 'same findings on its own stdout, and a Studio / MCP / AI author has no '
+    + 'CLI at all, which is the gap #4463 exists to close. NOTE the door '
+    + 'asymmetry — `POST /meta/:type/:name/publish` does not carry this field '
+    + 'yet (its declaration landed separately as #7294); the gate runs on both '
+    + 'doors, only the save door reports.',
+  ),
   message: z.string().optional(),
+}));
+
+/**
+ * Publish Metadata Item Response
+ *
+ * Describes the FULL body `POST /api/v1/meta/:type/:name/publish` returns
+ * (#7294 — the #5745 discipline carried one door over). The publish door is the
+ * sibling write surface of the save door: `saveMetaItem` writes a body, and
+ * `publishMetaItem` promotes an already-written DRAFT body to `active`. Until
+ * this declaration the route was served with no contract behind it at all —
+ * the string `PublishMetaItem` appeared nowhere under `packages/spec/src/`, so
+ * `version` here sat in exactly the undeclared state `version` on the save
+ * response sat in before #5745, despite being the same ADR-0008
+ * optimistic-concurrency token with the same "echo it back as `If-Match`" job.
+ *
+ * Presence was measured against `origin/main`, not assumed. The sole producer
+ * is `ObjectStackProtocolImplementation.publishMetaItem`, which builds ONE
+ * response object and the REST route hands it to `res.json()` verbatim. That
+ * object literal always sets `success` / `version` / `seq`, so the three are
+ * REQUIRED; the three `*Applied` receipts are each attached only when the
+ * corresponding side effect ran, so each is optional — and their absence means
+ * "that side effect did not run", NEVER "it failed".
+ *
+ * **The three conditional receipts, and what makes each conditional**
+ * (`runPublishSideEffects`, phase 2 of the ADR-0067 D2 split):
+ *
+ * - `seedApplied` — only when the published type is `seed`. Publishing a seed
+ *   is what makes its rows live, so the row materialization rides along.
+ * - `materializeApplied` — only when an ADR-0086 P2 publish materializer is
+ *   registered for the type (e.g. `permission` → `sys_permission_set`).
+ * - `projectionApplied` — only when an ADR-0094 mutation projector is
+ *   registered for the type. Same field, same meaning, as on
+ *   {@link SaveMetaItemResponseSchema}: both write doors run the projector.
+ *
+ * All three are **best-effort by contract**: publishing the metadata always
+ * succeeds independently, and a side-effect failure is SURFACED here rather
+ * than thrown. So `success: true` on the envelope does not mean the data plane
+ * caught up — a caller that needs it live must read the receipt's own
+ * `success`, which is why every receipt carries one.
+ */
+export const PublishMetaItemResponseSchema = lazySchema(() => z.object({
+  success: z.boolean().describe(
+    'Always true on a 2xx — the draft was promoted. It does NOT cover the '
+    + 'best-effort side effects below, each of which reports its own `success`.',
+  ),
+  version: z.string().describe(
+    'Content hash of the just-promoted body, and the token the ADR-0008 '
+    + 'optimistic-concurrency chain runs on: send it back as the `If-Match` '
+    + 'request header on the next write to that item and a concurrent edit is '
+    + 'reported as 409 `metadata_conflict` instead of silently overwritten. '
+    + 'Opaque to callers — echo it verbatim, never parse it. Currently emitted '
+    + 'as `sha256:<64 hex chars>`, but the format is not part of this contract.',
+  ),
+  seq: z.number().int().describe(
+    'Monotonic sequence number of the `op=\'publish\'` metadata event this '
+    + 'promotion appended to the item history (sys_metadata_history.event_seq). '
+    + 'Orders writes; unlike `version` it is not an OCC token.',
+  ),
+  seedApplied: z.object({
+    success: z.boolean().describe(
+      'False when the seed rows did not fully land. The publish itself still '
+      + 'succeeded — check this rather than assuming data went live.',
+    ),
+    inserted: z.number().int().describe('Rows created by the externalId-keyed upsert.'),
+    updated: z.number().int().describe('Rows updated by the externalId-keyed upsert.'),
+    error: z.string().optional().describe(
+      'Single failure message, present when the seed apply threw before the '
+      + 'loader ran (including "no readable seed bodies").',
+    ),
+    errors: z.array(z.unknown()).optional().describe(
+      'Per-record failures reported by the seed loader. Present only when the '
+      + 'loader ran and returned a non-empty error list.',
+    ),
+  }).optional().describe(
+    'Outcome of materializing a published `seed` body into data rows. Present '
+    + 'ONLY when the published type is `seed` — publishing a seed is what makes '
+    + 'its rows live, so the load rides along with the metadata promotion. '
+    + 'Best-effort: a seed-load problem is surfaced here, never thrown, so a '
+    + 'caller must check `seedApplied.success` instead of assuming the 200 '
+    + 'covered the data. Absent on the batch path, which suppresses the '
+    + 'per-item apply and loads every seed body in one later pass.',
+  ),
+  materializeApplied: z.object({
+    success: z.boolean().describe('False when the materializer threw or reported failure; the publish still succeeded.'),
+    inserted: z.number().int().describe('Data-plane rows created by the materializer.'),
+    updated: z.number().int().describe('Data-plane rows updated by the materializer.'),
+    error: z.string().optional().describe('Materializer failure message, present only when `success` is false.'),
+  }).optional().describe(
+    'Outcome of the ADR-0086 P2 publish-time materializer — the step that '
+    + 'projects the published body into its data-plane row (e.g. `permission` '
+    + '→ `sys_permission_set`, under the owning package). Present ONLY when a '
+    + 'materializer is registered for this metadata type, which is why it is '
+    + 'optional: its absence means "no materializer ran", never "it failed". '
+    + 'Best-effort, same contract as `seedApplied`.',
+  ),
+  projectionApplied: z.object({
+    success: z.boolean().describe('False when the projector threw; the metadata promotion itself still succeeded.'),
+    error: z.string().optional().describe('Projector failure message, present only when `success` is false.'),
+  }).optional().describe(
+    'Outcome of the awaited ADR-0094 mutation projector — the post-persist step '
+    + 'that materializes this metadata into its derived data-plane read model. '
+    + 'The same receipt {@link SaveMetaItemResponseSchema} carries, because the '
+    + 'projector runs on BOTH write doors: a direct active save and this '
+    + 'draft→active promotion. Present ONLY when a projector is registered for '
+    + 'this metadata type. Best-effort — a projector failure is reported here '
+    + 'and logged, never thrown.',
+  ),
+  message: z.string().optional().describe(
+    'Human-readable receipt, e.g. `Published draft — type=view, name=cases '
+    + '[seq=3]`. The producer sets it on every publish today; it stays optional '
+    + 'to match the producer\'s own signature and its `SaveMetaItemResponse` '
+    + 'twin, and because an absent human-readable string strips no data — the '
+    + 'failure mode #5745 exists to prevent.',
+  ),
 }));
 
 /**
@@ -746,62 +1101,53 @@ export {
 };
 
 // ==========================================
-// View Management Operations
+// View Management Operations — RETIRED
 // ==========================================
 
-export const ListViewsRequestSchema = lazySchema(() => z.object({
-  object: z.string().describe('Object name (snake_case)'),
-  type: z.enum(['list', 'form']).optional().describe('Filter by view type'),
-}));
-
-export const ListViewsResponseSchema = lazySchema(() => z.object({
-  object: z.string().describe('Object name'),
-  views: z.array(ViewSchema).describe('Array of view definitions'),
-}));
-
-export const GetViewRequestSchema = lazySchema(() => z.object({
-  object: z.string().describe('Object name (snake_case)'),
-  viewId: z.string().describe('View identifier'),
-}));
-
-export const GetViewResponseSchema = lazySchema(() => z.object({
-  object: z.string().describe('Object name'),
-  view: ViewSchema.describe('View definition'),
-}));
-
-export const CreateViewRequestSchema = lazySchema(() => z.object({
-  object: z.string().describe('Object name (snake_case)'),
-  data: ViewSchema.describe('View definition to create'),
-}));
-
-export const CreateViewResponseSchema = lazySchema(() => z.object({
-  object: z.string().describe('Object name'),
-  viewId: z.string().describe('Created view identifier'),
-  view: ViewSchema.describe('Created view definition'),
-}));
-
-export const UpdateViewRequestSchema = lazySchema(() => z.object({
-  object: z.string().describe('Object name (snake_case)'),
-  viewId: z.string().describe('View identifier'),
-  data: ViewSchema.partial().describe('Partial view data to update'),
-}));
-
-export const UpdateViewResponseSchema = lazySchema(() => z.object({
-  object: z.string().describe('Object name'),
-  viewId: z.string().describe('Updated view identifier'),
-  view: ViewSchema.describe('Updated view definition'),
-}));
-
-export const DeleteViewRequestSchema = lazySchema(() => z.object({
-  object: z.string().describe('Object name (snake_case)'),
-  viewId: z.string().describe('View identifier to delete'),
-}));
-
-export const DeleteViewResponseSchema = lazySchema(() => z.object({
-  object: z.string().describe('Object name'),
-  viewId: z.string().describe('Deleted view identifier'),
-  success: z.boolean().describe('Whether deletion succeeded'),
-}));
+// `ListViews` / `GetView` / `CreateView` / `UpdateView` / `DeleteView` —
+// five methods and their ten Request/Response schemas — were REMOVED per
+// ADR-0049 enforce-or-remove (#6239, protocol 17, maintainer ruling
+// 2026-08-07). Route 3 of the retirement playbook: not one of the ten was a
+// KEY on an authorable shape, nothing parsed them, and no route could reach the
+// methods, so there is no tombstone to write and no source or `sys_metadata`
+// row for a D2 conversion to rewrite. `RETIRED_DEFS_BY_MAJOR[17]` plus the D3
+// `SemanticMigration` `view-management-protocol-retired` ARE the declaration.
+//
+// ## What it declared, and what serves it
+//
+// A viewId-addressed CRUD surface over views: list by object (+ optional
+// list/form filter), read one, create, patch, delete. Measured on `origin/main`
+// immediately before the removal, it had ZERO of the three things a protocol
+// method needs:
+//
+//   - no implementation — `packages/metadata-protocol/src/protocol.ts` declares
+//     no `listViews`/`getView`/`createView`/`updateView`/`deleteView`; its only
+//     view resolver is `getUiView`;
+//   - no route — `packages/rest/src/rest-server.ts` never mentions `viewId`, so
+//     nothing viewId-addressed is reachable over HTTP at all;
+//   - no caller — the only `ViewProtocol` mention outside this file was
+//     `content/docs/kernel/services-checklist.mdx`, which already recorded the
+//     five as declared-and-unrouted.
+//
+// Views are read and written today through surfaces that DO exist: the
+// metadata routes (`/api/v1/meta/view/:name`, i.e. `getMetaItem` /
+// `saveMetaItem` / `deleteMetaItem` with `type: 'view'`) for the stored
+// definition, and `getUiView` (`GET /api/v1/ui/view/:object/:type`) for the
+// resolved render-time view.
+//
+// ## Why this one was worth the removal rather than a note
+//
+// A declared surface that is name-identical and semantics-adjacent to a real
+// one is not merely dead weight; it is an attractive nuisance in every grep.
+// It had already cost once: #5948's issue body AND its 2026-08-07 maintainer
+// ruling both read `GetViewResponseSchema` (this block, zero implementations)
+// as the contract of `GET /ui/view/:object/:type`, whose declared response is
+// `GetUiViewResponseSchema` — 250 lines up, one word different. The ruling's
+// reasoning happened to survive the mix-up, which is the luck that makes this
+// class of defect worth removing rather than annotating.
+//
+// If "read/write ONE view by id" becomes a real requirement, it returns through
+// the ENFORCE route — implementation first, vocabulary second (ADR-0049).
 
 // ==========================================
 // Permission Operations
@@ -977,17 +1323,90 @@ export const NotificationSchema = lazySchema(() => z.object({
   createdAt: z.string().datetime().describe('When notification was created'),
 }));
 
+// ==========================================
+// Notification inbox listing — NOT paginated
+// ==========================================
+
+// `cursor` was declared on BOTH halves of `GET /api/v1/notifications` and
+// honoured on neither, and `limit` declared a default the server has never
+// applied. Both are removed per the maintainer ruling of 2026-08-07 (#6361,
+// Option A), ruled together with #6363 as one capability's two halves — a
+// pagination capability is never half-deleted.
+//
+// ## What the route actually does
+//
+// It answers a WINDOW, never a page: `MessagingService.listInbox` reads the
+// newest `limit` rows and stops. There is no continuation token, no `hasMore`,
+// and no ordering key a caller could resume from — so `cursor` had nothing to
+// carry even if something had read it. The request half was ignored by the
+// domain (which reads `read` / `type` / `limit` and nothing else) and the
+// response half was never emitted, so an SDK caller looping "until the cursor
+// runs out" re-read page 1 forever, with no error and no 400.
+//
+// This is `data.query.cursor` (#4286, `query-cursor-retired`) one layer up,
+// with the same verdict for the same reason: a caller-visible pagination
+// parameter no engine implements is worse than inert, because it has a shipped
+// producer. That one deleted `QueryBuilder.cursor()` with the key; this one
+// deletes the `cursor` argument of `client.notifications.list()`.
+//
+// ## Why `limit` loses its default rather than gaining a truer number
+//
+// The ruling allowed either "declare the real default (50)" or "drop the
+// default and describe it as server-decided". The second is taken because the
+// FICTION IS THE MECHANISM, not just the number: nothing parses a query string
+// through this schema (#3899 wired the catalog's `requestSchema` to the real
+// entry for BODIES only), so `.default(...)` has never stamped anything onto
+// anything. Re-spelling `20` as `50` would keep a declaration that does not
+// execute and merely make it coincide with the server for as long as nobody
+// moves the clamp. `.optional()` plus prose is true on both axes: the schema
+// claims no behaviour it does not perform, and the server's window is
+// described as the server's.
+//
+// Deliberately NOT declared: `.int()`, `.positive()` or `.max(200)`. The
+// service CLAMPS an out-of-range limit (`Math.min(Math.max(limit ?? 50, 1),
+// 200)`); it does not refuse one. A constraint here would declare a rejection
+// the wire does not perform — the same declared-not-enforced defect in the
+// opposite direction. ADR-0049, #6361.
+
+/**
+ * One prescription, two rejection sites — the `cursor` key was declared on both
+ * halves of this route, so both tombstone it with the same string.
+ *
+ * Tombstoned rather than deleted for the ADR-0104 reason these schemas keep
+ * paying for: neither is `.strict()`, so a bare deletion makes Zod SILENTLY
+ * STRIP whatever the caller keeps sending — a clean parse and a parameter that
+ * never takes effect, which is the very failure this issue is about, moved one
+ * layer down. `retiredKey()` types the key as `never` (so `tsc` refuses it at
+ * the authoring site) and raises this text at parse time.
+ */
+const NOTIFICATIONS_CURSOR_REMOVED =
+  '`cursor` was removed from GET /api/v1/notifications in @objectstack/spec 17 '
+  + '(#6361, ADR-0049) — it was declared on the request AND the response and honoured on '
+  + 'neither: the server reads only `read`/`type`/`limit`, and no emit site ever wrote the '
+  + 'response key, so a caller paginating by it re-read the first window forever with no '
+  + 'error and no 400. Delete the key; the `cursor` argument of '
+  + '`client.notifications.list()` was removed with it. This route is NOT paginated — it '
+  + 'answers the newest `limit` notifications and stops, so ask for a bigger window '
+  + '(`limit`, clamped by the server into 1..200) instead of a next page. A first-class '
+  + 'inbox cursor, if ever built, will be a response-minted opaque token, not this key.';
+
 export const ListNotificationsRequestSchema = lazySchema(() => z.object({
   read: z.boolean().optional().describe('Filter by read status'),
   type: z.string().optional().describe('Filter by notification type'),
-  limit: z.number().default(20).describe('Maximum number of notifications to return'),
-  cursor: z.string().optional().describe('Pagination cursor'),
+  limit: z.number().optional().describe(
+    'Maximum number of notifications to return — the newest N. Omitted leaves the window '
+    + 'to the server, which is not a fixed part of this contract: the platform inbox '
+    + 'answers 50 and clamps any requested value into 1..200 rather than refusing it. '
+    + 'This endpoint is not paginated — there is no continuation token, so a larger '
+    + 'window is the only way to see more.',
+  ),
+  cursor: retiredKey(NOTIFICATIONS_CURSOR_REMOVED),
 }));
 
 export const ListNotificationsResponseSchema = lazySchema(() => z.object({
-  notifications: z.array(NotificationSchema).describe('List of notifications'),
+  notifications: z.array(NotificationSchema).describe('List of notifications — the newest window, not a page'),
   unreadCount: z.number().describe('Total number of unread notifications'),
-  cursor: z.string().optional().describe('Next page cursor'),
+  cursor: retiredKey(NOTIFICATIONS_CURSOR_REMOVED),
 }));
 
 export const MarkNotificationsReadRequestSchema = lazySchema(() => z.object({
@@ -1362,8 +1781,16 @@ export type GetMetaItemsRequest = z.input<typeof GetMetaItemsRequestSchema>;
 export type GetMetaItemsResponse = z.input<typeof GetMetaItemsResponseSchema>;
 export type GetMetaItemRequest = z.input<typeof GetMetaItemRequestSchema>;
 export type GetMetaItemResponse = z.input<typeof GetMetaItemResponseSchema>;
+export type GetMetaItemLayeredResponse = z.input<typeof GetMetaItemLayeredResponseSchema>;
+/**
+ * One #4463 runtime authoring-gate finding. The SINGLE declaration of the shape;
+ * `@objectstack/metadata-protocol` re-exports this rather than declaring its own
+ * (#4717), so the 422 `issues[]` and the 2xx `advisories[]` cannot drift apart.
+ */
+export type RuntimeAuthoringIssue = z.input<typeof RuntimeAuthoringIssueSchema>;
 export type SaveMetaItemRequest = z.input<typeof SaveMetaItemRequestSchema>;
 export type SaveMetaItemResponse = z.input<typeof SaveMetaItemResponseSchema>;
+export type PublishMetaItemResponse = z.input<typeof PublishMetaItemResponseSchema>;
 export type DeleteMetaItemRequest = z.input<typeof DeleteMetaItemRequestSchema>;
 export type DeleteMetaItemResponse = z.input<typeof DeleteMetaItemResponseSchema>;
 export type GetMetaItemCachedRequest = z.input<typeof GetMetaItemCachedRequestSchema>;
@@ -1422,30 +1849,6 @@ export type DeleteManyDataRequestParsed = z.infer<typeof DeleteManyDataRequestSc
 export type DeleteManyDataResponse = z.input<typeof DeleteManyDataResponseSchema>;
 /** Post-parse shape of {@link DeleteManyDataResponse} — defaults applied, transforms run (ADR-0122). */
 export type DeleteManyDataResponseParsed = z.infer<typeof DeleteManyDataResponseSchema>;
-
-// View Management Types
-export type ListViewsRequest = z.input<typeof ListViewsRequestSchema>;
-export type ListViewsResponse = z.input<typeof ListViewsResponseSchema>;
-/** Post-parse shape of {@link ListViewsResponse} — defaults applied, transforms run (ADR-0122). */
-export type ListViewsResponseParsed = z.infer<typeof ListViewsResponseSchema>;
-export type GetViewRequest = z.input<typeof GetViewRequestSchema>;
-export type GetViewResponse = z.input<typeof GetViewResponseSchema>;
-/** Post-parse shape of {@link GetViewResponse} — defaults applied, transforms run (ADR-0122). */
-export type GetViewResponseParsed = z.infer<typeof GetViewResponseSchema>;
-export type CreateViewRequest = z.input<typeof CreateViewRequestSchema>;
-/** Post-parse shape of {@link CreateViewRequest} — defaults applied, transforms run (ADR-0122). */
-export type CreateViewRequestParsed = z.infer<typeof CreateViewRequestSchema>;
-export type CreateViewResponse = z.input<typeof CreateViewResponseSchema>;
-/** Post-parse shape of {@link CreateViewResponse} — defaults applied, transforms run (ADR-0122). */
-export type CreateViewResponseParsed = z.infer<typeof CreateViewResponseSchema>;
-export type UpdateViewRequest = z.input<typeof UpdateViewRequestSchema>;
-/** Post-parse shape of {@link UpdateViewRequest} — defaults applied, transforms run (ADR-0122). */
-export type UpdateViewRequestParsed = z.infer<typeof UpdateViewRequestSchema>;
-export type UpdateViewResponse = z.input<typeof UpdateViewResponseSchema>;
-/** Post-parse shape of {@link UpdateViewResponse} — defaults applied, transforms run (ADR-0122). */
-export type UpdateViewResponseParsed = z.infer<typeof UpdateViewResponseSchema>;
-export type DeleteViewRequest = z.input<typeof DeleteViewRequestSchema>;
-export type DeleteViewResponse = z.input<typeof DeleteViewResponseSchema>;
 
 // Permission Types
 export type CheckPermissionRequest = z.input<typeof CheckPermissionRequestSchema>;
@@ -1652,14 +2055,11 @@ export interface PackageProtocol {
   disablePackage?(request: DisablePackageRequest): Promise<DisablePackageResponse>;
 }
 
-/** View management (optional). */
-export interface ViewProtocol {
-  listViews?(request: ListViewsRequest): Promise<ListViewsResponse>;
-  getView?(request: GetViewRequest): Promise<GetViewResponse>;
-  createView?(request: CreateViewRequest): Promise<CreateViewResponse>;
-  updateView?(request: UpdateViewRequest): Promise<UpdateViewResponse>;
-  deleteView?(request: DeleteViewRequest): Promise<DeleteViewResponse>;
-}
+// `ViewProtocol` (`listViews` / `getView` / `createView` / `updateView` /
+// `deleteView`) was REMOVED at protocol 17 — see the "View Management
+// Operations — RETIRED" note above (#6239). No host implemented it and no route
+// reached it; view read/write is `MetadataProtocol` (`getMetaItem` /
+// `saveMetaItem` / `deleteMetaItem` with `type: 'view'`) plus `getUiView`.
 
 /** Permissions (optional). */
 export interface PermissionProtocol {

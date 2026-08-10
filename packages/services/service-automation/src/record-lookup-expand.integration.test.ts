@@ -50,7 +50,7 @@ function expandFlow(name: string, runAs: 'system' | 'user', expand: string[], fi
     name, label: name, type: 'record_change', runAs,
     variables: [{ name: 'noteId', type: 'text', isInput: true }],
     nodes: [
-      { id: 'start', type: 'start', label: 'Start', config: { objectName: 'lead', triggerType: 'record-created', expand } },
+      { id: 'start', type: 'start', label: 'Start', config: { objectName: 'lead', triggerType: 'record-after-create', expand } },
       { id: 'up', type: 'update_record', label: 'Up', config: { objectName: 'audit', filter: { id: '{noteId}' }, fields } },
       { id: 'end', type: 'end', label: 'End' },
     ],

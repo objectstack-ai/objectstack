@@ -116,8 +116,13 @@ describe('[#5146] matchesFilterCondition — $not over records with no value', (
 
     it('$not of $notContains does NOT match them — the mirror case', () => {
       // A value-less field satisfies `$notContains` here, so the negation
-      // rejects it. `driver-sql` follows this answer; `driver-memory` answers
-      // the opposite for a null-valued field, which is filed on its own.
+      // rejects it. `driver-sql` follows this answer; `driver-memory`'s
+      // REFERENCE matcher answers the opposite for a null-valued field.
+      //
+      // ⚠️ [#5299, 2026-08-10] A ruling that morning would have reversed this
+      // direction; it was WITHDRAWN the same day and include re-affirmed. See
+      // the block at the bottom of this file for the affirmed direction and the
+      // measurement that settled it.
       expect(matched({ $not: { stage: { $notContains: 'w' } } })).toEqual(['1']);
     });
 
@@ -180,6 +185,65 @@ describe('[#5146] matchesFilterCondition — $not over records with no value', (
         expect(ids(fixture, { stage: { $exists: true } })).toEqual(ids(fixture, { stage: { $null: false } }));
         expect(ids(fixture, { stage: { $exists: false } })).toEqual(ids(fixture, { stage: { $null: true } }));
       }
+    });
+  });
+
+  // ── The NON-negated negatives — the affirmed direction, pinned ─────────────
+
+  /**
+   * [#5299, re-affirmed 2026-08-10] `$ne` / `$nin` / `$notContains` MATCH a
+   * no-value row. That is the platform semantics: ruled by #5146 for `$not`,
+   * extended to this operator family by #5298, and shipped across all eleven
+   * filter surfaces. This evaluator answers `['2','3','4']` below — the affirmed
+   * answer, not a lag behind a target.
+   *
+   * It was challenged and it held. A ruling on 2026-08-10 07:33Z would have
+   * taken SQL's native three-valued logic as the common denominator — negative
+   * operators never matching no-value rows, `['2']` below — and cells 1 and 3 of
+   * it were WITHDRAWN the same day once the reversal's cost had been measured
+   * across every surface.
+   *
+   * These assertions are load-bearing under either direction, and the coupling
+   * that makes them so is a large part of why the reversal was declined: this
+   * evaluator is the RLS write-side `check` and `read-scope-sql` is the
+   * read-side lowering, and PR #5962 converged them in ONE change precisely
+   * because they are security-coupled — one policy string must not admit two row
+   * sets. Every SQL face emits `nullSafeNegative` for these two operators
+   * (`col IS NULL OR col NOT IN (…)`), so a formula-only flip would make an RLS
+   * `check` DENY a write on a null field that the read scope still RETURNS —
+   * #5962's defect with the sign reversed. Anyone re-proposing a reversal steps
+   * on these lines DELIBERATELY, in the same PR that moves `driver-sql`,
+   * `read-scope-sql`, `filter-normalizer` and `driver-turso`'s remote transport
+   * — not one evaluator at a time.
+   *
+   * The full eleven-surface measurement, and why the reversal was declined, are
+   * recorded on family 4 in `@objectstack/spec`'s
+   * `filter-logic-conformance.ts` header.
+   */
+  describe('[#5299] $notContains / $nin over a value-less field — the affirmed direction', () => {
+    it('$notContains MATCHES a value-less field — re-affirmed 2026-08-10', () => {
+      expect(matched({ stage: { $notContains: 'w' } })).toEqual(['2', '3', '4']);
+    });
+
+    it('$nin MATCHES a value-less field — re-affirmed 2026-08-10', () => {
+      expect(matched({ stage: { $nin: ['won'] } })).toEqual(['2', '3', '4']);
+    });
+
+    it('$ne answers identically — one family, and the reason a partial flip is incoherent', () => {
+      // `$nin` is the list form of `$ne`, and `$ne` is ENROLLED in
+      // `FILTER_LOGIC_CASES` asserting exactly this row set. Moving `$nin`
+      // without `$ne` splits this evaluator against itself and against the gate.
+      expect(matched({ stage: { $ne: 'won' } })).toEqual(['2', '3', '4']);
+      expect(matched({ stage: { $nin: ['won'] } })).toEqual(matched({ stage: { $ne: 'won' } }));
+    });
+
+    it('the ESCAPE HATCH works, in both directions', () => {
+      // The half of the 07:33Z rule that was never in dispute, and that its
+      // withdrawal did not touch: "no value" is selectable, precisely, today —
+      // and `$exists` reads has-value (cell 2, shipped in PR #5962, stands).
+      expect(matched({ stage: { $exists: false } })).toEqual(['3', '4']);
+      expect(matched({ stage: { $null: true } })).toEqual(['3', '4']);
+      expect(matched({ stage: { $exists: true } })).toEqual(['1', '2']);
     });
   });
 });

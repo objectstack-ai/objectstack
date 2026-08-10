@@ -114,7 +114,7 @@ describe('[#5273] a bulk write carries no `ast` on `input`', () => {
     const { engine } = await boot();
     engine.registerHook('beforeFind', async (ctx: any) => { seen.push(ctx.input); }, { object: 'task' });
 
-    // No `as any` on the options: `find(object, query?: EngineQueryOptionsParsed)`
+    // No `as any` on the options: `find(object, query?: EngineQueryOptions)`
     // already infers an empty query, and erasing it would add a site to the
     // #4918 query-options ratchet (`check:query-options-erasure`) for no gain —
     // this call is in-contract, not a deliberate off-contract probe.
@@ -133,9 +133,14 @@ describe('[#5273] a bulk write carries no `ast` on `input`', () => {
     await seedTasks(engine, [{ title: 'a', status: 'todo' }, { title: 'b', status: 'todo' }]);
     await engine.update('task', { status: 'done' }, { multi: true, where: { status: 'todo' } } as any);
 
-    expect(seen).toHaveLength(1); // before* fires ONCE for the whole batch
-    expect('ast' in seen[0]!).toBe(false);
-    expect(seen[0]!.ast).toBeUndefined();
+    // [#5574] `before*` now fires once PER MATCHED ROW (D1), so the count is
+    // the row count — and EVERY per-row context must be free of `ast`, not
+    // just the first: the deleted claim would come back one row in otherwise.
+    expect(seen).toHaveLength(2);
+    for (const input of seen) {
+      expect('ast' in input).toBe(false);
+      expect(input.ast).toBeUndefined();
+    }
   });
 
   it('`beforeDelete` on a bulk write has no `ast` key', async () => {
@@ -146,9 +151,11 @@ describe('[#5273] a bulk write carries no `ast` on `input`', () => {
     await seedTasks(engine, [{ title: 'a', status: 'todo' }, { title: 'b', status: 'todo' }]);
     await engine.delete('task', { multi: true, where: { status: 'todo' } } as any);
 
-    expect(seen).toHaveLength(1);
-    expect('ast' in seen[0]!).toBe(false);
-    expect(seen[0]!.ast).toBeUndefined();
+    expect(seen).toHaveLength(2);
+    for (const input of seen) {
+      expect('ast' in input).toBe(false);
+      expect(input.ast).toBeUndefined();
+    }
   });
 });
 
@@ -156,22 +163,43 @@ describe('[#5273] a bulk write carries no `ast` on `input`', () => {
  * 2. `input.id` — present-but-undefined on the batch, bound per row after
  * ──────────────────────────────────────────────────────────────────────────── */
 
-describe('[#5273] `input.id` on a bulk write', () => {
-  it('`beforeUpdate` leaves `id` undefined (the key exists; nothing binds it)', async () => {
+describe('[#5273, moved by #5574] `input.id` on a bulk write', () => {
+  it('`beforeUpdate` fires per matched row, each naming its own `id`', async () => {
+    // ⚠️ This case is the inverse of what it asserted until #5574. It used to
+    // read "`beforeUpdate` leaves `id` undefined (the key exists; nothing binds
+    // it)" — the batch dispatch's shape, and the thing that made `input.id` a
+    // REROUTE lever (binding it moved the write onto the single-id branch).
+    // ADR-0058 Addendum II (D1/D2) replaced that dispatch with one context per
+    // matched row, each carrying its own row's id; D4 retired the lever, and
+    // `hook-target-rebind-errors.ts` is the refusal that replaced it.
     const seen: Array<Record<string, unknown>> = [];
     const { engine } = await boot();
-    engine.registerHook('beforeUpdate', async (ctx: any) => { seen.push(ctx.input); }, { object: 'task' });
+    engine.registerHook('beforeUpdate', async (ctx: any) => { seen.push({ ...ctx.input }); }, { object: 'task' });
 
-    await seedTasks(engine, [{ title: 'a', status: 'todo' }, { title: 'b', status: 'todo' }]);
+    const rows = await seedTasks(engine, [{ title: 'a', status: 'todo' }, { title: 'b', status: 'todo' }]);
     await engine.update('task', { status: 'done' }, { multi: true, where: { status: 'todo' } } as any);
 
-    // The engine builds `{ id, data, options }` with the shorthand `id`, so the
-    // KEY is there while the value is not. Documented as `{ id: undefined, … }`
-    // rather than "no id" because `'id' in input` answers true.
-    expect('id' in seen[0]!).toBe(true);
-    expect(seen[0]!.id).toBeUndefined();
-    expect(seen[0]!.data).toEqual({ status: 'done' });
-    expect(seen[0]!.options).toBeDefined();
+    expect(seen).toHaveLength(2);
+    expect(seen.map((i) => i.id).sort()).toEqual(rows.map((r) => r.id).sort());
+    // D3: the payload is BATCH-scoped — every per-row context carries THE
+    // payload, so a rewrite applies to the whole batch.
+    for (const input of seen) {
+      expect(input.data).toEqual({ status: 'done' });
+      expect(input.options).toBeDefined();
+    }
+  });
+
+  it('`beforeDelete` fires per matched row too, and carries no payload', async () => {
+    const seen: Array<Record<string, unknown>> = [];
+    const { engine } = await boot();
+    engine.registerHook('beforeDelete', async (ctx: any) => { seen.push({ ...ctx.input }); }, { object: 'task' });
+
+    const rows = await seedTasks(engine, [{ title: 'a', status: 'todo' }, { title: 'b', status: 'todo' }]);
+    await engine.delete('task', { multi: true, where: { status: 'todo' } } as any);
+
+    expect(seen).toHaveLength(2);
+    expect(seen.map((i) => i.id).sort()).toEqual(rows.map((r) => r.id).sort());
+    for (const input of seen) expect('data' in input).toBe(false);
   });
 
   it('`afterUpdate` fires per matched row, each naming its own `id`', async () => {
@@ -344,13 +372,20 @@ describe("[#5997] `before*` reads the CALLER's options bag, predicate included",
     const callerOptions = { multi: true, where: { status: 'todo' } };
     await engine.update('task', { status: 'done' }, callerOptions as any);
 
-    expect(seen).toHaveLength(1);
-    assertCallerBag(seen[0]!, callerOptions, { status: 'todo' });
-    // `multi` survives too — the guards branch on it to tell a batch from a
-    // by-id write when `input.id` is undefined for either reason.
-    expect((seen[0]!.options as any).multi).toBe(true);
-    // And the batch shape from §2 still holds on the same context.
-    expect(seen[0]!.id).toBeUndefined();
+    // [#5574] One context per matched row (D1) — and the PHASE rule is
+    // unchanged by that: `input.options` is still the CALLER's very bag on
+    // every one of them, `where` and `multi` visible. That is the whole point
+    // of asserting it per row rather than on the first: a per-row context that
+    // silently swapped in a `DriverOptions` view for rows 2..N would break
+    // both plugin-auth break-glass guards on exactly the batches they exist
+    // for, and `seen[0]` alone would never say so.
+    expect(seen).toHaveLength(2);
+    for (const input of seen) {
+      assertCallerBag(input, callerOptions, { status: 'todo' });
+      expect((input.options as any).multi).toBe(true);
+    }
+    // The per-row shape from §2 holds on the same contexts: each names ITS row.
+    expect(new Set(seen.map((i) => i.id)).size).toBe(2);
   });
 
   it('`beforeDelete` (single id) carries the caller `where`', async () => {
@@ -384,10 +419,12 @@ describe("[#5997] `before*` reads the CALLER's options bag, predicate included",
     const callerOptions = { multi: true, where: { id: { $in: doomed } } };
     await engine.delete('task', callerOptions as any);
 
-    expect(seen).toHaveLength(1);
-    assertCallerBag(seen[0]!, callerOptions, { id: { $in: doomed } });
-    expect((seen[0]!.options as any).multi).toBe(true);
-    expect(seen[0]!.id).toBeUndefined();
+    expect(seen).toHaveLength(2);
+    for (const input of seen) {
+      assertCallerBag(input, callerOptions, { id: { $in: doomed } });
+      expect((input.options as any).multi).toBe(true);
+    }
+    expect(seen.map((i) => i.id).sort()).toEqual([...doomed].sort());
     // The write really did run as a batch through that predicate — so the
     // assertions above describe a live path, not an inert options bag.
     // No `as any` on this one: `count(object, query?)` infers the empty query,
@@ -473,6 +510,6 @@ async function boot(): Promise<{ engine: ObjectQL; driver: any }> {
   const driver = makeStubDriver();
   engine.registerDriver(driver, true);
   await engine.init();
-  engine.registry.registerObject(taskObject as any);
+  engine.registry.registerObject(taskObject);
   return { engine, driver };
 }

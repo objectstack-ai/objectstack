@@ -379,9 +379,6 @@ export function createRestApiPlugin(config: RestApiPluginConfig = {}): Plugin {
                 throw err;
             }
 
-            const basePath = config.api?.api?.basePath || '/api';
-            const version = config.api?.api?.version || 'v1';
-            const versionedBase = `${basePath}/${version}`;
             const enableProjectScoping = config.api?.api?.enableProjectScoping ?? false;
             const projectResolution = config.api?.api?.projectResolution ?? 'auto';
 
@@ -393,12 +390,28 @@ export function createRestApiPlugin(config: RestApiPluginConfig = {}): Plugin {
             // those are; the route-ledger conformance guard drives the same
             // function, so a registrar added there cannot slip past it.
             if (restServer) {
+                // [#6306] ONE base for the whole surface. This is the same
+                // value `registerRoutes()` mounted everything else under —
+                // asked of the server that owns it, never recomputed here.
+                // The old line was `${basePath}/${version}`, which is
+                // `getApiBasePath()` minus its `apiPath` branch: a deployment
+                // setting `api.apiPath` moved 83 routes and left these 9
+                // behind at `/api/v1`. Reading the base instead of rebuilding
+                // it is the whole fix — and it is why the advertisement needs
+                // no edit: `/discovery`'s `routes.packages` /
+                // `routes.datasources` are projections of the routes these
+                // registrars report back (#6633), so the advertisement moves
+                // with the mount by construction.
+                const versionedBase = restServer.getApiBasePath();
                 mountAndRecordDirectRoutes({
                     server,
                     recorder: restServer,
                     ctx,
                     versionedBase,
                     protocol,
+                    // [#7033 / #7023] The package routes' authorization gate reads
+                    // the SAME identity resolution the rest of the surface does.
+                    resolveExecutionContext: (req) => restServer.resolvePackageRouteExecutionContext(req),
                     enableProjectScoping,
                     projectResolution,
                 });

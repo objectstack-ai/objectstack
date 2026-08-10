@@ -64,6 +64,15 @@ const PROBES: ReadonlyArray<{ file: string; re: RegExp; key: (m: RegExpExecArray
     re: /shouldDenyAnonymous\s*\(/g,
     key: () => 'automation:domains/automation.ts:anonymous-gate',
   },
+  // #7033 / #7023 — the /packages domain gate. Same GATE-pin shape: the key
+  // exists only while `handlePackagesRequest` still consults
+  // `shouldDenyAnonymous`. Delete the domain floor and the key vanishes → the
+  // covering `anonymous-deny-packages` row goes STALE → red CI.
+  {
+    file: 'packages/runtime/src/domains/packages.ts',
+    re: /shouldDenyAnonymous\s*\(/g,
+    key: () => 'packages:domains/packages.ts:anonymous-gate',
+  },
 
   // Raw-hono standard /data routes — genuinely pattern-based: ANY new
   // `rawApp.<verb>(`${prefix}/data...`)` → a new key → CI fails until a row covers it.
@@ -175,6 +184,11 @@ const HIGH_RISK = [
   // surfaces proof (#5570).
   'anonymous-deny-actions',
   'anonymous-deny-automation',
+  // #7033 / #7023 — the package-management surface guards destructive writes
+  // (discard-drafts / publish-drafts / delete / rollback) and the whole-package
+  // export/enumeration read face through a sibling dispatcher entry point, the
+  // last routed domain that had no authorization at all.
+  'anonymous-deny-packages',
   // #2948/#3003 — write-integrity face: without the strip, `readonly: true`
   // is false compliance (declared ≠ enforced) and approval/status columns are
   // one direct PATCH away from self-approval.

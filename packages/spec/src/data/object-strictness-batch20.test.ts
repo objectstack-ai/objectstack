@@ -252,6 +252,68 @@ describe('#4001 批 20 — curation is anchored to the sibling contract that mak
       expect(msg).toContain('retention');
     });
 
+    // #6631 — `lifecycle.storage.maxAge` is the third sideways pointer, and the
+    // mechanism it contrasted was true on exactly one dialect. Physical rotation
+    // is SQLite-only: `driver-sql` gates it behind
+    // `get supportsRotation() { return this.isSqlite }` and `rotateShards` throws
+    // on every other dialect (`packages/drivers/driver-sql/src/sql-driver.ts`).
+    // The LifecycleService then takes its `'rotation-fallback'` leg —
+    // `reap(…, 'rotation-fallback', 'created_at', windowMs, …)` in
+    // `packages/objectql/src/lifecycle/lifecycle-service.ts` — which is a reap BY
+    // AGE from `created_at`, precisely the mechanism the old guidance told the
+    // author rotation does not use. What the author most needs to keep believing
+    // still holds: the retained WINDOW is identical on every dialect. Only the
+    // reclamation is not — which is what the driver's own note directly above
+    // `supportsRotation` already says, and what these two surfaces now say too.
+    //
+    // ⛔ Scope: the qualifier, not the wording. Matched by idiom — does the text
+    // name the split at all? — so a rewrite is free and dropping the caveat is
+    // not. Nothing here asserts anything about what `LifecycleSchema` ACCEPTS,
+    // which is unchanged (the `onlyWhen`-vs-rotation `superRefine` carries the
+    // same dialect-specific reason and is deliberately left alone).
+    it('`lifecycle.storage.maxAge` points SIDEWAYS at `retention` — and qualifies the mechanism it contrasts, which is SQLite-only (#6631)', () => {
+      const rotating = { strategy: 'rotation', shards: 7, unit: 'day' } as const;
+      const msg = rejectOnObject({ lifecycle: { class: 'telemetry', storage: { ...rotating, maxAge: '7d' } } });
+
+      // Anti-vacuity. `strictObject` rejects an unknown key with or WITHOUT a
+      // `guidance` entry, so every assertion below would pass on a deleted entry.
+      // Anchor on the routing advice — the half of this message that was correct
+      // all along and must survive any rewording of the other half.
+      expect(msg, 'the `maxAge` guidance bullet is not being produced at all').toContain(
+        'Set the window with `shards`/`unit`, or use `retention` instead of rotation.',
+      );
+      // …and it really is THIS key's guidance rather than something the surface
+      // says to every unknown key: a sibling unknown key gets the bare rejection.
+      expect(rejectOnObject({ lifecycle: { class: 'telemetry', storage: { ...rotating, notAStorageKey: 1 } } }))
+        .not.toMatch(/SQLite/i);
+
+      // The pointed-at spelling really does parse (finding 18 — a prescription
+      // that does not work is worse than none).
+      accept(ObjectSchema, { ...OBJ, lifecycle: { class: 'telemetry', storage: rotating, retention: { maxAge: '7d' } } });
+
+      // The claim under test: both legs of the split are named.
+      expect(msg, 'the shard DROP must be attributed to SQLite').toMatch(/SQLite/);
+      expect(msg, 'and the other dialects must be told what they get instead').toMatch(/age-based reap|reaps? [^.]{0,32}by age/i);
+
+      // The retired unconditional claim, pinned by name so it cannot come back
+      // as a paraphrase of the same idea — it is false on Postgres/MySQL, where
+      // the fallback leg reaps from `created_at` exactly by age.
+      expect(msg).not.toContain('does not reap by age');
+    });
+
+    it("`lifecycle.storage.strategy`'s description carries the same qualifier — `(O(1) reclaim)` is a property of SQLite, not of the strategy (#6631)", () => {
+      const doc = LifecycleSchema.shape.storage.unwrap().shape.strategy.description ?? '';
+
+      // Anti-vacuity: an empty description satisfies every negative assertion
+      // below, and is exactly how a pin like this rots into decoration.
+      expect(doc.length, '`storage.strategy` lost its `.describe()`').toBeGreaterThan(0);
+      expect(doc, 'the description no longer describes the rotation mechanism at all').toMatch(/shard/i);
+
+      expect(doc, 'the O(1) shard DROP must be attributed to SQLite').toMatch(/SQLite/);
+      expect(doc, 'and the other dialects must be told what they get instead').toMatch(/age-based|by age/i);
+      expect(doc).not.toContain('rotate by DROPping the oldest shard (O(1) reclaim)');
+    });
+
     it('`access.sharingModel` points UP — it is a real TOP-LEVEL key, so distance would never find it', () => {
       const msg = rejectOnObject({ access: { default: 'private', sharingModel: 'private' } });
       expect(msg).toContain('TOP-LEVEL');
@@ -301,6 +363,11 @@ describe('#4001 批 20 — curation is anchored to the sibling contract that mak
       // Dataverse-style catalog vs junction table).
       expect(msg).toContain('org-wide catalog');
       expect(msg).toContain('junction/link');
+      // Since #5678 a THIRD value skips `owner_id`, for a different reason than
+      // the other two — the prescription has to say so, or an author reading
+      // "`'org'` and `'none'` BOTH skip it" concludes those are the only two.
+      expect(resolveInjectedSystemColumns({ ...OBJ, ownership: 'business_unit' }).owner).toBe(false);
+      expect(msg).toContain('business_unit');
     });
 
     it('`systemFields.ownership` names BOTH ownership anchors — since #5677 the property governs `owning_business_unit_id` too (#6365)', () => {
@@ -309,14 +376,22 @@ describe('#4001 批 20 — curation is anchored to the sibling contract that mak
       expect(msg).toContain('owner_id');
       expect(msg).toContain('owning_business_unit_id');
 
-      // The claim, against the authority: across the whole AUTHORABLE enum the
-      // two anchors move together — injected under `'user'`/omitted, withheld
-      // under `'org'`/`'none'`. (ADR-0117 D1's fourth tier is the one case that
-      // splits them, and it is deliberately unauthorable today — #5678.)
+      // The claim, against the authority: on three of the four tiers the two
+      // anchors move together — injected under `'user'`/omitted, withheld under
+      // `'org'`/`'none'`.
       for (const ownership of [undefined, 'user', 'org', 'none'] as const) {
         const plan = resolveInjectedSystemColumns({ ...OBJ, ownership });
         expect(plan.owningBusinessUnit, `ownership: ${String(ownership)}`).toBe(plan.owner);
       }
+
+      // …and ADR-0117 D1's fourth tier is the one case that SPLITS them. Since
+      // #5678 that split is a shape an author can actually reach, not a latent
+      // engine row — which is precisely why the guidance above has to name BOTH
+      // anchors rather than treating them as one lever.
+      accept(ObjectSchema, { ...OBJ, ownership: 'business_unit' });
+      const unitOwned = resolveInjectedSystemColumns({ ...OBJ, ownership: 'business_unit' });
+      expect(unitOwned.owner).toBe(false);
+      expect(unitOwned.owningBusinessUnit).toBe(true);
     });
 
     it('`external.allowWrites` names the DOUBLE opt-in — the datasource half and the object half', () => {

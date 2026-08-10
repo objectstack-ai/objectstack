@@ -1,5 +1,84 @@
 # @objectstack/metadata-fs
 
+## 17.0.0-rc.6
+
+### Patch Changes
+
+- a1b66ef: `FileSystemRepository` no longer creates its root directory when it is attached — only when it first writes.
+
+  `start()` used to `mkdir` both `<root>` and `<root>/.objectstack/.log` unconditionally, so merely attaching a repository was a write. Because `MetadataPlugin` attaches one at `<project>/.objectstack/metadata` during every boot, a command that never writes metadata still brought a directory skeleton into existence. The loudest case is `os migrate plan`, a declared dry run: on a project that had never been started it left
+
+  ```
+  .objectstack/metadata/.objectstack/.log
+  ```
+
+  behind, which also destroyed the one signal — does `.objectstack/` exist? — by which the next command can tell a fresh project from a started one. This is the filesystem half of the same property the database half already covers: a dry run leaves nothing behind.
+
+  Attaching and reading a repository whose root does not exist is now explicitly supported and answers as an empty repository (`get`, `getByHash`, `list`, `history`, `watch`). The root, the type directories and the JSONL change log all appear on the first `put` / `delete`, and nothing about the boot's read-only character changes: no metadata is written that was not written before.
+
+  One behavioural note for direct users of the package: when the root is absent at `start()`, the chokidar watcher is armed by the first write instead, because chokidar cannot watch a path that does not yet exist. A root brought into existence by a third party while the process runs — with this repository never writing — is therefore not picked up until the next `start()`.
+
+- ab07b53: fix(metadata-fs): register every written path with the watcher, so an item created while chokidar is still scanning is not invisible forever (#7282)
+
+  `FileSystemRepository`'s watcher could go **permanently blind to a single
+  item** — external edits to that file produced no `MetadataEvent` for the whole
+  life of the process, and nothing recovered short of a restart. The window is a
+  race between chokidar's asynchronous initial scan and the repository's own
+  first write, and both `start()` (which arms the watcher, after which the caller
+  may `put()` on the next tick) and `ensureRoot()` (which arms it in the middle
+  of the very first write, #7000) can open it.
+
+  Measured on chokidar 5 with this repository's options (`usePolling`,
+  `interval: 1000`):
+
+  1. chokidar reads `<root>/<type>/` and finds it EMPTY — the atomic `rename` in
+     `writeJsonAtomic` has not landed yet;
+  2. the rename lands, changing the directory's mtime;
+  3. chokidar calls `watchFile()` on that directory and libuv takes its polling
+     baseline stat, which already reflects step 2.
+
+  The directory's stat then never changes again, so no poll ever fires for it,
+  the directory is never re-read, the item file is never added to the watched
+  set, and no per-file watcher is created. `getWatched()` reports the type
+  directory as `[]` while the file sits in it, and neither `add` nor `change` is
+  ever emitted for that path.
+
+  The fix does not widen any timer. The only writer that can be inside that
+  window is the repository itself, so `put()` now tells the watcher explicitly
+  about the path it created instead of depending on a directory scan that may
+  never notice it. Registration is idempotent and emits nothing.
+
+  User-visible effect: `MetadataManager.subscribe()` (and every consumer of
+  `repo.watch()`) now reliably sees out-of-process edits — a hand edit, or a
+  `git checkout` bringing metadata JSON in — to items written earlier in the same
+  process. This was also the cause of four merge-queue ejections across three
+  PRs; the two time-based mitigations tried before it (a 20s/25s event deadline
+  and a wider pre-edit sleep) could not have worked, because the event was never
+  delivered rather than late.
+
+- 684ab22: fix(metadata-fs): the `FileSystemRepository` watcher now sees external edits in the production layout
+
+  `MetadataPlugin` attaches the repository at `<project>/.objectstack/metadata`, and the
+  watcher's `ignored` matcher was a bare dotfile regex. chokidar applies that matcher to the
+  watched root path itself, not only to entries found underneath it, so the `.objectstack`
+  segment of the root matched and the entire watch was inert — `getWatched()` returned `{}`
+  and no event ever fired. Hand edits, a `git checkout` that brings metadata JSON in, and any
+  other out-of-process writer under `.objectstack/metadata/` were invisible until the next
+  `start()`, even though `MetadataManager.setRepository()` is wired to those events and uses
+  them to invalidate the registry and the `list()` cache.
+
+  The matcher is now evaluated against the path _relative_ to the watch root, so dot segments
+  belonging to the root itself are never considered while dotfiles under the root — including
+  the repository's own `.objectstack/` bookkeeping subtree — stay ignored as before.
+
+- Updated dependencies [121852d]
+- Updated dependencies [5e247fd]
+- Updated dependencies [1a53a02]
+- Updated dependencies [a954634]
+- Updated dependencies [3d4c545]
+- Updated dependencies [bb7cb41]
+  - @objectstack/metadata-core@17.0.0-rc.6
+
 ## 17.0.0-rc.5
 
 ### Patch Changes

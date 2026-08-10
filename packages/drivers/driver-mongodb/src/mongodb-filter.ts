@@ -26,6 +26,25 @@
 import type { Filter } from 'mongodb';
 import { nextUtcCalendarDay } from '@objectstack/core';
 import { StandardErrorCode } from '@objectstack/spec/api';
+// [#5659] The Filter Protocol's boolean identity reduction, shared with
+// driver-sql, driver-memory and the flow linter and proven against the same
+// `FILTER_LOGIC_CASES` table this driver's conformance suite runs. This file
+// supplies only its own refusals — see `reduceFilterNode` below.
+import {
+  reduceFilterVerdict,
+  reduceFilterKeyVerdict,
+  type FilterVerdict as SharedFilterVerdict,
+  type FilterVerdictHooks,
+} from '@objectstack/spec/data';
+// [#5702] The retired filter operators and the prescription each refusal
+// prints, read from the spec so this driver's sentence about `$regex` cannot
+// drift from the four other refusal sites' (#5701).
+import { RETIRED_FILTER_OPERATORS } from '@objectstack/spec/data';
+// [#6520] `$icontains`' ASCII-only fold, defined once in the spec. This driver
+// hands a PATTERN to MongoDB rather than comparing strings, so the fold has to
+// live in the pattern source — see its docblock for why `$options: 'i'` is the
+// wrong tool.
+import { asciiCaseInsensitiveRegexSource } from '@objectstack/spec/data';
 import {
   coerceTemporalValue,
   type TemporalFieldKind,
@@ -64,8 +83,12 @@ function matchNothing(): Filter<any> {
  * - `'true'`  — matches every document; the translator emits no condition.
  * - `'false'` — matches no document; the translator emits {@link matchNothing}.
  * - `'clause'` — carries at least one real predicate; translate it normally.
+ *
+ * [#5659] The vocabulary is `@objectstack/spec`'s now, because the REDUCTION
+ * that produces it is — see {@link reduceFilterNode}. Kept as a local alias so
+ * every use site below still reads `FilterVerdict`.
  */
-type FilterVerdict = 'true' | 'false' | 'clause';
+type FilterVerdict = SharedFilterVerdict;
 
 /**
  * [#5239] Is `value` a Filter Protocol NODE — the shape `FilterConditionSchema`
@@ -135,51 +158,56 @@ function assertFilterNodeList(value: unknown, key: string, path: string): assert
  * emitted document came out empty, is the point. "Nothing was emitted" cannot
  * distinguish "the author wrote an empty group" from "something failed to
  * translate"; a structural verdict has no such blind spot.
+ *
+ * ## [#5659] The algebra is `@objectstack/spec`'s; the REFUSALS are this driver's
+ *
+ * Every paragraph above describes a ruling four consumers had to agree on and
+ * implemented four times — here, in `driver-sql` (whose copy this one was
+ * written to mirror, down to the variable names), in `driver-memory`'s matcher,
+ * and nearly a fifth time inside `@objectstack/lint`. It lives once now, in
+ * {@link reduceFilterVerdict}, proven against the same `FILTER_LOGIC_CASES`
+ * table this driver's conformance suite runs. What stays here is WHICH shapes
+ * this translator refuses and how it words them, handed over as
+ * {@link MONGO_FILTER_VERDICT_HOOKS} and invoked from exactly the positions
+ * they were invoked from before.
  */
 function reduceFilterNode(node: Record<string, unknown>, path: string): FilterVerdict {
-  let sawFalse = false;
-  let sawClause = false;
-  for (const [key, value] of Object.entries(node)) {
-    const verdict = reduceFilterKey(key, value, path);
-    if (verdict === 'false') sawFalse = true;
-    else if (verdict === 'clause') sawClause = true;
-  }
-  return sawFalse ? 'false' : sawClause ? 'clause' : 'true';
+  return reduceFilterVerdict(node, { ...MONGO_FILTER_VERDICT_HOOKS, path });
 }
 
 /** [#5239] The verdict of ONE key of a filter node. */
 function reduceFilterKey(key: string, value: unknown, path: string): FilterVerdict {
-  const here = path ? `${path}.${key}` : key;
+  return reduceFilterKeyVerdict(key, value, { ...MONGO_FILTER_VERDICT_HOOKS, path });
+}
 
-  if (key === '$and' || key === '$or') {
-    assertFilterNodeList(value, key, here);
-    let sawTrue = false;
-    let sawFalse = false;
-    let sawClause = false;
-    value.forEach((element, index) => {
-      const elementPath = `${here}[${index}]`;
-      assertFilterNode(element, elementPath);
-      const verdict = reduceFilterNode(element, elementPath);
-      if (verdict === 'true') sawTrue = true;
-      else if (verdict === 'false') sawFalse = true;
-      else sawClause = true;
-    });
-    // `$and: []` → no FALSE, no clause → TRUE (the AND identity).
-    if (key === '$and') return sawFalse ? 'false' : sawClause ? 'clause' : 'true';
-    // `$or: []` → no TRUE, no clause → FALSE (the OR identity). MongoDB itself
-    // answers neither: it rejects the empty array outright
-    // (`$and/$or/$nor must be a nonempty array`), so this filter used to be a
-    // 500-shaped throw rather than a verdict.
-    return sawTrue ? 'true' : sawClause ? 'clause' : 'false';
-  }
+/**
+ * [#5659] This translator's half of the reduction: the shape refusals, at the
+ * positions the shared walk visits them.
+ *
+ * The two `assert*` functions are wrapped in arrows rather than passed by
+ * reference because they are TypeScript assertion functions, whose narrowing is
+ * meaningless through a property reference. Nothing else about the call changes.
+ */
+const MONGO_FILTER_VERDICT_HOOKS: FilterVerdictHooks = {
+  assertNodeList: (value, key, path) => assertFilterNodeList(value, key, path),
+  assertNode: (value, path) => assertFilterNode(value, path),
+  classifyKey: (key, value, here) => classifyFilterKey(key, value, here),
+};
 
-  if (key === '$not') {
-    assertFilterNode(value, here);
-    const inner = reduceFilterNode(value, here);
-    // NOT TRUE ≡ FALSE — so `{ $not: {} }` matches nothing.
-    return inner === 'true' ? 'false' : inner === 'false' ? 'true' : 'clause';
-  }
-
+/**
+ * [#5239] The verdict of ONE **non-combinator** key — and this translator's gate
+ * on what a field constraint may not be.
+ *
+ * `here` is the already-joined path of the key, exactly as the reduction hands
+ * it over; the three combinator arms this used to open with are the shared
+ * walk's now.
+ *
+ * MongoDB's own answer to an empty combinator is worth keeping written down,
+ * because the reduction is what spares this driver from it: `$and`/`$or` with an
+ * empty array is rejected outright (`$and/$or/$nor must be a nonempty array`),
+ * so `{ $or: [] }` used to be a 500-shaped throw rather than a verdict.
+ */
+function classifyFilterKey(key: string, value: unknown, here: string): FilterVerdict {
   // Query-level keys carry no predicate; the emitter skips them and so does the
   // verdict, so the two never disagree about what this node is worth.
   if (QUERY_LEVEL_KEYS.has(key)) return 'true';
@@ -203,6 +231,22 @@ function reduceFilterKey(key: string, value: unknown, path: string): FilterVerdi
     typeof value.$null !== 'boolean'
   ) {
     throw nonBooleanNullComparandError(key, value.$null, `${here}.$null`);
+  }
+
+  // [#6520] `$icontains`' comparand is a NON-EMPTY string, gated on the WALK for
+  // the same reason `$null` is one paragraph up: a gate in the emitter fires or
+  // not depending on whether a boolean identity settled the enclosing node
+  // first, so `{ $or: [ {}, { name: { $icontains: '' } } ] }` would refuse or
+  // not depending on its siblings. The condition and the message are
+  // `driver-sql`'s `icontainsComparandError`, word for word — an empty
+  // comparand matches every row, and a predicate that constrains nothing WIDENS
+  // (#3948).
+  if (
+    isFilterNode(value) &&
+    Object.prototype.hasOwnProperty.call(value, '$icontains') &&
+    (typeof value.$icontains !== 'string' || value.$icontains === '')
+  ) {
+    throw icontainsComparandError(key, value.$icontains, `${here}.$icontains`);
   }
 
   // A field key always contributes a predicate. This stays `'clause'` even for
@@ -247,10 +291,13 @@ function filterArrayReachedDriverError(filters: unknown[]): Error {
  * swaps one driver for another must see one `400 INVALID_FILTER`, not a coded
  * refusal on three backends and a bare `{ error }` on the fourth.
  *
- * Note what this does NOT do: the `default:` arm of {@link translateFieldOperators}
- * still throws a bare `Error` with a `[mongodb]` prefix, outside this envelope.
- * That is #5346's, filed and measured separately — converting it here would be
- * an unrelated behaviour change riding on #5347.
+ * [#5702] The carve-out that used to close this comment is GONE. It read: *"the
+ * `default:` arm of {@link translateFieldOperators} still throws a bare `Error`
+ * with a `[mongodb]` prefix, outside this envelope. That is #5346's, filed and
+ * measured separately."* That arm now routes through this constructor, so this
+ * package no longer answers an unknown or retired operator with a 500-shaped
+ * body while its three siblings answer `400 INVALID_FILTER` — which was the last
+ * place the sentence two paragraphs up was not yet true.
  */
 function unsupportedFilterError(message: string): Error {
   const err = new Error(message) as Error & { code?: string; status?: number };
@@ -281,6 +328,28 @@ function nonBooleanNullComparandError(field: string, value: unknown, path: strin
       `compiled IS NOT NULL (anything but true), and driver-memory's matcher dropped the ` +
       `constraint entirely. Note "false" the STRING is truthy, so it landed on the side opposite ` +
       `the false it was written to mean (#5347).`,
+  );
+}
+
+/**
+ * [#6520] `$icontains` received a comparand that is not a non-empty string.
+ *
+ * The twin of `driver-sql`'s and `driver-memory`'s constructor of the same name,
+ * word for word: #3948 made the backends agree that an uncompilable filter is a
+ * loud refusal rather than a silent match-everything, and a suite that swaps one
+ * driver for another has to read one sentence in one envelope. Two rejections in
+ * one constructor because they are one mistake at one position — a non-string
+ * would have to be coerced into text the query never asked for, and an empty one
+ * matches every row.
+ */
+function icontainsComparandError(field: string, value: unknown, path: string): Error {
+  const shown = typeof value === 'string' ? `""` : JSON.stringify(value) ?? String(value);
+  return unsupportedFilterError(
+    `Operator "$icontains" on field "${field}" at ${path} requires a NON-EMPTY string comparand, ` +
+      `received ${shown}. "$icontains" is a case-insensitive LITERAL substring search, so its ` +
+      `comparand is the text to look for — an empty one matches every row (a predicate that ` +
+      `constrains nothing), and a non-string one would have to be coerced into text this query ` +
+      `never asked for.`,
   );
 }
 
@@ -520,6 +589,23 @@ function translateFieldOperators(
         result.$options = 'i';
         break;
 
+      // [#6520] `$icontains` — case-insensitive over ASCII and nothing else.
+      //
+      // The one arm in this family that does NOT set `$options: 'i'`, and the
+      // omission is the whole implementation. Mongo's `i` flag folds the full
+      // Unicode range, so it would match `CAFÉ` against `café` — the answer
+      // SQLite cannot give and therefore the one the protocol forbids (#4706
+      // Q1 = A). The fold lives in the pattern instead, one `[Aa]` class per
+      // ASCII letter, from the spec's shared `asciiCaseInsensitiveRegexSource`
+      // — the same source `driver-memory`'s mingo path binds.
+      //
+      // Its four neighbours above ARE `$options: 'i'`, and that is not a
+      // precedent to copy: it is them folding Unicode for the case-SENSITIVE
+      // `$contains` family, the open defect #6682 tracks on this driver.
+      case '$icontains':
+        result.$regex = asciiCaseInsensitiveRegexSource(String(value));
+        break;
+
       // Range operator → $gte + upper bound (half-open on a bare-day max,
       // inheriting `$lte`'s whole-day rule — #4042)
       case '$between':
@@ -561,12 +647,47 @@ function translateFieldOperators(
         }
         break;
 
-      default:
+      default: {
         // Reject unknown operators instead of passing them through (P0). Keys
         // like `$where` / `$function` / `$expr` / `$accumulator` would reach
         // MongoDB and execute server-side JavaScript or bypass query intent.
         // Every legitimate ObjectQL field operator is allowlisted above.
-        throw new Error(`[mongodb] unsupported filter operator '${op}'`);
+        //
+        // [#5702] Two changes, both about the SHAPE of the refusal rather than
+        // its verdict — this arm already refused, including `$regex`, which is
+        // why mongo was the one backend already satisfying #4706's requirement 3:
+        //
+        //  1. It threw a bare `new Error`, with no `code` and no `status`, three
+        //     lines from a helper in this same file that sets `INVALID_FILTER` /
+        //     400 and whose own comment says "a test suite that swaps one driver
+        //     for another must see one `400 INVALID_FILTER`". A 500-shaped body
+        //     for a 400-class client mistake is the half of #5324 the refusal
+        //     itself does not fix.
+        //  2. A RETIRED spelling now gets the spec's prescription instead of the
+        //     generic sentence: `$regex`'s author needs `$icontains`, and
+        //     "unsupported filter operator" does not say so.
+        const retired = RETIRED_FILTER_OPERATORS[op];
+        if (retired) {
+          const replacement = retired.to ? ` Write "${retired.to}" instead.` : '';
+          const alsoRetired = Object.keys(ops).filter(
+            (key) => key !== op && RETIRED_FILTER_OPERATORS[key],
+          );
+          const also = alsoRetired.length
+            ? ` The same field constraint also carries the retired ` +
+              `${alsoRetired.map((key) => `"${key}"`).join(', ')} — one "${retired.to}" replaces ` +
+              `the whole shape, so this is ONE mistake with ONE fix, not one per key.`
+            : '';
+          throw unsupportedFilterError(
+            `Filter operator "${op}" on field "${field}" at ${path} is RETIRED and is no longer ` +
+              `translated by this driver.${replacement} ${retired.why}${also}`,
+          );
+        }
+        throw unsupportedFilterError(
+          `Unsupported filter operator "${op}" on field "${field}" at ${path}. It is refused ` +
+            `rather than passed through to MongoDB, where keys like $where / $function / $expr ` +
+            `execute server-side JavaScript or bypass the query's intent (P0).`,
+        );
+      }
     }
   }
 

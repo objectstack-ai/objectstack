@@ -18,12 +18,16 @@ import { registerLogicNodes } from './logic-nodes.js';
  * The consequence shipped in `examples/app-crm` — see the first block below.
  */
 
-const warnings: string[] = [];
+/** One captured `warn` call — message AND structured meta (#6654 moved the
+ *  computed branch label and the out-edge labels into the meta slot). */
+type CapturedWarn = { msg: string; meta?: Record<string, any> };
+
+const warnings: CapturedWarn[] = [];
 
 function createTestLogger(): any {
     return {
         info: () => {},
-        warn: (msg: string) => { warnings.push(String(msg)); },
+        warn: (msg: string, meta?: Record<string, any>) => { warnings.push({ msg: String(msg), meta }); },
         error: () => {},
         debug: () => {},
         child: () => createTestLogger(),
@@ -196,10 +200,19 @@ describe('decision branch routing (#4414)', () => {
         }));
         await run({ status: 'converted' });
 
+        // #6654 — the computed branch label is potentially record-derived and
+        // the edge labels are flow-author metadata, so both moved out of the
+        // message into the structured slot. The #4414 fact under test is
+        // unchanged: the unclaimed selection is REPORTED, naming the computed
+        // branch and every out-edge label.
         expect(warnings.some((w) =>
-            w.includes("selected branch 'Yes — already converted'")
-            && w.includes("'Yes'") && w.includes("'No'")
-            && w.includes('#4414'),
+            w.msg.includes('no out-edge carries that label')
+            && w.msg.includes('#4414')
+            && w.meta?.branchLabel === 'Yes — already converted'
+            && (w.meta?.outEdges as Array<{ label: string | null }>)
+                .map((e) => e.label).includes('Yes')
+            && (w.meta?.outEdges as Array<{ label: string | null }>)
+                .map((e) => e.label).includes('No'),
         )).toBe(true);
         // Behaviour is unchanged (a run mid-flight must not die on it) — but it
         // is no longer invisible.

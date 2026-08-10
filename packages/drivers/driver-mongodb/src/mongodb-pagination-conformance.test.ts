@@ -31,6 +31,7 @@ import {
   PAGINATION_CASES,
   PAGINATION_ROWS,
   PAGINATION_UNORDERED_CASES,
+  PAGINATION_ZERO_LIMIT_CASES,
 } from '@objectstack/spec/data';
 import { MongoDBDriver } from './mongodb-driver.js';
 import { createTestMongod } from './test-mongod.js';
@@ -58,6 +59,21 @@ describe.skipIf(!sharedMongod)('driver-mongodb — paged reads are a partition o
   afterAll(async () => {
     if (driver) await driver.disconnect();
     if (sharedMongod) await sharedMongod.stop();
+  });
+
+  /**
+   * `limit: 0` returns no records (#6485/#6577) — the whole case-set, controls
+   * included, against a real mongod. The controls are what stop the
+   * short-circuit added for this contract from being an unconditional "return
+   * nothing": they read 2 and 12 rows back through the same door.
+   */
+  describe('`limit: 0` returns no records', () => {
+    for (const testCase of PAGINATION_ZERO_LIMIT_CASES) {
+      it(testCase.name, async () => {
+        const rows = await driver.find('ticket', { ...testCase.query });
+        expect(rows).toHaveLength(testCase.expectedRowCount);
+      });
+    }
   });
 
   for (const testCase of PAGINATION_CASES) {
@@ -164,5 +180,48 @@ describe('MongoDBDriver — the sort spec sent to the server', () => {
     expect(
       driver['buildSortSpec']({ orderBy: [{ field: 'id', order: 'desc' }], limit: 5, offset: 5 }),
     ).toEqual({ id: -1 });
+  });
+});
+
+/**
+ * The `limit: 0` guard, on a driver that is NEVER CONNECTED — #6485/#6577.
+ *
+ * Outside the `skipIf` for the same reason the sort-spec block above is, and
+ * for one more that is specific to this contract: the guard's whole claim is
+ * that the answer is produced WITHOUT consulting the MongoDB client. A test
+ * that needs a running mongod to prove that would be asserting the opposite of
+ * what it is about. Here the URI is unreachable by construction (port 1), so if
+ * the short-circuit were removed these cases would not fail on a row count —
+ * they would fail on a connection error, which is exactly the right alarm.
+ *
+ * Why this driver needed a guard at all when its `buildFindOptions` was already
+ * correct: it tests presence (`!== undefined`), so `0` was forwarded faithfully
+ * — into a client that DEFINES `limit: 0` as *no limit*. Forwarding was the
+ * problem, not the fix.
+ */
+describe('MongoDBDriver — `limit: 0` is answered before the client is consulted', () => {
+  const driver = new MongoDBDriver({ url: 'mongodb://127.0.0.1:1/unused', database: 'unused' });
+
+  it('find() returns zero records without dialing the server', async () => {
+    await expect(driver.find('ticket', { limit: 0 })).resolves.toHaveLength(0);
+  });
+
+  it('find() returns zero records with an offset too', async () => {
+    await expect(driver.find('ticket', { limit: 0, offset: 5 })).resolves.toHaveLength(0);
+  });
+
+  it('findOne() returns null — the empty result for its signature', async () => {
+    await expect(driver.findOne('ticket', { limit: 0 })).resolves.toBeNull();
+  });
+
+  it('does NOT short-circuit a non-zero limit — that read still needs the server', async () => {
+    // The control that keeps the guard from becoming "return nothing, always".
+    // With no short-circuit the unreachable URI is what answers, so a rejection
+    // here IS the assertion: the call went to the client, as it must.
+    await expect(driver.find('ticket', { limit: 2 })).rejects.toThrow();
+  });
+
+  it('does NOT short-circuit a read with no limit at all', async () => {
+    await expect(driver.find('ticket', {})).rejects.toThrow();
   });
 });

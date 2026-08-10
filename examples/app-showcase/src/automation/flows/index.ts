@@ -57,8 +57,11 @@ export const TaskCompletedFlow = defineFlow({
       type: 'notify',
       label: 'Notify the assignee',
       config: {
-        // A field ON the record: the flow record carries `project` as a scalar
-        // id, so `{record.project.owner}` would resolve to an empty string.
+        // A field ON the record — deliberately, so this flow stays the simple
+        // specimen. The flow record carries `project` as a scalar id, so
+        // `{record.project.owner}` would resolve to an empty string unless the
+        // start node declared `expand: ['project']`; the sibling
+        // `showcase_task_done_notify_owner` is where that hop is demonstrated.
         recipients: '{record.assignee}',
         title: '✅ Task done: {record.title}',
         message: '{summary}',
@@ -674,6 +677,14 @@ export const TaskDoneNotifyOwnerFlow = defineFlow({
         objectName: 'showcase_task',
         triggerType: 'record-after-update',
         condition: 'status == "done" && previous.status != "done"',
+        // The SAME resume-time trap this flow's sibling hit (#7381): the node
+        // below hops `{record.project.owner}`, and a flow record carries
+        // `project` as a scalar FK. Un-hydrated it resolved to nothing, the
+        // subflow's `notify` refused for want of a recipient, and every
+        // completion of a task ran this flow to a failure. Unlike the invoice
+        // case the hop is sound — `showcase_project.owner` is a real, seeded
+        // field — so the relation only needed declaring.
+        expand: ['project'],
       },
     },
     {
@@ -1074,6 +1085,13 @@ export const InvoiceDualSignoffFlow = defineFlow({
         objectName: 'showcase_invoice',
         triggerType: 'record-after-update',
         condition: 'status == "sent" && previous.status != "sent"',
+        // #3475 opt-in single-hop hydration. A flow record carries `account` as
+        // a scalar FK, so `{record.account.*}` reads nothing unless the relation
+        // is declared here; the engine re-reads it once, before the run starts,
+        // and the expanded object is part of the run state that survives the
+        // approval pause — which is why `notify_cleared` can still read it at
+        // RESUME time, hours or days later (#7381).
+        expand: ['account'],
       },
     },
     {
@@ -1097,11 +1115,22 @@ export const InvoiceDualSignoffFlow = defineFlow({
       label: 'Notify: Cleared',
       config: {
         topic: 'invoice.signoff',
-        recipients: ['{record.account.owner}'],
+        // The INVOICE's own owner, not `{record.account.owner}` (#7381).
+        // `showcase_account` has no `owner` field at all — its people-ish keys
+        // are `billing_email` and the injected `owner_id` — so that hop resolved
+        // to nothing however the relation was hydrated, and the notify node
+        // refuses a run with no recipients: approving the demo stranded its run
+        // instead of delivering this message. `showcase_invoice.owner` is the
+        // seeded rep (the same RLS anchor the contributor permission set uses),
+        // which is who "your invoice cleared sign-off" is addressed to anyway.
+        recipients: ['{record.owner}'],
         channels: ['inbox'],
         severity: 'info',
+        // The expanded relation is read HERE — `{record.account.name}` is what
+        // makes the start node's `expand: ['account']` live rather than inert,
+        // and it is the hydration path this kitchen-sink flow exists to teach.
         title: 'Invoice cleared: {record.name}',
-        message: 'Invoice "{record.name}" passed finance + legal sign-off and is on its way.',
+        message: 'Invoice "{record.name}" for {record.account.name} passed finance + legal sign-off and is on its way.',
         actionUrl: '/showcase_invoice/{record.id}',
       },
     },

@@ -7,23 +7,40 @@
  * Supports PostgreSQL, MySQL, SQLite, and other SQL databases.
  */
 
-import type { DriverOptions, SchemaMode } from '@objectstack/spec/data';
-import { parseAutonumberFormat, renderAutonumber, missingFieldValues, isTenancyDisabled, type AutonumberToken } from '@objectstack/spec/data';
+import type { DriverOptions, FilterCondition, SchemaMode } from '@objectstack/spec/data';
+import { parseAutonumberFormat, renderAutonumber, resolveAutonumberFormat, readAutonumberCounter, missingFieldValues, isTenancyDisabled, type AutonumberToken } from '@objectstack/spec/data';
 // The DECLARED aggregate vocabulary (#5907). Read from the spec so this driver's
 // "the protocol has no such function" refusal cannot drift from what
 // `AggregationNodeSchema.function` actually admits.
 import { AggregationFunction } from '@objectstack/spec/data';
 import { STRUCTURED_JSON_TYPES, FILE_REFERENCE_TYPES, MULTI_OPTION_TYPES, NUMERIC_VALUE_TYPES } from '@objectstack/spec/data';
+// [#5659] The Filter Protocol's boolean identity reduction — `$and: []` is TRUE,
+// `$or: []` is FALSE, `{}` is a TRUE disjunct, `$not: {}` is FALSE. One
+// implementation for all four consumers, proven against the same
+// `FILTER_LOGIC_CASES` table this driver's conformance suite runs; this file
+// supplies only its own refusals. See `reduceFilterNode` below.
+import {
+  reduceFilterVerdict,
+  reduceFilterKeyVerdict,
+  type FilterVerdict as SharedFilterVerdict,
+  type FilterVerdictHooks,
+} from '@objectstack/spec/data';
 // `defaultValue` runtime tokens (#4560). The DDL below asks the SPEC — not a
 // list of its own — which `defaultValue`s are instructions rather than literals,
 // so the engine and this driver can never disagree about what may become a
 // physical column DEFAULT.
 import { isNowDefaultToken, isRuntimeDefaultToken } from '@objectstack/spec/data';
+// [#5702] The retired filter operators and the prescription each refusal
+// prints. Read from the spec rather than restated here for the reason the
+// #5701 table itself gives: five refusal sites that each write their own
+// sentence about `$regex` are five sentences that drift apart. This driver
+// prints `why` VERBATIM.
+import { RETIRED_FILTER_OPERATORS } from '@objectstack/spec/data';
 import type { DriverQuery, IDataDriver } from '@objectstack/spec/contracts';
 import { StandardErrorCode } from '@objectstack/spec/api';
 import { StorageNameMapping } from '@objectstack/spec/system';
 import { ExternalSchemaModeViolationError } from '@objectstack/spec/shared';
-import { resolveTenancyPosture } from '@objectstack/types';
+import { isUniqueViolationError, uniqueViolationColumn, resolveTenancyPosture } from '@objectstack/types';
 import { postureEnforcesWall } from '@objectstack/spec/security';
 import { nextUtcCalendarDay } from '@objectstack/core';
 import {
@@ -53,6 +70,7 @@ import {
 import knex, { Knex } from 'knex';
 import { nanoid } from 'nanoid';
 import { createHash } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import { currentPerfTiming, perfNow, type PerfTiming } from '@objectstack/observability';
 
 /**
@@ -105,6 +123,50 @@ function lastIdentifierSegment(raw: string): string {
  * concurrent writers. Lazily created on first autonumber-bearing insert.
  */
 const SEQUENCES_TABLE = '_objectstack_sequences';
+
+/**
+ * How many times `create()` will re-seed a stale autonumber counter and retry
+ * a refused INSERT before giving the unique violation back to the caller
+ * (#5495).
+ *
+ * One is enough for the defect this bounds: a re-seed jumps the counter to the
+ * observed MAX in a single step, so the whole "one-time storm per database"
+ * collapses to one retry no matter how far behind the counter had fallen. The
+ * remaining budget is for concurrent writers taking the re-seeded number
+ * between our scan and our INSERT, which is a per-attempt race rather than a
+ * standing condition. The bound is what keeps a genuinely un-satisfiable insert
+ * from looping: at exhaustion the original error is rethrown unchanged.
+ */
+const AUTONUMBER_COLLISION_RETRIES = 3;
+
+/**
+ * One autonumber value this driver generated for a row it is about to insert
+ * (#5495) — the field, the value, and the coordinates under which that value's
+ * counter would be re-seeded.
+ *
+ * Its reason for existing is the distinction between "a number this driver
+ * handed out" and "a value the caller typed": only the former may be
+ * regenerated after a unique violation, and only the latter's 409 belongs to
+ * the client.
+ */
+export interface AutoNumberReservation {
+  /** The `auto_number` field on the object. */
+  field: string;
+  /** Physical table the value lives in (external objects map away from the object name). */
+  tableName: string;
+  /** Full rendered prefix — the LIKE anchor the re-seed scan uses. */
+  prefix: string;
+  /** Rendered counter scope (date/`{field}` tokens); `''` for a fixed-prefix format. */
+  scope: string;
+  /** Rendered text after the counter slot (#6468). */
+  suffix: string;
+  /** Tenant column for this object, or `null` when it has none. */
+  tenantField: string | null;
+  /** Tenant this row belongs to, or `null` for the global counter. */
+  tenantId: string | null;
+  /** The rendered value written onto the row. */
+  value: string;
+}
 
 // GLOBAL_TENANT ('__global__') — the sentinel for the NULL-organization
 // ("platform") bucket — is defined ONCE in schema-drift.ts and imported here:
@@ -490,8 +552,31 @@ function unsupportedFilterError(message: string): Error {
 }
 
 /**
- * [#5907] The aggregate functions this driver LOWERS into SQL, and the SQL
- * function each becomes.
+ * [#6409] How one declared aggregate function lowers into SQL.
+ *
+ * `sql` is the function NAME; `distinct` decides whether the argument list
+ * carries the `DISTINCT` keyword. Two fields rather than one string because
+ * `count_distinct` is the first entry in the vocabulary whose lowering is not a
+ * function name at all — `COUNT(DISTINCT x)` puts a keyword INSIDE the argument
+ * list, so a table of bare names has nowhere to say it. Encoding it as a
+ * template (`'count(distinct %s)'`) was the alternative and was rejected: the
+ * emitter binds the column as a knex identifier (`??`), and a template would
+ * have moved that binding into data.
+ *
+ * `distinct` also decides whether a FIELD is mandatory, which is why there is no
+ * third flag saying so: `COUNT(*)` is the spelling `AggregationNodeSchema`
+ * explicitly allows by making `field` optional, and `COUNT(DISTINCT *)` is a
+ * syntax error in every dialect this driver targets — there is nothing to
+ * deduplicate without a column. See {@link refuseDistinctAggregateWithoutField}.
+ */
+interface SqlAggregateLowering {
+  readonly sql: string;
+  readonly distinct: boolean;
+}
+
+/**
+ * [#5907] The aggregate functions this driver LOWERS into SQL, and what each
+ * becomes.
  *
  * The refusals below read their "compiled here" list off THIS table instead of
  * repeating it. A hand-written copy agrees with the compiler on the day it is
@@ -500,13 +585,24 @@ function unsupportedFilterError(message: string): Error {
  *
  * A `Map` rather than a plain object on purpose: a caller-supplied name is
  * looked up here, and `{}['constructor']` answers with a function.
+ *
+ * [#6409] `count_distinct` joined the table, and with it the table gained the
+ * `distinct` column. It is the ENFORCE leg of #6188's split ruling
+ * (2026-08-07): `array_agg`/`string_agg` left `AggregationFunction` because no
+ * SQL backend compiled them and none had one portable shape to compile TO,
+ * while `count_distinct` has exactly one — `COUNT(DISTINCT x)`, already the
+ * lowering `service-analytics`'s `AGGREGATE_SQL` uses for the Cube face — and
+ * stayed declared on the strength of it. With this entry the declared
+ * vocabulary and this driver's compiled vocabulary are the SAME SET; the values
+ * are pinned against the remote face by `AGGREGATION_CASES`.
  */
-const SQL_AGGREGATE_FUNCTIONS: ReadonlyMap<string, string> = new Map([
-  ['count', 'count'],
-  ['sum', 'sum'],
-  ['avg', 'avg'],
-  ['min', 'min'],
-  ['max', 'max'],
+const SQL_AGGREGATE_FUNCTIONS: ReadonlyMap<string, SqlAggregateLowering> = new Map([
+  ['count', { sql: 'count', distinct: false }],
+  ['sum', { sql: 'sum', distinct: false }],
+  ['avg', { sql: 'avg', distinct: false }],
+  ['min', { sql: 'min', distinct: false }],
+  ['max', { sql: 'max', distinct: false }],
+  ['count_distinct', { sql: 'count', distinct: true }],
 ]);
 
 /**
@@ -567,13 +663,39 @@ function undeclaredAggregateFunctionError(func: string): Error {
  * [#5907] Class 2 — a DECLARED function this backend cannot compile.
  *
  * Distinct from {@link undeclaredAggregateFunctionError} on purpose, and this is
- * the half that must not be collapsed into it: `count_distinct`, `array_agg` and
- * `string_agg` are declared by `AggregationFunction` and implemented by other
- * backends (`driver-mongodb` compiles all three, `driver-memory`'s analytics
- * face compiles `count_distinct`), so telling a dashboard author their
+ * the half that must not be collapsed into it: `count_distinct` is declared by
+ * `AggregationFunction` and implemented by other backends (`driver-mongodb`,
+ * and `driver-memory`'s analytics face), so telling a dashboard author their
  * `count_distinct` is a typo would be false — the same line #5345 drew in
  * `driver-memory`'s `filter-refusal.ts` between `unknownFieldOperatorError` and
  * `uncompilableFieldOperatorError`.
+ *
+ * `array_agg` and `string_agg` used to belong to this class too. #6188 retired
+ * both from `AggregationFunction` (ADR-0049 — declared by the spec, compiled by
+ * no SQL backend), so they now fall to class 1 and answer 400: the protocol no
+ * longer has those names, which is a different fact from "this backend cannot
+ * lower them" and deserves the different answer. `count_distinct` was
+ * deliberately kept and took the enforce leg instead.
+ *
+ * ⚠️ [#6409] **This class is now EMPTY, and the producer is kept deliberately.**
+ * `count_distinct` was its last inhabitant; with its lowering landed,
+ * `SQL_AGGREGATE_FUNCTIONS` covers every member of `AggregationFunction` and
+ * nothing reaches this branch — pinned as a positive assertion by
+ * `sql-driver-out-of-contract-aggregate-function.test.ts` ("the
+ * declared-but-uncompiled set is empty"), not left to be rediscovered.
+ *
+ * Deleting it as dead code was considered and rejected. The branch is not an
+ * unenforced DECLARATION — the ADR-0049 shape — it is the classifier that
+ * decides which of two truths a future name gets told. Removing it does not
+ * remove the condition; it makes {@link refuseAggregateFunction} answer 400 for
+ * the FIRST function a later spec bump adds, telling the author of a
+ * correctly-spelled `median` that the protocol has no such function. That is
+ * precisely the misreport #5907 exists to prevent, and it would land in the
+ * window between a spec change and a driver change — the window this repo
+ * opens on purpose whenever it takes ADR-0049's enforce leg, as #6188 just did
+ * for this very name. The cost of keeping it is one unreachable branch; the
+ * cost of dropping it is a wrong answer at exactly the moment the vocabulary
+ * grows.
  *
  * `NOT_IMPLEMENTED` / 501 is the answer, from the ADR-0112 STANDARD catalog
  * ("Feature not yet implemented"), whose own `HttpStatusErrorCodeMap` pairs it
@@ -602,11 +724,42 @@ function uncompilableAggregateFunctionError(func: string): Error {
     `correctly and @objectstack/spec AggregationFunction declares it — this is a capability gap ` +
     `in the backend, not a mistake in the query, which is why it answers NOT_IMPLEMENTED/501 ` +
     `rather than a 400. Aggregate with a function this backend compiles; whether the declaration ` +
-    `itself should stand is #6188 (ADR-0049 enforce-or-remove) (#5907).`,
+    `itself should stand is ADR-0049's enforce-or-remove question (#5907).`,
   ) as Error & { code?: string; status?: number };
   err.code = StandardErrorCode.enum.NOT_IMPLEMENTED;
   err.status = 501;
   return err;
+}
+
+/**
+ * [#6409] `count_distinct` written with no `field` — nothing to deduplicate.
+ *
+ * `AggregationNodeSchema` makes `field` optional because `COUNT(*)` is a real
+ * spelling, and the schema has no way to say "optional for this function,
+ * required for that one". So the aggregation parses, reaches this driver, and
+ * asks for `COUNT(DISTINCT *)` — which no dialect this driver targets accepts.
+ *
+ * Refused HERE rather than emitted and left to the database, for the reason
+ * #5907 gives at length one function up: a syntax error raised by SQLite or
+ * Postgres arrives with the driver's SQL in it and no `code`/`status`, so
+ * `mapDataError` serves an opaque 500 for what is a completely legible mistake
+ * in the request. The class is 1, not 2 — `INVALID_QUERY` / 400: the FUNCTION
+ * is compiled here, it is this aggregation node that is malformed, and the
+ * remedy is a key the caller can add.
+ *
+ * The twin lives in `driver-turso`'s `remote-transport.ts`, first sentence for
+ * first sentence (#5240 — one condition, one wording), and the two are compared
+ * as runtime messages by `remote-transport-aggregate-function-refusal.test.ts`.
+ */
+function refuseDistinctAggregateWithoutField(func: string): never {
+  const err = new Error(
+    `Aggregate function "${func}" needs a "field" — there is nothing to deduplicate. ` +
+    `COUNT(*) counts rows and is the spelling that takes no field; a distinct count has to name ` +
+    `the column whose values are deduplicated. Add "field" to the aggregations[] entry (#6409).`,
+  ) as Error & { code?: string; status?: number };
+  err.code = StandardErrorCode.enum.INVALID_QUERY;
+  err.status = 400;
+  throw err;
 }
 
 /**
@@ -693,6 +846,67 @@ function filterArrayReachedDriverError(filters: unknown[]): Error {
     `second compiler for it — call through ObjectQL, or lower the value yourself with ` +
     `parseFilterAST(). Note the INFIX join form ([condA, "or", condB]) has no lowering at ` +
     `all: write the prefix form ["or", condA, condB].`,
+  );
+}
+
+/**
+ * [#5702] A RETIRED filter operator reached the compiler.
+ *
+ * Separate from {@link unknownFieldOperatorMessage}'s "this name is not in the
+ * vocabulary" on purpose: `$regex` and `$options` were not typos, they were
+ * spellings this driver ANSWERED until #4706 retired them, and the author who
+ * wrote one needs the replacement rather than a list to search. The
+ * prescription is `RETIRED_FILTER_OPERATORS[op].why`, printed verbatim — the
+ * spec table exists so that the five refusal sites stop each composing their
+ * own sentence about the same retirement.
+ *
+ * `siblings` are the other keys of the SAME field constraint, and every retired
+ * one among them is named too. `{ $regex: '^acme', $options: 'i' }` is ONE
+ * mistake with ONE fix (write `$icontains`), so a message naming only the key
+ * the loop happened to reach first would send its author back for a second
+ * round-trip on the other one.
+ *
+ * Returns `null` when `op` is not retired, so the caller can fall through to
+ * the ordinary unknown-operator refusal with one expression.
+ */
+function retiredFilterOperatorError(op: string, field: string, siblings: readonly string[] = []): Error | null {
+  const guidance = RETIRED_FILTER_OPERATORS[op];
+  if (!guidance) return null;
+  const replacement = guidance.to ? ` Write "${guidance.to}" instead.` : '';
+  const alsoRetired = siblings.filter((key) => key !== op && RETIRED_FILTER_OPERATORS[key]);
+  const also = alsoRetired.length
+    ? ` The same field constraint also carries the retired ` +
+      `${alsoRetired.map((key) => `"${key}"`).join(', ')} — one "${guidance.to}" replaces the whole ` +
+      `shape, so this is ONE mistake with ONE fix, not one per key.`
+    : '';
+  return unsupportedFilterError(
+    `Filter operator "${op}" on field "${field}" is RETIRED and is no longer evaluated by this ` +
+      `driver.${replacement} ${guidance.why}${also}`,
+  );
+}
+
+/**
+ * [#5702] `$icontains` received a comparand that is not a non-empty string.
+ *
+ * Two rejections, one constructor, because they are one mistake at the
+ * comparand position and the repair is the same sentence:
+ *
+ * - **non-string** — `StringOperatorSchema` declares `$icontains: z.string()`.
+ *   Coercing `42` to `"42"` answers a query nobody wrote (the reading
+ *   `applyLike`'s `String(value)` would otherwise give it).
+ * - **empty string** — every row contains the empty substring, so the predicate
+ *   constrains nothing. A dropped predicate WIDENS a result set, and on an RLS
+ *   read scope that is a permission bypass rather than a degraded filter
+ *   (#3948) — the same reason #5240 refused `{ field: {} }` one level up.
+ */
+function icontainsComparandError(field: string, value: unknown, path: string): Error {
+  const shown = typeof value === 'string' ? `""` : JSON.stringify(value) ?? String(value);
+  return unsupportedFilterError(
+    `Operator "$icontains" on field "${field}" at ${path} requires a NON-EMPTY string comparand, ` +
+      `received ${shown}. "$icontains" is a case-insensitive LITERAL substring search, so its ` +
+      `comparand is the text to look for — an empty one matches every row (a predicate that ` +
+      `constrains nothing), and a non-string one would have to be coerced into text this query ` +
+      `never asked for.`,
   );
 }
 
@@ -793,7 +1007,7 @@ function isBindableComparand(value: unknown): boolean {
  * object.
  */
 const TEXT_PATTERN_OPERATORS: ReadonlySet<string> = new Set([
-  '$contains', '$notContains', '$startsWith', '$endsWith', '$regex',
+  '$contains', '$notContains', '$startsWith', '$endsWith', '$icontains',
 ]);
 
 /**
@@ -975,6 +1189,95 @@ function unrenderableTextComparandError(field: string, op: string, value: unknow
   );
 }
 
+/**
+ * [#7398] Operators whose SQL lowering compares a column's STORED SCALAR to a
+ * value — every spelling either of this driver's two comparison emitters
+ * answers ({@link SqlDriver.applyFilterCondition}'s plain-column switch and
+ * {@link SqlDriver.applyNormalizedComparison}'s normalised arms).
+ *
+ * The bare infix forms are here for the same reason they are in
+ * {@link SCALAR_COMPARAND_OPERATORS}: `applyNormalizedComparison` really does
+ * answer `in` / `nin` / `not_in` / `notin` / `=` / `<>` / `>` …, so a filter
+ * spelled that way against a normalised column compiles, and a gate that only
+ * knew the `$`-forms would leave the failure alive at a different spelling —
+ * the lesson #5234 already paid for in this file.
+ *
+ * `$between` is included although the card's minimum set stopped at the four
+ * ordering comparisons: it IS `>= AND <=` (this driver even decomposes a
+ * calendar-day `$between` into `$gte`/`$lt` a few lines above the emitter), so
+ * refusing the halves and compiling the compound would be the same wrong answer
+ * at one more spelling.
+ *
+ * Deliberately ABSENT, and this is the load-bearing half of the set: the `LIKE`
+ * family (`$contains`, `$notContains`, `$startsWith`, `$endsWith`,
+ * `$icontains`) and the null predicates (`$null`, `$exists`). `$contains` is
+ * the ONLY working membership spelling on a JSON-array column and downstream
+ * code depends on it (#7398's own tables), while `IS NULL` asks about the
+ * column's presence, which is a well-formed question whatever the column holds.
+ */
+const JSON_COLUMN_INCOMPATIBLE_OPERATORS: ReadonlySet<string> = new Set([
+  '$eq', '=', '==',
+  '$ne', '!=', '<>',
+  '$gt', '>', '$gte', '>=', '$lt', '<', '$lte', '<=',
+  '$in', 'in',
+  '$nin', 'nin', 'not_in', 'notin',
+  '$between', 'between',
+]);
+
+/**
+ * [#7398] A scalar-comparison operator met a column this driver stores as JSON
+ * TEXT, so the comparison can never mean what the caller wrote.
+ *
+ * The mechanism is one line of SQL. A `multiple: true` field is stored as the
+ * serialization `["U1","U2"]`, so `members in ('U1')` is FALSE — the text
+ * genuinely is not equal to that id — and `members not in ('U1')` is TRUE. The
+ * measured consequences on the issue's fixture, one row whose `members`
+ * contains `U1`:
+ *
+ * - `$in` / `$eq` / bare equality → **0 rows**, fail-CLOSED. Silent, and a
+ *   `200` with an empty array is byte-identical to a query that legitimately
+ *   matched nothing, so no caller has anything to key on.
+ * - `$nin` / `$ne` → **the row it was asked to exclude**, fail-OPEN. That is
+ *   the dangerous half and the reason this is a refusal rather than a
+ *   documented footgun: an exclusion that silently stops excluding WIDENS a
+ *   result set, the direction #3948 / #4209 / #5347 all ruled outranks a
+ *   narrowing one. The issue's downstream delete-guard
+ *   (`{ assignees: { $in: memberIds } }`) never fired once since it shipped.
+ * - The ordering comparisons are not even uniformly empty: `$lte` matched,
+ *   because `["usr_…"` sorts below `usr_…` on the leading `[`. A lexicographic
+ *   compare over a serialization is a wrong answer, not a narrow one.
+ *
+ * ADR-0112 class 1 — a caller mistake, so `INVALID_FILTER` / 400, the same
+ * envelope {@link unsupportedFilterError} gives the unknown-operator refusal
+ * one arm over. The message states the filter WAS NOT APPLIED for the reason
+ * that wording exists on the comparand-shape refusals: "no rows" is a
+ * legitimate answer to a legitimate query, so a caller must be told that this
+ * one was never asked.
+ *
+ * The prescription is `$contains` (and an `$or` of `$contains` for any-of)
+ * because that is the only spelling that works today — it lowers to
+ * `LIKE '%v%'` over the serialization. That it works at all is incidental
+ * rather than designed, which is the issue's ask 2 (`$overlaps` /
+ * `$containsAny`); ask 2 is a closed-spec-set question and is deliberately not
+ * answered here.
+ */
+function jsonColumnOperatorError(field: string, op: string, bare: boolean): Error {
+  const spelling = bare
+    ? `The bare equality spelling { "${field}": value }`
+    : `Operator "${op}"`;
+  const on = bare ? '' : ` on field "${field}"`;
+  return unsupportedFilterError(
+    `${spelling}${on} WAS NOT APPLIED: "${field}" is a multi-value (or otherwise JSON-valued) ` +
+      `field, stored by this driver as a JSON TEXT column (e.g. ["a","b"]), and "${op}" compares ` +
+      `that whole serialized text against a single value — it can never equal one member. ` +
+      `Use "$contains" for membership ({ "${field}": { "$contains": "a" } }), or an $or of ` +
+      `"$contains" for any-of ({ "$or": [{ "${field}": { "$contains": "a" } }, ` +
+      `{ "${field}": { "$contains": "b" } }] }). Refused rather than compiled because the answer ` +
+      `was silently wrong in BOTH directions: $in/$eq matched nothing, while $nin/$ne returned ` +
+      `the very rows they were asked to exclude (#7398).`,
+  );
+}
+
 /** A short, non-throwing rendering of an offending comparand for the message. */
 function safeShapePreview(value: unknown): string {
   try {
@@ -987,13 +1290,211 @@ function safeShapePreview(value: unknown): string {
 }
 
 /**
+ * Where the wildcard sits relative to the comparand. Named exactly as
+ * `service-analytics`'s `LikeShape` names its own, so the twin implementations
+ * read alike: `contains` → `%v%`, `starts` → `v%`, `ends` → `%v`.
+ */
+type TextMatchShape = 'contains' | 'starts' | 'ends';
+
+/**
+ * The ASCII case map, written out as data.
+ *
+ * [#6518] Spelled as two 26-character constants rather than reached through a
+ * locale-aware `LOWER()` because "ASCII only" is the CONTRACT (#4706 Q1 = A),
+ * and a locale can be configured to fold more. Measured on a live Postgres 16
+ * (both a `C.utf8` database and an ICU one): `lower('CAFÉ')` is `café` — the
+ * over-fold — while `translate('CAFÉ', <upper>, <lower>)` is `cafÉ`. The
+ * mapping being visible in the emitted SQL is the point: a reviewer can see
+ * that exactly 26 characters fold, without knowing the server's locale.
+ */
+const ASCII_UPPER_LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+const ASCII_LOWER_LETTERS = 'abcdefghijklmnopqrstuvwxyz';
+
+/** The character bound into every `ESCAPE` clause this driver emits. */
+const LIKE_ESCAPE_CHARACTER = '\\';
+
+/**
+ * Escape the LIKE metacharacters (`%`, `_`) and the escape character itself
+ * (`\`) so a comparand matches literally.
+ *
+ * This is the expression `service-analytics`'s `escapeLikePattern` is held to
+ * character for character by its `like-metacharacter-escape.test.ts`. Changing
+ * it here without changing it there forks one `$contains` into two.
+ */
+function escapeLikeComparand(value: unknown): string {
+  return String(value).replace(/[\\%_]/g, '\\$&');
+}
+
+/**
+ * [#6518] Escape the GLOB metacharacters (`*`, `?`, `[`) so a comparand matches
+ * literally, using GLOB's ONLY escape mechanism: a single-character class.
+ *
+ * GLOB has no `ESCAPE` clause — SQLite's grammar simply does not have one for
+ * it — so `[*]`, `[?]` and `[[]` are how a literal metacharacter is spelled.
+ * `]` needs no escape and deliberately gets none: every `[` this function sees
+ * is turned into a class that closes itself, so no unclosed class can survive
+ * for a later `]` to terminate. `%` and `_` are ordinary characters to GLOB and
+ * are likewise left alone — the escaped class here is NOT the LIKE one, and
+ * writing the two as one shared regex is the mistake to refuse.
+ *
+ * Measured before it was written (better-sqlite3 3.53.4, the nine-row
+ * `FILTER_TEXT_ROWS` fixture plus `a*b` / `a?b` / `a[b`): the unescaped pattern
+ * `*a*b*` returned six rows where `*a[*]b*` returns the one. An unescaped `*`
+ * is the same filter bypass an unescaped `%` is under LIKE, which is why this
+ * function exists at the same level as its LIKE sibling rather than inline.
+ */
+function escapeGlobComparand(value: unknown): string {
+  return String(value).replace(/[*?[]/g, '[$&]');
+}
+
+/** Wrap an already-escaped comparand in the wildcards `shape` calls for. */
+function wrapTextMatchShape(escaped: string, shape: TextMatchShape, wildcard: string): string {
+  if (shape === 'starts') return `${escaped}${wildcard}`;
+  if (shape === 'ends') return `${wildcard}${escaped}`;
+  return `${wildcard}${escaped}${wildcard}`;
+}
+
+/**
+ * [#6518] MySQL's ASCII-only case fold: 26 `REPLACE`s over the BINARY rendering
+ * of an expression.
+ *
+ * Ugly, and the alternatives are all wrong rather than merely uglier — that is
+ * the whole justification, so it is written down:
+ *
+ *   - `LOWER(x)` folds the full Unicode range (the defect this closes).
+ *   - `LOWER(x)` on a binary string is documented as INEFFECTIVE, so casting
+ *     first and folding after simply does not fold.
+ *   - `CONVERT(x USING ascii)` maps every non-ASCII character to `?`, which
+ *     COLLIDES `café` with `cafÉ` — strictly worse than over-folding.
+ *   - No MySQL collation is case-insensitive for ASCII and exact elsewhere.
+ *
+ * Operating on `CAST(x AS BINARY)` rather than on the text is what makes it
+ * provable without a live server: in binary space `REPLACE` matches bytes, so
+ * no collation participates, and UTF-8 is self-synchronising — a byte in
+ * `0x41..0x5A` can only ever be a real ASCII `A`..`Z`, never part of a
+ * multi-byte character. Byte-wise ASCII lowering therefore IS the ruled fold.
+ */
+function mysqlAsciiLowerBinary(expr: string): string {
+  let out = `CAST(${expr} AS BINARY)`;
+  for (let i = 0; i < ASCII_UPPER_LETTERS.length; i++) {
+    out = `REPLACE(${out}, '${ASCII_UPPER_LETTERS[i]}', '${ASCII_LOWER_LETTERS[i]}')`;
+  }
+  return out;
+}
+
+/**
+ * [#6518] The one place a text predicate becomes SQL — `{sql, bindings}` for
+ * knex's `whereRaw`, with `??` the column and `?` the pattern.
+ *
+ * # The defect this closes
+ *
+ * Before this, every dialect got `col LIKE ? ESCAPE ?` (and `LOWER()` on both
+ * sides for `$icontains`), which made case sensitivity the DIALECT's answer
+ * where #4706 rules it the CONTRACT's. Both halves over-matched — they returned
+ * rows the filter excludes, which on an RLS read scope is over-reach (#3948),
+ * not a loose filter:
+ *
+ * | | `$contains` family (must be case-SENSITIVE, Q2=A) | `$icontains` (folds ASCII ONLY, Q1=A) |
+ * |---|---|---|
+ * | SQLite | ✗ `LIKE` folds ASCII | ✓ `lower()` is ASCII-only |
+ * | Postgres | ✓ `LIKE` is case-exact | ✗ `LOWER()` folds all of Unicode |
+ * | MySQL | ✗ follows the collation | ✗ `LOWER()` folds all of Unicode |
+ *
+ * # What is emitted now, and why each cell
+ *
+ * - **SQLite → `GLOB`.** `LIKE`'s ASCII fold cannot be turned off per-statement;
+ *   `PRAGMA case_sensitive_like` is a CONNECTION-global switch, so one query
+ *   would change every other query's meaning. Of the operand-level tricks,
+ *   `CAST(col AS BLOB) LIKE ?` was measured to return NOTHING at all (SQLite's
+ *   LIKE is false for a BLOB operand), so the operator has to change. `GLOB` is
+ *   case-exact by definition and carries its own escape mechanism
+ *   ({@link escapeGlobComparand}). `lower()` in front of it is still the
+ *   `$icontains` fold, and still ASCII-only: measured, `lower('CAFÉ')` is
+ *   `'cafÉ'`, so `lower(name) GLOB '*café*'` answers row 4 and `'*cafÉ*'`
+ *   answers row 3 — the Q1 = A boundary, executed rather than argued.
+ * - **Postgres → `LIKE`, unchanged**, because `LIKE` there is already exact.
+ *   Only the fold moves, from `LOWER()` to {@link ASCII_UPPER_LETTERS}-driven
+ *   `translate()`. Measured live (PG 16, ICU database): `LOWER(name) LIKE
+ *   LOWER('%café%')` returned rows 3 AND 4; the `translate()` form returns row
+ *   4, and its `'%CAFÉ%'` mirror returns row 3.
+ * - **MySQL → `LIKE` over `CAST(… AS BINARY)`**, which is byte-wise and
+ *   therefore case-exact whatever the column's collation says. The fold adds
+ *   {@link mysqlAsciiLowerBinary} on top. NOT executed here: no MySQL server was
+ *   provisionable in the container that wrote this, so the mysql cell is a
+ *   declared skip in the live matrix rather than a claimed pass, and the
+ *   reasoning is written out on that helper instead.
+ * - **`'unknown'` → the pre-#6518 `LIKE`/`LOWER()` shape.** `dialectName` is
+ *   `'unknown'` for a knex client this driver does not model (mssql, oracle),
+ *   where `GLOB` is a syntax error and `CAST(… AS BINARY)` means something
+ *   else. Emitting the old shape is not an endorsement of it — it is the only
+ *   answer that still RUNS, and it is the residue the conformance ledger names.
+ *
+ * # Why one function and not four emitters
+ *
+ * The escaping is the P0 (#5567: an unescaped `%` matches every row), the fold
+ * is the contract, and the two interact — the SQLite arm needs a DIFFERENT
+ * escaped character class from the other three, which is exactly the kind of
+ * divergence a second emitter drops on the floor. Every arm below therefore
+ * builds its pattern from one of two named escape functions and one shared
+ * {@link wrapTextMatchShape}, so "which characters are literal" is answered per
+ * dialect in one readable place and can never be answered by accident.
+ */
+function textMatchPredicate(
+  dialect: SqlDialectName,
+  field: string,
+  value: unknown,
+  shape: TextMatchShape,
+  negate: boolean,
+  fold: boolean,
+): { sql: string; bindings: unknown[] } {
+  if (dialect === 'sqlite') {
+    // GLOB takes no ESCAPE clause, so this arm binds two values, not three.
+    const pattern = wrapTextMatchShape(escapeGlobComparand(value), shape, '*');
+    const column = fold ? 'lower(??)' : '??';
+    const comparand = fold ? 'lower(?)' : '?';
+    return {
+      sql: `${column} ${negate ? 'NOT GLOB' : 'GLOB'} ${comparand}`,
+      bindings: [field, pattern],
+    };
+  }
+
+  const pattern = wrapTextMatchShape(escapeLikeComparand(value), shape, '%');
+  const keyword = negate ? 'NOT LIKE' : 'LIKE';
+  // The `ESCAPE` character is BOUND, never written as a literal: MySQL applies C
+  // escape syntax inside string literals, so `'\'` and `'\\'` are the same
+  // backslash spelled two ways per dialect, while a bound value has one
+  // spelling everywhere (#5567).
+  const bindings = [field, pattern, LIKE_ESCAPE_CHARACTER];
+
+  if (dialect === 'postgres') {
+    const asciiLower = (expr: string) =>
+      fold ? `translate(${expr}, '${ASCII_UPPER_LETTERS}', '${ASCII_LOWER_LETTERS}')` : expr;
+    return { sql: `${asciiLower('??')} ${keyword} ${asciiLower('?')} ESCAPE ?`, bindings };
+  }
+
+  if (dialect === 'mysql') {
+    const caseExact = (expr: string) =>
+      fold ? mysqlAsciiLowerBinary(expr) : `CAST(${expr} AS BINARY)`;
+    return { sql: `${caseExact('??')} ${keyword} ${caseExact('?')} ESCAPE ?`, bindings };
+  }
+
+  const column = fold ? 'LOWER(??)' : '??';
+  const comparand = fold ? 'LOWER(?)' : '?';
+  return { sql: `${column} ${keyword} ${comparand} ESCAPE ?`, bindings };
+}
+
+/**
  * [#5134] What a filter node is worth as a boolean, before any SQL is emitted.
  *
  * - `'true'`  — matches every row; the compiler emits NO clause for it.
  * - `'false'` — matches no row; the compiler emits the dialect FALSE constant.
  * - `'clause'` — carries at least one real predicate; compile it normally.
+ *
+ * [#5659] The vocabulary is `@objectstack/spec`'s now, because the REDUCTION
+ * that produces it is — see {@link reduceFilterNode}. Kept as a local alias so
+ * every use site below still reads `FilterVerdict`.
  */
-type FilterVerdict = 'true' | 'false' | 'clause';
+type FilterVerdict = SharedFilterVerdict;
 
 /**
  * [#5134] Is `value` a Filter Protocol NODE — the shape `FilterConditionSchema`
@@ -1351,52 +1852,59 @@ function assertFilterNodeList(value: unknown, key: string, path: string): assert
  * "empty because the author wrote nothing" from "empty because something failed
  * to compile". A structural verdict has no such blind spot, and it lets the
  * emitter guarantee that every group it opens receives at least one clause.
+ *
+ * ## [#5659] The algebra is `@objectstack/spec`'s; the REFUSALS are this driver's
+ *
+ * Everything above describes a ruling (#5322/#5134) that four consumers had to
+ * agree on and implemented four times — here, in `driver-mongodb`, in
+ * `driver-memory`'s matcher, and nearly a fifth time inside `@objectstack/lint`,
+ * which declined to hand-write it and filed #5659 instead. The reduction now
+ * lives once, in {@link reduceFilterVerdict}, proven against the same
+ * `FILTER_LOGIC_CASES` table this driver's conformance suite runs.
+ *
+ * What stays here is what is genuinely this driver's: WHICH shapes it refuses
+ * and with which message. They are handed to the shared walk as
+ * {@link SQL_FILTER_VERDICT_HOOKS} and are invoked from exactly the positions
+ * they were invoked from before, so no wording, code or status moved — the
+ * conformance case-set is green on both sides of the change.
  */
 function reduceFilterNode(node: Record<string, unknown>, path: string): FilterVerdict {
-  let sawFalse = false;
-  let sawClause = false;
-  for (const [key, value] of Object.entries(node)) {
-    const verdict = reduceFilterKey(key, value, path);
-    if (verdict === 'false') sawFalse = true;
-    else if (verdict === 'clause') sawClause = true;
-  }
-  // AND over the node's keys: FALSE dominates, then a real predicate, else TRUE.
-  return sawFalse ? 'false' : sawClause ? 'clause' : 'true';
+  return reduceFilterVerdict(node, { ...SQL_FILTER_VERDICT_HOOKS, path });
 }
 
 /** [#5134] The verdict of ONE key of a filter node. */
 function reduceFilterKey(key: string, value: unknown, path: string): FilterVerdict {
-  const here = path ? `${path}.${key}` : key;
+  return reduceFilterKeyVerdict(key, value, { ...SQL_FILTER_VERDICT_HOOKS, path });
+}
 
-  if (key === '$and' || key === '$or') {
-    assertFilterNodeList(value, key, here);
-    let sawTrue = false;
-    let sawFalse = false;
-    let sawClause = false;
-    value.forEach((element, index) => {
-      const elementPath = `${here}[${index}]`;
-      assertFilterNode(element, elementPath);
-      const verdict = reduceFilterNode(element, elementPath);
-      if (verdict === 'true') sawTrue = true;
-      else if (verdict === 'false') sawFalse = true;
-      else sawClause = true;
-    });
-    // `$and: []` → no FALSE, no clause → TRUE (the AND identity).
-    if (key === '$and') return sawFalse ? 'false' : sawClause ? 'clause' : 'true';
-    // `$or: []` → no TRUE, no clause → FALSE (the OR identity). This is the
-    // half the old compile got backwards: it answered the whole table.
-    return sawTrue ? 'true' : sawClause ? 'clause' : 'false';
-  }
+/**
+ * [#5659] This driver's half of the reduction: the shape refusals, at the
+ * positions the shared walk visits them.
+ *
+ * `assertFilterNodeList` / `assertFilterNode` are wrapped in arrows rather than
+ * passed by reference because they are TypeScript assertion functions, whose
+ * narrowing is meaningless — and whose declaration requirements are a nuisance
+ * — through a property reference. Nothing else about the call changes.
+ */
+const SQL_FILTER_VERDICT_HOOKS: FilterVerdictHooks = {
+  assertNodeList: (value, key, path) => assertFilterNodeList(value, key, path),
+  assertNode: (value, path) => assertFilterNode(value, path),
+  classifyKey: (key, value, here) => classifyFilterKey(key, value, here),
+};
 
-  if (key === '$not') {
-    assertFilterNode(value, here);
-    const inner = reduceFilterNode(value, here);
-    // NOT TRUE ≡ FALSE — so `{ $not: {} }` matches nothing.
-    return inner === 'true' ? 'false' : inner === 'false' ? 'true' : 'clause';
-  }
-
+/**
+ * [#5134] The verdict of ONE **non-combinator** key — and this driver's gate on
+ * everything a field constraint may not be.
+ *
+ * `here` is the already-joined path of the key, exactly as the reduction hands
+ * it over; the three combinator arms this used to open with are the shared
+ * walk's now, and the refusals below are unchanged from when they sat under
+ * them.
+ */
+function classifyFilterKey(key: string, value: unknown, here: string): FilterVerdict {
   // [#5348] Everything still `$`-prefixed at this point is an UNDECLARED
-  // combinator — the three declared ones each returned above. Refused here and
+  // combinator — the shared walk resolved the three declared ones before this
+  // key ever reached the hook (#5659). Refused here and
   // not in the emitter for exactly the reason the two lines below are here, and
   // the reason #5327 gave for `{ field: {} }`: this walk is exhaustive and does
   // not short-circuit, while the emitter is skipped wholesale by a boolean
@@ -1474,6 +1982,20 @@ function reduceFilterKey(key: string, value: unknown, path: string): FilterVerdi
     typeof value.$exists !== 'boolean'
   ) {
     throw nonBooleanExistsComparandError(key, value.$exists, `${here}.$exists`);
+  }
+
+  // [#5702] `$icontains`'s comparand is a NON-EMPTY string by declaration,
+  // refused on this walk for the same evaluation-order reason as the two gates
+  // above: an empty comparand makes the predicate match every row, and a gate
+  // the emitter carries alone is skipped wholesale whenever a boolean identity
+  // settles the enclosing node — so `{ $or: [ {}, { name: { $icontains: '' } } ] }`
+  // would be refused or silently widened depending on its SIBLINGS.
+  if (
+    isFilterNode(value) &&
+    Object.prototype.hasOwnProperty.call(value, '$icontains') &&
+    (typeof value.$icontains !== 'string' || value.$icontains === '')
+  ) {
+    throw icontainsComparandError(key, value.$icontains, `${here}.$icontains`);
   }
 
   // A field key always contributes a predicate.
@@ -1811,6 +2333,52 @@ export type ReadPresentationKind = 'datetime' | 'date' | 'time' | 'boolean' | 'n
  */
 export type SqliteJournalMode = 'wal' | 'delete';
 
+/**
+ * What to do when a **file-backed** SQLite datasource points at a path that
+ * does not exist yet (#6743).
+ *
+ * - `'create'` — SQLite's own behaviour, and the default: the file is brought
+ *   into existence by the first statement on the connection.
+ * - `'empty-in-memory'` — do NOT create it. Open an ephemeral `:memory:`
+ *   database instead, which introspects as a database with zero tables — the
+ *   same thing a freshly-created empty file introspects as. For a read-only
+ *   caller (`os migrate plan`) the report is therefore identical while the
+ *   filesystem is left untouched.
+ *
+ * `'empty-in-memory'` is for callers that only ever READ. A caller that may
+ * write MUST leave it at `'create'`: writes land in the ephemeral database and
+ * are lost at disconnect. `os migrate apply` is exactly that caller — it boots
+ * with `deferSchemaDdl` too, but flushes the deferred DDL after confirmation,
+ * so it must keep `'create'`. Deferring the DDL and never opening the file are
+ * different promises; #3917 made the first, this makes the second.
+ */
+export type SqliteAbsentFileMode = 'create' | 'empty-in-memory';
+
+/**
+ * Resolve the filename a SQLite connection should actually open, given the
+ * declared target and the {@link SqliteAbsentFileMode} the host asked for.
+ *
+ * The ONE place the "does the target exist?" judgement is made (#6743). It is
+ * exported so the service layer's native→wasm step-down can resolve the same
+ * answer for its fallback rung rather than open-coding a second `existsSync`
+ * that is free to drift — the two-places objection that ruled out doing this
+ * check up in the CLI.
+ *
+ * Pseudo-filenames (`:memory:` and anything else `:`-prefixed) and non-file
+ * dialects are already fileless, so they are returned untouched.
+ */
+export function resolveSqliteAbsentFileTarget(
+  filename: string,
+  mode: SqliteAbsentFileMode | undefined,
+): { filename: string; openedEmptyInMemory: boolean } {
+  if (mode !== 'empty-in-memory') return { filename, openedEmptyInMemory: false };
+  if (typeof filename !== 'string' || filename === '' || filename.startsWith(':')) {
+    return { filename, openedEmptyInMemory: false };
+  }
+  if (existsSync(filename)) return { filename, openedEmptyInMemory: false };
+  return { filename: ':memory:', openedEmptyInMemory: true };
+}
+
 export type SqlDriverConfig = Knex.Config & {
   schemaMode?: SchemaMode;
   /**
@@ -1833,6 +2401,18 @@ export type SqlDriverConfig = Knex.Config & {
    * @see {@link SqlDriver.applySqliteJournalMode}
    */
   sqliteJournalMode?: SqliteJournalMode;
+  /**
+   * What to do when the **file-backed** SQLite target does not exist (#6743).
+   * Defaults to `'create'` — SQLite's own behaviour, and what every existing
+   * caller gets, since this option changes nothing unless it is passed.
+   *
+   * Ignored for `:memory:` and for non-SQLite dialects, neither of which can
+   * bring a database file into existence.
+   *
+   * @see {@link SqliteAbsentFileMode}
+   * @see {@link SqlDriver.sqliteOpenedEmptyInMemory}
+   */
+  sqliteAbsentFile?: SqliteAbsentFileMode;
 };
 
 // ── SQL Driver ───────────────────────────────────────────────────────────────
@@ -2163,16 +2743,65 @@ export class SqlDriver implements IDataDriver {
   /** Object defs `initObjects` registered but did not physically sync while {@link deferredDdl}. */
   protected deferredSchemaObjects = new Map<string, { name: string; fields?: Record<string, any> }>();
 
+  /** Backing field for {@link sqliteOpenedEmptyInMemory} (#6743). */
+  private openedEmptyInMemory = false;
+
   constructor(config: SqlDriverConfig) {
-    // `schemaMode` / `autoMigrate` / `sqliteJournalMode` are ObjectStack
-    // concerns, not Knex options — strip them before handing the config to Knex.
-    const { schemaMode, autoMigrate, sqliteJournalMode, ...knexConfig } = config;
+    // `schemaMode` / `autoMigrate` / `sqliteJournalMode` / `sqliteAbsentFile`
+    // are ObjectStack concerns, not Knex options — strip them before handing
+    // the config to Knex.
+    const { schemaMode, autoMigrate, sqliteJournalMode, sqliteAbsentFile, ...knexConfig } = config;
     this.schemaMode = schemaMode ?? 'managed';
     this.autoMigrate = autoMigrate ?? 'off';
     this.declaredJournalMode = sqliteJournalMode;
+    // `this.config` keeps the DECLARED target, deliberately: it is what
+    // `describeDriverConnection` renders, so `os migrate plan` still names the
+    // database the plan is about rather than the `:memory:` stand-in it read
+    // (#6743 — the ruling's "same report as today, byte for byte"). Only the
+    // Knex instance below is redirected.
     this.config = knexConfig;
-    this.knex = knex(SqlDriver.withConnectBound(knexConfig));
+    this.knex = knex(SqlDriver.withConnectBound(this.knexConfigFor(knexConfig, sqliteAbsentFile)));
     this.installQueryTiming();
+  }
+
+  /**
+   * Whether this driver opened an ephemeral `:memory:` database because its
+   * declared SQLite file did not exist and the host asked for
+   * `sqliteAbsentFile: 'empty-in-memory'` (#6743).
+   *
+   * `false` for every driver that did not ask for that mode — which is every
+   * driver that existed before it.
+   */
+  public get sqliteOpenedEmptyInMemory(): boolean {
+    return this.openedEmptyInMemory;
+  }
+
+  /**
+   * Apply {@link SqliteAbsentFileMode} to the Knex config, redirecting a
+   * missing SQLite file to `:memory:` before Knex ever opens it.
+   *
+   * Has to happen HERE rather than in `connect()`: the filename is baked into
+   * the Knex instance at construction, and better-sqlite3 opens (and therefore
+   * creates) the file on the first statement — which for this driver is the
+   * `PRAGMA auto_vacuum` in {@link connect}.
+   */
+  private knexConfigFor(
+    knexConfig: Knex.Config,
+    mode: SqliteAbsentFileMode | undefined,
+  ): Knex.Config {
+    if (mode !== 'empty-in-memory') return knexConfig;
+    const conn = (knexConfig as { connection?: unknown }).connection;
+    const declared = typeof conn === 'string' ? conn : (conn as { filename?: unknown })?.filename;
+    if (typeof declared !== 'string') return knexConfig;
+    const resolved = resolveSqliteAbsentFileTarget(declared, mode);
+    if (!resolved.openedEmptyInMemory) return knexConfig;
+    this.openedEmptyInMemory = true;
+    return {
+      ...knexConfig,
+      connection: typeof conn === 'string'
+        ? resolved.filename
+        : { ...(conn as object), filename: resolved.filename },
+    } as Knex.Config;
   }
 
   /**
@@ -2859,16 +3488,48 @@ export class SqlDriver implements IDataDriver {
 
     this.auditMissingTenant(object, 'create', options);
     this.injectTenantOnInsert(object, toInsert, options);
-    await this.fillAutoNumberFields(object, toInsert, options);
 
-    // Rotation (ADR-0057 P2): the base name is a read-only view — new rows
-    // land in the current shard.
-    const builder = this.getBuilder(this.rotationWriteTarget(object) ?? object, options);
-    const formatted = this.applyWriteColumnMap(object, this.formatInput(object, toInsert));
-    this.stampInsertTimestamps(object, formatted);
+    // #5495. The autonumber counter is bootstrapped from the data table exactly
+    // once, so any row that lands by a path bypassing `fillAutoNumberFields`
+    // leaves it permanently behind `MAX` — and every create then collided,
+    // burned a number and failed the request until it had ground past the
+    // seeded range one 409 at a time. Re-seed and retry instead, but ONLY when
+    // the collision is provably this counter's; see
+    // {@link collidingAutoNumberReservations} for how that is decided and why
+    // it cannot be decided from the error text alone.
+    //
+    // Retrying is confined to the no-caller-transaction case on purpose. Inside
+    // a caller's transaction there is nothing to repair here — the sequence
+    // UPDATE shares that transaction and rolls back with the refused INSERT, so
+    // no number is burned (measured) — and there is something to break: on
+    // Postgres a constraint failure aborts the whole transaction, so a retry
+    // issued on it could not succeed anyway. The caller owns that retry.
+    const mayRetry = options?.transaction === undefined;
+    for (let attempt = 0; ; attempt++) {
+      const reservations = await this.fillAutoNumberFields(object, toInsert, options);
 
-    const result = await builder.insert(formatted).returning('*');
-    return this.formatOutput(object, result[0]);
+      // Rotation (ADR-0057 P2): the base name is a read-only view — new rows
+      // land in the current shard.
+      const builder = this.getBuilder(this.rotationWriteTarget(object) ?? object, options);
+      const formatted = this.applyWriteColumnMap(object, this.formatInput(object, toInsert));
+      this.stampInsertTimestamps(object, formatted);
+
+      try {
+        const result = await builder.insert(formatted).returning('*');
+        return this.formatOutput(object, result[0]);
+      } catch (error) {
+        if (!mayRetry || attempt >= AUTONUMBER_COLLISION_RETRIES) throw error;
+        const colliding = await this.collidingAutoNumberReservations(error, reservations, options);
+        if (colliding.length === 0) throw error;
+        for (const reservation of colliding) {
+          await this.resyncSequenceToDataMax(reservation);
+          // Clear only what collided, so the next pass regenerates exactly
+          // those fields. A reservation that did NOT collide keeps its value
+          // rather than burning a second number for nothing.
+          delete toInsert[reservation.field];
+        }
+      }
+    }
   }
 
   /**
@@ -3026,9 +3687,68 @@ export class SqlDriver implements IDataDriver {
   }
 
   /**
-   * Bootstrap helper: scan the data table for the highest numeric suffix
-   * matching `prefix` (optionally scoped to a tenant). Used the first time
-   * a sequence row is created so legacy/seeded data continues monotonically.
+   * Bootstrap helper: scan the data table for the highest counter value among
+   * the values matching `prefix` (optionally scoped to a tenant). Used the first
+   * time a sequence row is created so legacy/seeded data continues monotonically.
+   *
+   * # Where the counter sits in a stored value (#6468)
+   *
+   * `renderAutonumber` composes `prefix + zero-padded(seq) + suffix`, so a format
+   * with tokens AFTER the `{0..0}` slot (`{000}-{YYYY}` → `001-2026`) does not
+   * end in the counter. Concatenating every digit of the tail read that as
+   * `12026` against a true counter of `1`, and the engine's own fallback seeding
+   * read the same row as `2026` — two different wrong answers for one dataset,
+   * so the issued band depended on which driver ran.
+   *
+   * `prefix` and `suffix` are `renderAutonumber`'s own output, computed by the
+   * caller and passed down: this driver derives no format understanding of its
+   * own, and the engine's `seedAutonumber` applies the identical rule to the
+   * identical two strings.
+   *
+   *   - **Either declared ⇒ ANCHORED**: the counter is the digit run at the
+   *     START of what follows the prefix, after removing the declared suffix
+   *     when the row carries it. That reading is not this driver's to hold: it
+   *     is spec's `readAutonumberCounter`, the declared inverse of
+   *     `renderAutonumber`, called here and by the engine's seeding scan so one
+   *     edit moves both sides (#6560 — the ruling that retired the two
+   *     hand-written copies PR #6553 left).
+   *   - **Neither declared ⇒ UNANCHORED**: the legacy reading (every digit in
+   *     the value, concatenated) is kept byte-for-byte, and stays HERE. The
+   *     engine's legacy reading of the same case differs on purpose (it takes
+   *     the last digit run), so there is nothing shared to hoist — spec answers
+   *     `undefined` for an unanchored slot rather than pick one of the two.
+   *
+   * ## The unanchored arm is IMPLEMENTATION DETAIL, outside the declared contract (#7287)
+   *
+   * That refusal is now a DECLARED boundary, not merely an absent agreement: the
+   * #7287 ruling (2026-08-10, 「宣告边界」) states that a stored value carrying
+   * non-digit content on an unanchored format is out of contract for counter
+   * readback, and that `readAutonumberCounter`'s `undefined` for that slot is the
+   * contract rather than a gap. The boundary and its rationale live in that
+   * function's TSDoc in `packages/spec/src/data/autonumber-format.ts`; the pins
+   * are `packages/spec/src/data/autonumber-unanchored-boundary.test.ts`.
+   *
+   * So the concatenate-every-digit reading below is THIS DRIVER'S behavior, not a
+   * promise the platform makes. On the inputs the contract admits — pure-digit
+   * values, which is what `renderAutonumber` emits for an unanchored format — it
+   * answers the same number the engine does. On mixed-content values it may
+   * answer differently (`'SO-2024-0007'` → `20240007` here, `7` in the engine's
+   * `readStoredAutonumberCounter`), and that difference is out of contract on
+   * both sides, not a defect on either.
+   *
+   * Consequently the ruling moves nothing here: neither this reading nor the
+   * engine's was hoisted into the shared helper, precisely because doing so would
+   * move live behavior on the other side over record numbers already issued.
+   *
+   * ## Why the suffix is NOT pushed into the LIKE
+   *
+   * `like 'prefix%suffix'` looks tempting and is wrong: the counter scope is the
+   * rendered PREFIX, so `{000}-{YYYY}` keeps ONE counter across years while its
+   * suffix renders `-2025` on last year's rows. Filtering on the current
+   * suffix would drop exactly those rows and seed BELOW the real max — the
+   * duplicate-record-number harm, self-inflicted. The predicate therefore stays
+   * `prefix%` and the suffix is applied per row, where a non-match simply means
+   * "different suffix, same counter".
    */
   protected async scanMaxNumericTail(
     queryRunner: Knex | Knex.Transaction,
@@ -3037,6 +3757,7 @@ export class SqlDriver implements IDataDriver {
     prefix: string,
     tenantField: string | null,
     tenantId: string | null,
+    suffix = '',
   ): Promise<number> {
     const escapedPrefix = prefix.replace(/([\\%_])/g, '\\$1');
     let builder = queryRunner(tableName).select(field).where(field, 'like', `${escapedPrefix}%`).whereNotNull(field);
@@ -3045,11 +3766,24 @@ export class SqlDriver implements IDataDriver {
     }
     const rows = await builder;
     let maxN = 0;
+    const anchored = prefix !== '' || suffix !== '';
     for (const r of rows as any[]) {
       const v: string = (r as any)[field];
       if (typeof v !== 'string') continue;
-      const tail = v.slice(prefix.length);
-      const n = parseInt(tail.replace(/[^0-9]/g, ''), 10);
+      let n: number;
+      if (anchored) {
+        // Spec's inverse of `renderAutonumber` (#6560). It also re-checks the
+        // prefix in JS: a driver-side `LIKE` can match looser than `startsWith`
+        // (collation, case-insensitive columns), and a row from another scope
+        // must not inflate this counter — it reads as `undefined`, same as a
+        // row carrying no counter at all.
+        const read = readAutonumberCounter(v, prefix, suffix);
+        if (read === undefined) continue;
+        n = read;
+      } else {
+        // Unanchored: `prefix` is '' here, so this is the whole value.
+        n = parseInt(v.replace(/[^0-9]/g, ''), 10);
+      }
       if (Number.isFinite(n) && n > maxN) maxN = n;
     }
     return maxN;
@@ -3067,8 +3801,34 @@ export class SqlDriver implements IDataDriver {
    *     transaction reads-modifies-writes at a time. A PK-violation race on
    *     first insert is retried as an UPDATE.
    *
-   * Gaps are tolerated by design — a rolled-back insert "burns" a number,
-   * matching standard sequence semantics.
+   * ## Which gaps are by design, and which one was a defect (#5495)
+   *
+   * These are two different things, and the sentence that used to stand here
+   * ("gaps are tolerated by design — a rolled-back insert burns a number")
+   * covered only the first while reading as though it covered both:
+   *
+   *  - **A rolled-back insert burns a number — still by design.** The caller
+   *    asked for a value, got one, and abandoned it. That is what every
+   *    standard sequence does, and nothing here tries to reclaim it.
+   *  - **A *persistently failing* insert used to burn one number per attempt —
+   *    that was the defect.** The bootstrap below runs exactly once, in the
+   *    `if (!existing)` branch: after it, the data table is never consulted
+   *    again. Any row landing by a path that bypasses `fillAutoNumberFields`
+   *    (an `isSystem` seed replay or a `preserveAudit` import — both
+   *    strip-exempt under #5503 and keeping their explicit numbers — or direct
+   *    SQL) therefore never raises the sequence, and once the counter sits
+   *    below `MAX` it is permanently behind. Every create then collided,
+   *    burned a number, and failed the request, until the counter had ground
+   *    past the seeded range one 409 at a time. That is the "one-time storm
+   *    per database" #5495 reported from the field: 25 consecutive 409s.
+   *
+   * The second one is no longer reachable from `create()`, which re-seeds this
+   * counter from the data-table MAX and retries when it can prove the
+   * collision was this counter's — see {@link collidingAutoNumberReservations}
+   * and {@link resyncSequenceToDataMax}. The storm now costs one internal
+   * retry instead of one failed request per burned number. This function's own
+   * contract is unchanged: it still hands out one value per call and never
+   * takes one back.
    */
   protected async getNextSequenceValue(
     object: string,
@@ -3079,6 +3839,10 @@ export class SqlDriver implements IDataDriver {
     tenantId: string | null,
     parentTrx?: Knex.Transaction,
     scope = '',
+    // Rendered text AFTER the sequence slot — forwarded verbatim to the
+    // bootstrap scan so it can find the counter in values that do not end in it
+    // (#6468). Purely positional plumbing; no sequencing logic reads it.
+    suffix = '',
   ): Promise<number> {
     // Pass the caller's transaction so a cold-cache first write inside a batch
     // transaction ensures the table on the right connection instead of dead-
@@ -3131,6 +3895,7 @@ export class SqlDriver implements IDataDriver {
           prefix,
           tenantField,
           resolvedTenantId === GLOBAL_TENANT ? null : resolvedTenantId,
+          suffix,
         );
         const initial = seedMax + 1;
         try {
@@ -3157,18 +3922,26 @@ export class SqlDriver implements IDataDriver {
    * plus `{field}` interpolation from the row), so it resets per period/group;
    * the full rendered prefix bootstraps the counter from existing data, and the
    * tenant scopes it for isolation.
+   *
+   * Returns one {@link AutoNumberReservation} per field it actually generated —
+   * the collision path in `create()` needs to know which values on the row are
+   * this driver's own and which the caller supplied, and under what scan
+   * coordinates a stale counter would be re-seeded (#5495). A field the caller
+   * filled is not reported, because a duplicate on it is the caller's 409 to
+   * receive, not a sequence to re-seed.
    */
   protected async fillAutoNumberFields(
     object: string,
     row: Record<string, any>,
     options?: DriverOptions,
-  ): Promise<void> {
+  ): Promise<AutoNumberReservation[]> {
     // Scan/seed the physical (remote) table for an external object; managed
     // objects fall through to the storage-mapped name. Config lookup stays
     // keyed by object name (matching initObjects/registerExternalObject).
     const tableName = this.physicalTableByObject[object] ?? StorageNameMapping.resolveTableName({ name: object } as any);
     const cfgs = this.autoNumberFields[object] || this.autoNumberFields[tableName];
-    if (!cfgs || cfgs.length === 0) return;
+    if (!cfgs || cfgs.length === 0) return [];
+    const reservations: AutoNumberReservation[] = [];
     const parentTrx = options?.transaction as Knex.Transaction | undefined;
     const timezone = options?.timezone;
     const now = new Date();
@@ -3207,9 +3980,165 @@ export class SqlDriver implements IDataDriver {
         tenantId,
         parentTrx,
         probe.scope,
+        probe.suffix,
       );
-      row[cfg.name] = renderAutonumber({ tokens: cfg.tokens, seq: next, record: row, now, timezone }).value;
+      const value = renderAutonumber({ tokens: cfg.tokens, seq: next, record: row, now, timezone }).value;
+      row[cfg.name] = value;
+      reservations.push({
+        field: cfg.name,
+        tableName,
+        prefix: probe.prefix,
+        scope: probe.scope,
+        suffix: probe.suffix,
+        tenantField: cfg.tenantField ?? null,
+        tenantId,
+        value,
+      });
     }
+    return reservations;
+  }
+
+  /**
+   * Does a row already hold `reservation.value` in the partition this
+   * counter covers? (#5495)
+   *
+   * This is the collision path's **dialect-free** discriminator, and it exists
+   * because the text-based one cannot answer for the configuration the field
+   * report came from. `uniqueViolationColumn()` (#6544) deliberately returns
+   * `undefined` for a composite key and for an index name — and the unique
+   * index this driver builds for a tenanted autonumber field is BOTH: ADR-0120
+   * D3 makes it `(COALESCE(organization_id,'__global__'), field)`, an
+   * expression composite, on which SQLite reports
+   * `UNIQUE constraint failed: index 'uniq_…'` and names no column at all
+   * (measured). So on the exact shape #5495 was filed against, the conflicting
+   * column is *never* determinable, and a retry predicate resting on it would
+   * either never fire or fire blindly.
+   *
+   * Asking the data instead is decidable in every dialect: if the value this
+   * driver just generated is already present, the collision was this counter's
+   * and re-seeding is the right answer. If it is absent, the duplicate was on
+   * some OTHER unique field — a value the caller typed — and that 409 is theirs
+   * to receive, so the error is rethrown untouched. That is the distinction the
+   * card required and the reason a blanket "retry any unique violation" is
+   * wrong.
+   *
+   * Costs one indexed lookup, on the failure path only. The happy path is
+   * unchanged.
+   *
+   * The partition matches {@link scanMaxNumericTail} exactly — same tenant
+   * column, same tenant value — so "exists here" and "would be re-seeded from
+   * here" cannot disagree. Built directly on the query runner rather than via
+   * `getBuilder`, mirroring `scanMaxNumericTail`: this is the sequence's own
+   * bookkeeping read against an explicit tenant, not a caller-facing read.
+   */
+  protected async autoNumberValueExists(
+    queryRunner: Knex | Knex.Transaction,
+    reservation: AutoNumberReservation,
+  ): Promise<boolean> {
+    let builder = queryRunner(reservation.tableName).select(reservation.field).where(reservation.field, reservation.value);
+    if (reservation.tenantField && reservation.tenantId !== null) {
+      builder = builder.where(reservation.tenantField, reservation.tenantId);
+    }
+    const hit = await builder.first();
+    return hit !== undefined && hit !== null;
+  }
+
+  /**
+   * Which of this row's generated autonumbers did the failed INSERT collide on?
+   * Empty means "none of them" — the caller must rethrow (#5495).
+   *
+   * Three states, all of them handled explicitly, because #6544's contract has
+   * three and collapsing any two of them silently is how a real 409 gets eaten:
+   *
+   *  1. **A column was named and it is one of ours** → that reservation
+   *     collided. No probe needed; the dialect already answered.
+   *  2. **A column was named and it is not ours** → the duplicate is on a
+   *     caller-supplied unique field. Return empty: the 409 is the client's and
+   *     must reach them unchanged. Retrying here would silently swallow it.
+   *  3. **No column was determinable** — a composite key, an index name, or
+   *     MySQL, which names only indexes. This is NOT treated as either of the
+   *     first two. It is resolved by {@link autoNumberValueExists}, which reads
+   *     the data instead of the message. On this repo's tenanted autonumber
+   *     index, state 3 is the ONLY state that ever occurs.
+   */
+  protected async collidingAutoNumberReservations(
+    error: unknown,
+    reservations: AutoNumberReservation[],
+    options?: DriverOptions,
+  ): Promise<AutoNumberReservation[]> {
+    if (reservations.length === 0 || !isUniqueViolationError(error)) return [];
+
+    const column = uniqueViolationColumn(error);
+    if (column !== undefined) return reservations.filter((r) => r.field === column);
+
+    const runner: Knex | Knex.Transaction = (options?.transaction as Knex.Transaction | undefined) ?? this.knex;
+    const colliding: AutoNumberReservation[] = [];
+    for (const reservation of reservations) {
+      if (await this.autoNumberValueExists(runner, reservation)) colliding.push(reservation);
+    }
+    return colliding;
+  }
+
+  /**
+   * Re-seed one counter from the data-table MAX, the operation the original
+   * bootstrap performs exactly once and never again (#5495).
+   *
+   * Only ever moves a counter FORWARD. A counter already at or ahead of the
+   * observed MAX is left alone: the collision that brought us here was then a
+   * concurrent writer taking the number rather than a stale counter, and
+   * rewinding would hand out numbers that are already in use.
+   *
+   * ## Read failures are not swallowed
+   *
+   * The MAX scan is deliberately NOT wrapped in a catch. #6114's rule for the
+   * engine's seeding path is that a read failure must be type-discriminated
+   * (`isMissingTableError`) and never folded into `0` or a stale value — the
+   * #5979 family. Here the stronger form is available: there is nothing to
+   * discriminate, because a scan failure simply propagates. Note also that the
+   * benign case that rule exists for cannot arise on this path — we are here
+   * *because* an INSERT into this very table was refused by a constraint, so
+   * the table demonstrably exists.
+   */
+  protected async resyncSequenceToDataMax(reservation: AutoNumberReservation): Promise<void> {
+    await this.ensureSequencesTable();
+    const resolvedTenantId =
+      reservation.tenantField && reservation.tenantId ? String(reservation.tenantId) : GLOBAL_TENANT;
+    const key = this.sequencesHasKeyHash
+      ? { key_hash: this.sequenceKeyHash(reservation.tableName, resolvedTenantId, reservation.field, reservation.scope) }
+      : { object: reservation.tableName, tenant_id: resolvedTenantId, field: reservation.field };
+
+    await this.knex.transaction(async (trx) => {
+      const observedMax = await this.scanMaxNumericTail(
+        trx,
+        reservation.tableName,
+        reservation.field,
+        reservation.prefix,
+        reservation.tenantField,
+        resolvedTenantId === GLOBAL_TENANT ? null : resolvedTenantId,
+        reservation.suffix,
+      );
+      const existing = await trx(SEQUENCES_TABLE).where(key).first();
+      if (!existing || Number(existing.last_value) >= observedMax) return;
+      await trx(SEQUENCES_TABLE).where(key).update({ last_value: observedMax, updated_at: this.knex.fn.now() });
+    });
+  }
+
+  /**
+   * Identity of the counter a reservation was drawn from — the same
+   * `(table, tenant, field, scope)` hash {@link getNextSequenceValue} keys the
+   * sequences row by (#6943).
+   *
+   * `create()` never needed this: one row draws at most one reservation per
+   * field, so "which counter" and "which reservation" are the same question.
+   * A batch breaks that — many rows draw from ONE counter — and both of the
+   * batch's collision decisions are per *counter*, not per reservation: re-seed
+   * each stale counter once rather than once per row, and re-issue every row
+   * that drew from it. See {@link bulkCreate}.
+   */
+  protected autoNumberCounterKey(reservation: AutoNumberReservation): string {
+    const resolvedTenantId =
+      reservation.tenantField && reservation.tenantId ? String(reservation.tenantId) : GLOBAL_TENANT;
+    return this.sequenceKeyHash(reservation.tableName, resolvedTenantId, reservation.field, reservation.scope);
   }
 
   /**
@@ -3279,6 +4208,27 @@ export class SqlDriver implements IDataDriver {
     return this.formatOutput(object, updated) || null;
   }
 
+  /**
+   * Columns `upsert`'s merge branch must never write ([#7011]): `created_at`
+   * (the row's birth timestamp belongs to the original insert) and every
+   * `auto_number` column — an autonumber is an immutable business identifier
+   * once assigned, so an upsert that lands on an existing row keeps that row's
+   * number (see the fuller rationale at the merge site). Autonumber columns
+   * are returned under their PHYSICAL names (an external object can remap
+   * logical fields via `external.columnMap`), matching the
+   * `applyWriteColumnMap`-processed row the merge column list is derived from;
+   * `created_at` stays the literal post-map key it has always been filtered as.
+   */
+  protected insertOnlyUpsertColumns(object: string): Set<string> {
+    // Same config resolution as `fillAutoNumberFields`: object name first,
+    // then the storage-mapped table name.
+    const tableName = this.physicalTableByObject[object] ?? StorageNameMapping.resolveTableName({ name: object } as any);
+    const cfgs = this.autoNumberFields[object] || this.autoNumberFields[tableName] || [];
+    const columns = new Set<string>(['created_at']);
+    for (const cfg of cfgs) columns.add(this.remoteColumn(object, cfg.name, cfg.name));
+    return columns;
+  }
+
   async upsert(object: string, data: Record<string, any>, conflictKeys?: string[], options?: DriverOptions): Promise<Record<string, any>> {
     const { _id, ...rest } = data;
     const toUpsert = { ...rest };
@@ -3291,23 +4241,69 @@ export class SqlDriver implements IDataDriver {
 
     this.auditMissingTenant(object, 'upsert', options);
     this.injectTenantOnInsert(object, toUpsert, options);
-    await this.fillAutoNumberFields(object, toUpsert, options);
 
-    const formatted = this.applyWriteColumnMap(object, this.formatInput(object, toUpsert));
-    this.stampInsertTimestamps(object, formatted);
     const mergeKeys = conflictKeys && conflictKeys.length > 0 ? conflictKeys : ['id'];
 
-    // Rotation: conflict-merge is scoped to the CURRENT shard (telemetry is
-    // effectively append-only; a cross-shard upsert would need a probe-first
-    // strategy nothing on the platform requires today).
-    const builder = this.getBuilder(this.rotationWriteTarget(object) ?? object, options);
-    // `created_at` is insert-only — never overwrite it when an existing row is
-    // merged on conflict (the stamped/seeded value belongs to the original
-    // insert). Everything else (incl. `updated_at`) merges as before, so an
-    // upsert that updates a row still advances `updated_at`.
-    const mergeColumns = Object.keys(formatted).filter((c) => c !== 'created_at');
-    const insertion = builder.insert(formatted).onConflict(mergeKeys);
-    await (mergeColumns.length > 0 ? insertion.merge(mergeColumns) : insertion.merge());
+    // #6943. Measured: `upsert` does NOT share `bulkCreate`'s shape. It is
+    // single-row, so a stale counter costs it exactly one burned number per
+    // call — the same shape `create()` had before #5495, for the same reason
+    // (no re-seed, no retry). `ON CONFLICT (mergeKeys) DO UPDATE` absorbs a
+    // conflict on the merge key only; the tenanted autonumber lives under a
+    // DIFFERENT unique index, so its violation is still raised and still
+    // reaches here. The remedy is therefore `create()`'s, verbatim: re-seed and
+    // re-issue, but only when the collision is provably this counter's
+    // ({@link collidingAutoNumberReservations}), and only outside a caller
+    // transaction (inside one the sequence UPDATE rolls back with the refused
+    // INSERT, so nothing is burned and there is nothing to repair — measured).
+    const mayRetry = options?.transaction === undefined;
+    for (let attempt = 0; ; attempt++) {
+      const reservations = await this.fillAutoNumberFields(object, toUpsert, options);
+
+      const formatted = this.applyWriteColumnMap(object, this.formatInput(object, toUpsert));
+      this.stampInsertTimestamps(object, formatted);
+
+      // Rotation: conflict-merge is scoped to the CURRENT shard (telemetry is
+      // effectively append-only; a cross-shard upsert would need a probe-first
+      // strategy nothing on the platform requires today).
+      const builder = this.getBuilder(this.rotationWriteTarget(object) ?? object, options);
+      // `created_at` is insert-only — never overwrite it when an existing row is
+      // merged on conflict (the stamped/seeded value belongs to the original
+      // insert). [#7011] `auto_number` columns are insert-only for the same
+      // reason, and a stronger one: the number is an externally visible
+      // business identifier once assigned (`CASE-00001`), and
+      // `fillAutoNumberFields` above reserved a FRESH value before the
+      // statement could know it would merge — leaving these columns in the
+      // merge set rewrote the existing row's number on every merge-path upsert
+      // (measured on a healthy counter: create → CASE-00001, two upserts of
+      // the same id → CASE-00002 then CASE-00003, one row throughout). The
+      // exclusion is unconditional — an explicit payload value does not
+      // renumber on merge either; `update()` is the deliberate renumbering
+      // path. The reservation itself still happens on the merge path (a gap,
+      // not a rewrite) — that pre-burn half is #6943's reseed family, not
+      // this exclusion's. Everything else (incl. `updated_at`) merges as
+      // before, so an upsert that updates a row still advances `updated_at`.
+      const insertOnlyColumns = this.insertOnlyUpsertColumns(object);
+      const mergeColumns = Object.keys(formatted).filter((c) => !insertOnlyColumns.has(c));
+      const insertion = builder.insert(formatted).onConflict(mergeKeys);
+
+      try {
+        await (mergeColumns.length > 0 ? insertion.merge(mergeColumns) : insertion.merge());
+        break;
+      } catch (error) {
+        if (!mayRetry || attempt >= AUTONUMBER_COLLISION_RETRIES) throw error;
+        const colliding = await this.collidingAutoNumberReservations(error, reservations, options);
+        if (colliding.length === 0) throw error;
+        for (const reservation of colliding) {
+          await this.resyncSequenceToDataMax(reservation);
+          // Clear only what collided, so the next pass regenerates exactly
+          // those fields — a reservation that did NOT collide keeps its value
+          // rather than burning a second number for nothing. (Safe here in a
+          // way it is NOT for a batch: one row cannot collide with itself.
+          // See {@link bulkCreate}.)
+          delete toUpsert[reservation.field];
+        }
+      }
+    }
 
     const readback = this.getBuilder(object, options).where('id', toUpsert.id);
     this.applyTenantScope(readback, object, options);
@@ -3357,33 +4353,126 @@ export class SqlDriver implements IDataDriver {
       return toInsert;
     });
     for (const row of rows) {
-      if (row && typeof row === 'object') {
-        this.injectTenantOnInsert(object, row, options);
-        // Reserve a persistent sequence value for each row's autonumber
-        // field(s) — the engine no longer pre-fills these (see #1603).
-        await this.fillAutoNumberFields(object, row, options);
+      if (row && typeof row === 'object') this.injectTenantOnInsert(object, row, options);
+    }
+
+    // #6943. A stale counter costs this path more than it costs `create()`.
+    // Each row reserves its own number in its own committed transaction, and
+    // then the whole batch goes in as ONE insert — so a single colliding row
+    // does not burn one number, it burns every number the batch reserved and
+    // fails the whole request. Measured on `main` @ `c8ff269` (counter at 10,
+    // rows 11–39 landed by a bypass path): a 3-row `bulkCreate` threw, wrote
+    // ZERO rows and moved `last_value` 10 → 13; the next call moved it 13 → 16
+    // and threw again. And the exposure is the worst available, because
+    // framework#2678 made this the common path for seed/import — which is
+    // precisely what *creates* the staleness (`isSystem` replay and
+    // `preserveAudit` import keep their explicit numbers and never enter
+    // `fillAutoNumberFields`, #5495/#5503).
+    //
+    // ## Batch semantics are deliberately NOT changed
+    //
+    // The card anticipated a decision about partial success and transaction
+    // boundaries. Measurement dissolves it: `insert(rows[])` is a SINGLE
+    // statement (`… select … union all select …` on SQLite, multi-row VALUES
+    // elsewhere), so the batch is ALREADY all-or-nothing — the failed batch
+    // above left the table exactly as it found it. Re-issuing and retrying the
+    // WHOLE batch therefore preserves the existing contract byte for byte: no
+    // partial success is introduced, no transaction is opened, no sibling-
+    // rollback question arises because siblings already fail together.
+    // Rejected instead:
+    //   - **Per-row retry inside the batch** (the shape the card sketched).
+    //     It requires splitting the one statement into N to learn which row
+    //     failed, which INVENTS partial success where none exists, costs N
+    //     round-trips on the hot seed/import path, and is what the engine's
+    //     own #6806 note warns about ("re-writing the batch could DUPLICATE
+    //     the rows that did land"). Nothing lands here, so nothing can.
+    //   - **Wrapping the batch in a driver-opened transaction.** It would move
+    //     the boundary the card was worried about, for no gain (the statement
+    //     is already atomic), and it defeats the reservation model: each
+    //     `getNextSequenceValue` commits on purpose, which is what makes a
+    //     forward-only re-seed meaningful. On SQLite (pool max 1) it is also
+    //     the deadlock `ensureSequencesTable` documents.
+    //   - **Re-seed but do not re-issue** (what the engine does at #6806).
+    //     Correct there, because the engine cannot know whether an arbitrary
+    //     driver applied the batch partially. Inside THIS driver that is
+    //     measurably false, so the caller can be handed a successful batch
+    //     instead of an error it has to retry itself.
+    //   - **Blanket retry on any unique violation.** Rejected for #5495's
+    //     reason: it silently eats the caller's own 409.
+    const mayRetry = options?.transaction === undefined;
+    // What each row currently holds, ACROSS attempts. A retry regenerates only
+    // the fields it cleared, so `fillAutoNumberFields` reports only those; a
+    // value kept from the previous pass is still a live reservation and has to
+    // stay described here, or a second collision on a counter that did not go
+    // stale the first time would find nothing to route and rethrow blind.
+    const reservationsPerRow: AutoNumberReservation[][] = rows.map(() => []);
+    for (let attempt = 0; ; attempt++) {
+      // Reserve a persistent sequence value for each row's autonumber
+      // field(s) — the engine no longer pre-fills these (see #1603).
+      for (let i = 0; i < rows.length; i++) {
+        const row = rows[i];
+        if (!row || typeof row !== 'object') continue;
+        const reissued = await this.fillAutoNumberFields(object, row, options);
+        if (reissued.length === 0) continue;
+        const replaced = new Set(reissued.map((r) => r.field));
+        reservationsPerRow[i] = [...reservationsPerRow[i].filter((r) => !replaced.has(r.field)), ...reissued];
+      }
+
+      // Same write-side marshaling as create() (#2735): JSON-typed and
+      // object-valued fields must be serialized per row before they reach the
+      // knex binder — the raw batch used to hand `{lat, lng}` objects straight
+      // to SQLite ("Wrong API use: tried to bind a value of an unknown type"),
+      // silently failing the whole seed batch. Timestamp stamping runs on the
+      // FORMATTED copy, mirroring create().
+      const formattedRows = rows.map((row) => {
+        if (!row || typeof row !== 'object') return row;
+        const formatted = this.applyWriteColumnMap(object, this.formatInput(object, row));
+        this.stampInsertTimestamps(object, formatted);
+        return formatted;
+      });
+      const builder = this.getBuilder(this.rotationWriteTarget(object) ?? object, options);
+
+      try {
+        const result = await builder.insert(formattedRows).returning('*');
+        // Read-back parity with create(): JSON columns come back as their stored
+        // strings from `returning('*')` — decode them so batch callers see the
+        // same shapes single-insert callers do.
+        return Array.isArray(result)
+          ? result.map((r) => this.formatOutput(object, r))
+          : result;
+      } catch (error) {
+        if (!mayRetry || attempt >= AUTONUMBER_COLLISION_RETRIES) throw error;
+        const colliding = await this.collidingAutoNumberReservations(error, reservationsPerRow.flat(), options);
+        if (colliding.length === 0) throw error;
+
+        // Re-seed each stale counter ONCE, not once per row that drew from it:
+        // the scan is identical for every row sharing a counter and the update
+        // is forward-only, so the repeats are pure cost.
+        const stale = new Set<string>();
+        for (const reservation of colliding) {
+          const key = this.autoNumberCounterKey(reservation);
+          if (stale.has(key)) continue;
+          stale.add(key);
+          await this.resyncSequenceToDataMax(reservation);
+        }
+
+        // Re-issue EVERY row drawn from a stale counter — including rows whose
+        // own value did not collide. This is where the batch genuinely differs
+        // from `create()`, which keeps a non-colliding value to avoid burning a
+        // second number. Keeping them here is unsound: a batch that straddles
+        // the seeded range (say the counter is at 10, rows 11–39 exist, and the
+        // batch reserved 11–70) has its low rows collide and its high rows not,
+        // and regenerating only the low ones hands them numbers ABOVE the kept
+        // ones — an intra-batch duplicate this driver would have created
+        // itself. Counters that did NOT go stale keep their values, so another
+        // tenant's rows in the same batch are undisturbed.
+        for (let i = 0; i < rows.length; i++) {
+          for (const reservation of reservationsPerRow[i]) {
+            if (stale.has(this.autoNumberCounterKey(reservation))) delete rows[i][reservation.field];
+          }
+        }
       }
     }
-    // Same write-side marshaling as create() (#2735): JSON-typed and
-    // object-valued fields must be serialized per row before they reach the
-    // knex binder — the raw batch used to hand `{lat, lng}` objects straight
-    // to SQLite ("Wrong API use: tried to bind a value of an unknown type"),
-    // silently failing the whole seed batch. Timestamp stamping runs on the
-    // FORMATTED copy, mirroring create().
-    const formattedRows = rows.map((row) => {
-      if (!row || typeof row !== 'object') return row;
-      const formatted = this.applyWriteColumnMap(object, this.formatInput(object, row));
-      this.stampInsertTimestamps(object, formatted);
-      return formatted;
-    });
-    const builder = this.getBuilder(this.rotationWriteTarget(object) ?? object, options);
-    const result = await builder.insert(formattedRows).returning('*');
-    // Read-back parity with create(): JSON columns come back as their stored
-    // strings from `returning('*')` — decode them so batch callers see the
-    // same shapes single-insert callers do.
-    return Array.isArray(result)
-      ? result.map((r) => this.formatOutput(object, r))
-      : result;
   }
 
   /**
@@ -3664,7 +4753,8 @@ export class SqlDriver implements IDataDriver {
       // groupBy items may be plain strings ('region') or structured objects
       // ({ field: 'closed_at', dateGranularity: 'quarter' }). For structured
       // items we emit a dialect-specific bucket expression aliased as the
-      // field name so the resulting row keys match in-memory bucketDateValue.
+      // projected column name so the resulting row keys match in-memory
+      // bucketDateValue — see the `outKey` note below for what that name is.
       // [#6212] The element type is `GroupByNode` — the spec's own union — so
       // the local `Array<string | { field, dateGranularity? }>` restatement is
       // gone. It had drifted from the declaration it was restating: `alias` was
@@ -3677,6 +4767,18 @@ export class SqlDriver implements IDataDriver {
           const kind = this.readPresentationKind(table, g);
           if (kind) presentedOutput.set(g, kind);
         } else if (g && typeof g === 'object' && g.field) {
+          // [#6401] The projected column is named `alias ?? field` — the rule
+          // `AggregationNodeSchema.alias` already gets a few dozen lines below,
+          // and the one `in-memory-aggregation.ts` has always applied
+          // (`g.alias ?? g.field`). This face was the half that PARSED the key
+          // and ignored it, so one aggregate came back keyed by `closed_at`
+          // under pushdown and by `qtr` under the in-memory fallback — decided
+          // by a driver capability bit and a timezone the caller cannot see
+          // (`engine.ts`'s `allStructuredSupported && !tzRequiresInMemory`
+          // fork). GROUP BY still keys on the FIELD; only the projection is
+          // renamed, so the buckets are identical and only their column name
+          // moves.
+          const outKey = g.alias ?? g.field;
           if (g.dateGranularity) {
             const bucket = this.buildDateBucketExpr(g.field, g.dateGranularity, table);
             if (!bucket) {
@@ -3690,12 +4792,18 @@ export class SqlDriver implements IDataDriver {
               );
             }
             builder.groupByRaw(bucket.sql, bucket.bindings);
-            builder.select(this.knex.raw(`${bucket.sql} as ??`, [...bucket.bindings, g.field]));
+            builder.select(this.knex.raw(`${bucket.sql} as ??`, [...bucket.bindings, outKey]));
           } else {
             builder.groupBy(g.field);
-            builder.select(g.field);
+            // `?? as ??` only when the name actually moves: an alias equal to
+            // the field would otherwise rewrite `select "region"` into
+            // `select "region" as "region"` on every dialect for no gain.
+            builder.select(outKey === g.field ? g.field : this.knex.raw('?? as ??', [g.field, outKey]));
+            // Keyed by the OUTPUT column, like the aggregation branch below —
+            // `presentReadColumns` matches on the name the row actually
+            // carries, so an aliased group value went unpresented before.
             const kind = this.readPresentationKind(table, g.field);
-            if (kind) presentedOutput.set(g.field, kind);
+            if (kind) presentedOutput.set(outKey, kind);
           }
         }
       }
@@ -3715,14 +4823,24 @@ export class SqlDriver implements IDataDriver {
     if (aggregates) {
       for (const agg of aggregates) {
         const funcName = agg.function;
-        const rawFunc = this.mapAggregateFunc(funcName);
+        const lowering = this.mapAggregateFunc(funcName);
         // Spec: `field` is optional for COUNT (means COUNT(*)).
         const fieldExpr = agg.field ?? '*';
+        // [#6409] `count_distinct` lowers to `count(distinct ??)`. The keyword
+        // goes in the SQL FRAGMENT, never in a binding: `??` still binds the
+        // column as a knex identifier exactly as it did for the other five, so
+        // the caller's field name has no path into the statement text. And
+        // `COUNT(DISTINCT *)` is not valid SQL anywhere — a distinct aggregate
+        // with no field is refused rather than emitted, so the caller reads
+        // their own mistake instead of a dialect's syntax error wrapped in a
+        // 500 (see {@link refuseDistinctAggregateWithoutField}).
+        if (lowering.distinct && fieldExpr === '*') refuseDistinctAggregateWithoutField(funcName);
+        const rawFunc = lowering.distinct ? `${lowering.sql}(distinct ??)` : `${lowering.sql}(??)`;
         if (agg.alias) {
           if (fieldExpr === '*') {
-            builder.select(this.knex.raw(`${rawFunc}(*) as ??`, [agg.alias]));
+            builder.select(this.knex.raw(`${lowering.sql}(*) as ??`, [agg.alias]));
           } else {
-            builder.select(this.knex.raw(`${rawFunc}(??) as ??`, [fieldExpr, agg.alias]));
+            builder.select(this.knex.raw(`${rawFunc} as ??`, [fieldExpr, agg.alias]));
           }
           // `min`/`max` are the only supported functions that hand back a value
           // OF the column rather than a count/total derived from it, so they are
@@ -3737,9 +4855,9 @@ export class SqlDriver implements IDataDriver {
           }
         } else {
           if (fieldExpr === '*') {
-            builder.select(this.knex.raw(`${rawFunc}(*)`));
+            builder.select(this.knex.raw(`${lowering.sql}(*)`));
           } else {
-            builder.select(this.knex.raw(`${rawFunc}(??)`, [fieldExpr]));
+            builder.select(this.knex.raw(rawFunc, [fieldExpr]));
           }
         }
       }
@@ -3753,8 +4871,49 @@ export class SqlDriver implements IDataDriver {
   // Distinct
   // ===================================
 
-  async distinct(object: string, field: string, filters?: any, options?: DriverOptions): Promise<any[]> {
+  /**
+   * Distinct values of one field, optionally constrained.
+   *
+   * The third argument is a **bare {@link FilterCondition}** — the same value
+   * `find()` carries under `query.where`, NOT a query envelope. The body has
+   * always said so (`applyFilters(builder, filters)` is handed the argument
+   * itself, never a `.where` off it); `filters?: any` simply left that sentence
+   * out of the type, and #6320 measured what the omission costs.
+   *
+   * What the annotation actually buys, measured rather than assumed (#6320):
+   *
+   * - **A truthy SCALAR no longer compiles.** `distinct('orders', 'product',
+   *   'completed')` used to type-check and RESOLVE the *unfiltered* set —
+   *   `applyFilters` emits no predicate for a non-object, non-array `where`
+   *   (see the closing comment there). That silent widening is the family
+   *   #6320/#5234 are about, and it is what this narrowing removes.
+   * - **A query envelope still compiles, and that is not fixable here.**
+   *   `FilterCondition` is an open map (`[key: string]: any`) because a filter
+   *   key is a *field name*, so `{ object, where }` is structurally a perfectly
+   *   good filter — one that constrains columns named `object` and `where`.
+   *   No type can separate it from a legitimate filter. It is caught at
+   *   RUNTIME instead, loudly: `INVALID_FILTER` / 400 out of
+   *   {@link assertCompilableComparand}, because the envelope's `where` value
+   *   is an object and no comparand may be. `driver-memory`'s half of that
+   *   asymmetry (a bare filter there returns the unfiltered set in silence)
+   *   stays open under the #5499 freeze; this driver's half never was silent.
+   *
+   * Held by `sql-driver-distinct-filter-narrowing.test.ts`.
+   */
+  async distinct(object: string, field: string, filters?: FilterCondition, options?: DriverOptions): Promise<any[]> {
     const builder = this.getBuilder(object, options);
+    // The third read door that skipped the chokepoint, and the one #6792 does
+    // NOT name — the card asserts the opposite ("called at 13 sites — …,
+    // `count`, `distinct`, …"). It is not among them; the 13th read site is
+    // `aggregate()`. Found by the gate this change ships, not by the card.
+    //
+    // VALUES rather than rows, which lowers the volume and not the class:
+    // measured on `main` at `6595262`, `distinct(account, 'name', undefined,
+    // { tenantId: 'org_a' })` returned `[A1, A2, B1, B2, P1]` — every other
+    // tenant's values for the named column. Documented with a runnable example
+    // (`content/docs/protocol/objectql/query-syntax.mdx`), so it is exposed the
+    // same way the window door is.
+    this.applyTenantScope(builder, object, options);
 
     if (filters) {
       this.applyFilters(builder, filters);
@@ -3789,6 +4948,20 @@ export class SqlDriver implements IDataDriver {
    */
   async findWithWindowFunctions(object: string, query: SqlWindowFunctionQuery, options?: DriverOptions): Promise<any[]> {
     const builder = this.getBuilder(object, options);
+    // ROWS, so this is the read-side wall itself — not a consistency tidy-up
+    // (#6792). This door returned every tenant's rows to a caller that passed
+    // `options.tenantId`, because it built through `getBuilder` and then simply
+    // never reached the chokepoint all thirteen other doors route through.
+    // Measured on `main` at `6595262` with two tenants seeded: `tenantId:
+    // 'org_a'` returned `[a1, a2, b1, b2, p1]` here and `[a1, a2, p1]` through
+    // `find()` — org_b's rows, handed to org_a, at the driver layer.
+    //
+    // Placed BESIDE `getBuilder` and above the caller's `where`, which is the
+    // position `findRows()` uses: the predicate has to be on the builder before
+    // anything reads it, and `applyTenantScope` is what owns the NULL-org
+    // platform-row and ADR-0105 D2 union semantics. Re-deriving either here
+    // would be a second, worse copy of the wall.
+    this.applyTenantScope(builder, object, options);
 
     builder.select('*');
 
@@ -3809,8 +4982,14 @@ export class SqlDriver implements IDataDriver {
       }
     }
 
-    if (query.limit) builder.limit(query.limit);
-    if (query.offset) builder.offset(query.offset);
+    // PRESENCE, not truthiness — the same test `findRows()` makes (#6577).
+    // `limit: 0` means "return no records" (#6485), and `0` is falsy, so
+    // `if (query.limit)` dropped the clause and answered a request for NOTHING
+    // with the WHOLE table. Measured on `main` before this line changed: three
+    // rows seeded, `{ limit: 0 }` returned 3 here and 0 through `find()` — one
+    // driver, two answers to one `QueryAST`.
+    if (query.limit !== undefined) builder.limit(query.limit);
+    if (query.offset !== undefined) builder.offset(query.offset);
 
     return await builder;
   }
@@ -3832,6 +5011,19 @@ export class SqlDriver implements IDataDriver {
    */
   async analyzeQuery(object: string, query: DriverQuery, options?: DriverOptions): Promise<any> {
     const builder = this.getBuilder(object, options);
+    // A PLAN, not rows — so this is a smaller fix than the one above, and it is
+    // made on its own merits rather than riding in on that one (#6792). It is
+    // the SAME defect #6577 fixed on this method one builder line lower: a plan
+    // is only worth reading if it explains the statement `find()` would
+    // actually run, and a missing tenant predicate is not a cosmetic
+    // difference — it changes selectivity and therefore which index the planner
+    // picks, so the EXPLAIN answers for a query nobody will execute.
+    // Measured on `main` at `6595262`, `tenantId: 'org_a'`:
+    //   analyze -> select * from `os6792_account`
+    //   find    -> select * from `os6792_account`
+    //              where (`organization_id` = ? or `organization_id` is null)
+    //              order by `id` asc
+    this.applyTenantScope(builder, object, options);
 
     if (query.fields) {
       builder.select(query.fields);
@@ -3849,8 +5041,15 @@ export class SqlDriver implements IDataDriver {
       }
     }
 
-    if (query.limit) builder.limit(query.limit);
-    if (query.offset) builder.offset(query.offset);
+    // PRESENCE, not truthiness — see `findWithWindowFunctions()` above (#6577).
+    // The stake is different here and no smaller: this door returns a PLAN, and
+    // a plan is only worth reading if it explains the statement `find()` would
+    // actually run. Measured on `main` before this line changed: `{ limit: 0 }`
+    // compiled to `select * from `orders`` while `find()` sent
+    // `select * from `orders` order by `id` asc limit ?` — an EXPLAIN for a
+    // different query, which is the one thing an EXPLAIN must never be.
+    if (query.limit !== undefined) builder.limit(query.limit);
+    if (query.offset !== undefined) builder.offset(query.offset);
 
     const sql = builder.toSQL();
     const client = (this.config as any).client;
@@ -4265,10 +5464,7 @@ export class SqlDriver implements IDataDriver {
         if (type === 'datetime') datetimeCols.push(name);
         if (type === 'time') timeCols.push(name);
         if (type === 'auto_number' || type === 'autonumber') {
-          const rawFmt = (typeof field.autonumberFormat === 'string' && field.autonumberFormat)
-            ? field.autonumberFormat
-            : (typeof field.format === 'string' && field.format ? field.format : '');
-          const fmt = rawFmt || '{0000}';
+          const fmt = resolveAutonumberFormat(field);
           autoNumberCols.push({ name, format: fmt, tokens: parseAutonumberFormat(fmt), tenantField });
         }
       }
@@ -4345,12 +5541,7 @@ export class SqlDriver implements IDataDriver {
             (this.timeFields[tableName] ??= new Set()).add(name);
           }
           if (type === 'auto_number' || type === 'autonumber') {
-            // Honor either the spec-canonical `autonumberFormat` or the
-            // shorthand `format` (both appear in metadata) — see #1603.
-            const rawFmt = (typeof field.autonumberFormat === 'string' && field.autonumberFormat)
-              ? field.autonumberFormat
-              : (typeof field.format === 'string' && field.format ? field.format : '');
-            const fmt = rawFmt || '{0000}';
+            const fmt = resolveAutonumberFormat(field);
             // Tokenize once: the renderer resolves date tokens (`{YYYYMMDD}`),
             // field interpolation (`{island_zone}`) and the sequence slot at
             // fill time. The counter scopes to whatever renders before the slot.
@@ -5673,8 +6864,30 @@ export class SqlDriver implements IDataDriver {
    *
    * Used both for sync idempotency ({@link getExistingIndexNames}) and for index
    * drift detection (#3728), which needs the full definition rather than just
-   * the name. Failures are swallowed: at worst we attempt a create and absorb
-   * the "already exists" error in {@link syncDeclaredIndexes}.
+   * the name.
+   *
+   * ⚠️ A failed read is an ERROR, not an empty table (#7332). This used to wrap
+   * the whole dialect dispatch in a bare `catch {}` and return `byName` in
+   * whatever half-built state it had reached, so the caller could not tell "this
+   * table genuinely has no such index" from "the read failed and I am guessing".
+   * Downstream, `diffManagedIndexes` takes its declared-index-missing branch on
+   * exactly that input: a transient SQLITE_BUSY, or a WAL read landing
+   * mid-flush, was laundered into a confident, specific and FALSE
+   * `actual: '(absent)'` — *"metadata declares index 'x' but the database has no
+   * such index"* — about an index that was there the whole time.
+   *
+   * The swallow's justification, *"let creation handle conflicts"*, is sound
+   * only where it was written: {@link getExistingIndexNames}, whose caller
+   * {@link syncDeclaredIndexes} corrects an optimistic wrong reading by
+   * attempting the create and absorbing the "already exists" error. Detection
+   * has no such backstop, and it inherited the swallow only because #3728 wired
+   * a second consumer onto the same function. So the split is by CALL SITE:
+   * `onFailure: 'partial'` is the creation seam's opt-in, and everything else —
+   * detection included — sees the throw. Its callers are already built for it:
+   * {@link reconcileAndWarnDrift} catches and warns "could not introspect
+   * '<table>' for drift detection", and `os migrate plan` / `apply` both catch,
+   * print the error and exit non-zero. The sibling read in the same detect
+   * path, {@link introspectColumns}, has never swallowed.
    *
    * Postgres reads `pg_index` rather than `pg_indexes` so indexes backing a
    * UNIQUE CONSTRAINT (which is exactly what knex's old `col.unique()` produced)
@@ -5690,7 +6903,17 @@ export class SqlDriver implements IDataDriver {
    * what tells the differ this index is none of its business
    * (`isSyncReproducibleIndex`).
    */
-  protected async introspectIndexes(tableName: string): Promise<PhysicalIndex[]> {
+  protected async introspectIndexes(
+    tableName: string,
+    opts: {
+      /**
+       * What a failed read means to THIS caller (#7332). `'throw'` (the
+       * default) surfaces it; `'partial'` returns whatever was read before the
+       * failure — correct only where a short read is self-correcting.
+       */
+      onFailure?: 'throw' | 'partial';
+    } = {},
+  ): Promise<PhysicalIndex[]> {
     const byName = new Map<string, PhysicalIndex>();
     const upsert = (name: string, unique: boolean, primary: boolean): PhysicalIndex => {
       let e = byName.get(name);
@@ -5770,8 +6993,9 @@ export class SqlDriver implements IDataDriver {
           else if (r.EXPRESSION != null) applyIndexKeyParts(entry, [String(r.EXPRESSION)]);
         }
       }
-    } catch {
-      // Best-effort — fall through and let creation handle conflicts.
+    } catch (e) {
+      // Only a caller that can CORRECT a short read may ask for one (#7332).
+      if (opts.onFailure !== 'partial') throw e;
     }
     return [...byName.values()];
   }
@@ -5779,9 +7003,18 @@ export class SqlDriver implements IDataDriver {
   /**
    * Names of the indexes that already exist on a table. Used to make
    * declared-index sync idempotent across repeated runs.
+   *
+   * Best-effort by design (#7332), and the one caller entitled to be: every
+   * consumer of this set uses it to decide whether to SKIP a create, so a name
+   * missing from a short read costs at most one redundant `CREATE INDEX` —
+   * which {@link syncDeclaredIndexes} absorbs as "already exists" — and a
+   * throw here would instead take the whole boot down on a transient read.
+   * The presence probes in {@link applyIndexDriftOp} fail the same safe way:
+   * a false absence keeps the legacy index in place and under-reports what was
+   * applied, never the reverse.
    */
   protected async getExistingIndexNames(tableName: string): Promise<Set<string>> {
-    return new Set((await this.introspectIndexes(tableName)).map((i) => i.name));
+    return new Set((await this.introspectIndexes(tableName, { onFailure: 'partial' })).map((i) => i.name));
   }
 
   /**
@@ -5950,7 +7183,17 @@ export class SqlDriver implements IDataDriver {
         // different name can race us here — both are benign for our intent
         // (the index exists). Anything else is a real failure.
         if (/already exists|duplicate key name|exists/i.test(msg)) continue;
-        if (nullSafe.size > 0 && /unique constraint failed|duplicate entry|duplicate key value/i.test(msg)) {
+        // The ERROR OBJECT, not `msg` (#6543). This used to be a private
+        // inline regex over the message alone, which is the only channel the
+        // SQLite family reliably fills — but Postgres answers this exact
+        // failure with `could not create unique index "…"` and puts the
+        // verdict on `code` (SQLSTATE 23505) instead, so a message-only read
+        // missed the dialect entirely and took the boot down on the very case
+        // the branch below exists to absorb. The shared predicate reads
+        // `code` / `errno` / `message` / `cause`; see
+        // `@objectstack/types`' `unique-violation.ts` for why it is the one
+        // name for this question.
+        if (nullSafe.size > 0 && isUniqueViolationError(e)) {
           // Existing rows violate the NULL-safe unique — the #5030 defect made
           // visible. Do not take the boot down: the declared constraint is not
           // enforced yet, say so at `error` (from the outside everything looks
@@ -6000,8 +7243,16 @@ export class SqlDriver implements IDataDriver {
       await this.knex.raw(sql);
     } catch (e: any) {
       const msg = String(e?.message ?? e);
+      // The positive limb is this site's own question — "does this server
+      // reject functional key parts?" — and stays a message test, because
+      // that is the only channel the answer is on. The NEGATIVE limb was a
+      // seventh spelling of the unique-violation vocabulary (`/duplicate/i`)
+      // and is now the shared predicate (#6543): a conflict must never be
+      // read as a syntax rejection and silently degraded to the bare
+      // composite, and on the `errno`-only shape mysql2 can hand back, a
+      // message-only exclusion did not fire.
       const functionalUnsupported =
-        this.isMysql && /syntax|functional|not supported|near '\(/i.test(msg) && !/duplicate/i.test(msg);
+        this.isMysql && /syntax|functional|not supported|near '\(/i.test(msg) && !isUniqueViolationError(e);
       if (!functionalUnsupported) throw e;
       (this.logger.error ?? this.logger.warn)(
         `[sql-driver] this MySQL/MariaDB server rejects functional key parts — created '${name}' on ` +
@@ -6149,8 +7400,32 @@ export class SqlDriver implements IDataDriver {
    *
    * Without a tenantId the call is treated as an unscoped/admin path —
    * keeps legacy callers, seed scripts, and cross-org tooling working.
-   * This is the single chokepoint for read-side tenant isolation in the
-   * SQL driver; every CRUD method routes through it.
+   *
+   * This is the single chokepoint for read-side tenant isolation in the SQL
+   * driver, and every read door routes through it — `findRows()` (what
+   * `find()`/`findOne()` use), `count()`, `aggregate()`, `distinct()`,
+   * `findWithWindowFunctions()`, `analyzeQuery()`/`explain()`, and the
+   * update/delete predicates and their readbacks. Write-side tenancy is a
+   * different mechanism and deliberately not this one: inserts stamp the
+   * column via {@link injectTenantOnInsert}, so the three `insert` builders
+   * (create / upsert / bulkCreate) reach `getBuilder` without coming here.
+   *
+   * ⚠️ That sentence used to be written as a claim — "every CRUD method routes
+   * through it" — and it was FALSE for as long as it had existed (#6792).
+   * Three doors built through `getBuilder` and never arrived:
+   * `findWithWindowFunctions` (ROWS — a caller passing `tenantId` got every
+   * tenant's rows), `analyzeQuery`/`explain` (a PLAN for a statement `find()`
+   * would not run), and `distinct` (every tenant's values for one column). The
+   * first two were filed; the third was found only because the invariant was
+   * finally MEASURED. Nothing had ever checked it, which is exactly how a
+   * docstring becomes the last place a wrong fact survives.
+   *
+   * So it is no longer a claim. `scripts/check-tenant-chokepoint.mjs`
+   * (`pnpm check:tenant-chokepoint`, wired into `.github/workflows/lint.yml`)
+   * re-derives it from the AST on every run: a method that builds through
+   * `getBuilder(object, options)` and lets that builder escape as a read must
+   * call this, or carry a written exemption. Edit this list and the gate will
+   * disagree with you — that is the point.
    */
   protected applyTenantScope(
     builder: Knex.QueryBuilder,
@@ -6841,6 +8116,68 @@ export class SqlDriver implements IDataDriver {
     return columnSql;
   }
 
+  /**
+   * [#7398] Is `localField` stored as a JSON TEXT column on `table`?
+   *
+   * Reads `jsonFields` — the per-table registry both `initObjects` and
+   * `registerExternalObject` fill from {@link SqlDriver.isJsonField}, i.e.
+   * `JSON_COLUMN_TYPES.has(type) || !!field.multiple`. Asking THAT registry
+   * rather than growing a second one is the whole point: `JSON_COLUMN_TYPES`
+   * already carries a header calling itself the single source for the DDL
+   * column-type switch and `isJsonField` "so the two can't drift", and a
+   * filter-side copy of "which columns are JSON" would be a third list to keep
+   * in step with the first two.
+   *
+   * It answers on the LOCAL field name, which is what the registry is keyed by
+   * (both writers enumerate `obj.fields`), not the possibly-remapped remote
+   * column an external `columnMap` produces.
+   *
+   * **A table with no entry answers `false`, deliberately.** A table this
+   * driver was never told about — one created straight through knex, as the
+   * conformance sweeps do — has no field types to consult, and inventing a
+   * refusal from an absent registry would refuse filters on ordinary columns.
+   * The gate fires only where the column type is KNOWN to be JSON.
+   */
+  protected isJsonColumn(table: string | null | undefined, localField: string): boolean {
+    if (!table) return false;
+    return this.jsonFields[table]?.includes(localField) === true;
+  }
+
+  /**
+   * [#7398] The column-type half of the filter gate: refuse a DECLARED operator
+   * that the column it was aimed at cannot give a meaningful answer for.
+   *
+   * The sibling of {@link assertCompilableComparand}, and called from the same
+   * three positions, one per lowering entry: the operator-object branch of
+   * {@link SqlDriver.applyFilterCondition}, that method's bare-value branch,
+   * and the plain `{ field: value }` loop in {@link SqlDriver.applyFilters}.
+   * The two gates ask different questions of the same comparison — that one
+   * asks whether the COMPARAND can be bound, this one whether the COLUMN can be
+   * compared — and #7398 is the square of that grid that had nothing on it.
+   *
+   * Placed BEFORE the calendar-day rewrites and before
+   * {@link SqlDriver.applyNormalizedComparison}, because a JSON column reaches
+   * BOTH emitters and only one of them is the site the issue named. A
+   * `multiple: true` datetime field on an external object (ADR-0015) has a
+   * `filterColumnExpr` — `registerExternalObject` never marks its datetime
+   * columns canonical, so `needsLegacyDatetimeRepair` stays true — and is
+   * therefore served by the normalised `whereRaw` arms, not by the plain
+   * `whereIn` / `where(field, op, v)` arms a managed `multiple: true` lookup
+   * goes through. Measured on both before this gate existed: `$in` → 0 rows,
+   * `$nin` → the excluded row, on each.
+   */
+  protected assertOperatorAppliesToColumn(
+    table: string | null | undefined,
+    localField: string,
+    column: string,
+    op: string,
+    bare = false,
+  ): void {
+    if (!JSON_COLUMN_INCOMPATIBLE_OPERATORS.has(op)) return;
+    if (!this.isJsonColumn(table, localField)) return;
+    throw jsonColumnOperatorError(column, op, bare);
+  }
+
   protected applyFilters(builder: Knex.QueryBuilder, filters: any) {
     if (!filters) return;
 
@@ -6903,6 +8240,10 @@ export class SqlDriver implements IDataDriver {
         // #5041 — the plain `{ field: value }` map compiles to an implicit `=`,
         // so it is a comparison emitter too and gets the same gate.
         assertCompilableComparand(column, '=', value);
+        // #7398 — and the column-type question the comparand gate cannot ask.
+        // This loop IS the bare `{ field: value }` spelling, one of the four
+        // the issue measured as silently answering zero rows on an array column.
+        this.assertOperatorAppliesToColumn(table, key, column, '=', true);
         const coerced = this.coerceFilterValue(table, key, value);
         const expr = this.filterColumnExpr(table, key, column);
         if (expr && this.applyNormalizedComparison(builder, 'and', expr, '=', coerced)) continue;
@@ -6983,23 +8324,31 @@ export class SqlDriver implements IDataDriver {
   }
 
   /**
-   * Parameterized `LIKE`/`NOT LIKE` match with the LIKE metacharacters `%` / `_`
-   * (and the escape char `\`) escaped in the user value so they match literally
-   * — otherwise a value of `%` matches every row (a filter-bypass, P0). Binds an
-   * explicit `ESCAPE '\'` because SQLite does not honour a default escape
-   * character (MySQL/Postgres do, but the explicit clause is correct for all
-   * three). `shape` positions the wildcard: `contains` → `%v%`, `starts` → `v%`,
-   * `ends` → `%v`.
+   * Parameterized text match for the `$contains` family and `$icontains`, with
+   * the comparand's metacharacters escaped so it matches LITERALLY — otherwise
+   * a value of `%` matches every row (a filter-bypass, P0). `shape` positions
+   * the wildcard: `contains` → `%v%`, `starts` → `v%`, `ends` → `%v`.
+   *
+   * **[#6518] The construct is chosen by DIALECT, and that is the whole point
+   * of this method's existence.** Everything about which SQL is emitted lives in
+   * {@link textMatchPredicate}; this method only picks `whereRaw` vs
+   * `orWhereRaw`. See that function for the per-dialect table and the measured
+   * evidence behind each cell — in one sentence: case sensitivity used to be
+   * the DIALECT's answer (SQLite's `LIKE` folds ASCII, Postgres's does not,
+   * MySQL's follows its collation) where #4706 Q2 = A says it is the
+   * CONTRACT's, and `LOWER()` folds the whole Unicode range on Postgres/MySQL
+   * where #4706 Q1 = A says `$icontains` folds ASCII only.
    *
    * **Second implementation, deliberately** (#5567):
    * `packages/services/service-analytics/src/like-pattern.ts` carries the same
-   * transform — same escaped character class, same three shapes, same bound
+   * LIKE transform — same escaped character class, same three shapes, same bound
    * `ESCAPE` — because `service-analytics` depends on no driver and this is a
    * private method taking a knex builder, so there is nothing for it to import.
-   * That file's header explains the choice; it is held to THIS expression, character
-   * for character, by `service-analytics`'s `like-metacharacter-escape.test.ts`.
-   * A third hand-copy is the thing to refuse: import from one of the two, or add
-   * a consumer to that test.
+   * That file's header explains the choice; it is held to the LIKE arm of
+   * {@link textMatchPredicate}, character for character, by
+   * `service-analytics`'s `like-metacharacter-escape.test.ts`. A third hand-copy
+   * is the thing to refuse: import from one of the two, or add a consumer to
+   * that test.
    *
    * **[#5234] `String(value)` is safe here because nothing unrenderable reaches
    * it.** {@link assertCompilableComparand} refuses an object comparand on this
@@ -7016,14 +8365,13 @@ export class SqlDriver implements IDataDriver {
     method: string,
     field: string,
     value: unknown,
-    shape: 'contains' | 'starts' | 'ends',
+    shape: TextMatchShape,
     negate = false,
+    fold = false,
   ): void {
-    const escaped = String(value).replace(/[\\%_]/g, '\\$&');
-    const pattern = shape === 'starts' ? `${escaped}%` : shape === 'ends' ? `%${escaped}` : `%${escaped}%`;
-    const keyword = negate ? 'NOT LIKE' : 'LIKE';
     const rawMethod = method.startsWith('or') ? 'orWhereRaw' : 'whereRaw';
-    builder[rawMethod](`?? ${keyword} ? ESCAPE ?`, [field, pattern, '\\']);
+    const { sql, bindings } = textMatchPredicate(this.dialectName, field, value, shape, negate, fold);
+    builder[rawMethod](sql, bindings);
   }
 
   /**
@@ -7176,6 +8524,11 @@ export class SqlDriver implements IDataDriver {
           // BEFORE any rewrite or coercion touches it, so the message names the
           // shape the caller actually sent.
           assertCompilableComparand(field, rawOp, opValue);
+          // #7398 — the column-type gate, on the operator AS WRITTEN and ahead
+          // of every rewrite and both emitters, so a JSON column cannot reach
+          // the plain `whereIn` arms below NOR the normalised `whereRaw` arms
+          // an external multi-value datetime column is routed to.
+          this.assertOperatorAppliesToColumn(table, localField, field, rawOp);
           // Calendar-day upper bounds first (#3777): `$lte` on a bare
           // `YYYY-MM-DD` against a datetime column compiles half-open, and a
           // `$between` whose max is a bare day decomposes into the same pair —
@@ -7251,13 +8604,16 @@ export class SqlDriver implements IDataDriver {
               break;
             }
             case '$contains':
-            // `$regex` reaches SQL only via the better-auth adapter, which emits
-            // it for a `contains` search (a plain substring, not a real regex).
-            // SQL has no portable regex, so compile the intended substring LIKE
-            // — correct for that producer and safe (the value is LIKE-escaped),
-            // where the old equality default silently made it an exact match.
-            case '$regex':
               this.applyContainsLike(builder, method, field, opValue);
+              break;
+            // [#5702] The case-INSENSITIVE twin of `$contains`, and the
+            // replacement `RETIRED_FILTER_OPERATORS` prescribes for `$regex`.
+            // Same `applyLike` — same escaped character class, same bound
+            // `ESCAPE` — with the fold applied to BOTH sides, because folding
+            // only the comparand compares a folded needle against a raw column
+            // and matches just the rows that were already lower-case.
+            case '$icontains':
+              this.applyLike(builder, method, field, opValue, 'contains', false, true);
               break;
             case '$notContains':
               // [#5298] NULL-safe: `NOT LIKE` is UNKNOWN for a NULL column, and
@@ -7303,18 +8659,29 @@ export class SqlDriver implements IDataDriver {
                 ? (logicalOp === 'or' ? 'orWhereNull' : 'whereNull')
                 : (logicalOp === 'or' ? 'orWhereNotNull' : 'whereNotNull')](field);
               break;
-            default:
+            default: {
+              // [#5702] A RETIRED spelling gets the prescription, not the
+              // vocabulary list: the author who wrote `$regex` needs
+              // `$icontains`, and a list of fifteen names does not say so.
+              const retired = retiredFilterOperatorError(op, field, Object.keys(value as object));
+              if (retired) throw retired;
               throw unsupportedFilterError(
                 `Unsupported filter operator "${op}" on field "${field}". Supported operators: ` +
                   `$eq, $ne, $gt, $gte, $lt, $lte, $in, $nin, $between, $contains, $notContains, ` +
-                  `$startsWith, $endsWith, $regex, $null, $exists.`,
+                  `$startsWith, $endsWith, $icontains, $null, $exists.`,
               );
+            }
           }
         }
       } else {
         const localField = this.mapSortField(key);
         const field = this.remoteColumn(table, key, localField);
         const method = logicalOp === 'or' ? 'orWhere' : 'where';
+        // #7398 — the bare `{ field: value }` spelling again, reached when the
+        // condition carries an operator SOMEWHERE (so `applyFilters` routed the
+        // whole node here) but not on this key. Same compilation, same gate:
+        // one condition must not have two verdicts depending on its siblings.
+        this.assertOperatorAppliesToColumn(table, localField, field, '=', true);
         const coerced = this.coerceFilterValue(table, localField, value);
         const columnExpr = this.filterColumnExpr(table, localField, field);
         if (columnExpr && this.applyNormalizedComparison(builder, logicalOp, columnExpr, '=', coerced)) continue;
@@ -7490,8 +8857,8 @@ export class SqlDriver implements IDataDriver {
   }
 
   /**
-   * The SQL function a declared aggregation lowers to, or a refusal that says
-   * which KIND of "no" this is (#5907).
+   * How a declared aggregation lowers into SQL, or a refusal that says which
+   * KIND of "no" this is (#5907).
    *
    * The `switch` this replaced answered both conditions with one bare `Error`
    * carrying no `code` and no `status`, so `mapDataError` fell to its default
@@ -7499,10 +8866,17 @@ export class SqlDriver implements IDataDriver {
    * #1117 gap, at the aggregate door. The lowering table is now the single
    * source of what this face compiles, and {@link refuseAggregateFunction}
    * decides between the two refusals.
+   *
+   * [#6409] Returns the {@link SqlAggregateLowering} RECORD rather than the bare
+   * SQL function name it used to. `count_distinct` lowers to
+   * `COUNT(DISTINCT x)` — a keyword inside the argument list, not a different
+   * function name — so a caller of this method needs both halves to emit the
+   * call. Every entry answering `{ sql, distinct: false }` compiles to exactly
+   * the text the previous `string` return produced.
    */
-  protected mapAggregateFunc(func: string): string {
-    const sql = SQL_AGGREGATE_FUNCTIONS.get(func);
-    if (sql !== undefined) return sql;
+  protected mapAggregateFunc(func: string): SqlAggregateLowering {
+    const lowering = SQL_AGGREGATE_FUNCTIONS.get(func);
+    if (lowering !== undefined) return lowering;
     refuseAggregateFunction(func);
   }
 
@@ -7783,6 +9157,41 @@ export class SqlDriver implements IDataDriver {
    * 3. **Objects** — Expression envelopes (`{ dialect, source }`), evaluated
    *    app-side; never a column DEFAULT.
    * 4. **Everything else** — a real literal, emitted verbatim.
+   *
+   * # What this deliberately does NOT read: `options[].default` (#7246)
+   *
+   * A select field's option-level `default: true` is now a real initial value —
+   * `ObjectQL.applyFieldDefaults` falls back to the marked option when the field
+   * declares no `defaultValue`. It gets NO physical column DEFAULT here, and
+   * that asymmetry with case 4 is the decision, not an omission.
+   *
+   * The #4560 discipline does not forbid it: an option's `value` is a plain
+   * literal, not a runtime token, so it *could* be emitted. The reasons not to:
+   *
+   *  - **One resolver owns the precedence.** `defaultValue` beats the option
+   *    flag, and that ordering lives in the engine. A column DEFAULT is a
+   *    second resolver that fires only where the engine did not, so keeping it
+   *    out means there is exactly one place the question is answered.
+   *  - **The shape has no scalar DDL form.** On `multiple: true` the default is
+   *    an ARRAY of the marked options. Emitting would need a "…except for
+   *    multi-selects" carve-out invisible to the author.
+   *  - **It would divide deployments silently.** This method runs for a FRESH
+   *    column ({@link createColumn}) and a re-materialized one
+   *    ({@link rebuildSqliteTablePatched}) — never a retrofit of an existing
+   *    table. Emitting would give new databases (and any SQLite rebuild) a
+   *    DEFAULT that older databases on identical metadata lack, and
+   *    `detectDrift`'s only `default_mismatch` producer is the #4560 token
+   *    check — there is no general declared-literal-vs-physical comparison — so
+   *    nothing would ever report the divergence.
+   *  - **It would make SQL the odd driver out.** The engine fallback serves
+   *    memory, mongodb, sql and turso identically from day one; a SQL-only
+   *    second enforcement point is exactly the per-datasource split #4597 and
+   *    #4560 were both about.
+   *
+   * The value the engine resolves is what every ObjectStack write path stores;
+   * only a writer bypassing the engine entirely sees NULL, and that writer is
+   * not reading `options` either. Pinned by
+   * `sql-driver-option-default-ddl.test.ts`.
    */
   protected applyDeclaredColumnDefault(col: Knex.ColumnBuilder, field: any, type: string): void {
     const dv = field?.defaultValue;
@@ -7806,6 +9215,14 @@ export class SqlDriver implements IDataDriver {
    */
   protected sqliteFilename(): string | null {
     if (!this.isSqlite) return null;
+    // Redirected to `:memory:` because the declared file did not exist and the
+    // host asked not to create one (#6743). `this.config` still names the
+    // declared target — on purpose, so the CLI can print it — but NO on-disk
+    // file backs this connection, which is precisely what this method reports.
+    // Both callers depend on that reading: `ensureDatabaseExists` would
+    // otherwise `mkdir` the state directory this mode exists to avoid, and
+    // `applySqliteJournalMode` would try to put an in-memory database in WAL.
+    if (this.openedEmptyInMemory) return null;
     const conn = (this.config as any).connection;
     const filename = typeof conn === 'string' ? conn : conn?.filename;
     if (typeof filename !== 'string' || filename === '') return null;

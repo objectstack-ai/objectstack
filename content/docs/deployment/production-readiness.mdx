@@ -104,6 +104,53 @@ the [HARDENING.md recipes](https://github.com/objectstack-ai/objectstack/blob/ma
       compliance regime needs longer, and register an `archive` datasource
       if audit data must move to cold storage instead of being retained hot.
 
+## CDN / reverse-proxy caching of `/meta` object schemas
+
+Object schemas are the hottest metadata read — every list, form and detail
+render fetches one — so they are the first thing an operator reaches for when
+putting a CDN or reverse proxy in front of the runtime. Since
+[ADR-0106](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0106-metadata-plane-fls-object-schema-masking.md)
+those responses are **per-caller**, and the rules below are what keep that safe.
+
+- **The response is already marked private.** `GET /meta/object/:name` answers
+  `Cache-Control: private, no-cache` — store it in the *client*, revalidate on
+  every use, never in a shared cache. A proxy configured to ignore `private`
+  (`proxy_ignore_headers Cache-Control`, an "override TTL" rule, an edge worker
+  that caches by URL alone) would serve one user's projection to another. Do
+  not add such a rule for `/meta` or `/metadata`.
+- **The ETag carries the caller's field visibility.** The validator is the
+  shared document hash plus, for a restricted caller, a `~<fingerprint>` suffix
+  hashing the set of fields that caller cannot read. Consequences worth knowing
+  before tuning anything:
+  - A caller who can read every field produces **no** suffix, so their ETag and
+    body are byte-identical to pre-ADR-0106 releases — existing cache hit rates
+    on unrestricted deployments are unchanged.
+  - Callers in the same permission cohort share one validator, and therefore
+    share `304`s. Cache storage stays O(objects), not O(users × objects).
+  - A permission change moves the fingerprint, so a stale `304` self-invalidates
+    on the next revalidation. There is nothing to purge after editing a
+    permission set.
+  - **Never strip or rewrite `ETag`** on these routes (some proxies drop it when
+    they compress). Without it every read falls back to a full body, and a proxy
+    that *replaces* it with its own hash of the served body erases the cohort
+    dimension.
+- **A `private, no-store` response means field visibility could not be
+  resolved.** In that degraded window the runtime serves the unmasked schema
+  deliberately — failing closed would brick every render of the object and can
+  deadlock console bootstrap, since permission sets are themselves metadata —
+  and marks it un-storable so it cannot be replayed to anyone else. It also
+  emits a structured warning and increments
+  `objectstack_meta_field_visibility_undetermined_total`. **Alert on that
+  counter**: a deployment sitting in this state is disclosing more than it
+  intends, and it is meant to be a hydration blip, not a resting state.
+- **A `503 FIELD_VISIBILITY_UNRESOLVED` is the security service being
+  unhealthy**, not the metadata store. The runtime refuses the read rather than
+  disclose an unmasked schema. It is safe to retry and must not be cached.
+- To deliberately restore the old, unmasked behaviour on a trusted deployment,
+  the supported switch is `OS_ALLOW_UNMASKED_OBJECT_METADATA=1` (or per-server
+  `metadata.maskObjectFields: false`) — not a caching rule that hides the
+  per-caller dimension.
+
 ## What's NOT in the runtime (yet)
 
 - **OTel context propagation.** We export `parseTraceparent` /

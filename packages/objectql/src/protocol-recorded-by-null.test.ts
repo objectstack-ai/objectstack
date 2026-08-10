@@ -160,9 +160,9 @@ describe('#4556 — protocol write paths store NULL, not the sentinel string', (
         const { driver } = makeStubDriver();
         engine.registerDriver(driver, true);
         await engine.init();
-        engine.registry.registerObject(sysUserObject as any);
-        engine.registry.registerObject(sysMetadataObject as any);
-        engine.registry.registerObject(sysMetadataHistoryObject as any);
+        engine.registry.registerObject(sysUserObject);
+        engine.registry.registerObject(sysMetadataObject);
+        engine.registry.registerObject(sysMetadataHistoryObject);
         await engine.insert('sys_user', { id: 'usr_alice', name: 'Alice' }, { context: { isSystem: true } } as any);
         protocol = new ObjectStackProtocolImplementation(engine);
     });

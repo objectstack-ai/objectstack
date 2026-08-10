@@ -33,6 +33,11 @@ export const localizationSettingsManifest: SettingsManifest = {
     {
       type: 'select', key: 'timezone', label: 'Default timezone', required: false, default: 'UTC',
       description: 'IANA zone used to resolve today()/daysFromNow, analytics date buckets, and rendered datetimes.',
+      // The description has always promised the IANA domain; since #5712 the
+      // declaration matches it: any valid IANA zone is accepted on the write
+      // and env doors, and the curated options below are a UI convenience
+      // list, not an exhaustive statement of what is legal.
+      valueDomain: 'iana_time_zone',
       options: [
         { value: 'UTC', label: 'UTC' },
         { value: 'America/Los_Angeles', label: '(UTC−08/−07) Los Angeles' },
@@ -66,7 +71,11 @@ export const localizationSettingsManifest: SettingsManifest = {
     {
       type: 'text', key: 'default_country', label: 'Default country', required: false, default: 'US',
       description: 'ISO 3166-1 alpha-2 code (e.g. US, GB, CN). Used for address and phone defaults.',
+      // Third case of the same hole #5712 closed on timezone/currency: the
+      // pattern constrains SHAPE only, and `ZZ` is a shape-valid code assigned
+      // to nobody. The domain constrains membership; both still apply.
       pattern: '^[A-Za-z]{2}$', minLength: 2, maxLength: 2,
+      valueDomain: 'iso_3166_alpha2',
     },
 
     // ── Formats ───────────────────────────────────────────────────────────
@@ -118,6 +127,10 @@ export const localizationSettingsManifest: SettingsManifest = {
       // 'USD', which surfaced an unwanted "$"/"US$" on every code-less amount).
       // A workspace can still pick a default to apply org-wide.
       description: 'ISO 4217 code applied when a currency field omits its own. Leave unset to render code-less amounts as plain numbers.',
+      // As with `timezone`: the description promises ISO 4217, and since #5712
+      // the declaration delivers it — any ISO 4217 code is accepted, the
+      // curated options are a UI convenience list.
+      valueDomain: 'iso_4217_currency',
       options: [
         { value: 'USD', label: 'USD — US Dollar' },
         { value: 'EUR', label: 'EUR — Euro' },

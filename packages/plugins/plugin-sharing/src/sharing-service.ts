@@ -1,18 +1,26 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type {
+  AuthoredRowWriteOperation,
+  AuthoredRowWriteVerdict,
   ISharingService,
   IHierarchyScopeResolver,
   RecordShare,
   GrantShareInput,
-  SharingExecutionContext,
   ShareAccessLevel,
+  SharingWriteVerdict,
 } from '@objectstack/spec/contracts';
 import {
   normalizeTenancyPosture,
   postureEnforcesWall,
   type TenancyPosture,
 } from '@objectstack/spec/security';
+// [#7136] Every enforcement method below takes the FULL `resolveAuthzContext`
+// envelope — the same type `ISharingService` declares for these parameters
+// since #6523 (the #6206 ruling: no per-site subset contracts). Annotating the
+// implementations with a narrower shape is what forced this file to cast its
+// way out of its own contract to read fields the caller had already supplied.
+import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { WRITE_ACCESS_LEVELS, normalizeAccessLevel } from './access-level.js';
 import {
   deleteRowsForDeletedRecords,
@@ -125,8 +133,8 @@ export function effectiveSharingModel(schema: any): 'private' | 'read' | 'public
  * organization": the contract types the field as `string | null`, and `null` is
  * the value a resolver's fail-closed obligation is written against.
  */
-function activeOrganizationId(context: SharingExecutionContext): string | null {
-  const org = (context as any)?.tenantId;
+function activeOrganizationId(context: ExecutionContext): string | null {
+  const org = context?.tenantId;
   return typeof org === 'string' && org.trim() !== '' ? org : null;
 }
 
@@ -141,6 +149,28 @@ function hasOwnerField(schema: any): boolean {
  */
 export interface SharingSecurityProbe {
   hasWriteBypass?(object: string, context: unknown): Promise<boolean>;
+  /**
+   * [#5493] `ISecurityService.checkAuthoredRowWrite` — "does an APP-AUTHORED
+   * row-level policy admit this row for this write operation, on its own, with
+   * the platform's ownership floor taken out?"
+   *
+   * Read by {@link SharingService.probeAuthoredRowWrite} so the write gate can
+   * DEFER instead of hard-refusing a by-id write that a declared widener
+   * admits. Structural on purpose, exactly like the two members above: this
+   * plugin does not depend on `@objectstack/plugin-security`, it declares the
+   * slice it probes.
+   *
+   * `admit` is EVIDENCE, never authorization — it says a declared policy speaks
+   * for this row, not that the write is permitted. Every other outcome
+   * (`abstain`, an absent method, an absent service, a throw) is one
+   * instruction: keep today's refusal.
+   */
+  checkAuthoredRowWrite?(
+    object: string,
+    recordId: string,
+    operation: AuthoredRowWriteOperation,
+    context?: unknown,
+  ): Promise<AuthoredRowWriteVerdict>;
   /**
    * [ADR-0111 D1 DEPTH] The caller's effective WRITE scope on `object`
    * (`own` / `own_and_reports` / `unit` / `unit_and_below` / `org`), resolved
@@ -189,6 +219,11 @@ export interface SharingServiceOptions {
    * the super-user write bypass (`modifyAllRecords`) in
    * {@link SharingService.canManageShares}. Absent / throwing / returning
    * null → management authority fails CLOSED to owner-only.
+   *
+   * [#5493] The SAME handle carries the authored-row-write verdict read by
+   * {@link SharingService.probeAuthoredRowWrite} — one late binding, two
+   * probes, so a deployment cannot end up with one of them wired and the other
+   * not. Both fail closed on absence, in their own directions.
    */
   securityService?: () => SharingSecurityProbe | null | undefined;
   /**
@@ -246,7 +281,7 @@ export class SharingService implements ISharingService {
    */
   async buildReadFilter(
     object: string,
-    context: SharingExecutionContext,
+    context: ExecutionContext,
   ): Promise<unknown | null> {
     if (this.shouldBypass(object, context)) return null;
 
@@ -264,6 +299,15 @@ export class SharingService implements ISharingService {
     // [ADR-0057 D1] Access DEPTH widens the owner-match for this grant:
     // own → [me], unit → my BU members, unit_and_below → my BU subtree, org →
     // no owner filter. Sharing grants are still OR-ed in on top (additive).
+    //
+    // [#7136] This cast SURVIVES the annotation widening, on purpose. Unlike
+    // `userId` / `tenantId`, `__readScope` and `__writeScope` are not fields of
+    // `ExecutionContext` at all: they are private keys plugin-security's
+    // middleware stamps onto the context it forwards
+    // (`security-plugin.ts` — `sc.__readScope = …`). So the cast is not
+    // residue of the narrow contract and is NOT deletable here. ⛔ Nor is the
+    // fix to declare them on the envelope — that would publish a middleware
+    // seam as authorable, client-supplied vocabulary.
     const readScope = (context as any).__readScope as ('own' | 'own_and_reports' | 'unit' | 'unit_and_below' | 'org' | undefined);
     if (readScope === 'org') return null;
     const ownerIds = await this.resolveOwnerScopeIds(context, readScope);
@@ -313,7 +357,7 @@ export class SharingService implements ISharingService {
    */
   async buildWriteFilter(
     object: string,
-    context: SharingExecutionContext,
+    context: ExecutionContext,
     verb: 'update' | 'delete' = 'update',
   ): Promise<unknown | null> {
     if (this.shouldBypass(object, context)) return null;
@@ -328,6 +372,7 @@ export class SharingService implements ISharingService {
       return { id: '__deny_all__' };
     }
 
+    // Middleware-stamped, not a field of the envelope — see buildReadFilter().
     const writeScope = (context as any).__writeScope as ('own' | 'own_and_reports' | 'unit' | 'unit_and_below' | 'org' | undefined);
     if (writeScope === 'org') return null;
     const ownerIds = await this.resolveOwnerScopeIds(context, writeScope);
@@ -369,7 +414,7 @@ export class SharingService implements ISharingService {
   private async matchesOwnerScope(
     object: string,
     recordId: string,
-    context: SharingExecutionContext,
+    context: ExecutionContext,
   ): Promise<boolean> {
     const own = await this.engine.find(object, {
       where: { id: recordId },
@@ -379,6 +424,7 @@ export class SharingService implements ISharingService {
     });
     const owner = Array.isArray(own) && own[0] ? (own[0] as any)[OWNER_FIELD] : undefined;
     if (owner == null) return false;
+    // Middleware-stamped, not a field of the envelope — see buildReadFilter().
     const writeScope = (context as any).__writeScope as ('own' | 'own_and_reports' | 'unit' | 'unit_and_below' | 'org' | undefined);
     if (writeScope === 'org') return true;
     const owners = await this.resolveOwnerScopeIds(context, writeScope);
@@ -404,7 +450,7 @@ export class SharingService implements ISharingService {
    */
   private async hasModifyAllBypass(
     object: string,
-    context: SharingExecutionContext,
+    context: ExecutionContext,
   ): Promise<boolean> {
     const probe = this.securityService?.();
     if (!probe || typeof probe.hasWriteBypass !== 'function') return false;
@@ -416,52 +462,184 @@ export class SharingService implements ISharingService {
   }
 
   /**
+   * [#6428] The two reasons {@link shouldBypass} answers `true` are NOT the
+   * same verdict, and merging them is what the tri-state exists to undo.
+   *
+   * - `context.isSystem` → **`allow`**. A platform-internal writer (audit,
+   *   migrations, this plugin's own reconciliation) is positively permitted;
+   *   the contract calls it a complete bypass, and a composing caller must not
+   *   re-gate it behind somebody else's floor.
+   * - a bypass-LISTED object → **`abstain`**. Record sharing simply does not
+   *   enforce on `sys_user` / `sys_record_share` / … — it is not a statement
+   *   that the write is permitted, and whatever else guards those tables
+   *   (RLS, the platform ownership floor) still decides.
+   *
+   * `null` = "no bypass applies, keep evaluating".
+   */
+  private bypassVerdict(
+    object: string,
+    context: ExecutionContext,
+  ): SharingWriteVerdict | null {
+    if (context?.isSystem) return 'allow';
+    if (this.bypassObjects.has(object)) return 'abstain';
+    return null;
+  }
+
+  /**
+   * [#6428] The one place an unresolvable write gate becomes a verdict.
+   *
+   * **`deny`, never `abstain`** — the two are opposite instructions to a
+   * composing caller (`abstain` hands the row to another authority, `deny`
+   * ends it), and reading a failed lookup as "no opinion" is exactly the
+   * confusion that produced #5492's measured fail-open. Logged rather than
+   * swallowed: a silently-denied write is indistinguishable from a legitimate
+   * refusal, which is how a broken engine looks like a permissions problem.
+   */
+  private writeGateFailClosed(
+    verb: 'update' | 'delete',
+    object: string,
+    recordId: string,
+    context: ExecutionContext,
+    err: unknown,
+  ): SharingWriteVerdict {
+    this.logger?.error?.(
+      `[sharing] the ${verb} gate could not resolve a verdict for '${object}' record `
+      + `'${recordId}' (user ${context?.userId ?? 'unknown'}) — DENYING (fail-closed, #6428): `
+      + 'a failed lookup is a refusal, never an abstention',
+      err instanceof Error ? err : new Error(String(err)),
+    );
+    return 'deny';
+  }
+
+  /**
+   * [#6428] Tri-state UPDATE verdict — the single place the update gate is
+   * decided, and the primary form of {@link canEdit}.
+   *
+   * `allow` when a POSITIVE basis exists: ownership (widened by write DEPTH),
+   * an explicit write-level share, or — [#4647] — the `modifyAllRecords`
+   * super-user bypass. That bypass branch is what makes "Modify All Data" mean
+   * what it says (an admin edits any record regardless of ownership — #1883's
+   * Salesforce reference frame) on rows the DEPTH fast-path cannot reach: an
+   * OWNERLESS row (`owner_id` NULL, which system-context seeds routinely
+   * produce) matches no owner set at any depth, so ownership alone refused it.
+   *
+   * `abstain` when record sharing does not enforce on the row at all — a
+   * public object, an object with no `owner_id` field, a bypass-listed
+   * internal, an object with no resolvable schema. Historically these returned
+   * the same `true` as a real grant, and #5492's E2 experiment measured what
+   * that costs a caller which lets the answer OVERRIDE the platform's
+   * `created_by` ownership floor: an ordinary member's cross-creator UPDATE
+   * succeeded on owner-less objects, where the floor alone had been refusing it.
+   *
+   * `deny` for everything else, including a lookup that throws.
+   */
+  async checkEdit(
+    object: string,
+    recordId: string,
+    context: ExecutionContext,
+  ): Promise<SharingWriteVerdict> {
+    const bypass = this.bypassVerdict(object, context);
+    if (bypass) return bypass;
+
+    try {
+      const schema = this.engine.getSchema?.(object);
+      if (!schema) return 'abstain';
+      const model = effectiveSharingModel(schema);
+      if (model === 'public') return 'abstain';
+      if (!hasOwnerField(schema)) return 'abstain';
+      if (!context.userId) return 'deny';
+
+      // 1) Ownership (write DEPTH widens the owner-set) — fast path.
+      if (await this.matchesOwnerScope(object, recordId, context)) return 'allow';
+
+      // 2) Explicit write-level share (`edit`, plus not-yet-normalised `full`).
+      const editGrants = await this.engine.find('sys_record_share', {
+        where: {
+          object_name: object,
+          record_id: recordId,
+          recipient_type: 'user',
+          recipient_id: context.userId,
+          access_level: { $in: [...WRITE_ACCESS_LEVELS] },
+        },
+        fields: ['id'],
+        limit: 1,
+        context: SYSTEM_CTX,
+      });
+      if (Array.isArray(editGrants) && editGrants.length > 0) return 'allow';
+
+      // 3) [#4647] Modify All Data — the explicit bypass, asked LAST and
+      // answered by the same predicate `security/explain` reports.
+      return (await this.hasModifyAllBypass(object, context)) ? 'allow' : 'deny';
+    } catch (err) {
+      return this.writeGateFailClosed('update', object, recordId, context, err);
+    }
+  }
+
+  /**
    * Return `true` if the caller may UPDATE `(object, recordId)`: ownership
    * (widened by write DEPTH), an explicit write-level share, or — [#4647] —
    * the `modifyAllRecords` super-user bypass. Always `true` for system context,
    * public objects, and objects without an owner field.
    *
-   * The bypass branch is what makes "Modify All Data" mean what it says
-   * (an admin edits any record regardless of ownership — #1883's Salesforce
-   * reference frame) on rows the DEPTH fast-path cannot reach: an OWNERLESS
-   * row (`owner_id` NULL, which system-context seeds routinely produce) matches
-   * no owner set at any depth, so ownership alone refused it.
+   * [#6428] The two-state PROJECTION of {@link checkEdit}: `true` for every
+   * verdict that is not `deny`. The truth table is byte-for-byte the historical
+   * one — `abstain` is where the old `true` for public / owner-less / bypassed
+   * objects went — so every existing caller (the sharing middleware, the
+   * `sys_attachment` parent gate, the ADR-0055 master check) keeps its exact
+   * semantics. A caller that would let this answer OVERRIDE another authority
+   * must read {@link checkEdit} instead, because only there is "I permit this"
+   * distinguishable from "I do not enforce here".
    */
   async canEdit(
     object: string,
     recordId: string,
-    context: SharingExecutionContext,
+    context: ExecutionContext,
   ): Promise<boolean> {
-    if (this.shouldBypass(object, context)) return true;
+    return (await this.checkEdit(object, recordId, context)) !== 'deny';
+  }
 
-    const schema = this.engine.getSchema?.(object);
-    if (!schema) return true;
-    const model = effectiveSharingModel(schema);
-    if (model === 'public') return true;
-    if (!hasOwnerField(schema)) return true;
-    if (!context.userId) return false;
+  /**
+   * [#6428 / ADR-0111 D3] Tri-state DELETE verdict — the primary form of
+   * {@link canDelete}.
+   *
+   * Deliberately NARROWER than {@link checkEdit}: `allow` is ownership (widened
+   * by write DEPTH) or the `modifyAllRecords` super-user bypass — and NOTHING
+   * ELSE. An `edit` (or legacy `full`) share opens update but not delete
+   * (sharing widens rows, never verbs), so a share holder gets `deny` here
+   * while `checkEdit` answers `allow` on the same row. The `abstain` set is
+   * IDENTICAL to `checkEdit`'s: both gates agree about which objects sharing
+   * enforces on, and differ only about the verb.
+   *
+   * [#4647] The bypass is asked EXPLICITLY (`hasWriteBypass`) instead of only
+   * riding in as `__writeScope === 'org'`. The scope proxy was silently
+   * partial: `matchesOwnerScope` refuses an OWNERLESS row before it ever looks
+   * at the scope, so a Modify All Data holder could not delete a row with a
+   * NULL `owner_id` — while `security/explain` said the bypass applied.
+   */
+  async checkDelete(
+    object: string,
+    recordId: string,
+    context: ExecutionContext,
+  ): Promise<SharingWriteVerdict> {
+    const bypass = this.bypassVerdict(object, context);
+    if (bypass) return bypass;
 
-    // 1) Ownership (write DEPTH widens the owner-set) — fast path.
-    if (await this.matchesOwnerScope(object, recordId, context)) return true;
+    try {
+      const schema = this.engine.getSchema?.(object);
+      if (!schema) return 'abstain';
+      if (effectiveSharingModel(schema) === 'public') return 'abstain';
+      if (!hasOwnerField(schema)) return 'abstain';
+      if (!context.userId) return 'deny';
 
-    // 2) Explicit write-level share (`edit`, plus not-yet-normalised `full`).
-    const editGrants = await this.engine.find('sys_record_share', {
-      where: {
-        object_name: object,
-        record_id: recordId,
-        recipient_type: 'user',
-        recipient_id: context.userId,
-        access_level: { $in: [...WRITE_ACCESS_LEVELS] },
-      },
-      fields: ['id'],
-      limit: 1,
-      context: SYSTEM_CTX,
-    });
-    if (Array.isArray(editGrants) && editGrants.length > 0) return true;
+      // Ownership / write DEPTH only — no share branch. This is the whole
+      // difference from checkEdit.
+      if (await this.matchesOwnerScope(object, recordId, context)) return 'allow';
 
-    // 3) [#4647] Modify All Data — the explicit bypass, asked LAST and answered
-    // by the same predicate `security/explain` reports.
-    return this.hasModifyAllBypass(object, context);
+      // [#4647] Modify All Data — the same explicit bypass checkEdit consults.
+      return (await this.hasModifyAllBypass(object, context)) ? 'allow' : 'deny';
+    } catch (err) {
+      return this.writeGateFailClosed('delete', object, recordId, context, err);
+    }
   }
 
   /**
@@ -473,31 +651,84 @@ export class SharingService implements ISharingService {
    * rows, never verbs. Always `true` for system context, public objects, and
    * objects without an owner field, matching {@link canEdit}.
    *
-   * [#4647] The bypass is now asked EXPLICITLY (`hasWriteBypass`) instead of
-   * only riding in as `__writeScope === 'org'`. The scope proxy was silently
-   * partial: `matchesOwnerScope` refuses an OWNERLESS row before it ever looks
-   * at the scope, so a Modify All Data holder could not delete a row with a
-   * NULL `owner_id` — while `security/explain` said the bypass applied.
+   * [#6428] The two-state PROJECTION of {@link checkDelete}, on the same rule
+   * as {@link canEdit}: `true` for everything that is not a `deny`.
    */
   async canDelete(
     object: string,
     recordId: string,
-    context: SharingExecutionContext,
+    context: ExecutionContext,
   ): Promise<boolean> {
-    if (this.shouldBypass(object, context)) return true;
+    return (await this.checkDelete(object, recordId, context)) !== 'deny';
+  }
 
-    const schema = this.engine.getSchema?.(object);
-    if (!schema) return true;
-    if (effectiveSharingModel(schema) === 'public') return true;
-    if (!hasOwnerField(schema)) return true;
-    if (!context.userId) return false;
+  /**
+   * [#5493 / maintainer ruling 2026-08-08, issue comment 5226389104] Ask the
+   * OTHER row-level write authority whether an APP-AUTHORED RLS policy admits
+   * this row for this operation, so the by-id write gate can DEFER instead of
+   * hard-refusing a write that a declaration already speaks for.
+   *
+   * **This is not a sharing verdict and it never becomes one.** Nothing here
+   * feeds {@link checkEdit} / {@link checkDelete} / {@link buildWriteFilter} —
+   * those keep answering exactly what record sharing knows, which is what
+   * `plugin-security`'s own composition (#5492) reads off this service. Folding
+   * the probe into them would make the two authorities read each other in a
+   * circle. Only the middleware's refusal branch consults it.
+   *
+   * **Why the security service answers it and this plugin does not re-derive
+   * it.** Row-level write authority is ONE composite determination, but its two
+   * halves know different things. The composed RLS answer cannot stand in for
+   * "an app policy admits this row": the platform's own ownership floor
+   * (`owner_only_writes` / `owner_only_deletes`, `created_by ==
+   * current_user.id`) ships on the additive `member_default` baseline, so the
+   * composed answer is true for the row's CREATOR whether or not any app policy
+   * mentions it. #5493's probe E-A measured the cost — a creator who is no
+   * longer the owner (a record transferred away) would get their old records
+   * back. Separating the two needs policy PROVENANCE, which is private to
+   * `plugin-security` by design. Hence a verdict on the service, and hence this
+   * method is a PASSTHROUGH with no logic of its own to drift.
+   *
+   * **Fail-closed in the `abstain` direction**, because the caller uses `admit`
+   * to WIDEN: an absent security service (no `plugin-security` at all), a
+   * service that predates the method, a probe that throws, a principal-less
+   * context, a delegated (on-behalf-of) identity, and any verdict this consumer
+   * does not recognise all return `abstain` — byte-for-byte the behaviour of a
+   * deployment that never asked.
+   */
+  async probeAuthoredRowWrite(
+    object: string,
+    recordId: string,
+    operation: AuthoredRowWriteOperation,
+    context: ExecutionContext,
+  ): Promise<AuthoredRowWriteVerdict> {
+    try {
+      if (!context?.userId) return 'abstain';
+      // [ADR-0090 D10] A delegated identity is not measurable here. The
+      // delegator intersection is composed by the MIDDLEWARE (it gates twice),
+      // so a single verdict would be resolved against one of the two identities
+      // and silently stand for both. Declining to defer is the answer that
+      // changes nothing — the same stance `hasWriteBypass` and
+      // `resolveWriteScope` already take on this context.
+      if ((context as { onBehalfOf?: { userId?: string } }).onBehalfOf?.userId) return 'abstain';
 
-    // Ownership / write DEPTH only — no share branch. This is the whole
-    // difference from canEdit.
-    if (await this.matchesOwnerScope(object, recordId, context)) return true;
+      const probe = this.securityService?.();
+      // Feature-detected, never assumed: the contract declares the method
+      // OPTIONAL precisely so absence and `abstain` are ONE instruction.
+      if (!probe || typeof probe.checkAuthoredRowWrite !== 'function') return 'abstain';
 
-    // [#4647] Modify All Data — the same explicit bypass canEdit consults.
-    return this.hasModifyAllBypass(object, context);
+      const verdict = await probe.checkAuthoredRowWrite(object, recordId, operation, context);
+      // Only the literal `admit` widens. A probe answering in a vocabulary this
+      // consumer does not know is an unmeasured answer, not a permission.
+      return verdict === 'admit' ? 'admit' : 'abstain';
+    } catch (err) {
+      this.logger?.warn?.(
+        `[sharing] the authored-row-write probe for '${object}' record '${recordId}' `
+        + `(${operation}, user ${context?.userId ?? 'unknown'}) could not be resolved — `
+        + 'ABSTAINING, so the existing refusal stands (fail-closed, #5493)',
+        err instanceof Error ? err : new Error(String(err)),
+      );
+      return 'abstain';
+    }
   }
 
   /**
@@ -513,7 +744,7 @@ export class SharingService implements ISharingService {
   async canManageShares(
     object: string,
     recordId: string,
-    context: SharingExecutionContext,
+    context: ExecutionContext,
   ): Promise<boolean> {
     if (context?.isSystem) return true;
     if (!object || !recordId || !context?.userId) return false;
@@ -577,7 +808,7 @@ export class SharingService implements ISharingService {
   private async isRecordVisible(
     object: string,
     recordId: string,
-    context: SharingExecutionContext,
+    context: ExecutionContext,
   ): Promise<boolean> {
     try {
       const rows = await this.engine.find(object, {
@@ -600,7 +831,7 @@ export class SharingService implements ISharingService {
   private async assertCanManageShares(
     object: string,
     recordId: string,
-    context: SharingExecutionContext,
+    context: ExecutionContext,
   ): Promise<void> {
     if (context?.isSystem) return;
     if (!(await this.isRecordVisible(object, recordId, context))) {
@@ -659,7 +890,7 @@ export class SharingService implements ISharingService {
    */
   async grant(
     input: GrantShareInput,
-    context: SharingExecutionContext,
+    context: ExecutionContext,
   ): Promise<RecordShare> {
     if (!input.object) throw new Error('VALIDATION_FAILED: object is required');
     if (!input.recordId) throw new Error('VALIDATION_FAILED: recordId is required');
@@ -760,7 +991,7 @@ export class SharingService implements ISharingService {
    */
   async revoke(
     shareId: string,
-    context: SharingExecutionContext,
+    context: ExecutionContext,
     scope?: { object: string; recordId: string },
   ): Promise<void> {
     if (!shareId) throw new Error('VALIDATION_FAILED: shareId is required');
@@ -814,7 +1045,7 @@ export class SharingService implements ISharingService {
   async listShares(
     object: string,
     recordId: string,
-    context: SharingExecutionContext,
+    context: ExecutionContext,
   ): Promise<RecordShare[]> {
     if (!context?.isSystem) {
       await this.assertCanManageShares(object, recordId, context);
@@ -949,10 +1180,10 @@ export class SharingService implements ISharingService {
    * posture-scoped rather than unconditional.
    */
   private async resolveOwnerScopeIds(
-    context: SharingExecutionContext,
+    context: ExecutionContext,
     scope: 'own' | 'own_and_reports' | 'unit' | 'unit_and_below' | 'org' | undefined,
   ): Promise<string[]> {
-    const me = String((context as any).userId);
+    const me = String(context.userId);
     if (!scope || scope === 'own' || scope === 'org') return [me];
     const resolver = this.hierarchyResolver?.();
     if (!resolver) return [me];
@@ -988,7 +1219,7 @@ export class SharingService implements ISharingService {
           // The @deprecated compatibility alias, carried through unchanged for
           // resolvers that still read it. It is NOT the authority — a resolver
           // reading it alone is the shape #5858 ruled out.
-          tenantId: (context as any).tenantId ?? null,
+          tenantId: context.tenantId ?? null,
         },
         scope,
       );
@@ -1074,7 +1305,7 @@ export class SharingService implements ISharingService {
     return 'isolated';
   }
 
-  private shouldBypass(object: string, context: SharingExecutionContext): boolean {
+  private shouldBypass(object: string, context: ExecutionContext): boolean {
     if (context?.isSystem) return true;
     if (this.bypassObjects.has(object)) return true;
     return false;

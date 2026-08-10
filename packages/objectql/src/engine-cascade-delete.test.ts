@@ -99,7 +99,7 @@ describe('cascadeDeleteRelations — required FK escalates set_null → restrict
         const { driver } = makeStubDriver();
         engine.registerDriver(driver, true);
         await engine.init();
-        for (const o of [acct, oppRequired, noteOptional, taskCascade]) engine.registry.registerObject(o as any);
+        for (const o of [acct, oppRequired, noteOptional, taskCascade]) engine.registry.registerObject(o);
     });
 
     it('refuses to delete a parent with a REQUIRED-FK child (DELETE_RESTRICTED, 409) and leaves both rows', async () => {
@@ -108,6 +108,15 @@ describe('cascadeDeleteRelations — required FK escalates set_null → restrict
 
         await expect(engine.delete('acct', { where: { id: a.id } } as any))
             .rejects.toMatchObject({ code: 'DELETE_RESTRICTED', status: 409, dependentObject: 'opp', dependentCount: 1 });
+
+        // [#7307] The refusal's copy is now SPLIT in two. The structured fields
+        // above are unchanged — this pins which half says what, so a later edit
+        // cannot quietly put the API names back in front of an end user.
+        const err = await engine.delete('acct', { where: { id: a.id } } as any).catch((e) => e);
+        expect(err.message).toContain('Opportunity');       // the label, …
+        expect(err.message).not.toContain('opp');           // … not the API name,
+        expect(err.message).not.toMatch(/deleteBehavior/);  // … and no authoring hint.
+        expect(err.developerMessage).toContain("set deleteBehavior:'cascade' on opp.account");
 
         // Nothing was deleted or mutated.
         expect(await engine.findOne('acct', { where: { id: a.id } })).toBeTruthy();

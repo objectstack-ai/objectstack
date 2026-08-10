@@ -123,8 +123,14 @@ export const MetadataTypeSchema = lazySchema(() => z.enum([
   //   1. INDEPENDENT LIFECYCLE — the endpoint matcher indexes, invalidates and
   //      re-judges one stored `api` item at a time (`buildEndpointIndex`,
   //      `MetadataManager.ENDPOINT_METADATA_TYPE`).
-  //   2. DECLARATIVE GOVERNABILITY — `allowRuntimeCreate: true` plus file
-  //      patterns (see the registry entry below).
+  //   2. DECLARATIVE GOVERNABILITY — file patterns plus a resolved declaration
+  //      schema (`ApiEndpointSchema`), see the registry entry below. ⚠️ This
+  //      clause originally read "`allowRuntimeCreate: true` plus file
+  //      patterns"; #5488 flipped that flag to `false` (maintainer ruling
+  //      2026-08-07), so governability now rests on the artifact route alone —
+  //      which is the route that was ever governed. The admission test is
+  //      unaffected: ADR-0088 asks whether the kind is DECLARATIVELY governed,
+  //      not whether it is runtime-writable.
   //   3. A REAL CONSUMER — #5040's E-series executor serves them and
   //      `/openapi.json` describes them; #5040 E8 proves it on a real boot.
   // ADR-0088's own `router` row already anticipated this: "the endpoint
@@ -150,6 +156,18 @@ export const MetadataTypeSchema = lazySchema(() => z.enum([
   // Security Protocol
   'permission',  // Permission sets (PermissionSetSchema)
   'position',    // Positions — flat capability-distribution groups (ADR-0090 D3)
+  // [#5961] `capability` was ENFORCED BUT UNDECLARED — the same mirror of
+  // `declared ≠ enforced` that #5271 closed for `api`. `PLURAL_TO_SINGULAR`
+  // has mapped `capabilities` → `capability` since #5870, `AppPlugin`
+  // registers stack-declared capabilities under that exact name, and
+  // `bootstrapDeclaredCapabilities` reads them back — but the kind was absent
+  // from this enum, from `BUILTIN_METADATA_TYPE_SCHEMAS` and from
+  // `DEFAULT_METADATA_TYPE_REGISTRY`, so it resolved no schema and
+  // `PUT /api/v1/meta/capability/:name` stored ANY JSON on an authorization
+  // surface. ⚠️ `role` / `profile` / `policy` are a DIFFERENT question and are
+  // deliberately NOT admitted here: they have no `PLURAL_TO_SINGULAR` mapping,
+  // no declaration schema and no read-back seam — see #5961's ruling.
+  'capability',  // Package-declared authorization capabilities (CapabilityDeclarationSchema, ADR-0066 D1)
 
   // AI Protocol
   'agent',       // AI agent definitions (AgentSchema)
@@ -637,15 +655,40 @@ export const DEFAULT_METADATA_TYPE_REGISTRY: MetadataTypeRegistryEntryParsed[] =
   // history (label says it all — admins iterate frequently, want to roll back).
   // `app`: tenants may author custom navigation apps (Salesforce Lightning App
   // parity), so `allowRuntimeCreate: true`.
+  //
+  // `allowOrgOverride` in this section is governed by ADR-0005's amendment
+  // table (`docs/adr/0005-metadata-customization-overlay.md:53-64`), which
+  // whitelists exactly `view`/`dashboard`/`report` ("Pure presentation. Safe
+  // per-org override.") and says ❌ for `page`/`app`/`action` ("Conservative
+  // default — these bind to routes and side-effects. Promote individually if
+  // a concrete need appears."). `page`/`app`/`action`/`dataset` were ROLLED
+  // BACK from an unratified `true` by the 2026-08-08 maintainer ruling on
+  // #6483 (same verdict family as `flow`, #6283): no promotion ADR exists,
+  // and no live org-scoped overlay rows were found in-repo. `dataset` is
+  // absent from the table, so it takes the amendment's default for new types
+  // — `allowOrgOverride: false` until an admission pair (overlay schema + a
+  // WRITTEN render-only rationale) is ratified. Promotion of any of these is
+  // an ADR-0005 revision, not a registry edit.
+  //
+  // NOT closed: `allowRuntimeCreate` stays `true` on all four — a tenant may
+  // still author a BRAND-NEW page/app/action/dataset (the ADR-0005 two-tier
+  // model); what is closed is per-org overlay of a PACKAGED item, now a loud
+  // `403 not_overridable` at the write. ADR-0045's publish visibility flip
+  // (`runtime/domains/packages.ts`) keeps working: it rewrites apps
+  // MATERIALIZED into `sys_metadata` (DB-only provenance), which rides the
+  // `allowRuntimeCreate` tier, not this flag.
   { type: 'view', label: 'View', filePatterns: ['**/*.view.ts', '**/*.view.yml', '**/*.view.json'], supportsOverlay: true, allowOrgOverride: true, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: false, loadOrder: 50, domain: 'ui' },
-  { type: 'page', label: 'Page', filePatterns: ['**/*.page.ts', '**/*.page.yml'], supportsOverlay: true, allowOrgOverride: true, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: false, loadOrder: 50, domain: 'ui' },
+  { type: 'page', label: 'Page', filePatterns: ['**/*.page.ts', '**/*.page.yml'], supportsOverlay: true, allowOrgOverride: false, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: false, loadOrder: 50, domain: 'ui' },
   { type: 'dashboard', label: 'Dashboard', filePatterns: ['**/*.dashboard.ts', '**/*.dashboard.yml', '**/*.dashboard.json'], supportsOverlay: true, allowOrgOverride: true, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: false, loadOrder: 60, domain: 'ui' },
-  { type: 'app', label: 'Application', filePatterns: ['**/*.app.ts', '**/*.app.yml', '**/*.app.json'], supportsOverlay: true, allowOrgOverride: true, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: false, loadOrder: 70, domain: 'ui' },
-  { type: 'action', label: 'Action', filePatterns: ['**/*.action.ts', '**/*.action.yml'], supportsOverlay: false, allowOrgOverride: true, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: false, loadOrder: 50, domain: 'ui' },
+  { type: 'app', label: 'Application', filePatterns: ['**/*.app.ts', '**/*.app.yml', '**/*.app.json'], supportsOverlay: true, allowOrgOverride: false, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: false, loadOrder: 70, domain: 'ui' },
+  // `action` was additionally the #6283 `flow` shape exactly: its own row
+  // declares `supportsOverlay: false`, so `allowOrgOverride: true` granted a
+  // write nothing could ever read back — the #6190 phantom. (ADR-0005, #6483)
+  { type: 'action', label: 'Action', filePatterns: ['**/*.action.ts', '**/*.action.yml'], supportsOverlay: false, allowOrgOverride: false, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: false, loadOrder: 50, domain: 'ui' },
   { type: 'report', label: 'Report', filePatterns: ['**/*.report.ts', '**/*.report.yml'], supportsOverlay: true, allowOrgOverride: true, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: false, loadOrder: 60, domain: 'ui' },
   // ADR-0021: dataset is the analytics semantic layer that report/dashboard bind to.
   // loadOrder 55 < report/dashboard (60) so datasets register before their consumers.
-  { type: 'dataset', label: 'Dataset', description: 'Analytics semantic layer — dimensions & measures', filePatterns: ['**/*.dataset.ts', '**/*.dataset.yml', '**/*.dataset.json'], supportsOverlay: true, allowOrgOverride: true, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: false, loadOrder: 55, domain: 'ui' },
+  { type: 'dataset', label: 'Dataset', description: 'Analytics semantic layer — dimensions & measures', filePatterns: ['**/*.dataset.ts', '**/*.dataset.yml', '**/*.dataset.json'], supportsOverlay: true, allowOrgOverride: false, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: false, loadOrder: 55, domain: 'ui' },
 
   // Automation Protocol — flow is executionPinned (ADR-0009).
   // ADR-0019: there is no `approval` metadata type — approvals are Approval
@@ -746,31 +789,71 @@ export const DEFAULT_METADATA_TYPE_REGISTRY: MetadataTypeRegistryEntryParsed[] =
   //
   // WHY THE FLAGS ARE THESE VALUES (the decision this entry records):
   //
-  // `allowRuntimeCreate: true` is NOT a new grant — it WRITES DOWN what the
-  // runtime already did. Until this entry existed, `api` had no static registry
-  // row, and both write gates treat a type with no row as runtime-creatable on
-  // purpose: `isRuntimeCreateAllowed` (metadata-protocol `protocol.ts`) and
-  // `assertAllowed` (`sys-metadata-repository.ts`) each fall through with
-  // "types with NO static registry entry are synthesised by `getMetaTypes()`
-  // with allowRuntimeCreate: true, so the write gate must agree" — and both
-  // name `api` in that comment. So `PUT /api/v1/meta/api/:name` accepted
-  // writes; it just accepted them UNVALIDATED. Declaring `true` here keeps the
-  // authorization verdict byte-identical and changes exactly one thing: the
-  // body must now satisfy `ApiEndpointSchema` (422 `invalid_metadata`).
+  // ⚠️ RECORDED OVERTURN — 2026-08-09 (#5488). The block below used to record a
+  // decision for `allowRuntimeCreate: true`, and the three bullets it rested on
+  // are reproduced verbatim further down because they were not wrong about the
+  // mechanism — they were wrong about the PREMISE they all shared. That premise
+  // ("there is a runtime create door here worth validating") was disproven by a
+  // real boot: `PUT /api/v1/meta/api/:name` answered 200 "Saved", and the
+  // endpoint was then NEVER SERVED — `GET` on its declared path 404s forever,
+  // with no `[EndpointMatcher] … EXCLUDED` line, because it was not gated out,
+  // it was never in the index at all. The serving criterion is owned by
+  // `IMetadataService.matchEndpoint` → `EndpointMatcher` →
+  // `MetadataManager.listForIndex('api')`, which reads the manager's `registry`
+  // plus its registered loaders (`["filesystem","memory"]`); a runtime write
+  // lands in `sys_metadata`, which is in neither. So `allowRuntimeCreate: true`
+  // declared a capability the runtime never had.
   //
-  // The alternative — CODE-ONLY (`allowRuntimeCreate: false` +
-  // `allowOrgOverride: false`, the `job` / `agent` shape) — was considered and
-  // rejected on the evidence:
-  //   • it would REMOVE a door rather than validate one, turning today's 200
+  // The maintainer ruled on it 2026-08-07T16:59Z, verbatim:
+  //
+  //   "Decision: Option B — flip the `api` registry entry to
+  //    `allowRuntimeCreate: false` and make the write inlet reject loudly
+  //    (the existing #5086 mechanism). ADR-0049 remove side, with the
+  //    corresponding retirement bookkeeping. […] Re-entry path recorded: if
+  //    #2657 Part B ever promotes `apis` to a registered type with a real
+  //    consumption path, re-enable then — implementation first, declaration
+  //    second."
+  //
+  // Rationale as ruled: zero business pull for Studio-authored runtime
+  // endpoints today (17.x declarative endpoints are served via stack artifacts
+  // / `publishPackage`, which is untouched); making the matcher read
+  // `sys_metadata` instead would re-open cache, invalidation, tenancy and the
+  // ADR-0110 D3 miss-vs-outage semantics on a new read path — not a cost to pay
+  // without pull; and a write that answers "Saved" and then 404s forever is the
+  // most dangerous silent-lie shape for AI authors (ADR-0049 false compliance).
+  //
+  // WHAT THE THREE ORIGINAL BULLETS SAID, and what became of each — kept
+  // verbatim so the overturn is auditable rather than silently rewritten:
+  //   • "it would REMOVE a door rather than validate one, turning today's 200
   //     into a 403 for every runtime author, which is a contract change no
-  //     issue in this chain asked for;
-  //   • #5086 (PR #5263) refuses code-only types BEFORE persistence, draft and
+  //     issue in this chain asked for" — TRUE, and now deliberate: #5488 is the
+  //     issue that asked for it, and the door being removed opened onto nothing.
+  //     A 403 that names the artifact route is strictly better than a 200 whose
+  //     route 404s.
+  //   • "#5086 (PR #5263) refuses code-only types BEFORE persistence, draft and
   //     active alike — so `api` DRAFTS would become impossible, and #5206's
   //     step 2 (the `publishPackageDrafts` endpoint gate, PR #5279) would have
-  //     nothing left to gate;
-  //   • ADR-0121's ruling is "publish REJECTS" with a named-key prescription
+  //     nothing left to gate" — MECHANICALLY CORRECT, and it is why the flip
+  //     could not be split spec-first. `gateApiDraftsForPublish` is therefore
+  //     retired in the SAME change (#5488), deliberately and on the record: it
+  //     gated a promotion into a state the matcher can never read.
+  //   • "ADR-0121's ruling is 'publish REJECTS' with a named-key prescription
   //     (D1/D2/D6), which presupposes an author who could write the draft.
-  //     "Rejected at publish" is not "refused at authoring".
+  //     'Rejected at publish' is not 'refused at authoring'." — STILL TRUE of
+  //     ADR-0121, and unaffected: the publish gates
+  //     (`validateApiEndpointDeclarations`) remain the one judge of servability
+  //     on the route that actually serves — the stack artifact / `publishPackage`
+  //     path. What is withdrawn is only the runtime-authored draft, which had no
+  //     servable destination to be judged toward.
+  //
+  // `allowRuntimeCreate: false` + `allowOrgOverride: false` therefore makes
+  // `api` CODE-ONLY (the `job` / `agent` / `capability` shape): the #5086 inlet
+  // refuses `PUT /api/v1/meta/api/:name` before persistence, on every kernel,
+  // in draft mode as well as active, with `code: 'NOT_CREATABLE'`, `status: 403`
+  // and a prescription naming this entry's own `filePatterns[0]`
+  // (`**/*.api.ts`) — i.e. declare the endpoint in the stack artifact and ship
+  // it through `publishPackage`. `OS_METADATA_WRITABLE` remains the one
+  // operator escape hatch, unchanged.
   //
   // `allowOrgOverride: false` (also unchanged from today's effective value): an
   // endpoint is an OUTWARD URL contract owned by the declaring package. A
@@ -790,7 +873,7 @@ export const DEFAULT_METADATA_TYPE_REGISTRY: MetadataTypeRegistryEntryParsed[] =
   // run at publish (stack schema, `publishPackage`, `publishPackageDrafts`) and
   // again at load (`buildEndpointIndex`). This entry adds a SHAPE check in
   // front of them, never a second opinion about servability.
-  { type: 'api', label: 'API Endpoint', description: 'Declarative HTTP endpoint — a stable URL and policy layer over an existing pipeline (ADR-0121)', filePatterns: ['**/*.api.ts', '**/*.api.yml', '**/*.api.json'], supportsOverlay: false, allowOrgOverride: false, allowRuntimeCreate: true, supportsVersioning: false, executionPinned: false, loadOrder: 92, domain: 'system' },
+  { type: 'api', label: 'API Endpoint', description: 'Declarative HTTP endpoint — a stable URL and policy layer over an existing pipeline (ADR-0121)', filePatterns: ['**/*.api.ts', '**/*.api.yml', '**/*.api.json'], supportsOverlay: false, allowOrgOverride: false, allowRuntimeCreate: false, supportsVersioning: false, executionPinned: false, loadOrder: 92, domain: 'system' },
   { type: 'translation', label: 'Translation', filePatterns: ['**/*.translation.ts', '**/*.translation.yml', '**/*.translation.json'], supportsOverlay: true, allowOrgOverride: true, allowRuntimeCreate: true, supportsVersioning: false, executionPinned: false, loadOrder: 90, domain: 'system' },
   { type: 'email_template', label: 'Email Template', filePatterns: ['**/*.email-template.ts', '**/*.email-template.yml', '**/*.email-template.json'], supportsOverlay: true, allowOrgOverride: true, allowRuntimeCreate: true, supportsVersioning: false, executionPinned: false, loadOrder: 85, domain: 'system' },
   // ADR-0046: package documentation. Inert data — no runtime behavior, no
@@ -800,13 +883,76 @@ export const DEFAULT_METADATA_TYPE_REGISTRY: MetadataTypeRegistryEntryParsed[] =
   // never parses `content`. loadOrder is last: nothing references docs.
   { type: 'doc', label: 'Documentation', description: 'Package documentation — flat Markdown items (ADR-0046)', filePatterns: ['**/docs/*.md'], supportsOverlay: false, allowOrgOverride: false, allowRuntimeCreate: true, supportsVersioning: false, executionPinned: false, loadOrder: 99, domain: 'system' },
   // Navigation spine over docs (ADR-0046 §6): ordered groups, membership derived
-  // by rule. Render-time like view/dashboard ⇒ overlay-allowed so Studio can
-  // drag-edit; runtime-creatable for AI/authors. loadOrder last (references docs).
-  { type: 'book', label: 'Documentation Book', description: 'Documentation navigation spine — ordered groups with derived membership (ADR-0046 §6)', filePatterns: ['**/*.book.ts'], supportsOverlay: true, allowOrgOverride: true, allowRuntimeCreate: true, supportsVersioning: false, executionPinned: false, loadOrder: 99, domain: 'system' },
+  // by rule. Overlay-mergeable at read (`supportsOverlay: true`); runtime-
+  // creatable for AI/authors. loadOrder last (references docs).
+  //
+  // `allowOrgOverride: false` — ROLLED BACK from an unratified `true` (#6483,
+  // ADR-0005). The "render-time like view/dashboard" argument that used to
+  // sit here is only half of ADR-0005's admission pair; the WRITTEN
+  // render-only rationale ratified into the whitelist table was never filed,
+  // and `book` appears nowhere in that table, so it takes the amendment's
+  // default for absentees: `false` until promoted by an ADR-0005 revision.
+  // Zero live org-scoped book overlay rows in-repo at rollback. Studio's
+  // drag-edit of a PACKAGED book now answers `403 not_overridable`;
+  // authoring a BRAND-NEW book keeps working (`allowRuntimeCreate`).
+  { type: 'book', label: 'Documentation Book', description: 'Documentation navigation spine — ordered groups with derived membership (ADR-0046 §6)', filePatterns: ['**/*.book.ts'], supportsOverlay: true, allowOrgOverride: false, allowRuntimeCreate: true, supportsVersioning: false, executionPinned: false, loadOrder: 99, domain: 'system' },
 
   // Security Protocol
-  { type: 'permission', label: 'Permission Set', filePatterns: ['**/*.permission.ts', '**/*.permission.yml'], supportsOverlay: true, allowOrgOverride: true, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: false, loadOrder: 15, domain: 'security' },
-  { type: 'position', label: 'Position', filePatterns: ['**/*.position.ts', '**/*.position.yml'], supportsOverlay: true, allowOrgOverride: true, allowRuntimeCreate: true, supportsVersioning: false, executionPinned: false, loadOrder: 15, domain: 'security' },
+  //
+  // `permission` / `position`: `allowOrgOverride: false` — ROLLED BACK from
+  // an unratified `true` (#6483, 2026-08-08 maintainer ruling; same verdict
+  // family as `flow`, #6283). ADR-0005's security row says ❌ outright:
+  // "Authorization correctness; overlays would create silent privilege
+  // drift" — a per-org overlay of a packaged permission set IS that drift,
+  // definitionally. `position` is absent from the ADR's table and takes the
+  // amendment's `false` default for new types. Zero live org-scoped overlay
+  // rows for either type in-repo at rollback.
+  //
+  // Blast radius, measured while landing #6483: plugin-security's ADR-0094
+  // write-through (`permission-set-projection.ts`) routes data-door edits of
+  // permission sets into `saveMetaItem`. Runtime-created sets — including
+  // package-bound rows MATERIALIZED through the metadata door, whose
+  // provenance is `sys_metadata`, not an artifact — ride `allowRuntimeCreate`
+  // (still `true`) and keep working; a data-door edit of a CODE-DECLARED
+  // (artifact-backed) set now refuses with 403 — the same refusal that
+  // write-through already issues on kernels without an overlay layer
+  // (ADR-0086 two-doors: edit the package and re-publish). If
+  // ADR-0094's "customize packaged sets via env overlay" direction
+  // (2026-07-14) is to be restored, that is an ADR-0005 whitelist revision —
+  // file it there; do not flip this flag back ad hoc.
+  { type: 'permission', label: 'Permission Set', filePatterns: ['**/*.permission.ts', '**/*.permission.yml'], supportsOverlay: true, allowOrgOverride: false, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: false, loadOrder: 15, domain: 'security' },
+  { type: 'position', label: 'Position', filePatterns: ['**/*.position.ts', '**/*.position.yml'], supportsOverlay: true, allowOrgOverride: false, allowRuntimeCreate: true, supportsVersioning: false, executionPinned: false, loadOrder: 15, domain: 'security' },
+  // [#5961] Package-declared authorization capabilities (ADR-0066 D1).
+  //
+  // ⛔ CODE-ONLY, and that is the whole point of the entry. ADR-0066 D1 says
+  // packages DEFINE capabilities — `defineCapability` on a stack's
+  // `capabilities[]`, or a `*.capability.ts` file the loader globs — while
+  // permission sets GRANT them and resources REQUIRE them. An administrator
+  // minting a brand-new capability at runtime has no counterpart in that
+  // three-way separation: nothing in code would ever require the name, so the
+  // row would be an unreferenced grant target sitting in the SAME namespace
+  // `systemPermissions` / `requiredPermissions` resolve by string. Hence
+  // `allowRuntimeCreate: false` AND `allowOrgOverride: false`, which together
+  // are #5086's code-only declaration — `saveMetaItem` refuses
+  // `PUT /api/v1/meta/capability/:name` with 403 `not_creatable` on EVERY
+  // kernel, and `codeOnlySourceHint` reads `filePatterns[0]` back to tell the
+  // author where to declare it instead. `job` (#4509) and `agent` (ADR-0063 §2)
+  // carry the same pair for the same reason.
+  //
+  // The package-declaration channel is untouched: `AppPlugin` registers stack
+  // `capabilities[]` through `registerInMemory`, and the filesystem loader
+  // globs `filePatterns` — neither goes through `saveMetaItem`, so
+  // `bootstrapDeclaredCapabilities` still seeds `sys_capability` exactly as
+  // before. `OS_METADATA_WRITABLE=capability` remains the ONE documented
+  // operator escape hatch (ADR-0005), and behind it the write is now judged by
+  // `CapabilityDeclarationSchema` (422) instead of being stored unvalidated.
+  //
+  // `supportsOverlay: false` — a capability is a name, label and scope; there
+  // is no merge semantic, and letting a tenant overlay a package-shipped
+  // declaration would let it re-scope `org` → `platform`.
+  // `loadOrder: 12` — before `permission`/`position` (15), so a set's
+  // `systemPermissions` resolves against capabilities that already exist.
+  { type: 'capability', label: 'Capability', description: 'Package-declared authorization capability — the DEFINITION side of ADR-0066 D1 (grants live on permission sets; requirements on resources)', filePatterns: ['**/*.capability.ts', '**/*.capability.yml'], supportsOverlay: false, allowOrgOverride: false, allowRuntimeCreate: false, supportsVersioning: false, executionPinned: false, loadOrder: 12, domain: 'security' },
 
   // AI Protocol
   // `agent`: executionPinned — long-running conversations must stick to the
@@ -858,8 +1004,17 @@ export const DEFAULT_METADATA_TYPE_REGISTRY: MetadataTypeRegistryEntryParsed[] =
   // an author-owned definition has no git to fall back on, so opening the
   // type and giving it a real history path are the same piece of work.
   { type: 'agent', label: 'AI Agent', filePatterns: ['**/*.agent.ts', '**/*.agent.yml'], supportsOverlay: false, allowOrgOverride: false, allowRuntimeCreate: false, supportsVersioning: true, executionPinned: true, loadOrder: 90, domain: 'ai' },
-  { type: 'tool', label: 'AI Tool', filePatterns: ['**/*.tool.ts', '**/*.tool.yml'], supportsOverlay: true, allowOrgOverride: true, allowRuntimeCreate: true, supportsVersioning: false, executionPinned: false, loadOrder: 85, domain: 'ai' },
-  { type: 'skill', label: 'AI Skill', filePatterns: ['**/*.skill.ts', '**/*.skill.yml'], supportsOverlay: true, allowOrgOverride: true, allowRuntimeCreate: true, supportsVersioning: false, executionPinned: false, loadOrder: 88, domain: 'ai' },
+  // `tool` / `skill`: `allowOrgOverride: false` — ROLLED BACK from an
+  // unratified `true` (#6483, 2026-08-08 maintainer ruling). ADR-0005's ai
+  // row says ❌: "Behavioural contracts with model providers; treat like
+  // flows" — and `flow` itself was rolled back by #6283 on that very row.
+  // ADR-0063 §2's model (tenants extend the platform by AUTHORING skills +
+  // tools) is the `allowRuntimeCreate: true` tier, which stays open; what
+  // closes is per-org overlay of a PACKAGE-SHIPPED tool/skill, now a loud
+  // `403 not_overridable`. Zero live org-scoped overlay rows for either
+  // type in-repo at rollback; zero production write sites found.
+  { type: 'tool', label: 'AI Tool', filePatterns: ['**/*.tool.ts', '**/*.tool.yml'], supportsOverlay: true, allowOrgOverride: false, allowRuntimeCreate: true, supportsVersioning: false, executionPinned: false, loadOrder: 85, domain: 'ai' },
+  { type: 'skill', label: 'AI Skill', filePatterns: ['**/*.skill.ts', '**/*.skill.yml'], supportsOverlay: true, allowOrgOverride: false, allowRuntimeCreate: true, supportsVersioning: false, executionPinned: false, loadOrder: 88, domain: 'ai' },
 ];
 
 // ==========================================

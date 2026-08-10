@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/plugin-email",
-  "version": "17.0.0-rc.5",
+  "version": "17.0.0-rc.6",
   "license": "Apache-2.0",
   "description": "Email service plugin for ObjectStack — IEmailService + transport-pluggable outbound delivery with sys_email persistence.",
   "main": "dist/index.js",

@@ -42,6 +42,7 @@ export {
   type ActionContributionLocation,
   type MetadataIconContribution,
   type PanelContribution,
+  type PanelLocation,
   type CommandContribution,
   type StudioPluginContributions,
   type StudioPluginManifest,

@@ -87,7 +87,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
     },
     _views: {
       my_pending: {
-        label: "Mis pendientes",
+        label: "Aprobaciones pendientes",
         emptyState: {
           title: "Sin aprobaciones pendientes",
           message: "Estás al día: nada espera tu aprobación."

@@ -15,6 +15,14 @@
  * whose descriptor declares `resumeAuthority: 'service'` is resumable only
  * with the in-process {@link RESUME_AUTHORITY_SERVICE} marker — which no JSON
  * body can carry. A `screen` pause (the reason the route exists) is untouched.
+ *
+ * **#5561 step two moved where the line sits.** An omission used to resolve
+ * `'any'` (the schema default step one removed), so a pausing type that never
+ * stated its authority was raw-resumable. It now resolves `'service'`: the
+ * generic route is an OPT-IN a descriptor declares, not a default it inherits.
+ * `open_pause` below therefore declares `'any'` explicitly — it is the stand-in
+ * for `screen`/`wait`, which declare it too — and the undeclared shape gets its
+ * own describe block asserting the refusal plus the one-line fix that lifts it.
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
@@ -56,16 +64,19 @@ function registerPausers(engine: AutomationEngine): void {
     type: 'gated_pause',
     descriptor: defineActionDescriptor({
       type: 'gated_pause', version: '1.0.0', name: 'Gated Pause',
-      supportsPause: true, isAsync: true, resumeAuthority: 'service',
+      supportsPause: true, resumeAuthority: 'service',
     }),
     async execute() { return { success: true, suspend: true, correlation: 'req_1' }; },
   });
   // Stands in for `screen` / `wait`: the caller supplies the continuation, so
-  // the generic route is the intended door (descriptor defaults to 'any').
+  // the generic route is the intended door. Declared explicitly, exactly as the
+  // four pausing built-ins declare it — since #5561 there is no default to
+  // inherit, and an omission means the opposite of this (see `undeclared_pause`).
   engine.registerNodeExecutor({
     type: 'open_pause',
     descriptor: defineActionDescriptor({
-      type: 'open_pause', version: '1.0.0', name: 'Open Pause', supportsPause: true,
+      type: 'open_pause', version: '1.0.0', name: 'Open Pause',
+      supportsPause: true, resumeAuthority: 'any',
     }),
     async execute() { return { success: true, suspend: true }; },
   });
@@ -143,9 +154,12 @@ describe('resume authorization gate (#3801)', () => {
     expect(downstream).toEqual(['after']);
   });
 
-  it('a node type with no published descriptor stays ungated', async () => {
-    // `registerNodeExecutor` without a descriptor — the gate has nothing
-    // declaring itself service-owned, so behaviour is unchanged.
+  it('refuses a node type that published no descriptor at all (#5561)', async () => {
+    // `registerNodeExecutor` without a descriptor declares NOTHING — not even
+    // `supportsPause` — so it is the loudest instance of the shape step two
+    // closes, and the one neither the registration warning nor
+    // `check:resume-authority-declared` can see (both key on a descriptor
+    // literal). Before the flip this resumed and ran `after`.
     engine.registerNodeExecutor({
       type: 'bare_pause',
       async execute() { return { success: true, suspend: true }; },
@@ -153,8 +167,82 @@ describe('resume authorization gate (#3801)', () => {
     engine.registerFlow('bare_flow', pauseFlow('bare_flow', 'bare_pause') as never);
     const paused = await engine.execute('bare_flow');
 
-    expect((await engine.resume(paused.runId!)).success).toBe(true);
-    expect(downstream).toEqual(['after']);
+    const refused = await engine.resume(paused.runId!);
+    expect(refused.success).toBe(false);
+    expect(refused.code).toBe('PERMISSION_DENIED');
+    expect(refused.error).toMatch(/never declares resumeAuthority/);
+    expect(downstream).toEqual([]);
+    // Refused, not consumed — the pause survives for a legitimate continuation.
+    expect(engine.listSuspendedRuns()).toHaveLength(1);
+  });
+
+  // ── an undeclared pausing type: fail-closed, and the fix that lifts it ──
+  //
+  // The end-to-end shape #5561 step two exists for. Before the flip the
+  // descriptor below (`supportsPause: true`, no `resumeAuthority`) inherited the
+  // schema default and was raw-resumable; a third-party pausing node shipped
+  // fail-open unless its author remembered a field nothing forced them to write.
+
+  describe('a pausing type that never declares resumeAuthority (#5561)', () => {
+    /** The descriptor shape the whole issue is about, parameterised by authority. */
+    function registerUndeclared(e: AutomationEngine, authority?: 'any' | 'service'): void {
+      e.registerNodeExecutor({
+        type: 'undeclared_pause',
+        descriptor: defineActionDescriptor({
+          type: 'undeclared_pause', version: '1.0.0', name: 'Undeclared Pause',
+          supportsPause: true, ...(authority ? { resumeAuthority: authority } : {}),
+        }),
+        async execute() { return { success: true, suspend: true }; },
+      });
+      e.registerFlow('undeclared_flow', pauseFlow('undeclared_flow', 'undeclared_pause') as never);
+    }
+
+    it('refuses the generic resume, naming the omission and the one-line fix', async () => {
+      registerUndeclared(engine);
+      const paused = await engine.execute('undeclared_flow');
+      expect(paused.status).toBe('paused');
+
+      const refused = await engine.resume(paused.runId!, { variables: { new_assignee: 'ada' } });
+
+      expect(refused.success).toBe(false);
+      expect(refused.code).toBe('PERMISSION_DENIED');
+      // Distinct from the declared-'service' wording: this reader has to add a
+      // field to a descriptor, not route through somebody's service API.
+      expect(refused.error).toMatch(/never declares resumeAuthority/);
+      expect(refused.error).toContain("resumeAuthority: 'any'");
+      expect(refused.error).not.toMatch(/only its owning service may resume/);
+      // Refused, not consumed.
+      expect(downstream).toEqual([]);
+      expect(engine.listSuspendedRuns()).toHaveLength(1);
+    });
+
+    it("declaring 'any' is the whole migration — the same flow then resumes", async () => {
+      // A fresh engine registering the SAME node type with the one field added:
+      // the prescription the refusal prints, applied verbatim.
+      const declared = makeEngine(downstream);
+      registerUndeclared(declared, 'any');
+      const paused = await declared.execute('undeclared_flow');
+
+      const resumed = await declared.resume(paused.runId!, { variables: { new_assignee: 'ada' } });
+
+      expect(resumed.success).toBe(true);
+      expect(resumed.code).toBeUndefined();
+      expect(downstream).toEqual(['after']);
+      expect(declared.listSuspendedRuns()).toHaveLength(0);
+    });
+
+    it('is still resumable by an owning service while undeclared — closed, not bricked', async () => {
+      // Fail-closed must not mean "unrecoverable": the in-process marker still
+      // continues the run, so a host that knows what it is doing is not stuck
+      // waiting on a plugin release.
+      registerUndeclared(engine);
+      const paused = await engine.execute('undeclared_flow');
+
+      const ok = await engine.resume(paused.runId!, { [RESUME_AUTHORITY_SERVICE]: true });
+
+      expect(ok.success).toBe(true);
+      expect(downstream).toEqual(['after']);
+    });
   });
 
   it('gates a flow authored against a deprecated ALIAS of the gated type', async () => {

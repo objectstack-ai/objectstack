@@ -71,6 +71,9 @@ import type {
   MetaRef,
 } from '@objectstack/metadata-core';
 import { EndpointMatcher } from './endpoint-matcher.js';
+// [#5309] The stored ENVELOPE / authored BODY split — peeled before any spec
+// schema parses a stored row. See `stored-envelope.ts`.
+import { peelStoredEnvelope } from './stored-envelope.js';
 import type { ApiEndpointMatch } from '@objectstack/spec/contracts';
 
 /**
@@ -787,16 +790,30 @@ export class MetadataManager implements IMetadataService {
    * has with {@link loadDiagnosed}, so every existing caller keeps its exact
    * behaviour and only callers that ASK for the verdict pay for it.
    *
-   * [#5840] Deliberately NOT expressed as `(await getDiagnosed(…)).data`,
-   * although that is what it computes. The obvious delegation adds one
-   * `await` hop, and a registry hit here is observed one microtask sooner than
-   * it would be through a second async frame — which `register()`'s watchers
-   * depend on, because `notifyWatchers` does not await its handlers and
-   * ObjectQL's bridge re-reads through `get()` on the event rather than
-   * trusting the payload (`register-notifies-watchers.test.ts` pins it, and
-   * went red on the delegating version). The duplication is three lines and is
-   * pinned from the other side: `get()` and `getDiagnosed().data` are asserted
-   * to agree on every case in `metadata-manager-get-diagnosed.test.ts`.
+   * Not expressed as `(await getDiagnosed(…)).data`, although that is what it
+   * computes — and the reason has CHANGED, so do not read the duplication as a
+   * standing constraint.
+   *
+   * [#5840] recorded the delegation as unsafe: it adds one `await` hop, and
+   * `register-notifies-watchers.test.ts` went red on the delegating version, so
+   * three lines were duplicated to hold the frame count fixed. [#6043] measured
+   * that test and found it was pinning this method's microtask depth rather than
+   * the ordering guarantee it named — `notifyWatchers` never awaits its handlers,
+   * so a subscriber's `await get(…)` had simply been settling inside the
+   * microtasks `await register(…)` yields. That case now asserts the ordering
+   * synchronously against the registry and does not observe this method's frame
+   * count at all; the whole `@objectstack/metadata` suite was re-measured on the
+   * delegating version and stayed green.
+   *
+   * What survives is a plain, local reason: the registry hit is the hot path and
+   * answering it without a second async frame is worth three lines. Nothing
+   * external depends on the hop count any more. Consolidating the two into one
+   * delegation is therefore a viable, deliberately un-taken change (#6043 was
+   * test-scoped) — if you take it, note that `get()`'s callers outside this
+   * package were never surveyed for timing sensitivity, only this package's
+   * tests. Either way the two stay pinned to each other from the other side:
+   * `get()` and `getDiagnosed().data` are asserted to agree on every case in
+   * `metadata-manager-get-diagnosed.test.ts`.
    */
   async get(type: string, name: string): Promise<unknown | undefined> {
     // Check in-memory registry first
@@ -1645,10 +1662,16 @@ export class MetadataManager implements IMetadataService {
    * ## What it judges, and on what
    *
    * The registry stores either a raw spec document or a publish envelope
-   * (`{ name, packageId, state, metadata: {…spec} }`); the endpoint is read
-   * out with the SAME rule this method's caller uses for
-   * `publishedDefinition` (`data.metadata ?? data`), so publish gates exactly
-   * the document publish is about to snapshot. An item that does not satisfy
+   * (`{ name, packageId, state, metadata: {…spec} }`), and in BOTH shapes the
+   * row carries the metadata layer's bookkeeping. [#5309] The envelope is
+   * peeled off first (`peelStoredEnvelope`) and the gate judges the authored
+   * BODY: the wrapped half of that peel is the `data.metadata ?? data` rule
+   * this method used to spell inline — the same document `publishedDefinition`
+   * snapshots — and the flat half additionally removes `packageId` / `state` /
+   * `version` / `published*`, which are storage identity, never endpoint
+   * vocabulary. (What publish SNAPSHOTS is unchanged: `publishedDefinition`
+   * still stores `data.metadata ?? data` verbatim, envelope included, because
+   * `revertPackage` restores from it.) An item whose body does not satisfy
    * `ApiEndpointSchema` fails here too — not extra strictness but a
    * precondition: an unparsed shape cannot be gated, and it could never be
    * served either (the matcher's own loud skip refuses it at load).
@@ -1672,8 +1695,13 @@ export class MetadataManager implements IMetadataService {
     const gatedItems: Array<{ name: string }> = [];
 
     for (const item of apiItems) {
-      const document = item.data?.metadata ?? item.data;
-      const parsed = ApiEndpointSchema.safeParse(document);
+      // [#5309] Envelope OFF before the body parse — the same peel the load-time
+      // backstop applies (`buildEndpointIndex`), so the two doors judge the same
+      // document. The wrapped half of the rule is the `data.metadata ?? data`
+      // this line used to spell inline; the flat half additionally takes off the
+      // bookkeeping (`packageId`, `state`, …) that shares a level with the body.
+      const { body } = peelStoredEnvelope(item.data);
+      const parsed = ApiEndpointSchema.safeParse(body);
       if (!parsed.success) {
         for (const issue of parsed.error.issues) {
           errors.push({

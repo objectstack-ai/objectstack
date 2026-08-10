@@ -11,6 +11,11 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
+// [#4513] The `/meta` read path's share of the governance table this file's
+// write-path assertions measure. Imported from `@objectstack/metadata-core`
+// because that is where it lives for BOTH consumers — see the last describe.
+import { applyAuditFieldGovernance } from '@objectstack/metadata-core';
+import { AUDIT_PROVENANCE_FIELDS } from '@objectstack/spec/data';
 import { ObjectQL } from './engine.js';
 
 const taskObject = {
@@ -109,7 +114,7 @@ describe('[#4447] created_at is engine-owned on an ordinary write', () => {
     const { driver } = makeStubDriver();
     engine.registerDriver(driver, true);
     await engine.init();
-    engine.registry.registerObject(taskObject as any);
+    engine.registry.registerObject(taskObject);
   });
 
   /** An ordinary authenticated caller — NOT `isSystem`, no `preserveAudit`. */
@@ -255,7 +260,7 @@ describe('[#4447] a declared audit field cannot loosen the platform posture', ()
     const { driver } = makeStubDriver();
     engine.registerDriver(driver, true);
     await engine.init();
-    engine.registry.registerObject(shadowed as any);
+    engine.registry.registerObject(shadowed);
   });
 
   it('the registry restores the engine-owned governance', () => {
@@ -302,5 +307,105 @@ describe('[#4447] a declared audit field cannot loosen the platform posture', ()
       readonly: true,
       system: true,
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// [#4513] The other half of the same contract: what the `/meta` READ surface
+// tells a client about these fields.
+//
+// #4447 closed the write path off the registry's post-injection schema — a
+// place `@objectstack/metadata-protocol` structurally cannot reach (`objectql`
+// depends on IT, so the import would close a turbo-rejected cycle). The read
+// path therefore answered from the stored artifact/overlay body and reported
+// `readonly: false` on the very field every assertion above proves is refused.
+//
+// `applyAuditFieldGovernance` is the read path's share of one table, and this
+// block is where the two are held against each other with BOTH sides live: the
+// engine's refusal measured on a real write, and the normalizer's answer
+// measured on the same document. A future key added to the governance the
+// registry forces, but not to the normalizer, fails here rather than in a
+// production `/meta` body.
+// ---------------------------------------------------------------------------
+describe('[#4513] the read-path normalizer answers what this engine enforces', () => {
+  const shadowed = {
+    name: 'audit_readface',
+    label: 'Shadowed',
+    fields: {
+      id: { name: 'id', label: 'ID', type: 'text' as const, primaryKey: true },
+      title: { name: 'title', label: 'Title', type: 'text' as const },
+      // The same materialized artifact field as the block above.
+      created_at: {
+        label: 'Created At', type: 'datetime' as const, required: false,
+        readonly: false, sortable: true,
+      },
+    },
+  };
+
+  let engine: ObjectQL;
+  beforeEach(async () => {
+    engine = new ObjectQL();
+    const { driver } = makeStubDriver();
+    engine.registerDriver(driver, true);
+    await engine.init();
+    // [#4311] Typed call site: `packageId` is required, and the ledger over
+    // this package's hidden test layer is a shrink-only ratchet — a new test
+    // pays its own way rather than raising the frozen number.
+    engine.registry.registerObject(shadowed, 'test');
+  });
+
+  it('the normalizer reproduces the registry\'s governance, field for field', () => {
+    // Ground truth: what the engine will enforce, read off the live registry.
+    const enforced: any = engine.registry.getObject('audit_readface')?.fields;
+    // What a `/meta` read is allowed to say, computed from the AUTHORED
+    // document — the body the read path actually has in hand.
+    const reported: any = (applyAuditFieldGovernance(shadowed) as any).fields;
+
+    for (const name of AUDIT_PROVENANCE_FIELDS) {
+      if (!reported[name]) continue; // the read path governs declared fields only
+      expect(reported[name].readonly, `${name}.readonly`).toBe(enforced[name].readonly);
+      expect(reported[name].system, `${name}.system`).toBe(enforced[name].system);
+    }
+    expect(reported.created_at).toMatchObject({ readonly: true, system: true });
+  });
+
+  it('the refusal and the reported value are measured on the same field', async () => {
+    const row: any = await engine.insert(
+      'audit_readface', { title: 'T' }, { context: { userId: 'u1' } } as any,
+    );
+    const real = row.created_at;
+    await engine.update(
+      'audit_readface',
+      { title: 'T2', created_at: FORGED },
+      { where: { id: row.id }, context: { userId: 'u1' } } as any,
+    );
+    // [#4918] No `as any` on the options bag — this call is ON contract, and
+    // the signature infers it.
+    const after: any = await engine.findOne('audit_readface', { where: { id: row.id } });
+
+    // The write was refused …
+    expect(after.created_at).toBe(real);
+    expect(after.created_at).not.toBe(FORGED);
+    // … so the read is not permitted to advertise it as writable.
+    expect((applyAuditFieldGovernance(shadowed) as any).fields.created_at.readonly).toBe(true);
+  });
+
+  it('leaves an audit-opted-out object alone, because the engine does too', () => {
+    const optedOut = {
+      name: 'audit_optout',
+      label: 'Opted out',
+      systemFields: { audit: false },
+      fields: {
+        id: { name: 'id', label: 'ID', type: 'text' as const, primaryKey: true },
+        created_at: { label: 'Created At', type: 'datetime' as const, readonly: false },
+      },
+    };
+    engine.registry.registerObject(optedOut, 'test');
+
+    const enforced: any = engine.registry.getObject('audit_optout')?.fields.created_at;
+    const reported: any = (applyAuditFieldGovernance(optedOut) as any).fields.created_at;
+    expect(enforced.readonly).toBe(false);
+    expect(reported.readonly).toBe(false);
+    expect(reported.system).toBeUndefined();
   });
 });

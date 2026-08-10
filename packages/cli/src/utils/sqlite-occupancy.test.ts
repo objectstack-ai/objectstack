@@ -4,7 +4,8 @@
  * SQLite occupancy detection (#3917).
  *
  * The scenario these encode is the one that produced the report: a dev server
- * holding `.objectstack/data/standalone.db` open while `os migrate apply` runs
+ * holding `.objectstack/data/objectstack.db` (the unified default since #6469)
+ * open while `os migrate apply` runs
  * in another terminal. The probe has to tell that apart from a database nobody
  * is attached to — including a database that merely has `-wal`/`-shm` left over
  * from a crash, which sidecar presence alone cannot do.

@@ -5,6 +5,7 @@ import type { IHttpServer, IHttpRequest, IHttpResponse, RouteHandler } from '@ob
 import { SettingsService } from './settings-service.js';
 import { registerSettingsRoutes } from './settings-routes.js';
 import { brandingSettingsManifest } from './manifests/branding.manifest.js';
+import { localizationSettingsManifest } from './manifests/localization.manifest.js';
 
 class MockHttp implements IHttpServer {
   routes = new Map<string, RouteHandler>();
@@ -212,5 +213,94 @@ describe('settings-routes', () => {
     const r2 = makeReqRes({ params: { namespace: 'branding' }, body: { workspace_name: 'X' } });
     await write(r2.req, r2.res);
     expect(r2.state.status).toBe(403); // has setup.access, lacks setup.write
+  });
+
+  // ── #5712 — the declared valueDomain, as it lands on the HTTP surface ─────
+  // The card's repros, asserted with the full envelope: status AND code, per
+  // the rejection-test contract — a bare "it threw" carries one bit where the
+  // defect has two.
+
+  it('PUT /api/settings/localization accepts Europe/Zurich + CHF (the #5712 repro)', async () => {
+    const http = new MockHttp();
+    const svc = new SettingsService({ env: {} });
+    svc.registerManifest(localizationSettingsManifest);
+    registerSettingsRoutes(http, svc, { contextFromRequest: adminProvider });
+
+    const h = http.routes.get('PUT /api/settings/:namespace')!;
+    const { req, res, state } = makeReqRes({
+      params: { namespace: 'localization' },
+      body: { timezone: 'Europe/Zurich', currency: 'CHF' },
+    });
+    await h(req, res);
+    expect(state.status).toBe(200);
+    expect(state.body.error).toBeUndefined();
+    expect(state.body.data.values.timezone.value).toBe('Europe/Zurich');
+    expect(state.body.data.values.currency.value).toBe('CHF');
+  });
+
+  it('PUT /api/settings/localization rejects garbage with 400 + SETTINGS_VALIDATION + invalid_value', async () => {
+    const http = new MockHttp();
+    const svc = new SettingsService({ env: {} });
+    svc.registerManifest(localizationSettingsManifest);
+    registerSettingsRoutes(http, svc, { contextFromRequest: adminProvider });
+
+    const h = http.routes.get('PUT /api/settings/:namespace')!;
+    const { req, res, state } = makeReqRes({
+      params: { namespace: 'localization' },
+      body: { timezone: 'Mars/Olympus' },
+    });
+    await h(req, res);
+    expect(state.status).toBe(400);
+    expect(state.body.error.code).toBe('SETTINGS_VALIDATION');
+    expect(state.body.error.details.fields).toEqual([
+      expect.objectContaining({
+        field: 'timezone',
+        code: 'invalid_value',
+        constraint: { valueDomain: 'iana_time_zone' },
+        value: 'Mars/Olympus',
+      }),
+    ]);
+  });
+
+  /**
+   * #7169 — the STATUS half of the fail-closed refusal.
+   *
+   * `SettingsValidationError` carries `code` and the service suite pins that; a
+   * rejection case's other required assertion is the HTTP `status`, and this
+   * surface mints it here rather than on the error (ADR-0112 envelope, same
+   * 400 + `SETTINGS_VALIDATION` mapping every other save-time refusal takes).
+   * Restore `catch { continue }` in `validatePatch` and this case answers 200.
+   */
+  it('PUT rejects an unparseable `visible` predicate with 400 + SETTINGS_VALIDATION + invalid_value', async () => {
+    const http = new MockHttp();
+    const svc = new SettingsService({ env: {} });
+    svc.registerManifest({
+      namespace: 'celns',
+      label: 'CEL namespace',
+      specifiers: [
+        { type: 'text', key: 'note', label: 'Note' },
+        // CEL the spec's `ExpressionInputSchema` declares legal and this
+        // service's evaluator cannot parse.
+        { type: 'text', key: 'api_key', label: 'API key', required: true,
+          visible: "${data.note in ['x']}" },
+      ],
+    } as any);
+    registerSettingsRoutes(http, svc, { contextFromRequest: adminProvider });
+
+    const h = http.routes.get('PUT /api/settings/:namespace')!;
+    const { req, res, state } = makeReqRes({
+      params: { namespace: 'celns' },
+      body: { note: 'anything' },
+    });
+    await h(req, res);
+    expect(state.status).toBe(400);
+    expect(state.body.error.code).toBe('SETTINGS_VALIDATION');
+    expect(state.body.error.details.fields).toEqual([
+      expect.objectContaining({
+        field: 'api_key',
+        code: 'invalid_value',
+        constraint: { visible: "data.note in ['x']" },
+      }),
+    ]);
   });
 });

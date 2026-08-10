@@ -101,8 +101,8 @@ describe('unknown engine option keys are rejected (#4371 option 2)', () => {
         finds = mem.finds;
         engine.registerDriver(mem.driver, true);
         await engine.init();
-        engine.registry.registerObject(task as any);
-        engine.registry.registerObject(person as any);
+        engine.registry.registerObject(task);
+        engine.registry.registerObject(person);
         await engine.insert('person', { id: 'p1', name: 'P' });
         a = await engine.insert('task', { title: 'A', status: 'open', owner: 'p1' });
         await engine.insert('task', { title: 'B', status: 'done', owner: 'p1' });

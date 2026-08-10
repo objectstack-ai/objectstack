@@ -23,10 +23,13 @@
  *    bare field name or `{ field, dateGranularity?, alias? }`) and so is
  *    `RecordHighlightsProps.fields[]` (`RecordHighlightsField` — bare field
  *    name or `{ name, label?, icon?, type?, readonly? }`), so this is the
- *    common path on both surfaces. It matters more after #5583 / a future
- *    `strictObject` batch: an `unrecognized_keys` raised inside an object arm
- *    collapses exactly the same way, so the unpacking is what will carry the
- *    strict rejection's named surface + rename suggestion to the author.
+ *    common path on both surfaces. **As of #5583 it is also the only thing
+ *    carrying a STRICT rejection out of a union arm**: `ChartGroupBySchema`'s
+ *    object arm is a `strictObject` now, and the `unrecognized_keys` it raises
+ *    collapses exactly like any other arm failure — so this unpacking, not the
+ *    schema, is what puts the named surface and the rename in front of the
+ *    author. `validate-react-page-props.test.ts` pins that end to end; deleting
+ *    the unpacking turns it red while `packages/spec`'s own tests stay green.
  * 2. **The offending value is dropped.** `Invalid option: expected one of
  *    "count"|"sum"|…` never echoes what was actually written, and the
  *    hand-rolled check #5020 replaced did (`aggregate.function "median" is not

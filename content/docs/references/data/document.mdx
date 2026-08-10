@@ -52,9 +52,9 @@ const result = DocumentSchema.parse(data);
 | **fileSize** | `number` | ✅ | File size in bytes |
 | **category** | `string` | optional | Document category |
 | **tags** | `string[]` | optional | Document tags |
-| **versioning** | `{ enabled: boolean; versions: { versionNumber: number; createdAt: number; createdBy: string; size: number; … }[]; majorVersion: number; minorVersion: number }` | optional | Version control |
+| **versioning** | `{ enabled: boolean; versions: object[]; majorVersion: number; minorVersion: number }` | optional | Version control |
 | **template** | `{ id: string; name: string; description?: string; fileUrl: string; … }` | optional | Document template |
-| **eSignature** | `{ provider: Enum<'docusign' \| 'adobe-sign' \| 'hellosign' \| 'custom'>; enabled: boolean; signers: { email: string; name: string; role: string; order: number }[]; expirationDays: number; … }` | optional | E-signature config |
+| **eSignature** | `{ provider: Enum<'docusign' \| 'adobe-sign' \| 'hellosign' \| 'custom'>; enabled: boolean; signers: object[]; expirationDays: number; … }` | optional | E-signature config |
 | **access** | `{ isPublic: boolean; sharedWith?: string[]; expiresAt?: number }` | optional | Access control |
 | **metadata** | `Record<string, any>` | optional | Custom metadata |
 

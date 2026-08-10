@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/plugin-approvals",
-  "version": "17.0.0-rc.5",
+  "version": "17.0.0-rc.6",
   "license": "Apache-2.0",
   "description": "Multi-step approval engine for ObjectStack — sys_approval_process + sys_approval_request + sys_approval_action + IApprovalService.",
   "main": "dist/index.js",

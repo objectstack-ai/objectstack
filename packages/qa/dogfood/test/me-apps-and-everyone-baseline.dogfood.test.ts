@@ -13,15 +13,25 @@
 // `allowDelete` on `'*'`, so the bootstrap REFUSED to bind it to the
 // `everyone` position on every boot and the baseline flowed only through the
 // separate fallback channel (the "second distribution channel" D5 rejected).
-// The wildcard is now delete-free (anchor-safe per the D5 bit list), the
-// everyone binding succeeds, and deleting records is no longer a baseline
-// right.
+// The baseline is now anchor-safe per the D5 bit list, the everyone binding
+// succeeds, and deleting records is no longer a baseline right.
+//
+// [#5491] The `'*'` wildcard that carried those bits is GONE entirely — not
+// just its delete bit. It union-merged into every org member and erased
+// app-declared explicit-allow gates on create/read/edit, so the maintainer
+// narrowed the baseline to explicit-allow (2026-08-07). The two properties
+// above are unaffected — the everyone binding is about the SET, not its
+// grants — but the delete case below can no longer borrow its create right
+// from the wildcard and now declares it. Anchor-safety of the shipped set is
+// pinned statically in `plugin-security`'s `member-default-explicit-allow`
+// suite; this file pins that the BINDING actually happens at bootstrap.
 //
 // @proof: me-apps-and-everyone-baseline
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import showcaseStack from '@objectstack/example-showcase';
 import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { SecurityPlugin } from '@objectstack/plugin-security';
 
 const SYS = { isSystem: true } as const;
 
@@ -32,7 +42,21 @@ describe('ADR-0090 D5 closures: /me/apps + anchor-bindable baseline', () => {
   let memberTok: string;
 
   beforeAll(async () => {
-    stack = await bootStack(showcaseStack);
+    // Deliberately VANILLA: `member_default` must stay the CONFIGURED baseline,
+    // because the #2753 assertion below is precisely that the bootstrap binds
+    // THAT set to the `everyone` anchor. The #5491 consequence — the baseline no
+    // longer grants objects — is handled where it bites, by declaring the probe's
+    // create grant instead of inheriting it from a wildcard (see the delete case).
+    //
+    // [#7001] SAID OUT LOUD, in the argument, because it is a real dependency of
+    // this file and not a background fact. It used to be silent: `bootStack`
+    // built a vanilla `new SecurityPlugin()` for everyone, so this suite got the
+    // platform baseline by DEFAULT while `objectstack dev` gave the same
+    // showcase its own declared `showcase_member_default` — the boot-path
+    // asymmetry #7001 closed. The harness now honours an app's declared default,
+    // so the file that genuinely wants the platform's own baseline asks for it.
+    // Nothing about the claim below changed; only who is saying it.
+    stack = await bootStack(showcaseStack, { security: new SecurityPlugin() });
     adminTok = await stack.signIn();
     memberTok = await stack.signUp('baseline-member@verify.test');
     ql = await stack.kernel.getServiceAsync('objectql');
@@ -139,13 +163,46 @@ describe('ADR-0090 D5 closures: /me/apps + anchor-bindable baseline', () => {
   });
 
   it('deleting records is no longer a baseline right (anchor-forbidden bit removed)', async () => {
-    // The member can still create their own record…
+    // [#5491] Where the create right comes from changed, and that is the point.
+    // It used to come from `member_default`'s `'*'` grant — the baseline handed
+    // every member create/read/edit on EVERY object, which is what erased
+    // app-declared explicit-allow gates and what the maintainer removed. So the
+    // create bit is now DECLARED, on one named object, and bound to this member
+    // the same way the tab probes above bind theirs.
+    //
+    // The delete assertion is untouched and is still ADR-0090 D5's property: the
+    // declared set deliberately carries no `allowDelete`, and the baseline may
+    // not carry one (anchor-forbidden bit) — so a member's own record is still
+    // undeletable. What this case can no longer be accused of is passing because
+    // some wildcard happened to grant create.
+    const memberUser = await ql.findOne('sys_user', { where: { email: 'baseline-member@verify.test' }, context: SYS });
+    expect(memberUser?.id, 'baseline member resolved').toBeTruthy();
+    const inquirySet = await ql.insert(
+      'sys_permission_set',
+      {
+        name: 'baseline_inquiry_probe',
+        label: 'Baseline probe — inquiry create, deliberately no delete',
+        object_permissions: JSON.stringify({
+          showcase_inquiry: { allowRead: true, allowCreate: true },
+        }),
+      },
+      { context: SYS },
+    );
+    const inquirySetId = inquirySet?.id
+      ?? (await ql.findOne('sys_permission_set', { where: { name: 'baseline_inquiry_probe' }, context: SYS }))?.id;
+    expect(inquirySetId, 'probe set stored').toBeTruthy();
+    await ql.insert(
+      'sys_user_permission_set',
+      { user_id: memberUser.id, permission_set_id: inquirySetId },
+      { context: SYS },
+    );
+
     const created = await stack.apiAs(memberTok, 'POST', '/data/showcase_inquiry', {
       name: 'Baseline Probe',
       email: 'baseline-probe@verify.test',
       message: 'delete-bit probe',
     });
-    expect(created.status, 'baseline create still works').toBeLessThan(300);
+    expect(created.status, 'the DECLARED create grant works').toBeLessThan(300);
     const body: any = await created.json();
     const id = body?.id ?? body?.record?.id;
     expect(id).toBeTruthy();

@@ -1,5 +1,475 @@
 # @objectstack/core
 
+## 17.0.0-rc.6
+
+### Minor Changes
+
+- 82da264: feat: declare `ExecutionContext.authGate`, so the ADR-0069 gate sits inside the closed field set (#7280)
+
+  The ADR-0069 authentication-policy gate (expired password, enforced MFA) rode
+  the execution context **undeclared**: REST's `computeExecCtx` spread it onto the
+  assembled envelope with `...(authGate ? { authGate } : {})` behind an `as any`,
+  and its `enforceAuth` read it back ten lines later. Nothing was broken — but the
+  closed entry field set shipped in #6216 is derived from `keyof ExecutionContext`,
+  so a field that exists only inside an `as any` is **outside every closure gate by
+  construction**: `ENTRY_EXECUTION_CONTEXT_FIELDS` could not list it,
+  `ExecutionContextEntryFields` could not demand it, and the runtime pin that
+  reconciles the closed set against `ExecutionContextSchema.shape` could not see
+  it. It was the exact blind spot that gate exists to remove, sitting one `as any`
+  outside it.
+
+  **@objectstack/spec** declares the field:
+
+  ```ts
+  authGate: z.object({ code: z.string(), message: z.string() }).optional();
+  ```
+
+  Both inner keys are required, matching the sole producer
+  (`AuthManager.computeAuthGate`, which sets both on every return branch) — `code`
+  is the stable machine code a client branches on, `message` is what the blocked
+  user reads, and the transport seam renders both as the `403` body.
+
+  **@objectstack/core** picks it up as an ENTRY-decided field — it is resolved from
+  the request's own session at the transport entry point, never written mid-request
+  — so `ExecutionContextAssemblyInput` gains a **required** `authGate` input on the
+  same footing as `accessToken`: every face states its decision instead of omitting
+  it. A guest principal never carries one (no authenticated session for a policy
+  gate to attach to). Also exported: `normalizeAuthGate`, which completes a session
+  user's loose `authGate` into the declared shape at the one producer rather than
+  tolerating a partial shape downstream — a gate naming a `code` but no `message`
+  no longer renders a `403` body with `message: undefined`. `AuthGate` is now
+  derived from the schema instead of being a second hand-written declaration.
+
+  **@objectstack/rest** passes the resolved gate as an assembler input and drops the
+  post-assembly spread; the remaining `as any` covers `__kernel` alone.
+  **@objectstack/runtime** (the runtime / MCP dispatcher) passes `authGate:
+undefined` on the record: it enforces the same gate at its own seam
+  (`HttpDispatcher.enforceAuthGate` re-reads the session and calls
+  `evaluateAuthGate`) and never reads `context.authGate`, so carrying it there
+  would be a second copy no consumer reads.
+
+  **No runtime behaviour change on either surface.** The shared assembler omits
+  `undefined`-valued keys, so the key is present exactly when it was before. The one
+  new behaviour is the normalization above, on a shape the sole producer never
+  emits today.
+
+- f586f1a: refactor: one shared `ExecutionContext` assembler, two named anonymous entries (#6216)
+
+  `resolveAuthzContext` already made AUTHORIZATION resolution single-sourced; the
+  step after it — turning the resolved envelope into the `ExecutionContext` that
+  reaches enforcement — was still one hand-written copy per transport, and the
+  copies drifted twice for real: **#6071** (the REST copy never set
+  `principalKind`, so every enforcement judgment reading it was silently
+  never-true on that face) and **#6206 / #6551** (a dropped `accessible_org_ids`
+  produced real 403s on the share-link faces).
+
+  **@objectstack/core** gains the single assembly, with the anonymous divergence
+  as named API rather than drift (maintainer ruling 2026-08-08 on #6216, Option
+  A):
+
+  - `assembleExecutionContext(input)` — the **fail-closed default** entry. No
+    resolved principal → `undefined`, and the surface answers 401.
+  - `assembleExecutionContextOrGuest(input)` — the **explicit guest** entry. No
+    resolved principal → a first-class guest envelope (`principalKind: 'guest'`,
+    `positions: ['guest']`), whose consumers are live (`explain-engine`'s
+    guest ⇒ `EXTERNAL` posture floor). Adopted only by a surface whose product
+    semantics serve anonymous principals.
+  - The field set is **closed by type**: `ExecutionContextEntryFields` requires a
+    decision for every `ExecutionContext` field that is not explicitly declared
+    non-entry-resolved, so a new field cannot reach one transport and miss
+    another. Also exported: `ENTRY_EXECUTION_CONTEXT_FIELDS`,
+    `EntryExecutionContextField`, `ExecutionContextAssemblyInput`,
+    `OAuthTokenProvenance`, `EntryLocalization`.
+
+  **@objectstack/runtime** (`resolveExecutionContext`, the runtime / MCP
+  dispatcher) and **@objectstack/rest** (`computeExecCtx`) now assemble through
+  that module — the dispatcher via the guest entry, REST via the fail-closed
+  default.
+
+  **No runtime behaviour change on either surface.** The remaining per-face
+  divergences are required inputs rather than silent omissions: REST passes
+  `accessToken: undefined` (it has never carried the session bearer on the
+  envelope, and `session.accessToken` is a published hook surface) and
+  `oauth: undefined` (OAuth bearers are honoured on the `/mcp` door alone). The
+  one measurable difference is that a key whose value was `undefined` is now
+  omitted rather than spelled — invisible to `ctx.x` reads, to `JSON.stringify`
+  and to spreading the envelope.
+
+- 28d1eb7: fix(core): the QA `contains` assertion fails loudly instead of silently passing on a non-array/non-string actual (#7256)
+
+  `TestRunner.assert`'s `case 'contains':` handled the two shapes it can evaluate —
+  an array (membership) and a string (substring) — and had **no `else`**. Every
+  other shape fell straight out of the switch throwing nothing, so the assertion
+  reported **PASSED**. A scenario asserting
+  `{ field: "body.data.items", operator: "contains", expectedValue: "acme" }`
+  against a response that has no `body.data.items` at all reported ✅. The
+  overwhelmingly common way to reach that branch is the one that matters most: a
+  typo'd `field` path, or a response shape that moved under a suite nobody
+  re-read. The assertion that was supposed to _be_ the test is the thing that
+  silently disappears, and CI believes the green.
+
+  `contains` was the only path in this engine that could decide "no comparison
+  applies here" and report success. Every other unhandled shape already fails
+  loud — an operator with no branch throws `Unknown assertion operator`, an action
+  type with no adapter branch throws `Unsupported action type in HttpAdapter`,
+  and `equals`/`not_equals`/`is_null`/`not_null` all compare unconditionally. This
+  closes the asymmetry rather than adding a new posture: an assertion the engine
+  **cannot evaluate** is a **failed** assertion.
+
+  The message is written for the author who has to act on it, so it names the
+  field, the operator and the runtime type of what the path actually resolved to
+  (`null` and arrays get their own names, not `typeof`'s `object`), and then says
+  which of the two things is wrong:
+
+  ```
+  Assertion failed: body.data.items cannot be evaluated by 'contains' — expected an
+  array or a string at that path, got undefined. The path resolved to nothing — the
+  field is absent from the result, or the path is misspelled. Use 'is_null' if
+  asserting absence is what you meant.
+  ```
+
+  `undefined`/`null` point at the **fixture** (the path did not resolve, so the
+  field path or the response shape it was written against is the suspect);
+  a number, boolean or object points at the **assertion** (the path resolved
+  fine and `contains` is the wrong operator for what it found).
+
+  **Behaviour change, and its measured blast radius.** Suites that today pass a
+  `contains` against a non-array/non-string will start failing — which is the
+  point; each such assertion was asserting nothing. The in-tree radius was
+  measured on the loud build and is **zero**: `os test` is the runner's only
+  consumer, and the repository contains no Quality Protocol suite documents at
+  all (no `qa/*.test.json` anywhere; the three example apps run `vitest`, and
+  `packages/qa/*` are vitest suites that never touch `TestRunner`). No CI workflow
+  invokes `os test`. So no in-repo case was passing vacuously and none needed
+  repair. Downstream suites are the ones that will see red, and every case they
+  see is a test that was never running.
+
+  The two evaluable shapes are untouched in both directions: a matching array or
+  string still passes, a non-matching one still fails with its existing message.
+  `not_contains`, `gt`, `gte`, `lt`, `lte` and `error` are declared in
+  `TestAssertionTypeSchema` and still have no branch in the runner — they were
+  already refused loudly at `default:` rather than silently passed, so they do not
+  carry this defect; that gap is recorded separately and is pinned here so a later
+  implementation is a deliberate change rather than an accident.
+
+### Patch Changes
+
+- b127c8b: fix(spec,core): a filter placeholder is recognised by INTENT — `{TODAY()}` refuses loudly instead of comparing as a literal (#5586)
+
+  `UnknownFilterTokenError` had a hole exactly where authors fall in. Recognition
+  used the token-NAME grammar `/^\$?\{([a-zA-Z0-9_]+)\}$/`, so any placeholder
+  carrying a **non-word character** classified as "not a placeholder at all" and
+  was handed to the driver verbatim, to be compared as a literal string — the
+  silent-wrong-result failure the diagnostic exists to abolish.
+
+  The failure was inverted against the author. Measured on 17.0.0-rc.2 against a
+  four-row fixture:
+
+  | filter value             | before                           |                                                                                                                            |
+  | ------------------------ | -------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+  | `due_date < '{today}'`   | 2 rows                           | correct — the two overdue rows                                                                                             |
+  | `due_date < '{TODAY}'`   | throws `UnknownFilterTokenError` | diagnostic working                                                                                                         |
+  | `due_date < '{TODAY()}'` | **4 rows**                       | diagnostic bypassed — literal string compare, and `'2026-…' < '{'` in lexicographic order swallowed a row due a week later |
+
+  So misspelling `{today}` as `{TODAY}` was reported by name, while misspelling it
+  as `{TODAY()}` returned the wrong rows in silence — and the parenthesised,
+  kebab-case, natural-language and dotted spellings (`{TODAY()}`,
+  `{current-user-id}`, `{30 days ago}`, `{user.id}`) are precisely what an author
+  migrating from another system's macro syntax writes first.
+
+  **Both directions of the behaviour change:**
+
+  - **Previously silent, now refuses loudly** — a filter value that is entirely
+    brace-wrapped and outside the vocabulary now throws `UnknownFilterTokenError`
+    (`code: FILTER_TOKEN_UNKNOWN`, `status: 400`) on the ObjectQL read and write
+    paths and the analytics dataset executor, and is reported as
+    `filter-token-unknown` by `objectstack build` / `validate` / `lint`. Before,
+    it reached the data engine and compared as text.
+  - **Unchanged** — `{today}` / `{current_user_id}` still resolve; `{TODAY}` still
+    refuses with the same identity; a value that merely _contains_ braces
+    (`'acme {x} deal'`), or is not ONE pair around the whole value (`{a}{b}`,
+    `{{x}}`, `{}`), is still an ordinary literal and still reaches the driver
+    untouched.
+
+  Recognition and vocabulary are now two named grammars rather than one:
+  `FILTER_TOKEN_WRAPPED_RE` (`/^\$?\{([^{}]+)\}$/`) answers "did the author mean a
+  placeholder", and `isContextToken` / `isDateMacroToken` answer "is it in the
+  vocabulary". Wide in, strict out. No escape hatch for a literal `{…}` comparand
+  ships with this: a repo-wide measurement across structured metadata, examples,
+  seed data and fixtures found zero legitimate consumers comparing a
+  brace-wrapped literal, and an escape syntax is a public micro-contract that can
+  be added the day one shows up.
+
+  Flow templates are unaffected. `interpolateFilter` in
+  `@objectstack/service-automation` already recognised the same wide shape and
+  resolves `{record.id}` / `{TODAY() + 30}` from flow variables **before** the
+  filter reaches ObjectQL; its hand-off to the engine is keyed on the token
+  vocabulary (`isKnownFilterToken`), which this change does not touch.
+
+- d6d1a50: refactor(core): one implementation per hook-dispatch flavour, plus a paired-pin gate (#5282)
+
+  `ObjectKernel` does not extend `ObjectKernelBase` — it is a standalone
+  production kernel with its own `hooks` map, and only `LiteKernel` extends the
+  base. Lifecycle-hook dispatch therefore existed **twice**, with no shared code
+  path: the base's `triggerHook` (isolating) / `triggerHookOrThrow` (propagating) /
+  `context.trigger` on one side, and `ObjectKernel`'s private
+  `triggerShutdownHookIsolating` / `context.trigger` on the other. The two
+  isolating loops printed the same `Hook handler failed: kernel:shutdown` line
+  because someone typed it twice.
+
+  That seam produced three consecutive bugs, each the same shape — one hook name
+  meaning opposite things on the two kernels: `kernel:ready` (#5170),
+  `kernel:bootstrapped` / `kernel:listening` (#5257, where a swallowed
+  `server.listen()` failure let a process print "✅ Bootstrap complete" with
+  nothing listening), and `kernel:shutdown` in the other direction (#5274, where
+  one bad handler skipped every `destroy()`).
+
+  **No behaviour change.** The two dispatch flavours move verbatim into an
+  internal module, `packages/core/src/hook-dispatch.ts`, which both kernels now
+  call:
+
+  - `dispatchHookIsolating` — a failing handler is logged as
+    `Hook handler failed: <name>` and the remaining handlers still run.
+  - `dispatchHookPropagating` — the first failure escapes unwrapped and the
+    handlers behind it are skipped.
+
+  Every call path keeps the flavour, the log wording and the trace line it had
+  before, including the one asymmetry inside the propagating flavour:
+  `PluginContext.trigger` has never emitted the `Triggering hook: <name>` trace on
+  either kernel, so it still does not. The kernels' two `hooks` maps are
+  deliberately **not** unified, and `ObjectKernel` deliberately does **not** gain a
+  base class — both were considered and ruled out of scope.
+
+  How "no behaviour change" was proved: the paired kernel pins from #5170 / #5257 /
+  #5274 pass untouched, and deleting the shared dispatcher's error log now turns
+  **both** kernels' test files red from a single edit — a property the hand-mirrored
+  copies could not have (editing `ObjectKernel`'s private loop could never turn
+  `lite-kernel.test.ts` red).
+
+  Shared dispatch cannot cover the residual two-maps seam, so the pairing of the
+  tests is now a gate rather than a convention: `pnpm check:kernel-hook-pairs`
+  (`scripts/check-kernel-hook-pairs.mjs`, wired into the ESLint job) requires every
+  `kernel:*` hook dispatched in `packages/core/src` to be named in a test title in
+  **both** `kernel.test.ts` and `lite-kernel.test.ts`, and fails naming the hook
+  and the side that lacks it. A fifth lifecycle hook can no longer arrive paired on
+  one kernel only.
+
+  Also pinned, deliberately unchanged: `kernel:shutdown` has two dispatch paths
+  with different flavours on both kernels — the kernel's own teardown isolates,
+  while a plugin calling `ctx.trigger('kernel:shutdown')` by hand propagates.
+  Nothing in the repo triggers it by hand today, so this is dormant; it is now a
+  documented fact with a named test on each side rather than a surprise found at
+  teardown.
+
+- d0d5205: refactor(core,plugin-audit,service-storage,plugin-reports): give the `__` operation-private-key convention a single owner (#7284)
+
+  `withoutOperationPrivateKeys` — the rule that a consumer forwarding a caller's
+  execution envelope to a question about a DIFFERENT object must first drop the
+  `__`-prefixed keys plugin-security stamped for the operation in flight — had been
+  hand-copied into three packages: `plugin-audit`'s comment access hooks (#7141),
+  `service-storage`'s attachment access hooks (#7145) and `plugin-reports`' report
+  service (#7204). Each carried its own `OPERATION_PRIVATE_KEY_PREFIX` and its own
+  doc block, and the prose had already diverged while the code still agreed — the
+  shape that makes a later divergence in behaviour hard to notice.
+
+  The helper now lives once, in `@objectstack/core`
+  (`security/operation-private-keys.ts`), exported from the package root. Core is
+  the only candidate all three consumers already depend on: `plugin-security` is
+  the producer of the convention and the most honest owner, but none of the three
+  depends on it and a string-prefix filter does not justify three new dependency
+  edges onto a plugin; `@objectstack/spec` is fenced off by Prime Directive #2. The
+  new home sits beside `assemble-execution-context.ts`, which owns the other end of
+  the same lifecycle — that file is where an `ExecutionContext` is built at a
+  transport entry point, this one is where it is stripped back down before being
+  forwarded.
+
+  The full reasoning moved with the code rather than being thinned: which keys the
+  middleware stamps and why each is a widening input, why they are dropped by
+  PREFIX and never by a name list, and why the fresh copy is load-bearing in both
+  directions. Each consumer keeps only its own local half — which object _its_
+  gates actually ask about — and points at the shared home.
+
+  No behaviour change: the three copies were byte-equivalent, and all three
+  packages' suites pass unchanged. Two new pins at the home cover it — the rule's
+  own behaviour, which no package-level test had ever asserted directly, and a
+  repository-shape pin that turns red if a fourth file declares its own copy.
+
+- Updated dependencies [3d5c090]
+- Updated dependencies [e5bd768]
+- Updated dependencies [e027b3e]
+- Updated dependencies [c2429b0]
+- Updated dependencies [445a0c2]
+- Updated dependencies [f6609e6]
+- Updated dependencies [a70358a]
+- Updated dependencies [97e7e3c]
+- Updated dependencies [8828b9e]
+- Updated dependencies [53068c1]
+- Updated dependencies [ee58392]
+- Updated dependencies [f16e54e]
+- Updated dependencies [06be54e]
+- Updated dependencies [259459d]
+- Updated dependencies [3f7f14e]
+- Updated dependencies [6968885]
+- Updated dependencies [eaed61f]
+- Updated dependencies [debe2f6]
+- Updated dependencies [97b0798]
+- Updated dependencies [43a7a8d]
+- Updated dependencies [73f69dc]
+- Updated dependencies [04c56aa]
+- Updated dependencies [b3efeb7]
+- Updated dependencies [ddd075a]
+- Updated dependencies [88154be]
+- Updated dependencies [e8dc61e]
+- Updated dependencies [2f3e793]
+- Updated dependencies [d8e8d9c]
+- Updated dependencies [94e749b]
+- Updated dependencies [ea1d916]
+- Updated dependencies [ae31a19]
+- Updated dependencies [e0f300b]
+- Updated dependencies [62b6a2f]
+- Updated dependencies [5b4780b]
+- Updated dependencies [a933452]
+- Updated dependencies [8140915]
+- Updated dependencies [7b48cf9]
+- Updated dependencies [b5404f4]
+- Updated dependencies [f764691]
+- Updated dependencies [e120a5a]
+- Updated dependencies [e650d67]
+- Updated dependencies [04476e7]
+- Updated dependencies [79228cd]
+- Updated dependencies [b3363e9]
+- Updated dependencies [2ef1807]
+- Updated dependencies [d03fe25]
+- Updated dependencies [2672f85]
+- Updated dependencies [11066f6]
+- Updated dependencies [916af17]
+- Updated dependencies [84c86fb]
+- Updated dependencies [2a2a9fb]
+- Updated dependencies [a2e157c]
+- Updated dependencies [95c4227]
+- Updated dependencies [2a61116]
+- Updated dependencies [d4df105]
+- Updated dependencies [e2798fa]
+- Updated dependencies [0fd8556]
+- Updated dependencies [74155c7]
+- Updated dependencies [6908830]
+- Updated dependencies [8b06bba]
+- Updated dependencies [4c54037]
+- Updated dependencies [0f7157b]
+- Updated dependencies [d9bef45]
+- Updated dependencies [f549a0d]
+- Updated dependencies [82da264]
+- Updated dependencies [9b9b70f]
+- Updated dependencies [f5a9bc2]
+- Updated dependencies [881a3cc]
+- Updated dependencies [ad6317b]
+- Updated dependencies [8a88885]
+- Updated dependencies [5f7669e]
+- Updated dependencies [becbe53]
+- Updated dependencies [b127c8b]
+- Updated dependencies [a80302a]
+- Updated dependencies [474f131]
+- Updated dependencies [050cd82]
+- Updated dependencies [4d552af]
+- Updated dependencies [44d677c]
+- Updated dependencies [c32944d]
+- Updated dependencies [1dd780f]
+- Updated dependencies [c8d6f6e]
+- Updated dependencies [92a67f2]
+- Updated dependencies [9136327]
+- Updated dependencies [bf0ae99]
+- Updated dependencies [cb3b6cd]
+- Updated dependencies [73b7234]
+- Updated dependencies [d2b97c3]
+- Updated dependencies [59b794f]
+- Updated dependencies [fc3a36a]
+- Updated dependencies [69787f0]
+- Updated dependencies [5d022a1]
+- Updated dependencies [042b9ee]
+- Updated dependencies [f549a0d]
+- Updated dependencies [a36db28]
+- Updated dependencies [3f8817a]
+- Updated dependencies [a2443e3]
+- Updated dependencies [e1554b1]
+- Updated dependencies [4856789]
+- Updated dependencies [c3f4916]
+- Updated dependencies [33e0385]
+- Updated dependencies [2205363]
+- Updated dependencies [09fe58d]
+- Updated dependencies [d0a5ceb]
+- Updated dependencies [e18a162]
+- Updated dependencies [d127ff0]
+- Updated dependencies [9b86cf6]
+- Updated dependencies [8825a06]
+- Updated dependencies [5087ac6]
+- Updated dependencies [2d1ddf0]
+- Updated dependencies [354b00f]
+- Updated dependencies [3de535b]
+- Updated dependencies [fe2e15a]
+- Updated dependencies [c6b6bb4]
+- Updated dependencies [2f59da0]
+- Updated dependencies [8ad609c]
+- Updated dependencies [bbee302]
+- Updated dependencies [08863dd]
+- Updated dependencies [56664f5]
+- Updated dependencies [31cbe90]
+- Updated dependencies [90bbf25]
+- Updated dependencies [eb91eba]
+- Updated dependencies [42da73d]
+- Updated dependencies [643b7c7]
+- Updated dependencies [1a15893]
+- Updated dependencies [b70e534]
+- Updated dependencies [2233a85]
+- Updated dependencies [62dd69a]
+- Updated dependencies [e15e679]
+- Updated dependencies [2ab1257]
+- Updated dependencies [4cc4fb7]
+- Updated dependencies [2c26040]
+- Updated dependencies [f758cec]
+- Updated dependencies [78f0be8]
+- Updated dependencies [35f7fb4]
+- Updated dependencies [a5302c7]
+- Updated dependencies [7084313]
+- Updated dependencies [0e043d8]
+- Updated dependencies [dadd1ad]
+- Updated dependencies [2f2e63c]
+- Updated dependencies [486d526]
+- Updated dependencies [89d7b35]
+- Updated dependencies [85ec26d]
+- Updated dependencies [f6476fc]
+- Updated dependencies [4ac12ef]
+- Updated dependencies [b88f5e8]
+- Updated dependencies [42cc219]
+- Updated dependencies [d7e0b42]
+- Updated dependencies [3510e4a]
+- Updated dependencies [aa4b90d]
+- Updated dependencies [54299ca]
+- Updated dependencies [dc61def]
+- Updated dependencies [251e888]
+- Updated dependencies [183b4c4]
+- Updated dependencies [2fdb36e]
+- Updated dependencies [20526f5]
+- Updated dependencies [c5eef1d]
+- Updated dependencies [e0f300b]
+- Updated dependencies [761a0ba]
+- Updated dependencies [be87153]
+- Updated dependencies [60f0dd8]
+- Updated dependencies [a87c5cd]
+- Updated dependencies [a47f338]
+- Updated dependencies [2598216]
+- Updated dependencies [2c7e62d]
+- Updated dependencies [eb7613c]
+- Updated dependencies [ecc9110]
+- Updated dependencies [f7bd4e2]
+- Updated dependencies [361bd5b]
+- Updated dependencies [1818998]
+- Updated dependencies [09ee21c]
+- Updated dependencies [f549a0d]
+- Updated dependencies [3fc2e48]
+- Updated dependencies [e8f435c]
+- Updated dependencies [41610f6]
+  - @objectstack/spec@17.0.0-rc.6
+
 ## 17.0.0-rc.5
 
 ### Minor Changes

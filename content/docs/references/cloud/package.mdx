@@ -14,8 +14,8 @@ flows, translations, agents — into a named, versioned artifact.
 
 Architecture:
 - `sys_package`         — identity (one row per logical package)
-- `sys_package_version` — immutable release snapshots (see package-version.zod.ts)
-- `sys_package_installation` — env ↔ version pairing (see environment-package.zod.ts)
+- `sys_package_version` — immutable release snapshots (see [package-version.zod.ts](/docs/references/cloud/package-version))
+- `sys_package_installation` — env ↔ version pairing (see [environment-package.zod.ts](/docs/references/cloud/environment-package))
 
 See `docs/adr/0003-package-as-first-class-citizen.md` for the full rationale.
 
@@ -44,6 +44,7 @@ Register a new package in the Control Plane
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **manifestId** | `string` | ✅ | Globally unique reverse-domain package identifier (e.g. com.acme.crm) |
+| **namespace** | `string` | optional | Metadata namespace claimed by the package (mirrors manifest.namespace; e.g. "crm" → object names "crm_account") |
 | **ownerOrgId** | `string` | ✅ | Owner organization ID |
 | **displayName** | `string` | ✅ | Display name shown in Studio and Marketplace |
 | **description** | `string` | optional | Short package description |
@@ -69,6 +70,7 @@ Register a new package in the Control Plane
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | UUID of the package (stable, never reused) |
 | **manifestId** | `string` | ✅ | Globally unique reverse-domain package identifier (e.g. com.acme.crm) |
+| **namespace** | `string` | optional | Metadata namespace claimed by the package (mirrors manifest.namespace; e.g. "crm" → object names "crm_account") |
 | **ownerOrgId** | `string` | ✅ | Organization ID of the package owner/publisher |
 | **displayName** | `string` | ✅ | Display name shown in Studio and Marketplace |
 | **description** | `string` | optional | Short package description |

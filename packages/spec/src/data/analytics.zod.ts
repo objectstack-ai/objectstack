@@ -29,6 +29,7 @@ export const AggregationMetricType = z.enum([
   'string', // Custom SQL expression returning a string
   'boolean' // Custom SQL expression returning a boolean
 ]);
+export type AggregationMetricType = z.input<typeof AggregationMetricType>;
 
 /**
  * Dimension Type
@@ -41,6 +42,7 @@ export const DimensionType = z.enum([
   'time', 
   'geo'
 ]);
+export type DimensionType = z.input<typeof DimensionType>;
 
 /**
  * Time Interval for Time Dimensions
@@ -48,6 +50,7 @@ export const DimensionType = z.enum([
 export const TimeUpdateInterval = z.enum([
   'second', 'minute', 'hour', 'day', 'week', 'month', 'quarter', 'year'
 ]);
+export type TimeUpdateInterval = z.input<typeof TimeUpdateInterval>;
 
 /**
  * Metric Schema

@@ -144,9 +144,10 @@ export type SidebarGroupContributionParsed = z.infer<typeof SidebarGroupContribu
  * Where an action CONTRIBUTION appears inside the Studio IDE shell.
  *
  * [#4737] This was exported as `ActionLocationSchema` until v17 — the same
- * name `@objectstack/spec/ui` exports for a DIFFERENT concept: the 7-value
+ * name `@objectstack/spec/ui` exports for a DIFFERENT concept: the
  * platform-canonical vocabulary for where an action renders in a running
- * application's UI (`list_toolbar`, `record_header`, …, `global_nav`), whose
+ * application's UI (`list_toolbar`, `record_header`, …, `record_section`;
+ * 7 values at the time of the rename, 6 since #6888 retired `global_nav`), whose
  * docblock declares it "single source of truth for the whole platform". This
  * one is the 3-value Studio IDE surface enum consumed only by
  * `ActionContributionSchema.location` below. Same name, disjoint
@@ -213,6 +214,7 @@ export type MetadataIconContribution = z.input<typeof MetadataIconContributionSc
 
 /** Where a panel can be placed */
 export const PanelLocationSchema = lazySchema(() => z.enum(['bottom', 'right', 'modal']));
+export type PanelLocation = z.input<typeof PanelLocationSchema>;
 
 /**
  * Declares an auxiliary panel (like VS Code's Terminal, Problems, Output panels).

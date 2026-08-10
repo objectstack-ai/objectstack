@@ -1,0 +1,9 @@
+{
+  "file": "packages/objectql/src/engine.ts",
+  "adrs": [
+    "ADR-0057",
+    "ADR-0067",
+    "ADR-0119"
+  ],
+  "invariant": "The transaction seam is same-origin by construction (#5351/#5696, 2026-08-06 ruling). `buildDriverOptions` threads the ambient handle ONLY to the driver that owns it, compared by instance identity via `TransactionScope` — handing it to another driver does not put that driver inside the transaction, it runs the statement on the wrong connection. `enforceTransactionOrigin` then decides the write: an append-only system ledger (`lifecycle.class` in `SYSTEM_LEDGER_LIFECYCLE_CLASSES`, the same tuple ADR-0057 §3.6 routing reads — never a second copy) is CARVED OUT and executed outside the transaction, surviving rollback; any other cross-driver write is REFUSED before hooks run. Never add a companion transaction on the second driver (no two-phase commit in IDataDriver) and never restore the unconditional handle lift."
+}

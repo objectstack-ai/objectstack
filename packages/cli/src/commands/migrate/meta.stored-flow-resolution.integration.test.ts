@@ -94,6 +94,7 @@ describe('os migrate meta --stored — the protocol resolves the engine itself (
 
   it('rewrites a pre-17 flow row with NO canonicalizeFlow passed by the command', async () => {
     const stack = await bootSchemaStack({
+      jsonOutput: false,
       databaseUrl: `file:${dbFile}`,
       projectRoot: dir,
       extraPlugins: await buildDataMigrationPlugins({ automation: true }),
@@ -163,6 +164,7 @@ describe('os migrate meta --stored — the protocol resolves the engine itself (
     // verbatim and leave the row `pending` forever; `saveMetaItem` now
     // canonicalizes flow bodies before its schema gate.
     const stack = await bootSchemaStack({
+      jsonOutput: false,
       databaseUrl: `file:${dbFile}`,
       projectRoot: dir,
       extraPlugins: await buildDataMigrationPlugins({ automation: true }),
@@ -223,6 +225,7 @@ describe('os migrate meta --stored — the protocol resolves the engine itself (
     // The honest negative: the coverage comes from the engine being present,
     // not from the report defaulting to optimistic.
     const stack = await bootSchemaStack({
+      jsonOutput: false,
       databaseUrl: `file:${dbFile}`,
       projectRoot: dir,
       extraPlugins: await buildDataMigrationPlugins(),

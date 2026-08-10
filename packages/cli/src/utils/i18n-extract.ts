@@ -35,13 +35,14 @@
  *   objects.<name>._views.<view>.description
  *   objects.<name>._views.<view>.emptyState.title / .message
  *   objects.<name>._actions.<action>.label
+ *   objects.<name>._actions.<action>.description
  *   objects.<name>._actions.<action>.confirmText
  *   objects.<name>._actions.<action>.successMessage
  *   objects.<name>._actions.<action>.params.<param>.label / .helpText / .placeholder
  *   objects.<name>._actions.<action>.params.<param>.options.<value>
  *   objects.<name>._actions.<action>.resultDialog.title / .description / .acknowledge
  *   objects.<name>._actions.<action>.resultDialog.fields.<path>
- *   globalActions.<action>.label / .confirmText / .successMessage
+ *   globalActions.<action>.label / .description / .confirmText / .successMessage
  *   globalActions.<action>.params.<param>.* / .resultDialog.* (same shape as object actions)
  *   apps.<app>.label / .description
  *   apps.<app>.navigation.<id>.label
@@ -439,10 +440,14 @@ function addSectionList(index: SectionIndex, sections: unknown, objectName: unkn
   for (const section of sections) {
     if (!section || typeof section !== 'object') continue;
     const s = section as Record<string, unknown>;
-    // `record:details` reads `title ?? label`, form views author `label`; a
-    // localized-map label (`{ en, 'zh-CN' }`) is already multilingual and
+    // `label` is the ONE heading spelling both surfaces declare —
+    // `RecordDetailsProps.sections[]` and `FormSectionSchema` (#5611, #5730).
+    // A `title` here is off-spec and deliberately unread: reading it would
+    // scaffold a bundle key for a heading the schema rejects, which is how a
+    // consumer-side tolerance grows into a second de-facto contract (PD #12).
+    // A localized-map label (`{ en, 'zh-CN' }`) is already multilingual and
     // `inlineText` drops it to "nothing authored in plain text".
-    addSection(index, objectName, s.name, s.label ?? s.title);
+    addSection(index, objectName, s.name, s.label);
   }
 }
 
@@ -539,6 +544,76 @@ function walkObjectSections(config: any, out: ExpectedEntry[]): void {
   }
 }
 
+// ─── Object filter-preset tabs (`objects.<o>._tabs.<tab>.label`) ───────
+//
+// The writing half of the `_tabs` slot `ObjectTranslationDataSchema` declares
+// and `resolveTabLabel` reads (#5377). Declared, written and read in one PR,
+// which is the whole point: a slot with no extractor is a key a translator has
+// to know exists, and that is most of why the tab bar stayed English.
+//
+// Scope matches the resolver exactly — a list page's
+// `interfaceConfig.userFilters.tabs`, the one `ViewTabSchema` carrier anything
+// renders. `ListViewSchema.tabs` has no reader in either repo; scaffolding keys
+// for it would fill every bundle with entries no screen can ever show, and the
+// coverage gate would then demand translations for them.
+//
+// A tab that references a saved view still gets its own entry. The resolver
+// falls back to the referenced view's label when `_tabs` is empty, so the key
+// is genuinely optional — but it is the only way to give a tab a label that
+// DIFFERS from the view it opens, and a skeleton that omitted it would hide
+// that from the translator.
+
+/** Emit `objects.<object>._tabs.<tab>.label` for every rendered preset tab. */
+function walkObjectTabs(config: any, out: ExpectedEntry[]): void {
+  const pages: any[] = Array.isArray(config?.pages) ? config.pages : [];
+  // One tab name may be authored on several pages over the same object (a
+  // shared "urgent" preset); collect first so the key is emitted once, the
+  // same way `walkObjectSections` de-duplicates a heading.
+  const index = new Map<string, Map<string, string | undefined>>();
+
+  for (const page of pages) {
+    if (!page || typeof page !== 'object') continue;
+    const cfg = page.interfaceConfig;
+    const tabs = cfg?.userFilters?.tabs;
+    if (!Array.isArray(tabs)) continue;
+    // The page's own source binding first, then its record binding — the order
+    // `translatePage` resolves the object in.
+    const objectName = inlineText(cfg?.source) ?? inlineText(page.object);
+    if (objectName === undefined) continue;
+
+    let tabsForObject = index.get(objectName);
+    if (!tabsForObject) index.set(objectName, (tabsForObject = new Map()));
+
+    for (const tab of tabs) {
+      if (!tab || typeof tab !== 'object') continue;
+      const tabName = inlineText(tab.name);
+      if (tabName === undefined) continue;
+      // A localized-map label is already multilingual — `inlineText` drops it,
+      // so the entry is emitted with no seed and coverage does not demand a
+      // translation for a string nobody authored in plain text.
+      const authored = inlineText(tab.label);
+      if (!tabsForObject.has(tabName)) tabsForObject.set(tabName, authored);
+      else if (tabsForObject.get(tabName) === undefined && authored !== undefined) {
+        tabsForObject.set(tabName, authored);
+      }
+    }
+  }
+
+  for (const [objectName, tabs] of index) {
+    for (const [tabName, label] of tabs) {
+      pushDerived(
+        out,
+        ['objects', objectName, '_tabs', tabName, 'label'],
+        // Seed mirrors the renderer's own fallback (`tab.label || tab.name`).
+        label ?? tabName,
+        label,
+        'view',
+        { objectName },
+      );
+    }
+  }
+}
+
 /** Collect every translatable entry from a normalized stack config. */
 export function collectExpectedEntries(config: any): ExpectedEntry[] {
   const out: ExpectedEntry[] = [];
@@ -613,6 +688,7 @@ export function collectExpectedEntries(config: any): ExpectedEntry[] {
         const aname = action.name as string;
         const aroot = ['objects', objectName, '_actions', aname];
         pushDerived(out, [...aroot, 'label'], action.label ?? aname, inlineText(action.label), 'action', { objectName });
+        pushOptional(out, [...aroot, 'description'], action.description, 'action', { objectName });
         pushOptional(out, [...aroot, 'confirmText'], action.confirmText, 'action', { objectName });
         pushOptional(out, [...aroot, 'successMessage'], action.successMessage, 'action', { objectName });
         pushActionParams(out, ['objects', objectName, '_actions', aname], action, 'action', objectName);
@@ -686,6 +762,12 @@ export function collectExpectedEntries(config: any): ExpectedEntry[] {
       : ['globalActions', action.name];
     const kind: ExpectedEntry['source'] = objectName ? 'action' : 'globalAction';
     pushDerived(out, [...root, 'label'], action.label ?? action.name, inlineText(action.label), kind, { objectName });
+    // `description` is OPTIONAL-not-derived, exactly like confirmText: the
+    // param dialog falls back to its own generic `actionDialog.description`
+    // string when the action declares none, so an undeclared description is
+    // not an i18n gap to seed (`pushDerived` would invent an English source
+    // string nothing authored). #7367.
+    pushOptional(out, [...root, 'description'], action.description, kind, { objectName });
     pushOptional(out, [...root, 'confirmText'], action.confirmText, kind, { objectName });
     pushOptional(out, [...root, 'successMessage'], action.successMessage, kind, { objectName });
     pushActionParams(out, root, action, kind, objectName);
@@ -789,6 +871,9 @@ export function collectExpectedEntries(config: any): ExpectedEntry[] {
   // than one of them — collecting first and emitting once keeps a heading
   // from being counted twice against coverage.
   walkObjectSections(config, out);
+
+  // ── Object filter-preset tabs (`objects.<o>._tabs.<tab>.label`) ───
+  walkObjectTabs(config, out);
 
   // ── Metadata configuration forms (Studio admin UI) ────────────────
   // Registry-driven: always included, independent of stack config. These

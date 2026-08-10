@@ -1,0 +1,1854 @@
+{
+  "$comment": "Standing platform test checklist — area ledger. Hand-edited, append-only; validated by scripts/check-platform-checklist.mjs (pnpm check:platform-checklist). Authoring rules: docs/qa/platform-checklist/README.md · execution protocol: RUNNER.md.",
+  "area": "access-security",
+  "title": "Access, permissions, RLS/FLS, write-path guards",
+  "items": [
+    {
+      "id": "access-security.rls-both-sides",
+      "title": "Row-level security: restricted member sees only their rows; admin sees all",
+      "since": "v15",
+      "status": "active",
+      "revision": 2,
+      "priority": "P0",
+      "surface": "api",
+      "personas": [
+        "admin (first sign-in dev admin, platform posture)",
+        "two plain members (everyone baseline = showcase_member_default only)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "showcase_private_note (OWD private, member_default grants create/read/edit)",
+          "two fresh sign-ups, e.g. rls-a@verify.test / rls-b@verify.test"
+        ]
+      },
+      "steps": [
+        "boot showcase isolated (own port + file DB per dogfood skill §0); sign in as admin; sign up members A and B (fresh emails) — both hold only the everyone baseline showcase_member_default",
+        "as A: POST /api/v1/data/showcase_private_note {\"title\": \"A note 1\"} and a second note; as B: POST one note — capture the returned ids",
+        "as A: GET /api/v1/data/showcase_private_note (list); as B: same; capture both record sets",
+        "as A: GET /api/v1/data/showcase_private_note/<B's id> (foreign by-id read); as A: PATCH /api/v1/data/showcase_private_note/<B's id> {\"body\": \"forged\"} (foreign by-id write)",
+        "as admin: GET /api/v1/data/showcase_private_note and confirm the full row set (A's + B's rows) is visible — the entitled side of the gate",
+        "re-read B's note as admin and confirm the forged PATCH left it byte-identical",
+        "run the app-agnostic sweep: runRlsProofs from @objectstack/verify (objectstack verify) over every showcase object; capture the per-object verdicts"
+      ],
+      "acceptance": [
+        {
+          "clause": "A's list contains exactly A's notes — none of B's (presence AND absence, from the server row set, not the UI)",
+          "oracle": "api",
+          "verify": "GET /api/v1/data/showcase_private_note as A: records[] titles include 'A note 1', exclude B's title; symmetric check as B",
+          "evidence": "both list responses"
+        },
+        {
+          "clause": "foreign by-id READ is denied server-side (non-2xx) — owner isolation holds at record granularity, not just list filtering",
+          "oracle": "api",
+          "verify": "GET /api/v1/data/showcase_private_note/<B's id> as A answers non-200 (403 PERMISSION_DENIED or a not-found-shaped denial — capture which; both are honest owner isolation, a 200 is the failure)",
+          "evidence": "status + body"
+        },
+        {
+          "clause": "foreign by-id WRITE is denied and the row is unchanged (the #1994 'you can't mutate what you can't see' invariant)",
+          "oracle": "api",
+          "verify": "PATCH as A answers >=400 AND the admin re-read of B's note shows the pre-attempt body — a 4xx with a mutated row is still a FAIL",
+          "evidence": "PATCH response + admin re-read"
+        },
+        {
+          "clause": "admin (platform posture) reads the full set — the entitled side of the same gate (both sides, RUNNER rule 4 / ADR-0057 D10)",
+          "oracle": "api",
+          "verify": "admin GET list contains every id created in this run",
+          "evidence": "admin listing"
+        },
+        {
+          "clause": "runRlsProofs reports rls-consistent (or member-visible on deliberately public objects) for every non-skipped showcase object; any rls-hole verdict is a FAIL and files an issue",
+          "oracle": "test",
+          "verify": "run runRlsProofs(stack, adminToken, memberToken, config) from packages/verify/src/rls.ts; summary.holes must be 0",
+          "evidence": "formatRlsReport output"
+        },
+        {
+          "clause": "skipped objects in the verify report are each explainable (no plain-text probe field / blocked fixture) — a skip hiding a hole is the #3415 seed-defect class",
+          "oracle": "test",
+          "verify": "for each status:'skipped' row, the detail names the benign reason; spot-check one skipped object by hand with the by-id read/write probe",
+          "evidence": "report detail lines + the spot-check trace"
+        }
+      ],
+      "negative": [
+        "the foreign by-id write must not silently succeed: a 2xx on the forged PATCH, or a 4xx that still mutated the row (verified by the admin re-read), is a FAIL even though every list looked correctly filtered"
+      ],
+      "traps": [
+        "wrong-persona"
+      ],
+      "automated": {
+        "kind": "verify",
+        "ref": "packages/verify/src/rls.ts (objectstack verify) + packages/qa/dogfood/test/showcase-private-owd.dogfood.test.ts"
+      },
+      "source": [
+        "packages/verify/src/rls.ts",
+        "ADR-0057 D10",
+        "packages/qa/dogfood/test/showcase-private-owd.dogfood.test.ts",
+        "authz-conformance.matrix.ts rows rls-read / rls-by-id-write"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-07",
+          "change": "initial — standing P0, delegating the systematic sweep to @objectstack/verify and keeping the persona spot-check manual",
+          "ref": "#3358"
+        },
+        {
+          "revision": 2,
+          "date": "2026-08-07",
+          "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        }
+      ]
+    },
+    {
+      "id": "access-security.write-path-guards",
+      "title": "Write-path guards: readonly strip, owner_id forge/transfer denied, bulk validation",
+      "since": "v16",
+      "status": "active",
+      "revision": 2,
+      "priority": "P0",
+      "surface": "api",
+      "personas": [
+        "admin",
+        "two non-admin members (owner forge is only meaningful non-privileged; everyone baseline grants private-note create/edit and contact is reachable read-only, so use a member with showcase_contributor where create is needed)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "showcase_contact.lead_score is the seeded readonly:true field (no defaultValue — stripped writes read back null)",
+          "showcase_private_note carries the owner_id anchor",
+          "showcase_invoice.tax_rate + line quantity/unit_price/product lock via readonlyWhen record/parent.status == 'paid'"
+        ]
+      },
+      "steps": [
+        "boot showcase isolated; admin session + two members Alice and Bob (fresh sign-ups); resolve their sys_user ids via the data API or objectql",
+        "as admin (contact create is admin-side in the stock matrix): POST /api/v1/data/showcase_contact {\"name\": \"RO probe\", \"email\": \"ro-probe@verify.test\", \"lead_score\": 10} — forging the readonly field on INSERT; GET the row back",
+        "PATCH the same contact with {\"lead_score\": 99}; GET again",
+        "as Alice: POST /api/v1/data/showcase_private_note {\"title\": \"planted\", \"owner_id\": \"<Bob's id>\"} (insert forge); then POST a note with {\"owner_id\": \"<Alice's own id>\"} (explicit self-owner); then PATCH her own note with {\"owner_id\": \"<Bob's id>\"} (transfer) and with {\"owner_id\": null} (disown)",
+        "as Alice: POST /api/v1/data/showcase_private_note/createMany with 3 records carrying no owner_id; GET them back and read owner_id on each",
+        "as admin: set an invoice to status 'paid', then PATCH its tax_rate and a line's quantity — the readonlyWhen lock (#3042 bulk half: updateMany over a set including the paid invoice's line)",
+        "bulk-update a set where some rows violate a validation rule (e.g. showcase_invoice_line quantity below min 0 on some rows only) via POST /api/v1/data/showcase_invoice_line/updateMany; read the per-row outcome"
+      ],
+      "acceptance": [
+        {
+          "clause": "readonly field is stripped on INSERT — stored value is the default (null for lead_score), never the payload's; the create itself still succeeds (#3043 admit-and-strip, not reject)",
+          "oracle": "api",
+          "verify": "POST answers 2xx; GET /api/v1/data/showcase_contact/<id> shows lead_score null; response header/body droppedFields advertises the strip (#3431)",
+          "evidence": "payload + read + droppedFields"
+        },
+        {
+          "clause": "readonly field is stripped on UPDATE — value unchanged after PATCH (#2948/#3003; note: a deployment opting into strictReadonlyWrites refuses instead with ERR_READONLY_FIELD_REJECTED per #5126 — stock showcase is strip)",
+          "oracle": "api",
+          "verify": "before/after GETs identical on lead_score",
+          "evidence": "the reads"
+        },
+        {
+          "clause": "owner forge on INSERT is DENIED for the member and the row is not created",
+          "oracle": "api",
+          "verify": "POST with owner_id=<Bob> as Alice answers >=400; a system-context count of notes titled 'planted' is 0",
+          "evidence": "response + filtered count"
+        },
+        {
+          "clause": "owner transfer and disown on UPDATE are DENIED; owner unchanged — while explicit SELF-owner insert succeeds (the guard gates on identity, not on the key's presence)",
+          "oracle": "api",
+          "verify": "PATCH owner_id=<Bob> and owner_id=null both >=400 with owner_id re-reading as Alice's id; POST with owner_id=<Alice's own id> is 2xx and persists",
+          "evidence": "responses + re-reads"
+        },
+        {
+          "clause": "empty-owner bulk insert stamps the calling member on every row",
+          "oracle": "api",
+          "verify": "all createMany rows read back owner_id == Alice's sys_user id",
+          "evidence": "the reads"
+        },
+        {
+          "clause": "readonlyWhen locks hold at the API on the locked state: paid invoice's tax_rate and its lines' quantity/unit_price/product are not writable, and a bulk update touching any locked row drops the field for the batch (#3042)",
+          "oracle": "api",
+          "verify": "post-write reads show the locked fields unchanged on the paid invoice and its lines",
+          "evidence": "write payloads + re-reads"
+        },
+        {
+          "clause": "bulk update evaluates validation rules PER ROW (the #3106 updateMany gap must not reproduce): violating rows rejected/skipped, compliant rows applied — one mixed batch shows both outcomes",
+          "oracle": "api",
+          "verify": "updateMany response distinguishes per-row results; re-reads confirm compliant rows changed and violating rows did not",
+          "evidence": "bulk response + row reads"
+        }
+      ],
+      "negative": [
+        "run the forge/transfer clauses as ADMIN too and confirm they SUCCEED where legitimately privileged — the guard must gate on privilege, not break the admin path (wrong-persona trap, both sides)",
+        "isSystem writes must still set readonly fields (A1's isSystem carve-out): verify via an objectql write with context {isSystem:true} that lead_score IS settable system-side"
+      ],
+      "automated": {
+        "kind": "dogfood",
+        "ref": "packages/qa/dogfood/test/owner-anchor-and-bulk-writes.dogfood.test.ts (+ showcase-static-readonly.dogfood.test.ts, showcase-readonly-when-parent.dogfood.test.ts)"
+      },
+      "traps": [
+        "wrong-persona"
+      ],
+      "source": [
+        "#3358 §9",
+        "release-15.1 plan §A1–A4",
+        "#3106",
+        "#5126",
+        "examples/app-showcase/src/data/objects/contact.object.ts (lead_score)",
+        "examples/app-showcase/src/data/objects/invoice.object.ts (readonlyWhen)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-07",
+          "change": "initial — merged from #3358 §9 and the 15.1 A-group rows these dogfood tests pin",
+          "ref": "#3358"
+        },
+        {
+          "revision": 2,
+          "date": "2026-08-07",
+          "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        }
+      ]
+    },
+    {
+      "id": "access-security.record-access-explain",
+      "title": "Record-grained access explain shows per-layer attribution and a verdict",
+      "since": "v16",
+      "status": "active",
+      "revision": 2,
+      "priority": "P1",
+      "surface": "mixed",
+      "personas": [
+        "admin (drives the panel and the explain API)",
+        "auditor (viewAllRecords persona whose access is explained)",
+        "plain member (the deny case)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a showcase_private_note owned by a third user (the probe record)",
+          "auditor member granted showcase_auditor (sys_user_permission_set row, as showcase-permission-zoo.dogfood.test.ts does)"
+        ]
+      },
+      "steps": [
+        "boot showcase with the console; as admin create the probe: a member-owned showcase_private_note; grant a second member showcase_auditor",
+        "in the console's access explain panel pick user = the auditor, object = showcase_private_note, record = the probe; screenshot the layered result",
+        "call the API twin: POST /api/v1/security/explain (client security.explain; GET variant also mounted — rest-route-ledger security-explain family) with the same user/object/record; capture the JSON",
+        "as the auditor (real session): GET /api/v1/data/showcase_private_note/<probe id> — the impersonated-read cross-check",
+        "repeat panel + API explain for the PLAIN member (no auditor set) on the same record",
+        "as the plain member: GET the same record and capture the denial"
+      ],
+      "acceptance": [
+        {
+          "clause": "the panel attributes access per layer (permission set → position → sharing → row rules) and renders a record.visible verdict naming the deciding layer",
+          "oracle": "screenshot",
+          "verify": "screenshot shows all layers with the verdict",
+          "evidence": "screenshot"
+        },
+        {
+          "clause": "for the auditor the deciding layer is the VAMA bypass, attributed to the showcase_auditor set (explain() reports the vama_bypass layer — the permission-zoo pinned shape)",
+          "oracle": "api",
+          "verify": "POST /api/v1/security/explain response names vama_bypass (or the equivalent layer key) with showcase_auditor as contributor",
+          "evidence": "explain JSON"
+        },
+        {
+          "clause": "the explain verdict MATCHES the impersonated read, both ways: auditor verdict visible ∧ auditor GET 200; plain-member verdict not-visible ∧ plain-member GET non-200 (server truth outranks the panel)",
+          "oracle": "api",
+          "verify": "compare record.visible against the actual GET status per persona — any disagreement is a FAIL against explain",
+          "evidence": "explain JSONs + both GET traces"
+        },
+        {
+          "clause": "the deny-side explain still answers 200 with a structured not-visible result naming the deciding layer — not EXPLAIN_FAILED, not an empty body",
+          "oracle": "api",
+          "verify": "plain-member explain response: 200, visible=false, deciding layer named; error code EXPLAIN_FAILED absent",
+          "evidence": "explain JSON"
+        },
+        {
+          "clause": "panel and API twin agree (same layers, same verdict) — the console must render the server's explanation, not recompute its own",
+          "oracle": "api",
+          "verify": "field-by-field compare of the panel's displayed layers vs the POST /api/v1/security/explain body",
+          "evidence": "screenshot + JSON diff"
+        }
+      ],
+      "negative": [
+        "explain for the plain member must NOT show visible=true merely because the ADMIN is the one asking — the explanation is about the target user, not the caller (wrong-persona); cross-check with the plain member's own denied GET"
+      ],
+      "traps": [
+        "hydration-race",
+        "wrong-persona"
+      ],
+      "automated": {
+        "kind": "dogfood",
+        "ref": "packages/qa/dogfood/test/showcase-permission-zoo.dogfood.test.ts (explain vama_bypass case)"
+      },
+      "source": [
+        "#3358 §5",
+        "packages/rest/src/rest-route-ledger.ts (security-explain family)",
+        "packages/plugins/plugin-security/src/explain-engine.ts"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-07",
+          "change": "initial import from #3358, adding the impersonated-read cross-check",
+          "ref": "#3358"
+        },
+        {
+          "revision": 2,
+          "date": "2026-08-07",
+          "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        }
+      ]
+    },
+    {
+      "id": "access-security.readonly-package-locks-studio",
+      "title": "A read-only package actually locks Studio editing surfaces",
+      "since": "v16",
+      "status": "active",
+      "revision": 2,
+      "priority": "P2",
+      "surface": "mixed",
+      "personas": [
+        "admin"
+      ],
+      "steps": [
+        "boot showcase with the console; open Studio → object designer and the permission matrix on an object belonging to a read-only (installed/locked) package",
+        "screenshot the surface; then read the DOM state of the edit affordances (checkboxes, Save)",
+        "attempt the edit through the UI anyway (click a checkbox / Save) and capture what the client does",
+        "forge the write directly: PUT /api/v1/meta/object/<packaged object name> with a trivial field change, as the same admin session",
+        "repeat the same PUT against a WRITABLE (draft/app-local) object to prove the guard discriminates by package writability, not by blanket denial"
+      ],
+      "acceptance": [
+        {
+          "clause": "the read-only badge renders AND the controls are actually disabled — checkboxes/Save inert, edit affordances absent",
+          "oracle": "dom",
+          "verify": "after screenshot confirms render, assert disabled state on the controls (a badge alone is not a lock)",
+          "evidence": "screenshot + disabled-state DOM read"
+        },
+        {
+          "clause": "the SERVER refuses the same write: direct PUT /api/v1/meta/object/<name> on the read-only package answers 4xx with a ledgered metadata-protocol code (WRITABLE_PACKAGE_REQUIRED, or ITEM_LOCKED for _lock'd items) — UI absence never suffices (ADR-0057 D10)",
+          "oracle": "api",
+          "verify": "PUT response status >=400 and error.code ∈ {WRITABLE_PACKAGE_REQUIRED, ITEM_LOCKED} (packages/spec/src/api/error-code-ledger.zod.ts, @objectstack/metadata-protocol entry)",
+          "evidence": "PUT trace"
+        },
+        {
+          "clause": "the same PUT against a writable object SUCCEEDS for the same admin — the lock keys on package writability, not on the route (both sides of the gate)",
+          "oracle": "api",
+          "verify": "writable-target PUT answers 2xx and a follow-up GET shows the change",
+          "evidence": "both traces"
+        },
+        {
+          "clause": "the denied write leaves the packaged object byte-identical (persistence of the lock)",
+          "oracle": "api",
+          "verify": "GET /api/v1/meta/object/<name> before/after the denied PUT — identical",
+          "evidence": "the two reads"
+        }
+      ],
+      "negative": [
+        "a UI that greys the controls while the direct PUT succeeds is a FAIL of this item even though the screenshot looks correct — record it as a server-guard gap, not a UI polish issue"
+      ],
+      "traps": [
+        "stale-console-bundle",
+        "hydration-race"
+      ],
+      "source": [
+        "#3358 §5",
+        "packages/spec/src/api/error-code-ledger.zod.ts (@objectstack/metadata-protocol codes)",
+        "ADR-0010 §3.3 (_lock)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-07",
+          "change": "initial import from #3358",
+          "ref": "#3358"
+        },
+        {
+          "revision": 2,
+          "date": "2026-08-07",
+          "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        }
+      ]
+    },
+    {
+      "id": "access-security.crud-permission-matrix",
+      "title": "CRUD × permission-set matrix: every access-matrix.json row holds — allowed verbs succeed, withheld verbs 403, VAMA bounded",
+      "since": "v15",
+      "status": "active",
+      "revision": 1,
+      "priority": "P0",
+      "surface": "api",
+      "personas": [
+        "admin",
+        "one fresh member per permission set under test (set granted via a sys_user_permission_set row, as showcase-permission-zoo.dogfood.test.ts does)",
+        "a second member as the foreign-row owner"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "examples/app-showcase/access-matrix.json — it IS the expectation table (31 permission-set × object rows)",
+          "seeded permission sets showcase_contributor/manager/executive/auditor/ops/member_default/guest_portal/field_ops_delegate (security bootstrap)"
+        ],
+        "knownGaps": [
+          "every authenticated member ALSO holds the everyone baseline showcase_member_default additively (ADR-0090 D5) — the effective expectation per cell is the UNION of the tested set's row and the baseline's row for that object; compute the union before judging a cell, or a baseline-granted read will look like a matrix violation"
+        ]
+      },
+      "steps": [
+        "boot showcase isolated; admin session; for each permission set in access-matrix.json create a fresh member (unique email) and grant exactly that set by inserting the sys_user_permission_set row (system context), mirroring showcase-permission-zoo.dogfood.test.ts",
+        "as admin (or a helper member), seed one FOREIGN-owned probe row per object under test (e.g. a showcase_private_note, showcase_inquiry, showcase_invoice + line, showcase_announcement owned by someone other than the persona)",
+        "for every row of access-matrix.json drive all four verbs as that persona: POST /api/v1/data/<object> {minimal valid payload}, GET /api/v1/data/<object> + GET /api/v1/data/<object>/<probe id>, PATCH /api/v1/data/<object>/<own or probe id>, DELETE /api/v1/data/<object>/<id> — capture status + error.code for each cell",
+        "for rows with viewAllRecords:true (auditor on showcase_inquiry/showcase_invoice/showcase_invoice_line/showcase_private_note): GET the foreign probe by id and list; for the SAME objects re-run as a persona whose row says viewAllRecords:false",
+        "for rows with modifyAllRecords:true (ops on showcase_announcement): PATCH the foreign-owned announcement; re-run the same PATCH as member_default (modifyAllRecords:false)",
+        "for the guest_portal row pair on showcase_inquiry (create:true, read:false): POST an inquiry as that persona, then GET the list and the created id",
+        "record the full verb × set × object verdict matrix and diff it against access-matrix.json (unioned with the baseline per the known gap above)"
+      ],
+      "acceptance": [
+        {
+          "clause": "every allowed cell succeeds: for each access-matrix.json row, verbs marked true answer 2xx and the effect persists (created row readable, patched field re-reads changed, deleted row gone)",
+          "oracle": "api",
+          "verify": "per-cell status < 300 plus a follow-up read proving the effect",
+          "evidence": "the verdict matrix + spot re-reads"
+        },
+        {
+          "clause": "every withheld cell is DENIED SERVER-SIDE with the ledgered code: verbs marked false answer 403 with error.code PERMISSION_DENIED (rest-server maps explicit security denials to 403 PERMISSION_DENIED) — UI absence never counts (ADR-0057 D10)",
+          "oracle": "api",
+          "verify": "per-cell status 403 and body code PERMISSION_DENIED; capture any cell answering a different code for triage",
+          "evidence": "the verdict matrix"
+        },
+        {
+          "clause": "a denied CREATE leaves no row behind (persistence of the denial)",
+          "oracle": "api",
+          "verify": "system-context count of rows matching the denied payload's unique marker is 0",
+          "evidence": "filtered count"
+        },
+        {
+          "clause": "viewAllRecords:true bypasses OWD/sharing on exactly the named objects — the auditor reads the foreign private note/inquiry/invoice/line by id AND in lists; a persona without the bit gets the foreign row neither way",
+          "oracle": "api",
+          "verify": "auditor GETs 200 with the probe present; the contrast persona's by-id GET non-200 and list excludes it",
+          "evidence": "both personas' traces"
+        },
+        {
+          "clause": "modifyAllRecords:true grants foreign WRITE only where held: ops PATCHes anyone's announcement (public_read OWD, owner-writes baseline) with 2xx + persisted change; member_default's identical PATCH is denied and the row unchanged",
+          "oracle": "api",
+          "verify": "ops PATCH 2xx + re-read; member PATCH >=400 + unchanged re-read",
+          "evidence": "both traces + re-reads"
+        },
+        {
+          "clause": "the write-only intake asymmetry holds: guest_portal's showcase_inquiry row (create:true, read:false) accepts the POST but denies reading it back — create must not imply read",
+          "oracle": "api",
+          "verify": "POST 2xx; subsequent GET list/by-id as the same persona non-200 or excludes the row",
+          "evidence": "POST + read traces"
+        },
+        {
+          "clause": "every variant (permission set) is driven over EVERY object row access-matrix.json lists for it, and the run record carries one verdict per cell — a set skipped or an object row skipped makes the item at best partial",
+          "oracle": "api",
+          "verify": "verdict matrix dimensions match access-matrix.json entries (31 rows × 4 verbs at revision-time; recount from the file each run)",
+          "evidence": "the matrix artifact"
+        }
+      ],
+      "negative": [
+        "run one denied cell per set as ADMIN and confirm it succeeds — proves the denial came from the persona's grants, not from a broken route (wrong-persona, both sides)",
+        "any withheld cell answering 2xx is a FAIL even if the created/changed data looks harmless; silent success is the defect"
+      ],
+      "variants": [
+        "showcase_contributor",
+        "showcase_manager",
+        "showcase_executive",
+        "showcase_auditor",
+        "showcase_ops",
+        "showcase_member_default",
+        "showcase_guest_portal",
+        "showcase_field_ops_delegate"
+      ],
+      "automated": {
+        "kind": "verify",
+        "ref": "packages/verify/src/verify.ts (runCrudVerification) + packages/verify/src/rls.ts (runRlsProofs) — objectstack verify; persona-grained cells remain manual"
+      },
+      "traps": [
+        "wrong-persona",
+        "seed-data-thin"
+      ],
+      "source": [
+        "examples/app-showcase/access-matrix.json (variant source — the expectation table)",
+        "examples/app-showcase/src/security/permission-sets.ts",
+        "ADR-0090 D1/D5",
+        "packages/qa/dogfood/test/showcase-permission-zoo.dogfood.test.ts"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-07",
+          "change": "new — CRUD × permission matrix grounded in access-matrix.json, per the deep-test contract",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        }
+      ]
+    },
+    {
+      "id": "access-security.owd-sharing-matrix",
+      "title": "Sharing-model / OWD matrix: private, public_read, public_read_write, controlled_by_parent each enforce their declared baseline",
+      "since": "v15",
+      "status": "active",
+      "revision": 1,
+      "priority": "P0",
+      "surface": "api",
+      "personas": [
+        "admin",
+        "members A and B (baseline only)",
+        "contributor members for the invoice/line and project cases",
+        "ops (modifyAllRecords contrast on announcements)",
+        "auditor (viewAllRecords contrast on lines)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "one seeded object per model, from the access-matrix sharingModel column: showcase_private_note (private), showcase_announcement (public_read), showcase_account + showcase_project (public_read_write), showcase_invoice_line under showcase_invoice (controlled_by_parent)",
+          "contributor invoice RLS owner == current_user.email (permission-sets.ts invoice_own_rows) — invoices must be created with owner set to the creating contributor's email"
+        ]
+      },
+      "steps": [
+        "boot showcase isolated; create members A and B (baseline), two contributor members C1/C2 (grant showcase_contributor), an ops member, an auditor member",
+        "private: as A create a showcase_private_note; as B list, GET by id, PATCH it",
+        "public_read: as admin (or ops) create a showcase_announcement owned by someone other than B; as B GET list + by id, then PATCH it; as ops PATCH the same announcement (modifyAllRecords contrast)",
+        "public_read_write: as admin create a showcase_project; as C1 (allowEdit:true on projects, no project RLS) GET it and PATCH a non-FLS field (e.g. name suffix) — record-level write open by OWD; as A (member_default, allowEdit:false) attempt the same PATCH — the object-level bit must still gate",
+        "controlled_by_parent: as C1 POST /api/v1/data/showcase_invoice {\"name\": \"INV-C1-1\", \"owner\": \"<C1 email>\", \"status\": \"draft\"} then POST /api/v1/data/showcase_invoice_line {\"invoice\": <that id>, \"product\": <seeded product id>, \"quantity\": 1}; as C2 list lines, GET C1's line by id, PATCH it",
+        "as C1: GET/PATCH their OWN line by id (the entitled side of ADR-0055 derivation)",
+        "as auditor: list showcase_invoice_line — viewAllRecords crosses the derived scope",
+        "capture per-model, per-persona verb outcomes"
+      ],
+      "acceptance": [
+        {
+          "clause": "private: only the owner reads/writes — B's list excludes A's note, B's by-id GET and PATCH are non-2xx, A's own read/write 2xx",
+          "oracle": "api",
+          "verify": "the four traces; PATCH denial confirmed unchanged by admin re-read",
+          "evidence": "traces + re-read"
+        },
+        {
+          "clause": "public_read: everyone reads, only owner writes — B GET 200 (list and by id) but B PATCH >=400 with the row unchanged",
+          "oracle": "api",
+          "verify": "B's GET/PATCH traces + admin re-read of the announcement",
+          "evidence": "traces + re-read"
+        },
+        {
+          "clause": "public_read: modifyAllRecords crosses the owner-writes baseline — ops' PATCH of the same foreign announcement is 2xx and persists (the bypass matters exactly where the baseline stops)",
+          "oracle": "api",
+          "verify": "ops PATCH 2xx + re-read shows the change",
+          "evidence": "trace + re-read"
+        },
+        {
+          "clause": "public_read_write: record-level write is open — C1 (holding allowEdit on showcase_project) PATCHes a project they do not own with 2xx; the object-level bit still gates: A's identical PATCH (member_default allowEdit:false) answers 403 PERMISSION_DENIED",
+          "oracle": "api",
+          "verify": "both PATCH traces; the OWD opens records, never verbs the set withholds",
+          "evidence": "both traces"
+        },
+        {
+          "clause": "controlled_by_parent: line access derives from the master (ADR-0055) — C2 cannot list, read by id, or PATCH C1's line (C1's invoice is outside C2's owner-RLS read set); C1 reads and writes their own line by id",
+          "oracle": "api",
+          "verify": "C2's three denials (list excludes, by-id non-200, PATCH >=400 + unchanged) and C1's 2xx pair; no line-level rule is authored — derivation is the only mechanism in play",
+          "evidence": "all traces"
+        },
+        {
+          "clause": "controlled_by_parent + VAMA: the auditor's viewAllRecords on showcase_invoice_line surfaces every line regardless of master ownership",
+          "oracle": "api",
+          "verify": "auditor list contains C1's line",
+          "evidence": "auditor listing"
+        },
+        {
+          "clause": "all four model variants are exercised and each verdict is recorded per persona-verb — a model not driven leaves the item partial",
+          "oracle": "api",
+          "verify": "run record carries verdicts for private / public_read / public_read_write / controlled_by_parent",
+          "evidence": "run record"
+        }
+      ],
+      "negative": [
+        "the public_read foreign PATCH must fail server-side even when the console hides the edit button — drive it as a forged direct request; a 2xx there is a FAIL (D10)",
+        "run C2's line probes ALSO as C1 to prove the denial is derivation, not a broken line route (wrong-persona both sides)"
+      ],
+      "variants": [
+        "private",
+        "public_read",
+        "public_read_write",
+        "controlled_by_parent"
+      ],
+      "automated": {
+        "kind": "dogfood",
+        "ref": "packages/qa/dogfood/test/showcase-private-owd.dogfood.test.ts + showcase-public-read-owd.dogfood.test.ts + controlled-by-parent.dogfood.test.ts + showcase-invoice-cbp.dogfood.test.ts"
+      },
+      "traps": [
+        "wrong-persona"
+      ],
+      "source": [
+        "packages/spec/src/security/sharing.zod.ts (the four-model enum — variant source)",
+        "examples/app-showcase/access-matrix.json (sharingModel column)",
+        "ADR-0055",
+        "authz-conformance.matrix.ts rows owd-private / owd-public-read / controlled-by-parent"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-07",
+          "change": "new — OWD matrix over the four spec sharing models, per the deep-test contract",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        }
+      ]
+    },
+    {
+      "id": "access-security.fls-mask-and-strip",
+      "title": "Field-level security: editable:false strips/denies writes API-side and renders read-only in the UI; masked-read half needs an authored readable:false grant",
+      "since": "v15",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "mixed",
+      "personas": [
+        "contributor (the FLS-restricted persona: showcase_project.budget/spent/budget_remaining readable:true, editable:false)",
+        "admin (the unrestricted contrast)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "showcase_contributor.fields FLS on showcase_project budget figures (permission-sets.ts — keys are <object>.<field> qualified; bare keys silently enforce nothing, the compile-time lint security-fls-unqualified-key guards that)",
+          "a seeded showcase_project row with a non-null budget"
+        ],
+        "knownGaps": [
+          "stock showcase authors NO readable:false FLS grant, so the read-MASKING half (field absent/nulled on GET, plugin-security/src/field-masker.ts) has no stock fixture; to run it, author a scratch permission set carrying readable:false on a showcase_project field and grant it to a fresh member — if the run cannot author one through a supported surface, record that half blocked(fixture) rather than ticking on the write half alone"
+        ]
+      },
+      "steps": [
+        "boot showcase with the console; contributor member (grant showcase_contributor); pick a seeded showcase_project and record its budget via a system-context read",
+        "as contributor over the API: PATCH /api/v1/data/showcase_project/<id> {\"name\": \"<name> (edited)\"} — an editable field, then PATCH {\"budget\": 999999999} — the FLS-locked field",
+        "re-read the project system-side; compare budget before/after",
+        "as admin: PATCH the same budget field to a new value and re-read (the entitled side)",
+        "in the console as the contributor: open the project's detail/edit form; screenshot; inspect the budget/spent/budget_remaining controls' state",
+        "read-mask half (see knownGaps): grant a scratch readable:false set to a fresh member, then GET the project as that member and inspect whether the masked field is absent/nulled in the API body AND blank in the UI render",
+        "as admin GET the same row — the unmasked contrast"
+      ],
+      "acceptance": [
+        {
+          "clause": "editable field write succeeds for the contributor (the FLS lock is per-field, not per-object)",
+          "oracle": "api",
+          "verify": "name PATCH 2xx and re-reads changed",
+          "evidence": "trace + re-read"
+        },
+        {
+          "clause": "editable:false field write is refused/stripped for the contributor and the stored value is unchanged (the permission-zoo pinned behavior: status >= 400 and budget identical)",
+          "oracle": "api",
+          "verify": "budget PATCH answers >=400 (or a documented strip) AND the system-context re-read equals the pre-write budget — the value oracle decides, not the status alone",
+          "evidence": "trace + before/after reads"
+        },
+        {
+          "clause": "the SAME write succeeds for admin — the lock keys on the caller's FLS, not on the field (both sides)",
+          "oracle": "api",
+          "verify": "admin budget PATCH 2xx + persisted re-read",
+          "evidence": "trace + re-read"
+        },
+        {
+          "clause": "the UI renders the FLS state faithfully for the contributor: budget figures visible (readable:true) but not editable — input disabled/read-only on the edit form",
+          "oracle": "dom",
+          "verify": "after a screenshot confirms the form rendered, assert the disabled/read-only state of the three budget controls",
+          "evidence": "screenshot + DOM read"
+        },
+        {
+          "clause": "read masking (given the scratch readable:false grant): the masked field is absent or nulled in the member's API read AND blank in their UI render, while admin's read carries the value — API and UI agree, both personas",
+          "oracle": "api",
+          "verify": "member GET body lacks/nulls the field; admin GET carries it; UI screenshots per persona match their API bodies",
+          "evidence": "both GET bodies + screenshots"
+        }
+      ],
+      "negative": [
+        "a UI-only lock is a FAIL: if the form disables the control but the direct PATCH mutates budget, record a server-guard gap (the API clause is the oracle, the DOM clause is corroboration only)"
+      ],
+      "traps": [
+        "wrong-persona",
+        "stale-console-bundle",
+        "hydration-race"
+      ],
+      "automated": {
+        "kind": "dogfood",
+        "ref": "packages/qa/dogfood/test/showcase-permission-zoo.dogfood.test.ts (FLS budget case — write half only)"
+      },
+      "source": [
+        "examples/app-showcase/src/security/permission-sets.ts (contributor FLS)",
+        "packages/plugins/plugin-security/src/field-masker.ts (read-mask enforcement site)",
+        "ADR-0090 D10 (mask intersection)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-07",
+          "change": "new — FLS item per the deep-test contract; read-mask half carries an explicit fixture gap instead of an ungrounded step",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        }
+      ]
+    },
+    {
+      "id": "access-security.scope-depth-asymmetry",
+      "title": "Scope depth (readScope/writeScope): org-wide read with own-only write, per persona — depth widens along geometry, never bypasses",
+      "since": "v15",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": [
+        "plain member M (creates the foreign probe inquiries via member_default create:true)",
+        "manager (readScope org / writeScope own on showcase_inquiry)",
+        "executive (readScope org, no write, on showcase_inquiry + showcase_private_note)",
+        "ops (readScope org / writeScope org on showcase_inquiry)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "showcase_inquiry is OWD private with create granted to the baseline — depth only matters where the baseline stops (permission-sets.ts docblock)",
+          "personas staffed by granting the sets (sys_user_permission_set) or assigning the bound positions manager/exec/ops (bind-position-sets.ts wires position → set at boot)"
+        ]
+      },
+      "steps": [
+        "boot showcase isolated; create member M plus manager/executive/ops personas; as M: POST /api/v1/data/showcase_inquiry {\"subject\": \"M probe\", ...minimal valid payload}; as the manager: POST their OWN inquiry",
+        "as the manager: GET /api/v1/data/showcase_inquiry (list) — M's inquiry must appear (readScope org on a private object)",
+        "as the manager: PATCH M's inquiry (foreign write, writeScope own) and PATCH their own inquiry",
+        "as the executive: GET the inquiry list and M's inquiry by id; then attempt PATCH (no edit bit at all); also GET /api/v1/data/showcase_private_note list (readScope org over private notes)",
+        "as ops: PATCH M's inquiry (writeScope org)",
+        "as M: GET the manager's inquiry by id — the baseline member must NOT get org-wide read (the contrast that proves depth did the widening)",
+        "capture all traces + admin re-reads after every denied write"
+      ],
+      "acceptance": [
+        {
+          "clause": "manager reads org-wide on the private object: M's inquiry present in the manager's list and readable by id",
+          "oracle": "api",
+          "verify": "GET list contains 'M probe'; by-id GET 200",
+          "evidence": "traces"
+        },
+        {
+          "clause": "manager's write stays own-scoped (the read/write ASYMMETRY): PATCH on M's inquiry >=400 with the row unchanged; PATCH on the manager's own inquiry 2xx",
+          "oracle": "api",
+          "verify": "both PATCH traces + admin re-read of M's inquiry",
+          "evidence": "traces + re-read"
+        },
+        {
+          "clause": "executive reads org-wide (inquiries AND private notes) but cannot write at all — every PATCH >=400, rows unchanged",
+          "oracle": "api",
+          "verify": "list/by-id GETs 200 with foreign rows present; PATCH >=400 + unchanged re-read",
+          "evidence": "traces + re-read"
+        },
+        {
+          "clause": "ops writes org-wide: PATCH on M's inquiry 2xx and persisted (the entitled side of the exact guard that denied the manager)",
+          "oracle": "api",
+          "verify": "ops PATCH 2xx + re-read shows the change",
+          "evidence": "trace + re-read"
+        },
+        {
+          "clause": "the baseline member has NO org-wide read: M cannot read the manager's inquiry by id and M's list holds only M's own — depth was the widener, not the object or route",
+          "oracle": "api",
+          "verify": "M's by-id GET non-200; M's list excludes the manager's inquiry",
+          "evidence": "traces"
+        },
+        {
+          "clause": "each persona variant is driven and recorded (manager / executive / ops read+write outcomes) — the asymmetry table in the run record matches the readScope/writeScope columns of access-matrix.json",
+          "oracle": "api",
+          "verify": "diff the recorded outcomes against the access-matrix.json readScope/writeScope annotations for showcase_manager/showcase_executive/showcase_ops",
+          "evidence": "the outcome table"
+        }
+      ],
+      "negative": [
+        "a manager PATCH of M's inquiry that answers 2xx is a FAIL even if some UI would have hidden the row — writeScope own must be enforced on the forged direct request; and the same PATCH as ops must SUCCEED, or the finding is a broken route rather than a working guard (wrong-persona, both sides)"
+      ],
+      "variants": [
+        "manager: read org / write own",
+        "executive: read org / write none",
+        "ops: read org / write org"
+      ],
+      "automated": {
+        "kind": "dogfood",
+        "ref": "packages/qa/dogfood/test/showcase-scope-depth.dogfood.test.ts (+ showcase-scope-depth-write, showcase-scope-depth-fallback)"
+      },
+      "traps": [
+        "wrong-persona"
+      ],
+      "source": [
+        "examples/app-showcase/src/security/permission-sets.ts (ADR-0057 D1 dials)",
+        "examples/app-showcase/access-matrix.json (readScope/writeScope columns — variant source)",
+        "ADR-0057 D1"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-07",
+          "change": "new — scope-depth read/write asymmetry matrix, per the deep-test contract",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        }
+      ]
+    },
+    {
+      "id": "access-security.anonymous-deny-surfaces",
+      "title": "Anonymous requests to every mounted API family answer 401 UNAUTHENTICATED — uniformly, before any resource resolution",
+      "since": "v15",
+      "status": "active",
+      "revision": 1,
+      "priority": "P0",
+      "surface": "api",
+      "personas": [
+        "anonymous (no Authorization header)",
+        "an authenticated member (the unaffected contrast)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "stock secure default — boot with NO requireAuth override, exactly as the dogfood pin does; the platform default is what a fresh production deployment gets"
+        ]
+      },
+      "steps": [
+        "boot showcase on the platform-default auth posture; do NOT sign in for the probe half",
+        "fire unauthenticated requests, one per mounted surface family: GET /api/v1/data/showcase_private_note (data), GET /api/v1/meta (metadata), POST /api/v1/actions/showcase_task/showcase_mark_done/anon-probe-id (dispatcher actions — deliberately a NONEXISTENT record id), GET /api/v1/automation (dispatcher automation), POST /api/v1/batch {\"operations\": []} (batch), GET /api/v1/security/explain (security-explain)",
+        "capture status + full body per surface",
+        "classify each 401 body into exactly ONE of the two declared envelope families (rest-flat vs dispatcher-wrapper, #5632) — no tolerant cross-family reads",
+        "sign in as a member and repeat the data + meta reads to prove the gate keys on anonymity, not on the routes",
+        "fetch a declared-public route (rest-route-ledger disposition 'public', forms family) anonymously — the gate must not over-deny it"
+      ],
+      "acceptance": [
+        {
+          "clause": "every probed surface answers HTTP 401 with error code UNAUTHENTICATED (ANONYMOUS_DENY_STATUS/ANONYMOUS_DENY_CODE from @objectstack/core) — no surface differs",
+          "oracle": "api",
+          "verify": "all captured statuses == 401 and each body's code == 'UNAUTHENTICATED'",
+          "evidence": "the per-surface traces"
+        },
+        {
+          "clause": "denial happens BEFORE resource resolution: the actions probe with a nonexistent record id still answers 401 (never 404) — an anonymous caller must not learn the route's shape (#5519: the gate is the handler's first statement)",
+          "oracle": "api",
+          "verify": "POST /api/v1/actions/showcase_task/showcase_mark_done/anon-probe-id → 401, not 404/400",
+          "evidence": "trace"
+        },
+        {
+          "clause": "every 401 body classifies into exactly one of the two declared envelope families — a third dialect (hybrid/re-nested body) is a FAIL even though the status is right (#5632)",
+          "oracle": "api",
+          "verify": "mutually exclusive family predicates as in showcase-anonymous-deny-surfaces.dogfood.test.ts: rest-flat (top-level error string, no success flag) for /data /meta /batch /security, dispatcher-wrapper for /actions /automation",
+          "evidence": "classified bodies"
+        },
+        {
+          "clause": "an authenticated member is unaffected: the same data/meta reads answer 200 for a signed-in baseline member",
+          "oracle": "api",
+          "verify": "member GET /api/v1/data/showcase_private_note and GET /api/v1/meta → 200",
+          "evidence": "member traces"
+        },
+        {
+          "clause": "declared-public surfaces stay public: a rest-route-ledger 'public' route (anonymous forms) answers without the 401 — the deny must gate on the route's declared posture, not blanket the server (both sides of the gate)",
+          "oracle": "api",
+          "verify": "anonymous fetch of a forms-family public route answers non-401",
+          "evidence": "trace"
+        },
+        {
+          "clause": "every surface variant is probed and recorded; a family not driven (e.g. only /data checked) leaves the item partial — the #5519 lesson is exactly that sibling surfaces drifted while /data looked fine",
+          "oracle": "api",
+          "verify": "run record carries one verdict per variant below",
+          "evidence": "run record"
+        }
+      ],
+      "negative": [
+        "the destructive automation case must be denied too: anonymous DELETE /api/v1/automation/showcase_reassign_wizard answers 401 and the flow remains registered afterwards (verify by an authed GET /api/v1/automation listing it) — a 200 {deleted:true} is the exact #5519 regression"
+      ],
+      "variants": [
+        "data (/api/v1/data)",
+        "metadata (/api/v1/meta)",
+        "actions (/api/v1/actions — dispatcher-mounted)",
+        "automation (/api/v1/automation — dispatcher-mounted)",
+        "batch (/api/v1/batch)",
+        "security-explain (/api/v1/security/explain)"
+      ],
+      "automated": {
+        "kind": "dogfood",
+        "ref": "packages/qa/dogfood/test/showcase-anonymous-deny-surfaces.dogfood.test.ts"
+      },
+      "traps": [
+        "dispatcher-vs-hono-route"
+      ],
+      "source": [
+        "release-15.1 plan §A8",
+        "#2567",
+        "#5519/#5569/#5570",
+        "#5632",
+        "authz-conformance.matrix.ts anonymous-deny rows (covers keys)",
+        "packages/core/src/security/anonymous-deny.ts"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-07",
+          "change": "new — auth-boundary sweep over every mounted family, grounded in the #2567/#5519 conformance rows and their dogfood pin",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        }
+      ]
+    },
+    {
+      "id": "access-security.sharing-rules-widen",
+      "title": "Criteria sharing rules widen the OWD baseline: matching rows become visible to the rule's audience, non-matching stay hidden",
+      "since": "v15.1",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": [
+        "a member in the rule's audience (position / unit_and_subordinates)",
+        "a member NOT in the audience",
+        "admin"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "the shipped criteria sharing rules + sys_business_unit tree (examples/app-showcase/src/security/)",
+          "runtime-assigned exec/manager/Field-Ops personas (as access-security.scope-depth-asymmetry already provisions)"
+        ],
+        "knownGaps": [
+          "the owner-based rule is [experimental] and skipped per the liveness ledger — exclude it; criteria + position/unit audiences are the live surface"
+        ]
+      },
+      "variants": [
+        "criteria rule, position audience",
+        "criteria rule, unit_and_subordinates audience",
+        "manual one-off share via the record-shares route"
+      ],
+      "steps": [
+        "boot showcase isolated; assign the exec/manager/Field-Ops positions to distinct runtime members",
+        "as admin create a MATCHING probe record (satisfies a rule's criteria, e.g. a high-value / red project or a matching inquiry) and a NON-MATCHING probe on the same private-OWD object",
+        "as the audience member: GET the object list and GET each probe by id",
+        "as a member OUTSIDE the audience: same reads",
+        "read sys_record_share for the matching record; run /security/explain for the audience member + matching record",
+        "manual-share the non-matching record to a specific user via the record-shares route; that user re-reads",
+        "§A13: as admin edit a materialized share, restart the server, re-read (seed-not-clobber)"
+      ],
+      "acceptance": [
+        {
+          "clause": "the audience member reads the MATCHING record (list + by-id) though the object OWD is private — the rule widened access",
+          "oracle": "api",
+          "verify": "audience member's list contains the matching id and the by-id GET is 200",
+          "evidence": "the reads"
+        },
+        {
+          "clause": "the NON-matching record stays invisible to the same audience member, and the matching record stays invisible to a member outside the audience — widening is scoped, both sides",
+          "oracle": "api",
+          "verify": "non-matching by-id GET is denied for the audience member; matching by-id GET is denied for the outsider",
+          "evidence": "the four reads"
+        },
+        {
+          "clause": "the widening is materialized: a sys_record_share row exists for the matching record and the explain output names the SHARING layer as the deciding grant (not OWD, not position)",
+          "oracle": "api",
+          "verify": "sys_record_share read + /security/explain attribution",
+          "evidence": "the row + explain"
+        },
+        {
+          "clause": "a manual one-off share grants exactly the target user and no one else (both sides)",
+          "oracle": "api",
+          "verify": "target reads the record; a third user still cannot",
+          "evidence": "the two reads"
+        },
+        {
+          "clause": "§A13 — an admin edit to a materialized/seeded share survives a restart (the seed does not clobber it, #2909)",
+          "oracle": "api",
+          "verify": "post-restart re-read shows the admin's edit intact",
+          "evidence": "before/after-restart reads"
+        }
+      ],
+      "negative": [
+        "a non-matching record becoming visible to the audience (over-broad rule), or a matching record leaking to an outsider, is a FAIL; a share silently dropped on restart is the #2909 regression"
+      ],
+      "traps": [
+        "wrong-persona",
+        "seed-data-thin"
+      ],
+      "source": [
+        "examples/app-showcase/src/security/ (criteria rules + sys_business_unit tree)",
+        "content/docs/capabilities/permissions.mdx (layer 3 sharing), showcase_tour_security ('Widening')",
+        "docs/plans/release-15.1-test-plan.md §A13 (#2909)",
+        "packages/plugins/plugin-sharing (sys_record_share materialization, ADR-0055)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-08",
+          "change": "initial — THE marquee gap: sharing rules (criteria → materialized sys_record_share) had zero behavioral coverage though showcase ships stock fixtures; owd-sharing-matrix only did baselines",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        }
+      ]
+    },
+    {
+      "id": "access-security.record-share-grant-revoke",
+      "title": "Per-record manual shares grant, scope, and revoke access on a private-OWD record; rule evaluate reconciles the audience",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": [
+        "member A (owner of the private-OWD probe note)",
+        "member B (the grantee — baseline only, no relation to A)",
+        "member C (a third baseline member — the isolation contrast)",
+        "admin (drives the rule evaluate + system-context re-reads)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "showcase_private_note (sharingModel: private — member_default grants create/read/edit, so a non-owner sees nothing without a share)",
+          "three fresh sign-ups (A/B/C) whose sys_user ids are resolved via a system-context read",
+          "the seeded criteria sharing rule share_red_projects_with_execs on showcase_project + at least one red-health showcase_project (examples/app-showcase/src/security/sharing-rules.ts) for the evaluate clause"
+        ]
+      },
+      "steps": [
+        "boot showcase isolated (own port + file DB, dogfood skill §0); admin session + members A/B/C (fresh emails); resolve their sys_user ids system-side",
+        "as A: POST /api/v1/data/showcase_private_note {\"title\": \"A share probe\"} — capture the id",
+        "as B: GET /api/v1/data/showcase_private_note/<A id> — the PRE-grant baseline (private OWD, B is not owner → must be refused)",
+        "as A: POST /api/v1/data/showcase_private_note/<A id>/shares {\"recipientType\": \"user\", \"recipientId\": \"<B id>\", \"accessLevel\": \"read\"} — capture the 201 sys_record_share row (source 'manual')",
+        "as B: GET the note by id AND GET /api/v1/data/showcase_private_note (list) — the grant must make it visible both ways",
+        "as C: GET the note by id — still refused (the grant named B, not everyone)",
+        "as A: GET /api/v1/data/showcase_private_note/<A id>/shares (management-gated list) — the manual grant is present",
+        "as B (a non-manager on A's note): POST /api/v1/data/showcase_private_note/<A id>/shares granting themselves — must be refused (creating a share is not a reader's power, ADR-0111 D5)",
+        "as A: DELETE /api/v1/data/showcase_private_note/<A id>/shares/<shareId> → 204; then as B: GET the note by id again — refused once more",
+        "revoke-scope probe: attempt DELETE of the same shareId through a DIFFERENT record's path (/data/showcase_private_note/<some other id>/shares/<shareId>) — must be refused (the URL's object/id is the revoke scope, ADR-0111 D4)",
+        "as admin: POST /api/v1/sharing/rules/share_red_projects_with_execs/evaluate — capture the reconcile result; read sys_record_share for the matched red project"
+      ],
+      "acceptance": [
+        {
+          "clause": "PRE-grant isolation holds: B's by-id GET of A's private note is non-2xx before any share exists (the baseline the grant then widens)",
+          "oracle": "api",
+          "verify": "GET /api/v1/data/showcase_private_note/<A id> as B answers non-200 (403 PERMISSION_DENIED or a not-found-shaped denial) BEFORE the POST /shares",
+          "evidence": "the pre-grant read"
+        },
+        {
+          "clause": "the manual grant lands as a sys_record_share row: POST .../shares answers 201 with recipient_type 'user', recipient_id B, access_level 'read', source 'manual', granted_by A",
+          "oracle": "api",
+          "verify": "POST /api/v1/data/showcase_private_note/<A id>/shares status 201; the returned/re-read sys_record_share row carries those fields (packages/plugins/plugin-sharing/src/objects/sys-record-share.object.ts)",
+          "evidence": "the POST response + a system-context sys_record_share read"
+        },
+        {
+          "clause": "the grant widens B's read BOTH ways and stays scoped: after the grant B reads the note by id (200) AND it appears in B's list, while C (ungranted) still cannot read it by id",
+          "oracle": "api",
+          "verify": "B by-id GET 200 + B list contains the id; C by-id GET non-200 and C list excludes it",
+          "evidence": "B's two reads + C's two reads"
+        },
+        {
+          "clause": "the shares list is management-gated: A (owner/manager) lists the record's shares, but B (visible-but-not-manager) POSTing a share is refused 403 (or 404 when the record is invisible) — reading a record does not confer re-share authority (ADR-0111 D5)",
+          "oracle": "api",
+          "verify": "A GET .../shares 200 with the grant present; B POST .../shares >=400 (403 visible-not-manager / 404 invisible)",
+          "evidence": "A's list + B's refused POST"
+        },
+        {
+          "clause": "revoke retracts access: DELETE .../shares/:shareId answers 204 and B's next by-id GET is non-2xx again — access tracks the grant lifecycle, not a cached decision",
+          "oracle": "api",
+          "verify": "DELETE 204; B by-id GET after revoke non-200; a system-context sys_record_share read shows the row gone",
+          "evidence": "DELETE trace + B's post-revoke read"
+        },
+        {
+          "clause": "revoke is record-scoped: revoking the share id through a different record's path is refused — a share can only be revoked through the record it belongs to (ADR-0111 D4)",
+          "oracle": "api",
+          "verify": "DELETE /data/showcase_private_note/<other id>/shares/<shareId> answers >=400 and the share still exists (re-read)",
+          "evidence": "the mis-scoped DELETE trace + survival read"
+        },
+        {
+          "clause": "rule evaluate reconciles the audience: POST /sharing/rules/share_red_projects_with_execs/evaluate returns {ruleId, matchedRecords>=1, grantsCreated/grantsUpdated} and a sys_record_share row exists for the matched red project with source 'rule' and source_id the rule name",
+          "oracle": "api",
+          "verify": "the SharingRuleEvaluationResult body (packages/plugins/plugin-sharing/src/sharing-rule-service.ts evaluateRule) + the materialized rule-sourced share row",
+          "evidence": "evaluate response + the sys_record_share read"
+        }
+      ],
+      "negative": [
+        "a revoked share whose record still reads 200 for B, or a grant that leaks to C, is a FAIL even though the manual grant looked correct — access must equal the live grant set",
+        "a non-manager (B) successfully POSTing a share on A's note is the ADR-0111 D5 authority gap — a 2xx there is a FAIL"
+      ],
+      "traps": [
+        "wrong-persona"
+      ],
+      "source": [
+        "packages/rest/src/rest-route-ledger.ts (record-shares family: GET/POST /data/:object/:id/shares, DELETE .../:shareId; sharing-rules family evaluate)",
+        "packages/rest/src/rest-server.ts (registerRecordShareEndpoints ~L7246-7331; registerSharingRuleEndpoints evaluate ~L7477-7493)",
+        "packages/plugins/plugin-sharing/src/objects/sys-record-share.object.ts (recipient_type/recipient_id/access_level/source fields)",
+        "packages/plugins/plugin-sharing/src/sharing-rule-service.ts (evaluateRule → SharingRuleEvaluationResult)",
+        "examples/app-showcase/src/security/sharing-rules.ts (share_red_projects_with_execs seeded criteria rule)",
+        "ADR-0111 D1/D4/D5"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-08",
+          "change": "new — per-record manual share grant/scope/revoke lifecycle on showcase_private_note plus rule-evaluate reconcile, grounded in the ADR-0111 record-shares routes",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        }
+      ]
+    },
+    {
+      "id": "access-security.audit-log-browser",
+      "title": "The audit-log browser surfaces attributable events over sys_audit_log with correct actor/object, filters, and a before/after payload drawer",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "mixed",
+      "personas": [
+        "admin (drives the /system/audit-log page and the delete + settings write)",
+        "a fresh member (generates the attributable login event)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "sys_audit_log (plugin-audit; enable.apiMethods = get + list only — writes happen only through internal system hooks)",
+          "the console audit-log page at /system/audit-log (objectui apps/console/src/pages/system/AuditLogPage.tsx → /api/v1/data/sys_audit_log)",
+          "a deletable seeded record (e.g. a showcase_task) and a writable settings namespace for the config_change event"
+        ]
+      },
+      "steps": [
+        "boot showcase with the console; admin session",
+        "generate 3 attributable events with distinct action/actor/object: (a) a fresh member SIGNS IN (action 'login', actor = the member); (b) as admin DELETE a showcase_task via /api/v1/data/showcase_task/<id> (action 'delete', object_name showcase_task, record_id set); (c) write a setting (action 'config_change')",
+        "open /system/audit-log; wait for the table to settle; screenshot",
+        "locate all three events in the page and read their action / object / actor cells",
+        "set the Action filter to 'delete' and confirm only the delete event remains; capture the re-issued /api/v1/data/sys_audit_log request with its $filter",
+        "click the delete row → the side drawer opens; screenshot the Before (old_value) / After (new_value) JSON panels",
+        "cross-check the API twin directly: GET /api/v1/data/sys_audit_log?$filter=... for each of the three actions and compare actor/object/action to the page",
+        "attempt to forge the trail: POST and PATCH /api/v1/data/sys_audit_log — both must be refused (get+list only)"
+      ],
+      "acceptance": [
+        {
+          "clause": "all three ops produce audit rows with the correct action, actor and target: login→action 'login' attributed to the member; delete→action 'delete' with object_name showcase_task + record_id; settings write→action 'config_change'",
+          "oracle": "api",
+          "verify": "GET /api/v1/data/sys_audit_log returns the three rows; action/actor(user_id)/object_name/record_id match what each op did (fields per packages/plugins/plugin-audit/src/objects/sys-audit-log.object.ts)",
+          "evidence": "the three audit rows"
+        },
+        {
+          "clause": "the browser renders those same rows: after a screenshot confirms the table painted, the DOM rows carry the same action/actor/object the API returned — the page shows server truth, not a recomputation",
+          "oracle": "dom",
+          "verify": "post-screenshot, the three rows' Action/Object/Actor cells equal the API values (read the DOM only after render is confirmed — hydration-race)",
+          "evidence": "screenshot + the row DOM read"
+        },
+        {
+          "clause": "the Action filter narrows to exactly one event, and the narrowing is server-side",
+          "oracle": "network",
+          "verify": "setting Action=delete re-issues GET /api/v1/data/sys_audit_log with $filter carrying action=delete; the table then shows only the delete event",
+          "evidence": "the filtered request + the single-row table"
+        },
+        {
+          "clause": "the drawer shows the change payload as Before/After JSON — old_value and new_value pretty-printed, not just a label (recorded faithfully as a two-panel before/after, NOT a merged semantic diff)",
+          "oracle": "screenshot",
+          "verify": "the row drawer renders old_value under 'Before' and new_value under 'After' as JSON where the event carries them",
+          "evidence": "the drawer screenshot annotated 'before/after panels, not a diff'"
+        },
+        {
+          "clause": "the API twin reconciles with the page: GET /api/v1/data/sys_audit_log returns the same three events with matching actor/object — a page row without a backing API row (or vice versa) is a FAIL",
+          "oracle": "api",
+          "verify": "field-by-field compare of the page's three rows against the /api/v1/data/sys_audit_log bodies",
+          "evidence": "API list vs page rows"
+        },
+        {
+          "clause": "the trail is append-only via the data API: POST and PATCH /api/v1/data/sys_audit_log are refused (enable.apiMethods = get + list) — an actor cannot forge or edit their own audit record",
+          "oracle": "api",
+          "verify": "POST and PATCH both answer >=400 (method not permitted for the object); a follow-up list shows no forged row",
+          "evidence": "the two write traces + the list"
+        }
+      ],
+      "negative": [
+        "a login / delete / config_change that leaves NO audit row is the #3415-class silent-seed/hook failure — a FAIL against the audit hook, not a fixture block",
+        "a successful POST/PATCH to sys_audit_log via the data API is a FAIL — append-only must hold at the server, not only in the read-only page"
+      ],
+      "traps": [
+        "hydration-race",
+        "stale-console-bundle"
+      ],
+      "source": [
+        "packages/plugins/plugin-audit/src/objects/sys-audit-log.object.ts (action enum, actor/user_id/object_name/record_id/old_value/new_value fields, enable.apiMethods get+list)",
+        "packages/plugins/plugin-audit/src/audit-plugin.ts (nav_audit_logs → sys_audit_log)",
+        "objectui apps/console/src/pages/system/AuditLogPage.tsx (/api/v1/data/sys_audit_log, $filter/$orderby/$top/$skip, Before/After drawer)",
+        "objectui apps/console/src/AppContent.tsx (route system/audit-log)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-08",
+          "change": "new — audit-log browser over sys_audit_log: attributable events, server-side filter, before/after payload drawer, API cross-check, append-only guard",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        }
+      ]
+    },
+    {
+      "id": "access-security.owd-save-gate",
+      "title": "OWD save gate: external ≤ internal on every object write, and a packaged object's OWD can only be tightened at runtime — Studio inline AND server-side",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "mixed",
+      "personas": [
+        "admin (drives the Studio designer and the direct meta PUTs)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "showcase declares externalSharingModel on shipped objects: showcase_announcement (external private ≤ internal public_read) and showcase_account (external public_read ≤ internal public_read_write)",
+          "a writable/draft object name for the R2 server probe (author via PUT /api/v1/meta/object/qa_owd_probe?mode=draft — no shipped object is mutated)",
+          "the Studio object designer Settings tab (objectui ObjectSettingsPanel / PackageOwdOverviewPanel), which computes isExternalWider inline"
+        ],
+        "knownGaps": [
+          "runtime EVALUATION of externalSharingModel against external principals is liveness `planned` (#2696) — this item tests the AUTHORING/save gate (external ≤ internal at write; packaged tighten-only), NOT external-principal enforcement; do not tick an external-principal read/write result",
+          "R1 (owd_widening_forbidden) is only reachable via the OS_METADATA_WRITABLE=object escape hatch; on a STOCK deploy a runtime meta PUT to a packaged object is refused earlier by the writable-package gate (WRITABLE_PACKAGE_REQUIRED) — the run must record WHICH layer answered the 4xx"
+        ]
+      },
+      "steps": [
+        "boot showcase with the console; admin session",
+        "Studio inline (browser): open the object designer Settings for a writable/draft object; set sharingModel=private and externalSharingModel=public_read; screenshot — the panel must flag the D11 external-wider violation inline (owd-sharing.ts isExternalWider) and not offer a clean save",
+        "server R2 reject: PUT /api/v1/meta/object/qa_owd_probe?mode=draft with sharingModel:'private' + externalSharingModel:'public_read' — capture the 4xx + error code",
+        "server R2 admit: PUT the same draft with externalSharingModel:'private' (≤ private) — capture the 2xx (the gate orders, it does not blanket-deny)",
+        "packaged tighten (R1): PUT /api/v1/meta/object/showcase_announcement widening sharingModel private→public_read_write (or externalSharingModel private→public_read) — capture the 4xx AND its code (WRITABLE_PACKAGE_REQUIRED on stock; owd_widening_forbidden under OS_METADATA_WRITABLE=object)",
+        "GET /api/v1/meta/object/showcase_announcement before and after the denied PUT — confirm byte-identical",
+        "cross-check the shipped declarations: GET /api/v1/meta/object/showcase_account and showcase_announcement — both satisfy external ≤ internal"
+      ],
+      "acceptance": [
+        {
+          "clause": "Studio flags external-wider inline: with sharingModel=private + externalSharingModel=public_read the Settings panel shows the D11 violation and does not present a clean save",
+          "oracle": "screenshot",
+          "verify": "after the designer settles, the panel surfaces the external-wider warning (owd-sharing.ts isExternalWider / ObjectSettingsPanel externalWider) — a screenshot confirms it before any DOM read",
+          "evidence": "the designer screenshot"
+        },
+        {
+          "clause": "server R2 rejects external > internal on ANY object write: the writable-object PUT with externalSharingModel wider than sharingModel answers 4xx (403) code owd_external_wider",
+          "oracle": "api",
+          "verify": "PUT /api/v1/meta/object/qa_owd_probe?mode=draft status >=400 and body code 'owd_external_wider' (packages/plugins/plugin-security/src/object-posture-gate.ts R2)",
+          "evidence": "the PUT trace"
+        },
+        {
+          "clause": "server R2 admits external ≤ internal: the same object with externalSharingModel no wider than sharingModel saves 2xx — the gate keys on the width ordering, not on the key's presence",
+          "oracle": "api",
+          "verify": "PUT with externalSharingModel:'private' answers 2xx and a follow-up GET shows the value",
+          "evidence": "the PUT trace + read"
+        },
+        {
+          "clause": "a packaged object's OWD cannot be widened at runtime: the widening PUT on showcase_announcement answers 4xx with a ledgered code — WRITABLE_PACKAGE_REQUIRED on the stock deploy, or owd_widening_forbidden under the OS_METADATA_WRITABLE=object escape hatch — recorded with WHICH layer answered",
+          "oracle": "api",
+          "verify": "PUT /api/v1/meta/object/showcase_announcement (widened) status >=400 and code ∈ {WRITABLE_PACKAGE_REQUIRED, owd_widening_forbidden}",
+          "evidence": "the PUT trace + the code + the answering-layer note"
+        },
+        {
+          "clause": "the denied widening is inert: GET /api/v1/meta/object/showcase_announcement is byte-identical before and after the refused PUT",
+          "oracle": "api",
+          "verify": "the two metadata reads match on sharingModel + externalSharingModel",
+          "evidence": "the before/after reads"
+        },
+        {
+          "clause": "the shipped app passes its own gate: showcase_account (external public_read ≤ internal public_read_write) and showcase_announcement (external private ≤ internal public_read) both satisfy external ≤ internal",
+          "oracle": "api",
+          "verify": "GET both objects' metadata; externalSharingModel width ≤ sharingModel width for each (OWD_WIDTH private<public_read<public_read_write)",
+          "evidence": "the two metadata reads"
+        }
+      ],
+      "negative": [
+        "a Studio panel that greys the save while a direct meta PUT widens is a FAIL — the server gate is the authority (ADR-0057 D10 both-sides)",
+        "a stock-deploy packaged-object widening PUT that answers 2xx (or leaves the object widened) is a FAIL",
+        "do NOT tick external-principal read/write enforcement: that evaluation is liveness `planned` (#2696) — this item is the save/authoring gate only"
+      ],
+      "variants": [
+        "R2 external ≤ internal (authoring gate, all object writes)",
+        "R1 env-tighten-only (packaged/artifact-backed objects)"
+      ],
+      "traps": [
+        "stale-console-bundle",
+        "hydration-race"
+      ],
+      "source": [
+        "packages/plugins/plugin-security/src/object-posture-gate.ts (R1 owd_widening_forbidden / R2 owd_external_wider, 403)",
+        "packages/lint/src/validate-security-posture.ts (OWD_WIDTH + SECURITY_EXTERNAL_WIDER lint parity)",
+        "objectui packages/app-shell/src/views/studio-design/owd-sharing.ts (isExternalWider) + PackageOwdOverviewPanel.tsx + ObjectSettingsPanel.tsx",
+        "examples/app-showcase/src/data/objects/announcement.object.ts + account.object.ts (externalSharingModel declarations)",
+        "ADR-0090 D11, ADR-0086 D1, ADR-0057 D10, #3050, objectui#2508"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-08",
+          "change": "new — OWD save gate both-sides: Studio inline external-wider warning + server object-posture-gate (R2 external≤internal on every write, R1 packaged tighten-only); external-principal evaluation carried as a knownGap (#2696 planned)",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        }
+      ]
+    },
+    {
+      "id": "access-security.public-form-intake",
+      "title": "Anonymous public form renders the whitelist only and its submit strips forged anchors; the inquiry lands via publicFormGrant",
+      "since": "v15.1",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "mixed",
+      "personas": [
+        "anonymous (no Authorization header — the platform-default secure posture)",
+        "admin / staff (reads the landed inquiry to prove what was stripped vs stamped)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "examples/app-showcase/src/ui/views/inquiry.view.ts formViews.contact — sharing.allowAnonymous:true, publicLink '/forms/contact-us', whitelist fields name/email/company/message, submitBehavior kind 'thank-you'",
+          "showcase_inquiry (sharingModel private; the submit derives authorization from publicFormGrant {object: showcase_inquiry})",
+          "the guest-defaults hook (examples/app-showcase/src/data/hooks/index.ts) that stamps status/source server-side",
+          "platform-default auth posture (secure-by-default — no requireAuth override), so the anonymous path exercises the real production gate"
+        ]
+      },
+      "steps": [
+        "boot showcase on the platform-default auth posture; do NOT sign in for the anonymous half",
+        "anon GET /api/v1/forms/contact-us — capture the resolved form + objectSchema.fields",
+        "anon POST /api/v1/forms/contact-us/submit with the whitelist fields (name/email/company/message) PLUS forged owner_id + organization_id + created_by + a non-whitelisted business field status:'closed' — capture the 201",
+        "as admin/staff: read the landed showcase_inquiry and inspect owner_id, organization_id, created_by, status, source vs the payload",
+        "anon GET /api/v1/forms/contact-us/lookup/owner_id — the non-whitelisted lookup picker probe",
+        "browser: open the public link '/forms/contact-us', submit the form, and screenshot the submitBehavior thank-you panel",
+        "unpublish the contact form view (or clear sharing.allowAnonymous) and anon GET /api/v1/forms/contact-us again; then republish and re-GET",
+        "smuggle probe: anon POST with a JSON body carrying a __proto__ key nesting owner_id — confirm no inherited anchor lands"
+      ],
+      "acceptance": [
+        {
+          "clause": "the resolved schema is the whitelist only: anon GET /forms/contact-us returns exactly name/email/company/message; owner_id, organization_id, status, source, created_by are absent from objectSchema.fields AND from the rendered sections (#3022)",
+          "oracle": "api",
+          "verify": "the form body's objectSchema.fields keys == the four whitelist fields; server-managed anchors excluded (packages/rest/src/public-form-routes.test.ts GET /forms/:slug cases)",
+          "evidence": "the resolved form body"
+        },
+        {
+          "clause": "forged anchors are stripped on submit: the landed showcase_inquiry's owner_id is the server-stamped owner (NOT the forged usr_victim), organization_id/created_by are not the forged values — a visitor cannot forge ownership (#3004/#3022)",
+          "oracle": "api",
+          "verify": "the staff read of the landed row shows owner_id/organization_id/created_by != the forged payload values",
+          "evidence": "the landed row read + the forged payload"
+        },
+        {
+          "clause": "non-whitelisted business fields are dropped/overridden: the landed status is NOT the submitted 'closed' — the guest-defaults hook stamps status/source and the whitelist excludes them",
+          "oracle": "api",
+          "verify": "the landed row's status is the seeded default (not 'closed') and source is server-stamped",
+          "evidence": "the landed row"
+        },
+        {
+          "clause": "the inquiry still lands under publicFormGrant: POST answers 201 and the row is created even under secure-by-default with NO guest_portal profile — the insert context carries publicFormGrant {object: showcase_inquiry}, anonymous:true",
+          "oracle": "api",
+          "verify": "POST 201; the created showcase_inquiry is readable by staff; name/email/company/message persisted",
+          "evidence": "the 201 + the landed row"
+        },
+        {
+          "clause": "a non-whitelisted lookup picker is refused: anon GET /forms/contact-us/lookup/owner_id answers 403 LOOKUP_NOT_PUBLIC — the form cannot open an anonymous sys_user search the submit would refuse",
+          "oracle": "api",
+          "verify": "the lookup route status 403 + code LOOKUP_NOT_PUBLIC (public-form-routes.test.ts lookup case)",
+          "evidence": "the lookup trace"
+        },
+        {
+          "clause": "submitBehavior renders: after an anonymous submit the browser shows the thank-you panel (submitBehavior kind 'thank-you')",
+          "oracle": "screenshot",
+          "verify": "the post-submit screenshot shows the configured title/message thank-you state",
+          "evidence": "the submit screenshot"
+        },
+        {
+          "clause": "unpublish kills the link both-sides: after the contact form view is unpublished / allowAnonymous cleared, anon GET /forms/contact-us is non-2xx not-found; republishing restores service",
+          "oracle": "api",
+          "verify": "GET /forms/contact-us answers a not-found (non-2xx) while unpublished, and 200 again after republish",
+          "evidence": "the before/after traces"
+        }
+      ],
+      "negative": [
+        "a landed inquiry carrying the forged owner_id / organization_id / created_by, or a form schema exposing a server-managed anchor, is the #3022 insert-forge regression — FAIL",
+        "a __proto__ body key that smuggles an inherited owner_id past the filter is a FAIL (public-form-routes.test.ts pins this)"
+      ],
+      "traps": [
+        "hydration-race",
+        "stale-console-bundle"
+      ],
+      "source": [
+        "examples/app-showcase/src/ui/views/inquiry.view.ts (formViews.contact: allowAnonymous, publicLink '/forms/contact-us', whitelist, submitBehavior)",
+        "examples/app-showcase/src/data/objects/inquiry.object.ts (sharingModel private, publicFormGrant docblock, server-controlled status/source)",
+        "examples/app-showcase/src/data/hooks/index.ts (guest-defaults stamping)",
+        "packages/rest/src/rest-route-ledger.ts (forms family: GET /forms/:slug, POST /forms/:slug/submit, GET /forms/:slug/lookup/:field)",
+        "packages/rest/src/public-form-routes.test.ts (#3022 anchor-enforcement: whitelist strip, __proto__ guard, publicFormGrant, LOOKUP_NOT_PUBLIC)",
+        "ADR-0056 Option A, #3022/#3036/#3004"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-08",
+          "change": "new — merges the console/routes/ui/docs anonymous public-form rows into one item: whitelist-only render, forged-anchor strip on submit, publicFormGrant landing, non-whitelisted lookup refusal, unpublish-kills-link",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        }
+      ]
+    },
+    {
+      "id": "access-security.share-link-capability-tokens",
+      "title": "Share-link capability tokens: anon resolve renders the record minus redactFields, password/audience gates hold, revoke/expire refuse without leaking",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "api",
+      "personas": [
+        "a member who can SEE the shared record (the link minter)",
+        "anonymous (the token holder)",
+        "a second member (the list-scoping contrast)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "an object declaring publicSharing { enabled:true, allowedAudiences, allowedPermissions, redactFields } with at least one visible record — REQUIRED to mint any link"
+        ],
+        "knownGaps": [
+          "NO stock showcase object sets publicSharing.enabled (verified across examples/app-showcase/src) — createLink answers 422 SHARING_NOT_ENABLED for every showcase object, so the resolve/redact/password/revoke clauses are BLOCKED until a publicSharing-enabled fixture object (e.g. qa_public_note with redactFields) is added; only the SHARING_NOT_ENABLED clause is runnable on stock today",
+          "the GET /share-links/:token/messages half is ai_conversations-only (Cloud/EE service-ai in the `cloud` repo) — split out as a separate knownGap; do not exercise messages against open-framework showcase"
+        ]
+      },
+      "blocked": {
+        "by": "fixture",
+        "ref": "no showcase object sets publicSharing.enabled — needs a publicSharing-enabled fixture object (PENDING-GAPS.md §C share-link-capability-tokens)"
+      },
+      "steps": [
+        "STOCK-RUNNABLE probe: as a member, POST /api/v1/share-links {\"object\": \"showcase_private_note\", \"recordId\": \"<a visible note id>\"} — capture the 422 SHARING_NOT_ENABLED that proves the block (no showcase object opts in)",
+        "with a publicSharing-enabled fixture object F (redactFields declared): as a member who can see a record r of F, POST /api/v1/share-links {object:F, recordId:r, redactFields?, audience?, password?, expiresAt?} — capture the 201 {token}",
+        "anon GET /api/v1/share-links/<token>/resolve — capture the 200 {record, link, redactFields}; confirm every field in F.publicSharing.redactFields ∪ link.redact_fields is absent from record",
+        "mint a password-gated link; anon resolve WITHOUT ?password / x-share-password header → 401; with a WRONG password → 401; with the correct password → 200",
+        "mint audience:'signed_in'; anon resolve → 401 SIGN_IN_REQUIRED; mint audience:'email' and resolve with an email OFF the allowlist → refused",
+        "DELETE /api/v1/share-links/<idOrToken> (revoke); anon resolve → 410 EXPIRED_OR_REVOKED; mint a short-expiry link and, after it expires, resolve → 410 — the record must never appear",
+        "delete the shared record r, then anon resolve the still-live token → 410 RECORD_GONE (fail-closed, #5190)",
+        "GET /api/v1/share-links?object=F&recordId=r as the minter vs a SECOND member — the list returns only the caller's own links"
+      ],
+      "acceptance": [
+        {
+          "clause": "mint requires the per-object opt-in: POST /share-links on an object WITHOUT publicSharing.enabled answers 422 SHARING_NOT_ENABLED — link-sharing is opt-in per object (this is exactly why stock showcase blocks the rest of this item)",
+          "oracle": "api",
+          "verify": "POST /api/v1/share-links {object: any stock showcase object} → 422 code SHARING_NOT_ENABLED (packages/plugins/plugin-sharing/src/share-link-service.ts getPolicy gate)",
+          "evidence": "the 422 trace"
+        },
+        {
+          "clause": "resolve renders the record MINUS redactFields: anon GET /:token/resolve returns 200 with the record, and every field in the object's publicSharing.redactFields ∪ the per-link redact_fields is stripped before it leaves the server",
+          "oracle": "api",
+          "verify": "the resolve body's record omits the redaction set; body also carries link + redactFields (packages/runtime/src/domains/share-links.ts applyRedaction)",
+          "evidence": "the resolve body"
+        },
+        {
+          "clause": "the password gate holds both sides: no/blank password → 401 NEEDS_PASSWORD; wrong password → 401 WRONG_PASSWORD; correct password → 200 — the token alone is insufficient when a password is set",
+          "oracle": "api",
+          "verify": "the three resolve traces with the declared codes (share-links.ts sendErr NEEDS_PASSWORD/WRONG_PASSWORD)",
+          "evidence": "the three traces"
+        },
+        {
+          "clause": "audience gating holds: a signed_in-audience link answers 401 SIGN_IN_REQUIRED for an anonymous caller; an email-audience link refuses an email off the allowlist (resolveToken returns null → named refusal, never the record)",
+          "oracle": "api",
+          "verify": "signed_in resolve → 401 SIGN_IN_REQUIRED; email resolve with a non-allowlisted email → refused",
+          "evidence": "the two traces"
+        },
+        {
+          "clause": "revoke / expiry / record-gone name the refusal, NEVER the record: after DELETE, past expiresAt, or record deletion, resolve answers 410 (EXPIRED_OR_REVOKED / RECORD_GONE) — a dead token must never leak the row (#5190 fail-closed)",
+          "oracle": "api",
+          "verify": "post-revoke, post-expiry, and post-record-delete resolves each answer 410 with no record in the body",
+          "evidence": "the three traces"
+        },
+        {
+          "clause": "the list is caller-scoped: GET /share-links returns only links created_by the caller; a second member cannot enumerate the minter's tokens even with a guessed recordId",
+          "oracle": "api",
+          "verify": "minter's list contains the token; the second member's list for the same object/recordId excludes it (share-links.ts createdBy pin)",
+          "evidence": "both list bodies"
+        }
+      ],
+      "negative": [
+        "a resolve that returns the record after revoke/expiry, that includes a redactField, or that leaks another user's tokens in the list, is a FAIL",
+        "the /:token/messages branch is ai_conversations-only (Cloud/EE) — a knownGap, not a stock clause; do not tick it on open-framework showcase"
+      ],
+      "variants": [
+        "audience link_only",
+        "audience signed_in",
+        "audience email (allowlist)",
+        "password-gated",
+        "redactFields stripped",
+        "revoked",
+        "expired",
+        "record-gone (fail-closed)"
+      ],
+      "traps": [
+        "wrong-persona"
+      ],
+      "source": [
+        "packages/runtime/src/domains/share-links.ts (resolve/create/list/revoke; 401 NEEDS_PASSWORD/WRONG_PASSWORD/SIGN_IN_REQUIRED, 410 EXPIRED_OR_REVOKED/RECORD_GONE, applyRedaction)",
+        "packages/plugins/plugin-sharing/src/share-link-service.ts (getPolicy publicSharing gate → 422 SHARING_NOT_ENABLED, resolveToken audience/password/expiry, #5190 recordStillExists fail-closed, list createdBy scoping)",
+        "packages/runtime/src/route-ledger.ts (share-links rows incl. public resolve/messages)",
+        "packages/plugins/plugin-sharing/src/objects/sys-share-link.object.ts",
+        "ADR-0047, ADR-0111 D8, #5190"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-08",
+          "change": "new — share-link capability tokens (ADR-0047): resolve-minus-redactFields, password/audience gates, fail-closed revoke/expire/record-gone, caller-scoped list; blocked(fixture) because no showcase object opts into publicSharing, messages half split as a Cloud/EE knownGap",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        }
+      ]
+    },
+    {
+      "id": "access-security.suggested-binding-loop",
+      "title": "Suggested audience bindings reconcile, confirm materializes the anchor binding, dismiss removes it; bad states 404/409/400 and non-admins are refused",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "api",
+      "personas": [
+        "tenant admin (the only principal the surface serves)",
+        "a plain member (the deny contrast)",
+        "anonymous (the unconditional-deny contrast)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "sys_audience_binding_suggestion (plugin-security) + the reconcile at boot/list",
+          "showcase's isDefault permission set showcase_member_default (examples/app-showcase/src/security/permission-sets.ts) — the one declared install-time suggestion"
+        ],
+        "knownGaps": [
+          "stock showcase AUTO-BINDS its only isDefault set (everyone → showcase_member_default) at boot (examples/app-showcase/src/security/bind-position-sets.ts docblock: the security plugin auto-binds the app's isDefault/fallbackPermissionSet to everyone), so the reconcile marks that suggestion 'confirmed (observed)', NOT pending — there is no PENDING suggestion to confirm/dismiss on stock. The list/reconcile, status-filter, idempotent-409, 404, non-admin-403 and anon-401 clauses run against the confirmed row; the confirm-a-PENDING and dismiss-a-PENDING clause needs a scratch package that suggests a not-auto-bound binding → knownGap until that fixture lands"
+        ]
+      },
+      "steps": [
+        "boot showcase with the console; admin session",
+        "GET /api/v1/security/suggested-bindings — capture the reconciled list; locate the showcase_member_default → everyone suggestion and its status",
+        "GET with ?status=confirmed and ?status=pending — confirm the filter narrows and the member_default suggestion reports 'confirmed' (auto-bound at boot)",
+        "GET with ?status=garbage — capture the 400 naming the accepted values",
+        "POST /api/v1/security/suggested-bindings/<confirmed id>/confirm — capture the 409 SUGGESTION_STATE (confirm is not re-runnable on a settled row)",
+        "POST /api/v1/security/suggested-bindings/does-not-exist/confirm — capture the 404 SUGGESTION_NOT_FOUND",
+        "as a plain member: GET the list AND POST a confirm — both must be refused 403 (tenant-admin pre-gate)",
+        "anon (no auth): GET the list — capture the 401 UNAUTHENTICATED",
+        "(knownGap) PENDING loop: seed/install a package suggesting a not-auto-bound binding so a 'pending' row appears; POST /confirm materializes the anchor binding under the caller's context (verify via /api/v1/security/explain or an access probe); POST /dismiss records the 'no' and drops it from pending; re-list reflects the transition"
+      ],
+      "acceptance": [
+        {
+          "clause": "the list reconciles declarations against live bindings: GET /security/suggested-bindings returns showcase's isDefault suggestion, and the reconcile marks it 'confirmed' because everyone → showcase_member_default is already bound at boot (a binding-present suggestion is observed-confirmed, never pending)",
+          "oracle": "api",
+          "verify": "the list body carries the member_default suggestion with status 'confirmed' (packages/plugins/plugin-security/src/suggested-audience-bindings.ts syncAudienceBindingSuggestions)",
+          "evidence": "the reconciled list"
+        },
+        {
+          "clause": "the status filter is validated: ?status=confirmed|pending|dismissed narrow the set, while ?status=garbage answers 400 naming the accepted values — an unknown filter is not silently an empty list",
+          "oracle": "api",
+          "verify": "the three filtered lists + the 400 body (packages/runtime/src/domains/security.ts isSuggestionStatus guard)",
+          "evidence": "the filtered lists + the 400"
+        },
+        {
+          "clause": "confirm on a settled row is a 409: POST .../<confirmed id>/confirm answers 409 SUGGESTION_STATE — confirm is idempotent-safe, never a double-bind",
+          "oracle": "api",
+          "verify": "the confirm trace status 409 code SUGGESTION_STATE (SuggestionStateError)",
+          "evidence": "the trace"
+        },
+        {
+          "clause": "a bad suggestion id is a 404: POST .../does-not-exist/confirm|dismiss answers 404 SUGGESTION_NOT_FOUND",
+          "oracle": "api",
+          "verify": "the trace status 404 code SUGGESTION_NOT_FOUND (SuggestionNotFoundError)",
+          "evidence": "the trace"
+        },
+        {
+          "clause": "the whole surface is tenant-admin-only: a plain member's list AND confirm both answer 403 — the read is as gated as the write (ADR-0066 pre-gate)",
+          "oracle": "api",
+          "verify": "member GET list and POST confirm both >=400 (403)",
+          "evidence": "both member traces"
+        },
+        {
+          "clause": "anonymous is denied unconditionally: an unauthenticated GET answers 401 UNAUTHENTICATED (this admin seam never honoured a deny opt-out, #2567/#3963)",
+          "oracle": "api",
+          "verify": "anon GET /security/suggested-bindings status 401 code UNAUTHENTICATED",
+          "evidence": "the anon trace"
+        },
+        {
+          "clause": "(knownGap) confirm materializes a PENDING binding and dismiss removes it: given a fixture seeding a pending suggestion, POST /confirm creates the anchor binding under the CALLER's context (a follow-up /security/explain shows the new grant), and POST /dismiss records the no and drops it from pending",
+          "oracle": "api",
+          "verify": "pre/post /security/explain (or access probe) around confirm; the list transitions pending→confirmed and pending→dismissed",
+          "evidence": "explain before/after + the list transitions"
+        }
+      ],
+      "negative": [
+        "a confirm that binds a high-privilege set onto everyone/guest must be refused by the D5/D9 audience-anchor gate (403), never silently accepted",
+        "a confirm running under the SYSTEM context rather than the caller's is the ADR-0090 D9 violation — the write must carry the admin's identity through the gates",
+        "the pending-loop clause is fixture-gapped (stock auto-binds the only suggestion) — do not tick confirm/dismiss-a-pending on stock showcase"
+      ],
+      "traps": [
+        "wrong-persona"
+      ],
+      "source": [
+        "packages/runtime/src/domains/security.ts (GET list / POST :id/confirm|dismiss; 400 unknown-status, 401 anon, 403/404/409 typed-error mapping)",
+        "packages/plugins/plugin-security/src/suggested-audience-bindings.ts (syncAudienceBindingSuggestions convergent reconcile; SuggestionNotFoundError 404, SuggestionStateError 409; confirm under caller context)",
+        "packages/plugins/plugin-security/src/objects/sys-audience-binding-suggestion.object.ts",
+        "packages/rest/src/rest-route-ledger.ts (security suggested-bindings rows)",
+        "examples/app-showcase/src/security/bind-position-sets.ts + permission-sets.ts (isDefault auto-bind)",
+        "ADR-0090 D5/D9/D12, #2567/#3963"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-08",
+          "change": "new — suggested-binding admin loop (ADR-0090 D5/D9): reconcile/list, status-filter validation, idempotent-409, 404, admin-only + anon-deny; confirm/dismiss-a-pending carried as a knownGap because stock auto-binds its only isDefault suggestion",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        }
+      ]
+    },
+    {
+      "id": "access-security.sharing-rule-authoring-ui",
+      "title": "Authoring a sharing rule in Setup materializes matching grants for exactly the audience; deleting the rule retracts them",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "mixed",
+      "personas": [
+        "admin (authors + deletes the rule in Setup)",
+        "a member in the rule's audience (gains exactly the matching rows)",
+        "a member OUTSIDE the audience (the scoping contrast)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "the Setup 'Sharing Rules' surface (objectui plugin-sharing sharing-plugin.ts nav_sharing_rules → sys_sharing_rule record form, requiredPermissions manage_platform_settings) OR the POST /api/v1/sharing/rules authoring endpoint",
+          "a private-OWD object with authorable matching/non-matching rows (showcase_project — health field) and a position to receive the grant (e.g. auditor or a scratch position)"
+        ],
+        "knownGaps": [
+          "authoring a rule in Setup issues a direct sys_sharing_rule insert (packages/spec/src/security/sharing.zod.ts) — use a criteria DISTINCT from the seeded red-project rules (e.g. record.health == 'green') so this item does not overlap access-security.sharing-rules-widen, which tests the SEEDED rules' enforcement"
+        ]
+      },
+      "steps": [
+        "boot showcase with the console; admin session",
+        "author a NEW criteria sharing rule via Setup → Sharing Rules (create a sys_sharing_rule record) OR POST /api/v1/sharing/rules: object showcase_project, condition record.health == 'green' (distinct from the seeded red rules), accessLevel 'read', sharedWith {type:'position', value:'<a position>'} — capture the 2xx",
+        "as admin: seed a MATCHING probe (a green-health showcase_project owned by someone else) and a NON-MATCHING probe (a red-health project)",
+        "as the audience persona (holding that position): GET /api/v1/data/showcase_project (list) + GET each probe by id",
+        "as a member OUTSIDE the audience: the same reads",
+        "read sys_record_share for the matching project — a row with source 'rule', source_id the new rule name",
+        "negative-authoring probe: POST /api/v1/sharing/rules with a missing/empty criteria — capture the rejection (defineRule refuses a match-all, #3896)",
+        "delete the rule via Setup (delete the sys_sharing_rule record) OR DELETE /api/v1/sharing/rules/:idOrName",
+        "as the audience persona: re-read the matching project by id — refused again; re-read sys_record_share — the rule-sourced grant is gone",
+        "screenshot the Setup Sharing Rules list before authoring, after authoring, and after delete"
+      ],
+      "acceptance": [
+        {
+          "clause": "authoring lands a rule: creating the criteria rule (Setup record form or POST /sharing/rules) answers 2xx and the rule reads back via GET /api/v1/sharing/rules/:idOrName",
+          "oracle": "api",
+          "verify": "the create response 2xx + the getRule read of the same idOrName",
+          "evidence": "create + read traces"
+        },
+        {
+          "clause": "a match-all criteria is refused at authoring: a rule with a missing/empty criteria answers 400 (defineRule refuses match-all, #3896) — a typo'd predicate cannot silently share every record",
+          "oracle": "api",
+          "verify": "POST /sharing/rules with empty criteria → 400 VALIDATION_FAILED naming the field",
+          "evidence": "the rejection"
+        },
+        {
+          "clause": "the rule materializes grants for MATCHING rows only: a sys_record_share (source 'rule', source_id the rule name) exists for the matching green project and none for the non-matching red project",
+          "oracle": "api",
+          "verify": "system-context sys_record_share reads for both probes",
+          "evidence": "the two share reads"
+        },
+        {
+          "clause": "the audience persona gains exactly the matching rows, both sides: the audience persona reads the matching project (list + by-id) but not the non-matching; a member OUTSIDE the audience reads neither — widening is scoped",
+          "oracle": "api",
+          "verify": "audience: matching by-id 200 + present in list, non-matching by-id non-200; outsider: both by-id non-200",
+          "evidence": "the four+ reads"
+        },
+        {
+          "clause": "delete retracts: deleting the rule removes its materialized sys_record_share grants and the audience persona's next by-id read of the matching project is refused again",
+          "oracle": "api",
+          "verify": "post-delete: sys_record_share for the matching project has no rule-sourced row; audience by-id GET non-200",
+          "evidence": "post-delete share read + persona read"
+        },
+        {
+          "clause": "the Setup surface reflects the rule lifecycle: after authoring the Sharing Rules list shows the new rule; after delete it is gone — the UI renders the same rows the API serves",
+          "oracle": "screenshot",
+          "verify": "before/after/after-delete screenshots of the Setup Sharing Rules list",
+          "evidence": "the three screenshots"
+        }
+      ],
+      "negative": [
+        "a rule that shares the NON-matching (red) project, or grants that survive the rule's deletion (orphaned sys_record_share), is a FAIL",
+        "do not overlap access-security.sharing-rules-widen: that item verifies the SEEDED rules' enforcement — this item authors a DISTINCT criteria in-run and verifies authoring + retraction"
+      ],
+      "traps": [
+        "wrong-persona",
+        "hydration-race"
+      ],
+      "source": [
+        "packages/rest/src/rest-server.ts (registerSharingRuleEndpoints ~L7345-7494: list/create/get/delete)",
+        "packages/spec/src/security/sharing.zod.ts (criteria rule authoring + match-all refusal #3896)",
+        "packages/plugins/plugin-sharing/src/objects/sys-sharing-rule.object.ts + sys-record-share.object.ts",
+        "objectui packages/plugins/plugin-sharing/src/sharing-plugin.ts (nav_sharing_rules Setup nav → sys_sharing_rule)",
+        "cross-ref access-security.sharing-rules-widen (seeded-rule enforcement), ADR-0058 D3, ADR-0111 D6"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-08",
+          "change": "new — sharing-rule AUTHORING loop (Setup create → materialized matching grants → delete retracts), distinct from sharing-rules-widen which tests the seeded rules' enforcement",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        }
+      ]
+    },
+    {
+      "id": "access-security.permission-matrix-edit-loop",
+      "title": "Editing the permission matrix and publishing flips an affected persona's live API access; revoke flips it back; assign/unassign moves access",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "mixed",
+      "personas": [
+        "admin (edits the matrix + publishes)",
+        "member M (holds the edited set — the persona whose API access flips)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a WRITABLE (draft/app-local) permission set S — authored in-run or an unlocked set (a locked package set is the readonly-package-locks-studio case, not this one)",
+          "member M granted S via a sys_user_permission_set row",
+          "the console Permission Matrix editor (objectui PermissionMatrixEditor.tsx, type=permission → client.save() → PUT /api/v1/meta/permission/<name>, then publish)"
+        ]
+      },
+      "steps": [
+        "boot showcase with the console; admin session; provision member M granted a writable set S that WITHHOLDS a verb on an object (e.g. delete:false on showcase_task)",
+        "baseline: as M, DELETE /api/v1/data/showcase_task/<id> — must be refused 403 (the withheld verb)",
+        "in the console Permission Matrix editor for S, flip delete ON for showcase_task; save (draft) then publish — capture PUT /api/v1/meta/permission/S and POST /api/v1/meta/permission/S/publish",
+        "as M: DELETE /api/v1/data/showcase_task/<another id> — must now be 2xx (access flipped)",
+        "flip delete back OFF in the matrix; publish; as M: DELETE again — must be refused 403",
+        "field-level half: flip an FLS bit (a showcase_project field editable:false→true) in the lower matrix; publish; as M PATCH that field — the write flips accordingly",
+        "assign/unassign: grant M a SECOND permission set (insert sys_user_permission_set) — M gains its verbs; remove the row — the access retracts",
+        "re-open the editor for S and read the checkbox state for the flipped verb"
+      ],
+      "acceptance": [
+        {
+          "clause": "baseline withheld verb is denied: before the edit, M's DELETE on the object answers 403 PERMISSION_DENIED (S withholds it)",
+          "oracle": "api",
+          "verify": "DELETE /api/v1/data/showcase_task/<id> as M → 403 PERMISSION_DENIED",
+          "evidence": "the baseline trace"
+        },
+        {
+          "clause": "the matrix edit saves and publishes: flipping the verb in the console and publishing answers 2xx on PUT /api/v1/meta/permission/S and the publish call, and the published set carries the new verb",
+          "oracle": "api",
+          "verify": "PUT + POST .../publish both 2xx; GET /api/v1/meta/permission/S (published) shows delete:true on showcase_task",
+          "evidence": "PUT + publish + GET"
+        },
+        {
+          "clause": "access flips ON after publish: M's identical DELETE now answers 2xx and the row is gone — the persona's live API access tracks the PUBLISHED matrix",
+          "oracle": "api",
+          "verify": "DELETE as M → 2xx + a follow-up read shows the row absent",
+          "evidence": "trace + re-read"
+        },
+        {
+          "clause": "revoke flips it back: flipping the verb OFF and republishing returns M's DELETE to 403 — the edit loop is reversible",
+          "oracle": "api",
+          "verify": "post-republish DELETE as M → 403 PERMISSION_DENIED",
+          "evidence": "the trace"
+        },
+        {
+          "clause": "assign/unassign moves access: granting M a second permission set widens M's API access to that set's verbs; removing the sys_user_permission_set row retracts it",
+          "oracle": "api",
+          "verify": "before/after traces of a verb the second set grants — 2xx while assigned, >=400 after unassign",
+          "evidence": "the before/after traces"
+        },
+        {
+          "clause": "the editor reflects the published state: re-opening the matrix shows the flipped verb's checkbox in its published state — the editor renders the published set, not a stale draft",
+          "oracle": "dom",
+          "verify": "after a screenshot confirms the editor rendered, the verb's checkbox matches the last published value",
+          "evidence": "screenshot + checkbox DOM read"
+        }
+      ],
+      "negative": [
+        "an edit that repaints the matrix but whose PUT/publish never lands (M's access unchanged) is a FAIL — the network + M's live access are the oracles, not the checkbox paint",
+        "enforcement flipping on the DRAFT alone (before publish) is wrong: access must key on the PUBLISHED set",
+        "cross-ref: enforcement correctness is access-security.crud-permission-matrix and the read-only-package lock is access-security.readonly-package-locks-studio — this item is the WRITE/edit loop only"
+      ],
+      "variants": [
+        "object-verb flip (CRUD)",
+        "field-level R/W flip (FLS)",
+        "permission-set assign/unassign"
+      ],
+      "traps": [
+        "stale-console-bundle",
+        "hydration-race",
+        "wrong-persona"
+      ],
+      "source": [
+        "objectui packages/app-shell/src/views/metadata-admin/PermissionMatrixEditor.tsx (type=permission editor; client.save → PUT /api/v1/meta/permission/<name>; object CRUD+VAMA+lifecycle + field R/W)",
+        "packages/spec/src/security/permission.zod.ts (PermissionSetSchema)",
+        "packages/rest/src/rest-route-ledger.ts (PUT /api/v1/meta/:type/:name saveItem; POST .../publish publishItem)",
+        "examples/app-showcase/src/security/permission-sets.ts",
+        "cross-ref access-security.crud-permission-matrix + access-security.readonly-package-locks-studio, ADR-0090 D1/D5, ADR-0033"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-08",
+          "change": "new — permission-matrix WRITE/edit loop: flip a verb in the console matrix → publish → affected persona's live API access flips, revoke flips back, assign/unassign moves access (enforcement + lock covered by sibling items)",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        }
+      ]
+    },
+    {
+      "id": "access-security.capability-declaration-lifecycle",
+      "title": "A package-declared capability bootstraps into sys_capability and resolves across the grant/require three-way (ADR-0066); platform names cannot be shadowed",
+      "since": "v17",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "mixed",
+      "personas": [
+        "admin",
+        "a member whose permission set GRANTS the capability",
+        "a member whose set does NOT"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "the shipped capability declaration examples/app-showcase/src/security/capabilities.ts (showcase.export_data, org-scoped, defineCapability) — the DEFINE side of ADR-0066",
+          "OpsPermissionSet granting it via systemPermissions (examples/app-showcase/src/security/permission-sets.ts) — the GRANT side"
+        ],
+        "knownGaps": [
+          "no shipped resource REQUIREs showcase.export_data yet (the source note calls it a 'future export endpoint/action') — the require-side enforcement clause needs a scratch resource carrying requiredPermissions:['showcase.export_data'], or is recorded as a knownGap on stock seeds"
+        ]
+      },
+      "variants": [
+        "DEFINE — capability metadata authored via defineCapability, bootstrapped to a sys_capability row",
+        "GRANT — a permission set's systemPermissions carries the capability name",
+        "REQUIRE — a resource's requiredPermissions lists it; denied unless a granted set carries it",
+        "shadow-refusal — a declaration whose name collides with PLATFORM_CAPABILITY_NAMES is refused loudly"
+      ],
+      "steps": [
+        "boot showcase isolated; confirm the declared capability bootstrapped: GET the sys_capability row for showcase.export_data (bootstrap-declared-capabilities.ts upsertPackageCapability writes name/label/description/scope)",
+        "read its fields — label falls back to humanize(name), description to 'Capability <name>.' when absent (capabilityRowFields)",
+        "as the GRANTED member (holding OpsPermissionSet) and as a NON-granted member, exercise a resource that REQUIREs the capability (author a scratch resource with requiredPermissions:['showcase.export_data'] if none ships — see knownGaps): granted passes, non-granted is denied 403",
+        "author a scratch package declaring a capability whose name is in PLATFORM_CAPABILITY_NAMES; boot/validate",
+        "author a scratch capability with a malformed/unvalidated shape and confirm the write door validates it before it reaches the sys_capability upsert (the #5961 concern: an unvalidated row lands directly in the authorization namespace)"
+      ],
+      "acceptance": [
+        {
+          "clause": "the package-declared capability materializes as a sys_capability row at boot with its authored identity (name is the upsert key; label/description apply their documented fallbacks)",
+          "oracle": "api",
+          "verify": "the sys_capability read for showcase.export_data matches the declaration; label/description fallbacks hold when omitted",
+          "evidence": "the row read + the declaration source"
+        },
+        {
+          "clause": "the three-way resolves by NAME: a resource requiring the capability is denied for a member whose granted permission sets do not carry it, and permitted for one that does — both sides",
+          "oracle": "api",
+          "verify": "403 for the non-granted member, 2xx for the OpsPermissionSet holder, on a resource carrying requiredPermissions:['showcase.export_data']",
+          "evidence": "the two responses (scratch resource if none ships — record which)"
+        },
+        {
+          "clause": "a declaration whose name shadows a curated PLATFORM_CAPABILITY_NAME is refused LOUDLY — a package cannot hijack a platform-owned capability name",
+          "oracle": "build",
+          "verify": "the shadow declaration is rejected at authoring/boot with a located error naming the collision (bootstrap-declared-capabilities.ts guard)",
+          "evidence": "the refusal text"
+        },
+        {
+          "clause": "the capability write door validates before the upsert — an unvalidated capability row must never land directly in the authorization namespace (#5961)",
+          "oracle": "build",
+          "verify": "a malformed capability shape is rejected at parse/validate, not silently upserted into sys_capability",
+          "evidence": "the rejection"
+        }
+      ],
+      "negative": [
+        "a shadow declaration silently accepted (overwriting a platform capability) is a FAIL; an unvalidated capability row reaching sys_capability is the #5961 authz-namespace-injection FAIL"
+      ],
+      "traps": [
+        "wrong-persona",
+        "stale-dist"
+      ],
+      "source": [
+        "packages/spec/liveness/capability.json (ADR-0066 D1, #5961 — the kind's own liveness ledger)",
+        "packages/plugins/plugin-security/src/bootstrap-declared-capabilities.ts (upsertPackageCapability, capabilityRowFields, PLATFORM_CAPABILITY_NAMES guard)",
+        "packages/lint/src/validate-capability-references.ts (authoring lint known-name set)",
+        "examples/app-showcase/src/security/{capabilities.ts,permission-sets.ts} (DEFINE + GRANT fixtures)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-08",
+          "change": "initial — the coverage ratchet caught `capability` as a NEW metadata kind (#5961 landed on main); authored the declaration→bootstrap→grant/require lifecycle + shadow-refusal + the #5961 authz-namespace validation concern",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        }
+      ]
+    }
+  ]
+}

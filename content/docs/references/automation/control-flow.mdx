@@ -94,7 +94,7 @@ const result = FlowRegionSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **nodes** | `{ id: string; type: string; label: string; config?: Record<string, any>; … }[]` | ✅ | Region body nodes (single-entry/single-exit sub-graph) |
-| **edges** | `{ id: string; source: string; target: string; condition?: string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; … }[]` | optional | Region body edges |
+| **edges** | `{ id: string; source: string; target: string; condition?: string \| object; … }[]` | optional | Region body edges |
 
 
 ---
@@ -109,7 +109,7 @@ const result = FlowRegionSchema.parse(data);
 | **iteratorVariable** | `string` | optional | Loop variable holding the current item |
 | **indexVariable** | `string` | optional | Optional loop variable holding the current index |
 | **maxIterations** | `integer` | optional | Hard cap on iterations (clamped to the engine ceiling) |
-| **body** | `{ nodes: { id: string; type: string; label: string; config?: Record<string, any>; … }[]; edges?: { id: string; source: string; target: string; condition?: string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; … }[] }` | optional | Loop body region (omit for legacy flat-graph loops) |
+| **body** | `{ nodes: object[]; edges?: object[] }` | optional | Loop body region (omit for legacy flat-graph loops) |
 
 
 ---
@@ -122,7 +122,7 @@ const result = FlowRegionSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | optional | Branch label |
 | **nodes** | `{ id: string; type: string; label: string; config?: Record<string, any>; … }[]` | ✅ | Branch body nodes |
-| **edges** | `{ id: string; source: string; target: string; condition?: string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; … }[]` | optional | Branch body edges |
+| **edges** | `{ id: string; source: string; target: string; condition?: string \| object; … }[]` | optional | Branch body edges |
 
 
 ---
@@ -133,7 +133,7 @@ const result = FlowRegionSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **branches** | `{ name?: string; nodes: { id: string; type: string; label: string; config?: Record<string, any>; … }[]; edges?: { id: string; source: string; target: string; condition?: string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; … }[] }[]` | ✅ | Branch regions executed concurrently; implicit join at block end |
+| **branches** | `{ name?: string; nodes: object[]; edges?: object[] }[]` | ✅ | Branch regions executed concurrently; implicit join at block end |
 
 
 ---
@@ -149,7 +149,7 @@ const result = FlowRegionSchema.parse(data);
 | **backoffMultiplier** | `number` | ✅ | Exponential backoff multiplier; 1 (the default) keeps the delay flat |
 | **maxRetryDelayMs** | `integer` | ✅ | Ceiling for a single backoff delay (ms) |
 | **jitter** | `boolean` | ✅ | Randomize each delay within [50%, 100%] of its computed value — spreads a thundering herd of simultaneous retries |
-| **retryDelayMs** | `never` | optional | [REMOVED] `retryDelayMs` was removed in @objectstack/spec 17.0.0 (#4661, #4964) — the retry policy now has ONE spelling for its base delay across every surface that carries it: `job.retryPolicy`, a `try_catch` node's `retry`, `flow.errorHandling` and an ETL pipeline's `retry`. Rename the key to `backoffMs`; the value (milliseconds before the first retry) is unchanged. `os migrate meta --from 16` rewrites it for you. |
+| **retryDelayMs** | `never` | optional | [REMOVED] `retryDelayMs` was removed in @objectstack/spec 17.0.0 (#4661, #4964) — the retry policy now has ONE spelling for its base delay across every surface that carries it: `job.retryPolicy`, a `try_catch` node's `retry` and `flow.errorHandling`. Rename the key to `backoffMs`; the value (milliseconds before the first retry) is unchanged. Run `os migrate meta --from 16` to rewrite existing sources automatically. |
 
 
 ---
@@ -160,8 +160,8 @@ const result = FlowRegionSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **try** | `{ nodes: { id: string; type: string; label: string; config?: Record<string, any>; … }[]; edges?: { id: string; source: string; target: string; condition?: string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; … }[] }` | ✅ | Protected region |
-| **catch** | `{ nodes: { id: string; type: string; label: string; config?: Record<string, any>; … }[]; edges?: { id: string; source: string; target: string; condition?: string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; … }[] }` | optional | Handler region run when the try region fails |
+| **try** | `{ nodes: object[]; edges?: object[] }` | ✅ | Protected region |
+| **catch** | `{ nodes: object[]; edges?: object[] }` | optional | Handler region run when the try region fails |
 | **errorVariable** | `string` | optional | Variable holding the caught error in the catch region |
 | **retry** | `{ maxRetries?: integer; backoffMs?: integer; backoffMultiplier?: number; maxRetryDelayMs?: integer; … }` | optional | Optional retry policy for the try region |
 

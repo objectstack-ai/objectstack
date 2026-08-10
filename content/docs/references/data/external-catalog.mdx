@@ -40,7 +40,7 @@ const result = ExternalCatalogSchema.parse(data);
 | **datasource** | `string` | ✅ | Datasource.name this catalog snapshots. |
 | **snapshotAt** | `string` | ✅ | When the snapshot was taken (ISO 8601). |
 | **dialect** | `string` | optional | Remote SQL dialect, when known. |
-| **tables** | `{ remoteSchema?: string; remoteName: string; columns: { name: string; sqlType: string; nullable: boolean; primaryKey: boolean; … }[]; indexes?: { name: string; columns: string[]; unique: boolean }[]; … }[]` | ✅ | Snapshotted remote tables. |
+| **tables** | `{ remoteSchema?: string; remoteName: string; columns: object[]; indexes?: object[]; … }[]` | ✅ | Snapshotted remote tables. |
 
 
 ---

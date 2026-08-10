@@ -29,7 +29,7 @@
 //     from the schema instead of a hand-listed array is what stops this gate
 //     from becoming a third dialect of the contract.
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import {
   ApiRoutesSchema,
   DiscoverySchema,
@@ -125,6 +125,55 @@ describe('[#4828] getDiscovery() conforms to DiscoverySchema', () => {
   });
 
   // ═════════════════════════════════════════════════════════════════════════
+  // [#6633] The direct-mount surface keys: `packages` flows, `datasources`
+  // deliberately does not
+  // ═════════════════════════════════════════════════════════════════════════
+  describe('[#6633] direct-mount surface keys', () => {
+    it('advertises `routes.packages` iff the `package` service is registered', async () => {
+      // Registered — the same predicate that gates the @objectstack/rest
+      // direct-mount registrar (`direct-mount-composition.ts`), so on the host
+      // that serves this builder's shape, advertised ⇔ mounted.
+      const withPackage: any = await makeImpl(new Map([['package', {}]])).getDiscovery();
+      expect(withPackage.routes.packages).toBe('/api/v1/packages');
+
+      // Absent — nothing mounts the surface for this boot, so the key is
+      // absent, never a promise of a 404 (ADR-0076 D12).
+      const without: any = await makeImpl().getDiscovery();
+      expect(Object.prototype.hasOwnProperty.call(without.routes, 'packages')).toBe(false);
+    });
+
+    it('does NOT advertise `datasources` — this builder knows nothing about the federation mount', async () => {
+      // Same disposition as `mcp` above: the `datasources/:name/external/*`
+      // family is mounted by the REST host (unconditionally, 503-degrading),
+      // which this builder cannot see — and the runtime dispatcher serves no
+      // /datasources domain at all. Even a registered `external-datasource`
+      // service says nothing about an HTTP mount, so advertising here would be
+      // the advertise-the-unmounted half of D12. The REST discovery endpoint
+      // advertises it from its recorded direct mounts.
+      const discovery: any = await makeImpl(
+        new Map([['external-datasource', {}]]),
+      ).getDiscovery();
+
+      expect(Object.prototype.hasOwnProperty.call(discovery.routes, 'datasources')).toBe(false);
+      expect(declaredRouteKeys().has('datasources')).toBe(true);
+    });
+
+    it('[#6714] does NOT advertise `email` — this builder knows nothing about the email mount', async () => {
+      // Same disposition as `datasources` above: `registerEmailEndpoints`
+      // mounts `POST {base}/email/send` on the REST host (unconditionally,
+      // 501-degrading when no email service is configured), which this builder
+      // cannot see — and the runtime dispatcher serves no /email domain at
+      // all. Advertising here would be the advertise-the-unmounted half of
+      // ADR-0076 D12. The REST discovery endpoint advertises it from its
+      // recorded route registrations.
+      const discovery: any = await makeImpl().getDiscovery();
+
+      expect(Object.prototype.hasOwnProperty.call(discovery.routes, 'email')).toBe(false);
+      expect(declaredRouteKeys().has('email')).toBe(true);
+    });
+  });
+
+  // ═════════════════════════════════════════════════════════════════════════
   // [#5672] Fullness: the vocabulary, whole, from every producer
   // ═════════════════════════════════════════════════════════════════════════
   //
@@ -195,6 +244,93 @@ describe('[#4828] getDiscovery() conforms to DiscoverySchema', () => {
     const discovery: any = await makeImpl().getDiscovery();
 
     expect(['production', 'sandbox', 'development']).toContain(discovery.environment);
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // [#5936] The unset-NODE_ENV default, asserted on THIS producer
+  // ═══════════════════════════════════════════════════════════════════════════
+  //
+  // `/discovery` has two producers. #5673 ruled that a deployment whose operator
+  // never set `NODE_ENV` must not call itself `development` — `environment` is
+  // machine-readable and a client may loosen a destructive action's
+  // confirmation on it — but that dispatch was scoped to the runtime dispatcher
+  // and forbade touching `packages/spec`, so the default landed at that
+  // producer's own call site and THIS producer went on answering `development`
+  // for the same input. The 2026-08-07 ruling (direction 1) folded the default
+  // into `resolveDiscoveryEnvironment`, which is what makes one decision reach
+  // both.
+  //
+  // This case is the half a mapper test cannot cover: that this producer passes
+  // the operator's value through AS READ and adds no default of its own. Its
+  // sibling lives in `packages/runtime/src/discovery-schema-conformance.test.ts`
+  // and asserts the identical fact about the dispatcher — the pair is what makes
+  // "the two producers agree" a checked fact rather than a comment.
+  //
+  // Reverse verification, direction predicted BEFORE running — and the
+  // interesting part is that the two revert shapes go DIFFERENT ways:
+  //
+  //   * Revert the whole change (the mapper back to `development` for a
+  //     non-string AND the dispatcher back to `getEnv('NODE_ENV', 'production')`)
+  //     and the two unset rows HERE go RED reading `development` while the
+  //     runtime's sibling rows stay GREEN. That asymmetry IS the bug #5936
+  //     reports, reproduced on demand.
+  //   * Revert only the mapper and BOTH producers go red, because the
+  //     dispatcher no longer carries a default of its own to fall back on —
+  //     which is the point of the consolidation, stated as a test outcome.
+  //
+  // The unrecognised-spelling rows stay green under every revert; they are
+  // #4828's rule, which this change deliberately leaves alone.
+  describe('[#5936] NODE_ENV defaults are the shared mapper\'s decision, not this producer\'s', () => {
+    const OLD_NODE_ENV = process.env.NODE_ENV;
+    afterEach(() => {
+      if (OLD_NODE_ENV === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = OLD_NODE_ENV;
+    });
+
+    it.each([
+      ['unset', undefined],
+      // `NODE_ENV=` exports an empty string; the mapper reads a blank value as
+      // "the host did not say", the same absence `os serve` / `os doctor` and
+      // the runtime producer already read as production.
+      ['empty', ''],
+    ])('NODE_ENV %s advertises production — never development', async (_label, raw) => {
+      if (raw === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = raw;
+
+      const discovery: any = await makeImpl().getDiscovery();
+
+      expect(discovery.environment).toBe('production');
+      expect(DiscoverySchema.safeParse(discovery).success).toBe(true);
+    });
+
+    // [#6287] `preview` left this list when it stopped being unrecognised: it is
+    // a declared `EnvironmentTypeSchema` member and now has a stated fold
+    // (`sandbox`), so asserting `development` for it here would assert the
+    // opposite of the mapper's decision. The RULE these rows pin — an unknown
+    // spelling degrades to `development` and never claims production — is
+    // unchanged; only the examples had to be ones that are genuinely unknown.
+    it.each(['qa', 'uat', 'nonsense'])(
+      'NODE_ENV=%s is an unrecognised spelling — still development, never production (#4828)',
+      async (raw) => {
+        process.env.NODE_ENV = raw;
+
+        const discovery: any = await makeImpl().getDiscovery();
+
+        expect(discovery.environment).toBe('development');
+      },
+    );
+
+    it.each([
+      ['test', 'development'],
+      ['staging', 'sandbox'],
+      ['production', 'production'],
+    ])('NODE_ENV=%s advertises %s — the same table the dispatcher reads', async (raw, expected) => {
+      process.env.NODE_ENV = raw;
+
+      const discovery: any = await makeImpl().getDiscovery();
+
+      expect(discovery.environment).toBe(expected);
+    });
   });
 
   it('reports a `locale` block derived from the i18n service when one is registered', async () => {

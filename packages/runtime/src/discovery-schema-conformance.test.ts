@@ -275,23 +275,37 @@ describe('[#4828] getDiscoveryInfo() conforms to DiscoverySchema', () => {
       expect(DiscoverySchema.safeParse(info).success).toBe(true);
     });
 
-    // [#5673] The pin for this issue, and the reason it is driven through the
-    // REAL producer rather than through `resolveDiscoveryEnvironment` alone:
-    // the UNSET default is decided at THIS call site (`getEnv`'s second
-    // argument), so a green mapper test in `packages/spec` cannot see it. The
-    // whole setup is deleting the variable — that is precisely the state of a
-    // production deployment whose operator never set it.
+    // [#5673] The pin for that issue: the whole setup is deleting the variable
+    // — precisely the state of a production deployment whose operator never set
+    // it — driven through the REAL producer rather than through
+    // `resolveDiscoveryEnvironment` alone.
     //
-    // Reverse verification, direction predicted BEFORE running: restore the old
-    // `getEnv('NODE_ENV', 'development')` and these two cases go RED (they read
-    // `development`), while every `it.each` row above stays green — the old
-    // default was only ever consulted when NODE_ENV was absent, so nothing that
-    // sets it can detect the change. Measured both ways.
+    // [#5936] It stays here, and driven end-to-end, for a reason that survived
+    // the default moving. When #5673 landed, the default WAS this call site
+    // (`getEnv`'s second argument) and a green mapper test in `packages/spec`
+    // could not have seen it. The 2026-08-07 ruling folded the default into the
+    // mapper, so the spec-side case now covers the decision itself — and this
+    // one covers the wiring: that this producer passes the operator's value
+    // through as read and adds no default of its own. A local default here
+    // would satisfy the mapper's test and still be the drift #5936 removed;
+    // only an end-to-end assertion can tell the two apart. Its sibling in
+    // `@objectstack/metadata-protocol` asserts the same fact about the other
+    // producer, which is the pair that makes "one decision" checkable.
+    //
+    // Reverse verification, direction predicted BEFORE running: restore the
+    // mapper's pre-#5936 `development` default and these two cases go RED
+    // reading `development`, while every `it.each` row above stays green,
+    // because the default is only ever consulted when NODE_ENV is absent. Note
+    // this producer no longer has a second place to be fixed: the call site
+    // carries no default, so the mapper's answer IS this producer's answer.
+    // Measured both ways.
     it.each([
       ['unset', undefined],
-      // `getEnv` collapses `''` to its default (`process.env[key] || default`),
-      // so `NODE_ENV=` is the same absence as never exporting it — and the same
-      // absence `doctorNodeEnv()` and `os serve` already read as production.
+      // `NODE_ENV=` exports an empty string. `getEnv` collapses it to its
+      // default (`process.env[key] || default`) and, since #5936, the mapper
+      // reads a blank string as unset too — so this is the same absence
+      // `doctorNodeEnv()` and `os serve` already read as production, and it
+      // answers the same on both producers.
       ['empty', ''],
     ])('NODE_ENV %s advertises production — never development (#5673)', async (_label, raw) => {
       if (raw === undefined) delete process.env.NODE_ENV;
@@ -308,7 +322,11 @@ describe('[#4828] getDiscoveryInfo() conforms to DiscoverySchema', () => {
     // two different rules and #5673 deliberately moved only the first — #4828's
     // "never CLAIM production on a guess" is untouched, and this case is the
     // guard against a later simplification collapsing them back into one.
-    it.each(['qa', 'preview', 'uat', 'nonsense'])(
+    // [#6287] `preview` dropped out of this list when it gained a declared fold
+    // (`sandbox`) — it is an `EnvironmentTypeSchema` member, so it is no longer
+    // an example of a spelling this repo does not recognise. The rule and its
+    // remaining examples are untouched.
+    it.each(['qa', 'uat', 'nonsense'])(
       'NODE_ENV=%s is an unrecognised spelling — still development, never production (#4828)',
       async (raw) => {
         process.env.NODE_ENV = raw;

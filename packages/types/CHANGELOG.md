@@ -1,5 +1,307 @@
 # @objectstack/types
 
+## 17.0.0-rc.6
+
+### Minor Changes
+
+- 91cefb8: refactor(types,rest,metadata,analytics): Postgres 的 `"x" of relation "y"` 短语收归一处，三个包不再各修一遍同一个超串洞（#6615）
+
+  Postgres 把「关系内部某个子对象」的失败写成 `column "label" of relation "sys_team" does not exist`——里面**逐字包含**一句合法的「表不存在」短语 `relation "sys_team" does not exist`，含义却相反：关系正因为存在才被点名。任何对「这句话是不是在说表没了」的正则收紧都消不掉这个匹配，短语确实在里面；唯一的修法是**先问更具体的问题**。所以修的是**顺序**，不是模式。
+
+  正因为如此，这个短语被分三次教给了这个仓库，分属三个包、三个 PR，其中两次是在别处已经踩过同一个洞之后：`@objectstack/rest` 的 `mapDataError`（#5352）、`@objectstack/service-analytics` 的缺列扣除（#6035 / PR #6346）、`@objectstack/metadata` 的 `MISSING_TABLE.excludes`（#6347 / PR #6613）。本次把它收进 `@objectstack/types`，与 `isUniqueViolationError`（#6250）和 `isModuleNotFoundError`（framework#3265）同一个理由与同一个位置。
+
+  **两种宽度，故意保留成两个导出。** 三个消费者要的并不是同一条正则，差别也不是随手写的，而是**每个站点哪个方向的误差是安全的**：
+
+  - `matchMissingColumnOfRelation(message)` —— 严格提取器，锚定 Postgres 的 errmsg 模板 `column "%s" of relation "%s" does not exist`，返回列名。`rest` 用它把 42703 答成 `400 INVALID_FIELD` 而不是 `404`；`service-analytics` 用它在分类前扣除缺列。这两处**过宽**会把真正缺失的表变成硬失败、回退 #5033 刻意保留的宽容，**漏匹配**只是让消息含糊一点——所以必须严格。
+  - `isRelationSubObjectPhrase(message)` —— 宽检测器，丢掉 `column` / `[a-z0-9_]+` / `does not exist` 三个锚点：任意子对象、任意带引号标识符、任意判词。`metadata` 用它做排除。这一处**过宽**只会把良性判定变成响亮判定，**漏匹配**却会让 `event_seq` 从 1 重新开始、撞进一张已有行的历史表——方向正好相反。
+
+  把两者合并成一条正则，无论哪种宽度胜出都会对其中一个调用方是错的；这是卡片记录在案的风险，两个导出即为此而设，理由是承重的而非风格的。仓库里第四份拷贝（`service-analytics` 测试内用于守护 fixture 的那条正则）同时收编：它本是为「两张面孔别对不上」而写，却把断言打在其中一面的私有复述上，因而正是它要防的漂移。
+
+  行为逐字保持不变：搬进来的两条模式与原站点逐字节相同。`@objectstack/service-analytics` 因此新增一条对 `@objectstack/types` 的依赖边——这是本次唯一的依赖变化，构造上无环（`@objectstack/types` 只依赖 `@objectstack/spec`，后者无仓内依赖），且仓库 73 个包中已有 25 个、16 个 service 中已有 5 个携带同一条边。
+
+- 129b378: fix(types,rest): one named answer for "which column conflicted" — an index name is never returned as one (#6544)
+
+  #6250 retired four private "is this a unique violation?" vocabularies into
+  `isUniqueViolationError`. It left the harder half of the question behind: the
+  import runner's `sanitizeRowError` still carried its own three-dialect regex
+  chain, because it does **more** than answer yes/no — it names the offending
+  column so the importer can say _"A record with this `email` already exists."_
+  This lands that second answer as a shared export and migrates the last private
+  copy onto it.
+
+  **New — `uniqueViolationColumn(error)` in `@objectstack/types`** (`string |
+undefined`), sibling to `isUniqueViolationError` and gated on it, reading the
+  same channels one step down the same bounded `cause` chain, plus
+  node-postgres' `detail` field.
+
+  **Its contract, per the maintainer's 2026-08-08 ruling: a value comes back only
+  when the identifier the driver printed is determinably a COLUMN.** When a
+  dialect names an _index_ instead — MySQL's `Duplicate entry … for key
+'idx_email_unique'`, Postgres' `violates unique constraint "sys_user_email_key"`,
+  SQLite's `UNIQUE constraint failed: index 'x'` — the answer is `undefined`,
+  never the index name. Callers render this into a form field, and an index name
+  mistaken for a column points the user at a field that does not exist, whereas
+  `undefined` degrades to generic copy. A **composite** key (`Key (tenant_id,
+email)=(…)`) is `undefined` for the same reason: there is no single offending
+  column, and naming the first is the same class of wrong answer.
+
+  **⚠️ User-visible change on MySQL imports.** MySQL's duplicate-entry message
+  names the index and never the column, so the importer no longer names a column
+  there: rows that used to read _"A record with this `idx_email_unique` already
+  exists."_ — or, on MySQL 8's table-qualified `for key 'sys_user.email'`, a
+  plausible-looking _`email`_ that was still an index name — now read **"A record
+  with this value already exists."** That is deliberate and is the accepted cost
+  of the ruling. The conflict is still recognised as a conflict; only the naming
+  narrowed.
+
+  Three smaller import messages improve in the same move, all previously wrong
+  rather than merely vague:
+
+  - SQLite's expression/partial-index form used to render as _"A record with this
+    **index** already exists."_
+  - Postgres' expression index used to render the truncated fragment _"A record
+    with this **lower(email** already exists."_
+  - A Postgres conflict with no `DETAIL:` line used to fall through to the SQL
+    backstop and echo the driver's own sentence — index name included — at the
+    importer. It now gets the same generic conflict copy, which is also the exact
+    wording `mapDataError` puts in the 409 `UNIQUE_VIOLATION` body, so the
+    importer and the API say one thing about one condition.
+
+  Not changed: the NOT NULL branch, the raw-SQL backstop, and every non-conflict
+  message, which pass through exactly as before.
+
+### Patch Changes
+
+- 88f9d94: fix(types,rest): one named unique-violation predicate — a MySQL conflict is 409 UNIQUE_VIOLATION, not 500 (#6250)
+
+  **On MySQL, every unique-constraint conflict came back as `500 INTERNAL_ERROR`.**
+  The API contract registers `UNIQUE_VIOLATION` as a 409 code
+  (`packages/spec/src/api/error-code-ledger.zod.ts`), so a front end had no way to
+  tell "this email is already taken" from "the server fell over" — no retry advice,
+  no field to point at, and a 5xx in the operator's dashboards for what is an
+  ordinary client outcome. SQLite and Postgres deployments never saw it, which is
+  why it survived: their conflict prose happens to contain the words the mapping
+  looked for.
+
+  **Cause: the conflict verdict was nested inside a leak heuristic.** REST's 409
+  branch lived inside the true-branch of `looksLikeInternalErrorLeak()`, keyed on
+  the substrings `unique constraint` / `unique violation`. MySQL says
+  `ER_DUP_ENTRY: Duplicate entry '…' for key '…'`, which matches no limb of that
+  heuristic, so the conflict never reached the `if` at all and fell out of the
+  terminal `UNCLASSIFIED_FAULT`. Two unrelated questions — "is this a conflict?"
+  and "would echoing this text leak internals?" — had been fused into one, and
+  MySQL is where they disagree.
+
+  Measured on the previous release, through the real error mapper:
+
+  ```
+  mysql,    bare message       500 INTERNAL_ERROR  →  409 UNIQUE_VIOLATION
+  mysql,    knex-wrapped SQL   500 DATABASE_ERROR  →  409 UNIQUE_VIOLATION
+  postgres, SQLSTATE only      500 INTERNAL_ERROR  →  409 UNIQUE_VIOLATION
+  sqlite,   message            409 UNIQUE_VIOLATION   (unchanged)
+  postgres, message            409 UNIQUE_VIOLATION   (unchanged)
+  ```
+
+  So the hole was never MySQL-only: the mapping read one of the two channels
+  drivers use. A Postgres error carrying SQLSTATE `23505` with unremarkable prose
+  was a 500 as well.
+
+  **New: `isUniqueViolationError(error)`, exported from `@objectstack/types`.** One
+  named predicate replaces the substring test, reading every channel a driver
+  uses — `code` (`23505` / `ER_DUP_ENTRY` / `SQLITE_CONSTRAINT_UNIQUE`), `errno`
+  (`1062`), the message, and one step down the `cause` chain that pool and
+  query-builder layers wrap with. Its vocabulary is the union of the four
+  hand-written copies the repo already carried, so routing REST through it cannot
+  narrow any verdict clients rely on today; an unrecognised error is never a
+  conflict, because a false 409 tells an SDK not to retry and points the user at a
+  value that is fine.
+
+  **The internal-leak classifier is byte-identical.** The fix hoists the conflict
+  question out of it rather than widening its criteria, so nothing else it guards
+  is reclassified as safe-to-expose. And the 409 body is fixed text: MySQL embeds
+  the offending user data in its message (`Duplicate entry 'a@b.com' …`) and
+  Postgres the index and column names, none of which reaches the client. The full
+  driver text still reaches the server log.
+
+  No action needed. Clients that already handled `409 UNIQUE_VIOLATION` on SQLite
+  and Postgres now receive it on MySQL too.
+
+- Updated dependencies [3d5c090]
+- Updated dependencies [e5bd768]
+- Updated dependencies [e027b3e]
+- Updated dependencies [c2429b0]
+- Updated dependencies [445a0c2]
+- Updated dependencies [f6609e6]
+- Updated dependencies [a70358a]
+- Updated dependencies [97e7e3c]
+- Updated dependencies [8828b9e]
+- Updated dependencies [53068c1]
+- Updated dependencies [ee58392]
+- Updated dependencies [f16e54e]
+- Updated dependencies [06be54e]
+- Updated dependencies [259459d]
+- Updated dependencies [3f7f14e]
+- Updated dependencies [6968885]
+- Updated dependencies [eaed61f]
+- Updated dependencies [debe2f6]
+- Updated dependencies [97b0798]
+- Updated dependencies [43a7a8d]
+- Updated dependencies [73f69dc]
+- Updated dependencies [04c56aa]
+- Updated dependencies [b3efeb7]
+- Updated dependencies [ddd075a]
+- Updated dependencies [88154be]
+- Updated dependencies [e8dc61e]
+- Updated dependencies [2f3e793]
+- Updated dependencies [d8e8d9c]
+- Updated dependencies [94e749b]
+- Updated dependencies [ea1d916]
+- Updated dependencies [ae31a19]
+- Updated dependencies [e0f300b]
+- Updated dependencies [62b6a2f]
+- Updated dependencies [5b4780b]
+- Updated dependencies [a933452]
+- Updated dependencies [8140915]
+- Updated dependencies [7b48cf9]
+- Updated dependencies [b5404f4]
+- Updated dependencies [f764691]
+- Updated dependencies [e120a5a]
+- Updated dependencies [e650d67]
+- Updated dependencies [04476e7]
+- Updated dependencies [79228cd]
+- Updated dependencies [b3363e9]
+- Updated dependencies [2ef1807]
+- Updated dependencies [d03fe25]
+- Updated dependencies [2672f85]
+- Updated dependencies [11066f6]
+- Updated dependencies [916af17]
+- Updated dependencies [84c86fb]
+- Updated dependencies [2a2a9fb]
+- Updated dependencies [a2e157c]
+- Updated dependencies [95c4227]
+- Updated dependencies [2a61116]
+- Updated dependencies [d4df105]
+- Updated dependencies [e2798fa]
+- Updated dependencies [0fd8556]
+- Updated dependencies [74155c7]
+- Updated dependencies [6908830]
+- Updated dependencies [8b06bba]
+- Updated dependencies [4c54037]
+- Updated dependencies [0f7157b]
+- Updated dependencies [d9bef45]
+- Updated dependencies [f549a0d]
+- Updated dependencies [82da264]
+- Updated dependencies [9b9b70f]
+- Updated dependencies [f5a9bc2]
+- Updated dependencies [881a3cc]
+- Updated dependencies [ad6317b]
+- Updated dependencies [8a88885]
+- Updated dependencies [5f7669e]
+- Updated dependencies [becbe53]
+- Updated dependencies [b127c8b]
+- Updated dependencies [a80302a]
+- Updated dependencies [474f131]
+- Updated dependencies [050cd82]
+- Updated dependencies [4d552af]
+- Updated dependencies [44d677c]
+- Updated dependencies [c32944d]
+- Updated dependencies [1dd780f]
+- Updated dependencies [c8d6f6e]
+- Updated dependencies [92a67f2]
+- Updated dependencies [9136327]
+- Updated dependencies [bf0ae99]
+- Updated dependencies [cb3b6cd]
+- Updated dependencies [73b7234]
+- Updated dependencies [d2b97c3]
+- Updated dependencies [59b794f]
+- Updated dependencies [fc3a36a]
+- Updated dependencies [69787f0]
+- Updated dependencies [5d022a1]
+- Updated dependencies [042b9ee]
+- Updated dependencies [f549a0d]
+- Updated dependencies [a36db28]
+- Updated dependencies [3f8817a]
+- Updated dependencies [a2443e3]
+- Updated dependencies [e1554b1]
+- Updated dependencies [4856789]
+- Updated dependencies [c3f4916]
+- Updated dependencies [33e0385]
+- Updated dependencies [2205363]
+- Updated dependencies [09fe58d]
+- Updated dependencies [d0a5ceb]
+- Updated dependencies [e18a162]
+- Updated dependencies [d127ff0]
+- Updated dependencies [9b86cf6]
+- Updated dependencies [8825a06]
+- Updated dependencies [5087ac6]
+- Updated dependencies [2d1ddf0]
+- Updated dependencies [354b00f]
+- Updated dependencies [3de535b]
+- Updated dependencies [fe2e15a]
+- Updated dependencies [c6b6bb4]
+- Updated dependencies [2f59da0]
+- Updated dependencies [8ad609c]
+- Updated dependencies [bbee302]
+- Updated dependencies [08863dd]
+- Updated dependencies [56664f5]
+- Updated dependencies [31cbe90]
+- Updated dependencies [90bbf25]
+- Updated dependencies [eb91eba]
+- Updated dependencies [42da73d]
+- Updated dependencies [643b7c7]
+- Updated dependencies [1a15893]
+- Updated dependencies [b70e534]
+- Updated dependencies [2233a85]
+- Updated dependencies [62dd69a]
+- Updated dependencies [e15e679]
+- Updated dependencies [2ab1257]
+- Updated dependencies [4cc4fb7]
+- Updated dependencies [2c26040]
+- Updated dependencies [f758cec]
+- Updated dependencies [78f0be8]
+- Updated dependencies [35f7fb4]
+- Updated dependencies [a5302c7]
+- Updated dependencies [7084313]
+- Updated dependencies [0e043d8]
+- Updated dependencies [dadd1ad]
+- Updated dependencies [2f2e63c]
+- Updated dependencies [486d526]
+- Updated dependencies [89d7b35]
+- Updated dependencies [85ec26d]
+- Updated dependencies [f6476fc]
+- Updated dependencies [4ac12ef]
+- Updated dependencies [b88f5e8]
+- Updated dependencies [42cc219]
+- Updated dependencies [d7e0b42]
+- Updated dependencies [3510e4a]
+- Updated dependencies [aa4b90d]
+- Updated dependencies [54299ca]
+- Updated dependencies [dc61def]
+- Updated dependencies [251e888]
+- Updated dependencies [183b4c4]
+- Updated dependencies [2fdb36e]
+- Updated dependencies [20526f5]
+- Updated dependencies [c5eef1d]
+- Updated dependencies [e0f300b]
+- Updated dependencies [761a0ba]
+- Updated dependencies [be87153]
+- Updated dependencies [60f0dd8]
+- Updated dependencies [a87c5cd]
+- Updated dependencies [a47f338]
+- Updated dependencies [2598216]
+- Updated dependencies [2c7e62d]
+- Updated dependencies [eb7613c]
+- Updated dependencies [ecc9110]
+- Updated dependencies [f7bd4e2]
+- Updated dependencies [361bd5b]
+- Updated dependencies [1818998]
+- Updated dependencies [09ee21c]
+- Updated dependencies [f549a0d]
+- Updated dependencies [3fc2e48]
+- Updated dependencies [e8f435c]
+- Updated dependencies [41610f6]
+  - @objectstack/spec@17.0.0-rc.6
+
 ## 17.0.0-rc.5
 
 ### Patch Changes

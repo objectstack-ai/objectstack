@@ -104,6 +104,19 @@ a `where` predicate on the sort key — §7), and `distinct` (unique values via
 effect was suppressing the REST list count, which is truthful again). **Enforced**:
 `having` (§5). The experimental flags above are tracked in the liveness ledger
 (`packages/spec/liveness/query.json`).
+
+One member of `AggregationNode` was settled separately, in #6815: the
+per-aggregation **`distinct`** flag is **removed** on the same terms. It escaped the
+#4286 sweep because that sweep asked which members no executor reads and this one had
+a reader — one out of six. The engine's in-memory fallback deduplicated before
+applying the function, while `driver-sql`, `driver-turso`, `driver-mongodb`,
+`driver-memory` and the analytics SQL builder all ignored it, so
+`{ function: 'sum', field: 'amount', distinct: true }` answered a deduplicated sum on
+the fallback path and an ordinary sum on every SQL datasource — one query, two
+plausible numbers, chosen by which backend served it. The live deduplicating spelling
+is the **`count_distinct` function** (`COUNT(DISTINCT field)` on both SQL faces since
+#6409); `SUM(DISTINCT …)` / `AVG(DISTINCT …)` have no replacement, because no backend
+ever computed them here.
 </Callout>
 
 ### Key Types
@@ -117,13 +130,12 @@ interface SortNode {
 
 // AggregationNode — aggregation definition
 interface AggregationNode {
-  function: 'count' | 'sum' | 'avg' | 'min' | 'max'
-          | 'count_distinct' | 'array_agg' | 'string_agg';
+  function: 'count' | 'sum' | 'avg' | 'min' | 'max' | 'count_distinct';
   field?: string;        // optional for COUNT(*)
   alias: string;         // result column alias
-  distinct?: boolean;    // DISTINCT before aggregation — in-memory path only
   filter?: FilterCondition; // [EXPERIMENTAL — not enforced] FILTER WHERE clause — never applied
 }
+// `distinct?: boolean` was REMOVED in protocol 17 (#6815) — see the callout above.
 
 // FieldNode — one entry of the select list. A field name, optionally dotted to
 // reach through a relationship ('owner.name'). Related *records* come from
@@ -279,15 +291,23 @@ not `LIKE` wildcards, and `.` / `*` / `+` are ordinary characters, not regex
 metacharacters — `{ name: { $icontains: 'a.b' } }` matches `a.b` and not `axb`.
 
 <Callout type="info">
-  **Status:** the case rules above are the protocol's declaration as of
-  `@objectstack/spec` 18. The backend lowerings that deliver them — making SQLite's
-  and turso's `LIKE` case-exact, dropping MongoDB's hardcoded `$options: 'i'`, and
-  implementing `$icontains` everywhere — are tracked by
-  [#5702](https://github.com/objectstack-ai/objectstack/issues/5702). Until it
-  lands, a backend that has not been aligned refuses `$icontains` outright rather
-  than answering it approximately, and `$contains` still follows its dialect. The
-  shared standard both halves are measured against is `FILTER_TEXT_CASES`
-  (`@objectstack/spec/data`).
+  **Status:** `$icontains` is implemented on **every** backend and every evaluation
+  face, and folds the same ASCII domain on all of them —
+  [#5702](https://github.com/objectstack-ai/objectstack/issues/5702) did the SQL
+  family and [#6520](https://github.com/objectstack-ai/objectstack/issues/6520) did
+  the rest (the in-memory driver's query, matcher and analytics faces, MongoDB,
+  ObjectQL's `having`, the RLS write-side `check`, and the analytics SQL
+  compilers). A filter using it means the same thing whether your tests run on the
+  in-memory double or your production runs SQL.
+
+  One half of the case rules above is still landing: `$contains` /
+  `$startsWith` / `$endsWith` / `$notContains` are case-**sensitive** by ruling and
+  are so on the SQL family, but the in-memory driver's query path and MongoDB still
+  fold them over the whole Unicode range —
+  [#6682](https://github.com/objectstack-ai/objectstack/issues/6682). Until that
+  lands, prefer `$icontains` when you *want* a fold rather than relying on
+  `$contains` being loose on those two backends. The shared standard both halves
+  are measured against is `FILTER_TEXT_CASES` (`@objectstack/spec/data`).
 </Callout>
 
 ### `$regex` — removed
@@ -532,10 +552,31 @@ no driver can order by it — `SqlDriver` would render it as
 `"account"."company_name"` against a table that was never joined, and until the
 path was refused, the unknown-column backstop retried **without the sort** and
 answered 200 with unordered rows. Denormalise the value onto the queried object
-(for example with a formula or rollup field) when you need to sort by it.
+as a **stored** field — one this object's own rows carry, written when the
+source changes — when you need to sort by it.
 
 Internal callers reaching `engine.find()` directly are unaffected: a dotted
 `orderBy` there still falls through to the driver backstop and orders nothing.
+</Callout>
+
+<Callout type="warn">
+**Do not denormalise onto a `formula` field to sort by it.** A `formula` field
+is virtual: no driver materialises a column for it (the engine evaluates it
+*after* the driver returns), so `ORDER BY` on one hits the same unknown-column
+backstop and is **silently dropped** — 200, every row present, arbitrary order.
+Measured on a real `SqlDriver` (better-sqlite3) and on `InMemoryDriver`: rows
+inserted `C A E B D` come back `C A E B D` for both `asc` and `desc`, while the
+same query on a stored column returns `A B C D E` / `E D C B A`.
+
+A `rollup`/`summary` field *does* get a real, maintained column and can be
+sorted on — but it aggregates **child** records (`count`/`sum`/`min`/`max`/
+`avg`), so it cannot carry a looked-up parent's column such as
+`account.company_name`. For that, write the value onto a stored field of the
+queried object and keep it in sync (a trigger or flow on the source record).
+
+This page taught the `formula`/`rollup` version until #6924, and so did the
+`400 INVALID_SORT` hint itself (#4256) — both are corrected together. The same
+correction on the search axis is #6673.
 </Callout>
 
 ---
@@ -715,17 +756,28 @@ const query: QueryAST = {
 // { count: 100, total: 5000000, average: 50000, min_amount: 10000, max_amount: 500000 }
 ```
 
-**Schema enum:** `count`, `sum`, `avg`, `min`, `max`, `count_distinct`, `array_agg`, `string_agg`.
+**Schema enum:** `count`, `sum`, `avg`, `min`, `max`, `count_distinct`.
 
 <Callout type="warn">
-Only `count`, `sum`, `avg`, `min`, and `max` are portable. `count_distinct`, `array_agg`
-and `string_agg` are implemented by the MongoDB driver and by the engine's in-memory
-aggregation fallback, but not by the SQL drivers — on `SqlDriver` (and on the Turso
-driver, both transports) they are refused as a **capability gap**:
+Only `count`, `sum`, `avg`, `min`, and `max` are portable today. `count_distinct` is
+declared and is implemented by the MongoDB driver and by the engine's in-memory
+aggregation fallback, but not yet by the SQL drivers — on `SqlDriver` (and on the Turso
+driver, both transports) it is refused as a **capability gap**:
 `501 NOT_IMPLEMENTED`, "declared but not implemented by this backend". That is
 deliberately a different answer from a function the schema enum never declared
 (`median`), which is `400 INVALID_QUERY` — the caller's mistake — so an author who
-wrote `count_distinct` is never told they made a typo (#5907).
+wrote `count_distinct` is never told they made a typo (#5907). Its SQL lowering
+(`COUNT(DISTINCT field)`) is scheduled: the declaration leads the implementation here
+by decision, not by drift.
+</Callout>
+
+<Callout type="warn">
+**Removed in 17:** `array_agg` and `string_agg` were declared by this enum and compiled
+by no SQL backend, so which backend could compute them was unpredictable to the author.
+Both were retired (#6188, ADR-0049 enforce-or-remove) and are now refused at parse with
+a prescription. There is no replacement in the query vocabulary — read the rows with an
+ordinary `fields` query and shape them in the caller, or materialise the roll-up as a
+stored field. `os migrate meta --from 16` rewrites affected dataset measures.
 </Callout>
 
 ### Group By Multiple Fields
@@ -816,6 +868,12 @@ from presentation; Postgres and MySQL hand back their own native temporal value)
 then re-deduplicates the presented values, because SQL `DISTINCT` compares the *stored*
 form.
 
+It is tenant-scoped on the same terms as `find()` — the `organization_id` predicate is
+applied when the call carries `options.tenantId` (the fourth argument), and the example
+above omits it, so it returns the column's values across every tenant. Until #6792 the
+predicate was dropped even when `tenantId` *was* supplied, which made a scoped call
+disclose every other tenant's values for that column.
+
 ### Full-Text Search
 
 The `search` parameter does **not** reach a full-text index. The engine expands it into
@@ -877,6 +935,32 @@ a user typing `acme` does not find `ACME Corp`. Only `select` / `status` option
 `[EXPERIMENTAL — not enforced]` markers (#4286): the schema accepts them, the
 expansion ignores them.
 
+#### Searching by a related record's title — mirror the value
+
+Search targets are **this object's own columns**. A dotted path is not one of
+them: `searchFields: ['project_id.name']` is refused at the ingress rather than
+dropped, because the search axis does not resolve traversal the way `fields`,
+`sort` and `filters` do:
+
+```text
+Unknown field 'project_id.name' on object 'task'. '$searchFields' narrows which
+columns 'search' scans, so a name the object does not declare cannot narrow
+anything — and the engine used to drop it and scan the default columns instead,
+answering a NARROWER search with a WIDER one. 'search' scans this object's own
+columns; a related record's column cannot be a search target.
+```
+
+The declarative answer is a **mirror field**: copy the related record's title
+into a stored field on this object and declare *that* field searchable — a task
+list searched by project name carries a `project_name` text column on `task`,
+maintained on write and listed in `task.searchableFields`, so the expansion stays
+a single-table `$or` of `$contains`. The mirror must be **stored**: a `formula`
+field is virtual, no driver materializes a column for it, and a `$contains`
+against one has nothing to scan. Cross-object search paths are rejected by
+design, not pending — see [Schema Design → Searching by a related record's
+title](/docs/data-modeling/schema-design#searching-by-a-related-records-title--mirror-the-value)
+for the maintenance hooks.
+
 ### Joins — removed (#4286)
 
 `query.joins` was **removed in `@objectstack/spec` 17** (#4286, ADR-0049
@@ -922,6 +1006,13 @@ That method always selects `*` plus the window columns — it does not honor a `
 projection, and niladic rendering means argument-taking functions (`LAG(field)`)
 emit without their argument. For request-level analytics use `aggregations` +
 `groupBy` (§5).
+
+Tenancy works exactly as it does on `find()`: the driver applies its
+`organization_id` predicate only when the call carries `options.tenantId`. The example
+above omits it and therefore reads across every tenant — the intended unscoped/admin
+path, but a deliberate choice rather than a default to inherit. (Until #6792 this door
+dropped `options.tenantId` even when it was supplied, so a scoped call still returned
+every tenant's rows.)
 
 ---
 

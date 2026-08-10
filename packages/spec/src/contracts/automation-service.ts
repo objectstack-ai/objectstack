@@ -185,7 +185,9 @@ export interface AutomationResult {
      *
      *  - `'forbidden'` — {@link IAutomationService.resume} refused because the
      *    run is parked on a node whose descriptor declares
-     *    `resumeAuthority: 'service'` (#3801). A transport maps it to **403**.
+     *    `resumeAuthority: 'service'` — or declares no `resumeAuthority` at all,
+     *    which resolves the same way (#3801, #5561). A transport maps it to
+     *    **403**.
      *  - `'invalid_signal'` — the resume signal tried to write variables the
      *    flow engine reserves for itself (a `$…` name, or one carrying a `.$`
      *    segment: `$runId`, `<nodeId>.$mapItemDone`, …). A transport maps it to
@@ -261,7 +263,9 @@ export interface AutomationResult {
  * the tail of a decision it already authorized and recorded (#3801).
  *
  * A run parked on a node whose descriptor declares `resumeAuthority: 'service'`
- * (today: `approval`) is resumable ONLY with this marker present. It is a
+ * (today: `approval`, `approval_revise`) is resumable ONLY with this marker
+ * present — as is a pause whose node type declares no `resumeAuthority` at all,
+ * fail-closed since #5561. It is a
  * symbol on purpose: the generic resume route builds its signal out of a JSON
  * body, and no JSON body can produce a symbol-keyed property — so the marker
  * is unforgeable from outside the process, while an in-process owner
@@ -297,9 +301,10 @@ export interface ResumeSignal {
     variables?: Record<string, unknown>;
     /**
      * Set by the service that OWNS the suspension to clear the resume gate on
-     * a `resumeAuthority: 'service'` node (#3801). See
+     * a `resumeAuthority: 'service'` node — or on one that declares no
+     * authority, which is gated the same way since #5561 (#3801). See
      * {@link RESUME_AUTHORITY_SERVICE} — unforgeable from an HTTP body, and
-     * ignored entirely on `'any'` nodes.
+     * ignored entirely on nodes that declare `'any'`.
      */
     [RESUME_AUTHORITY_SERVICE]?: true;
 }
@@ -477,6 +482,12 @@ export interface IAutomationService {
      * {@link RESUME_AUTHORITY_SERVICE}. The gate follows a subflow pause down
      * to the child the signal would actually land on, so a parent parked on a
      * `subflow` node is no way around it.
+     *
+     * **A node type that declares NO `resumeAuthority` is gated identically**
+     * (#5561): the generic route is an opt-in a descriptor declares with
+     * `'any'`, not a default it inherits. The refusal names the omission and
+     * the one-line declaration that lifts it, so this is recoverable by the
+     * plugin author rather than only by the platform.
      *
      * @param runId - The paused run's id
      * @param signal - Optional output to merge and/or branch label to follow

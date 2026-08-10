@@ -1452,3 +1452,242 @@ describe('[#5859] resolveOwnerScopeIds fills the AUTHORITATIVE organization', ()
     expect(seen).toHaveLength(0);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────
+// [#6428] Tri-state write verdicts (#5492 ruling B, step 1).
+//
+// `canEdit` answered ONE `true` for two different facts — "I permit this
+// write" and "record sharing does not enforce on this row at all". #5492's E2
+// experiment delegated a pre-image write gate to it and measured the cost: on
+// an object with NO `owner_id` column, an ordinary member's cross-creator
+// UPDATE came back `ok: true` where `main` answers 403, because the platform's
+// `created_by` ownership floor is that object's only row-level write gate and
+// an abstaining `true` overrode it.
+//
+// `checkEdit` / `checkDelete` separate the two; `canEdit` / `canDelete` stay
+// exactly as they were (`verdict !== 'deny'`), which the parity block below
+// pins branch by branch so a two-state caller cannot drift under this change.
+// ─────────────────────────────────────────────────────────────────────
+
+describe('[#6428] SharingService.checkEdit / checkDelete — allow / abstain / deny', () => {
+  let engine: ReturnType<typeof makeFakeEngine>;
+  let svc: SharingService;
+
+  beforeEach(() => {
+    engine = makeFakeEngine({
+      account: ACCOUNT_SCHEMA,            // private + owner_id  → sharing enforces
+      whiteboard: CANON_PUBLIC_RW_SCHEMA, // public_read_write   → sharing does not
+      note: ORPHAN_SCHEMA,                // private, NO owner_id → the E2 shape
+      sys_record_share: { name: 'sys_record_share' },
+    });
+    svc = new SharingService({ engine });
+    engine._tables.account = [{ id: 'a1', name: 'Acme', owner_id: 'alice' }];
+    engine._tables.whiteboard = [{ id: 'w1', name: 'Board', owner_id: 'alice' }];
+    engine._tables.note = [{ id: 'n1', body: 'an object with no owner column' }];
+  });
+
+  it('allow — the record owner, on both verbs', async () => {
+    expect(await svc.checkEdit('account', 'a1', { userId: 'alice' })).toBe('allow');
+    expect(await svc.checkDelete('account', 'a1', { userId: 'alice' })).toBe('allow');
+  });
+
+  it('deny — a stranger on a sharing-enforced object', async () => {
+    expect(await svc.checkEdit('account', 'a1', { userId: 'bob' })).toBe('deny');
+    expect(await svc.checkDelete('account', 'a1', { userId: 'bob' })).toBe('deny');
+  });
+
+  it('deny — a principal-less context (no userId is not "no opinion")', async () => {
+    expect(await svc.checkEdit('account', 'a1', {})).toBe('deny');
+    expect(await svc.checkDelete('account', 'a1', {})).toBe('deny');
+  });
+
+  it('deny — a read-level share', async () => {
+    await svc.grant(
+      { object: 'account', recordId: 'a1', recipientId: 'bob', accessLevel: 'read' },
+      { isSystem: true },
+    );
+    expect(await svc.checkEdit('account', 'a1', { userId: 'bob' })).toBe('deny');
+  });
+
+  it('[ADR-0111 D3] an edit share is allow on update and DENY on delete — the verb boundary survives the tri-state', async () => {
+    await svc.grant(
+      { object: 'account', recordId: 'a1', recipientId: 'bob', accessLevel: 'edit' },
+      { isSystem: true },
+    );
+    expect(await svc.checkEdit('account', 'a1', { userId: 'bob' })).toBe('allow');
+    // NOT `abstain`: the delete gate has a real opinion here and it is "no".
+    // An abstain would hand the row to a caller's fallback and let an edit
+    // share leak the delete verb through the back door.
+    expect(await svc.checkDelete('account', 'a1', { userId: 'bob' })).toBe('deny');
+  });
+
+  it('[#5492 E2] abstain — an object with NO owner_id column, where the boolean said `true`', async () => {
+    // THE pin this card exists for. The verdict is "I do not enforce here",
+    // so #5492 step 2 can keep the platform `created_by` floor in force…
+    expect(await svc.checkEdit('note', 'n1', { userId: 'bob' })).toBe('abstain');
+    expect(await svc.checkDelete('note', 'n1', { userId: 'bob' })).toBe('abstain');
+    // …while the two-state projection every current caller reads is unchanged.
+    expect(await svc.canEdit('note', 'n1', { userId: 'bob' })).toBe(true);
+    expect(await svc.canDelete('note', 'n1', { userId: 'bob' })).toBe(true);
+  });
+
+  it('abstain — a public object, and an object this engine has no schema for', async () => {
+    expect(await svc.checkEdit('whiteboard', 'w1', { userId: 'bob' })).toBe('abstain');
+    expect(await svc.checkDelete('whiteboard', 'w1', { userId: 'bob' })).toBe('abstain');
+    expect(await svc.checkEdit('ghost', 'g1', { userId: 'bob' })).toBe('abstain');
+  });
+
+  it('the two bypass reasons split: a system context ALLOWS, a bypass-listed object ABSTAINS', async () => {
+    // Merging these was the ambiguity in miniature. A platform-internal writer
+    // is positively permitted; `sys_user` is merely not sharing-enforced, and
+    // saying `allow` there would invite a composing caller to skip the gate
+    // that actually guards those tables.
+    expect(await svc.checkEdit('account', 'a1', { isSystem: true })).toBe('allow');
+    expect(await svc.checkDelete('account', 'a1', { isSystem: true })).toBe('allow');
+    expect(await svc.checkEdit('sys_user', 'u1', { userId: 'bob' })).toBe('abstain');
+    expect(await svc.checkDelete('sys_user', 'u1', { userId: 'bob' })).toBe('abstain');
+  });
+
+  it('[#4647] allow — Modify All Data, still asked LAST', async () => {
+    let probeCalls = 0;
+    const withBypass = new SharingService({
+      engine,
+      securityService: () => ({
+        hasWriteBypass: async () => { probeCalls++; return true; },
+      }),
+    });
+    expect(await withBypass.checkEdit('account', 'a1', { userId: 'bob' })).toBe('allow');
+    expect(await withBypass.checkDelete('account', 'a1', { userId: 'bob' })).toBe('allow');
+    expect(probeCalls).toBe(2);
+    // The owner never pays for the probe: ownership answers first.
+    probeCalls = 0;
+    expect(await withBypass.checkEdit('account', 'a1', { userId: 'alice' })).toBe('allow');
+    expect(probeCalls).toBe(0);
+  });
+});
+
+describe('[#6428] fail-closed: an unresolvable verdict is DENY, never abstain', () => {
+  let engine: ReturnType<typeof makeFakeEngine>;
+  let logged: any[];
+  let svc: SharingService;
+
+  beforeEach(() => {
+    engine = makeFakeEngine({
+      account: ACCOUNT_SCHEMA,
+      sys_record_share: { name: 'sys_record_share' },
+    });
+    logged = [];
+    svc = new SharingService({
+      engine,
+      logger: { error: (...args: any[]) => { logged.push(args); } },
+    });
+    engine._tables.account = [{ id: 'a1', name: 'Acme', owner_id: 'alice' }];
+  });
+
+  it('a throwing ownership lookup denies — and says so in the log', async () => {
+    // Non-vacuity: this caller is ALLOWED while the engine works.
+    expect(await svc.checkEdit('account', 'a1', { userId: 'alice' })).toBe('allow');
+
+    engine.find = async () => { throw new Error('engine down'); };
+
+    // `abstain` here would be the fail-open: it tells a composing caller
+    // "nobody objects", on a row this service is supposed to be guarding.
+    expect(await svc.checkEdit('account', 'a1', { userId: 'alice' })).toBe('deny');
+    expect(await svc.checkDelete('account', 'a1', { userId: 'alice' })).toBe('deny');
+    // The boolean projection converges with it: a denial, not a thrown 500.
+    expect(await svc.canEdit('account', 'a1', { userId: 'alice' })).toBe(false);
+    expect(await svc.canDelete('account', 'a1', { userId: 'alice' })).toBe(false);
+
+    expect(logged.length).toBeGreaterThan(0);
+    expect(String(logged[0][0])).toContain('fail-closed');
+    expect(String(logged[0][0])).toContain('#6428');
+  });
+
+  it('a throwing SHARE lookup denies too — the whole evaluation is covered, not just the first query', async () => {
+    await svc.grant(
+      { object: 'account', recordId: 'a1', recipientId: 'bob', accessLevel: 'edit' },
+      { isSystem: true },
+    );
+    // Non-vacuity: the share is what makes this caller `allow`…
+    expect(await svc.checkEdit('account', 'a1', { userId: 'bob' })).toBe('allow');
+
+    const realFind = engine.find.bind(engine);
+    engine.find = async (object: string, options?: any) => {
+      if (object === 'sys_record_share') throw new Error('share table unavailable');
+      return realFind(object, options);
+    };
+
+    // …so losing exactly that lookup must refuse, never fall back to "I have
+    // no opinion about a row I was gating a second ago".
+    expect(await svc.checkEdit('account', 'a1', { userId: 'bob' })).toBe('deny');
+  });
+});
+
+describe('[#6428] the boolean projection does not drift (compatibility clause)', () => {
+  let engine: ReturnType<typeof makeFakeEngine>;
+  let svc: SharingService;
+
+  beforeEach(async () => {
+    engine = makeFakeEngine({
+      account: ACCOUNT_SCHEMA,
+      whiteboard: CANON_PUBLIC_RW_SCHEMA,
+      note: ORPHAN_SCHEMA,
+      sys_record_share: { name: 'sys_record_share' },
+    });
+    svc = new SharingService({ engine });
+    engine._tables.account = [{ id: 'a1', name: 'Acme', owner_id: 'alice' }];
+    engine._tables.whiteboard = [{ id: 'w1', name: 'Board', owner_id: 'alice' }];
+    engine._tables.note = [{ id: 'n1', body: 'no owner column' }];
+    await svc.grant(
+      { object: 'account', recordId: 'a1', recipientId: 'carol', accessLevel: 'edit' },
+      { isSystem: true },
+    );
+  });
+
+  // Every branch of both gates, with the boolean answer `main` gives today.
+  // `resolveSharingCanEdit` (plugin-security :3484) and the `sys_attachment`
+  // parent gate read exactly this column, so a single flipped cell here is a
+  // silent enforcement change in packages this PR does not touch.
+  const CASES: Array<{
+    what: string;
+    object: string;
+    id: string;
+    ctx: any;
+    edit: boolean;
+    del: boolean;
+  }> = [
+    { what: 'owner', object: 'account', id: 'a1', ctx: { userId: 'alice' }, edit: true, del: true },
+    { what: 'stranger', object: 'account', id: 'a1', ctx: { userId: 'bob' }, edit: false, del: false },
+    { what: 'edit-share holder', object: 'account', id: 'a1', ctx: { userId: 'carol' }, edit: true, del: false },
+    { what: 'no principal', object: 'account', id: 'a1', ctx: {}, edit: false, del: false },
+    { what: 'system context', object: 'account', id: 'a1', ctx: { isSystem: true }, edit: true, del: true },
+    { what: 'public object', object: 'whiteboard', id: 'w1', ctx: { userId: 'bob' }, edit: true, del: true },
+    { what: 'no owner column', object: 'note', id: 'n1', ctx: { userId: 'bob' }, edit: true, del: true },
+    { what: 'unknown object', object: 'ghost', id: 'g1', ctx: { userId: 'bob' }, edit: true, del: true },
+    { what: 'bypass-listed object', object: 'sys_user', id: 'u1', ctx: { userId: 'bob' }, edit: true, del: true },
+  ];
+
+  it('canEdit / canDelete are `verdict !== deny` on every branch, and unchanged from the two-state era', async () => {
+    for (const c of CASES) {
+      const editVerdict = await svc.checkEdit(c.object, c.id, c.ctx);
+      const deleteVerdict = await svc.checkDelete(c.object, c.id, c.ctx);
+      expect(await svc.canEdit(c.object, c.id, c.ctx), `canEdit — ${c.what}`).toBe(c.edit);
+      expect(await svc.canDelete(c.object, c.id, c.ctx), `canDelete — ${c.what}`).toBe(c.del);
+      expect(editVerdict !== 'deny', `projection parity, canEdit — ${c.what}`).toBe(c.edit);
+      expect(deleteVerdict !== 'deny', `projection parity, canDelete — ${c.what}`).toBe(c.del);
+    }
+  });
+
+  it('the abstain set is exactly where the boolean `true` carried no permission', async () => {
+    // Anti-vacuity for the table above: three of its `true` cells are abstains,
+    // not allows — which is the whole content of this change. If a later edit
+    // made these `allow`, the parity test would stay green and the fail-open
+    // would be back.
+    for (const [object, id] of [['whiteboard', 'w1'], ['note', 'n1'], ['ghost', 'g1'], ['sys_user', 'u1']]) {
+      expect(await svc.checkEdit(object, id, { userId: 'bob' }), `${object} must abstain`).toBe('abstain');
+    }
+    // …and the ones that are real permissions stay `allow`.
+    expect(await svc.checkEdit('account', 'a1', { userId: 'alice' })).toBe('allow');
+    expect(await svc.checkEdit('account', 'a1', { isSystem: true })).toBe('allow');
+  });
+});

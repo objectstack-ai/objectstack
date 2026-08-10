@@ -97,11 +97,19 @@ describe('exportedValueNames', () => {
 });
 
 describe('buildSchemaIndex — cross-category same name', () => {
-  // The live specimen on `main`: `ServiceStatus` is an enum declared in
-  // `api/discovery.zod.ts` AND an object declared in
+  // Drawn from the live specimen this behaviour was found on: `ServiceStatus`
+  // was an enum declared in `api/discovery.zod.ts` AND an object declared in
   // `system/core-services.zod.ts`. The bare-name index let `system` (walked
   // later) win, and then placed the API schema on `api/core-services.mdx` —
   // a page with no `api/core-services.zod.ts` behind it.
+  //
+  // That specimen is no longer live: #6604 renamed the system side to
+  // `KernelServiceStatusSchema`, so the two categories no longer publish the
+  // name. The fixture stays SYNTHETIC and unchanged on purpose — what it pins
+  // is that cross-category same-name resolution is correct whenever it occurs,
+  // and a rename of one specimen retires the specimen, not the property. Wiring
+  // the fixture to whatever names happen to collide on `main` today would make
+  // this coverage evaporate the next time someone tidies those names up.
   const idx = index(
     file('api', 'discovery.zod.ts', 'export const ServiceStatus = z.enum([]);'),
     file('system', 'core-services.zod.ts', 'export const ServiceStatusSchema = z.object({});'),

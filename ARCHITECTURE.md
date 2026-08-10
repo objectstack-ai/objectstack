@@ -267,16 +267,6 @@ official plugin lives in `packages/plugins/*`.
 
 **Dependencies**: `@objectstack/core`, `@objectstack/spec`, `@objectstack/types`, `hono`
 
-#### `@objectstack/plugin-msw`
-**Location**: `packages/plugins/plugin-msw/`  
-**Role**: Mock Service Worker Plugin
-
-- Browser-based API mocking
-- E2E testing support
-- Development mode
-
-**Dependencies**: `@objectstack/objectql`, `@objectstack/spec`, `@objectstack/types`, `msw`
-
 ### Tools Packages
 
 #### `@objectstack/cli`
@@ -403,7 +393,7 @@ Lifecycle:
 
 ### Plugin Capability Declaration
 
-**Location**: `packages/spec/src/system/plugin-capability.zod.ts`
+**Location**: `packages/spec/src/kernel/plugin-capability.zod.ts`
 
 Plugins declare capabilities through structured manifests:
 
@@ -433,8 +423,6 @@ interface PluginCapabilityManifest {
     ├── @objectstack/core (Kernel + Logger)
     │       ↑
     │       ├── @objectstack/objectql (Query Engine)
-    │       │       ↑
-    │       │       └── @objectstack/plugin-msw
     │       │
     │       ├── @objectstack/metadata (Metadata I/O)
     │       │       ↑
@@ -579,7 +567,7 @@ export type Field = z.infer<typeof FieldSchema>;
 - Parallel development
 - Incremental migration
 
-**See Also**: [content/docs/introduction/architecture.mdx](content/docs/introduction/architecture.mdx)
+**See Also**: [content/docs/concepts/architecture.mdx](content/docs/concepts/architecture.mdx)
 
 ### 7. Monorepo Structure
 
@@ -648,13 +636,37 @@ export type Field = z.infer<typeof FieldSchema>;
 
 ### Architecture Decision Records (ADRs)
 
-Important architectural decisions are documented as ADRs in `docs/adr/`:
+Important architectural decisions are documented as ADRs in `docs/adr/`.
 
-- [ADR-0001: Metadata Service Architecture](docs/adr/0001-metadata-service-architecture.md) - Explains why both ObjectQL and MetadataPlugin can provide metadata service and how they work together
+**Metadata service architecture.** This section used to link
+`docs/adr/0001-metadata-service-architecture.md`, deleted on 2026-02-11 in `9da8e3e72`
+(together with ADR-0002 and the ADR `README.md`). The link is deliberately not repointed
+at another record, because the decision it carried — *both ObjectQL and MetadataPlugin can
+provide the metadata service, MetadataPlugin taking precedence and ObjectQL acting as
+fallback* — is no longer what the code does. Today:
+
+- **MetadataPlugin is the sole provider** of the `metadata` service
+  (`packages/metadata/src/plugin.ts`). `ObjectQLPlugin` registers `objectql`, `data`,
+  `manifest` and `lifecycle` — never `metadata`.
+- **ObjectQL is a consumer.** In `start()` it reads the `metadata` service, syncs
+  definitions into its own registry and subscribes to metadata events, and degrades to
+  that internal registry when no such service is present
+  (`packages/objectql/src/plugin.ts`).
+- **The shared-interface principle survived, as a spec contract**: `IMetadataService` in
+  `packages/spec/src/contracts/metadata-service.ts`, with the slot declared as
+  `CoreServiceName 'metadata'` in `packages/spec/src/system/core-services.zod.ts`.
+- **Repository, change-log and subscription mechanics** are recorded in
+  [ADR-0008: Metadata Repository, Change Log & Subscription](docs/adr/0008-metadata-repository-and-change-log.md).
+
+The single-provider decision itself has **no ADR record today** — ADR-0001 was deleted and
+nothing replaced it. Re-homing it is a maintainer call; until then the contract and the two
+plugin files above are the live source of truth.
 
 ### Component-Specific Documentation
 
-- [Metadata Flow Documentation](docs/METADATA_FLOW.md) - Detailed explanation of how metadata flows from definition to runtime, including configuration examples and troubleshooting
+`docs/METADATA_FLOW.md` no longer exists in this repository and no replacement was ever
+written; the closest live description of how metadata flows from definition to runtime is
+the "Metadata service architecture" walkthrough immediately above.
 
 ---
 
@@ -691,15 +703,16 @@ Important architectural decisions are documented as ADRs in `docs/adr/`:
 
 ## Related Documentation
 
-- [Quick Reference Guide](./QUICK-REFERENCE.md) - Fast lookup for common tasks
-- [Package Dependency Graph](./PACKAGE-DEPENDENCIES.md) - Complete dependency visualization
 - [Development Roadmap](./ROADMAP.md) - Next-phase optimization & improvement plan
-- [Studio Roadmap](./apps/studio/ROADMAP.md) - Studio IDE development plan
-- [MicroKernel Architecture Guide](./content/docs/developers/micro-kernel.mdx)
-- [Plugin Ecosystem Architecture](./content/docs/developers/plugin-ecosystem.mdx)
-- [Writing Plugins](./content/docs/developers/writing-plugins.mdx)
-- [Three-Layer Stack](./content/docs/introduction/architecture.mdx)
-- [Design Principles](./content/docs/introduction/design-principles.mdx)
+- [Three-Layer Stack](./content/docs/concepts/architecture.mdx) - How the Data, System, and UI protocols work together as one cohesive system
+- [Design Principles](./content/docs/concepts/design-principles.mdx)
+
+Six more links used to live in this list — a Quick Reference Guide, a Package Dependency
+Graph, a Studio Roadmap, and three `content/docs/developers/*` guides (MicroKernel
+Architecture, Plugin Ecosystem, Writing Plugins). None of those files exist anywhere in
+this repository today (Studio itself now lives in the separate `objectui` repository, so
+no relative link from here can reach a Studio roadmap), and no replacement was ever
+written, so the entries are removed rather than repointed at a guess.
 
 ---
 

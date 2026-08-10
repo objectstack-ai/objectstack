@@ -33,6 +33,19 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
+      # ADR cross-link gate (#6592). `docs/adr/` is deliberately NOT added to the
+      # lychee globs below -- see the ⛔ note there for why -- so the decision
+      # registry gets its own resolver, in the same advisory lane.
+      #
+      # Deliberately `node` and not `pnpm`: the script has zero dependencies, so
+      # this lane needs no setup-node / corepack / `pnpm install`, and the whole
+      # advisory job stays a checkout plus two checks. It is also why an author
+      # can run it locally in any container (`pnpm check:adr-links` when a
+      # workspace install exists, `node scripts/check-adr-links.mjs` when it does
+      # not) -- which lychee, installed by the action at CI time, cannot offer.
+      - name: Check ADR cross-links
+        run: node scripts/check-adr-links.mjs --self-test && node scripts/check-adr-links.mjs
+
       - name: Check links with lychee
         uses: lycheeverse/lychee-action@v2
         with:
@@ -55,6 +68,22 @@ jobs:
           # suffix that a site route omits. Without this pair the gate cannot go
           # green at all: 1286 root-relative links fail as "Cannot resolve
           # root-relative link ... provide a root dir".
+          #
+          # ⛔ Do NOT add `docs/adr/**/*.md` here. It looks like the one-line fix
+          # for #6592 and it is not: measured on the pinned lychee 0.24.2, that
+          # glob reports 8 broken links today, every one a pre-existing ADR →
+          # source-tree link whose target moved out of this repo. This job would
+          # be red on every PR from the moment it merged, which is how an
+          # advisory lane becomes a lane nobody reads (#6028 landed it
+          # advisory-first specifically to earn a green streak). `docs/adr/` is
+          # checked by the `Check ADR cross-links` step above instead, which can
+          # freeze those 8 on a shrink-only baseline and fail on a NEW one --
+          # something neither `exclude` nor `.lycheeignore` can express, because
+          # neither ever tells you an entry stopped being needed.
+          # `ARCHITECTURE.md` joined this glob in #6867: unlike `docs/adr/**`, it
+          # carried no pre-existing rot once its 10 dead links + 2 stale path
+          # references were fixed in the same PR, so -- unlike the ADR directory
+          # above -- it needs no KNOWN_DEAD_TARGETS-style baseline to land clean.
           args: >-
             --offline
             --root-dir ${{ github.workspace }}/content
@@ -63,5 +92,6 @@ jobs:
             'content/**/*.md'
             'content/**/*.mdx'
             'README.md'
+            'ARCHITECTURE.md'
           # Fail the job if broken links are found
           fail: true

@@ -28,7 +28,13 @@ import path from 'node:path';
 import url from 'node:url';
 import { describe, expect, it } from 'vitest';
 
-import { analyzeSites, countSites, countStripSites, listSchemaFiles } from './lib/strictness-ledger';
+import {
+  analyzeSites,
+  analyzeTree,
+  countSites,
+  countStripSites,
+  listSchemaFiles,
+} from './lib/strictness-ledger';
 
 const HERE = path.dirname(url.fileURLToPath(import.meta.url));
 const SPEC = path.resolve(HERE, '..');
@@ -117,8 +123,11 @@ describe('site counting reads the AST, not the source text', () => {
   });
 
   it('knows every object idiom, including z.looseObject(', () => {
+    // 2 → 3 at #7127, which MOVED `AddressSchema` (a plain z.object site) in
+    // from `field.zod.ts`. As with the chart count above, the number is
+    // incidental — the assertion that carries the meaning is the idiom read.
     const fv = analyzeSites(at('data/field-value.zod.ts'));
-    expect(fv).toHaveLength(2);
+    expect(fv).toHaveLength(3);
     expect(fv.find((s) => s.name === 'FileValueSchema')?.idiom).toBe('z.looseObject');
   });
 });
@@ -136,19 +145,36 @@ describe('site counting reads the AST, not the source text', () => {
  * is the exact instrument this campaign keeps getting burned by.
  */
 describe('posture reading, with a red control for each', () => {
-  /** Analyze a mutated copy of a real source file. */
-  const mutate = (rel: string, from: string, to: string) => {
-    const src = fs.readFileSync(path.join(SRC, rel), 'utf-8');
-    expect(src, `mutation anchor missing in ${rel}`).toContain(from);
+  /**
+   * Analyze source the tree does not have to contain, from a temp file the test
+   * owns for the duration of the case.
+   *
+   * `rel` is what the reading reports as the site's `file`; the temp file itself
+   * is written flat under one mkdtemp dir, so a nested `rel` needs no mkdir.
+   */
+  const analyzeSource = (source: string, rel: string) => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'strictness-'));
     const tmp = path.join(dir, path.basename(rel));
-    fs.writeFileSync(tmp, src.replace(from, to));
+    fs.writeFileSync(tmp, source);
     try {
       return analyzeSites(tmp, rel);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
   };
+
+  /** Analyze a mutated copy of a real source file. */
+  const mutate = (rel: string, from: string, to: string) => {
+    const src = fs.readFileSync(path.join(SRC, rel), 'utf-8');
+    expect(src, `mutation anchor missing in ${rel}`).toContain(from);
+    return analyzeSource(src.replace(from, to), rel);
+  };
+
+  /** Every site under the triaged directories, `file` relative to `src/`. */
+  const triagedSites = () =>
+    TRIAGED.flatMap((dir) =>
+      analyzeTree(path.join(SRC, dir)).map((s) => ({ ...s, file: `${dir}/${s.file}` })),
+    );
 
   it('reads the strictObject( helper as strict — and as strip once un-converted', () => {
     const rel = 'ui/action.zod.ts';
@@ -162,12 +188,98 @@ describe('posture reading, with a red control for each', () => {
   });
 
   it('reads the OLDER z.object(…).strict() spelling as strict too', () => {
-    // The reading the `strictObject(`-only count could not make. These four are
-    // why `security/` is done and `automation/` is not zero.
-    const perm = analyzeSites(at('security/permission.zod.ts'));
-    expect(perm.filter((s) => s.posture === 'strict')).toHaveLength(4);
-    expect(perm.find((s) => s.name === 'PermissionSetSchema')?.idiom).toBe('z.object');
-    expect(countStripSites(at('security/permission.zod.ts'))).toBe(0);
+    // The reading the `strictObject(`-only count could not make, carried by an
+    // OWNED fixture (#6940).
+    //
+    // ## Why this is synthetic and not a real site
+    //
+    // It used to be a real one, and it moved three times in three PRs:
+    // `security/permission.zod.ts`'s four sites (#5593 migrated all four), then
+    // `TenancyConfigSchema` (#6619 folded its hand-written map into the shared
+    // template), then `ObjectCapabilities` (#6805 folded that one too), then
+    // `PerOperationRequiredPermissionsSchema`. Every author obeyed the "move
+    // this fixture rather than deleting the assertion" instruction — the
+    // instruction was the problem, not its readers. The #4001 campaign's whole
+    // direction is to convert every remaining `z.object(shape, { error }).strict()`
+    // carrier to `strictObject`, so each wave evicts whatever site is standing
+    // here, and the TERMINAL state — zero carriers in the tree — leaves that
+    // instruction with nowhere to point.
+    //
+    // The reading under test is a property of the READER
+    // (`lib/strictness-ledger.ts`), not of any file in this tree, and
+    // `packages/spec` is not the only tree that reader reads. So the load-bearing
+    // material is written by the test, is outside the campaign's conversion
+    // surface, and survives the terminal state unchanged. The live tree is still
+    // read below — as a control, not as the carrier.
+    const owned = analyzeSource(
+      [
+        "import { z } from 'zod';",
+        '',
+        '/** The campaign-era spelling: shape, error map, then the closing call. */',
+        'export const OwnedClosedSchema = z.object(',
+        '  { a: z.string() },',
+        "  { error: () => 'unknown key' },",
+        ').strict();',
+        '',
+        '/** The same spelling as prettier wraps it once the chain gets long. */',
+        'export const OwnedWrappedClosedSchema = z',
+        '  .object({ b: z.string() })',
+        '  .strict();',
+        '',
+        '/** Control: same idiom, left open — a reader that calls every site strict fails here. */',
+        'export const OwnedOpenSchema = z.object({ c: z.string() });',
+        '',
+        '/** Control: the helper the campaign converts TO — the idioms must stay distinct. */',
+        'export const OwnedHelperSchema = strictObject({ d: z.string() });',
+      ].join('\n'),
+      'owned-older-spelling.zod.ts',
+    );
+
+    // Pinned as whole maps rather than per-site lookups, so an extra or missing
+    // site is a failure too — the counting defects in this campaign have all
+    // been omissions that a `find()` would have walked past.
+    expect(Object.fromEntries(owned.map((s) => [s.name, s.posture]))).toEqual({
+      OwnedClosedSchema: 'strict',
+      OwnedWrappedClosedSchema: 'strict',
+      OwnedOpenSchema: 'strip',
+      OwnedHelperSchema: 'strict',
+    });
+    expect(Object.fromEntries(owned.map((s) => [s.name, s.idiom]))).toEqual({
+      OwnedClosedSchema: 'z.object',
+      OwnedWrappedClosedSchema: 'z.object',
+      OwnedOpenSchema: 'z.object',
+      OwnedHelperSchema: 'strictObject',
+    });
+
+    // ## The live control, stated so the campaign cannot evict it
+    //
+    // What the borrowed site really bought was evidence that this spelling is
+    // not a museum piece the reader keeps supporting for nobody. That is a
+    // statement about the POPULATION, so it is read as one — no site is named,
+    // and an empty population is a legitimate reading (it is the campaign's
+    // declared goal), which is why there is no `toBeGreaterThan(0)` here.
+    const live = triagedSites();
+    const carriers = live.filter((s) => s.idiom === 'z.object' && s.posture === 'strict');
+
+    // Corroboration that does NOT share the AST reader — the same tactic as the
+    // coverage-walk case above, for the same reason: a bug in the reader must
+    // not be able to confirm itself. Coarse by construction (file-level text,
+    // not the site's own chain), so it cannot prove the reading is right; it can
+    // only catch the reader claiming a file closes keys that never says so.
+    for (const site of carriers) {
+      const text = fs.readFileSync(path.join(SRC, site.file), 'utf-8');
+      expect(text, `${site.file} is read as closing ${site.name}, but never spells it`).toContain(
+        '.strict()',
+      );
+    }
+
+    // And the anti-collapse control, on real material and with nothing named: a
+    // reader that stopped distinguishing idioms — or postures — would satisfy
+    // every assertion above about the owned fixture only by accident, and fails
+    // here outright. True in the terminal state too, where the surviving idioms
+    // are `strictObject` and friends rather than `z.object`.
+    expect(new Set(live.map((s) => s.idiom)).size).toBeGreaterThan(1);
+    expect(new Set(live.map((s) => s.posture)).size).toBeGreaterThan(1);
   });
 
   it('reads a default site as strip — and as strict once closed', () => {
@@ -252,10 +364,7 @@ describe('posture reading, with a red control for each', () => {
     // `z.looseObject(` under a triaged directory — the early return for
     // `z.looseObject` was the same defect waiting for its first instance, so it
     // is covered before that instance exists rather than after.
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'strictness-idiom-'));
-    const file = path.join(dir, 'synthetic.zod.ts');
-    fs.writeFileSync(
-      file,
+    const sites = analyzeSource(
       [
         'export const A = strictObject({ a: 1 }).passthrough();',
         'export const B = strictObject({ b: 1 });',
@@ -265,19 +374,15 @@ describe('posture reading, with a red control for each', () => {
         // Last explicit call wins, not the first.
         'export const F = strictObject({ f: 1 }).passthrough().strict();',
       ].join('\n'),
+      'synthetic.zod.ts',
     );
-    try {
-      const posture = Object.fromEntries(analyzeSites(file).map((s) => [s.name, s.posture]));
-      expect(posture).toEqual({
-        A: 'passthrough',
-        B: 'strict',
-        C: 'strict',
-        D: 'passthrough',
-        E: 'catchall',
-        F: 'strict',
-      });
-    } finally {
-      fs.rmSync(dir, { recursive: true, force: true });
-    }
+    expect(Object.fromEntries(sites.map((s) => [s.name, s.posture]))).toEqual({
+      A: 'passthrough',
+      B: 'strict',
+      C: 'strict',
+      D: 'passthrough',
+      E: 'catchall',
+      F: 'strict',
+    });
   });
 });

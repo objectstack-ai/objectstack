@@ -8,28 +8,121 @@
 // These run through the REAL `callData`, so they pin both halves at once: the
 // object the ADR-0049 exposure gate consults and the object actually queried
 // are the same one, and it is the one in the path.
+//
+// [#6719] The `DomainHandlerDeps` stand-in below used to HAND-WRITE its three
+// error exits, and what they answered was not the ADR-0112 envelope:
+//
+//     error:           (message, code = 500) => ({ status: code, body: { error: message } })
+//     routeNotFound:   (route)               => ({ status: 404, body: { route } })
+//     errorFromThrown: (e)                   => ({ status: …,   body: { error: e?.message } })
+//
+// A bare string where production answers `{ success: false, error: { code,
+// message, httpStatus, details? } }`. So every `/data` case driven through this
+// harness was STRUCTURALLY incapable of going red on an envelope regression —
+// a wrong `error.code`, a dropped `httpStatus`, an unpromoted `details.code`, a
+// missing `success` — because none of those fields existed here to be wrong.
+// The exits are now taken off a real dispatcher (see `realErrorExits`), and the
+// cases at the bottom of this file drive the two error branches `/data` owns.
 
 import { describe, it, expect, vi } from 'vitest';
+import { ApiErrorSchema, BaseResponseSchema, envelopeViolations } from '@objectstack/spec/api';
 import { handleDataRequest } from './data.js';
+import { HttpDispatcher } from '../http-dispatcher.js';
+import type { DomainHandlerDeps } from '../domain-handler-registry.js';
+
+/**
+ * [#6719] The dispatcher's OWN `DomainHandlerDeps` error exits — not a
+ * lookalike. `HttpDispatcher.domainDeps` is the exact object every `/data`
+ * request runs against in production; it is borrowed off a real dispatcher
+ * built over a kernel stub, exactly as `error-envelope.conformance.test.ts`'s
+ * `makeDispatcher()` does (these branches never reach a service).
+ *
+ * Deliberately NOT `apiErrorResponse({ … })` re-expressed here: `error()` also
+ * carries the #3867 5xx message-leak guard, and a restatement would make these
+ * cases green against the restatement's rules instead of production's — the
+ * same class of mistake as the hand-written double it replaces.
+ *
+ * `routeNotFound` is unreachable from `handleDataRequest` today (the domain has
+ * no route-resolution exit of its own) and `errorFromThrown` is applied one
+ * layer up, by the dispatcher, to what this domain THROWS. Both are supplied
+ * real anyway so a future `/data` branch is born conformant rather than
+ * inheriting a stand-in.
+ */
+const realErrorExits = (() => {
+    const dispatcher: any = new HttpDispatcher({ context: { getService: () => null } } as any);
+    const domainDeps: DomainHandlerDeps = dispatcher.domainDeps;
+    return {
+        error: domainDeps.error,
+        routeNotFound: domainDeps.routeNotFound,
+        errorFromThrown: domainDeps.errorFromThrown,
+    };
+})();
+
+/**
+ * [#6719] Every assertion a `/data` error body must satisfy, spelled once.
+ *
+ * The rules are IMPORTED from `packages/spec` (`BaseResponseSchema` /
+ * `ApiErrorSchema` / `envelopeViolations`), never restated here — a local
+ * restatement could drift from the schema it claims to check. The explicit
+ * `httpStatus` line is load-bearing on top of the schemas: `ApiErrorSchema`
+ * declares `httpStatus` OPTIONAL (a producer emitting only the semantic `code`
+ * is conformant), so a dispatcher that dropped it would still parse clean. The
+ * dispatcher stack promises to mirror it, and that promise is checked here.
+ *
+ * Sibling of `expectConformantError` in `error-envelope.conformance.test.ts`,
+ * which is file-local to that suite; importing it would register that file's
+ * `describe`s in this one.
+ */
+function expectDataErrorEnvelope(response: { status: number; body: any } | undefined) {
+    expect(response, 'branch produced no response').toBeTruthy();
+    const body = response!.body;
+
+    expect(BaseResponseSchema.safeParse(body).success).toBe(true);
+    expect(envelopeViolations(body), `not the declared envelope: ${JSON.stringify(body)}`).toEqual([]);
+    expect(body.success).toBe(false);
+
+    const parsed = ApiErrorSchema.safeParse(body.error);
+    expect(parsed.error?.issues ?? []).toEqual([]);
+    expect(parsed.success).toBe(true);
+
+    // `code` is the semantic string, never the status; `httpStatus` is the number.
+    expect(typeof body.error.code).toBe('string');
+    expect(body.error.code).not.toBe(String(response!.status));
+    expect(body.error.httpStatus).toBe(response!.status);
+
+    // The parking spots #3842 emptied stay empty.
+    expect(body.error.type).toBeUndefined();
+    expect(body.error.details?.code).toBeUndefined();
+    expect(body.error.details?.type).toBeUndefined();
+
+    return body.error;
+}
 
 /** Records what the protocol service was asked for. */
-function setup(objectDefs: Record<string, any> = {}) {
+function setup(
+    objectDefs: Record<string, any> = {},
+    opts: { multiTenantHost?: boolean; engine?: any } = {},
+) {
     const findData = vi.fn(async (req: any) => ({ object: req.object, records: [], total: 0 }));
     const protocol = { findData };
     const metadata = { getObject: async (name: string) => objectDefs[name] };
+    const engine = opts.engine ?? null;
     const deps: any = {
         // [#5155] The request is the first argument of every kernel-reading
         // facility now; the fake takes it so a call site that forgot to pass
         // one cannot silently resolve the wrong slot name.
-        resolveService: async (_ctx: any, name: string) => (name === 'protocol' ? protocol : name === 'metadata' ? metadata : null),
+        resolveService: async (_ctx: any, name: string) =>
+            name === 'protocol' ? protocol
+            : name === 'metadata' ? metadata
+            : name === 'objectql' ? engine
+            : null,
         getService: () => null,
-        getObjectQL: async () => null,
+        getObjectQL: async () => engine,
         getRequestKernelService: async () => null,
-        isMultiTenantHost: () => false,
+        isMultiTenantHost: () => opts.multiTenantHost === true,
         success: (data: any) => ({ status: 200, body: data }),
-        error: (message: string, code = 500) => ({ status: code, body: { error: message } }),
-        routeNotFound: (route: string) => ({ status: 404, body: { route } }),
-        errorFromThrown: (e: any) => ({ status: e?.statusCode ?? e?.status ?? 500, body: { error: e?.message } }),
+        // [#6719] The REAL exits — see `realErrorExits`.
+        ...realErrorExits,
         resolveActiveOrganizationId: async () => undefined,
         announceKernelEvent: async () => {},
     };
@@ -95,5 +188,87 @@ describe('POST /data/:object/query binds to the object in the path (#3946)', () 
         await post(deps, context, 'crm_account/query', { context: { userId: 'root', isSystem: true } });
 
         expect(findData.mock.calls[0][0].context).toBe(context.executionContext);
+    });
+});
+
+/**
+ * [#6719] The cases the old harness could not host.
+ *
+ * `handleDataRequest` has exactly TWO error exits of its own — both
+ * `deps.error(…)` — and the old stand-in answered both with a bare string, so
+ * no case in this file ever read an error body. These do, through the real
+ * exits, and each asserts the ADR-0112 triple (`success: false` + `error.code`
+ * + `error.httpStatus`) rather than status-and-message.
+ *
+ * The domain's other failure mode is a THROW (the ADR-0049 exposure gate, a
+ * record miss). `handleDataRequest` does not catch it — the dispatcher above
+ * maps it with `errorFromThrown`, which is why the two throw cases apply that
+ * same real method at the boundary instead of pretending the domain returns
+ * there.
+ */
+describe('[#6719] /data error exits answer in the ADR-0112 envelope', () => {
+    it('a missing object name is refused in the declared envelope (400)', async () => {
+        const { deps, context } = setup();
+        const res: any = await handleDataRequest(deps, '', 'GET', undefined, {}, context);
+
+        expect(res.handled).toBe(true);
+        expect(res.response.status).toBe(400);
+        const error = expectDataErrorEnvelope(res.response);
+        expect(error.code).toBe('VALIDATION_ERROR');
+        expect(error.message).toBe('Object name required');
+    });
+
+    it('an unresolved environment on a multi-tenant host is refused in the declared envelope (428)', async () => {
+        // The one `/data` branch with a status outside the common set — 428 is
+        // in the spec's status→code map, so `error.code` is the precondition
+        // code and not the generic 4xx bucket.
+        const { deps, context } = setup({}, { multiTenantHost: true });
+        const res: any = await handleDataRequest(deps, 'crm_account', 'GET', undefined, {}, context);
+
+        expect(res.handled).toBe(true);
+        expect(res.response.status).toBe(428);
+        const error = expectDataErrorEnvelope(res.response);
+        expect(error.code).toBe('PRECONDITION_REQUIRED');
+        expect(error.message).toMatch(/^Project not resolved\./);
+    });
+
+    it("the exposure gate's throw reaches the wire as a conformant 404", async () => {
+        const { deps, context } = setup({ sys_user: { apiEnabled: false } });
+
+        const thrown = await post(deps, context, 'sys_user/query', {}).then(
+            () => undefined,
+            (e: any) => e,
+        );
+        expect(thrown).toMatchObject({ statusCode: 404 });
+
+        const response = deps.errorFromThrown(thrown);
+        expect(response.status).toBe(404);
+        const error = expectDataErrorEnvelope(response);
+        expect(error.code).toBe('RESOURCE_NOT_FOUND');
+    });
+
+    it('a record miss keeps its OWN code — promoted into `error.code`, not derived from the status', async () => {
+        // The promotion rule, driven by a real `/data` throw: the ObjectQL
+        // fallback's miss carries `.code = 'RECORD_NOT_FOUND'`, which
+        // `errorFromThrown` passes as `details.code` for `buildApiError` to
+        // lift into the declared field. Leave it unpromoted and `error.code`
+        // silently degrades to the status-derived `RESOURCE_NOT_FOUND` while
+        // the real code hides in `details` — exactly the drift #3842 closed.
+        const engine = { find: vi.fn(async () => []) };
+        const { deps, context } = setup({}, { engine });
+
+        const thrown = await handleDataRequest(deps, 'crm_account/rec_missing', 'GET', undefined, {}, context).then(
+            () => undefined,
+            (e: any) => e,
+        );
+        expect(thrown?.code).toBe('RECORD_NOT_FOUND');
+
+        const response = deps.errorFromThrown(thrown);
+        expect(response.status).toBe(404);
+        const error = expectDataErrorEnvelope(response);
+        expect(error.code).toBe('RECORD_NOT_FOUND');
+        // The code was LIFTED, not copied: nothing else was in `details`, so
+        // `details` disappears rather than lingering as `{}`.
+        expect(error.details).toBeUndefined();
     });
 });

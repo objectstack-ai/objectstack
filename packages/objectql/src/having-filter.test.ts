@@ -13,6 +13,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import { RETIRED_FILTER_OPERATORS } from '@objectstack/spec/data';
 import { applyHaving, matchesHaving } from './having-filter.js';
 
 const ROWS = [
@@ -65,20 +66,97 @@ describe('applyHaving', () => {
   });
 });
 
+/**
+ * [#7047] The refusal's ENVELOPE, asserted separately from its message.
+ *
+ * Every assertion in this describe block used to be `toThrow(/message/)` alone,
+ * and that is precisely why the defect survived: a throw-only assertion is green
+ * whether or not the thrown error carries `code` and `status` (#6142/#6050
+ * measured this shape of hole). Both `unknownOperator()` returns were bare
+ * `new Error`, so a 400-class author mistake reached the client 500-shaped
+ * through `rest`'s unclassified-fault branch — the only one of the five refusal
+ * faces that did (#6993's execution census; the four driver faces all answered
+ * `INVALID_FILTER` / 400).
+ *
+ * `code` and `status` are checked on BOTH branches — retired and unknown — and
+ * on BOTH positions — a field condition and a node-level logical key — because
+ * they are four independent `return`/`throw` sites and enveloping some of them
+ * leaves the same 500 one operator name away.
+ */
+function expectInvalidFilterEnvelope(fn: () => unknown): Error & { code?: string; status?: number } {
+  let err: (Error & { code?: string; status?: number }) | undefined;
+  try {
+    fn();
+  } catch (e) {
+    err = e as Error & { code?: string; status?: number };
+  }
+  expect(err, 'expected `having` to REFUSE this filter').toBeInstanceOf(Error);
+  // The ADR-0112 envelope the four driver faces already speak. Not a new code:
+  // a caller swapping HAVING for a driver-side `where` catches one shape.
+  expect(err!.code).toBe('INVALID_FILTER');
+  expect(err!.status).toBe(400);
+  return err!;
+}
+
 describe('matchesHaving — the unknown-operator refusal', () => {
   it('THROWS on an unknown condition operator instead of ignoring it', () => {
-    expect(() => matchesHaving(ROWS[0], { order_count: { $median: 3 } }))
-      .toThrow(/Unsupported operator '\$median' in `having`.*\$gte.*unfiltered aggregates/s);
+    const err = expectInvalidFilterEnvelope(() => matchesHaving(ROWS[0], { order_count: { $median: 3 } }));
+    expect(err.message).toMatch(/Unsupported operator '\$median' in `having`.*\$gte.*unfiltered aggregates/s);
   });
 
   it('THROWS on an unknown logical operator', () => {
-    expect(() => matchesHaving(ROWS[0], { $nand: [{ order_count: 2 }] }))
-      .toThrow(/Unsupported operator '\$nand'/);
+    const err = expectInvalidFilterEnvelope(() => matchesHaving(ROWS[0], { $nand: [{ order_count: 2 }] }));
+    expect(err.message).toMatch(/Unsupported operator '\$nand'/);
   });
 
-  it('accepts $regex with $options as its sibling, not an operator', () => {
-    expect(matchesHaving({ k: 'Alpha' }, { k: { $regex: '^alp', $options: 'i' } })).toBe(true);
+  /**
+   * [#7047] The unknown branch is reachable from `applyHaving` too, which is the
+   * entry point `engine.aggregate()` actually calls — the envelope has to be on
+   * the error that leaves the module, not only on the one `matchesHaving`
+   * raises directly.
+   */
+  it('carries the envelope out through applyHaving, the engine-facing entry point', () => {
+    expectInvalidFilterEnvelope(() => applyHaving(ROWS, { order_count: { $median: 3 } }));
+    expectInvalidFilterEnvelope(() => applyHaving(ROWS, { $nand: [{ order_count: 2 }] }));
   });
+
+  /**
+   * [#5702] REPLACED. This case read `accepts $regex with $options as its
+   * sibling, not an operator` and asserted `matchesHaving({ k: 'Alpha' },
+   * { k: { $regex: '^alp', $options: 'i' } }) === true` — HAVING running a real
+   * `RegExp`, with `$options` skipped as its flags.
+   *
+   * #4706 retired both spellings and #5710 flipped their last producer, so
+   * there is no true/false answer left to assert: HAVING is the fifth of the
+   * five refusal sites `RETIRED_FILTER_OPERATORS` names, and it now refuses.
+   * The old arm also answered an ILLEGAL pattern with `return false` — "this
+   * row does not match" for a filter that could not run at all — which is the
+   * silent wrong answer the retirement is about, on the one evaluation face no
+   * conformance table drives.
+   */
+  for (const [label, condition, mustMention] of [
+    ['a bare $regex', { k: { $regex: '^alp' } }, ["'$regex'", '$icontains']],
+    ['a bare $options', { k: { $options: 'i' } }, ["'$options'", '$icontains']],
+    [
+      '$regex with $options — one mistake, one fix',
+      { k: { $regex: '^alp', $options: 'i' } },
+      ["'$regex'", "'$options'", '$icontains'],
+    ],
+  ] as const) {
+    it(`REFUSES the retired ${label}, naming the replacement, in the ADR-0112 envelope`, () => {
+      // [#7047] `code` + `status` + message. The message half already passed
+      // before this card; the envelope half is what was missing.
+      const err = expectInvalidFilterEnvelope(() => matchesHaving({ k: 'Alpha' }, condition));
+      expect(err.message).toContain('RETIRED');
+      for (const mention of mustMention) expect(err.message).toContain(mention);
+      // [#7047] The prescription VERBATIM, not a paraphrase of it. The spec
+      // table exists so the five refusal sites stop each writing their own
+      // sentence about one retirement (#5701); a substring check on '$icontains'
+      // alone would stay green if this face started rewording it.
+      const first = Object.keys(condition.k)[0]!;
+      expect(err.message).toContain(RETIRED_FILTER_OPERATORS[first]!.why);
+    });
+  }
 });
 
 /**
@@ -175,6 +253,34 @@ describe('no-value rows and the negation-carrying operators (#5905 / #5298 optio
       expect(matchesHaving(NULLED, { tag: { $ne: 'alpha' } })).toBe(true);
       expect(matchesHaving(MISSING, { tag: { $ne: 'alpha' } })).toBe(true);
       expect(matchesHaving(VALUED_IN, { tag: { $ne: 'alpha' } })).toBe(false);
+    });
+  });
+
+  /**
+   * [#6518] The `$contains` family is case-SENSITIVE by contract (#4706 Q2 = A).
+   *
+   * This face already was, by the same mechanism `formula`'s evaluator is —
+   * `String.prototype.includes` / `startsWith` / `endsWith` compare exactly — so
+   * #6518, which moved the SQL family onto that answer, changed nothing here.
+   * It is pinned for the reason #5905 gave for pinning this file at all:
+   * `having` is the one text-operator face with NO conformance-table coverage
+   * (`check-driver-conformance` scopes itself to `packages/drivers/*`, and
+   * `packages/objectql` imports no case-set), so a fold added here to make some
+   * backend agree would go red nowhere.
+   */
+  describe('[#6518] the $contains family is case-SENSITIVE', () => {
+    it('$contains, $startsWith and $endsWith do not fold case', () => {
+      expect(matchesHaving(VALUED_IN, { tag: { $contains: 'LPH' } })).toBe(false);
+      expect(matchesHaving(VALUED_IN, { tag: { $contains: 'lph' } })).toBe(true);
+      expect(matchesHaving(VALUED_IN, { tag: { $startsWith: 'ALP' } })).toBe(false);
+      expect(matchesHaving(VALUED_IN, { tag: { $startsWith: 'alp' } })).toBe(true);
+      expect(matchesHaving(VALUED_IN, { tag: { $endsWith: 'HA' } })).toBe(false);
+      expect(matchesHaving(VALUED_IN, { tag: { $endsWith: 'ha' } })).toBe(true);
+    });
+
+    it('$notContains carries the mirror: a case-only difference SATISFIES it', () => {
+      expect(matchesHaving(VALUED_IN, { tag: { $notContains: 'LPH' } })).toBe(true);
+      expect(matchesHaving(VALUED_IN, { tag: { $notContains: 'lph' } })).toBe(false);
     });
   });
 

@@ -90,6 +90,7 @@ export const TransformType = z.enum([
   'javascript',   // Custom script (Review security!)
   'map'           // Value mapping (e.g. "Active" -> "active")
 ]);
+export type TransformType = z.input<typeof TransformType>;
 
 /**
  * Import Field Mapping Item — one column of an import mapping.

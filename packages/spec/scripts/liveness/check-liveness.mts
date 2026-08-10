@@ -52,6 +52,30 @@
 // flagged 48 of 227 entries with a ~100% false-positive rate, so failing on it
 // would have failed every build. The parse fix is what turned a hit into signal.
 //
+// PRODUCER-SIDE EVIDENCE (`producer`, #4837): `live` means AUTHORING the
+// property changes runtime behaviour. A consumer that reads the property is
+// necessary and not sufficient — when the effect also depends on a second input
+// somebody must supply, the verdict needs evidence that somebody does.
+// `Seed.env` was `live` on a correct consumer pointer (`filterByEnv`) while not
+// one of six call sites passed `env`, so the filter returned its input on line
+// one and the authored value was never read. An optional `"producer"` cites the
+// call site; its paths resolve exactly like `evidence`.
+//
+// THE README'S OWN INDEX (#7257): the ledger README ends with a "Current state"
+// table, one row per governed type, under a heading that claims complete
+// registry coverage. Nothing reconciled that table against `GOVERNED`, so the
+// heading's number was the count of ROWS rather than of governed types, and
+// `api` and `capability` were governed for days with no row at all. Same shape
+// as #4956 one level up: a completeness sentence that no build could fail. See
+// readme-table.mts.
+//
+// EVIDENCE SCOPE (`evidenceScope`, #4895): four measured verdicts have been
+// reached by searching this repo alone and published as if they covered every
+// consumer (`app.homePageId`, `flow.…position`, `HttpMethod`,
+// `Notification`). An optional `"evidenceScope": "in-repo" | "cross-repo"`
+// records how wide the last look actually was. Absent = unverified scope (a
+// worklist row); malformed = FAIL, same asymmetry as `verifiedAt`.
+//
 // RE-VERIFICATION CLOCK (`verifiedAt`): a ledger entry is a claim with a
 // timestamp, and code moves under it in BOTH directions — `flow.status` (#3711)
 // and `action.undoable` (#3714) were both understated by entries that were
@@ -67,6 +91,7 @@
 //   tsx check-liveness.mts --stale-verification   # print the re-verification worklist
 //   tsx check-liveness.mts --stale-verification=90  # ...with a custom staleness threshold
 //   tsx check-liveness.mts --undrilled            # print the undrilled-container worklist
+//   tsx check-liveness.mts --producer-gap         # print the producer-evidence worklist (#4837)
 //   tsx check-liveness.mts --ledger-root=<dir>    # read the ledgers from <dir> instead of
 //                                                 # packages/spec/liveness — how the self-test
 //                                                 # runs the REAL gate against a mutated copy
@@ -81,6 +106,7 @@ import { getMetadataTypeSchema, listMetadataTypeSchemaTypes } from '../../src/ke
 import { WebhookSchema } from '../../src/automation/webhook.zod';
 import { QuerySchema } from '../../src/data/query.zod';
 import { ValidationRuleSchema } from '../../src/data/validation.zod';
+import { TestSuiteSchema } from '../../src/qa/testing.zod';
 import {
   BOUND_PROOF_PATHS,
   HIGH_RISK_CLASSES,
@@ -96,6 +122,7 @@ import {
   type VerificationReport,
 } from './verification.mts';
 import { checkEvidence } from './evidence.mts';
+import { buildProducerReport, type ProducerEntry, type ProducerReport } from './producer.mts';
 import { ORPHAN_GUIDANCE, findOrphanEntries, type Orphan } from './orphans.mts';
 import {
   STALE_UNDRILLED_GUIDANCE,
@@ -104,6 +131,12 @@ import {
   reconcileContainerCoverage,
   type ContainerCoverage,
 } from './drill.mts';
+import {
+  README_ORPHAN_ROW_GUIDANCE,
+  README_TABLE_GUIDANCE,
+  parseStateTable,
+  reconcileReadmeTable,
+} from './readme-table.mts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const specRoot = resolve(here, '../..'); // packages/spec
@@ -127,7 +160,7 @@ const ledgerRoot = ledgerRootArg
 
 // Governed metadata types, rolled out highest-frequency / highest-risk first.
 // (`query` is not a metadata type — see SPEC_ONLY_SCHEMAS below.)
-const GOVERNED = ['object', 'field', 'flow', 'action', 'hook', 'permission', 'position', 'agent', 'tool', 'skill', 'dataset', 'page', 'view', 'report', 'dashboard', 'webhook', 'query', 'datasource', 'app', 'book', 'doc', 'email_template', 'job', 'mapping', 'seed', 'translation', 'validation', 'api'];
+const GOVERNED = ['object', 'field', 'flow', 'action', 'hook', 'permission', 'position', 'agent', 'tool', 'skill', 'dataset', 'page', 'view', 'report', 'dashboard', 'webhook', 'query', 'datasource', 'app', 'book', 'doc', 'email_template', 'job', 'mapping', 'seed', 'translation', 'validation', 'api', 'capability', 'qa'];
 
 // Registered metadata types that are NOT yet governed — the coverage ratchet.
 //
@@ -191,10 +224,24 @@ const PENDING_GOVERNANCE: Record<string, string> = {
 // and update — so the ledger must keep governing `ValidationRuleSchema`; it is
 // the kind, not the schema, that went away. Governing it here is what stops the
 // retirement from quietly un-governing a live surface.
+//
+// `qa` is not a metadata type either — `TestSuiteSchema` is the FILE surface of
+// the shipped `os test` command: an author writes `qa/*.test.json`, the CLI
+// loads it, and `TestRunner`/`HttpTestAdapter` execute it. #6247 filed it as
+// declared-but-inert on a grep that scanned only `*Schema` identifiers; the
+// consumers read the TYPE names (`QA.TestSuite`, `QA.TestStep`, `QA.TestAction`),
+// so the grep missed an entire execution chain and the 2026-08-07 retire ruling
+// was withdrawn on 2026-08-08 in favour of enforce. Governing it here is the
+// half of that ruling that keeps the surface honest going forward: the runner
+// reads a real, measured subset of the declared keys, and the ones nothing reads
+// (`suite.name`, `scenario.tags`, `scenario.requires`) are now recorded as such
+// instead of being invisible. Like `query`, there is no registry to fold it back
+// onto — the override IS its governance.
 const SPEC_ONLY_SCHEMAS: Record<string, unknown> = {
   webhook: WebhookSchema,
   query: QuerySchema,
   validation: ValidationRuleSchema,
+  qa: TestSuiteSchema,
 };
 
 // ADR-0010 provenance/lock overlay fields — system-stamped, on every type; auto-live.
@@ -328,7 +375,14 @@ const report: any = {
   brokenDeferrals: [] as string[], // a declared deferral whose target is missing, drifted, or double-declared
   deferredContainers: [] as string[], // containers whose subtree IS classified elsewhere — resolved, not believed
   deferredChildKeys: 0, // how many child keys those resolved deferrals actually cover
+  readmeMissingRows: [] as string[], // a GOVERNED type with no row in the README state table (#7257)
+  readmeOrphanRows: [] as string[], // a README row for a type GOVERNED does not contain
+  readmeHeadingErrors: [] as string[], // "N governed types" disagrees with the rows / with GOVERNED
+  readmeMalformedRows: [] as string[], // a table line the row parser could not read — never silently skipped
+  readmeRowCount: 0, // rows the parser found, printed every run so the number is visible rather than believed
   verification: null as VerificationReport | null, // `verifiedAt` ages — the re-verification worklist
+  producers: null as ProducerReport | null, // `producer` / `evidenceScope` — the #4837 / #4895 worklists
+  producerMissing: [] as string[], // a `producer` pointer into thin air — FAILS, like a rotted `evidence`
   // The three evidence counters, and the distinction between the first two is
   // the whole point: `evidenceLocal` is how many repo-rooted paths `live` entries
   // DECLARE, `evidenceMissing` is how many of those do not exist here. The
@@ -344,6 +398,9 @@ const report: any = {
 // walk so the age report sees exactly the set the gate itself classified.
 const verificationEntries: VerificationEntry[] = [];
 
+// The same set, folded for the producer / evidence-scope report below.
+const producerEntries: ProducerEntry[] = [];
+
 const proofFs = { existsSync, readFileSync };
 
 function classify(type: string, path: string, status: string, led: any, cat: any) {
@@ -351,7 +408,23 @@ function classify(type: string, path: string, status: string, led: any, cat: any
   cat.byStatus[status] = (cat.byStatus[status] || 0) + 1;
   report.totals.byStatus[status] = (report.totals.byStatus[status] || 0) + 1;
   // Framework-auto entries (`led === null`) have no ledger row to date-stamp.
-  if (led !== null) verificationEntries.push({ key: `${type}/${path}`, status, verifiedAt: led?.verifiedAt });
+  if (led !== null) {
+    verificationEntries.push({ key: `${type}/${path}`, status, verifiedAt: led?.verifiedAt });
+    producerEntries.push({
+      key: `${type}/${path}`,
+      status,
+      producer: led?.producer,
+      evidenceScope: led?.evidenceScope,
+    });
+  }
+  // A `producer` pointer resolves through the SAME resolver as `evidence`: a
+  // call-site claim nothing can falsify is the failure mode this field exists to
+  // remove, so it must not get a weaker standard than the consumer pointer it
+  // completes (#4837).
+  if (typeof led?.producer === 'string') {
+    const pv = checkEvidence(led.producer, (p) => existsSync(join(repoRoot, p)));
+    for (const miss of pv.missing) report.producerMissing.push(`${type}/${path} → ${miss}`);
+  }
   if (status === 'live' && led?.evidence) {
     // Extract every repo-rooted path the evidence claims and resolve the ones
     // attributed to THIS repo. Cross-repo pointers (objectui / cloud) are
@@ -513,6 +586,28 @@ report.undrilledChildKeys = coverage.inheritedChildKeys;
 report.deferredContainers = undrilledBaseline.deferred.map((d) => `${d.container} → ${d.to}`);
 report.deferredChildKeys = coverage.deferredChildKeys;
 
+// ── the README's own index: does the state table cover GOVERNED? ──
+// The gate's fourth direction (#7257). The three above ask whether the LEDGERS
+// are honest; this asks whether the file that indexes them is. It reads the
+// README from the ledger root so the self-test can point it at a mutated copy —
+// the same `--ledger-root` trick the evidence guard uses, and for the same
+// reason: a gate that fails is worth exactly as much as the proof that it fails,
+// and this table is complete on a green tree.
+const readmeFile = join(ledgerRoot, 'README.md');
+if (!existsSync(readmeFile)) {
+  report.readmeHeadingErrors.push(`${readmeFile} does not exist — the ledger index is gone`);
+} else {
+  const stateTable = parseStateTable(readFileSync(readmeFile, 'utf8'));
+  const readme = reconcileReadmeTable({ governed: GOVERNED, table: stateTable });
+  report.readmeMissingRows = readme.missingRows;
+  report.readmeOrphanRows = readme.orphanRows.concat(
+    readme.duplicateRows.map((d) => `${d} — duplicate row`),
+  );
+  report.readmeHeadingErrors = readme.headingErrors;
+  report.readmeMalformedRows = readme.malformed;
+  report.readmeRowCount = stateTable.rows.length;
+}
+
 // ── verifiedAt: how old is each claim? ──
 // Age never fails the gate — re-verification is a worklist, not a merge gate.
 // A MALFORMED value does fail: it silently disables the staleness check for
@@ -522,6 +617,13 @@ const staleDays = Number(staleDaysArg?.split('=')[1]) || DEFAULT_STALE_DAYS;
 const showWorklist = staleDaysArg !== undefined;
 const showUndrilled = args.includes('--undrilled');
 report.verification = buildVerificationReport(verificationEntries, { staleDays });
+
+// ── producer-side evidence + verification scope (#4837 / #4895) ──
+// Same asymmetry as the clock above: an ABSENT field is a worklist row (the
+// ledger predates both fields, and back-filling guesses is exactly the sin these
+// record), a MALFORMED one fails.
+const showProducerGap = args.includes('--producer-gap');
+report.producers = buildProducerReport(producerEntries);
 
 // ── coverage: is every REGISTERED metadata type accounted for? ──
 // The gate's own blind spot until #4487. Everything above asks "is every
@@ -551,11 +653,17 @@ const failed =
   report.staleEvidence.length > 0 ||
   report.orphanEntries.length > 0 ||
   report.verification.errors.length > 0 ||
+  report.producers.errors.length > 0 ||
+  report.producerMissing.length > 0 ||
   report.ungoverned.length > 0 ||
   report.stalePending.length > 0 ||
   report.undrilledNew.length > 0 ||
   report.undrilledStale.length > 0 ||
-  report.brokenDeferrals.length > 0;
+  report.brokenDeferrals.length > 0 ||
+  report.readmeMissingRows.length > 0 ||
+  report.readmeOrphanRows.length > 0 ||
+  report.readmeHeadingErrors.length > 0 ||
+  report.readmeMalformedRows.length > 0;
 if (asJson) {
   process.stdout.write(JSON.stringify(report, null, 2) + '\n');
 } else {
@@ -669,6 +777,39 @@ if (asJson) {
       '   `containers` list and admit the keys are classified nowhere.',
     );
   }
+  if (report.readmeMissingRows.length) {
+    console.log(
+      `\n✗ ${report.readmeMissingRows.length} governed type(s) with NO row in the README's ` +
+      '"Current state" table — the index fell behind its own registry:',
+    );
+    report.readmeMissingRows.forEach((t: string) => console.log(`    ${t}`));
+    console.log('');
+    README_TABLE_GUIDANCE.forEach((line) => console.log(line ? `   ${line}` : ''));
+  }
+  if (report.readmeOrphanRows.length) {
+    console.log(`\n✗ ${report.readmeOrphanRows.length} README state-table row(s) that GOVERNED does not back:`);
+    report.readmeOrphanRows.forEach((t: string) => console.log(`    ${t}`));
+    console.log('');
+    README_ORPHAN_ROW_GUIDANCE.forEach((line) => console.log(line ? `   ${line}` : ''));
+  }
+  if (report.readmeHeadingErrors.length) {
+    console.log(`\n✗ ${report.readmeHeadingErrors.length} README state-table heading error(s):`);
+    report.readmeHeadingErrors.forEach((s: string) => console.log(`    ${s}`));
+    console.log(
+      '\n   "N governed types (complete registry coverage)" is a completeness CLAIM, and\n' +
+      '   until #7257 nothing could falsify it: N was the count of rows, not of governed\n' +
+      '   types, so the two agreed only by coincidence — until `api` and `capability` were\n' +
+      '   governed with no row and the sentence stayed true-looking. Fix the number and the\n' +
+      '   rows together; they are checked against each other AND against GOVERNED.',
+    );
+  }
+  if (report.readmeMalformedRows.length) {
+    console.log(
+      `\n✗ ${report.readmeMalformedRows.length} unreadable line(s) in the README state table —` +
+      ' a row this parser cannot see is a row it cannot govern:',
+    );
+    report.readmeMalformedRows.forEach((s: string) => console.log(`    ${s}`));
+  }
   // ── re-verification clock ──
   // Annotated at the boundary: `report` is deliberately `any` (see its
   // declaration), so without this every `v.*` below is `any` too — which is how
@@ -697,6 +838,36 @@ if (asJson) {
     }
   } else if (v.stale.length || v.unverified.length) {
     console.log('  run with --stale-verification[=days] for the worklist.');
+  }
+
+  // ── producer-side evidence + verification scope ──
+  const pr: ProducerReport = report.producers!;
+  if (pr.errors.length) {
+    console.log(`\n✗ ${pr.errors.length} malformed \`producer\` / \`evidenceScope\` value(s):`);
+    pr.errors.forEach((s: string) => console.log(`    ${s}`));
+  }
+  if (report.producerMissing.length) {
+    console.log(
+      `\n✗ ${report.producerMissing.length} \`producer\` pointer(s) that do not resolve — a call-site claim`
+      + ` nothing can falsify is what this field exists to remove:`,
+    );
+    report.producerMissing.forEach((s: string) => console.log(`    ${s}`));
+  }
+  const scopes = Object.entries(pr.byScope).map(([s, n]) => `${n} ${s}`).join(', ') || 'none';
+  console.log(
+    `\nevidence quality: ${pr.withProducer} live entr(ies) cite a PRODUCER (${pr.withoutProducer.length} do not); `
+    + `verification scope declared on ${scopes} (${pr.unscoped} undeclared).`,
+  );
+  if (showProducerGap) {
+    if (pr.withoutProducer.length) {
+      console.log(
+        `\n  live without producer-side evidence (${pr.withoutProducer.length}) — a consumer pointer is half`
+        + ` the call graph; the half that killed \`Seed.env\` is the other one:`,
+      );
+      pr.withoutProducer.forEach((k: string) => console.log(`    ${k}`));
+    }
+  } else if (pr.withoutProducer.length) {
+    console.log('  run with --producer-gap for the producer-evidence worklist.');
   }
   // ── container coverage: how much rides on inheritance? ──
   // Printed every run, pass or fail. The gate used to say "all properties are
@@ -734,7 +905,8 @@ if (asJson) {
       '\n✓ every governed-type property at the walk\'s one-level granularity is classified, every ' +
       'registered type is governed or explicitly pending, no ledger row outlives its property, ' +
       'every container inheritance is declared, every `live` entry\'s repo-local evidence path ' +
-      'resolves, and all bound high-risk proofs resolve.',
+      'resolves, all bound high-risk proofs resolve, and the README state table carries a row ' +
+      `for each of the ${report.readmeRowCount} governed type(s) it claims to index.`,
     );
     if (report.undrilledChildKeys) {
       console.log(

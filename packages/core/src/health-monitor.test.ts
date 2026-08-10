@@ -120,28 +120,96 @@ describe('PluginHealthMonitor', () => {
      * Ref'd `Timeout` handles — `getActiveResourcesInfo()` reports only
      * resources currently keeping the event loop alive, which is exactly the
      * property that made `os migrate` idle ~120s in #4813.
+     *
+     * The count is *process*-global, so it is only ever read here in
+     * synchronously adjacent pairs (see below). Comparing two reads separated
+     * by an `await` is what made this suite flaky in the merge queue (#6329):
+     * the runner shares this loop and keeps a **non-unref'd 100ms** timer on it
+     * (`throttle(sendTasksUpdate, 100)` in `@vitest/runner`), so once the
+     * window between the reads stretched past 100ms under full concurrent load
+     * — the failing run measured 105ms — that timer fired inside the window and
+     * the count fell by one for a reason that had nothing to do with the
+     * monitor. Between two adjacent synchronous statements no timer callback
+     * can run at all, so a difference measured that way is the monitor's doing
+     * and nobody else's.
      */
     const refdTimers = () =>
       process.getActiveResourcesInfo().filter((r) => r === 'Timeout').length;
 
+    /**
+     * Run `body` while recording the `Timeout` handles `setTimeout` hands out,
+     * and return those armed with `delay` — the monitor's health-check guards,
+     * told apart from every other timer on the shared loop by the very timeout
+     * they were configured with.
+     *
+     * Holding the handles is what lets the assertion below name the guard
+     * instead of counting the world. It records where the guard came from; what
+     * it then asserts is still the observable consequence — whether that handle
+     * is keeping the event loop alive — never that `clearTimeout` was called.
+     */
+    const recordingGuards = async (
+      delay: number,
+      body: () => Promise<void>
+    ): Promise<NodeJS.Timeout[]> => {
+      const guards: NodeJS.Timeout[] = [];
+      const real = globalThis.setTimeout;
+      const recording = ((...args: Parameters<typeof globalThis.setTimeout>) => {
+        const handle = real(...args);
+        if (args[1] === delay) guards.push(handle);
+        return handle;
+      }) as typeof globalThis.setTimeout;
+      Object.assign(recording, real);
+
+      globalThis.setTimeout = recording;
+      try {
+        await body();
+      } finally {
+        globalThis.setTimeout = real;
+      }
+      return guards;
+    };
+
     it("leaves no ref'd timer behind when the health check wins the race", async () => {
       const calls = { count: 0 };
-      monitor.registerPlugin('guarded-plugin', guardedConfig());
+      const config = guardedConfig();
+      monitor.registerPlugin('guarded-plugin', config);
 
-      const before = refdTimers();
-      monitor.startMonitoring('guarded-plugin', healthyPlugin(calls));
+      const guards = await recordingGuards(config.timeout, async () => {
+        monitor.startMonitoring('guarded-plugin', healthyPlugin(calls));
 
-      // The initial check runs immediately; wait for its report to land.
-      await vi.waitFor(() => {
-        expect(monitor.getHealthReport('guarded-plugin')).toBeDefined();
+        // The initial check runs immediately; wait for its report to land.
+        await vi.waitFor(() => {
+          expect(monitor.getHealthReport('guarded-plugin')).toBeDefined();
+        });
       });
-
-      // Drop the monitoring interval — whatever is left is the guard's doing.
-      monitor.stopMonitoring('guarded-plugin');
 
       expect(calls.count).toBe(1);
       expect(monitor.getHealthStatus('guarded-plugin')).toBe('healthy');
-      expect(refdTimers()).toBe(before);
+
+      // The round armed exactly one guard. Without this the reclaim below would
+      // be vacuously green — a difference of zero because nothing was measured,
+      // rather than because nothing was left behind.
+      expect(guards).toHaveLength(1);
+
+      // Everything from here to the last assertion runs in one uninterrupted
+      // synchronous turn, so each difference is attributable.
+      const whileMonitoring = refdTimers();
+
+      // Drop the monitoring interval — whatever is left is the guard's doing.
+      monitor.stopMonitoring('guarded-plugin');
+      const afterStop = refdTimers();
+
+      // The interval was pinning the loop and is now reclaimed. This also keeps
+      // the instrument honest: `refdTimers()` demonstrably observes *this*
+      // monitor's timers on *this* loop, so the guard's zero below is a real
+      // reading and not a blind one.
+      expect(whileMonitoring - afterStop).toBe(1);
+
+      // The guard is not pinning the loop: reclaiming it a second time is a
+      // no-op. Had it outlived the race it would still be armed and ref'd, and
+      // this reclaim would drop the count by one.
+      for (const guard of guards) clearTimeout(guard);
+      expect(refdTimers()).toBe(afterStop);
     });
 
     it('still reports the timeout when the check never answers', async () => {

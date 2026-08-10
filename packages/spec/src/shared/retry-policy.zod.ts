@@ -27,7 +27,9 @@
  *
  * - `automation/flow.zod.ts` → `Flow.errorHandling` (#4964) — spelled the base
  *   delay `retryDelayMs`, every other key already identical.
- * - `automation/etl.zod.ts` → `ETLPipeline.retry` (#4962) — spelled the count
+ * - `automation/etl.zod.ts` → `ETLPipeline.retry` (#4962; the whole L2 layer
+ *   was retired at #6414, so this surface no longer exists — the convergence
+ *   is recorded because it is how the divergence was FOUND) — spelled the count
  *   `maxAttempts`, defaulted it to **3** (the opposite of the opt-in reading
  *   below), and declared no `backoffMultiplier` / `maxRetryDelayMs` / `jitter`
  *   at all, so its backoff was flat, uncapped and unjittered.
@@ -37,11 +39,12 @@
  * the question simply was not the one whose answer everybody read off it. After
  * a convergence completes, a surviving dialect reads as *reviewed and kept*.
  *
- * Both now build from {@link retryPolicyShape}, so the four surfaces share one
- * declaration of the key set, the bounds and the defaults. The two of them that
- * are `.strict()` keep their own `strictObject` curation and their own extra
- * keys (`Flow.errorHandling.strategy`) — what is shared is the *contract*, not
- * the surface's framing of it.
+ * The surviving one of those two builds from {@link retryPolicyShape} like the
+ * named surfaces do, so the three remaining surfaces share one declaration of
+ * the key set, the bounds and the defaults. The only one of them that is
+ * `.strict()` — `Flow.errorHandling` — keeps its own `strictObject` curation and
+ * its own extra keys (`strategy`); what is shared is the *contract*, not the
+ * surface's framing of it.
  *
  * ## Why this file, and why it is not in `shared/index.ts`
  *
@@ -75,13 +78,14 @@ import { retiredKey } from './retired-key';
  * The retry policy's raw Zod shape — key set, bounds, defaults and prose, in
  * ONE place.
  *
- * Two of the four surfaces that carry this policy cannot simply reference
- * {@link RetryPolicySchema}: `Flow.errorHandling` and `ETLPipeline.retry` are
- * `.strict()` (`strictObject`, the #4001 campaign standard) and the flow one
- * also carries `strategy` plus its own `superRefine`. Handing them the *shape*
- * rather than the *schema* is what lets them stay strict, keep their curated
- * unknown-key tables, and still have exactly one declaration of what a retry
- * policy IS — the alternative (a fifth hand-copied key list) is the debt #4964
+ * One of the three surfaces that carry this policy cannot simply reference
+ * {@link RetryPolicySchema}: `Flow.errorHandling` is `.strict()`
+ * (`strictObject`, the #4001 campaign standard) and also carries `strategy` plus
+ * its own `superRefine`. (`ETLPipeline.retry` was the second such surface until
+ * #6414 retired the whole L2 ETL layer.) Handing it the *shape* rather than the
+ * *schema* is what lets it stay strict, keep its curated unknown-key table, and
+ * still have exactly one declaration of what a retry policy IS — the
+ * alternative, one hand-copied key list per strict surface, is the debt #4964
  * and #4962 exist to remove.
  *
  * It is a function rather than a const for the same reason every schema here is
@@ -108,28 +112,29 @@ export function retryPolicyShape() {
     // ── Tombstone (ADR-0087) ────────────────────────────────────────────
     // `retryDelayMs` was the automation-side spelling of `backoffMs`, on BOTH
     // `try_catch`'s `retry` (#4661) and `Flow.errorHandling` (#4964). It is
-    // tombstoned rather than deleted because two of the four owning shapes are
+    // tombstoned rather than deleted because two of the three owning shapes are
     // not `.strict()`: a plain deletion would have Zod silently strip the
     // authored value and drop the delay back to the 1000ms default, which is
-    // precisely the quiet-failure class ADR-0049 exists to remove. On the two
-    // strict surfaces the tombstone is still the better channel — it carries
-    // the rename, where a bare unknown-key rejection would only carry the key.
+    // precisely the quiet-failure class ADR-0049 exists to remove. On the strict
+    // surface the tombstone is still the better channel — it carries the
+    // rename, where a bare unknown-key rejection would only carry the key.
     // `retry-policy-converged` rewrites it on the load path.
     retryDelayMs: retiredKey(
       '`retryDelayMs` was removed in @objectstack/spec 17.0.0 (#4661, #4964) — the retry policy now ' +
       'has ONE spelling for its base delay across every surface that carries it: `job.retryPolicy`, ' +
-      "a `try_catch` node's `retry`, `flow.errorHandling` and an ETL pipeline's `retry`. " +
+      "a `try_catch` node's `retry` and `flow.errorHandling`. " +
       'Rename the key to `backoffMs`; the value (milliseconds before the first retry) ' +
-      'is unchanged. `os migrate meta --from 16` rewrites it for you.',
+      'is unchanged. Run `os migrate meta --from 16` to rewrite existing sources automatically.',
     ),
   };
 }
 
 /**
  * Exponential-backoff retry policy — the named schema for `job.retryPolicy` and
- * a `try_catch` node's `retry` region. `Flow.errorHandling` and
- * `ETLPipeline.retry` carry the same contract via {@link retryPolicyShape},
- * which they must, being `.strict()` (see that function's note).
+ * a `try_catch` node's `retry` region. `Flow.errorHandling` carries the same
+ * contract via {@link retryPolicyShape}, which it must, being `.strict()` (see
+ * that function's note). `ETLPipeline.retry` did the same until #6414 retired
+ * the L2 ETL layer.
  *
  * Delay before retry *n* is `min(backoffMs * backoffMultiplier^(n-1),
  * maxRetryDelayMs)`, optionally jittered.
@@ -144,13 +149,19 @@ export function retryPolicyShape() {
  * `backoffMultiplier: 2`) into existing job documents, so no deployed stack
  * changes behaviour. What changes is what a NEWLY authored omission means.
  *
- * The ETL half needed no conversion branch and deliberately has none: an ETL
- * pipeline is not a `defineStack` collection and `etl.zod.ts` has no parse site
- * anywhere in objectstack / objectui / cloud (批 12's measurement), so there is
- * no stored document for a D2 walker to reach. Writing one anyway would be a
- * conversion advertising coverage it does not have. The `maxAttempts` tombstone
- * on that block is the whole migration channel, and it reaches the only door
- * that exists — `tsc` at the authoring site, and the parse.
+ * The ETL half never got a conversion branch — deliberately, and now
+ * permanently: an ETL pipeline was not a `defineStack` collection and
+ * `etl.zod.ts` had no parse site anywhere in objectstack / objectui / cloud
+ * (批 12's measurement), so there was no stored document for a D2 walker to
+ * reach and writing one anyway would have been a conversion advertising
+ * coverage it did not have. #6414 then retired the whole L2 layer, which took
+ * `ETLPipeline.retry` with it. There is therefore NO `maxAttempts` tombstone:
+ * a tombstone keeps a key unwritable on a shape that survives, and no `retry`
+ * block survives to author the key into — an absence strictly stronger than a
+ * tombstone. What declares the removal is `RETIRED_DEFS_BY_MAJOR` plus the D3
+ * `etl-pipeline-layer-retired` semantic migration (which ABSORBED #4962's own
+ * conversion entry for exactly this reason), and the door an upgrading author
+ * actually hits is `tsc` — TS2724/TS2305 on every removed ETL name.
  *
  * The reason to make absence mean "no retry" rather than "retry three times":
  * a retry replays whatever the attempt already did — a job handler's writes and

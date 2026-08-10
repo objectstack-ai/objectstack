@@ -1,0 +1,7 @@
+{
+  "file": "packages/plugins/plugin-security/src/security-plugin.ts",
+  "adrs": [
+    "ADR-0106"
+  ],
+  "invariant": "ADR-0106 D7 — getMetadataReadableFields differs from getReadableFields in exactly one place, and the asymmetry is the decision. On the DATA plane a caller resolving to zero permission sets falls OPEN, mirroring the engine middleware, because reporting a narrowing the data path would not enforce is its own drift. On the METADATA plane the same caller resolves the configured fallback permission set (the two-step /auth/me/permissions performs), so a guest-facing deployment's schema exposure is a deliberate permission-set decision rather than an accidental everything-default. Converging the two methods in either direction reverses this."
+}

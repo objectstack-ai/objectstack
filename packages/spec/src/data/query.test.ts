@@ -4,14 +4,16 @@ import {
   FieldNodeSchema,
   SortNodeSchema,
   AggregationFunction,
+  AggregationNodeSchema,
   type QueryAST,
 } from './query.zod';
+import { EngineAggregateOptionsSchema } from './data-engine.zod';
 
 describe('AggregationFunction', () => {
   it('should accept valid aggregation functions', () => {
     const validFunctions = [
       'count', 'sum', 'avg', 'min', 'max',
-      'count_distinct', 'array_agg', 'string_agg'
+      'count_distinct'
     ];
 
     validFunctions.forEach(fn => {
@@ -19,9 +21,51 @@ describe('AggregationFunction', () => {
     });
   });
 
+  it('declares exactly the functions the SQL family can lower', () => {
+    // The roster itself is the contract (#6188): `service-analytics` derives
+    // its supported set from `.options`, so an addition here silently widens
+    // what the dataset compiler claims to support. A change to this list is a
+    // vocabulary decision and must be visible in review.
+    expect(AggregationFunction.options).toEqual([
+      'count', 'sum', 'avg', 'min', 'max', 'count_distinct',
+    ]);
+  });
+
   it('should reject invalid aggregation functions', () => {
     expect(() => AggregationFunction.parse('COUNT')).toThrow();
     expect(() => AggregationFunction.parse('median')).toThrow();
+  });
+
+  // ── #6188: the two retired values carry a prescription, not a bare reject ──
+  //
+  // Both halves matter. The refusal alone is what `median` already got; what
+  // the retirement adds is that the author who wrote a value which USED to be
+  // legal is told it was removed and what to do instead. A test that only
+  // asserted `.toThrow()` would stay green if the error map were deleted.
+  it('prescribes the retirement for `array_agg`', () => {
+    expect(() => AggregationFunction.parse('array_agg'))
+      .toThrow(/`array_agg`.*was removed.*#6188.*Delete the aggregation/s);
+  });
+
+  it('prescribes the retirement for `string_agg`', () => {
+    expect(() => AggregationFunction.parse('string_agg'))
+      .toThrow(/`string_agg`.*was removed.*#6188.*Delete the aggregation/s);
+  });
+
+  it('does NOT tell a mis-spelling that it "was removed"', () => {
+    // `arry_agg` was never legal; claiming it was removed would misinform.
+    // Only the two retired spellings are dispatched — everything else keeps
+    // zod's own enum message listing the legal functions.
+    expect(() => AggregationFunction.parse('arry_agg')).toThrow();
+    const message = (() => {
+      try {
+        AggregationFunction.parse('arry_agg');
+        return '';
+      } catch (e) {
+        return (e as Error).message;
+      }
+    })();
+    expect(message).not.toContain('was removed');
   });
 });
 
@@ -285,15 +329,17 @@ describe('QuerySchema - Aggregations', () => {
     expect(() => QuerySchema.parse(query)).not.toThrow();
   });
 
-  it('should accept aggregation with distinct flag', () => {
-    const query: QueryAST = {
+  it('rejects the retired per-aggregation `distinct` flag (#6815)', () => {
+    // Was `should accept aggregation with distinct flag`. `count` + `distinct`
+    // is the exact shape `count_distinct` already spells portably, and it is
+    // the shape the removal is loudest about: the two answered the same number
+    // in the in-memory fallback and different numbers on every SQL face.
+    expect(() => QuerySchema.parse({
       object: 'order',
       aggregations: [
         { function: 'count', field: 'customer_id', distinct: true, alias: 'unique_customers' },
       ],
-    };
-
-    expect(() => QuerySchema.parse(query)).not.toThrow();
+    })).toThrow(/aggregations\[\]\.distinct.*removed.*count_distinct/s);
   });
 
   // ============================================================================
@@ -454,8 +500,14 @@ describe('QuerySchema - Aggregations', () => {
     expect(() => QuerySchema.parse(query)).not.toThrow();
   });
 
-  it('should accept query with ARRAY_AGG aggregation', () => {
-    const query: QueryAST = {
+  // These two used to assert that `array_agg` / `string_agg` PARSE. #6188
+  // retired both, so the fixtures are replaced rather than re-spelled: what
+  // needs pinning now is that the refusal reaches the author through the
+  // nested `aggregations[]` parse, carrying the prescription — the enum's
+  // error map is reachable from the real authoring surface, not just from a
+  // bare `AggregationFunction.parse`.
+  it('refuses ARRAY_AGG through the query surface, with the prescription', () => {
+    const query = {
       object: 'order',
       fields: ['customer_id'],
       aggregations: [
@@ -464,15 +516,33 @@ describe('QuerySchema - Aggregations', () => {
       groupBy: ['customer_id'],
     };
 
-    expect(() => QuerySchema.parse(query)).not.toThrow();
+    expect(() => QuerySchema.parse(query))
+      .toThrow(/`array_agg`.*was removed.*os migrate meta/s);
   });
 
-  it('should accept query with STRING_AGG aggregation', () => {
-    const query: QueryAST = {
+  it('refuses STRING_AGG through the query surface, with the prescription', () => {
+    const query = {
       object: 'order',
       fields: ['customer_id'],
       aggregations: [
         { function: 'string_agg', field: 'product_name', alias: 'product_names' },
+      ],
+      groupBy: ['customer_id'],
+    };
+
+    expect(() => QuerySchema.parse(query))
+      .toThrow(/`string_agg`.*was removed.*os migrate meta/s);
+  });
+
+  it('still accepts the aggregation that was kept', () => {
+    // `count_distinct` takes ADR-0049's ENFORCE leg (maintainer ruling
+    // 2026-08-07), so the split must be visible from the authoring surface:
+    // one of the three unlowered functions stayed and two left.
+    const query: QueryAST = {
+      object: 'order',
+      fields: ['customer_id'],
+      aggregations: [
+        { function: 'count_distinct', field: 'product_id', alias: 'products' },
       ],
       groupBy: ['customer_id'],
     };
@@ -613,11 +683,82 @@ describe('QueryAST.distinct — REMOVED (#4286)', () => {
       .toThrow(/query\.distinct.*removed/s);
   });
 
-  it('per-aggregation `distinct` is a DIFFERENT, live member and still parses', () => {
+  // This case used to read `per-aggregation distinct is a DIFFERENT, live
+  // member and still parses` — true when #4286 swept the request surface, and
+  // the reason `AggregationNode.distinct` outlived that sweep: #4286
+  // dispositioned `QueryAST.distinct` (this file's other tombstone) and
+  // `AggregationNode.filter` (marked EXPERIMENTAL), and the per-aggregation
+  // flag was neither. It IS still a different member — with the same verdict
+  // one level down, reached separately in #6815.
+  it('per-aggregation `distinct` is a DIFFERENT member with its OWN prescription (#6815)', () => {
     expect(() => QuerySchema.parse({
       object: 'order',
       aggregations: [{ function: 'count', field: 'customer_id', distinct: true, alias: 'unique_customers' }],
+    })).toThrow(/aggregations\[\]\.distinct.*removed/s);
+    // Not the query-level message: two keys, two prescriptions, two live
+    // replacements. Mixing them would send an author to `groupBy` for a
+    // problem `count_distinct` solves.
+    expect(() => QuerySchema.parse({
+      object: 'order',
+      aggregations: [{ function: 'count', field: 'customer_id', distinct: true, alias: 'unique_customers' }],
+    })).not.toThrow(/`query\.distinct` was removed/);
+  });
+});
+
+describe('AggregationNode.distinct — REMOVED (#6815, ADR-0049)', () => {
+  it('refuses either value — `false` was as divergent as `true`', () => {
+    // `distinct: false` selected the SQL faces' behaviour on the in-memory
+    // path, so it was never inert: it was one of the two answers. The
+    // tombstone refuses the KEY, not a value.
+    for (const value of [true, false]) {
+      expect(() => AggregationNodeSchema.parse(
+        { function: 'sum', field: 'amount', alias: 'total', distinct: value },
+      )).toThrow(/aggregations\[\]\.distinct.*removed/s);
+    }
+  });
+
+  it('the prescription names the six faces and the live spelling', () => {
+    const message = AggregationNodeSchema.safeParse(
+      { function: 'sum', field: 'amount', alias: 'total', distinct: true },
+    ).error!.issues[0]!.message;
+    // The FROM → TO an upgrading author needs, and the measurement that
+    // justifies it: one honouring face, five ignoring ones.
+    expect(message).toContain('@objectstack/spec 17');
+    expect(message).toContain('count_distinct');
+    for (const face of ['driver-sql', 'driver-turso', 'driver-mongodb', 'driver-memory']) {
+      expect(message, `the prescription must name the ${face} face`).toContain(face);
+    }
+  });
+
+  it('a legal aggregation parses and carries NO `distinct` property (non-strict strip path)', () => {
+    // `AggregationNodeSchema` is `z.object()`, not `.strict()`. A bare
+    // deletion would therefore have made zod SILENTLY STRIP a caller's
+    // `distinct` — replacing a divergent flag with an ignored one, which is
+    // the #3733 / ADR-0104 shape. The tombstone is what makes the removal
+    // audible; this pins that the surviving members are untouched by it.
+    const parsed = AggregationNodeSchema.parse({ function: 'sum', field: 'amount', alias: 'total' });
+    expect(parsed).not.toHaveProperty('distinct');
+    expect(parsed).toEqual({ function: 'sum', field: 'amount', alias: 'total' });
+  });
+
+  it('`count_distinct` — the live deduplicating spelling — is untouched', () => {
+    // The removal deletes the flag, never the capability: `count_distinct`
+    // took ADR-0049's ENFORCE leg in #6409 and every SQL face compiles it.
+    expect(() => QuerySchema.parse({
+      object: 'order',
+      aggregations: [{ function: 'count_distinct', field: 'customer_id', alias: 'unique_customers' }],
     })).not.toThrow();
+  });
+
+  it('reaches `EngineAggregateOptionsSchema` too — one schema, every aggregation door', () => {
+    // `EngineAggregateOptionsSchema.aggregations` reuses this schema BY
+    // REFERENCE (data-engine.zod.ts), so the engine-options door inherits the
+    // tombstone without restating it. Pinned because the query-level
+    // `cursor`/`distinct` pair had to be re-declared there by hand, and a
+    // reader could reasonably expect the same here.
+    expect(() => EngineAggregateOptionsSchema.parse({
+      aggregations: [{ function: 'sum', field: 'amount', alias: 'total', distinct: true }],
+    })).toThrow(/aggregations\[\]\.distinct.*removed/s);
   });
 });
 
@@ -756,17 +897,25 @@ describe('QuerySchema - Edge Cases and Null Handling', () => {
     expect(() => QuerySchema.parse(query)).not.toThrow();
   });
 
-  it('should handle optional distinct flag in aggregation', () => {
-    const query: QueryAST = {
+  it('refuses a mixed aggregation list the moment ONE entry carries `distinct` (#6815)', () => {
+    // Was `should handle optional distinct flag in aggregation`. The mixed
+    // list is the interesting shape: the second entry is untouched by the
+    // retirement, so the refusal has to come from the first ENTRY rather than
+    // from the array, and it has to point at that entry's index.
+    const result = QuerySchema.safeParse({
       object: 'order',
       aggregations: [
         { function: 'count', field: 'customer_id', alias: 'unique_customers', distinct: true },
-        { function: 'sum', field: 'amount', alias: 'total_amount' }, // distinct undefined
+        { function: 'sum', field: 'amount', alias: 'total_amount' }, // never carried the key
       ],
       groupBy: ['region'],
-    };
-
-    expect(() => QuerySchema.parse(query)).not.toThrow();
+    });
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === 'aggregations.0.distinct');
+    expect(issue, JSON.stringify(result.error!.issues)).toBeDefined();
+    expect(issue!.message).toMatch(/aggregations\[\]\.distinct.*removed/s);
+    // Only the offending entry is reported — the sibling `sum` is legal.
+    expect(result.error!.issues).toHaveLength(1);
   });
 
   it('should reject invalid object type', () => {

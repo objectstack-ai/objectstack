@@ -457,6 +457,40 @@ describe('settings envelope (#4224) — SETTINGS_VALIDATION speaks the field-lev
     expect(field.constraint).toEqual({ allowed: 'smtp, log' });
   });
 
+  it('an off-grid number reaches the client as a parseable invalid_value (#6199)', async () => {
+    // The grid breach's whole ADR-0112 envelope, driven through the real route:
+    // the HTTP status AND the code, which is what makes this a refusal test
+    // rather than a "something threw" test. The service-level suite pins the
+    // `FieldError`; only here is the 400 observable, because
+    // `SettingsValidationError` carries no status of its own — the route maps
+    // it, and that mapping is the thing a client actually keys on.
+    const { http, service } = mount();
+    service.registerManifest({
+      namespace: 'stepped',
+      label: 'Stepped',
+      writePermission: 'setup.write',
+      readPermission: 'setup.access',
+      specifiers: [
+        { key: 'temperature', type: 'slider', label: 'Temperature', min: 0, max: 2, step: 0.1 },
+      ],
+    } as any);
+    const { status, body } = await drive(http, 'PUT /api/settings/:namespace', {
+      params: { namespace: 'stepped' },
+      body: { temperature: 0.15 },
+    });
+    expect(status).toBe(400);
+    expect(body.error.code).toBe('SETTINGS_VALIDATION');
+
+    const [field] = body.error.details.fields;
+    expect(FieldErrorSchema.safeParse(field).success).toBe(true);
+    // `invalid_value` is the catalog's slot for "rejected for a reason no other
+    // member names" — no `FieldErrorCode` member names a grid, and the catalog
+    // is closed on purpose (ADR-0114), so a service does not get to invent one.
+    expect(field.code).toBe('invalid_value');
+    // The spacing and its anchor both travel, so a client can rebuild the grid.
+    expect(field.constraint).toEqual({ step: 0.1, min: 0 });
+  });
+
   it('the pre-#4224 map is gone from both of its old spellings', async () => {
     const http = lockedPattern();
     const { body } = await drive(http, 'PUT /api/settings/:namespace', {

@@ -264,7 +264,27 @@ describe('migrateStoredMetadata — apply (#4327)', () => {
         expect(metaRows(tables)[0]!.state).toBe('draft');
     });
 
-    it('walks every org, not just the env-wide bucket', async () => {
+    it('walks every org, not just the env-wide bucket — and REPORTS the org-scoped residue it cannot rewrite', async () => {
+        // The walk is what this case is named for, and the walk is unchanged:
+        // both buckets are scanned. What changed is the org row's OUTCOME.
+        //
+        // [#6190, 2026-08-09] `action` is `allowOrgOverride: false`, so since
+        // that ruling an org-scoped row of it cannot be written — and this pass
+        // rewrites through `saveMetaItem`, so it is refused like any other
+        // write. That is the correct outcome, not a gap to route around:
+        //
+        //   • Ruling 2 = A made existing org-scoped rows of such types
+        //     NON-DESTRUCTIVE residue — audible, disposed of operationally,
+        //     never rewritten by a migration. A canonicalization pass that
+        //     quietly rewrote them would be doing exactly the migration the
+        //     ruling declined to authorise, one row at a time.
+        //   • And the refusal is not silent: the row surfaces in the report
+        //     with the reason, which makes this pass a SECOND residue detector
+        //     alongside the cold-boot warn (PR #6600).
+        //
+        // Deliberately NOT re-spelled to an org-overridable type: that would
+        // have kept the assertion green while deleting the only coverage of
+        // what the pass does with residue.
         const { engine, tables } = makeStubEngine([
             legacyObjectRow,
             { ...legacyActionRow, organization_id: 'org_a' },
@@ -274,9 +294,16 @@ describe('migrateStoredMetadata — apply (#4327)', () => {
         const report = await protocol.migrateStoredMetadata({ apply: true });
 
         expect(report.scanned).toBe(2);
-        expect(report.rewritten).toBe(2);
+        expect(report.rewritten).toBe(1);
+        expect(report.failed).toBe(1);
+
+        const orgReport = report.rows.find((r: any) => r.type === 'action')!;
+        expect(orgReport.outcome).toBe('failed');
+        expect(orgReport.reason).toContain('cannot be written org-scoped');
+
+        // Non-destructive: the stored bytes are exactly as they were.
         const orgRow = metaRows(tables).find((r) => r.organization_id === 'org_a')!;
-        expect(JSON.parse(orgRow.metadata).target).toBe('convertHandler');
+        expect(JSON.parse(orgRow.metadata).execute).toBe('convertHandler');
     });
 
     it('leaves archived rows alone — they are a record of what was, not served metadata', async () => {

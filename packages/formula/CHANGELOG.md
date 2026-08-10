@@ -1,5 +1,754 @@
 # @objectstack/formula
 
+## 17.0.0-rc.6
+
+### Minor Changes
+
+- f6cd635: fix(formula): the CEL pushdown compiler parses through the canonical front end, so `DEFAULT_LIMITS` finally apply to RLS/sharing predicates (#6132)
+
+  `cel-to-filter.ts` — the ONE canonical CEL → `FilterCondition` pushdown compiler
+  (ADR-0058 D1/D2/D6), consumed by the RLS path (`plugin-security`'s
+  `RLSCompiler`), the sharing seeder (`plugin-sharing`), and the analytics SQL
+  backend — kept a **private, limitless** parse environment of its own:
+
+  ```ts
+  new Environment({ unlistedVariablesAreDyn: true, enableOptionalTypes: true });
+  ```
+
+  no `limits`, no stdlib, no `rewriteNullableTernary`. That made the pushdown path
+  the one place on the platform that answered a _different_ question from
+  `celEngine.compile()` about what parses. Measured: a 300-term addition, a
+  60-level parenthesis nest and a 200-element list literal all parsed there while
+  the interpreter refused each one outright (`Exceeded maxAstNodes (256)` /
+  `maxDepth (32)` / `maxListElements (64)`). Escalated: an 80-term conjunction, a
+  40-level nest and a 200-element `$in` all reached **real pushdown SQL**,
+  silently — and `isSupportedRlsExpression`, the ADR-0056 D4 authoring gate, was a
+  thin wrapper over the same limitless environment, so it was no independent check
+  either.
+
+  It now parses through `parseCelToAstWithReason` — #4812's canonical entry, with
+  `DEFAULT_LIMITS`, the stdlib and the #3306 null-guard rewrite. "What parses" has
+  one answer again.
+
+  **Within the limits nothing moves, and that is measured, not asserted.** Across
+  the 710 sources of the pushdown corpus that both front ends accept, the only AST
+  difference is `rewriteNullableTernary`'s `dyn(…)` wrap on the three null-guard
+  ternaries — and a ternary faults on its own `?:` node before the lowerer
+  descends into a branch, so verdict _and_ detail come out byte-identical. Pinned
+  in `cel-to-filter-parse-convergence.test.ts`, which rebuilds the old environment
+  to compare against.
+
+  **Over the limits, behaviour changes — in two dated steps.**
+
+  - **Now, during `17.0.0-rc.x` (`rc-grace`):** an over-limit predicate **still
+    compiles** — nothing that enforces today stops enforcing on this upgrade — and
+    emits one WARN per predicate naming the bound that was exceeded
+    (`maxAstNodes` / `maxDepth` / `maxListElements` / …), the platform's value for
+    it, and what the predicate itself measures (cel-js's own accounting: the
+    smallest bound it parses under), plus what will happen at GA.
+  - **At v17.0.0 GA (`fail-closed`):** the same predicate is **refused** —
+    `{ ok: false, reason: 'parse-error', detail: 'Exceeded maxAstNodes (256)' }` —
+    and the RLS path turns that into `RLS_DENY_FILTER`, i.e. zero rows, fail
+    closed. A sharing rule with such a condition is not seeded.
+
+  **The flip is one line.** `CEL_PUSHDOWN_LIMITS_MODE` in
+  `packages/formula/src/cel-pushdown-limits.ts` — the single dated switch,
+  shipping as `'rc-grace'`, to be set to `'fail-closed'` at the v17.0.0 GA release
+  (i.e. when this package's version leaves `17.0.0-rc.x`). Both positions are
+  exercised in CI today, in `@objectstack/formula` and in
+  `@objectstack/plugin-security` (where the `RLS_DENY_FILTER` outcome lives), so
+  the GA half is proven before it ships rather than after. Two tests are written
+  to go red on that line so the flip cannot be silent.
+
+  **If you author RLS or sharing predicates:** a predicate over any of these
+  bounds is already refused everywhere else on the platform (`os build`,
+  `os validate`, the interpreter). Split it, or move the logic into a hook/action
+  body (`ScriptBody { language: 'js' }`), before upgrading past the rc line. The
+  WARN names the predicate and its measure so you can find them.
+
+  **New public surface**, for consumers that must _report_ a refusal rather than
+  merely react to one:
+
+  - `parseCelToAstWithReason(source, opts?)` — the reason-carrying sister entrance
+    to `parseCelToAst`. Same front end, same verdict, but it distinguishes
+    `'parse'` (not valid CEL) from `'bounds'` (valid CEL, over budget) and names
+    the exceeded limit, its platform value, and the source's measure. Graded by
+    the same by-class/by-code classifier `celEngine.compile` uses (#6223) — never
+    by error prose. `parseCelToAst` is unchanged and still collapses every refusal
+    to `null`.
+  - `CelParseResult`, `CelBoundsOverrun`, `CelLimitKey`, `ParseCelToAstOptions`.
+  - `CEL_PUSHDOWN_LIMITS_MODE`, `celPushdownLimitsMode()`,
+    `setCelPushdownLimitsModeForTests()`, `CelPushdownLimitsMode`.
+
+  `@objectstack/lint` needs no change, at either position of the switch. Its two
+  enforceability gates read `isSupportedRlsExpression` and `compileCelToFilter`,
+  both downstream of this switch, and both suites pin "the lint verdict IS the
+  consumer's verdict" in both directions — so authoring-time reporting flips with
+  the runtime by construction. An over-limit sharing `condition` is in fact
+  already an authoring **error** today (`expression-invalid`, from the general
+  expression rule, quoting `Exceeded maxAstNodes (256)`), because that rule has
+  always gone through the canonical front end.
+
+- 3f8817a: feat(spec,drivers,objectql,analytics,formula): `$icontains` reaches every JS evaluation face (#6520)
+
+  The other half of #5702. That change implemented `$icontains` on the SQL family
+  and correctly left the spec's `FILTER_OPERATORS` alone; this one adds the
+  operator to that array and gives every remaining evaluation face an arm, in ONE
+  change, because those two steps cannot be separated.
+
+  **Why one PR.** `FILTER_OPERATORS` is not a word list, it is a runtime allowlist:
+  `driver-memory`'s shape gate derives from it, and its matcher's `default:` arm
+  assumes the gate already refused anything unimplemented. Measured on a branch
+  that added the name early (#5701): the gate stopped refusing, the matcher fell
+  through, and `match({ name: 'zzz' }, { name: { $icontains: 'acme' } })` returned
+  `true` — the predicate silently dropped, every row matched. A dropped predicate
+  does not narrow a query, it WIDENS it, and on an RLS read scope that is a
+  permission bypass rather than a degraded feature (#3948). So the word list
+  travels with the evaluators or not at all.
+
+  **What now answers it**, all folding the same domain: `driver-memory` (query
+  path, reference matcher, and the analytics/cube face), `driver-mongodb`,
+  `objectql`'s `having`, `@objectstack/formula`'s `matchesFilterCondition` (the RLS
+  write-side `check`), and `service-analytics`' three SQL compilers (the RLS
+  lowering, the native-SQL strategy, and the `/analytics/sql` echo).
+
+  **The fold is ASCII-only, and that is the contract, not an implementation
+  detail** (#4706 Q1 = A). `$icontains: 'café'` does not match `CAFÉ`. Every face
+  reads one shared definition — `foldAsciiCase` /
+  `asciiCaseInsensitiveContains` / `asciiCaseInsensitiveRegexSource`, new exports
+  on `@objectstack/spec/data` — because the two obvious per-package spellings are
+  both wrong in the same direction: `toLowerCase()` folds the whole Unicode range,
+  and so does a `RegExp` built with the `i` flag. SQLite folds ASCII only and three
+  of the five drivers are SQLite underneath, so a Unicode fold on a JS face would
+  re-open exactly the divergence the ruling closed. The pattern-binding faces
+  (mingo, mongo) therefore emit one `[Aa]` character class per ASCII letter and
+  pass NO flags; mongo's `$icontains` is the one arm in its family that does not
+  set `$options: 'i'`.
+
+  The comparand keeps the rules its SQL twin has: matched LITERALLY (`%`, `_` and
+  regex metacharacters are ordinary characters), and refused when empty or
+  non-string — an empty comparand matches every row, which is a predicate that
+  constrains nothing.
+
+  **User-visible effect.** A filter using `$icontains` now behaves the same on the
+  in-memory double and on SQL, so an app whose tests run on one and whose
+  production runs the other stops getting two answers from one filter. Downstream,
+  #5814 (better-auth `Where.mode: 'insensitive'`) no longer hits a 400 on the
+  memory double.
+
+  Not changed, and still tracked: the `$contains` family still folds Unicode on
+  `driver-memory`'s query path and `driver-mongodb` (#6682) — both remain DEBT rows
+  in `scripts/check-driver-conformance.mjs`, now naming one open requirement each
+  instead of two. `formula`'s unknown-operator posture stays a silent, fail-closed
+  `false` (it governs a write-side check, where an unevaluable condition denies
+  rather than widens); the decision and its limits are documented on
+  `matches-filter.ts`, and no operator the spec DECLARES is answered that way any
+  more.
+
+- 6965160: feat(lint): view/page 可见性谓词的裸标识符构建期闸门 —— 坏谓词发不出去(#6128)
+
+  新增 **error 级** 规则 `visibility-bare-identifier`:view/page 的可见性谓词
+  (`visibleWhen` 及其两个已弃用别名 `visibleOn` / `visibility`)里引用了任何绑定根都解析不到的
+  顶层标识符时,`os validate` / `os build` / `os lint` 一律拒收。写成 `status == 'active'`
+  而不是 `record.status == 'active'` 的谓词,从此发不出去。
+
+  按 #5149 维护者 2026-08-06 裁决的构建期半边落地(运行时 warn-once 半边已由 objectui#3541 合入)。
+  本仓传统的准确表述是:fail-open 或 fail-closed 都可以裁,**静默不可以**。谓词失败仍然 fail-open
+  (已发货 app 行为不变),但坏谓词不再能进入产物。
+
+  **为什么现有两道闸都放行**(#5149 Repro 1 实测,已写进规则注释,防后人误并):
+  ADR-0032 的标识符闸(`validate-expressions.ts`)解析 record 作用域的裸引用,但它的遍历只覆盖
+  objects / flows / actions / sharingRules / hooks,**从不走 views 与 pages**;ADR-0089 D3b
+  只判**有根**的谓词根错层(runtime 面的 `data.`、metadata 面的 `record.`),**无根**的谓词两边都不匹配。
+  两闸之间正好漏掉「作者按文档示例写了裸字段名 → 谓词永远解析失败 → 控制台 fail-open 静默显示」。
+
+  **判定由两个既有 oracle 合成,本包不自建 CEL 环境**(#4812 的教训):声明性判定取
+  `@objectstack/formula` 的 `firstUndeclaredReference`(即 `validateExpression` 给 record 作用域
+  裸引用定罪的同一个严格环境),AST 取规范入口 `parseCelToAst`。AST 先收集所有处于**接收者位置**
+  的标识符(`a.b` / `a?.b` / `a['b']` / `a.exists(…)`)并在检查前声明它们,于是只剩「当作裸值引用」
+  的标识符会被判 —— 未知**根**(`my_record.x`)交还给 ADR-0089 D3b,不在本规则射程内。
+
+  **与 #4953(全量 vs 稀疏绑定)的边界**:#4953 实测同一求值器在两种绑定下语义相反
+  (`has(record.a)` 全量 true / 稀疏 false;`record.a != null` 全量 false / 稀疏 FAULT)。本规则
+  **按构造与该分叉无关** —— 它从不追问某个 KEY 在已绑定的根上是否存在,只追问标识符有没有根,
+  而无根标识符在两种绑定下都解析不到。`has(record.x)` / `record.x != null` 等守卫写法在本闸门下
+  一律绿,无论 #4953 最终怎么裁;已加测试钉住这条边界。
+
+  **遍历按实测修正,否则规则生来即死**:`os build` 跑 `examples/app-showcase` 得到的唯一一条
+  view 表单谓词落在 `views[0].formViews.edit.sections[0].fields[6].visibleWhen` —— 运行时 app 形状下
+  `views[]` 条目是**视图容器**(`ViewSchema` 声明的自有键就是 `list` / `form` / `listViews` /
+  `formViews`),`sections` 在下一层。原遍历只读 `views[].sections`,在这份 stack 上报告「干净」。
+  现在覆盖容器的 `form` 与每个 `formViews.<key>`,以及仍然直接携带 `sections` 的 `defineForm` 形状;
+  pages 改走共享的 `walkPageComponents`(regions、slotted 页的 `slots`、以及 `properties` 里的
+  `page:tabs` / `page:accordion` / `page:card` 子树都随之覆盖,source-authored 页按其既有语义跳过)。
+  `objects[].views` 明确不读 —— 该键已被 schema 立碑拒绝,读它只会造出一条永不触发的幽灵检查。
+  两条既有 ADR-0089 D3b advisory 随遍历一并变得真正可达。
+
+  注册表 tier `advisory` → `gating`(#5762 的先例):tier 声明并非自述,
+  `authoring-rule-wiring.test.ts` 会读规则源码核对。
+
+  已知盲点(已钉测试、方向安全):字段名与 CEL **类型名**相同时(`type` / `int` / `string` / `list`
+  / `map` / `timestamp` …)不判 —— CEL 自身声明这些标识符,`type == 'grid'` 到检查器那里是类型
+  overload 错误而非未知变量;改读 overload 消息会误杀合法的 `type(record.x) == string`。语法不通过
+  的谓词同样不判,交还给拥有该判定的闸门。两者都是漏判,永远不会变成误红。
+
+  仓内 `app-todo` / `app-crm` / `app-showcase` 三个示例 `os validate` 全部通过、零 visibility finding,
+  无需修改任何示例内容。
+
+  `@objectstack/formula` 侧:公开导出 `firstUndeclaredReference`(理由与既有的
+  `collectCelRootIdentifiers` 一致 —— 绑定根集合不同的消费方需要的是同一个答案,替代方案是在消费方
+  自建严格 `Environment`,而那正是 #4812 从本包消费方手里拿掉的私有前端)。
+
+### Patch Changes
+
+- b230e5e: fix(formula): `classifyError` grades a CEL fault by error class + code, never by the message (#6223)
+
+  `EvalResult.error.kind` is author-facing — `@objectstack/objectql`'s `cel-fault`
+  puts it in front of the author as `` `${kind}: ${first line}` `` and
+  `packages/rest` re-emits it as the HTTP body's `reason`. cel-js embeds the
+  author's own **source line** in `message` (`formatErrorWithHighlight`), so a
+  classifier that regex-matches that text is matching text the author writes.
+  PR #6202 closed the `ParseError` arm this way and left `type` / `runtime` on the
+  keyword table pending a per-code audit. This is that audit, and its verdict is
+  that the table goes entirely.
+
+  Measured on cel-js 8.0.0 — one `no such overload` **evaluation** fault, four
+  field names, three wrong answers:
+
+  ```text
+  record.status        > 1  ->  runtime   (right)
+  record.parse_status  > 1  ->  parse     (wrong)
+  record.syntax_mode   > 1  ->  parse     (wrong)
+  record.type_code     > 1  ->  type      (wrong)
+  ```
+
+  `parse` is the inverse of the #6133 misdirection: the expression is
+  syntactically perfect and failed on the data, and the author was told to go fix
+  an expression that has nothing wrong with it.
+
+  `classifyError` now reads only structured contract:
+
+  - `ParseError` -> `bounds` when `code === 'limit_exceeded'`, else `parse`
+    (unchanged, from #6202);
+  - `EvaluationError` -> `type` for the one declaration-class code
+    (`unknown_variable`, the root identifier is not bound in this scope at all),
+    else `runtime`;
+  - anything that is not a cel-js error -> `runtime`.
+
+  Two findings from the audit worth recording. First, the residual keyword arm was
+  **not** dormant: `matches()` is an ObjectStack stdlib binding over `new
+RegExp(...)`, so an uncompilable pattern escapes as a native `SyntaxError` whose
+  message echoes the pattern — and the pattern can come off the row, not just out
+  of the source. `matches(record.name, record.re)` with `re = "type("` was
+  graded `type`; with `"Exceeded maxAstNodes("` it was graded `bounds`. A data
+  value was picking the error kind. Second, there is deliberately no `TypeError`
+  arm: cel-js raises that class only from its non-evaluating `TypeChecker`, which
+  runs only inside `Environment#check`, and that method catches it and _returns_
+  `{ valid: false, error }`. The check-time `TypeError -> type` mapping already
+  lives in `celEngine.compile`, which reads that object.
+
+  Six evaluate-time codes change verdict from `type` to `runtime`
+  (`int_conversion_error`, `uint_conversion_error`, `double_conversion_error`,
+  `invalid_index_type`, `heterogeneous_list_element`,
+  `invalid_comprehension_range`). Each is a fault decided against the row; every
+  one of them was graded `type` only because cel-js happens to use the word "type"
+  in its prose (`int() type error: cannot convert to int`). Every evaluate-time
+  code the engine can reach now has a fixture pinning its `kind`.
+
+- 5d24f4b: fix(formula): the ADR-0032 §1c retry rewrites only the operands that faulted (#7098)
+
+  **A CEL expression could return a silently wrong boolean.** No fault, no log
+  line, no failing test — `{ ok: true }` with the wrong answer. If you have
+  compound CEL that mixes a numeric comparison with a string equality over
+  string-serialized fields, read the "which expressions change answer" list below:
+  those expressions answer differently after this fix, and the new answer is the
+  right one.
+
+  ## What was wrong
+
+  When a comparison faults on a string-serialized numeric or date field
+  (`record.rating >= 4` where `rating` reads back as `"5.0"` — #1530 / #1534),
+  ADR-0032 §1c hydrates and retries. The retry hydrated the **entire scope** and
+  re-ran the **entire expression**, justified by a docblock claim that it
+
+  > can never change a comparison that already evaluated cleanly — it only rescues
+  > one that already faulted.
+
+  That claim was false, and it was load-bearing: it was the stated reason the
+  hydration was allowed to be unconditional and scope-wide. The retry knows only
+  that the _whole expression_ faulted, not that each sub-comparison did. So:
+
+  ```text
+  record.n >= 4 && record.s == "5.0"    with { n: "7", s: "5.0" }
+    before -> { ok: true, value: false }        after -> { ok: true, value: true }
+  ```
+
+  `record.n >= 4` faults and is correctly rescued. But `record.s` was hydrated to
+  the number `5` as well, so the author's deliberate string equality — **true**
+  when it was evaluated the first time — became `5 == "5.0"`, which CEL answers
+  `false` across types. The expression returned `false`, and nothing reported that
+  a clean answer had been overruled.
+
+  ## Which expressions change answer
+
+  Only expressions that **already reached the §1c retry** — i.e. some operand
+  faulted `no such overload`. Everything that evaluates without faulting is
+  untouched. Within that set, an expression changes answer when it also contains:
+
+  - **a string equality / inequality on a numeric-looking or ISO-date field** —
+    `record.n >= 4 && record.s == "5.0"`, and the `!=` and ternary forms. Now
+    answers on the string the author wrote.
+  - **a string membership test** — `record.s in ["5.0", "x"]`.
+  - **the same field compared as a number in one place and as a string in
+    another** — `record.n >= 4 && record.n == "7"`. Both answers are now correct
+    at once; previously the second was collateral damage from the first.
+  - **a numeric-looking string the expression RETURNS rather than compares** —
+    `record.n >= 4 ? record.s : "none"` returned the number `5`; it now returns
+    the string `"5.0"`. A `Field.formula` of type text was storing a different
+    value than the record held.
+
+  One class becomes a **loud fault where it used to be silently rescued**: an
+  operand whose value the rewrite cannot read before deciding — bound by a
+  comprehension (`record.items.exists(i, i.price > 100)`), or behind a computed
+  index. That is the deliberate trade of this fix. Rescuing an operand we cannot
+  prove faulted is exactly the defect being closed, so those report the original
+  `no such overload` instead of guessing. The reported error is unchanged in shape
+  and message.
+
+  ## What replaces it
+
+  The coercion is now **per operand position** — the same discipline
+  `rewriteTemporalEquality` already documents ("no field-wide trade-off"), one
+  step stricter. The scope is never rewritten; the faulting operand is wrapped in
+  `double(…)` or `date(…)` in place. An operand is rewritten only when all three
+  hold, which makes the docblock's guarantee true by construction rather than by
+  assertion:
+
+  1. the operator **raises** on a string-versus-number/Timestamp pair instead of
+     answering one, so the comparison cannot have produced an answer;
+  2. the counterpart is a number or a Timestamp **in this scope**, read off the
+     values in hand rather than off a static type (every field is `dyn` under
+     `unlistedVariablesAreDyn`);
+  3. the operand's own value is a §1c serialization artifact — an entirely-numeric
+     string or an ISO-8601 date. A zip like `"02134"`, or free text, still faults
+     loudly.
+
+  Measured per operator on cel-js 8.0.0 and pinned in the new tests: `<` `<=` `>`
+  `>=` `+` `-` `*` `/` `%` **fault** on a mixed pair and are eligible. `==`, `!=`
+  and `in` **answer** across types — CEL equality is total — so they already had
+  an answer and are never rewritten. That measurement is the root of the defect:
+  the string equality above never faulted at all.
+
+  `Field.date` strings not matching a Timestamp under `==` remains owned by
+  `rewriteTemporalEquality`, which wraps them statically on the clean path, where
+  both sides are known from the source instead of inferred from an unrelated
+  conjunct's fault.
+
+  ## Reach
+
+  `celEngine.evaluate` — the only home of this retry — does **not** reach RLS.
+  Row-level security compiles its `using` / `check` predicates through
+  `compileCelToFilter` (SQL pushdown) and `matchesFilterCondition` (write-side
+  post-image), and declared sharing rules do the same; neither calls this
+  evaluator. No access-control decision could be inverted by this.
+
+  It does reach write-gating decisions, which is why the behaviour was not
+  acceptable as documented: validation-rule predicates and `when` conditionals,
+  `readonlyWhen`, hook `condition`s, automation/flow conditions, and formula
+  fields and default values. A validation rule is **fail-closed** on a fault
+  (#4649) — but a silently flipped boolean is not a fault, so a rule that should
+  have rejected a write instead read as "not violated" and let it through.
+
+- 29b94ed: fix(formula): the CEL hydration retry arms off cel-js's structured code, not the phrase "no such overload" (#6679)
+
+  `celEngine.evaluate` catches a fault and asks `isNumericOverloadError` whether to
+  hydrate string-serialized numeric / date fields and re-evaluate once — the
+  ADR-0032 §1c accommodation for `Field.rating` → `"5.0"` and `Field.date` →
+  `"2026-06-20"` (#1530, #1534). That question was answered by
+  `/no such overload/i.test(err.message)`: the last message-text read in
+  `cel-engine.ts` that armed behaviour after #6223 / PR #6677 closed the same hole
+  in `classifyError`. It now reads
+  `err instanceof EvaluationError && err.code === 'no_such_overload'`, the same
+  class-and-code rule `classifyCelFault` already follows one function below.
+
+  The phrase was reachable from a **native** throw, not only from cel-js. Our
+  `matches()` stdlib binding is `new RegExp(String(re)).test(...)`, so an
+  uncompilable pattern escapes cel-js unwrapped as a `SyntaxError` echoing the
+  pattern verbatim — `Invalid regular expression: /no such overload(/` — which
+  matched. The pattern can be written in the source or read off a row via
+  `matches(record.name, record.re)`.
+
+  The filing recorded this as observation-class, expecting the consequence to be
+  nil because the retry re-throws the original error. Measuring it for the fix
+  found one case where it is not nil, so this ships as a fix rather than a
+  tolerance removal: when hydration lets the expression short-circuit around the
+  throwing call, the spurious retry **succeeds** and returns a value where the
+  fault was the right answer.
+
+  ```text
+  record.s == "5.0" ? matches(record.name, "no such overload(") : false
+    { s: "5.0", name: "x" }   ->  was: ok, false        now: the regex fault
+  record.s == "5.0" ? matches(record.name, "(") : false
+    { s: "5.0", name: "x" }   ->  the regex fault       (unchanged)
+  ```
+
+  Evaluation 1 takes the `matches(...)` branch and throws natively; the phrase
+  armed the retry; hydration made `record.s` the number `5`, so `5 == "5.0"` went
+  false, the ternary took the other branch, and `matches` was never called. Two
+  expressions that differ only in whether a regex literal happens to contain the
+  phrase no longer disagree about whether they fault.
+
+  The behaviour change is one-directional and narrow. A genuine cel-js
+  `no_such_overload` still arms the retry and every §1c hydration behaves exactly
+  as before; only a native throw whose message merely contains the phrase stops
+  arming it. Faults are otherwise unchanged — a native throw carries no cel-js
+  contract, so it is still reported as `runtime` (#6223).
+
+- 07c68b0: fix(formula): 括号/引号/转义等 parse 期错误不再被误报为 `runtime`
+
+  `celEngine` 的错误分类此前完全靠**错误文案关键词**判定,而 cel-js 8.0.0 的 parse 期错误有约 19 种措辞,只有 3 种含 `parse` / `unexpected` / `syntax`。其余整类 —— 最典型的括号/方括号/花括号不配对(`Expected RPAREN, got EOF`)、未闭合字符串、非法转义、保留字 —— 全部落到默认值 `runtime`。
+
+  `kind` 不是内部字段:它被原样拼进作者可见的写入拒绝文案(`@objectstack/objectql` 的 `rule-validator` / `cel-fault`)与 REST 错误响应体的 `reason`。少写一个右括号的校验规则,作者读到的是 `(runtime: …)` —— 指向数据与求值期,而真正该改的是表达式本身,与 ADR-0032 D1d 的"消息面向自纠"相悖。
+
+  改为按 cel-js 抛出的**错误类**判定:`ParseError` → `parse`(其中 `code: 'limit_exceeded'` 仍 → `bounds`,cel-js 的越界一律由 parser 抛出)。这一层不再读文案,因此也修掉了关键词方案无法修的一格:cel-js 会把**作者自己的源码行**嵌进 `message`(`formatErrorWithHighlight`),于是字段名能决定错误分类 —— 实测 `((record.type_id)` 这条普通的括号不配对,此前被判为 `type`,只因回显的源码里含子串 "type"。
+
+  `type` / `runtime` 两支暂仍走原关键词表:cel-js 的 `TypeChecker` 按**阶段**而非按故障选择错误类(`isEvaluating ? evaluationError : typeError`),同一个 `unknown_variable` 在 check 期是 `TypeError`、在 eval 期是 `EvaluationError`,整体结构化会改变这些既有判定。审计见 #6133。
+
+  kind 词表本身(`parse` / `type` / `runtime` / `bounds` / `dialect`)未变,消费方未改。
+
+- e9b5265: fix(formula,lint): `current_user` becomes a declared root, and its field-level rejection becomes a real rule (#6290)
+
+  `@objectstack/formula` told two stories about one root. `introspectScope` handed
+  `current_user` to authors as a legal namespace and `checkRoleCatalog`'s four
+  position-membership regexes all lead with it — both correct, because ADR-0068 D1
+  makes `current_user` THE canonical spelling and `buildScope` really does mount
+  the same `EvalUser` under it. Only `cel-engine.ts`'s `SCOPE_ROOTS` disagreed, so
+  the strict environment read the blessed spelling as a BARE FIELD REFERENCE while
+  its two aliases (`user`, `ctx`) passed unremarked.
+
+  Three things change.
+
+  **1. `SCOPE_ROOTS` declares `current_user`.** That list is a "never faults"
+  baseline, not a per-surface contract, and it now advertises exactly what the
+  package advertises elsewhere. A new pin asserts the property directly: every
+  root `introspectScope` reports must resolve in the strict env.
+
+  **2. The wrong prescription is gone.** Because the rejection used to fall out of
+  the baseline's omission, the author got the GENERIC bare-field diagnostic —
+  "Write `record.current_user`". That shape binds on no layer of the platform, so
+  an author who followed the message ended up with something strictly worse than
+  what they started with, still silent. The field-level verdict now comes from a
+  rule of its own in `@objectstack/lint`, which names the real failure (unbound ⇒
+  fault ⇒ visibility falls back to `true` ⇒ the field a `current_user` test was
+  meant to hide stays visible for everyone, #6146) and prescribes surfaces that
+  exist: move the predicate to the option's own `visibleWhen`, declare field-level
+  security on a permission set (`fields: { '<object>.<field>': { readable: false } }`),
+  or rewrite it against `record`. It covers `visibleWhen`, `readonlyWhen` and
+  `requiredWhen`, which share the one evaluator.
+
+  **3. Per-option `visibleWhen` is validated at all.** `validate-expressions.ts`
+  walked field-level conditional rules and stopped there, so `SelectOption.visibleWhen`
+  — an authorable CEL slot the client filters on AND the server enforces — reached
+  compile, validate and run time checked by nobody. A bare field reference, a
+  reference to a field that does not exist, a syntax error or a template-dialect
+  predicate in an option all shipped in silence, and the option simply never
+  offered itself. Options are now walked, located by option value, on the same
+  `record` scope as their host field.
+
+  The two surfaces deliberately give opposite verdicts on `current_user`, because
+  their evaluators differ: field-level rules go through `evalFieldPredicate`
+  (`record` + `previous` + `parent`, never a user), options through
+  `resolveCascadingOptions` against the host's predicate scope, which does bind it
+  (ADR-0068 / objectui#2284). The showcase's role-gated option
+  (`'admin' in current_user.positions`) had never met this rule before and is now
+  pinned as the legal usage it is.
+
+  Sweep: `objectstack validate` is clean on all three example apps
+  (`app-showcase`, `app-crm`, `app-todo`) with the option walk active — zero new
+  findings, including the showcase object that carries both a record-scoped
+  cascade and the role-gated option.
+
+- d5e9f6e: 字段级 `*When` 的未绑定根检查:黑名单翻成白名单,并把因果句按槽位分档
+
+  同一段诊断上的两条**正交**分档轴,一次设计通过 —— 分开做会把这段文案写两遍,
+  且第二遍推翻第一遍。
+
+  ## 轴一:根集合从 3 项黑名单翻成 3 项白名单(#6713)
+
+  字段级 `visibleWhen` / `readonlyWhen` / `requiredWhen` 实测只绑 `record`、
+  `previous`、`parent` 三个根,三处独立证据一致:服务端
+  `rule-validator.ts` 的两处绑定(`readonlyWhen` 绑
+  `{ record, previous, extra: { parent } }`,`requiredWhen` 绑
+  `{ record, previous, ...parentScope }`);客户端 `evalFieldPredicate` 绑
+  `record` + `previous` + 调用方 `scope`,而 objectui 全部五个字段级调用点
+  (`form.tsx` ×3、`WizardForm.tsx`、`GridField.tsx`)传的 `scope` 只可能是
+  `undefined` 或 `{ parent }`;作者端 objectui 的
+  `FIELD_RULE_ROOTS = ['record', 'previous', 'parent']`,注释明写 "nothing else"。
+
+  而检查此前是一张**黑名单** —— #6584 一项、#6711 三项
+  (`current_user` / `user` / `ctx`)。黑名单在这个面上结构性地追不上
+  `SCOPE_ROOTS`:每新增一个根都要有人记得抄过来(`current_user` 自己就是 #6290
+  加进去、#6584 才被发现的)。实测有 **21 个根**落在这条缝里,它们同样未绑定、
+  同样 fault、而且同样**静默** —— 都在 `SCOPE_ROOTS` 里,所以裸引用检查也从不
+  报它们。其中两个是高可信度的作者笔误而非理论成员:
+
+  - `os.user.id` —— ADR-0068 D1 的**第四种**用户拼写(`buildScope` 把同一个
+    `EvalUser` 挂在 `current_user` / `user` / `ctx.user` / `os.user` 下),#6711
+    收了三种,`os` 这一支没收;
+  - `data.status == 'x'` —— `data` 是**元数据表单**里同一个 `visibleWhen` 键的
+    **合法**根(`view.zod.ts`:"Root: `record` … in runtime forms, or `data` in
+    metadata forms"),两种表单同一个键名、不同的根。
+
+  判定改为 `SCOPE_ROOTS` 成员减去白名单,列表直接从 `@objectstack/formula` 取,
+  不在消费端重述 —— 因此 `SCOPE_ROOTS` 将来新增的成员自动被覆盖。
+
+  处方随之**按根分档**:用户根(`current_user` / `user` / `ctx` / `os`)保留原有
+  的选项级 `visibleWhen` 与权限集 FLS 两条用户向处方;`data` 给出元数据表单 vs
+  运行期表单的解释;其余根给出通用的「改写成 `record` 谓词」。此前只有用户向处方,
+  对写了 `data.type == 'select'` 的作者是答非所问。
+
+  ## 轴二:因果句按槽位分档(#6716)
+
+  三个槽位此前共用一句「falls back to VISIBLE … showing for everyone」,而这句话
+  只对其中一个精确。三格全部**实测**,每格量了两端:
+
+  - **`visibleWhen` —— 仅客户端、fail-OPEN,原文案正确。** 服务端根本不评估字段级
+    `visibleWhen`(`ConditionalFieldDef` 无此成员,`fieldsNeedPrior` 只看
+    `requiredWhen || readonlyWhen ||` 选项可见性),唯一裁决来自渲染端,
+    `resolveFieldRuleState` 对可见性传 `fallback: true`。
+  - **`readonlyWhen` —— 两端方向相反,服务端说了算,原文案是反的。** 服务端
+    `isReadonlyWhenLocked` 命中 `unknownVariableOf` 后返回 `true`(#4889 的
+    carve-out,其触发条件正是未绑定根这一类),`stripReadonlyWhenFields` 随即把该
+    字段从 payload 中删除;客户端 `resolveFieldRuleState` 传 `fallback: false`,
+    表单仍渲染为可编辑。按 ADR-0057 D10(server enforces, client is courtesy)以
+    服务端为准:作者改了字段、保存报成功、值静默不落库。原文案告诉作者「对所有人
+    可见」—— 失败方向与排障方向都相反。
+  - **`requiredWhen` —— 两端都 fail-OPEN,且与可见性无关。** 服务端记日志后
+    `continue`(#4977 明确没有采用 #4889 的 carve-out),客户端 `fallback: false`,
+    两端都不强制,记录带着空字段保存成功。原文案在这里不只是不精确,而是说错了
+    字段的哪个属性。
+
+  `conditionalRequired` 在 `FieldSchema` 里是 `retiredKey`(按名字拒绝),解析后的
+  编译路径上该分支是惰性的,因此给它一条与槽位无关的通用句,而不是编造第四格测量。
+
+  ## `@objectstack/formula`
+
+  `SCOPE_ROOTS` 改为公开导出。一个绑定**封闭**根集合的面,必须能说出它**不**绑定
+  的那些根,而那个补集就是 `SCOPE_ROOTS` 减去该面自己的白名单;消费端手抄的列表
+  追不上这张表。注意它不能用 `firstUndeclaredReference` 替代:严格环境同时声明了
+  CEL 的**类型名**,`type(record.x) == string` 里的 `string` 会被判成「能解析的根」
+  —— 实测按可解析性判定会误杀这条合法谓词(1 例),按 `SCOPE_ROOTS` 成员判定不会。
+
+- cafec0a: `validateExpression`: give an over-budget expression a SIZE prescription instead of the dialect trailer (#7073)
+
+  ADR-0032's shared validator appended one trailer to every `celEngine.compile`
+  refusal, byte for byte — `— predicates are bare CEL (e.g. \`record.rating >= 4\`).`
+  That sentence is right for a dialect mistake and actively wrong for a **bounds**
+  refusal: an 80-clause conjunction is already bare CEL, perfectly good syntax, and
+  merely over the platform's parse budget. The author was told to change the one
+  thing that was never wrong; an AI author, which obeys the last sentence it was
+  handed, rewrites the dialect and regresses. Reported by #6833's measurement.
+
+  The refusal is unchanged — same inputs refused, same `Exceeded maxAstNodes (256)`
+  front half from cel-js. Only the prescription is now class-aware: a `bounds`
+  verdict (read off the engine's own `error.kind`, with the exceeded bound named by
+  `parseCelToAstWithReason`) produces
+
+  > invalid CEL predicate: Exceeded maxAstNodes (256) … — this is valid CEL that
+  > exceeds the `maxAstNodes` budget (limit 256) — a SIZE fault, not a dialect
+  > mistake, so re-spelling the expression will not fix it. Shrink it (fewer
+  > clauses, shallower nesting, fewer list elements), or precompute the heavy part
+  > into a stored field and reference that field instead. …
+
+  while a genuine dialect/syntax fault keeps the old trailer verbatim. Fixed once at
+  the producer, so all ~10 expression slots benefit — build, metadata registration,
+  lint's `validateStackExpressions`, and the `validate_expression` tool. The
+  remedies are deliberately slot-generic: the slots' combination semantics differ,
+  so PR #6831's RLS-specific "splitting the top-level `&&` widens the grant" is not
+  portable and splitting is offered only with a caveat.
+
+  Also documents, text-only, the completeness gap in `cel-pushdown-limits.ts`'s
+  "nothing else needs to move at GA": a third lint gate (`validateStackExpressions`)
+  covers the same `sharingRules[].condition` and is mode-agnostic, so during the
+  rc grace window lint is stricter than the runtime — benign, tightening-direction,
+  and self-healing at GA. No behaviour change there.
+
+- Updated dependencies [3d5c090]
+- Updated dependencies [e5bd768]
+- Updated dependencies [e027b3e]
+- Updated dependencies [c2429b0]
+- Updated dependencies [445a0c2]
+- Updated dependencies [f6609e6]
+- Updated dependencies [a70358a]
+- Updated dependencies [97e7e3c]
+- Updated dependencies [8828b9e]
+- Updated dependencies [53068c1]
+- Updated dependencies [ee58392]
+- Updated dependencies [f16e54e]
+- Updated dependencies [06be54e]
+- Updated dependencies [259459d]
+- Updated dependencies [3f7f14e]
+- Updated dependencies [6968885]
+- Updated dependencies [eaed61f]
+- Updated dependencies [debe2f6]
+- Updated dependencies [97b0798]
+- Updated dependencies [43a7a8d]
+- Updated dependencies [73f69dc]
+- Updated dependencies [04c56aa]
+- Updated dependencies [b3efeb7]
+- Updated dependencies [ddd075a]
+- Updated dependencies [88154be]
+- Updated dependencies [e8dc61e]
+- Updated dependencies [2f3e793]
+- Updated dependencies [d8e8d9c]
+- Updated dependencies [94e749b]
+- Updated dependencies [ea1d916]
+- Updated dependencies [ae31a19]
+- Updated dependencies [e0f300b]
+- Updated dependencies [62b6a2f]
+- Updated dependencies [5b4780b]
+- Updated dependencies [a933452]
+- Updated dependencies [8140915]
+- Updated dependencies [7b48cf9]
+- Updated dependencies [b5404f4]
+- Updated dependencies [f764691]
+- Updated dependencies [e120a5a]
+- Updated dependencies [e650d67]
+- Updated dependencies [04476e7]
+- Updated dependencies [79228cd]
+- Updated dependencies [b3363e9]
+- Updated dependencies [2ef1807]
+- Updated dependencies [d03fe25]
+- Updated dependencies [2672f85]
+- Updated dependencies [11066f6]
+- Updated dependencies [916af17]
+- Updated dependencies [84c86fb]
+- Updated dependencies [2a2a9fb]
+- Updated dependencies [a2e157c]
+- Updated dependencies [95c4227]
+- Updated dependencies [2a61116]
+- Updated dependencies [d4df105]
+- Updated dependencies [e2798fa]
+- Updated dependencies [0fd8556]
+- Updated dependencies [74155c7]
+- Updated dependencies [6908830]
+- Updated dependencies [8b06bba]
+- Updated dependencies [4c54037]
+- Updated dependencies [0f7157b]
+- Updated dependencies [d9bef45]
+- Updated dependencies [f549a0d]
+- Updated dependencies [82da264]
+- Updated dependencies [9b9b70f]
+- Updated dependencies [f5a9bc2]
+- Updated dependencies [881a3cc]
+- Updated dependencies [ad6317b]
+- Updated dependencies [8a88885]
+- Updated dependencies [5f7669e]
+- Updated dependencies [becbe53]
+- Updated dependencies [b127c8b]
+- Updated dependencies [a80302a]
+- Updated dependencies [474f131]
+- Updated dependencies [050cd82]
+- Updated dependencies [4d552af]
+- Updated dependencies [44d677c]
+- Updated dependencies [c32944d]
+- Updated dependencies [1dd780f]
+- Updated dependencies [c8d6f6e]
+- Updated dependencies [92a67f2]
+- Updated dependencies [9136327]
+- Updated dependencies [bf0ae99]
+- Updated dependencies [cb3b6cd]
+- Updated dependencies [73b7234]
+- Updated dependencies [d2b97c3]
+- Updated dependencies [59b794f]
+- Updated dependencies [fc3a36a]
+- Updated dependencies [69787f0]
+- Updated dependencies [5d022a1]
+- Updated dependencies [042b9ee]
+- Updated dependencies [f549a0d]
+- Updated dependencies [a36db28]
+- Updated dependencies [3f8817a]
+- Updated dependencies [a2443e3]
+- Updated dependencies [e1554b1]
+- Updated dependencies [4856789]
+- Updated dependencies [c3f4916]
+- Updated dependencies [33e0385]
+- Updated dependencies [2205363]
+- Updated dependencies [09fe58d]
+- Updated dependencies [d0a5ceb]
+- Updated dependencies [e18a162]
+- Updated dependencies [d127ff0]
+- Updated dependencies [9b86cf6]
+- Updated dependencies [8825a06]
+- Updated dependencies [5087ac6]
+- Updated dependencies [2d1ddf0]
+- Updated dependencies [354b00f]
+- Updated dependencies [3de535b]
+- Updated dependencies [fe2e15a]
+- Updated dependencies [c6b6bb4]
+- Updated dependencies [2f59da0]
+- Updated dependencies [8ad609c]
+- Updated dependencies [bbee302]
+- Updated dependencies [08863dd]
+- Updated dependencies [56664f5]
+- Updated dependencies [31cbe90]
+- Updated dependencies [90bbf25]
+- Updated dependencies [eb91eba]
+- Updated dependencies [42da73d]
+- Updated dependencies [643b7c7]
+- Updated dependencies [1a15893]
+- Updated dependencies [b70e534]
+- Updated dependencies [2233a85]
+- Updated dependencies [62dd69a]
+- Updated dependencies [e15e679]
+- Updated dependencies [2ab1257]
+- Updated dependencies [4cc4fb7]
+- Updated dependencies [2c26040]
+- Updated dependencies [f758cec]
+- Updated dependencies [78f0be8]
+- Updated dependencies [35f7fb4]
+- Updated dependencies [a5302c7]
+- Updated dependencies [7084313]
+- Updated dependencies [0e043d8]
+- Updated dependencies [dadd1ad]
+- Updated dependencies [2f2e63c]
+- Updated dependencies [486d526]
+- Updated dependencies [89d7b35]
+- Updated dependencies [85ec26d]
+- Updated dependencies [f6476fc]
+- Updated dependencies [4ac12ef]
+- Updated dependencies [b88f5e8]
+- Updated dependencies [42cc219]
+- Updated dependencies [d7e0b42]
+- Updated dependencies [3510e4a]
+- Updated dependencies [aa4b90d]
+- Updated dependencies [54299ca]
+- Updated dependencies [dc61def]
+- Updated dependencies [251e888]
+- Updated dependencies [183b4c4]
+- Updated dependencies [2fdb36e]
+- Updated dependencies [20526f5]
+- Updated dependencies [c5eef1d]
+- Updated dependencies [e0f300b]
+- Updated dependencies [761a0ba]
+- Updated dependencies [be87153]
+- Updated dependencies [60f0dd8]
+- Updated dependencies [a87c5cd]
+- Updated dependencies [a47f338]
+- Updated dependencies [2598216]
+- Updated dependencies [2c7e62d]
+- Updated dependencies [eb7613c]
+- Updated dependencies [ecc9110]
+- Updated dependencies [f7bd4e2]
+- Updated dependencies [361bd5b]
+- Updated dependencies [1818998]
+- Updated dependencies [09ee21c]
+- Updated dependencies [f549a0d]
+- Updated dependencies [3fc2e48]
+- Updated dependencies [e8f435c]
+- Updated dependencies [41610f6]
+  - @objectstack/spec@17.0.0-rc.6
+
 ## 17.0.0-rc.5
 
 ### Patch Changes

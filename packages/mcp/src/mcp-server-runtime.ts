@@ -68,6 +68,330 @@ const DESTRUCTIVE_TOOLS = new Set([
   'delete_field',
 ]);
 
+// ── Metadata outage vs. metadata miss (#6055, ADR-0110 D3) ───────────────────
+
+/**
+ * [#6055] The classification this file gives "the metadata read did not
+ * happen", and the classification it gives "the read happened and found
+ * nothing". Both are the standard catalog's own codes for their status
+ * (`HttpStatusErrorCodeMap[503]` / `[404]`, ADR-0112) — the same spelling the
+ * `sys_metadata` half of this family already emits (#5532 / #5843 / #5705), not
+ * a vocabulary invented for MCP.
+ *
+ * There is no HTTP status on this surface: MCP answers `prompts/get` with a
+ * `GetPromptResult` and `resources/read` with a `ReadResourceResult`, and
+ * neither carries an error envelope (only `CallToolResult` has `isError`). So
+ * the code travels in the payload the surface already had — text for a prompt,
+ * the JSON body for a resource — and that is the strongest discriminator this
+ * transport offers. See the PR body for why the channel was not changed.
+ */
+const METADATA_UNAVAILABLE_CODE = 'SERVICE_UNAVAILABLE';
+const METADATA_MISS_CODE = 'RESOURCE_NOT_FOUND';
+
+/**
+ * [#6055] The sentence for "a read that would have decided this did not
+ * happen", modelled on `METADATA_STORE_UNAVAILABLE_MESSAGE` (#5532) —
+ * *whether it exists is unknown*, plus the retry advice — with two deliberate
+ * differences:
+ *
+ * 1. It names the **metadata service**, not "the metadata store". The verdict
+ *    behind it is `getDiagnosed`'s `degraded`, whose meaning is "at least one
+ *    LOADER threw and nothing answered this item" — a loader-set fact, not a
+ *    single-store one. PR #6051 records that distinction explicitly (it is why
+ *    `degraded` did not copy #5897's `storeUnavailable` spelling), so echoing
+ *    "store" here would import the narrower claim.
+ * 2. It states what the caller is NOT getting. This surface is fail-CLOSED
+ *    both before and after this change — the defect was never that an outage
+ *    widened access, only that it was **described** as an author's decision —
+ *    and saying so keeps the next reader from "restoring" a body here.
+ */
+function metadataUnavailableSentence(subject: string, withheld: string): string {
+  return (
+    `The metadata service could not be read, so whether ${subject} exists is unknown. `
+    + `No ${withheld} is being served for this call. `
+    + 'Retry once the metadata service is reachable.'
+  );
+}
+
+/** What {@link diagnosedGet} and {@link diagnoseEmptyRead} report. */
+interface DiagnosedRead {
+  data: unknown;
+  degraded: boolean;
+  errors: string[];
+}
+
+/**
+ * [#6055] Read one metadata item, keeping the ADR-0110 D3 verdict instead of
+ * flattening an outage into the same `undefined` a never-declared name
+ * produces.
+ *
+ * `IMetadataService.getDiagnosed` is **optional** (#5840): implementations that
+ * predate it cannot report the distinction at all, so a service without it is
+ * read exactly as before and reports nothing degraded — which is precisely what
+ * it could express. Same probe, same fallback, as the two consumers PR #6051
+ * landed (`metadata-protocol/src/protocol.ts`, `objectql/src/plugin.ts`).
+ *
+ * `getDiagnosed` is the diagnosed twin of `get` (registry-first, and
+ * `metadata-manager-get-diagnosed.test.ts` pins that `get()` and
+ * `getDiagnosed().data` agree on every case), so swapping it in for a `get`
+ * call site changes what the caller LEARNS, never what it resolves.
+ */
+async function diagnosedGet(
+  metadataService: IMetadataService,
+  type: string,
+  name: string,
+): Promise<DiagnosedRead> {
+  if (typeof metadataService.getDiagnosed === 'function') {
+    const diagnosed = await metadataService.getDiagnosed(type, name);
+    return {
+      data: diagnosed?.data,
+      degraded: diagnosed?.degraded === true,
+      errors: Array.isArray(diagnosed?.errors) ? diagnosed.errors : [],
+    };
+  }
+  return { data: await metadataService.get(type, name), degraded: false, errors: [] };
+}
+
+/**
+ * [#6055] The verdict for a lookup that did NOT go through `get` — used by the
+ * `object_schema` resource, whose resolver is `getObject(name)`.
+ *
+ * Deliberately a **verdict-only probe run after the empty answer**, rather than
+ * swapping `getObject` out for `getDiagnosed('object', name)`. The ground is
+ * the *contract*, not the runtime: `getObject` is its own member of
+ * `IMetadataService`, and at the time of #6055 that member carried **no
+ * documented equivalence** to `get('object', name)`. Presuming an undocumented
+ * equivalence at a consumer is exactly the private dialect Prime Directive #12
+ * forbids, so the resolver is left untouched and only the *question* "could
+ * this answer be trusted as complete?" is asked of the contract member that is
+ * declared to answer it.
+ *
+ * [#6724] This TSDoc used to offer a second, factual ground — that the
+ * equivalence "does not hold in general", `MetadataFacade.getObject` (objectql)
+ * returning "a different shape from its own `get()`". That claim is **false**,
+ * and it was asserted rather than measured. `SchemaRegistry.getItem`
+ * special-cases `'object'`/`'objects'` straight back to `getObject`, so the
+ * facade's `get('object', n)` resolves through the very same lookup, and the
+ * `item?.content ?? item` unwrap that follows is a no-op — a merged
+ * `ServiceObject` has no `content` key. Measured: the two members hand back the
+ * **identical object reference** on a hit, and both answer `undefined` on a
+ * miss. All three shipped implementations are pinned that way by
+ * `packages/objectql/src/metadata-service-getobject-equivalence.test.ts`
+ * (PR #6839 for #6745), and `IMetadataService.getObject` has documented the
+ * equivalence since PR #6723 (#6505) — so the "no documented equivalence" half
+ * above is a fact about #6055's repo, not today's.
+ *
+ * Correcting the record does not decide the design question, and this note
+ * deliberately does not make that call: whether the resolver should become
+ * `getDiagnosed('object', name)` and shed the extra miss-path read is a
+ * separate judgement, to be made on its own merits by whoever takes it up.
+ *
+ * Consequences of that choice, both acceptable and both deliberate:
+ * - one extra read on the MISS path only (never on a hit, never on success);
+ * - on a host that implements `getDiagnosed` *and* a `getObject` resolving
+ *   somewhere else, a degraded loader set makes this answer "unknown" for an
+ *   object that is genuinely absent. That is the conservative direction — it
+ *   withholds, it never admits — and no such host exists today
+ *   (`MetadataManager` is the only `getDiagnosed` implementation on `main`).
+ *   Since PR #6723 the contract also rules such a host out by declaration, so
+ *   this reads as residual risk against a contract violation, not as a live
+ *   divergence anyone can point at.
+ */
+async function diagnoseEmptyRead(
+  metadataService: IMetadataService,
+  type: string,
+  name: string,
+): Promise<{ degraded: boolean; errors: string[] }> {
+  if (typeof metadataService.getDiagnosed !== 'function') {
+    return { degraded: false, errors: [] };
+  }
+  const diagnosed = await metadataService.getDiagnosed(type, name);
+  return {
+    degraded: diagnosed?.degraded === true,
+    errors: Array.isArray(diagnosed?.errors) ? diagnosed.errors : [],
+  };
+}
+
+/**
+ * What MCP's `prompts/get` answers with — the text-content subset of the SDK's
+ * `GetPromptResult` this surface produces.
+ *
+ * The index signature is not decoration: the SDK's own result types are
+ * `{ [x: string]: unknown; … }` (protocol passthrough plus `_meta`), and a
+ * named interface without it is rejected by `registerPrompt`'s callback
+ * signature. Narrower than `GetPromptResult` on the `content` union so the pin
+ * tests can read `.text` without narrowing at every assertion.
+ */
+export interface AgentPromptResult {
+  [key: string]: unknown;
+  messages: Array<{ role: 'user' | 'assistant'; content: { type: 'text'; text: string } }>;
+}
+
+/** An `Error: …` answer on the prompt surface — this file's existing shape. */
+function promptError(text: string): AgentPromptResult {
+  return { messages: [{ role: 'user' as const, content: { type: 'text' as const, text } }] };
+}
+
+/**
+ * [#6055] Resolve the `agent_prompt` answer for one call.
+ *
+ * Exported so the three states below can be pinned directly: the handler is
+ * registered on a private `McpServer`, and driving it over a transport would
+ * test the SDK rather than this decision.
+ *
+ * The three states, and why each answers what it does:
+ *
+ * - **present** — the agent's instructions plus any UI context. Unchanged.
+ * - **genuinely absent** — `Error: Agent "X" not found`, byte-identical to
+ *   before. A miss is a real fact about what the author declared and this
+ *   surface was always right to state it.
+ * - **degraded** — an honest {@link METADATA_UNAVAILABLE_CODE} sentence.
+ *   Before #6055 this case produced the *not found* text: an availability
+ *   failure reported to an MCP client as a declaration fact, the ADR-0110 D3
+ *   shape. It never widened access (no instructions were served either way),
+ *   so this is a diagnosis fix and MUST stay one — a body served here would be
+ *   a security regression, not a nicety.
+ *
+ * Order matters and is the same narrowing PR #6051 applied to `getMetaItem`:
+ * `degraded` only decides the answer once the read has resolved NOTHING, i.e.
+ * only when the answer would otherwise have been the unfounded "not found".
+ * A read that answered a body is served as it always was.
+ */
+export async function buildAgentPromptResult(
+  metadataService: IMetadataService,
+  args: { agentName?: unknown; objectName?: unknown; recordId?: unknown; viewName?: unknown },
+  logger?: Logger,
+): Promise<AgentPromptResult> {
+  const agentName = String(args.agentName ?? '');
+  if (!agentName) {
+    return promptError('Error: agentName argument is required');
+  }
+
+  const read = await diagnosedGet(metadataService, 'agent', agentName);
+
+  if (read.data === undefined || read.data === null) {
+    if (read.degraded) {
+      logger?.warn(
+        '[MCP] agent prompt refused — the metadata service could not be read, so whether this agent '
+          + 'exists is unknown. The caller was told SERVICE_UNAVAILABLE and no instructions were served '
+          + '(unchanged: nothing is served on a miss either). '
+          + 'Fix: check the loaders behind the metadata service (datasource connection, credentials, table).',
+        { agentName, errors: read.errors },
+      );
+      return promptError(
+        `Error: ${METADATA_UNAVAILABLE_CODE} — `
+          + metadataUnavailableSentence(`agent "${agentName}"`, 'agent instruction'),
+      );
+    }
+    return promptError(`Error: Agent "${agentName}" not found`);
+  }
+
+  const agent = read.data as Agent;
+
+  // Build system prompt from agent instructions + context
+  const parts: string[] = [];
+  parts.push(agent.instructions ?? '');
+
+  const contextHints: string[] = [];
+  if (args.objectName) contextHints.push(`Current object: ${args.objectName}`);
+  if (args.recordId) contextHints.push(`Selected record ID: ${args.recordId}`);
+  if (args.viewName) contextHints.push(`Current view: ${args.viewName}`);
+  if (contextHints.length > 0) {
+    parts.push('\n--- Current Context ---\n' + contextHints.join('\n'));
+  }
+
+  return {
+    messages: [{
+      role: 'assistant' as const,
+      content: { type: 'text' as const, text: parts.join('\n') },
+    }],
+  };
+}
+
+/**
+ * What MCP's `resources/read` answers with — the text-content subset of the
+ * SDK's `ReadResourceResult`. Carries an index signature for the same reason
+ * {@link AgentPromptResult} does.
+ */
+export interface ObjectSchemaResourceResult {
+  [key: string]: unknown;
+  contents: Array<{ uri: string; mimeType: string; text: string }>;
+}
+
+/**
+ * [#6055] Resolve the `objectstack://objects/{objectName}` answer for one call.
+ *
+ * The `agent_prompt` sibling of this fix, on the second occurrence of the same
+ * family in this package: `getObject()` returning `undefined` was read as
+ * `Object "X" not found` whether the object was never declared or every loader
+ * behind the metadata service was down.
+ *
+ * A resource body is JSON, so unlike the prompt surface it can carry the
+ * classification structurally — and both answers now do, so an MCP client can
+ * tell an outage from a miss without parsing prose. The `error` sentence of the
+ * miss is unchanged; `code`/`status` are additive.
+ *
+ * Why the resolver is still `getObject` and the verdict is a second, probe-only
+ * read: see {@link diagnoseEmptyRead}.
+ */
+export async function buildObjectSchemaResource(
+  metadataService: IMetadataService,
+  objectName: string,
+  logger?: Logger,
+): Promise<ObjectSchemaResourceResult> {
+  const uri = `objectstack://objects/${objectName}`;
+  const body = (payload: unknown): ObjectSchemaResourceResult => ({
+    contents: [{ uri, mimeType: 'application/json', text: JSON.stringify(payload) }],
+  });
+
+  const objectDef = await metadataService.getObject(objectName);
+
+  if (!objectDef) {
+    const { degraded, errors } = await diagnoseEmptyRead(metadataService, 'object', objectName);
+    if (degraded) {
+      logger?.warn(
+        '[MCP] object schema withheld — the metadata service could not be read, so whether this object '
+          + 'exists is unknown. The caller was told SERVICE_UNAVAILABLE and no schema was served '
+          + '(unchanged: nothing is served on a miss either). '
+          + 'Fix: check the loaders behind the metadata service (datasource connection, credentials, table).',
+        { objectName, errors },
+      );
+      return body({
+        error: metadataUnavailableSentence(`object "${objectName}"`, 'schema'),
+        code: METADATA_UNAVAILABLE_CODE,
+        status: 503,
+      });
+    }
+    return body({
+      error: `Object "${objectName}" not found`,
+      code: METADATA_MISS_CODE,
+      status: 404,
+    });
+  }
+
+  const def = objectDef as ObjectDef;
+  const fields = def.fields ?? {};
+  const fieldSummary = Object.entries(fields).map(([key, f]) => ({
+    name: key,
+    type: f.type,
+    label: f.label ?? key,
+    required: f.required ?? false,
+  }));
+
+  return {
+    contents: [{
+      uri,
+      mimeType: 'application/json',
+      text: JSON.stringify({
+        name: def.name,
+        label: def.label ?? def.name,
+        fields: fieldSummary,
+        enableFeatures: def.enable ?? {},
+      }, null, 2),
+    }],
+  };
+}
+
 /**
  * MCPServerRuntime — Bridges ObjectStack kernel services to the Model Context Protocol.
  *
@@ -291,42 +615,10 @@ export class MCPServerRuntime {
         description: 'Get the full schema of a specific data object including fields and features',
         mimeType: 'application/json',
       },
-      async (_uri, variables) => {
-        const objectName = String(variables.objectName);
-        const objectDef = await metadataService.getObject(objectName);
-
-        if (!objectDef) {
-          return {
-            contents: [{
-              uri: `objectstack://objects/${objectName}`,
-              mimeType: 'application/json',
-              text: JSON.stringify({ error: `Object "${objectName}" not found` }),
-            }],
-          };
-        }
-
-        const def = objectDef as ObjectDef;
-        const fields = def.fields ?? {};
-        const fieldSummary = Object.entries(fields).map(([key, f]) => ({
-          name: key,
-          type: f.type,
-          label: f.label ?? key,
-          required: f.required ?? false,
-        }));
-
-        return {
-          contents: [{
-            uri: `objectstack://objects/${objectName}`,
-            mimeType: 'application/json',
-            text: JSON.stringify({
-              name: def.name,
-              label: def.label ?? def.name,
-              fields: fieldSummary,
-              enableFeatures: def.enable ?? {},
-            }, null, 2),
-          }],
-        };
-      },
+      async (_uri, variables) =>
+        // [#6055] Outage vs. miss lives in the builder — see
+        // {@link buildObjectSchemaResource}.
+        buildObjectSchemaResource(metadataService, String(variables.objectName), logger),
     );
     resourceCount++;
 
@@ -448,48 +740,10 @@ export class MCPServerRuntime {
           viewName: z.string().optional().describe('Current view name'),
         },
       },
-      async (args) => {
-        const agentName = String(args.agentName ?? '');
-        if (!agentName) {
-          return {
-            messages: [{
-              role: 'user' as const,
-              content: { type: 'text' as const, text: 'Error: agentName argument is required' },
-            }],
-          };
-        }
-
-        const raw = await metadataService.get('agent', agentName);
-        if (!raw) {
-          return {
-            messages: [{
-              role: 'user' as const,
-              content: { type: 'text' as const, text: `Error: Agent "${agentName}" not found` },
-            }],
-          };
-        }
-
-        const agent = raw as Agent;
-
-        // Build system prompt from agent instructions + context
-        const parts: string[] = [];
-        parts.push(agent.instructions ?? '');
-
-        const contextHints: string[] = [];
-        if (args.objectName) contextHints.push(`Current object: ${args.objectName}`);
-        if (args.recordId) contextHints.push(`Selected record ID: ${args.recordId}`);
-        if (args.viewName) contextHints.push(`Current view: ${args.viewName}`);
-        if (contextHints.length > 0) {
-          parts.push('\n--- Current Context ---\n' + contextHints.join('\n'));
-        }
-
-        return {
-          messages: [{
-            role: 'assistant' as const,
-            content: { type: 'text' as const, text: parts.join('\n') },
-          }],
-        };
-      },
+      async (args) =>
+        // [#6055] Outage vs. miss lives in the builder — see
+        // {@link buildAgentPromptResult}.
+        buildAgentPromptResult(metadataService, args, logger),
     );
 
     logger?.info('[MCP] Agent prompts bridged');

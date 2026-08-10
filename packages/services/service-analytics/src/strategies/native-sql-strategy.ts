@@ -12,7 +12,7 @@ import {
 } from './filter-normalizer.js';
 import { compileScopedFilterToSql } from '../read-scope-sql.js';
 import { datasetInvalidError, invalidMemberError } from '../dataset-refusal.js';
-import { likePattern, LIKE_ESCAPE_CHAR, type LikeShape } from '../like-pattern.js';
+import { likePattern, LIKE_ESCAPE_CHAR, asciiLowerSqlExpr, type LikeShape } from '../like-pattern.js';
 import { nextUtcCalendarDay } from '@objectstack/core';
 
 /**
@@ -20,9 +20,10 @@ import { nextUtcCalendarDay } from '@objectstack/core';
  *
  * A table rather than a `switch` so its coverage is *assertable*: the aggregate
  * vocabulary lives in `@objectstack/spec` (`AggregationFunction`), the dataset
- * compiler subtracts the two it cannot lower (`array_agg`, `string_agg`), and
- * `aggregation-lockstep.test.ts` checks that what remains is exactly the keys
- * below. A `switch` gave that no purchase — the missing case fell to
+ * compiler subtracts whatever it cannot lower (`UNSUPPORTED_AGGREGATES` — empty
+ * since #6188 retired its two members, `array_agg` and `string_agg`, from the
+ * spec itself), and `aggregation-lockstep.test.ts` checks that what remains is
+ * exactly the keys below. A `switch` gave that no purchase — the missing case fell to
  * `default: COUNT(*)`, so an aggregate the spec grew would have returned a row
  * count instead of the number the author asked for, silently. objectui#2945.
  *
@@ -716,6 +717,9 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
       equals: '=', notEquals: '!=', gt: '>', gte: '>=', lt: '<', lte: '<=',
       contains: 'LIKE', notContains: 'NOT LIKE',
       startsWith: 'LIKE', endsWith: 'LIKE',
+      // [#6520] `$icontains` — `LIKE` like its neighbours; what separates it is
+      // the ASCII fold applied below, not the keyword.
+      icontains: 'LIKE',
     };
     /**
      * Where each string operator puts the wildcard. [#5567] The pattern itself is
@@ -728,6 +732,9 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     const likeShape: Record<string, LikeShape> = {
       contains: 'contains', notContains: 'contains',
       startsWith: 'starts', endsWith: 'ends',
+      // [#6520] Same wildcard placement as `contains`; the case fold is what
+      // differs, and it is applied to both sides of the comparison below.
+      icontains: 'contains',
     };
 
     // Null predicates and the LIKE family read the column as stored — the former
@@ -758,6 +765,13 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
       params.push(likePattern(shape, values[0]));
       const patternRef = `$${params.length}`;
       params.push(LIKE_ESCAPE_CHAR);
+      // [#6520] `$icontains` folds ASCII case on BOTH sides. Only this operator
+      // folds: the rest of the family is case-EXACT by ruling (#4706 Q2 = A),
+      // and `objectql-strategy.ts`'s echo of this statement carries the same
+      // `fold` flag on the same single row so the two keep describing one query.
+      if (operator === 'icontains') {
+        return `${asciiLowerSqlExpr(rawCol)} ${sqlOp} ${asciiLowerSqlExpr(patternRef)} ESCAPE $${params.length}`;
+      }
       return `${rawCol} ${sqlOp} ${patternRef} ESCAPE $${params.length}`;
     }
 

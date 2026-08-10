@@ -2,6 +2,8 @@
 
 import { classifyFilterToken, CONTEXT_TOKENS } from '@objectstack/spec/data';
 
+import { walkAuthoredFilters, type FilterSurface } from './filter-walk.js';
+
 /**
  * Build-time filter-placeholder diagnostics (issue #3574).
  *
@@ -45,13 +47,16 @@ import { classifyFilterToken, CONTEXT_TOKENS } from '@objectstack/spec/data';
  *
  * ## Scope — filter subtrees only
  *
- * The walk descends into `filter` / `filters` / `runtimeFilter` subtrees and
- * classifies string values inside them. It deliberately does NOT check
- * navigation `recordId` / `params`, which resolve an additional vocabulary —
- * `AppContextSelector` ids such as `{active_package}` — that is meaningless in
- * a filter because filters are not evaluated with the sidebar's selector
- * state. Restricting the walk keeps that legitimate usage out of the rule and
- * holds false positives at zero.
+ * Finding those subtrees is `filter-walk.ts`'s job since #5330 gave the same
+ * traversal a second consumer; this file owns only the judgement on the strings
+ * inside them. The shared walk descends into `filter` / `filters` /
+ * `runtimeFilter` and deliberately does NOT check navigation `recordId` /
+ * `params`, which resolve an additional vocabulary — `AppContextSelector` ids
+ * such as `{active_package}` — that is meaningless in a filter because filters
+ * are not evaluated with the sidebar's selector state. Restricting the walk
+ * keeps that legitimate usage out of the rule and holds false positives at
+ * zero. The seven surfaces below stay THIS rule's declaration, not the walk's:
+ * a shared surface list would let another rule's widening land here silently.
  *
  * Only whole-string placeholders are considered (`'{token}'` / `'${token}'`,
  * anchored). A value that merely contains braces is left alone.
@@ -78,28 +83,22 @@ export interface FilterTokenFinding {
 
 type AnyRec = Record<string, unknown>;
 
-/** Keys whose subtree is a filter — the only place placeholders resolve. */
-const FILTER_KEYS = new Set(['filter', 'filters', 'runtimeFilter']);
+const KNOWN_LIST = CONTEXT_TOKENS.join('}, {');
 
 /**
- * Coerce a collection (array or name-keyed map) to an array of records,
- * injecting `name` from the map key — mirrors the helper in the sibling
- * authoring lints so the rule works on both the parsed (array) and normalized
- * (map) stack shapes.
+ * The presentation collections this rule has scanned since #3574. Declared
+ * here, handed to the shared walk — see the scope note above for why it is not
+ * a constant in `filter-walk.ts`.
  */
-function asArray(v: unknown): AnyRec[] {
-  if (Array.isArray(v)) return v as AnyRec[];
-  if (v && typeof v === 'object') {
-    return Object.entries(v as AnyRec).map(([name, def]) => ({ name, ...(def as AnyRec) }));
-  }
-  return [];
-}
-
-function label(v: unknown, fallback: string): string {
-  return typeof v === 'string' && v.length > 0 ? v : fallback;
-}
-
-const KNOWN_LIST = CONTEXT_TOKENS.join('}, {');
+const TOKEN_FILTER_SURFACES: readonly FilterSurface[] = [
+  { key: 'dashboards', kind: 'dashboard' },
+  { key: 'objects', kind: 'object' },
+  { key: 'views', kind: 'view' },
+  { key: 'reports', kind: 'report' },
+  { key: 'datasets', kind: 'dataset' },
+  { key: 'pages', kind: 'page' },
+  { key: 'apps', kind: 'app' },
+];
 
 /**
  * Classify every string inside an already-identified filter subtree.
@@ -160,43 +159,6 @@ function walkFilterValues(
 }
 
 /**
- * Find `filter` / `filters` / `runtimeFilter` subtrees anywhere beneath
- * `node`, then classify the values inside them.
- *
- * Scanning for filter KEYS rather than enumerating known surfaces is
- * deliberate: widget filters, list-view filters, dataset and measure filters,
- * report runtime filters, and SDUI component filters all spell the key the
- * same way, and a new surface that follows the convention is covered the day
- * it ships. Enumerating surfaces is how #3574 happened — the dashboard was
- * simply never added to the list.
- */
-function scanForFilters(
-  node: unknown,
-  path: string,
-  where: string,
-  out: FilterTokenFinding[],
-  seen: Set<unknown>,
-): void {
-  if (!node || typeof node !== 'object') return;
-  if (seen.has(node)) return;
-  seen.add(node);
-
-  if (Array.isArray(node)) {
-    node.forEach((v, i) => scanForFilters(v, `${path}[${i}]`, where, out, seen));
-    return;
-  }
-
-  for (const [k, v] of Object.entries(node as AnyRec)) {
-    const childPath = `${path}.${k}`;
-    if (FILTER_KEYS.has(k)) {
-      walkFilterValues(v, childPath, where, out, new Set());
-      continue;
-    }
-    scanForFilters(v, childPath, where, out, seen);
-  }
-}
-
-/**
  * Validate filter placeholders across a schema-parsed stack.
  *
  * Pure `(stack) => Finding[]`; no I/O. Covers dashboards (widget + global
@@ -207,43 +169,9 @@ export function validateFilterTokens(stack: Record<string, unknown> | undefined 
   if (!stack || typeof stack !== 'object') return [];
   const out: FilterTokenFinding[] = [];
 
-  const surfaces: Array<[key: string, kind: string]> = [
-    ['dashboards', 'dashboard'],
-    ['objects', 'object'],
-    ['views', 'view'],
-    ['reports', 'report'],
-    ['datasets', 'dataset'],
-    ['pages', 'page'],
-    ['apps', 'app'],
-  ];
-
-  for (const [key, kind] of surfaces) {
-    const items = asArray((stack as AnyRec)[key]);
-    items.forEach((item, i) => {
-      const name = label(item.name ?? item.id, `#${i}`);
-      // Dashboards are the surface #3574 was filed against; name the widget in
-      // `where` so the author can jump straight to it.
-      if (kind === 'dashboard') {
-        const widgets = Array.isArray(item.widgets) ? (item.widgets as AnyRec[]) : [];
-        widgets.forEach((w, wi) => {
-          const wName = label(w.id ?? w.title, `#${wi}`);
-          scanForFilters(
-            w,
-            `${key}[${i}].widgets[${wi}]`,
-            `dashboard "${name}" · widget "${wName}"`,
-            out,
-            new Set(),
-          );
-        });
-        // …and everything else on the dashboard (globalFilters, header, etc.)
-        // minus the widgets already covered above.
-        const { widgets: _skip, ...rest } = item;
-        scanForFilters(rest, `${key}[${i}]`, `dashboard "${name}"`, out, new Set());
-        return;
-      }
-      scanForFilters(item, `${key}[${i}]`, `${kind} "${name}"`, out, new Set());
-    });
-  }
+  walkAuthoredFilters(stack, TOKEN_FILTER_SURFACES, ({ value, path, where }) => {
+    walkFilterValues(value, path, where, out, new Set());
+  });
 
   return out;
 }

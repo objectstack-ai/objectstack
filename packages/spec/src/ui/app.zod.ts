@@ -5,7 +5,7 @@ import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
 import { ExpressionInputSchema } from '../shared/expression.zod';
 import { I18nLabelSchema } from './i18n.zod';
 import { retiredKey } from '../shared/retired-key';
-import { strictUnknownKeyError } from '../shared/suggestions.zod';
+import { strictObject, type StrictObjectOptions } from '../shared/strict-object';
 
 /**
  * Base Navigation Item Schema
@@ -54,12 +54,6 @@ import { ProtectionSchema } from '../shared/protection.zod';
  * tombstones there, so strictness now guards the real contract rather than
  * dead surface (ADR-0049 enforce-or-remove).
  */
-
-/** Keys every nav-item variant shares (drift-guarded by app.test.ts). */
-const BASE_NAV_ITEM_KEYS = [
-  'id', 'label', 'icon', 'order', 'badge', 'badgeVariant', 'visible',
-  'requiredPermissions', 'requiresObject', 'requiresService', 'type',
-] as const;
 
 /**
  * Semantic near-misses shared by every nav-item variant.
@@ -124,61 +118,142 @@ const NAV_EXPANDED_ALIASES_ELSEWHERE: Readonly<Record<string, string>> = {
   isopen: 'type: \'group\' (with expanded)',
 };
 
-/** Per-variant payload keys, for the error map's suggestion pool. */
-const NAV_VARIANT_KEYS: Readonly<Record<string, readonly string[]>> = {
-  object: ['objectName', 'viewName', 'recordId', 'recordMode', 'filters', 'children'],
-  dashboard: ['dashboardName'],
-  page: ['pageName', 'params'],
-  url: ['url', 'target'],
-  report: ['reportName'],
-  action: ['actionDef'],
-  component: ['componentRef', 'params'],
-  group: ['expanded', 'children'],
-  separator: [],
+/** Every `type` a navigation item can carry — one strict branch each. */
+type NavItemVariant =
+  | 'object' | 'dashboard' | 'page' | 'url' | 'report'
+  | 'action' | 'component' | 'group' | 'separator';
+
+/**
+ * The two variants that ACCEPT `children`.
+ *
+ * Not on the branch schema itself — {@link NavigationItemSchema} `.extend()`s
+ * the recursive `children` onto these two members, and strictness plus the
+ * error map ride that extension, so `children` is legal on exactly these two at
+ * the door anything actually parses. Two facts follow, and they are the reason
+ * this set exists at all:
+ *
+ * 1. the `children` PRESCRIPTION must not be filed on them — it would be a dead
+ *    entry on the extended surface, which `alias-integrity.test.ts` rejects;
+ * 2. `children` belongs in their `extraKeys`, so a near-miss (`childs`,
+ *    `childrens`) still resolves on the extended surface even though the branch
+ *    schema's own `.shape` has no such key.
+ *
+ * Kept as a two-entry set rather than the nine-entry key transcription this
+ * factory used to carry (#5593): everything else the suggestion pool needs is
+ * read from each branch's own `.shape`. Getting this set wrong in the dangerous
+ * direction — naming a variant whose member does accept `children` — fails the
+ * gate rather than shipping a dead entry.
+ */
+const NAV_VARIANTS_ACCEPTING_CHILDREN: ReadonlySet<NavItemVariant> = new Set(['object', 'group']);
+
+/**
+ * The separator's own alias table — the subset of {@link NAV_ITEM_ALIASES} whose
+ * TARGET the separator branch actually declares.
+ *
+ * A separator is a divider: `type`, an optional `id`, an optional `order`, and
+ * nothing else. Every other entry in the shared table would name a key this
+ * branch rejects, so it is demoted to {@link SEPARATOR_NAV_ITEM_GUIDANCE}.
+ */
+const SEPARATOR_NAV_ITEM_ALIASES: Readonly<Record<string, string>> = {
+  name: 'id',
+  sort: 'order',
+  sortorder: 'order',
+  position: 'order',
 };
 
 /**
- * Build the strict error map for one nav-item variant. Each variant gets its
- * own so the "did you mean" pool is that variant's real key set — suggesting
- * `dashboardName` on a `url` item would be noise, not help.
+ * What a separator answers for the base nav keys it does NOT declare.
+ *
+ * One sentence, filed under each key an author is likely to reach for, because
+ * they all have the same answer: a divider carries no label, no icon, no badge
+ * and no gate — those belong on the items it separates, and a *titled* section
+ * is a `group`, not a separator. Filed as `guidance` rather than as aliases
+ * because there is no key here to rename onto (finding 7 is exactly the mistake
+ * of answering with one).
  */
-const navItemUnknownKeyError = (variant: keyof typeof NAV_VARIANT_KEYS) =>
-  strictUnknownKeyError({
-    surface: `this \`${variant}\` navigation item`,
-    knownKeys: [...BASE_NAV_ITEM_KEYS, ...NAV_VARIANT_KEYS[variant]],
-    aliases: {
-      ...NAV_ITEM_ALIASES,
-      // Cross-variant payloads: naming the right key on the wrong `type` is
-      // the commonest nav mistake, so point at the type that owns it.
-      ...(variant !== 'object' ? { objectname: 'type: \'object\' (with objectName)' } : {}),
-      ...(variant !== 'page' ? { pagename: 'type: \'page\' (with pageName)' } : {}),
-      ...(variant !== 'url' ? { url: 'type: \'url\' (with url)' } : {}),
-      ...(variant !== 'dashboard' ? { dashboardname: 'type: \'dashboard\' (with dashboardName)' } : {}),
-      ...(variant !== 'report' ? { reportname: 'type: \'report\' (with reportName)' } : {}),
-      ...(variant !== 'component' ? { componentref: 'type: \'component\' (with componentRef)' } : {}),
-      // `expanded` is a cross-variant key too — it just looks shared because
-      // "start expanded" is a sidebar-wide idea. It exists on `group` alone, so
-      // only `group` may answer with the bare key name (#5555).
-      ...(variant !== 'group' ? NAV_EXPANDED_ALIASES_ELSEWHERE : NAV_EXPANDED_ALIASES_ON_GROUP),
-    },
-    guidance: {
-      children:
-        '`children` is only meaningful on a `group` item (or an `object` item nesting its ' +
-        'views). Nest entries under `{ type: \'group\', children: [...] }`.',
-    },
-    history:
-      'Until #4001 these were dropped silently — the entry still parsed, so a mis-spelled ' +
-      'config shipped as a nav item that quietly ignored it (a stripped `visible` renders ' +
-      'an entry that should have been gated).',
-  });
+const SEPARATOR_NAV_ITEM_GUIDANCE: Readonly<Record<string, string>> = Object.fromEntries(
+  ['label', 'title', 'icon', 'badge', 'badgeVariant', 'visible', 'requiredPermissions', 'requiresObject', 'requiresService']
+    .map((key) => [
+      key,
+      `\`${key}\` is not a separator key — a separator is a divider and declares only `
+      + '`id` and `order`. Put labels, icons, badges and visibility gating on the items it '
+      + "separates, or use `{ type: 'group', label: '…' }` for a titled section.",
+    ]),
+);
 
-const actionDefUnknownKeyError = strictUnknownKeyError({
-  surface: "this nav item's action definition",
-  knownKeys: ['actionName', 'params'],
-  aliases: { action: 'actionName', name: 'actionName', args: 'params', input: 'params' },
+/**
+ * Authoring-surface options for one nav-item variant.
+ *
+ * Each variant gets its own table so the "did you mean" pool is that variant's
+ * real key set — suggesting `dashboardName` on a `url` item would be noise, not
+ * help. Before #5593 the pool was a hand-transcribed
+ * `[...BASE_NAV_ITEM_KEYS, ...NAV_VARIANT_KEYS[variant]]`; `strictObject` reads
+ * it from the branch's `.shape` instead, so the two copies became one and the
+ * nine tables joined the shape-backed half of the alias-integrity gate — which
+ * is where the "alias target must be a key this shape accepts" claim finally
+ * reaches the family that historically broke it (#5555).
+ *
+ * ⚠️ The PROSE targets below survive that stronger judgement deliberately, and
+ * `alias-integrity.test.ts`'s `PROSE_ALIAS_TARGETS` allowlist matches these
+ * strings EXACTLY. They are not key names and must not become key names: the
+ * key an author wrote is spelled correctly, it is the `type` that is wrong, so
+ * answering with a bare key name would be ledger finding 7 (a rename onto a key
+ * this variant also rejects).
+ */
+const navItemSurface = (variant: NavItemVariant): StrictObjectOptions => ({
+  surface: `this \`${variant}\` navigation item`,
+  aliases: {
+    // ⚠️ `separator` is the ONE branch that spreads nothing — it declares
+    // `type`/`id`/`order` and no more — so the shared table's targets (`label`,
+    // `visible`, `requiredPermissions`, `badgeVariant`, `requiresObject`) are
+    // keys IT REJECTS. Answering `title` with *"did you mean `label`?"* there
+    // was ledger finding 7, live on `main`: the author fixes the spelling as
+    // instructed and is rejected a second time, with no suggestion left. It
+    // survived #5483's guard because the hand-transcribed key list handed every
+    // variant `[...BASE_NAV_ITEM_KEYS, ...]`, base keys included, so the
+    // transcription said `label` was known here and the guard believed it —
+    // the exact array-vs-shape drift #5593 exists to abolish, found by the
+    // migration itself. The nine base-only spellings become a PRESCRIPTION
+    // below instead of a rename.
+    ...(variant === 'separator' ? SEPARATOR_NAV_ITEM_ALIASES : NAV_ITEM_ALIASES),
+    // Cross-variant payloads: naming the right key on the wrong `type` is
+    // the commonest nav mistake, so point at the type that owns it.
+    ...(variant !== 'object' ? { objectname: 'type: \'object\' (with objectName)' } : {}),
+    ...(variant !== 'page' ? { pagename: 'type: \'page\' (with pageName)' } : {}),
+    ...(variant !== 'url' ? { url: 'type: \'url\' (with url)' } : {}),
+    ...(variant !== 'dashboard' ? { dashboardname: 'type: \'dashboard\' (with dashboardName)' } : {}),
+    ...(variant !== 'report' ? { reportname: 'type: \'report\' (with reportName)' } : {}),
+    ...(variant !== 'component' ? { componentref: 'type: \'component\' (with componentRef)' } : {}),
+    // `expanded` is a cross-variant key too — it just looks shared because
+    // "start expanded" is a sidebar-wide idea. It exists on `group` alone, so
+    // only `group` may answer with the bare key name (#5555).
+    ...(variant !== 'group' ? NAV_EXPANDED_ALIASES_ELSEWHERE : NAV_EXPANDED_ALIASES_ON_GROUP),
+  },
+  // The recursive `children` key, which lives on the UNION member rather than on
+  // the branch — see {@link NAV_VARIANTS_ACCEPTING_CHILDREN}. Naming it keeps a
+  // near-miss resolvable on the surface that really accepts it.
+  ...(NAV_VARIANTS_ACCEPTING_CHILDREN.has(variant) ? { extraKeys: ['children'] } : {}),
+  // Filed only where it can FIRE. `children` is legal on the `object` and
+  // `group` members, so the prescription is written for the other seven; #5483's
+  // guard had to exempt the two by name (`VARIANT_LEGAL_GUIDANCE`) because a
+  // transcription cannot tell a legal variant from a dead entry. The shape can,
+  // so the exemption is deleted and the table is simply correct per variant
+  // (#5593) — the same demotion-instead-of-tolerance move #5555 made one field
+  // over. The separator's own prescriptions ride alongside it.
+  guidance: {
+    ...(NAV_VARIANTS_ACCEPTING_CHILDREN.has(variant)
+      ? {}
+      : {
+          children:
+            '`children` is only meaningful on a `group` item (or an `object` item nesting its ' +
+            'views). Nest entries under `{ type: \'group\', children: [...] }`.',
+        }),
+    ...(variant === 'separator' ? SEPARATOR_NAV_ITEM_GUIDANCE : {}),
+  },
   history:
-    'Until #4001 these were dropped silently — the definition still parsed, so clicking ' +
-    'the entry dispatched a different action than the author declared.',
+    'Until #4001 these were dropped silently — the entry still parsed, so a mis-spelled ' +
+    'config shipped as a nav item that quietly ignored it (a stripped `visible` renders ' +
+    'an entry that should have been gated).',
 });
 
 /**
@@ -194,9 +269,12 @@ const actionDefUnknownKeyError = strictUnknownKeyError({
  * spread copies the per-key schemas into a FRESH `z.object` whose posture is
  * its own. Nothing inherits from here, in either direction.
  *
- * And every branch already applies its own `.strict()` with the curated
- * `navItemUnknownKeyError`, so every key this base contributes is ALREADY
- * gated at all nine doors. This schema is module-private and is never parsed —
+ * And every branch already applies its own `strictObject` with the curated
+ * per-variant table ({@link navItemSurface}; `navItemUnknownKeyError` until
+ * #5593), so every key this base contributes is ALREADY gated at all nine
+ * doors — and, since #5593, the "did you mean" pool each door offers is read
+ * from that branch's own shape rather than from a transcription that included
+ * these keys whether the branch spread them or not. This schema is module-private and is never parsed —
  * `.strict()` is a property of a PARSE, so closing it would enforce exactly
  * nothing while making a shape fragment look load-bearing (#4583: *"a
  * precisely-validated dead slot is the more convincing lie"*).
@@ -303,7 +381,7 @@ const BaseNavItemSchema = z.object({
  *   objectName: 'ticket', filters: { owner_id: '{current_user_id}', status: 'open' } }
  * ```
  */
-export const ObjectNavItemSchema = lazySchema(() => z.object({
+export const ObjectNavItemSchema = lazySchema(() => strictObject(navItemSurface('object'), {
   ...BaseNavItemSchema.shape,
   type: z.literal('object'),
   objectName: z.string().describe('Target object name'),
@@ -343,7 +421,37 @@ export const ObjectNavItemSchema = lazySchema(() => z.object({
   filters: z.record(z.string(), z.string()).optional().describe(
     'URL filter conditions — targets the /:objectName/data bare surface via filter[<field>]=<value> params instead of a saved view. Values support template vars {current_user_id}, {current_org_id}. Mutually exclusive with recordId/viewName.',
   ),
-}, { error: navItemUnknownKeyError('object') }).strict());
+  /**
+   * Deep-link auto-run (#4848): after landing on the object's LIST surface,
+   * the shell runs this declared action once — the entry navigates AND opens
+   * the action (e.g. a create dialog) in one click, instead of dropping the
+   * user on the list to find the toolbar button themselves.
+   *
+   * This is the declared form of the `?runAction=<actionName>` URL contract
+   * that cloud#844 shipped as two private string halves (objectui's
+   * `CloudOnboardingNext.tsx` concatenating the query, its
+   * `EnvironmentListToolbar.tsx` consuming it by literal match) — an implicit
+   * cross-repo contract neither side's rename turned red. Declaring the
+   * reference here is what makes it validatable: `defineStack`'s
+   * cross-reference walk and `validate-action-name-refs` (lint) both reject a
+   * name that resolves to no defined action.
+   *
+   * The name resolves against the stack's declared actions (global
+   * `stack.actions` + any object's `actions`) — the same "defined ANYWHERE"
+   * scope every other name-bound action surface uses. It does NOT additionally
+   * assert the action is placed on this object's list toolbar; that is the
+   * consumer's dispatch concern (same deliberate scope note as
+   * `validate-action-name-refs`).
+   *
+   * List-surface semantics only, so it composes with `viewName`, `filters`,
+   * or the default view — but not with `recordId` (a record detail has no
+   * list toolbar to auto-run; rejected by `objectNavTargetExclusivity` so the
+   * dead combination is unrepresentable rather than silently ignored).
+   */
+  runAction: z.string().optional().describe(
+    'Auto-run this declared action once on arrival at the object\'s list surface (deep-link "navigate = run action", #4848). Must name an action defined in the stack; validated by defineStack and lint. Not combinable with recordId.',
+  ),
+}));
 
 /**
  * Correct-by-construction guard (ADR-0053 philosophy): `filters` combined
@@ -355,7 +463,7 @@ export const ObjectNavItemSchema = lazySchema(() => z.object({
  * ignored when recordId is set".
  */
 const objectNavTargetExclusivity = (
-  item: { filters?: unknown; recordId?: unknown; viewName?: unknown },
+  item: { filters?: unknown; recordId?: unknown; viewName?: unknown; runAction?: unknown },
   ctx: z.RefinementCtx,
 ): void => {
   if (item.filters && (item.recordId || item.viewName)) {
@@ -368,64 +476,87 @@ const objectNavTargetExclusivity = (
         + 'Remove the extra field(s); runtime precedence would silently ignore them.',
     });
   }
+  // `runAction` is a LIST-surface contract (#4848): the consumer auto-runs the
+  // action from the list toolbar on arrival. A `recordId` entry lands on a
+  // record detail instead, so the declared auto-run would silently do nothing —
+  // the exact dead affordance the declared reference exists to make impossible.
+  if (item.runAction && item.recordId) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['runAction'],
+      message:
+        '`runAction` cannot be combined with `recordId` — the auto-run fires on the object\'s '
+        + 'LIST surface, and a recordId entry lands on a record detail instead, so the declared '
+        + 'action would never run. Remove `recordId` to keep the list deep-link, or remove '
+        + '`runAction` to keep the record deep-link.',
+    });
+  }
 };
 
 /**
  * 2. Dashboard Navigation Item
  * Navigates to a specific dashboard.
  */
-export const DashboardNavItemSchema = lazySchema(() => z.object({
+export const DashboardNavItemSchema = lazySchema(() => strictObject(navItemSurface('dashboard'), {
   ...BaseNavItemSchema.shape,
   type: z.literal('dashboard'),
   dashboardName: z.string().describe('Target dashboard name'),
-}, { error: navItemUnknownKeyError('dashboard') }).strict());
+}));
 
 /**
  * 3. Page Navigation Item
  * Navigates to a custom UI page/component.
  */
-export const PageNavItemSchema = lazySchema(() => z.object({
+export const PageNavItemSchema = lazySchema(() => strictObject(navItemSurface('page'), {
   ...BaseNavItemSchema.shape,
   type: z.literal('page'),
   pageName: z.string().describe('Target custom page component name'),
   // OPEN by design: the page owns its own param contract.
   params: z.record(z.string(), z.unknown()).optional().describe('Parameters passed to the page context'),
-}, { error: navItemUnknownKeyError('page') }).strict());
+}));
 
 /**
  * 4. URL Navigation Item
  * Navigates to an external or absolute URL.
  */
-export const UrlNavItemSchema = lazySchema(() => z.object({
+export const UrlNavItemSchema = lazySchema(() => strictObject(navItemSurface('url'), {
   ...BaseNavItemSchema.shape,
   type: z.literal('url'),
   url: z.string().describe('Target external URL'),
   target: z.enum(['_self', '_blank']).default('_self').describe('Link target window'),
-}, { error: navItemUnknownKeyError('url') }).strict());
+}));
 
 /**
  * 5. Report Navigation Item
  * Navigates to a specific report.
  */
-export const ReportNavItemSchema = lazySchema(() => z.object({
+export const ReportNavItemSchema = lazySchema(() => strictObject(navItemSurface('report'), {
   ...BaseNavItemSchema.shape,
   type: z.literal('report'),
   reportName: z.string().describe('Target report name'),
-}, { error: navItemUnknownKeyError('report') }).strict());
+}));
 
 /**
  * 6. Action Navigation Item
  * Triggers an action (e.g. opening a flow, running a script, or launching a screen action).
  */
-export const ActionNavItemSchema = lazySchema(() => z.object({
+export const ActionNavItemSchema = lazySchema(() => strictObject(navItemSurface('action'), {
   ...BaseNavItemSchema.shape,
   type: z.literal('action'),
-  actionDef: z.object({
+  actionDef: strictObject(
+    {
+      surface: "this nav item's action definition",
+      aliases: { action: 'actionName', name: 'actionName', args: 'params', input: 'params' },
+      history:
+        'Until #4001 these were dropped silently — the definition still parsed, so clicking ' +
+        'the entry dispatched a different action than the author declared.',
+    },
+    {
     actionName: z.string().describe('Action machine name to execute'),
     // OPEN by design: the action owns its own param contract.
     params: z.record(z.string(), z.unknown()).optional().describe('Parameters passed to the action'),
-  }, { error: actionDefUnknownKeyError }).strict().describe('Action definition to execute when clicked'),
-}, { error: navItemUnknownKeyError('action') }).strict());
+  }).describe('Action definition to execute when clicked'),
+}));
 
 /**
  * 7. Component Navigation Item
@@ -446,25 +577,25 @@ export const ActionNavItemSchema = lazySchema(() => z.object({
  *   componentRef: 'metadata:resource', params: { type: 'object' } }
  * ```
  */
-export const ComponentNavItemSchema = lazySchema(() => z.object({
+export const ComponentNavItemSchema = lazySchema(() => strictObject(navItemSurface('component'), {
   ...BaseNavItemSchema.shape,
   type: z.literal('component'),
   componentRef: z.string().describe('Component registry key (e.g. "metadata:directory")'),
   // OPEN by design: props are the component's own contract.
   params: z.record(z.string(), z.unknown()).optional().describe('Props passed to the component'),
-}, { error: navItemUnknownKeyError('component') }).strict());
+}));
 
 /**
  * 8. Group Navigation Item
  * A container for child navigation items (Sub-menu).
  * Does not perform navigation itself.
  */
-export const GroupNavItemSchema = lazySchema(() => z.object({
+export const GroupNavItemSchema = lazySchema(() => strictObject(navItemSurface('group'), {
   ...BaseNavItemSchema.shape,
   type: z.literal('group'),
   expanded: z.boolean().default(false).describe('Default expansion state in sidebar'),
   // children property is added in the recursive definition below
-}, { error: navItemUnknownKeyError('group') }).strict());
+}));
 
 /**
  * 9. Separator Navigation Item
@@ -472,11 +603,11 @@ export const GroupNavItemSchema = lazySchema(() => z.object({
  * match the objectui renderer's `item.type === 'separator'` branch
  * (inverse-drift fix, liveness audit #1878/#1891/#1894).
  */
-const SeparatorNavItemSchema = lazySchema(() => z.object({
+const SeparatorNavItemSchema = lazySchema(() => strictObject(navItemSurface('separator'), {
   type: z.literal('separator'),
   id: SnakeCaseIdentifierSchema.optional().describe('Optional id for the separator'),
   order: z.number().optional().describe('Sort order within the same level (lower = first)'),
-}, { error: navItemUnknownKeyError('separator') }).strict());
+}));
 
 /** Separator branch — internal, mirrors {@link SeparatorNavItemSchema}. */
 type SeparatorNavItem = z.infer<typeof SeparatorNavItemSchema>;
@@ -620,21 +751,20 @@ export const NavigationItemSchema: z.ZodType<NavigationItem, NavigationItemInput
  *   ],
  * }
  */
-export const NavigationContributionSchema = lazySchema(() => z.object({
-  app: SnakeCaseIdentifierSchema.describe('Target app name to contribute navigation into (e.g. "setup")'),
-  group: SnakeCaseIdentifierSchema.optional().describe('Target group nav-item id to append into (e.g. "group_integrations"); omit to append at the app top level'),
-  priority: z.number().int().min(0).default(200).describe('Merge priority within the target group — lower applied first (matches object extender priority)'),
-  items: z.array(NavigationItemSchema).describe('Navigation items contributed into the target app/group'),
-}, {
-  error: strictUnknownKeyError({
+export const NavigationContributionSchema = lazySchema(() => strictObject(
+  {
     surface: 'this navigation contribution',
-    knownKeys: ['app', 'group', 'priority', 'items'],
     aliases: { targetapp: 'app', appname: 'app', targetgroup: 'group', groupid: 'group', order: 'priority', navigation: 'items' },
     history:
       'Until #4001 these were dropped silently — the contribution still parsed, so a ' +
       'package injected its menu into the wrong place, or nowhere.',
-  }),
-}).strict().describe('A navigation contribution: a package injecting nav items into an app it does not own (ADR-0029 D7)'));
+  },
+  {
+  app: SnakeCaseIdentifierSchema.describe('Target app name to contribute navigation into (e.g. "setup")'),
+  group: SnakeCaseIdentifierSchema.optional().describe('Target group nav-item id to append into (e.g. "group_integrations"); omit to append at the app top level'),
+  priority: z.number().int().min(0).default(200).describe('Merge priority within the target group — lower applied first (matches object extender priority)'),
+  items: z.array(NavigationItemSchema).describe('Navigation items contributed into the target app/group'),
+}).describe('A navigation contribution: a package injecting nav items into an app it does not own (ADR-0029 D7)'));
 /**
  * The authoring shape of a contribution (#4195) — `priority` is `.default(200)`
  * and each item is a {@link NavigationItemInput}, so this is what a package
@@ -649,21 +779,20 @@ export type NavigationContributionParsed = z.infer<typeof NavigationContribution
  * App Branding Configuration
  * Allows configuring the look and feel of the specific app.
  */
-export const AppBrandingSchema = lazySchema(() => z.object({
-  primaryColor: z.string().optional().describe('Primary theme color hex code'),
-  accentColor: z.string().optional().describe('Accent color hex code (highlights, active states). Declared to match the objectui ConsoleLayout read of branding.accentColor (inverse-drift fix, liveness audit #1878/#1891/#1894).'),
-  logo: z.string().optional().describe('Custom logo URL for this app'),
-  favicon: z.string().optional().describe('Custom favicon URL for this app'),
-}, {
-  error: strictUnknownKeyError({
+export const AppBrandingSchema = lazySchema(() => strictObject(
+  {
     surface: "this app's branding block",
-    knownKeys: ['primaryColor', 'accentColor', 'logo', 'favicon'],
     aliases: { primary: 'primaryColor', accent: 'accentColor', color: 'primaryColor', logourl: 'logo', icon: 'favicon', theme: 'primaryColor' },
     history:
       'Until #4001 these were dropped silently — branding still parsed, so a theme the ' +
       'author set never reached the shell.',
-  }),
-}).strict());
+  },
+  {
+  primaryColor: z.string().optional().describe('Primary theme color hex code'),
+  accentColor: z.string().optional().describe('Accent color hex code (highlights, active states). Declared to match the objectui ConsoleLayout read of branding.accentColor (inverse-drift fix, liveness audit #1878/#1891/#1894).'),
+  logo: z.string().optional().describe('Custom logo URL for this app'),
+  favicon: z.string().optional().describe('Custom favicon URL for this app'),
+}));
 
 /**
  * `app.areas[].order`, retired in 17.0.0 (#4667, ADR-0049).
@@ -780,7 +909,29 @@ const AREA_REQUIRED_PERMISSIONS_RETIRED =
  * };
  * ```
  */
-export const NavigationAreaSchema = lazySchema(() => z.object({
+export const NavigationAreaSchema = lazySchema(() => strictObject(
+  {
+    surface: 'this navigation area',
+    // `sort: 'order'` retired with the key it pointed at (#4667); the three
+    // gating aliases (`visibleWhen`/`visibleOn`/`permissions`) retired with
+    // theirs (#4651). An alias must never rename onto a key that is itself
+    // gone — it would answer "unknown key" with a second unknown key — so each
+    // moves to `guidance` and carries the prescription instead.
+    aliases: { title: 'label', name: 'id', items: 'navigation', children: 'navigation' },
+    guidance: {
+      order: AREA_ORDER_RETIRED,
+      sort: AREA_ORDER_RETIRED,
+      visible: AREA_VISIBLE_RETIRED,
+      visibleWhen: AREA_VISIBLE_RETIRED,
+      visibleOn: AREA_VISIBLE_RETIRED,
+      requiredPermissions: AREA_REQUIRED_PERMISSIONS_RETIRED,
+      permissions: AREA_REQUIRED_PERMISSIONS_RETIRED,
+    },
+    history:
+      'Until #4001 these were dropped silently — the area still parsed, so its gating or ' +
+      'ordering was quietly ignored.',
+  },
+  {
   /** Unique area identifier */
   id: SnakeCaseIdentifierSchema.describe('Unique area identifier (lowercase snake_case)'),
 
@@ -804,30 +955,7 @@ export const NavigationAreaSchema = lazySchema(() => z.object({
 
   /** Navigation items within this area */
   navigation: z.array(NavigationItemSchema).describe('Navigation items within this area'),
-}, {
-  error: strictUnknownKeyError({
-    surface: 'this navigation area',
-    knownKeys: ['id', 'label', 'icon', 'description', 'navigation'],
-    // `sort: 'order'` retired with the key it pointed at (#4667); the three
-    // gating aliases (`visibleWhen`/`visibleOn`/`permissions`) retired with
-    // theirs (#4651). An alias must never rename onto a key that is itself
-    // gone — it would answer "unknown key" with a second unknown key — so each
-    // moves to `guidance` and carries the prescription instead.
-    aliases: { title: 'label', name: 'id', items: 'navigation', children: 'navigation' },
-    guidance: {
-      order: AREA_ORDER_RETIRED,
-      sort: AREA_ORDER_RETIRED,
-      visible: AREA_VISIBLE_RETIRED,
-      visibleWhen: AREA_VISIBLE_RETIRED,
-      visibleOn: AREA_VISIBLE_RETIRED,
-      requiredPermissions: AREA_REQUIRED_PERMISSIONS_RETIRED,
-      permissions: AREA_REQUIRED_PERMISSIONS_RETIRED,
-    },
-    history:
-      'Until #4001 these were dropped silently — the area still parsed, so its gating or ' +
-      'ordering was quietly ignored.',
-  }),
-}).strict());
+}));
 
 /**
  * App Context Selector Schema
@@ -903,7 +1031,16 @@ const CONTEXT_SELECTOR_RETIRED_KEY_GUIDANCE: Readonly<Record<string, string>> = 
     + 'Delete the key.',
 };
 
-export const AppContextSelectorSchema = lazySchema(() => z.object({
+export const AppContextSelectorSchema = lazySchema(() => strictObject(
+  {
+    surface: 'this app context selector',
+    aliases: { name: 'id', title: 'label', source: 'optionsSource', options: 'optionsSource' },
+    guidance: CONTEXT_SELECTOR_RETIRED_KEY_GUIDANCE,
+    history:
+      'Until #4001 these were dropped silently — the selector still parsed, so its scope ' +
+      'variable behaved differently than declared.',
+  },
+  {
   /**
    * Identifier — also the template-variable name the selected value is
    * exposed under. Reference it in nav items as `{<id>}`
@@ -923,7 +1060,15 @@ export const AppContextSelectorSchema = lazySchema(() => z.object({
    * Re-uses existing REST surfaces (e.g. `/api/v1/packages`) so no
    * bespoke option API is required.
    */
-  optionsSource: z.object({
+  optionsSource: strictObject(
+    {
+      surface: "this context selector's options source",
+      aliases: { url: 'endpoint', path: 'endpoint', value: 'valueKey', label: 'labelKey', filters: 'filter', where: 'filter' },
+      history:
+        'Until #4001 these were dropped silently — the source still parsed, so the ' +
+        'dropdown resolved its options from a different shape than declared.',
+    },
+    {
     endpoint: z.string().describe('REST endpoint returning the option rows (e.g. /api/v1/packages)'),
     valueKey: z.string().default('id').describe('Row property used as the option value (dotted path allowed, e.g. "manifest.id")'),
     labelKey: z.string().default('name').describe('Row property used as the option label (dotted path allowed, e.g. "manifest.name")'),
@@ -943,32 +1088,22 @@ export const AppContextSelectorSchema = lazySchema(() => z.object({
      * filter: [{ key: 'manifest.scope', op: 'nin', value: ['system', 'cloud'] }]
      * ```
      */
-    filter: z.array(z.object({
+    filter: z.array(strictObject(
+      {
+        surface: 'this context-selector option filter',
+        aliases: { field: 'key', path: 'key', operator: 'op', values: 'value' },
+        history:
+          'Until #4001 these were dropped silently — the predicate still parsed, so the ' +
+          'option list was not narrowed the way the author declared.',
+      },
+      {
       key: z.string().describe('Dotted path on each row to compare (e.g. "manifest.scope")'),
       op: z.enum(['eq', 'ne', 'in', 'nin']).default('eq')
         .describe('Comparison operator: eq | ne | in | nin'),
       value: z.union([z.string(), z.array(z.string())])
         .describe('Comparison value (string for eq/ne, string[] for in/nin)'),
-    }, {
-      error: strictUnknownKeyError({
-        surface: 'this context-selector option filter',
-        knownKeys: ['key', 'op', 'value'],
-        aliases: { field: 'key', path: 'key', operator: 'op', values: 'value' },
-        history:
-          'Until #4001 these were dropped silently — the predicate still parsed, so the ' +
-          'option list was not narrowed the way the author declared.',
-      }),
-    }).strict()).optional().describe('Predicates (AND) each option row must satisfy'),
-  }, {
-    error: strictUnknownKeyError({
-      surface: "this context selector's options source",
-      knownKeys: ['endpoint', 'valueKey', 'labelKey', 'filter'],
-      aliases: { url: 'endpoint', path: 'endpoint', value: 'valueKey', label: 'labelKey', filters: 'filter', where: 'filter' },
-      history:
-        'Until #4001 these were dropped silently — the source still parsed, so the ' +
-        'dropdown resolved its options from a different shape than declared.',
-    }),
-  }).strict().describe('Option data source'),
+    })).optional().describe('Predicates (AND) each option row must satisfy'),
+  }).describe('Option data source'),
 
   // `includeAll` and `placement` were removed in 17.0.0 (#4509) — see
   // CONTEXT_SELECTOR_RETIRED_KEY_GUIDANCE above.
@@ -989,17 +1124,7 @@ export const AppContextSelectorSchema = lazySchema(() => z.object({
   /** How the selection is persisted across navigation. */
   persist: z.enum(['query', 'session', 'none']).default('query')
     .describe('Persist selection via URL query, sessionStorage, or not at all'),
-}, {
-  error: strictUnknownKeyError({
-    surface: 'this app context selector',
-    knownKeys: ['id', 'label', 'icon', 'optionsSource', 'allValue', 'persist'],
-    aliases: { name: 'id', title: 'label', source: 'optionsSource', options: 'optionsSource' },
-    guidance: CONTEXT_SELECTOR_RETIRED_KEY_GUIDANCE,
-    history:
-      'Until #4001 these were dropped silently — the selector still parsed, so its scope ' +
-      'variable behaved differently than declared.',
-  }),
-}).strict());
+}));
 
 export type AppContextSelector = z.input<typeof AppContextSelectorSchema>;
 /** Post-parse shape of {@link AppContextSelector} — defaults applied, transforms run (ADR-0122). */
@@ -1046,19 +1171,6 @@ export type AppContextSelectorParsed = z.infer<typeof AppContextSelectorSchema>;
  *   ]
  * }
  */
-/** Keys {@link AppSchema} declares (drift-guarded by app.test.ts). */
-const APP_KEYS = [
-  'name', 'label', 'description', 'icon', 'branding', 'active', 'isDefault',
-  'hidden', 'navigation', 'areas', 'contextSelectors', 'homePageId',
-  'requiredPermissions', 'defaultAgent', 'protection',
-  // ADR-0010 runtime protection envelope (MetadataProtectionFields spread).
-  '_lock', '_lockReason', '_lockSource', '_provenance', '_packageId',
-  '_packageVersion', '_lockDocsUrl',
-  // Tombstoned in PR A (#4142) — declared so the prescription, not a bare
-  // "unrecognized key", is what an upgrading author sees.
-  'version', 'aria', 'objects', 'apis', 'sharing', 'embed', 'mobileNavigation',
-] as const;
-
 /**
  * `app.homePageId`, retired in 17.0.0 (#4667, ADR-0049) — **premise corrected in
  * #4709**, retirement itself upheld.
@@ -1097,52 +1209,81 @@ const HOME_PAGE_ID_RETIRED =
   + 'should own the root landing. Run `os migrate meta --from 16` to rewrite existing sources '
   + 'automatically.';
 
-const appUnknownKeyError = strictUnknownKeyError({
-  surface: 'this app',
-  knownKeys: APP_KEYS,
-  aliases: {
-    title: 'label',
-    nav: 'navigation',
-    menu: 'navigation',
-    menus: 'navigation',
-    items: 'navigation',
-    sidebar: 'navigation',
-    tabs: 'navigation',
-    sections: 'areas',
-    groups: 'areas',
-    permissions: 'requiredPermissions',
-    // `home` / `homepage` / `landingpage` aliased `homePageId`, retired in
-    // 17.0.0 (#4667). They fall through to the tombstone's own prescription
-    // rather than renaming onto a key that no longer exists.
-    agent: 'defaultAgent',
-    logo: 'branding',
-    theme: 'branding',
-    enabled: 'active',
-    default: 'isDefault',
-    selectors: 'contextSelectors',
-  },
-  guidance: {
-    pages:
-      '`pages` is not an App field — a page is its own metadata record; reference it from ' +
-      "navigation with `{ type: 'page', pageName: '<name>' }`.",
-    views:
-      '`views` is not an App field — views belong to their object (`listViews`); reference ' +
-      "one from navigation with `{ type: 'object', objectName, viewName }`.",
-    flows:
-      '`flows` is not an App field — flows are top-level stack metadata ' +
-      '(`defineStack({ flows })`), not app-scoped.',
-    // The three retired `homePageId` aliases. `retiredKey` already answers the
-    // canonical spelling; these cover the spellings that used to route to it.
-    home: HOME_PAGE_ID_RETIRED,
-    homepage: HOME_PAGE_ID_RETIRED,
-    landingpage: HOME_PAGE_ID_RETIRED,
-  },
-  history:
-    'Until #4001 these were dropped silently — the app still parsed, so navigation or ' +
-    'gating the author declared never reached the shell.',
-});
+/**
+ * The prescription for every author-shaped spelling of the ADR-0045 publish
+ * gate (#4829).
+ *
+ * The gate's key is `_unpublished`, and the `_` prefix is load-bearing: it
+ * marks the channel tooling stamps onto artifacts (ADR-0010's `_lock` /
+ * `_provenance` envelope, and the prefix `lintAuthoredRecordKeys` skips), so
+ * "the machine writes this" is legible from the key alone. That property is
+ * only worth having if the near-miss spellings do not route an author onto it,
+ * which is why this text tells them to stop rather than to rename.
+ *
+ * `published` and `draft` are here for the same reason as `unpublished`: an
+ * author reaching for publish state on an app reaches for one of the three, and
+ * the honest answer to all three is that publish state is not authored — it is
+ * the outcome of `POST /packages/:id/publish-drafts`.
+ */
+const UNPUBLISHED_IS_MACHINE_MANAGED =
+  'Publish state is not authorable on an app. The ADR-0045 publish gate is the machine-managed '
+  + '`_unpublished` key: the AI materialization path sets it, and `POST /packages/:id/publish-drafts` '
+  + '(the "Publish" button) clears it. Delete this key. If you wanted to keep the app out of the App '
+  + 'Switcher — the personal-settings case, e.g. Account — that is `hidden: true`, which is navigation '
+  + 'presentation ONLY and never affects access (#4829).';
 
-export const AppSchema = lazySchema(() => z.object({
+export const AppSchema = lazySchema(() => strictObject(
+  {
+    surface: 'this app',
+    aliases: {
+      title: 'label',
+      nav: 'navigation',
+      menu: 'navigation',
+      menus: 'navigation',
+      items: 'navigation',
+      sidebar: 'navigation',
+      tabs: 'navigation',
+      sections: 'areas',
+      groups: 'areas',
+      permissions: 'requiredPermissions',
+      // `home` / `homepage` / `landingpage` aliased `homePageId`, retired in
+      // 17.0.0 (#4667). They fall through to the tombstone's own prescription
+      // rather than renaming onto a key that no longer exists.
+      agent: 'defaultAgent',
+      logo: 'branding',
+      theme: 'branding',
+      enabled: 'active',
+      default: 'isDefault',
+      selectors: 'contextSelectors',
+    },
+    guidance: {
+      pages:
+        '`pages` is not an App field — a page is its own metadata record; reference it from ' +
+        "navigation with `{ type: 'page', pageName: '<name>' }`.",
+      views:
+        '`views` is not an App field — views belong to their object (`listViews`); reference ' +
+        "one from navigation with `{ type: 'object', objectName, viewName }`.",
+      flows:
+        '`flows` is not an App field — flows are top-level stack metadata ' +
+        '(`defineStack({ flows })`), not app-scoped.',
+      // The three retired `homePageId` aliases. `retiredKey` already answers the
+      // canonical spelling; these cover the spellings that used to route to it.
+      home: HOME_PAGE_ID_RETIRED,
+      homepage: HOME_PAGE_ID_RETIRED,
+      landingpage: HOME_PAGE_ID_RETIRED,
+      // #4829 — the publish gate is `_unpublished`, and it is MACHINE-managed.
+      // An explicit entry rather than the edit-distance suggester, which would
+      // answer this spelling with a bare "did you mean `_unpublished`?" and so
+      // teach the one thing the key exists to prevent: an author writing it.
+      unpublished: UNPUBLISHED_IS_MACHINE_MANAGED,
+      published: UNPUBLISHED_IS_MACHINE_MANAGED,
+      draft: UNPUBLISHED_IS_MACHINE_MANAGED,
+    },
+    history:
+      'Until #4001 these were dropped silently — the app still parsed, so navigation or ' +
+      'gating the author declared never reached the shell.',
+  },
+  {
   /** Machine name (id) */
   name: SnakeCaseIdentifierSchema.describe('App unique machine name (lowercase snake_case)'),
   
@@ -1157,7 +1298,8 @@ export const AppSchema = lazySchema(() => z.object({
   version: retiredKey(
     '`App.version` was removed in @objectstack/spec 17.0.0 (2026-06 liveness audit — ' +
     'no consumer in framework or objectui). An app is versioned by its owning package: ' +
-    'use `manifest.version`. Delete the key.',
+    'use `manifest.version`. Delete the key. ' +
+    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
   ),
 
   /** Description */
@@ -1187,11 +1329,55 @@ export const AppSchema = lazySchema(() => z.object({
    * Mirrors GitHub Settings / Google account chip / Salesforce
    * "Personal Settings" — visible to every user, but reached from the
    * avatar rather than the app launcher.
+   *
+   * ⛔ **NOT an access gate, and never was one on this surface.** Between
+   * ADR-0045 (2026-06-12) and its 2026-08 revision the REST metadata gate
+   * (`filterAppForUser`, `packages/rest/src/rest-server.ts`) read THIS key as
+   * "unpublished ⇒ externally unobservable", which is a second, contradictory
+   * contract on one boolean. The measured cost (#4829): the platform's own
+   * `account` app is authored `hidden: true` for exactly the reason this
+   * docblock gives, so every user without `studio.access`/`setup.access` had it
+   * erased from `GET /meta/app` — password, avatar, sessions and inbox all
+   * unreachable, while any admin saw a healthy system. Presentation and
+   * lifecycle are orthogonal; the publish gate now rides its own machine-managed
+   * key, `_unpublished` (declared directly below). Authoring `hidden: true` affects
+   * navigation and nothing else.
    */
   hidden: z.boolean().optional()
-    .describe('Hide from the App Switcher; the shell surfaces hidden apps via the avatar menu instead'),
-  
-  /** 
+    .describe('Hide from the App Switcher; the shell surfaces hidden apps via the avatar menu instead (navigation only — never an access gate)'),
+
+  /**
+   * ADR-0045 §3 — the **publish gate**. `true` means the app is *unpublished*:
+   * externally unobservable, not merely unlisted. `filterAppForUser` drops it
+   * from every metadata response except a builder's (`studio.access` /
+   * `setup.access`, for direct-URL preview); ADR-0045's discovery, direct-API
+   * and outbound-side-effect gates hang off the same bit.
+   *
+   * **Machine-managed — do not author it.** It is written by the AI additive
+   * materialization path (which lands a real, invisible app) and cleared by
+   * `POST /packages/:id/publish-drafts` (the visibility flip that IS "Publish").
+   * The `_` prefix is this repo's marker for the channel tooling stamps onto
+   * artifacts rather than an author writing it — the same channel as ADR-0010's
+   * `_lock` / `_provenance` / `_packageId` envelope, and the prefix
+   * `lintAuthoredRecordKeys` already exempts from the unknown-authoring-key
+   * report for that reason.
+   *
+   * Why a dedicated key and not `hidden` (#4829, maintainer ruling 2026-08-04):
+   * `hidden: true` is a spelling an author — very often an AI (ADR-0033) —
+   * reaches for naturally on a personal-settings app, and under the old regime
+   * that spelling silently 404'd the app for every non-builder. Nobody reaches
+   * for `_unpublished` by accident, so the failure mode this key can produce is
+   * bounded to the machine that owns it.
+   *
+   * It is declared here (rather than omitted) because the write path validates
+   * against this very schema — `saveMetaItem` answers 422 on an off-spec body,
+   * and `Registry.validate('app', …)` runs `AppSchema.parse` — so the flip and
+   * the ADR-0087 conversion of stored rows both need the key to be legal.
+   */
+  _unpublished: z.boolean().optional()
+    .describe('Machine-managed publish gate (ADR-0045 §3) — true = unpublished, externally unobservable. Written by AI materialization, cleared by publish-drafts. Never authored.'),
+
+  /**
    * Full Navigation Tree — supports unlimited nesting depth.
    * Pages are referenced by name via `type: 'page'` items.
    * Groups can contain other groups for arbitrary sidebar depth.
@@ -1254,7 +1440,8 @@ export const AppSchema = lazySchema(() => z.object({
     '`App.objects` was removed in @objectstack/spec 17.0.0 (2026-06 liveness audit — ' +
     'never read; the spec itself labelled it "config file convenience"). Objects belong ' +
     'to the stack (`defineStack({ objects })`); an app reaches them through its ' +
-    'navigation items. Delete the key.',
+    'navigation items. Delete the key. ' +
+    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
   ),
   apis: retiredKey(
     '`App.apis` was removed in @objectstack/spec 17.0.0 (2026-06 liveness audit — ' +
@@ -1272,7 +1459,8 @@ export const AppSchema = lazySchema(() => z.object({
     '`rateLimit: { enabled: true, windowMs, maxRequests }`. Read the ' +
     '`declarative-apis-endpoints-live` entry of the protocol upgrade guide first; it is a ' +
     'security review, not a rename. A route that genuinely needs handler CODE still ' +
-    'belongs in a plugin manifest `contributes.routes` entry.',
+    'belongs in a plugin manifest `contributes.routes` entry. ' +
+    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
   ),
 
   /**
@@ -1286,12 +1474,14 @@ export const AppSchema = lazySchema(() => z.object({
     '`App.sharing` was removed in @objectstack/spec 17.0.0 (2026-06 liveness audit / ' +
     'ADR-0049 enforce-or-remove) — no public-app route ever read it, so it declared ' +
     'sharing that did not exist. Public access is granted per FORM VIEW ' +
-    '(`FormView.sharing`, the public-data-collection surface). Delete the key.',
+    '(`FormView.sharing`, the public-data-collection surface). Delete the key. ' +
+    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
   ),
   embed: retiredKey(
     '`App.embed` was removed in @objectstack/spec 17.0.0 (2026-06 liveness audit / ' +
     'ADR-0049) — no iframe route ever read it. Embedding is a per-form-view surface ' +
-    '(`FormView.sharing`), not an app-level switch. Delete the key.',
+    '(`FormView.sharing`), not an app-level switch. Delete the key. ' +
+    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
   ),
 
   /**
@@ -1303,7 +1493,8 @@ export const AppSchema = lazySchema(() => z.object({
   mobileNavigation: retiredKey(
     '`App.mobileNavigation` was removed in @objectstack/spec 17.0.0 (2026-06 liveness ' +
     'audit — fully unimplemented; no renderer, including packages/mobile, ever read ' +
-    'it). Delete the key; the block returns if/when a real mobile navigation ships.',
+    'it). Delete the key; the block returns if/when a real mobile navigation ships. ' +
+    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
   ),
 
   /**
@@ -1333,12 +1524,17 @@ export const AppSchema = lazySchema(() => z.object({
 
   /**
    * REMOVED — never read at the APP level (2026-06 liveness audit). ARIA
-   * attributes are live on the component/widget surfaces that render DOM.
+   * attributes are live on the page / page-component / list-view surfaces that
+   * render DOM. NOT on a dashboard widget: `dashboard.widgets[].aria` was
+   * retired in this same 17.0.0 (#5010), so "component/widget" pointed half of
+   * its readers at another tombstone (#6756).
    */
   aria: retiredKey(
     '`App.aria` was removed in @objectstack/spec 17.0.0 (2026-06 liveness audit — no ' +
-    'renderer read app-level ARIA attributes). Declare `aria` on the component/widget ' +
-    'that renders the DOM node instead. Delete the key.',
+    'renderer read app-level ARIA attributes). Declare `aria` on the page component ' +
+    'that renders the DOM node instead (`page.components[].aria`; `page.aria` and the ' +
+    'list view `aria` are live too). Delete the key. ' +
+    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
   ),
 
   /**
@@ -1354,7 +1550,7 @@ export const AppSchema = lazySchema(() => z.object({
 
   // ADR-0010 — runtime protection envelope (internal — set by loader).
   ...MetadataProtectionFields,
-}, { error: appUnknownKeyError }).strict());
+}));
 
 /**
  * App Factory Helper

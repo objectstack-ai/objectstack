@@ -8,6 +8,7 @@ import {
   type ConnectableDatasource,
   type IDatasourceDriverFactory,
 } from '@objectstack/service-datasource';
+import type { SqliteAbsentFileMode } from '@objectstack/driver-sql';
 
 /**
  * DefaultDatasourcePlugin — the `default` datasource as a DECLARATION
@@ -64,6 +65,15 @@ export interface DefaultDatasourcePluginOptions {
   /** Arms the shared factory's dev sqlite step-down (#2229) + loosen-only self-heal passthroughs. */
   dev?: boolean;
   /**
+   * Forwarded to the shared factory: what a `sqlite` default does when its
+   * file does not exist (#6743). `'empty-in-memory'` is for read-only boots
+   * (`os migrate plan`); the default `'create'` is every other boot.
+   *
+   * Ignored when {@link factory} is injected — a host that brings its own
+   * factory owns its own open semantics.
+   */
+  sqliteAbsentFile?: SqliteAbsentFileMode;
+  /**
    * Host-injected driver factory. Defaults to the shared open-core factory
    * (`createDefaultDatasourceDriverFactory`). The seam exists for hosts whose
    * `default` needs a driver the open-core factory cannot build — the cloud
@@ -98,6 +108,7 @@ export class DefaultDatasourcePlugin implements Plugin {
 
   private readonly def: DefaultDatasourceDefinition;
   private readonly dev?: boolean;
+  private readonly sqliteAbsentFile?: SqliteAbsentFileMode;
   private readonly factory?: IDatasourceDriverFactory;
   /** The init()-time local connection service — held for destroy()'s teardown. */
   private connection?: DatasourceConnectionService;
@@ -105,6 +116,7 @@ export class DefaultDatasourcePlugin implements Plugin {
   constructor(def: DefaultDatasourceDefinition, opts: DefaultDatasourcePluginOptions = {}) {
     this.def = def;
     this.dev = opts.dev;
+    this.sqliteAbsentFile = opts.sqliteAbsentFile;
     this.factory = opts.factory;
   }
 
@@ -121,7 +133,10 @@ export class DefaultDatasourcePlugin implements Plugin {
 
   init = async (ctx: PluginContext) => {
     const connection = new DatasourceConnectionService({
-      factory: () => this.factory ?? createDefaultDatasourceDriverFactory({ dev: this.dev }),
+      factory: () => this.factory ?? createDefaultDatasourceDriverFactory({
+        dev: this.dev,
+        ...(this.sqliteAbsentFile ? { sqliteAbsentFile: this.sqliteAbsentFile } : {}),
+      }),
       engine: () => {
         try {
           return ctx.getService('data');

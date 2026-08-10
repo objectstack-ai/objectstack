@@ -168,3 +168,78 @@ export const PAGINATION_UNORDERED_CASES: readonly UnorderedPaginationConformance
 
 /** Every id in {@link PAGINATION_ROWS}, for the "visited exactly once" check. */
 export const PAGINATION_ALL_IDS: readonly string[] = PAGINATION_ROWS.map((r) => r.id);
+
+/**
+ * One read whose `limit` must be honoured **as written** — including when it is
+ * `0`.
+ *
+ * # The ruling
+ *
+ * `limit: 0` means **return no records** (objectstack#6485). It is not "no
+ * limit", and it is not a value a layer may drop on its way down.
+ *
+ * # Why this is a separate case-set from {@link PAGINATION_CASES}
+ *
+ * Everything above is about a *page* being a partition. This is about the page
+ * SIZE being read at all, and the two fail independently: a driver can walk
+ * twelve rows in a perfect partition and still answer `{ limit: 0 }` with the
+ * whole table, because the two live at different lines. Keeping them apart is
+ * also what keeps the coverage ledger honest — a driver that answers one and
+ * not the other is a half-covered cell, and a shared marker would let it import
+ * its way to green.
+ *
+ * # The defect this exists to catch
+ *
+ * `if (query.limit) { ... }` — truthiness where the contract asks for presence.
+ * `0` is falsy, so the clause is dropped and the read that asked for nothing is
+ * answered with everything: the widest possible answer to the narrowest
+ * possible request. It is invisible from any single backend, which is why it
+ * needs a shared standard — two shipped drivers answered the same `QueryAST`
+ * with opposite result sets, and the one that disagreed returned MORE data than
+ * was asked for rather than less (objectstack#6577).
+ *
+ * # Why the controls are not padding
+ *
+ * A driver that returns `[]` for every query passes every `limit: 0` row here
+ * and fails its users completely. So each zero case is stated beside the
+ * non-zero read it must NOT become. The property is "`limit` is honoured as
+ * written", not "`limit: 0` is special-cased".
+ *
+ * # Scope
+ *
+ * `find()` and whatever a driver builds on it. Nothing here says HOW a driver
+ * keeps the promise, and the answers genuinely differ — which is the reason
+ * this is a shared case-set rather than a lint rule. The SQL family needed a
+ * presence check; `driver-memory` needed the same on its slice; and
+ * `driver-mongodb` needed neither, because it already forwarded `0` faithfully
+ * — into a client that DEFINES `limit: 0` as *no limit*. There the contract has
+ * to be answered BEFORE the client is consulted, by a short-circuit that
+ * returns the empty result without a round trip. Same standard, three
+ * mechanisms; the cases test the property, not the clause.
+ */
+export interface ZeroLimitConformanceCase {
+    /** Case label, used as the test name. */
+    name: string;
+    /** The query, exactly as a caller writes it. */
+    query: { limit?: number; offset?: number };
+    /**
+     * How many of the twelve {@link PAGINATION_ROWS} must come back. A count
+     * rather than an id set on purpose: `offset` with no `orderBy` leaves
+     * *which* rows unspecified, and that is
+     * {@link PAGINATION_UNORDERED_CASES}' question, not this one.
+     */
+    expectedRowCount: number;
+}
+
+/**
+ * The cases. Three ask for nothing and must get nothing; three are the controls
+ * that stop "return nothing, always" from passing.
+ */
+export const PAGINATION_ZERO_LIMIT_CASES: readonly ZeroLimitConformanceCase[] = [
+    { name: 'limit 0 returns no records', query: { limit: 0 }, expectedRowCount: 0 },
+    { name: 'limit 0 with an explicit offset 0 returns no records', query: { limit: 0, offset: 0 }, expectedRowCount: 0 },
+    { name: 'limit 0 past the first page still returns no records', query: { limit: 0, offset: 5 }, expectedRowCount: 0 },
+    { name: 'control — limit 2 returns two records', query: { limit: 2 }, expectedRowCount: 2 },
+    { name: 'control — offset 0 alone does not truncate', query: { offset: 0 }, expectedRowCount: PAGINATION_ROWS.length },
+    { name: 'control — no limit returns every record', query: {}, expectedRowCount: PAGINATION_ROWS.length },
+];

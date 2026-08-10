@@ -625,6 +625,15 @@ const opportunities = await engine.find('opportunity', {
 > "&lt;field&gt; is required" validation error. To delete the children along with
 > the parent, set `deleteBehavior: cascade` explicitly. An explicit `set_null`
 > or `cascade` is always honored as written.
+>
+> The refusal carries **two** messages, for two audiences. `error` is written for
+> the person who clicked delete: it is rendered in the caller's locale from the
+> built-in catalog and names the objects and the field by their **labels**, so a
+> client may show it to an end user as-is. `developerMessage` is the operator's
+> copy — English, API names, and the `deleteBehavior: cascade` remedy — and
+> should not be surfaced to end users. Override any locale's sentence with a
+> `translation` item under `errors.delete_restricted` /
+> `errors.delete_restricted_required`.
 
 **Multiple lookups:**
 ```yaml

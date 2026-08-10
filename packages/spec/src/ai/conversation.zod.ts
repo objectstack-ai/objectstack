@@ -338,3 +338,5 @@ export type MessagePruningEvent = z.input<typeof MessagePruningEventSchema>;
 export type ConversationAnalytics = z.input<typeof ConversationAnalyticsSchema>;
 /** Post-parse shape of {@link ConversationAnalytics} — defaults applied, transforms run (ADR-0122). */
 export type ConversationAnalyticsParsed = z.infer<typeof ConversationAnalyticsSchema>;
+export type FileContent = z.input<typeof FileContentSchema>;
+export type TextContent = z.input<typeof TextContentSchema>;

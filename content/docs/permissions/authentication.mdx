@@ -68,6 +68,12 @@ expire after the server-configured TTL (the CLI assumes a 10-minute / 600s
 default). The device flow requires `plugins: { deviceAuthorization: true }` in
 your `AuthPlugin` configuration.
 
+Under `--json` this command is the CLI's **one declared NDJSON exception**: it
+emits the verification-URL record before you authorize and the result record
+afterwards, one compact JSON document per line, so stdout must be parsed line by
+line rather than with a single `JSON.parse`. See
+[the CLI reference](/docs/deployment/cli#os-login--json-is-ndjson--the-one-exception).
+
 The email/password path is still supported for CI and non-interactive shells:
 
 ```bash

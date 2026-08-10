@@ -1,5 +1,264 @@
 # @objectstack/plugin-mcp-server
 
+## 17.0.0-rc.6
+
+### Patch Changes
+
+- 4f3d232: docs(mcp): `diagnoseEmptyRead` 的 TSDoc 更正一句被证伪的事实 (#6724)
+
+  `packages/mcp/src/mcp-server-runtime.ts` 里 `diagnoseEmptyRead` 的 TSDoc(#6055
+  由 PR #6051 落地)为"在空答案之后再跑一次仅取结论的探针,而不是把
+  `getObject` 换成 `getDiagnosed('object', name)`"这个设计选择给出了两条理由。
+  其中一条是事实陈述,而它是**错的**:
+
+  > `MetadataFacade.getObject`(objectql)返回 `registry.getObject(name)` —— a
+  > different shape from its own `get()`,因此等价关系在一般情况下不成立。
+
+  `SchemaRegistry.getItem` 对 `'object'` / `'objects'` 类型直接特判回
+  `getObject`,所以 facade 的 `get('object', n)` 走的是同一次查找;其后的
+  `item?.content ?? item` 解包是空操作 —— 合并后的 `ServiceObject` 根本没有
+  `content` 键。实测:命中时两个成员交回**同一个对象引用**,未命中时双方都是
+  `undefined`。三个已发布实现由 `packages/objectql/src/
+metadata-service-getobject-equivalence.test.ts`(PR #6839)钉住,契约侧的
+  `IMetadataService.getObject` 自 PR #6723(#6505)起也写明了这条等价关系。
+
+  同一句话在 `mcp-server-runtime.metadata-outage.test.ts` 里被复述过一次,一并
+  更正。
+
+  仍然成立的那半条理由被保留:`getObject` 是 `IMetadataService` 自己的成员,
+  #6055 当时它并**没有**被文档化的等价关系,在消费端擅自假定一条正是 Prime
+  Directive #12 禁止的私有方言 —— 所以解析器当初没有被换掉。
+
+  **纯注释,零行为变化。** 这次更正**不**主张把解析器换成
+  `getDiagnosed('object', name)`:那是一次独立的判断,由接手的人按其自身利弊
+  去做,本次改动既不作出也不预设。
+
+- 5c2716b: mcp: a metadata outage stops being reported to MCP clients as `Agent "X" not found`
+
+  The `agent_prompt` prompt resolved its body through `metadataService.get('agent', name)`
+  and answered the resulting `undefined` with `Error: Agent "X" not found`. That `undefined`
+  carries two opposite facts (#5840, ADR-0110 D3): the name was never declared, or every
+  loader behind the metadata service was down. So during a metadata outage an MCP client was
+  told, positively, what the author had declared — from a read that never happened. The same
+  shape sat one bridge over: the `objectstack://objects/{objectName}` resource answered
+  `getObject()`'s `undefined` with `Object "X" not found`.
+
+  **Both surfaces now separate the two.** A degraded read answers `SERVICE_UNAVAILABLE` —
+  the same catalogued code and the same "whether it exists is unknown, retry once it is
+  reachable" sentence the `sys_metadata` half of this family already emits (#5532 / #5843) —
+  and a genuine miss keeps its not-found answer, byte for byte on the prompt surface.
+  MCP's `prompts/get` and `resources/read` results carry no error envelope, so the
+  classification travels in the payload each surface already had: the prompt's text, and the
+  resource's JSON body, which now names `code` and `status` on **both** answers
+  (`SERVICE_UNAVAILABLE`/503 vs `RESOURCE_NOT_FOUND`/404) so a client can tell them apart
+  without parsing prose.
+
+  **This is a diagnosis fix, not an access change.** Both surfaces were already fail-closed:
+  no instructions and no schema were served during an outage before this, and none are now.
+  The defect was the description.
+
+  Hosts whose `metadata` slot predates the optional `getDiagnosed` member report nothing
+  degraded — exactly what they could express before — so their behaviour is unchanged. The
+  object resource additionally keeps `getObject()` as its resolver and consults the
+  diagnosed read only as a verdict probe on the miss path, because `getObject` is its own
+  contract member with no documented equivalence to `get('object', name)` (and
+  `MetadataFacade.getObject` is not that).
+
+- Updated dependencies [3d5c090]
+- Updated dependencies [e5bd768]
+- Updated dependencies [e027b3e]
+- Updated dependencies [c2429b0]
+- Updated dependencies [445a0c2]
+- Updated dependencies [f6609e6]
+- Updated dependencies [a70358a]
+- Updated dependencies [97e7e3c]
+- Updated dependencies [8828b9e]
+- Updated dependencies [53068c1]
+- Updated dependencies [ee58392]
+- Updated dependencies [f16e54e]
+- Updated dependencies [06be54e]
+- Updated dependencies [259459d]
+- Updated dependencies [3f7f14e]
+- Updated dependencies [6968885]
+- Updated dependencies [eaed61f]
+- Updated dependencies [debe2f6]
+- Updated dependencies [97b0798]
+- Updated dependencies [43a7a8d]
+- Updated dependencies [73f69dc]
+- Updated dependencies [04c56aa]
+- Updated dependencies [b3efeb7]
+- Updated dependencies [ddd075a]
+- Updated dependencies [88154be]
+- Updated dependencies [e8dc61e]
+- Updated dependencies [2f3e793]
+- Updated dependencies [d8e8d9c]
+- Updated dependencies [94e749b]
+- Updated dependencies [ea1d916]
+- Updated dependencies [ae31a19]
+- Updated dependencies [b230e5e]
+- Updated dependencies [5d24f4b]
+- Updated dependencies [29b94ed]
+- Updated dependencies [07c68b0]
+- Updated dependencies [f6cd635]
+- Updated dependencies [e0f300b]
+- Updated dependencies [62b6a2f]
+- Updated dependencies [5b4780b]
+- Updated dependencies [a933452]
+- Updated dependencies [8140915]
+- Updated dependencies [7b48cf9]
+- Updated dependencies [b5404f4]
+- Updated dependencies [f764691]
+- Updated dependencies [e120a5a]
+- Updated dependencies [e9b5265]
+- Updated dependencies [e650d67]
+- Updated dependencies [04476e7]
+- Updated dependencies [79228cd]
+- Updated dependencies [b3363e9]
+- Updated dependencies [2ef1807]
+- Updated dependencies [d03fe25]
+- Updated dependencies [2672f85]
+- Updated dependencies [11066f6]
+- Updated dependencies [916af17]
+- Updated dependencies [84c86fb]
+- Updated dependencies [2a2a9fb]
+- Updated dependencies [a2e157c]
+- Updated dependencies [95c4227]
+- Updated dependencies [2a61116]
+- Updated dependencies [d4df105]
+- Updated dependencies [e2798fa]
+- Updated dependencies [0fd8556]
+- Updated dependencies [74155c7]
+- Updated dependencies [6908830]
+- Updated dependencies [8b06bba]
+- Updated dependencies [4c54037]
+- Updated dependencies [0f7157b]
+- Updated dependencies [d9bef45]
+- Updated dependencies [f549a0d]
+- Updated dependencies [82da264]
+- Updated dependencies [f586f1a]
+- Updated dependencies [9b9b70f]
+- Updated dependencies [f5a9bc2]
+- Updated dependencies [881a3cc]
+- Updated dependencies [ad6317b]
+- Updated dependencies [d5e9f6e]
+- Updated dependencies [8a88885]
+- Updated dependencies [5f7669e]
+- Updated dependencies [becbe53]
+- Updated dependencies [b127c8b]
+- Updated dependencies [a80302a]
+- Updated dependencies [474f131]
+- Updated dependencies [050cd82]
+- Updated dependencies [4d552af]
+- Updated dependencies [44d677c]
+- Updated dependencies [c32944d]
+- Updated dependencies [1dd780f]
+- Updated dependencies [cafec0a]
+- Updated dependencies [c8d6f6e]
+- Updated dependencies [92a67f2]
+- Updated dependencies [9136327]
+- Updated dependencies [bf0ae99]
+- Updated dependencies [cb3b6cd]
+- Updated dependencies [73b7234]
+- Updated dependencies [d2b97c3]
+- Updated dependencies [59b794f]
+- Updated dependencies [fc3a36a]
+- Updated dependencies [69787f0]
+- Updated dependencies [5d022a1]
+- Updated dependencies [042b9ee]
+- Updated dependencies [f549a0d]
+- Updated dependencies [a36db28]
+- Updated dependencies [3f8817a]
+- Updated dependencies [a2443e3]
+- Updated dependencies [e1554b1]
+- Updated dependencies [4856789]
+- Updated dependencies [c3f4916]
+- Updated dependencies [33e0385]
+- Updated dependencies [2205363]
+- Updated dependencies [09fe58d]
+- Updated dependencies [d0a5ceb]
+- Updated dependencies [e18a162]
+- Updated dependencies [d6d1a50]
+- Updated dependencies [d127ff0]
+- Updated dependencies [9b86cf6]
+- Updated dependencies [8825a06]
+- Updated dependencies [5087ac6]
+- Updated dependencies [6965160]
+- Updated dependencies [2d1ddf0]
+- Updated dependencies [354b00f]
+- Updated dependencies [3de535b]
+- Updated dependencies [fe2e15a]
+- Updated dependencies [c6b6bb4]
+- Updated dependencies [2f59da0]
+- Updated dependencies [8ad609c]
+- Updated dependencies [bbee302]
+- Updated dependencies [08863dd]
+- Updated dependencies [56664f5]
+- Updated dependencies [31cbe90]
+- Updated dependencies [90bbf25]
+- Updated dependencies [eb91eba]
+- Updated dependencies [42da73d]
+- Updated dependencies [643b7c7]
+- Updated dependencies [d0d5205]
+- Updated dependencies [1a15893]
+- Updated dependencies [b70e534]
+- Updated dependencies [2233a85]
+- Updated dependencies [62dd69a]
+- Updated dependencies [e15e679]
+- Updated dependencies [2ab1257]
+- Updated dependencies [4cc4fb7]
+- Updated dependencies [28d1eb7]
+- Updated dependencies [2c26040]
+- Updated dependencies [f758cec]
+- Updated dependencies [78f0be8]
+- Updated dependencies [35f7fb4]
+- Updated dependencies [a5302c7]
+- Updated dependencies [7084313]
+- Updated dependencies [91cefb8]
+- Updated dependencies [0e043d8]
+- Updated dependencies [dadd1ad]
+- Updated dependencies [2f2e63c]
+- Updated dependencies [486d526]
+- Updated dependencies [89d7b35]
+- Updated dependencies [85ec26d]
+- Updated dependencies [f6476fc]
+- Updated dependencies [4ac12ef]
+- Updated dependencies [b88f5e8]
+- Updated dependencies [42cc219]
+- Updated dependencies [d7e0b42]
+- Updated dependencies [3510e4a]
+- Updated dependencies [aa4b90d]
+- Updated dependencies [54299ca]
+- Updated dependencies [dc61def]
+- Updated dependencies [251e888]
+- Updated dependencies [183b4c4]
+- Updated dependencies [2fdb36e]
+- Updated dependencies [20526f5]
+- Updated dependencies [c5eef1d]
+- Updated dependencies [e0f300b]
+- Updated dependencies [761a0ba]
+- Updated dependencies [be87153]
+- Updated dependencies [60f0dd8]
+- Updated dependencies [a87c5cd]
+- Updated dependencies [a47f338]
+- Updated dependencies [2598216]
+- Updated dependencies [2c7e62d]
+- Updated dependencies [eb7613c]
+- Updated dependencies [ecc9110]
+- Updated dependencies [f7bd4e2]
+- Updated dependencies [361bd5b]
+- Updated dependencies [129b378]
+- Updated dependencies [88f9d94]
+- Updated dependencies [1818998]
+- Updated dependencies [09ee21c]
+- Updated dependencies [f549a0d]
+- Updated dependencies [3fc2e48]
+- Updated dependencies [e8f435c]
+- Updated dependencies [41610f6]
+  - @objectstack/spec@17.0.0-rc.6
+  - @objectstack/formula@17.0.0-rc.6
+  - @objectstack/core@17.0.0-rc.6
+  - @objectstack/types@17.0.0-rc.6
+
 ## 17.0.0-rc.5
 
 ### Patch Changes

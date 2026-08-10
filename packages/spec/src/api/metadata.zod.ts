@@ -413,3 +413,5 @@ export type MetadataDependenciesResponseParsed = z.infer<typeof MetadataDependen
 export type MetadataDependentsResponse = z.input<typeof MetadataDependentsResponseSchema>;
 /** Post-parse shape of {@link MetadataDependentsResponse} — defaults applied, transforms run (ADR-0122). */
 export type MetadataDependentsResponseParsed = z.infer<typeof MetadataDependentsResponseSchema>;
+export type MetadataBulkUnregisterRequest = z.input<typeof MetadataBulkUnregisterRequestSchema>;
+export type MetadataValidateRequest = z.input<typeof MetadataValidateRequestSchema>;

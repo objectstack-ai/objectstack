@@ -81,6 +81,31 @@
  * same dialect instead would have fossilised it into a second de-facto contract
  * (PD#12). The control is flipped into the `[#6203]` block at the bottom, whose
  * own docblock carries the per-case reverse-verification prediction.
+ *
+ * ---
+ *
+ * # [#6409] Class 2 emptied: `count_distinct` COMPILES on both faces
+ *
+ * Two rows of the measurement at the top are now history. `REMOTE
+ * count_distinct` and `LOCAL count_distinct` no longer throw — the ENFORCE leg
+ * of #6188's split ruling landed the `COUNT(DISTINCT x)` lowering on both faces
+ * in one change, which is the only way it could land: `TursoDriver` picks its
+ * face from `url`, so a lowering on one of them alone would be #6203's shape
+ * again.
+ *
+ * The class-2 block is flipped, not deleted, and what replaced its 501
+ * assertions is the NEW substance — the declared-minus-compiled set asserted
+ * EMPTY (positively, so a future spec addition goes red here), the emitted
+ * `count(distinct "stage")`, and the refusal wording asserted to have gained
+ * `count_distinct` as a COMPILED function rather than an unsupported one. The
+ * parity block gains the two cases that follow from it: `count_distinct` is
+ * ANSWERED identically by both faces, and its one new refusal — a field-less
+ * `count_distinct`, since `COUNT(DISTINCT *)` is not valid SQL — is REFUSED
+ * identically by both, `INVALID_QUERY`/400, one wording.
+ *
+ * Class 1 is untouched. `median`, `array_agg`, `string_agg` and every miscased
+ * spelling are still names the Query Protocol does not declare; those refusals
+ * stay verbatim. A pin is flipped only where the fact under it moved.
  */
 
 import { describe, it, expect, vi } from 'vitest';
@@ -163,8 +188,11 @@ async function refusalOfAst(fn: string, ast: QueryAST): Promise<WireBearingError
 /** Class 1's inputs: off-contract by construction — see {@link undeclaredAst}. */
 const refusalOfUndeclared = (fn: string) => refusalOfAst(fn, undeclaredAst(fn));
 
-/** Class 2's inputs: declared names, so the fixture is a real `QueryAST`. */
-const refusalOfDeclared = (fn: AggregationNode['function']) => refusalOfAst(fn, declaredAst(fn));
+// [#6409] `refusalOfDeclared` — the class-2 helper — is gone with the class. It
+// took an `AggregationNode['function']` and there is no longer a member of that
+// type either face refuses, so keeping it would have been a helper with no
+// callable input rather than a helper with no caller. `declaredAst` stays: the
+// parity block builds `count_distinct`'s ANSWER with it.
 
 /**
  * The same query put to the OTHER face of `TursoDriver` — the local/replica one,
@@ -190,7 +218,14 @@ async function localRefusalOf(fn: string, ast: QueryAST): Promise<WireBearingErr
 
 describe('[#5907] RemoteTransport refuses an aggregate function it cannot compile', () => {
   describe('a function name the Query Protocol never declared', () => {
-    const UNDECLARED = ['median', 'stddev', 'percentile_cont', 'group_concat'];
+    // `array_agg` / `string_agg` moved here from the class below at #6188, which
+    // retired both from `AggregationFunction` — they are now undeclared names
+    // (400), not declared-but-uncompiled ones (501). Mirrors the twin in
+    // `driver-sql`; the parity block further down compares the two faces on the
+    // reclassified pair as well.
+    const UNDECLARED = [
+      'median', 'stddev', 'percentile_cont', 'group_concat', 'array_agg', 'string_agg',
+    ];
 
     for (const fn of UNDECLARED) {
       it(`refuses "${fn}" with INVALID_QUERY / 400`, async () => {
@@ -226,32 +261,48 @@ describe('[#5907] RemoteTransport refuses an aggregate function it cannot compil
     });
   });
 
-  describe('a DECLARED function this backend cannot compile', () => {
-    // Typed against the declared enum on purpose — see the twin's note (#4918).
-    const UNCOMPILABLE: Array<AggregationNode['function']> = [
-      'count_distinct',
-      'array_agg',
-      'string_agg',
-    ];
+  describe('[#6409] class 2 is empty — every declared function compiles here', () => {
+    // `count_distinct` was this class's last member on this face too; #6409
+    // lowered it to `count(distinct "x")` here and on the local driver in ONE
+    // change, so there is no 501-bearing input left to construct. The TYPE
+    // annotation is kept on the empty array — it is what makes re-adding a name
+    // a `tsc`-checked claim that the name really is declared (#4918).
+    const UNCOMPILABLE: Array<AggregationNode['function']> = [];
 
-    it('the fixture is exactly the declared-but-uncompiled set', () => {
-      const compiled = ['count', 'sum', 'avg', 'min', 'max'];
+    it('the declared-but-uncompiled set is EMPTY', () => {
+      const compiled = ['count', 'sum', 'avg', 'min', 'max', 'count_distinct'];
       expect([...AggregationFunction.options].filter((f) => !compiled.includes(f)).sort())
         .toEqual([...UNCOMPILABLE].sort());
+      expect(UNCOMPILABLE).toEqual([]);
     });
 
-    for (const fn of UNCOMPILABLE) {
-      it(`refuses "${fn}" with NOT_IMPLEMENTED / 501`, async () => {
-        const err = await refusalOfDeclared(fn);
-        expect(err.code).toBe('NOT_IMPLEMENTED');
-        expect(err.status).toBe(501);
-        expect(err.message.startsWith(UNCOMPILABLE_SENTENCE(fn))).toBe(true);
-        expect(err.message).not.toContain('is not a declared aggregate function');
-        expect(err.message).toContain('capability gap');
-        expect(err.message).toContain('count, sum, avg, min, max');
-        expect(err.message).not.toContain('[RemoteTransport]');
-      });
-    }
+    // The substance that replaced the 501 assertion: the name goes through the
+    // COMPILE door. Asserted on the emitted statement, which is this file's
+    // instrument; the VALUES, on both faces at once, are `AGGREGATION_CASES`'
+    // job (`turso-remote-aggregation-conformance.test.ts`).
+    it('`count_distinct` compiles instead of being refused', async () => {
+      const { t, calls } = transportWithCapturingClient();
+      await t.aggregate('deal', declaredAst('count_distinct'));
+      expect(calls.map((c) => c.sql))
+        .toEqual(['SELECT count(distinct "stage") AS "n" FROM "deal"']);
+    });
+
+    // The wording half of the acceptance: the refusal no longer names
+    // `count_distinct` as unsupported. Read off a REAL refusal, since the
+    // message builds its list from the lowering table.
+    it('the refusal message names `count_distinct` among the functions it COMPILES', async () => {
+      const err = await refusalOfUndeclared('median');
+      expect(err.message).toContain('count, sum, avg, min, max, count_distinct');
+      expect(err.message).not.toContain('count_distinct" is declared but not implemented');
+    });
+
+    // The class-2 producer is deliberately kept in `remote-transport.ts` with
+    // nothing to produce — see its docblock. This states the consequence, so an
+    // unreachable branch is not read as an oversight.
+    it('the two refusal sentences remain distinguishable', () => {
+      expect(UNCOMPILABLE_SENTENCE('x')).not.toBe(UNDECLARED_SENTENCE('x'));
+      expect(UNCOMPILABLE_SENTENCE('x')).toContain('declared but not implemented');
+    });
   });
 
   // ── The cross-package half: one condition, one wording ─────────────────────
@@ -261,13 +312,28 @@ describe('[#5907] RemoteTransport refuses an aggregate function it cannot compil
     // literal — a shared constant would agree with itself no matter how far the
     // two faces drifted. This is what makes "首句逐字一致" checkable.
     // One entry per class, each carrying the query value its class is entitled
-    // to: `median` cannot be a `QueryAST` (that is what class 1 means), the three
-    // declared names can and are.
+    // to: `median` cannot be a `QueryAST` (that is what class 1 means), the
+    // declared name can and is.
+    //
+    // `array_agg` / `string_agg` stay in this list across #6188 and change
+    // SIDES: they were class-2 fixtures built with `declaredAst`, and now that
+    // the enum no longer has them they are class-1 fixtures built with
+    // `undeclaredAst`. Parity is the property that must survive the
+    // reclassification — the two faces have to agree on the NEW answer as
+    // exactly as they agreed on the old one, which is what would break if only
+    // one of them read the narrowed enum.
+    //
+    // [#6409] `count_distinct` LEAVES this list, and it is the first entry to
+    // leave by being ANSWERED rather than by being reclassified. Its parity is
+    // now a parity of VALUES, and it moved to the block below rather than being
+    // dropped: a name that stops being refused stops having a refusal to
+    // compare, but the property #5240 asks for — the two faces cannot be told
+    // apart by a caller — is exactly as load-bearing for an answer as for a
+    // refusal, and #6203 is what happens when only one face gains a spelling.
     const PARITY: Array<[fn: string, ast: QueryAST]> = [
       ['median', undeclaredAst('median')],
-      ['count_distinct', declaredAst('count_distinct')],
-      ['array_agg', declaredAst('array_agg')],
-      ['string_agg', declaredAst('string_agg')],
+      ['array_agg', undeclaredAst('array_agg')],
+      ['string_agg', undeclaredAst('string_agg')],
     ];
     for (const [fn, ast] of PARITY) {
       it(`"${fn}" is answered identically by the local driver and this transport`, async () => {
@@ -276,18 +342,86 @@ describe('[#5907] RemoteTransport refuses an aggregate function it cannot compil
         expect(remote.code).toBe(local.code);
         expect(remote.status).toBe(local.status);
         // The first sentence is the contract; the tails happen to coincide too
-        // because both faces compile the same five functions today, so the whole
+        // because both faces compile the same six functions today, so the whole
         // message is compared while that holds.
         expect(remote.message.split('. ')[0]).toBe(local.message.split('. ')[0]);
         expect(remote.message).toBe(local.message);
       });
     }
+
+    /**
+     * [#6409] The parity `count_distinct` moved to: both faces ANSWER it, and
+     * they answer it the same way.
+     *
+     * The local driver runs a real better-sqlite3 database while this transport
+     * builds a statement string, so the two are compared on the axis they
+     * share — the SQL each emits for one aggregation. That the two agree on the
+     * VALUES over a fixture with duplicates and nulls is the shared
+     * `AGGREGATION_CASES` table's job, run against both faces by the two
+     * conformance suites; this case is the local one, kept here because this
+     * file is where "one query, one answer, whatever the connection string"
+     * lives.
+     */
+    it('[#6409] `count_distinct` is COMPILED by both faces, not refused by either', async () => {
+      const ast = declaredAst('count_distinct');
+
+      const { t, calls } = transportWithCapturingClient();
+      await t.aggregate('deal', ast);
+      expect(calls.map((c) => c.sql))
+        .toEqual(['SELECT count(distinct "stage") AS "n" FROM "deal"']);
+
+      const d = new SqlDriver({
+        client: 'better-sqlite3',
+        connection: { filename: ':memory:' },
+        useNullAsDefault: true,
+      });
+      await d.initObjects([
+        { name: 'deal', fields: { id: { type: 'text', name: 'id' }, stage: { type: 'text', name: 'stage' } } } as any,
+      ]);
+      // An empty table on the local face, matching the empty result set the
+      // capturing client returns: what is compared is that NEITHER face refuses,
+      // which is the fork this case guards.
+      await expect(d.aggregate('deal', ast)).resolves.toEqual([{ n: 0 }]);
+    });
+
+    /**
+     * [#6409] The new refusal, on both faces: `count_distinct` with no `field`.
+     * `COUNT(DISTINCT *)` is not valid SQL, so this is a mistake in the
+     * aggregation node rather than a capability gap — `INVALID_QUERY` / 400 —
+     * and #5240 applies to it like any other condition: one wording, both faces.
+     * `code` AND `status`, never a bare `toThrow` (#6144, ADR-0112).
+     */
+    it('[#6409] a field-less `count_distinct` is refused identically by both faces', async () => {
+      const ast = {
+        object: 'deal',
+        aggregations: [{ function: 'count_distinct', alias: 'n' }],
+      } as QueryAST;
+
+      const remote = await refusalOfAst('count_distinct', ast);
+      const local = await localRefusalOf('count_distinct', ast);
+
+      expect(remote.code).toBe('INVALID_QUERY');
+      expect(remote.status).toBe(400);
+      expect(local.code).toBe(remote.code);
+      expect(local.status).toBe(remote.status);
+      expect(remote.message.split('. ')[0]).toBe(local.message.split('. ')[0]);
+      expect(remote.message).toBe(local.message);
+      expect(remote.message).toContain('nothing to deduplicate');
+      // ⛔ Not the capability-gap answer: both faces DO compile this function.
+      expect(remote.message).not.toContain('capability gap');
+      expect(remote.message).not.toContain('[RemoteTransport]');
+      expect(local.message).not.toContain('[sql-driver]');
+    });
   });
 
   // ── Controls: nothing but the refusal's identity moved ─────────────────────
 
   describe('the compiled vocabulary is untouched', () => {
-    it('emits byte-identical SQL for the five functions it lowers', async () => {
+    // The five whose lowering IS a function name. [#6409] The sixth,
+    // `count_distinct`, deliberately cannot join this loop — its lowering puts
+    // a keyword inside the argument list, which is the whole reason it needed a
+    // change here at all, and it is asserted on its own above.
+    it('emits byte-identical SQL for the five functions it lowers as a bare name', async () => {
       for (const fn of ['count', 'sum', 'avg', 'min', 'max'] as const) {
         const { t, calls } = transportWithCapturingClient();
         await t.aggregate('deal', declaredAst(fn));

@@ -60,11 +60,16 @@
  * both ways in #5830: re-dropping the `not_in` arm turns the `not_in` pin red
  * on sqlite exactly as it did on memory.
  *
- * Its sibling `auth-contains-filter.test.ts` is NOT interchangeable this way —
- * driver-sql compiles `$regex` through the same `applyContainsLike` as
- * `$contains` (`sql-driver.ts`, the `case '$regex':` fallthrough), so a SQL
- * backend cannot tell #5710's defect from its fix. That file's disposition is
- * #5830's open half; do not "finish the job" by copying this harness onto it.
+ * [#5893] Its sibling `auth-contains-filter.test.ts` was NOT interchangeable
+ * this way when the note above was written — driver-sql compiled `$regex`
+ * through the same `applyContainsLike` as `$contains` (`sql-driver.ts`, the
+ * `case '$regex':` fallthrough), so a SQL backend could not tell #5710's defect
+ * from its fix, and #5830 deferred it rather than create an always-green pin.
+ * #5702 (PR #6549) deleted the fallthrough and RETIRED the spelling: `$regex`
+ * is now refused by name in the ADR-0112 envelope (`INVALID_FILTER` / 400), so
+ * that file has moved onto this harness too and witnesses its defect through
+ * the refusal. It carries its own guard for the refusal, because that property
+ * — not a row difference — is what lets its behavioural pins fail at all.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';

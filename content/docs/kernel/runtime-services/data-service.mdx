@@ -1,6 +1,6 @@
 ---
 title: services.data
-description: CRUD runtime helper API for records (`get`, `find`, `create`, `update`, `delete`).
+description: CRUD runtime helper API for records (`query`, `get`, `find`, `create`, `update`, `delete`).
 ---
 
 # `services.data`
@@ -32,12 +32,37 @@ the code that **holds** the binding calls it, with plain arguments and no `ctx` 
 ## Methods
 
 ```ts
-services.data.get<T = any>(object: string, id: string): Promise<GetDataResult<T>>
+services.data.query<T = any>(object: string, query: Partial<QueryAST>): Promise<PaginatedResult<T>>
 services.data.find<T = any>(object: string, options?: QueryOptions | QueryOptionsV2): Promise<PaginatedResult<T>>
+services.data.get<T = any>(object: string, id: string): Promise<GetDataResult<T>>
 services.data.create<T = any>(object: string, data: Partial<T>): Promise<CreateDataResult<T>>
 services.data.update<T = any>(object: string, id: string, data: Partial<T>): Promise<UpdateDataResult<T>>
 services.data.delete(object: string, id: string): Promise<DeleteDataResult>
 ```
+
+### Two list entries, one preference
+
+`query` and `find` both answer a list read with the same
+`{ records, total?, hasMore? }` envelope, and the Canonical source declares which
+of the two to prefer — the block above lists them in its declaration order.
+`data.query` is *"Advanced Query using ObjectStack Query Protocol"*; `data.find`
+carries an `@deprecated` tag in the same file: *"Use `data.query()` with standard
+QueryAST parameters instead. This method uses legacy parameter names."* The tag
+ships in the package's published type declarations, so an editor strikes `find`
+through at every call site and points at `query`. As with the options vocabulary
+below, the posture is the SDK's own, not this page's — it is recorded product
+direction ([#986](https://github.com/objectstack-ai/objectstack/issues/986):
+deprecate the legacy-parameter query entries, promote `data.query(AST)`).
+
+Deprecated means "prefer `query`", not "scheduled for removal in this version":
+`find` remains fully functional, keeps both of its option vocabularies (see
+[below](#find-options-canonical-and-legacy)), and the Canonical source still
+describes `QueryOptionsV2` as *"the vocabulary `data.find()` still accepts"*
+for callers that stay on it. The capability line between the two entries is
+real, though. `find` rides GET query parameters, so it has no spelling for a
+`search` term or for nested `expand` detail — it refuses a nested expand with an
+error whose own text says to use `data.query()`. `query` POSTs the full
+`QueryAST` as a JSON body (`POST /data/:object/query`) and carries all of it.
 
 ## Canonical source
 
@@ -60,6 +85,12 @@ key for key. A managed runtime binds `services.data` to this same shape.
 - `object`: short object name (for example `task`, `account`)
 - `id`: record ID for single-record operations
 - `data`: partial payload for create/update
+- `query` (`query`): a `Partial<QueryAST>` — the spec's query protocol shape
+  (`packages/spec/src/data/query.zod.ts`): `where` / `fields` / `orderBy` /
+  `limit` / `offset`, plus the AST-only clauses (`search`, `expand` with nested
+  detail, `aggregations`, `groupBy`, `having`). The AST's own `object` key is
+  not needed here: the server takes the target from the `object` argument (the
+  URL path) and overwrites anything the body says
 - `options` (`find`): filtering, sorting and pagination — two vocabularies, one
   behaviour; see the table below
 
@@ -67,7 +98,7 @@ key for key. A managed runtime binds `services.data` to this same shape.
 
 The signature above accepts `QueryOptions | QueryOptionsV2`, and the Canonical source
 declares which of the two to write. `QueryOptionsV2` is *"canonical query options using
-Spec protocol field names … the recommended interface for `data.find()` queries"*, while
+Spec protocol field names … the vocabulary `data.find()` still accepts"*, while
 `QueryOptions` carries an `@deprecated` tag in the same file describing *"legacy parameter
 names … that require translation to QueryAST"*, with the instruction to *"prefer QueryAST
 fields directly"*. Both interfaces are declared in `packages/client/src/index.ts`, so the
@@ -97,7 +128,8 @@ silently rather than refused, so migrate an options object as a whole.
 ## Returns
 
 - `get`: single record payload
-- `find`: list payload + pagination metadata
+- `query`/`find`: list payload + pagination metadata — the same
+  `PaginatedResult` envelope for both
 - `create`/`update`: mutated record payload
 - `delete`: `{ object, id, success }` — the spec's `DeleteDataResponse`. The
   flag is `success`, not `deleted` (#5638)
@@ -133,7 +165,18 @@ export async function recentOrdersForContact(data: DataService, contactId: strin
     limit: 20,
   });
 
-  return { contact, orders };
+  // `query` — the Canonical source's preferred list entry — POSTs the same
+  // words as a Partial<QueryAST> body, and carries the clauses `find` has no
+  // GET spelling for. Here: per-relation `expand` detail, which `find`
+  // refuses with an error that itself points at `query`.
+  const { records: withContact } = await data.query<{ id: string; amount: number }>('sales_order', {
+    where: { contact_id: contact.id },
+    orderBy: [{ field: 'created_at', order: 'desc' }],
+    limit: 20,
+    expand: { contact_id: { object: 'contact', fields: ['name'] } },
+  });
+
+  return { contact, orders, withContact };
 }
 ```
 

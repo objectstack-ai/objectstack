@@ -3,10 +3,10 @@
 import { z } from 'zod';
 import { ProtectionSchema } from '../shared/protection.zod';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
-import { strictObject } from '../shared/strict-object';
+import { strictObject, strictObjectError } from '../shared/strict-object';
 import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
 import { ExpressionInputSchema } from '../shared/expression.zod';
-import { normalizeVisibleWhen, strictVisibilityError } from '../shared/visibility';
+import { normalizeVisibleWhen, VISIBILITY_STRICT_OPTIONS } from '../shared/visibility';
 import { I18nLabelSchema, AriaPropsSchema } from './i18n.zod';
 import { ChartTypeSchema } from './chart.zod';
 import { SharingConfigSchema } from './sharing.zod';
@@ -192,6 +192,35 @@ export const VIEW_FILTER_OPERATORS = [
 export type ViewFilterOperator = (typeof VIEW_FILTER_OPERATORS)[number];
 
 /**
+ * The operators whose `value` is a LIST rather than a scalar (#6227).
+ *
+ * These are the authoring spellings that lower to `$in` / `$nin`
+ * (`AST_OPERATOR_MAP`, `data/filter.zod.ts`), which
+ * {@link https://github.com/objectstack-ai/objectstack/issues/5869 | the runtime
+ * gate} requires to be arrays. Exported so a producer can ask the question the
+ * schema asks instead of hard-coding its own list: `@object-ui`'s filter builder
+ * decides `isMultiOperator` from a local `["in", "notIn"]` literal
+ * (`components/src/custom/filter-builder.tsx`), a second dialect of exactly this
+ * fact that is already one spelling adrift — `notIn` is an alias, not the
+ * canonical member. One declared vocabulary, same reasoning as
+ * {@link VIEW_FILTER_OPERATOR_ALIASES}.
+ */
+export const VIEW_FILTER_LIST_VALUE_OPERATORS = [
+  'in', 'not_in',
+] as const satisfies readonly ViewFilterOperator[];
+
+/**
+ * The operators whose `value` is a two-element `[min, max]` array (#6227).
+ *
+ * Separate from {@link VIEW_FILTER_LIST_VALUE_OPERATORS} because the check is
+ * different in kind: membership takes ANY arity (`[]` included), a range takes
+ * exactly two bounds.
+ */
+export const VIEW_FILTER_PAIR_VALUE_OPERATORS = [
+  'between',
+] as const satisfies readonly ViewFilterOperator[];
+
+/**
  * Legacy operator spellings normalized to the canonical vocabulary above.
  *
  * These are historical shorthand (`eq`, `gt`) and camelCase (`notEquals`,
@@ -346,6 +375,158 @@ export function stripViewConsoleDecorations(body: unknown): unknown {
   return stripRowDecorations(body, false, 0);
 }
 
+/** `string` / `number` / `an array of 3` / `null` … — the word the refusal uses. */
+function describeFilterValue(value: unknown): string {
+  if (value === null) return 'null';
+  if (value === undefined) return 'no value';
+  if (Array.isArray(value)) return `an array of ${value.length}`;
+  return `a ${typeof value}`;
+}
+
+/**
+ * A short, bounded rendering of the offending value.
+ *
+ * Bounded for the reason the runtime twin's `shapePreview` is: the value can be
+ * arbitrarily large, and the message is for a human reading a refusal, not a
+ * dump.
+ */
+function previewFilterValue(value: unknown): string {
+  if (value === undefined) return '(omitted)';
+  let text: string;
+  try {
+    text = JSON.stringify(value) ?? String(value);
+  } catch {
+    text = String(value);
+  }
+  return text.length > 40 ? `${text.slice(0, 39)}…` : text;
+}
+
+/**
+ * [#6227] `value` must have the shape the rule's OPERATOR can execute.
+ *
+ * ## The two-stage failure this closes
+ *
+ * `{ field: 'stage', operator: 'not_in', value: 'won' }` — a set operator with a
+ * scalar comparand — was a spec-VALID `ViewFilterRule`: `value` declared
+ * `string | number | boolean | null | (string | number)[]` with no coupling to
+ * `operator`, so every operator accepted every shape. The view published cleanly
+ * and then failed at QUERY time, where #5869 / PR #6209 had already closed the
+ * runtime half: `assertListComparandShapes` (`@objectstack/objectql`,
+ * `filter-comparand-shape.ts`) refuses the lowered `{ stage: { $nin: 'won' } }`
+ * with a named 400 `INVALID_FILTER`. Correct refusal, wrong moment — the author
+ * is gone by then, and before #6209 the same shape was a 500. That file's own
+ * module docblock names this schema as the reachable authoring source of the
+ * defect.
+ *
+ * ## Why this mirrors the runtime gate EXACTLY, and refuses to go further
+ *
+ * The checks below are `assertListComparandShapes`' three constraints, one for
+ * one: `$in`/`$nin` must be an array, `$between` must be a 2-array. Nothing else
+ * is judged here, deliberately — #5685 already ruled on the opposite error, where
+ * `FieldOperatorsSchema` declared `$gt` as `number | Date | FieldReference` while
+ * every first-party producer put an ISO STRING there; the schema was ruled the
+ * wrong side and widened to match the runtime. A publish-time gate refusing more
+ * than the query path refuses would re-create that mismatch pointing the other
+ * way, and would reject stored metadata that executes correctly today.
+ * Specifically NOT refused, because the runtime does not refuse them:
+ *
+ * - **`in: []` / `not_in: []`.** An empty list is a legitimate declared predicate
+ *   — "matches nothing" / "matches everything" — and the runtime gate says so in
+ *   as many words. Arity is not this check's business for membership; only "is it
+ *   a list at all".
+ * - **A scalar operator carrying an array** (`equals: ['a','b']`). `equals`
+ *   lowers to a bare `{ field: value }` deep-equality comparand
+ *   (`convertComparison`), which every backend answers.
+ * - **A string operator carrying a number** (`contains: 5`). Lowers to
+ *   `$contains: 5`; no backend refuses it.
+ * - **A unary operator carrying a value** (`is_empty: ''`). The null predicates
+ *   take their direction from the operator NAME — `convertComparison` maps them
+ *   to `{ $null: true|false }` and ignores the value position entirely — and the
+ *   ObjectUI client deliberately sends a truthy PLACEHOLDER value for both
+ *   `isnull` and `isnotnull`. Refusing it would break a live first-party producer
+ *   to enforce nothing.
+ *
+ * ## Why `superRefine` and not `z.discriminatedUnion` (measured, not assumed)
+ *
+ * 1. **`z.discriminatedUnion` cannot read this discriminator — it does not
+ *    construct.** `operator` is `z.preprocess(normalizeFilterOperator, z.enum(…))`
+ *    — the alias fold that lets a stored `notIn` / `nin` / `gt` parse. Zod 4
+ *    extracts a discriminator's literal values from the option's own def, and a
+ *    preprocess wrapper hides them: building the union throws
+ *    `Invalid discriminated union option at index "0"` before any parse happens.
+ *    The alias fold is load-bearing ({@link VIEW_FILTER_OPERATOR_ALIASES} exists
+ *    for stored metadata) and is not negotiable to buy a union.
+ * 2. **A refinement adds no JSON-Schema structure.** Measured with
+ *    `z.toJSONSchema` before and after: byte-identical output. `ui/ViewFilterRule`
+ *    is a PUBLISHED def whose authorable key set is a ratchet of exactly three
+ *    entries (`authorable-surface/ui.json`). A union fans that one def into N
+ *    branches re-declaring the same three keys per branch — the phantom
+ *    liveness-worklist inflation #7042 measured and refused for
+ *    `ViewContainerWireSchema` one screen down — and ObjectUI's SchemaForm would
+ *    stop rendering the single operator dropdown it renders today.
+ * 3. **Error quality points at the defect.** A refinement emits ONE issue at path
+ *    `['value']` naming the operator, the received shape and the expected one. A
+ *    union emits every branch's failure and leads with the discriminator, i.e. it
+ *    blames `operator` for a defect that is in `value`.
+ *
+ * In Zod 4 a refinement lives INSIDE the schema rather than wrapping it in a
+ * `ZodEffects`, so `.shape` and the `ZodObject` class survive (measured) and
+ * every carrier — `z.array(ViewFilterRuleSchema)` on `ListView.filter`, a tab
+ * filter, `Page.filterBy`, a related-list filter and a lookup picker filter —
+ * keeps working untouched.
+ *
+ * ## The wording is the runtime's wording (#5240)
+ *
+ * The leading sentence is kept verbatim from `nonListComparandError` /
+ * `malformedRangeComparandError` so one condition keeps one wording across the
+ * two moments it can be reported. The TAIL deliberately differs: the runtime's
+ * closing fact is "the filter was NOT applied", which is false here — nothing
+ * ran, the metadata is being refused — so this one prescribes the fix instead.
+ */
+function checkViewFilterRuleValueShape(
+  rule: { field?: unknown; operator?: unknown; value?: unknown },
+  ctx: z.RefinementCtx,
+): void {
+  // `operator` is read POST-parse, so it is already folded to canonical by
+  // `normalizeFilterOperator`: a stored `notIn` is `not_in` here, and this check
+  // never has to know the alias table.
+  const operator = rule.operator as ViewFilterOperator;
+  const value = rule.value;
+  const field = typeof rule.field === 'string' ? rule.field : '<field>';
+
+  const isList = (VIEW_FILTER_LIST_VALUE_OPERATORS as readonly string[]).includes(operator);
+  const isPair = (VIEW_FILTER_PAIR_VALUE_OPERATORS as readonly string[]).includes(operator);
+
+  if (isList) {
+    if (Array.isArray(value)) return;
+    ctx.addIssue({
+      code: 'custom',
+      path: ['value'],
+      message:
+        `Operator "${operator}" on field "${field}" requires an ARRAY of values. `
+        + `Received ${describeFilterValue(value)} (${previewFilterValue(value)}). `
+        + `"${operator}" tests membership of a list — write `
+        + `${value === undefined ? '["…"]' : previewFilterValue([value])} for a single value, `
+        + `or use ${operator === 'in' ? '"equals"' : '"not_equals"'} to compare against it. `
+        + `An empty list [] is allowed and is a real predicate. This is refused at authoring `
+        + `time because the query path refuses it too (400 INVALID_FILTER, #5869).`,
+    });
+    return;
+  }
+
+  if (!isPair) return;
+  if (Array.isArray(value) && value.length === 2) return;
+  ctx.addIssue({
+    code: 'custom',
+    path: ['value'],
+    message:
+      `Operator "${operator}" on field "${field}" requires a [min, max] value array. `
+      + `Received ${describeFilterValue(value)} (${previewFilterValue(value)}). `
+      + `A range needs exactly two bounds, in order. This is refused at authoring time `
+      + `because the query path refuses it too (400 INVALID_FILTER, #5869).`,
+  });
+}
+
 /**
  * View Filter Rule Schema
  * Standardized filter condition used in list views, tabs, and page-level filters.
@@ -411,10 +592,20 @@ export const ViewFilterRuleSchema = lazySchema(() => strictObject({
    */
   operator: z.preprocess(normalizeFilterOperator, z.enum(VIEW_FILTER_OPERATORS))
     .describe('Filter operator'),
-  /** Filter value (optional for unary operators like is_empty, is_null) */
+  /**
+   * Filter value (optional for unary operators like is_empty, is_null).
+   *
+   * The accepted SHAPE is coupled to `operator` by
+   * {@link checkViewFilterRuleValueShape} (#6227).
+   */
   value: z.union([z.string(), z.number(), z.boolean(), z.null(), z.array(z.union([z.string(), z.number()]))])
-    .optional().describe('Filter value'),
-}).describe('View filter rule'));
+    .optional().describe(
+      'Filter value. The accepted SHAPE depends on the operator: `in` / `not_in` take an '
+      + 'array (any length, including []), `between` takes exactly [min, max], every other '
+      + 'operator takes a scalar. The unary operators (is_empty / is_not_empty / is_null / '
+      + 'is_not_null) take their direction from the operator name and ignore this key.',
+    ),
+}).superRefine(checkViewFilterRuleValueShape).describe('View filter rule'));
 
 export type ViewFilterRule = z.input<typeof ViewFilterRuleSchema>;
 /** Post-parse shape of {@link ViewFilterRule} — defaults applied, transforms run (ADR-0122). */
@@ -559,7 +750,7 @@ export const GroupingConfigSchema = lazySchema(() => strictObject({
   surface: 'this grouping configuration',
   history: VIEW_HISTORY,
 }, {
-  fields: z.array(GroupingFieldSchema).min(1).describe('Fields to group by (supports up to 3 levels)'),
+  fields: z.array(GroupingFieldSchema).min(1).describe('Fields to group by, in nesting order — the first entry is the outermost group and each later entry nests one level deeper (at least one field)'),
 }).describe('Record grouping configuration'));
 
 /**
@@ -775,12 +966,19 @@ export const UserFilterFieldSchema = lazySchema(() => strictObject({
  * `packages/spec` and objectui two sources of truth for one contract — the
  * fork #2231's derive-by-reference unification exists to prevent (PD#12).
  *
- * ⚠️ Scope of the promotion: `allowAddTab` declares that the tab bar RENDERS an
- * add-tab affordance. The button objectui renders today carries no click
- * handler, so it is presentational — filed against the renderer as #5236, and
- * deliberately NOT written into the `.describe()`, because a contract that
- * promises "end users can add presets" would be advertising a capability the
- * runtime does not deliver (PD#10).
+ * ⚠️ Scope of the promotion, and its RESOLUTION (#5236 → #6961). At promotion
+ * time `allowAddTab` was described as declaring only that the tab bar RENDERS
+ * an add-tab affordance: the button objectui rendered carried no click handler,
+ * so it was presentational, and the narrower wording was deliberate — a
+ * contract promising "end users can add presets" would have advertised a
+ * capability the runtime did not deliver (PD#10). The maintainer then ruled
+ * **A1 — implement, session-scoped** (#5236, 2026-08-06), objectui#3926
+ * delivered it (`packages/plugin-list/src/UserFilters.tsx` — naming popover,
+ * snapshot of the applied filters, component state only, remove affordance on
+ * the added tab), and the `.describe()` below was upgraded back to the real
+ * semantics. The narrowing was the interim state the ruling closed, not the
+ * contract: the key now promises the behaviour, and PD#10 is satisfied by the
+ * delivery rather than by the hedge.
  *
  * ## What closing flips, and why that flip is wanted (批 6e's question)
  *
@@ -814,7 +1012,7 @@ export const UserFiltersSchema = lazySchema(() => strictObject({
   showAllRecords: z.boolean().optional()
     .describe('Show an "All records" tab before the presets (tabs element)'),
   allowAddTab: z.boolean().optional()
-    .describe('Render an "add tab" affordance after the presets (tabs element). Page lists only — object views use `listViews` for named presets'),
+    .describe('Let end users add their own tab after the presets (tabs element): the affordance asks for a name and snapshots the filters currently applied as a new tab. SESSION-SCOPED — an added tab lives only for the current mount, is never written back as metadata (ADR-0047), and carries a remove control the authored presets do not. Page lists only — object views use `listViews` for named presets'),
 }).describe('End-user quick-filter configuration (Airtable "User filters" parity)'));
 
 /**
@@ -1284,12 +1482,14 @@ export const ListViewSchema = lazySchema(() => strictObject({
   // objectui@fb35e48; ledger: dead).
   responsive: retiredKey(
     '`view.responsive` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — ' +
-    'no renderer ever read it; the grid is responsive by its own layout rules. Delete the key.',
+    'no renderer ever read it; the grid is responsive by its own layout rules. Delete the key. ' +
+    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
   ),
   performance: retiredKey(
     '`view.performance` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — ' +
     'no renderer or runtime read it; list-view performance tuning was never implemented. ' +
-    'Delete the key.',
+    'Delete the key. ' +
+    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
   ),
 }));
 
@@ -1310,27 +1510,46 @@ export const ListViewSchema = lazySchema(() => strictObject({
  * is the allocation `lazySchema` exists to defer.
  */
 /**
- * [#4001 批 18] Deliberately NOT converted to `strictObject` — and the ledger
- * row for this site is a measurement artifact, not open surface.
+ * [#4001 批 18] Deliberately still a BARE `z.object` — and the ledger row for
+ * this site is a measurement artifact, not open surface.
  *
- * Two independent reasons, both verified rather than assumed:
+ * Two reasons were recorded; #6619 retired one of them and left the other
+ * standing, which is why the posture here did not move with the fold:
  *
  * 1. **The posture here was never the live one.** This base is module-private
  *    and has exactly ONE consumer, {@link FormFieldSchema}, which applies
  *    `.strict()` after extending it (ADR-0089 D3a). An unknown form-field key
  *    is already rejected at the only door; the ledger reads `strip` because it
- *    counts the BASE, and the base is not a door.
- * 2. **It already carries a bespoke error map.** The `{ error:
- *    strictVisibilityError }` below is the ADR-0089 map that resolves the
- *    `visibleWhen` / `visibility` pair. Converting would mean re-expressing
- *    that map as `guidance` and re-proving the `.transform()` — a refactor of
- *    working, tested behaviour rather than a strictness change. Same call the
- *    note on {@link FormSectionSchema} records, for the same family of shape.
+ *    counts the BASE, and the base is not a door. Still true — and it is why
+ *    this site takes `strictObjectError` rather than `strictObject`: the fold
+ *    is a change to what the message can SAY, and closing this shape as a side
+ *    effect would have been an acceptance change smuggled in with it.
+ * 2. ~~It already carries a bespoke error map.~~ **Retired by #6619.** The
+ *    ADR-0089 map that resolves the `visibleWhen` / `visibility` pair is no
+ *    longer bespoke: it is `VISIBILITY_STRICT_OPTIONS`, a shared `strictObject`
+ *    options fragment whose prescription rides the template's set-keyed
+ *    `guidance` channel. `strictObjectError` builds exactly the map
+ *    `strictObject` would and registers the surface with
+ *    `alias-integrity.test.ts` — the audit this site used to sit outside — with
+ *    the shape left open for the extension to close.
+ *
+ * `extraKeys: ['fields']` is the base/extension boundary the helper documents:
+ * the candidate list is read from THIS shape, and `fields` is declared one
+ * level up by the extension that also closes it, so naming it here is what
+ * keeps `feilds` pointing at `fields` instead of at `field`.
+ *
+ * Spelled as a literal `z.object(shape, { error: strictObjectError(…) })`
+ * rather than through a wrapper on purpose: the strictness ledger's AST reader
+ * (`scripts/lib/strictness-ledger.ts`) recognises the `z.object(` idiom and
+ * counts this site's OPEN posture — the row `ui/view.zod.ts` carries as its
+ * one `authorable` strip site. A wrapper would hide the site from the
+ * instrument entirely, which is a gate going quiet, not a posture change.
  *
  * The nested `keyField` block below IS converted: strictness does not recurse,
  * so a closed parent said nothing about it.
  */
-const FormFieldBaseSchema = lazySchema(() => z.object({
+const FormFieldBaseSchema = lazySchema(() => {
+  const shape = {
   /** Field name (snake_case) */
   field: z.string().describe('Field name (snake_case)'),
   
@@ -1441,7 +1660,11 @@ const FormFieldBaseSchema = lazySchema(() => z.object({
   /** @deprecated ADR-0089 — use `visibleWhen`. Accepted and normalized to `visibleWhen` at parse. */
   visibleOn: ExpressionInputSchema.optional().describe('[DEPRECATED → `visibleWhen`] Visibility predicate (CEL). Normalized to `visibleWhen` at parse.'),
   disclosure: z.enum(['inline', 'popover']).optional().describe('Composite rendering: inline bordered box (default) or a summary line + gear popover (progressive disclosure).'),
-}, { error: strictVisibilityError }));
+  };
+  return z.object(shape, {
+    error: strictObjectError({ ...VISIBILITY_STRICT_OPTIONS, extraKeys: ['fields'] }, shape),
+  });
+});
 
 /**
  * A parsed form field — the TYPE half of {@link FormFieldSchema}.
@@ -1506,14 +1729,15 @@ export const FormFieldSchema: z.ZodType<FormField, FormFieldInput> = lazySchema(
 /**
  * Form Layout Section
  *
- * Deliberately NOT converted to `strictObject` by #4001: this shape already
- * closed under ADR-0089 D3a, with `strictVisibilityError` — the bespoke map that
- * resolves the `visibleWhen` / `visibility` pair — and a `.transform()` that
- * normalizes them. Converting would mean re-expressing that map as `guidance`
- * and re-proving the transform: a refactor of working, tested behaviour rather
- * than a strictness change. Same call as the widget map in `dashboard.zod.ts`.
+ * Closed under ADR-0089 D3a, and — since #6619 — closed with the SHARED
+ * template rather than a bespoke map. #4001 skipped this shape because
+ * converting it meant re-expressing `strictVisibilityError` as `guidance`, and
+ * `guidance` could not express a family of keys; #6619 gave the channel a
+ * set-keyed form and the conversion became the same one call every other closed
+ * shape in this package makes. The `.transform()` that folds
+ * `visibleOn` → `visibleWhen` is unchanged and still runs after the parse.
  */
-export const FormSectionSchema = lazySchema(() => z.object({
+export const FormSectionSchema = lazySchema(() => strictObject(VISIBILITY_STRICT_OPTIONS, {
   /**
    * Stable identifier for translation lookup. snake_case convention.
    * When provided, translation bundles can target this section's `label`
@@ -1560,7 +1784,7 @@ export const FormSectionSchema = lazySchema(() => z.object({
     z.string(), // Legacy: simple field name
     FormFieldSchema, // Enhanced: detailed field config
   ])),
-}, { error: strictVisibilityError }).strict().transform(normalizeVisibleWhen));
+}).transform(normalizeVisibleWhen));
 
 /**
  * A single form action button (submit / cancel / reset): visibility + label.
@@ -1575,6 +1799,104 @@ export const FormButtonConfigSchema = lazySchema(() => strictObject({
   label: I18nLabelSchema.optional().describe('Button label (i18n-capable; renderer default when omitted)'),
 }).strict());
 export type FormButtonConfig = z.input<typeof FormButtonConfigSchema>;
+
+/** An object that may carry the `groups` alias beside canonical `sections`. */
+type WithFormSectionAlias = { sections?: unknown; groups?: unknown };
+
+/**
+ * Fold the legacy `groups` alias onto the canonical `sections` and drop
+ * `groups` from the output (#6926) — the whole-array counterpart of
+ * `normalizeVisibleWhen`.
+ *
+ * ## What this makes true
+ *
+ * `groups` was declared with the inline comment *"Legacy support -> alias to
+ * sections"* since the schema existed, and nothing in this repo ever performed
+ * the fold. The alias was honored exactly ONE boundary downstream, inside the
+ * renderer (objectui `spec-bridge/bridges/form-view.ts` `spec.sections ??
+ * spec.groups`, and `plugin-form/ObjectForm.tsx`'s full legacy fold, shipped by
+ * objectui#2545 because a `groups`-only spec had rendered nothing). Every
+ * framework consumer that is NOT that renderer read `sections` only — so the
+ * same authored form rendered in the console and degraded on the REST
+ * public-form routes. Folding at the producer makes the declared alias true for
+ * every consumer of a parsed form at once, instead of teaching each consumer a
+ * second key to read (the lenient-consumer shape this package rejects).
+ *
+ * ## Precedence: `sections` wins
+ *
+ * Deliberately the renderer's own rule (`spec.sections ?? spec.groups`), so no
+ * form that renders today changes what it renders. `??` treats an EMPTY array
+ * as present, and so does this: `{ sections: [], groups: [...] }` folds to
+ * `sections: []`, matching the renderer rather than inventing a merge.
+ *
+ * ⚠️ The two objectui folds disagree on exactly that input, and this rule picks
+ * the PRIMARY path's answer. `spec-bridge/bridges/form-view.ts` uses `??`, so
+ * an empty `sections` wins; `plugin-form/ObjectForm.tsx` gates on
+ * `!folded.sections?.length`, so there the alias wins when `sections` is empty.
+ * An alias is consulted when the canonical key is ABSENT — a fallback-on-empty
+ * is a lenient-consumer accommodation, which is the shape this fold exists to
+ * remove. Also note ObjectForm's fold rewrites sub-keys (`title` → `label`,
+ * `defaultCollapsed` → `collapsed`): that is a renderer-local shape adaptation,
+ * NOT spec semantics. This fold is `FormSectionSchema` → `FormSectionSchema`,
+ * verbatim, with no sub-key rewriting.
+ *
+ * ## Why `.overwrite()` and not `.transform()` (measured, #6926)
+ *
+ * Both fold identically at parse. `.transform()` returns a `ZodPipe`, and this
+ * schema is consumed as an OBJECT in two places in this file that a pipe breaks:
+ * {@link FormViewOverlayWireSchema} builds the flattened form-overlay union
+ * member with `FormViewSchema.extend(...)` (a pipe has no `.extend`), and
+ * {@link selectViewMetadataBranch} reads `._zod.def.shape.type` through
+ * `overlayTypeValues` — which a pipe answers with an EMPTY set, i.e. a silent
+ * mis-dispatch rather than an error. Splitting into an object schema plus a
+ * piped export would require re-applying the fold on the overlay branch by
+ * hand, which is the re-transcription that lets two doors disagree.
+ *
+ * `.overwrite()` is zod 4's "transform that does not change the type", which is
+ * precisely what a `FormSectionSchema[]` → `FormSectionSchema[]` alias fold is.
+ * It keeps the schema a `ZodObject`, and `.extend()` INHERITS the check, so the
+ * fold reaches every parse door with one declaration: `FormViewSchema` itself,
+ * `ViewSchema.form` / `.formViews.*`, both `ViewItemSchema` form arms, and the
+ * flattened `formOverlay` member of `ViewMetadataSchema`. The cost is that the
+ * INFERRED output type still declares `groups?` even though a parsed form never
+ * carries it; the runtime contract is the enforced one. (Narrowing the exported
+ * `FormViewParsed` by hand is not the fix — ADR-0122's gate requires it to read
+ * `z.infer<typeof FormViewSchema>` verbatim.)
+ *
+ * Deliberately NOT exported: it is an implementation detail of this one schema,
+ * and a public fold helper is an invitation to fold a second time somewhere
+ * else. Export it if and when a pre-parse door is ruled to need the same fold
+ * (see "What this does NOT reach").
+ *
+ * ## Ordering: the `pane` refinement above still sees `groups`
+ *
+ * Checks run in attachment order, so the `.superRefine` is evaluated BEFORE
+ * this fold and keeps reporting a misplaced `pane` at the path the author
+ * actually wrote (`groups.0.pane`, not `sections.0.pane`). Attaching the fold
+ * first would have re-pathed that message onto a key the author never typed.
+ *
+ * ## What this does NOT reach
+ *
+ * Only PARSED forms. Pre-parse consumers still see the authored key and are
+ * right to: `packages/lint`'s view rules walk authored sources
+ * (`validate-form-layout.ts`, `validate-visibility-predicates.ts`), and a
+ * `sys_metadata` row saved through `saveMetaItem` is persisted VERBATIM (the
+ * save validates and then discards `parsed.data` on purpose) and re-read
+ * through the ADR-0087 stored-row conversion chain, which is not a zod parse.
+ * The alias therefore stays legal at input — this fold narrows output, never
+ * acceptance.
+ */
+function foldFormGroupsIntoSections<T extends WithFormSectionAlias>(
+  input: T,
+): Omit<T, 'groups'> {
+  if (input.groups === undefined) return input as Omit<T, 'groups'>;
+  const { groups, ...rest } = input;
+  // `sections` wins when present — including when it is an empty array, which
+  // is what the renderer's `??` does and therefore what authored forms already
+  // render.
+  if (rest.sections !== undefined) return rest as Omit<T, 'groups'>;
+  return { ...rest, sections: groups } as Omit<T, 'groups'>;
+}
 
 /**
  * Form View Schema
@@ -1647,7 +1969,15 @@ export const FormViewSchema = lazySchema(() => strictObject({
   data: ViewDataSchema.optional().describe('Data source configuration (defaults to "object" provider)'),
 
   sections: z.array(FormSectionSchema).optional(), // For simple layout
-  groups: z.array(FormSectionSchema).optional(), // Legacy support -> alias to sections
+  /**
+   * Legacy alias of {@link FormViewSchema.sections} — accepted at INPUT, folded
+   * onto `sections` at parse (#6926), and therefore never present in a parsed
+   * form. See {@link foldFormGroupsIntoSections} for the fold and why it lives
+   * here rather than in each consumer.
+   */
+  groups: z.array(FormSectionSchema).optional().describe(
+    '[LEGACY ALIAS → `sections`] Accepted for back-compat and folded onto `sections` at parse; `sections` wins when both are present. Prefer `sections`.',
+  ),
 
   /**
    * Inline child collections (master-detail). When present, the standard
@@ -1686,7 +2016,8 @@ export const FormViewSchema = lazySchema(() => strictObject({
   defaultSort: retiredKey(
     '`form.defaultSort` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — ' +
     'nothing read it: a related list inside a form sorts by its own list view\'s `sort`. ' +
-    'Delete the key and set the sort on the related list view instead.',
+    'Delete the key and set the sort on the related list view instead. ' +
+    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
   ),
 
   /** Public form sharing configuration */
@@ -1784,7 +2115,8 @@ export const FormViewSchema = lazySchema(() => strictObject({
     '`form.aria` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — no form ' +
     'renderer ever applied it, so declared ARIA attributes silently did not reach the DOM. ' +
     'Delete the key. The form renderer emits its own semantic markup; report gaps as ' +
-    'renderer issues rather than per-view attribute overrides.',
+    'renderer issues rather than per-view attribute overrides. ' +
+    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
   ),
 }).superRefine((view, ctx) => {
   // `section.pane` is split-only vocabulary. On any other form type it would
@@ -1807,7 +2139,10 @@ export const FormViewSchema = lazySchema(() => strictObject({
       }
     });
   }
-}));
+  // ⚠️ Anything added below this loop still runs BEFORE the `.overwrite()`
+  // fold — see {@link foldFormGroupsIntoSections} — so a refinement that
+  // reads sections must keep reading BOTH buckets.
+}).overwrite(foldFormGroupsIntoSections));
 
 /**
  * Object-scoped user filters (ADR-0047 amendment, framework #2679 / objectui #2338).
@@ -2310,7 +2645,7 @@ export function defineViewItem(config: z.input<typeof ViewItemSchema>): ViewItem
 // an arbitrary body — Prime Directive #10's "declared ≠ enforced", one layer
 // above the object schemas #4001 closed: at union-MEMBER SELECTION, not at
 // any single member. The fix is a precondition, NOT a strictness flip on the
-// members — see {@link viewIdentityVocabulary}.
+// members — see {@link assertViewIdentity} and {@link viewMetadataVocabulary}.
 
 /**
  * Optional identity + structural-guard fields layered onto the two "flattened
@@ -2427,6 +2762,21 @@ function collectDeclaredTopLevelKeys(schema: unknown, into: Set<string>, depth =
 }
 
 /**
+ * [#5599] The precondition's predicate half, extracted (#6391) so
+ * {@link diagnoseViewMetadata} can ask the SAME question the parse path asks
+ * without having to recognise the issue text the other half writes.
+ *
+ * True for anything this precondition does not judge (non-objects, arrays —
+ * left to the union, which already rejects them) and for any object carrying at
+ * least one key some member declares that the write path did not stamp itself.
+ */
+function speaksViewVocabulary(body: unknown): boolean {
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) return true;
+  const vocabulary = viewMetadataVocabulary();
+  return Object.keys(body as Record<string, unknown>).some((key) => vocabulary.has(key));
+}
+
+/**
  * [#5599] The minimal identity precondition, run BEFORE the four-arm union.
  *
  * A `view` body must speak the `view` vocabulary — carry at least one key some
@@ -2464,12 +2814,12 @@ function collectDeclaredTopLevelKeys(schema: unknown, into: Set<string>, depth =
  * so a rejected body yields ONE named issue instead of that issue plus four
  * `invalid_union` branches for arms that were never the point.
  */
-function assertViewIdentity(body: unknown, ctx: z.RefinementCtx, vocabulary: Set<string>): boolean {
+function assertViewIdentity(body: unknown, ctx: z.RefinementCtx): boolean {
   // Non-objects and arrays are left to the union, which already rejects them —
   // this precondition answers "which object is not a view", nothing else.
   if (typeof body !== 'object' || body === null || Array.isArray(body)) return true;
+  if (speaksViewVocabulary(body)) return true;
   const keys = Object.keys(body as Record<string, unknown>);
-  if (keys.some((key) => vocabulary.has(key))) return true;
   // Report the two halves separately. Lumping them together would call `name`
   // "unrecognized", which is false and would send an author to fix the wrong
   // key: `name` is declared, it is just discounted as evidence.
@@ -2494,6 +2844,292 @@ function assertViewIdentity(body: unknown, ctx: z.RefinementCtx, vocabulary: Set
       (keys.length === 0 ? '' : '.'),
   });
   return false;
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// [#6391] The union's members, named and published
+// ───────────────────────────────────────────────────────────────────────────
+//
+// Measured from the consumer side (objectui#3606 / PR objectui#3624, against
+// `@objectstack/spec` 17.0.0-rc.5): a consumer that has to turn a
+// `ViewMetadataSchema` failure back into per-field diagnostics had exactly two
+// routes, and both couple to spec internals. It could index the nested
+// `invalid_union` `errors[]` BY MEMBER POSITION — position is an internal
+// detail nobody promised, so objectui pinned it with a CANARY test that rings
+// on every reorder — or it could re-declare each member itself, which is a
+// deeper coupling still and was measured and rejected there.
+//
+// The cause was never the union: member 1 was already the exported
+// `ViewItemWireSchema`, and a consumer could reference THAT contractually. The
+// other three were inline expressions with no name, so member 2 was merely
+// "shaped like `ViewSchema`" — key-for-key identical, behaviourally identical,
+// and NOT the same object, which is precisely the difference between a contract
+// and a resemblance.
+//
+// So the members get names, the union is built FROM those names (the identity
+// is guaranteed by construction, not maintained by hand), and a branch-naming
+// diagnostic entry point sits beside them so a consumer never has to know the
+// order at all — {@link diagnoseViewMetadata}.
+//
+// The names are published as ONE export — {@link VIEW_METADATA_MEMBERS}, keyed
+// by branch — rather than as three individual `…Schema` consts, and that is a
+// decision rather than a style: a top-level exported schema binding mints a new
+// protocol def (`ui/ViewContainerWire`, …) in `json-schema.manifest/` and, for
+// anything with a derivable object shape, a full set of keys in the ratcheted
+// `authorable-surface/`. The container member's 15 keys ARE `ui/View`'s 15
+// keys — duplicating them there would add 15 phantom authorable properties to
+// the ADR-0049 liveness worklist for a wire door nobody authors against. The
+// record gives a consumer the same contractual handle
+// (`VIEW_METADATA_MEMBERS.container`) with none of that.
+//
+// ⛔ What this deliberately does NOT do: convert the union to
+// `z.discriminatedUnion`. That was the filer's other option, and it would move
+// the ACCEPTANCE face — a discriminated union refuses an unknown discriminant
+// outright where this union falls through all four members, and several of
+// these shapes have no discriminant key at all (a flattened overlay may carry
+// nothing but `columns`). The dispatch below is therefore a DIAGNOSTIC
+// dispatch: it names the branch a failure belongs to, and decides nothing about
+// whether the body is accepted. `ViewMetadataSchema` remains the only judge.
+
+/**
+ * [#6391] Member 2 of {@link ViewMetadataSchema} — a non-empty `defineView`
+ * container. Published as `VIEW_METADATA_MEMBERS.container`.
+ *
+ * `ViewSchema` itself accepts `{}` (every slot optional), which would register
+ * zero views; the refinement is what makes this member "a container that
+ * actually defines a view" — see {@link containerHasAView}. It is published
+ * because that refinement, not `ViewSchema`, is what the union holds: a
+ * consumer selecting "the container branch" needs the object the union is
+ * actually going to run, or its diagnosis diverges from the platform's on
+ * exactly the empty-container case.
+ */
+const ViewContainerWireSchema = lazySchema(() =>
+  ViewSchema.refine(containerHasAView, {
+    message:
+      'A view container must define at least one of `list`, `form`, `listViews`, or `formViews`.',
+  }),
+);
+
+/**
+ * [#6391] Member 3 of {@link ViewMetadataSchema} — a flattened runtime LIST
+ * overlay: an inline `ListView` config at the top level plus the optional
+ * identity/round-trip fields a personalization PUT carries. Published as
+ * `VIEW_METADATA_MEMBERS.listOverlay`.
+ *
+ * `.strip()` is load-bearing, not leftover. `.extend()` INHERITS strictness, so
+ * closing `ListViewSchema` for authoring (#4001) silently made this overlay
+ * strict too — and this member exists precisely to carry Studio's auxiliary
+ * round-trip keys (`isPinned`, `sortOrder`, …) that `saveMetaItem` persists
+ * verbatim. Strict here is a 422 on a shape the platform itself writes. The
+ * ledger names this as the trap to watch while batching: a response-side
+ * extension of an authoring schema must strip back, or an upstream field
+ * addition becomes a crash.
+ */
+const ListViewOverlayWireSchema = lazySchema(() =>
+  ListViewSchema.extend(flattenedViewOverlayFields()).strip(),
+);
+
+/**
+ * [#6391] Member 4 of {@link ViewMetadataSchema} — a flattened runtime FORM
+ * overlay, published as `VIEW_METADATA_MEMBERS.formOverlay`. Same construction
+ * and the same `.strip()` rationale as {@link ListViewOverlayWireSchema}; the
+ * list member is tried first, and a flattened form (no required `columns`,
+ * disjoint `type` enum) then matches here.
+ */
+const FormViewOverlayWireSchema = lazySchema(() =>
+  FormViewSchema.extend(flattenedViewOverlayFields()).strip(),
+);
+
+/**
+ * [#6391] The branch names of {@link ViewMetadataSchema}'s union, in
+ * declaration order.
+ *
+ * The order is still the union's evaluation order — that has not changed and is
+ * observable — but a consumer no longer has to *encode* it: it can ask for a
+ * branch by name via {@link VIEW_METADATA_MEMBERS}, or let
+ * {@link diagnoseViewMetadata} name the branch for it.
+ */
+export const VIEW_METADATA_BRANCHES = ['viewItem', 'container', 'listOverlay', 'formOverlay'] as const;
+
+/** [#6391] One branch of {@link ViewMetadataSchema}'s union, by name. */
+export type ViewMetadataBranch = (typeof VIEW_METADATA_BRANCHES)[number];
+
+/**
+ * [#6391] Branch name → the schema {@link ViewMetadataSchema}'s union actually
+ * holds for that branch.
+ *
+ * This record IS the union's member list: the schema below is built by mapping
+ * {@link VIEW_METADATA_BRANCHES} over it, so "member N is the published schema"
+ * is guaranteed by construction rather than by two declarations agreeing. Add a
+ * member here and it is in the union, named, in one edit.
+ *
+ * The values are {@link lazySchema} proxies, so naming them costs no eager
+ * materialisation (ADR-0089 D3a) — reading this record does not build a single
+ * view schema.
+ */
+export const VIEW_METADATA_MEMBERS = {
+  // 1. Standalone ViewItem record — nested config validated genuinely, and the
+  //    WIRE variant, so Studio's round-trip keys have a declared home.
+  viewItem: ViewItemWireSchema,
+  // 2. Non-empty defineView container.
+  container: ViewContainerWireSchema,
+  // 3/4. Flattened runtime overlay — inline ListView / FormView config + identity.
+  listOverlay: ListViewOverlayWireSchema,
+  formOverlay: FormViewOverlayWireSchema,
+} as const satisfies Record<ViewMetadataBranch, z.ZodTypeAny>;
+
+/**
+ * [#5599] The `view` vocabulary, derived once from the members on first use.
+ *
+ * Hoisted out of {@link ViewMetadataSchema}'s factory closure (#6391) so
+ * {@link diagnoseViewMetadata} can consult the SAME derivation the parse path
+ * consults. Two copies of this rule would be two answers to "is this a view
+ * body at all?", and the diagnostic one would be the wrong one.
+ *
+ * Still computed on first call rather than at module load: the members are
+ * {@link lazySchema} proxies whose factories run on first `_zod` touch, and
+ * deriving eagerly would force every view schema in the file to materialise as
+ * a side effect of this module loading (ADR-0089 D3a).
+ */
+let viewVocabularyCache: Set<string> | undefined;
+function viewMetadataVocabulary(): Set<string> {
+  if (!viewVocabularyCache) {
+    const vocabulary = new Set<string>();
+    for (const branch of VIEW_METADATA_BRANCHES) {
+      collectDeclaredTopLevelKeys(VIEW_METADATA_MEMBERS[branch], vocabulary);
+    }
+    // Identity the write path supplies is not evidence of shape — see
+    // `VIEW_WRITE_PATH_IDENTITY_KEYS` for why this subtraction is the
+    // difference between closing #5599 and only appearing to.
+    for (const key of VIEW_WRITE_PATH_IDENTITY_KEYS) vocabulary.delete(key);
+    viewVocabularyCache = vocabulary;
+  }
+  return viewVocabularyCache;
+}
+
+/**
+ * [#6391] The `type` values that tell the two flattened overlay branches apart.
+ *
+ * `ListViewSchema.type` and `FormViewSchema.type` are disjoint enums — the
+ * property the union's own comment already relies on ("a flattened form (no
+ * required `columns`, disjoint `type` enum) then matches the form member"). Read
+ * off the schemas rather than re-listed, so a new view type cannot make the
+ * dispatch disagree with the members.
+ */
+function overlayTypeValues(schema: z.ZodTypeAny): ReadonlySet<string> {
+  const shape = (schema as unknown as { _zod?: { def?: { shape?: Record<string, unknown> } } })
+    ._zod?.def?.shape;
+  const values = (shape?.type as { _zod?: { values?: Set<unknown> } } | undefined)?._zod?.values;
+  return new Set([...(values ?? [])].filter((v): v is string => typeof v === 'string'));
+}
+
+/**
+ * [#6391] Which branch of {@link ViewMetadataSchema} a body CLAIMS to be, by
+ * its structural discriminants — or `null` when nothing in the body settles it.
+ *
+ * This is the "select the member by body" entry the filer asked for, and it
+ * encodes exactly the discriminants the members themselves already declare:
+ *
+ * - a nested `config` means a ViewItem record — both overlay members pin
+ *   `config: z.undefined()` precisely to exclude that shape;
+ * - a container slot (`list` / `form` / `listViews` / `formViews`) means a
+ *   container — both overlay members pin those `undefined` too;
+ * - otherwise the body is a flattened overlay, and `viewKind` (when the write
+ *   path inherited one — #2555) or the disjoint `type` enums say which family.
+ *
+ * ⚠️ A `null` answer is not a rejection and a non-`null` one is not an
+ * acceptance. This function decides which branch is worth EXPLAINING; whether
+ * the body parses is `ViewMetadataSchema`'s answer and only its answer.
+ */
+export function selectViewMetadataBranch(body: unknown): ViewMetadataBranch | null {
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) return null;
+  const b = body as Record<string, unknown>;
+  if (b.config !== undefined) return 'viewItem';
+  if (b.list !== undefined || b.form !== undefined || b.listViews !== undefined || b.formViews !== undefined) {
+    return 'container';
+  }
+  if (b.viewKind === 'form') return 'formOverlay';
+  if (b.viewKind === 'list') return 'listOverlay';
+  if (typeof b.type === 'string') {
+    if (overlayTypeValues(FormViewSchema).has(b.type)) return 'formOverlay';
+    if (overlayTypeValues(ListViewSchema).has(b.type)) return 'listOverlay';
+  }
+  return null;
+}
+
+/** [#6391] The result of {@link diagnoseViewMetadata}. */
+export type ViewMetadataDiagnosis =
+  | { success: true; branch: ViewMetadataBranch; data: ViewMetadataParsed }
+  | { success: false; branch: ViewMetadataBranch | null; issues: readonly z.core.$ZodIssue[] };
+
+/**
+ * [#6391] Explain a `view` body the way a consumer needs it explained: with the
+ * failing BRANCH named and that branch's own per-field issues, flat.
+ *
+ * The problem this closes, measured in objectui#3624: `ViewMetadataSchema`
+ * failing produces ONE root `invalid_union` issue with the per-field truth
+ * buried in nested `errors[]`, addressable only by member position. Here the
+ * position never appears — the caller gets `branch: 'listOverlay'` and the list
+ * overlay's own issues, with real field paths.
+ *
+ * Three outcomes, and the middle one is the one worth reading twice:
+ *
+ * 1. **The body parses.** `ViewMetadataSchema` accepted it; the branch reported
+ *    is the first member that accepts it.
+ * 2. **The body is not a `view` at all** (#5599's identity precondition —
+ *    `{ nope: 1 }`, `{}`, identity keys only). `branch` is `null` and the
+ *    issues are the precondition's own. Naming a branch here would be a lie:
+ *    the union never ran, and pointing the author at "the form overlay" would
+ *    send them to fix a shape they were not writing.
+ * 3. **The body claims a branch and that branch rejects it.** `branch` names
+ *    it, `issues` are that member's, resolved against the body's own paths.
+ *    When no discriminant settles the claim, every member is tried and the one
+ *    complaining LEAST is reported — the same "fewest issues wins" ranking
+ *    `selectUnionBranches` (`shared/error-map.zod.ts`) already uses for this
+ *    family, so one mistake gets one prescription across every surface.
+ *
+ * ⛔ **Acceptance is not decided here.** This function delegates the verdict to
+ * `ViewMetadataSchema` and only ever explains a verdict it did not make: if the
+ * schema accepts, this reports success no matter what the branch dispatch
+ * thinks. Pinned in `view-union-diagnostics.test.ts`.
+ */
+export function diagnoseViewMetadata(body: unknown): ViewMetadataDiagnosis {
+  const parsed = ViewMetadataSchema.safeParse(body);
+  const stripped = stripViewConsoleDecorations(body);
+
+  if (parsed.success) {
+    const accepting = VIEW_METADATA_BRANCHES.find(
+      (branch) => VIEW_METADATA_MEMBERS[branch].safeParse(stripped).success,
+    );
+    // The union accepted, so some member did; `selectViewMetadataBranch` is the
+    // fallback only for the impossible case, never the primary answer.
+    return { success: true, branch: accepting ?? selectViewMetadataBranch(stripped) ?? 'viewItem', data: parsed.data };
+  }
+
+  // (2) The identity precondition short-circuited the pipe with `z.NEVER`, so
+  // the union never ran and there is no branch to name. Detected by re-running
+  // the precondition's own predicate rather than by pattern-matching its issue
+  // text — same rule, one source.
+  if (!speaksViewVocabulary(body)) {
+    return { success: false, branch: null, issues: parsed.error.issues };
+  }
+
+  const claimed = selectViewMetadataBranch(stripped);
+  const candidates = claimed ? [claimed] : [...VIEW_METADATA_BRANCHES];
+  let best: { branch: ViewMetadataBranch; issues: readonly z.core.$ZodIssue[] } | undefined;
+  for (const branch of candidates) {
+    const result = VIEW_METADATA_MEMBERS[branch].safeParse(stripped);
+    // A member that accepts what the union rejected cannot happen (the union is
+    // exactly these members), but if it ever did, reporting zero issues under a
+    // `success: false` would be the worst possible answer — so skip it.
+    if (result.success) continue;
+    if (!best || result.error.issues.length < best.issues.length) {
+      best = { branch, issues: result.error.issues };
+    }
+  }
+  return best
+    ? { success: false, branch: best.branch, issues: best.issues }
+    : { success: false, branch: claimed, issues: parsed.error.issues };
 }
 
 /**
@@ -2521,48 +3157,15 @@ function assertViewIdentity(body: unknown, ctx: z.RefinementCtx, vocabulary: Set
  * on member 4.
  */
 export const ViewMetadataSchema = lazySchema(() => {
-  const members = [
-    // 1. Standalone ViewItem record — nested config validated genuinely, and
-    //    the WIRE variant, so Studio's round-trip keys have a declared home.
-    ViewItemWireSchema,
-    // 2. Non-empty defineView container.
-    ViewSchema.refine(containerHasAView, {
-      message:
-        'A view container must define at least one of `list`, `form`, `listViews`, or `formViews`.',
-    }),
-    // 3. Flattened runtime overlay — inline ListView / FormView config + identity.
-    //    The list member is tried first; a flattened form (no required
-    //    `columns`, disjoint `type` enum) then matches the form member.
-    //
-    //    `.strip()` is load-bearing, not leftover. `.extend()` INHERITS
-    //    strictness, so closing `ListViewSchema`/`FormViewSchema` for authoring
-    //    (#4001) silently made this overlay strict too — and this member exists
-    //    precisely to carry Studio's auxiliary round-trip keys (`isPinned`,
-    //    `sortOrder`, …) that `saveMetaItem` persists verbatim. Strict here is a
-    //    422 on a shape the platform itself writes. The ledger names this as the
-    //    trap to watch while batching: a response-side extension of an authoring
-    //    schema must strip back, or an upstream field addition becomes a crash.
-    ListViewSchema.extend(flattenedViewOverlayFields()).strip(),
-    FormViewSchema.extend(flattenedViewOverlayFields()).strip(),
-  ] as const;
-
-  // [#5599] Derived once, on first parse — see `collectDeclaredTopLevelKeys`.
-  let vocabulary: Set<string> | undefined;
-  const viewVocabulary = (): Set<string> => {
-    if (!vocabulary) {
-      vocabulary = new Set<string>();
-      for (const member of members) collectDeclaredTopLevelKeys(member, vocabulary);
-      // Identity the write path supplies is not evidence of shape — see
-      // `VIEW_WRITE_PATH_IDENTITY_KEYS` for why this subtraction is the
-      // difference between closing #5599 and only appearing to.
-      for (const key of VIEW_WRITE_PATH_IDENTITY_KEYS) vocabulary.delete(key);
-    }
-    return vocabulary;
-  };
+  // [#6391] The members ARE {@link VIEW_METADATA_MEMBERS}, read in
+  // {@link VIEW_METADATA_BRANCHES} order. Built by mapping rather than
+  // re-listed, so "the published schema is the member the union runs" cannot
+  // drift into "the published schema resembles it" — the exact gap objectui had
+  // to bridge with a canary test.
+  const members = VIEW_METADATA_BRANCHES.map((branch) => VIEW_METADATA_MEMBERS[branch]);
 
   return z.preprocess(
-    (body, ctx) =>
-      assertViewIdentity(body, ctx, viewVocabulary()) ? stripViewConsoleDecorations(body) : z.NEVER,
+    (body, ctx) => (assertViewIdentity(body, ctx) ? stripViewConsoleDecorations(body) : z.NEVER),
     z.union(members as unknown as readonly [z.ZodTypeAny, z.ZodTypeAny, ...z.ZodTypeAny[]]),
   );
 });
@@ -2922,3 +3525,10 @@ export type UserFiltersParsed = z.infer<typeof UserFiltersSchema>;
 export type AddRecordConfig = z.input<typeof AddRecordConfigSchema>;
 /** Post-parse shape of {@link AddRecordConfig} — defaults applied, transforms run (ADR-0122). */
 export type AddRecordConfigParsed = z.infer<typeof AddRecordConfigSchema>;
+export type CalendarConfig = z.input<typeof CalendarConfigSchema>;
+export type GanttConfig = z.input<typeof GanttConfigSchema>;
+export type GanttQuickFilter = z.input<typeof GanttQuickFilterSchema>;
+export type KanbanConfig = z.input<typeof KanbanConfigSchema>;
+export type NavigationMode = z.input<typeof NavigationModeSchema>;
+export type TreeConfig = z.input<typeof TreeConfigSchema>;
+export type ViewItemName = z.input<typeof ViewItemNameSchema>;

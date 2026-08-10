@@ -1,0 +1,7 @@
+{
+  "file": "packages/spec/src/type-alias-convention.pin.test.ts",
+  "adrs": [
+    "ADR-0122"
+  ],
+  "invariant": "ADR-0122 D6: this file is the EXEMPTION REGISTRY for the type-alias convention, and its assertions are the only thing making the exemption honest. Each line says `z.input` and `z.infer` of one schema are the same type, which is why that schema's bare alias is allowed to have no `XParsed` (D3 — a permanent synonym is a name an author can only pick wrongly). Isomorphism is not declared by anyone; it is a fact about the schema tree, and it ROTS the day a nested field gains a `.default()` / `.transform()` / `.catch()` / `.pipe()`. Deleting a red line to make the build pass re-opens exactly the hole phase 1 closed: the alias silently joins the shape-diff set and the phase-2 flip of the bare name breaks its consumers with no migration target. The fix for a red line is always the same and is never deletion alone — declare `XParsed` next to the bare alias, THEN delete the pin. `scripts/check-spec-parsed-alias.mjs` reads this file as its registry, so a pin removed without its alias turns that gate red too."
+}

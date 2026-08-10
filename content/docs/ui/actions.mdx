@@ -21,7 +21,7 @@ The types you'll actually use:
 | `url` | Navigate / open a link | `target` is the URL (`${ctx.record.id}` interpolation supported) |
 | `modal` | Open a modal page — client-side only, no server dispatch | `target` names the modal page (to collect input *and* run logic, use `script` + `params`) |
 | `api` | Call an HTTP endpoint directly | `target` is the endpoint; `method` / `bodyShape` / `bodyExtra` shape the request |
-| `form` | Open a form view, prefilled with the current record | `target` names the FormView; routed to `/forms/:target?recordId=…` |
+| `form` | Open a form view, prefilled with the current record — in-shell, and the submit lands on the created record ([contract](/docs/protocol/objectui/actions#what-type-form-promises)) | `target` names the FormView; routed to `/forms/:target?recordId=…` |
 
 <Callout type="warn">
 Prefer `confirmText`/`params` over the two action properties that are **not
@@ -189,7 +189,6 @@ is collected, then the body runs with those values as its `input`.
 | `record_more` | Record page overflow ("…") menu |
 | `record_related` | Related-list sections |
 | `record_section` | Named action bars on record pages |
-| `global_nav` | App-level navigation |
 
 Surfaces can also reference actions **by name**:
 
@@ -207,6 +206,10 @@ defineView({
 
 // App navigation — an action as a nav item
 { type: 'action', actionDef: { actionName: 'crm_convert_lead' } }
+
+// App navigation — deep-link auto-run on an object entry: land on the
+// object's list surface, then run the declared action once
+{ type: 'object', objectName: 'sys_environment', runAction: 'create_environment' }
 ```
 
 <Callout type="info">
@@ -244,6 +247,26 @@ construction — exist at all.
 - **`resultDialog`** — a one-time reveal dialog for output the user must copy
   (generated tokens, export links).
 - **`variant` / `icon` / `order`** — presentation and sort position.
+
+<Callout type="warn">
+**`params` is an array of parameter *definitions*, never a map of values.**
+Writing `params: { … }` is rejected at authoring time, and what to write
+instead depends on the action's `type`:
+
+| You wanted | Write this instead |
+|:---|:---|
+| A static request body for `type: 'api'` | `bodyExtra: { name: '{{page.inquiryName}}' }` — merged last, `{{page.<var>}}` tokens resolved by the runtime |
+| A value to interpolate into a `type: 'url'` `target` | Put it in the `target` string itself. `${param.X}` interpolates a value the params **dialog** collected; `${ctx.X}` one from the action context |
+| A new tab for `type: 'url'` | `openIn: 'new-tab'` (for an *async* handler that redirects, use `opensInNewTab` instead) |
+
+There is no object form of `params` on a url action to migrate to: the two
+things it used to mean in the renderer — a statically authored `${param.X}`
+scope, and a `params.newTab` flag — were **retired**, not renamed
+([#6828](https://github.com/objectstack-ai/objectstack/issues/6828)). Both are
+already expressible with the keys above, so a third meaning of `params` earns
+nothing; if you have a case the `target` string genuinely cannot express, that
+is a spec proposal for a properly named key, not a values map under this one.
+</Callout>
 
 ## Permissions and visibility
 

@@ -153,21 +153,44 @@ describe('[#5324/#5328] a filter this driver cannot evaluate is refused, not ans
     });
   }
 
-  it('refuses "$options" with no "$regex" to modify, on both faces', async () => {
-    // The one entry in the vocabulary that is a MODIFIER rather than a
-    // predicate, and therefore the one that could be allowlisted into a fresh
-    // leak: measured before this arm existed, `{ stage: { $options: 'i' } }`
-    // still escaped as an uncoded `unknown query operator $options` on the live
-    // path while the matcher ignored it and matched EVERY row — #5324's exact
-    // shape, surviving for a single operator.
-    const where = { stage: { $options: 'i' } };
+  /**
+   * [#5702] REPLACED, not re-spelled. This case used to be
+   * `refuses "$options" with no "$regex" to modify, on both faces` and it pinned
+   * the companion rule #5324 added while `$regex`/`$options` were still
+   * ALLOWLISTED members of this driver's vocabulary (they were, because
+   * plugin-auth's adapter produced `$regex` on the authentication path).
+   *
+   * That producer was flipped by #5710 and both spellings are retired by #4706,
+   * so the companion rule has no surviving shape to judge: `$options` is now
+   * refused on sight, with or without a `$regex` beside it. Keeping the old
+   * assertion would have kept passing — the filter still throws — while pinning
+   * a message that PRESCRIBES the retired form (`{ "$regex": "abc",
+   * "$options": "i" }`), which is the failure mode where a green test documents
+   * the wrong contract.
+   */
+  for (const [label, where, mustMention] of [
+    ['a bare $regex', { stage: { $regex: 'W' } }, ['$regex', '$icontains']],
+    ['a bare $options', { stage: { $options: 'i' } }, ['$options', '$icontains']],
+    [
+      '$regex WITH $options — one mistake, one fix',
+      { stage: { $regex: 'W', $options: 'i' } },
+      ['$regex', '$options', '$icontains'],
+    ],
+  ] as const) {
+    it(`refuses ${label}, naming the replacement, on both faces`, async () => {
+      const live = await liveRefusal(where);
+      expectEnvelope(live);
+      expect(live.message).toContain('RETIRED');
+      for (const mention of mustMention) expect(live.message).toContain(mention);
 
-    const live = await liveRefusal(where);
-    expectEnvelope(live);
-    expect(live.message).toContain('has no "$regex" to modify');
-
-    expect(matcherRefusal(where).message).toBe(live.message);
-  });
+      // Both faces, one sentence — the #5324 invariant, which is exactly what a
+      // retirement must not be allowed to fork: this driver's matcher is the one
+      // surface in the repo that really evaluated `$regex`.
+      const reference = matcherRefusal(where);
+      expectEnvelope(reference);
+      expect(reference.message).toBe(live.message);
+    });
+  }
 
   it('names the position, so a refusal deep in a scope tree is actionable', async () => {
     const err = await liveRefusal({ $or: [{ owner: 'u1' }, { $and: [{ stage: { $sounds_like: 'won' } }] }] });
@@ -271,7 +294,11 @@ describe('[#5324/#5328] a filter this driver cannot evaluate is refused, not ans
       [{ stage: { $null: false } }, ['1', '2', '3']],
       [{ stage: { $null: true } }, []],
       [{ stage: { $exists: true } }, ['1', '2', '3']],
-      [{ stage: { $regex: 'W', $options: 'i' } }, ['1']],
+      // [#5702] `{ stage: { $regex: 'W', $options: 'i' } } → ['1']` used to sit
+      // here, as a LEGAL shape. It is not one any more — #4706 retired both
+      // spellings and this driver refuses them — so it moved to the refusal
+      // table above rather than being deleted: the shape still has to have a
+      // pinned answer, only the answer changed from a row list to a refusal.
       [{ score: { $between: [10, 20] } }, ['1', '2']],
       [{ $or: [{ stage: 'won' }, { owner: 'u2' }] }, ['1', '2']],
       [{ $and: [{ owner: 'u1' }, { score: { $gt: 15 } }] }, ['3']],

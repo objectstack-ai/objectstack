@@ -43,7 +43,7 @@ const result = ActionNavItemSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
-| **label** | `string` | ✅ | Display proper label |
+| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
@@ -65,26 +65,27 @@ const result = ActionNavItemSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | ✅ | App unique machine name (lowercase snake_case) |
-| **label** | `string` | ✅ | App display label |
-| **version** | `never` | optional | [REMOVED] `App.version` was removed in @objectstack/spec 17.0.0 (2026-06 liveness audit — no consumer in framework or objectui). An app is versioned by its owning package: use `manifest.version`. Delete the key. |
-| **description** | `string` | optional | App description |
+| **label** | `string \| Record<string, string>` | ✅ | App display label |
+| **version** | `never` | optional | [REMOVED] `App.version` was removed in @objectstack/spec 17.0.0 (2026-06 liveness audit — no consumer in framework or objectui). An app is versioned by its owning package: use `manifest.version`. Delete the key. Run `os migrate meta --from 16` to rewrite existing sources automatically. |
+| **description** | `string \| Record<string, string>` | optional | App description |
 | **icon** | `string` | optional | App icon used in the App Launcher |
 | **branding** | `{ primaryColor?: string; accentColor?: string; logo?: string; favicon?: string }` | optional | App-specific branding |
 | **active** | `boolean` | optional | Whether the app is enabled |
 | **isDefault** | `boolean` | optional | Is default app |
-| **hidden** | `boolean` | optional | Hide from the App Switcher; the shell surfaces hidden apps via the avatar menu instead |
-| **navigation** | `({ id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … } \| … +5 more)[]` | optional | Full navigation tree for the app sidebar |
-| **areas** | `{ id: string; label: string; icon?: string; description?: string; … }[]` | optional | Navigation areas for partitioning navigation by business domain |
-| **contextSelectors** | `{ id: string; label: string; icon?: string; optionsSource: object; … }[]` | optional | App-level scope dropdowns whose value is injected into nav items as `{<id>}` template vars |
+| **hidden** | `boolean` | optional | Hide from the App Switcher; the shell surfaces hidden apps via the avatar menu instead (navigation only — never an access gate) |
+| **_unpublished** | `boolean` | optional | Machine-managed publish gate (ADR-0045 §3) — true = unpublished, externally unobservable. Written by AI materialization, cleared by publish-drafts. Never authored. |
+| **navigation** | `({ id: string; label: string \| Record<string, string>; icon?: string; order?: number; … } \| { type: 'separator'; id?: string; order?: number } \| … +7 more)[]` | optional | Full navigation tree for the app sidebar |
+| **areas** | `{ id: string; label: string \| Record<string, string>; icon?: string; description?: string \| Record<string, string>; … }[]` | optional | Navigation areas for partitioning navigation by business domain |
+| **contextSelectors** | `{ id: string; label: string \| Record<string, string>; icon?: string; optionsSource: object; … }[]` | optional | App-level scope dropdowns whose value is injected into nav items as `{<id>}` template vars |
 | **homePageId** | `never` | optional | [REMOVED] `app.homePageId` was removed in @objectstack/spec 17.0.0 (#4667, #4709, ADR-0049). objectui's console did read it before v17 (`resolveLandingRoute`), so this key had a consumer — it was retired because the capability is better expressed on the navigation item itself than as an ID cross-reference that silently falls back when it dangles. An app's landing page IS its first navigation item (by `order`), and the root landing follows `isDefault` routing. Delete the key; to change where an app opens, reorder `navigation` so the intended entry is first, and set `isDefault` on the app that should own the root landing. Run `os migrate meta --from 16` to rewrite existing sources automatically. |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this app |
-| **objects** | `never` | optional | [REMOVED] `App.objects` was removed in @objectstack/spec 17.0.0 (2026-06 liveness audit — never read; the spec itself labelled it "config file convenience"). Objects belong to the stack (`defineStack({ objects })`); an app reaches them through its navigation items. Delete the key. |
-| **apis** | `never` | optional | [REMOVED] `App.apis` was removed in @objectstack/spec 17.0.0 (2026-06 liveness audit — never read). Delete the key and declare the endpoint one level up, on the STACK: `defineStack({ apis })`. That surface EXECUTES from protocol 17 (#5040). Between #4936 and the executor landing it was refused wholesale — nothing mounted a declared path, so every key including `authRequired` parsed and gated nothing — and that blanket refusal is now narrowed to five per-endpoint publish gates (namespace, supported target, mapping, policy, uniqueness): an endpoint that passes them is mounted and serves traffic as soon as the stack is published. Two things to get right when you move it: the path must sit inside your own carve-out, `/api/v1/apps/<manifest.namespace>/<subpath>` with an explicit `manifest.namespace` (ADR-0121 D1/D2), and `authRequired` defaults to `true` — an explicit `false` is the only thing that opens anonymous access, and ADR-0121 D6 then requires an armed `rateLimit: { enabled: true, windowMs, maxRequests }`. Read the `declarative-apis-endpoints-live` entry of the protocol upgrade guide first; it is a security review, not a rename. A route that genuinely needs handler CODE still belongs in a plugin manifest `contributes.routes` entry. |
-| **sharing** | `never` | optional | [REMOVED] `App.sharing` was removed in @objectstack/spec 17.0.0 (2026-06 liveness audit / ADR-0049 enforce-or-remove) — no public-app route ever read it, so it declared sharing that did not exist. Public access is granted per FORM VIEW (`FormView.sharing`, the public-data-collection surface). Delete the key. |
-| **embed** | `never` | optional | [REMOVED] `App.embed` was removed in @objectstack/spec 17.0.0 (2026-06 liveness audit / ADR-0049) — no iframe route ever read it. Embedding is a per-form-view surface (`FormView.sharing`), not an app-level switch. Delete the key. |
-| **mobileNavigation** | `never` | optional | [REMOVED] `App.mobileNavigation` was removed in @objectstack/spec 17.0.0 (2026-06 liveness audit — fully unimplemented; no renderer, including packages/mobile, ever read it). Delete the key; the block returns if/when a real mobile navigation ships. |
+| **objects** | `never` | optional | [REMOVED] `App.objects` was removed in @objectstack/spec 17.0.0 (2026-06 liveness audit — never read; the spec itself labelled it "config file convenience"). Objects belong to the stack (`defineStack({ objects })`); an app reaches them through its navigation items. Delete the key. Run `os migrate meta --from 16` to rewrite existing sources automatically. |
+| **apis** | `never` | optional | [REMOVED] `App.apis` was removed in @objectstack/spec 17.0.0 (2026-06 liveness audit — never read). Delete the key and declare the endpoint one level up, on the STACK: `defineStack({ apis })`. That surface EXECUTES from protocol 17 (#5040). Between #4936 and the executor landing it was refused wholesale — nothing mounted a declared path, so every key including `authRequired` parsed and gated nothing — and that blanket refusal is now narrowed to five per-endpoint publish gates (namespace, supported target, mapping, policy, uniqueness): an endpoint that passes them is mounted and serves traffic as soon as the stack is published. Two things to get right when you move it: the path must sit inside your own carve-out, `/api/v1/apps/<manifest.namespace>/<subpath>` with an explicit `manifest.namespace` (ADR-0121 D1/D2), and `authRequired` defaults to `true` — an explicit `false` is the only thing that opens anonymous access, and ADR-0121 D6 then requires an armed `rateLimit: { enabled: true, windowMs, maxRequests }`. Read the `declarative-apis-endpoints-live` entry of the protocol upgrade guide first; it is a security review, not a rename. A route that genuinely needs handler CODE still belongs in a plugin manifest `contributes.routes` entry. Run `os migrate meta --from 16` to rewrite existing sources automatically. |
+| **sharing** | `never` | optional | [REMOVED] `App.sharing` was removed in @objectstack/spec 17.0.0 (2026-06 liveness audit / ADR-0049 enforce-or-remove) — no public-app route ever read it, so it declared sharing that did not exist. Public access is granted per FORM VIEW (`FormView.sharing`, the public-data-collection surface). Delete the key. Run `os migrate meta --from 16` to rewrite existing sources automatically. |
+| **embed** | `never` | optional | [REMOVED] `App.embed` was removed in @objectstack/spec 17.0.0 (2026-06 liveness audit / ADR-0049) — no iframe route ever read it. Embedding is a per-form-view surface (`FormView.sharing`), not an app-level switch. Delete the key. Run `os migrate meta --from 16` to rewrite existing sources automatically. |
+| **mobileNavigation** | `never` | optional | [REMOVED] `App.mobileNavigation` was removed in @objectstack/spec 17.0.0 (2026-06 liveness audit — fully unimplemented; no renderer, including packages/mobile, ever read it). Delete the key; the block returns if/when a real mobile navigation ships. Run `os migrate meta --from 16` to rewrite existing sources automatically. |
 | **defaultAgent** | `string` | optional | Platform agent bound to this app's ambient chat ('ask' is the implicit default; 'build' for authoring surfaces) — ADR-0063 §1 |
-| **aria** | `never` | optional | [REMOVED] `App.aria` was removed in @objectstack/spec 17.0.0 (2026-06 liveness audit — no renderer read app-level ARIA attributes). Declare `aria` on the component/widget that renders the DOM node instead. Delete the key. |
+| **aria** | `never` | optional | [REMOVED] `App.aria` was removed in @objectstack/spec 17.0.0 (2026-06 liveness audit — no renderer read app-level ARIA attributes). Declare `aria` on the page component that renders the DOM node instead (`page.components[].aria`; `page.aria` and the list view `aria` are live too). Delete the key. Run `os migrate meta --from 16` to rewrite existing sources automatically. |
 | **protection** | `{ lock: Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>; reason: string; docsUrl?: string }` | optional | Package author protection block — lock policy for this app. |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
@@ -118,9 +119,9 @@ const result = ActionNavItemSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Selector id; selected value is exposed as the nav template var `{<id>}` |
-| **label** | `string` | ✅ | Dropdown label |
+| **label** | `string \| Record<string, string>` | ✅ | Dropdown label |
 | **icon** | `string` | optional | Icon name |
-| **optionsSource** | `{ endpoint: string; valueKey: string; labelKey: string; filter?: { key: string; op: Enum<'eq' \| 'ne' \| 'in' \| 'nin'>; value: string \| string[] }[] }` | ✅ | Option data source |
+| **optionsSource** | `{ endpoint: string; valueKey: string; labelKey: string; filter?: object[] }` | ✅ | Option data source |
 | **allValue** | `string` | ✅ | Sentinel value meaning "no concrete selection yet" (empty string is almost always right) |
 | **persist** | `Enum<'query' \| 'session' \| 'none'>` | ✅ | Persist selection via URL query, sessionStorage, or not at all |
 
@@ -134,7 +135,7 @@ const result = ActionNavItemSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
-| **label** | `string` | ✅ | Display proper label |
+| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
@@ -157,7 +158,7 @@ const result = ActionNavItemSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
-| **label** | `string` | ✅ | Display proper label |
+| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
@@ -179,7 +180,7 @@ const result = ActionNavItemSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
-| **label** | `string` | ✅ | Display proper label |
+| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
@@ -201,10 +202,10 @@ const result = ActionNavItemSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique area identifier (lowercase snake_case) |
-| **label** | `string` | ✅ | Area display label |
+| **label** | `string \| Record<string, string>` | ✅ | Area display label |
 | **icon** | `string` | optional | Area icon name |
-| **description** | `string` | optional | Area description |
-| **navigation** | `({ id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … } \| … +5 more)[]` | ✅ | Navigation items within this area |
+| **description** | `string \| Record<string, string>` | optional | Area description |
+| **navigation** | `({ id: string; label: string \| Record<string, string>; icon?: string; order?: number; … } \| { type: 'separator'; id?: string; order?: number } \| … +7 more)[]` | ✅ | Navigation items within this area |
 
 
 ---
@@ -220,7 +221,7 @@ A navigation contribution: a package injecting nav items into an app it does not
 | **app** | `string` | ✅ | Target app name to contribute navigation into (e.g. "setup") |
 | **group** | `string` | optional | Target group nav-item id to append into (e.g. "group_integrations"); omit to append at the app top level |
 | **priority** | `integer` | optional | Merge priority within the target group — lower applied first (matches object extender priority) |
-| **items** | `({ id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … } \| … +5 more)[]` | ✅ | Navigation items contributed into the target app/group |
+| **items** | `({ id: string; label: string \| Record<string, string>; icon?: string; order?: number; … } \| { type: 'separator'; id?: string; order?: number } \| … +7 more)[]` | ✅ | Navigation items contributed into the target app/group |
 
 
 ---
@@ -240,7 +241,7 @@ This schema accepts one of the following structures:
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
-| **label** | `string` | ✅ | Display proper label |
+| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
@@ -255,6 +256,7 @@ This schema accepts one of the following structures:
 | **recordId** | `string` | optional | Navigate directly to this record id instead of the list view. Supports template vars: `{current_user_id}`, `{current_org_id}`. |
 | **recordMode** | `Enum<'view' \| 'edit'>` | optional | Open the record in view (default) or edit mode. Only meaningful when `recordId` is set. |
 | **filters** | `Record<string, string>` | optional | URL filter conditions — targets the /:objectName/data bare surface via filter[`<field>`]=`<value>` params instead of a saved view. Values support template vars `{current_user_id}`, `{current_org_id}`. Mutually exclusive with recordId/viewName. |
+| **runAction** | `string` | optional | Auto-run this declared action once on arrival at the object's list surface (deep-link "navigate = run action", #4848). Must name an action defined in the stack; validated by defineStack and lint. Not combinable with recordId. |
 | **children** | `[NavigationItem](#navigationitem)[]` | optional | Child navigation items (e.g. specific views) |
 
 ---
@@ -268,7 +270,7 @@ This schema accepts one of the following structures:
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
-| **label** | `string` | ✅ | Display proper label |
+| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
@@ -291,7 +293,7 @@ This schema accepts one of the following structures:
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
-| **label** | `string` | ✅ | Display proper label |
+| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
@@ -315,7 +317,7 @@ This schema accepts one of the following structures:
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
-| **label** | `string` | ✅ | Display proper label |
+| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
@@ -339,7 +341,7 @@ This schema accepts one of the following structures:
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
-| **label** | `string` | ✅ | Display proper label |
+| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
@@ -362,7 +364,7 @@ This schema accepts one of the following structures:
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
-| **label** | `string` | ✅ | Display proper label |
+| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
@@ -385,7 +387,7 @@ This schema accepts one of the following structures:
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
-| **label** | `string` | ✅ | Display proper label |
+| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
@@ -423,7 +425,7 @@ This schema accepts one of the following structures:
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
-| **label** | `string` | ✅ | Display proper label |
+| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
@@ -448,7 +450,7 @@ This schema accepts one of the following structures:
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
-| **label** | `string` | ✅ | Display proper label |
+| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
@@ -463,6 +465,7 @@ This schema accepts one of the following structures:
 | **recordId** | `string` | optional | Navigate directly to this record id instead of the list view. Supports template vars: `{current_user_id}`, `{current_org_id}`. |
 | **recordMode** | `Enum<'view' \| 'edit'>` | optional | Open the record in view (default) or edit mode. Only meaningful when `recordId` is set. |
 | **filters** | `Record<string, string>` | optional | URL filter conditions — targets the /:objectName/data bare surface via filter[`<field>`]=`<value>` params instead of a saved view. Values support template vars `{current_user_id}`, `{current_org_id}`. Mutually exclusive with recordId/viewName. |
+| **runAction** | `string` | optional | Auto-run this declared action once on arrival at the object's list surface (deep-link "navigate = run action", #4848). Must name an action defined in the stack; validated by defineStack and lint. Not combinable with recordId. |
 
 
 ---
@@ -474,7 +477,7 @@ This schema accepts one of the following structures:
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
-| **label** | `string` | ✅ | Display proper label |
+| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
@@ -497,7 +500,7 @@ This schema accepts one of the following structures:
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
-| **label** | `string` | ✅ | Display proper label |
+| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
@@ -519,7 +522,7 @@ This schema accepts one of the following structures:
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
-| **label** | `string` | ✅ | Display proper label |
+| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |

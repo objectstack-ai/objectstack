@@ -70,8 +70,14 @@ export const SysJob = ObjectSchema.create({
     }),
 
     last_run_at: Field.datetime({ label: 'Last Run At', required: false, group: 'State' }),
+    // [#7072] `degraded` mirrors `sys_job_run.status` (#5548's ruling: one
+    // additional outcome meaning "completed without accomplishing the work").
+    // Enforced by ObjectQL's record validator, so it must stay in step with
+    // `JobExecutionStatus` in `@objectstack/spec` and with `sys_job_run.status`.
+    // A degraded run leaves `failure_count` below untouched and puts its reason
+    // in `last_error` — that column may therefore carry a non-error note.
     last_status: Field.select(
-      ['success', 'failed', 'timeout', 'running'],
+      ['success', 'failed', 'timeout', 'running', 'degraded'],
       { label: 'Last Status', required: false, group: 'State' },
     ),
     last_error: Field.textarea({ label: 'Last Error', required: false, group: 'State' }),

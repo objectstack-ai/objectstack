@@ -1,6 +1,16 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { ServiceObject, ObjectSchema, ObjectOwnership, provisionPrimary, resolveCrudAffordances, resolveInjectedSystemColumns, LEGACY_API_METHODS, AUDIT_PROVENANCE_FIELDS, type AuditProvenanceField } from '@objectstack/spec/data';
+import { ServiceObject, ObjectSchema, ObjectOwnership, provisionPrimary, resolveCrudAffordances, resolveInjectedSystemColumns, LEGACY_API_METHODS, AUDIT_PROVENANCE_FIELDS } from '@objectstack/spec/data';
+// [#4513] The audit-family governance table, and [#6562] the injected-column
+// DEFINITION tables it governs — see the re-exports below for why both live in a
+// package `objectql` and `metadata-protocol` both depend on.
+import {
+  AUDIT_FIELD_GOVERNANCE,
+  AUDIT_FIELD_DEFS,
+  TENANT_SCOPE_FIELD_DEF,
+  OWNER_FIELD_DEF,
+  OWNING_BUSINESS_UNIT_FIELD_DEF,
+} from '@objectstack/metadata-core';
 import { SystemFieldName } from '@objectstack/spec/system';
 import { resolveTenancyPosture, resolveSearchPinyinEnabled } from '@objectstack/types';
 import { postureEnforcesWall } from '@objectstack/spec/security';
@@ -16,14 +26,40 @@ import { applyProtection } from '@objectstack/spec/shared';
 export const RESERVED_NAMESPACES = new Set(['base', 'system']);
 
 /**
- * Default priorities for ownership types.
+ * Default priorities for the three contributor kinds.
+ *
+ * [ADR-0029 D9.3] `DEFAULT_OVERLAY_PRIORITY` sits BETWEEN the owner and the
+ * extenders so a `getObjectContributors()` read lists the stack in layer
+ * order. It is ORDERING ONLY: {@link SchemaRegistry.resolveObject} selects its
+ * base layer by KIND, never by "highest priority wins" — extender priority is
+ * author-declared (`ext.priority ?? 200` in the `objectExtensions` loop), so a
+ * package could otherwise re-rank a tenant's overlay out of the base slot by
+ * declaring `priority: 140`. Declared numbers order PEERS; they must not be
+ * able to change WHICH LAYER IS THE BASE.
  */
 export const DEFAULT_OWNER_PRIORITY = 100;
+export const DEFAULT_OVERLAY_PRIORITY = 150;
 export const DEFAULT_EXTENDER_PRIORITY = 200;
 
 /**
  * Contributor Record
- * Tracks how a package contributes to an object (own or extend).
+ * Tracks how a package contributes to an object.
+ *
+ * Three kinds (ADR-0029 D9):
+ *
+ * - `own` — the single owning package. Defines the base schema, the table and
+ *   the namespace claim. Exactly one per object name, unconditionally
+ *   ({@link SchemaRegistry.assertSingleOwnerPerObject}).
+ * - `overlay` — [D9.1] a TENANT customization layer over the owner's
+ *   definition, hydrated from a `sys_metadata` row. It REPLACES the base layer
+ *   at resolution time (D9.2) and owns nothing: it claims no namespace,
+ *   decides no package membership, holds no table. That is why the
+ *   single-owner assertion needs no "unless it is an overlay" clause — which
+ *   matters beyond tidiness, since ADR-0028 D5/D6 rest on that sentence being
+ *   unconditional. `ownership: 'overlay'` is LOADER-SET at the hydration seams
+ *   and reachable from no authoring surface.
+ * - `extend` — additive contributions from other packages, folded on top of
+ *   whichever layer is the base.
  */
 export interface ObjectContributor {
   packageId: string;
@@ -247,51 +283,21 @@ export interface SchemaRegistryOptions {
  *     site for why that shape presumes nothing about the undecided D2 policy.
  */
 /**
- * Column definitions for the audit-provenance family, keyed by the spec's
- * {@link AUDIT_PROVENANCE_FIELDS} tuple — the canonical declaration of WHICH
- * columns exist (#3786). This table owns only WHAT each column looks like.
+ * [#6562] The column-definition tables — `AUDIT_FIELD_DEFS` and the three
+ * ownership/tenancy anchors below — now live in `@objectstack/metadata-core`,
+ * re-exported here so the symbols still resolve from `@objectstack/objectql`.
  *
- * The `satisfies` clause is the sync mechanism: a name added to the spec tuple
- * without a definition here — or a definition for a name the spec dropped — is
- * a compile error, not a silently diverging copy. Same discipline as the
- * spec's `APPROVER_VALUE_BINDINGS`.
+ * Same criterion, same package and the same cycle as {@link AUDIT_FIELD_GOVERNANCE}
+ * one comment down: the `/meta` READ path lives in
+ * `@objectstack/metadata-protocol`, which `@objectstack/objectql` depends on, so
+ * it could not import WHAT each injected column looks like from the registry
+ * that provisions it. Until it could, an overlay-backed read served the stored
+ * document verbatim and reported the platform's own columns as *absent* while a
+ * registry-backed read of the same object reported them present — one endpoint,
+ * two field sets, and nothing telling the caller which it had received. The read
+ * exits and this injection now derive one answer from one table.
  */
-const AUDIT_FIELD_DEFS = {
-  created_at: {
-    type: 'datetime',
-    label: 'Created At',
-    required: false,
-    readonly: true,
-    system: true,
-    description: 'Timestamp when the record was created (auto-populated by the driver).',
-  },
-  created_by: {
-    type: 'lookup',
-    reference: 'sys_user',
-    label: 'Created By',
-    required: false,
-    readonly: true,
-    system: true,
-    description: 'User who created the record (populated when an authenticated session is present).',
-  },
-  updated_at: {
-    type: 'datetime',
-    label: 'Last Modified At',
-    required: false,
-    readonly: true,
-    system: true,
-    description: 'Timestamp of the most recent modification (auto-populated by the driver).',
-  },
-  updated_by: {
-    type: 'lookup',
-    reference: 'sys_user',
-    label: 'Last Modified By',
-    required: false,
-    readonly: true,
-    system: true,
-    description: 'User who last modified the record (populated when an authenticated session is present).',
-  },
-} satisfies Record<AuditProvenanceField, Record<string, unknown>>;
+export { AUDIT_FIELD_DEFS, TENANT_SCOPE_FIELD_DEF, OWNER_FIELD_DEF, OWNING_BUSINESS_UNIT_FIELD_DEF };
 
 /**
  * [#4447] The subset of {@link AUDIT_FIELD_DEFS} that is NOT authorable — the
@@ -300,16 +306,20 @@ const AUDIT_FIELD_DEFS = {
  * Only `readonly` / `system` travel: everything else an author writes —
  * `label`, `description`, `hidden`, `group`, and even `type` for an
  * external object mapping a differently-typed remote column — stays theirs.
+ * `type` and `reference` are deliberately NOT forced: an external/federated
+ * object legitimately maps its audit column to a differently-typed remote
+ * column, and #4447 is about writability, not storage shape. Narrower is the
+ * point — this overrides an author, so it takes only what the defect requires.
+ *
+ * [#4513] The table itself now lives in `@objectstack/metadata-core`, because
+ * the `/meta` READ surface has to report the same answer this injection
+ * enforces and could not reach it here: `@objectstack/objectql` depends on
+ * `@objectstack/metadata-protocol`, so the import a read-side pin needs would
+ * close a turbo-rejected cycle. Same criterion, same package, and for the same
+ * reason as the #5619 dispatch predicates. Re-exported here so the symbol
+ * still resolves from `@objectstack/objectql`.
  */
-const AUDIT_FIELD_GOVERNANCE: Record<AuditProvenanceField, Record<string, unknown>> =
-  Object.fromEntries(
-    // ONLY the keys that decide WHO MAY WRITE the column. `type` and
-    // `reference` are deliberately NOT forced: an external/federated object
-    // legitimately maps its audit column to a differently-typed remote column,
-    // and #4447 is about writability, not storage shape. Narrower is the point
-    // — this overrides an author, so it takes only what the defect requires.
-    AUDIT_PROVENANCE_FIELDS.map((name) => [name, { readonly: true, system: true }]),
-  ) as unknown as Record<AuditProvenanceField, Record<string, unknown>>;
+export { AUDIT_FIELD_GOVERNANCE };
 
 /**
  * [ADR-0117 D1] The injected BU-ownership column name, spelled out so it greps
@@ -377,26 +387,31 @@ export function applySystemFields(
   // per-record owner is meaningless: any platform-managed table (`managedBy`
   // is set — config/append-only/system/platform; `better-auth` already
   // returned above), the `sys_*` namespace, or an explicit opt-out via
-  // `ownership: 'org' | 'none'` on the schema (Dataverse-style — catalog /
-  // junction tables). Note this is the SAFE default direction: forgetting the
+  // `ownership: 'business_unit' | 'org' | 'none'` on the schema (Dataverse-style
+  // — catalog / junction tables, plus D1's unit-owned tier, which takes the BU
+  // anchor instead). Note this is the SAFE default direction: forgetting the
   // opt-out leaves a harmless spare column, whereas the old opt-IN model let
   // authors silently ship objects with no working ownership at all.
   // `ownership` is a declared ObjectSchema field (record-ownership model), read
   // off the typed schema by the plan — no `as any` (#3175).
   //
   // [ADR-0117 D1 / #5677] The plan treats the value as a `string`, not the
-  // enum, on purpose. The spec enum is `'user' | 'org' | 'none'` TODAY; D1's
-  // fourth tier `'business_unit'` lands in #5678 — the engine must recognise the
-  // tier BEFORE the schema can emit it, or the tier's first appearance would be
-  // judged by a no-overlap literal test and get the INVERSE of what D1 declares.
+  // enum, on purpose: it is also called on pre-parse input. That widening is
+  // what let the engine recognise D1's fourth tier `'business_unit'` BEFORE the
+  // schema could emit it — the ordering #5677 → #5678 exists to guarantee, since
+  // a tier the schema emits first would be judged by a no-overlap literal test
+  // and get the INVERSE of what D1 declares. As of #5678 the spec enum reads
+  // `'user' | 'business_unit' | 'org' | 'none'` and the tier is authorable.
   //
   // [ADR-0117 D1 / #5677] The ownership decision is a POSITIVE LIST, deliberately
   // — it used to read `ownership !== 'org' && ownership !== 'none'`, i.e. a
   // DENY-list, so ANY value outside the two exclusions fell through to "inject
-  // `owner_id`". That default is safe only while the enum has exactly three
+  // `owner_id`". That default was safe only while the enum had exactly three
   // members: D1's `business_unit` tier means "owned by a UNIT, not a person"
   // (`owner_id` ❌, `owning_business_unit_id` ✅), and under the deny-list it
-  // would have been stamped with `owner_id` — the exact inverse.
+  // would have been stamped with `owner_id` — the exact inverse. The same
+  // argument applies to any FIFTH tier a later ADR adds, which is why the list
+  // stays positive rather than being "completed" to the current enum.
   //
   // The `sys_*` / `managedBy` ineligibility and the per-tier table
   //
@@ -420,20 +435,54 @@ export function applySystemFields(
   // Platform-owned field settings that must WIN over a declared field, rather
   // than lose to it like `additions` does (#4447).
   const overrides: Record<string, any> = {};
+  // Platform-owned index declarations, appended to the object's `indexes[]` —
+  // the ONE surface an index is declared on in this system (#6810, below).
+  const indexAdditions: Array<{ fields: string[] }> = [];
 
   if (wantTenant && !schema.fields?.organization_id) {
-    additions.organization_id = {
-      type: 'lookup',
-      reference: 'sys_organization',
-      label: 'Organization',
-      required: false,
-      indexed: opts.multiTenant,
-      hidden: true,
-      readonly: true,
-      system: true,
-      description:
-        'Tenant scope (auto-populated by org-scoping on insert; NULL on single-tenant stacks).',
-    };
+    // [#6562] The authorable shape is the shared table's, spread verbatim.
+    //
+    // [#6810] Nothing is spread ON TOP of it any more. This line used to read
+    // `{ ...TENANT_SCOPE_FIELD_DEF, indexed: opts.multiTenant }`, and `indexed`
+    // is the one key that was never a `FieldSchema` key at all — removed in the
+    // 16.x line (#2377, ADR-0049) because a field-level index flag built no
+    // index, and `FieldSchema` is a `strictObject`, so a document carrying it is
+    // rejected BY NAME ("never a FieldSchema key; a field-level index flag built
+    // no index"). #6562's reasoning for leaving it here — that its only consumer
+    // reads the REGISTERED schema, never a served document — held for the
+    // consumer and not for the document: `registerObject` runs this function
+    // BEFORE storing and `getItem('object', …)` serves that post-injection
+    // document, so the key reached `/meta`, where `decorateMetadataItem`
+    // re-parsed the served body and stamped `_diagnostics: { valid: false,
+    // errors: [{ path: 'fields.organization_id', code: 'unrecognized_keys' }] }`
+    // on EVERY registry-backed object — both tenancy modes, both read exits. A
+    // defect report the platform wrote about its own column, on a document the
+    // author never wrote and could not fix, in the channel Studio renders
+    // invalid-metadata banners from.
+    additions.organization_id = { ...TENANT_SCOPE_FIELD_DEF };
+
+    // [#6810] So the tenant index is declared where every other index in this
+    // system is declared: the object's `indexes[]`.
+    //
+    // This is also the first time the intent is actually ENFORCED. The sole
+    // reader of the old flag was one line in `driver-mongodb`
+    // (`mongodb-schema.ts`), while `driver-sql` — which every walled deployment
+    // runs — only ever materialized `indexes[]`, so the wall's hottest predicate
+    // ran unindexed no matter what the flag said.
+    //
+    // No `name`: each driver derives its own (SQL's `buildIndexName` is
+    // table-qualified, which a hardcoded name could not be without colliding
+    // across tables on Postgres; Mongo's index names are per-collection).
+    // `unique` is left at its default `false` — a plain lookup index, never a
+    // constraint.
+    //
+    // `multiTenant: false` declares NO index rather than a false one: on an
+    // unwalled stack nothing filters by organization, so the index is dead
+    // weight — the same intent the old flag's value carried, expressed as
+    // presence instead of a boolean.
+    if (opts.multiTenant && !declaresTenantIndex(schema)) {
+      indexAdditions.push({ fields: ['organization_id'] });
+    }
   }
 
   if (wantAudit) {
@@ -477,17 +526,7 @@ export function applySystemFields(
   // editable in forms and assignable via the API. SecurityPlugin auto-stamps
   // it to the acting user on insert when left NULL.
   if (wantOwner && !schema.fields?.owner_id) {
-    additions.owner_id = {
-      type: 'lookup',
-      reference: 'sys_user',
-      label: 'Owner',
-      required: false,
-      readonly: false,
-      system: true,
-      description:
-        'Record owner (auto-stamped to the creating user on insert; reassignable). ' +
-        'Drives owner-scoped views, reports and notifications.',
-    };
+    additions.owner_id = { ...OWNER_FIELD_DEF };
   }
 
   // [ADR-0117 D1] Record-level business-unit ownership. Shaped after
@@ -522,28 +561,52 @@ export function applySystemFields(
   // writes and nothing filters is dead weight — the same reasoning that gates
   // `organization_id`'s index on `multiTenant`.
   if (wantOwningBusinessUnit && !schema.fields?.[OWNING_BUSINESS_UNIT_FIELD]) {
-    additions[OWNING_BUSINESS_UNIT_FIELD] = {
-      type: 'lookup',
-      reference: 'sys_business_unit',
-      label: 'Owning Business Unit',
-      required: false,
-      hidden: true,
-      readonly: true,
-      system: true,
-      description:
-        'Record-level business-unit ownership (ADR-0117 D1). Server-stamped scope anchor; ' +
-        'NULL until the stamping middleware lands.',
-    };
+    additions[OWNING_BUSINESS_UNIT_FIELD] = { ...OWNING_BUSINESS_UNIT_FIELD_DEF };
   }
 
-  if (Object.keys(additions).length === 0 && Object.keys(overrides).length === 0) return schema;
+  if (
+    Object.keys(additions).length === 0 &&
+    Object.keys(overrides).length === 0 &&
+    indexAdditions.length === 0
+  ) {
+    return schema;
+  }
 
   return {
     ...schema,
     // `additions` LOSE to an author's field (a declared `owner_id` is theirs);
     // `overrides` WIN over it (the audit family's governance is not authorable).
     fields: { ...additions, ...(schema.fields ?? {}), ...overrides },
+    // [#6810] Author-declared indexes keep their position; the platform's
+    // tenant index is APPENDED, never merged into or reordering theirs.
+    ...(indexAdditions.length > 0
+      ? { indexes: [...((schema as any).indexes ?? []), ...indexAdditions] }
+      : {}),
   };
+}
+
+/**
+ * [#6810] Is the tenant index already declared on this object?
+ *
+ * The append is the one part of this injection that is not naturally
+ * idempotent — the field injection re-runs harmlessly because
+ * `!schema.fields?.organization_id` stops it, an array push does not — so an
+ * author who hand-wrote `indexes: [{ fields: ['organization_id'] }]` must not
+ * end up with the platform's duplicate beside it.
+ *
+ * Matched on the single-column shape this function emits, deliberately: an
+ * author's composite (`['organization_id', 'code']`) is a leading-column match
+ * on some dialects and not on others, so it is not treated as a substitute.
+ */
+function declaresTenantIndex(schema: ServiceObject): boolean {
+  const declared = (schema as any).indexes;
+  if (!Array.isArray(declared)) return false;
+  return declared.some(
+    (idx: any) =>
+      Array.isArray(idx?.fields) &&
+      idx.fields.length === 1 &&
+      idx.fields[0] === 'organization_id',
+  );
 }
 
 /**
@@ -813,6 +876,22 @@ function isTenantAuthored(item: unknown): boolean {
   return (item as { _provenance?: unknown } | null | undefined)?._provenance === 'org';
 }
 
+/**
+ * [ADR-0029 D9.6] Is this registered body a CODE-shipped artifact?
+ *
+ * The exact test {@link SchemaRegistry.getArtifactItem} has always applied,
+ * factored out so the object branch and the D9.8 hydration discriminator
+ * ({@link SchemaRegistry.getPackagedObjectOwner}) cannot drift into two
+ * different answers to one question — "does a code package ship this name?".
+ * Truthy `_packageId`, not the `'sys_metadata'` rehydration sentinel, and not
+ * tenant provenance.
+ */
+function isCodeArtifactBody(item: unknown): boolean {
+  const it = item as { _packageId?: unknown } | null | undefined;
+  if (!it || !it._packageId || it._packageId === 'sys_metadata') return false;
+  return !isTenantAuthored(it);
+}
+
 export class SchemaRegistry {
   // ==========================================
   // Logging control
@@ -1028,19 +1107,26 @@ export class SchemaRegistry {
    * Register an object with ownership semantics.
    * 
    * @param schema - The object definition
-   * @param packageId - The owning package ID
+   * @param packageId - The owning package ID, or — for an `overlay` — the
+   *   `sys_metadata` row's own binding (provenance ON the layer, never an
+   *   ownership claim; ADR-0029 D9.9)
    * @param namespace - The package namespace (for FQN computation)
-   * @param ownership - 'own' (single owner) or 'extend' (additive merge)
+   * @param ownership - 'own' (single owner) | 'overlay' (tenant layer that
+   *   REPLACES the base at resolution; ADR-0029 D9) | 'extend' (additive merge)
    * @param priority - Merge priority (lower applied first, higher wins on conflict)
    * 
-   * @throws Error if trying to 'own' an object that already has an owner
+   * @throws Error if trying to 'own' an object that already has a PACKAGED owner
    */
   registerObject(
     schema: ServiceObject,
     packageId: string,
     namespace?: string,
     ownership: ObjectOwnership = 'own',
-    priority: number = ownership === 'own' ? DEFAULT_OWNER_PRIORITY : DEFAULT_EXTENDER_PRIORITY
+    priority: number = ownership === 'own'
+      ? DEFAULT_OWNER_PRIORITY
+      : ownership === 'overlay'
+        ? DEFAULT_OVERLAY_PRIORITY
+        : DEFAULT_EXTENDER_PRIORITY
   ): string {
     // Apply system-field injection (multi-tenant org_id, future owner/audit)
     // BEFORE FQN computation and contributor storage so every consumer of
@@ -1081,7 +1167,15 @@ export class SchemaRegistry {
     // system/append-only tables (sys_record_share, sys_member, …) via the
     // driver's `syncSchema`, a schema-migration-bearing change. Those keep
     // resolving their title on read via `resolveDisplayField` / `titleFormat`.
-    if (ownership === 'own') {
+    //
+    // [ADR-0029 D9, blast-radius row 2] The gate asks "is this a BASE LAYER",
+    // not "is this the owner". An `overlay` REPLACES the base at resolution
+    // time (D9.2), so the overlay body IS the resolved object — gating title
+    // provisioning on `own` alone would silently change `nameField` on every
+    // overlaid object, which is the same designation the packaged twin gets.
+    // Extensions still never redesignate: they merge into a base that has
+    // already been provisioned.
+    if (ownership === 'own' || ownership === 'overlay') {
       schema = provisionPrimary(schema, { synthesize: false });
 
       // [#2486] Search-normalization companion column (`__search`). Runs
@@ -1090,8 +1184,8 @@ export class SchemaRegistry {
       // column is a real additive migration (ADR-0045) that the driver's
       // `syncSchema` materializes, populated by plugin-pinyin-search's
       // before-save hooks and OR-ed into `$search` by the engine's
-      // `expandSearchToFilter`. Owned objects only: extensions merge into
-      // the owner's already-provisioned shape.
+      // `expandSearchToFilter`. BASE layers only: extensions merge into
+      // the base's already-provisioned shape.
       if (this.searchCompanion) {
         schema = provisionSearchCompanion(schema);
       }
@@ -1115,20 +1209,67 @@ export class SchemaRegistry {
     // Validate ownership rules
     if (ownership === 'own') {
       const existingOwner = contributors.find(c => c.ownership === 'own');
-      if (existingOwner && existingOwner.packageId !== packageId) {
+      if (existingOwner && isTenantAuthored(existingOwner.definition) && !isTenantAuthored(schema)) {
+        // ── LATE INSTALL (ADR-0029 D9 §6.1) ──
+        //
+        // A code package registers an object a TENANT row already holds. That
+        // happens whenever the hydration seams run before the package does —
+        // a `sys_metadata` row written on a kernel where nothing shipped the
+        // name, then a package that later ships it (install, upgrade, or a
+        // boot whose order puts `loadMetaFromDb` first). Before D9 the tenant
+        // row had taken the `own` slot by default, so this threw "already
+        // owned by" under a foreign id, or SPLICED THE TENANT'S BODY AWAY
+        // under the same id.
+        //
+        // D9's recommended default, and the only outcome that loses nothing:
+        // the CODE layer becomes the owner and the tenant contribution is
+        // re-classified as its overlay layer — exactly the two layers that
+        // would exist had the package registered first. The resolved object
+        // does not move (the tenant body is the base either way, D9.2); what
+        // changes is that the packaged definition now survives underneath it,
+        // so `isArtifactBacked` is honest from this moment on.
+        //
+        // Deliberately narrow: it fires ONLY when the sitting owner is
+        // tenant-authored (`_provenance: 'org'`) and the incoming body is not.
+        // Two code packages claiming one name is D3's cross-package refusal
+        // and still throws below, whatever the ids.
+        const staleOverlay = contributors.findIndex(c => c.ownership === 'overlay');
+        if (staleOverlay !== -1) contributors.splice(staleOverlay, 1);
+        existingOwner.ownership = 'overlay';
+        existingOwner.priority = DEFAULT_OVERLAY_PRIORITY;
+        this.log(
+          `[Registry] Late install of "${fqn}": package "${packageId}" takes ownership; ` +
+          `the tenant contribution (${existingOwner.packageId}) becomes its overlay layer.`
+        );
+      } else if (existingOwner && existingOwner.packageId !== packageId) {
         throw new Error(
           `Object "${fqn}" is already owned by package "${existingOwner.packageId}". ` +
           `Package "${packageId}" cannot claim ownership. Use 'extend' to add fields.`
         );
-      }
-      // Remove existing owner contribution from same package (re-registration)
-      const idx = contributors.findIndex(c => c.packageId === packageId && c.ownership === 'own');
-      if (idx !== -1) {
-        contributors.splice(idx, 1);
+      } else if (existingOwner) {
+        // Remove existing owner contribution from same package (re-registration).
         // Normal path (metadata rebuild / HMR / multi-project seed replays the
         // same owned object), not an error — keep it at debug so a stock boot
         // stays warning-free (#3420).
+        contributors.splice(contributors.indexOf(existingOwner), 1);
         this.debug(`[Registry] Re-registering owned object: ${fqn} from ${packageId}`);
+      }
+    } else if (ownership === 'overlay') {
+      // [ADR-0029 D9.9] AT MOST ONE overlay layer per object name, replaced on
+      // re-write — and keyed by KIND, never by package. The row's `package_id`
+      // is provenance ON the layer, not a second identity for it: the
+      // overlay-uniqueness index in `sys_metadata` keys on
+      // `(type, name, organization_id, COALESCE(package_id, ''))` and can
+      // legitimately hold two rows for one `(type, name)` bound to two
+      // packages, which this registry could never represent because
+      // `computeFQN` is identity. Keying the replacement by package would let
+      // that unrepresentable shape in through the side door; the mis-bound row
+      // is refused at the PRODUCER instead (`saveMetaItem`), and counted in
+      // `loadMetaFromDb`'s per-record `errors` at boot.
+      const idx = contributors.findIndex(c => c.ownership === 'overlay');
+      if (idx !== -1) {
+        contributors.splice(idx, 1);
+        this.debug(`[Registry] Replacing overlay layer of object: ${fqn} from ${packageId}`);
       }
     } else {
       // extend mode: remove existing extension from same package
@@ -1184,23 +1325,76 @@ export class SchemaRegistry {
     // Find owner (must exist for a valid object)
     const ownerContrib = contributors.find(c => c.ownership === 'own');
     if (!ownerContrib) {
-      console.warn(`[Registry] Object "${fqn}" has extenders but no owner. Skipping.`);
+      // [ADR-0029 D9.5] An ORPHAN OVERLAY lands here too, and says so: the
+      // tenant can still see the row in `sys_metadata`, so "extenders" would
+      // be the wrong noun to hand whoever reads this line.
+      console.warn(
+        contributors.some(c => c.ownership === 'overlay')
+          ? `[Registry] Object "${fqn}" has an overlay layer but no owner. Skipping.`
+          : `[Registry] Object "${fqn}" has extenders but no owner. Skipping.`
+      );
       return undefined;
     }
 
-    // Start with owner's definition
-    let merged = { ...ownerContrib.definition };
+    // [ADR-0029 D9.2] The BASE layer is the tenant overlay when one is
+    // registered, and the owner otherwise — `overlay ?? own`. Selection asks
+    // the KIND (D9.3), never the priority.
+    //
+    // This is deliberately BIT-FOR-BIT what the pre-D9 splice produced: the
+    // overlay used to BE the owner, so the fold already ran over the overlay
+    // body. The resolved schema — `_provenance: 'org'` included, which every
+    // registry-direct consumer reads — does not move. Only what the registry
+    // REMEMBERS changes: the packaged owner is still here, underneath.
+    const baseContrib = contributors.find(c => c.ownership === 'overlay') ?? ownerContrib;
+    const merged = this.foldExtenders(contributors, baseContrib);
 
-    // Apply extensions in priority order (already sorted)
+    // Cache the result
+    this.mergedObjectCache.set(fqn, merged);
+    return merged;
+  }
+
+  /**
+   * Fold every `extend` contribution over a chosen base layer, in the list's
+   * (priority-sorted) order. Extracted from {@link resolveObject} so the
+   * code-layer resolution ({@link resolveOwnerLayer}) folds extenders exactly
+   * the same way rather than growing a second, drifting copy.
+   */
+  private foldExtenders(contributors: ObjectContributor[], base: ObjectContributor): ServiceObject {
+    let merged = { ...base.definition };
     for (const contrib of contributors) {
       if (contrib.ownership === 'extend') {
         merged = mergeObjectDefinitions(merged, contrib.definition);
       }
     }
-
-    // Cache the result
-    this.mergedObjectCache.set(fqn, merged);
     return merged;
+  }
+
+  /**
+   * [ADR-0029 D9.6] The CODE-LAYER resolution of an object: the OWNER's
+   * declaration with its extenders folded on, deliberately ignoring any tenant
+   * `overlay` layer.
+   *
+   * This is what artifact identity has to be read from, and it is NOT implied
+   * by D9.2 — D9.2 leaves the merged body identical on purpose, `_provenance:
+   * 'org'` included, so asking the MERGED body "does a code package ship
+   * this?" answers about whatever last overwrote the base rather than about
+   * the code layer. That is precisely how `isArtifactBacked` came to answer
+   * `false` for a name a package still ships (#6853 P3), disarming both gates
+   * that read it.
+   *
+   * With no overlay registered this is byte-for-byte `resolveObject`'s answer,
+   * which is why the honest predicate costs nothing on the common shape.
+   *
+   * Uncached on purpose: a second cache would have to stay correct at every
+   * one of `mergedObjectCache`'s invalidation points, and the fold is a
+   * shallow spread over a contributor list that is almost always length 1.
+   */
+  private resolveOwnerLayer(fqn: string): ServiceObject | undefined {
+    const contributors = this.objectContributors.get(fqn);
+    if (!contributors || contributors.length === 0) return undefined;
+    const ownerContrib = contributors.find(c => c.ownership === 'own');
+    if (!ownerContrib) return undefined;
+    return this.foldExtenders(contributors, ownerContrib);
   }
 
   /**
@@ -1217,6 +1411,27 @@ export class SchemaRegistry {
    * 2. Legacy FQN match (e.g., 'crm__account') — backward compat.
    */
   getObject(name: string): ServiceObject | undefined {
+    const fqn = this.resolveObjectKey(name);
+    return fqn === undefined ? undefined : this.resolveObject(fqn);
+  }
+
+  /**
+   * [#6808] The name→FQN half of {@link getObject}, extracted so the READ and
+   * the name-addressed REMOVAL ({@link unregisterObject}) cannot disagree
+   * about which contributor entry a bare name addresses.
+   *
+   * That disagreement is not hypothetical — it is the shape of the bug this
+   * was extracted for: `deleteMetaItem`'s registry heal reached one of the two
+   * places an `object` lives, and the surface data CRUD dispatches on
+   * (`getObject`) kept serving a deleted object. A remover that resolved names
+   * its own way would re-open the same seam one layer down: it could remove an
+   * entry `getObject` never served, leaving the served one behind.
+   *
+   * Returns `undefined` when nothing is registered under the name, so
+   * `getObject` keeps its exact previous behaviour: `resolveObject` on an
+   * unknown FQN also answered `undefined`.
+   */
+  private resolveObjectKey(name: string): string | undefined {
     // Canonical: short name lookup
     const matches: string[] = [];
     for (const fqn of this.objectContributors.keys()) {
@@ -1232,11 +1447,11 @@ export class SchemaRegistry {
           `Returning first match. Use FQN to disambiguate.`
         );
       }
-      return this.resolveObject(matches[0]);
+      return matches[0];
     }
 
     // Fallback: explicit FQN
-    return this.resolveObject(name);
+    return this.objectContributors.has(name) ? name : undefined;
   }
 
   /**
@@ -1275,10 +1490,69 @@ export class SchemaRegistry {
 
   /**
    * Get the owner contributor for an object.
+   *
+   * Unchanged by ADR-0029 D9: it keeps meaning "the package that owns the
+   * table". An overlay is not an owner, so it is never returned here.
    */
   getObjectOwner(fqn: string): ObjectContributor | undefined {
     const contributors = this.objectContributors.get(fqn);
     return contributors?.find(c => c.ownership === 'own');
+  }
+
+  /**
+   * [ADR-0029 D9.8] The PACKAGED (code-shipped) owner of an object name, if
+   * one is registered — the discriminator every overlay-hydration seam asks
+   * before deciding which KIND to register:
+   *
+   * ```
+   * packaged `own` contributor already registered for this name?
+   *   yes -> register as `overlay`   (a layer over the code definition)
+   *   no  -> register as `own`       (a runtime-authored object, keyed by the
+   *                                   row's package_id or the sentinel)
+   * ```
+   *
+   * "Packaged" is the artifact test, not merely "an owner exists": a
+   * runtime-authored object's owner IS the tenant's own row, and re-writing it
+   * must stay an ordinary re-registration rather than becoming a layer over
+   * itself. Name-addressed, resolving the key exactly as `getObject` does, so
+   * the decision and the registration cannot talk about different entries.
+   */
+  getPackagedObjectOwner(name: string): ObjectContributor | undefined {
+    const fqn = this.resolveObjectKey(name);
+    if (fqn === undefined) return undefined;
+    const owner = this.objectContributors.get(fqn)?.find(c => c.ownership === 'own');
+    return owner && isCodeArtifactBody(owner.definition) ? owner : undefined;
+  }
+
+  /**
+   * [ADR-0029 D9.7] Remove the tenant OVERLAY layer of an object, leaving the
+   * packaged owner exactly where it is — the layer-addressed sibling of
+   * #6818's name-addressed {@link unregisterObject}.
+   *
+   * This is why #6853's "how do we restore the packaged definition?" question
+   * dissolves instead of being answered. The packaged owner is already here,
+   * at its own priority, in its own namespace, with its own definition, so
+   * restoration is NOT a re-registration at all — the heal that used to need
+   * `(definition, packageId, namespace, ownership, priority)` at delete time,
+   * three of which no longer existed by then, has nothing left to reconstruct.
+   *
+   * @returns whether an overlay layer was removed (`false` = nothing was
+   *   registered under that name, or the entry had no overlay layer; removal
+   *   is idempotent).
+   */
+  removeObjectOverlay(name: string): boolean {
+    const fqn = this.resolveObjectKey(name);
+    if (fqn === undefined) return false;
+    const contributors = this.objectContributors.get(fqn);
+    if (!contributors) return false;
+    const idx = contributors.findIndex(c => c.ownership === 'overlay');
+    if (idx === -1) return false;
+    const [removed] = contributors.splice(idx, 1);
+    // The same two invalidations every other contributor mutation performs.
+    this.mergedObjectCache.delete(fqn);
+    this._objectRevision += 1;
+    this.log(`[Registry] Removed overlay layer of object: ${fqn} (was bound to ${removed.packageId})`);
+    return true;
   }
 
   /**
@@ -1297,6 +1571,13 @@ export class SchemaRegistry {
    * the `sys` namespace is shared across many first-party plugins, but each
    * object name has exactly one owner.
    *
+   * [ADR-0029 D9.5] The count is LITERALLY unchanged by the overlay layer —
+   * `ownership === 'own'`, no exemption clause. Overlays are not owners, so
+   * D3's sentence keeps holding as written, which is what ADR-0028's D5/D6
+   * depend on: an ownership rule qualified with "unless it is an overlay"
+   * would have to be re-litigated at every call site. What D9 adds is one new
+   * VIOLATION class, the orphan overlay (an `overlay` with no `own`).
+   *
    * @throws Error listing every object whose owner count is not exactly 1.
    */
   assertSingleOwnerPerObject(): void {
@@ -1304,11 +1585,27 @@ export class SchemaRegistry {
     for (const [fqn, contributors] of this.objectContributors.entries()) {
       const owners = contributors.filter(c => c.ownership === 'own');
       if (owners.length === 0) {
-        const extenders = contributors.map(c => c.packageId).join(', ') || '(none)';
-        violations.push(
-          `Object "${fqn}" has no owner — only extend contributions from [${extenders}]. ` +
-          `Exactly one package must register it with ownership 'own'.`
-        );
+        // [ADR-0029 D9.5] The ORPHAN OVERLAY class. Reachable by uninstalling
+        // the packaged owner while a `sys_metadata` row for its object still
+        // exists under a binding `unregisterObjectsByPackage` cannot reach by
+        // package id (the sentinel). It must be LOUD rather than silent:
+        // `resolveObject` would otherwise warn once and answer `undefined` for
+        // a name the tenant can still see in `sys_metadata`.
+        const overlays = contributors.filter(c => c.ownership === 'overlay');
+        if (overlays.length > 0) {
+          const bindings = overlays.map(c => c.packageId).join(', ') || '(none)';
+          violations.push(
+            `Object "${fqn}" has an orphan overlay layer [${bindings}] and no owner. ` +
+            `An overlay layers OVER an owned object — re-install the package that owns it, ` +
+            `or delete the sys_metadata row.`
+          );
+        } else {
+          const extenders = contributors.map(c => c.packageId).join(', ') || '(none)';
+          violations.push(
+            `Object "${fqn}" has no owner — only extend contributions from [${extenders}]. ` +
+            `Exactly one package must register it with ownership 'own'.`
+          );
+        }
       } else if (owners.length > 1) {
         const names = owners.map(c => c.packageId).join(', ');
         violations.push(
@@ -1354,6 +1651,25 @@ export class SchemaRegistry {
           contributors.splice(idx, 1);
           this.log(`[Registry] Removed ${contrib.ownership} contribution to ${fqn} from ${packageId}`);
         }
+
+        // [ADR-0029 D9.7] An overlay layer leaves with the base it layers
+        // over. Nothing durable is lost — the layer is a runtime projection of
+        // a `sys_metadata` row this does not touch, and a re-install
+        // re-hydrates it — whereas leaving it behind would MANUFACTURE the
+        // orphan-overlay violation D9.5 names, on every uninstall of a
+        // customized packaged object. Keyed off the OWNER's removal, not off
+        // the overlay's own binding: a sentinel-bound layer names no package
+        // and this walk is addressed by package id.
+        if (contrib.ownership === 'own') {
+          const overlayIdx = contributors.findIndex(c => c.ownership === 'overlay');
+          if (overlayIdx !== -1) {
+            const [dropped] = contributors.splice(overlayIdx, 1);
+            this.log(
+              `[Registry] Removed overlay layer of ${fqn} with its owner ` +
+              `(layer was bound to ${dropped.packageId})`
+            );
+          }
+        }
       }
 
       // Clean up empty contributor lists
@@ -1365,6 +1681,104 @@ export class SchemaRegistry {
       this.mergedObjectCache.delete(fqn);
       this._objectRevision += 1;
     }
+  }
+
+  /**
+   * [#6808] Unregister ONE object, addressed by NAME — the removal verb this
+   * registry was missing, and the reason a deleted object stayed servable.
+   *
+   * ## Why a second removal verb, and not a call to the first one
+   *
+   * Until this method, {@link unregisterObjectsByPackage} was the ONLY way an
+   * object left `objectContributors`, and it is addressed by PACKAGE. That is
+   * the right verb for an uninstall and the wrong one for a delete: an
+   * `object` created at runtime has no package identity of its own (the write
+   * path keys its contributor by the row's `package_id`, or the
+   * `'sys_metadata'` sentinel when the row is package-less), so routing a
+   * single delete through it would mean synthesising an identity and then
+   * tearing down every SIBLING object registered under it — a far wider blast
+   * radius than the delete the operator asked for.
+   *
+   * The gap it left was load-bearing. A runtime-authored `object` is written
+   * into TWO places (`metadata['object']` via {@link registerItem} and
+   * `objectContributors` via {@link registerObject}), and the metadata-protocol
+   * heal that runs after a `sys_metadata` delete only ever reached the first.
+   * Measured over the real repository: after `DELETE /meta/object/<name>` the
+   * row was gone and `metadata['object']` was empty, while `getObject(name)`
+   * — and therefore `getItem('object', name)`, which special-cases straight
+   * back to it — kept serving the object for the life of the process. Since
+   * `getObject` is what the data plane dispatches on
+   * (`assertObjectRegistered`), the deleted object stayed readable, syncable
+   * and WRITABLE.
+   *
+   * ## The ADR-0029 guard, and why it is the SAME judgement, not a second one
+   *
+   * ADR-0029: exactly one package owns an object; others may only `extend` it.
+   * An extender's fields are merged into the owner's definition
+   * ({@link resolveObject}), so removing an owned object out from under a live
+   * extender leaves contributions that resolve to nothing —
+   * {@link assertSingleOwnerPerObject}'s "has extenders but no owner"
+   * violation, reached at runtime instead of at bootstrap.
+   * `unregisterObjectsByPackage` already encodes the answer (refuse, name the
+   * extenders, force overrides), so this mirrors that judgement rather than
+   * inventing a second one; only the address changes, from package to name.
+   * Both facts it needs — the owner and the extenders — are already in the
+   * contributor list, so no new bookkeeping structure exists to drift.
+   *
+   * "Other" means "not the owner's package", the same relation the sibling
+   * verb expresses as "not the package being uninstalled": an extension the
+   * OWNER itself contributed goes away with the object it extends, exactly as
+   * it would on an uninstall. An object with no owner at all (only extenders —
+   * already an ADR-0029 violation) counts every extender as other, so it is
+   * refused rather than silently torn down.
+   *
+   * @param name Short name (canonical) or FQN — resolved exactly as
+   *   {@link getObject} resolves it, so this removes precisely the entry that
+   *   was being served.
+   * @param options.force Skip the extender guard. The escape hatch the
+   *   package-scoped verb has, for a caller that has already decided.
+   * @returns whether an object was removed (`false` = nothing registered
+   *   under that name; removal is idempotent).
+   * @throws Error naming the extenders when the object is still extended by
+   *   another package and `force` is not set.
+   */
+  unregisterObject(name: string, options: { force?: boolean } = {}): boolean {
+    const fqn = this.resolveObjectKey(name);
+    if (fqn === undefined) return false;
+    const contributors = this.objectContributors.get(fqn) ?? [];
+
+    const owner = contributors.find(c => c.ownership === 'own');
+    if (!options.force) {
+      const otherExtenders = contributors.filter(
+        c => c.ownership === 'extend' && c.packageId !== owner?.packageId
+      );
+      if (otherExtenders.length > 0) {
+        throw new Error(
+          `Cannot unregister object "${fqn}": it is extended by ` +
+          `${otherExtenders.map(c => c.packageId).join(', ')}. Unregister the extenders first.`
+        );
+      }
+    }
+
+    // The whole entry goes: the object no longer exists, so no contribution to
+    // it does either. Leaving the extenders behind would be the owner-less
+    // state the guard above exists to prevent.
+    this.objectContributors.delete(fqn);
+    // The same two invalidations every other contributor mutation performs —
+    // the merged-object cache would otherwise keep answering `resolveObject`
+    // for a name with no contributors, and registry-derived caches (the
+    // engine's roll-up summary index) would never learn the set moved.
+    this.mergedObjectCache.delete(fqn);
+    this._objectRevision += 1;
+    // Namespaces are deliberately NOT touched: a namespace is registered per
+    // PACKAGE and shared by every object that package ships, so dropping one
+    // object must not unregister it. `unregisterObjectsByPackage` leaves it
+    // alone too — `uninstallPackage` owns that half.
+    this.log(
+      `[Registry] Unregistered object: ${fqn} ` +
+      `(${contributors.length} contribution(s), owner ${owner?.packageId ?? '(none)'})`
+    );
+    return true;
   }
 
   // ==========================================
@@ -1575,10 +1989,23 @@ export class SchemaRegistry {
    */
   getArtifactItem<T>(type: string, name: string, currentPackageId?: string): T | undefined {
     if (type === 'object' || type === 'objects') {
-      const obj = this.getObject(name) as any;
-      return obj && obj._packageId && obj._packageId !== 'sys_metadata' && !isTenantAuthored(obj)
-        ? (obj as T)
-        : undefined;
+      // [ADR-0029 D9.6] Artifact identity is read from the OWNER contributor's
+      // layer, NEVER from the merged body. The merged body deliberately keeps
+      // the overlay's `_provenance: 'org'` (D9.2 — the resolved schema must
+      // not move), so applying the artifact test to it answers about whichever
+      // layer is on top rather than about the code layer, which is exactly how
+      // this predicate came to answer `false` for a name a code package still
+      // ships (#6853 P3) and silently disarmed `saveMetaItem`'s overlay gate
+      // and tier 3 of the delete heal.
+      //
+      // What comes BACK is the code-layer body (owner + its extenders), which
+      // is what every consumer of this lookup wants — the packaged baseline an
+      // overlay customizes, and the `_lock`/`_packageId`/`_provenance`
+      // envelope that must win over an overlay (ADR-0010 §3.3). With no
+      // overlay registered it is byte-for-byte the previous answer.
+      const fqn = this.resolveObjectKey(name);
+      const ownerLayer = fqn === undefined ? undefined : this.resolveOwnerLayer(fqn);
+      return ownerLayer && isCodeArtifactBody(ownerLayer) ? (ownerLayer as T) : undefined;
     }
     const collection = this.metadata.get(type);
     if (!collection) return undefined;
@@ -1644,6 +2071,55 @@ export class SchemaRegistry {
       }
     }
     return false;
+  }
+
+  /**
+   * [#5079] Remove the PLAIN-KEY entry for `(type, name)` — the slot an
+   * ADR-0005 overlay row hydrates into — and nothing else. The composite
+   * (`<packageId>:<name>`) entries are never touched.
+   *
+   * The other half of {@link removeRuntimeShadow}, for the case that method
+   * deliberately declines. `removeRuntimeShadow` drops the plain key only
+   * when a packaged artifact remains underneath, so the name stays
+   * resolvable; that was the whole story while the plain key could only ever
+   * be an artifact's shadow. #4521 changed it: `saveMetaItem` now writes an
+   * overlay through into the registry, so a runtime-CREATED item (nothing
+   * shipped under that name) lives under the plain key too — and its DELETE
+   * had nothing that would ever remove it. `GET /meta/<type>` kept
+   * enumerating a deleted item and `GET /meta/<type>/<name>` kept serving its
+   * body for the life of the process (#4432's "every surface in agreement"
+   * clause, residual). plugin-security's `permission` projection carries a
+   * consumer-side work-around for the same lingering entry
+   * (`readDeclaredBody` skipping shadows so a deleted set is not undeletable);
+   * this is the producer-side removal it was compensating for.
+   *
+   * Whether the item really is gone from every OTHER layer is not a fact this
+   * registry holds — the MetadataService may still serve a baseline for the
+   * name — so the caller decides. `deleteMetaItem`'s
+   * `restoreArtifactRegistryView` calls this only after both lower layers
+   * (composite artifact, MetadataService baseline) have answered "nothing".
+   *
+   * Refuses exactly one entry: a plain-key registration that IS a packaged
+   * artifact — `_packageId` set, not the `'sys_metadata'` rehydration
+   * sentinel, not tenant-authored — which is the same predicate
+   * {@link getArtifactItem} applies to its own bare-key fallback. Artifact
+   * loaders normally register under a composite key, but
+   * `loadMetadataFromService` passes the item's own `_packageId` through, so a
+   * package-stamped item can land here; unregistering shipped code that the
+   * overlay delete never touched would be a worse bug than the one this fixes.
+   *
+   * @returns whether an entry was removed.
+   */
+  removeOverlayEntry(type: string, name: string): boolean {
+    const collection = this.metadata.get(type);
+    if (!collection || !collection.has(name)) return false;
+    const plain = collection.get(name) as any;
+    if (plain && plain._packageId && plain._packageId !== 'sys_metadata' && !isTenantAuthored(plain)) {
+      return false;
+    }
+    collection.delete(name);
+    this.log(`[Registry] Removed overlay entry ${type}: ${name} (no layer serves it any more)`);
+    return true;
   }
 
   /**

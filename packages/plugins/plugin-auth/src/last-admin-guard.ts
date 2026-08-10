@@ -186,24 +186,35 @@
  *  - **by-id** (`delete(obj, { where: { id } })` — what better-auth's adapter
  *    emits, and what every cascade recursion re-enters with): `input.id`
  *    carries the scalar id.
- *  - **predicate / `multi`**: `input.id` is present-but-undefined, and the
- *    CALLER's own options bag is still on `input.options`, predicate included
- *    — `delete()` only rebuilds that slot into `DriverOptions` *after* the
- *    `before*` hooks return. That is the same slot the ban half reads, and it
- *    does not contradict the `HookContextSchema.input` contract table
- *    (#5273 / #5899): what is unreachable from `input` is the composed
- *    `ast` — the *effective* predicate, onto which the filters middleware may
- *    add RLS / sharing scoping. Middleware can only NARROW it, so treating the
- *    caller's predicate as the doomed set over-approximates it, which is the
- *    fail-closed direction: this guard may refuse a delete that would have
- *    removed fewer rows, and can never miss one that removes more.
- *  - `ctx.previous` (the engine's #5272 pre-image, and objectql's
- *    `sys_fetch_previous_delete` builtin — `object: '*'`, priority 5) is bound
- *    for the by-id shape ONLY; a batch dispatch names no single row, so it
- *    stays undefined there. The guard therefore never consumes it: it needs the
- *    target IDS, not a pre-image, and a `previous`-based implementation would
- *    be correct by-id and blind on exactly the bulk path that can sweep every
- *    administrator at once.
+ *  - **predicate / `multi`**: the CALLER's own options bag is still on
+ *    `input.options`, predicate and `multi` included — `delete()` only rebuilds
+ *    that slot into `DriverOptions` *after* the `before*` hooks return. That is
+ *    the same slot the ban half reads, and it does not contradict the
+ *    `HookContextSchema.input` contract table (#5273 / #5899): what is
+ *    unreachable from `input` is the composed `ast` — the *effective*
+ *    predicate, onto which the filters middleware may add RLS / sharing
+ *    scoping. Middleware can only NARROW it, so treating the caller's predicate
+ *    as the doomed set over-approximates it, which is the fail-closed
+ *    direction: this guard may refuse a delete that would have removed fewer
+ *    rows, and can never miss one that removes more.
+ *
+ *    ⚠️ [#5574] `input.id` USED to be present-but-undefined here, and this
+ *    guard used to key on that. It no longer is: ADR-0058 Addendum II
+ *    dispatches `before*` once per MATCHED ROW, each context naming its own
+ *    row, so a predicate write is now indistinguishable from a by-id write by
+ *    the id alone — and reading it that way approved a sweep of every
+ *    administrator one legitimate-looking row at a time. `options.multi` is the
+ *    discriminator, and `resolveTargetIds` asks it FIRST. See that function.
+ *  - `ctx.previous` (the engine's #5272 pre-image — its SOLE producer since
+ *    #5929, which retired objectql's `sys_fetch_previous_delete` builtin
+ *    (`object: '*'`, priority 5) once the engine's own earlier read made that
+ *    hook's `!ctx.previous` guard unreachable) is now bound on BOTH shapes:
+ *    by-id since #5272, and per matched row since #5574.
+ *    The guard still never consumes it, and the reason is sharper than before:
+ *    it needs the target IDS as a SET, and a `previous`-based implementation
+ *    would see exactly one row per dispatch — correct for a single write and
+ *    blind on exactly the bulk path that can sweep every administrator at
+ *    once.
  *
  * ## Scope: the ENVIRONMENT, not each organization
  *
@@ -800,15 +811,46 @@ export function registerLastAdminGuard(
    * guard having to refuse every bulk write on principle. When the resolution
    * itself cannot be completed (the read throws, or the match set overflows
    * `maxScan`) `scan` refuses loudly instead of guessing.
+   *
+   * ## [#5574] Why `multi` outranks a bound `input.id`, and why that is the
+   * whole fix
+   *
+   * This function used to read "is there an id? then that is the target set",
+   * and that was sound only because a predicate write's `before*` dispatch left
+   * `input.id` present-but-UNDEFINED. ADR-0058 Addendum II made the `before*`
+   * phase per row: a predicate write now dispatches once per MATCHED ROW, each
+   * context carrying that row's id. Read naively, every one of those dispatches
+   * looks like a by-id write of a single administrator — and a ban of ONE admin
+   * out of three is legitimately allowed, so a `multi` ban of ALL THREE passed
+   * as three separate approvals and locked the environment out. Measured, on
+   * this file's own #5892 / #5941 / #5978 cases.
+   *
+   * The distinction the guard actually needs is UNCHANGED and is the one the
+   * contract preserves on purpose: `input.options` is the CALLER's bag during
+   * `before*`, `multi` and `where` included (D2, and `hook.zod.ts`'s PHASE
+   * rule). So `multi` is asked FIRST — on a predicate write the target set is
+   * the caller's predicate, whichever row this particular dispatch happens to
+   * name — and the id is only the answer when the write really is by-id.
+   *
+   * This is the general shape of what per-row dispatch does to a guard that
+   * reasons about a write as a SET rather than about one record: the per-row
+   * view is strictly less information for that question, and the batch-scoped
+   * slot is where the question is still answerable. A guard here must never be
+   * rewritten to reason from `ctx.previous` alone for the same reason.
+   *
+   * Cost, named: on a legitimate predicate write this resolves the same set
+   * once per matched row. It is bounded by `maxScan` and it is the correct
+   * trade — the alternative is a break-glass guard that is exact and wrong.
    */
   const resolveTargetIds = async (
     op: GuardedOp,
     object: string,
     id: unknown,
-    options: { where?: unknown } | undefined,
+    options: { where?: unknown; multi?: unknown } | undefined,
     data?: Record<string, unknown>,
   ): Promise<Set<string>> => {
-    const single = toId(id) ?? toId(data?.id);
+    const isPredicateWrite = options?.multi === true;
+    const single = isPredicateWrite ? undefined : (toId(id) ?? toId(data?.id));
     if (single) return new Set([single]);
     const where = options?.where as EngineQueryOptions['where'];
     const rows = await scan(op, object, {
@@ -861,7 +903,7 @@ export function registerLastAdminGuard(
   const enforce = async (
     op: GuardedOp,
     input:
-      | { id?: unknown; data?: Record<string, unknown>; options?: { where?: unknown } }
+      | { id?: unknown; data?: Record<string, unknown>; options?: { where?: unknown; multi?: unknown } }
       | undefined,
   ): Promise<void> => {
     const words = OP_WORDS[op];
@@ -930,7 +972,7 @@ export function registerLastAdminGuard(
     op: GuardedOp,
     table: string,
     input:
-      | { id?: unknown; data?: Record<string, unknown>; options?: { where?: unknown } }
+      | { id?: unknown; data?: Record<string, unknown>; options?: { where?: unknown; multi?: unknown } }
       | undefined,
     patch?: Record<string, unknown>,
   ): Promise<void> => {
@@ -996,7 +1038,7 @@ export function registerLastAdminGuard(
   const guardBan = async (rawCtx: unknown): Promise<void> => {
     const ctx = (rawCtx ?? {}) as {
       object?: string;
-      input?: { id?: unknown; data?: Record<string, unknown>; options?: { where?: unknown } };
+      input?: { id?: unknown; data?: Record<string, unknown>; options?: { where?: unknown; multi?: unknown } };
     };
     if (ctx.object !== SystemObjectName.USER) return;
 
@@ -1012,7 +1054,7 @@ export function registerLastAdminGuard(
   const guardDelete = async (rawCtx: unknown): Promise<void> => {
     const ctx = (rawCtx ?? {}) as {
       object?: string;
-      input?: { id?: unknown; options?: { where?: unknown } };
+      input?: { id?: unknown; options?: { where?: unknown; multi?: unknown } };
     };
     if (ctx.object !== SystemObjectName.USER) return;
 
@@ -1031,7 +1073,7 @@ export function registerLastAdminGuard(
   const ctxOf = (rawCtx: unknown) =>
     (rawCtx ?? {}) as {
       object?: string;
-      input?: { id?: unknown; data?: Record<string, unknown>; options?: { where?: unknown } };
+      input?: { id?: unknown; data?: Record<string, unknown>; options?: { where?: unknown; multi?: unknown } };
     };
 
   const guardMemberUpdate = async (rawCtx: unknown): Promise<void> => {

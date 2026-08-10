@@ -34,6 +34,28 @@ import type { IStorageService } from '@objectstack/spec/contracts';
  *     any visible mistake — cannot widen who can read the bytes, because the
  *     second record gets its own copy.
  *
+ * ### The one write that cannot honour it, and is refused
+ *
+ * [#7102] A predicate (`multi: true`) update has ONE payload for N matched
+ * rows — `driver.updateMany` takes one `SET` clause — so writing a file id
+ * through one lands the SAME id in every matched record. Under exclusive
+ * ownership that is not a degraded outcome, it is the property above running
+ * backwards: one record owns the file and N−1 reference bytes whose
+ * readability is decided by a record they have nothing to do with. Neither
+ * hook branch can rescue it — claiming per row hands N−1 records an unowned
+ * reference, skipping hands ALL of them a reference nobody owns, which the
+ * release/tombstone path may eventually collect.
+ *
+ * So the write is REFUSED, in `beforeUpdate`, before the driver runs:
+ * {@link FileFieldBulkWriteError} (`FILE_FIELD_BULK_WRITE_REFUSED` / 400).
+ * The invariant above is a property this module holds, not prose describing
+ * the cases where it happens to work out. Refusal is narrow on purpose — it
+ * fires only on a file id TOKEN reaching a file-class field through a
+ * predicate update, which is exactly the condition that produces the shared
+ * id. A bulk CLEAR (`{ avatar: null }`) or a bulk write of a legacy inline
+ * blob or external URL owns nothing and stays supported; so does every
+ * single-record update, whose behaviour is byte-identical to before.
+ *
  * ## What this module does NOT do
  *
  * It records ownership, releases ownership, and — only on a deployment that
@@ -61,17 +83,41 @@ const PACKAGE_ID = 'com.objectstack.service.storage';
 // every internal page). Inert on write contexts.
 const SYSTEM_CTX = { isSystem: true, [RAW_FILE_VALUES_CONTEXT_KEY]: true } as const;
 
-/** Bound on records resolved per where-shaped multi-delete — matches the
- * attachment lifecycle's posture: bound one pass, converge across sweeps. */
-const MULTI_DELETE_RESOLVE_LIMIT = 1_000;
-
 /** Bound on owned files released per record delete. */
 const RELEASE_BATCH_LIMIT = 1_000;
 
-/** Key under which beforeDelete stashes the ids of records about to die (the
- * engine passes the SAME HookContext object to before/after delete). Only
- * needed for where-shaped deletes, where afterDelete has no id list. */
+/**
+ * Key under which `beforeDelete` collects the ids of the records about to die,
+ * for `afterDelete` to release in ONE pass.
+ *
+ * [#6966] It lives on `HookContext.dispatch.scope` — the engine's per-write
+ * scratch, one object shared by every dispatch of one caller write across both
+ * phases — NOT on the context. This comment used to say "the engine passes the
+ * SAME HookContext object to before/after delete"; that has been false for a
+ * predicate (`multi: true`) delete since #5574 made the `before*` phase
+ * dispatch per row, each row on a freshly built context. The stash died with
+ * the row that wrote it, and the guard that decided whether to write one had
+ * inverted as well (see the hook below), so this whole path was dead code.
+ *
+ * Only needed for predicate deletes: a single-id delete's `afterDelete` reads
+ * `input.id` directly.
+ */
 const STASH_KEY = '__fileRefDeletedIds';
+
+/**
+ * [#6966] Is this dispatch one row of a predicate write's fan-out?
+ *
+ * Asked of the ENGINE's marker, never inferred from `input.id`. Before #5574 a
+ * bulk write dispatched `before*` once with `input.id` present-but-`undefined`,
+ * so "no id" was a reliable bulk signal and the guards here were written on it;
+ * every per-row context now carries an id, so that inference answers "single
+ * write" for every row of a batch. An ABSENT marker reads as `false`, which is
+ * the single-write direction these guards already default to.
+ */
+function perRowDispatch(ctx: any): { index: number; scope: Record<string, unknown> } | null {
+  const d = ctx?.dispatch;
+  return d?.mode === 'per-row' && d.scope ? { index: d.index, scope: d.scope } : null;
+}
 
 /** Engine surface these installers need — duck-typed like the other
  * service-storage seams so tests can fake it. */
@@ -123,6 +169,37 @@ export class FileConstraintError extends Error {
   readonly code = 'ERR_FILE_CONSTRAINT';
   constructor(message: string) {
     super(message);
+  }
+}
+
+/**
+ * [#7102] Raised when a predicate (`multi: true`) update writes a file id into
+ * a file-class field. See the module header for why no hook branch can honour
+ * exclusive ownership for that write; this is the refusal that keeps the
+ * invariant true rather than aspirational.
+ *
+ * ADR-0112 envelope: a registered `code` plus a 4xx `status`, so the REST
+ * layer answers `400 FILE_FIELD_BULK_WRITE_REFUSED` instead of promoting a
+ * bare `Error` to a 500. `400` because the refusal is a verdict about what the
+ * CALLER asked for — the write is expressible and permitted, it just cannot be
+ * expressed as one payload — and the remedy is the caller's: issue the update
+ * per record.
+ */
+export class FileFieldBulkWriteError extends Error {
+  readonly code = 'FILE_FIELD_BULK_WRITE_REFUSED';
+  readonly status = 400;
+  readonly object: string;
+  readonly fields: readonly string[];
+  constructor(object: string, fields: readonly string[]) {
+    super(
+      `Refusing a multi-record update that writes a file id into ` +
+        `${fields.map((f) => `'${object}.${f}'`).join(', ')}: one payload writes one id to ` +
+        `every matched record, and a file is owned by at most one record's field ` +
+        `(ADR-0104 D3 exclusive ownership). Update each record separately, so each ` +
+        `one gets a file it owns.`,
+    );
+    this.object = object;
+    this.fields = [...fields];
   }
 }
 
@@ -555,11 +632,47 @@ export function installFileReferenceHooks(
       if (!object || !data || typeof data !== 'object') return;
       const fileFields = activeFileFields(engine, object);
       if (fileFields.length === 0) return;
-      const ids = asIdList(ctx?.input?.id);
-      // A multi-update writing a file id would give the same id to every
-      // matched record; only a single-record update can own one. Copy-on-claim
-      // needs a definite owner, so skip — `claimFile` then refuses to steal.
+      // [#6966] "Is this a multi-update?" is the engine's marker, not the shape
+      // of `input.id`. A per-row context names ITS row, so the old
+      // `ids.length === 1` test answered "single update" on every row of a
+      // batch — and then ran N times over ONE batch-scoped payload, aiming a
+      // row-conditioned rewrite at a shared SET clause, which ADR-0058
+      // Addendum II D3 names as out of contract. Both halves are fixed by
+      // asking the right question once: rows after the first have nothing left
+      // to do, because the payload they would inspect is the same object the
+      // first row already reconciled.
+      const perRow = perRowDispatch(ctx);
+
+      // [#7102] The refusal. This hook is the last point that can see BOTH the
+      // predicate nature of the write (the engine's marker) and the payload,
+      // before `driver.updateMany` puts one `SET` clause across N rows — and a
+      // throw here propagates: `dispatchPerRowBeforeHooks` runs outside
+      // `update()`'s try block, so the ADR-0112 envelope reaches the caller
+      // intact and nothing is written. It fires on the FIRST row, so the
+      // remaining N−1 dispatches never happen either.
+      //
+      // The condition is `isFileIdToken`, the same single arbiter copy-on-claim
+      // and the read resolver ask — so the refusal covers exactly the writes
+      // this module would otherwise have to own, and nothing else. A bulk
+      // clear, a legacy inline blob and an external URL all own nothing and
+      // pass; see the module header.
+      if (perRow) {
+        const written = fileFields.filter(
+          (field) => field in data && idTokensIn(data[field]).length > 0,
+        );
+        if (written.length > 0) throw new FileFieldBulkWriteError(object, written);
+      }
+
+      if (perRow && perRow.index !== 0) return;
+      const ids = perRow ? null : asIdList(ctx?.input?.id);
       const recordId = ids && ids.length === 1 ? String(ids[0]) : null;
+      // [#7102] On a per-row dispatch this call is now provably a no-op, and
+      // deliberately left in place rather than branched around: copy-on-claim
+      // only ever acts on an id token, and the refusal above has just
+      // established the payload holds none. Keeping one unconditional
+      // copy-on-claim pass is what makes "the before hook always reconciles the
+      // payload it is given" a property of this handler instead of a case
+      // analysis a later edit has to re-derive.
       await applyCopyOnClaim(engine, getStorage, logger, object, recordId, data, fileFields);
     },
     { packageId: PACKAGE_ID },
@@ -602,7 +715,28 @@ export function installFileReferenceHooks(
       const fileFields = activeFileFields(engine, object);
       if (fileFields.length === 0) return;
       const ids = asIdList(ctx?.input?.id);
-      if (!ids || ids.length !== 1) return; // see beforeUpdate — no definite owner
+      // [#6966] Deliberately NOT switched to the dispatch marker, unlike its
+      // `beforeUpdate` twin. This test no longer means what its old comment
+      // ("see beforeUpdate — no definite owner") said — since #5038 a predicate
+      // write's `afterUpdate` fires per row with one bound id, so this passes
+      // per row instead of skipping — but the reconciliation it now performs is
+      // the SAFER of the two outcomes, and restoring the skip would regress:
+      // the first row claims the copy `beforeUpdate` made, later rows leave it
+      // alone (`claimFile` never steals, it warns), whereas skipping would
+      // leave that copy owned by NOBODY while N records still reference it —
+      // exactly the unreferenced-but-referenced state the sweep may collect.
+      //
+      // [#7102] The defect that comment named — a predicate update giving N
+      // records one file id, so N−1 reference bytes they do not own whichever
+      // branch is taken — is CLOSED, and not here: it is refused in
+      // `beforeUpdate`, before the driver write, so no such payload reaches
+      // this hook any more. What a predicate write can still deliver is a bulk
+      // CLEAR or a bulk write of a non-token value, and reconciling THOSE per
+      // row is exactly right — each row releases the file its own slot owned.
+      // Which is why this test stays as it is: it is what lets a per-row
+      // dispatch through to that release, and the `claimFile` half it also
+      // permits is now unreachable on the predicate path.
+      if (!ids || ids.length !== 1) return;
       const recordId = String(ids[0]);
 
       for (const field of fileFields) {
@@ -630,32 +764,33 @@ export function installFileReferenceHooks(
     { packageId: PACKAGE_ID },
   );
 
-  // ── beforeDelete: resolve ids for where-shaped deletes ────────────
-  // A delete keyed by id needs nothing here; a `where` delete has no id list
-  // in afterDelete, and by then the records are gone.
+  // ── beforeDelete: collect the batch's ids for a predicate delete ──
+  //
+  // A delete keyed by id needs nothing here — `afterDelete` reads `input.id`.
+  //
+  // [#6966] A predicate delete used to need a QUERY here: the batch dispatched
+  // once with no id, so the only way to learn which rows were about to die was
+  // to re-run the caller's `where` before the write landed. It does not any
+  // more. The engine has already matched the doomed set and hands it over one
+  // row at a time (#5574), so this collects what it is given and issues no
+  // query at all.
+  //
+  // What was here before was dead on every path: its guard was
+  // `if (asIdList(ctx?.input?.id)) return;`, and a per-row context HAS an id,
+  // so it returned before doing anything — and had it not, the stash it wrote
+  // went onto a per-row context the `after` phase never sees.
   engine.registerHook(
     'beforeDelete',
     async (ctx: any) => {
       const object: string = ctx?.object;
       if (!object) return;
       if (activeFileFields(engine, object).length === 0) return;
-      if (asIdList(ctx?.input?.id)) return; // afterDelete can read it directly
-      const where = ctx?.input?.options?.where;
-      if (!where) return;
-      try {
-        const rows = await engine.find(object, {
-          where,
-          limit: MULTI_DELETE_RESOLVE_LIMIT,
-          context: { ...SYSTEM_CTX },
-        });
-        ctx[STASH_KEY] = (rows ?? []).map((r) => r?.id).filter((id) => id != null);
-      } catch (err) {
-        logger.warn(
-          `[storage] file reference: failed to resolve ids before a where-delete on ${object} ` +
-            `(${(err as Error)?.message ?? err})`,
-        );
-        ctx[STASH_KEY] = [];
-      }
+      const perRow = perRowDispatch(ctx);
+      if (!perRow) return; // single-id delete — afterDelete reads it directly
+      const rowIds = asIdList(ctx?.input?.id);
+      if (!rowIds) return;
+      const collected = (perRow.scope[STASH_KEY] ??= []) as Array<string | number>;
+      for (const rowId of rowIds) collected.push(rowId);
     },
     { packageId: PACKAGE_ID },
   );
@@ -669,8 +804,22 @@ export function installFileReferenceHooks(
       const object: string = ctx?.object;
       if (!object) return;
       if (activeFileFields(engine, object).length === 0) return;
-      const stashed = Array.isArray(ctx?.[STASH_KEY]) ? ctx[STASH_KEY] : null;
-      const ids = stashed ?? asIdList(ctx?.input?.id);
+      // [#6966] One release pass per WRITE, not per row. A predicate delete
+      // fires this per matched row (#5038); releasing on each of them meant N
+      // `sys_file` queries of one id apiece, where the whole batch fits in one
+      // `$in`. The first row's dispatch does the work for all of them, because
+      // by then `beforeDelete` has collected every id onto the shared scope.
+      //
+      // The fallback is not decoration: it covers a per-row dispatch whose
+      // `beforeDelete` never ran (this object gained file fields between the
+      // two phases is impossible, but a directly-invoked handler in a test has
+      // no `before` half) and it keeps the answer per row rather than empty.
+      const perRow = perRowDispatch(ctx);
+      if (perRow && perRow.index !== 0) return;
+      const collected = perRow && Array.isArray(perRow.scope[STASH_KEY])
+        ? (perRow.scope[STASH_KEY] as Array<string | number>)
+        : null;
+      const ids = (collected?.length ? collected : null) ?? asIdList(ctx?.input?.id);
       if (!ids || ids.length === 0) return;
       try {
         const owned = await engine.find('sys_file', {

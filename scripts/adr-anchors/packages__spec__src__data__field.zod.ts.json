@@ -1,0 +1,7 @@
+{
+  "file": "packages/spec/src/data/field.zod.ts",
+  "adrs": [
+    "ADR-0120"
+  ],
+  "invariant": "`UniqueScopeSchema` is the closed scope vocabulary `boolean | 'global' | 'organization'` (ADR-0120 D1). `'organization'` is the explicit synonym of field-level `true` — identical materialization, and `isUniqueDeclared` MUST count it (a word the vocabulary accepts but no driver reads is declarable-but-inert, ADR-0078). `'tenant'` and `'org'` are rejected, never aliased — the parse error names `'organization'` (§Terminology; PD #12: one contract, no dialects). The single-tenant story is D3's NULL-safe COALESCE bucket, NOT the retired 'composite degenerates to single-column' claim #5030 falsified."
+}

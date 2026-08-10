@@ -142,49 +142,70 @@ describe('lowerCallables — declared `functions` entries (#4396)', () => {
 // hand-written sample is a third copy of the truth and drifts exactly the way
 // the two halves already did.
 //
-// SCOPE: the map form. The ARRAY form (`functions: [{ name, handler }]`) does
-// not round-trip either — in both its bare and declared spellings, since #4343
-// and #4976 each only ever touched the map — and its member lives in
-// `stack.zod.ts` rather than in `FlowFunctionEntrySchema`. Filed as #6238;
-// extend the parametrisation below when it lands.
-describe('lowerCallables → the spec parses what it emits (#4976)', () => {
+// SCOPE: all four cells of map/array × bare/declared. The ARRAY form
+// (`functions: [{ name, handler }]`) was the last one still broken — in BOTH
+// its spellings, because #4343 and #4976 each only ever touched the map, while
+// `lowerCallables` has lowered the array branch the whole time. Its member
+// lives inline in `stack.zod.ts` rather than in `FlowFunctionEntrySchema`
+// (an array entry names itself, so it is a different record, not the same
+// schema in a list), which is why widening one did not widen the other. #6238
+// widened it; the parametrisation below now covers the array form too.
+describe('lowerCallables → the spec parses what it emits (#4976, #6238)', () => {
   const base = {
     manifest: { id: 'com.example.demo', name: 'demo', version: '1.0.0', type: 'app' as const },
   };
 
   /** Exactly what `objectstack compile` does, in the order it does it. */
-  const buildPipeline = (functions: Record<string, unknown>) => {
+  const buildPipeline = (functions: unknown) => {
     const stack = defineStack({ ...base, functions } as never);
     const normalized = normalizeStackInput(stack as Record<string, unknown>);
     return lowerCallables(normalized);
   };
 
-  const cases: Array<[label: string, functions: Record<string, unknown>]> = [
-    ['a bare handler', { scoreLead: () => ({ score: 1 }) }],
-    ['a declared writer', { syncBilling: { handler: () => ({ ok: true }), effect: 'writes' } }],
-    ['a declaration that states the pure default', { scoreLead: { handler: () => ({ score: 1 }), effect: 'pure' } }],
-    ['a declaration that states nothing', { scoreLead: { handler: () => ({ score: 1 }) } }],
-    ['both spellings side by side', {
+  /**
+   * `form` drives the entry-level assertion, which can only run on the map:
+   * `FlowFunctionEntrySchema` is the map entry's schema and is exported, while
+   * the array member is inline in `ObjectStackDefinitionSchema`. The array
+   * cells are pinned by the whole-stack parse below — the assertion the build
+   * actually makes.
+   */
+  const cases: Array<[label: string, form: 'map' | 'array', functions: unknown]> = [
+    ['a bare handler', 'map', { scoreLead: () => ({ score: 1 }) }],
+    ['a declared writer', 'map', { syncBilling: { handler: () => ({ ok: true }), effect: 'writes' } }],
+    ['a declaration that states the pure default', 'map', { scoreLead: { handler: () => ({ score: 1 }), effect: 'pure' } }],
+    ['a declaration that states nothing', 'map', { scoreLead: { handler: () => ({ score: 1 }) } }],
+    ['both spellings side by side', 'map', {
       scoreLead: () => ({ score: 1 }),
       syncBilling: { handler: () => ({ ok: true }), effect: 'writes' },
     }],
+    // ── the array form (#6238) ──
+    ['an array entry with a bare handler', 'array', [{ name: 'scoreLead', handler: () => ({ score: 1 }) }]],
+    ['an array entry declaring a writer', 'array', [{ name: 'syncBilling', handler: () => ({ ok: true }), effect: 'writes' }]],
+    ['an array entry declaring the pure default', 'array', [{ name: 'scoreLead', handler: () => ({ score: 1 }), effect: 'pure' }]],
+    ['an array entry carrying a packageId', 'array', [{ name: 'scoreLead', handler: () => ({ score: 1 }), packageId: 'com.example.pkg' }]],
+    ['several array entries side by side', 'array', [
+      { name: 'scoreLead', handler: () => ({ score: 1 }) },
+      { name: 'syncBilling', handler: () => ({ ok: true }), effect: 'writes' },
+    ]],
   ];
 
-  for (const [label, functions] of cases) {
-    it(`parses every entry it emits for ${label}`, () => {
-      const emitted = (buildPipeline(functions).lowered as {
-        functions: Record<string, unknown>;
-      }).functions;
+  for (const [label, form, functions] of cases) {
+    if (form === 'map') {
+      it(`parses every entry it emits for ${label}`, () => {
+        const emitted = (buildPipeline(functions).lowered as {
+          functions: Record<string, unknown>;
+        }).functions;
 
-      for (const [name, entry] of Object.entries(emitted)) {
-        const result = FlowFunctionEntrySchema.safeParse(entry);
-        expect(
-          result.success,
-          `emitted entry '${name}' (${JSON.stringify(entry)}) is not a shape FlowFunctionEntrySchema accepts: `
-          + JSON.stringify(result.success ? [] : result.error.issues),
-        ).toBe(true);
-      }
-    });
+        for (const [name, entry] of Object.entries(emitted)) {
+          const result = FlowFunctionEntrySchema.safeParse(entry);
+          expect(
+            result.success,
+            `emitted entry '${name}' (${JSON.stringify(entry)}) is not a shape FlowFunctionEntrySchema accepts: `
+            + JSON.stringify(result.success ? [] : result.error.issues),
+          ).toBe(true);
+        }
+      });
+    }
 
     it(`parses the whole lowered stack for ${label}`, () => {
       // The assertion the build itself makes (`compile.ts` step 3). Parsing the
@@ -216,5 +237,20 @@ describe('lowerCallables → the spec parses what it emits (#4976)', () => {
     // And it is JSON — the artifact is `objectstack.json`, not a module.
     expect(JSON.parse(JSON.stringify(lowered)).functions.syncBilling)
       .toEqual({ handler: 'syncBilling', effect: 'writes' });
+  });
+
+  it('carries an ARRAY entry\'s declaration into the artifact too (#6238)', () => {
+    // Same guarantee, other spelling. The array branch of `lowerCallables`
+    // rewrites `name` to the ref as well as `handler`, so both keys must come
+    // back as the ref and `effect` must survive beside them.
+    const { lowered } = buildPipeline([
+      { name: 'syncBilling', handler: () => ({ ok: true }), effect: 'writes' },
+    ]);
+    const parsed = ObjectStackDefinitionSchema.parse(lowered) as {
+      functions: Array<{ name: string; handler: string; effect: string }>;
+    };
+    expect(parsed.functions).toEqual([{ name: 'syncBilling', handler: 'syncBilling', effect: 'writes' }]);
+    expect(JSON.parse(JSON.stringify(lowered)).functions)
+      .toEqual([{ name: 'syncBilling', handler: 'syncBilling', effect: 'writes' }]);
   });
 });

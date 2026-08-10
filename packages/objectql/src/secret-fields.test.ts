@@ -133,11 +133,11 @@ async function buildEngine(withCrypto: boolean) {
   const { driver, stores } = makeStubDriver();
   engine.registerDriver(driver, true);
   await engine.init();
-  engine.registry.registerObject(sysSecretObject as any);
-  engine.registry.registerObject(dsObject as any);
+  engine.registry.registerObject(sysSecretObject);
+  engine.registry.registerObject(dsObject);
   const crypto = makeFakeCrypto();
   if (withCrypto) engine.setCryptoProvider(crypto.provider);
-  return { engine, stores, crypto };
+  return { engine, stores, crypto, driver };
 }
 
 describe('objectql secret-field channel', () => {
@@ -178,6 +178,30 @@ describe('objectql secret-field channel', () => {
     const plain = await ctx.engine.resolveSecret(stored.db_password);
     expect(plain).toBe('s3cr3t');
     expect(ctx.crypto.calls.decrypt).toBe(1);
+  });
+
+  // [#6231] `resolveSecret` reads `sys_secret` straight off the driver. That
+  // call used to spell `{ object: 'sys_secret', where: { id } } as QueryAST`,
+  // where the cast existed only to satisfy the AST's then-required `object`.
+  // With `DriverQuery` (`Omit<QueryAST, 'object'>`) the key is gone and so is
+  // the cast — so `where` is type-checked at this call site again.
+  it('resolveSecret reads sys_secret by argument one — the AST never restates the object name', async () => {
+    const created = await ctx.engine.insert('ext_datasource', { name: 'pg', db_password: 's3cr3t' });
+    const stored = ctx.stores.get('ext_datasource')!.get(created.id) as any;
+
+    const seen: Array<{ object: string; ast: any }> = [];
+    const realFind = ctx.driver.find.bind(ctx.driver);
+    ctx.driver.find = async (object: string, ast: any) => {
+      seen.push({ object, ast });
+      return realFind(object, ast);
+    };
+
+    expect(await ctx.engine.resolveSecret(stored.db_password)).toBe('s3cr3t');
+
+    const secretReads = seen.filter((c) => c.object === 'sys_secret');
+    expect(secretReads).toHaveLength(1);
+    expect(secretReads[0].ast).not.toHaveProperty('object');
+    expect(secretReads[0].ast.where).toEqual({ id: expect.any(String) });
   });
 
   it('fail-closed: writing a secret field with no CryptoProvider throws', async () => {
@@ -259,8 +283,8 @@ async function buildPasswordEngine() {
   const { driver, stores } = makeStubDriver();
   engine.registerDriver(driver, true);
   await engine.init();
-  engine.registry.registerObject(deviceObject as any);
-  engine.registry.registerObject(authUserObject as any);
+  engine.registry.registerObject(deviceObject);
+  engine.registry.registerObject(authUserObject);
   return { engine, stores };
 }
 

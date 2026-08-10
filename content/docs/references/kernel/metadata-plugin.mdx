@@ -117,7 +117,7 @@ const result = MetadataBulkResultSchema.parse(data);
 | **type** | `'standard'` | ✅ | Plugin type |
 | **description** | `string` | optional | Plugin description |
 | **capabilities** | `{ crud?: boolean; query?: boolean; overlay?: boolean; watch?: boolean; … }` | ✅ | Plugin capabilities |
-| **config** | `{ storage: object; customizationPolicies?: { metadataType: string; allowCustomization?: boolean; lockedFields?: string[]; customizableFields?: string[]; … }[]; mergeStrategy?: object; additionalTypes?: { label: string; description?: string; filePatterns: string[]; supportsOverlay?: boolean; … }[]; … }` | optional | Plugin configuration |
+| **config** | `{ storage: object; customizationPolicies?: object[]; mergeStrategy?: object; additionalTypes?: object[]; … }` | optional | Plugin configuration |
 
 
 ---
@@ -128,7 +128,7 @@ const result = MetadataBulkResultSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **types** | `Enum<'object' \| 'field' \| 'hook' \| 'seed' \| 'mapping' \| 'view' \| 'page' \| 'dashboard' \| 'app' \| 'action' \| 'report' \| 'dataset' \| 'flow' \| 'job' \| 'datasource' \| 'external_catalog' \| 'translation' \| 'api' \| 'email_template' \| 'doc' \| 'book' \| 'permission' \| 'position' \| 'agent' \| 'tool' \| 'skill'>[]` | optional | Filter by metadata types |
+| **types** | `Enum<'object' \| 'field' \| 'hook' \| 'seed' \| 'mapping' \| 'view' \| 'page' \| 'dashboard' \| 'app' \| 'action' \| 'report' \| 'dataset' \| 'flow' \| 'job' \| 'datasource' \| 'external_catalog' \| 'translation' \| 'api' \| 'email_template' \| 'doc' \| 'book' \| 'permission' \| 'position' \| 'capability' \| 'agent' \| 'tool' \| 'skill'>[]` | optional | Filter by metadata types |
 | **namespaces** | `string[]` | optional | Filter by namespaces |
 | **packageId** | `string` | optional | Filter by owning package |
 | **search** | `string` | optional | Full-text search query |
@@ -184,6 +184,7 @@ const result = MetadataBulkResultSchema.parse(data);
 * `book`
 * `permission`
 * `position`
+* `capability`
 * `agent`
 * `tool`
 * `skill`
@@ -197,7 +198,7 @@ const result = MetadataBulkResultSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `Enum<'object' \| 'field' \| 'hook' \| 'seed' \| 'mapping' \| 'view' \| 'page' \| 'dashboard' \| 'app' \| 'action' \| 'report' \| 'dataset' \| 'flow' \| 'job' \| 'datasource' \| … +11 more>` | ✅ | Metadata type identifier |
+| **type** | `Enum<'object' \| 'field' \| 'hook' \| 'seed' \| 'mapping' \| 'view' \| 'page' \| 'dashboard' \| 'app' \| 'action' \| 'report' \| 'dataset' \| 'flow' \| 'job' \| 'datasource' \| … +12 more>` | ✅ | Metadata type identifier |
 | **label** | `string` | ✅ | Display label for the metadata type |
 | **description** | `string` | optional | Description of the metadata type |
 | **filePatterns** | `string[]` | ✅ | Glob patterns to discover files of this type |
@@ -208,7 +209,7 @@ const result = MetadataBulkResultSchema.parse(data);
 | **executionPinned** | `boolean` | optional | Transaction rows reference a specific version_hash; history GC is disabled and getByHash() MUST resolve old hashes (ADR-0009) |
 | **loadOrder** | `integer` | optional | Loading priority (lower = earlier) |
 | **domain** | `Enum<'data' \| 'ui' \| 'automation' \| 'system' \| 'security' \| 'ai'>` | ✅ | Protocol domain |
-| **actions** | `{ name: string; label: string; objectName?: string; icon?: string; … }[]` | optional | Declarative type-level actions (e.g. datasource "Test connection"), reusing ActionSchema; merged with plugin-registered actions when emitted |
+| **actions** | `{ name: string; label: string \| Record<string, string>; description?: string \| Record<string, string>; objectName?: string; … }[]` | optional | Declarative type-level actions (e.g. datasource "Test connection"), reusing ActionSchema; merged with plugin-registered actions when emitted |
 
 ### Allowed Values: `MetadataTypeRegistryEntry.type`
 
@@ -235,6 +236,7 @@ const result = MetadataBulkResultSchema.parse(data);
 * `book`
 * `permission`
 * `position`
+* `capability`
 * `agent`
 * `tool`
 * `skill`

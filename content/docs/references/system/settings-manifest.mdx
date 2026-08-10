@@ -31,8 +31,8 @@ Resolution order (handled by `SettingsService.get`):
 ## TypeScript Usage
 
 ```typescript
-import { ResolvedSettingValueSchema, SettingsActionResultSchema, SettingsManifestSchema, SettingsNamespacePayloadSchema, SpecifierSchema, SpecifierHandlerSchema, SpecifierOptionSchema, SpecifierScopeSchema, SpecifierType } from '@objectstack/spec/system';
-import type { ResolvedSettingValue, SettingsActionResult, SettingsManifest, SettingsNamespacePayload, Specifier, SpecifierHandler, SpecifierOption, SpecifierScope, SpecifierType } from '@objectstack/spec/system';
+import { ResolvedSettingValueSchema, SettingsActionResultSchema, SettingsManifestSchema, SettingsNamespacePayloadSchema, SpecifierSchema, SpecifierHandlerSchema, SpecifierOptionSchema, SpecifierScopeSchema, SpecifierType, SpecifierValueDomainSchema } from '@objectstack/spec/system';
+import type { ResolvedSettingValue, SettingsActionResult, SettingsManifest, SettingsNamespacePayload, Specifier, SpecifierHandler, SpecifierOption, SpecifierScope, SpecifierType, SpecifierValueDomain } from '@objectstack/spec/system';
 
 // Validate data
 const result = ResolvedSettingValueSchema.parse(data);
@@ -77,7 +77,7 @@ const result = ResolvedSettingValueSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **namespace** | `string` | ✅ | Namespace (snake_case, globally unique) |
 | **version** | `integer` | optional | Manifest schema version |
-| **label** | `string` | ✅ | Display label |
+| **label** | `string \| Record<string, string>` | ✅ | Display label |
 | **icon** | `string` | optional | Icon (Lucide) |
 | **description** | `string` | optional | Short description |
 | **helpText** | `string` | optional | Markdown help text shown above specifiers |
@@ -86,8 +86,8 @@ const result = ResolvedSettingValueSchema.parse(data);
 | **writePermission** | `string` | optional | Permission required to write |
 | **category** | `string` | optional | Settings hub category |
 | **order** | `number` | optional | Display order |
-| **specifiers** | `{ type: Enum<'group' \| 'child_pane' \| 'info_banner' \| 'title_value' \| 'text' \| 'textarea' \| … +13 more>; id?: string; key?: string; label: string; … }[]` | ✅ | Page contents (ordered) |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Whole-manifest visibility |
+| **specifiers** | `{ type: Enum<'group' \| 'child_pane' \| 'info_banner' \| 'title_value' \| 'text' \| 'textarea' \| … +13 more>; id?: string; key?: string; label: string \| Record<string, string>; … }[]` | ✅ | Page contents (ordered) |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Whole-manifest visibility. Grammar is NOT CEL: root `data` with one-level member access, `\|\|` `&&` `!`, `===` `!==` `==` `!=` `>=` `<=` `>` `<`, parentheses and string/number/bool/null literals, optionally wrapped in `${...}`; bare string or `{ dialect, source }` envelope. |
 | **featureFlag** | `string` | optional | Gate manifest visibility on a feature flag |
 | **beta** | `boolean` | optional | Show a Beta chip on the page |
 
@@ -100,7 +100,7 @@ const result = ResolvedSettingValueSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **manifest** | `{ namespace: string; version?: integer; label: string; icon?: string; … }` | ✅ |  |
+| **manifest** | `{ namespace: string; version?: integer; label: string \| Record<string, string>; icon?: string; … }` | ✅ |  |
 | **values** | `Record<string, { value: any; source: Enum<'env' \| 'global' \| 'tenant' \| 'user' \| 'default'>; locked: boolean; lockedReason?: string; … }>` | ✅ | Effective values keyed by specifier.key |
 
 
@@ -115,11 +115,11 @@ const result = ResolvedSettingValueSchema.parse(data);
 | **type** | `Enum<'group' \| 'child_pane' \| 'info_banner' \| 'title_value' \| 'text' \| 'textarea' \| 'password' \| 'email' \| 'url' \| 'phone' \| 'number' \| 'toggle' \| 'select' \| 'radio' \| … +5 more>` | ✅ | Specifier variant |
 | **id** | `string` | optional | Stable identifier (snake_case) |
 | **key** | `string` | optional | Storage key (snake_case) |
-| **label** | `string` | ✅ | Display label |
+| **label** | `string \| Record<string, string>` | ✅ | Display label |
 | **description** | `string` | optional | Help text |
 | **icon** | `string` | optional | Icon name (Lucide) |
 | **default** | `any` | optional | Default value |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility expression |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility expression evaluated against the namespace value map, e.g. `${data.provider === 'smtp'}`. Hidden specifiers are not rendered and their values are not validated. Grammar is NOT CEL: root `data` with one-level member access, `\|\|` `&&` `!`, `===` `!==` `==` `!=` `>=` `<=` `>` `<`, parentheses and string/number/bool/null literals, optionally wrapped in `${...}`; bare string or `{ dialect, source }` envelope. |
 | **required** | `boolean` | optional | Required field |
 | **encrypted** | `boolean` | optional | Encrypt value at rest (forced true for password) |
 | **scope** | `Enum<'global' \| 'tenant' \| 'user'>` | optional | Override manifest scope for this key |
@@ -129,7 +129,8 @@ const result = ResolvedSettingValueSchema.parse(data);
 | **writePermission** | `string` | optional | Permission required to write this specifier |
 | **deprecated** | `boolean` | optional | Mark deprecated |
 | **replacedBy** | `string` | optional | Replacement key (used when deprecated=true) |
-| **options** | `{ value: string \| number \| boolean; label: string; description?: string; icon?: string }[]` | optional | Options for select/radio/multiselect |
+| **options** | `{ value: string \| number \| boolean; label: string \| Record<string, string>; description?: string; icon?: string }[]` | optional | Options for select/radio/multiselect |
+| **valueDomain** | `Enum<'iana_time_zone' \| 'iso_4217_currency' \| 'iso_3166_alpha2'>` | optional | Standard value domain enforced on write (options degrade to a UI suggestion list) |
 | **min** | `number` | optional |  |
 | **max** | `number` | optional |  |
 | **step** | `number` | optional |  |
@@ -137,7 +138,7 @@ const result = ResolvedSettingValueSchema.parse(data);
 | **maxLength** | `integer` | optional |  |
 | **pattern** | `string` | optional | Regex pattern (text only) |
 | **rows** | `integer` | optional |  |
-| **handler** | `{ kind: 'http'; method?: Enum<'GET' \| 'POST' \| 'PUT' \| 'DELETE' \| 'PATCH'>; url: string; body?: Record<string, any>; … } \| { kind: 'action'; name: string; params?: Record<string, any>; confirmText?: string } \| { kind: 'navigate'; url: string; target?: Enum<'_self' \| '_blank'> }` | optional | Action handler (action_button) |
+| **handler** | `{ kind: 'http'; method?: Enum<'GET' \| 'POST' \| 'PUT' \| 'DELETE' \| 'PATCH'>; url: string; body?: Record<string, any>; … } \| { kind: 'action'; name: string; params?: Record<string, any>; confirmText?: string \| Record<string, string> } \| { kind: 'navigate'; url: string; target?: Enum<'_self' \| '_blank'> }` | optional | Action handler (action_button) |
 | **childNamespace** | `string` | optional | Sub-namespace (child_pane) |
 | **bannerText** | `string` | optional | Markdown body (info_banner) |
 | **bannerSeverity** | `Enum<'info' \| 'success' \| 'warning' \| 'error'>` | optional |  |
@@ -183,7 +184,7 @@ This schema accepts one of the following structures:
 | **method** | `Enum<'GET' \| 'POST' \| 'PUT' \| 'DELETE' \| 'PATCH'>` | ✅ |  |
 | **url** | `string` | ✅ | Endpoint URL; supports $`{...}` interpolation |
 | **body** | `Record<string, any>` | optional | Optional JSON body; supports $`{...}` interpolation |
-| **confirmText** | `string` | optional | Confirm dialog text before invoking (omit = no confirm) |
+| **confirmText** | `string \| Record<string, string>` | optional | Confirm dialog text before invoking (omit = no confirm) |
 
 ---
 
@@ -196,7 +197,7 @@ This schema accepts one of the following structures:
 | **kind** | `'action'` | ✅ |  |
 | **name** | `string` | ✅ | Registered action machine name |
 | **params** | `Record<string, any>` | optional |  |
-| **confirmText** | `string` | optional | Display label (plain string; i18n keys are auto-generated by the framework) |
+| **confirmText** | `string \| Record<string, string>` | optional | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
 
 ---
 
@@ -222,7 +223,7 @@ This schema accepts one of the following structures:
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **value** | `string \| number \| boolean` | ✅ | Stored value |
-| **label** | `string` | ✅ | Display label |
+| **label** | `string \| Record<string, string>` | ✅ | Display label |
 | **description** | `string` | optional | Optional helper text |
 | **icon** | `string` | optional | Optional Lucide icon name |
 
@@ -263,6 +264,17 @@ This schema accepts one of the following structures:
 * `color`
 * `json`
 * `action_button`
+
+
+---
+
+## SpecifierValueDomain
+
+### Allowed Values
+
+* `iana_time_zone`
+* `iso_4217_currency`
+* `iso_3166_alpha2`
 
 
 ---

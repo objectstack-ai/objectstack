@@ -2,7 +2,7 @@
 
 import { z } from 'zod';
 import { ExpressionInputSchema } from '../shared/expression.zod';
-import { strictUnknownKeyError } from '../shared/suggestions.zod';
+import { strictObject } from '../shared/strict-object';
 
 /**
  * Organization-Wide Defaults (OWD)
@@ -96,55 +96,6 @@ export const ShareRecipientType = z.enum([
 ]);
 
 /**
- * Keys the sharing-rule surface declares — the base shape plus the
- * `criteria`-variant extension keys (`type` / `condition`), since the strict
- * error map rides {@link BaseSharingRuleSchema} into every extension
- * (drift-guarded by sharing.test.ts).
- */
-const SHARING_RULE_KEYS = [
-  'name', 'label', 'description', 'object', 'active', 'accessLevel',
-  'sharedWith', 'type', 'condition',
-] as const;
-
-const sharingRuleUnknownKeyError = strictUnknownKeyError({
-  surface: 'this sharing rule',
-  knownKeys: SHARING_RULE_KEYS,
-  aliases: {
-    // The runtime/persisted rule row spells the compiled predicate `criteria`
-    // (`criteria_json`); the authored key is the CEL `condition` (#3896).
-    criteria: 'condition',
-    filter: 'condition',
-    when: 'condition',
-    access: 'accessLevel',
-    level: 'accessLevel',
-    recipient: 'sharedWith',
-    sharewith: 'sharedWith',
-    sharedto: 'sharedWith',
-    enabled: 'active',
-  },
-  guidance: {
-    ownedBy:
-      '`ownedBy` belongs to the removed `owner`-type sharing rule — it depends on live ' +
-      'team/position membership, which the static materialiser cannot track, so it was ' +
-      'removed from the authoring surface (ADR-0078). Only `criteria` rules are ' +
-      'authorable; express membership-shaped access via RLS dynamic membership ' +
-      '(§7.3.1) or business-unit depth scopes (ADR-0057).',
-  },
-  history:
-    'Until #4001 these were dropped silently — the rule still parsed, so a share the ' +
-    'author intended was never materialised (or a constraint never applied).',
-});
-
-const sharingRecipientUnknownKeyError = strictUnknownKeyError({
-  surface: 'this sharing-rule recipient',
-  knownKeys: ['type', 'value'],
-  aliases: { id: 'value', target: 'value' },
-  history:
-    'Until #4001 these were dropped silently — the recipient still parsed, so the ' +
-    'grant could land on the wrong principal without a diagnostic.',
-});
-
-/**
  * Base Sharing Rule
  * Common metadata for all sharing strategies.
  *
@@ -152,7 +103,45 @@ const sharingRecipientUnknownKeyError = strictUnknownKeyError({
  * (zod carries the catchall and error through extension), so the
  * criteria rule below inherits both.
  */
-const BaseSharingRuleSchema = z.object({
+const BaseSharingRuleSchema = strictObject(
+  {
+    surface: 'this sharing rule',
+    // The strict error map rides `.extend()` into `CriteriaSharingRuleSchema`,
+    // which is the ONLY surface anything parses (`SharingRuleSchema` IS that
+    // extension; this base is module-private). Its two extension keys are named
+    // here so the suggestion pool on the extended surface is complete, and so
+    // the `criteria`/`filter`/`when` → `condition` aliases below point at a key
+    // the shape that actually runs them accepts. Before #5593 that was implicit
+    // in a hand-transcribed `SHARING_RULE_KEYS` array which quietly listed both
+    // the base's keys and the extension's; `extraKeys` is where that legitimate
+    // content goes now that the base's own keys come from `.shape`.
+    extraKeys: ['type', 'condition'],
+    aliases: {
+      // The runtime/persisted rule row spells the compiled predicate `criteria`
+      // (`criteria_json`); the authored key is the CEL `condition` (#3896).
+      criteria: 'condition',
+      filter: 'condition',
+      when: 'condition',
+      access: 'accessLevel',
+      level: 'accessLevel',
+      recipient: 'sharedWith',
+      sharewith: 'sharedWith',
+      sharedto: 'sharedWith',
+      enabled: 'active',
+    },
+    guidance: {
+      ownedBy:
+        '`ownedBy` belongs to the removed `owner`-type sharing rule — it depends on live ' +
+        'team/position membership, which the static materialiser cannot track, so it was ' +
+        'removed from the authoring surface (ADR-0078). Only `criteria` rules are ' +
+        'authorable; express membership-shaped access via RLS dynamic membership ' +
+        '(§7.3.1) or business-unit depth scopes (ADR-0057).',
+    },
+    history:
+      'Until #4001 these were dropped silently — the rule still parsed, so a share the ' +
+      'author intended was never materialised (or a constraint never applied).',
+  },
+  {
   // Identification
   name: z.string().regex(/^[a-z_][a-z0-9_]*$/).describe('Unique rule name (snake_case)'),
   label: z.string().optional().describe('Human-readable label'),
@@ -166,10 +155,18 @@ const BaseSharingRuleSchema = z.object({
   accessLevel: SharingLevel.default('read'),
 
   // Recipient (Whom to share with)
-  sharedWith: z.object({
+  sharedWith: strictObject(
+  {
+    surface: 'this sharing-rule recipient',
+    aliases: { id: 'value', target: 'value' },
+    history:
+      'Until #4001 these were dropped silently — the recipient still parsed, so the ' +
+      'grant could land on the wrong principal without a diagnostic.',
+  },
+  {
     type: ShareRecipientType,
     value: z.string().describe('ID or code of the recipient (user / team / position / business unit)'),
-  }, { error: sharingRecipientUnknownKeyError }).strict().describe('The recipient of the shared access'),
+  }).describe('The recipient of the shared access'),
 
   // ADR-0010 — runtime protection envelope (internal — set by loader).
   //
@@ -186,7 +183,7 @@ const BaseSharingRuleSchema = z.object({
   // output fails to parse — a hard 422 on the overlay path") and prescribes
   // this spread as the fix.
   ...MetadataProtectionFields,
-}, { error: sharingRuleUnknownKeyError }).strict();
+});
 
 /**
  * 1. Criteria-Based Sharing Rule
@@ -239,6 +236,10 @@ export type SharingRuleParsed = z.infer<typeof SharingRuleSchema>;
 export type CriteriaSharingRule = z.input<typeof CriteriaSharingRuleSchema>;
 /** Post-parse shape of {@link CriteriaSharingRule} — defaults applied, transforms run (ADR-0122). */
 export type CriteriaSharingRuleParsed = z.infer<typeof CriteriaSharingRuleSchema>;
+export type OWDModel = z.input<typeof OWDModel>;
+export type ShareRecipientType = z.input<typeof ShareRecipientType>;
+export type SharingLevel = z.input<typeof SharingLevel>;
+export type SharingRuleType = z.input<typeof SharingRuleType>;
 
 /**
  * Type-safe factory for a record sharing rule. Validates at authoring time via

@@ -11,6 +11,11 @@
  * Only the one thing no author looks at, and the only thing a CI step, a
  * `set -e` script, a Makefile or a container entrypoint looks at.
  *
+ * Two of those observations have since changed, and deliberately: #6217 gave
+ * `--json` its stdout back, so the boot log and the shutdown receipt now arrive
+ * on **stderr** and stdout is one JSON document. That is what let this file
+ * drop the payload-hunting extractor it had to carry — see {@link jsonPayload}.
+ *
  * The cause was `emitJson(payload, timer.elapsed())` — a DURATION handed to the
  * parameter that means `exitCode`, so the process exited with its own runtime
  * in milliseconds, truncated to 8 bits. `packages/cli/src/utils/format.exit-code.test.ts`
@@ -92,33 +97,24 @@ function runCli(args: string[], cwd: string, env: Record<string, string> = {}): 
 }
 
 /**
- * The `--json` payload, dug out of stdout.
+ * The `--json` payload: the WHOLE of stdout, parsed as one document.
  *
- * This command boots a kernel and the kernel's INFO logger writes to STDOUT, so
- * the machine payload arrives with human log lines above AND below it — the
- * whole stdout is not valid JSON. That is its own defect for the same audience
- * and is filed as #6217; it is not this test's subject, and working around it
- * here is exactly what a consumer has to do today.
+ * This used to be a heuristic extractor — scan backwards for a lone `}` at
+ * column 0, then back to its matching lone `{` — written under duress because
+ * the kernel's INFO logger wrote to stdout, so the payload arrived with ~60 log
+ * lines above it and two below and the whole stream was not valid JSON. That
+ * was its own defect for the same audience (#6217); it is fixed, `--json` now
+ * reserves stdout for the payload and the kernel's output goes to stderr, and
+ * the extractor is gone.
  *
- * Structural rather than a regex over the buffer: `emitJson` pretty-prints, so
- * the payload is a lone `{` through a lone `}` at column 0; `{ compact: true }`
- * puts one object on one line. A log line that merely looks like JSON fails
- * `JSON.parse` and the scan continues.
+ * Keeping this a bare `JSON.parse` is deliberate: the heuristic could silently
+ * pick the wrong text the moment a log line looked like an object, so removing
+ * it removes a way for THIS pin to pass on the wrong bytes. The invariant it
+ * now leans on is pinned across the whole `bootSchemaStack` family in
+ * `json-stdout-purity.e2e.test.ts`.
  */
 function jsonPayload(stdout: string): Record<string, unknown> {
-  const lines = stdout.split('\n');
-  for (let i = lines.length - 1; i >= 0; i--) {
-    const line = lines[i];
-    if (line === '}') {
-      for (let j = i; j >= 0; j--) {
-        if (lines[j] === '{') return JSON.parse(lines.slice(j, i + 1).join('\n'));
-      }
-    }
-    if (line.startsWith('{') && line.endsWith('}')) {
-      try { return JSON.parse(line); } catch { /* a log line shaped like an object */ }
-    }
-  }
-  throw new Error(`no --json payload on stdout:\n${stdout}`);
+  return JSON.parse(stdout) as Record<string, unknown>;
 }
 
 const RUNS = 3;
@@ -166,8 +162,11 @@ describe('os migrate recorded-by --json — a successful run exits 0 (#4873)', (
         pending: 0,
         applied: false,
       });
-      expect(run.stdout).toContain('Graceful shutdown complete');
-      expect(run.stderr).toBe('');
+      // The receipt moved streams with #6217 and is still a receipt: the
+      // kernel really came up and really came down, it just says so on stderr
+      // now so stdout can be the payload and nothing else.
+      expect(run.stderr).toContain('Graceful shutdown complete');
+      expect(run.stdout).not.toContain('Graceful shutdown complete');
     }
   });
 

@@ -899,6 +899,30 @@ export interface InstalledPackageLedgerReading {
    * directory name is the missing package's own constant.
    */
   readerFailure?: { cause: unknown };
+  /**
+   * Present ONLY when the reader package LOADED and its
+   * `DEFAULT_INSTALLED_PACKAGES_DIR` export is not a string (#5996).
+   *
+   * A FOURTH fact — the last cell of the edge #5644 carved. `readerFailure` is
+   * "present but unloadable"; this is "loaded but unrecognizable". That export
+   * is the single authority on where the ledger lives, so a reading in this
+   * state carries no `dir` and read no directory at all: the `??` fallback
+   * that used to guess `.objectstack/installed-packages` in its place was the
+   * tolerant consumer read Prime Directive #12 forbids, two lines from the
+   * #5413 comment saying so. `received` is what the export actually was.
+   */
+  dirAuthorityMissing?: { received: unknown };
+  /**
+   * The resolved ledger directory — `cwd` joined with the producer's
+   * `DEFAULT_INSTALLED_PACKAGES_DIR` export (#5996). Present exactly when that
+   * export was read successfully, whatever happened afterwards (a `failure`
+   * reading still carries it); absent when the reader never loaded
+   * (`readerFailure`) or loaded without declaring it (`dirAuthorityMissing`).
+   * Rows that name the directory take it from HERE, never from a re-hardcoded
+   * literal: the literal is the consumer restating what only the producer
+   * decides.
+   */
+  dir?: string;
 }
 
 /**
@@ -957,15 +981,29 @@ interface SkippedLedgerEntry {
  * separated by `loadOptionalPackage()` (`utils/optional-package.ts` carries how,
  * and the measurements behind it); only the genuinely-absent half stays silent.
  *
+ * And a FIFTH — the cell the fourth's edge left uncovered (#5996). `loaded` is
+ * still not RECOGNIZED: the ledger directory's name is the module's own
+ * `DEFAULT_INSTALLED_PACKAGES_DIR` export — the single authority on that name —
+ * and a module that evaluates fine while declaring no such string is a reader
+ * this doctor does not know how to follow. The consumer-side `??` that used to
+ * sit on that export answered the state with a hard-coded guess, two lines
+ * above the #5413 comment that forbids exactly that accommodation (Prime
+ * Directive #12), while the runtime kept reading wherever the package decides —
+ * two reports, potentially two directories, no line saying so. The guess is
+ * gone: the state comes back as `dirAuthorityMissing`, and no directory —
+ * guessed or otherwise — is read while it holds.
+ *
  * Called UNCONDITIONALLY since #5429 — from `run()`, outside the tenancy-posture
  * gate and outside the config-analysis block. Two consequences worth knowing:
  * every finding above is now reachable under every posture (which is the whole
  * point), and this function no longer sits inside a `try` belonging to somebody
- * else. It must therefore report rather than throw for anything it can hit, so
- * the directory path is resolved INSIDE the guarded block: `DEFAULT_INSTALLED_
- * PACKAGES_DIR` comes from a dynamically loaded module, and a `path.join()` over
- * a non-string export used to be absorbed by the config `catch` and misreported
- * as "Could not load config for analysis".
+ * else. It must therefore report rather than throw for anything it can hit,
+ * which is why the export is TYPE-CHECKED before `path.join()` ever sees it
+ * (#5996): the join over two known strings cannot throw. Before the check
+ * existed, the same hazard was handled positionally — the join lived INSIDE the
+ * guarded block, because a `path.join()` over a non-string export used to be
+ * absorbed by the config `catch` and misreported as "Could not load config for
+ * analysis". The named reading replaces both the guess and the throw.
  */
 async function readInstalledPackageEntries(cwd: string): Promise<InstalledPackageLedgerReading> {
   // Dynamic, like serve.ts's cloud-connection load: `os doctor` must still run
@@ -984,32 +1022,54 @@ async function readInstalledPackageEntries(cwd: string): Promise<InstalledPackag
   }
   const mod: any = load.module;
 
+  // Case 5 (#5996) — LOADED is not RECOGNIZED. This export is the single
+  // authority on what the ledger directory is called, and a module that
+  // evaluates fine without declaring it (as a string) is not a reader this
+  // doctor knows how to follow. Read with no `??` fallback for the same reason
+  // the destructuring below has none (Prime Directive #12): the guess the
+  // fallback used to make is the consumer restating what only the producer
+  // decides, and the runtime keeps reading wherever the package says — so the
+  // guess could put doctor and the runtime on two different directories, both
+  // silent. No guessed directory is read; the state is its own named row.
+  const declaredDir: unknown = mod.DEFAULT_INSTALLED_PACKAGES_DIR;
+  if (typeof declaredDir !== 'string') {
+    return { entries: [], skipped: [], dirAuthorityMissing: { received: declaredDir } };
+  }
+  // Outside the `try` on purpose: both operands are known strings, so this
+  // join cannot throw, and resolving it here keeps `dir` in scope for every
+  // return below — including the `failure` one.
+  const dir = path.join(cwd, declaredDir);
+
   try {
-    const dir = path.join(cwd, mod.DEFAULT_INSTALLED_PACKAGES_DIR ?? '.objectstack/installed-packages');
     // No directory = nothing was ever installed. Genuinely not a finding.
-    if (!fs.existsSync(dir)) return { entries: [], skipped: [] };
+    if (!fs.existsSync(dir)) return { entries: [], skipped: [], dir };
     // #5413 — read BOTH halves of the listing. Destructured with no `??`
     // fallback on purpose: `list()` declares this shape, and a tolerant read
     // here would be the exact consumer-side accommodation that let the silence
     // live in the first place.
     const { entries, skipped } = new mod.LocalManifestSource(dir).list();
-    return { entries, skipped };
+    return { entries, skipped, dir };
   } catch (err) {
-    return { entries: [], skipped: [], failure: { cause: err } };
+    return { entries: [], skipped: [], dir, failure: { cause: err } };
   }
 }
 
 /**
  * Whether a ledger reading covers everything it was supposed to (#5412 / #5413
- * / #5644).
+ * / #5644 / #5996).
  *
  * The D5e advisory's success line is a claim about BOTH of its halves, so any
- * of the three ways the ledger half can come back short must withhold it. The
- * three are reported as their own rows, by their own check, above — this
+ * of the four ways the ledger half can come back short must withhold it. The
+ * four are reported as their own rows, by their own check, above — this
  * predicate is only about what the ADVISORY may still claim.
  */
 function ledgerReadingIsComplete(reading: InstalledPackageLedgerReading): boolean {
-  return !reading.failure && !reading.readerFailure && reading.skipped.length === 0;
+  return (
+    !reading.failure
+    && !reading.readerFailure
+    && !reading.dirAuthorityMissing
+    && reading.skipped.length === 0
+  );
 }
 
 /**
@@ -1348,17 +1408,25 @@ const LEDGER_ROW_NAME = 'Installed packages';
  *   • **The cause is quoted, not paraphrased** (#5390 / #5403). `ENOTDIR: not
  *     a directory, scandir '…'` names the file that is in the way; no sentence
  *     doctor could invent would beat it.
+ *   • **`dir` is the directory doctor actually read** (#6643) — resolved from
+ *     `DEFAULT_INSTALLED_PACKAGES_DIR` and carried on the reading, exactly as
+ *     its `skipped` sibling takes it since #5996. It used to open with a
+ *     re-hardcoded ``.objectstack/installed-packages/`` literal "under the
+ *     project root": the consumer restating a value only the producer decides,
+ *     and — since the resolved directory is `cwd`-joined — a vaguer answer than
+ *     the one doctor was holding. A row reporting an unreadable directory owes
+ *     the reader the directory it actually tried.
  */
-export function installedPackageLedgerFailureCheck(err: unknown): HealthCheckResult {
+export function installedPackageLedgerFailureCheck(err: unknown, dir: string): HealthCheckResult {
   const cause = describeThrown(err);
   return {
     name: LEDGER_ROW_NAME,
     status: 'warning',
     message: `Could not read the installed-package ledger (installed packages NOT checked) — ${reportRowHeadline(cause)}`,
     fix:
-      'The ledger is the `.objectstack/installed-packages/` directory under the\n'
-      + '      project root; it exists here, which is why this is reported rather than\n'
-      + '      treated as "nothing was ever installed". Every package it lists is one\n'
+      `The ledger is \`${dir}\`; it exists here, which is why\n`
+      + '      this is reported rather than treated as "nothing was ever\n'
+      + '      installed". Every package it lists is one\n'
       + '      this runtime ALSO cannot rehydrate at boot — not registered with the\n'
       + '      kernel, absent from the console’s installed-apps list — so an app missing\n'
       + '      from this environment is very likely in there.\n'
@@ -1398,9 +1466,16 @@ export function installedPackageLedgerFailureCheck(err: unknown): HealthCheckRes
  *     are different repairs.
  *   • **The row quotes the FIRST cause; `fix` carries them all** (#5390 body).
  *     One row is one line, the same bound every other finding here respects.
+ *   • **`dir` is the directory doctor actually read** — the one resolved from
+ *     `DEFAULT_INSTALLED_PACKAGES_DIR`, handed down through the reading
+ *     (#5996). It used to be a re-hardcoded `.objectstack/installed-packages/`
+ *     literal: the same guess the deleted `??` fallback made, i.e. the
+ *     consumer restating what only the producer decides. A row that names
+ *     files to repair owes the reader the directory they are really in.
  */
 export function installedPackageLedgerSkippedEntriesCheck(
   skipped: SkippedLedgerEntry[],
+  dir: string,
 ): HealthCheckResult {
   const described = skipped.map((s) => ({ file: s.file, cause: describeThrown(s.cause) }));
   const n = described.length;
@@ -1419,7 +1494,7 @@ export function installedPackageLedgerSkippedEntriesCheck(
       + '      the kernel and does not appear in the console\'s installed-apps list — so an\n'
       + '      app missing from this environment is very likely one of the files below.\n'
       + '      Repair the JSON, or delete the file to uninstall the package for real.\n'
-      + '      Under `.objectstack/installed-packages/`:\n'
+      + `      Under \`${dir}\`:\n`
       + described
         .map((s) => `        ${s.file}\n          cause: ${indentUnderGutter(s.cause).replace(/\n/g, '\n    ')}`)
         .join('\n'),
@@ -1479,6 +1554,69 @@ export function installedPackageLedgerReaderFailureCheck(err: unknown): HealthCh
 }
 
 /**
+ * Say what the directory-authority export actually was, for the one row that
+ * reports it missing (#5996). Nothing was THROWN in this state — the module
+ * loaded fine — so this is a sibling of `describeThrown` for a received value
+ * rather than a caught one.
+ */
+function describeMissingDirAuthority(received: unknown): string {
+  if (received === undefined) {
+    return 'DEFAULT_INSTALLED_PACKAGES_DIR is not among its exports';
+  }
+  return `DEFAULT_INSTALLED_PACKAGES_DIR is not a string (got ${typeof received}: ${String(received)})`;
+}
+
+/**
+ * What doctor reports when the package it reads ledgers through LOADED and
+ * does not declare where the ledger lives (#5996).
+ *
+ * The fourth sibling of `installedPackageLedgerFailureCheck`, and the last
+ * cell of the edge #5644 carved. That issue split "present but unloadable" out
+ * of absence's silence; this row is "loaded but unrecognizable": the module
+ * evaluated fine and its `DEFAULT_INSTALLED_PACKAGES_DIR` export — the single
+ * authority on what the ledger directory is called — is not a string. Like its
+ * three siblings the row takes the {@link LEDGER_ROW_NAME} name column, makes
+ * the D5e advisory withhold its `✓ Unique scope` line, and stays a warning.
+ *
+ * What the row replaces is not silence but a GUESS. A consumer-side `??` used
+ * to answer this state by reading a hard-coded `.objectstack/installed-packages`
+ * instead — two lines above the #5413 comment prohibiting exactly that
+ * accommodation (Prime Directive #12). The runtime keeps reading wherever the
+ * package decides, so the guess could have doctor and the runtime reporting on
+ * two different directories with neither saying so; a report over the wrong
+ * directory is the same false PASS as this family's other three, wearing a
+ * plausible path.
+ *
+ * What is deliberately NOT here, in the row or behind it: any directory path.
+ * The one name doctor had for the ledger is the export that just came back
+ * non-string, so naming a path — any path — would be doctor claiming the
+ * knowledge whose loss this row reports. Same ground as #5644's option-B
+ * rejection, one cell over: while this row shows, no directory is read at all.
+ */
+export function installedPackageLedgerDirAuthorityMissingCheck(received: unknown): HealthCheckResult {
+  const saw = describeMissingDirAuthority(received);
+  return {
+    name: LEDGER_ROW_NAME,
+    status: 'warning',
+    message:
+      'The installed-package ledger reader does not declare the ledger directory (installed packages NOT checked) — '
+      + reportRowHeadline(saw),
+    fix:
+      '`@objectstack/cloud-connection` IS installed here and it DID load — but it does not\n'
+      + '      export `DEFAULT_INSTALLED_PACKAGES_DIR` as a string, and that export is the single\n'
+      + '      authority on what the ledger directory is called. Doctor will not read a guessed\n'
+      + '      path in its place: the ledger’s location belongs to that package — the runtime\n'
+      + '      reads wherever it decides — so a guess here could have doctor and the runtime\n'
+      + '      reporting on two different directories with neither saying so. Nothing about the\n'
+      + '      installed packages was read; whether a ledger even exists went unasked.\n'
+      + '      A package that loads without this export is not one this doctor recognizes: the\n'
+      + '      installed `@objectstack/cloud-connection` and this `os` CLI disagree about that\n'
+      + '      package’s export surface. Align their versions (upgrade the older of the two).\n'
+      + `      saw: ${indentUnderGutter(saw)}`,
+  };
+}
+
+/**
  * Every readability finding one ledger reading produced — the whole of the
  * posture-independent check #5429 promoted out of the D5e block.
  *
@@ -1533,18 +1671,39 @@ export function installedPackageLedgerChecks(
   reading: InstalledPackageLedgerReading,
 ): HealthCheckResult[] {
   // The reader never loaded, so neither the directory nor any entry was
-  // reached — mutually exclusive with both rows below rather than a third
+  // reached — mutually exclusive with the rows below rather than another
   // independent one (#5644).
   if (reading.readerFailure) {
     return [installedPackageLedgerReaderFailureCheck(reading.readerFailure.cause)];
   }
+  // The reader loaded and never said where the ledger is (#5996) — nothing
+  // below the export read was reached, so mutually exclusive with both
+  // remaining rows for the same reason as above.
+  if (reading.dirAuthorityMissing) {
+    return [installedPackageLedgerDirAuthorityMissingCheck(reading.dirAuthorityMissing.received)];
+  }
   const out: HealthCheckResult[] = [];
-  if (reading.failure) out.push(installedPackageLedgerFailureCheck(reading.failure.cause));
+  // Same invariant as the `skipped` row below, one boundary out (#6643): a
+  // `failure` reading always carries the directory the failure was ABOUT.
+  // `failure` is set only in the `catch` of `readInstalledPackageEntries()`,
+  // and that `try` opens after `dir` is already resolved — the two are set on
+  // the same return. The `!` states that where the flat reading shape cannot,
+  // and the parameter stays required so this row can never quietly fall back
+  // to a guessed literal.
+  if (reading.failure) out.push(installedPackageLedgerFailureCheck(reading.failure.cause, reading.dir!));
   // Independent of the row above, not an `else`: `failure` means the directory
   // could not be enumerated at all, `skipped` means it enumerated fine and
   // named files inside it would not parse. Each names packages the other does
   // not (#5412 vs #5413).
-  if (reading.skipped.length > 0) out.push(installedPackageLedgerSkippedEntriesCheck(reading.skipped));
+  if (reading.skipped.length > 0) {
+    // A reading with skipped entries always carries the directory they were
+    // skipped IN: `skipped` is per-file fallout of an enumeration only the
+    // resolved `dir` makes possible, and `readInstalledPackageEntries()` sets
+    // both on the same return. The `!` states that invariant where the flat
+    // reading shape cannot (#5996) — the parameter stays required so the row
+    // can never quietly fall back to a guessed literal.
+    out.push(installedPackageLedgerSkippedEntriesCheck(reading.skipped, reading.dir!));
+  }
   return out;
 }
 

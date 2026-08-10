@@ -37,17 +37,16 @@ function createMockDriver(): IDataDriver {
   return {
     name: 'mock',
     version: '1.0.0',
-    supports: {
-      transactions: false,
-      joins: false,
-      aggregations: false,
-      streaming: false,
-      bulkOperations: true,
-      nestedObjects: false,
-      fullTextSearch: false,
-      geoQueries: false,
-      changeStreams: false,
-    },
+    // An empty advertisement is a legal advertisement: every bit in
+    // `DriverCapabilities` is optional, and this mock needs none of the three
+    // that survive (#4782). The block used to spell nine — four RETIRED by
+    // #4634 (`transactions`/`joins`/`streaming`/`fullTextSearch`, now
+    // tombstoned as `never`) and five that were never keys of
+    // `DriverCapabilitiesSchema` at all (`aggregations`/`bulkOperations`/
+    // `nestedObjects`/`geoQueries`/`changeStreams`). Nothing here read any of
+    // them; their only effect was to be copied into the next mock. Capability
+    // is METHOD presence, not a boolean — do not re-add bits here.
+    supports: {},
 
     connect: vi.fn().mockResolvedValue(undefined),
     disconnect: vi.fn().mockResolvedValue(undefined),
@@ -177,6 +176,49 @@ describe('DatabaseLoader', () => {
       expect(loader.contract.capabilities.write).toBe(true);
       expect(loader.contract.capabilities.watch).toBe(false);
       expect(loader.contract.capabilities.list).toBe(true);
+    });
+  });
+
+  // [#6231] The driver takes the object name as argument ONE, and `DriverQuery`
+  // is `Omit<QueryAST, 'object'>` — so the AST must never restate it. These
+  // three read helpers used to spell `{ object: table, ...query } as any`, and
+  // that cast did more than tolerate the redundant key: it switched off
+  // checking for `where` / `orderBy` / `fields` as well, which is the account
+  // #5181's changeset opened (cloud#1030's `$like` reached runtime through
+  // exactly this hole). The redundant key is inert — no driver reads it — so
+  // the pin is on the SHAPE the driver is handed, which is what a future
+  // re-add would change.
+  describe('driver query shape (#6231)', () => {
+    it('never restates the object name inside the query AST', async () => {
+      const seen: Array<{ method: string; table: unknown; query: unknown }> = [];
+      for (const method of ['find', 'findOne', 'count'] as const) {
+        const real = (mockDriver[method] as (...a: unknown[]) => unknown).bind(mockDriver);
+        (mockDriver as unknown as Record<string, unknown>)[method] = (
+          table: unknown,
+          query: unknown,
+          ...rest: unknown[]
+        ) => {
+          seen.push({ method, table, query });
+          return real(table, query, ...rest);
+        };
+      }
+
+      // Every read path the loader owns: findOne (load/stat), find (loadMany/
+      // list) and count (exists).
+      await loader.save('object', 'account', { name: 'account' });
+      await loader.load('object', 'account');
+      await loader.loadMany('object');
+      await loader.exists('object', 'account');
+      await loader.list('object');
+      await loader.stat('object', 'account');
+
+      expect(seen.length).toBeGreaterThan(0);
+      for (const call of seen) {
+        // The object name travels as argument one…
+        expect(typeof call.table).toBe('string');
+        // …and only there.
+        expect(call.query ?? {}).not.toHaveProperty('object');
+      }
     });
   });
 
@@ -581,10 +623,35 @@ describe('DatabaseLoader schema-sync failure reporting (#4728)', () => {
 
       await loader.list('object');
 
+      // The `project_id` → `environment_id` forward migration still runs; it
+      // probes the column list before touching anything.
       expect(raw).toHaveBeenCalled();
-      expect(raw.mock.calls.some(([sql]) => String(sql).includes('idx_sys_metadata_overlay_active'))).toBe(
+      expect(raw.mock.calls.some(([sql]) => /table_info|information_schema/i.test(String(sql)))).toBe(
         true,
       );
+    });
+
+    /**
+     * #6771 — this path is precisely where the removed producer was NOT a
+     * no-op. `syncSchema` threw "already exists" BEFORE materializing the
+     * declared indexes, so `idx_sys_metadata_overlay_active` was unclaimed and
+     * the loader's own `CREATE UNIQUE INDEX IF NOT EXISTS` won it — with the
+     * pre-ADR-0048 key `(type, name, organization_id, environment_id, scope)`.
+     * `syncDeclaredIndexes` skips by name, so nothing ever repaired it.
+     */
+    it('issues NO overlay-index DDL — this package is not a producer of that name', async () => {
+      const driver = createMockDriver();
+      driver.syncSchema = vi.fn().mockRejectedValue(alreadyExists());
+      const raw = vi.fn().mockResolvedValue(undefined);
+      (driver as unknown as { raw: unknown }).raw = raw;
+      const loader = new DatabaseLoader({ driver });
+
+      await loader.list('object');
+
+      const overlayDdl = raw.mock.calls
+        .map(([sql]) => String(sql))
+        .filter((sql) => /idx_sys_metadata_overlay_active/i.test(sql));
+      expect(overlayDdl).toEqual([]);
     });
   });
 

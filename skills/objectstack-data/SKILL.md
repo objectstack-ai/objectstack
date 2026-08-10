@@ -100,6 +100,96 @@ Toggle system behaviours per object:
 
 ---
 
+## Search Fields (`searchableFields`)
+
+`searchableFields` on the object is the canonical set `$search` scans (ADR-0061).
+Leave it unset and search auto-defaults to the `nameField` plus the object's
+short-text and enum columns (`text` / `email` / `phone` / `url` / `autonumber` /
+`textarea` / `markdown` / `select` / `status`); declare it to pin the set
+explicitly. Views may narrow it, never widen it.
+
+### ⛔ Searching by a related record's title — mirror the value, always
+
+`$search` scans **the queried object's own columns**. A dotted path is never a
+search target: unlike `fields` / `sort` / `filters`, the search axis does not
+resolve traversal, and `project_id.name` in `searchableFields` (or in a
+`$searchFields` override) is **refused**, not silently dropped.
+
+**This is the one prescription — emit it every time.** To search by a related
+record's title, copy that title into a **stored field on this object** and
+declare *that* field searchable. A task list searched by project name:
+
+```typescript
+// `project_name` is a stored, denormalized mirror of the parent's title.
+{
+  name: 'task',
+  enable: { searchable: true },
+  fields: {
+    name:         { type: 'text', required: true },
+    project_id:   { type: 'lookup', reference: 'project' },
+    project_name: { type: 'text', label: 'Project Name' },   // ← the mirror
+  },
+  searchableFields: ['name', 'project_name'],
+}
+```
+
+`?search=apollo` expands to `name $contains 'apollo' OR project_name $contains
+'apollo'` — one single-table scan, every driver, no traversal. (A `text` mirror
+also lands in the auto-default set when the object declares no
+`searchableFields`.)
+
+❌ **Never mirror onto a `formula` field.** A formula field is *virtual* — no
+driver materializes a column for it, so a `$contains` predicate against one has
+nothing to scan (the SQL driver would emit a `WHERE` over a column that does not
+exist). CEL also only reads this record's own fields (`record.<field>`), so a
+formula cannot fetch the related title in the first place. Since #6674 the
+mistake is **refused, not silent**: a `formula` entry in any `searchableFields`
+— the object's own set included — is an `os validate` error
+(`searchable-field-unsearchable`), and a request naming one is `400
+INVALID_FIELD`. It used to clear both and then never match.
+
+**Mirror maintenance is the trade-off** — a mirror is denormalized data, only as
+fresh as whatever writes it. Cover both write paths:
+
+| When | What maintains the mirror |
+|:-----|:--------------------------|
+| A task is created, or re-pointed at another project | `beforeInsert` / `beforeUpdate` hook on `task` — read the parent's `name` for the incoming `project_id`, stamp `project_name` |
+| A project is renamed | `afterUpdate` hook on `project` — re-stamp `project_name` on that project's tasks |
+
+Rows written by a path that bypasses hooks (bulk import, direct SQL) need a
+one-off backfill. See [Lifecycle Hooks](./rules/hooks.md).
+
+**The errors an author sees for the dotted path** (grep either back to here).
+`os validate` → `searchable-field-unknown`:
+
+```text
+searchableFields entry "project_id.name" is not a field on object "task". The
+declaration is stale: searching it can never match, and the engine silently
+drops it — leaving a narrower search than declared, or the auto-default set once
+every entry is dropped.
+
+hint: 'search' scans this object's own columns, so a related record's column
+cannot be a search target — expand the relation and search the related object,
+or copy the value onto a stored text field here. Clients echo this declaration
+verbatim as the '$searchFields' override, so a stale entry becomes a 400
+INVALID_FIELD on list search (#4254), not just a quietly narrowed one.
+```
+
+A request carrying the dotted path is `400 INVALID_FIELD`:
+
+```text
+Unknown field 'project_id.name' on object 'task'. '$searchFields' narrows which
+columns 'search' scans, so a name the object does not declare cannot narrow
+anything — and the engine used to drop it and scan the default columns instead,
+answering a NARROWER search with a WIDER one. 'search' scans this object's own
+columns; a related record's column cannot be a search target.
+```
+
+Cross-object search paths are rejected by design, not pending. Do not invent a
+per-project convention for this — the mirror field is the answer.
+
+---
+
 ## Field Groups (MVP)
 
 Organize fields into logical groups (e.g., "Contact Information", "Billing",
@@ -478,8 +568,8 @@ export const accountExtension = defineObjectExtension({
 - `priority` controls merge order (default `200`; range `0–999`)
 - Extensions can add fields, validations, and indexes — but cannot remove them
 - Do **not** author `ownership: 'extend'` on an object schema — the object-level
-  `ownership` property is the *record-ownership* enum (`'user' | 'org' | 'none'`),
-  unrelated to extensions
+  `ownership` property is the *record-ownership* enum
+  (`'user' | 'business_unit' | 'org' | 'none'`), unrelated to extensions
 
 ---
 
@@ -671,28 +761,41 @@ should be visible to a **platform admin env-wide** but hidden from members —
 e.g. identity tables a plugin writes via its own adapter (`sys_sso_provider`,
 OAuth clients). These hit a non-obvious interaction:
 
-- The default `member_default` ships a **wildcard `tenant_isolation` RLS**
-  (`organization_id == current_user.organization_id`). Any row whose
-  `organization_id` is **null or absent** (common for adapter-written rows that
-  never get the tenant stamp) is **denied** — the list renders empty.
-- A platform admin's `viewAllRecords` superuser bypass is **posture-gated**: it
-  fires **only** for objects marked `access.default: 'private'` **or**
-  `tenancy: { enabled: false }`. On ordinary tenant objects it deliberately does
-  **not** grant cross-tenant visibility — so the admin sees 0 rows too.
+- Reads of a tenant object pass the **Layer 0 tenant wall** (ADR-0095 D1): an
+  `organization_id == <the caller's organization>` filter AND-composed ahead of
+  every business RLS policy. Any row whose `organization_id` is **null or
+  absent** (common for adapter-written rows that never get the tenant stamp) is
+  **denied** — the list renders empty. Single-tenant deployments never hit this;
+  the wall is inert there.
+- The `viewAllRecords` superuser bit is **posture-gated and wall-blind**: it
+  short-circuits **business RLS only**, and only on objects whose posture allows
+  it (`access.default: 'private'`, `tenancy: { enabled: false }`, or a
+  better-auth-managed identity table). It never crosses the Layer 0 wall —
+  crossing takes a *true platform admin* (the superuser bit **and** a
+  platform-exclusive capability: `manage_metadata`, `manage_platform_settings`,
+  `studio.access`, `manage_users`) on one of those same postures. So an org
+  admin holding the superuser bit stays org-scoped, and on an ordinary tenant
+  object nobody crosses — the admin sees 0 rows too.
 
 **Recipe — env-global, admin-only object that admins can fully see:**
 
 ```typescript
-tenancy: { enabled: false }, // env IS the tenant; admin viewAllRecords bypass applies
-requiredPermissions: ['manage_platform_settings'], // object-level gate → members get 403
+tenancy: { enabled: false }, // not a tenant object → Layer 0 contributes nothing
+requiredPermissions: ['manage_platform_settings'], // capability AND-gate → members get 403
 ```
 
-> ⚠️ **Don't use either flag alone.** `tenancy.enabled:false` *by itself* drops
-> the wildcard RLS, and `member_default`'s `'*': allowRead` then **leaks every
-> row to all authenticated users**. `access.default:'private'` *by itself* opts
-> the admin's `'*'` grant out too, so the **admin sees nothing**. The
-> `tenancy.enabled:false` + `requiredPermissions` pair is the correct combo
-> (admin sees all, non-admins 403). Posture model: ADR-0066.
+> ⚠️ **Both keys are load-bearing — neither works alone.**
+> `tenancy: { enabled: false }` *by itself* switches the wall off for **every**
+> caller, and any permission set carrying a wildcard (`'*'`) read grant then
+> reads every row env-wide — the shipped `viewer_readonly` still carries one, as
+> may an app-declared default profile or a customer-authored set. (The
+> `member_default` baseline is **not** one of them: it is explicit-allow and
+> grants only the objects it names.) `requiredPermissions` *by itself* leaves the
+> object a tenant object, so the wall keeps denying the untagged rows and even a
+> platform admin sees nothing. The pair is the correct combo (admin sees all,
+> non-admins 403), and `requiredPermissions` is the half that holds however
+> permissive the caller's grants are — it is an AND-gate checked **before** the
+> CRUD grant. Posture model: ADR-0066; tenant wall: ADR-0095 D1.
 
 ### Cross-skill notes
 
@@ -999,6 +1102,20 @@ Data-model rules (in addition to naming/label/i18n):
 | `rollup/missing-summary` | suggestion | a parent of numeric master_detail children with no roll-up `summary` |
 | `field/select-missing-options` | warning | a `select`/`multiselect`/`radio` with no `options` (or options source) |
 | `object/missing-name-field` | suggestion | an object with no `nameField` (ADR-0079's canonical title pointer) and no name-like field (`name`/`title`/`subject`/`label`/`full_name`/`display_name`/`code`) |
+
+> **`code` counts for R9, but is NOT a title-derivation key.** R9's name-like
+> list above is the *looser* of two "name-like" sets, and the difference is
+> deliberate. R9 asks **"will records be anonymous?"** — is there any readable
+> face at all — and a `code` clears that bar. ADR-0079's title derivation
+> (`resolveDisplayField`) asks the narrower **"what IS the title?"**, and its
+> name-ish set is `name`/`title`/`subject`/`label`/`full_name`/`display_name`
+> **without `code`** — an identifier is not a title. So an object whose only
+> name-ish field is `code` is R9-clean, yet its title is derived by the
+> lower-priority "first title-eligible field by declaration order" tier rather
+> than by name. Nothing user-visible turns on this (R9 is `suggestion`, and the
+> `Record #<id>` floor guarantees a title regardless), but do not read the R9
+> list as the derivation contract — set `nameField` explicitly when the title
+> matters.
 
 These same rules are the **rubric for AI-generated metadata** — a generation is
 "good" exactly when it is schema-valid and lint-clean:

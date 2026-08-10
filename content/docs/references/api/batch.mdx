@@ -55,10 +55,10 @@ const result = BatchConfigSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | optional | Record ID if operation succeeded |
 | **success** | `boolean` | ✅ | Whether this record was processed successfully |
-| **errors** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| … +257 more>; message: string; category?: string; httpStatus?: integer; … }[]` | optional | Array of errors if operation failed. Branch on `errors[0].code` — an atomic batch that rolled back marks rows that were written then undone with code ROLLED_BACK and rows never reached with NOT_ATTEMPTED, while the causal row keeps its own error (#4793). |
+| **errors** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| … +259 more>; message: string; category?: string; httpStatus?: integer; … }[]` | optional | Array of errors if operation failed. Branch on `errors[0].code` — an atomic batch that rolled back marks rows that were written then undone with code ROLLED_BACK and rows never reached with NOT_ATTEMPTED, while the causal row keeps its own error (#4793). |
 | **data** | `Record<string, any>` | optional | Full record data (if returnRecords=true) |
 | **index** | `number` | optional | Index of the record in the request array |
-| **droppedFields** | `{ object: string; fields: string[]; reason: Enum<'readonly' \| 'readonly_when'> }[]` | optional | Write-observability (#3407/#3431/#3455): caller-supplied fields LEGALLY stripped from THIS row before it was written — static `readonly` (#2948) / TRUE `readonlyWhen` (#3042) on update, or the #3043 create-ingress strip. Per-row because a batch can drop different fields on different rows (`readonlyWhen` is record-state-dependent). Present ONLY when ≥1 field was dropped for this row; the row still succeeded (success unchanged). A single response header cannot express per-row drops, so this body field is the canonical bulk channel — REST does not emit `X-ObjectStack-Dropped-Fields` for batches. Optional — omit-when-empty keeps the shape backward-compatible. |
+| **droppedFields** | `{ object: string; fields: string[]; reason: Enum<'readonly' \| 'readonly_when' \| 'primary_key'> }[]` | optional | Write-observability (#3407/#3431/#3455): caller-supplied fields LEGALLY stripped from THIS row before it was written — static `readonly` (#2948) / TRUE `readonlyWhen` (#3042) on update, or the #3043 create-ingress strip. Per-row because a batch can drop different fields on different rows (`readonlyWhen` is record-state-dependent). Present ONLY when ≥1 field was dropped for this row; the row still succeeded (success unchanged). A single response header cannot express per-row drops, so this body field is the canonical bulk channel — REST does not emit `X-ObjectStack-Dropped-Fields` for batches. Optional — omit-when-empty keeps the shape backward-compatible. |
 
 
 ---
@@ -122,13 +122,13 @@ const result = BatchConfigSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
-| **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| … +257 more>; message: string; category?: string; httpStatus?: integer; … }` | optional | Error details if success is false |
+| **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| … +259 more>; message: string; category?: string; httpStatus?: integer; … }` | optional | Error details if success is false |
 | **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **operation** | `Enum<'create' \| 'update' \| 'upsert' \| 'delete'>` | optional | Operation type that was performed |
 | **total** | `number` | ✅ | Total number of records in the batch |
 | **succeeded** | `number` | ✅ | Number of records that succeeded |
 | **failed** | `number` | ✅ | Number of records that failed |
-| **results** | `{ id?: string; success: boolean; errors?: { code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| … +257 more>; message: string; category?: string; httpStatus?: integer; … }[]; data?: Record<string, any>; … }[]` | ✅ | Detailed results for each record |
+| **results** | `{ id?: string; success: boolean; errors?: object[]; data?: Record<string, any>; … }[]` | ✅ | Detailed results for each record |
 
 
 ---
@@ -143,7 +143,7 @@ A cross-object batch strip event: dropped fields plus the operation index
 | :--- | :--- | :--- | :--- |
 | **object** | `string` | ✅ | Object the write targeted (resolved object name) |
 | **fields** | `string[]` | ✅ | Caller-supplied field names the engine removed from the write payload |
-| **reason** | `Enum<'readonly' \| 'readonly_when'>` | ✅ | Why the fields were dropped: static readonly (#2948) or a TRUE readonlyWhen predicate (#3042) |
+| **reason** | `Enum<'readonly' \| 'readonly_when' \| 'primary_key'>` | ✅ | Why the fields were dropped: static readonly (#2948), a TRUE readonlyWhen predicate (#3042), or the primary-key strip of a payload id the engine ruled is not an identifier (#6437) |
 | **index** | `integer` | ✅ | Index of the operation in the request `operations` array |
 
 
@@ -182,7 +182,7 @@ A cross-object batch strip event: dropped fields plus the operation index
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **results** | `any[]` | ✅ | Per-operation result, index-aligned with the request operations |
-| **droppedFields** | `{ object: string; fields: string[]; reason: Enum<'readonly' \| 'readonly_when'>; index: integer }[]` | optional | Write-observability (#3407/#3431/#3455/#3794): caller-supplied fields the engine LEGALLY stripped from an operation before it was written — static `readonly` (#2948) or a TRUE `readonlyWhen` predicate (#3042). This endpoint is the console record form's save path (master-detail writes parent + children in one transaction), so without it the ONE surface where a user edits a `readonlyWhen` field reported plain success while the value never landed. Each event carries the `index` of its operation. Present ONLY when ≥1 field was dropped; the batch still committed without them (results/success semantics unchanged). Optional — omit-when-empty keeps the shape backward-compatible. |
+| **droppedFields** | `{ object: string; fields: string[]; reason: Enum<'readonly' \| 'readonly_when' \| 'primary_key'>; index: integer }[]` | optional | Write-observability (#3407/#3431/#3455/#3794): caller-supplied fields the engine LEGALLY stripped from an operation before it was written — static `readonly` (#2948) or a TRUE `readonlyWhen` predicate (#3042). This endpoint is the console record form's save path (master-detail writes parent + children in one transaction), so without it the ONE surface where a user edits a `readonlyWhen` field reported plain success while the value never landed. Each event carries the `index` of its operation. Present ONLY when ≥1 field was dropped; the batch still committed without them (results/success semantics unchanged). Optional — omit-when-empty keeps the shape backward-compatible. |
 
 
 ---

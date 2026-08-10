@@ -60,12 +60,25 @@
  *    linter, gate and engine cannot drift apart (the same one-source move
  *    #4254 made between gate and engine).
  *
- * The OBJECT's own `searchableFields` stays existence-only: the runtime's
- * declared branch filters by existence, never by type, so a json or lookup
- * column declared THERE is a choice the engine executes (a `$contains` over
- * the raw column), not a 400. Flagging it would reject metadata the runtime
- * accepts — the false finding that makes authors stop trusting the linter
- * (ADR-0072 D1).
+ * 3. VIRTUALITY, on EVERY surface — the object's own set included
+ *    (`searchable-field-unsearchable`, #6674): a `formula` entry names a real
+ *    field, so check 1 passes it, and the runtime's declared branch admitted
+ *    it verbatim — but the value is computed on read with no stored column, so
+ *    the scan looks at nothing. Measured 0 rows on driver-memory and 0 rows
+ *    WITH NO ERROR on driver-sql. Since #6674 the spec resolution drops such
+ *    an entry and both enforcement faces refuse it by name.
+ *
+ * The OBJECT's own `searchableFields` stays existence-only OTHERWISE, and the
+ * dividing line is STORAGE, not search quality: the runtime's declared branch
+ * filters by existence and scannability, never by type taste, so a json or
+ * lookup column declared THERE is a choice the engine executes (a `$contains`
+ * over the stored JSON text / the stored foreign key) — narrow, rarely useful,
+ * but a scan that CAN match, so it is neither a 400 nor a finding. Flagging
+ * those would reject metadata the runtime accepts — the false finding that
+ * makes authors stop trusting the linter (ADR-0072 D1). A virtual entry is the
+ * opposite case: no column exists on any driver, so admitting it is the
+ * fail-open #4254 closed one axis over, surviving on the known-but-virtual
+ * axis.
  *
  * Three skips keep false positives near zero (ADR-0072 D1):
  *
@@ -93,6 +106,7 @@
 
 import {
   resolveSearchFieldResolution,
+  isVirtualSearchField,
   SEARCHABLE_TEXTUAL_TYPES,
   SEARCHABLE_ENUM_TYPES,
   SEARCH_AUTO_EXCLUDED_FIELDS,
@@ -124,8 +138,9 @@ export interface SearchableFieldFinding {
  * Which runtime judgment applies to the declaration being checked:
  *
  * - `'canonical'` — the object's own `searchableFields`. The runtime honors
- *   any entry that exists (existence-filtered, never type-filtered), so only
- *   existence is checked.
+ *   any entry that exists and has a stored column to scan (existence- and
+ *   scannability-filtered, never type-filtered), so existence and virtuality
+ *   are checked and nothing else (#6674).
  * - `'narrowing'` — a list view's `searchableFields` (metadata or react
  *   surface). Clients echo it as the `$searchFields` override, which the
  *   #4254 ingress gate intersects with the object's allowed set — entries the
@@ -344,12 +359,41 @@ export function checkSearchableFieldList(
           (dotted
             ? `'search' scans this object's own columns, so a related record's ` +
               `column cannot be a search target — expand the relation and search ` +
-              `the related object, or copy the value onto a formula field here. `
+              `the related object, or copy the value onto a stored text field here. `
             : `Fix the name, or add "${name}" to ${objectName}.fields. `) +
           `Clients echo this declaration verbatim as the '$searchFields' ` +
           `override, so a stale entry becomes a 400 INVALID_FIELD on list ` +
           `search (#4254), not just a quietly narrowed one.` +
           (known.size > 0 ? ` Object fields: ${[...known].sort().join(', ')}.` : ''),
+      });
+      continue;
+    }
+
+    // ── [#6674] Virtual entries — EVERY surface, canonical included ──
+    //
+    // The one check that is not view-level, because the runtime's declared
+    // branch no longer executes it: a `formula` value is computed on read and
+    // has no stored column, so the entry can never match wherever it is
+    // declared. Judged by the spec's own predicate, so linter and runtime
+    // cannot disagree about which types have a column.
+    if (isVirtualSearchField(target.fields[name])) {
+      const vtype = target.fields[name]?.type;
+      findings.push({
+        severity: 'error',
+        rule: SEARCHABLE_FIELD_UNSEARCHABLE,
+        where,
+        path: `${path}[${i}]`,
+        message:
+          `${subject} entry "${name}" on object "${objectName}" is a virtual ` +
+          `'${vtype}' field: its value is computed on read and never stored, so no ` +
+          `driver materializes a column for 'search' to scan and the entry can never ` +
+          `match. It reads as search coverage and delivers none — the runtime used to ` +
+          `admit it verbatim because the declaration named it (#6674).`,
+        hint:
+          `Mirror the computed value onto a stored text field on "${objectName}" and ` +
+          `declare that instead, or drop "${name}". At runtime the ingress gate now ` +
+          `refuses this entry with 400 INVALID_FIELD, the same answer a stale entry ` +
+          `gets (#4254).`,
       });
       continue;
     }
@@ -411,7 +455,7 @@ export function checkSearchableFieldList(
         (isReference
           ? `A ${meta?.type} column stores only the referenced record's id, so it ` +
             `cannot be a keyword target — drop "${name}" from this view and, to ` +
-            `search by the related record's title, mirror it onto a text/formula ` +
+            `search by the related record's title, mirror it onto a stored text ` +
             `field here and declare that instead. `
           : `Drop "${name}" from this view, or target a text-like field instead. `) +
         `Declaring 'searchableFields' on object "${objectName}" chooses the ` +

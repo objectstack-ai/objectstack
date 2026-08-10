@@ -31,17 +31,28 @@ export const SysSsoProvider = ObjectSchema.create({
   icon: 'shield-check',
   isSystem: true,
   managedBy: 'better-auth',
-  // ADR-0024 — env-global, ADMIN-ONLY identity config. Two orthogonal controls:
+  // ADR-0024 — env-global, ADMIN-ONLY identity config. Two orthogonal controls,
+  // both re-premised in #6964 because the mechanisms they used to name expired:
   //   • `tenancy.enabled: false` — the env IS the tenant; providers are env-wide,
-  //     not org-partitioned. Opting out of multi-tenancy lets a platform admin's
-  //     `viewAllRecords` superuser bypass see every provider (without it, the
-  //     `member_default` wildcard `tenant_isolation` RLS denies every row, since
-  //     better-auth writes via its adapter with no tenantId → `organization_id`
-  //     is never stamped).
+  //     not org-partitioned. What this marks out of the way is now the ADR-0095
+  //     D1 **Layer 0 tenant wall** (`plugin-security/tenant-layer.ts`), not the
+  //     wildcard `tenant_isolation` RLS `member_default` used to ship — D1
+  //     retired that policy. The consequence is unchanged: this table HAS an
+  //     `organization_id` column, and better-auth writes via its adapter with no
+  //     tenantId → the column is never stamped, so a wall AND-composing
+  //     `organization_id == <caller org>` would deny every row. Opting out sets
+  //     `tenancyDisabled`, which makes `computeTenantLayer0Filter` return `null`
+  //     (platform-global object ⇒ Layer 0 contributes nothing), so admins see
+  //     every env provider. This is now the ONLY thing that opens the table up:
+  //     under ADR-0095 W2 the `viewAllRecords` superuser bit alone no longer
+  //     crosses the wall — that takes a true `PLATFORM_ADMIN`.
   //   • `requiredPermissions: ['manage_platform_settings']` — object-level
-  //     capability gate (ADR-0066 D3) so ordinary members are denied entirely
-  //     (without it, tenancy-disabled + `member_default`'s `'*': allowRead` would
-  //     leak providers to every authenticated user).
+  //     capability AND-gate (ADR-0066 D3/⑤) evaluated BEFORE the CRUD grant
+  //     (`security-plugin.ts` step 1.5), so ordinary members are denied
+  //     "regardless of how permissive their grants are". It no longer stands
+  //     against `member_default`'s `'*': allowRead` — #5491 removed that
+  //     wildcard — but against any grant on this object that an app-declared
+  //     default profile or a customer-authored permission set might name.
   // Together: admins see all env providers; non-admins get 403. better-auth's
   // own endpoints already read via a system context. (Env-only object — no
   // control-plane cross-tenant risk.)

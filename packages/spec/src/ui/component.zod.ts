@@ -110,6 +110,17 @@ import { FeedItemType, FeedFilterMode } from '../data/feed.zod';
 // component-level `visibleWhen` (ADR-0089) — that one is a page to rewrite, not
 // a key to declare.
 //
+// "The rest of that inventory" was one pair short, and how the shortfall
+// happened is the reusable part: #5775's ruling named its keys individually, so
+// the two `element:record_picker` shorthands the renderer reads through the
+// SAME `ds.x ?? props.x` line as the keys that were named — `sort` and `limit`
+// — fell outside it and stayed undeclared. #6276 declared them on the same
+// #5611 rule (maintainer ruling 2026-08-08, direction A). The lesson for the
+// next divergence sweep: enumerate by the RENDERER'S read pattern, not by the
+// key list a previous ruling happened to quote. Retiring the flat family
+// wholesale in favour of `dataSource` is the standing alternative, deferred to
+// v18 as #6590 — not rejected.
+//
 // ── #5068: THE GATE IS WIRED — read the flip precisely ─────────────────────
 //
 // `packages/lint/src/validate-component-props.ts` dispatches on the component's
@@ -139,15 +150,24 @@ import { FeedItemType, FeedFilterMode } from '../data/feed.zod';
 //     `saveMetaItem` / REST `/meta` write still stores an unvalidated props bag
 //     (#4463's fourth wall). That is recorded, not fixed, by #5068.
 //
-// The gate is WARNING-level in this first step. The live corpus violates these
-// declarations in places that are open contract questions rather than authoring
-// mistakes — inline `{ en, 'zh-CN' }` label maps on three published platform
-// pages against an `I18nLabelSchema` that is a plain `z.string()` (#5728), and
-// keys objectui's renderers honour that this file does not declare. The
-// warning-period inventory is the acceptance baseline for the error upgrade.
-// #5775 cleared this file's half of that inventory; #5728 (the label maps) and
-// the page rewrites (`page:card.visible`, #5776's tab `key`) are what remain
-// before the upgrade to error.
+// The gate is WARNING-level in this first step. The live corpus violated these
+// declarations in places that were open contract questions rather than
+// authoring mistakes, and the inventory is the acceptance baseline for the
+// error upgrade. Two of the three entries are now cleared:
+//
+//  - #5775 declared the keys objectui's renderers honour and tombstoned the
+//    four nothing read.
+//  - #5728 settled the inline `{ en, 'zh-CN' }` label maps the three published
+//    platform pages author: the maintainer ruled (2026-08-06) that the map is a
+//    delivered capability, so `I18nLabelSchema` is a union of the plain string
+//    and an inline locale map, and `element:text.content` — declared a bare
+//    `z.string()` and therefore out of that union's reach — was named in the
+//    same ruling and moved onto it. That retired all 42 `component-props-invalid`
+//    findings this gate reported on the platform pages (34 label + 8 content).
+//
+// What remains before the upgrade to error is the page rewrites
+// (`page:card.visible` → the component-level `visibleWhen`, #5776's tab `key`
+// → `value`), not a declaration in this file.
 //
 // The verdict is pinned in `component.test.ts` and in the `ui/` tables of
 // `docs/audits/2026-07-unknown-key-strictness-ledger.md` — change all three
@@ -161,6 +181,10 @@ import { FeedItemType, FeedFilterMode } from '../data/feed.zod';
 import { lazySchema } from '../shared/lazy-schema';
 import { ExpressionInputSchema } from '../shared/expression.zod';
 import { retiredKey } from '../shared/retired-key';
+// `element:record_picker`'s flat `sort` shorthand is the SAME contract as
+// `ElementDataSourceSchema.sort` (page.zod.ts) — one shape, imported from the
+// shared source rather than re-spelled here (#6276).
+import { SortItemSchema } from '../shared/enums.zod';
 const EmptyProps = z.object({});
 
 /**
@@ -200,15 +224,114 @@ export type PageContainerProps = z.input<typeof PageContainerProps>;
 export const PageHeaderProps = z.object({
   title: I18nLabelSchema.describe('Page title'),
   subtitle: I18nLabelSchema.optional().describe('Page subtitle'),
-  icon: z.string().optional().describe('Icon name'),
+  /**
+   * REMOVED (#6946, maintainer ruling 2026-08-09 「全部接受」 on objectui#3829,
+   * route (c) — retire upstream).
+   *
+   * A header icon nothing has ever drawn. `PageHeaderRenderer`
+   * (`containers.tsx`) resolves `icon` only per header ACTION (`action.icon`,
+   * inside the action pipeline) and never off the header's own props bag;
+   * `@object-ui/layout`'s `<PageHeader>` accepts an `icon` REACT prop from a
+   * host but — unlike `actions`, whose `schema?.actions ??
+   * schema?.properties?.actions` fallback sits four lines away in the same
+   * function — gives it no schema fallback, so an authored node cannot reach
+   * it. objectui's registration publishes no `icon` input either, which is
+   * what put this key in that repo's `UNPUBLISHED_EXEMPTIONS` map as a B-class
+   * "spec declares it, NO renderer read point" entry.
+   *
+   * The live mechanism is the record chrome (`recordChrome`, on by default)
+   * for the header's own identity, and each action's own `icon` for the
+   * buttons beside it.
+   */
+  icon: retiredKey(
+    '`page:header` property `icon` was removed in @objectstack/spec 17.0.0 (#6946, ADR-0087 D2) — '
+    + 'no renderer ever read it: objectui resolves `icon` only per header action (`action.icon`), '
+    + 'never off the header\'s own props bag, and the component registry never published it as an '
+    + 'input, so an authored value was accepted and dropped. Delete the key. The header\'s own '
+    + 'identity is drawn by the record chrome (`recordChrome`, on by default) and each action '
+    + 'carries its own `icon`. Run `os migrate meta --from 16` to rewrite existing sources automatically.',
+  ),
   breadcrumb: z.boolean().default(true).describe('Show breadcrumb'),
   actions: z.array(z.string()).optional().describe('Action IDs to show in header'),
+  /**
+   * Which of the two page-header layouts the renderer builds (#6776).
+   *
+   * ON (the default) the header carries the **record chrome**: the title
+   * renders as a record chip with the follow star and the copy-record-id
+   * button beside it. OFF it falls back to a bare heading — one title line and
+   * nothing record-shaped — which is what a dashboard or a landing page wants,
+   * since there is no record for the chip to describe.
+   *
+   * Declared here because the renderer has always read it and the schema had
+   * not caught up: `containers.tsx:979` resolves
+   * `schema?.recordChrome === false || schema?.properties?.recordChrome === false`
+   * and `:1453` branches the whole header on it, while objectui's own console
+   * preview sample authors `recordChrome: false` on a non-record page. Until
+   * this declaration that page was legal per objectui's published manifest and
+   * `warning: undeclared` per `validateComponentProps` (#5068) — two platform
+   * authorities disagreeing about one key (#5435).
+   */
+  recordChrome: z.boolean().default(true).describe(
+    'Render the record chrome — the title as a record chip with its follow star and copy-id button. Set false on a non-record page (dashboard, landing) to fall back to the bare heading layout.',
+  ),
+  /**
+   * Follow (favourite) star beside the record title — `RecordTitleChip
+   * showStar` (#6776). Part of the record chrome, so it has no effect when
+   * `recordChrome` is false. Read at `containers.tsx:980`, consumed at `:1531`.
+   */
+  showStar: z.boolean().default(true).describe(
+    'Show the follow (favourite) star beside the record title. Part of the record chrome — no effect when `recordChrome` is false.',
+  ),
+  /**
+   * Copy-record-id button beside the record title — `RecordTitleChip
+   * showCopyId` (#6776). Same record-chrome scoping as `showStar`. Read at
+   * `containers.tsx:981`, consumed at `:1532`.
+   */
+  showCopyId: z.boolean().default(true).describe(
+    'Show the copy-record-id button beside the record title. Part of the record chrome — no effect when `recordChrome` is false.',
+  ),
   /** ARIA accessibility */
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
 });
 
 export const PageTabsProps = z.object({
-  type: z.enum(['line', 'card', 'pill']).default('line'),
+  /**
+   * Tab-strip visual style. **Renamed from `type` at protocol 17 (#6776,
+   * ADR-0087 D2)** — the same concept, the same three values, a spelling an
+   * author can actually write.
+   *
+   * A props key named `type` collides with the component node's own dispatch
+   * key, and the collision is structural rather than cosmetic:
+   *
+   *   - objectui's `SchemaRenderer` hoists `properties` onto the node but
+   *     deliberately skips `type` and `id`, or the inner value would shadow
+   *     which renderer to dispatch to — its comment names this exact case
+   *     ("tab visual style: 'line' | 'card' | 'pill'").
+   *   - `sdui-parser`'s `BASE_PROPS` contains `'type'`, so a manifest input by
+   *     that name is skipped as a base prop and never validated at all.
+   *   - In the flat and JSX carriers a node reads `{ type: 'page:tabs', … }`,
+   *     so `type` is the tag name and this prop has no spelling left.
+   *
+   * `tabStyle` is what objectui's registry publishes and what the renderer
+   * reads in every carrier (`containers.tsx:381`), so the contract converges on
+   * the spelling that works rather than the one that reads well — the #5775
+   * `displayField` → `labelField` shape, and one spelling rather than two
+   * (Prime Directive #12).
+   */
+  tabStyle: z.enum(['line', 'card', 'pill']).default('line')
+    .describe("Tab-strip visual style: 'line' underlines the active tab, 'card' frames each tab, 'pill' renders rounded pills"),
+  /**
+   * REMOVED (#6776). The declared spelling of `tabStyle`, unauthorable in any
+   * flat or JSX carrier because a page component's own dispatch key is also
+   * called `type`. The live mechanism is `tabStyle`.
+   */
+  type: retiredKey(
+    '`page:tabs` property `type` was removed in @objectstack/spec 17.0.0 (#6776, ADR-0087 D2) — '
+    + 'a props key named `type` collides with the page component\'s own dispatch key, so it is '
+    + 'unauthorable in the flat and JSX carriers and was never validated in them. Rename the key '
+    + 'to `tabStyle`; the value (`line` | `card` | `pill`) is unchanged. '
+    + 'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
+  ),
   position: z.enum(['top', 'left']).default('top'),
   items: z.array(z.object({
     label: I18nLabelSchema,
@@ -250,7 +373,32 @@ export const PageTabsProps = z.object({
 export const PageCardProps = z.object({
   title: I18nLabelSchema.optional(),
   bordered: z.boolean().default(true),
-  actions: z.array(z.string()).optional(),
+  /**
+   * REMOVED (#6946, maintainer ruling 2026-08-09 「全部接受」 on objectui#3829,
+   * route (c) — retire upstream).
+   *
+   * A card action list nothing has ever rendered. `PageCardRenderer`
+   * (`containers.tsx`) reads exactly four keys — `title`, `bordered`,
+   * `body ?? children`, `footer` — and returns a `<Card>` built from them;
+   * there is no actions area in the markup and no `actions` input in the
+   * registration, which is what put this key in objectui's
+   * `UNPUBLISHED_EXEMPTIONS` map as a B-class "spec declares it, NO renderer
+   * read point" entry. The card's sibling `page:header` DOES read `actions`
+   * off its bag, so the divergence was invisible to anyone reading the two
+   * declarations side by side.
+   *
+   * The live mechanism is composition: author the buttons as components in
+   * `children` or `footer` (`element:button`, `record:quick_actions`).
+   */
+  actions: retiredKey(
+    '`page:card` property `actions` was removed in @objectstack/spec 17.0.0 (#6946, ADR-0087 D2) — '
+    + 'no renderer ever read it: objectui\'s card renderer builds its `<Card>` from `title`, '
+    + '`bordered`, `children` and `footer` only, has no actions area, and the component registry '
+    + 'never published it as an input, so an authored value was accepted and dropped. Delete the '
+    + 'key and author the buttons as components in the card\'s `children` or `footer` '
+    + '(`element:button`, `record:quick_actions`), which is what actually renders. '
+    + 'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
+  ),
   /**
    * Card content, in order — the canonical composition slot, matching every
    * other container (`grid`, `flex`, `page:section`, `page:tabs` items).
@@ -272,7 +420,7 @@ export const PageCardProps = z.object({
     '`page:card` property `body` was removed in @objectstack/spec 17.0.0 (#5775, ADR-0087 D2) — '
     + 'it was a second spelling of the composition slot every other container calls `children`, '
     + 'and the renderer reads both. Rename the key to `children`; the value (an array of child '
-    + 'components) is unchanged. Run `os migrate meta --from 16` to rewrite it automatically.',
+    + 'components) is unchanged. Run `os migrate meta --from 16` to rewrite existing sources automatically.',
   ),
   /** Slot for footer content */
   footer: z.array(z.unknown()).optional().describe('Card footer components (slot)'),
@@ -288,7 +436,35 @@ export const PageCardProps = z.object({
 
 export const RecordDetailsProps = z.object({
   columns: z.enum(['1', '2', '3', '4']).default('2').describe('Number of columns for field layout (1-4)'),
-  layout: z.enum(['auto', 'custom']).default('auto').describe('Layout mode: auto uses object highlightFields, custom uses explicit sections'),
+  /**
+   * REMOVED (#6946, maintainer ruling 2026-08-09 「全部接受」 on objectui#3818 —
+   * the removal direction).
+   *
+   * The declared `auto` | `custom` semantics were never implemented. objectui's
+   * `RecordDetailsRenderer` does read `layout`, but only to test it against
+   * `inline` | `compact` — two values this enum never permitted — so BOTH legal
+   * values fell to the same `vertical` branch and the key selected nothing.
+   * That is why it survived `check:react-declaration-parity`: objectui's
+   * registry declared `layout` with the same `auto` | `custom` enum this schema
+   * did, and the gate compares two DECLARATIONS, never a declaration against a
+   * renderer (AGENTS.md). A third spelling, `stacked` | `inline` | `compact`,
+   * sat in `@object-ui/types`' mirror — three declarations of one key, none of
+   * them the branch the renderer takes.
+   *
+   * The live mechanism is what you author: `sections` renders the explicit
+   * groups (the old `custom`), and omitting it falls back to the object's
+   * `highlightFields` (the old `auto`). objectui#3818 deletes the input and the
+   * dead branch on the next pin bump.
+   */
+  layout: retiredKey(
+    '`record:details` property `layout` was removed in @objectstack/spec 17.0.0 (#6946, ADR-0087 D2) — '
+    + 'its declared `auto` | `custom` semantics were never implemented: the renderer tests `layout` '
+    + 'only against `inline` | `compact`, two values the schema never permitted, so both legal '
+    + 'values took the same branch and the key selected nothing. Delete the key — the body is '
+    + 'already chosen by what you author: `sections` renders the explicit groups (the old '
+    + '`custom`), and omitting it falls back to the object\'s `highlightFields` (the old `auto`). '
+    + 'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
+  ),
   /**
    * Field groups rendered as the detail body, IN ORDER.
    *
@@ -412,6 +588,7 @@ export const RecordHighlightsField = z.union([
     readonly: z.boolean().optional().describe('Render this chip read-only — suppresses inline editing on the highlight card. Use for hook/automation-maintained columns that must not be hand-edited from the record header.'),
   }),
 ]).describe('Highlight field: bare name, or {name,label?,icon?,type?,readonly?}');
+export type RecordHighlightsField = z.input<typeof RecordHighlightsField>;
 
 export const RecordHighlightsProps = z.object({
   fields: z.array(RecordHighlightsField).min(1).max(7).describe('Key fields to highlight (1-7 fields max, typically displayed as prominent cards). Each item may be a bare field name or {name, label?, icon?, type?, readonly?} for inline overrides.'),
@@ -481,6 +658,7 @@ export const RecordPathProps = z.object({
   /** ARIA accessibility */
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
 });
+export type RecordPathProps = z.input<typeof RecordPathProps>;
 
 export const PageAccordionProps = z.object({
   items: z.array(z.object({
@@ -490,6 +668,20 @@ export const PageAccordionProps = z.object({
     children: z.array(z.unknown()).describe('Child components'),
   })),
   allowMultiple: z.boolean().default(false).describe('Allow multiple panels to be expanded simultaneously'),
+  /**
+   * Panel framing (#6776). `flush` is the renderer's own default and draws the
+   * divider itself (`border-b last:border-b-0` on every panel but the last);
+   * `card` hands the border to whatever each panel contains, so a panel holding
+   * a `page:card` does not get a second frame around the first.
+   *
+   * Declared here because the renderer has always read it — `containers.tsx:734`
+   * resolves `schema?.variant ?? schema?.properties?.variant ?? 'flush'`, and
+   * its own comment invites authors in ("Authors opt in by setting
+   * `variant: 'card'`"). The difference is visible on screen, so this was an
+   * author-facing option that `PageAccordionProps` simply never declared.
+   */
+  variant: z.enum(['flush', 'card']).default('flush')
+    .describe("Panel framing: 'flush' draws a divider under each panel; 'card' leaves the border to each panel's own content"),
   /** ARIA accessibility */
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
 });
@@ -509,7 +701,19 @@ export const AIChatWindowProps = z.object({
  */
 
 export const ElementTextPropsSchema = lazySchema(() => z.object({
-  content: z.string().describe('Text or Markdown content'),
+  /**
+   * Text or Markdown body copy.
+   *
+   * `I18nLabelSchema` rather than a bare `z.string()` (#5728, named explicitly
+   * in the maintainer's ruling because the label-wide widening could not reach
+   * it): `sys-user.page.ts` authors eight `element:text` nodes whose `content`
+   * is an inline `{ en, 'zh-CN', 'ja-JP', 'es-ES' }` map, and objectui resolves
+   * them through the same `pickLocalized` every label goes through. The bare
+   * string was the declaration disagreeing with the delivered shape, and it was
+   * eight of the 42 findings the #5068 gate reported on the platform's own
+   * pages.
+   */
+  content: I18nLabelSchema.describe('Text or Markdown content — a plain string, or an inline locale map'),
   variant: z.enum(['heading', 'subheading', 'body', 'caption'])
     .optional().default('body').describe('Text style variant'),
   align: z.enum(['left', 'center', 'right'])
@@ -530,6 +734,7 @@ export const ElementNumberPropsSchema = lazySchema(() => z.object({
   /** ARIA accessibility */
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
 }));
+export type ElementNumberProps = z.input<typeof ElementNumberPropsSchema>;
 
 export const ElementImagePropsSchema = lazySchema(() => z.object({
   src: z.string().describe('Image URL or attachment field'),
@@ -643,6 +848,35 @@ export const ElementFormPropsSchema = lazySchema(() => z.object({
  * enforce-or-remove: the control is a single-select `Select` with no search
  * box, so both were capability claims nothing kept (#5021 / #4988 precedent).
  * Either may return the day it is implemented; a declaration is not a roadmap.
+ *
+ * ⚠️ #6276 finished the same inventory one key-pair later, and the finding is
+ * worth stating as a rule rather than as two more keys. The renderer resolves
+ * its query from FOUR keys through one identical pattern — `dataSource` first,
+ * the flat `properties` shorthand second:
+ *
+ * ```ts
+ * const object = ds.object ?? props.object;
+ * const filter = ds.filter ?? props.filter;
+ * const sort   = ds.sort   ?? props.sort;
+ * const limit  = ds.limit  ?? props.limit ?? 50;
+ * ```
+ *
+ * After #5775 two of those four shorthands were declared (`object`, `filter`)
+ * and two were not, so one renderer read half a contract and half a trapdoor:
+ * an author who inferred `properties.limit: 20` from the `object`/`filter`
+ * spelling got the renderer's default 50 with zero diagnostics — ADR-0078, on
+ * the same element that had just been rewritten to remove it. The maintainer's
+ * ruling (2026-08-08, direction A) declares the other two, so all four flat
+ * shorthands are contract. Direction B — retiring the whole flat family and
+ * making `dataSource` the single data-binding door — was NOT dropped: it is a
+ * cross-element decision (`element:form` / `element:filter` carry the same flat
+ * `object`), tracked as #6590 for v18, and A does not block it. When B lands
+ * these two retire alongside `object` / `filter` under ADR-0087, together.
+ *
+ * Both keys are declared in the shape `ElementDataSourceSchema` already uses
+ * for its own `sort` / `limit`, deliberately: they are the SAME contract read
+ * through a second spelling, so a divergent shape here would be a third
+ * dialect rather than a shorthand.
  */
 export const ElementRecordPickerPropsSchema = lazySchema(() => z.object({
   object: z.string().describe('Object to pick records from'),
@@ -657,6 +891,24 @@ export const ElementRecordPickerPropsSchema = lazySchema(() => z.object({
   /** Control label rendered above the select. */
   label: I18nLabelSchema.optional().describe('Control label rendered above the select'),
   filter: FilterConditionSchema.optional().describe('Filter criteria for available records'),
+  /**
+   * Row order (#6276). The flat shorthand for `dataSource.sort`, and the same
+   * shape — `SortItemSchema[]`, the pairs the renderer forwards to the query as
+   * `$orderby`. `dataSource.sort` wins when both are written
+   * (`ds.sort ?? props.sort`).
+   */
+  sort: z.array(SortItemSchema).optional()
+    .describe('Row order — synonym of the component-level `dataSource.sort`, which takes precedence when both are set'),
+  /**
+   * Row cap (#6276). The flat shorthand for `dataSource.limit`, same shape.
+   * `dataSource.limit` wins when both are written, and with neither the
+   * renderer queries `$top: 50` (`ds.limit ?? props.limit ?? 50`) — that 50 is
+   * the renderer's fallback, not a schema default, so it is documented here
+   * rather than declared: declaring it would materialize a `limit: 50` on every
+   * parsed picker and turn an unset key into an authored one.
+   */
+  limit: z.number().int().positive().optional()
+    .describe('Max records offered — synonym of the component-level `dataSource.limit`, which takes precedence when both are set (renderer default 50)'),
   targetVariable: z.string().optional().describe('Page variable to bind selected record ID(s)'),
   placeholder: I18nLabelSchema.optional().describe('Placeholder text'),
   /** Shown in place of the row list when the query returns nothing. */
@@ -670,7 +922,7 @@ export const ElementRecordPickerPropsSchema = lazySchema(() => z.object({
     + '(#5775, ADR-0087 D2) — it was a required declaration no renderer ever read, while the '
     + 'renderer honoured `labelField` for the same thing and defaulted to `name`. Rename the key '
     + 'to `labelField`; the value (a field name) is unchanged. '
-    + 'Run `os migrate meta --from 16` to rewrite it automatically.',
+    + 'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
   ),
   /**
    * REMOVED (#5775). ADR-0049 enforce-or-remove: the control has no search
@@ -681,7 +933,7 @@ export const ElementRecordPickerPropsSchema = lazySchema(() => z.object({
     + '(#5775, ADR-0049) — the picker renders a plain single-select with no search input, so no '
     + 'renderer ever read it and it narrowed nothing. Delete the key. To restrict which records '
     + 'the picker offers, use `filter` (or the component-level `dataSource.filter`), which the '
-    + 'query path does apply. Run `os migrate meta --from 16` to remove it automatically.',
+    + 'query path does apply. Run `os migrate meta --from 16` to rewrite existing sources automatically.',
   ),
   /**
    * REMOVED (#5775). ADR-0049 enforce-or-remove: the control is a single-select
@@ -692,11 +944,12 @@ export const ElementRecordPickerPropsSchema = lazySchema(() => z.object({
     + '(#5775, ADR-0049) — the picker is a single-select `Select` and the bound page variable '
     + 'holds one record id, so `multiple: true` selected nothing extra and reported success. '
     + 'Delete the key; multi-record selection is not implemented on this element. '
-    + 'Run `os migrate meta --from 16` to remove it automatically.',
+    + 'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
   ),
   /** ARIA accessibility */
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
 }));
+export type ElementRecordPickerProps = z.input<typeof ElementRecordPickerPropsSchema>;
 
 /**
  * A single-line free-text input — the data-entry half of an SDUI page (Airtable

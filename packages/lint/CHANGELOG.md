@@ -1,5 +1,1419 @@
 # @objectstack/lint
 
+## 17.0.0-rc.6
+
+### Minor Changes
+
+- d0e5537: feat(lint): `validate-ai-agent-authoring` 新增 `app.defaultAgent` 取值检查(warning 档,#6041)
+
+  `app.defaultAgent` 的 Zod 类型是 `SnakeCaseIdentifierSchema`,任何 snake_case
+  字符串都能 parse、build、通过 `os:check` —— 但运行期只解析平台 agent 名单
+  (`ask`/`build` 及其历史别名 `data_chat`/`metadata_assistant`,ADR-0063 §2),
+  表外的名字会静默回落到平台默认值。#5985 实测:把坏例子
+  `defaultAgent: 'sales_copilot'` 放回语料后,`check:skill-examples` 仍 208
+  全绿、EXIT=0 —— 现有门禁对这类缺陷结构性失明,这正是坏语料当初得以发布的机制
+  (语料本身已由 PR #6030 修复)。
+
+  本 PR 是 `validate-ai-agent-authoring` 已有规则(此前只扫描 `stack.agents`
+  数组)的取值半边:遍历 `stack.apps[].defaultAgent`,取值不在
+  `PLATFORM_AGENT_NAMES`(复用同文件既有名单,未新建重复列表)内即产出一条
+  `warning` 级 finding(规则 id `default-agent-outside-roster`),消息中点名
+  实际取值与允许集合。维护者裁定(2026-08-07,2026-08-09 重申)为 **A 档**:
+  warning 而非 error —— 危害等级是静默回落而非崩溃,且不惩罚存量元数据;
+  schema 本身不收窄为 enum(ADR-0063 已经撤回过一次 breaking 的收紧)。
+
+  落地前已按裁定要求测量现存 in-repo `app.defaultAgent` 取值:仅
+  `packages/platform-objects/src/apps/studio.app.ts` 一处真实赋值
+  (`defaultAgent: 'metadata_assistant'`,合法平台别名),对该值实际跑规则
+  0 条 finding —— "不惩罚存量" 的前提已验证而非假设。
+
+- 4bda5f8: feat(lint): `flow-trigger-unroutable` 收紧到"省略"形态 —— 无 `triggerType` 的 `record_change` flow 同样报错 (#7215)
+
+  `flow-trigger-unroutable`(#6637)此前只判"矛盾"形态:`config.triggerType` **存在**但引擎路由不到
+  任何 trigger(如 `triggerType: 'onCreate'`)。本次按 #7215(维护者裁定,方案一:现在就收紧)扩展到
+  "省略"形态:`type: 'record_change'` 且**完全没有** `triggerType` 这个键。两种写法在运行期是同一个
+  缺陷 —— `AutomationEngine.resolveTriggerBinding` 对两者走的是同一条回退链,最终都返回
+  `undefined`,flow 被静默降级为手动 flow,连 `getTriggerBindingAudit` 都因为"看起来像手动/screen
+  flow"而跳过它,不会在任何地方点名。因此复用同一个 rule id 与同一档 severity(`error`),而不是新开
+  一条 —— 这是同一个缺陷的两种写法,不是两个缺陷。
+
+  ## 为什么现在收紧,而不是 #6637 立规则时就收紧
+
+  #6637 立规则时,语料测出一个真实的省略实例:`examples/app-todo` 的 `TaskCompletionFlow`。当时把它
+  判死,等于在一个已发布的示例 app 上,对该 app 的语义意图下一个未经确认的猜测,所以判据当时要求
+  `triggerType` 这个 key 必须**存在**,省略形态被单独立卡搁置(#7041 item 2)。#7039 已经把那个实例
+  修好 —— `TaskCompletionFlow` 现在显式声明 `triggerType: 'record-after-update'` 并正确路由 ——
+  语料窗口转绿,#7215 因此裁定:一个零命中规则,只要缺陷类别有过真实实例(学费已经交过)、oracle 是
+  封闭的(能不能路由是引擎自己的硬编码链,不是猜测)、当下语料对它是绿的(收紧不产生 churn)、
+  severity 与危害匹配,就应当趁窗口开着落地,而不是等下一个省略实例出现、把落地成本重新推高。
+
+  ## 语料计数(先测,后收紧)
+
+  用生产入口(`validateFlowTriggerReadiness`)跑过本仓 `examples/`、`apps/`、`packages/` 下按内容
+  搜索到的**每一个** `type: 'record_change'` 真实 flow 定义 —— 全库只有两个:
+  `examples/app-todo/src/flows/task.flow.ts`(`TaskCompletionFlow`)与
+  `examples/app-showcase/src/automation/flows/index.ts`(`UrgentTaskAlertFlow`),两者都已显式声明
+  `triggerType`。**省略实例命中数为 0**。收紧后的判据在整棵树上是绿的:不产生任何新的 baseline 条目,
+  不需要修任何示例 app。
+
+  ## 判据里没有变的部分
+
+  "这条规则不判的第二种形态"维持原样:一个 `record_change` flow 若同时声明了引擎**确实**会路由的东西
+  (`config.schedule`、`triggerType: 'api'`、`config.timeRelative` 对象),它会按错误的 trigger 绑定
+  并触发 —— 这是一个不同的缺陷("绑错"而不是"没绑上"),仍然不是这条规则要判的,`routesToSomeTrigger`
+  分支字符对字符保持不变。
+
+  `validate-flow-trigger-readiness.test.ts` 里原先钉住"省略形态故意不判"的边界测试(其自身注释写明
+  "收紧是必须删掉这个测试的有意行为,不是顺手带过的副作用")已按 #7215 删除,替换为覆盖"省略形态触发"、
+  "省略但有其它路由 sibling 时不触发"、"非 `record_change` 类型的 flow 即使省略 `triggerType` 也不
+  触发"的新用例。
+
+- 8b82686: 新增 gating 规则 `flow-trigger-unroutable`（#6637）：`type: 'record_change'` 的 flow 若在 start 节点声明了引擎无法路由的 `triggerType`（如 `onCreate`、`on_update`、`['onCreate']`），现在在 `os lint` / `os validate` / `os build` 与运行时发布闸门上报 `error`。
+
+  这是 never-fire 家族里最安静的一种失败。引擎的 `resolveTriggerBinding` 只按字面量 `startsWith('record-')` 认领 record-change flow，落空后整条分支链走到底返回 `undefined`，`activateFlowTrigger` 直接 `return`，该 flow 就被当成手动 flow —— 而专门为「悄悄没绑上」而建的 `getTriggerBindingAudit` 调用的是同一个 resolver，会以「manual / screen flow — nothing to bind」跳过它。因此启动告警和 CLI 启动摘要都不会点名，唯一痕迹是 banner 里 flow 总数比 bound 数多一。
+
+  规则范围刻意收窄到「声明了 `record_change`」的 flow：落空到无绑定本身也正是一个 flow 合法地成为手动 flow 的机制，而 `autolaunched` / `screen` 才是手动 flow 声明的类型，所以这条规则在结构上不可能误伤真正的手动 flow。`triggerType` 完全缺失的情形（同样必死）不在本次范围内，另行处理。
+
+- d06b3dc: feat(lint): literal empty combinators are refused at authoring time, with a per-shape prescription (#5330)
+
+  #5322 settled what an empty combinator MEANS at run time — the boolean identity
+  reduction — and #5659/PR #6528 made that reduction one implementation
+  (`reduceFilterVerdict` in `@objectstack/spec/data`, proven against
+  `FILTER_LOGIC_CASES`, consumed by every backend). This change adds the other half
+  the ruling deliberately left open: the literal SPELLINGS are now refused where an
+  author writes them, which is Prime Directive #12's standard shape (reject at the
+  producer, do not tolerate at the consumer) and #5240's same-direction precedent
+  one shape over.
+
+  `validateEmptyCombinators` is a new gating rule in `AUTHORING_RULES`, so it runs
+  on `os validate` / `os build` / `os lint` at once, and on the runtime publish
+  gate for `flow` writes — the door a Studio tenant, a REST `/meta` client and an
+  MCP/AI author all use. Two rule ids:
+
+  - `filter-empty-combinator` — a literal `$and: []`, `$or: []` or `$not: {}`.
+  - `filter-empty-node` — a literal `{}` standing as the whole filter, or as a
+    branch of `$and` / `$or`.
+
+  **The prescription is per shape, because the identities disagree.** `{$and: []}`
+  and `{}` reduce to TRUE (match EVERY row); `{$or: []}` and `{$not: {}}` reduce to
+  FALSE (match NO row). A generic "empty combinator, fix it" message teaches the
+  wrong fix half the time, so each shape names its own: delete the key to mean "no
+  filter"; fill the array to mean a constraint; put the negated condition inside
+  `$not`; and, when zero rows really is the intent, `{ <field>: { $in: [] } }` is
+  the declared spelling that says so instead of implying it. The row-set wording in
+  every message is DERIVED from `reduceFilterVerdict` rather than retyped, and a
+  test drives the four #5322 identity cases straight out of `FILTER_LOGIC_CASES` and
+  asserts the message agrees with the rows the table says the filter selects.
+
+  **Nothing at run time changed.** No translate or evaluation path is touched, the
+  conformance matrix is untouched, and a stack that ignores the finding runs exactly
+  as before. The literal-vs-programmatic boundary the ruling requires is structural,
+  not heuristic: this rule sees only values that reached the metadata graph, so a
+  producer that assembles zero disjuncts while serving a request — an RLS lowering,
+  a CEL `!expr`, a client-built query — never reaches it and keeps the runtime
+  identity, which is what makes `{$or: []}` = zero rows fail-closed (#5134).
+
+  Also internal: the filter-subtree traversal `validate-filter-tokens.ts` grew for
+  #3574 moved to a shared `filter-walk.ts` now that it has a second consumer — the
+  same argument `page-walk.ts` (#3583) and `view-walk.ts` (#6381) make. Each rule
+  still declares its OWN surface list, so one rule's widening cannot land silently
+  in the other; `validate-filter-tokens`'s behaviour is unchanged.
+
+- 424c510: feat(lint): metadata 表单谓词的路径解析闸门 —— 引用不存在的路径在发布期就被拒(#7010)
+
+  新增 **error 级** 规则族 `validate-predicate-path-refs`,在 `os validate` / `os build` /
+  `os lint` 三条命令上判定:一个 metadata 编辑表单(数据源为 `{ provider: 'schema', schemaId }`
+  的 `defineForm` 形状)里的可见性谓词,其 `data.` 路径必须能在该 `schemaId` 对应的 schema 上逐段
+  解析。两条规则,同一个问题:
+
+  - `predicate-path-unresolved` —— `data.` 有根,但某一段不是该层 schema 声明的键
+    (`data.tpye == 'formula'`)。消息点名**不可解析的那一段**,hint 给出编辑距离最近的候选。
+  - `predicate-path-unrooted` —— 裸标识符,而这个名字**恰好是目标 schema 的键**
+    (`type == 'formula'`)。这是 #6254 的形状:名字写对了,根丢了。
+
+  ## 为什么现有三道闸都放行
+
+  `validate-visibility-predicates.ts`(ADR-0089 D3b)判的是谓词的**形状**:能不能解析
+  (`visibility-predicate-syntax`,#6253)、有没有根(`visibility-bare-identifier`,#6128)、
+  根对不对层(`visibility-root-mislayered`)。三条都**不打开目标 schema**,所以
+  `data.tpye == 'formula'` 三条全过,而后在控制台 fail-open —— 元素无条件渲染,和完全不写谓词
+  像素级一致(#5149 一族)。
+
+  #6254 已经实测过这个洞的另一半:`object.form.ts` 的 16 处裸谓词写成 `type == 'formula'`,而
+  #6248 的裸标识符闸**按构造抓不到** —— `type` 是 CEL 自己声明的类型名标识符,到严格检查器那里
+  是类型 overload 错误而非未知变量。本规则不问 CEL「什么能解析」,只问**目标 schema**「这个键声明了
+  没有」,所以 CEL 的类型名词汇表与它无关。
+
+  ## 落点:`data.*` 一层,这是决定而非省略
+
+  `error` 级闸门要求 oracle 是**封闭**的 —— 一个能枚举、且「不在其中」确实等于「解析不到」的键集。
+  ADR-0089 D3 的两层里只有一层满足:metadata 编辑表单的行是某个 metadata type 的实例,形状由
+  `getMetadataTypeSchema` 这一份规范注册表逐键给出。运行期 record 面(`record.*`)**今天不封闭**
+  —— lookup 穿透、authored `fields` 从不列出的系统列、formula/rollup 输出都是合法路径,在开集上架
+  `error` 闸只会制造误红,而误红是闸门唯一不能犯的方向。已在规则注释与 #7010 上记为待裁的开放问题。
+
+  ## repeater 行重绑 `data`,规则跟着重绑(#6254)
+
+  `type: 'record'` / `repeater` / `composite` 子字段列表里,`data` 绑定的是**这一行**
+  (objectui 的 metadata SchemaForm 以 `{ data: row }` 求值),但根**仍然拼作 `data`**。所以
+  `object.form.ts` 的 `data.type` 指的是 `FieldSchema.type` 而不是并不存在的 `ObjectSchema.type`。
+  规则按同样的重绑下降 —— 不这么做,已发货的语料会读出 16 条误红而不是 0 条。
+
+  ## 语料计数(先量再收紧)
+
+  规则通过**生产入口**跑过本仓发货的全部 metadata 表单(`METADATA_FORM_REGISTRY`,17 张表 46 条
+  谓词):**两条规则的命中数都是 0**,因此才落 `error`。反向验证同时钉住:把 #6254 修前的裸写法还原
+  到 `object.form.ts` 的深拷贝上,规则报出 **恰好 16 条** `predicate-path-unrooted` —— 正是该单
+  当年人工读出来的那 16 处。
+
+  ## 明确不判(都是漏判方向,永远不会变成误红)
+
+  规范前端解析不了的谓词(交还 #6253);不声明键集的作用域(`z.record(z.string(), z.unknown())`
+  / `z.unknown()`);record map 的**键**段(`z.record(z.string(), X)` 按构造接受任何键);推导宏
+  绑定的循环变量(`data.tags.all(t, …)`);下标访问(`data.x['y']`);解析不到 schema 的
+  `schemaId`。裸标识符里**不是** schema 键的那些也不判 —— 那是 `visibility-bare-identifier`
+  的判决,一条坏谓词只应产生一条 finding。
+
+  规则注册在 `AUTHORING_RULES`(`tier: 'gating'`,三条命令全覆盖),`surfaces` 保持 `cli`:它其实
+  只需要被写入的那一条 item,但 `views[]` 可见性谓词这一族的另外三条规则今天都是 CLI-only,单独把
+  三分之一的判决搬到 Studio 写入门上,比一条都不搬更难预测 —— 该族应当一次整体迁移,这是关于
+  `views` 写入门的决定,不该搭在本单的车上。理由已写成 `RUNTIME_VISIBILITY_FAMILY_IS_CLI_ONLY`。
+
+- 6965160: feat(lint): view/page 可见性谓词的裸标识符构建期闸门 —— 坏谓词发不出去(#6128)
+
+  新增 **error 级** 规则 `visibility-bare-identifier`:view/page 的可见性谓词
+  (`visibleWhen` 及其两个已弃用别名 `visibleOn` / `visibility`)里引用了任何绑定根都解析不到的
+  顶层标识符时,`os validate` / `os build` / `os lint` 一律拒收。写成 `status == 'active'`
+  而不是 `record.status == 'active'` 的谓词,从此发不出去。
+
+  按 #5149 维护者 2026-08-06 裁决的构建期半边落地(运行时 warn-once 半边已由 objectui#3541 合入)。
+  本仓传统的准确表述是:fail-open 或 fail-closed 都可以裁,**静默不可以**。谓词失败仍然 fail-open
+  (已发货 app 行为不变),但坏谓词不再能进入产物。
+
+  **为什么现有两道闸都放行**(#5149 Repro 1 实测,已写进规则注释,防后人误并):
+  ADR-0032 的标识符闸(`validate-expressions.ts`)解析 record 作用域的裸引用,但它的遍历只覆盖
+  objects / flows / actions / sharingRules / hooks,**从不走 views 与 pages**;ADR-0089 D3b
+  只判**有根**的谓词根错层(runtime 面的 `data.`、metadata 面的 `record.`),**无根**的谓词两边都不匹配。
+  两闸之间正好漏掉「作者按文档示例写了裸字段名 → 谓词永远解析失败 → 控制台 fail-open 静默显示」。
+
+  **判定由两个既有 oracle 合成,本包不自建 CEL 环境**(#4812 的教训):声明性判定取
+  `@objectstack/formula` 的 `firstUndeclaredReference`(即 `validateExpression` 给 record 作用域
+  裸引用定罪的同一个严格环境),AST 取规范入口 `parseCelToAst`。AST 先收集所有处于**接收者位置**
+  的标识符(`a.b` / `a?.b` / `a['b']` / `a.exists(…)`)并在检查前声明它们,于是只剩「当作裸值引用」
+  的标识符会被判 —— 未知**根**(`my_record.x`)交还给 ADR-0089 D3b,不在本规则射程内。
+
+  **与 #4953(全量 vs 稀疏绑定)的边界**:#4953 实测同一求值器在两种绑定下语义相反
+  (`has(record.a)` 全量 true / 稀疏 false;`record.a != null` 全量 false / 稀疏 FAULT)。本规则
+  **按构造与该分叉无关** —— 它从不追问某个 KEY 在已绑定的根上是否存在,只追问标识符有没有根,
+  而无根标识符在两种绑定下都解析不到。`has(record.x)` / `record.x != null` 等守卫写法在本闸门下
+  一律绿,无论 #4953 最终怎么裁;已加测试钉住这条边界。
+
+  **遍历按实测修正,否则规则生来即死**:`os build` 跑 `examples/app-showcase` 得到的唯一一条
+  view 表单谓词落在 `views[0].formViews.edit.sections[0].fields[6].visibleWhen` —— 运行时 app 形状下
+  `views[]` 条目是**视图容器**(`ViewSchema` 声明的自有键就是 `list` / `form` / `listViews` /
+  `formViews`),`sections` 在下一层。原遍历只读 `views[].sections`,在这份 stack 上报告「干净」。
+  现在覆盖容器的 `form` 与每个 `formViews.<key>`,以及仍然直接携带 `sections` 的 `defineForm` 形状;
+  pages 改走共享的 `walkPageComponents`(regions、slotted 页的 `slots`、以及 `properties` 里的
+  `page:tabs` / `page:accordion` / `page:card` 子树都随之覆盖,source-authored 页按其既有语义跳过)。
+  `objects[].views` 明确不读 —— 该键已被 schema 立碑拒绝,读它只会造出一条永不触发的幽灵检查。
+  两条既有 ADR-0089 D3b advisory 随遍历一并变得真正可达。
+
+  注册表 tier `advisory` → `gating`(#5762 的先例):tier 声明并非自述,
+  `authoring-rule-wiring.test.ts` 会读规则源码核对。
+
+  已知盲点(已钉测试、方向安全):字段名与 CEL **类型名**相同时(`type` / `int` / `string` / `list`
+  / `map` / `timestamp` …)不判 —— CEL 自身声明这些标识符,`type == 'grid'` 到检查器那里是类型
+  overload 错误而非未知变量;改读 overload 消息会误杀合法的 `type(record.x) == string`。语法不通过
+  的谓词同样不判,交还给拥有该判定的闸门。两者都是漏判,永远不会变成误红。
+
+  仓内 `app-todo` / `app-crm` / `app-showcase` 三个示例 `os validate` 全部通过、零 visibility finding,
+  无需修改任何示例内容。
+
+  `@objectstack/formula` 侧:公开导出 `firstUndeclaredReference`(理由与既有的
+  `collectCelRootIdentifiers` 一致 —— 绑定根集合不同的消费方需要的是同一个答案,替代方案是在消费方
+  自建严格 `Environment`,而那正是 #4812 从本包消费方手里拿掉的私有前端)。
+
+- ecff951: feat(lint): view/page 可见性谓词的 CEL 语法构建期闸门 —— `country === "USA"` 不再零诊断(#6253)
+
+  新增 **error 级** 规则 `visibility-predicate-syntax`:view/page 的可见性谓词
+  (`visibleWhen` 及其两个已弃用别名 `visibleOn` / `visibility`)如果规范 CEL 前端根本
+  解析不了,`os validate` / `os build` / `os lint` 一律拒收。`===` 这类写法从此发不出去。
+
+  按维护者 2026-08-07 对 #6253 的裁定落地:**判 blocking error**,与其它谓词面
+  (validation rule / flow / action,ADR-0032)同级;不设 warning 档,也不为本面写豁免——
+  warning 在 CI 里通常不拦,那只是「多绕几步的静默」。
+
+  **为什么这一面此前无人判**:`validate-expressions.ts`(ADR-0032)对它遍历到的每条谓词都跑
+  `validateExpression`,语法错报 blocking error——但它的遍历面是 objects / flows / actions /
+  sharingRules / hooks,**从不走 `views` 与 `pages`**。走这一面的三条规则(ADR-0089 D3b 两条
+  advisory,加 #6128 的裸标识符闸)都明确不判语法,理由是「不发明第二个语法判定」。那条政策
+  在它自己的调用点上成立(`validateExpression` 就在同一批调用点上跑),**在 view/page 面上不成立:
+  那里没有第二个判定,沉默就是没人报**。后果与 #5149 同型:谓词求值失败 → `evalFieldPredicate`
+  返回 fallback → 可见性 fallback 是 `true` → 元素无条件渲染,与「没写谓词」在屏幕上一模一样。
+  `packages/spec/src/ui/view.test.ts` 的 fixture 就写着 `'country === "USA"'`,正说明这是作者
+  (尤其 AI)会写出来的形状。
+
+  **判定仍然不是本包给的**——旧政策要保护的正是这一点,它完整保留:判定取 `parseCelToAst`
+  (规范前端,带 #3306 改写与 `DEFAULT_LIMITS`,#4812),本规则不自建 `Environment`、不手写
+  tokenizer。#6253 加的是**对既有判定的上报**,外加原始报错缺的自纠措辞:cel-js 只说
+  `Unexpected character: =` 并画一个 caret,既没点名作者写的运算符,也没给出 CEL 的写法。
+
+  **明确不走 `validateExpression` / `celEngine.compile`**,尽管那才是 ADR-0032 的入口:
+  `compile()` 是 parse **+ 类型检查**,差别不是理论上的——实测它会以
+  `no such overload: type == string` 拒掉 `type == 'grid'`,而那正是本文件**已钉测试的既有盲点**
+  (字段名与 CEL 类型名相同时不判,因为改读 overload 消息会误杀合法的 `type(record.x) == string`)。
+  从语法分支绕过去会把那条决定悄悄推翻,并把一条 error 级闸门从「解析不了」扩张成「类型检查不过」——
+  而这一面的谓词绝大多数是 `dyn`。裁定说的是语法,parse 判定恰好就是语法。
+
+  **消息自纠**:实测过的非 CEL 拼法各自点名并给出 CEL 写法——`===`→`==`、`!==`→`!=`、
+  `<>`→`!=`、`and`→`&&`、`or`→`||`、`not`→`!`、单个 `=`→`==`。扫描前先把字符串字面量抹平,
+  所以 `record.msg == 'a === b' and record.n > 1` 归咎于 `and` 而不是字面量里的 `===`;
+  `record.msg == 'a === b'` 本身能解析,压根不报。`??` 与 SQL 的 `IN (…)` 故意不进表:两者
+  都会解析失败、都照报(带前端原话),但都没有「换一个 token」就能修好的等价写法,给半个修法
+  只会让作者多跑一趟。
+
+  **边界**(均已钉测试):空/纯空白谓词不是语法错(`parseCelToAst` 对空源也返回 `null`,
+  没有这道 guard 会把「没写谓词」报成坏 CEL);`DEFAULT_LIMITS` 超限属于**边界**错而非语法错,
+  照报但引用前端原话、不假装找到了 typo,与 ADR-0032 把两者一并归入「invalid CEL predicate」
+  的既有做法一致,且超长谓词在消息里省略,单条 runaway 表达式刷不满控制台;一条坏谓词**只出一个
+  finding**——源码解析不出 AST 就没有标识符可判,裸标识符闸自动让位,该互斥性由「断言整个上报集合」
+  钉住而不是靠调用方内部实现。
+
+  注册表无需改动:`validateVisibilityPredicates` 的 tier 在 #6128 已是 `gating`、commands 已是
+  build/lint/validate,本规则的 `error` 直接沿用(已加测试复核该前提仍然成立)。
+
+  仓内清扫:除 `packages/spec/src/ui/view.test.ts` 那几条**纯 schema 测试样本**(它们只跑
+  `FormFieldSchema.parse`,不经 lint,属于本单援引的证据而非待修点)外,全仓 examples / apps /
+  packages 的 view/page 可见性谓词均能通过规范前端解析,无需修改任何示例内容。
+
+- 31cbe90: feat(spec,lint): declare the SDUI deep-link "navigate = run action" as a validatable `runAction` nav reference (#4848)
+
+  The `?runAction=<actionName>` deep link (cloud#844) lived as two private string
+  halves — objectui's `CloudOnboardingNext.tsx` concatenating the query and its
+  `EnvironmentListToolbar.tsx` consuming it by literal match — an implicit
+  cross-repo contract neither side's rename turned red. Per the maintainer's
+  2026-08-06 ruling on #4848, the contract is now spec-declared, contract-first.
+
+  **New slot — `ObjectNavItemSchema.runAction` (optional).** An `object` nav item
+  may declare the action to auto-run once on arrival at the object's list
+  surface. The name resolves against the stack's declared actions (global
+  `stack.actions` + any object's `actions`) — the same "defined ANYWHERE" scope
+  every other name-bound action surface uses. `runAction` + `recordId` is
+  parse-rejected (`objectNavTargetExclusivity`): a record detail has no list
+  toolbar, so the combination is a dead affordance made unrepresentable.
+
+  **Validation, both layers.** `defineStack`'s cross-reference walk rejects a
+  `runAction` naming no defined action (size-gated like the neighboring
+  dashboard/page/report checks), and `validate-action-name-refs` gains a nav
+  `runAction` arm — error severity, near-miss "did you mean", running on every
+  `os validate`/`lint`/`compile` via the reference-integrity suite.
+
+  The slot is ledgered `planned` + `authorWarn` (enforce-or-mark, like
+  `object.externalSharingModel`'s P1): no shipped shell reads the declared slot
+  yet, so authors are told the auto-run still fires only via the transitional URL
+  query param until the objectui consumer half lands. cloud#1048's pin remains
+  the transitional guard.
+
+- f012f55: Add the startup open-vocabulary verdict rule — "not registered YET" and "no provider at all" are the same value, and a verdict recorded from it is never retracted (#4776).
+
+  A boot fills its registries incrementally, so asking one "is X there?" while it is still filling is fine — the answer is simply not final yet. Turning that not-yet into a **verdict and recording the verdict** is the defect: the provider registers a moment later and nothing goes back to undo the record. One showcase cold start produced three instances of the shape in three unrelated subsystems (#4769, #4771, #4772).
+
+  `findStartupRegistryVerdicts(source, { file })` is a pure decision procedure over plugin source (parsed, never executed, never type-checked). It reports two rule ids:
+
+  - `startup-open-vocabulary-verdict` — inside `constructor` / `init` / `start`, a read of a capability vocabulary ADR-0018 keeps runtime-extensible whose conclusion is **recorded** (announced in a `warn`/`error` log, cached in an instance field or module binding, or persisted). All three parts, or it is not a finding — a read-only probe is legal and is not flagged.
+  - `startup-verdict-assertive-wording` — emitted only at a site the first rule already flagged, when the diagnostic asserts a terminal outcome about a world that has not finished forming ("will fail at execution time", "you need Redis").
+
+  Every finding's hint prescribes the three shapes the fixes took: resolve where the value is used (a `kernel:ready` hook or a lazy accessor — `createLazyCacheRateLimitStorage()`, #4772), seal the vocabulary then judge (`AutomationEngine.sealNodeTypeVocabulary()`, #4771), or order the verdict after the mutation it describes (#4769). All three cures are recognised by shape and pass.
+
+  Severity is always `warning` — the rule reasons about a boot sequence it cannot execute, so it advises and never gates. The kernel SERVICE-registry half of the same family stays with `pnpm check:startup-registry-verdict`; the rule module states the measured division of labour between the two.
+
+- 92e13a0: refactor(lint)!: retire `visibility-alias-deprecated` — the rule could not fire on any real CLI input (#6318, ADR-0049)
+
+  `@objectstack/lint` shipped a fourth conditional-visibility rule whose only job
+  was to report the deprecated predicate **key** (`visibleOn` on a view form
+  section/field, `visibility` on a page component) and steer the author to
+  `visibleWhen`. It never reported on anything a command actually loads.
+
+  **Why it could not fire.** The rule is registered `input: 'normalized'`, so what
+  `os validate` / `os build` / `os lint` hand it is the output of
+  `normalizeStackInput`. The two ADR-0087 D2 conversions that fold the alias —
+  `view-visibleOn-to-visibleWhen` and `page-component-visibility-to-visibleWhen` —
+  run **inside** `normalizeStackInput`, one layer above. The key is therefore
+  already renamed by the time the rule sees the stack. Re-measured per site:
+
+  | alias site                          | rule fed the raw authored object | rule fed the `normalized` tier |
+  | ----------------------------------- | -------------------------------- | ------------------------------ |
+  | `views[].form.sections[]`           | 1 finding                        | **0**                          |
+  | `views[].formViews.edit.sections[]` | 1 finding                        | **0**                          |
+  | `pages[].regions[].components[]`    | 1 finding                        | **0**                          |
+
+  The one shape it did still fire on is a view **container** carrying top-level
+  `sections` — the shape its own unit tests used, and the shape strict
+  `ViewSchema` refuses outright (`Unrecognized key(s) on this view container:
+\`sections\``). A green unit test over a fixture production can never send.
+
+  **No working app loses a signal.** Authors were never hearing this rule, and
+  they do hear the conversion: the same D2 entry emits a `warnConversionNotice`
+  from `defineStack` that names the site, the conversion id and the retirement
+  window — wording the lint rule never had.
+
+  ```
+  defineStack: views[0].form.sections[0].visibleWhen: 'visibleOn' -> 'visibleWhen'
+    (converted at load; conversion 'view-visibleOn-to-visibleWhen', retires in protocol 16).
+    Update the source to the canonical shape — the conversion stops running then.
+  ```
+
+  **Authored metadata is unaffected.** `visibleOn` / `visibility` remain accepted
+  exactly as before, still fold to `visibleWhen`, and still retire with protocol 16. Nothing an app author writes has to change.
+
+  **Consumer migration — one removed export.** The rule id constant leaves the
+  published barrel:
+
+  - `VISIBILITY_ALIAS_DEPRECATED` (`'visibility-alias-deprecated'`) is removed from
+    `@objectstack/lint`. Delete the import; no finding carries that `rule` value
+    any more, so a `suppressWarnings: ['visibility-alias-deprecated']` entry or a
+    filter comparing against it is now dead code and can go with it.
+
+  The other three rules in the same module are **unchanged** — they judge the
+  predicate's _value_, which crosses the fold into `visibleWhen` intact, and each
+  still reports normally on the `normalized` tier:
+  `visibility-root-mislayered`, `visibility-bare-identifier`,
+  `visibility-predicate-syntax`. `checkElement` also keeps reading the predicate
+  through the deprecated keys (canonical-first, so an alias can never override
+  `visibleWhen`), which is what lets those three still judge an alias-spelled
+  predicate handed to the exported function directly.
+
+  Retired rather than re-anchored: making the rule read a genuine pre-normalize
+  value would have changed `runAuthoringRules`' external input contract, which is
+  a `packages/lint` public-API decision for the maintainer rather than a rule
+  file's to take.
+
+  <!-- adr-0087: not-required (already-registered view-visibleOn-to-visibleWhen, page-component-visibility-to-visibleWhen) The authored alias surface is already covered by those two D2 conversions, which are unchanged by this PR — they keep accepting `visibleOn` / `visibility`, keep folding them to `visibleWhen`, and keep their protocol-16 retirement window. This change removes only a lint rule id from a TS export surface; no authored or stored metadata shape changes, so there is nothing new for the ledger to carry. -->
+
+### Patch Changes
+
+- e0f300b: feat(spec): `ChartAggregateSchema` / `ChartGroupBySchema` reject unknown keys instead of dropping them (#5583, #4001 批 15's last two sites)
+
+  `<ObjectChart aggregate={{ … }}>` is the react tier's object-bound chart binding,
+  and until now a key it did not declare was **silently stripped by the parse**.
+  `groupby` for `groupBy` degraded the chart to a single ungrouped point, `fn` for
+  `function` fell back to the default, `dateGranularty` for `dateGranularity`
+  turned off date bucketing — each with `os build` / `os validate` fully green.
+  That is #4001's founding failure mode, on the surface an AI page author is most
+  likely to write.
+
+  Both object shapes are `strictObject` now, so an undeclared key is a named
+  rejection carrying the surface, the offending key and a rename:
+
+  ```
+  Unrecognized key(s) on this chart aggregate: `groupby`.
+  Did you mean `groupby` → `groupBy`? Until #5583 an undeclared aggregate key was
+  dropped at parse — …
+  ```
+
+  Curated beyond edit distance where the near-miss is semantic rather than a typo:
+  `fn` / `agg` / `aggregation` → `function`, `measure` → `field`, and the ADR-0021
+  dataset vocabulary an author carries over from the other binding mode
+  (`dimension` / `category` → `groupBy`). Wrong-LAYER keys get a prescription
+  instead of a rename — `dateGranularity` written _beside_ `groupBy` did nothing at
+  all and now says where it belongs; `alias`, `filter`, `objectName` and a
+  `measures` array are pointed at the surface that owns them.
+
+  **Why this took two issues.** `.strict()` is a property of a PARSE, and until
+  #5020 nothing parsed these schemas: the react-page publish gate re-derived the
+  vocabulary by hand. Closing them first would have shipped a precisely-validated
+  door with nothing behind it (#4583). #5020 wired the parse; this is the posture.
+
+  **The zod-4 union collapse is load-bearing here.** `groupBy` is a union, so the
+  `unrecognized_keys` its strict arm raises never reaches `error.issues` — zod
+  reports one `invalid_union` whose own message is the bare string `"Invalid
+input"`. What carries the named rejection to the author is `packages/lint`'s
+  `describeIssue` arm unpacking, pinned end to end on both sides.
+
+  **`groupBy` stays REQUIRED — the product question this pair raised is answered,
+  and the answer does not move the schema.** An ungrouped single-value chart is
+  not a supported `<ObjectChart>` shape: the single-value need is served by the
+  separate `object-metric` block, the example corpus authors zero ungrouped
+  `<ObjectChart>` aggregates, and objectui's `schema.aggregate?.groupBy ||
+schema.xAxisKey` reads are optional-chained on `aggregate` itself — they serve
+  charts with **no aggregate at all**, not ungrouped ones. #5020's `warning`-level
+  tolerance for an absent `groupBy` therefore stays a tolerance rather than
+  becoming a blessing; its hint now states the ruling.
+
+  **Upgrading:** if a chart aggregate carried a key this schema does not declare,
+  it was already being ignored — the rejection names it and prescribes the fix. No
+  legal declaration changes meaning.
+
+- e9b5265: fix(formula,lint): `current_user` becomes a declared root, and its field-level rejection becomes a real rule (#6290)
+
+  `@objectstack/formula` told two stories about one root. `introspectScope` handed
+  `current_user` to authors as a legal namespace and `checkRoleCatalog`'s four
+  position-membership regexes all lead with it — both correct, because ADR-0068 D1
+  makes `current_user` THE canonical spelling and `buildScope` really does mount
+  the same `EvalUser` under it. Only `cel-engine.ts`'s `SCOPE_ROOTS` disagreed, so
+  the strict environment read the blessed spelling as a BARE FIELD REFERENCE while
+  its two aliases (`user`, `ctx`) passed unremarked.
+
+  Three things change.
+
+  **1. `SCOPE_ROOTS` declares `current_user`.** That list is a "never faults"
+  baseline, not a per-surface contract, and it now advertises exactly what the
+  package advertises elsewhere. A new pin asserts the property directly: every
+  root `introspectScope` reports must resolve in the strict env.
+
+  **2. The wrong prescription is gone.** Because the rejection used to fall out of
+  the baseline's omission, the author got the GENERIC bare-field diagnostic —
+  "Write `record.current_user`". That shape binds on no layer of the platform, so
+  an author who followed the message ended up with something strictly worse than
+  what they started with, still silent. The field-level verdict now comes from a
+  rule of its own in `@objectstack/lint`, which names the real failure (unbound ⇒
+  fault ⇒ visibility falls back to `true` ⇒ the field a `current_user` test was
+  meant to hide stays visible for everyone, #6146) and prescribes surfaces that
+  exist: move the predicate to the option's own `visibleWhen`, declare field-level
+  security on a permission set (`fields: { '<object>.<field>': { readable: false } }`),
+  or rewrite it against `record`. It covers `visibleWhen`, `readonlyWhen` and
+  `requiredWhen`, which share the one evaluator.
+
+  **3. Per-option `visibleWhen` is validated at all.** `validate-expressions.ts`
+  walked field-level conditional rules and stopped there, so `SelectOption.visibleWhen`
+  — an authorable CEL slot the client filters on AND the server enforces — reached
+  compile, validate and run time checked by nobody. A bare field reference, a
+  reference to a field that does not exist, a syntax error or a template-dialect
+  predicate in an option all shipped in silence, and the option simply never
+  offered itself. Options are now walked, located by option value, on the same
+  `record` scope as their host field.
+
+  The two surfaces deliberately give opposite verdicts on `current_user`, because
+  their evaluators differ: field-level rules go through `evalFieldPredicate`
+  (`record` + `previous` + `parent`, never a user), options through
+  `resolveCascadingOptions` against the host's predicate scope, which does bind it
+  (ADR-0068 / objectui#2284). The showcase's role-gated option
+  (`'admin' in current_user.positions`) had never met this rule before and is now
+  pinned as the legal usage it is.
+
+  Sweep: `objectstack validate` is clean on all three example apps
+  (`app-showcase`, `app-crm`, `app-todo`) with the option walk active — zero new
+  findings, including the showcase object that carries both a record-scoped
+  cascade and the role-gated option.
+
+- d5e9f6e: 字段级 `*When` 的未绑定根检查:黑名单翻成白名单,并把因果句按槽位分档
+
+  同一段诊断上的两条**正交**分档轴,一次设计通过 —— 分开做会把这段文案写两遍,
+  且第二遍推翻第一遍。
+
+  ## 轴一:根集合从 3 项黑名单翻成 3 项白名单(#6713)
+
+  字段级 `visibleWhen` / `readonlyWhen` / `requiredWhen` 实测只绑 `record`、
+  `previous`、`parent` 三个根,三处独立证据一致:服务端
+  `rule-validator.ts` 的两处绑定(`readonlyWhen` 绑
+  `{ record, previous, extra: { parent } }`,`requiredWhen` 绑
+  `{ record, previous, ...parentScope }`);客户端 `evalFieldPredicate` 绑
+  `record` + `previous` + 调用方 `scope`,而 objectui 全部五个字段级调用点
+  (`form.tsx` ×3、`WizardForm.tsx`、`GridField.tsx`)传的 `scope` 只可能是
+  `undefined` 或 `{ parent }`;作者端 objectui 的
+  `FIELD_RULE_ROOTS = ['record', 'previous', 'parent']`,注释明写 "nothing else"。
+
+  而检查此前是一张**黑名单** —— #6584 一项、#6711 三项
+  (`current_user` / `user` / `ctx`)。黑名单在这个面上结构性地追不上
+  `SCOPE_ROOTS`:每新增一个根都要有人记得抄过来(`current_user` 自己就是 #6290
+  加进去、#6584 才被发现的)。实测有 **21 个根**落在这条缝里,它们同样未绑定、
+  同样 fault、而且同样**静默** —— 都在 `SCOPE_ROOTS` 里,所以裸引用检查也从不
+  报它们。其中两个是高可信度的作者笔误而非理论成员:
+
+  - `os.user.id` —— ADR-0068 D1 的**第四种**用户拼写(`buildScope` 把同一个
+    `EvalUser` 挂在 `current_user` / `user` / `ctx.user` / `os.user` 下),#6711
+    收了三种,`os` 这一支没收;
+  - `data.status == 'x'` —— `data` 是**元数据表单**里同一个 `visibleWhen` 键的
+    **合法**根(`view.zod.ts`:"Root: `record` … in runtime forms, or `data` in
+    metadata forms"),两种表单同一个键名、不同的根。
+
+  判定改为 `SCOPE_ROOTS` 成员减去白名单,列表直接从 `@objectstack/formula` 取,
+  不在消费端重述 —— 因此 `SCOPE_ROOTS` 将来新增的成员自动被覆盖。
+
+  处方随之**按根分档**:用户根(`current_user` / `user` / `ctx` / `os`)保留原有
+  的选项级 `visibleWhen` 与权限集 FLS 两条用户向处方;`data` 给出元数据表单 vs
+  运行期表单的解释;其余根给出通用的「改写成 `record` 谓词」。此前只有用户向处方,
+  对写了 `data.type == 'select'` 的作者是答非所问。
+
+  ## 轴二:因果句按槽位分档(#6716)
+
+  三个槽位此前共用一句「falls back to VISIBLE … showing for everyone」,而这句话
+  只对其中一个精确。三格全部**实测**,每格量了两端:
+
+  - **`visibleWhen` —— 仅客户端、fail-OPEN,原文案正确。** 服务端根本不评估字段级
+    `visibleWhen`(`ConditionalFieldDef` 无此成员,`fieldsNeedPrior` 只看
+    `requiredWhen || readonlyWhen ||` 选项可见性),唯一裁决来自渲染端,
+    `resolveFieldRuleState` 对可见性传 `fallback: true`。
+  - **`readonlyWhen` —— 两端方向相反,服务端说了算,原文案是反的。** 服务端
+    `isReadonlyWhenLocked` 命中 `unknownVariableOf` 后返回 `true`(#4889 的
+    carve-out,其触发条件正是未绑定根这一类),`stripReadonlyWhenFields` 随即把该
+    字段从 payload 中删除;客户端 `resolveFieldRuleState` 传 `fallback: false`,
+    表单仍渲染为可编辑。按 ADR-0057 D10(server enforces, client is courtesy)以
+    服务端为准:作者改了字段、保存报成功、值静默不落库。原文案告诉作者「对所有人
+    可见」—— 失败方向与排障方向都相反。
+  - **`requiredWhen` —— 两端都 fail-OPEN,且与可见性无关。** 服务端记日志后
+    `continue`(#4977 明确没有采用 #4889 的 carve-out),客户端 `fallback: false`,
+    两端都不强制,记录带着空字段保存成功。原文案在这里不只是不精确,而是说错了
+    字段的哪个属性。
+
+  `conditionalRequired` 在 `FieldSchema` 里是 `retiredKey`(按名字拒绝),解析后的
+  编译路径上该分支是惰性的,因此给它一条与槽位无关的通用句,而不是编造第四格测量。
+
+  ## `@objectstack/formula`
+
+  `SCOPE_ROOTS` 改为公开导出。一个绑定**封闭**根集合的面,必须能说出它**不**绑定
+  的那些根,而那个补集就是 `SCOPE_ROOTS` 减去该面自己的白名单;消费端手抄的列表
+  追不上这张表。注意它不能用 `firstUndeclaredReference` 替代:严格环境同时声明了
+  CEL 的**类型名**,`type(record.x) == string` 里的 `string` 会被判成「能解析的根」
+  —— 实测按可解析性判定会误杀这条合法谓词(1 例),按 `SCOPE_ROOTS` 成员判定不会。
+
+- e48d861: fix(lint): the field-level user-root rejection covers all three ADR-0068 spellings, not just `current_user` (#6585)
+
+  #6290 gave field-level `visibleWhen` / `readonlyWhen` / `requiredWhen` a
+  surface-level rejection when the predicate reaches for the signed-in user, with
+  a prescription that names surfaces which actually bind one. That check matched a
+  single spelling — `current_user` — while ADR-0068 D1 makes `user` and `ctx.user`
+  **the same object under different names**: `buildScope` hangs one `EvalUser`
+  reference on `current_user` / `user` / `ctx.user` / `os.user`. So the identical
+  semantic error produced an error under one spelling and **total silence** under
+  the other two (both have always been in `SCOPE_ROOTS`, so the bare-reference
+  check never fired on them either). Which of three ADR-equivalent spellings the
+  author happened to pick decided whether they got a build-time diagnostic at all.
+
+  The failure direction is the one #6146 named: an unbound root faults, the fault
+  falls back, and visibility's fallback is `true` — so a predicate written to HIDE
+  a field by role left it visible to everyone, silently.
+
+  All three roots now share one verdict, one prescription and one message; only
+  the root named in the message varies. Nothing about the option level changes:
+  per-option `visibleWhen` resolves against the host's predicate scope, which
+  binds the user under every spelling, so the showcase's role-gated option
+  (`'admin' in current_user.positions`) stays legal — under the aliases too.
+
+  **`ctx` is judged as a whole root, not only in `ctx.user` form.** At this
+  surface that is simply what is true: `buildScope` creates the `ctx` root _only_
+  when the evaluation carries a user, and no field-level site passes one — the
+  server binds `record` + `previous` (+ `parent`) and the client's
+  `evalFieldPredicate` binds `record` + `previous` + a caller scope that is only
+  ever `{ parent }`. `ctx.locale` therefore faults exactly like `ctx.user.id`
+  here. The narrower reading was rejected because it needs a source-level spelling
+  match, which would re-open this very fork one level down (`ctx["user"].id`
+  silent, `ctx.user.id` rejected) while leaving a real fail-open fault
+  unreported. `ctx` remains ActionEngine's predicate root elsewhere and is
+  untouched there — the platform's own `ctx.user` predicates all sit on action
+  `visible` (`sys-user.object.ts`, `sys-invitation.object.ts`), a surface this
+  rule never reads, and that acceptance is pinned.
+
+  Sweep: field-level `*When` predicates reading any user root measure **zero**
+  across `examples/`, `packages/` and the downstream `objectui` repo, by both a
+  slot-keyed scan and an alias-keyed one — so no shipping metadata is refused by
+  the widening. `objectstack validate` stays clean on all three example apps.
+
+- b127c8b: fix(spec,core): a filter placeholder is recognised by INTENT — `{TODAY()}` refuses loudly instead of comparing as a literal (#5586)
+
+  `UnknownFilterTokenError` had a hole exactly where authors fall in. Recognition
+  used the token-NAME grammar `/^\$?\{([a-zA-Z0-9_]+)\}$/`, so any placeholder
+  carrying a **non-word character** classified as "not a placeholder at all" and
+  was handed to the driver verbatim, to be compared as a literal string — the
+  silent-wrong-result failure the diagnostic exists to abolish.
+
+  The failure was inverted against the author. Measured on 17.0.0-rc.2 against a
+  four-row fixture:
+
+  | filter value             | before                           |                                                                                                                            |
+  | ------------------------ | -------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+  | `due_date < '{today}'`   | 2 rows                           | correct — the two overdue rows                                                                                             |
+  | `due_date < '{TODAY}'`   | throws `UnknownFilterTokenError` | diagnostic working                                                                                                         |
+  | `due_date < '{TODAY()}'` | **4 rows**                       | diagnostic bypassed — literal string compare, and `'2026-…' < '{'` in lexicographic order swallowed a row due a week later |
+
+  So misspelling `{today}` as `{TODAY}` was reported by name, while misspelling it
+  as `{TODAY()}` returned the wrong rows in silence — and the parenthesised,
+  kebab-case, natural-language and dotted spellings (`{TODAY()}`,
+  `{current-user-id}`, `{30 days ago}`, `{user.id}`) are precisely what an author
+  migrating from another system's macro syntax writes first.
+
+  **Both directions of the behaviour change:**
+
+  - **Previously silent, now refuses loudly** — a filter value that is entirely
+    brace-wrapped and outside the vocabulary now throws `UnknownFilterTokenError`
+    (`code: FILTER_TOKEN_UNKNOWN`, `status: 400`) on the ObjectQL read and write
+    paths and the analytics dataset executor, and is reported as
+    `filter-token-unknown` by `objectstack build` / `validate` / `lint`. Before,
+    it reached the data engine and compared as text.
+  - **Unchanged** — `{today}` / `{current_user_id}` still resolve; `{TODAY}` still
+    refuses with the same identity; a value that merely _contains_ braces
+    (`'acme {x} deal'`), or is not ONE pair around the whole value (`{a}{b}`,
+    `{{x}}`, `{}`), is still an ordinary literal and still reaches the driver
+    untouched.
+
+  Recognition and vocabulary are now two named grammars rather than one:
+  `FILTER_TOKEN_WRAPPED_RE` (`/^\$?\{([^{}]+)\}$/`) answers "did the author mean a
+  placeholder", and `isContextToken` / `isDateMacroToken` answer "is it in the
+  vocabulary". Wide in, strict out. No escape hatch for a literal `{…}` comparand
+  ships with this: a repo-wide measurement across structured metadata, examples,
+  seed data and fixtures found zero legitimate consumers comparing a
+  brace-wrapped literal, and an escape syntax is a public micro-contract that can
+  be added the day one shows up.
+
+  Flow templates are unaffected. `interpolateFilter` in
+  `@objectstack/service-automation` already recognised the same wide shape and
+  resolves `{record.id}` / `{TODAY() + 30}` from flow variables **before** the
+  filter reaches ObjectQL; its hand-off to the engine is keyed on the token
+  vocabulary (`isKnownFilterToken`), which this change does not touch.
+
+- 01fd9e1: fix(lint): `validateFormLayout` walks the view CONTAINER ladder, so both its rules stop reporting clean on every real app (#6251)
+
+  `form-field-unknown` and `absolute-colspan-discouraged` read a `sections` array
+  off the **`views[]` entry itself** and skipped everything else. But a `views[]`
+  entry is a view CONTAINER, not a view: `ViewSchema` declares exactly `name` /
+  `label` / `object` / `list` / `form` / `listViews` / `formViews`, and form
+  sections live one level down, under `form` and each `formViews.<key>`. So the
+  one shape the traversal read is the one shape strict `ViewSchema` **refuses** —
+  measured, `unrecognized_keys` naming `sections` — and the shapes every app
+  actually ships were never inspected at all.
+
+  Measured on the three shipped example apps, before and after: `app-showcase`,
+  `app-crm` and `app-todo` carry **0** form sites at the entry root and **14**
+  under `form` / `formViews.<key>`. The old traversal therefore had nothing to
+  read on any of them, and reported clean for that reason — the "ghost check"
+  shape (#4984 / #5009): a rule that is green because it never read anything is
+  worse than no rule, because it occupies the slot that would otherwise look
+  empty.
+
+  One broken form, three placements, before → after:
+
+  | placement                                            | before  | after   |
+  | ---------------------------------------------------- | ------- | ------- |
+  | `views[0].sections` (entry IS a bare form view)      | reports | reports |
+  | `views[0].form.sections` (container default form)    | silent  | reports |
+  | `views[0].formViews.edit.sections` (named form view) | silent  | reports |
+
+  What changed, precisely:
+
+  - The traversal is the one `validate-visibility-predicates.ts` landed in #6248
+    for the identical hole on the sibling rule — copied, not re-derived, so two
+    rules on one surface cannot drift apart about which forms exist. `list` /
+    `listViews.<key>` are `ObjectListViewSchema` and carry no `sections`, so they
+    are deliberately not walked; `objects[].views` stays out because
+    `object.zod.ts` tombstones that key by name.
+  - The legacy `groups` bucket (`FormSectionSchema[]`, the documented alias of
+    `sections`) is read too. Measured: it is **not** folded into `sections` at
+    parse, so a `groups`-authored form was a second silent shape.
+  - A finding names its sub-container — `view "contact_views" · formViews.create`
+    — because an artifact-emitted container carries neither `name` nor `object`,
+    and without it two forms under one view were indistinguishable.
+  - A sub-container inherits the container's object binding when it declares no
+    `data.object` of its own, resolved through the same `objectName` → `object` →
+    `data.object` ladder the other view-walking rules in this package use.
+  - A map-shaped `views` reports at the key it sits at (`views.contact_views.…`)
+    rather than a synthetic index, so a finding stays usable as an edit target.
+
+  Both rules remain advisory `warning`s and their messages, hints and severities
+  are unchanged. No new finding appeared on any example app, so nothing that was
+  green goes red on existing metadata — what changes is that a form defect in the
+  places apps actually put forms is now reported instead of silently passed.
+
+- a5ca08d: fix(lint): `object/missing-name-field` 认 `nameField`、不再把已退役的 `titleFormat` 当作 name 面(#6108)
+
+  `object/missing-name-field` 的谓词从来不读 `obj.nameField`,却仍然采信 `obj.titleFormat`:
+
+  ```
+  hasNameField = !!obj.primaryField || !!obj.titleFormat || fields.some(name-like)
+  ```
+
+  净效果是同一个包里两条规则互相矛盾。`validate-record-title.ts` 把每一处 `titleFormat`
+  声明都报成 `title-format-retired`,并按 **ADR-0079** 指示作者迁移到 `nameField`
+  (`titleFormat` 是 render-only 模板,服务端既不能返回也不能查询);而共享的
+  `objectTitleCompleteness`(`@objectstack/spec/data`)判定标题面时也从不读它。于是:
+  **照平台自己的迁移建议把 `titleFormat` 换成 `nameField` 的对象,反而多得一条
+  "records will display as raw IDs" suggestion;守着已退役的键不动的对象反而干净。**
+
+  下游实测(hotcrm main,`@objectstack/* 17.0.0-rc.3`):6 处命中里 4 处是误报,
+  四个对象——`crm_campaign_member` / `crm_event_attendee` / `crm_contract` /
+  `crm_forecast`——都显式声明了 `nameField`;只有两个 line-item 对象是真命中。
+
+  本次修正:
+
+  - 谓词补读 `nameField`(ADR-0079 的规范主标题指针),显式声明它的对象不再被告警;
+  - 摘掉 `titleFormat` 这一支。**只声明 `titleFormat`、没有 `nameField` 的对象因此会
+    新得一条本规则的 suggestion** —— 这是刻意的翻转,不是回归:这类对象正是 ADR-0079
+    要求迁移的那一批,`validate-record-title` 今天已经对它同时报
+    `title-format-retired` 与 `title-unresolvable`。两条规则从此对同一个对象给出一致判断;
+  - `primaryField` 与 name-like 字段两支行为不变;
+  - 提示文案改为只点名作者真正能声明的面(`nameField` 与 name-like 字段),并新增 `fix` 提示
+    说明 `titleFormat` 不算标题面 —— 读到旧文案的作者很容易顺手再写一个 `titleFormat`,
+    又掉回同一个矛盾里。旧文案里的 `primaryField` 同时不再出现:该键在 `packages/spec` 中
+    没有任何声明,`ObjectSchema.create()` 会以 `unrecognized_keys` 拒收它(实测,已立 #6326),
+    提示不该向作者广告一个会被 schema 硬拒的键。谓词里的这一支保持不动。
+
+- 6ce10bd: fix(lint): 摘掉 `primaryField` 这个幽灵键——两条规则不再把它当作标题面(#6326)
+
+  `primaryField` 在 `packages/spec` 里**没有任何声明**。实测(`17.0.0-rc.5` dist):
+
+  ```
+  ObjectSchema.safeParse({ name: 'probe_obj', label: 'Probe', primaryField: 'code',
+                           fields: { code: { type: 'text', label: 'Code' } } })
+  // => success: false
+  // => issues: [{ code: 'unrecognized_keys', keys: ['primaryField'], path: [] }]
+
+  ObjectSchema.create(/* 同上 */)
+  // => throws: ObjectSchema.create('probe_obj'): unknown key(s) — primaryField.
+  ```
+
+  同一形状换成 `nameField: 'code'` 则 `safeParse` 通过。也就是说,这个键**从来不是可声明面**,
+  而三处消费者没跟上——两面同源,却各自有一个可达面:
+
+  - **文档面(作者会照做,当下活着的那一半)**:`skills/objectstack-data/SKILL.md` 是 AI 编写
+    元数据时读的技能文档,它把 `primaryField` 明说成 `object/missing-name-field` 的合法逃逸口。
+    照它写出来的对象在 `ObjectSchema.create()` 上被 ADR-0032「不静默丢弃未知键」的闸硬拒——
+    **这是在教 AI 写出必然失败的元数据。**
+  - **规则面(判定永不成立)**:`data-model-rules.ts` 的 `!!obj.primaryField` 一支,以及
+    `validate-semantic-roles.ts` 标题解析链里的那一项,对任何 schema 收得下的对象恒为 false,
+    属于 #4984 家族的死支——看起来在保护什么,实际什么都判不到。
+
+  本次按维护者裁定 **remove,不 declare**(`nameField` 已是 ADR-0079 的规范主标题指针,
+  再立一个平行指针没有拉力,且与 Prime Directive #7「One Zod source per metadata type」相悖):
+
+  - `data-model-rules.ts`:`object/missing-name-field` 的谓词收敛为
+    `!!obj.nameField || fields.some(name-like)`;
+  - `validate-semantic-roles.ts`:规则 (d) 的标题解析链收敛为
+    `[nameField, displayNameField]`(`displayNameField` 实测可声明,保留);
+  - `skills/objectstack-data/SKILL.md`:该规则的表述改为只点名作者真正能声明的面——
+    `nameField` 与 name-like 字段(并列出这七个名字)。
+
+  **零 `packages/spec` 改动,不需要迁移:`primaryField` 从来不是可声明键,写了它的对象在
+  schema 上本来就发布不了,所以没有任何能工作的 app 会因此回归。** 行为上唯一的变化是:
+  一个只靠 `primaryField` 充当标题面的对象,现在会新得一条 `object/missing-name-field`
+  的 suggestion(severity 为 suggestion,不失败命令)——而这类对象本就通不过 `ObjectSchema`。
+  真正的修法是改声明 `nameField`。
+
+- 5087ac6: fix(lint): script-node retired-key diagnostic no longer says "rewrite it" (#7030)
+
+  `validate-expressions`'s lint diagnostic for a `script` node carrying a retired
+  dispatch key (`config.actionType` / `template` / `recipients` / `variables` /
+  `script`, retired in `@objectstack/spec` 17, #4343) closed with `Run \`os
+  migrate meta --from 16\` to rewrite it automatically.`For the`template`/`recipients`/`variables`/`script`branches the value is **deleted**,
+not rewritten into anything, so "rewrite **it**" named the wrong antecedent —
+the same false-antecedent shape #6856 (route D, maintainer-ruled) already swept
+out of every`packages/spec/src` tombstone. This was the one live site the
+sweep's scan surface (`packages/spec/src` only) could not see.
+
+  The sentence now reads `Run \`os migrate meta --from 16\` to rewrite existing
+  sources automatically.`— naming a property of the TOOL (it rewrites your
+source files), never the retired key's fate, which the message body already
+states per branch. Message copy only: the diagnostic still fires on the same
+inputs, at the same severity, with the same`#4343` / per-key / replacement
+  guidance untouched.
+
+  `packages/spec/src/shared/retired-key-migrate-sentence.test.ts` — the #6856
+  class pin — is widened to scan `packages/lint/src` alongside `packages/spec/src`
+  so this sentence cannot drift from the house form again, in either package.
+  That widening is test-only (no `@objectstack/spec` runtime code changed);
+  listed here only because the pin's own file lives inside `packages/spec`.
+
+- 7618ee8: `translation-target-unknown` 按运行时视图身份判定容器默认 `list` 的 `_views` 键(#5164 第 2 棒 / lint 段)
+
+  `validate-translation-references` 的 `collectViewRecord()` 过去读 `view.list.name`
+  来决定容器默认列表贡献哪个 `_views` 名 —— 作者没写 `name` 时它什么也不注册,而组装器
+  (`expandViewContainer`,`packages/spec/src/ui/view.zod.ts`)给同一个视图的身份是
+  `<object>.default`。第 1 棒(#6124)已把 i18n 提取器改为向组装器查询同一个键,于是
+  **同一次 `os lint` 运行里**出现了一对自相矛盾的结论:
+
+  - 要求方 `i18n/missing-view`:`objects.<object>._views.default.label` 缺翻译;
+  - 否定方 `translation-target-unknown`:`_views.default` 是孤儿键,「no view of object
+    `<object>` declares it」。
+
+  作者补了译文被判孤儿,删了译文被判缺翻译,两条都躲不掉。本仓库自带示例上实测有 8 处
+  (`examples/app-showcase` 6 处、`examples/app-todo` 2 处)。
+
+  本规则现在同样**向组装器查询**这个键,而不是第三次自行推导,因此继承了组装器仅有的三条
+  规则:
+
+  - 无 `name` 的默认列表键为 `default`;带 `name` 的沿用作者的 `name`;
+  - 结构上与某个 `listViews` 条目完全相同的默认列表被组装器按签名**折叠**进该条目,只有
+    存活的那个键合法 —— 被折叠掉的 `list.name` 不再是合法键(`examples/app-crm` 形状);
+  - 因命名冲突被改名的键(`default` → `default_2`)按**改名后**判定,因为改名后的名字才是
+    注册表键。
+
+  ## 判定变化(全是 warning,不改 `os lint` 退出码)
+
+  | 形状                                                                    | 变化前       | 变化后                                  |
+  | ----------------------------------------------------------------------- | ------------ | --------------------------------------- |
+  | 默认 `list` 无 `name`,包里写 `_views.default.*`                         | 报孤儿(误报) | 通过                                    |
+  | 默认 `list` 无 `name`,包里写 `_views.list.*`                            | 报孤儿       | 报孤儿(不变;提示语现在会列出 `default`) |
+  | 默认 `list` 与某个 `listViews.<k>` 同签名,包里写 `_views.<list.name>.*` | 通过(漏报)   | 报孤儿 —— 该键运行时解析不到            |
+  | 默认 `list` 因冲突被改名 `default_2`,包里写 `_views.default_2.*`        | 报孤儿(误报) | 通过                                    |
+
+  本仓库 12 个受棘轮覆盖的配置上实测:**新增 0 条**,消除 8 条误报;
+  `check:i18n-coverage` 基线不变(该棘轮只数 `i18n/` 前缀,本规则不在其内)。
+
+  裁决依据:维护者 2026-08-06(#5164)—— `_views` 翻译键的 canonical 拼写 = 运行时身份的
+  裸键。第 3 棒 objectui `viewSuffixes` 去第二候选(objectui#3502)不在本次变更内。
+
+- 2d1ddf0: fix(spec): liveness-ledger follow-through — `dashboard.widgets[].colorVariant` is `live`, and `field.widget`'s note names the widget that is actually stamped (#6774, #6773)
+
+  Two ledger records that stopped being answerable to reality after objectui
+  implementations landed. Both are corrections to the **evidence base**, not new
+  judgments: the legal-metadata set is byte-identical before and after, and no
+  schema acceptance test changed.
+
+  ## `dashboard.widgets[].colorVariant` — `dead` → `live` (#6774)
+
+  The 2026-08-03 `dead` verdict was right when it was written: every read of
+  `widget.colorVariant` was an authoring surface, `DashboardRenderer` built the
+  metric component schema explicitly, and only `options.colorVariant` ever reached
+  `MetricWidget`. #5010 ruling B then resolved the enforce-or-remove the other way
+  — keep the declaration, objectui implements it — and objectui#3359 /
+  PR objectui#3799 (merge `c4c0ac897`) did exactly that: `DatasetWidget` resolves
+  the declared token through the accent table `MetricWidget` already shared. This
+  repo absorbed it with the `.objectui-sha` pin `09987b68`, whose ancestry over
+  that merge is re-verified in the row.
+
+  So the 16 authored sites — 7 in `packages/platform-objects`' `system_overview`,
+  9 across `examples/app-showcase` — now paint the accent they declare. A widget
+  that never authored the key, and the enum's own `default`, still resolve to no
+  class, so their markup is unchanged.
+
+  **What changes for an author.** The row drops `authorWarn`/`authorHint`, so
+  `os validate` (and any other `@objectstack/lint` consumer) no longer emits
+  `liveness-dead-property` telling you to move `colorVariant` under `options`. That
+  advisory would now be wrong twice over: the key works where it is declared, and
+  `options.colorVariant` is the slot that measured dead. PR #5255's pinned
+  "`colorVariant` still warns beside the four retired keys" positive contrast is
+  released with it — its premise was that no renderer reads the key.
+
+  The dashboard ledger now warns on nothing, which is the resolved state
+  `webhook` and `email_template` already sit in. `dashboard` stays registered in
+  the lint's `TYPE_COLLECTIONS` so a future regression that re-deadens a widget
+  key warns on its own, and the block's silence pins gained the anti-vacuity guard
+  #4651's area gates use — a lint that had stopped loading ledgers returns "no
+  findings" too.
+
+  ## `field.widget` — the note named a widget nobody ever stamped (#6773)
+
+  The note offered `sys_permission_set (capability-multiselect)` as a worked
+  example of the override in use. That half was never true. ADR-0056 P1 stamps
+  `permission-facet-link` on all six `sys_permission_set` facets through a single
+  choke point, and `field:capability-multiselect` was registered only by objectui's
+  docs-site-only `registerFields()` — never by the live `registerAllFields()` walk
+  over `fieldWidgetMap` — so authoring it always fell through to the `type`
+  renderer. objectui#3308 / PR objectui#3793 then retired the name outright under
+  ADR-0049; at pin `09987b68` it survives only as tombstone comments and a
+  retirement pin test.
+
+  The verdict is untouched and was never at risk: `widget` is `live` on the
+  `sys_sharing_rule` trio alone (`object-ref` / `filter-condition` /
+  `recipient-picker`, all three re-checked in `fieldWidgetMap` at the same pin).
+  What was wrong was one example — false evidence in the base the next
+  enforce-or-remove audit reads, which is the #5175 lesson.
+
+  Nothing to migrate in either half: the schemas, the parsed shapes and the
+  runtime are unchanged — only the classification of what they already do, and the
+  evidence cited for it.
+
+- cd584d5: fix(lint): the `element:record_picker` field-binding entry drops #5775's retired `displayField` / `searchFields` (#6629)
+
+  `COMPONENT_FIELD_SPECS` — the one hand-written table naming which component
+  props carry FIELD NAMES — still listed `displayField` and `searchFields` for
+  `element:record_picker`, with a comment ("The schema says `displayField`; real
+  pages author `labelField`. Accept both.") describing a spec that no longer
+  exists. #5775 retired both: `displayField` was renamed to `labelField`
+  (ADR-0087 D2) and `searchFields` was deleted (ADR-0049), and both are
+  `retiredKey()` tombstones on `ElementRecordPickerPropsSchema`. The entry now
+  names `labelField` alone.
+
+  What changes for an author: a page that writes one of the retired keys no
+  longer collects a second `page-field-unknown` finding on top of the #5068 props
+  gate's rename/delete prescription. That finding was the misleading half — it
+  reported that the field named by a key which no longer exists does not exist
+  either, while the prescription is what actually moves the page forward. No
+  spec-conformant page is affected; nothing else in the table moves.
+
+  The harder half of the residue is that nothing reconciled this hand-written
+  table against the spec, which is how a retirement that disposed of the schema,
+  the tombstone, the ADR-0087 conversion and the generated artifacts still left
+  dead spelling standing in a live rule — the ADR-0078 reader face, where the
+  next author infers the spelling is current. `component-field-specs-liveness.test.ts`
+  closes that class table-wide: every prop the table names must exist on the
+  corresponding `ComponentPropsMap` schema and must not be a tombstone, so the
+  next retirement that forgets this table goes red naming the entry instead of
+  surviving as residue.
+
+- 9bc846b: fix(objectql,lint): 服务端为 `requiredWhen` 绑定 parent 作用域,并把构建期硬闸扩到同一格
+
+  `readonlyWhen` 的 parent 作用域洞在 #4889 已经补上;同一个字段上、由同一个求值器处理的
+  `requiredWhen` 隔一个槽位还漏着。detail 对象上声明的
+  `` requiredWhen: P`parent.status == 'sent'`  `` ——「表头一旦 Sent,每一行都必须填写说明」——
+  只在内联表格里被求值,服务端从来只绑 `record` / `previous`,谓词直接 fault 走 fail-open
+  分支,写入带着空字段落库,API 还回 200。
+
+  注意它与 #4889 是**镜像**而不是同一种故障:`readonlyWhen` fail-open 是**写进了本该冻结的字段**,
+  `requiredWhen` fail-open 是**收下了本该被拒的记录**。两者都是同一处声明点上的 `declared ≠ enforced`
+  (PD #10)。
+
+  本次按维护者 2026-08-06 的裁决落 A + C 两条,**刻意不对称于 #4889**:
+
+  - **A —— 绑作用域,求值语义不动。** 引擎用 #4889 已经建好的
+    `resolveMasterDetailParent(s)` 解析主表头行并传入求值器,insert / 单 id update /
+    bulk update 三个调用点都覆盖。**不可求值仍然 fail-open**(记日志、跳过、放行):
+    表头此刻读不到就 422 掉一次本来合法的写入,比 `readonlyWhen` 那边「拒掉一个字段」响得多。
+    这是 issue 的 B 案,明确不做,留给 ADR-0058 D5 下一次复审。
+  - **C —— 改在构建期拦。** `@objectstack/lint` 的 parent 作用域闸原本只盖 `readonlyWhen`,
+    现在同样判 `requiredWhen`:对象没有恰好一个 `master_detail` 关系时,`parent` 不是元数据
+    陈述过的事实,声明直接判 error。两格共用同一个闸,但**报错文案不同** —— 两边运行时的失败
+    方向相反(`readonlyWhen` fail-closed ⇒ 字段永远写不进;`requiredWhen` fail-open ⇒ 要求
+    永远不生效),文案指错了就等于给了相反的修法。运行时敢保持 fail-open,正是因为这道闸
+    拦住了那条会无声烂掉的声明。
+
+  同一次改动里补了 ADR-0113 非回归判定在 parent 作用域下的正确输入:「存量行本来就违规吗」问的是
+  **写入前**那一行的状态,而它挂的是**旧**表头。改挂(repoint)到另一个主表时,若把落地表头也
+  喂给这个前置判定,就会把「移到 Sent 表头之下」读成既有违规而放行 —— 正是本 issue 要堵的那个
+  收下动作,只是换了个入口。因此求值器新增 `previousParent`,仅在载荷确实改挂时由引擎解析,
+  其余情况沿用同一行、不多付一次读。
+
+  对象级 `script` / `cross_field` 规则共用这个求值调用点,自 #4649 起对不可求值谓词是
+  **fail-closed**,本次**没有**给它们绑新根 —— 绑了会把它们今天拒掉的写入翻成接受。这条由 pin
+  测试钉住(#4972 当初把本改动挡在范围外,就是为了这个爆炸半径)。
+
+  仓内暂无 app 声明 parent 作用域的 `requiredWhen`(showcase 的 invoice line 用的是行作用域的
+  `record.quantity >= 100`),所以这是补潜伏缺口,不改变任何现有 app 的写入行为。
+
+- ca522e9: fix(lint): 超预算的 RLS 谓词有了自己的规则 id，不再被当成方言写错 (#6778)
+
+  `rowLevelSecurity[].using` / `.check` 里一条**语法完美、可下推**、只是太大的 CEL
+  谓词（例如 80 项合取，超过 `maxAstNodes` 256），此前报在
+  `rls-predicate-unparseable` 名下——那条规则的提示语讲的是 SQL 与 CEL 的方言混淆
+  （"用 `&&` 别用 `AND`"、"`LIKE` 没有 CEL 拼法"）。判决是**对的**，指路是错的：
+  作者要做的是把谓词改小或拆开，而不是检查自己的方言。
+
+  新增第三个 id **`rls-predicate-over-budget`**（与既有两个并列导出）：
+
+  - 消息点名**具体越界的那个界**和平台取值——`maxAstNodes` (256) / `maxDepth` (32)
+    / `maxListElements` (64) 各自报各自的，取自 formula 姊妹入口
+    `parseCelToAstWithReason` 的 `kind: 'bounds'` 载荷，而不是写死一个；被告知去缩短
+    错误的那根轴，作者就会改错地方。越界谓词按定义很长，引文因此截断到 200 字符。
+  - 提示语给的是真正的补救：把长 `||` 链折成 `field in [...]`；把集合预解析成
+    `current_user.<key>` 成员键（ADR-0105 D11）；把重复子表达式反范式化成本对象上的
+    一个 formula/rollup 字段；以及——**只对顶层 `||`** 可以拆成多条策略（适用策略之
+    间是 OR），顶层 `&&` 这样拆会**放大**访问权限而不是保持它。
+
+  **没有行为变更。** 判定边界仍然是 `isSupportedRlsExpression` 本身，一个字符没动；
+  同样的输入照样被拒，只是其中一类被告知了真正的原因。区分只发生在**解释**里：
+  运行时把越界折叠进 `reason: 'parse-error'` 是有意为之（"每个消费者都已经把这个
+  reason 路由到自己的拒绝路径"），对只需决定拒不拒的运行时是对的，对职责就是点明该
+  改哪里的授时诊断则不然。
+
+  该规则不读 `cel-pushdown-limits.ts` 的 GA 日期开关，对它保持中立：17.0.0-rc.x 宽限
+  窗口内越界谓词仍被放行，本规则一条都不报（实测 0 条）；v17 GA 翻转后同一谓词被拒，
+  落到新 id 上。两个开关位置都有测试钉住，越界与真正的语法错误两侧各自成对钉住，
+  将来任何把二者重新合并的改动都会变红。
+
+- 4ac12ef: fix(spec,lint): a virtual `formula` field in `searchableFields` is refused loudly, not admitted verbatim (#6674)
+
+  #4254 closed the fail-open on the unknown-name axis: a `$searchFields` entry the
+  engine would not scan is `400 INVALID_FIELD`, never a silently widened search.
+  The same shape survived one axis over, on names that are perfectly real.
+
+  The declared branch of `resolveSearchFieldResolution` filtered entries by
+  EXISTENCE only, so a `formula` field declared in `searchableFields` entered the
+  allowed set — and the ingress gate, which reads that same set, accepted it for
+  exactly that reason. Measured on `origin/main`:
+
+  ```
+  AUTO:          {"allowed":["name","project_name"],"source":"auto"}                formula excluded
+  DECL-FORMULA:  {"allowed":["name","project_name_formula"],"source":"declared"}    admitted verbatim
+  ?search=Apollo&searchFields=project_name_formula  ->  200, 0 rows                 silent
+  ```
+
+  Zero rows is the defect. A formula value is computed on read and no driver
+  materializes a column for it (`driver-sql` `fieldHasColumn`, driver-turso's
+  "Virtual — no column"), so the `$contains` the engine expands `$search` into has
+  nothing to scan: 0 rows on driver-memory (the property is absent from the stored
+  row) and 0 rows WITH NO ERROR on driver-sql/better-sqlite3. The declaration read
+  as search coverage and delivered none.
+
+  - **`@objectstack/spec` — the deciding face.** The declared branch now filters on
+    existence AND scannability: an entry naming a virtual field is not admitted.
+    New exports `SEARCH_VIRTUAL_TYPES` (exactly `formula`, pinned) and
+    `isVirtualSearchField` — one judgment, so the resolution, the gate and the
+    linter cannot drift about which types have a column. The resolution itself
+    stays non-throwing: it is consulted on every search by internal callers that
+    never pass an ingress, which is why #4254 put the loudness at the ingress.
+  - **`@objectstack/metadata-protocol` — `400 INVALID_FIELD` with its own reason.**
+    Split out before the declared/auto branch, because both of those messages are
+    wrong for it: "outside the declared set" is false when the entry IS in the
+    list, and the auto-default's "declare `searchableFields` to choose the
+    searchable set" would instruct the author to write the declaration being
+    refused. The new message names the field, its type, that the value is computed
+    on read and never stored, and the fix (mirror onto a stored text field).
+  - **`@objectstack/lint` — a build error at authoring time**, on the object's own
+    `searchableFields` as well as a view's narrowing, under the existing
+    `searchable-field-unsearchable` rule (no new rule id). This narrows the
+    canonical surface, which #4830 had deliberately left existence-only.
+
+  The carve-out that made canonical existence-only is deliberately KEPT and pinned
+  by controls in all three packages: the dividing line is STORAGE, not search
+  quality. A `json` or `lookup` column declared in `searchableFields` is still the
+  author's choice and still executed — a `$contains` over the stored JSON text or
+  the stored foreign key. Narrow and rarely useful, but a scan that CAN match, so
+  it is neither a 400 nor a finding. Only "there is no column at all" is refused.
+
+  **Compatibility.** A corpus sweep of this repo plus `objectui` and `cloud` found
+  ZERO authored `searchableFields` naming a formula-typed field, so nothing in the
+  tree changes verdict. For an already-published object that does carry one:
+  loading is unaffected (no schema-parse change — `searchableFields` is still
+  `z.array(z.string())`, this is a resolution and enforcement rule); a plain
+  `?search=` keeps returning the SAME rows, because the dropped entry matched none
+  of them; only a request that NAMES the formula field flips from `200` with no
+  rows to `400 INVALID_FIELD` — including objectui's list search, which echoes the
+  declaration verbatim. An object whose `searchableFields` is ENTIRELY formula
+  entries filters to empty and falls through to the auto-default, exactly as an
+  all-stale declaration has since #4254; the linter reports the declaration rather
+  than leaving that swap silent.
+
+- 59e9b7c: fix(lint): `searchable-field-unknown` / `searchable-field-unsearchable` prescribe a **stored** mirror, not a formula (#6673)
+
+  Both authoring-time hints for a bad `searchableFields` entry told the author to
+  mirror a related record's value onto a formula field — a fix that can never
+  work:
+
+  - FROM (dotted-path entry, e.g. `project_id.name`): "…expand the relation and
+    search the related object, or copy the value onto **a formula field** here."
+  - TO: "…or copy the value onto **a stored text field** here."
+
+  - FROM (a `lookup`/`master_detail` column outside the allowed set): "…mirror
+    it onto **a text/formula** field here and declare that instead."
+  - TO: "…mirror it onto **a stored text** field here and declare that instead."
+
+  A `formula` field is virtual — no driver materializes a column for it
+  (`packages/objectql/src/engine.ts`, `driver-sql/src/schema-drift.ts`,
+  `driver-turso/src/remote-transport.ts`), so a `$contains` predicate against one
+  has nothing to scan. A CEL formula also only reads the record's own fields
+  (`record.<field>`), so it cannot fetch the related title in the first place.
+  Only the **stored** half of the old prescription ever worked; an author who
+  followed it verbatim got metadata that passed both lint and the `#4254`
+  runtime gate and then just never matched.
+
+  The corpus already prescribes the stored-field mirror everywhere else
+  (`content/docs/data-modeling/schema-design.mdx`, the `objectstack-data` and
+  `objectstack-ui` skills, PR #6670 / #6898) — this brings the tool's own hint
+  text into agreement with it.
+
+  Message text only — no schema, rule id, severity, or runtime behaviour change.
+
+- 3510e4a: refactor(spec,drivers,lint): one implementation of the filter identity reduction (#5659)
+
+  `{ $and: [] }` matches every row, `{ $or: [] }` matches none, `{}` is a TRUE
+  disjunct that absorbs its `$or`, `{ $not: {} }` is FALSE. That is a ruling
+  (#5322/#5134) pinned for every backend by the four identity cases in
+  `FILTER_LOGIC_CASES` — and it was implemented four times over: `reduceFilterNode`
+  in `driver-sql`, the same function again in `driver-mongodb`, the
+  `every`/`some`/truthiness algebra of `driver-memory`'s matcher, and nearly a
+  fifth hand-written copy inside `@objectstack/lint`, which declined to write one
+  and filed this issue instead.
+
+  **New in `@objectstack/spec` (`@objectstack/spec/data`): `reduceFilterVerdict`**,
+  beside the case table that proves it. It answers `'true' | 'false' | 'clause'`
+  for a filter node and never throws on its own; each backend's own refusals — the
+  undeclared `$`-combinator and the `undefined` comparand in `driver-sql`, the
+  query-level keys and the `$null` comparand in `driver-mongodb` — are passed in as
+  `FilterVerdictHooks` and are invoked from exactly the positions they were invoked
+  from before. `reduceFilterKeyVerdict` answers the same question for one key, which
+  is what both SQL and MongoDB emitters consult while walking a node.
+
+  **No behaviour changes in the three drivers.** The move is mechanical: the shared
+  algebra replaces each private copy, the refusals stay where they were, and the
+  `FILTER_LOGIC_CASES` conformance suites are green on both sides of the change —
+  including the SQL-inheriting `driver-sqlite-wasm` and `driver-turso`.
+
+  **`@objectstack/lint` gains two warnings it was structurally blind to.** The
+  `multi: true` unbounded-bulk-write rule (#5482) asked "does this filter have zero
+  keys", so a `delete_record` bounded by `filter: { $and: [] }` or
+  `filter: { $or: [{}] }` — a whole-object write by the ruling every driver executes
+  — passed silently. It now asks the reduction, and it warns about both while
+  staying quiet on `{ $or: [] }` and `{ $not: {} }`, which match nothing. The
+  message names the shape it saw (`a filter that REDUCES TO TRUE ({"$and":[]})`)
+  rather than calling a non-empty filter "empty".
+
+  If you have a flow declaring a bulk write bounded by one of those two shapes, the
+  lint will now tell you so — the write was already unbounded at run time; only the
+  feedback is new.
+
+- 8599c21: i18n section headings: read only the declared `label` spelling, never `title`
+
+  `record:details` sections and form-view sections declare exactly one heading key —
+  `label` (`RecordDetailsProps.sections[]` and `FormSectionSchema`; #5611 settled this
+  by declaring `label` and deliberately NOT declaring `title`). Two consumers still
+  read `label ?? title`:
+
+  - `os i18n extract` / `os lint`'s coverage walk (`i18n-extract.ts`) scaffolded
+    `objects.<object>._sections.<name>.label` from a `title`;
+  - the `translation-section-name-missing` lint rule accepted a `title` as the
+    heading it reports on.
+
+  Both now read `label` only. Per Prime Directive #12 the tolerance was the bug: a
+  consumer that reads an undeclared spelling turns it into a second de-facto contract,
+  and here it did so on the loudest possible surface — the extractor would seed a
+  translation bundle key from a spelling the schema rejects, teaching the wrong key to
+  every translator downstream.
+
+  FROM → TO: a section authored as `{ name: 'timeline', title: 'Timeline' }` becomes
+  `{ name: 'timeline', label: 'Timeline' }`. No migration is expected in practice —
+  every `record:details` section in this repo and in `packages/platform-objects`
+  already authors `label` (~12 sections, zero `title`).
+
+  Behaviour change if you do author `title`: the heading is treated as absent. The
+  extractor still emits the section's expected key (it is derived from `name`) but
+  seeds it with the section name instead of your `title` text, and the lint rule no
+  longer reports that section. Rename the key to `label` — which is also what the
+  schema itself will tell you, since `title` is not a declared key there.
+
+- 1bb679c: fix(lint): `_views` keys for named `listViews`/`formViews` entries are the runtime's, single spelling (#6422)
+
+  `validateTranslationReferences` accepted two spellings for a named view entry —
+  the map key and the entry's inner `name` — while the composer
+  (`expandViewContainerWithDiagnostics`) constructs the runtime identity from the
+  map key alone and ignores `name` entirely. Per the #5164 ruling (canonical =
+  the runtime identity's bare key), the named branches now read their keys from
+  the composer, exactly as the default `list` already does: an inner `name`
+  diverging from its map key stops being a legal bundle key (the runtime never
+  resolves it), and a collision-renamed entry (`formViews.default` beside a
+  default `list` → `default_2`) becomes legal under the renamed key — the one
+  spelling that actually resolves — instead of being reported as an orphan.
+
+  Measured over all 12 ratchet-covered configs in this repo: `os lint` verdicts
+  are byte-identical before/after (`added: 0 / removed: 0`).
+
+- ea8e849: `visibility-predicate-syntax`: an over-budget predicate is a SIZE fault, not "not valid CEL" (#7217)
+
+  view / page `visibleWhen` 的门禁把两类拒绝合成了一类。`parseCelToAst` 对"不是 CEL"
+  和"是 CEL、但超过平台解析预算"返回同一个 `null`（生产侧刻意如此），于是一条
+  80 项合取的谓词——完全合法的 bare CEL，只是超过 `maxAstNodes` 256——被报成
+  `visibility predicate is not valid CEL`，并附上方言处方（"写 `==` 不是 `===`、
+  `&&` 不是 `and` …"）。标题是假的，处方在这条源码上根本不可能成功：作者（尤其是
+  照着最后一句话执行的 LLM 作者）会去改一堆本来就没错的运算符，然后带着同一条超预算
+  谓词回来。#7073 / PR #7209 在 ADR-0032 的共享生产者上修的是同一个缺陷，而本门禁
+  按其自身 docblock 刻意不走 `validateExpression`，所以生产侧的修复到不了这里。
+
+  **判定不变**：拒绝的输入集合、严重级别、每条坏谓词一个 finding，全部与修复前一致。
+  红绿边界仍然是规范前端接受什么——`celRefusal` 改问 `parseCelToAstWithReason`，而
+  `parseCelToAst` 本身就是"它把 reason 丢掉"（同一个 env、同一套 limits），所以没有
+  任何一条源码换了颜色。变的只有解释。
+
+  新增第三个 error 级 id **`visibility-predicate-over-budget`**（与
+  `visibility-predicate-syntax` / `visibility-bare-identifier` 并列导出），理由与
+  #6778 / PR #6831 在 RLS 侧把 `rls-predicate-over-budget` 从
+  `rls-predicate-unparseable` 拆出来时相同：后果相同，**修法不同**，而 `--json`
+  消费者与抑制清单都按 id 取值。超预算谓词现在报：
+
+  > visibility predicate is syntactically valid CEL but overruns the `maxAstNodes`
+  > budget (platform limit 256) (Exceeded maxAstNodes (256)) (predicate: …) …
+  >
+  > hint: There is no syntax or dialect error to correct here — this is a SIZE
+  > fault, not a dialect mistake, so re-spelling the predicate will not fix it.
+  > Make it smaller, or move the work off the predicate: (1) collapse a long
+  > `record.f == 'a' || record.f == 'b' || …` chain into a single
+  > `record.f in ['a', 'b', …]` …; (2) precompute the heavy part into a
+  > formula/rollup field on the object and test that one field instead. …
+
+  越界的那条界（`maxAstNodes` / `maxDepth` / `maxListElements` / …）与平台取值来自
+  前端自己的结构化 `overrun`，不是硬编码，也不是二次解析它的散文（#6223）；提示里的
+  绑定根随 layer 走（runtime 用 `record`，`*.form.ts` 元数据表单用 `data`），否则处方
+  本身又会是一句照做不了的话。真正的方言/语法错误保持 #6253 的 id、message 与 hint
+  逐字不变——两个方向都有 pin。
+
+  **兼容性**：这是新增 id，不是改名。抑制 `visibility-predicate-syntax` 的配置从此不再
+  抑制超预算这一类——与 #6778 接受的代价相同，而且本来就是抑制错了对象（抑制的是
+  "语法"，命中的是"太大"）。仓库内除 `packages/lint` 自身与 changelog 外，没有任何
+  配置、文档或示例引用这些 id。
+
+- Updated dependencies [3d5c090]
+- Updated dependencies [e5bd768]
+- Updated dependencies [e027b3e]
+- Updated dependencies [c2429b0]
+- Updated dependencies [445a0c2]
+- Updated dependencies [f6609e6]
+- Updated dependencies [a70358a]
+- Updated dependencies [97e7e3c]
+- Updated dependencies [8828b9e]
+- Updated dependencies [53068c1]
+- Updated dependencies [ee58392]
+- Updated dependencies [f16e54e]
+- Updated dependencies [06be54e]
+- Updated dependencies [259459d]
+- Updated dependencies [3f7f14e]
+- Updated dependencies [6968885]
+- Updated dependencies [eaed61f]
+- Updated dependencies [debe2f6]
+- Updated dependencies [97b0798]
+- Updated dependencies [43a7a8d]
+- Updated dependencies [73f69dc]
+- Updated dependencies [04c56aa]
+- Updated dependencies [b3efeb7]
+- Updated dependencies [ddd075a]
+- Updated dependencies [88154be]
+- Updated dependencies [e8dc61e]
+- Updated dependencies [2f3e793]
+- Updated dependencies [d8e8d9c]
+- Updated dependencies [94e749b]
+- Updated dependencies [ea1d916]
+- Updated dependencies [ae31a19]
+- Updated dependencies [b230e5e]
+- Updated dependencies [5d24f4b]
+- Updated dependencies [29b94ed]
+- Updated dependencies [07c68b0]
+- Updated dependencies [f6cd635]
+- Updated dependencies [e0f300b]
+- Updated dependencies [62b6a2f]
+- Updated dependencies [5b4780b]
+- Updated dependencies [a933452]
+- Updated dependencies [8140915]
+- Updated dependencies [7b48cf9]
+- Updated dependencies [b5404f4]
+- Updated dependencies [f764691]
+- Updated dependencies [e120a5a]
+- Updated dependencies [e9b5265]
+- Updated dependencies [e650d67]
+- Updated dependencies [04476e7]
+- Updated dependencies [79228cd]
+- Updated dependencies [b3363e9]
+- Updated dependencies [2ef1807]
+- Updated dependencies [d03fe25]
+- Updated dependencies [2672f85]
+- Updated dependencies [11066f6]
+- Updated dependencies [916af17]
+- Updated dependencies [84c86fb]
+- Updated dependencies [2a2a9fb]
+- Updated dependencies [a2e157c]
+- Updated dependencies [95c4227]
+- Updated dependencies [2a61116]
+- Updated dependencies [d4df105]
+- Updated dependencies [e2798fa]
+- Updated dependencies [0fd8556]
+- Updated dependencies [74155c7]
+- Updated dependencies [6908830]
+- Updated dependencies [8b06bba]
+- Updated dependencies [4c54037]
+- Updated dependencies [0f7157b]
+- Updated dependencies [d9bef45]
+- Updated dependencies [f549a0d]
+- Updated dependencies [82da264]
+- Updated dependencies [9b9b70f]
+- Updated dependencies [f5a9bc2]
+- Updated dependencies [881a3cc]
+- Updated dependencies [ad6317b]
+- Updated dependencies [d5e9f6e]
+- Updated dependencies [8a88885]
+- Updated dependencies [5f7669e]
+- Updated dependencies [becbe53]
+- Updated dependencies [b127c8b]
+- Updated dependencies [a80302a]
+- Updated dependencies [474f131]
+- Updated dependencies [050cd82]
+- Updated dependencies [4d552af]
+- Updated dependencies [44d677c]
+- Updated dependencies [c32944d]
+- Updated dependencies [1dd780f]
+- Updated dependencies [cafec0a]
+- Updated dependencies [c8d6f6e]
+- Updated dependencies [92a67f2]
+- Updated dependencies [9136327]
+- Updated dependencies [bf0ae99]
+- Updated dependencies [cb3b6cd]
+- Updated dependencies [73b7234]
+- Updated dependencies [d2b97c3]
+- Updated dependencies [59b794f]
+- Updated dependencies [fc3a36a]
+- Updated dependencies [69787f0]
+- Updated dependencies [5d022a1]
+- Updated dependencies [042b9ee]
+- Updated dependencies [f549a0d]
+- Updated dependencies [a36db28]
+- Updated dependencies [3f8817a]
+- Updated dependencies [a2443e3]
+- Updated dependencies [e1554b1]
+- Updated dependencies [4856789]
+- Updated dependencies [c3f4916]
+- Updated dependencies [33e0385]
+- Updated dependencies [2205363]
+- Updated dependencies [09fe58d]
+- Updated dependencies [d0a5ceb]
+- Updated dependencies [e18a162]
+- Updated dependencies [d127ff0]
+- Updated dependencies [9b86cf6]
+- Updated dependencies [8825a06]
+- Updated dependencies [5087ac6]
+- Updated dependencies [6965160]
+- Updated dependencies [2d1ddf0]
+- Updated dependencies [354b00f]
+- Updated dependencies [3de535b]
+- Updated dependencies [fe2e15a]
+- Updated dependencies [c6b6bb4]
+- Updated dependencies [2f59da0]
+- Updated dependencies [8ad609c]
+- Updated dependencies [bbee302]
+- Updated dependencies [08863dd]
+- Updated dependencies [56664f5]
+- Updated dependencies [31cbe90]
+- Updated dependencies [90bbf25]
+- Updated dependencies [eb91eba]
+- Updated dependencies [42da73d]
+- Updated dependencies [643b7c7]
+- Updated dependencies [1a15893]
+- Updated dependencies [b70e534]
+- Updated dependencies [2233a85]
+- Updated dependencies [62dd69a]
+- Updated dependencies [e15e679]
+- Updated dependencies [2ab1257]
+- Updated dependencies [4cc4fb7]
+- Updated dependencies [2c26040]
+- Updated dependencies [f758cec]
+- Updated dependencies [78f0be8]
+- Updated dependencies [35f7fb4]
+- Updated dependencies [a5302c7]
+- Updated dependencies [7084313]
+- Updated dependencies [0e043d8]
+- Updated dependencies [dadd1ad]
+- Updated dependencies [2f2e63c]
+- Updated dependencies [486d526]
+- Updated dependencies [89d7b35]
+- Updated dependencies [85ec26d]
+- Updated dependencies [f6476fc]
+- Updated dependencies [4ac12ef]
+- Updated dependencies [b88f5e8]
+- Updated dependencies [42cc219]
+- Updated dependencies [d7e0b42]
+- Updated dependencies [3510e4a]
+- Updated dependencies [aa4b90d]
+- Updated dependencies [54299ca]
+- Updated dependencies [dc61def]
+- Updated dependencies [251e888]
+- Updated dependencies [183b4c4]
+- Updated dependencies [2fdb36e]
+- Updated dependencies [20526f5]
+- Updated dependencies [c5eef1d]
+- Updated dependencies [e0f300b]
+- Updated dependencies [761a0ba]
+- Updated dependencies [be87153]
+- Updated dependencies [60f0dd8]
+- Updated dependencies [a87c5cd]
+- Updated dependencies [a47f338]
+- Updated dependencies [2598216]
+- Updated dependencies [2c7e62d]
+- Updated dependencies [eb7613c]
+- Updated dependencies [ecc9110]
+- Updated dependencies [f7bd4e2]
+- Updated dependencies [361bd5b]
+- Updated dependencies [1818998]
+- Updated dependencies [09ee21c]
+- Updated dependencies [f549a0d]
+- Updated dependencies [3fc2e48]
+- Updated dependencies [e8f435c]
+- Updated dependencies [41610f6]
+  - @objectstack/spec@17.0.0-rc.6
+  - @objectstack/formula@17.0.0-rc.6
+  - @objectstack/sdui-parser@17.0.0-rc.6
+
 ## 17.0.0-rc.5
 
 ### Patch Changes

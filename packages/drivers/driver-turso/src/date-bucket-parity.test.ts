@@ -65,7 +65,7 @@ describe('TursoDriver date-bucket parity (framework#3773)', () => {
         await driver.create(
           'bucket_storage_probe',
           { id: 'p1', at: new Date('2026-01-10T09:00:00Z') },
-          { bypassTenantAudit: true } as never,
+          { bypassTenantAudit: true },
         );
         const res: any = await driver.execute(
           `SELECT typeof("at") AS t FROM "bucket_storage_probe" WHERE id = 'p1'`,

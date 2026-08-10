@@ -64,7 +64,7 @@ Top-level full-text search engine configuration
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **provider** | `Enum<'elasticsearch' \| 'algolia' \| 'meilisearch' \| 'typesense' \| 'opensearch'>` | ✅ | Search engine backend provider |
-| **indexes** | `{ indexName: string; objectName: string; fields: { name: string; type: Enum<'text' \| 'keyword' \| 'number' \| 'date' \| 'boolean' \| 'geo'>; analyzer?: string; searchable: boolean; … }[]; replicas: number; … }[]` | ✅ | Search index definitions |
+| **indexes** | `{ indexName: string; objectName: string; fields: object[]; replicas: number; … }[]` | ✅ | Search index definitions |
 | **analyzers** | `Record<string, { type: Enum<'standard' \| 'simple' \| 'whitespace' \| 'keyword' \| 'pattern' \| 'language'>; language?: string; stopwords?: string[]; customFilters?: string[] }>` | optional | Named text analyzer configurations |
 | **facets** | `{ field: string; maxValues: number; sort: Enum<'count' \| 'alpha'> }[]` | optional | Faceted search configurations |
 | **typoTolerance** | `boolean` | ✅ | Enable typo-tolerant search |

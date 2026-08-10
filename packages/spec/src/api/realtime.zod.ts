@@ -48,6 +48,7 @@ export const SubscriptionEventSchema = lazySchema(() => z.object({
   object: z.string().optional().describe('Object name to subscribe to'),
   filters: z.unknown().optional().describe('Filter conditions'),
 }));
+export type SubscriptionEvent = z.input<typeof SubscriptionEventSchema>;
 
 /**
  * Subscription Schema

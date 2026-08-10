@@ -49,7 +49,7 @@ The `type` field selects how an action is dispatched. The complete enum is **`sc
 | `flow` | Invoke a Screen/automation Flow by name. | Yes |
 | `modal` | Open a modal/page by name. | Yes |
 | `api` | Call an API endpoint (`method` defaults to `POST`). | Yes |
-| `form` | Open a FormView by name, routed to `/console/forms/:name`. | Yes |
+| `form` | Open a FormView by name, routed to `/console/forms/:name` **inside the console shell**; the submit lands on the created record. | Yes |
 
 `target` is the canonical binding for every non-`script` type, and since protocol 17 it is the **only** one. The deprecated `execute` alias was removed (#3855): authoring it is rejected with an error naming the replacement, not silently stripped. Run `os migrate meta --from 16` to rewrite existing sources automatically — the removal also ships in the machine-readable change manifest (`spec-changes.json`), which composes across however many majors you are jumping.
 
@@ -92,7 +92,26 @@ type: url
 target: '/api/v1/auth/sign-in/social?provider=${param.provider}&callbackURL=${ctx.origin}/_console/apps/account/sys_account'
 ```
 
-To open the result in a new tab, set `opensInNewTab: true` (the renderer pre-opens the tab synchronously so popup blockers don't fire). `newTabUrl` provides a zero-roundtrip new-tab target template supporting the `{recordId}` placeholder.
+For a **static** url, `openIn: 'new-tab'` opens `target` in a new tab and `openIn: 'self'` navigates in place; omitted, absolute URLs open in a new tab and relative ones navigate in place. For an **async handler that redirects**, set `opensInNewTab: true` instead (the renderer pre-opens the tab synchronously so popup blockers don't fire); `newTabUrl` provides a zero-roundtrip new-tab target template supporting the `{recordId}` placeholder.
+
+<Callout type="warn">
+**The interpolation scope is not authorable, and `params` is not it.** `params`
+is the parameter DEFINITION array — `ActionParam[]`, the dialog shown before
+the action runs — on every action type, so `params: { id: 'abc' }` on a url
+action is rejected at parse time. `${param.X}` resolves against the values that
+dialog **collected**; a value you already know at authoring time belongs
+literally in the `target` string.
+
+Two url-side readings of an object-form `params` existed in the renderer and
+were **retired** by the 2026-08-10 ruling on
+[#6828](https://github.com/objectstack-ai/objectstack/issues/6828) rather than
+given a key: a statically authored `${param.X}` scope (say it in `target`), and
+`params.newTab` (say it with `openIn: 'new-tab'`). The refusal message names
+both replacements. Note the asymmetry with `type: 'api'`, where the object form
+*did* get a key — `bodyExtra`, per
+[#5777](https://github.com/objectstack-ai/objectstack/issues/5777) — because a
+request payload has no other spelling; a url interpolation scope does.
+</Callout>
 
 ### Flow Actions
 
@@ -139,6 +158,33 @@ label: Quick Edit
 type: form
 target: customer_quick_edit
 ```
+
+#### What `type: 'form'` promises
+
+`type: 'form'` is the platform's first-class way to open an object's form — the shape that replaced the `type: 'modal'` object fallback — so its contract is stated here rather than left to each renderer to decide (ruled 2026-08-10 on [#7245](https://github.com/objectstack-ai/objectstack/issues/7245)):
+
+1. **It renders in-shell.** The internal form route nests **inside** the console shell: sidebar, app navigation and breadcrumb stay. A form action never drops the operator onto an unchromed standalone page with the browser Back button as the only way home. The route survives too — `/console/forms/:name` stays deep-linkable and bookmarkable, which is what a route buys you over a transient dialog.
+2. **A successful submit lands on the created record.** On the internal path the default post-submit behavior is a **redirect to the record that was just created**, not a confirmation panel. The `thank-you` panel is the default for the **public** `/console/f/:slug` path only, where there is no record the anonymous submitter is allowed to see.
+3. **An explicit `submitBehavior` on the FormView always wins**, in either mode. The defaults above are what you get for declaring nothing; they are not a ceiling.
+
+| | Public path (`/console/f/:slug`) | Form action / internal path (`/console/forms/:name`) |
+| --- | --- | --- |
+| Audience | anonymous visitors | authed operators — where `type: 'form'` sends them |
+| Chrome | standalone page, no console chrome | nested inside the console shell |
+| Default when `submitBehavior` is omitted | `thank-you` confirmation panel | redirect to the created record |
+
+The four `submitBehavior` kinds and their options are documented on the [Forms guide](/docs/ui/forms).
+
+<Callout type="warn">
+**Current renderer status (2026-08-10).** The console shipping at the pinned
+`.objectui-sha` does **not** implement this contract yet: it renders
+`/console/forms/:name` as a top-level page outside the shell, and it falls back
+to the `thank-you` panel in both modes. The statement above is the contract —
+the renderer half is tracked in ObjectUI and linked from the
+[#7245 thread](https://github.com/objectstack-ai/objectstack/issues/7245). Until
+it lands, an internal FormView that must land on its new record has to declare
+`submitBehavior` explicitly.
+</Callout>
 
 ### Modal Actions
 
@@ -221,7 +267,6 @@ The `locations` array declares where an action surfaces. The canonical enum (`AC
 | `record_more` | Overflow ("More" / ⋯) menu on a record |
 | `record_related` | Actions on a related-list section inside a record |
 | `record_section` | Actions inside a body section/tab of a record |
-| `global_nav` | Global navigation / command-palette actions |
 
 ```yaml
 name: export_customers

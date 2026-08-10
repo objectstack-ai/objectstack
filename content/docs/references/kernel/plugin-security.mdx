@@ -43,7 +43,7 @@ Complete dependency graph for a package and its transitive dependencies
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **root** | `{ id: string; version: string }` | ✅ | Root package of the dependency graph |
-| **nodes** | `{ id: string; version: string; dependencies: { name: string; versionConstraint: string; type: Enum<'required' \| 'optional' \| 'peer' \| 'dev'>; resolvedVersion?: string }[]; depth: integer; … }[]` | ✅ | All resolved package nodes in the dependency graph |
+| **nodes** | `{ id: string; version: string; dependencies: object[]; depth: integer; … }[]` | ✅ | All resolved package nodes in the dependency graph |
 | **edges** | `{ from: string; to: string; constraint: string }[]` | ✅ | Directed edges representing dependency relationships |
 | **stats** | `{ totalDependencies: integer; directDependencies: integer; maxDepth: integer }` | ✅ | Summary statistics for the dependency graph |
 
@@ -93,8 +93,8 @@ Result of a dependency resolution process
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **status** | `Enum<'success' \| 'conflict' \| 'error'>` | ✅ | Overall status of the dependency resolution |
-| **graph** | `{ root: object; nodes: { id: string; version: string; dependencies: { name: string; versionConstraint: string; type: Enum<'required' \| 'optional' \| 'peer' \| 'dev'>; resolvedVersion?: string }[]; depth: integer; … }[]; edges: { from: string; to: string; constraint: string }[]; stats: object }` | optional | Resolved dependency graph if resolution succeeded |
-| **conflicts** | `{ package: string; conflicts: { version: string; requestedBy: string[]; constraint: string }[]; resolution?: object; severity: Enum<'error' \| 'warning' \| 'info'> }[]` | ✅ | List of dependency conflicts detected during resolution |
+| **graph** | `{ root: object; nodes: object[]; edges: object[]; stats: object }` | optional | Resolved dependency graph if resolution succeeded |
+| **conflicts** | `{ package: string; conflicts: object[]; resolution?: object; severity: Enum<'error' \| 'warning' \| 'info'> }[]` | ✅ | List of dependency conflicts detected during resolution |
 | **errors** | `{ package: string; error: string }[]` | ✅ | Errors encountered during dependency resolution |
 | **installOrder** | `string[]` | ✅ | Topologically sorted list of package IDs for installation |
 | **resolvedIn** | `integer` | optional | Time taken to resolve dependencies in milliseconds |
@@ -227,7 +227,7 @@ Result of a security scan performed on a plugin
 | **vulnerabilities** | `{ cve?: string; id: string; title: string; description: string; … }[]` | ✅ | List of vulnerabilities discovered during the scan |
 | **summary** | `{ critical: integer; high: integer; medium: integer; low: integer; … }` | ✅ | Summary counts of vulnerabilities by severity |
 | **licenseIssues** | `{ package: string; license: string; reason: string; severity: Enum<'error' \| 'warning' \| 'info'> }[]` | ✅ | License compliance issues found during the scan |
-| **codeQuality** | `{ score?: number; issues: { type: Enum<'security' \| 'quality' \| 'style'>; severity: Enum<'error' \| 'warning' \| 'info'>; message: string; file?: string; … }[] }` | optional | Code quality analysis results |
+| **codeQuality** | `{ score?: number; issues: object[] }` | optional | Code quality analysis results |
 | **nextScanAt** | `string` | optional | ISO 8601 timestamp for the next scheduled scan |
 
 

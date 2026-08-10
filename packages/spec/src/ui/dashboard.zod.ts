@@ -4,14 +4,18 @@ import { z } from 'zod';
 import { ProtectionSchema } from '../shared/protection.zod';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { strictObject } from '../shared/strict-object';
+import type { KeySetGuidance } from '../shared/suggestions.zod';
 import { FilterConditionSchema } from '../data/filter.zod';
 import { DateGranularity } from '../data/query.zod';
+import { DATE_MACRO_WRAPPED_RE, isDateMacroToken } from '../data/date-macros.zod';
 import { ChartTypeSchema, ChartConfigSchema } from './chart.zod';
 import { ActionType } from './action.zod';
 import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
 // `AriaPropsSchema` is no longer imported here: `widgets[].aria` was retired
-// (#5010). The shape itself is NOT removed — it stays live on `app.aria` and
-// `page.components[].aria`, whose renderers really do apply it. See the
+// (#5010). The shape itself is NOT removed — it stays live on `page.aria` /
+// `page.components[].aria` and on the list view's `aria`, whose renderers
+// really do apply it. (NOT on `app.aria`: that key is a `retiredKey()`
+// tombstone of its own, removed in the same 17.0.0 — #6756.) See the
 // tombstone below.
 import { I18nLabelSchema } from './i18n.zod';
 // `ResponsiveConfigSchema` is no longer imported here: `widgets[].responsive`
@@ -116,9 +120,16 @@ export const DashboardHeaderSchema = lazySchema(() => strictObject({
 }).describe('Dashboard header configuration'));
 
 /**
- * Legacy / quarantined widget keys that `.strict()` now rejects. Naming them
- * lets the error map hand the author a fixable message instead of a bare
- * "unrecognized key". Two families:
+ * The three key FAMILIES the widget shape rejects with a prescription rather
+ * than a rename — declared as `strictObject` `guidanceSets` (#6619), which is
+ * the form the shared template grew so these could stop being a hand-written
+ * `$ZodErrorMap`.
+ *
+ * Set-keyed, not exact-keyed, and that is the whole reason the form had to
+ * exist: eleven legacy analytics keys share ONE migration answer, and
+ * transcribing it eleven times into `guidance` would have emitted the paragraph
+ * once per key written. A set answers once per message however many of its
+ * members appear.
  *
  * - **Pre-ADR-0021 inline analytics** (`object`/`categoryField`/`valueField`/
  *   `aggregate`/`rowField`/`columnField`/…): removed from the authorable spec at
@@ -127,87 +138,63 @@ export const DashboardHeaderSchema = lazySchema(() => strictObject({
  * - **objectui-internal props** (`component`, inline `data`): renderer-only
  *   capabilities that are intentionally not modeled server-side (framework#3251
  *   decision tree) — they must not appear on AI-authored dashboard metadata.
+ * - **The #5022 drill near-key**, in all three spellings an author reaches for.
+ *   A dashboard widget has NO per-widget drill configuration, by design: an
+ *   ADR-0021 dataset-bound widget drills through the semantic layer, deriving
+ *   the target object and filter from the clicked dataset row. Saying only
+ *   "unrecognized key" here would leave the author to conclude the capability
+ *   is missing, when in fact it is automatic — and would leave them guessing
+ *   between two real keys on two other surfaces.
+ *
+ * ⚠️ The three used to be an if/else chain, so exactly ONE fired even when a
+ * widget carried keys from two families and the other prescription was silently
+ * dropped. Declared as sets they all fire, one bullet each, in declaration
+ * order — the one deliberate behaviour change in this fold (#6619).
  */
-const LEGACY_WIDGET_ANALYTICS_KEYS = new Set([
-  'object', 'categoryField', 'categoryGranularity', 'valueField', 'aggregate',
-  'aggregation', 'rowField', 'columnField', 'xAxisField', 'yAxisFields', 'measures',
-]);
-const QUARANTINED_WIDGET_KEYS = new Set(['component', 'data']);
+const WIDGET_GUIDANCE_SETS = [
+  {
+    name: 'LEGACY_WIDGET_ANALYTICS_KEYS',
+    keys: [
+      'object', 'categoryField', 'categoryGranularity', 'valueField', 'aggregate',
+      'aggregation', 'rowField', 'columnField', 'xAxisField', 'yAxisFields', 'measures',
+    ],
+    prescription:
+      'The pre-ADR-0021 inline analytics shape (`object` + `categoryField` + '
+      + '`valueField` + `aggregate`, pivot `rowField`/`columnField`) was removed — '
+      + 'bind a `dataset` and select `dimensions` + `values` by name. Renderer-only '
+      + 'settings belong under `options`.',
+  },
+  {
+    name: 'QUARANTINED_WIDGET_KEYS',
+    keys: ['component', 'data'],
+    prescription:
+      '`component` and inline `data` are objectui-internal renderer capabilities, '
+      + 'not part of the author-facing dashboard spec (framework#3251).',
+  },
+  {
+    name: 'WIDGET_DRILL_NEAR_KEYS',
+    keys: ['drillDown', 'drilldown', 'drill'],
+    prescription:
+      'Drill-through on a dashboard is AUTOMATIC and not configurable per widget: '
+      + 'a dataset-bound widget derives the drill target and filter from the dataset row '
+      + 'that was clicked, and a `table`/`pivot` widget is the one to reach for when you '
+      + 'want the detail to be clickable (`metric`/`chart` render the aggregate only). '
+      + 'The two configurable drills live elsewhere and neither is a widget key: '
+      + '`drillDown` (camelCase, a config object) is the react-tier `<ObjectChart drillDown={…}>` '
+      + 'prop — `ChartDrillDownSchema`; `drilldown` (all lowercase, a boolean) is '
+      + '`ReportSchema.drilldown` (ADR-0021 D2, on by default).',
+  },
+] as const satisfies readonly KeySetGuidance[];
 
 /**
- * Error map for the strict `DashboardWidgetSchema`. Turns an
- * `unrecognized_keys` rejection into a *fixable* message: it always names the
- * offending key(s), and when a key is a removed inline-analytics key or an
- * objectui-internal prop it points the author at the ADR-0021 dataset shape
- * (and `options` for renderer-specific extras). Mirrors `strictVisibilityError`
- * (ADR-0089 D3a); every other issue code defers to zod's default.
- *
- * ## Message order: the fix comes before the history (#5955 / #6416)
- *
- * ```text
- * Unrecognized key(s) on this dashboard widget: `k1`.   ← which key is wrong
- * [ one of the three prescription branches ]            ← the fix
- * Undeclared top-level keys were dropped silently …     ← why it used to be silent
- * ```
- *
- * Hand-written `$ZodErrorMap`s were out of reach of both #5955 (which moved the
- * sentence inside the shared `strictUnknownKeyError`) and #5593 (which migrates
- * the direct call sites to `strictObject`); #6416 applies the same ruling here.
- * The history sentence used to sit between the key statement and the branch that
- * fixes it, pushing every prescription — the ADR-0021 dataset migration, the
- * objectui quarantine, the #5022 drill answer — past character ~220 of a message
- * several consumers render on ONE line. Nothing is dropped or made conditional:
- * the sentence is still emitted verbatim, just last.
+ * The widget's own history sentence — the explanatory clause emitted LAST,
+ * after both fix channels (#5955 / #6416). Distinct from `DASHBOARD_HISTORY`:
+ * the widget has been strict since the ADR-0021 cutover, so it says what
+ * happened before THAT, in its own words.
  */
-const strictWidgetAnalyticsError: z.core.$ZodErrorMap = (issue) => {
-  if (issue.code !== 'unrecognized_keys') return undefined;
-  const keys = (issue as { keys?: readonly string[] }).keys ?? [];
-  const list = keys.map((k) => `\`${k}\``).join(', ');
-  const front = `Unrecognized key(s) on this dashboard widget: ${list}.`;
-  const history =
-    `Undeclared top-level keys were dropped silently before strict validation, ` +
-    `shipping inert metadata; a stale or mis-layered key is now a loud parse error.`;
-  if (keys.some((k) => LEGACY_WIDGET_ANALYTICS_KEYS.has(k))) {
-    return (
-      front +
-      ' The pre-ADR-0021 inline analytics shape (`object` + `categoryField` + ' +
-      '`valueField` + `aggregate`, pivot `rowField`/`columnField`) was removed — ' +
-      'bind a `dataset` and select `dimensions` + `values` by name. Renderer-only ' +
-      'settings belong under `options`. ' +
-      history
-    );
-  }
-  if (keys.some((k) => QUARANTINED_WIDGET_KEYS.has(k))) {
-    return (
-      front +
-      ' `component` and inline `data` are objectui-internal renderer capabilities, ' +
-      'not part of the author-facing dashboard spec (framework#3251). ' +
-      history
-    );
-  }
-  // #5022 — the drill near-key, in all three spellings an author reaches for.
-  // A dashboard widget has NO per-widget drill configuration, by design: an
-  // ADR-0021 dataset-bound widget drills through the semantic layer, deriving
-  // the target object and filter from the clicked dataset row. Saying only
-  // "unrecognized key" here would leave the author to conclude the capability
-  // is missing, when in fact it is automatic — and would leave them guessing
-  // between two real keys on two other surfaces.
-  if (keys.some((k) => k === 'drillDown' || k === 'drilldown' || k === 'drill')) {
-    return (
-      front +
-      ' Drill-through on a dashboard is AUTOMATIC and not configurable per widget: ' +
-      'a dataset-bound widget derives the drill target and filter from the dataset row ' +
-      'that was clicked, and a `table`/`pivot` widget is the one to reach for when you ' +
-      'want the detail to be clickable (`metric`/`chart` render the aggregate only). ' +
-      'The two configurable drills live elsewhere and neither is a widget key: ' +
-      '`drillDown` (camelCase, a config object) is the react-tier `<ObjectChart drillDown={…}>` ' +
-      'prop — `ChartDrillDownSchema`; `drilldown` (all lowercase, a boolean) is ' +
-      '`ReportSchema.drilldown` (ADR-0021 D2, on by default). ' +
-      history
-    );
-  }
-  return `${front} ${history}`;
-};
+const WIDGET_HISTORY =
+  'Undeclared top-level keys were dropped silently before strict validation, '
+  + 'shipping inert metadata; a stale or mis-layered key is now a loud parse error.';
 
 /**
  * Widget `options` — the renderer-extras escape hatch, with the keys that
@@ -304,7 +291,7 @@ const COMPARE_TO_STRING_RETIRED = (kind: 'previousPeriod' | 'previousYear') =>
   + `Write \`compareTo: { kind: '${kind}' }\` instead — same comparison, spelled the way the `
   + 'analytics executor actually reads it (`DatasetSelection.compareTo`). Add `dimension` only '
   + 'when the selection has more than one dated time dimension; with one, the executor resolves '
-  + 'it. Run `os migrate meta --from 16` to rewrite it automatically.';
+  + 'it. Run `os migrate meta --from 16` to rewrite existing sources automatically.';
 
 // ── Per-widget action button prescriptions (#5010) ───────────────────────────
 //
@@ -327,13 +314,24 @@ const WIDGET_ACTION_RETIRED = (key: 'actionUrl' | 'actionType' | 'actionIcon') =
   + '(`DashboardHeaderAction`, same vocabulary, and `icon` is the header spelling of '
   + '`actionIcon`). For a per-ROW affordance, the widget to reach for is a `table`/`pivot` '
   + 'bound to a dataset: its rows are clickable and drill through the semantic layer. '
-  + 'Run `os migrate meta --from 16` to rewrite it automatically.';
+  + 'Run `os migrate meta --from 16` to rewrite existing sources automatically.';
 
 /**
  * Dashboard Widget Schema
  * A single component on the dashboard grid.
+ *
+ * Strict since the ADR-0021 cutover; since #6619 strict through the SHARED
+ * `strictObject` template rather than a hand-written `$ZodErrorMap`. The three
+ * prescriptions are unchanged in wording ({@link WIDGET_GUIDANCE_SETS}); what
+ * the fold adds is the rename channel the bespoke map never had — `titel`,
+ * `datset`, `dimension`, `option` now resolve to the declared key instead of
+ * being echoed back with nothing but the history sentence.
  */
-export const DashboardWidgetSchema = lazySchema(() => z.object({
+export const DashboardWidgetSchema = lazySchema(() => strictObject({
+  surface: 'this dashboard widget',
+  history: WIDGET_HISTORY,
+  guidanceSets: WIDGET_GUIDANCE_SETS,
+}, {
   /** Unique widget identifier (snake_case, used for targetWidgets references) */
   id: SnakeCaseIdentifierSchema.describe('Unique widget identifier (snake_case)'),
 
@@ -600,7 +598,7 @@ export const DashboardWidgetSchema = lazySchema(() => z.object({
     'The shared `ResponsiveConfig` shape is NOT gone — it stays live on `page.components[].responsive`, ' +
     'which objectui `useResponsiveConfig` really does read; move the layout there if you need ' +
     'breakpoint behaviour today. ' +
-    'Run `os migrate meta --from 16` to rewrite it automatically.',
+    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
   ),
 
   // `aria` REMOVED (#5010, ADR-0049 D2): the same "false compliance" the
@@ -612,7 +610,13 @@ export const DashboardWidgetSchema = lazySchema(() => z.object({
   // in `DashboardRenderer` / `DatasetWidget` are the renderer's OWN DOM props,
   // and objectui's single `.aria` read (`plugin-view/ObjectView.tsx:989`) is a
   // `view`'s. The shared `AriaPropsSchema` is untouched — it stays live on
-  // `app.aria` and `page.components[].aria`, which really are applied.
+  // `page.aria` / `page.components[].aria` and on the list view's `aria`,
+  // which really are applied (`action.aria` carries the shape too, but the
+  // ledger grades that one PARTIAL). It is NOT live on `app.aria`: that key
+  // is a `retiredKey()` tombstone removed in the same 17.0.0 by the 2026-06
+  // app liveness audit, and `os migrate meta --from 16` strips it — so the
+  // "lift it up to the app" repair this note used to imply was a dead end
+  // that also lost the block (#6756).
   aria: retiredKey(
     '`dashboard.widgets[].aria` was removed in @objectstack/spec 17.0.0 (#5010, ADR-0049 D2) — ' +
     'no renderer ever applied it, so ARIA attributes declared on a widget silently did not reach ' +
@@ -620,19 +624,82 @@ export const DashboardWidgetSchema = lazySchema(() => z.object({
     'removal the dashboard-level `aria` got in 17.0.0 (#3896). Delete the key. The dashboard ' +
     'renderer emits its own `aria-*` attributes for the widget grid; author a `title` (and ' +
     '`description`) on the widget instead — those ARE what the renderer labels the card with. ' +
-    'The shared `AriaProps` shape is NOT gone: it stays live on `app.aria` and ' +
-    '`page.components[].aria`. ' +
-    'Run `os migrate meta --from 16` to rewrite it automatically.',
+    'The shared `AriaProps` shape is NOT gone: it stays live on `page.aria`, ' +
+    '`page.components[].aria` and the list view `aria`. ' +
+    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
   ),
   // ADR-0021 single-form: every widget binds a `dataset` and selects `values`
   // (both required above) — there is no inline-query shape to disambiguate.
-}, { error: strictWidgetAnalyticsError })
-  // ADR-0021 endpoint (framework#3251, protocol 16 `step16`): reject undeclared
-  // top-level keys instead of silently stripping them. A hallucinated or legacy
-  // key is now a deterministic author-time error (CI) rather than a silent
-  // no-op a human reviewer would miss. `options` stays the free-form escape
-  // hatch for renderer-specific extras.
-  .strict());
+  //
+  // ADR-0021 endpoint (framework#3251, protocol 16 `step16`): `strictObject`
+  // rejects undeclared top-level keys instead of silently stripping them. A
+  // hallucinated or legacy key is a deterministic author-time error (CI) rather
+  // than a silent no-op a human reviewer would miss. `options` stays the
+  // free-form escape hatch for renderer-specific extras.
+}));
+
+/**
+ * Dashboard date-range presets — the named windows a dashboard date filter may
+ * select, in the display order the filter bar offers them.
+ *
+ * **This is the vocabulary's single source of truth (#4614).** It used to exist
+ * three times: inline in `dateRange.defaultRange` below, as `PRESET_RANGES` in
+ * objectui's `dashboard-filters` (the module that maps each name to its
+ * date-macro bounds), and as a hand-written table in
+ * `content/docs/ui/dashboards.mdx`. Three copies of one enum drift in the
+ * direction nobody notices: a name the renderer knows but the schema does not is
+ * rejected from metadata that would have rendered, and a name the schema knows
+ * but the renderer does not validates clean and then resolves to nothing.
+ *
+ * Each preset resolves to a pair of date-macro token bounds at query time (see
+ * `DATE_MACRO_TOKENS` in `../data/date-macros.zod`). That is why the two
+ * vocabularies live one import apart and neither restates the other's grammar.
+ */
+export const DATE_RANGE_PRESETS = [
+  'today',        'yesterday',
+  'this_week',    'last_week',
+  'this_month',   'last_month',
+  'this_quarter', 'last_quarter',
+  'this_year',    'last_year',
+  'last_7_days',  'last_30_days', 'last_90_days',
+] as const;
+
+export type DateRangePreset = (typeof DATE_RANGE_PRESETS)[number];
+
+/**
+ * What `dashboard.dateRange.defaultRange` accepts: every preset, plus the
+ * `custom` sentinel.
+ *
+ * `custom` is deliberately NOT a member of {@link DATE_RANGE_PRESETS} — it names
+ * no window. It means "open the from/to picker with no preset applied", so it
+ * carries no bounds and resolves to no range. That distinction is load-bearing
+ * in both directions: `defaultRange: 'custom'` is a legitimate dashboard
+ * declaration, while a `globalFilters` date filter defaulting to `'custom'` is
+ * not — a bare filter value gives the sentinel no from/to to hand over. The
+ * `superRefine` on {@link GlobalFilterSchema} therefore checks the presets
+ * alone, and this list exists so `defaultRange`'s accepted set is left exactly
+ * as it was by the extraction.
+ */
+export const DATE_RANGE_DEFAULT_RANGES = [...DATE_RANGE_PRESETS, 'custom'] as const;
+
+export type DateRangeDefaultRange = (typeof DATE_RANGE_DEFAULT_RANGES)[number];
+
+/**
+ * ISO calendar date, optionally carrying a time part — `2026-01-15`,
+ * `2026-01-15T08:30:00Z`. Deliberately narrower than `Date.parse`, which also
+ * accepts locale prose (`March 5, 2026`) and bare years (`2026`); neither is a
+ * value a backend compares a date column against usefully.
+ *
+ * Mirrors the accepted set of objectui's `isUsableDateString`, so this schema
+ * never rejects a spelling the renderer resolves correctly.
+ */
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}(?:[T ][\d:.]+(?:Z|[+-]\d{2}:?\d{2})?)?$/;
+
+/** True for `'{today}'` / `'${30_days_ago}'` — a wrapped, KNOWN macro token. */
+function isDateMacroPlaceholder(value: string): boolean {
+  const m = value.match(DATE_MACRO_WRAPPED_RE);
+  return !!m && isDateMacroToken(m[1]);
+}
 
 /**
  * Dynamic options binding for global filters.
@@ -709,6 +776,46 @@ export const GlobalFilterSchema = lazySchema(() => strictObject({
 
   /** Widget IDs to apply this filter to (when scope is widget) */
   targetWidgets: z.array(z.string()).optional().describe('Widget IDs to apply this filter to'),
+}).superRefine((filter, ctx) => {
+  // #4614 — a date filter's `defaultValue` is checked against the vocabulary
+  // that can actually resolve it.
+  //
+  // Why this filter type and not the built-in `dateRange`: `dateRange`'s
+  // `defaultRange` has always been an enum, so a typo there was already an
+  // author-time error. A `globalFilters` entry of `type: 'date'` was the
+  // asymmetric half — `defaultValue` is `string | number | boolean`, so a bare
+  // preset name is the ONLY spelling available, and nothing checked it. An
+  // unknown name then failed SILENTLY and late: the renderer cannot lift it to a
+  // range, falls through to "a bare string date means equality on that day", and
+  // emits `created_at = 'last_7_dayz'` — a condition no row matches, which the
+  // backend answers `200 OK` with a zero. Every tile reads 0 and the filter bar
+  // shows "All time", so the dashboard looks deliberately empty rather than
+  // misconfigured. That is the failure this moves to parse time.
+  if (filter.type !== 'date' || filter.defaultValue === undefined) return;
+
+  const value = filter.defaultValue;
+  if (
+    typeof value === 'string' &&
+    ((DATE_RANGE_PRESETS as readonly string[]).includes(value) ||
+      isDateMacroPlaceholder(value) ||
+      ISO_DATE_RE.test(value))
+  ) {
+    return;
+  }
+
+  ctx.addIssue({
+    code: 'custom',
+    path: ['defaultValue'],
+    message:
+      `${JSON.stringify(value)} is not a value a \`type: 'date'\` filter can resolve. ` +
+      'Use one of three spellings: a preset name (' +
+      DATE_RANGE_PRESETS.join(', ') +
+      '); an ISO date such as `2026-01-15` or `2026-01-15T08:30:00Z`, meaning that ' +
+      'day exactly; or a date-macro token such as `{today}` or `{30_days_ago}` ' +
+      '(the full vocabulary is `DATE_MACRO_TOKENS` in `@objectstack/spec/data`). ' +
+      "`custom` is not among them — it is a `dateRange.defaultRange` sentinel that " +
+      'carries no bounds of its own.',
+  });
 }));
 
 /**
@@ -790,7 +897,7 @@ export const DashboardSchema = lazySchema(() => strictObject({
     aliases: { dateField: 'field', fieldName: 'field', preset: 'defaultRange', range: 'defaultRange', default: 'defaultRange', allowCustom: 'allowCustomRange', custom: 'allowCustomRange' },
   }, {
     field: z.string().optional().describe('Default date field name for time-based filtering'),
-    defaultRange: z.enum(['today', 'yesterday', 'this_week', 'last_week', 'this_month', 'last_month', 'this_quarter', 'last_quarter', 'this_year', 'last_year', 'last_7_days', 'last_30_days', 'last_90_days', 'custom']).default('this_month').describe('Default date range preset'),
+    defaultRange: z.enum(DATE_RANGE_DEFAULT_RANGES).default('this_month').describe('Default date range preset'),
     allowCustomRange: z.boolean().default(true).describe('Allow users to pick a custom date range'),
   }).optional().describe('Global dashboard date range filter configuration'),
 
@@ -803,12 +910,14 @@ export const DashboardSchema = lazySchema(() => strictObject({
   aria: retiredKey(
     '`dashboard.aria` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — no ' +
     'dashboard renderer ever applied it, so declared ARIA attributes silently did not reach ' +
-    'the DOM. Delete the key.',
+    'the DOM. Delete the key. ' +
+    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
   ),
   performance: retiredKey(
     '`dashboard.performance` was removed in @objectstack/spec 17.0.0 (#3896 audit ' +
     'close-out) — no renderer or runtime read it; dashboard performance tuning was never ' +
-    'implemented. Delete the key.',
+    'implemented. Delete the key. ' +
+    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
   ),
   /**
    * ADR-0010 §3.7 — Package-level protection envelope. Package

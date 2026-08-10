@@ -17,7 +17,7 @@ REJECTED (#4721); spell the direction `order`, never `direction`.
 
 ```typescript
 import { AggregationFunction, AggregationNodeSchema, DateGranularity, FieldNodeSchema, FullTextSearchSchema, GroupByNodeSchema, QuerySchema, SortNodeSchema } from '@objectstack/spec/data';
-import type { AggregationNode, FieldNode, FullTextSearch, GroupByNode, SortNode } from '@objectstack/spec/data';
+import type { AggregationFunction, AggregationNode, FieldNode, FullTextSearch, GroupByNode, SortNode } from '@objectstack/spec/data';
 
 // Validate data
 const result = AggregationFunction.parse(data);
@@ -35,8 +35,6 @@ const result = AggregationFunction.parse(data);
 * `min`
 * `max`
 * `count_distinct`
-* `array_agg`
-* `string_agg`
 
 
 ---
@@ -47,10 +45,10 @@ const result = AggregationFunction.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **function** | `Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct' \| 'array_agg' \| 'string_agg'>` | ✅ | Aggregation function |
+| **function** | `Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct'>` | ✅ | Aggregation function |
 | **field** | `string` | optional | Field to aggregate (optional for COUNT(*)) |
 | **alias** | `string` | ✅ | Result column alias |
-| **distinct** | `boolean` | optional | Apply DISTINCT before aggregation |
+| **distinct** | `never` | optional | [REMOVED] `query.aggregations[].distinct` was removed in @objectstack/spec 17 (#6815, ADR-0049) — exactly ONE of the six faces that read an aggregation honoured it. The objectql in-memory fallback deduplicated the values before applying the function, while `driver-sql`, `driver-turso`, `driver-mongodb`, `driver-memory` and the service-analytics SQL builder all ignored it — so `{ function: 'sum', field: 'amount', distinct: true }` answered a DEDUPLICATED sum when the engine fell back in memory and an ordinary sum on every SQL datasource: one query, two numbers, chosen by which backend happened to serve it. Both answers are plausible, so nothing surfaced the divergence. Delete the key. For a deduplicated COUNT the live spelling is the `count_distinct` aggregation function, which every SQL face compiles to `COUNT(DISTINCT field)` (#6409) and the in-memory fallback computes identically. `SUM(DISTINCT …)` / `AVG(DISTINCT …)` get no replacement: no backend ever computed them here, and a per-row measure that needs deduplicating is a modelling problem to fix in the data, not a flag on the read. |
 | **filter** | `any` | optional | [EXPERIMENTAL — not enforced] Per-aggregation filter (SQL FILTER (WHERE …)). Neither the SQL builders nor the in-memory fallback applies it (#4286); filter the whole query with `where` instead. |
 
 
@@ -134,7 +132,7 @@ Type: `string`
 | **top** | `number` | optional | Alias for limit (OData compatibility) |
 | **cursor** | `never` | optional | [REMOVED] `query.cursor` was removed in @objectstack/spec 17 (#4286, ADR-0049) — no driver ever implemented keyset pagination, so the cursor was accepted and ignored and every page came back identical (a caller looping "until hasMore is false" never terminates). Delete the key; `QueryBuilder.cursor()` was removed with it. Express the keyset as an ordinary `where` predicate on your sort key — `where: { created_at: { $gt: last.created_at } }` with the matching `orderBy` — which every driver executes with canonicalised comparands. A first-class cursor, if ever built, will be a response-minted opaque token, not this caller-built record. |
 | **joins** | `never` | optional | [REMOVED] `query.joins` was removed in @objectstack/spec 17 (#4286, ADR-0049) — no engine or driver ever read it: a query carrying `joins` behaved exactly as if the key were absent, while its name squatted on the reserved REST parameter set. Delete the key. Related records are read through `expand` — `expand: { owner: { object: 'user', fields: ['name'] } }` — which the engine resolves via batch $in queries, and a single related column is a dotted `fields` path (`fields: ['owner.name']`). |
-| **aggregations** | `{ function: Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct' \| 'array_agg' \| 'string_agg'>; field?: string; alias: string; distinct?: boolean; … }[]` | optional | Aggregation functions |
+| **aggregations** | `{ function: Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct'>; field?: string; alias: string; filter?: any }[]` | optional | Aggregation functions |
 | **groupBy** | `(string \| { field: string; dateGranularity?: Enum<'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>; alias?: string })[]` | optional | GROUP BY targets (strings or `{field, dateGranularity?}` objects for date bucketing) |
 | **having** | `any` | optional | HAVING — filter over the AGGREGATED rows (aggregation aliases + groupBy projections); applied engine-side after aggregation |
 | **windowFunctions** | `never` | optional | [REMOVED] `query.windowFunctions` was removed in @objectstack/spec 17 (#4286, ADR-0049) — `find()` never applied it: no engine or driver read the key on the query path, so every OVER clause it declared was silently dropped. Delete the key. Window functions are a SQL-driver capability behind `SqlDriver.findWithWindowFunctions(object, query)` (embedder-level; not on the `IDataDriver` contract or the REST surface); request-level analytics are `aggregations` + `groupBy`. |

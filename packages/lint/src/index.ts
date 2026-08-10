@@ -39,6 +39,31 @@ export {
 } from './validate-null-guards.js';
 export type { NullGuardFinding, NullGuardOptions } from './validate-null-guards.js';
 
+// #4776 — "the provider is not registered YET" and "there is no provider" are
+// the same value in a registry that is still filling, and a verdict recorded
+// from that value is never retracted. Exported as a decision procedure over
+// plugin SOURCE (not over a stack), for the same reason the null-guard one
+// above is: cloud graph-lint, the AI authoring path and a plugin author outside
+// this repo must reach ONE verdict rather than re-derive it. In-repo
+// enforcement is `lint-startup-registry-verdict.corpus.test.ts`, which sweeps
+// `packages/**` with it; the SERVICE-registry half of the same family stays
+// with `pnpm check:startup-registry-verdict` (see the module note for the
+// measured division of labour between the two).
+export {
+  findStartupRegistryVerdicts,
+  OPEN_VOCABULARY_PROBES,
+  PRE_SEAL_PHASES,
+  SEAL_MARKERS,
+  STARTUP_VERDICT_HINT,
+  STARTUP_OPEN_VOCABULARY_VERDICT,
+  STARTUP_VERDICT_ASSERTIVE_WORDING,
+} from './lint-startup-registry-verdict.js';
+export type {
+  StartupRegistryVerdictFinding,
+  StartupRegistryVerdictOptions,
+  StartupRegistryVerdictSeverity,
+} from './lint-startup-registry-verdict.js';
+
 export { validateListViewMode, LIST_VIEW_FILTERS_IN_VIEWS_MODE } from './validate-list-view-mode.js';
 
 // [ADR-0078] The functional-completeness gate. All judgement lives in the shared
@@ -58,6 +83,7 @@ export {
   FLOW_TRIGGER_UNKNOWN_EVENT,
   FLOW_TIME_RELATIVE_DESCRIPTOR_INVALID,
   FLOW_TIME_RELATIVE_DESCRIPTOR_UNROUTABLE,
+  FLOW_TRIGGER_UNROUTABLE,
 } from './validate-flow-trigger-readiness.js';
 export type {
   FlowTriggerReadinessFinding,
@@ -137,10 +163,10 @@ export type { FormLayoutFinding, FormLayoutSeverity } from './validate-form-layo
 
 export {
   validateVisibilityPredicates,
-  VISIBILITY_ALIAS_DEPRECATED,
   VISIBILITY_ROOT_MISLAYERED,
   VISIBILITY_BARE_IDENTIFIER,
   VISIBILITY_PREDICATE_SYNTAX,
+  VISIBILITY_PREDICATE_OVER_BUDGET,
 } from './validate-visibility-predicates.js';
 export type {
   VisibilityFinding,
@@ -148,6 +174,17 @@ export type {
   VisibilityLayer,
   VisibilityOptions,
 } from './validate-visibility-predicates.js';
+
+export {
+  validatePredicatePathRefs,
+  PREDICATE_PATH_UNRESOLVED,
+  PREDICATE_PATH_UNROOTED,
+} from './validate-predicate-path-refs.js';
+export type {
+  PredicatePathFinding,
+  PredicatePathSeverity,
+  PredicatePathOptions,
+} from './validate-predicate-path-refs.js';
 
 export {
   validateCapabilityReferences,
@@ -230,6 +267,7 @@ export {
   validateRlsPredicateEnforceability,
   RLS_PREDICATE_UNENFORCEABLE,
   RLS_PREDICATE_UNPARSEABLE,
+  RLS_PREDICATE_OVER_BUDGET,
 } from './validate-rls-predicate-enforceability.js';
 export type {
   RlsPredicateFinding,
@@ -248,6 +286,22 @@ export type {
 
 export { validateFilterTokens, FILTER_TOKEN_UNKNOWN } from './validate-filter-tokens.js';
 export type { FilterTokenFinding, FilterTokenSeverity } from './validate-filter-tokens.js';
+
+// #5330 — the same subtree, judged for SHAPE rather than for its strings. The
+// runtime meaning of an empty combinator is settled (#5322: boolean identity,
+// one implementation in `@objectstack/spec`'s `reduceFilterVerdict`); this
+// refuses the literal spellings at authoring time, with a prescription that is
+// per shape because the identities disagree — `{$and: []}` / `{}` are match-ALL
+// and `{$or: []}` / `{$not: {}}` are match-NONE.
+export {
+  validateEmptyCombinators,
+  FILTER_EMPTY_COMBINATOR,
+  FILTER_EMPTY_NODE,
+} from './validate-empty-combinators.js';
+export type {
+  EmptyCombinatorFinding,
+  EmptyCombinatorSeverity,
+} from './validate-empty-combinators.js';
 
 export {
   validateObjectReferences,
@@ -380,6 +434,7 @@ export type {
 export {
   validateAiAgentAuthoring,
   AGENT_AUTHORING_WITHDRAWN,
+  DEFAULT_AGENT_OUTSIDE_ROSTER,
 } from './validate-ai-agent-authoring.js';
 export type {
   AiAgentAuthoringFinding,

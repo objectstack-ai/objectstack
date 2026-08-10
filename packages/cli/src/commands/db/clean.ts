@@ -4,7 +4,6 @@ import { Command, Flags } from '@oclif/core';
 import { statSync, existsSync } from 'node:fs';
 import chalk from 'chalk';
 import { printError } from '../../utils/format.js';
-import { resolveDefaultDevDbUrl } from '../dev.js';
 import { resolveTelemetryDbPath } from '../../utils/telemetry-datasource.js';
 
 /**
@@ -24,13 +23,13 @@ export default class DbClean extends Command {
 
   static override examples = [
     '$ os db clean',
-    '$ os db clean --database file:./.objectstack/data/dev.db',
+    '$ os db clean --database file:./.objectstack/data/objectstack.db',
   ];
 
   static override flags = {
     database: Flags.string({
       char: 'd',
-      description: 'SQLite database URL/path (defaults to $OS_DATABASE_URL, then the per-project dev DB)',
+      description: 'SQLite database URL/path (defaults to $OS_DATABASE_URL, then the project database via the shared #6469 resolution)',
       env: 'OS_DATABASE_URL',
     }),
   };
@@ -38,10 +37,15 @@ export default class DbClean extends Command {
   async run(): Promise<void> {
     const { flags } = await this.parse(DbClean);
 
-    const raw =
-      flags.database?.trim() ||
-      resolveDefaultDevDbUrl({ env: process.env, cwd: process.cwd() }) ||
-      '';
+    // The ONE shared resolution (#6469): the file this cleans is the file
+    // `os dev` / `os start` / `os migrate` actually use in this directory —
+    // including a legacy `dev.db` / `standalone.db` still being compat-read.
+    const { resolveProjectDatabaseUrl } = await import('@objectstack/runtime');
+    const resolved = flags.database?.trim()
+      ? undefined
+      : resolveProjectDatabaseUrl({ env: process.env, projectRoot: process.cwd() });
+    if (resolved?.notice) console.log(chalk.yellow(`⚠ ${resolved.notice}`));
+    const raw = flags.database?.trim() || resolved?.url || '';
     const primary = raw.replace(/^file:/i, '').replace(/^sqlite:/i, '');
 
     if (!primary || primary === ':memory:' || primary.startsWith(':')) {

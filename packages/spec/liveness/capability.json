@@ -1,0 +1,43 @@
+{
+  "type": "capability",
+  "_note": "CapabilityDeclarationSchema (ADR-0066 D1). The DECLARATION side of the three-way separation — packages DEFINE a capability here, permission sets GRANT it via `systemPermissions`, resources REQUIRE it via `requiredPermissions`. Seeded 2026-08-08 with #5961, the PR that made `capability` a registered metadata kind; every property was call-graph-closed at that time against `packages/plugins/plugin-security/src/bootstrap-declared-capabilities.ts`, which is the one consumer that turns a declaration into a `sys_capability` row. The ADR-0010 envelope keys carry the same `null` verdict as `permission`/`position`: they are loader-stamped, not authored.",
+  "props": {
+    "name": {
+      "status": "live",
+      "verifiedAt": "2026-08-08",
+      "evidence": "packages/plugins/plugin-security/src/bootstrap-declared-capabilities.ts:203-210 (upsertPackageCapability — the name is the `sys_capability` upsert key, is matched against PLATFORM_CAPABILITY_NAMES to refuse shadowing a curated capability, and is the string `systemPermissions` / `requiredPermissions` resolve a grant by); packages/lint/src/validate-capability-references.ts:99 (the authoring lint's known-name set)",
+      "note": "The whole identity of a capability. This is also why the kind's write door matters: the name is resolved by string from both the grant side and the requirement side, so an unvalidated row lands directly in the authorization namespace (#5961)."
+    },
+    "label": {
+      "status": "live",
+      "verifiedAt": "2026-08-08",
+      "evidence": "packages/plugins/plugin-security/src/bootstrap-declared-capabilities.ts:122 (capabilityRowFields — written to sys_capability.label, falling back to humanize(name) when absent)",
+      "note": "display (Setup's capability list/detail, rendered from the sys_capability row)."
+    },
+    "description": {
+      "status": "live",
+      "verifiedAt": "2026-08-08",
+      "evidence": "packages/plugins/plugin-security/src/bootstrap-declared-capabilities.ts:123 (capabilityRowFields — written to sys_capability.description, falling back to `Capability <name>.` when absent)",
+      "note": "display."
+    },
+    "scope": {
+      "status": "live",
+      "verifiedAt": "2026-08-08",
+      "evidence": "packages/plugins/plugin-security/src/bootstrap-declared-capabilities.ts:124 (capabilityRowFields — written to sys_capability.scope, normalized to 'org' only on an exact 'org' match, else 'platform')",
+      "note": "platform vs org decides whether holding the capability is a global power or one scoped to the caller's organization — the same distinction PLATFORM_CAPABILITIES carries on the curated side. Not display: it is the field that would be escalated if a tenant could overlay a package-shipped declaration, which is why the #5961 registry entry sets `supportsOverlay: false` / `allowOrgOverride: false`."
+    },
+    "packageId": {
+      "status": "live",
+      "verifiedAt": "2026-08-08",
+      "evidence": "packages/plugins/plugin-security/src/bootstrap-declared-capabilities.ts:294 (`const packageId = cap._packageId ?? cap.packageId` — the ADR-0086 D3 author-declared FALLBACK provenance, consulted when the registry stamp is absent; with neither, upsertPackageCapability takes the no-owning-package refusal at :214 and the capability is materialized with no package provenance)",
+      "note": "Deliberately a fallback and not the primary: #5870 added `capabilities` to the ObjectQL engine's stamped-collection list (packages/objectql/src/engine.ts:2393), so `_packageId` now reaches a declaration and takes precedence. The key stays live because the fallback branch is still read and still decides materialization for any declaration that arrives unstamped."
+    },
+    "_lock": null,
+    "_lockReason": null,
+    "_lockSource": null,
+    "_provenance": null,
+    "_packageId": null,
+    "_packageVersion": null,
+    "_lockDocsUrl": null
+  }
+}

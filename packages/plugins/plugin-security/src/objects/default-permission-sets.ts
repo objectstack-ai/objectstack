@@ -314,27 +314,53 @@ const baseDefaultPermissionSets: PermissionSet[] = [
     name: 'member_default',
     label: 'Member — Standard Access',
     objects: {
-      // [ADR-0090 D5, #2753] NO `allowDelete`: delete/purge/transfer are
-      // anchor-forbidden bits, and this set IS the `everyone` baseline — the
-      // bootstrap binds it to the anchor, so it must stay anchor-safe.
+      // [#5491] NO `'*'` WILDCARD GRANT. This set is the additive `everyone`
+      // baseline — it resolves for EVERY authenticated member — and object
+      // permissions merge most-permissively, so a wildcard here was not a
+      // default, it was a FLOOR no app could get under. An application that
+      // declared an explicit all-false deny on one of its objects still had
+      // create, read and edit on it (only `allowDelete` stayed profile-driven,
+      // because this set never granted it), and `security/explain` said so
+      // outright: "create on 'crm_opportunity' is granted by [member_default]".
+      // HotCRM's 17.0 GA sweep measured the consequence across 5 profiles ×
+      // 17 objects: 21 of 21 create-denial probes returned 201, and on
+      // `public_read` objects a non-holder read ALL rows.
+      //
+      // Maintainer ruling (2026-08-07): the platform baseline narrows to
+      // explicit-allow. Object access comes from OWDs plus profile /
+      // permission-set declarations only — declared IS enforced. Deny-precedence
+      // merge semantics were considered and REJECTED; do not reintroduce a
+      // wildcard here "with a priority", and do not reintroduce one at all.
+      //
+      // What a member still gets from this set is what the set can actually
+      // NAME: read on the better-auth identity tables (below), self-service on
+      // their own preferences, and the `_self` RLS carve-outs that scope both.
+      // Everything else is the application's to declare.
+      //
+      // [ADR-0090 D5, #2753] There is still NO `allowDelete` anywhere in this
+      // set: delete/purge/transfer are anchor-forbidden bits and the bootstrap
+      // binds this set to the `everyone` anchor, so it must stay anchor-safe.
       // Deleting records is not a baseline right; grant it per object via an
       // ordinary (position-distributed) set where the domain calls for it.
       // The owner-scoped delete RLS below is KEPT as a narrowing defense for
       // members who receive a delete bit from such a set.
       //
       // [#3544] NO `allowExport` either, for the same reason and deliberately:
-      // this set is the `everyone` baseline, so granting export here would hand
-      // bulk egress to every authenticated user and make the opt-in axis a
-      // no-op. Bulk export is not a baseline right — grant it per object via an
-      // ordinary position-distributed set where the domain calls for it. Do not
-      // "fix" its absence.
-      '*': {
-        allowRead: true,
-        allowCreate: true,
-        allowEdit: true,
-      },
-      // Identity tables are managed by better-auth — no direct writes.
+      // granting export here would hand bulk egress to every authenticated user
+      // and make the opt-in axis a no-op. Do not "fix" its absence.
+      //
+      // Identity tables are managed by better-auth — readable, never written
+      // directly. With the wildcard gone this is no longer a narrowing overlay
+      // but the grant itself: it is what keeps `/auth/me`, the org switcher and
+      // the Account app working for a member with no application profile.
       ...denyWritesOnManagedObjects(),
+      // Self-service preferences. NOT a better-auth table, so it is not covered
+      // by the block above, and its `sys_user_preference_self` RLS policy below
+      // (`operation: 'all'`) declares exactly this intent: a member reads and
+      // writes their OWN preference rows. Under the wildcard that grant was
+      // implicit; making it explicit is the migration, not a widening — the
+      // effective access for a member is byte-identical.
+      sys_user_preference: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: false },
     },
     rowLevelSecurity: [
       // [ADR-0095 D1] The wildcard `tenant_isolation` policy RETIRED here — the

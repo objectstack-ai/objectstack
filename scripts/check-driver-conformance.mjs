@@ -152,9 +152,19 @@ const CASE_SETS = [
     what: 'an UNSORTED paged read is a partition too — #4363',
   },
   {
+    file: 'pagination-conformance.ts',
+    marker: 'PAGINATION_ZERO_LIMIT_CASES',
+    what: '`limit: 0` returns no records, on presence not truthiness — #6485/#6577',
+  },
+  {
     file: 'filter-text-conformance.ts',
     marker: 'FILTER_TEXT_CASES',
     what: 'text operators: ASCII-only case folding, literal comparands, `$regex` refused — #4706/#5701',
+  },
+  {
+    file: 'aggregation-conformance.ts',
+    marker: 'AGGREGATION_CASES',
+    what: 'the value each declared AggregationFunction produces, dedup and NULLs included — #6409',
   },
 ];
 
@@ -270,42 +280,84 @@ const CASE_SETS = [
 // investment is frozen (#5499). Un-freezing it is what should re-run these cells
 // in CI; until then, this note is the honest state of the mongo column.
 
-// ## FILTER_TEXT_CASES: five DEBT rows, opened by #5701 — read this first
+// ## FILTER_TEXT_CASES: two DEBT rows left of the five #5701 opened
 //
 // The ledger was EMPTY (see the note above) until `FILTER_TEXT_CASES` arrived.
-// These five rows are not a regression in coverage: the case-set is the
+// Those five rows were not a regression in coverage: the case-set is the
 // CONTRACT half of the #4706 ruling, landed deliberately ahead of every
-// implementation, and one row per driver is what makes "ahead of" a counted
-// fact instead of an assumption. They are cleared by #5702, one suite at a
-// time, exactly the way the five before them were.
+// implementation, and one row per driver is what made "ahead of" a counted fact
+// instead of an assumption. #5702 cleared two of the three requirements; #6518
+// cleared the third on the SQL family and DELETED its three rows. What remains
+// is the #5499 frozen family — driver-memory and driver-mongodb — where the
+// freeze, not the difficulty, is why the cells are open.
 //
-// What the case-set demands, and why nobody can answer it yet:
+// What the case-set demands, and where each requirement stands:
 //
-//   1. `$icontains` — a NEW operator (ASCII-only case fold). No backend has an
-//      arm for it. All five refuse it today, which is the fail-closed
-//      direction, so this is a missing capability rather than a live defect.
+//   1. `$icontains` — a NEW operator (ASCII-only case fold). **DONE
+//      EVERYWHERE** (#5702 + #6518 on the SQL family; #6520 on the rest). #6520
+//      lifted the #5499 freeze for this operator as a sanctioned one-off
+//      (maintainer ruling, 2026-08-08, semantic parity only) and gave every
+//      remaining face an arm in ONE PR with the spec word-list admission —
+//      driver-memory's three surfaces, driver-mongodb, objectql's `having`,
+//      formula, and service-analytics' three compilers. The ordering was the
+//      constraint, not the code: `FILTER_OPERATORS` is what driver-memory's
+//      shape gate derives from, so admitting the name a PR earlier would have
+//      turned this driver's loud refusal into a silently dropped predicate
+//      (#5701 measured it; #3948 is what a dropped predicate is on a read
+//      scope). Both rows below therefore keep their DEBT entry for
+//      requirement 2 ALONE.
 //   2. `$contains` / `$startsWith` / `$endsWith` / `$notContains` must be
 //      case-SENSITIVE (#4706 Q2 = A, superseding `filter.zod.ts`'s former
-//      "Case sensitivity should be handled at backend level"). NO driver
-//      delivers this on its live query path today: driver-memory and
-//      driver-mongodb fold the full Unicode range, and the SQL family follows
-//      its dialect (SQLite — so also turso and sqlite-wasm — folds ASCII;
-//      Postgres happens to be case-exact already; MySQL depends on collation).
-//      The one surface that does compare case-sensitively is driver-memory's
-//      REFERENCE matcher, which is not the path a query takes — see that row.
-//   3. `$regex` / `$options` must be REFUSED, naming `$icontains`. Exactly one
-//      driver refuses `$regex` today (driver-mongodb, via its `default:` arm —
-//      though outside the ADR-0112 envelope the case-set requires; see its
-//      row). The other four accept it: driver-memory evaluates it as a real
-//      RegExp, and driver-sql / driver-sqlite-wasm / driver-turso compile it to
-//      a substring LIKE. That is deliberate, not neglect — `plugin-auth`'s
-//      ObjectQL adapter still emits it on the AUTHENTICATION path. **#5710
-//      flips that producer before any of these four cells may be cleared**; a
-//      driver that refuses `$regex` first breaks sign-in.
+//      "Case sensitivity should be handled at backend level"). **DONE on the SQL
+//      family** (#6518): case sensitivity used to be the DIALECT's answer, so
+//      `SqlDriver` now picks the construct per dialect — `GLOB` on the SQLite
+//      dialects (whose `LIKE` folds ASCII), `LIKE` unchanged on Postgres (whose
+//      `LIKE` is already case-exact), and `LIKE` over `CAST(… AS BINARY)` on
+//      MySQL (whose answer otherwise follows the column's collation). turso's
+//      remote transport carries the twin in `pushLike`, and the two are held to
+//      the same rows by `turso-local-remote-text-parity.test.ts`. **STILL OPEN
+//      on driver-memory and driver-mongodb**, which fold the full Unicode range
+//      on their live query paths — and on driver-memory the REFERENCE matcher
+//      answers the same operator case-sensitively, so that package disagrees
+//      with itself. Both are the #5499 frozen family; tracked as #6682.
 //
-// Each row's `why` is what that driver does TODAY, measured on this branch by
-// reading the compiler and (for driver-memory) executing it. Nothing here is
-// predicted.
+//      Two faces #6518 measured and did NOT have to change, recorded because
+//      "not mentioned" reads as "not checked": `formula`'s `matchesFilter` and
+//      objectql's `having` were already case-exact (`String.prototype.includes`
+//      and friends), and `service-analytics`'s two SQL compilers emit
+//      Postgres-shaped statements, where `LIKE` is case-exact by definition.
+//      That last one is the reason a driver-only change did NOT compile one
+//      permission rule into two row sets (#3948): the RLS lowering and the
+//      driver meet only on Postgres, where neither moved.
+//   3. `$regex` / `$options` must be REFUSED, naming `$icontains`. **DONE on all
+//      five** (#5702), which was blocked until #5710 flipped the last live
+//      producer (`plugin-auth`'s ObjectQL adapter, on the AUTHENTICATION path).
+//      Each site now prints `RETIRED_FILTER_OPERATORS[op].why` verbatim, so the
+//      five refusals say one thing; driver-mongodb's `default:` arm was
+//      additionally routed through its own `INVALID_FILTER` helper, which is the
+//      `code` half the case-set requires and the last bare `new Error` in the
+//      DRIVER family (this gate's own scope, `packages/drivers/*`). The sixth
+//      refusal face — objectql's `having` (`having-filter.ts`) — was outside
+//      that scope and kept its bare `new Error` until #7047.
+//
+// ## AGGREGATION_CASES: two DEBT rows on arrival, and they are the same pair
+//
+// The column arrived with #6409, which lowered `count_distinct` to
+// `COUNT(DISTINCT x)` on the SQL family — the ENFORCE leg of #6188's split
+// ruling. Three of the five cells were covered by that PR: `driver-sql` and
+// `driver-turso` (its REMOTE transport, an independent compiler, which is what
+// the case-set exists to hold against the local one) plus `driver-sqlite-wasm`,
+// whose suite pins the inherited statement surviving a different ENGINE, the
+// same judgement #4405 recorded for its filter-logic cell.
+//
+// The two open cells are `driver-memory` and `driver-mongodb` — the #5499 frozen
+// family, and open by that decision rather than by difficulty. #6409's ruling
+// put both explicitly out of scope and left their partial implementations
+// untouched, so the rows below record what each ANSWERS today, read from the
+// source on this branch. Neither is a prediction, and neither is a permission
+// slip: the cell clears when a suite runs the case-set, not when someone argues
+// the driver would pass it. Both would go RED as they stand, which is the
+// reason the rows exist rather than a reason to omit them.
 
 const LEDGER = [
   {
@@ -313,76 +365,108 @@ const LEDGER = [
     marker: 'FILTER_TEXT_CASES',
     kind: 'DEBT',
     why:
-      'Measured, and the one row where "which face" changes the answer — do NOT take a single reading here. '
-      + 'The QUERY path (`find()` -> `normalizeFieldOperators`, and the analytics face via '
-      + '`filterSubstringPattern`) lowers `$contains` to `new RegExp(escapeRegex(v), "i")`: literal comparand '
-      + '(requirement 2\'s escaping half holds) but case-INSENSITIVE over the whole Unicode range, which '
-      + 'fails requirement 2 and overshoots requirement 1\'s ASCII boundary. The reference matcher '
-      + '(`memory-matcher.ts` `match()`, the record-at-a-time evaluator `filter-logic-conformance.ts` counts '
-      + 'as a backend) uses String.prototype.includes and is case-SENSITIVE — i.e. this package answers one '
-      + '`$contains` two ways today, the divergence class #5374 fixed between the other two faces. Whichever '
-      + 'suite clears this cell has to pick one and align both. `$icontains` is refused on both faces '
-      + "(`SUPPORTED_FIELD_OPERATORS` derives from the spec's FILTER_OPERATORS, which deliberately does not "
-      + 'carry it yet) — unimplemented but fail-closed. `$regex`/`$options` are ACCEPTED and evaluated as a '
-      + 'real RegExp, the opposite of requirement 3 and the only live regex evaluator in the repo; that arm '
-      + "exists for plugin-auth's adapter and cannot be removed before #5710.",
-    issue: 'https://github.com/objectstack-ai/objectstack/issues/5702',
-  },
-  {
-    driver: 'driver-sql',
-    marker: 'FILTER_TEXT_CASES',
-    kind: 'DEBT',
-    why:
-      'Measured: `applyLike` escapes `\\`, `%` and `_` and binds ESCAPE, so the literal-comparand cases would '
-      + 'pass today. Case sensitivity is the DIALECT\'s, not the driver\'s — SQLite\'s LIKE folds ASCII, '
-      + 'Postgres does not, MySQL follows its collation — so requirement 2 fails on two of three dialects and '
-      + 'needs a case-exact comparison (GLOB / instr() / a binary collation), not a flag. `$icontains` hits the '
-      + '`default:` arm and is refused in the ADR-0112 envelope. `$regex` is COMPILED (to the same substring '
-      + 'LIKE), not refused.',
-    issue: 'https://github.com/objectstack-ai/objectstack/issues/5702',
-  },
-  {
-    driver: 'driver-sqlite-wasm',
-    marker: 'FILTER_TEXT_CASES',
-    kind: 'DEBT',
-    why:
-      'Measured: `SqliteWasmDriver extends SqlDriver`, so every fact in the driver-sql row applies unchanged, '
-      + 'with the dialect pinned to SQLite — i.e. requirement 2 fails here specifically because LIKE folds '
-      + 'ASCII case. Tracked as DEBT rather than EXEMPT for the reason its FILTER_LOGIC row was: "inherits, '
-      + 'therefore fine" is the assumption these suites exist to disprove, and what this one would add is the '
-      + 'sql.js engine EXECUTING the compiled predicate, which is where a collation choice actually shows up.',
-    issue: 'https://github.com/objectstack-ai/objectstack/issues/5702',
-  },
-  {
-    driver: 'driver-turso',
-    marker: 'FILTER_TEXT_CASES',
-    kind: 'DEBT',
-    why:
-      'Measured: DUAL-TRANSPORT, so this cell needs TWO suites like its three predecessors. Local/replica '
-      + 'inherits SqlDriver (see the driver-sql row) on the SQLite dialect. Remote does not go through knex at '
-      + 'all: `remote-transport.ts` carries its own hand-written SUPPORTED_FILTER_OPERATORS — which lists '
-      + '`$regex` and not `$icontains` — and its own LIKE assembly. Both transports therefore fail requirement '
-      + '2 (SQLite LIKE folds ASCII) and requirement 3, and refuse `$icontains` today.',
-    issue: 'https://github.com/objectstack-ai/objectstack/issues/5702',
+      'Re-measured after #6518, which cleared requirement 2 on the SQL family and NOT here — this package is '
+      + 'in the #5499 frozen family, so the freeze rather than the difficulty is why the cell is open. '
+      + 'Requirement 3 is DONE (#5702): `$regex`/`$options` are no longer in `SUPPORTED_FIELD_OPERATORS`, the '
+      + 'matcher\'s `$regex` arm (the only live regex evaluator in the repo, and the one that answered an '
+      + 'ILLEGAL pattern with `false`) is deleted, and both faces refuse them with the spec prescription '
+      + 'naming `$icontains`. Requirement 2 is still the one row where "which face" changes the answer — do '
+      + 'NOT take a single reading here. The QUERY path (`find()` -> `normalizeFieldOperators`, and the '
+      + 'analytics face via `filterSubstringPattern`) lowers `$contains` to `new RegExp(escapeRegex(v), "i")`: '
+      + 'literal comparand (requirement 2\'s escaping half holds) but case-INSENSITIVE over the whole Unicode '
+      + 'range, which fails requirement 2 and overshoots requirement 1\'s ASCII boundary. The reference '
+      + 'matcher (`memory-matcher.ts` `match()`, the record-at-a-time evaluator `filter-logic-conformance.ts` '
+      + 'counts as a backend) uses String.prototype.includes and is case-SENSITIVE — i.e. this package '
+      + 'answers one `$contains` two ways today, the divergence class #5374 fixed between the other two '
+      + 'faces. Whichever suite clears this cell has to pick one and align both: tracked as #6682, which is '
+      + 'the successor #6518 left behind for exactly this pair of packages. Requirement 1 is DONE here '
+      + 'since #6520: all THREE of this package\'s faces answer `$icontains` with the spec\'s shared '
+      + 'ASCII-only fold — the query path and the analytics face bind a pattern from '
+      + '`asciiCaseInsensitiveRegexSource` (no `i` flag, which folds Unicode), the reference matcher calls '
+      + '`asciiCaseInsensitiveContains`, and the NON-EMPTY-string comparand rule is driver-sql\'s word for '
+      + 'word. So this row now carries ONE open requirement, not two. It still cannot go: coverage is '
+      + 'judged by importing the WHOLE case-set, so a cell answering one requirement and not the other must '
+      + 'not import it — #6520\'s suites drive `FILTER_TEXT_ROWS` and spell their own `$icontains` cases '
+      + 'rather than naming the marker, which would flip this cell to covered and fail RECONCILED while '
+      + 'requirement 2 is open.',
+    issue: 'https://github.com/objectstack-ai/objectstack/issues/6682',
   },
   {
     driver: 'driver-mongodb',
     marker: 'FILTER_TEXT_CASES',
     kind: 'DEBT',
     why:
-      'Measured: the FURTHEST from the ruling. `translateFieldOperators` lowers `$contains`/`$startsWith`/'
-      + '`$endsWith`/`$notContains` to `$regex` with a HARDCODED `$options: "i"`, i.e. case-insensitive over '
-      + 'the whole Unicode range — requirement 2 inverted, and requirement 1\'s ASCII-only boundary violated in '
-      + 'the same expression. `escapeRegex` does escape metacharacters, so the literal-comparand cases hold. '
-      + 'An incoming `$regex` reaches the `default:` arm and IS refused (mongo is the only backend that '
-      + 'already satisfies requirement 3), and `$icontains` is refused there too — but that arm throws a bare '
-      + '`new Error("[mongodb] unsupported filter operator ...")`, NOT the ADR-0112 envelope its own '
-      + '`unsupportedFilterError` helper (same file, used by three other refusals here) produces. The '
-      + "case-set requires `code: 'INVALID_FILTER'`, so clearing this cell means routing that arm through the "
-      + 'helper as well. Note this package is in the '
-      + '#5499 frozen family: its real-mongod suites are opt-in, so whatever clears this cell needs a '
-      + 'server-free half like `mongodb-filter-logic-translation.test.ts` has.',
-    issue: 'https://github.com/objectstack-ai/objectstack/issues/5702',
+      'Re-measured after #6518, which cleared requirement 2 on the SQL family and NOT here — #5499 freezes '
+      + 'this package, so the cell stays open by decision rather than by difficulty. Still the FURTHEST from '
+      + 'the ruling, but the ENVELOPE half is closed (#5702): that arm used to throw a bare '
+      + "`new Error('[mongodb] unsupported filter operator …')` — no `code`, no `status` — three lines from "
+      + 'this file\'s own `unsupportedFilterError` helper, which sets `INVALID_FILTER` / 400 and which three '
+      + 'other refusals here already used. It now routes through the helper, and a RETIRED spelling '
+      + 'additionally gets the spec prescription naming `$icontains`, so requirement 3 is DONE (mongo was '
+      + 'already the only backend REFUSING `$regex`; what was missing was the shape of the refusal). '
+      + 'Requirement 2 is inverted here and requirement 1\'s ASCII boundary violated in the same expression: '
+      + '`translateFieldOperators` lowers `$contains`/`$startsWith`/`$endsWith`/`$notContains` to `$regex` '
+      + 'with a HARDCODED `$options: "i"` — tracked as #6682, the successor #6518 left behind for this pair '
+      + 'of frozen packages. `escapeRegex` does escape metacharacters, so the literal-comparand cases hold. '
+      + 'Requirement 1 is DONE here since #6520: `translateFieldOperators` has a `$icontains` arm, and it is '
+      + 'the ONE arm in that family that does not set `$options: "i"` — the fold lives in the pattern '
+      + '(`asciiCaseInsensitiveRegexSource`, one `[Aa]` class per ASCII letter), because mongo\'s `i` flag '
+      + 'folds the whole Unicode range and would fail the CAFÉ rows. The non-empty-string comparand rule '
+      + 'sits on the validating WALK beside `$null`\'s, not in the emitter, so it cannot be skipped by a '
+      + 'boolean identity settling the enclosing node. So this row now carries ONE open requirement, not '
+      + 'two. It still cannot go: '
+      + 'coverage is judged by importing the whole case-set, so a half-answered cell must not import it. Note '
+      + 'this package is in the #5499 frozen family: its real-mongod suites are opt-in, so whatever clears '
+      + 'this cell needs a server-free half like `mongodb-filter-logic-translation.test.ts` has.',
+    issue: 'https://github.com/objectstack-ai/objectstack/issues/6682',
+  },
+  {
+    driver: 'driver-memory',
+    marker: 'AGGREGATION_CASES',
+    kind: 'DEBT',
+    why:
+      'Measured on this branch by reading `MemoryDriver.computeAggregate` (`memory-driver.ts`): it has arms '
+      + 'for count/sum/avg/min/max and then `default: return null`. There is NO `count_distinct` arm, so an '
+      + 'aggregation the Query Protocol declares — and that every SQL face now lowers (#6409) — resolves with '
+      + '`{ n: null }`: no error, no log, no refusal. The case-set says 2 over `AGGREGATION_ROWS`. That is a '
+      + 'wrong ANSWER rather than a wrong number, and it is the `default:`-arm shape the '
+      + '`aggregation-lockstep` guard exists to stop one layer up, reached here through a different door. '
+      + 'The package is partial in the way #6409\'s ruling described: its ANALYTICS face '
+      + '(`memory-analytics.ts`) DOES implement `count_distinct`, so this package answers one declared '
+      + 'function two ways depending on which face you enter — the divergence class #5374 fixed for '
+      + '`$contains` in this same package. #5499 freezes it, so the cell is open by decision, not by '
+      + 'difficulty: the fix is one arm beside its neighbours. Tracked as #6814. '
+      + '[#6401] Re-measured when the case-set gained its `groupByAlias` axis: on THAT axis this driver '
+      + 'AGREES. `performAggregation`\'s `normalizeGroupBy` (`memory-driver.ts:1066-1068`) already returns '
+      + '`{ field, alias: node.alias ?? node.field }` and projects the group value under `alias` — the answer '
+      + '#6401 converged the three SQL faces onto. It had reached it independently, so the enforce leg needed '
+      + 'NO mechanical alignment here. The cell stays open on `count_distinct` alone.',
+    issue: 'https://github.com/objectstack-ai/objectstack/issues/6814',
+  },
+  {
+    driver: 'driver-mongodb',
+    marker: 'AGGREGATION_CASES',
+    kind: 'DEBT',
+    why:
+      'Measured on this branch by reading `mongodb-aggregation.ts`: `count_distinct` lowers to '
+      + '`{ $addToSet: fieldRef ?? null }` and `postProcessAggregation` takes the array\'s `.length`. '
+      + '`$addToSet` adds an explicit `null` to the set, so a nullable column sizes ONE HIGHER than '
+      + '`COUNT(DISTINCT col)` does — 3 where the case-set says 2 over `AGGREGATION_ROWS`. `$addToSet` on a '
+      + 'MISSING field adds nothing, so the divergence shows only for an explicitly-null value, which is '
+      + 'exactly what the fixture seeds and what a nullable column produces in practice. Not executed — this '
+      + 'package has no suite for the cell, which is the debt. #5499 freezes it; the fix is a `$ne: null` '
+      + 'before the `$addToSet` (or sizing a `$setDifference` against `[null]`). Tracked as #6814. Note the '
+      + 'real-mongod suites are opt-in since #5517, so whatever clears this cell needs a server-free half '
+      + 'like `mongodb-filter-logic-translation.test.ts` has. '
+      + '[#6401] Re-measured when the case-set gained its `groupByAlias` axis, and the finding is WIDER than '
+      + 'the alias: `buildAggregationPipeline` annotates `groupBy` as `string[]` and builds '
+      + '`groupId[field] = \'$\' + field` (`mongodb-aggregation.ts:66-69`, mirrored in the `$project` at '
+      + '`:85-88`). A STRUCTURED `GroupByNode` — aliased or not — is an object there, so the `$group._id` key '
+      + 'becomes the literal `"[object Object]"` and its value `"$[object Object]"`. This face cannot take '
+      + 'the structured half of the declared union at all, so the alias is unreachable rather than ignored. '
+      + '`mongodb-driver.ts:512` passes `(query as any).groupBy`, which is why the union never met that '
+      + '`string[]` annotation at `tsc`. Read from the source; not executed. Same #6814 home.',
+    issue: 'https://github.com/objectstack-ai/objectstack/issues/6814',
   },
 ];
 

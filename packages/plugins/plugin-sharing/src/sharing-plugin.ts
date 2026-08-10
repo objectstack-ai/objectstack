@@ -3,10 +3,28 @@
 import type { Plugin, PluginContext } from '@objectstack/core';
 import { resolveAuthzContext } from '@objectstack/core';
 import type { EngineMiddleware, OperationContext } from '@objectstack/objectql';
-import type { IHttpServer, IHttpRequest, ShareLinkExecutionContext } from '@objectstack/spec/contracts';
+import type {
+  AuthSessionApi,
+  IAuthService,
+  IHierarchyScopeResolver,
+  IHttpRequest,
+  IHttpServer,
+  II18nService,
+  IMetadataService,
+  IObjectQLEngine,
+} from '@objectstack/spec/contracts';
+// [#6206] The share-link routes' context is the FULL authorization envelope —
+// it feeds enforcement (`engine.find`), so it is an `ExecutionContext`, never
+// the route-local `ShareLinkExecutionContext`.
+import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { SysRecordShare, SysSharingRule, SysShareLink } from './objects/index.js';
 import { SysBusinessUnit, SysBusinessUnitMember } from '@objectstack/platform-objects/identity';
-import { SharingService, type SharingEngine, type SharingTenancyProbe } from './sharing-service.js';
+import {
+  SharingService,
+  type SharingEngine,
+  type SharingSecurityProbe,
+  type SharingTenancyProbe,
+} from './sharing-service.js';
 import { SharingRuleService } from './sharing-rule-service.js';
 import { ShareLinkService } from './share-link-service.js';
 import { registerShareLinkRoutes } from './share-link-routes.js';
@@ -408,7 +426,7 @@ export class SharingServicePlugin implements Plugin {
     if (typeof (ctx as any).hook === 'function') {
       (ctx as any).hook('kernel:ready', async () => {
         try {
-          const i18n = ctx.getService<any>('i18n');
+          const i18n = ctx.getService<II18nService>('i18n');
           if (i18n && typeof i18n.loadTranslations === 'function') {
             const { SharingTranslations } = await import('./translations/index.js');
             for (const [locale, data] of Object.entries(SharingTranslations)) {
@@ -423,9 +441,13 @@ export class SharingServicePlugin implements Plugin {
 
   async start(ctx: PluginContext): Promise<void> {
     ctx.hook('kernel:ready', async () => {
-      let engine: any = null;
-      try { engine = ctx.getService<any>('objectql'); }
-      catch { try { engine = ctx.getService<any>('data'); } catch { /* ignore */ } }
+      // The engine SEEN WHOLE (`registerHook` / `unregisterHooksByPackage` /
+      // `registerMiddleware` are all bound below), which is the `objectql`
+      // slot. Its ledger entry records it as "the SAME instance as `data`,
+      // seen whole", so the alias fallback resolves the same object.
+      let engine: IObjectQLEngine | null = null;
+      try { engine = ctx.getService<IObjectQLEngine>('objectql'); }
+      catch { try { engine = ctx.getService<IObjectQLEngine>('data'); } catch { /* ignore */ } }
       if (!engine) {
         ctx.logger.warn('SharingServicePlugin: no ObjectQL engine — service NOT registered');
         return;
@@ -439,14 +461,17 @@ export class SharingServicePlugin implements Plugin {
         // [ADR-0057] Late-bound lookup of the enterprise hierarchy resolver.
         // Open edition: not registered → hierarchy scopes fail closed to own.
         hierarchyResolver: () => {
-          try { return ctx.getService<any>('hierarchy-scope-resolver'); }
+          try { return ctx.getService<IHierarchyScopeResolver>('hierarchy-scope-resolver'); }
           catch { return null; }
         },
         // [ADR-0111 D1/D2] Late-bound security probe for canManageShares'
         // Modify-All path. Absent (no plugin-security) → owner-only, fail
         // closed — a degraded security stack never widens sharing authority.
         securityService: () => {
-          try { return ctx.getService<any>('security'); }
+          // The named surface this option already requires — plugin-security is
+          // OPTIONAL, so the consumer declares the slice it probes rather than
+          // taking a runtime dependency on `ISecurityService`.
+          try { return ctx.getService<SharingSecurityProbe>('security'); }
           catch { return null; }
         },
         // [ADR-0105 D1 / #5859] Late-bound tenancy posture — read exactly the
@@ -537,8 +562,8 @@ export class SharingServicePlugin implements Plugin {
           // sys_sharing_rule BEFORE listRules so the lifecycle hooks bind to a
           // populated table (previously rules were decorative — ruleCount: 0).
           try {
-            let metadataService: any = null;
-            try { metadataService = ctx.getService<any>('metadata'); } catch { /* optional */ }
+            let metadataService: IMetadataService | null = null;
+            try { metadataService = ctx.getService<IMetadataService>('metadata'); } catch { /* optional */ }
             if (metadataService) {
               await bootstrapDeclaredSharingRules(this.ruleService, metadataService, engine, ctx.logger as any);
             }
@@ -600,20 +625,46 @@ export class SharingServicePlugin implements Plugin {
         ctx.registerService('shareLinks', this.linkService);
 
         if (this.options.registerShareLinkRoutes !== false) {
-          let http: IHttpServer | null = null;
-          try {
-            http = ctx.getService<IHttpServer>('http-server');
-          } catch {
-            // No HTTP server — service still reachable via getService.
-          }
+          // [#4251 B5] Canonical name FIRST, alias second. This read was
+          // `http-server`-only, and that is the DEPRECATED alias: the ledger
+          // records `http.server` as canonical and as the only name present on
+          // every provider path (`runtime.ts`'s `config.server` path registers
+          // no alias). On that path the share-link REST routes silently never
+          // mounted. Per-name `try` because `getService` throws on an empty
+          // slot, so both names cannot share one `try` (#4393).
+          // Neither name present → no HTTP server; the service stays reachable
+          // via getService.
+          const readServer = (name: string): IHttpServer | null => {
+            try { return ctx.getService<IHttpServer>(name); } catch { return null; }
+          };
+          const http: IHttpServer | null = readServer('http.server') ?? readServer('http-server');
           if (http) {
             // [Finding-2] Derive the caller from the platform's VERIFIED
             // resolution (session / API key / OAuth), never from spoofable
-            // `x-user-id` headers. `positions`/`permissions` flow through so the
-            // createLink record-access check evaluates real RLS. An
-            // unresolvable request → anonymous (the authed routes then 401).
-            const ql: any = engine;
-            const verifiedContextFromRequest = async (req: IHttpRequest): Promise<ShareLinkExecutionContext> => {
+            // `x-user-id` headers. An unresolvable request → anonymous (the
+            // authed routes then 401).
+            //
+            // [#6206 / #6430 — maintainer ruling A, 2026-08-07] The envelope is
+            // handed on WHOLE. This assembly used to name four fields
+            // (`userId`/`tenantId`/`positions`/`permissions`) and the resulting
+            // object was passed straight into `engine.find` as the [Finding-2]
+            // visibility check's context — so `accessible_org_ids`,
+            // `org_user_ids`, `systemPermissions`, `posture` and
+            // `tabPermissions` never reached enforcement. Under the `group`
+            // tenancy posture `accessible_org_ids` IS the Layer 0 wall
+            // (ADR-0105 D2) and an absent set DENIES, so link creation answered
+            // a blanket 403 on a posture that ships. `posture` is likewise
+            // resolved once by the resolver and carried (ADR-0095 D2) — never
+            // re-derived at the enforcement site, which is exactly what a
+            // per-site subset forces the next layer to do.
+            //
+            // A spread, not a field list, on purpose: a field list is how this
+            // seam broke, and it breaks again the day `ResolvedAuthzContext`
+            // grows a dimension nobody remembers to add here. The route's own
+            // 401 decision reads `userId` off the same object (see
+            // `ShareLinkExecutionContext` in the contract for that boundary).
+            const ql = engine;
+            const verifiedContextFromRequest = async (req: IHttpRequest): Promise<ExecutionContext> => {
               try {
                 const headers = new Headers();
                 for (const [k, v] of Object.entries(req.headers ?? {})) {
@@ -622,8 +673,14 @@ export class SharingServicePlugin implements Plugin {
                 }
                 const getSession = async (h: any) => {
                   try {
-                    const authService: any = ctx.getService('auth');
-                    let api: any = authService?.api;
+                    // Both members are OPTIONAL on the contract, and that is
+                    // load-bearing: the shipped plugin-auth registers an
+                    // `AuthManager`, which has no `api` member at all (#4127
+                    // batch 4), so on every real stack this falls through to
+                    // `getApi()`. Typed, the optionality is visible; erased, the
+                    // dead first branch looked like the primary path.
+                    const authService = ctx.getService<IAuthService>('auth');
+                    let api: AuthSessionApi | undefined = authService?.api;
                     if (!api && typeof authService?.getApi === 'function') api = await authService.getApi();
                     return await api?.getSession?.({ headers: h });
                   } catch {
@@ -631,12 +688,11 @@ export class SharingServicePlugin implements Plugin {
                   }
                 };
                 const authz = await resolveAuthzContext({ ql, headers, getSession });
-                return {
-                  userId: authz.userId,
-                  tenantId: authz.tenantId,
-                  positions: authz.positions,
-                  permissions: authz.permissions,
-                };
+                // `isSystem: false` states what the absence of the flag already
+                // means (ADR-0118 D2: absence is never system) and matches what
+                // both sibling transports build — `rest-server.ts` and
+                // `runtime/src/security/resolve-execution-context.ts`.
+                return { ...authz, isSystem: false };
               } catch {
                 return {}; // anonymous → authed routes 401
               }
@@ -759,6 +815,14 @@ export class SharingServicePlugin implements Plugin {
  * write operations. Exported so it can be unit-tested without booting
  * a kernel. `log` is optional — the [ADR-0111 D10] delete-denial breadcrumb
  * is best-effort and absent in unit tests.
+ *
+ * [#5493] The by-id write gate DEFERS before it hard-refuses: a refusal is
+ * checked against `service.probeAuthoredRowWrite`, the security service's
+ * app-authored RLS verdict, and only stands when that verdict is not `admit`.
+ * The probe is reached through the `security` late-binding the passed
+ * {@link SharingService} already holds, so this builder's signature — and every
+ * caller of it — is unchanged, and a stack without `@objectstack/plugin-security`
+ * behaves exactly as before.
  */
 export function buildSharingMiddleware(
   service: SharingService,
@@ -843,6 +907,38 @@ export function buildSharingMiddleware(
           });
         }
         if (!ok) {
+          // [#5493 / maintainer ruling 2026-08-08, issue comment 5226389104]
+          // Row-level write authority is ONE composite determination. Before
+          // this middleware HARD-REFUSES a by-id write, it asks the other half
+          // whether an APP-AUTHORED RLS widener admits this row by declaration.
+          //
+          // The measured defect: on an object where record sharing enforces
+          // (a `private`/`public_read` OWD *and* an `owner_id` field), this
+          // gate answered FORBIDDEN before RLS was ever consulted, so an
+          // app-declared update-widener was never asked. On an object where
+          // sharing ABSTAINS — a `public` model, `controlled_by_parent`, or no
+          // `owner_id` column — `canEdit` already answered `true` and the same
+          // widener worked. Half a mechanism, discriminated by a property no
+          // author declares.
+          //
+          // `admit` does NOT authorize the write: it retracts THIS authority's
+          // refusal and hands the row to the security pre-image gate, which
+          // composes per #6684/#5492 and makes the final row decision. Every
+          // other outcome — `abstain`, no security service, a service without
+          // the method, a throwing probe — leaves the refusal below untouched,
+          // byte for byte.
+          //
+          // By-id only, and deliberately: the bulk path composes a FILTER
+          // rather than a verdict and is tracked separately (#6736). Nothing
+          // here touches it.
+          const authored = await service.probeAuthoredRowWrite(
+            ctx.object,
+            String(id),
+            verb,
+            exec ?? {},
+          );
+          if (authored === 'admit') return next();
+
           // [ADR-0111 D10] A fail-closed delete denial gets a specific,
           // greppable reason so the "edit-share does not grant delete"
           // tightening is diagnosable rather than a mystery 403.

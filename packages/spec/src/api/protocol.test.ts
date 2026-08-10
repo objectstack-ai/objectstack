@@ -14,14 +14,7 @@ import {
   CreateManyDataResponseSchema,
   UpdateManyDataRequestSchema,
   DeleteManyDataRequestSchema,
-  // Views
-  ListViewsRequestSchema,
-  ListViewsResponseSchema,
-  GetViewRequestSchema,
-  CreateViewRequestSchema,
-  UpdateViewRequestSchema,
-  DeleteViewRequestSchema,
-  DeleteViewResponseSchema,
+  // View-management schemas removed with the retired ViewProtocol (#6239, v17)
   // Permissions
   CheckPermissionRequestSchema,
   CheckPermissionResponseSchema,
@@ -65,6 +58,7 @@ import {
   GetFieldLabelsRequestSchema,
   GetFieldLabelsResponseSchema,
 } from './protocol.zod';
+import type { ListNotificationsRequest } from './protocol.zod';
 
 describe('ObjectStack Protocol', () => {
 
@@ -166,24 +160,41 @@ describe('ObjectStack Protocol', () => {
     expect(DeleteManyDataRequestSchema.safeParse(deleteManyReq).success).toBe(true);
   });
 
-  it('validates Views operations', () => {
-    expect(ListViewsRequestSchema.safeParse({ object: 'project', type: 'list' }).success).toBe(true);
-    expect(ListViewsResponseSchema.safeParse({
-      object: 'project',
-      views: [{ list: { columns: [] } }],
-    }).success).toBe(true);
-    expect(GetViewRequestSchema.safeParse({ object: 'project', viewId: 'v1' }).success).toBe(true);
-    expect(CreateViewRequestSchema.safeParse({
-      object: 'project',
-      data: { list: { columns: [] } },
-    }).success).toBe(true);
-    expect(UpdateViewRequestSchema.safeParse({
-      object: 'project',
-      viewId: 'v1',
-      data: { list: { columns: [] } },
-    }).success).toBe(true);
-    expect(DeleteViewRequestSchema.safeParse({ object: 'project', viewId: 'v1' }).success).toBe(true);
-    expect(DeleteViewResponseSchema.safeParse({ object: 'project', viewId: 'v1', success: true }).success).toBe(true);
+  it('no longer publishes a viewId-addressed view CRUD surface (#6239)', async () => {
+    // Retired at protocol 17: five methods, ten schemas, zero implementations
+    // and zero routes — and already mis-read once as the contract of
+    // `GET /ui/view/:object/:type` (#5948). The unit test that stood here
+    // asserted the ten shapes parse; the shapes are what was removed, so it is
+    // replaced wholesale rather than re-spelled (the retirement playbook's
+    // third fixture disposition — an assertion that keeps passing because
+    // nothing is produced is not coverage).
+    //
+    // Reverse verification, direction predicted first: these are
+    // `false`-expecting existence checks over a runtime namespace, so restoring
+    // any removed limb turns exactly this test red. Plain red, not one of the
+    // inverted directions — nothing downstream counts these names.
+    const protocol = await import('./protocol.zod');
+    for (const name of [
+      'ListViewsRequestSchema', 'ListViewsResponseSchema',
+      'GetViewRequestSchema', 'GetViewResponseSchema',
+      'CreateViewRequestSchema', 'CreateViewResponseSchema',
+      'UpdateViewRequestSchema', 'UpdateViewResponseSchema',
+      'DeleteViewRequestSchema', 'DeleteViewResponseSchema',
+    ]) {
+      expect(name in protocol, `${name} must not be exported`).toBe(false);
+    }
+  });
+
+  it('keeps the two view surfaces that ARE routed', async () => {
+    // The point of the removal, asserted positively so a later reader cannot
+    // mistake it for "views left the protocol". `getUiView` serves the resolved
+    // render-time view; the stored definition travels on the generic metadata
+    // methods with `type: 'view'`.
+    const protocol = await import('./protocol.zod');
+    expect('GetUiViewRequestSchema' in protocol).toBe(true);
+    expect('GetUiViewResponseSchema' in protocol).toBe(true);
+    expect('GetMetaItemRequestSchema' in protocol).toBe(true);
+    expect('SaveMetaItemRequestSchema' in protocol).toBe(true);
   });
 
   it('validates Permissions operations', () => {
@@ -260,6 +271,69 @@ describe('ObjectStack Protocol', () => {
       unreadCount: 1,
     }).success).toBe(true);
     expect(MarkNotificationsReadRequestSchema.safeParse({ ids: ['n1', 'n2'] }).success).toBe(true);
+  });
+
+  /**
+   * [#6361] `GET /api/v1/notifications` declares no pagination — on either half.
+   *
+   * Maintainer ruling 2026-08-07 (Option A), ruled jointly with #6363: one
+   * capability's two halves are never half-deleted. `cursor` was declared on the
+   * request AND the response and honoured on neither, and `limit` declared a
+   * `.default(20)` no request path has ever applied (the server windows at 50).
+   *
+   * Asserted on the SHAPES rather than only through `safeParse`, and that choice
+   * is the whole point: both retired keys were `optional`, so every parse was
+   * green before the removal and every parse is green after it. A value-level
+   * test cannot see this class of defect at all — which is exactly why the
+   * family's double-assertion ratchet (#3877 Stage D) was blind to it.
+   */
+  it('[#6361] tombstones `cursor` on BOTH halves, with the prescription', () => {
+    // BOTH halves or neither — the ruling's "one capability, two halves" clause,
+    // asserted rather than trusted. A half-deletion is the specific outcome the
+    // maintainer ruled out, so it gets a test rather than a comment.
+    for (const [half, schema] of [
+      ['request', ListNotificationsRequestSchema],
+      ['response', ListNotificationsResponseSchema],
+    ] as const) {
+      const probe = half === 'request'
+        ? { read: false, limit: 10, cursor: 'n_42' }
+        : { notifications: [], unreadCount: 0, cursor: 'n_42' };
+      const result = schema.safeParse(probe);
+
+      // Refused, not stripped. Neither schema is `.strict()`, so a BARE DELETION
+      // would have parsed this cleanly and dropped the key — the silent-strip
+      // class (#3733, ADR-0104), i.e. the very defect this issue reports,
+      // re-created one layer down. That is why the assertion is on the refusal.
+      expect(result.success, `${half} half must refuse a retired \`cursor\``).toBe(false);
+      const issue = result.error!.issues.find((i) => i.path.join('.') === 'cursor');
+      expect(issue, `${half} half must fault on the \`cursor\` path`).toBeDefined();
+
+      // The message IS the migration doc (retiredKey's contract), so its
+      // substance is asserted, not merely its existence: what was removed, that
+      // the route is not paginated, and the replacement to reach for.
+      expect(issue!.message).toMatch(/`cursor` was removed from GET \/api\/v1\/notifications/);
+      expect(issue!.message).toMatch(/not paginated/i);
+      expect(issue!.message).toMatch(/limit/);
+      expect(issue!.message).toMatch(/#6361/);
+    }
+
+    // `tsc` is the first channel retiredKey buys — the input type is `never`.
+    // Pinned as a compile-time fact so deleting the tombstone cannot pass as a
+    // refactor. @ts-expect-error fails the build if the key becomes writable.
+    // @ts-expect-error `cursor` is retired: its input type is `never`.
+    const rejectedByTsc: ListNotificationsRequest = { cursor: 'n_42' };
+    void rejectedByTsc;
+
+    // The surviving keys, named. `limit` is plainly optional now — parsing an
+    // empty query stamps NO number onto it, where it used to stamp 20 that no
+    // request path had ever applied. Stated through the parse result so it holds
+    // if Zod's internal representation of a default ever moves.
+    expect(Object.keys((ListNotificationsRequestSchema as any).shape)).toEqual(['read', 'type', 'limit', 'cursor']);
+    const parsedEmpty = ListNotificationsRequestSchema.parse({});
+    expect(Object.prototype.hasOwnProperty.call(parsedEmpty, 'limit')).toBe(false);
+    expect(ListNotificationsRequestSchema.parse({ limit: 7 }).limit).toBe(7);
+    // The response half keeps exactly #6363's landed business, and gains nothing.
+    expect(ListNotificationsResponseSchema.safeParse({ notifications: [], unreadCount: 0 }).success).toBe(true);
   });
 
   /**
@@ -674,5 +748,212 @@ describe('SaveMetaItemResponseSchema (#5745 — declares the full save response)
     expect(
       SaveMetaItemResponseSchema.safeParse({ ...realResponse, projectionApplied: { error: 'x' } }).success,
     ).toBe(false);
+  });
+});
+
+import { PublishMetaItemResponseSchema } from './protocol.zod';
+
+/**
+ * #7294 — the same suite one door over, for `POST /meta/:type/:name/publish`.
+ *
+ * The publish door had NO declaration at all: `PublishMetaItem` appeared
+ * nowhere under `packages/spec/src/`, so its `version` — the same ADR-0008 OCC
+ * token the save door already declares — rode the wire with no contract behind
+ * it, and `PublishMetaItemResponse` could not be named at the type level.
+ *
+ * Optionality is measured, not assumed (evidence in the PR): the sole producer
+ * is `ObjectStackProtocolImplementation.publishMetaItem`, whose single response
+ * literal always sets `success` / `version` / `seq`, and attaches each of the
+ * three `*Applied` receipts only when the matching side effect ran.
+ */
+describe('PublishMetaItemResponseSchema (#7294 — declares the full publish response)', () => {
+  /** A verbatim capture of a real `publishMetaItem` return (promotion path). */
+  const realResponse = {
+    success: true,
+    version: 'sha256:7aad99c8d969efb5067fff275fb3e5be7ec90f9cd610d41709fcddbf8c34b1f0',
+    seq: 2,
+    message: 'Published draft — type=view, name=cases [seq=2]',
+  };
+
+  it('round-trips a real response without stripping any field', () => {
+    const parsed = PublishMetaItemResponseSchema.parse(realResponse);
+    expect(Object.keys(parsed).sort()).toEqual(Object.keys(realResponse).sort());
+    expect(parsed).toEqual(realResponse);
+  });
+
+  it('carries the ADR-0008 OCC token: version survives parse as the If-Match value', () => {
+    expect(PublishMetaItemResponseSchema.parse(realResponse).version).toBe(realResponse.version);
+  });
+
+  it('keeps seq as an integer and rejects a fractional one', () => {
+    expect(PublishMetaItemResponseSchema.parse(realResponse).seq).toBe(2);
+    expect(PublishMetaItemResponseSchema.safeParse({ ...realResponse, seq: 2.5 }).success).toBe(false);
+  });
+
+  it('requires success / version / seq — the producer always emits them', () => {
+    for (const missing of ['success', 'version', 'seq'] as const) {
+      const body: Record<string, unknown> = { ...realResponse };
+      delete body[missing];
+      expect(
+        PublishMetaItemResponseSchema.safeParse(body).success,
+        `omitting '${missing}' must fail parse`,
+      ).toBe(false);
+    }
+  });
+
+  it('carries seedApplied — present only when a `seed` was published', () => {
+    expect(PublishMetaItemResponseSchema.safeParse(realResponse).success).toBe(true);
+    const withSeed = PublishMetaItemResponseSchema.parse({
+      ...realResponse,
+      seedApplied: { success: true, inserted: 3, updated: 1 },
+    });
+    expect(withSeed.seedApplied).toEqual({ success: true, inserted: 3, updated: 1 });
+    // The loader's per-record failure list is part of the shape, not extra
+    // baggage the schema drops on the floor.
+    const withErrors = PublishMetaItemResponseSchema.parse({
+      ...realResponse,
+      seedApplied: { success: false, inserted: 0, updated: 0, errors: [{ row: 1, reason: 'bad ref' }] },
+    });
+    expect(withErrors.seedApplied?.errors).toHaveLength(1);
+  });
+
+  it('seedApplied counters are required integers once the key is present', () => {
+    expect(
+      PublishMetaItemResponseSchema.safeParse({ ...realResponse, seedApplied: { success: true } }).success,
+    ).toBe(false);
+    expect(
+      PublishMetaItemResponseSchema.safeParse({
+        ...realResponse, seedApplied: { success: true, inserted: 1.5, updated: 0 },
+      }).success,
+    ).toBe(false);
+  });
+
+  it('carries materializeApplied — present only when an ADR-0086 P2 materializer is registered', () => {
+    const parsed = PublishMetaItemResponseSchema.parse({
+      ...realResponse,
+      materializeApplied: { success: false, inserted: 0, updated: 0, error: 'boom-from-materializer' },
+    });
+    expect(parsed.materializeApplied)
+      .toEqual({ success: false, inserted: 0, updated: 0, error: 'boom-from-materializer' });
+  });
+
+  it('carries projectionApplied — the same ADR-0094 receipt the save door declares', () => {
+    const parsed = PublishMetaItemResponseSchema.parse({
+      ...realResponse,
+      projectionApplied: { success: false, error: 'boom-from-projector' },
+    });
+    expect(parsed.projectionApplied).toEqual({ success: false, error: 'boom-from-projector' });
+    expect(
+      PublishMetaItemResponseSchema.safeParse({ ...realResponse, projectionApplied: { error: 'x' } }).success,
+    ).toBe(false);
+  });
+
+  it('leaves all three receipts optional — absent means that side effect did not run', () => {
+    for (const key of ['seedApplied', 'materializeApplied', 'projectionApplied'] as const) {
+      expect(realResponse).not.toHaveProperty(key);
+    }
+    expect(PublishMetaItemResponseSchema.safeParse(realResponse).success).toBe(true);
+  });
+});
+
+import { RuntimeAuthoringIssueSchema } from './protocol.zod';
+
+/**
+ * #4717 — `advisories`, the #4463 D3 advisory half, on the save response.
+ *
+ * The gate runs the shared author-time rule registry over every body going
+ * `active` and splits its findings by severity. `error` becomes the 422; the
+ * rest are advisory — they do not block the write, and until #4717 they went
+ * only to a process-deduped `console.warn`, which is unreachable by exactly the
+ * Studio / MCP / AI authors #4463 exists for.
+ *
+ * ⚠️ This field is CONDITIONAL, and that has a consequence worth stating where
+ * the next reader will meet it: the producer-side conformance gate
+ * (`packages/objectql/src/save-meta-response-conformance.test.ts`) works by
+ * asserting that nothing was stripped, and a key that is absent strips nothing.
+ * So it stays green whether or not this declaration exists — measured, not
+ * assumed (the PR's R1/R3 rows). The declaration is deliberate rather than
+ * test-driven, and these cases are what make it checkable at all.
+ */
+describe('SaveMetaItemResponseSchema.advisories (#4717 — #4463 D3 on the response)', () => {
+  const realResponse = {
+    success: true,
+    version: 'sha256:7aad99c8d969efb5067fff275fb3e5be7ec90f9cd610d41709fcddbf8c34b1f0',
+    seq: 1,
+    state: 'active',
+    message: 'Saved flow \'nightly_purge\' (env-wide, state=active) [seq=1]',
+  };
+
+  /** A verbatim capture of a real finding — `lintFlowPatterns`, warning tier. */
+  const advisory = {
+    rule: 'flow-multi-write-unfiltered',
+    path: 'flow \'nightly_purge\' · node \'purge\' (delete_record)',
+    where: 'flow \'nightly_purge\' · node \'purge\' (delete_record)',
+    message: 'declares `multi: true` with no `filter` key — this is a WHOLE-OBJECT write.',
+    hint: 'Add a `filter`, or state the whole-object intent explicitly.',
+    severity: 'warning' as const,
+  };
+
+  it('carries a real advisory through parse without stripping it', () => {
+    const parsed = SaveMetaItemResponseSchema.parse({ ...realResponse, advisories: [advisory] });
+    expect(parsed.advisories).toEqual([advisory]);
+  });
+
+  it('is OPTIONAL — absence means "nothing to report", never "the gate did not run"', () => {
+    expect(SaveMetaItemResponseSchema.safeParse(realResponse).success).toBe(true);
+    expect(SaveMetaItemResponseSchema.parse(realResponse).advisories).toBeUndefined();
+  });
+
+  it('does not fabricate an empty array when the key is absent', () => {
+    // The producer omits the key rather than emitting `[]`, so a clean save's
+    // response bytes are unchanged. A `.default([])` here would quietly undo
+    // that on the consumer side: every caller would see a key the server never
+    // sent, and "absent" would stop being distinguishable at all.
+    expect('advisories' in SaveMetaItemResponseSchema.parse(realResponse)).toBe(false);
+  });
+
+  it('rejects a non-array, so a single issue object cannot masquerade as the list', () => {
+    expect(
+      SaveMetaItemResponseSchema.safeParse({ ...realResponse, advisories: advisory }).success,
+    ).toBe(false);
+  });
+});
+
+/**
+ * The element shape itself — declared once (#4717) and re-exported by
+ * `@objectstack/metadata-protocol` as its `RuntimeAuthoringIssue`, so the 422's
+ * `issues[]` and the 2xx's `advisories[]` cannot drift into two dialects.
+ */
+describe('RuntimeAuthoringIssueSchema (#4717 — the ONE finding shape)', () => {
+  const issue = {
+    rule: 'flow-multi-write-unfiltered',
+    path: 'flows[0].nodes[1].config.multi',
+    where: 'flow "nightly_purge" · node "purge"',
+    message: 'unbounded bulk delete',
+    hint: 'add a filter',
+    severity: 'warning',
+  };
+
+  it('accepts a finding with all six keys', () => {
+    expect(RuntimeAuthoringIssueSchema.parse(issue)).toEqual(issue);
+  });
+
+  it('requires every one of the six — a partial finding is not a finding', () => {
+    for (const missing of ['rule', 'path', 'where', 'message', 'hint', 'severity'] as const) {
+      const body: Record<string, unknown> = { ...issue };
+      delete body[missing];
+      expect(
+        RuntimeAuthoringIssueSchema.safeParse(body).success,
+        `omitting '${missing}' must fail parse`,
+      ).toBe(false);
+    }
+  });
+
+  it('closes severity to the three the gate emits', () => {
+    for (const severity of ['error', 'warning', 'info']) {
+      expect(RuntimeAuthoringIssueSchema.safeParse({ ...issue, severity }).success).toBe(true);
+    }
+    expect(RuntimeAuthoringIssueSchema.safeParse({ ...issue, severity: 'advisory' }).success).toBe(false);
+    expect(RuntimeAuthoringIssueSchema.safeParse({ ...issue, severity: 'fatal' }).success).toBe(false);
   });
 });

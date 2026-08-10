@@ -25,7 +25,7 @@ import { ObjectQLPlugin } from '@objectstack/objectql';
 import { HonoServerPlugin } from '@objectstack/plugin-hono-server';
 import { createRestApiPlugin } from '@objectstack/rest';
 import { AuthPlugin } from '@objectstack/plugin-auth';
-import { SecurityPlugin } from '@objectstack/plugin-security';
+import { SecurityPlugin, appSecurityPluginOptions } from '@objectstack/plugin-security';
 import { SharingServicePlugin } from '@objectstack/plugin-sharing';
 import { SettingsServicePlugin, LocalCryptoProvider } from '@objectstack/service-settings';
 import { AnalyticsServicePlugin } from '@objectstack/service-analytics';
@@ -103,8 +103,22 @@ export interface BootOptions {
    * Override the SecurityPlugin instance. Pass a `new SecurityPlugin({...})`
    * to carry a custom `fallbackPermissionSet` / extra permission sets — this
    * is how an owner-isolated RLS fixture makes a fresh member fall back to a
-   * permission set that carries `RLS.ownerPolicy(...)` instead of the broad-read
-   * `member_default`. Defaults to a vanilla `new SecurityPlugin()`.
+   * permission set that carries `RLS.ownerPolicy(...)` instead of the
+   * platform's `member_default`.
+   *
+   * **Default (since #7001): the app's own declared default profile** —
+   * `new SecurityPlugin(appSecurityPluginOptions(config))`, i.e. the permission
+   * set the config marks `isDefault: true`, wired exactly as `objectstack
+   * serve` wires it. A config declaring no such set is unaffected: the
+   * resolution yields `undefined` and the plugin keeps deriving its own default
+   * (`member_default`) from the built-in sets.
+   *
+   * A plugin passed here wins WHOLE — the harness never merges the app's
+   * declared default into it. An instance arrives carrying its own constructor
+   * options, and silently rewriting one of them would be a second, worse
+   * surprise than the one #7001 fixed. So this is also the explicit opt-out:
+   * a suite that deliberately wants the vanilla platform baseline over an app
+   * that declares a default asks for it with `security: new SecurityPlugin()`.
    */
   security?: SecurityPlugin;
   /**
@@ -416,7 +430,18 @@ export async function bootStack(
     await kernel.use(plugin as any);
   }
 
-  await kernel.use(opts.security ?? new SecurityPlugin());
+  // [#7001] The app's DECLARED default profile, resolved the one way every boot
+  // path resolves it. Character-for-character what `objectstack serve` does
+  // (`packages/cli/src/commands/serve.ts`) — the same helper, the same argument
+  // — because the two disagreeing was the defect: an app could declare a
+  // profile, ship it to users through the CLI, and have every one of its own
+  // tests run against a boot that did not include it. A harness whose context
+  // differs from the seam it verifies reports green on a difference in
+  // production behaviour, which is the one thing it exists not to do.
+  //
+  // `opts.security` still wins whole — see BootOptions.security for why a
+  // caller-supplied plugin is never partially rewritten.
+  await kernel.use(opts.security ?? new SecurityPlugin(appSecurityPluginOptions(config)));
   // Sharing service — apps that declare `requires: ['sharing']` rely on it for
   // record-share grants; without it their RLS/sharing rules are inert and the
   // verifier would under-report authorization.

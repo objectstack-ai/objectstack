@@ -509,12 +509,30 @@ describe('InMemoryDriver', () => {
       expect(results.map((r: any) => r.name).sort()).toEqual(['Bob', 'Diana']);
     });
 
-    it('should filter with $regex operator', async () => {
-      const results = await driver.find(testTable, {
-        where: { name: { $regex: /^[AB]/ } },
-      });
-      expect(results).toHaveLength(2);
-      expect(results.map((r: any) => r.name).sort()).toEqual(['Alice', 'Bob']);
+    // [#5702] REPLACED WHOLESALE, not re-spelled. This case used to read
+    // `should filter with $regex operator` and asserted that
+    // `{ name: { $regex: /^[AB]/ } }` returned Alice and Bob — i.e. it pinned
+    // the real `RegExp` evaluation that made this driver the only backend in
+    // the repo answering `$regex` as a pattern while every SQL backend answered
+    // it as a literal substring. That divergence is what #4706 retired the
+    // operator over, so the limb is gone and its fixture cannot be re-spelled
+    // into the new world: there is no `$regex` answer left to assert.
+    //
+    // What replaces it pins the retirement instead — and pins `code`/`status`,
+    // not merely that something threw, because a bare `toThrow()` here would
+    // stay green against any error at all, including the uncoded engine errors
+    // #5324 spent a whole issue routing back into the ADR-0112 envelope.
+    it('refuses the retired $regex operator, in the ADR-0112 envelope', async () => {
+      const err = await driver
+        .find(testTable, { where: { name: { $regex: '^[AB]' } } })
+        .then(() => null, (e: any) => e);
+      expect(err).toBeInstanceOf(Error);
+      expect(err.code).toBe('INVALID_FILTER');
+      expect(err.status).toBe(400);
+      expect(err.message).toContain('$regex');
+      // The prescription, not just the verdict: an author who wrote `$regex`
+      // needs the name of what replaces it.
+      expect(err.message).toContain('$icontains');
     });
 
     it('should count with complex filter', async () => {

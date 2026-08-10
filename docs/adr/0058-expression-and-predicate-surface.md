@@ -119,7 +119,13 @@
 >   Falling back to one dispatch for the batch would skip the hook for N-1 rows
 >   silently — the failure shape this whole family exists to abolish.
 >
-> **`before*` hooks are NOT per row, and that is not a version gap.** A
+> **`before*` hooks are NOT per row, and that is not a version gap.**
+> ⚠️ **SUPERSEDED by Addendum II below (#5574, ruling B).** The maintainer
+> reversed the "not a version gap" half on measured evidence: `before*` hooks
+> ARE dispatched per row on a predicate write. What survives verbatim is the
+> reason given here for the payload — one `updateMany` carries one payload —
+> which Addendum II keeps as its D3 rather than overturning. Kept in place, not
+> rewritten, because a reversed decision is a record (Prime Directive #13). A
 > `beforeUpdate` / `beforeDelete` fires once for the whole batch because it may
 > still rewrite the payload, and one `updateMany` carries one payload — there is
 > nothing per-row to hand it. So #5037's `HookConditionError` and its
@@ -139,6 +145,233 @@
 > after-type record-change trigger now rides the per-row dispatch and the route
 > is real. The message names it because the fact changed, not because the
 > constraint was relaxed.
+
+---
+
+> **Addendum II (2026-08, #5748 / #5574 / #6462) — BULK-WRITE, part two: which
+> writes ARE bulk writes, and what a bulk write does to the `before*` phase.**
+> _Contract recorded here. The `data.id` half is **implemented** (#5748 / PR
+> #5919). The `before*` half is the **spec** side of a deliberate contract-first
+> split (#6462); the engine side is #5574's engine card, `Blocked-by` it._
+>
+> Addendum I answered "what is a record-scoped declaration evaluated over when
+> one write touches N rows" for the `after*` phase. Two questions it left are
+> answered here, because a maintainer ruled on both on 2026-08-06 and directed
+> them into one appendix.
+>
+> ---
+>
+> ### Part A — which writes are bulk writes (#5748, delivered)
+>
+> `ObjectQL.update(object, data, options)` took its id from two sources with two
+> different rules: `where.id` went through a scalar test (an operator object, an
+> array or `null` is a predicate, not an id), while `data.id` went through none
+> at all and outranked both `where` and an explicit `options.multi`. So
+> `update(o, { id: { $in: ['a','b'] }, title: 'x' }, { multi: true })` bound a
+> serialized operator object as a **primary key** and silently discarded the
+> declared bulk intent.
+>
+> **The decision (ruling A, 2026-08-06).** One scalar test, defined once and
+> reused on both sides: a non-scalar `data.id` is not an id, so the same call
+> now dispatches to `updateMany` and honours the declared `multi: true`. Route B
+> (reject non-scalar `data.id` outright) was considered and refused — it would
+> have made "the author put the predicate in the wrong slot" fatal for a call
+> whose intent is unambiguous once the two halves agree. The concern behind B
+> was converted into a required test instead, and #5919 landed 16 assertions of
+> it: a non-scalar `data.id` **without** `multi: true` rejects with zero driver
+> calls, so a typo is never silently promoted into a real batch write.
+>
+> Two consequences landed after it, same rule one layer on: a value already
+> ruled not-a-primary-key does not get to sit in the primary-key column of the
+> SET clause either — stripped with a warning on the predicate branch (#6262)
+> and on the by-id branch (#6435).
+>
+> Why this belongs in the bulk-write appendix and not in a dispatch ADR of its
+> own: everything Addendum I says is conditioned on a write BEING a predicate
+> write. A rule that decides that question silently, and differently depending
+> on which slot the caller used, is the entry to this whole surface.
+>
+> ---
+>
+> ### Part B — the `before*` phase is per row too (#5574 ruling B; spec half #6462)
+>
+> **What Addendum I got right and what it got wrong.** It reasoned: one
+> `updateMany` carries one payload, a `before*` hook may rewrite the payload,
+> therefore there is nothing per-row to hand it, therefore the dispatch is
+> batch-scoped. The premise is true; the conclusion does not follow. The payload
+> is not the only thing a `before*` handler reads — `previous` is — and binding
+> a per-row pre-image needs no per-row payload at all.
+>
+> **The measured harm (#5574).** On the predicate path `ctx.previous` was never
+> assigned in the before phase, so every guard hook written the way guards are
+> written — `if (ctx.previous?.locked) throw` — passed silently. A hotcrm
+> deployment measured all **15** of its guard hooks bypassed by one batch edit,
+> including writing `null` into a `readonly: true` field that the single-id path
+> refuses. The failure direction is fail-OPEN, and the optional chaining that
+> makes it silent is exactly what an AI writes. The alternative on the table
+> (option A: document the limitation) was refused for that reason — it puts the
+> hole in the manual and leaves it in the product.
+>
+> **The decision.** A predicate write dispatches `beforeUpdate` / `beforeDelete`
+> **once per matched row**, on a single-record-shaped context, replacing the
+> single batch dispatch — the same move #5038 made for `after*`, held to the
+> same yardstick. The full clause set, with the reasoning that does not fit
+> here, is `packages/spec/src/data/bulk-write-hook-conformance.ts` (D1–D7), and
+> `BULK_WRITE_HOOK_DISPATCH_CONTRACT` is that table machine-readable, carrying a
+> `delivered` flag per event so the contract-first gap cannot read as delivered.
+> The load-bearing clauses:
+>
+> - **Per-row context (D1/D2).** `input.id` names the row, `previous` is its
+>   pre-image, `input.options` is still the caller's bag (the PHASE rule is
+>   unchanged), `result` stays absent — the before phase has no post-state.
+>   Zero matched rows is zero dispatches.
+> - **The payload stays BATCH-scoped, and that IS the merge rule (D3).** Every
+>   per-row context carries the one payload, not a copy. A rewrite therefore
+>   applies to the whole batch whoever made it, rewrites accumulate in dispatch
+>   order, N post-hook payloads cannot diverge, nothing is reconciled, and no
+>   predicate write is ever split into N single-row writes. One `updateMany`,
+>   one affected count (#4639), one aggregate `data.records.updated`. A rewrite
+>   *conditioned* on the row is out of contract: it widens to every matched row
+>   rather than scoping itself. Per-row `previous` is supplied so a guard can
+>   REFUSE, not so a rewrite can be aimed.
+> - **`input.id` stops being a reroute lever, on this path only (D4).** A
+>   per-row context arrives with `id` already bound and the dispatch decided, so
+>   rebinding it retargets nothing; it is refused rather than ignored, because a
+>   silent no-op is the failure this family exists to abolish.
+> - **One ceiling, both phases (D6).** `MAX_BULK_PER_ROW_HOOK_ROWS` (10 000)
+>   governs `before*` exactly as it governs `after*`, and the check runs before
+>   the FIRST per-row dispatch — so an over-ceiling batch runs zero handlers and
+>   writes nothing, rather than running 10 001 and then throwing. Still a
+>   refusal, never a downgrade. `resolveBulkPerRowHookBudget` is the rule,
+>   executable, and the engine half replaces its open-coded copy with it.
+> - **One read, reused (D7).** The row set is read once, with the composed AST
+>   the write binds, and serves validation (#3106), the `readonlyWhen` strip
+>   (#3042) and both per-row dispatches. The ruling forbids a second fetch in as
+>   many words.
+>
+> **Why per-row payload COPIES plus a reconciliation rule was rejected.** It is
+> the obvious alternative and it is defeated by a measured fact, so the evidence
+> is recorded rather than left to be rediscovered: objectql's own
+> `sys_stamp_audit_update` builtin is registered on `'*'` and reads
+> `new Date().toISOString()` **inside** the per-record stamp. Under per-row
+> dispatch that is one clock read per row, so rows either side of a millisecond
+> boundary carry different `updated_at` values — a converge-or-refuse rule would
+> refuse honest batches non-deterministically, and a converge-or-split rule
+> would shatter one `updateMany` into N writes for the same reason. Beside that,
+> nothing measured needs divergent payloads: every `beforeUpdate` payload
+> rewrite in the repo (the audit stamp, plugin-pinyin-search's companion
+> projection, service-storage's copy-on-claim) is row-invariant. Refusing
+> divergence also stays reversible in the safe direction — a later ADR can relax
+> it, while a write that has learned to split itself cannot be un-split.
+>
+> **The consequences, priced as this appendix's predecessor requires.**
+>
+> - **`bulk_write_previous_unbound` becomes unreachable.** #5038 retired
+>   `HookConditionError` for after-type hooks and Addendum I kept it alive
+>   "rescoped to the before dispatch". Once the engine half lands there is no
+>   dispatch left without a bound `previous`, and `isPredicateBulkWrite`
+>   (`hook-wrappers.ts`) — whose whole test is "no `input.id` and `multi`" —
+>   answers `false` for the before phase too. Both `HookConditionLimitation`
+>   members then have neither producer nor reachable consumer, which is an
+>   ADR-0049 enforce-or-remove item for the engine card, not a gap.
+> - **The demand becomes effectively universal, and that is #5846's bill.** The
+>   engine gates the row-set read on `hasHooksFor('beforeUpdate', object)`, and
+>   objectql registers `sys_stamp_audit_update` and `sys_fetch_previous_update`
+>   on `'*'` — so the gate is true for every object wherever the plugin is
+>   loaded. Making those builtins express in their registration what their
+>   handlers already decide at run time is #5846's, already scoped there.
+> - **The dispatch ladder must be resolved BEFORE the before phase**, since the
+>   row set has to be read to build the per-row contexts. That reorders a seam
+>   #5846 also owns (its (a) direction moves the prior read ahead of
+>   `beforeUpdate` and binds it), and it interacts with one existing capability
+>   — a `beforeUpdate` handler that CLEARS `input.id` on a by-id call currently
+>   converts the write into a predicate write. Deliberately **not** settled
+>   here: it is a live-behaviour question on a seam another card owns, and this
+>   appendix will not presume the answer. The engine half and #5846 settle it
+>   together, in one edit to one ordering, and record it as an amendment.
+>   **→ Settled in Amendment II.1 below.**
+> - **`scripts/adr-anchors.json`'s `hook-wrappers.ts` invariant still describes
+>   the batch dispatch.** It is TRUE today and must move with the engine half,
+>   not before it. **→ Moved with #5574's engine half.**
+
+---
+
+> **Amendment II.1 (2026-08, #5574 engine half + #5846 (a)) — the `input.id`
+> reroute lever is RETIRED, and refused loudly.**
+> _Settles the item Addendum II left open by name. Delivered in the same PR that
+> delivered the per-row `before*` dispatch, because it is the same edit to the
+> same ordering._
+>
+> **The capability, stated exactly.** `update()` and `delete()` dispatched their
+> `before*` event FIRST and only then read `hookContext.input.id` to choose the
+> driver call. The id slot therefore doubled as a control lever: a handler
+> assigning `ctx.input.id = undefined` on a by-id call converted the write into
+> a PREDICATE write over the caller's `where`; a handler assigning a different
+> id moved the write to another row (`delete()` supported that explicitly, by
+> re-reading the pre-image for the new target — #5272).
+>
+> **Why it cannot survive the reorder.** A per-row `before*` context is BUILT
+> from the matched row set, so the row set must be in hand before the first
+> dispatch, so the branch that decides whether there IS a row set must be
+> decided before that. #5846's (a) direction lands in the same edit: the by-id
+> path reads its prior row ahead of the dispatch and binds `previous` there. By
+> the time any handler runs, the target is settled — `previous`, the
+> `readonlyWhen` strip and every validation rule have already been computed
+> against the row the ladder chose.
+>
+> **The three options, and the choice.** *Ignore it* — the assignment retargets
+> nothing and says nothing, which is the silent no-op D4 exists to abolish, and
+> here the write still lands on the ORIGINAL row. *Honour it by re-resolving* —
+> the write lands on a row whose pre-image was never read, whose `readonlyWhen`
+> locks were never evaluated and whose rules were checked against a different
+> record: silently weaker enforcement, aimed by a hook. *Refuse* — chosen. The
+> write is rejected with `HookTargetRebindError`
+> (`objectql/src/hook-target-rebind-errors.ts`, code `ERR_HOOK_TARGET_REBIND`,
+> an `ERR_`-prefixed operational code on the error's own bag and deliberately
+> NOT an ADR-0112 wire code, same reasoning as the budget refusal). The message
+> NAMES the retired capability, so an author whose handler stopped working
+> learns what changed instead of watching a write land somewhere unexpected.
+>
+> **Scope, stated precisely, because the two verbs do NOT answer alike.**
+>
+> | | CLEARED id | REBOUND to another id |
+> |---|---|---|
+> | `update()` by-id | refused | refused |
+> | `delete()` by-id | refused | **honoured** (#5272's re-read, unchanged) |
+> | either, per-row | refused (D4) | refused (D4) |
+>
+> The CLEARED column is uniform because the ladder reorder leaves it no answer
+> of its own: clearing worked by falling through to the predicate branch, and
+> that branch is chosen before any handler runs. That is the capability this
+> amendment retires, and it is the one the ruling names.
+>
+> The REBOUND column is not uniform, and the asymmetry is principled rather
+> than an oversight. The case against honouring a rebind is that the write would
+> land on a row whose pre-image, `readonlyWhen` locks and validation rules were
+> never evaluated — and on `delete()` that is simply not true: #5272 already
+> RE-RESOLVES the new target, re-reading its pre-image and rebinding `previous`
+> before `afterDelete` or the summary recompute can see it. `update()` has no
+> such mechanism and would have to grow one, which is the "silently pick
+> re-resolution instead" this ruling forbids. So `update()` refuses and
+> `delete()` keeps honouring, until the delete-side repoint is ruled on as its
+> own question (#6752) — deliberately NOT folded in here as a rider on an
+> ordering change.
+>
+> Premise for the retirement, checked against `origin/main`: the only
+> `ctx.input.id` assignment in the whole repository was one engine test forcing
+> the fail-closed AST assertion, which is now the refusal's own pin.
+>
+> **What replaces it, for each thing it was used for.** Write a different row:
+> `ctx.api` / `ctx.ql` for that row explicitly. Write many rows: have the caller
+> pass `{ multi: true, where: … }`. Stop this write: throw from the handler —
+> the supported way for a `before*` guard to refuse, and the one the per-row
+> `previous` binding exists to enable.
+>
+> **One consequence priced with it.** `ENGINE_UPDATE_REJECT_MESSAGE` /
+> `ENGINE_DELETE_REJECT_MESSAGE` used to be raised AFTER the before phase, so a
+> handler binding `input.id` could convert a rejecting call into a by-id write.
+> That is the same lever pointed the other way; with the ladder resolved first
+> the refusal lands before any handler runs and before anything is read.
 
 ---
 

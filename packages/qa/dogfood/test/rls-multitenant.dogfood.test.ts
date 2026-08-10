@@ -3,16 +3,28 @@
 // Org-scoped (#1994) cross-tenant gate — the faithful counterpart to the
 // single-tenant smoke in `auto-verify-rls.dogfood.test.ts`.
 //
-// THE INVESTIGATION (why the single-tenant run showed all `member-visible`):
-// `member_default` scopes rows with a wildcard `tenant_isolation` policy
-// (`organization_id = current_user.organization_id`). When the org-scoping
-// plugin is absent, SecurityPlugin.collectRLSPolicies STRIPS every policy whose
-// predicate references `current_user.organization_id` (security-plugin.ts) — and
-// `member_default` carries NO owner-scoped READ policy — so a fresh member can
-// read every row. That is the `member-visible` verdict: not a broad-read default
-// of the app, but the harness booting single-tenant. Apps like hotcrm (9 sharing
-// files, `requires: ['sharing']`) rely on exactly this org boundary, so a
-// single-tenant boot under-reports their authorization model.
+// THE INVESTIGATION (why the single-tenant run showed all `member-visible`),
+// stated in the mechanism of its time: `member_default` THEN scoped rows with a
+// wildcard `tenant_isolation` policy (`organization_id =
+// current_user.organization_id`), and when the org-scoping plugin was absent
+// SecurityPlugin.collectRLSPolicies STRIPPED every policy whose predicate
+// referenced `current_user.organization_id` (security-plugin.ts) — and
+// `member_default` carries NO owner-scoped READ policy — so a fresh member read
+// every row. That is the `member-visible` verdict: not a broad-read default of
+// the app, but the harness booting single-tenant.
+//
+// [#6964] Both halves have since moved; the conclusion has not. ADR-0095 D1
+// RETIRED that wildcard policy — the tenant scope is now the Layer 0 wall
+// (`plugin-security/tenant-layer.ts`), which is inert under the `single` posture
+// by construction (`computeTenantLayer0Filter` returns `null` when
+// `postureEnforcesWall` is false) rather than by policy stripping. And #5491
+// removed `member_default`'s `'*'` grant, so on an app object a fresh member is
+// now refused at the CRUD gate before any row scope is consulted. What survives
+// is the fact this file is built on: a single-tenant boot applies NO org row
+// scope to reads, and `member_default` still carries no owner-scoped READ policy
+// (its `owner_only_*` policies are `update`/`delete` only). Apps like hotcrm
+// (9 sharing files, `requires: ['sharing']`) rely on exactly this org boundary,
+// so a single-tenant boot under-reports their authorization model.
 //
 // THE FIX: boot with `{ multiTenant: true }` so OrgScopingPlugin registers
 // before SecurityPlugin and the wildcard `organization_id` policies APPLY. The

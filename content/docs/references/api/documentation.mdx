@@ -77,11 +77,11 @@ const result = ApiChangelogEntrySchema.parse(data);
 | **title** | `string` | ✅ | Documentation title |
 | **version** | `string` | ✅ | API version |
 | **description** | `string` | optional | API description |
-| **servers** | `{ url: string; description?: string; variables?: Record<string, { default: string; description?: string; enum?: string[] }> }[]` | ✅ | API server URLs |
+| **servers** | `{ url: string; description?: string; variables?: Record<string, object> }[]` | ✅ | API server URLs |
 | **ui** | `{ type: Enum<'swagger-ui' \| 'redoc' \| 'rapidoc' \| 'stoplight' \| 'scalar' \| 'graphiql' \| 'postman' \| 'custom'>; path: string; theme: Enum<'light' \| 'dark' \| 'auto'>; enableTryItOut: boolean; … }` | optional | Testing UI configuration |
 | **generateOpenApi** | `boolean` | ✅ | Generate OpenAPI 3.0 specification |
 | **generateTestCollections** | `boolean` | ✅ | Generate API test collections |
-| **testCollections** | `{ name: string; description?: string; variables: Record<string, any>; requests: { name: string; description?: string; method: Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE' \| 'HEAD' \| 'OPTIONS'>; url: string; … }[]; … }[]` | ✅ | Predefined test collections |
+| **testCollections** | `{ name: string; description?: string; variables: Record<string, any>; requests: object[]; … }[]` | ✅ | Predefined test collections |
 | **changelog** | `{ version: string; date: string; changes: object; migrationGuide?: string }[]` | ✅ | API version changelog |
 | **codeTemplates** | `{ language: string; name: string; template: string; variables?: string[] }[]` | ✅ | Code generation templates |
 | **termsOfService** | `string` | optional | Terms of service URL |
@@ -104,7 +104,7 @@ const result = ApiChangelogEntrySchema.parse(data);
 | **description** | `string` | optional | Collection description |
 | **variables** | `Record<string, any>` | ✅ | Shared variables |
 | **requests** | `{ name: string; description?: string; method: Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE' \| 'HEAD' \| 'OPTIONS'>; url: string; … }[]` | ✅ | Test requests in this collection |
-| **folders** | `{ name: string; description?: string; requests: { name: string; description?: string; method: Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE' \| 'HEAD' \| 'OPTIONS'>; url: string; … }[] }[]` | optional | Request folders for organization |
+| **folders** | `{ name: string; description?: string; requests: object[] }[]` | optional | Request folders for organization |
 
 
 ---
@@ -186,8 +186,8 @@ const result = ApiChangelogEntrySchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **openApiSpec** | `{ openapi: string; info: object; servers: { url: string; description?: string; variables?: Record<string, { default: string; description?: string; enum?: string[] }> }[]; paths: Record<string, any>; … }` | optional | Generated OpenAPI specification |
-| **testCollections** | `{ name: string; description?: string; variables: Record<string, any>; requests: { name: string; description?: string; method: Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE' \| 'HEAD' \| 'OPTIONS'>; url: string; … }[]; … }[]` | optional | Generated test collections |
+| **openApiSpec** | `{ openapi: string; info: object; servers: object[]; paths: Record<string, any>; … }` | optional | Generated OpenAPI specification |
+| **testCollections** | `{ name: string; description?: string; variables: Record<string, any>; requests: object[]; … }[]` | optional | Generated test collections |
 | **markdown** | `string` | optional | Generated markdown documentation |
 | **html** | `string` | optional | Generated HTML documentation |
 | **generatedAt** | `string` | ✅ | Generation timestamp |
@@ -235,7 +235,7 @@ const result = ApiChangelogEntrySchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **openapi** | `string` | ✅ | OpenAPI specification version |
 | **info** | `{ title: string; version: string; description?: string; termsOfService?: string; … }` | ✅ | API metadata |
-| **servers** | `{ url: string; description?: string; variables?: Record<string, { default: string; description?: string; enum?: string[] }> }[]` | ✅ | API servers |
+| **servers** | `{ url: string; description?: string; variables?: Record<string, object> }[]` | ✅ | API servers |
 | **paths** | `Record<string, any>` | ✅ | API paths and operations |
 | **components** | `{ schemas?: Record<string, any>; responses?: Record<string, any>; parameters?: Record<string, any>; examples?: Record<string, any>; … }` | optional | Reusable components |
 | **security** | `Record<string, string[]>[]` | optional | Global security requirements |
