@@ -3139,6 +3139,14 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         label: "详情(JSON)",
         help: "最近一次运行的计数,JSON 编码,供诊断用。"
       },
+      deviation_observed_at: {
+        label: "Deviation Observed At",
+        help: "When this deployment last ADMITTED a value its own verified contract rejects, through an OS_ALLOW_LAX_* escape hatch. Deliberately does NOT clear verified_at: it withdraws only the irreversible half of what the certificate authorises — byte deletion stops, validation and tombstoning continue. Cleared by the next apply-mode run."
+      },
+      deviation_detail: {
+        label: "Deviation Detail (JSON)",
+        help: "JSON-encoded first counterexample behind deviation_observed_at (object, field, type, parse issue), so an operator can find the value that closed the irreversible gate."
+      },
       created_at: {
         label: "创建时间"
       },

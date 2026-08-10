@@ -21,6 +21,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+import { assertEngineUpdateDispatch } from '@objectstack/objectql';
 import {
   isDataMigrationVerified,
   mayActIrreversibly,
@@ -63,7 +64,10 @@ function ledgerEngine(rows: Array<Record<string, unknown>>) {
       tables[object].push({ ...data });
       return data;
     },
-    async update(object, data: any) {
+    async update(object, data: any, options?: any) {
+      // Held to the real engine's dispatch predicate, so this double cannot be
+      // looser than `ObjectQL.update` about what counts as a by-id write.
+      assertEngineUpdateDispatch(data, options);
       const row = tables[object].find((r) => r.id === data.id);
       if (row) Object.assign(row, data);
       return row;
@@ -87,7 +91,8 @@ function reapEngine() {
       const where = options?.where ?? {};
       return tables[object].find((r) => Object.entries(where).every(([k, v]) => r[k] === v)) ?? null;
     },
-    async update(object, data: any) {
+    async update(object, data: any, options?: any) {
+      assertEngineUpdateDispatch(data, options);
       updates.push({ object, data });
       return data;
     },
