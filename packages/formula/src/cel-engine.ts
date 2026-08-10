@@ -1073,36 +1073,197 @@ function isNumericOverloadError(err: unknown): boolean {
 }
 
 /**
- * Recursively coerce string values that faulted a CEL overload into their
- * intended primitive: entirely-numeric literals → `number` (#1534), and
- * ISO-8601 date / date-time strings → `Date` (cel-js `google.protobuf.Timestamp`)
- * (#1530). Used only on the {@link isNumericOverloadError} retry path, so it can
- * never change a comparison that already evaluated cleanly — it only rescues one
- * that already faulted. Strings that are neither (a zip like `"02134"`, free
- * text) pass through untouched; if the retry still cannot type-check, the
- * original loud error is preserved.
+ * The operators that RAISE on a string-versus-number/Timestamp operand pair
+ * instead of answering one. This membership is the entire basis of the §1c
+ * rescue below — for these operators a mixed pair cannot have produced an
+ * answer, so rewriting the operand cannot change one.
+ *
+ * Measured per operator on cel-js 8.0.0 (#7098), against an int literal, a
+ * number-valued field, a `today()` Timestamp and a Date-valued field:
+ *
+ *  - `<` `<=` `>` `>=` `+` `-` `*` `/` `%` — **fault**, every shape:
+ *    `no such overload: dyn<string> >= int`. Listed.
+ *  - `==` `!=` — **answer**, `false` / `true`. CEL equality is defined across
+ *    types, so `record.s == 5` over `{ s: "5" }` is a clean `false`, not a
+ *    fault. DELIBERATELY ABSENT: coercing an equality is exactly the defect
+ *    this function closes — the author's string equality already had an answer.
+ *    The separate problem that a `Field.date` string never equals a Timestamp is
+ *    owned by {@link rewriteTemporalEquality}, which wraps it statically and
+ *    per-occurrence on the CLEAN path, where the two sides are known from the
+ *    source rather than guessed from an unrelated conjunct's fault.
+ *  - `in` — **answers** too (`"7" in [1, 7]` is a clean `false`). Absent for the
+ *    same reason.
  */
-function hydrateOverloadStrings(value: unknown): unknown {
-  if (typeof value === 'string') {
-    const trimmed = value.trim();
-    if (trimmed.length > 0) {
-      if (NUMERIC_STRING_RE.test(trimmed)) {
-        const n = Number(trimmed);
-        if (Number.isFinite(n)) return n;
-      } else if (ISO_TEMPORAL_STRING_RE.test(trimmed)) {
-        const ms = Date.parse(trimmed);
-        if (!Number.isNaN(ms)) return new Date(ms);
+const COERCIBLE_OPS: ReadonlySet<string> = new Set([
+  '<', '<=', '>', '>=', '+', '-', '*', '/', '%',
+]);
+
+/** What an operand will actually BE at evaluation time — see {@link operandKind}. */
+type OperandKind = 'number' | 'temporal' | 'string' | 'unknown';
+
+/**
+ * The scope path a node names, or null when it names none: `record.n` →
+ * `['record','n']`, a bare `status` (the flattened flow scope) → `['status']`,
+ * and `record.items[0].price` / `record["n"]` → the same walk through a CONSTANT
+ * index. Null for everything else — a call, an arithmetic sub-tree, a variable
+ * bound by a comprehension — which is what keeps the rewrite below to operands
+ * whose runtime value we can actually read before deciding.
+ */
+function scopePath(node: unknown): string[] | null {
+  if (!isCelNode(node)) return null;
+  if (node.op === 'id' && typeof node.args === 'string') return [node.args];
+  if (node.op === '.' && Array.isArray(node.args) && node.args.length === 2) {
+    const [base, member] = node.args;
+    if (typeof member !== 'string') return null;
+    const head = scopePath(base);
+    return head ? [...head, member] : null;
+  }
+  if (node.op === '[]' && Array.isArray(node.args) && node.args.length === 2) {
+    const [base, index] = node.args;
+    if (!isCelNode(index) || index.op !== 'value') return null;
+    const key = index.args;
+    if (typeof key !== 'string' && typeof key !== 'bigint' && typeof key !== 'number') return null;
+    const head = scopePath(base);
+    return head ? [...head, String(key)] : null;
+  }
+  return null;
+}
+
+/** Resolve a {@link scopePath} against the scope; `undefined` when any hop is absent. */
+function resolveScopePath(scope: Record<string, unknown>, path: readonly string[]): unknown {
+  let cur: unknown = scope;
+  for (const seg of path) {
+    if (cur == null || typeof cur !== 'object') return undefined;
+    cur = (cur as Record<string, unknown>)[seg];
+  }
+  return cur;
+}
+
+/** The {@link OperandKind} of a concrete runtime value. */
+function valueKind(v: unknown): OperandKind {
+  if (typeof v === 'number' || typeof v === 'bigint') return 'number';
+  if (v instanceof Date) return 'temporal';
+  if (typeof v === 'string') return 'string';
+  return 'unknown';
+}
+
+/**
+ * What the operand will actually be when cel-js evaluates it — read off the
+ * literal, off the known return type of a stdlib call, or (for a scope path) off
+ * the value ALREADY IN HAND in this scope. Reading the scope rather than the
+ * static type is what makes the "this comparison provably faulted" test exact
+ * under `unlistedVariablesAreDyn`, where every field is statically `dyn`.
+ *
+ * `unknown` is the safe answer and the common one: an arithmetic sub-tree, a
+ * comprehension variable, an absent key. An `unknown` counterpart never licenses
+ * a rewrite.
+ */
+function operandKind(node: unknown, scope: Record<string, unknown>): OperandKind {
+  if (!isCelNode(node)) return 'unknown';
+  if (node.op === 'value') return valueKind(node.args);
+  if (isTemporalCall(node)) return 'temporal';
+  if (node.op === 'call' && Array.isArray(node.args) && typeof node.args[0] === 'string') {
+    const fn = node.args[0];
+    if (fn === 'date' || fn === 'datetime') return 'temporal';
+    if (fn === 'double' || fn === 'int' || fn === 'uint') return 'number';
+    return 'unknown';
+  }
+  const path = scopePath(node);
+  if (!path) return 'unknown';
+  const resolved = resolveScopePath(scope, path);
+  return resolved === undefined ? 'unknown' : valueKind(resolved);
+}
+
+/**
+ * The coercion this operand needs to meet `counterpart`, or null when it is not
+ * one ADR-0032 §1c rescues: entirely-numeric literals → `double(…)` (#1534) and
+ * ISO-8601 date / date-time strings → `date(…)` (#1530). Strings that are
+ * neither — a zip like `"02134"`, free text — return null and the original loud
+ * fault is preserved, exactly as before.
+ *
+ * The coercion must MATCH the counterpart: a numeric string opposite a Timestamp
+ * (or an ISO string opposite a number) is a genuine mismatch, not a §1c
+ * serialization artifact, and is left to fault.
+ */
+function coercionFor(value: unknown, counterpart: OperandKind): 'double' | 'date' | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return null;
+  if (counterpart === 'number' && NUMERIC_STRING_RE.test(trimmed)) {
+    return Number.isFinite(Number(trimmed)) ? 'double' : null;
+  }
+  if (counterpart === 'temporal' && ISO_TEMPORAL_STRING_RE.test(trimmed)) {
+    return Number.isNaN(Date.parse(trimmed)) ? null : 'date';
+  }
+  return null;
+}
+
+/** Wrap an AST node in a one-argument stdlib call (`double(x)` / `date(x)`). */
+function wrapInCall(fn: string, node: CelNode): CelNode {
+  return { op: 'call', args: [fn, [node]] };
+}
+
+/**
+ * #7098 — coerce the operands that PROVABLY faulted, and only those.
+ *
+ * The predecessor of this function hydrated the whole scope and re-ran the
+ * expression, on a docblock claim that "it can never change a comparison that
+ * already evaluated cleanly". That claim was false and load-bearing: the retry
+ * knows only that the WHOLE expression faulted, so rewriting the scope
+ * re-interprets every OTHER comparison too. `record.n >= 4 && record.s == "5.0"`
+ * over `{ n: "7", s: "5.0" }` faults on the first conjunct, hydrates BOTH fields,
+ * and answers `false` — the author's deliberate string equality was `true` in
+ * evaluation 1, and nothing reports that it was overruled.
+ *
+ * So the rewrite is now **per-occurrence**, the same discipline
+ * {@link rewriteTemporalEquality} already documents ("no field-wide trade-off"),
+ * and one step stricter — it is per operand POSITION, so a field compared to an
+ * int in one conjunct and to a string literal in another keeps both answers.
+ *
+ * An operand is rewritten only where all three hold, which together make the
+ * docblock's guarantee true by construction rather than by assertion:
+ *  1. the operator is one of {@link COERCIBLE_OPS} — no string↔number/Timestamp
+ *     overload exists, so a mixed pair cannot have produced an answer;
+ *  2. the counterpart is a number or a Timestamp *in this scope*, established by
+ *     {@link operandKind} against the values in hand, not by static type;
+ *  3. this operand's own value is a §1c serialization artifact
+ *     ({@link coercionFor}).
+ *
+ * Returns the rewritten source, or null when no operand qualifies — in which
+ * case the caller preserves the original loud error rather than guessing. That
+ * is the deliberate trade: shapes the walk cannot read (a comprehension
+ * variable, a computed index) now FAULT where they were once silently rescued,
+ * because a silent rescue of an operand we cannot prove faulted is precisely the
+ * defect this closes.
+ */
+function rewriteFaultedOperands(source: string, scope: Record<string, unknown>): string | null {
+  let ast: unknown;
+  try {
+    ast = (recordScopeEnv ??= buildScopedEnv([])).parse(source).ast;
+  } catch {
+    return null;
+  }
+  let changed = false;
+  const visit = (node: unknown): void => {
+    if (!isCelNode(node)) return;
+    if (COERCIBLE_OPS.has(node.op) && Array.isArray(node.args) && node.args.length === 2) {
+      const args = node.args as unknown[];
+      for (const side of [0, 1] as const) {
+        const operand = args[side];
+        const path = scopePath(operand);
+        if (!path) continue;
+        const counterpart = operandKind(args[1 - side], scope);
+        if (counterpart !== 'number' && counterpart !== 'temporal') continue;
+        const fn = coercionFor(resolveScopePath(scope, path), counterpart);
+        if (!fn) continue;
+        args[side] = wrapInCall(fn, operand as CelNode);
+        changed = true;
       }
     }
-    return value;
-  }
-  if (Array.isArray(value)) return value.map(hydrateOverloadStrings);
-  if (value && typeof value === 'object' && !(value instanceof Date)) {
-    const out: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(value)) out[k] = hydrateOverloadStrings(v);
-    return out;
-  }
-  return value;
+    if (Array.isArray(node.args)) for (const child of node.args) visit(child);
+  };
+  visit(ast);
+  return changed ? serialize(ast as Parameters<typeof serialize>[0]) : null;
 }
 
 /**
@@ -1303,14 +1464,17 @@ export const celEngine: DialectEngine = {
         // date/datetime fields (`end_date` → `"2026-06-20"`) on
         // `record.end_date <= daysFromNow(60)` (#1530), since cel-js compares the
         // raw string against the `google.protobuf.Timestamp` from `today()` etc.
-        // Hydrate those strings to number / Date and retry ONCE. This only runs
-        // after a fault, so a comparison that already evaluated cleanly is never
-        // re-interpreted; if the retry still cannot type-check, the original loud
-        // error is reported.
+        // Coerce those operands — and ONLY those — and retry ONCE. #7098: the
+        // coercion is per operand POSITION, not scope-wide, so a comparison that
+        // already evaluated cleanly is never re-interpreted; the scope itself is
+        // never rewritten, so a numeric-looking string RETURNED by the expression
+        // keeps its type too. When no operand provably faulted, or the retry still
+        // cannot type-check, the original loud error is reported.
         if (!isNumericOverloadError(err)) throw err;
-        const hydrated = hydrateOverloadStrings(scope) as Record<string, unknown>;
+        const coercedSource = rewriteFaultedOperands(evalSource, scope);
+        if (coercedSource === null) throw err;
         try {
-          const raw = env.evaluate(evalSource, hydrated);
+          const raw = env.evaluate(coercedSource, scope);
           return { ok: true, value: coerce(raw) as T };
         } catch {
           // Hydration did not resolve it — surface the original fault, not the
