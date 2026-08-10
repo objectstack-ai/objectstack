@@ -2571,11 +2571,19 @@ export class ObjectQL implements IObjectQLEngine {
    * that opts into `NOW()` gets the instant, which is what the SQL column
    * DEFAULT gives it today.
    *
-   * `now` is the caller's per-insert snapshot, so two defaulted fields on one
-   * record cannot straddle a millisecond boundary.
+   * `instant` is the caller's per-insert `now` snapshot when the `NOW()` token
+   * is what asked, so two defaulted fields on one record cannot straddle a
+   * millisecond boundary.
+   *
+   * It is NOT only the token's, though (#7373): this is the one place that
+   * knows what shape a declared type stores an instant in, so the CEL branch's
+   * {@link normalizeExpressionDefault} routes its own `Date` results through
+   * the SAME table rather than growing a second copy of it. Hence the
+   * parameter is an arbitrary `instant`, not "now" — `daysFromNow(7)` is a
+   * week out and takes the identical per-type treatment.
    */
-  private resolveNowDefault(fieldType: unknown, now: Date): string {
-    const iso = now.toISOString(); // YYYY-MM-DDTHH:MM:SS.sssZ
+  private resolveNowDefault(fieldType: unknown, instant: Date): string {
+    const iso = instant.toISOString(); // YYYY-MM-DDTHH:MM:SS.sssZ
     if (fieldType === 'date') return iso.slice(0, 10);
     if (fieldType === 'time') {
       const timeOfDay = iso.slice(11, 23); // HH:MM:SS.fff
@@ -2585,6 +2593,69 @@ export class ObjectQL implements IObjectQLEngine {
       return timeOfDay.endsWith('.000') ? timeOfDay.slice(0, 8) : timeOfDay;
     }
     return iso;
+  }
+
+  /**
+   * Put a CEL `defaultValue`'s evaluated result into the storage shape the
+   * field's declared type contracts for (#7373).
+   *
+   * The counterpart the expression branch was missing. `applyFieldDefaults`
+   * has three ways to produce a default and, before this, only two of them
+   * honoured the stored-value contract: the `NOW()` token routed through
+   * {@link resolveNowDefault}, a literal is checked against
+   * `valueSchemaFor(def, 'stored')` at AUTHOR time (#7127), and the expression
+   * envelope's result was assigned verbatim. But the temporal stdlib returns a
+   * JS `Date` — ADR-0053 D1 fixes `today()` / `daysFromNow(n)` / `daysAgo(n)`
+   * as UTC-midnight of the reference-tz calendar day, and `now()` as the raw
+   * instant — while `valueSchemaFor` says a stored instant is an ISO-8601
+   * STRING. So `{ dialect: 'cel', source: 'daysFromNow(7)' }` on a `datetime`
+   * put a `Date` object in the column: a value the platform's own
+   * `os migrate value-shapes` scan reports as a violation.
+   *
+   * Why NORMALIZE rather than refuse the `Date` — the two shapes this could
+   * have taken, decided on measurement:
+   *
+   *  - **The drivers already agree with this answer.** Handed a `Date`,
+   *    `SqlDriver.formatInput` coerces it through `canonicalUtcDatetime`
+   *    (`toISOString()`) and `toDateOnly` (`YYYY-MM-DD`); mongodb's
+   *    `storageDatetimeValue` keeps the BSON `Date`, which is what parsing the
+   *    ISO string produces anyway, and its `storageDateValue` collapses to the
+   *    same `YYYY-MM-DD`. Normalizing here is therefore byte-identical on
+   *    every SQL and mongodb-backed store and changes exactly one thing: the
+   *    memory driver, which applies its temporal canon to filter comparands
+   *    only (`coerceTemporalValue`) and stores writes as handed. That is the
+   *    whole defect, and this is the smallest change that closes it.
+   *  - **Refusal would single out one writer.** `validateRecord` accepts a
+   *    `Date` on `date`/`datetime` from ANY caller by explicit decision
+   *    (`if (value instanceof Date) return null`), and temporal types are not
+   *    in ADR-0104's strict value-shape block at all. Refusing a `Date` only
+   *    when a CEL default produced it would make the rule depend on who wrote
+   *    the value rather than on what the value is — and would break the
+   *    documented envelope (#7244) on precisely the SQL backends where it
+   *    stores correctly today.
+   *
+   * This is the `NOW()` crack of #4597 / #4560 in its third form: a value the
+   * SQL driver silently repaired at the wire and non-SQL datasources did not,
+   * so one declaration stored two shapes depending on the datasource. Resolved
+   * engine-side, one answer serves every driver; the driver coercions stay as
+   * defence in depth for writes that bypass the engine.
+   *
+   * No day can shift here. ADR-0053 D1's `Date` is UTC-midnight OF the
+   * reference-tz calendar day, and {@link resolveNowDefault} reads it back
+   * with `toISOString()` — UTC getters, the same `getUTC*` reading the ADR
+   * names for the driver filter path. Reading those parts in LOCAL time is the
+   * move that would shift a day, and nothing here does it.
+   *
+   * Non-`Date` results (a string, a number, a bool, a list) pass through
+   * untouched: this normalizes temporal FORM, it does not police the contract,
+   * and a CEL default is documented as "result type is a runtime concern".
+   * An `Invalid Date` passes through too — the same totality the driver
+   * canons keep, so a value nothing can interpret is never silently rewritten
+   * into a wrong one.
+   */
+  private normalizeExpressionDefault(fieldType: unknown, value: unknown): unknown {
+    if (!(value instanceof Date) || Number.isNaN(value.getTime())) return value;
+    return this.resolveNowDefault(fieldType, value);
   }
 
   /**
@@ -2751,7 +2822,10 @@ export class ObjectQL implements IObjectQLEngine {
           extra: { object },
         });
         if (result.ok) {
-          out[f.name] = result.value as unknown;
+          // Normalized to the declared type's stored shape, never assigned
+          // verbatim: the temporal stdlib returns a `Date` and the contract
+          // names an ISO-8601 string (#7373 — {@link normalizeExpressionDefault}).
+          out[f.name] = this.normalizeExpressionDefault(f.type, result.value);
         } else {
           this.logger.warn('Failed to evaluate default expression', {
             object, field: f.name, error: result.error,
