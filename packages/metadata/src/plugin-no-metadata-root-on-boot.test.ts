@@ -24,7 +24,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, existsSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { MetadataPlugin } from './plugin';
+import { MetadataPlugin } from './plugin.js';
 
 vi.mock('@objectstack/core', async (orig) => {
     const real = (await orig()) as any;
