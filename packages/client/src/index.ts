@@ -16,6 +16,7 @@ import {
   GetMetaItemsResponse,
   GetMetaItemResponse,
   SaveMetaItemResponse,
+  PublishMetaItemResponse,
   LoginRequest,
   SessionResponse,
   GetPresignedUrlRequest,
@@ -929,14 +930,30 @@ export class ObjectStackClient {
      * the per-item flow beside `packages.publishDrafts`' package-scoped one.
      * 404 [no_draft] when there is nothing to publish. Compound names pass
      * through unencoded, like `getItem`.
+     *
+     * The resolved `version` is the ADR-0008 optimistic-concurrency token, the
+     * same carrier `saveItem` returns and with the same job: echo it back as
+     * `If-Match` on the next write to the item. It is nameable here only since
+     * #7294, which declared `PublishMetaItemResponseSchema` — this method
+     * resolved to `any` before that, because the publish door had no
+     * declaration at all for a return type to point at.
+     *
+     * The three `*Applied` receipts are each present only when their side
+     * effect ran, and each reports its own `success`: a 200 here means the
+     * draft was promoted, NOT that a seed load or a data-plane projection
+     * caught up.
      */
-    publishItem: async (type: string, name: string, opts?: { message?: string }) => {
+    publishItem: async (
+        type: string,
+        name: string,
+        opts?: { message?: string },
+    ): Promise<PublishMetaItemResponse> => {
         const route = this.getRoute('metadata');
         const res = await this.fetch(`${this.baseUrl}${route}/${type}/${name}/publish`, {
             method: 'POST',
             body: JSON.stringify(opts?.message ? { message: opts.message } : {}),
         });
-        return this.unwrapResponse<any>(res);
+        return this.unwrapResponse<PublishMetaItemResponse>(res);
     },
 
     /**
@@ -5320,6 +5337,7 @@ export type {
   GetMetaItemsResponse,
   GetMetaItemResponse,
   SaveMetaItemResponse,
+  PublishMetaItemResponse,
   CheckPermissionRequest,
   CheckPermissionResponse,
   GetObjectPermissionsResponse,

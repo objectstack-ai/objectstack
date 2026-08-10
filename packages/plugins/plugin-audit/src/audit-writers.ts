@@ -355,17 +355,41 @@ function referenceIdsOf(value: any): string[] {
  * over the raw stored value. Empty/missing → "∅".
  *
  * [#7230] `titlesFor` is the pre-resolved id → title map for THIS field's
- * target object (see `resolveTrackedLookupTitles`). It is a lookup into an
- * already-batched result, never a read: this function stays synchronous, and
- * the callers that have no reference to resolve (`matchMilestone`'s `{token}`
- * interpolation) pass nothing and keep today's behaviour exactly.
+ * target object (see `resolveLookupTitles`). It is a lookup into an
+ * already-batched result, never a read: this function stays synchronous, and a
+ * caller with nothing to resolve passes nothing and keeps today's behaviour
+ * exactly. [#7290] Both summary branches now feed it: the tracked-change diff
+ * (`renderTrackedChangeSummary`) and the fired-milestone template
+ * (`renderMilestoneSummary`), each from its own read plan.
  *
  * An id with no entry in the map — record deleted, object unregistered, title
  * field unresolvable — falls back to the raw id, which is what this function
  * returned before the branch existed. The change is therefore restore-invariant:
  * it can only replace an id with a title, never a title with an id.
+ *
+ * [#7289] `optionLabelFor` is the locale-bound lookup for THIS field's option
+ * labels — `objects.<object>.fields.<field>.options.<value>`, the key shape the
+ * shipped bundles actually carry (`translations/zh-CN.objects.generated.ts`:
+ * `sys_audit_log.fields.action.options.create = "创建"`). Like `titlesFor` it is an
+ * already-resolved lookup and never I/O, so this function stays SYNCHRONOUS;
+ * and like `titlesFor`, a caller with nothing to resolve passes nothing and
+ * keeps today's behaviour exactly. That opt-in shape is load-bearing rather
+ * than stylistic — see {@link renderMilestoneSummary}, which passes nothing on
+ * purpose and is documented there.
+ *
+ * The lookup is consulted only where a DECLARED OPTION MATCHED, so a value
+ * matching no option still renders `String(value)` as before. Bundles are
+ * generated FROM the declared options (`os i18n extract`), so a bundle key with
+ * no matching declared option cannot arise, and a miss falls straight back to
+ * the authored `label`. Same restore-invariance as the reference branch: it can
+ * only replace an authored label with that label's translation.
  */
-function displayFieldValue(field: any, value: any, titlesFor?: Map<string, string>): string {
+function displayFieldValue(
+  field: any,
+  value: any,
+  titlesFor?: Map<string, string>,
+  optionLabelFor?: (optionValue: string) => string | undefined,
+): string {
   if (value === null || value === undefined || value === '') return '∅';
   if (titlesFor && typeof field?.type === 'string' && REFERENCE_FIELD_TYPES.has(field.type)) {
     const ids = referenceIdsOf(value);
@@ -377,7 +401,7 @@ function displayFieldValue(field: any, value: any, titlesFor?: Map<string, strin
       const ov = o && typeof o === 'object' ? (o.value ?? o.name ?? o.label) : o;
       if (ov === value) {
         const ol = o && typeof o === 'object' ? (o.label ?? o.name ?? ov) : o;
-        return String(ol);
+        return optionLabelFor?.(String(ov)) ?? String(ol);
       }
     }
   }
@@ -386,7 +410,8 @@ function displayFieldValue(field: any, value: any, titlesFor?: Map<string, strin
 
 /**
  * [#7230] Every tracked-change field of `fields` that is a reference, grouped
- * by TARGET OBJECT — the read plan for {@link resolveTrackedLookupTitles}.
+ * by TARGET OBJECT — the tracked-change branch's read plan for
+ * {@link resolveLookupTitles}.
  *
  * Grouping by target object (not by field, and emphatically not by row) is what
  * keeps this off the write hot path: N tracked reference fields pointing at one
@@ -434,6 +459,14 @@ function planTrackedLookupReads(
  * shape is the bundle's own (`objects.<object>.fields.<field>.label`), and a
  * miss returns `undefined` so the authored def label, then the machine key,
  * still answer exactly as before.
+ *
+ * [#7289] The select/picklist VALUE is localized through that same translator
+ * on the bundles' own option key shape, one line below the label. This branch's
+ * FRAME is fully localized — the verb template and the object label (ADR-0053 /
+ * framework#3039), and the field label since #7230 — so an authored-language
+ * option value was the single remaining untranslated token inside it
+ * (`阶段: Proposal → Closed Won` on a zh-CN page). Filling it makes the string
+ * uniformly localized instead of half-localized, which is the whole defect.
  */
 function renderTrackedChangeSummary(
   objectName: string,
@@ -453,44 +486,174 @@ function renderTrackedChangeSummary(
       (typeof field.label === 'string' && field.label.length > 0 ? field.label : key);
     const reference = typeof field.reference === 'string' ? field.reference : undefined;
     const titlesFor = reference ? lookupTitles?.get(reference) : undefined;
-    const from = displayFieldValue(field, oldVals ? oldVals[key] : undefined, titlesFor);
-    const to = displayFieldValue(field, newVals[key], titlesFor);
+    // Only a field that DECLARES options can consume this, so the ordinary
+    // tracked scalar allocates no closure; both calls below share the one.
+    const optionLabelFor = Array.isArray(field.options)
+      ? (optionValue: string): string | undefined =>
+          translate(`objects.${objectName}.fields.${key}.options.${optionValue}`)
+      : undefined;
+    const from = displayFieldValue(
+      field,
+      oldVals ? oldVals[key] : undefined,
+      titlesFor,
+      optionLabelFor,
+    );
+    const to = displayFieldValue(field, newVals[key], titlesFor, optionLabelFor);
     parts.push(`${label}: ${from} → ${to}`);
   }
   return parts.length > 0 ? parts.join('; ') : null;
 }
 
 /**
+ * [#7290] The `{token}` pattern of an `activityMilestones` summary template.
+ *
+ * A FRESH instance per call, deliberately: a module-level `/g` regex carries
+ * `lastIndex` between callers, and this one is read twice per fired milestone
+ * (once to plan the reads, once to render). One definition, no shared cursor.
+ */
+function milestoneTokenRe(): RegExp {
+  return /\{(\w+)\}/g;
+}
+
+/**
  * ADR-0052 §5b.2 — declarative semantic milestones. If a watched field
  * transitioned INTO a configured `value` on this update (before ≠ value, after =
- * value), return the interpolated summary (and optional activity type). `{token}`
- * in the template is replaced by the record's field value, resolving select
- * option labels when possible. Returns null when no milestone fired (needs the
- * `before` snapshot to detect a transition). Takes precedence over the raw
- * field-change summary.
+ * value), return the matched summary TEMPLATE (and optional activity type).
+ * Returns null when no milestone fired (needs the `before` snapshot to detect a
+ * transition). Takes precedence over the raw field-change summary.
+ *
+ * [#7290] Detection only — the `{token}` interpolation moved out to
+ * {@link renderMilestoneSummary}, with {@link planMilestoneTokenReads} between
+ * them. Splitting it is what keeps the reference read OFF the write hot path
+ * and this function synchronous:
+ *
+ *   match (sync, no I/O) → plan from the MATCHED template's tokens → one read
+ *   per distinct target object → render (sync)
+ *
+ * A read placed BEFORE this function would have to speculate on the whole
+ * after-row, and would therefore fire on every update of a milestone-declaring
+ * object — including the overwhelming majority where no milestone fires at all.
+ * That is the shape #6656 / PR #6977's ruling was obtained to remove from this
+ * file, so the plan is built from what actually matched, or not at all.
  */
 function matchMilestone(
   objectDef: any,
-  fields: Record<string, any> | null,
   before: Record<string, any> | null,
   after: Record<string, any> | null,
-): { summary: string; type?: string } | null {
+): { template: string; type?: string } | null {
   const milestones =
     objectDef && Array.isArray(objectDef.activityMilestones) ? objectDef.activityMilestones : null;
   if (!milestones || !after || !before) return null;
   for (const m of milestones) {
     if (!m || typeof m.field !== 'string' || typeof m.summary !== 'string') continue;
     if (after[m.field] === m.value && before[m.field] !== m.value) {
-      const summary = m.summary.replace(/\{(\w+)\}/g, (_match: string, key: string) => {
-        const v = after[key];
-        if (v === null || v === undefined || v === '') return '';
-        const field = fields ? fields[key] : undefined;
-        return field ? displayFieldValue(field, v) : String(v);
-      });
-      return { summary, type: typeof m.type === 'string' ? m.type : undefined };
+      return { template: m.summary, type: typeof m.type === 'string' ? m.type : undefined };
     }
   }
   return null;
+}
+
+/**
+ * [#7290] The read plan for one FIRED milestone template — the referenced ids
+ * its `{token}`s actually name, grouped by TARGET OBJECT.
+ *
+ * Keyed on the matched template rather than on the row: a template naming no
+ * reference field (`'Task completed: {title}'` — the shipped showcase example)
+ * produces an empty plan and therefore no read, and a token whose value is
+ * empty contributes nothing because `referenceIdsOf` yields no ids for it.
+ * Grouping by target object gives the same batching as
+ * {@link planTrackedLookupReads}: N reference tokens pointing at one object are
+ * answered by ONE `id: { $in: [...] }`.
+ *
+ * Unlike the tracked-change plan this one does NOT filter on `trackHistory`.
+ * The token is whatever the milestone author wrote, and `trackHistory` governs
+ * the field-change summary — a different branch, which a fired milestone
+ * replaces outright. Requiring it here would silently render raw ids for the
+ * exact templates authors write (`'Deal won by {owner}'` on an untracked
+ * `owner`), which is the defect, not a guard against it.
+ *
+ * Only the AFTER row is read, because that is the only side the interpolation
+ * consults — a milestone summary describes the state the record arrived in.
+ */
+function planMilestoneTokenReads(
+  template: string,
+  fields: Record<string, any> | undefined | null,
+  after: Record<string, any> | null,
+): Map<string, Set<string>> {
+  const byObject = new Map<string, Set<string>>();
+  if (!fields || !after) return byObject;
+  for (const match of template.matchAll(milestoneTokenRe())) {
+    const key = match[1];
+    const field = fields[key];
+    if (!field || typeof field.type !== 'string' || !REFERENCE_FIELD_TYPES.has(field.type)) continue;
+    const reference = typeof field.reference === 'string' ? field.reference.trim() : '';
+    if (!reference) continue;
+    for (const id of referenceIdsOf(after[key])) {
+      let set = byObject.get(reference);
+      if (!set) { set = new Set<string>(); byObject.set(reference, set); }
+      set.add(id);
+    }
+  }
+  return byObject;
+}
+
+/**
+ * [#7290] Interpolate a fired milestone's `{token}`s from the after-row.
+ *
+ * The author's template wording is theirs and is not touched — only what a
+ * token RESOLVES TO changes: a `lookup` / `master_detail` / `user` token now
+ * renders the referenced record's title instead of the raw 32-char id
+ * (`'Deal won by oBK25…'` → `'Deal won by 张伟'`), using the already-batched
+ * `lookupTitles` from {@link planMilestoneTokenReads}. Everything else is
+ * byte-identical to the pre-#7290 behaviour, including the empty-value rule:
+ * a token whose value is null/undefined/'' renders as the EMPTY STRING here,
+ * not as `displayFieldValue`'s `∅` — a milestone sentence is prose, not a
+ * diff row.
+ *
+ * Restore-invariant for the same reason `displayFieldValue`'s branch is: an id
+ * with no resolved title renders exactly as it did before.
+ *
+ * [#7289] Select option labels are deliberately NOT localized here, and the
+ * opt-out is BY CONSTRUCTION: no option resolver is handed to
+ * `displayFieldValue`, so a select token renders its AUTHORED label byte-for-byte
+ * as it did before that card. This is neither an oversight nor an accident of a
+ * shared helper — the tracked-change branch localizes them, and the asymmetry is
+ * the ruling, so it is recorded here rather than inferred from the call.
+ *
+ * The two branches differ in what SURROUNDS the token. #7290's title resolution
+ * is locale-INDEPENDENT: `usr_1` → `张伟` is the record's own datum, the same
+ * string in every locale, so it could be added to an untranslated sentence
+ * without giving that sentence a locale. An option label is locale-DEPENDENT
+ * rendering, and a milestone template is an author-written sentence with NO
+ * bundle key of its own — #7290 ruled translating templates a contract decision
+ * and left it. So the author's own option label is the only rendering
+ * guaranteed to agree with the sentence around it: template and option label are
+ * both authored metadata, in one language, by one author. Reading the bundle
+ * here would GUARANTEE a split sentence (`Deal moved to 已赢单`) in exactly the
+ * case the bundle exists for — authoring language ≠ workspace locale — trading
+ * the reported half-localized string for its mirror image.
+ *
+ * The tracked-change branch has the opposite geometry: its frame is fully
+ * localized, so there the authored value is the mismatch and translating it is
+ * the fix. Pinned in `audit-option-label-summary.test.ts` as a WITH-LOCALE
+ * milestone case, because the pre-existing seam case in
+ * `audit-milestone-summary.test.ts` boots with no locale and cannot bite here.
+ */
+function renderMilestoneSummary(
+  template: string,
+  fields: Record<string, any> | undefined | null,
+  after: Record<string, any> | null,
+  lookupTitles?: Map<string, Map<string, string>>,
+): string {
+  return template.replace(milestoneTokenRe(), (_match: string, key: string) => {
+    const v = after ? after[key] : undefined;
+    if (v === null || v === undefined || v === '') return '';
+    const field = fields ? fields[key] : undefined;
+    if (!field) return String(v);
+    const reference = typeof field.reference === 'string' ? field.reference : undefined;
+    const titlesFor = reference ? lookupTitles?.get(reference) : undefined;
+    return displayFieldValue(field, v, titlesFor);
+  });
 }
 
 /**
@@ -693,8 +856,16 @@ export function installAuditWriters(
   };
 
   /**
-   * [#7230] Referenced record TITLES for the tracked-change summary — id →
-   * title, per target object.
+   * [#7230, #7290] Referenced record TITLES for a summary — id → title, per
+   * target object — resolved from a read PLAN its caller built.
+   *
+   * Taking the plan as a PARAMETER rather than building it here is what keeps
+   * the two summary branches one implementation: `planTrackedLookupReads` (the
+   * diff, #7230) and `planMilestoneTokenReads` (a fired milestone's tokens,
+   * #7290) both end here. The title-field resolution, the masking skip below
+   * and the `['id', titleField]` projection are therefore shared by
+   * construction — a second copy for the milestone branch would be a second
+   * de-facto contract, and the mask is precisely where that must not happen.
    *
    * ## Why this is shaped as a plan + one read per target object
    *
@@ -710,6 +881,11 @@ export function installAuditWriters(
    *    type actually changed in this write. Every other write — the overwhelming
    *    majority, including every create and delete — pays nothing, and
    *    `#6977`'s counts are untouched. Pinned in `audit-lookup-summary.test.ts`.
+   *    [#7290] `planMilestoneTokenReads` is empty on the same default: it is
+   *    only ever called once a milestone has ALREADY matched, i.e. on the
+   *    transition `before !== value && after === value`, and it is empty again
+   *    whenever that template names no reference token. Pinned in
+   *    `audit-milestone-summary.test.ts`.
    *  - **One read per distinct target object**, never per field and never per
    *    value: N tracked reference fields pointing at one object are answered by
    *    a single `id: { $in: [...] }`. Same batching shape `plugin-approvals`
@@ -738,13 +914,10 @@ export function installAuditWriters(
    * failing driver leaves the id unresolved, and `displayFieldValue` renders the
    * raw id exactly as it did before this branch existed.
    */
-  const resolveTrackedLookupTitles = async (
+  const resolveLookupTitles = async (
     api: any,
-    fields: Record<string, any> | null,
-    oldVals: Record<string, any> | null,
-    newVals: Record<string, any> | null,
+    plan: Map<string, Set<string>>,
   ): Promise<Map<string, Map<string, string>> | undefined> => {
-    const plan = planTrackedLookupReads(fields, oldVals, newVals);
     if (plan.size === 0) return undefined;
     const sys = api.sudo();
     const out = new Map<string, Map<string, string>>();
@@ -1060,33 +1233,49 @@ export function installAuditWriters(
       // ADR-0052 §5b — declarative activity, precedence: a configured semantic
       // milestone (§5b.2) wins; else a tracked field-change diff ("Stage:
       // Proposal → Closed Won", §5b.1); else the generic fallback.
-      // [#6656] Masked views, not the raw pair. `matchMilestone` interpolates
-      // `{field}` from the after-row straight into a summary the record feed
-      // and Setup dashboards render verbatim, so it must never see a raw
-      // credential value. Computed fields are kept (a milestone may key on a
+      // [#6656] Masked views, not the raw pair. The milestone branch
+      // interpolates `{field}` from the after-row straight into a summary the
+      // record feed and Setup dashboards render verbatim, so it must never see
+      // a raw credential value. Computed fields are kept (a milestone may key on a
       // formula); detection is unaffected for every other class, since the
       // mask touches credential fields only — and a milestone whose declared
       // `value` is a secret's plaintext would be a leak in the metadata
       // itself, not a case worth preserving.
-      const milestone = matchMilestone(
-        getObjectDef(ctx.object),
-        getFieldDefs(ctx.object),
-        ledgerView(ctx.object, before, { dropComputed: false }),
-        ledgerView(ctx.object, after, { dropComputed: false }),
-      );
+      const summaryFields = getFieldDefs(ctx.object);
+      const beforeView = ledgerView(ctx.object, before, { dropComputed: false });
+      const afterView = ledgerView(ctx.object, after, { dropComputed: false });
+      const milestone = matchMilestone(getObjectDef(ctx.object), beforeView, afterView);
       if (milestone) {
-        summary = milestone.summary;
+        // [#7290] The read is keyed on the tokens of the template that ACTUALLY
+        // FIRED, and is reached only on the transition itself — rare by
+        // construction, since a milestone fires on `before !== value && after
+        // === value` and never again while the record sits at that value. An
+        // update of a milestone-declaring object that fires NOTHING pays zero,
+        // which is what keeps #6656 / PR #6977's retirement in place on this
+        // branch too; a plan built before the match would have paid on every
+        // such update, which is the shape that ruling was obtained to remove.
+        //
+        // The plan reads the same MASKED after-view the interpolation renders
+        // from, so a credential field can no more become a read key here than
+        // it can reach the summary text.
+        const lookupTitles = await resolveLookupTitles(
+          api,
+          planMilestoneTokenReads(milestone.template, summaryFields, afterView),
+        );
+        summary = renderMilestoneSummary(milestone.template, summaryFields, afterView, lookupTitles);
         if (milestone.type) activityType = milestone.type;
       } else {
         // [#7230] The read plan is built from the SAME masked views the summary
         // renders, and only reached once a milestone has declined — a write
         // that changes no tracked reference field issues no read at all.
-        const trackedFields = getFieldDefs(ctx.object);
-        const lookupTitles = await resolveTrackedLookupTitles(api, trackedFields, oldValue, newValue);
+        const lookupTitles = await resolveLookupTitles(
+          api,
+          planTrackedLookupReads(summaryFields, oldValue, newValue),
+        );
         summary =
           renderTrackedChangeSummary(
             ctx.object,
-            trackedFields,
+            summaryFields,
             oldValue,
             newValue,
             translate,

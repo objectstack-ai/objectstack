@@ -9,7 +9,13 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createDefaultDatasourceDriverFactory } from '../default-datasource-driver-factory.js';
+import {
+  createDefaultDatasourceDriverFactory,
+  missingTursoDriverMessage,
+  TURSO_DRIVER_INSTALL_COMMAND,
+  TURSO_DRIVER_PACKAGE,
+} from '../default-datasource-driver-factory.js';
+import { isUnbuiltWorkspaceFailure } from '../connect-failure-remedy.js';
 
 const factory = () => createDefaultDatasourceDriverFactory({ dev: false });
 
@@ -352,5 +358,100 @@ describe('createDefaultDatasourceDriverFactory — legacy config spellings are n
     });
     const driver: any = handle.driver ?? handle;
     expect(driver.config.url).toBe('mongodb://svc:pw@mongo.internal:27017/events');
+  });
+});
+
+// #7314 — the OPTIONAL libSQL driver is missing, and until now this arm said so
+// and stopped: `turso driver requested but @objectstack/driver-turso is not
+// installed (…)`. The HOST loader (`@objectstack/runtime`'s
+// `loadTursoDriverFactory`, single owner since #6268) has answered the same
+// missing package with the install command, the consequence and the reason for
+// refusing since #5602 — so the SAME fault got two qualities of answer depending
+// on whether the datasource happened to be the host's `default` (told how to fix
+// it) or one added in Setup / probed by `testConnection` / declared as a
+// non-default (told only that it was broken).
+//
+// Pinned by CONTENT rather than by `toThrow()`: the defect is what the message
+// omits, and a throw-only assertion was green throughout the years this arm
+// omitted it.
+describe('createDefaultDatasourceDriverFactory — the missing libSQL package is answered with a remedy (#7314)', () => {
+  const message = (cause: unknown, datasource?: string) =>
+    missingTursoDriverMessage({ cause, ...(datasource ? { datasource } : {}) });
+
+  const notInstalled = Object.assign(
+    new Error(`Cannot find package '${TURSO_DRIVER_PACKAGE}' imported from /app/node_modules/x.mjs`),
+    { code: 'ERR_MODULE_NOT_FOUND' },
+  );
+
+  it('states the exact install command, on its own copy-pasteable line', () => {
+    expect(TURSO_DRIVER_INSTALL_COMMAND).toBe('npm install @objectstack/driver-turso');
+    expect(message(notInstalled)).toContain(`\n\n    ${TURSO_DRIVER_INSTALL_COMMAND}\n\n`);
+  });
+
+  it('names the package that is missing', () => {
+    expect(TURSO_DRIVER_PACKAGE).toBe('@objectstack/driver-turso');
+    expect(message(notInstalled)).toContain(TURSO_DRIVER_PACKAGE);
+  });
+
+  it('states the consequence and that the refusal is deliberate', () => {
+    const text = message(notInstalled);
+    // Not decoration: without it the reader's next move is to look for the
+    // fallback, and a libSQL selection quietly served by another engine is the
+    // #3276 class — writes accepted into the wrong database.
+    expect(text).toContain('refuses rather than falling back');
+    expect(text).toContain('wrong database');
+  });
+
+  it('names the datasource that failed, and falls back to `default`', () => {
+    expect(message(notInstalled, 'warehouse')).toContain("datasource 'warehouse'");
+    expect(message(notInstalled)).toContain("datasource 'default'");
+  });
+
+  it('keeps the import error verbatim, so the unbuilt-workspace classifier still fires', () => {
+    // Load-bearing: this arm re-throws a NEW Error and therefore drops the
+    // original `code`, so `isUnbuiltWorkspaceFailure` can only recognise an
+    // unbuilt/uninstalled workspace from the `Cannot find package` TEXT the
+    // message carries. Drop the interpolation and a half-built worktree silently
+    // goes back to being told "Fix the datasource configuration" (#5794).
+    const text = message(notInstalled);
+    expect(text).toContain(notInstalled.message);
+    expect(isUnbuiltWorkspaceFailure(new Error(text))).toBe(true);
+  });
+
+  it('names no escape hatch and no host-boot knob — one fix, stated once', () => {
+    const text = message(notInstalled);
+    // `OS_ALLOW_DRIVER_CONNECT_FAILURE` would only hide a package that does not
+    // exist (#5794), and `OS_DATABASE_URL` / `--database` select the HOST's
+    // `default` datasource — neither can affect the datasource that failed here.
+    expect(text).not.toContain('OS_ALLOW_DRIVER_CONNECT_FAILURE');
+    expect(text).not.toContain('OS_DATABASE_URL');
+    expect(text).not.toContain('--database');
+    expect(text.match(new RegExp(TURSO_DRIVER_INSTALL_COMMAND.replace(/\//g, '\\/'), 'g'))).toHaveLength(1);
+  });
+
+  it('is what the turso arm actually raises when the optional package is absent', async () => {
+    // `@objectstack/driver-turso` is deliberately not a dependency of this
+    // package — that is what "optional" means — so the missing-package path is
+    // reachable here for a real reason and needs no stub.
+    let raised: unknown;
+    try {
+      await factory().create({
+        driver: 'turso',
+        name: 'warehouse',
+        config: { url: 'libsql://my-db.turso.io', authToken: 'tok' },
+      });
+    } catch (err) {
+      raised = err;
+    }
+    if (raised === undefined) {
+      throw new Error(
+        `${TURSO_DRIVER_PACKAGE} resolved from @objectstack/service-datasource, so this case no `
+        + 'longer exercises the missing-package arm. If the package was made a dependency, this '
+        + 'assertion is the notice that the pin above needs a stubbed import instead.',
+      );
+    }
+    expect((raised as Error).message).toContain(TURSO_DRIVER_INSTALL_COMMAND);
+    expect((raised as Error).message).toContain(TURSO_DRIVER_PACKAGE);
+    expect((raised as Error).message).toContain("datasource 'warehouse'");
   });
 });

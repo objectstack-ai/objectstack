@@ -518,6 +518,26 @@ const TARGET_REQUIRED_TYPES: ReadonlySet<string> = new Set(
  * Note: The action name is the configuration ID. JavaScript function names can use camelCase,
  * but the metadata ID must be lowercase snake_case.
  */
+// Retired-VALUE prescription. Declared with `//` (never `/** */`) and ABOVE the
+// enum's JSDoc deliberately: `build-docs.ts` takes a doc comment adjacent to the
+// declaration as the reference entry's blurb, so a `/** */` here would displace
+// the location table below. (House style set by the `crypto.hash` /
+// `HookBodyCapability` and `array_agg` / `AggregationFunction` enum-value
+// retirements — `data/hook-body.zod.ts`, `data/query.zod.ts`.)
+const GLOBAL_NAV_RETIRED =
+  '`global_nav` was removed from `ACTION_LOCATIONS` in @objectstack/spec 17 (#6888, ADR-0049 '
+  + 'enforce-or-remove) — no running-app surface ever rendered it. The console command palette '
+  + '(`⌘K`) builds its groups from nav items, objects, dashboards, pages, reports, recent items '
+  + 'and record search; it reads no action metadata at all, so an action declaring this location '
+  + 'never reached a user. The only thing that DID draw it was the Studio designer, which '
+  + 'previewed a command-palette frame for a surface the product does not have — an authoring '
+  + 'tool teaching authors to write dead metadata (ADR-0078). Place the action on a location a '
+  + 'renderer serves (`list_toolbar`, `list_item`, `record_header`, `record_more`, '
+  + '`record_related`, `record_section`), or — for an action that deliberately has no UI home, '
+  + 'such as an object-less one invoked over REST/MCP/AI — declare it headless with '
+  + '`locations: []`, which keeps its capability gate, param contract and audit trail. '
+  + 'Run `os migrate meta --from 16` to rewrite existing sources automatically.';
+
 /**
  * Action Location — where an action is allowed to surface in the UI.
  *
@@ -534,7 +554,23 @@ const TARGET_REQUIRED_TYPES: ReadonlySet<string> = new Set(
  * - `record_related`  — actions on a related list section inside a record.
  * - `record_section`  — actions surfaced inside a body section/tab of a record
  *                       (e.g. a Security tab grouping change-password, 2FA, etc.).
- * - `global_nav`      — global navigation/command-palette level actions.
+ *
+ * `global_nav` was REMOVED in 17 (#6888, maintainer ruling 2026-08-09). It had
+ * been declared here since the vocabulary was written and no product surface
+ * ever served it: the console's ⌘K palette composes its groups from nav items,
+ * objects, dashboards, pages, reports, recent items and record search, and
+ * references no action metadata. Four of the five references to the value in
+ * the whole UI repo were the Studio designer — which drew the author a mock
+ * "⌘K · Command palette" frame, promising a rendering the product cannot do
+ * (the ADR-0078 declares-renders-does-nothing shape, arriving through the
+ * location vocabulary rather than through a missing key). Retired rather than
+ * implemented: no user has asked for command-palette actions and the only two
+ * declarers were our own showcase corpus, so wiring the palette would have been
+ * capability expansion with no pull. This is an enum VALUE, not a key, so there
+ * is no `retiredKey()` tombstone — the prescription lives on the enum's own
+ * error map above, keyed on `issue.input` so that only the spelling which used
+ * to be legal is told it "was removed". An object-less action's honest
+ * declaration is `locations: []` (headless), not a location nothing renders.
  */
 export const ACTION_LOCATIONS = [
   'list_toolbar',
@@ -543,10 +579,15 @@ export const ACTION_LOCATIONS = [
   'record_more',
   'record_related',
   'record_section',
-  'global_nav',
 ] as const;
 
-export const ActionLocationSchema = z.enum(ACTION_LOCATIONS);
+export const ActionLocationSchema = z.enum(ACTION_LOCATIONS, {
+  // Only the spelling that USED to be legal gets the retirement message.
+  // Telling the author of `globalnav` that their value "was removed" would
+  // misinform, so everything else keeps zod's own enum error, which already
+  // lists the legal locations. (`array_agg` / `crypto.hash` precedent.)
+  error: (issue) => (issue.input === 'global_nav' ? GLOBAL_NAV_RETIRED : undefined),
+});
 export type ActionLocation = z.input<typeof ActionLocationSchema>;
 
 /**
@@ -913,6 +954,32 @@ const actionObject = () => strictObject({
    * bare "expected array, received object" an author cannot act on. Sources
    * still carrying the object form are rewritten at load by the
    * `inline-action-api-params-to-body-extra` conversion (ADR-0087 D2).
+   *
+   * **The api prescription is not universal, which #6828 measured and the
+   * maintainer's 2026-08-10 ruling closed.** On a `type:'url'` action the
+   * object form meant a THIRD thing again — objectui's `ActionRunner` read a
+   * non-array `params` as the `${param.X}` interpolation scope for `target`,
+   * and `params.newTab` as a legacy new-tab flag. Sending that author to
+   * `bodyExtra` is a wrong instruction: an api request-body key is not an
+   * interpolation scope (the same asymmetry is why the conversion above guards
+   * on `type === 'api'` — rewriting a url action's object `params` would be
+   * lossy, and ADR-0087 D2 requires losslessness). The ruling **retired** the
+   * url meaning rather than giving it a key: the scope is already expressible
+   * as `target`-string interpolation, and the flag is already {@link openIn}.
+   * So the refusal below prescribes per action type — `bodyExtra` for `api`,
+   * the sanctioned url spellings for `url` — and nothing new enters the
+   * vocabulary. A future authorable interpolation-scope key needs a spec
+   * proposal that demonstrates pull, not a third arm of this one.
+   *
+   * The branch is stated IN THE TEXT rather than selected at runtime because
+   * zod cannot see a sibling from a property-level error map: the map receives
+   * only `{ code, expected, input, inst, path }` for the offending value, and
+   * an object-level `.check()`/`.superRefine()` — which would see `type` — is
+   * skipped once a property has already failed (probed on zod 4.4.3). Reading
+   * `type` here would mean restructuring `ActionSchema` behind a
+   * `z.preprocess`, which erases `z.input<typeof ActionSchema>` (the authoring
+   * type `defineAction` publishes) — a far larger change than the guidance
+   * defect warrants, and one that moves surfaces this issue must not move.
    */
   params: z.array(ActionParamSchema, {
     error: (iss) => (
@@ -920,8 +987,11 @@ const actionObject = () => strictObject({
         && iss.input !== null
         && typeof iss.input === 'object'
         && !Array.isArray(iss.input)
-        ? "`params` is the parameter DEFINITION array (fields collected from the user before the action runs), not the request payload. "
+        ? "`params` is the parameter DEFINITION array (fields collected from the user before the action runs), not a values map. "
           + "For a `type:'api'` action's static request body — including `{{page.<var>}}` tokens — use `bodyExtra: { … }` instead (#5777). "
+          + "For a `type:'url'` action there is nowhere to move it to, by decision: put static values straight into the `target` string "
+          + "(`${param.X}` interpolates a value collected by the params dialog, `${ctx.X}` one from the action context), and open a new tab with "
+          + "`openIn: 'new-tab'`. The url-side readings of an object `params` — a static `${param.X}` scope, and `params.newTab` — are RETIRED, not renamed (#6828). "
           + 'Expected an array of ActionParam, received an object.'
         : undefined
     ),

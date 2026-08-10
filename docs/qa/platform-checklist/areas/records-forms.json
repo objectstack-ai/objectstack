@@ -1359,10 +1359,10 @@
     },
     {
       "id": "records-forms.action-location-matrix",
-      "title": "Action buttons surface at exactly their declared locations — list toolbar, list row, record header/more/related/section, global nav — and each dispatches for real",
+      "title": "Action buttons surface at exactly their declared locations — list toolbar, list row, record header/more/related/section — and each dispatches for real",
       "since": "v15",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -1371,7 +1371,7 @@
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "the per-location action fleet on showcase_task (examples/app-showcase/src/ui/actions/index.ts): showcase_bulk_reassign (list_item+list_toolbar, flow), showcase_quick_view (list_item, modal), showcase_mark_done (list_item+record_header+record_section, script, visible '!record.done'), showcase_log_time (record_header+record_related+record_section, form), showcase_open_docs (record_more, url), showcase_recalc_selection (record_more, api — deliberately kept OFF the toolbar, objectui#3142), showcase_new_task (global_nav, modal)",
+          "the per-location action fleet on showcase_task (examples/app-showcase/src/ui/actions/index.ts): showcase_bulk_reassign (list_item+list_toolbar, flow), showcase_quick_view (list_item, modal), showcase_mark_done (list_item+record_header+record_section, script, visible '!record.done'), showcase_log_time (record_header+record_related+record_section, form), showcase_open_docs (record_more, url), showcase_recalc_selection (record_more, api — deliberately kept OFF the toolbar, objectui#3142)",
           "seeded tasks in both done and not-done states for the CEL visibility both-sides check"
         ]
       },
@@ -1382,14 +1382,13 @@
         "record_more — showcase_open_docs / showcase_recalc_selection under the ⋯ overflow",
         "record_related — showcase_log_time on the related-list section",
         "record_section — showcase_mark_done / showcase_log_time in the Task Detail quick-actions bar (record:quick_actions resolves through the location filter)",
-        "global_nav — showcase_new_task in the command palette / global nav",
         "empty-locations semantics probe — a locations-less action lands on EVERY location including the toolbar (objectui action-bar.tsx documented behavior; the reason recalc_selection must declare record_more)"
       ],
       "steps": [
         "boot the showcase isolated; sign in as admin; open the showcase_task list view",
-        "for each location variant, navigate to its surface (list header / row menu / a not-done task's detail title bar / its ⋯ menu / a related-list section / the Task Detail quick-actions bar / the global command palette), screenshot AFTER render settles, then read the rendered action buttons from the DOM",
+        "for each location variant, navigate to its surface (list header / row menu / a not-done task's detail title bar / its ⋯ menu / a related-list section / the Task Detail quick-actions bar), screenshot AFTER render settles, then read the rendered action buttons from the DOM",
         "record for every fixture action WHERE it rendered — building the full placement matrix (rendered locations vs declared locations)",
-        "dispatch one action per location with a ref-targeted click: bulk_reassign (screen-flow wizard opens), quick_view (modal opens), mark_done (script executes), log_time (form dialog opens on showcase_task.edit), open_docs (url navigation), recalc_selection from the ⋯ menu (api POST), new_task from the palette; capture each network trace",
+        "dispatch one action per location with a ref-targeted click: bulk_reassign (screen-flow wizard opens), quick_view (modal opens), mark_done (script executes), log_time (form dialog opens on showcase_task.edit), open_docs (url navigation), recalc_selection from the ⋯ menu (api POST); capture each network trace",
         "verify the state-changing dispatches server-side: mark_done flips the task's done flag (API re-read), recalc_selection's per-record branch recomputes the estimate",
         "CEL visibility both sides: locate a done task and a not-done task; read the row menu and record header of each for showcase_mark_done",
         "empty-locations probe: in a scratch/writable package author a copy of an api action with NO locations key; reload and record every surface it appears on (including the toolbar), then delete the probe"
@@ -1402,7 +1401,7 @@
           "evidence": "per-location screenshots + the placement matrix"
         },
         {
-          "clause": "placement is EXCLUSIVE, not additive: the matrix has zero extra placements — record_more-only actions (open_docs, recalc_selection) never render in record_header or list_toolbar; global_nav-only new_task never renders on rows; the engine location-filters even explicitly-named actions (the record:quick_actions bar note in the fixture source)",
+          "clause": "placement is EXCLUSIVE, not additive: the matrix has zero extra placements — record_more-only actions (open_docs, recalc_selection) never render in record_header or list_toolbar; the engine location-filters even explicitly-named actions (the record:quick_actions bar note in the fixture source)",
           "oracle": "dom",
           "verify": "the placement matrix's extra-placement cells are all empty, checked against every captured surface",
           "evidence": "the same matrix, extra-placement columns"
@@ -1411,7 +1410,7 @@
           "clause": "each location's sampled action DISPATCHES for real — flow wizard opens and resumes, modal opens, script executes, form opens the declared edit form view, url navigates, api POSTs — and state-changing ones round-trip server-side (mark_done flips done; recalc updates the estimate)",
           "oracle": "network",
           "verify": "one captured dispatch per location + API re-reads for the two state changes",
-          "evidence": "the seven traces + the two re-reads"
+          "evidence": "the six traces + the two re-reads"
         },
         {
           "clause": "row-level CEL visibility gates per record, both sides: showcase_mark_done ('visible: !record.done') renders on the not-done task's row/header and is ABSENT on the done task's — and the evaluation is fail-closed (a throwing expression hides, never shows)",
@@ -1441,7 +1440,7 @@
         "ref": "objectui: e2e/live/list-row-action-cel.spec.ts (row-level CEL visibility) + e2e/live/action-modal.spec.ts (dialog dispatch)"
       },
       "source": [
-        "packages/spec/src/ui/action.zod.ts:397 (ACTION_LOCATIONS — the canonical 7-value enum, single source of truth)",
+        "packages/spec/src/ui/action.zod.ts:565 (ACTION_LOCATIONS — the canonical 6-value enum, single source of truth; `global_nav` was the 7th until #6888 retired it — no product surface rendered it)",
         "examples/app-showcase/src/ui/actions/index.ts (per-location fixture fleet + the record:quick_actions filter note + the objectui#3142 empty-locations commentary)",
         "objectui: packages/.../action-bar.tsx (missing/empty locations → every location)",
         "cross-ref: bulk dispatch-count semantics live in records-forms.list-view-capabilities (bulk-actions variant); param dialogs in records-forms.action-param-widgets"
@@ -1458,12 +1457,18 @@
           "date": "2026-08-08",
           "change": "pinned enumSource for the variants-freshness ratchet — spec enum drift is caught by the manual check on this item directly",
           "ref": "claude/platform-test-checklist-ocwugl"
+        },
+        {
+          "revision": 3,
+          "date": "2026-08-10",
+          "change": "dropped the global_nav variant — the vocabulary lost that member (#6888). The variant was UNRUNNABLE as written, not merely obsolete: its step 'new_task from the palette' could never pass, because the console ⌘K palette builds its groups from nav items, objects, dashboards, pages, reports, recent items and record search and reads no action metadata at all. The fixture fleet loses showcase_new_task with it (now headless, locations: []); the dispatch step drops from seven traces to six; enumSource.expect 7 → 6",
+          "ref": "claude/issue-6888-retire-global-nav"
         }
       ],
       "enumSource": {
         "file": "packages/spec/src/ui/action.zod.ts",
         "export": "ACTION_LOCATIONS",
-        "expect": 7
+        "expect": 6
       }
     },
     {

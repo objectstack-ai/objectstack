@@ -887,10 +887,12 @@ export class SecurityPlugin implements Plugin {
       // update), and the lifecycle ops with no overlay translation
       // (transfer/restore/purge) stay refused on package rows. Ordinary
       // `update`/`delete` on a package row are handled downstream by the
-      // ADR-0094 write-through, which translates them into env-scope OVERLAY
-      // operations (customize / reset via the standard ADR-0005 layering) —
-      // the boot re-seed can no longer revert an admin's change, because the
-      // change lives in the overlay and the record projects overlay-wins.
+      // ADR-0094 write-through, which TRANSLATES them into a metadata write.
+      // Whether that write is ACCEPTED is ADR-0005's call, not this gate's,
+      // and since ADR-0094 D5-R (#6483 / PR #6608 rolled `permission` back to
+      // `allowOrgOverride: false`) a CODE-DECLARED set is refused there with
+      // 403 `NOT_OVERRIDABLE` — the 2026-07-14 "customize / reset via an env
+      // overlay" direction this comment used to state is RETIRED.
       // Placed BEFORE the empty-principal fall-open and the CRUD check so the
       // forging boundary holds even for a principal-less context and a
       // superuser with modifyAllRecords. System/boot writes carry `isSystem`
@@ -3189,14 +3191,17 @@ export class SecurityPlugin implements Plugin {
     }
     if (op === 'insert') return; // no existing row to protect
 
-    // [ADR-0094, direction confirmed 2026-07-14] `update`/`delete` on a
-    // package-managed row are no longer refused here: the write-through
-    // middleware (which runs after this gate + the delegated-admin gate +
-    // the CRUD checks) translates them into env-scope OVERLAY operations —
-    // customize / reset via the standard ADR-0005 layering — and itself
-    // re-asserts the legacy refusal when the kernel has no metadata overlay
-    // layer to carry the customization. The lifecycle ops below have no
-    // overlay translation, so the package-row protection stays for them.
+    // [ADR-0094 D5-R] `update`/`delete` on a package-managed row are not
+    // refused HERE: the write-through middleware (which runs after this gate
+    // + the delegated-admin gate + the CRUD checks) translates them into a
+    // metadata write, and the refusal is LEFT TO THAT PRODUCER. Since #6483 /
+    // PR #6608 rolled `permission` back to `allowOrgOverride: false`, a
+    // CODE-DECLARED (artifact-backed) set is refused there with 403
+    // `NOT_OVERRIDABLE`; a `sys_metadata`-backed set rides
+    // `allowRuntimeCreate` and still lands. The 2026-07-14 "customize / reset
+    // via the standard ADR-0005 layering" direction this comment used to cite
+    // is RETIRED. The lifecycle ops below have no metadata translation, so the
+    // package-row protection stays for them.
     if (op === 'update' || op === 'delete') return;
 
     if (!this.ql) return;

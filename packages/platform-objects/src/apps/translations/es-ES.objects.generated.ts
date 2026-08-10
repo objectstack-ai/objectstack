@@ -2343,7 +2343,8 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
           success: "Correcto",
           failed: "Fallido",
           timeout: "Tiempo de espera agotado",
-          running: "En ejecución"
+          running: "En ejecución",
+          degraded: "Degradado"
         }
       },
       last_error: {
@@ -2380,7 +2381,8 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
           running: "En ejecución",
           success: "Correcto",
           failed: "Fallido",
-          timeout: "Tiempo de espera agotado"
+          timeout: "Tiempo de espera agotado",
+          degraded: "Degradado"
         }
       },
       started_at: {

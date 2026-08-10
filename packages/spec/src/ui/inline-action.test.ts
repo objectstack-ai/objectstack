@@ -205,6 +205,111 @@ describe('InlineActionSchema — `bodyExtra` is the payload key, `params` is not
   });
 });
 
+/**
+ * #6828 — the THIRD meaning of `params`, and why one prescription is not enough.
+ *
+ * #5777 settled the `type:'api'` half: the object form means the request
+ * payload, and the payload moves to `bodyExtra`. It did not settle the
+ * `type:'url'` half, where objectui's `ActionRunner` read a non-array `params`
+ * as the `${param.X}` interpolation scope for `target` and `params.newTab` as a
+ * legacy new-tab flag. So between #5777 and this card the refusal told a url
+ * author to use `bodyExtra` — an api request-body key, which is not an
+ * interpolation scope and cannot carry a new-tab flag. Wrong instruction, and
+ * the exact one the maintainer's 2026-08-10 ruling on #6828 names when it
+ * retires the url meaning instead of giving it a key.
+ *
+ * Both arms are pinned, on both surfaces, by path + code + message content: a
+ * regression that drops either arm is a wrong instruction again, and the bare
+ * "expected array, received object" would keep a `toThrow()`-shaped test green.
+ */
+describe('object-form `params` prescribes per action type (#6828)', () => {
+  /** The `params` issue a parse produced, or a readable failure if it produced none. */
+  const paramsIssue = (r: { success: boolean; error?: z.ZodError }) => {
+    expect(r.success).toBe(false);
+    const issues = r.error!.issues;
+    const issue = issues.find(i => i.path.join('.') === 'params');
+    expect(issue, JSON.stringify(issues)).toBeDefined();
+    return issue!;
+  };
+
+  it("sends a `type:'url'` action to `target` interpolation and `openIn`, NOT to `bodyExtra`", () => {
+    // The shape the issue measured: the interpolation scope half. `target`
+    // already carries the token, and the scope is the only thing missing a
+    // spelling — which the ruling declines to add.
+    const r = InlineActionSchema.safeParse({
+      type: 'url',
+      target: '/x?id=${param.id}',
+      params: { id: 'abc' },
+    }) as { success: boolean; error?: z.ZodError };
+    const issue = paramsIssue(r);
+    expect(issue.code).toBe('invalid_type');
+    expect((issue as unknown as { expected: string }).expected).toBe('array');
+    expect(issue.message).toContain('`target` string');
+    expect(issue.message).toContain("openIn: 'new-tab'");
+    expect(issue.message).toContain('RETIRED, not renamed (#6828)');
+  });
+
+  it('names the retired `params.newTab` escape hatch, so the flag half has an answer too', () => {
+    // The second url reading: `executeUrl` read `params.newTab` below `openIn`
+    // in priority. `openIn` is the declared key, so this half is a plain
+    // deprecation — but only if the message says so where the author lands.
+    const r = InlineActionSchema.safeParse({
+      type: 'url',
+      target: 'https://example.com/pricing',
+      params: { newTab: true },
+    }) as { success: boolean; error?: z.ZodError };
+    const issue = paramsIssue(r);
+    expect(issue.code).toBe('invalid_type');
+    expect(issue.message).toContain('params.newTab');
+    expect(issue.message).toContain("openIn: 'new-tab'");
+  });
+
+  it("keeps the `type:'api'` arm intact — `bodyExtra` is still the payload prescription", () => {
+    // The url arm is additive. #5777's answer must not be displaced by it:
+    // the api author reaching for a payload still gets the key that holds one.
+    const r = InlineActionSchema.safeParse({
+      type: 'api',
+      target: '/api/v1/forms/contact-us/submit',
+      params: { name: '{{page.inquiryName}}' },
+    }) as { success: boolean; error?: z.ZodError };
+    const issue = paramsIssue(r);
+    expect(issue.code).toBe('invalid_type');
+    expect(issue.message).toContain('bodyExtra: { … }');
+    expect(issue.message).toContain('(#5777)');
+  });
+
+  it('guides the REGISTERED action surface identically — the field factory is shared', () => {
+    // `params` is declared once on `actionObject()`, so a registered `type:'url'`
+    // action must land on the same guidance. Pinned because a future fix that
+    // moved the branch onto `InlineActionSchema` alone would silently leave the
+    // registry surface on the api-only prescription.
+    const r = ActionSchema.safeParse({
+      name: 'open_pricing',
+      label: 'Pricing',
+      type: 'url',
+      target: '/pricing?plan=${param.plan}',
+      params: { plan: 'pro' },
+    }) as { success: boolean; error?: z.ZodError };
+    const issue = paramsIssue(r);
+    expect(issue.code).toBe('invalid_type');
+    expect(issue.message).toContain('RETIRED, not renamed (#6828)');
+    expect(issue.message).toContain('bodyExtra: { … }');
+  });
+
+  it('leaves the definition-array meaning of `params` accepted on a url action', () => {
+    // The acceptance face does not move: the array form was always the one
+    // meaning, and a url action collecting input still interpolates `${param.X}`
+    // from the dialog. This is the sanctioned spelling the message points at.
+    const r = InlineActionSchema.safeParse({
+      type: 'url',
+      target: '/api/v1/auth/sign-in/social?provider=${param.provider}',
+      params: [{ name: 'provider', label: 'Provider', type: 'text' }],
+      openIn: 'new-tab',
+    });
+    expect(r.success, JSON.stringify((r as { error?: unknown }).error)).toBe(true);
+  });
+});
+
 describe('normalizeInlineAction — the legacy spellings cloud actually writes', () => {
   it('folds the exact shape in cloud service-tenant pages', () => {
     // packages/service-tenant/src/pages/{pricing,welcome,billing-cancel,billing-success}

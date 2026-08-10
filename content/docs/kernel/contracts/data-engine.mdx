@@ -113,6 +113,10 @@ interface EngineQueryOptions {
   search?: string | FullTextSearch;          // Full-text search — the bare query text
                                              // is canonical (ADR-0061 D1); the object
                                              // form carries the Tier-2 knobs (#7178)
+  searchFields?: string[];                   // Fields the `search` expansion may match
+                                             // against — a validated override, intersected
+                                             // with the object's declared/derived
+                                             // searchable set (ADR-0061 D1)
   expand?: Record<string, QueryAST>;         // Recursive relation loading
   context?: ExecutionContext;            // Identity, tenant, transaction — any subset
 }

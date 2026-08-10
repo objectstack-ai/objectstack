@@ -59,17 +59,70 @@
  */
 
 /**
- * The `systemPermissions` capabilities that exempt a caller from the mask
- * (ADR-0106 D4).
+ * [#6603 / ADR-0066 D1] The capabilities that let a caller **write** an object
+ * schema — the authoritative set, from which the D4 read exemption below is
+ * derived.
+ *
+ * The gate itself is spelled at eight sites (`packages/rest/src/rest-server.ts`
+ * ×4, `packages/runtime/src/domains/meta.ts` ×2, and the two `/packages` write
+ * transports); this constant is the same key named ONCE so the read side can
+ * reference it instead of re-spelling it. Changing the write gate's key without
+ * changing this constant is the drift #7020 measured — see below.
+ */
+export const OBJECT_SCHEMA_WRITE_CAPABILITIES: readonly string[] = ['manage_metadata'];
+
+/**
+ * [ADR-0106 D4] Capabilities that exempt a caller from the mask **without**
+ * granting them schema writes — the named read-only exemptions.
  *
  * These are exactly the two the `app` filter treats as "builder" — Studio and
  * Setup authoring cannot work against a projected schema, and draft/preview
- * reads are admin-gated upstream already. The exemption is a **caller**
- * property, not a route property: an exempt caller hitting the public route
- * gets the full schema, and a non-exempt caller gets the projection on every
- * route.
+ * reads are admin-gated upstream already.
+ *
+ * Kept as an explicit list rather than derived, because the #7020 measurement
+ * found real principals here that hold no write capability and are meant not to:
+ * `organization_admin` / `organization_admin_no_bypass` (`setup.access`, with
+ * `manage_metadata` withheld in as many words at
+ * `plugin-security/src/objects/default-permission-sets.ts:139-142`) and the
+ * showcase `showcase_ops` operations persona. Whether those stay exempt is the
+ * follow-up ruling #7020 leaves open; until it lands, nobody's current read
+ * access is narrowed.
+ *
+ * This is ALSO the `/packages` read cohort (#7033 / #7023) — `package-routes.ts`
+ * and `domains/packages.ts` import it by this name. That gate was ruled
+ * separately and is deliberately NOT the union below.
  */
-export const OBJECT_SCHEMA_MASK_EXEMPT_CAPABILITIES: readonly string[] = ['studio.access', 'setup.access'];
+export const OBJECT_SCHEMA_READ_ONLY_EXEMPT_CAPABILITIES: readonly string[] = ['studio.access', 'setup.access'];
+
+/**
+ * The `systemPermissions` capabilities that exempt a caller from the mask
+ * (ADR-0106 D4) — **derived**, never hand-kept.
+ *
+ * #7020 measured the two sets this platform actually had: the #6603 write gate
+ * (`manage_metadata`) and this exemption list (`studio.access` / `setup.access`)
+ * were disjoint apart from `admin_full_access` carrying all three, so
+ * #6603's stated rationale — *"whoever can write a schema is whoever can see
+ * the full schema"* — held only by that coincidence. A `manage_metadata`-only
+ * caller passed every write gate and still read a PROJECTED schema, which is
+ * precisely the GET → edit → PUT round trip that deletes the fields the caller
+ * could not see.
+ *
+ * The maintainer's 2026-08-10 ruling makes the write gate authoritative and this
+ * list a derivation of it, so the invariant holds **by construction**: the union
+ * cannot drift from the write gate, because it is not written down twice.
+ *
+ * The derivation is one-directional on purpose — can-write implies can-see-all;
+ * it does not imply can-see-all requires can-write. The read-only exemptions
+ * above are preserved verbatim pending their follow-up ruling.
+ *
+ * The exemption is a **caller** property, not a route property: an exempt caller
+ * hitting the public route gets the full schema, and a non-exempt caller gets
+ * the projection on every route.
+ */
+export const OBJECT_SCHEMA_MASK_EXEMPT_CAPABILITIES: readonly string[] = [
+    ...OBJECT_SCHEMA_WRITE_CAPABILITIES,
+    ...OBJECT_SCHEMA_READ_ONLY_EXEMPT_CAPABILITIES,
+];
 
 /**
  * Environment escape hatch for ADR-0106 D8 — a deployment that explicitly wants
@@ -158,8 +211,16 @@ export function isObjectSchemaMaskingEnabled(
 /**
  * Is this caller exempt from the mask (ADR-0106 D4)?
  *
- * `isSystem` (which `getReadableFields` already bypasses) plus a platform-admin
- * caller, judged by the same `systemPermissions` reading the `app` filter uses.
+ * `isSystem` (which `getReadableFields` already bypasses) plus any caller in
+ * {@link OBJECT_SCHEMA_MASK_EXEMPT_CAPABILITIES} — i.e. anyone the #6603 write
+ * gate admits ({@link OBJECT_SCHEMA_WRITE_CAPABILITIES}) OR one of the named
+ * read-only exemptions ({@link OBJECT_SCHEMA_READ_ONLY_EXEMPT_CAPABILITIES}),
+ * judged by the same `systemPermissions` reading the `app` filter uses.
+ *
+ * The write half is what makes "whoever can write a schema can see all of it"
+ * true by construction rather than by two lists staying coincidentally equal
+ * (#7020's ruling); it is also what keeps a masked read from being PUT back
+ * verbatim and silently deleting the invisible fields.
  */
 export function isObjectSchemaMaskExempt(context: unknown): boolean {
     if (!context || typeof context !== 'object') return false;

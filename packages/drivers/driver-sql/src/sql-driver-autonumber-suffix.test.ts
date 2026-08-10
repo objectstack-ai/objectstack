@@ -165,11 +165,12 @@ describe('SqlDriver autonumber seeding — the counter is located by the declare
       // lexicographic one — so the counter continues at 11.
       //
       // The RENDERING of a format-less field is a separate, pre-existing matter
-      // this fix does not touch: this driver substitutes `{0000}` for a missing
-      // format (see `initObjects`), so 11 renders `0011` here while the engine's
-      // fallback emits the bare `11`. That divergence is in the render default,
-      // not in the seeding parse #6468 is about, so the cross-side parity test
-      // uses explicitly-formatted fields.
+      // this fix does not touch: a format-less field resolves to the contract
+      // default `{0000}` (`resolveAutonumberFormat`, #6555), so 11 renders
+      // `0011` here — while the engine's fallback still emits the bare `11`
+      // until #7262 lands the other half. That divergence is in the render
+      // default, not in the seeding parse #6468 is about, so the cross-side
+      // parity test uses explicitly-formatted fields.
       await initRec();
       await seedRows(['1', '2', '10']);
 

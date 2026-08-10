@@ -477,7 +477,7 @@ jobs:
       - name: Download test shard attestations
         id: attestations
         continue-on-error: true
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           pattern: shard-attest-test-*
           path: ${{ runner.temp }}/shard-attestations
@@ -1020,7 +1020,7 @@ jobs:
       - name: Download dogfood attestations
         id: attestations
         continue-on-error: true
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           pattern: shard-attest-dogfood-*
           path: ${{ runner.temp }}/shard-attestations

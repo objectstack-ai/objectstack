@@ -2343,7 +2343,8 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
           success: "成功",
           failed: "失败",
           timeout: "超时",
-          running: "运行中"
+          running: "运行中",
+          degraded: "降级"
         }
       },
       last_error: {
@@ -2380,7 +2381,8 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
           running: "运行中",
           success: "成功",
           failed: "失败",
-          timeout: "超时"
+          timeout: "超时",
+          degraded: "降级"
         }
       },
       started_at: {

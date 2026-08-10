@@ -1,5 +1,5 @@
 ---
-name: checklist-run
+name: checklist-test
 description: >
   Execute the platform test checklist (docs/qa/platform-checklist/) against a real
   running app and produce a run record. Use whenever the maintainer says "测一下
@@ -7,7 +7,7 @@ description: >
   file", "验证 <功能点>", or points at a framework source file and asks whether it
   still works. Takes a SELECTOR (item id · area · capability kind · priority · a
   release · or a source-file path) and drives every matched item through its steps
-  following RUNNER.md. The companion to `coverage-sweep` (which AUTHORS items); this
+  following RUNNER.md. The companion to `checklist-author` (which AUTHORS items); this
   one RUNS them. NOT a customer-published skill — internal agent tooling (lives in
   .claude/, never in the published `skills/` dir).
 metadata:
@@ -17,7 +17,7 @@ metadata:
   internal: true
 ---
 
-# Checklist run — execute selected items against a live app
+# Checklist test — execute selected items against a live app
 
 You resolve a **selector** to a set of checklist items, boot the app in isolation, drive
 each item's steps in the browser / over the API, and emit a **run record**. The method
@@ -44,11 +44,12 @@ Selectors (one per run):
 |---|---|
 | `platform-core.console-login` (bare id) | that one item |
 | `area:records-forms` (or bare `records-forms`) | every item in the area |
+| **`records-forms.json`** (or the full `…/areas/records-forms.json` path) | **every item in that area — a list-directory filename works with no prefix** |
 | `capability:hook` | items mapped to a metadata kind in `coverage.json` |
 | `priority:P0` | the standing smoke |
 | `surface:api` | every API-surface item (cheap — no browser build needed) |
 | `since:v17` | everything introduced in a release (the release-sweep filter) |
-| **`file:packages/plugins/plugin-approvals/src/approval-service.ts`** | **items whose `source[]` cites that file — "test whatever covers this file"** |
+| **`file:packages/plugins/plugin-approvals/src/approval-service.ts`** | **items whose `source[]` cites that file — "test whatever covers this file"** (a bare path with a `/` or a code extension auto-resolves as `file:` too) |
 | `all` | the whole checklist |
 
 `--json` gives the runnable list (id · priority · surface · revision). **Blocked items are
@@ -83,7 +84,8 @@ Build once, up front, for the whole run.
 - Execute each item's `steps` faithfully; judge each `acceptance` clause and each
   `negative` against its declared `oracle`, capturing the `evidence` the clause names.
   **Server truth outranks pixels; DOM only after a screenshot confirms render; a `fail`
-  needs reproduction ×2 + the automation self-check + a filed issue** (RUNNER §rules).
+  needs reproduction ×2 + the automation self-check + a reproduction rule in the run
+  issue** (RUNNER §rules).
 
 ## 3. When the run teaches you something about the ITEM
 
@@ -94,15 +96,36 @@ a `history` entry, keep `node scripts/check-platform-checklist.mjs` green, and l
 task branch. Product defects found while running go to `FOLLOW-UPS.md` (or a filed issue)
 as expected-fail probes — never tick a clause green over a real defect.
 
-## 4. The run record — results do NOT go in the repo
+## 4. The result issue — one GitHub issue per run, text only
 
-Write one JSON per run in the shape RUNNER.md defines (env with framework sha +
-`.objectui-sha` + port + db; per-clause verdicts each naming its evidence; derived item
-verdict; issues). **`runs/` is git-ignored** — the record and its screenshots stay in the
-executing environment / the tracking issue / an external QA store, never committed. The
-committed source is the checklist under `areas/`; a run is a dated assertion about one
-build and belongs with that build's artifacts. Report the per-clause verdict table + the
-evidence paths + the env-setup-vs-test time split back to the maintainer.
+Every completed run — **pass or fail alike** — files exactly one GitHub issue as its
+durable record. Nothing about a run enters the repo tree: not the JSON, not screenshots.
+The JSON run record (RUNNER.md shape) is scratch in the executing environment; `runs/`
+stays git-ignored. The issue is the report.
+
+**The issue is pure text — no images, ever.** Screenshots exist only to let you and your
+subagents reach a verdict *live*; they are a judgment aid, discarded with the run
+environment. The durable report needs the **reproduction rule, not the picture**.
+
+File it with `issue_write` (github MCP):
+
+- **Title** — `QA run · <selector> · <framework-sha[:8]> · <date>`
+- **Labels** — `qa-run` always; add `bug` (and `regression` for a P0/P1) whenever any
+  clause failed, so a real defect is triageable straight from the run issue without a
+  second one.
+- **Body**, in this order:
+  - **Env fingerprint** — framework sha, `.objectui-sha`, port, db, seed, timestamp.
+  - **Scope** — the selector + the `revision` each item ran against.
+  - **Per-clause verdict table** — item · clause · verdict · one line of **text** oracle
+    evidence (the API/network/build/test result — server truth, never a pixel).
+  - **For every `fail`, a reproduction rule** — the exact ordered steps / the API calls
+    (method · path · body) / the ref-targeted selector path to re-hit it on a fresh boot,
+    plus expected-vs-actual from the oracle. Enough for a human or a fresh agent to
+    reproduce it with no screenshot from you.
+  - Derived item verdicts + any fixture-gap list.
+
+Report the same per-clause table + the env-setup-vs-test time split back to the maintainer
+in chat, and link the filed issue.
 
 ## Guardrails
 
@@ -110,5 +133,5 @@ evidence paths + the env-setup-vs-test time split back to the maintainer.
   console → build it or record `blocked(environment)`; a half-proven item is `partial`,
   not `pass`. A blocked verdict WITH evidence is a successful run; a faked pass is not.
 - **Don't run blocked items as if runnable** — the resolver hides them for this reason.
-- **One selector, one run record.** For a release sweep, run `since:vN` and `priority:P0`
-  as separate records rather than smearing them together.
+- **One selector, one run, one issue.** For a release sweep, run `since:vN` and
+  `priority:P0` as separate runs → separate issues, rather than smearing them together.

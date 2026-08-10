@@ -130,7 +130,30 @@ export function isTitleEligible(fieldDef: TitleEligibleFieldDef | undefined | nu
   return TITLE_ELIGIBLE_TYPES.has(type);
 }
 
-/** Exact name-ish field names (case-insensitive), highest derivation priority. */
+/**
+ * Exact name-ish field names (case-insensitive), highest derivation priority.
+ *
+ * DIVERGES from lint's `NAME_LIKE_FIELDS`
+ * (`packages/lint/src/data-model-rules.ts`) by exactly one entry: `code`. That
+ * difference is INTENTIONAL — the two sets answer different questions, and the
+ * maintainer ruled on 2026-08-10 (#6734) to keep both as they are and write the
+ * gap down in both places rather than converge them.
+ *
+ * This set answers **"what is the record's title?"** — it is tier 1 of
+ * {@link resolveDisplayField}'s derivation, i.e. the names whose presence is
+ * strong enough evidence to pick that field as the primary title outright. A
+ * `code` is an identifier, not a title, so it is deliberately absent here; a
+ * `code`-only object still gets a title, but at tier 3 ("first title-eligible
+ * field by declaration order") — by a different rule and a different priority.
+ *
+ * Lint R9 (`object/missing-name-field`) asks the looser **"will records be
+ * anonymous?"** question — does this object have any title FACE at all — and
+ * for that a `code` counts, which is why its set carries the extra entry. R9 is
+ * `severity: 'suggestion'` and the `Record #<id>` floor below guarantees a
+ * title regardless, so the two sets never disagree about an outcome a user
+ * sees. Do not "fix" either set into the other without a ruling that supersedes
+ * the one above.
+ */
 const NAME_ISH_EXACT: ReadonlySet<string> = new Set([
   'name', 'title', 'subject', 'label', 'full_name', 'display_name',
 ]);

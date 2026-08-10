@@ -50,8 +50,11 @@ test-run output the clause's `evidence` field names.
    - check the `traps` field and rule each listed trap out;
    - for console UI failures, confirm against current objectui source or a fresh build
      — the vendored `/_console` bundle may be stale (skill §2);
-   - then file the issue and cite it in the run record. A `fail` without a filed issue
-     is not a completed verdict.
+   - then capture the **reproduction rule** — ordered steps / API calls (method · path ·
+     body) / the ref-targeted selector path + expected-vs-actual — into the run's result
+     issue, which is labeled `bug`. A `fail` with no reproduction rule in its issue is not
+     a completed verdict. (The screenshot that convinced you is a live judgment aid, not
+     report content — describe what it showed in one line; never attach it.)
 3. **Classify blockers honestly.** Missing seed/persona/fixture → `blocked(fixture)`,
    and *record the gap on the item* (`fixtures.knownGaps` or `blocked`) so the next
    sweep doesn't rediscover it. A defect in the fixture itself (seed silently failing,
@@ -88,13 +91,20 @@ test-run output the clause's `evidence` field names.
 | `wrong-panel` | feature looks missing on a sibling surface | item's `steps` name the exact surface; check it |
 | `wrong-persona` | admin privileges mask a guard | run guard checks as the non-privileged persona |
 
-## Run records
+## Run records — the GitHub issue is the report
 
-One JSON per executed sweep, written to `runs/YYYY-MM-DD-<slug>.json`. **Results are
-NOT committed** — a run record is output about one build, not source; `runs/` is
-git-ignored except its README (the format contract). Keep the record and its evidence
-in the executing environment (CI artifact, runner workspace, the sweep's tracking
-issue, or an external QA store). Shape:
+Every completed run — **pass or fail alike** — files **one GitHub issue** as its durable
+record, labeled `qa-run` (plus `bug` when any clause failed). **Nothing lands in the
+repo** — not the JSON, not screenshots; `runs/` is git-ignored except its README.
+
+**The issue is text only.** Screenshots and DOM dumps are oracles you consult *live* to
+reach a verdict — never report artifacts. What the report carries for a defect is the
+**reproduction rule**: ordered steps / API calls (method · path · body) / the
+ref-targeted selector path + expected-vs-actual from the oracle, enough to re-hit it on a
+fresh boot with no picture. A clause whose oracle was a screenshot is recorded as a
+one-line text description of what it showed, not a link.
+
+The in-environment JSON scratch (RUNNER shape, never committed):
 
 ```jsonc
 {
@@ -114,7 +124,7 @@ issue, or an external QA store). Shape:
       "revision": 1,                     // ← the revision this verdict is valid for
       "verdict": "pass",
       "clauses": [
-        { "clause": 0, "verdict": "pass", "evidence": "…what was captured, where…" }
+        { "clause": 0, "verdict": "pass", "evidence": "…text: what the oracle returned — no image links…" }
       ],
       "issues": [],                      // filed failures / fixture gaps
       "notes": "…"
@@ -123,7 +133,8 @@ issue, or an external QA store). Shape:
 }
 ```
 
-A run summary for humans may additionally go to the sweep's tracking issue or an
-external QA store — but none of it lands in the repo. The durable, version-controlled
-truth is the checklist under `areas/`; a run is a dated assertion about a build that
-belongs wherever that build's other artifacts live.
+The issue body is: env fingerprint · scope (selector + per-item `revision`) · the
+per-clause verdict table (text oracle evidence) · a reproduction rule per `fail` ·
+derived item verdicts + fixture gaps. The durable, version-controlled truth is still the
+checklist under `areas/`; a run is a dated assertion about one build, and it lives in its
+issue, not the tree.

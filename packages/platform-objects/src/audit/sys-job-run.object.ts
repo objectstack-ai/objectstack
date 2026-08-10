@@ -46,8 +46,15 @@ export const SysJobRun = ObjectSchema.create({
       group: 'Identity',
     }),
 
+    // [#7072] `degraded` = ran to completion, work did not happen (#5548's
+    // ruling: one additional outcome, no enum family). This list is *enforced*
+    // — ObjectQL's record validator refuses an unlisted value with
+    // `invalid_option` — and must stay identical to `JobExecutionStatus` in
+    // `@objectstack/spec` (`system/job.zod.ts`) and to `sys_job.last_status`.
+    // A degraded run puts its reason in `error` below and does not bump the
+    // job's `failure_count`.
     status: Field.select(
-      ['running', 'success', 'failed', 'timeout'],
+      ['running', 'success', 'failed', 'timeout', 'degraded'],
       { label: 'Status', required: true, defaultValue: 'running', group: 'State' },
     ),
 

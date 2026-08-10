@@ -4,7 +4,14 @@
  * `objectstack.manifest.json` — on-disk descriptor for a template / package
  * source tree. Strict projection of `CreatePackageRequestSchema` (server-
  * managed fields excluded) plus scaffold-time extras (name slug,
- * specVersion, namespace, skills, preview, scaffold, readmePath).
+ * specVersion, namespace, skills, preview, scaffold, readmePath), with
+ * `manifestId` locally relaxed to OPTIONAL — this file is a source tree, not
+ * a publish request (#7319; the field's own TSDoc carries the measurement).
+ *
+ * Every shipped `objectstack.manifest.json` is parsed against this schema by
+ * `pnpm --filter @objectstack/spec check:template-manifests`, so the
+ * `$schema` line those files carry is a verified claim rather than an
+ * assertion nothing reads.
  */
 
 import { z } from 'zod';
@@ -35,8 +42,43 @@ export const TemplateManifestSchema = lazySchema(() =>
     //
     // Value constraints are reused from the publish field (one vocabulary,
     // §A.7); only the meaning differs, and the describe says so.
-    .omit({ ownerOrgId: true, createdBy: true, namespace: true })
+    //
+    // `manifestId` is omitted and re-declared for the same reason in a
+    // different direction (#7319): the create-request field is REQUIRED and
+    // must stay so — a publish request with no package identity is not a
+    // request — while on this file the id is a declarative DEFAULT the
+    // publisher may or may not have written down. The relaxation is therefore
+    // stated HERE, locally, and `CreatePackageRequestSchema` is untouched;
+    // widening the shared base would have loosened the publish surface too.
+    .omit({ ownerOrgId: true, createdBy: true, namespace: true, manifestId: true })
     .extend({
+      /**
+       * Reverse-domain package id this source tree publishes as — a
+       * declarative default, NOT a requirement of the file.
+       *
+       * OPTIONAL here, required on `CreatePackageRequestSchema`. The split is
+       * measured, not stylistic: `objectstack package publish` reads this file
+       * as raw JSON and resolves the id as
+       * `--manifest-id ?? m.manifestId ?? deriveManifestId(artifact, path)`
+       * (`packages/cli/src/commands/package/publish.ts`), so a template tree
+       * that declares none publishes perfectly well — the fallback derives
+       * `local.<slug>` from the compiled artifact. The bundled blank template
+       * has shipped without the key since it was written, and the id it would
+       * carry is per-project anyway: `create-objectstack` stamps the identity
+       * at scaffold time, so a template-level literal would name a package
+       * nobody publishes (#7319 rejected exactly that fix).
+       *
+       * Required stays required where it means something. The publish request
+       * that reaches the control plane still carries a mandatory
+       * `manifestId` — the package row is addressed by it and it is immutable
+       * once set — and this local override does not reach that schema.
+       *
+       * Value constraints are reused from the publish field, as with
+       * `namespace` above: one vocabulary, only the obligation differs.
+       */
+      manifestId: CreatePackageRequestSchema.shape.manifestId.optional().describe(
+        'Optional declarative default for the published package id (reverse-domain, e.g. com.acme.crm). Absent on a template source tree: `objectstack package publish` falls back to --manifest-id and then to a derived `local.<slug>`. NOT optional on the publish request itself'
+      ),
       name: z.string().regex(/^[a-z][a-z0-9-]*$/)
         .describe('CLI slug (kebab-case, no namespace prefix)'),
       specVersion: z.string().describe('Compatible @objectstack/spec semver range'),

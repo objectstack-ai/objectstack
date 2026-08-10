@@ -8,7 +8,7 @@
  */
 
 import type { DriverOptions, FilterCondition, SchemaMode } from '@objectstack/spec/data';
-import { parseAutonumberFormat, renderAutonumber, readAutonumberCounter, missingFieldValues, isTenancyDisabled, type AutonumberToken } from '@objectstack/spec/data';
+import { parseAutonumberFormat, renderAutonumber, resolveAutonumberFormat, readAutonumberCounter, missingFieldValues, isTenancyDisabled, type AutonumberToken } from '@objectstack/spec/data';
 // The DECLARED aggregate vocabulary (#5907). Read from the spec so this driver's
 // "the protocol has no such function" refusal cannot drift from what
 // `AggregationNodeSchema.function` actually admits.
@@ -5353,10 +5353,7 @@ export class SqlDriver implements IDataDriver {
         if (type === 'datetime') datetimeCols.push(name);
         if (type === 'time') timeCols.push(name);
         if (type === 'auto_number' || type === 'autonumber') {
-          const rawFmt = (typeof field.autonumberFormat === 'string' && field.autonumberFormat)
-            ? field.autonumberFormat
-            : (typeof field.format === 'string' && field.format ? field.format : '');
-          const fmt = rawFmt || '{0000}';
+          const fmt = resolveAutonumberFormat(field);
           autoNumberCols.push({ name, format: fmt, tokens: parseAutonumberFormat(fmt), tenantField });
         }
       }
@@ -5433,12 +5430,7 @@ export class SqlDriver implements IDataDriver {
             (this.timeFields[tableName] ??= new Set()).add(name);
           }
           if (type === 'auto_number' || type === 'autonumber') {
-            // Honor either the spec-canonical `autonumberFormat` or the
-            // shorthand `format` (both appear in metadata) — see #1603.
-            const rawFmt = (typeof field.autonumberFormat === 'string' && field.autonumberFormat)
-              ? field.autonumberFormat
-              : (typeof field.format === 'string' && field.format ? field.format : '');
-            const fmt = rawFmt || '{0000}';
+            const fmt = resolveAutonumberFormat(field);
             // Tokenize once: the renderer resolves date tokens (`{YYYYMMDD}`),
             // field interpolation (`{island_zone}`) and the sequence slot at
             // fill time. The counter scopes to whatever renders before the slot.

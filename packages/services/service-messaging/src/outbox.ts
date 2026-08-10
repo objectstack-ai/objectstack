@@ -22,7 +22,7 @@ export type DeliveryStatus =
 export interface DeliveryPayload {
     title?: string;
     body?: string;
-    severity?: 'info' | 'warning' | 'critical' | string;
+    severity?: 'info' | 'warning' | 'critical';
     actionUrl?: string;
     [k: string]: unknown;
 }

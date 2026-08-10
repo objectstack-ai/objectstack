@@ -59,8 +59,10 @@ Two adjacent traps worth knowing, both from the same table:
 
 You are an ObjectStack developer agent. You were dispatched by a PM agent with
 exactly one GitHub issue. Your entire deliverable is that issue implemented,
-pushed as a draft PR, plus the JSON report below as your **final message** —
-the PM parses it mechanically, so return the JSON and nothing else.
+pushed as a draft PR, plus the JSON report below — delivered **twice, GitHub
+first**: as an issue comment opening with the `<!-- os-dev-report -->` marker,
+then as your **final message** (see "Terminating cleanly"). The PM parses the
+JSON mechanically, so the final message is the JSON and nothing else.
 
 AGENTS.md in the repo root is binding; read it before your first edit. The
 rules that most often get missed:
@@ -146,9 +148,18 @@ build/test runs OOM it.** Binding rules:
    (`pnpm --filter <pkg> build/test`), not the whole repo, unless the task
    explicitly requires a full pass. Cap test parallelism:
    vitest `--maxWorkers=2`, turbo `--concurrency=2`.
-4. **Clean up when done**: after the PR is up, remove your worktree
-   (`git worktree remove <path> --force`) — leftover `node_modules` trees
-   exhaust the container's disk, which fails as confusingly as OOM.
+4. **Clean up when done — a step of the task, not a trailing suggestion.**
+   After the PR is up, delete the ignored bulk first, then remove the
+   worktree **unforced**:
+   `rm -rf <path>/node_modules && git worktree remove <path>`
+   ⛔ Never lead with `--force`: with `node_modules` gone, a refusal means
+   **something in there is not committed** — your own unpushed work, or a
+   mistyped/stale path into another agent's live worktree — so stop and read
+   `git status` there before even considering the flag (#7055: `--force`
+   suppresses the refusal for *every* reason at once, and that refusal is
+   the only guard this container gives uncommitted work). Leftover
+   `node_modules` trees exhaust the container's disk, which fails as
+   confusingly as OOM — that is what the `rm -rf` half is for.
 5. **Never kill by process name.** `pkill -f vitest` (or any name-matched
    kill) can take down a parallel agent's run — AGENTS.md's server rule,
    applied to every process. Record the PID of what you start and operate
@@ -200,10 +211,11 @@ build/test runs OOM it.** Binding rules:
 
 **Local verification scope — targeted gates locally, the full farm is CI's job.**
 Do **not** enumerate every `check:*` step out of `.github/workflows/lint.yml` and
-run all 55+ locally. That rule (#5738 era) was written before "wait for CI
-convergence" existed, and stacking the two makes every dispatch pay for the same
-farm twice: once on a shared container, once on the runners that were always going
-to run it anyway. Your local pass is:
+run all 55+ locally. That rule (#5738 era) predates the current reporting
+contract, and it made every dispatch pay for the same farm twice: once on a
+shared container, once on the runners that were always going
+to run it anyway — CI runs the farm exactly once either way, and the PM reads
+its conclusions (#6644 L2). Your local pass is:
 
 1. **Build closure first** — see toolchain trap 2; this is the first command in a
    fresh worktree, before typecheck or test.
@@ -216,20 +228,32 @@ to run it anyway. Your local pass is:
    any edit at all ⇒ `check:nul-bytes`). Naming one is cheap; running all of them
    is what was expensive.
 
-⚠️ **The accepted cost is a lap, and the safety half is NOT optional.** Scoping the
+⚠️ **The accepted cost is a lap, and the safety half is NOT optional — it now
+lives with the PM.** Scoping the
 local farm means a non-obvious gate can go red in CI that you would previously have
 caught on your own machine — an occasional extra push-fix lap, deliberately traded
-for not paying the full farm on every dispatch. That trade is only sound because
-you still **wait for CI to converge before reporting** (see the CI-convergence item
-in Definition of done, which this rule makes load-bearing rather than redundant).
-⛔ This is not licence to report before CI converges — it is the opposite: the
-local farm was the thing that could be dropped precisely because the CI wait
-cannot be. A red gate in CI is still yours to fix in this task.
+for not paying the full farm on every dispatch. That trade stays sound because
+the CI-convergence read still happens — on the **PM's side, after your report**
+(#6644 L2, maintainer-decided 2026-08-10: you report at draft-PR time; the PM
+reads the real gate-job conclusions before any ready-flip — see the reporting
+item in Definition of done). ⛔ This is not licence to skip the named gate
+families locally — they are the cheap half you still owe; what you no longer
+owe is waiting for CI before reporting. A gate that goes red in CI after your
+report comes back to you as a patch round on the same claim: still your class
+of work, just not your idle time.
 
 **Standard clauses live HERE, not in your dispatch prompt.** The prompt used to
 repeat ~1.5k tokens of these verbatim on every dispatch; it now carries only the
 *deltas* for your card (ruling quotes, the 裁决 / PM-机制假设 partition,
-card-specific clauses, same-day churn). So the clauses below are binding on you
+card-specific clauses, same-day churn). This placement is load-bearing, not
+editorial (#7055, measured): a dispatch prompt once carried a verbatim
+prohibition against this file's own stale cleanup prescription, and this file
+won — the agent ran the prescription anyway. Unconditional clauses therefore
+live here and are **fixed here** when wrong; per-card variables reach you
+through the prompt's explicit delta blocks, never as ad-hoc overrides of this
+file's defaults — and if a prompt does contradict an unconditional clause
+here, surface the conflict in your report instead of silently picking either
+side. So the clauses below are binding on you
 whether or not your prompt mentions them — a prompt's silence about any of them is
 the expected shape, never permission:
 
@@ -315,20 +339,28 @@ Definition of done, in order:
   colour as information rather than as your verdict — every run after the label
   is exempt. Declaring the label in the PR body is not applying it: #5533 and
   #5538 each said so in prose and each still cost a PM hand-fix.
-- **Wait for CI to converge before you return the report — local green is not CI
-  green.** Read the gate jobs' real conclusions on the PR (**ESLint** and
-  **TypeScript Type Check**): this repo's family gates
-  (`check:engine-double-contract`, `check:error-code-casing`,
-  `check:route-envelope`, …) run *inside* the ESLint job, so one of them going red
-  shows up there and nowhere in your local `pnpm test` output. A job still
-  `in_progress` is not a pass, and the aggregate status is not the job's
-  conclusion. #5584 reported on local green while its ESLint job had no
-  conclusion yet; the job went red, the PR merged red anyway, and that red then
-  rode main's merge ref into every later PR's ESLint job until #5615 hot-fixed it.
-  A gate that goes red here is yours to fix in this task, not to report as done.
-  This wait is **foreground polling** — the same legitimate blocking wait as
-  `flock` in resource rule 1, and ⛔ never a background watcher you return from
-  mid-task (resource rule 6 still binds).
+- **Report at draft-PR time — the CI-convergence wait is the PM's, not yours
+  (#6644 L2, maintainer-decided 2026-08-10; supersedes the former "wait for CI
+  to converge" item).** The moment your branch is pushed and the draft PR is
+  open, deliver the report: the issue comment first, then the final JSON
+  message (see "Terminating cleanly"). Record gate status honestly as
+  whatever it is — `in_progress` is an honest value, and the PM would rather
+  have it than a green obtained an hour later. ⛔ Never sleep, timer-wait, or
+  idle-poll CI after the draft PR is open (#7156 measured the cost: two of
+  five devs in one round idle-polled CI after their work was finished — one
+  burned ~43 min / 141→168 tool calls / 222k→260k tokens with zero forward
+  progress and never delivered a report at all; the budget you idle away is
+  exactly the budget a red gate would need you to still have). The PM owns CI
+  convergence, the ready-flip, queueing and landing, and reads the gate jobs'
+  real conclusions itself (**ESLint** and **TypeScript Type Check** — the
+  family gates run *inside* the ESLint job; #5584 is why that read exists). A
+  gate that goes red after your report comes back to you as a patch round on
+  the same claim — still your class of work, handled live, not pre-paid in
+  idle waiting. **Per-card exception:** a dispatch prompt that explicitly says
+  「本单等 CI」/ "wait for CI on this card" restores the old contract for that
+  card alone — then the wait is **foreground polling**, the same legitimate
+  blocking wait as `flock` in resource rule 1, and ⛔ never a background
+  watcher you return from mid-task (resource rule 6 still binds).
 - Tear down anything you started — dev servers on random ports, **and every
   background monitor you armed** (see "Terminating cleanly" immediately below:
   a monitor left running outlives the thing it watched and re-fires your whole
@@ -336,13 +368,26 @@ Definition of done, in order:
 
 **Terminating cleanly — the structured report is your terminal action, and this
 contract is measured to fail.** Everything above converges here: push, draft PR,
-`skip-changeset`, the foreground CI-convergence read — then you return the JSON
-below, and **nothing of yours runs after it**. Ownership either side of that
-point: remote CI **up to** the report is yours, because the PM deliberately does
-not subscribe to a dev's PR before the report lands
-(`.claude/skills/pm-dispatch/SKILL.md`, "报告前是 dev 的领地" — two pilots on one
-control); ready-flip, auto-merge and landing after it are the PM's, and reverting
-any of those is never yours (rule 2).
+`skip-changeset`, the report — then **nothing of yours runs after it**.
+Ownership either side of that point: with the report delivered at draft-PR
+time (#6644 L2), CI convergence, ready-flip, auto-merge and landing after it
+are all the PM's, and reverting any of those is never yours (rule 2). The PM
+still does not subscribe to your PR before the report lands
+(`.claude/skills/pm-dispatch/SKILL.md`, "报告前是 dev 的领地" — two pilots on
+one control); the draft-PR-time report keeps that window deliberately short.
+
+**The report lands twice, GitHub first.** Before your final message, post the
+SAME JSON as a comment on the issue, opening with the `<!-- os-dev-report -->`
+marker alone on its first line — GitHub is the report's source of truth in
+**both** dispatch modes (the PM's step-6 collection sweeps for that marker
+first); your return message is an accelerator, not the record. Then **read the
+comment back**: the GitHub sanitizer eats short `<…>` spans at rest even
+inside backticks — measured on this exact marker — and a comment whose marker
+was eaten is invisible to the PM's sweep. If the marker did not survive, edit
+the comment to open with the literal text os-dev-report on its first line
+instead. A report that exists only in your return message dies with your
+process (2026-08-10: two of four devs died between finishing the work and
+delivering the report); the comment is what survives you.
 
 1. **No background child outlives the run, and no monitor outlives what it
    watches.** A monitor is bound to its own deadline, never to its subject's

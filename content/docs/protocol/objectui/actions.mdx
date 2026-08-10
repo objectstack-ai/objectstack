@@ -92,7 +92,26 @@ type: url
 target: '/api/v1/auth/sign-in/social?provider=${param.provider}&callbackURL=${ctx.origin}/_console/apps/account/sys_account'
 ```
 
-To open the result in a new tab, set `opensInNewTab: true` (the renderer pre-opens the tab synchronously so popup blockers don't fire). `newTabUrl` provides a zero-roundtrip new-tab target template supporting the `{recordId}` placeholder.
+For a **static** url, `openIn: 'new-tab'` opens `target` in a new tab and `openIn: 'self'` navigates in place; omitted, absolute URLs open in a new tab and relative ones navigate in place. For an **async handler that redirects**, set `opensInNewTab: true` instead (the renderer pre-opens the tab synchronously so popup blockers don't fire); `newTabUrl` provides a zero-roundtrip new-tab target template supporting the `{recordId}` placeholder.
+
+<Callout type="warn">
+**The interpolation scope is not authorable, and `params` is not it.** `params`
+is the parameter DEFINITION array — `ActionParam[]`, the dialog shown before
+the action runs — on every action type, so `params: { id: 'abc' }` on a url
+action is rejected at parse time. `${param.X}` resolves against the values that
+dialog **collected**; a value you already know at authoring time belongs
+literally in the `target` string.
+
+Two url-side readings of an object-form `params` existed in the renderer and
+were **retired** by the 2026-08-10 ruling on
+[#6828](https://github.com/objectstack-ai/objectstack/issues/6828) rather than
+given a key: a statically authored `${param.X}` scope (say it in `target`), and
+`params.newTab` (say it with `openIn: 'new-tab'`). The refusal message names
+both replacements. Note the asymmetry with `type: 'api'`, where the object form
+*did* get a key — `bodyExtra`, per
+[#5777](https://github.com/objectstack-ai/objectstack/issues/5777) — because a
+request payload has no other spelling; a url interpolation scope does.
+</Callout>
 
 ### Flow Actions
 
@@ -221,7 +240,6 @@ The `locations` array declares where an action surfaces. The canonical enum (`AC
 | `record_more` | Overflow ("More" / ⋯) menu on a record |
 | `record_related` | Actions on a related-list section inside a record |
 | `record_section` | Actions inside a body section/tab of a record |
-| `global_nav` | Global navigation / command-palette actions |
 
 ```yaml
 name: export_customers

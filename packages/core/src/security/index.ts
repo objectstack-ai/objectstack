@@ -131,3 +131,11 @@ export {
 
 // ADR-0091 D1/D2 — grant validity windows, the shared resolution-time predicate.
 export { isGrantActive, isGrantExpired, type GrantValidityWindow } from './grant-validity.js';
+
+// #7284 — the `__` operation-private-key convention, the CONSUMER half of the
+// ExecutionContext lifecycle `assemble-execution-context.ts` opens. One owner
+// for the rule three packages had hand-copied (#7141 / #7145 / #7204).
+export {
+  OPERATION_PRIVATE_KEY_PREFIX,
+  withoutOperationPrivateKeys,
+} from './operation-private-keys.js';

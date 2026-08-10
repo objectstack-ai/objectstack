@@ -1103,6 +1103,20 @@ Data-model rules (in addition to naming/label/i18n):
 | `field/select-missing-options` | warning | a `select`/`multiselect`/`radio` with no `options` (or options source) |
 | `object/missing-name-field` | suggestion | an object with no `nameField` (ADR-0079's canonical title pointer) and no name-like field (`name`/`title`/`subject`/`label`/`full_name`/`display_name`/`code`) |
 
+> **`code` counts for R9, but is NOT a title-derivation key.** R9's name-like
+> list above is the *looser* of two "name-like" sets, and the difference is
+> deliberate. R9 asks **"will records be anonymous?"** — is there any readable
+> face at all — and a `code` clears that bar. ADR-0079's title derivation
+> (`resolveDisplayField`) asks the narrower **"what IS the title?"**, and its
+> name-ish set is `name`/`title`/`subject`/`label`/`full_name`/`display_name`
+> **without `code`** — an identifier is not a title. So an object whose only
+> name-ish field is `code` is R9-clean, yet its title is derived by the
+> lower-priority "first title-eligible field by declaration order" tier rather
+> than by name. Nothing user-visible turns on this (R9 is `suggestion`, and the
+> `Record #<id>` floor guarantees a title regardless), but do not read the R9
+> list as the derivation contract — set `nameField` explicitly when the title
+> matters.
+
 These same rules are the **rubric for AI-generated metadata** — a generation is
 "good" exactly when it is schema-valid and lint-clean:
 

@@ -19,6 +19,40 @@ export interface StepResult {
   duration: number;
 }
 
+/**
+ * Name the runtime shape of a value the way a suite author sees it in their fixture.
+ * `typeof` answers `object` for both `null` and an array, which are the two shapes a
+ * `contains` author most needs told apart from a plain record.
+ */
+function describeActualType(value: unknown): string {
+  if (value === null) return 'null';
+  if (Array.isArray(value)) return 'array';
+  return typeof value;
+}
+
+/**
+ * Say WHICH of the two things is wrong, because the message is the only thing the
+ * author has: `undefined`/`null` mean the path did not resolve to a value, so the
+ * FIXTURE (the field path, or the response shape it was written against) is the
+ * suspect; anything else means the path resolved fine and the ASSERTION picked an
+ * operator that does not apply to what it found.
+ */
+function containsInapplicableHint(actual: unknown): string {
+  if (actual === undefined) {
+    return (
+      'The path resolved to nothing — the field is absent from the result, or the path is misspelled. ' +
+      "Use 'is_null' if asserting absence is what you meant."
+    );
+  }
+  if (actual === null) {
+    return "The path resolved to null. Use 'is_null' if asserting absence is what you meant.";
+  }
+  return (
+    "'contains' tests array membership and string substrings only. " +
+    "Use 'equals' to compare a scalar, or point the field at the array or string you meant to look inside."
+  );
+}
+
 export class TestRunner {
   constructor(private adapter: TestExecutionAdapter) {}
 
@@ -173,6 +207,20 @@ export class TestRunner {
              if (!actual.includes(expected)) throw new Error(`Assertion failed: ${assertion.field} array does not contain ${expected}`);
          } else if (typeof actual === 'string') {
              if (!actual.includes(String(expected))) throw new Error(`Assertion failed: ${assertion.field} string does not contain ${expected}`);
+         } else {
+             // `contains` is defined over arrays (membership) and strings (substring), and
+             // over nothing else. This branch used to be absent, so every other shape fell
+             // out of the switch and the assertion reported PASSED (#7256) — a `contains`
+             // written against a path the result does not carry was the test silently
+             // deleting itself, and CI believed the green. An assertion the engine cannot
+             // evaluate is a FAILED assertion, which is the posture every other unhandled
+             // shape in this engine already takes (`default:` below; the HTTP adapter's
+             // unknown action type).
+             throw new Error(
+                 `Assertion failed: ${assertion.field} cannot be evaluated by 'contains' — ` +
+                 `expected an array or a string at that path, got ${describeActualType(actual)}. ` +
+                 containsInapplicableHint(actual)
+             );
          }
          break;
       case 'not_null':

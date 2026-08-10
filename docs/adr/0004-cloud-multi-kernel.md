@@ -64,8 +64,10 @@ Two deployable applications:
 
 ### 2. `KernelManager` + `ProjectKernelFactory` (new in `@objectstack/runtime`)
 
-- **`KernelManager`** ([`packages/runtime/src/kernel-manager.ts`](../../packages/runtime/src/kernel-manager.ts)): LRU+TTL cache of `Map<projectId, CachedKernel>`. Exposes `getOrCreate(projectId)` (concurrent-safe, single-flight per id) and `evict(projectId)` (calls `kernel.shutdown()`). Configurable `maxSize` and `ttlMs`.
-- **`DefaultProjectKernelFactory`** ([`packages/runtime/src/project-kernel-factory.ts`](../../packages/runtime/src/project-kernel-factory.ts)): given a `projectId`, reads project + credential + package-install rows from the control-plane driver, clones the base stack config, overrides the `default` datasource mapping to point at the project's driver, instantiates an `AppPlugin` per installed bundle, and calls `kernel.bootstrap()`.
+> **Path note (2026-08):** the two paths below are historical and deliberately unlinked — neither file is in this repository any more. `kernel-manager.ts` was moved to `packages/runtime/src/cloud/` on 2026-05-18 (`7dcde27c1`, "decouple runtime from service-cloud"), where `project-kernel-factory.ts` was also superseded by `cloud/artifact-kernel-factory.ts`; the whole `packages/runtime/src/cloud/` tree was then removed by #1600 (`feat(runtime)!: remove multi-tenant runtime; keep single-env + contracts`). Multi-kernel runtime code is no longer maintained here.
+
+- **`KernelManager`** (`packages/runtime/src/kernel-manager.ts`): LRU+TTL cache of `Map<projectId, CachedKernel>`. Exposes `getOrCreate(projectId)` (concurrent-safe, single-flight per id) and `evict(projectId)` (calls `kernel.shutdown()`). Configurable `maxSize` and `ttlMs`.
+- **`DefaultProjectKernelFactory`** (`packages/runtime/src/project-kernel-factory.ts`): given a `projectId`, reads project + credential + package-install rows from the control-plane driver, clones the base stack config, overrides the `default` datasource mapping to point at the project's driver, instantiates an `AppPlugin` per installed bundle, and calls `kernel.bootstrap()`.
 
 Both are exported from `@objectstack/runtime`. Self-hosted mode never imports `KernelManager`.
 
@@ -90,8 +92,10 @@ Custom domains and multi-hostname binding (ACME certificates, `sys_domain` table
 
 ### 5. Studio surfaces hostname as a first-class field
 
-- Project list ([`apps/studio/src/routes/projects.index.tsx`](../../apps/studio/src/routes/projects.index.tsx)) renders a globe icon + hostname inline with the project card.
-- Project detail ([`apps/studio/src/routes/projects.$projectId.index.tsx`](../../apps/studio/src/routes/projects.$projectId.index.tsx)) adds a **Domains** card with inline edit (Enter to save, Escape to cancel, toast on success/conflict).
+> **Path note (2026-08):** the two route paths below are historical and deliberately unlinked — Studio is not in this repository any more. `apps/studio/` was collapsed to a single-package metadata browser on 2026-05-22 (`6bacbced2`) and then migrated to the upstream `@object-ui/studio` package on 2026-05-24 (`06ad57f63`); `apps/` here now holds only `docs/`.
+
+- Project list (`apps/studio/src/routes/projects.index.tsx`) renders a globe icon + hostname inline with the project card.
+- Project detail (`apps/studio/src/routes/projects.$projectId.index.tsx`) adds a **Domains** card with inline edit (Enter to save, Escape to cancel, toast on success/conflict).
 
 ---
 

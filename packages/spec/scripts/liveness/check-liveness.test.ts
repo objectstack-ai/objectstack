@@ -136,6 +136,77 @@ describe('check:liveness — evidence pointers (#5623)', () => {
   });
 });
 
+// The README state table is COMPLETE on a green tree (#7257 back-filled the two
+// rows that were missing), so `pnpm check:liveness` passing says nothing about
+// whether this direction can fire. Same argument as the evidence guard above,
+// and the same mechanism answers it: `--ledger-root` points the gate at a copy
+// of packages/spec/liveness — which `cpSync` carries README.md into — so a case
+// can delete a row or skew the heading in the COPY and read the real exit code.
+describe('check:liveness — the README state table (#7257)', () => {
+  let tmp: string;
+
+  beforeAll(() => {
+    tmp = mkdtempSync(path.join(tmpdir(), 'os-liveness-readme-'));
+  });
+  afterAll(() => rmSync(tmp, { recursive: true, force: true }));
+
+  /** Copy the real ledgers (README included) and rewrite the README in the copy. */
+  function withReadme(name: string, edit: (md: string) => string): string {
+    const root = path.join(tmp, name);
+    cpSync(LEDGERS, root, { recursive: true });
+    const file = path.join(root, 'README.md');
+    writeFileSync(file, edit(readFileSync(file, 'utf8')));
+    return root;
+  }
+
+  it('FAILS when a governed type loses its row — the #7257 defect itself', () => {
+    // `qa` is the most recently added row (#6247 / PR #7255), so deleting it
+    // reproduces the exact state the two missing rows were in.
+    const root = withReadme('missing-row', (md) =>
+      md.split('\n').filter((l) => !l.startsWith('| qa | ')).join('\n'));
+
+    const { status, output } = runGate(root);
+    expect(status, output).toBe(1);
+    expect(output).toContain('governed type(s) with NO row in the README\'s "Current state" table');
+    expect(output).toMatch(/^ {4}qa$/m);
+    // The prescription has to survive with the check: without it the next agent
+    // to hit this failure writes a Notes cell out of the counts, which is the
+    // fabrication #7257 refused to commit.
+    expect(output).toContain('never from a guess');
+  });
+
+  it('FAILS when the heading count is skewed away from the rows', () => {
+    const root = withReadme('skewed-heading', (md) =>
+      md.replace(/^## Current state — (\d+) governed types/m, '## Current state — 99 governed types'));
+
+    const { status, output } = runGate(root);
+    expect(status, output).toBe(1);
+    expect(output).toContain('README state-table heading error(s)');
+    expect(output).toContain('heading says 99 governed types, the table has');
+    expect(output).toContain('GOVERNED has');
+  });
+
+  it('FAILS on a row that GOVERNED does not back — the mirror direction', () => {
+    const root = withReadme('orphan-row', (md) =>
+      md.replace(/^\| qa \| /m, '| notatype | 1 | 0 | 0 | 0 | invented by the self-test |\n| qa | '));
+
+    const { status, output } = runGate(root);
+    expect(status, output).toBe(1);
+    expect(output).toContain('README state-table row(s) that GOVERNED does not back');
+    expect(output).toMatch(/^ {4}notatype$/m);
+  });
+
+  // The control for all three: the same copy, unedited, is green. Without it
+  // every "exit 1" above is also satisfied by the copy simply being unreadable.
+  it('is green against a verbatim copy, and says how many rows it checked', () => {
+    const root = path.join(tmp, 'verbatim');
+    cpSync(LEDGERS, root, { recursive: true });
+    const { status, output } = runGate(root);
+    expect(status, output).toBe(0);
+    expect(output).toMatch(/README state table carries a row for each of the \d+ governed type\(s\)/);
+  });
+});
+
 describe('check:liveness — the evidence summary line (#5623)', () => {
   let tmp: string;
 

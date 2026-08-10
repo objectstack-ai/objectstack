@@ -736,7 +736,10 @@ export const DEFAULT_METADATA_ROUTES: RestApiRouteRegistration = {
   prefix: '/api/v1/meta',
   service: 'metadata',
   category: 'metadata',
-  methods: ['getMetaTypes', 'getMetaItems', 'getMetaItem', 'getMetaItemLayered', 'saveMetaItem'],
+  methods: [
+    'getMetaTypes', 'getMetaItems', 'getMetaItem', 'getMetaItemLayered', 'saveMetaItem',
+    'publishMetaItem',
+  ],
   authRequired: true,
   endpoints: [
     {
@@ -822,6 +825,30 @@ export const DEFAULT_METADATA_ROUTES: RestApiRouteRegistration = {
       // layer's per-type validation behind `saveMetaItem`, which rejects an
       // off-spec item with 422 + `issues`.
       responseSchema: 'SaveMetaItemResponseSchema',
+      permissions: ['metadata.write'],
+      cacheable: false,
+    },
+    {
+      method: 'POST',
+      path: '/:type/:name/publish',
+      handler: 'publishMetaItem',
+      category: 'metadata',
+      public: false,
+      summary: 'Publish the pending draft overlay (promotes draft → active)',
+      description:
+        'Promotes the item\'s pending DRAFT overlay to the live `active` row and records an '
+        + '`op=\'publish\'` history event. The sibling write door of `PUT /:type/:name` — the '
+        + 'ADR-0033 two-step spelling, where `?mode=draft` stages a body and this makes it live. '
+        + '404 `[no_draft]` when there is nothing to publish; 409 `metadata_conflict` when the '
+        + 'published row advanced while the draft was held. Served since before #7294 with no '
+        + 'declaration behind it — this entry is what makes its response contract nameable.',
+      tags: ['Metadata'],
+      // No `requestSchema` (#3899): the body is optional and its only read key
+      // is `message`, taken only when it is already a string and ignored
+      // otherwise — the route cannot 400 a malformed body, so declaring a
+      // schema here would advertise a gate that does not run. Every other
+      // input (`:type`, `:name`) is path-bound.
+      responseSchema: 'PublishMetaItemResponseSchema',
       permissions: ['metadata.write'],
       cacheable: false,
     },
