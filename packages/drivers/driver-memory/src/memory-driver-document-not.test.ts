@@ -202,8 +202,23 @@ describe('[#5324] InMemoryDriver.find compiles a document-level $not', () => {
    * with the identical matcher-vs-formula divergence already filed as **#5299**,
    * where this measurement is recorded. Pinned as measured so the fix that lands
    * there has to move these lines deliberately.
+   *
+   * ⚠️ [#5299, ruled 2026-08-10] The ruling is in, and it says the REFERENCE
+   * column below is the target on all three rows: SQL three-valued logic is the
+   * common denominator, so **negative operators never match no-value rows; the
+   * only ways to select "no value" are `$exists: false` / `$null: true`.** The
+   * `live` column is therefore the side that is wrong on every row here —
+   * mingo's `$exists` is key-presence, and its `$nin` / `$notContains` match a
+   * value that is not there.
+   *
+   * ⛔ Still not flipped, and by decision rather than by difficulty: this package
+   * is inside the #5499 investment freeze. Note also what the ruling assumed and
+   * this file disproves — it says "driver-memory already reads has-value" and
+   * "driver-memory and SQL already agree", which is true of the reference
+   * matcher and FALSE of the live query path users actually reach. That is the
+   * reason this pin exists.
    */
-  describe('known two-face divergences on a value-less field — pinned, see #5299', () => {
+  describe('[#5299] the ruled cells, live vs reference — behaviour frozen (#5499)', () => {
     const liveVsReference = async (where: unknown) => ({
       live: await idsFrom(nulled, where),
       reference: NULLED.filter((r) => match(r, where)).map((r) => r.id),
