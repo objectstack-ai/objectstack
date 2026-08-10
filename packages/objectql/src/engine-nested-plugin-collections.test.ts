@@ -159,9 +159,11 @@ describe('the two registration seams enumerate ONE collection list (#7049)', () 
     // `views` has no top-level `name` and the manifest seam additionally expands
     // an aggregated container into per-view items (ADR-0017); that expansion is
     // a LOOP-BODY difference between the seams, not an enumeration difference,
-    // and closing it changes what a nested plugin serves — its own card, filed
-    // rather than folded in here.
-    ['views', 'manifest seam additionally expands aggregated containers (ADR-0017)'],
+    // and closing it changes what a nested plugin serves. Measured while closing
+    // this card and filed as #7163 rather than folded in: one container
+    // registers `['account', 'account.all_accounts', 'account.form']` from a
+    // manifest and `['account']` from a nested plugin.
+    ['views', 'manifest seam additionally expands aggregated containers (ADR-0017) — #7163'],
     // Retired kinds the loop still iterates; the schema rejects the keys long
     // before either seam runs, so a fixture cannot exercise them (the gate
     // carries them as an `extra` waiver row for the same reason).
