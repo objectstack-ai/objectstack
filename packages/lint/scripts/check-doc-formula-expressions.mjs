@@ -490,22 +490,9 @@ const EXPRESSION_SLOT_TYPES =
  * reflow while dying with the example it excuses.
  */
 const EXEMPT_EXAMPLES = [
-  {
-    file: 'packages/spec/src/data/hook.zod.ts',
-    slot: 'HookSchema.condition',
-    source: "status = 'active' AND amount > 1000",
-    // NOT a partial snippet — a real defect, of exactly the #6641 class, found by
-    // this gate's own stock pass (#6763). It is SQL where the slot is CEL, and it
-    // contradicts the `.describe()` on the very next line, which spells the same
-    // idea as P`record.status == "closed" && record.amount > 1000`. Bare `status`
-    // and `amount` would resolve to nothing even after the operators were fixed.
-    // Exempted rather than corrected only because `packages/spec/src/**` belongs
-    // to the spec-surface seat and #6763 landed in spec-tooling; filed for
-    // transfer as #7175. Delete this entry with that fix — leaving it behind is
-    // itself an error (the "unnecessary" direction above), so the cleanup cannot
-    // be forgotten silently.
-    reason: 'REAL DEFECT pending cross-seat fix (#7175) — SQL `=`/`AND` and bare refs in a record-scoped CEL slot',
-  },
+  // Empty: the HookSchema.condition entry (#7175) was deleted once the example
+  // was corrected to canonical CEL — leaving it would itself be an error (an
+  // exemption over a now-clean example is the "unnecessary" direction above).
 ];
 
 /** `packages/spec/src/**` sources, sorted. */
