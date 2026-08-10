@@ -2919,7 +2919,30 @@ export class RestServer {
      */
     private async translateMetaItem(req: any, type: string, environmentId: string | undefined, item: any, i18nService?: any): Promise<any> {
         if (!item || typeof item !== 'object') return item;
-        if (!(await isTranslatableMetaType(type))) return item;
+        // [#6349] Normalize HERE, not at the call sites. `isTranslatableMetaType`
+        // reads `TRANSLATABLE_METADATA_TYPES`, which is DERIVED from
+        // `METADATA_DOCUMENT_TRANSLATORS`' keys — and those are singular-only
+        // (`view`/`action`/`object`/`app`/`dashboard`/`page`), matching
+        // `translateMetadataDocument`'s "Canonical metadata type string". The
+        // `/meta` handlers hand this helper the RAW `:type` path segment, and
+        // Prime Directive #3 makes PLURAL the canonical REST spelling, so the
+        // documented spelling missed the set and the whole localization was
+        // skipped: same route, same document, `?locale=zh-CN`, only the
+        // spelling differing —
+        //
+        //     singular "app"  :: label = "XLABELX"  ← translated
+        //     plural   "apps" :: label = "Setup"    ← raw English
+        //
+        // This is #3984's family (per-type judgements seeing only the singular)
+        // landing on the i18n predicate instead of on a gate. It folds at the
+        // HELPER rather than at the four call sites for the reason #6241 proved
+        // the hard way: a normalization the callers own is one a later caller
+        // forgets. The helper owns "does this type translate", so it owns the
+        // spelling that question is asked in. `metaTypeSingular` leaves an
+        // unmapped type untouched, so nothing that was untranslatable becomes
+        // translatable — the set is unchanged, only the spellings that reach it.
+        const metaType = RestServer.metaTypeSingular(type);
+        if (!(await isTranslatableMetaType(metaType))) return item;
         // The cached read path resolves the i18n service up-front (to build a
         // locale-aware ETag) and passes it here so we don't repeat the
         // potentially registry-hitting lookup on every request.
@@ -2932,7 +2955,7 @@ export class RestServer {
         const locale = this.extractLocale(req, i18n);
         if (!locale) return item;
         const { translateMetadataDocument } = await import('@objectstack/spec/system');
-        return translateMetadataDocument(type, item, bundle, { locale });
+        return translateMetadataDocument(metaType, item, bundle, { locale });
     }
 
     /**
@@ -3094,9 +3117,17 @@ export class RestServer {
 
     /**
      * Translate a list of metadata documents using `translateMetaItem`.
+     *
+     * Normalizes the `:type` spelling for the same reason, and on the same
+     * terms, as {@link translateMetaItem} — see the note there (#6349). The
+     * list route is one of the three that hands this the raw path segment, and
+     * splitting the fix (list normalized, single-item not) would trade one
+     * missing translation for the far harder "the list is localized but the
+     * detail page it links to is not".
      */
     private async translateMetaItems(req: any, type: string, environmentId: string | undefined, items: any): Promise<any> {
-        if (!(await isTranslatableMetaType(type))) return items;
+        const metaType = RestServer.metaTypeSingular(type);
+        if (!(await isTranslatableMetaType(metaType))) return items;
         // `getMetaItems` may hand back a bare array or an `{ items: [...] }`
         // envelope. Unwrap so list responses are localized the same way the
         // single-item route is; a non-array, non-envelope value is returned
@@ -3114,7 +3145,7 @@ export class RestServer {
         // `getMetaItems` elements are metadata documents (the list envelope is
         // the OUTER `{ type, items }`), so every element translates directly —
         // #5563 removed the per-element shape sniff that stood here.
-        const translated = arr.map((item) => translateMetadataDocument(type, item, bundle, { locale }));
+        const translated = arr.map((item) => translateMetadataDocument(metaType, item, bundle, { locale }));
         return Array.isArray(items) ? translated : { ...items, items: translated };
     }
 
