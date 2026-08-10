@@ -18,18 +18,20 @@
  * Two things about the shape here are load-bearing, and both are the difference
  * between this pin and a green-but-empty one:
  *
- * 1. **The facade is seeded through `registry.registerObject`, never through
- *    `facade.register('object', …)`.** Those are not interchangeable: the facade
- *    writes objects through `SchemaRegistry.registerItem`, which stores into the
- *    generic `metadata` map, while BOTH of its object reads resolve from
- *    `objectContributors` (`registry.getItem` special-cases the `object` type
- *    straight back to `registry.getObject`). An object written the first way is
- *    readable back through neither member — measured, both `undefined` — so a pin
- *    that seeded that way would compare `undefined` to `undefined` and call it
- *    equivalence. That write/read split is a separate, already-filed finding
- *    (#6725); this file deliberately does not assert on it, and the
- *    `expect(...).toBeDefined()` in the present-object case is what stops the
- *    vacuous version from ever passing here again.
+ * 1. **The facade is seeded through `registry.registerObject`.** When this pin was
+ *    written that was the ONLY seeding that worked: the facade wrote objects
+ *    through `SchemaRegistry.registerItem`, into the generic `metadata` map,
+ *    while BOTH of its object reads resolve from `objectContributors`
+ *    (`registry.getItem` special-cases the `object` type straight back to
+ *    `registry.getObject`). An object written the first way was readable back
+ *    through neither member — measured, both `undefined` — so a pin seeded that
+ *    way would have compared `undefined` to `undefined` and called it
+ *    equivalence. #6725 has since closed that split (`facade.register('object',
+ *    …)` performs the contributor write too, and pins the round-trip in
+ *    `metadata-facade.test.ts`), so either seeding would work here now; this one
+ *    is kept because it seeds the registry directly, the way a registry-backed
+ *    host actually acquires its objects. The `expect(...).toBeDefined()` in the
+ *    present-object case remains what stops a vacuous version from passing here.
  *
  * 2. **MetadataManager appears twice, under both of its resolution paths.** Its
  *    `get` answers from the in-memory registry when it can and falls back to the
@@ -163,9 +165,10 @@ const IMPLEMENTATIONS: readonly PinnedImplementation[] = [
         async create(objects) {
             const registry = new SchemaRegistry({ multiTenant: false });
             for (const object of objects) {
-                // NOT `facade.register('object', …)` — that writes where neither of
-                // the facade's object reads look (#6725), which would make the
-                // present-object case below compare undefined to undefined.
+                // Seeded on the registry, not through `facade.register('object', …)`
+                // — see the header. That write reached neither object read until
+                // #6725 closed the split; it now would, but this seeding is the
+                // one a registry-backed host actually performs.
                 registry.registerObject(object.definition as never, 'com.example.pin');
             }
             return new MetadataFacade(registry);
