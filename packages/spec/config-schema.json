@@ -66,8 +66,8 @@
           },
           "ownership": {
             "type": "string",
-            "enum": ["own", "shared"],
-            "description": "Record ownership model"
+            "enum": ["user", "business_unit", "org", "none"],
+            "description": "Record-ownership model: user (default — injects reassignable owner_id plus owning_business_unit_id) | business_unit (unit-owned: owning_business_unit_id only, no owner_id) | org | none (no per-record owner, neither anchor). Distinct from the package own/extend contribution kind."
           },
           "fields": {
             "type": "object",
