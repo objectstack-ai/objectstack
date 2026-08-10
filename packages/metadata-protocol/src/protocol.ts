@@ -9766,6 +9766,18 @@ export class ObjectStackProtocolImplementation implements
          * same contract as `seedApplied` — surfaced, never thrown.
          */
         materializeApplied?: PublishMaterializeResult;
+        /**
+         * Present when an ADR-0094 mutation projector is registered for this
+         * type: the outcome of the awaited post-persist projection. The
+         * draft→active promotion runs the projector exactly as a direct active
+         * save does, so this is the same receipt `saveMetaItem` returns.
+         *
+         * [#7294] It was ASSIGNED below and missing from this annotation, so
+         * the method's declared type denied a key the wire body carried — the
+         * same declared-≠-returned gap one layer down from the one #7294
+         * closed on the spec side.
+         */
+        projectionApplied?: MutationProjectionOutcome;
     }> {
         const { singularType, orgId, result } = await this.promoteDraftForPublish(request);
         const response: {
