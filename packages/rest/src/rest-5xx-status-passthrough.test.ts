@@ -41,11 +41,11 @@
 //   §1 §2 §5  predicted RED,   measured RED (19 failures total) — every
 //             declared 5xx degrades to 500 INTERNAL_ERROR again and the #5907
 //             501→500 case fails by name.
-//   §3        predicted GREEN, measured MIXED — 5 of 8 red. The prediction was
+//   §3        predicted GREEN, measured MIXED — 5 of 9 red. The prediction was
 //             right about WHAT these cases defend (a 5xx arm that starts
 //             echoing the producer's prose) and wrong about which assertion
 //             carries it. The CONTAINMENT half (`not.toContain(message)`) is
-//             genuinely direction-insensitive: it stayed green in all 8, since
+//             genuinely direction-insensitive: it stayed green in all 9, since
 //             the pre-fix terminal branch sanitised too (#5489). The ENVELOPE
 //             half (`error === INTERNAL_ERROR_MESSAGE`) moves, because the old
 //             heuristics answered some of these inputs with a DIFFERENT
