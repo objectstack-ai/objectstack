@@ -16,7 +16,10 @@ const fieldZoo = 'showcase_field_zoo';
 /**
  * Action matrix — covers every `ActionType` (script / url / flow / modal /
  * api / form) surfaced across a spread of `ActionLocation`s (toolbar, row,
- * record header/more, related list, global nav).
+ * record header/more, related list, record section) — plus two HEADLESS
+ * actions (`locations: []`), which is a declaration in its own right, not an
+ * omission: callable over REST/MCP/AI with the capability gate and audit trail
+ * intact, claiming no UI surface.
  */
 
 /**
@@ -173,7 +176,20 @@ export const LogTimeAction = defineAction({
   refreshAfter: true,
 });
 
-/** global nav command-palette action. */
+/**
+ * modal — headless (`locations: []`).
+ *
+ * This action used to declare `locations: ['global_nav']`, which #6888 retired:
+ * no product surface ever rendered that location, so the declaration placed the
+ * action nowhere. Its live entry point is elsewhere and always was — the
+ * Overview page's "Create Task" CTA (`../pages/index.ts`) carries an INLINE
+ * action of the same name, which is the path a user actually clicks. So the
+ * registered action keeps its declaration and states the truth about its UI
+ * surface (`[]` — "nowhere, deliberately") rather than naming a location
+ * nothing serves. No replacement placement was invented for it here: choosing
+ * one is a product decision about the showcase, not a consequence of the
+ * retirement (flagged on #6888).
+ */
 export const NewTaskAction = defineAction({
   name: 'showcase_new_task',
   label: 'New Task',
@@ -181,7 +197,7 @@ export const NewTaskAction = defineAction({
   objectName: task,
   type: 'modal',
   target: 'showcase_component_gallery',
-  locations: ['global_nav'],
+  locations: [],
   refreshAfter: true,
 });
 
@@ -340,9 +356,13 @@ export const ArchiveTaskAction = defineAction({
  * live specimen to exercise. This is that specimen.
  *
  * The body is genuinely object-less: it counts across SEVERAL objects, so there
- * is no single record or object the action could sensibly hang off. `location`
- * is `global_nav` for the same reason — an object-less action has no row and no
- * record header to render on.
+ * is no single record or object the action could sensibly hang off. It is
+ * HEADLESS for the same reason — an object-less action has no row and no record
+ * header to render on — which `locations: []` declares outright: callable over
+ * REST/MCP/AI, with its capability gate, param contract and audit trail intact,
+ * and claiming no UI surface. It used to say `locations: ['global_nav']`, which
+ * meant the same thing in intent but named a location no renderer served;
+ * #6888 retired that value and this is the declaration it always meant.
  */
 export const PortfolioSnapshotAction = defineAction({
   name: 'showcase_portfolio_snapshot',
@@ -360,7 +380,7 @@ export const PortfolioSnapshotAction = defineAction({
     capabilities: ['api.read'],
   },
   successMessage: 'Portfolio snapshot taken.',
-  locations: ['global_nav'],
+  locations: [],
   refreshAfter: false,
   ai: {
     exposed: true,

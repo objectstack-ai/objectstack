@@ -1263,7 +1263,31 @@ const step17: MigrationStep = {
     + '`HotReloadConfigSchema`, which `HotReloadManager` actually reads and which is KEPT '
     + 'unenforced as the starting point for a separate future decision. Like `isAsync`, its '
     + 'prescription is a semantic entry rather than a conversion: a manifest is not a stack '
-    + 'collection, so `os migrate meta` has no seam at which to rewrite one.',
+    + 'collection, so `os migrate meta` has no seam at which to rewrite one.\n\n'
+    + 'The action LOCATION vocabulary loses `global_nav` in this step (#6888, ADR-0049, '
+    + 'maintainer ruling 2026-08-09). It was declared from the day `ACTION_LOCATIONS` was '
+    + 'written and no product surface ever served it: the console command palette composes its '
+    + 'groups from nav items, objects, dashboards, pages, reports, recent items and record '
+    + 'search, and reads no action metadata at all — so an action declaring this location never '
+    + 'reached a user. What lifts it above ordinary inert-declaration cleanup is that the '
+    + 'authoring tool PROMISED the surface: the Studio designer previewed a mock '
+    + '`⌘K · Command palette` frame for exactly this value, so an author (very often an AI, '
+    + 'ADR-0033) declared it, watched it "render", shipped it, and got nothing — the ADR-0078 '
+    + 'shape arriving through a location vocabulary rather than through a missing key. It was '
+    + 'retired rather than implemented because the demand evidence is empty: no user has asked '
+    + 'for command-palette actions and the only two declarers were our own showcase corpus, so '
+    + 'wiring the palette would have been capability expansion with no pull. This is an enum '
+    + 'VALUE, not a key, so — as with `crypto.hash` and the two aggregate functions above — '
+    + 'there is no `retiredKey()` tombstone: the enum error map carries the prescription, keyed '
+    + 'on the received value so only the spelling that used to be legal is told it "was '
+    + 'removed". The conversion strips the value from `action.locations` and KEEPS the key even '
+    + 'when the array empties, because on this surface `locations: []` and an absent '
+    + '`locations` are different declarations: the empty array is the documented headless shape '
+    + '(callable over REST/MCP/AI, capability gate and audit trail intact), while an absent key '
+    + "means nobody placed the action — which is what `packages/lint`'s `action-no-placement` "
+    + 'warns about. An object-less action, whose only reason for declaring `global_nav` was that '
+    + 'it has no row and no record header to render on, is therefore migrated to the '
+    + 'declaration it always meant.',
   conversionIds: [
     'action-execute-to-target',
     'field-conditionalRequired-to-requiredWhen',
@@ -1320,6 +1344,7 @@ const step17: MigrationStep = {
     'page-structure-inert-keys-removed',
     'record-details-layout-removed',
     'app-hidden-to-unpublished',
+    'action-global-nav-location-removed',
   ],
   semantic: [
     {
