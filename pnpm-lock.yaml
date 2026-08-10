@@ -208,12 +208,24 @@ importers:
       '@objectstack/cli':
         specifier: workspace:*
         version: link:../../packages/cli
+      '@objectstack/core':
+        specifier: workspace:*
+        version: link:../../packages/core
       '@objectstack/formula':
         specifier: workspace:*
         version: link:../../packages/formula
       '@objectstack/objectql':
         specifier: workspace:*
         version: link:../../packages/objectql
+      '@objectstack/plugin-approvals':
+        specifier: workspace:*
+        version: link:../../packages/plugins/plugin-approvals
+      '@objectstack/service-automation':
+        specifier: workspace:*
+        version: link:../../packages/services/service-automation
+      '@objectstack/service-messaging':
+        specifier: workspace:*
+        version: link:../../packages/services/service-messaging
       '@playwright/test':
         specifier: ^1.62.1
         version: 1.62.1
