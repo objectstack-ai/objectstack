@@ -44,11 +44,12 @@ Selectors (one per run):
 |---|---|
 | `platform-core.console-login` (bare id) | that one item |
 | `area:records-forms` (or bare `records-forms`) | every item in the area |
+| **`records-forms.json`** (or the full `…/areas/records-forms.json` path) | **every item in that area — a list-directory filename works with no prefix** |
 | `capability:hook` | items mapped to a metadata kind in `coverage.json` |
 | `priority:P0` | the standing smoke |
 | `surface:api` | every API-surface item (cheap — no browser build needed) |
 | `since:v17` | everything introduced in a release (the release-sweep filter) |
-| **`file:packages/plugins/plugin-approvals/src/approval-service.ts`** | **items whose `source[]` cites that file — "test whatever covers this file"** |
+| **`file:packages/plugins/plugin-approvals/src/approval-service.ts`** | **items whose `source[]` cites that file — "test whatever covers this file"** (a bare path with a `/` or a code extension auto-resolves as `file:` too) |
 | `all` | the whole checklist |
 
 `--json` gives the runnable list (id · priority · surface · revision). **Blocked items are

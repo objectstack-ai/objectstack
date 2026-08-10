@@ -22,6 +22,11 @@
 //                           basename / containing dir) — "test whatever covers this file"
 //   all                     every active item
 //
+// Prefix-less conveniences (paste a filename/path, no prefix to remember):
+//   records-forms.json      a list-directory (areas/) filename = area:records-forms
+//   …/areas/records-forms.json   the full path works too (matched by basename)
+//   packages/foo/bar.ts     any path with a `/` or a code extension = file:<that path>
+//
 // Blocked items (carrying `blocked:{by,ref}`) are EXCLUDED by default — they cannot run
 // on stock fixtures. Pass --include-blocked to list them too (the runner records them as
 // blocked with their fixture reason, per RUNNER.md).
@@ -84,8 +89,22 @@ export function selectItems(selector, items, coverage = { metadataKinds: {} }) {
     return [];
   }
 
-  // No recognized prefix → treat the whole string as an id, else as an area name.
+  // No recognized prefix → try, in order: a checklist area FILE from the list dir
+  // (`records-forms.json`, or a full `…/areas/records-forms.json` path) → that area;
+  // a framework SOURCE-file path (has a `/` or a code extension) → resolve like `file:`;
+  // then a bare item id; then a bare area name. Lets you paste a list-directory filename
+  // or a source path with no prefix to remember.
   if (key === null) {
+    const raw = val.replace(/^\.?\//, '');
+    const base = basename(raw);
+    if (base.endsWith('.json')) {
+      const stem = base.slice(0, -'.json'.length); // "records-forms.json" → "records-forms"
+      const inArea = active.filter((it) => it.id.startsWith(`${stem}.`));
+      if (inArea.length) return inArea;
+    }
+    if (raw.includes('/') || /\.(tsx?|jsx?|mjs|cjs)$/.test(base)) {
+      return selectItems(`file:${raw}`, items, coverage);
+    }
     const asId = byId(val);
     if (asId.length) return asId;
     return active.filter((it) => it.id.startsWith(`${val}.`));
@@ -123,7 +142,13 @@ if (process.argv.includes('--self-test')) {
   eq(ids('file:packages/foo/bar.ts'), ['a.one'], 'file exact');
   eq(ids('file:foo'), ['a.one', 'b.three'], 'file dir match');
   eq(ids('nope.xxx'), [], 'unknown id → empty');
-  console.log('✓ checklist-select self-test: 12 cases pass.');
+  // prefix-less conveniences
+  eq(ids('a.json'), ['a.one', 'a.two'], 'bare area-file name .json → area');
+  eq(ids('docs/qa/platform-checklist/areas/b.json'), ['b.three'], 'area-file full path → area (by basename)');
+  eq(ids('packages/foo/bar.ts'), ['a.one'], 'bare source path (has /) → file: mode');
+  eq(ids('bar.ts'), ['a.one'], 'bare source basename (code ext) → file: mode');
+  eq(ids('missing.json'), [], 'unmatched .json name → empty, no throw');
+  console.log('✓ checklist-select self-test: 17 cases pass.');
   process.exit(0);
 }
 
