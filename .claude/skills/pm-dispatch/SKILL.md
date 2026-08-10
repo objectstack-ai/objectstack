@@ -1233,17 +1233,24 @@ Prime Directive #10 是一个强力生产者,而循环原本只有「修掉」�
   (口径见上面「消费者三处」),**两张板都要清到空**;三选一对两张板**逐条**
   适用,⛔ 不因为「那是前端仓」就整批默认接受 —— objectui 板上项的三选一由
   objectui 整仓座位执行,读数回贴给发版清单。
-  ⚠️ **「随 pin bump 进这次发布」是机制事实,不是流程保证 —— 反着读会以为
-  console bump 已被谁盯着(#6906 交付项 2 的核查结论;缺口另立单 #7275)。**
+  ⚠️ **「随 pin bump 进这次发布」是机制事实,不是自动的流程保证 —— 流程半边由
+  下面的发版前置条件补上(#6906 交付项 2 查出缺口、另立 #7275 裁决)。**
   队列管家的 #6162 机械产出(见「入队与落地」B)判据是**窗口收口**
   (`.objectui-sha` 落后 objectui main **且** objectui 合并队列已空),不是发版
   时刻;而且它立的是 `pm:queue` 单,**按构造不带 `target:<major>`** —— 那张
   bump 单因此既不在上面两条查询里,也没有对应的「明示接受」摘牌形态(#7268 是
   2026-08-10 的实测标本:`pm:queue` 独一份)。发版**记录**另有硬门兜底
   (`check:objectui-pin-fresh` —— 发版 PR 上 required、发布路径上 enforcing,
-  #3340 / #6170),所以陈旧 pin **发不出去**;缺的只是**发版时刻那张单或那次
-  豁免**,处置形态待裁。⛔ 在 #7275 有裁决之前,不要把「两张板已清空」读成
-  「console bump 也已就位」——这两件事今天没有任何机械关联。
+  #3340 / #6170),所以陈旧 pin **发不出去**;缺的是发版时刻那张单或那次豁免,
+  由本条补上:
+  **发版前置条件(维护者 2026-08-10 拍板,#7275 Option A)**:清板动手之前,
+  先取**一次** pin 读数(`.objectui-sha` 对 objectui main;⛔ 一次即止,不是
+  重扫)。pin 滞后 ⇒ console bump 单必须**已存在且已上板**(`target:<major>`;
+  上板由已拥有该标签生产权的座位执行 —— bump 单立在 objectstack,即分诊座位,
+  单一生产者纪律不因此多一个写者),或按上面的标准形态**明示接受**
+  (accepted-for-GA 评论留痕)。两者都不成立 ⇒ 不 cut。这条前置就是「板已清空」
+  与「console bump 已就位」之间唯一的机械关联 —— 跳过读数就回到 #7268 那种
+  板上看不见 pin 滞后的无声状态。
 
 ### 1. Fetch candidates
 
@@ -1468,7 +1475,11 @@ carries the identity. For
 each selected issue, **before dispatching** (repo rule: claim before code),
 execute as **one atomic pair**, in order:
 
-1. **Assign** to yourself (`@me`) and add `pm:dispatched`. Skip — and drop
+1. **Assign** to yourself (`@me`) and swap the state label — apply
+   `pm:dispatched` in the **same label write** that removes `pm:queue`; the
+   pair is atomic, never half (#7239 ruling 2026-08-10: the remove-only half
+   leaves in-flight cards that triage disjunction 3 re-pays full
+   comment-reads on every round). Skip — and drop
    from the batch — any issue that acquired an assignee since step 1.
 2. **Claim comment** (English, per the language policy), fixed shape — the
    branch name is the key,
