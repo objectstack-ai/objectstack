@@ -289,20 +289,30 @@ describe('ObjectQL seedAutonumber — the counter is located by the declared suf
 
   describe('a format declaring neither prefix nor suffix keeps the legacy reading', () => {
     it('reads the LAST digit run of the whole value', async () => {
-      // No format at all: `renderAutonumber` emits the bare counter, and the
-      // stored values have no anchor. `'10'` must win over `'2'` — this is a
-      // numeric max, never a lexicographic one.
+      // No format at all, so the stored values have no anchor: `'10'` must win
+      // over `'2'` — this is a numeric max, never a lexicographic one. That
+      // READING is what #6468 is about here and it is unchanged.
+      //
+      // ⚠️ The `0011` is the RENDERING, and it is deliberate — do not "fix" it
+      // back to a bare `'11'`. A format-less field resolves to the contract
+      // default `{0000}` since #6555/#7262 (`resolveAutonumberFormat`), which is
+      // what makes the engine and `driver-sql` mint the same shape over this
+      // exact dataset; the SQL arm pins `0011` too, in
+      // `sql-driver-autonumber-suffix.test.ts`. `{0000}` renders prefix '' and
+      // suffix '', so the unanchored reading below is untouched by it.
       const { result } = await insertOne(schemaWith('ref_no'), storedRows('ref_no', ['1', '2', '10']));
 
-      expect(result.ref_no).toBe('11');
+      expect(result.ref_no).toBe('0011');
     });
 
     it('reads past leading text that no format describes', async () => {
       // Values written before any format existed: the unanchored reading takes
-      // the trailing run, which is what it has always done.
+      // the trailing run, which is what it has always done. Rendered through the
+      // `{0000}` default (#6555/#7262) — see the note above before re-pinning
+      // this to a bare `'8'`.
       const { result } = await insertOne(schemaWith('ref_no'), storedRows('ref_no', ['SO-2024-0007']));
 
-      expect(result.ref_no).toBe('8');
+      expect(result.ref_no).toBe('0008');
     });
   });
 });

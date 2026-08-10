@@ -24,6 +24,20 @@
  * answer. `packages/objectql` and `packages/drivers/driver-sql` each pin their
  * own half; only this package can see both at once.
  *
+ * ## The format-LESS fixture (#6555) — a second fork, in RENDERING
+ *
+ * #6468's four fixtures all DECLARE a format, so the two arms agreed on the
+ * number's width by construction and only the counter was ever at stake. The
+ * fifth fixture declares none, which is where the sides forked a second time:
+ * the engine parsed the empty string and rendered `renderAutonumber`'s no-slot
+ * branch (`11`), `driver-sql` substituted its own `'{0000}'` (`0011`). The
+ * maintainer's route-3 ruling on #6555 put that default in the contract
+ * (`DEFAULT_AUTONUMBER_FORMAT` / `resolveAutonumberFormat`, #7265) and both
+ * generators now read it — driver-sql in #7263, the engine in #7262. That
+ * fixture is therefore what makes THIS file assert a shared rendering rather
+ * than only a shared counter, and it is the only case here whose two arms
+ * disagreed on shape.
+ *
  * The engine half runs on the REAL `InMemoryDriver` (`supports = {}`, so the
  * engine's fallback owns the counter — the shape memory/mongo deployments run)
  * and the driver half on a REAL `SqlDriver` over better-sqlite3, each holding
@@ -83,13 +97,18 @@ import { SqlDriver } from '@objectstack/driver-sql';
 /** Date tokens render from the wall clock, so the clock is pinned. Only `Date`. */
 const FIXED_NOW = new Date('2026-06-15T09:00:00Z');
 
-/** One object, one text field, one autonumber field carrying `format`. */
-function recSchema(format: string) {
+/**
+ * One object, one text field, one autonumber field. `format` is omitted from the
+ * declaration entirely when it is `undefined` — a field carrying `format:
+ * undefined` is not the same document as a field with no `format` key, and the
+ * format-LESS case below is exactly what #6555 is about.
+ */
+function recSchema(format?: string) {
   return {
     name: 'rec',
     fields: {
       title: { type: 'text' },
-      rec_no: { type: 'autonumber', format },
+      rec_no: format === undefined ? { type: 'autonumber' } : { type: 'autonumber', format },
     },
   } as any;
 }
@@ -98,7 +117,7 @@ const legacyRows = (stored: string[]) =>
   stored.map((v, i) => ({ id: `l${i + 1}`, rec_no: v, title: `legacy ${i + 1}` }));
 
 /** The number the ENGINE's fallback seeding issues after `stored`. */
-async function engineIssues(format: string, stored: string[]): Promise<string> {
+async function engineIssues(format: string | undefined, stored: string[]): Promise<string> {
   const driver = new InMemoryDriver();
   const engine = new ObjectQL();
   engine.registerDriver(driver as any, true);
@@ -114,7 +133,7 @@ async function engineIssues(format: string, stored: string[]): Promise<string> {
 }
 
 /** The number the SQL DRIVER's sequence bootstrap issues after `stored`. */
-async function sqlDriverIssues(format: string, stored: string[]): Promise<string> {
+async function sqlDriverIssues(format: string | undefined, stored: string[]): Promise<string> {
   const driver = new SqlDriver({
     client: 'better-sqlite3',
     connection: { filename: ':memory:' },
@@ -130,7 +149,8 @@ async function sqlDriverIssues(format: string, stored: string[]): Promise<string
 
 interface Fixture {
   label: string;
-  format: string;
+  /** `undefined` = the field declares NO format at all (#6555). */
+  format?: string;
   stored: string[];
   /** The counter both sides must reach, rendered through the same format. */
   expected: string;
@@ -168,6 +188,25 @@ const FIXTURES: Fixture[] = [
     format: '{0000}',
     stored: ['0001', '0002', '0003'],
     expected: '0004',
+  },
+  {
+    // #6555's own bug report, and the reason this file can now assert a shared
+    // RENDERING and not merely a shared counter. Every fixture above declares a
+    // format, so all four agreed on width by construction; this is the one that
+    // did not. Until #7262 the two arms answered `11` (engine, through
+    // `renderAutonumber`'s no-slot branch) and `0011` (SQL, through its own
+    // hardcoded `|| '{0000}'`) — one metadata document, two number shapes,
+    // decided by which driver ran. Both sides now read the declared default
+    // (`resolveAutonumberFormat`, #7265) and converge on `0011`.
+    //
+    // The counter itself was never in dispute here (#6468): the stored values
+    // are bare and unanchored, `'10'` beats `'2'` numerically on both sides, and
+    // `{0000}` renders prefix '' / suffix '' so neither seeding read moves.
+    label: 'NO format declared — the contract default `{0000}` (#6555)',
+    format: undefined,
+    stored: ['1', '2', '10'],
+    expected: '0011',
+    wasEngine: '11',
   },
 ];
 

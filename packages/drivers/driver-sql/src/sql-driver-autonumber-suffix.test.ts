@@ -164,13 +164,13 @@ describe('SqlDriver autonumber seeding — the counter is located by the declare
       // byte-for-byte: `'10'` wins over `'2'` — a numeric max, never a
       // lexicographic one — so the counter continues at 11.
       //
-      // The RENDERING of a format-less field is a separate, pre-existing matter
-      // this fix does not touch: a format-less field resolves to the contract
-      // default `{0000}` (`resolveAutonumberFormat`, #6555), so 11 renders
-      // `0011` here — while the engine's fallback still emits the bare `11`
-      // until #7262 lands the other half. That divergence is in the render
-      // default, not in the seeding parse #6468 is about, so the cross-side
-      // parity test uses explicitly-formatted fields.
+      // The RENDERING of a format-less field is a separate matter this fix does
+      // not touch: a format-less field resolves to the contract default
+      // `{0000}` (`resolveAutonumberFormat`, #6555), so 11 renders `0011` here.
+      // The engine's fallback rendered a bare `11` until #7262 landed the other
+      // half of that ruling; both sides now read the declared default, and
+      // `autonumber-seed-cross-side-parity.integration.test.ts` asserts these
+      // very rows against each other.
       await initRec();
       await seedRows(['1', '2', '10']);
 

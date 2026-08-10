@@ -25,7 +25,7 @@ import type { WriteObservabilityOptions } from '@objectstack/spec/contracts';
 // engine is what `metadata-protocol.validateData` returns, so letting the two
 // drift would put a translation layer between a verdict and its contract.
 import type { ValidateDataIssue, ValidateDataResponse } from '@objectstack/spec/api';
-import { parseAutonumberFormat, renderAutonumber, readAutonumberCounter, missingFieldValues, isTenancyDisabled, FILE_REFERENCE_TYPES, REFERENCE_VALUE_TYPES, referenceTargetOf, isFileIdToken, RAW_FILE_VALUES_CONTEXT_KEY, isCurrentUserDefaultToken, isNowDefaultToken } from '@objectstack/spec/data';
+import { parseAutonumberFormat, renderAutonumber, resolveAutonumberFormat, readAutonumberCounter, missingFieldValues, isTenancyDisabled, FILE_REFERENCE_TYPES, REFERENCE_VALUE_TYPES, referenceTargetOf, isFileIdToken, RAW_FILE_VALUES_CONTEXT_KEY, isCurrentUserDefaultToken, isNowDefaultToken } from '@objectstack/spec/data';
 // [#5158] Door 2's lowering sink — the SAME pair the protocol face (Door 1)
 // runs, so `FilterArray` has exactly one lowering in the product.
 import { isFilterAST, parseFilterAST, VALID_AST_OPERATORS } from '@objectstack/spec/data';
@@ -2601,6 +2601,37 @@ export class ObjectQL implements IObjectQLEngine {
    * to the SQL driver's persistent sequence (#1603). NOTE: this in-memory seeding
    * is single-instance.
    *
+   * # A format-LESS field renders through the contract default, not bare (#6555)
+   *
+   * "Identically to the SQL driver" was true of every DECLARED format and false
+   * of the one case nobody declares: with no format at all this method used to
+   * hand `parseAutonumberFormat` the empty string, whose empty token list
+   * `renderAutonumber` renders through its no-slot branch as a BARE counter —
+   * `1`, `2`, …. The SQL driver substituted `'{0000}'` in the same case and
+   * issued `0001`, `0002`, …. One metadata document, two number shapes, decided
+   * by which driver happened to serve it; the counter VALUE always agreed
+   * (#6468 pinned that), so what forked was rendering width alone.
+   *
+   * The maintainer ruling of 2026-08-08 (#6555, route 3) puts the default in the
+   * contract instead of in either fallback, and this method now reads it:
+   * {@link resolveAutonumberFormat} answers the canonical `autonumberFormat`,
+   * then the `format` shorthand (#1603), then `DEFAULT_AUTONUMBER_FORMAT`
+   * (`{0000}`). Two consequences, both deliberate:
+   *
+   *   - A format-less field on this path now issues `0001` where it issued `1`.
+   *     `{0000}` was chosen because it is the shape SQL deployments already
+   *     store, so the flip lands on engine-fallback deployments only.
+   *   - "Declared" is now a NON-EMPTY string (the SQL driver's long-standing
+   *     truthiness rule) rather than the `??` this method used, so
+   *     `autonumberFormat: ''` resolves to the default too instead of rendering
+   *     bare — and an empty canonical key no longer masks a declared `format`
+   *     shorthand. The bare counter is still reachable, by declaring a format
+   *     with no `{0..0}` slot (`'PRE-'` → `PRE-1`).
+   *
+   * Seeding is untouched by all of this: `{0000}` renders prefix `''` and suffix
+   * `''`, so {@link readStoredAutonumberCounter} stays on its UNANCHORED legacy
+   * branch and reads already-stored bare values exactly as before.
+   *
    * # Keeping the seeded counter in sync (#6806)
    *
    * Seeding "once per counter key" is only the truth while the engine is the
@@ -2649,10 +2680,14 @@ export class ObjectQL implements IObjectQLEngine {
     const issued: IssuedAutonumber[] = [];
     for (const [name, def] of Object.entries(fields)) {
       if ((def as any)?.type !== 'autonumber') continue;
-      // Honor either the spec-canonical `autonumberFormat` or the shorthand
-      // `format` (both appear in metadata; the driver reads both too) — #1603.
-      const fmt = (def as any).autonumberFormat ?? (def as any).format;
-      const tokens = parseAutonumberFormat(typeof fmt === 'string' ? fmt : '');
+      // The contract answers "which format?" — canonical `autonumberFormat`,
+      // then the `format` shorthand (#1603), then the declared default
+      // `{0000}`. One resolver, shared with the SQL driver, so a format-less
+      // field cannot render two shapes again (#6555; see the docstring above).
+      // `fmt` is kept only for the diagnostic below, which now names the format
+      // actually rendered with rather than `undefined`.
+      const fmt = resolveAutonumberFormat(def as never);
+      const tokens = parseAutonumberFormat(fmt);
       const current = record[name];
       // Respect an explicit value — reachable only for an EXEMPT writer now
       // (isSystem / preserveAudit / a hook stamp): #5503's strip removed every

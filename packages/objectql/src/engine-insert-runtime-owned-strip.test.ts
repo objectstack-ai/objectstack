@@ -118,12 +118,17 @@ describe('insert strip acts on CALLER-submitted values (#6339)', () => {
   });
 
   it('B (THE REPORT): a code the hook OVERWROTE lands, even though the caller sent the key', async () => {
-    // Identical to A except that the caller's payload also carries `code`. On
-    // `origin/main` this committed "1" — the sequence value, because the strip
-    // deleted the hook's write. Stated as the value it must NOT be, then as the
-    // value it must be.
+    // Identical to A except that the caller's payload also carries `code`.
+    // Before #6339 this committed the SEQUENCE value, because the strip deleted
+    // the hook's write. Stated as the value it must NOT be, then as the value it
+    // must be.
+    //
+    // ⚠️ The sequence value is spelled `'0001'`, not `'1'`, since #6555/#7262:
+    // this field declares no format, so it renders through the contract default
+    // `{0000}`. Re-pinned rather than left at `'1'` because `'1'` stopped being
+    // the value this guard means to exclude the moment the render moved.
     const row: any = await engine.insert('probe_num2', { title: 'B', code: 'CALLER-FORGED' });
-    expect(row.code).not.toBe('1');
+    expect(row.code).not.toBe('0001');
     expect(row.code).not.toBe('CALLER-FORGED');
     expect(row.code).toBe('HOOK-B');
   });
@@ -142,9 +147,15 @@ describe('insert strip acts on CALLER-submitted values (#6339)', () => {
     // `title: 'no-hook'` makes the hook return without writing, so the caller's
     // value is the value on the key — and it goes, exactly as before. The
     // sequence issues the number instead.
+    //
+    // ⚠️ The sequence's first number is `'0001'`, not `'1'`, since #6555/#7262:
+    // `code` declares no format, so it renders through the contract default
+    // `{0000}`. Do not "fix" this back to a bare `'1'` — that spelling was the
+    // engine-vs-driver-sql fork the ruling closed. What this case is about is
+    // the STRIP, not the width.
     const row: any = await engine.insert('probe_num2', { title: 'no-hook', code: 'CALLER-FORGED' });
     expect(row.code).not.toBe('CALLER-FORGED');
-    expect(row.code).toBe('1');
+    expect(row.code).toBe('0001');
     expect(warns).toHaveLength(1);
     // The contract of the text, not its wording (#5503's own pin discipline).
     expect(warns[0]).toContain("Field 'code' on 'probe_num2'");
@@ -211,8 +222,11 @@ describe('insert strip acts on CALLER-submitted values (#6339)', () => {
     ]);
     expect(rows[0].code).toBe('HOOK-r1');
     expect(rows[1].code).toBe('HOOK-r2');
-    expect(rows[2].code).toBe('1');
-    expect(rows[3].code).toBe('2');
+    // ⚠️ `'0001'` / `'0002'`, not bare — the format-less contract default
+    // `{0000}` (#6555/#7262). The counter, which is what this case pins, still
+    // runs 1 then 2 across the two sequence-issued rows.
+    expect(rows[2].code).toBe('0001');
+    expect(rows[3].code).toBe('0002');
     // Exactly one row was stripped, so exactly one warning.
     expect(warns).toHaveLength(1);
     expect(warns[0]).toContain("Field 'code'");
