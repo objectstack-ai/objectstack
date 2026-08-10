@@ -422,6 +422,74 @@ export const HookContextSchema = lazySchema(() => z.object({
   previous: z.record(z.string(), z.unknown()).optional().describe('Record state before operation'),
 
   /**
+   * Dispatch Marker
+   * How THIS hook call relates to the caller's write — and the one place a
+   * handler may keep state that survives from the `before*` phase to the
+   * `after*` phase of the same write.
+   *
+   * ## Why it exists (#6966)
+   *
+   * Since #5038 (`after*`) and #5574 (`before*`) a predicate (`multi: true`)
+   * write dispatches ONCE PER MATCHED ROW, on a context deliberately
+   * indistinguishable from the single-id shape — `input.id` names the row,
+   * `previous` is its pre-image. That indistinguishability is the feature: a
+   * handler written for one record needs no bulk-aware branch.
+   *
+   * It also erased the only signal several handlers had. Before #5574,
+   * "`input.id` is empty" meant "this one call stands for N rows", and guards
+   * across the platform were written on it. Every one of them silently
+   * inverted: a per-row context has an id, so the guard now answers "single
+   * write" for every row of a bulk write. This key restores the question as a
+   * FACT the engine states, rather than an inference from the shape of
+   * another key.
+   *
+   * ## Why the engine has to state it
+   *
+   * A handler cannot rebuild the answer. The verdict is the engine's dispatch
+   * ladder (`isByIdWrite` / `isPredicatePath`), which also consults driver
+   * capability (`updateMany`/`deleteMany` presence) — and `asScalarId` is
+   * deliberately unexported to stop the plugin side from re-deriving it from
+   * `options.multi` (#4434 / #4550). So the marker is produced where the
+   * verdict is made, once, and never re-derived.
+   *
+   * ## Not the retired `isPredicateBulkWrite` (#5574, ADR-0049)
+   *
+   * A bulk discriminator was removed from `hook-wrappers.ts` because it had
+   * neither a producer nor a reachable consumer: its whole test was "no
+   * `input.id` and `options.multi`", which answered `false` everywhere once
+   * every dispatch carried an id. This key is the opposite on both counts and
+   * must stay that way — it is bound by the engine at EVERY write dispatch
+   * site (insert, update, delete; both phases), and the platform's own
+   * handlers read it. If it ever loses its readers, retire it; do not leave it
+   * declared.
+   *
+   *  - `mode` — `'record'` when this call is the caller's whole write (a
+   *    single-id update/delete, a non-batch insert); `'per-row'` when it is
+   *    one of N dispatches for one caller write.
+   *  - `index` — 0-based position within that fan-out; always 0 when
+   *    `mode` is `'record'`. `index === 0` is how a handler does batch-scoped
+   *    work exactly once instead of N times.
+   *  - `scope` — scratch shared by EVERY dispatch of one caller write, both
+   *    phases, same object identity. Handlers used to stash on the context
+   *    itself, which worked only because a single-id write reuses one
+   *    `HookContext` across its before/after pair; a per-row dispatch builds a
+   *    fresh context per row, so those stashes silently stopped arriving
+   *    (#6966). This is that seam, named and contractual.
+   *
+   * OPTIONAL for the same reason `api` is: making it required would start
+   * rejecting the partial contexts `HookContextSchema.parse` accepts today.
+   * Read it as `ctx.dispatch?.mode === 'per-row'` — an ABSENT marker reads as
+   * "not a per-row dispatch", which is the back-compatible direction.
+   *
+   * Reads (`beforeFind`/`afterFind`) carry no marker: a read has no fan-out.
+   */
+  dispatch: z.object({
+    mode: z.enum(['record', 'per-row']).describe("'record' = this call is the caller's whole write; 'per-row' = one of N dispatches for one write"),
+    index: z.number().int().nonnegative().describe('0-based position in the per-row fan-out; always 0 when mode is "record"'),
+    scope: z.record(z.string(), z.unknown()).describe('Scratch shared by every dispatch of one caller write, across both phases (same object identity)'),
+  }).optional().describe('How this hook call relates to the caller\'s write (engine-produced; #6966)'),
+
+  /**
    * Execution Session
    * Contains authentication and organization/tenancy information.
    *
@@ -719,6 +787,12 @@ export type HookParsed = z.infer<typeof HookSchema>;
 export type ResolvedHook = z.output<typeof HookSchema>;
 export type HookEventType = z.input<typeof HookEvent>;
 export type HookContext = z.input<typeof HookContextSchema>;
+/**
+ * The engine's dispatch marker (#6966) — see `HookContext.dispatch`. Named so
+ * a handler can bind it once (`const d = ctx.dispatch;`) and narrow, instead of
+ * spelling `NonNullable<HookContext['dispatch']>` at every read site.
+ */
+export type HookDispatch = NonNullable<HookContext['dispatch']>;
 
 /**
  * Type-safe factory for a lifecycle hook. Validates at authoring time via

@@ -8,6 +8,16 @@ import {
 } from './state-machine.zod';
 import { AgentSchema } from '../ai/agent.zod';
 import { formatZodError } from '../shared/error-map.zod';
+import {
+  EXPORT_ENTRY_POINTS,
+  exportNamesOf,
+  holdersOf,
+  maybeOriginOf,
+  originFileOf,
+  originOf,
+  originsOf,
+  runtimeParityOf,
+} from '../../scripts/lib/export-origins-testkit';
 
 describe('StateMachineSchema', () => {
   it('should validate a simple state machine', () => {
@@ -333,88 +343,34 @@ describe('[#4001] ActionRef / GuardRef — strict inside a union', () => {
 // anti-vacuity guards; sabotage-verified in the PR (re-adding the export
 // turns it red).
 describe('[#4658] `EventSchema` is not exported from ./automation', () => {
-  it('resolves the export surface: no entry but ./kernel declares `EventSchema`', async () => {
-    const ts = (await import('typescript')).default;
-    const { resolve, relative, dirname } = await import('node:path');
-    const { fileURLToPath } = await import('node:url');
-    const { readFileSync } = await import('node:fs');
-
-    const specDir = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
-    // Every public entry point, read from package.json's exports map so a
-    // future entry cannot silently escape the uniqueness pin below.
-    const pkg = JSON.parse(readFileSync(resolve(specDir, 'package.json'), 'utf8')) as {
-      exports: Record<string, unknown>;
-    };
-    const entries: Record<string, string> = {};
-    for (const sub of Object.keys(pkg.exports)) {
-      if (sub === '.') entries[sub] = resolve(specDir, 'src/index.ts');
-      else if (/^\.\/[a-z-]+$/.test(sub)) entries[sub] = resolve(specDir, `src/${sub.slice(2)}/index.ts`);
-      // './openapi.json' / './package.json' are not TypeScript entry points.
-    }
-    // Anti-vacuity: the enumeration must have found the real surface.
-    expect(Object.keys(entries)).toContain('./automation');
-    expect(Object.keys(entries)).toContain('./kernel');
-    expect(Object.keys(entries).length).toBeGreaterThan(10);
-
-    const program = ts.createProgram(Object.values(entries), {
-      module: ts.ModuleKind.ESNext,
-      moduleResolution: ts.ModuleResolutionKind.Bundler,
-      skipLibCheck: true,
-      noEmit: true,
-    });
-    const checker = program.getTypeChecker();
-    const unalias = (s: import('typescript').Symbol) =>
-      s.getFlags() & ts.SymbolFlags.Alias ? checker.getAliasedSymbol(s) : s;
-
-    const exportsOf = (sub: string) => {
-      const sf = program.getSourceFile(entries[sub]);
-      const moduleSym = sf && checker.getSymbolAtLocation(sf);
-      // Without this guard a resolution failure would make every assertion
-      // below pass vacuously — the exact way a gate goes dormant (#4642).
-      expect(moduleSym, `${sub} module symbol must resolve`).toBeTruthy();
-      return checker.getExportsOfModule(moduleSym!);
-    };
-
-    const originOf = (sym: import('typescript').Symbol, label: string) => {
-      const decl = unalias(sym).declarations?.[0];
-      expect(decl, `${label} must have a declaration`).toBeTruthy();
-      const declFile = decl!.getSourceFile();
-      return `${relative(specDir, declFile.fileName)}:${
-        declFile.getLineAndCharacterOfPosition(decl!.getStart()).line + 1
-      }`;
-    };
+  it('resolves the export surface: no entry but ./kernel declares `EventSchema`', () => {
+    // Anti-vacuity: the baseline must cover the real surface. (This used to
+    // enumerate package.json's exports map and build its own `ts.createProgram`
+    // right here; `export-origins/` IS that resolution, computed once at build
+    // time and checked in — #4796.)
+    expect(EXPORT_ENTRY_POINTS).toContain('./automation');
+    expect(EXPORT_ENTRY_POINTS).toContain('./kernel');
+    expect(EXPORT_ENTRY_POINTS.length).toBeGreaterThan(10);
 
     // 1. The removed side: `./automation` still has a non-trivial surface —
     //    so the `not.toContain` cannot pass by resolving nothing — and no
     //    longer names `EventSchema`, while its surviving neighbours stand.
-    const automationExports = exportsOf('./automation');
-    expect(automationExports.length, './automation must export a non-trivial surface').toBeGreaterThan(50);
-    const automationNames = automationExports.map((e) => e.getName());
+    const automationNames = exportNamesOf('./automation');
+    expect(automationNames.length, './automation must export a non-trivial surface').toBeGreaterThan(50);
     expect(automationNames).not.toContain('EventSchema');
     expect(automationNames).toContain('StateMachineSchema');
     expect(automationNames).toContain('TransitionSchema');
 
     // 2. The surviving side: `./kernel` still exports the envelope const and
     //    its inferred type, declared in kernel/events/core.zod.ts.
-    const kernelExports = exportsOf('./kernel');
-    const kernelEventSchema = kernelExports.find((e) => e.getName() === 'EventSchema');
-    expect(kernelEventSchema, './kernel must export `EventSchema`').toBeTruthy();
-    const kernelOrigin = originOf(kernelEventSchema!, './kernel EventSchema');
-    expect(kernelOrigin).toMatch(/^src\/kernel\/events\/core\.zod\.ts:\d+$/);
-    expect(kernelExports.map((e) => e.getName())).toContain('Event');
+    expect(maybeOriginOf('./kernel', 'EventSchema'), './kernel must export `EventSchema`').toBeDefined();
+    expect(originFileOf('./kernel', 'EventSchema')).toBe('src/kernel/events/core.zod.ts');
+    expect(exportNamesOf('./kernel')).toContain('Event');
 
     // 3. Uniqueness — the dual-source pin proper: across EVERY public entry,
     //    an export named `EventSchema` must resolve to that ONE declaration.
-    const holders: string[] = [];
-    for (const sub of Object.keys(entries)) {
-      for (const sym of exportsOf(sub).filter((e) => e.getName() === 'EventSchema')) {
-        holders.push(sub);
-        expect(
-          originOf(sym, `${sub} EventSchema`),
-          `${sub} must resolve \`EventSchema\` to the kernel declaration`,
-        ).toBe(kernelOrigin);
-      }
-    }
+    expect(originsOf('EventSchema')).toEqual([originOf('./kernel', 'EventSchema')]);
+    const holders = holdersOf('EventSchema');
     expect(holders).toContain('./kernel');
     expect(holders).not.toContain('./automation');
   });
@@ -424,6 +380,12 @@ describe('[#4658] `EventSchema` is not exported from ./automation', () => {
     const kernel = await import('../kernel/index');
     expect('EventSchema' in automation).toBe(false);
     expect('EventSchema' in kernel).toBe(true);
+
+    // The compiler-free half of the baseline's freshness guard: a stale or
+    // hand-edited `export-origins/` that moved or invented a runtime export is
+    // caught here, in `pnpm test`, without waiting for `check:export-origins`.
+    expect(runtimeParityOf('./automation', automation)).toEqual({ missingAtRuntime: [], missingFromArtifact: [] });
+    expect(runtimeParityOf('./kernel', kernel)).toEqual({ missingAtRuntime: [], missingFromArtifact: [] });
 
     // What the name now unambiguously means: an emitted event INSTANCE.
     expect(() =>

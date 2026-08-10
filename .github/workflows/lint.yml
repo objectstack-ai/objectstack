@@ -117,8 +117,13 @@ jobs:
       - name: "@objectstack/verify stand-in erasure guard"
         run: pnpm check:verify-stand-in
 
-      # Raw control-byte guard (#3127 / #4890 / #5157 / #5460). Scans every
-      # tracked TEXT file for a raw ASCII control byte and fails on any hit.
+      # Raw control-byte guard (#3127 / #4890 / #5157 / #5460 / #6984). Scans
+      # every TEXT file git knows about for a raw ASCII control byte and fails on
+      # any hit. Since #6984 the scan set is the index PLUS untracked-but-not-
+      # ignored working-tree files, so a locally-authored file is covered before
+      # it is staged; here that widening is a no-op, because a workflow checks out
+      # a commit and has no untracked files at all (the step's summary line says
+      # so — it names both halves, and the untracked one reads 0 in CI).
       # WHICH bytes are in the set and WHY each is rejected are stated and argued
       # once, in the gate script's header — `scripts/check-nul-bytes.mjs`. That
       # header is authoritative and this comment cites it rather than restating it
@@ -132,6 +137,18 @@ jobs:
       # header for why. Authors must write the unicode escape instead of the byte.
       - name: Raw control-byte guard
         run: pnpm check:nul-bytes
+
+      # Stack-collection enumerations vs the schema (#6242). `stack.zod.ts`
+      # decides which collections a stack may declare; eight other enumerations
+      # of that same set are hand-maintained (the map-format list, the
+      # plural→singular map, the artifact category enum, ObjectQL's two
+      # registration loops, the artifact-ingest field map, the runtime's
+      # app-payload probe, the showcase coverage manifest) and nothing compared
+      # any of them to the schema. Each drift instance has been fixed one line at
+      # a time before, always after a missing key silently dropped a collection.
+      # A deviation is legal here only as a waiver row carrying its reason.
+      - name: Stack-collection enumerations answerable to stack.zod.ts
+        run: pnpm check:stack-collection-maps
 
       # Docs/skills authoring guard (#2035 / ADR-0059): TS code blocks in
       # Markdown/MDX are not type-checked or ESLinted, so skills/ and
@@ -345,6 +362,48 @@ jobs:
       - name: objectui pin-changeset digest guard
         run: pnpm check:objectui-changeset
 
+      # Changeset-family gate self-tests (#6509). The SELF-TEST halves only —
+      # the real scans stay in pr-automation.yml's `changeset-check`, and the
+      # split is the whole point of this step.
+      #
+      # Why they moved here. `check-empty-changeset.mjs` and
+      # `check-adr-0087-registration.mjs` were called from exactly one place in
+      # the repository: the `changeset-check` job, which a PR carrying
+      # `skip-changeset` is exempted from WHOLESALE (job-level `if:` plus the two
+      # per-step label reads). And "this PR edits a CI-internal script" is the
+      # textbook `skip-changeset` case — such a PR releases nothing, so by the
+      # workflow's own prescription it takes the label. The consequence is the
+      # exact inversion of #4690: a PR that edits these two checkers is the PR
+      # most likely to skip their own fixtures.
+      #
+      # Not hypothetical, and not this card's own reasoning either. PR #6876
+      # (#5620, merged) added FIVE consumer assertions to
+      # `check-empty-changeset.mjs` that never executed once on its own CI: it
+      # carried `skip-changeset`, so on run 31289894461 the step
+      # `Reject an empty-frontmatter changeset added by this PR` — the only thing
+      # that runs `--self-test` — reports `conclusion: skipped`. Every assertion
+      # in that PR was verified locally and by nothing else.
+      #
+      # This step is deliberately UNCONDITIONAL. No `if:`, no label read, no
+      # paths filter: an exemption is precisely what the two self-tests must not
+      # have, or the gap simply moves. That property is not left to prose —
+      # `check-empty-changeset.mjs`'s own consumer block asserts this step's
+      # shape (present, unguarded, self-test halves only), so removing or
+      # conditioning it reds the very check it was removing.
+      #
+      # Why the SELF-TEST halves only, and not `pnpm check:empty-changeset`:
+      # that script chains the real scan, whose verdict is a function of the
+      # PR's DIFF and therefore needs `$MERGE_BASE`. This job has no branch
+      # point, so a real scan here would fall back to reading stock — which is
+      # #6129, "judge the author for what main gained while their PR was open",
+      # in the direction of a false RED. The self-test halves have no such
+      # dependency: measured, both pass with REPO_ROOT pointing at a directory
+      # that is not a git repository at all. They build their own throwaway
+      # repos in $TMPDIR and read two files (this workflow and
+      # pr-automation.yml). ~0.8s + ~5.0s.
+      - name: Changeset-family gate self-tests
+        run: pnpm check:changeset-gate-self-tests
+
       # Release-notes drift guard: the platform is one version-locked train, so
       # every released @objectstack/spec major must have a curated, navigable
       # release page at content/docs/releases/v<major>.mdx. Catches the gap that
@@ -422,6 +481,32 @@ jobs:
       # runner-starved CI run.
       - name: Shard attestation gate
         run: pnpm check:shard-attestation
+
+      # Required-context name pin (#6865). A GitHub required status check is
+      # matched BY CHECK-RUN NAME, and a job's check-run name is its `name:`
+      # value — so eight job `name:` literals across this file and ci.yml are
+      # branch-protection contract, and until now nothing asserted them.
+      # Renaming one is a one-line edit whose consequence is silent and
+      # repo-wide: the old context never reports again (permanent pending, which
+      # wedges the PR and the queue), or it gets dropped from the settings to
+      # unwedge things and every gate that job carries degrades to advisory.
+      # That second shape is #5617 — PR #5584 merged with THIS job red for 19
+      # minutes, and four more merges repeated it the same night. ci.yml states
+      # the contract in prose in eight places and check:shard-attestation
+      # asserts the two aggregate gates' job IDS; neither pins a name literal,
+      # and this file had neither. The pin also holds each enrolled job to the
+      # shapes that let a bare name report at all (no matrix, no
+      # continue-on-error) and each enrolled workflow to the triggers a required
+      # context needs (`merge_group`, and a `pull_request` with no `paths:`) —
+      # the machine-readable form of #5617's audit exclusions. It deliberately
+      # does NOT judge job-level `if:`: four of the enrolled ci.yml jobs carry a
+      # filter-driven `if:` by design (#4928), and a skipped job still publishes
+      # a context. ⚠️ It cannot verify the required SET itself — Settings →
+      # Rulesets is unreadable from every agent seat (403) — so it asserts the
+      # repo-side half only, and the script's header says so at length.
+      # Reads two YAML files; sub-second.
+      - name: Required-context name pin
+        run: pnpm check:required-contexts
 
       # #4248 packaging-hygiene guard. Without a `files` whitelist npm packs the
       # whole package directory, and 20 of the 49 publishable packages declared
@@ -810,6 +895,28 @@ jobs:
 
       - name: Check the protocol upgrade guide is regenerated with the ADR-0087 registries
         run: pnpm --filter @objectstack/spec check:upgrade-guide
+
+      # The #4796 declaration-origin baseline. `export-origins/` records which
+      # SOURCE DECLARATION every public entry point exports under every name, and
+      # seventeen export-surface pin tests compare against it instead of each
+      # building their own `ts.createProgram` inside a vitest case (~55s of
+      # compilation per CI lap, and a non-deterministic timeout that ejected six
+      # unrelated PRs from the merge queue in one night).
+      #
+      # A comparison is only as good as the thing compared, so THIS STEP IS WHAT
+      # THOSE PINS MEAN. Without it a hand-edited or stale artifact would let
+      # every one of them report success over a fiction — the dormant-gate shape
+      # #4642 named. It belongs in this job for the same reason `check:docs`
+      # does: no paths filter, required status check, so it cannot go dormant on
+      # exactly the spec-only PRs that move the export surface.
+      #
+      # Reads `src/` via tsx and needs no build, so it runs before the workspace
+      # build and fails in ~3s. The self-test in front of it pins the resolver's
+      # own two edges (a re-export must read as ONE declaration; two declarations
+      # sharing a name must NOT) — a broken resolver would otherwise write a
+      # confidently wrong baseline and this step would agree with it.
+      - name: Check the export-origins baseline resolves as recorded
+        run: pnpm --filter @objectstack/spec check:export-origins
 
       # The authorable KEY surface — what a metadata author may write, which for
       # this platform is the third-party API. `api-surface/` records exported

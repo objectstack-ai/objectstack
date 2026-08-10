@@ -138,6 +138,7 @@ import type * as M60 from './data/driver.zod.js';
 import type * as M61 from './data/driver/common.zod.js';
 import type * as M62 from './data/driver/memory.zod.js';
 import type * as M63 from './data/driver/sqlite.zod.js';
+import type * as M181 from './data/driver/turso.zod.js';
 import type * as M64 from './data/external-lookup.zod.js';
 import type * as M65 from './data/feed.zod.js';
 import type * as M66 from './data/field.zod.js';
@@ -737,6 +738,9 @@ export type Iso333 = Assert<Eq< z.input< typeof M62.AutoPersistenceConfigSchema 
 // data/driver/sqlite.zod.ts
 export type Iso334 = Assert<Eq< z.input< typeof M63.SqliteWasmPersistModeSchema >, z.infer< typeof M63.SqliteWasmPersistModeSchema > >>;
 
+// data/driver/turso.zod.ts
+export type Iso834 = Assert<Eq< z.input< typeof M181.TursoTransportModeSchema >, z.infer< typeof M181.TursoTransportModeSchema > >>;
+
 // data/external-lookup.zod.ts
 export type Iso335 = Assert<Eq< z.input< typeof M64.ExternalDataSourceSchema >, z.infer< typeof M64.ExternalDataSourceSchema > >>;
 
@@ -916,7 +920,8 @@ export type Iso439 = Assert<Eq< z.input< typeof M94.PluginHealthStatusSchema >, 
 export type Iso440 = Assert<Eq< z.input< typeof M94.PluginHealthReportSchema >, z.infer< typeof M94.PluginHealthReportSchema > >>;
 
 // kernel/plugin-loading.zod.ts
-export type Iso441 = Assert<Eq< z.input< typeof M95.PluginLoadingStrategySchema >, z.infer< typeof M95.PluginLoadingStrategySchema > >>;
+// (Iso441 pinned `PluginLoadingStrategySchema`, removed with the rest of the
+// `manifest.loading` block in #4914 — ADR-0049 enforce-or-remove.)
 export type Iso442 = Assert<Eq< z.input< typeof M95.PluginLoadingEventSchema >, z.infer< typeof M95.PluginLoadingEventSchema > >>;
 
 // kernel/plugin-registry.zod.ts
@@ -1753,6 +1758,13 @@ describe('ADR-0122 type-alias convention', () => {
     // the pin also took its THIRD number (759 -> 760 -> 833), each time
     // because the next-free id had been claimed by a branch that merged
     // first. The file, not the history, is the operand.
+    //
+    // 824 -> 823 is #4914's ADR-0049 retirement of the `manifest.loading`
+    // block: `Iso441` pinned `PluginLoadingStrategySchema`, one of the eleven
+    // defs unpublished with the carrier key, so its pin goes with the schema.
+    // A DECREASE, and the first here — the id is retired in place rather than
+    // renumbered, because the ids are claims about pins and not positions
+    // (`Iso824` remains the highest, and the next author still takes 825).
     const self = readFileSync(fileURLToPath(import.meta.url), 'utf8');
     const pins = self.match(/^export type Iso\d+ = Assert</gm) ?? [];
     expect(pins).toHaveLength(823);

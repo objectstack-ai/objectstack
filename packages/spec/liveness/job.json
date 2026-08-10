@@ -38,9 +38,11 @@
     },
     "timeout": {
       "status": "live",
-      "verifiedAt": "2026-08-02",
+      "verifiedAt": "2026-08-09",
+      "evidenceScope": "in-repo",
       "evidence": "packages/services/service-job/src/run-with-policy.ts:25-33",
-      "note": "per-attempt limit; an over-limit run records execution status 'timeout' (JobTimeoutError). The in-flight handler is abandoned, not cancelled — as documented."
+      "producer": "packages/runtime/src/app-plugin.ts:875-876 — the scheduler threads `{ retryPolicy: job.retryPolicy, timeout: job.timeout }` into svc.schedule, and only when the author set one of them",
+      "note": "per-attempt limit; an over-limit run records execution status 'timeout' (JobTimeoutError). The in-flight handler is abandoned, not cancelled — as documented. Producer side re-verified 2026-08-09 (#4837 slice): the seeded row cited the consumer only, which is the shape that carried `Seed.env` — here it holds, because #3494 wired the threading at the same time as the enforcement."
     },
     "enabled": {
       "status": "live",

@@ -38,8 +38,17 @@ import {
   type ViewData,
   type HttpRequest,
   defineView,
+  defineForm,
+  ViewItemSchema,
+  ViewMetadataSchema,
 } from './view.zod';
 
+import {
+  exportNamesOf,
+  maybeOriginOf,
+  originFileOf,
+  originOf,
+} from '../../scripts/lib/export-origins-testkit';
 describe('HttpMethodSubsetSchema', () => {
   it('should accept valid HTTP methods', () => {
     const methods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] as const;
@@ -532,6 +541,12 @@ describe('FormViewSchema', () => {
     };
 
     expect(() => FormViewSchema.parse(formView)).not.toThrow();
+    // #6926 — acceptance is unchanged; the OUTPUT is what changed. This pin
+    // asserted acceptance only, which is exactly why it stayed green through
+    // the whole life of the unfolded alias. Say what the parse now produces.
+    const parsed = FormViewSchema.parse(formView) as Record<string, unknown>;
+    expect(Object.prototype.hasOwnProperty.call(parsed, 'groups')).toBe(false);
+    expect((parsed.sections as Array<{ label?: string }>)[0]?.label).toBe('Account Details');
   });
 
   it('should accept tabbed form view', () => {
@@ -649,6 +664,132 @@ describe('FormViewSchema', () => {
       expect(FormViewSchema.safeParse({
         sections: [{ label: 'Task', pane: 'primary', fields: ['title'] }],
       }).success).toBe(false);
+    });
+  });
+});
+
+/**
+ * #6926 — `groups` is declared as an alias of `sections` and, until this
+ * change, nothing folded it: the alias was honored one boundary downstream in
+ * objectui's renderer, so the same authored form rendered in the console and
+ * degraded on the framework's REST public-form routes (which read `sections`
+ * only). The fold now happens at the PRODUCER.
+ *
+ * These cases discriminate the fold — the two pre-existing `groups` pins
+ * (acceptance, and the `pane` error path) cannot, which is the measured reason
+ * an unfolded alias survived this file for its whole life.
+ */
+describe('FormViewSchema — the `groups` legacy alias folds onto `sections` (#6926)', () => {
+  const S = (label: string) => ({ label, fields: [label.toLowerCase()] });
+  const has = (o: unknown, k: string) => Object.prototype.hasOwnProperty.call(o as object, k);
+
+  it('groups-only → sections, with `groups` absent from the output', () => {
+    const parsed = FormViewSchema.parse({ type: 'simple', groups: [S('Account')] });
+    expect(has(parsed, 'groups')).toBe(false);
+    expect(parsed.sections?.map((s) => s.label)).toEqual(['Account']);
+  });
+
+  it('both present → `sections` wins (the renderer\'s own `sections ?? groups` rule)', () => {
+    const parsed = FormViewSchema.parse({
+      type: 'simple',
+      sections: [S('Canonical')],
+      groups: [S('Legacy')],
+    });
+    expect(has(parsed, 'groups')).toBe(false);
+    expect(parsed.sections?.map((s) => s.label)).toEqual(['Canonical']);
+  });
+
+  it('an EMPTY `sections` still wins over a populated `groups` (`??`, not a merge)', () => {
+    const parsed = FormViewSchema.parse({ type: 'simple', sections: [], groups: [S('Legacy')] });
+    expect(has(parsed, 'groups')).toBe(false);
+    expect(parsed.sections).toEqual([]);
+  });
+
+  it('an empty `groups` folds to an empty `sections` (content, not absence)', () => {
+    const parsed = FormViewSchema.parse({ type: 'simple', groups: [] });
+    expect(has(parsed, 'groups')).toBe(false);
+    expect(parsed.sections).toEqual([]);
+  });
+
+  it('sections-only and neither-key forms are untouched', () => {
+    expect(FormViewSchema.parse({ type: 'simple', sections: [S('Only')] }).sections?.[0]?.label)
+      .toBe('Only');
+    const bare = FormViewSchema.parse({ type: 'simple' });
+    expect(has(bare, 'sections')).toBe(false);
+    expect(has(bare, 'groups')).toBe(false);
+  });
+
+  it('the ACCEPTANCE face is unchanged — `groups` stays legal at input', () => {
+    expect(FormViewSchema.safeParse({ type: 'simple', groups: [S('Account')] }).success).toBe(true);
+    // …and the fold does not launder an invalid section past the schema.
+    expect(FormViewSchema.safeParse({ type: 'simple', groups: [{ label: 'No fields' }] }).success)
+      .toBe(false);
+  });
+
+  it('the `pane` refinement still reports the key the AUTHOR wrote', () => {
+    const result = FormViewSchema.safeParse({
+      type: 'simple',
+      groups: [{ label: 'Account', pane: 'primary', fields: ['account_name'] }],
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.some((i) => i.path.join('.') === 'groups.0.pane')).toBe(true);
+    }
+  });
+
+  describe('every parse door inherits the fold (one declaration, not per-door)', () => {
+    it('ViewSchema.form', () => {
+      const parsed = ViewSchema.parse({ form: { type: 'simple', groups: [S('Account')] } });
+      expect(has(parsed.form, 'groups')).toBe(false);
+      expect(parsed.form?.sections?.map((s) => s.label)).toEqual(['Account']);
+    });
+
+    it('ViewSchema.formViews.*', () => {
+      const parsed = ViewSchema.parse({ formViews: { edit: { type: 'simple', groups: [S('Account')] } } });
+      expect(has(parsed.formViews?.edit, 'groups')).toBe(false);
+      expect(parsed.formViews?.edit?.sections?.map((s) => s.label)).toEqual(['Account']);
+    });
+
+    it('defineView (the authored container door)', () => {
+      const view = defineView({ form: { type: 'simple', groups: [S('Account')] } });
+      expect(has(view.form, 'groups')).toBe(false);
+      expect(view.form?.sections?.map((s) => s.label)).toEqual(['Account']);
+    });
+
+    it('defineForm (the metadata-admin form door)', () => {
+      const form = defineForm({ schemaId: 'report', type: 'simple', groups: [S('Account')] });
+      expect(has(form, 'groups')).toBe(false);
+      expect(form.sections?.map((s) => s.label)).toEqual(['Account']);
+    });
+
+    it('ViewItemSchema — the standalone `form` record arm', () => {
+      const parsed = ViewItemSchema.parse({
+        name: 'crm_account.edit',
+        object: 'account',
+        viewKind: 'form',
+        config: { type: 'simple', groups: [S('Account')] },
+      });
+      const config = (parsed as { config: Record<string, unknown> }).config;
+      expect(has(config, 'groups')).toBe(false);
+      expect((config.sections as Array<{ label?: string }>).map((s) => s.label)).toEqual(['Account']);
+    });
+
+    it('ViewMetadataSchema — the container member', () => {
+      const parsed = ViewMetadataSchema.parse({ form: { type: 'simple', groups: [S('Account')] } }) as {
+        form?: Record<string, unknown>;
+      };
+      expect(has(parsed.form, 'groups')).toBe(false);
+      expect((parsed.form?.sections as Array<{ label?: string }>).map((s) => s.label)).toEqual(['Account']);
+    });
+
+    it('ViewMetadataSchema — the FLATTENED form-overlay member (`.extend()` inherits the fold)', () => {
+      const parsed = ViewMetadataSchema.parse({
+        viewKind: 'form',
+        type: 'simple',
+        groups: [S('Account')],
+      }) as Record<string, unknown>;
+      expect(has(parsed, 'groups')).toBe(false);
+      expect((parsed.sections as Array<{ label?: string }>).map((s) => s.label)).toEqual(['Account']);
     });
   });
 });
@@ -1504,6 +1645,31 @@ describe('GroupingConfigSchema', () => {
     const grouping = { fields: [] };
 
     expect(() => GroupingConfigSchema.parse(grouping)).toThrow();
+  });
+
+  it('fields .describe() states shape semantics without a fixed level cap (#7084)', () => {
+    const shape = (GroupingConfigSchema as unknown as { shape: Record<string, { description?: string }> }).shape;
+    const doc = shape.fields!.description ?? '';
+
+    // Non-empty arm FIRST — the negative arms below pass vacuously on '',
+    // so this arm is what makes them non-vacuous (the #6918 demonstration).
+    expect(doc.length, 'fields .describe() must not be empty').toBeGreaterThan(0);
+
+    // Substance, by idiom not verbatim: array order IS nesting order, and the
+    // gate's real lower bound (`.min(1)`) is stated.
+    expect(doc).toMatch(/nesting order/i);
+    expect(doc).toMatch(/outermost/i);
+    expect(doc).toMatch(/at least one/i);
+
+    // The #7084 defect must not return under a new number: the gate is
+    // `.min(1)` with NO upper bound, and nothing downstream enforces one
+    // either (objectui useGroupedData's buildLevel recurses over ALL
+    // configured levels — its only stop is `depth >= fields.length`). So any
+    // fixed-count support envelope here is prose the acceptance face does not
+    // have; house rule E17 says "up to N" is the same defect as "up to 3".
+    expect(doc).not.toMatch(/\bup to \d+\b/i);
+    expect(doc).not.toMatch(/\b\d+\s+levels?\b/i);
+    expect(doc).not.toMatch(/\bmax(?:imum)?(?:\s+of)?\s+\d+\b/i);
   });
 });
 
@@ -2700,53 +2866,21 @@ describe('[#4688] HttpRequest is single-source across ./shared and ./ui', () => 
   // `check:dual-source-exports` makes, but over `src/` so it runs in `pnpm test`
   // without a build. It also pins that `./ui` still EXPORTS the name at all —
   // the compatibility promise this file's own `type HttpRequest` import rests on.
-  it('both entry points resolve the TYPE to the one declaration in shared/http.zod.ts', async () => {
-    const ts = (await import('typescript')).default;
-    const { resolve, relative, dirname } = await import('node:path');
-    const { fileURLToPath } = await import('node:url');
-
-    const specDir = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
-    const entries = {
-      './shared': resolve(specDir, 'src/shared/index.ts'),
-      './ui': resolve(specDir, 'src/ui/index.ts'),
-    };
-    const program = ts.createProgram(Object.values(entries), {
-      module: ts.ModuleKind.ESNext,
-      moduleResolution: ts.ModuleResolutionKind.Bundler,
-      skipLibCheck: true,
-      noEmit: true,
-    });
-    const checker = program.getTypeChecker();
-    const unalias = (s: import('typescript').Symbol) =>
-      s.getFlags() & ts.SymbolFlags.Alias ? checker.getAliasedSymbol(s) : s;
-
-    const origins = new Map<string, string>();
-    for (const [sub, file] of Object.entries(entries)) {
-      const sf = program.getSourceFile(file);
-      const moduleSym = sf && checker.getSymbolAtLocation(sf);
-      // Without this, a resolution failure would make every assertion below
-      // pass vacuously — the exact way a gate goes dormant.
-      expect(moduleSym, `${sub} module symbol must resolve`).toBeTruthy();
-
-      const exported = checker
-        .getExportsOfModule(moduleSym!)
-        .find((e) => e.getName() === 'HttpRequest');
-      expect(exported, `${sub} must still export the name \`HttpRequest\``).toBeTruthy();
-
-      const decl = unalias(exported!).declarations?.[0];
-      expect(decl, `${sub}'s HttpRequest must have a declaration`).toBeTruthy();
-      const declFile = decl!.getSourceFile();
-      origins.set(
-        sub,
-        `${relative(specDir, declFile.fileName)}:${
-          declFile.getLineAndCharacterOfPosition(decl!.getStart()).line + 1
-        }`,
-      );
+  it('both entry points resolve the TYPE to the one declaration in shared/http.zod.ts', () => {
+    for (const sub of ['./shared', './ui'] as const) {
+      expect(
+        maybeOriginOf(sub, 'HttpRequest'),
+        `${sub} must still export the name \`HttpRequest\``,
+      ).toBeDefined();
     }
 
-    // Same file AND same line — one declaration reached by two import paths.
-    expect(origins.get('./ui')).toBe(origins.get('./shared'));
-    expect(origins.get('./shared')).toMatch(/^src\/shared\/http\.zod\.ts:\d+$/);
+    // ONE declaration reached by two import paths. The identity is the
+    // declaration itself — the baseline records `<file>#<declared name> (<kind>)`
+    // after unwinding the alias chain, so this is the same symbol-identity
+    // measurement the retired in-test `ts.createProgram` made, and no coarser
+    // than the `<file>:<line>` pair it used to compare (#4796).
+    expect(originOf('./ui', 'HttpRequest')).toBe(originOf('./shared', 'HttpRequest'));
+    expect(originFileOf('./shared', 'HttpRequest')).toBe('src/shared/http.zod.ts');
   });
 });
 
@@ -2780,73 +2914,28 @@ describe('[#4688] HttpRequest is single-source across ./shared and ./ui', () => 
 // therefore the load-bearing one; the runtime tests below it guard the value
 // ranges the whole argument rests on.
 describe('[#4691] `HttpMethod` is not exported from ./ui', () => {
-  it('resolves the export surface: ./ui has no `HttpMethod`, ./shared and ./api share one', async () => {
-    const ts = (await import('typescript')).default;
-    const { resolve, relative, dirname } = await import('node:path');
-    const { fileURLToPath } = await import('node:url');
-
-    const specDir = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
-    const entries = {
-      './shared': resolve(specDir, 'src/shared/index.ts'),
-      './ui': resolve(specDir, 'src/ui/index.ts'),
-      './api': resolve(specDir, 'src/api/index.ts'),
-    };
-    const program = ts.createProgram(Object.values(entries), {
-      module: ts.ModuleKind.ESNext,
-      moduleResolution: ts.ModuleResolutionKind.Bundler,
-      skipLibCheck: true,
-      noEmit: true,
-    });
-    const checker = program.getTypeChecker();
-    const unalias = (s: import('typescript').Symbol) =>
-      s.getFlags() & ts.SymbolFlags.Alias ? checker.getAliasedSymbol(s) : s;
-
-    const exportsOf = (sub: keyof typeof entries) => {
-      const sf = program.getSourceFile(entries[sub]);
-      const moduleSym = sf && checker.getSymbolAtLocation(sf);
-      // Without this guard a resolution failure would make every assertion
-      // below pass vacuously — the exact way a gate goes dormant (#4642).
-      expect(moduleSym, `${sub} module symbol must resolve`).toBeTruthy();
-      return checker.getExportsOfModule(moduleSym!);
-    };
-
-    // A sanity anchor: if this entry resolved to nothing, `find` returning
-    // undefined for `HttpMethod` below would prove nothing at all.
-    const uiExports = exportsOf('./ui');
-    expect(uiExports.length, './ui must export a non-trivial surface').toBeGreaterThan(50);
+  it('resolves the export surface: ./ui has no `HttpMethod`, ./shared and ./api share one', () => {
+    // A sanity anchor: if this entry resolved to nothing, the absence
+    // assertions below would prove nothing at all.
+    const uiNames = exportNamesOf('./ui');
+    expect(uiNames.length, './ui must export a non-trivial surface').toBeGreaterThan(50);
 
     // 1. The row this change removes: `./ui` no longer names `HttpMethod`.
-    expect(uiExports.map((e) => e.getName())).not.toContain('HttpMethod');
+    expect(uiNames).not.toContain('HttpMethod');
 
     // 2. …but it still offers the 5-value type under its own name, so the
     //    migration stays inside this entry point.
-    expect(uiExports.map((e) => e.getName()), '`HttpMethodType` was renamed at #5832')
-      .not.toContain('HttpMethodType');
-    const uiMethodSubset = uiExports.find((e) => e.getName() === 'HttpMethodSubset');
-    expect(uiMethodSubset, './ui must export `HttpMethodSubset`').toBeTruthy();
-
-    const originOf = (sym: import('typescript').Symbol, label: string) => {
-      const decl = unalias(sym).declarations?.[0];
-      expect(decl, `${label} must have a declaration`).toBeTruthy();
-      const declFile = decl!.getSourceFile();
-      return `${relative(specDir, declFile.fileName)}:${
-        declFile.getLineAndCharacterOfPosition(decl!.getStart()).line + 1
-      }`;
-    };
-
-    expect(originOf(uiMethodSubset!, './ui HttpMethodSubset'))
-      .toMatch(/^src\/shared\/http\.zod\.ts:\d+$/);
+    expect(uiNames, '`HttpMethodType` was renamed at #5832').not.toContain('HttpMethodType');
+    expect(maybeOriginOf('./ui', 'HttpMethodSubset'), './ui must export `HttpMethodSubset`').toBeDefined();
+    expect(originFileOf('./ui', 'HttpMethodSubset')).toBe('src/shared/http.zod.ts');
 
     // 3. `./shared` and `./api` keep naming ONE declaration `HttpMethod` — the
     //    7-value one. This change must not have disturbed that side.
-    const origins = new Map<string, string>();
     for (const sub of ['./shared', './api'] as const) {
-      const exported = exportsOf(sub).find((e) => e.getName() === 'HttpMethod');
-      expect(exported, `${sub} must still export \`HttpMethod\``).toBeTruthy();
-      origins.set(sub, originOf(exported!, `${sub} HttpMethod`));
+      expect(maybeOriginOf(sub, 'HttpMethod'), `${sub} must still export \`HttpMethod\``).toBeDefined();
     }
-    expect(origins.get('./api')).toBe(origins.get('./shared'));
-    expect(origins.get('./shared')).toMatch(/^src\/shared\/http\.zod\.ts:\d+$/);
+    expect(originOf('./api', 'HttpMethod')).toBe(originOf('./shared', 'HttpMethod'));
+    expect(originFileOf('./shared', 'HttpMethod')).toBe('src/shared/http.zod.ts');
   });
 
   it('keeps the two value ranges distinct: 7 for `HttpMethod`, 5 for `HttpMethodSubsetSchema`', async () => {

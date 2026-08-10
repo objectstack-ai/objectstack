@@ -114,9 +114,23 @@ const BUILTIN_PARAM_ORIGINS: ReadonlyMap<string, string> = new Map([
 /** Fallback origin sentence for a built-in supplied via `opts.builtinKeys`. */
 const GENERIC_BUILTIN_ORIGIN = 'the dispatcher supplies it.';
 
-function isPresent(v: unknown): boolean {
+/**
+ * Whether a value counts as PRESENT for action-param purposes — the one
+ * definition of "there is a value here to check".
+ *
+ * Exported because the AUTHORING gate on `ActionParamSchema.defaultValue`
+ * (#6970) must skip exactly what this dispatch path skips. An authored default
+ * of `null` or `''` never reaches {@link valueSchemaFor} at submit — it is
+ * treated as no value, and `required` decides the outcome — so a parse-time
+ * check that rejected `''` for not being an ISO instant would be a SECOND rule
+ * set, stricter than the contract it claims to enforce. Sharing the predicate
+ * makes that parity structural instead of remembered.
+ */
+export function isActionParamValuePresent(v: unknown): boolean {
   return v !== undefined && v !== null && !(typeof v === 'string' && v.trim() === '');
 }
+
+const isPresent = isActionParamValuePresent;
 
 /**
  * The tail appended to an `unknown_field` message when the rejected key is one

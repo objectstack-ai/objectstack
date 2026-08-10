@@ -293,7 +293,10 @@
         },
         "groups": {
           "status": "live",
-          "note": "objectui: legacy alias of sections, normalized at ObjectForm.tsx:90 and spec-bridge form-view.ts:169 (spec.sections ?? spec.groups). Audit L24 drift resolved by alias-at-one-boundary."
+          "verifiedAt": "2026-08-09",
+          "evidenceScope": "cross-repo",
+          "evidence": "packages/spec/src/ui/view.zod.ts (foldFormGroupsIntoSections + the .overwrite on FormViewSchema — the PRODUCER fold, #6926: groups-only folds onto sections, sections wins when both are present, and groups is absent from every parsed form); objectui: packages/react/src/spec-bridge/bridges/form-view.ts:169 packages/plugin-form/src/ObjectForm.tsx:129-142 (objectui @7b3e048 — the pre-existing boundary folds, now redundant for parsed forms and retiring in a later cross-repo lap)",
+          "note": "WHERE THE FOLD LIVES: at the producer, as of #6926 — a `.overwrite()` on FormViewSchema, inherited by every parse door (ViewSchema.form/.formViews.*, both ViewItemSchema form arms, and ViewMetadataSchema's container AND flattened form-overlay members, which picks it up through .extend()). Before #6926 the alias was declared but folded NOWHERE in this repo: it was honored one boundary downstream in objectui (alias-at-one-boundary, objectui#2545, after a groups-only spec rendered nothing), while the framework's REST public-form routes read `sections` only — so the same authored form rendered in the console and degraded on GET /forms/:slug, POST /forms/:slug/submit and GET /forms/:slug/lookup/:field. That omission is what let #6926 be filed reading a live key as dead; it is recorded here so the next reader cannot repeat it. STILL NOT FOLDED (measured 2026-08-09, #6926): a RUNTIME-saved sys_metadata row — saveMetaItem validates through ViewMetadataSchema and then deliberately discards parsed.data to keep Studio round-trip keys, and the read replays the ADR-0087 stored-row conversion chain, which is not a zod parse. Code-authored views (defineView/defineForm → registry) DO reach REST folded. Pre-parse consumers still read the authored key and are right to: packages/lint's view rules walk authored sources. Audit L24 drift resolved by alias-at-one-boundary; superseded by the producer fold."
         },
         "subforms": {
           "status": "live",

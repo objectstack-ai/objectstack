@@ -349,7 +349,20 @@ describe('RecordChangeTrigger', () => {
         expect((captured?.record as Record<string, unknown>).status).toBeUndefined();
     });
 
-    it('reads the __previous stash when ctx.previous is absent', async () => {
+    // [#6978] The `ctx.__previous` stash limb, deleted — same family as the `doc`
+    // alias above, same negative-pin treatment. `plugin-audit`'s `captureBefore`
+    // was the stash's ONLY producer and #6656 retired it, leaving the fallback
+    // with zero producers; ADR-0049 enforce-or-remove says it goes.
+    //
+    // This case REPLACES the one that used to live here ("reads the __previous
+    // stash when ctx.previous is absent"), which synthesised the key in its own
+    // body — the #4984 shape: a fixture spelling a key no producer emits, keeping
+    // a dead limb looking live. A positive case can never carry the weight here
+    // either, because the canonical key sits FIRST in the read and wins whether or
+    // not the limb exists. So the pin is inverted: restore the limb and this case
+    // goes red on both assertions (`previous` becomes `{ status: 'old' }`, and the
+    // record seeds from it instead of staying empty).
+    it('does NOT read the `__previous` stash — no producer emits that key (#6978)', async () => {
         const { engine, hooks } = fakeEngine();
         const trigger = new RecordChangeTrigger(engine, silentLogger());
         let captured: AutomationContext | undefined;
@@ -358,11 +371,14 @@ describe('RecordChangeTrigger', () => {
             captured = ctx;
         });
 
-        const ctx = hookCtx({ previous: undefined });
+        // Every declared source of a pre-image is dropped, so the stash is the only
+        // thing left that could answer — and it must not.
+        const ctx = hookCtx({ result: undefined, previous: undefined, input: { id: 't1' } });
         (ctx as unknown as { __previous: Record<string, unknown> }).__previous = { status: 'old' };
         await hooks[0].handler(ctx);
 
-        expect(captured?.previous).toEqual({ status: 'old' });
+        expect(captured?.previous).toBeUndefined();
+        expect(captured?.record).toEqual({});
     });
 
     it('isolates flow errors so the CRUD write is never broken', async () => {

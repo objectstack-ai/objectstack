@@ -226,7 +226,15 @@ describe('#6306 — with `apiPath` set, the direct-mount routes follow it', () =
 
     const pkg = resolveRoute(table, 'GET', discovery.routes.packages);
     expect(pkg, 'the advertised packages URL must be mounted').toBeDefined();
-    expect((await drive(pkg!)).statusCode).toBe(200);
+    // [#7033 / #7023] `GET /packages` is now authz-gated, and this real plugin
+    // boot wires the production caller resolver
+    // (`RestServer.resolvePackageRouteExecutionContext`) with no auth service in
+    // the ctx — so the anonymous discovery probe resolves to no identity and the
+    // gate answers 401. That still proves the advertised URL is MOUNTED and its
+    // handler runs at the moved base (a routing miss would have failed the
+    // `toBeDefined()` above); the base-placement subject of this pin is unchanged.
+    // The gate itself is pinned in `package-envelope.conformance.test.ts`.
+    expect((await drive(pkg!)).statusCode).toBe(401);
 
     const ext = resolveRoute(table, 'GET', `${discovery.routes.datasources}/pg_main/external/tables`);
     expect(ext, 'the advertised datasources base must be the base of the mounted family').toBeDefined();

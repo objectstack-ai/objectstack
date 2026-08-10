@@ -15,6 +15,40 @@
  * satisfy — returns `false` (the write is denied), never `true`. The operator
  * vocabulary mirrors `read-scope-sql.ts` so the in-memory and SQL backends agree.
  *
+ * ## The unknown-operator posture: silent `false`, DECIDED not inherited (#6520)
+ *
+ * The #6993 census measured that this face answers an operator it does not know
+ * with a silent `false` — no throw, no `code`, no message — where the other five
+ * JS evaluation faces (`driver-memory`'s three surfaces, `driver-mongodb`,
+ * objectql's `having`) all REFUSE with `INVALID_FILTER` / 400. #6520 was asked
+ * to decide whether to keep that or upgrade it, and KEPT it. The reasons, in the
+ * order they carry weight:
+ *
+ * 1. **The direction of the error is opposite here.** Those five faces compile
+ *    READ predicates, where dropping a constraint WIDENS the result set — on an
+ *    RLS read scope that is a permission bypass (#3948), so they must be loud.
+ *    This one evaluates a WRITE-side `check`: an unevaluable condition denies the
+ *    write. Silence costs a diagnostic, not a boundary.
+ * 2. **Callers depend on this being TOTAL.** `plugin-security`'s `explain-engine`
+ *    calls it per record to answer "does THIS row satisfy the filter?", and
+ *    several driver doubles use it as a list filter. Throwing turns a per-record
+ *    verdict into an aborted operation for those callers — a real behaviour
+ *    change on the read/explain path, which is not what a `$icontains` parity PR
+ *    should be deciding.
+ * 3. **The measured defect is gone without it.** The census's actual complaint
+ *    was that a spec-DECLARED operator (`$icontains`) got the silent `false`.
+ *    Every operator in `FILTER_OPERATORS` now has an arm in {@link evalOp}, so
+ *    the silent answer is reachable only for a name the protocol does not
+ *    declare or has retired.
+ *
+ * What stays open, deliberately and on the record: a RETIRED spelling
+ * (`$regex` / `$options`) still gets the silent `false` here while the other five
+ * faces print `RETIRED_FILTER_OPERATORS`' prescription naming `$icontains`. That
+ * is the residue of #4706's second indictment on this face. It is a narrower
+ * question than the one this section answers and it changes an accept/reject
+ * surface, so #6520 left it to the maintainer rather than folding it into a
+ * parity PR.
+ *
  * ONE shape is refused instead of answered (#5240): `{ field: {} }`, a field
  * constrained by zero operators, throws `INVALID_FILTER` rather than returning
  * `false`. It is the shape the four backends could not agree on, so no answer
@@ -26,7 +60,11 @@
  */
 
 import type { FilterCondition } from '@objectstack/spec/data';
-import { nextUtcCalendarDay, utcInstantMs } from '@objectstack/spec/data';
+// [#6520] `asciiCaseInsensitiveContains` is `$icontains`' fold, defined once in
+// the spec and shared by every JS evaluation face — so a `check` evaluated here
+// and the same predicate compiled to SQL by `read-scope-sql.ts` fold the same
+// domain.
+import { nextUtcCalendarDay, utcInstantMs, asciiCaseInsensitiveContains } from '@objectstack/spec/data';
 import { StandardErrorCode } from '@objectstack/spec/api';
 
 /**
@@ -180,6 +218,21 @@ function evalOp(actual: unknown, op: string, raw: unknown, record: Record<string
       return Array.isArray(v) && v.length === 2 && actual != null && v[0] != null && v[1] != null
         && order(actual, v[0], (a, b) => a >= b) && lteBound(actual, v[1]);
     case '$contains': return typeof actual === 'string' && typeof v === 'string' && actual.includes(v);
+    /**
+     * [#6520] `$contains`' case-INSENSITIVE twin, folding ASCII case and nothing
+     * else — `asciiCaseInsensitiveContains` is the spec's shared definition, the
+     * same one `driver-memory`'s matcher and objectql's `having` call.
+     *
+     * NOT `actual.toLowerCase().includes(v.toLowerCase())`, which is the obvious
+     * line and the wrong one: it folds the whole Unicode range, so an RLS
+     * `check` written with `$icontains` would ALLOW a write here that the read
+     * scope's SQL — folding ASCII only — then hides. One predicate, two answers,
+     * across the write gate and the read gate, is the #3948 shape reached
+     * through case folding (#4706 Q1 = A).
+     */
+    case '$icontains':
+      return typeof actual === 'string' && typeof v === 'string' && v !== ''
+        && asciiCaseInsensitiveContains(actual, v);
     case '$notContains': return !(typeof actual === 'string' && typeof v === 'string' && actual.includes(v));
     case '$startsWith': return typeof actual === 'string' && typeof v === 'string' && actual.startsWith(v);
     case '$endsWith': return typeof actual === 'string' && typeof v === 'string' && actual.endsWith(v);
@@ -208,6 +261,18 @@ function evalOp(actual: unknown, op: string, raw: unknown, record: Record<string
      * what `getPath` already returns for both (`undefined`).
      */
     case '$exists': return v === true ? actual != null : actual == null;
+    /**
+     * An operator this evaluator does not know answers `false` — the write is
+     * DENIED — rather than throwing. [#6520] examined this arm and KEPT it; the
+     * reasoning is on this module's header under "the unknown-operator posture",
+     * because it is a decision rather than an omission.
+     *
+     * What #6520 did change is the arm's REACH: every operator `FILTER_OPERATORS`
+     * declares now has a case above it, so this line is only reachable for a
+     * spelling the protocol does not have (a typo) or one it retired
+     * (`$regex` / `$options`). No DECLARED operator is answered silently here
+     * any more, which was the defect the #6993 census measured.
+     */
     default: return false; // unknown operator → fail closed
   }
 }

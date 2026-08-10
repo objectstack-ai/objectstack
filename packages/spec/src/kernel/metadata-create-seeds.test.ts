@@ -61,6 +61,13 @@ describe('metadata create seeds validate against their spec schemas', () => {
       // there is no runtime create surface for a create seed to seed. It is on
       // this list for `job`/`agent`'s reason, not as deferred work.
       'capability',
+      // [#5488] `api` joined them on 2026-08-09 (maintainer ruling
+      // 2026-08-07T16:59Z). It HAD a seed (#5271) and lost it with the runtime
+      // create door: `PUT /api/v1/meta/api/:name` now 403s `NOT_CREATABLE`
+      // before validation, so a minimal create literal has no create to serve.
+      // Endpoints are authored as stack artifacts and shipped via
+      // `publishPackage`. Same category as `capability`, not deferred work.
+      'api',
     ]);
     const seeded = new Set(listMetadataCreateSeedTypes());
     const missing = listMetadataTypeSchemaTypes().filter((t) => !seeded.has(t) && !KNOWN_UNSEEDED.has(t));

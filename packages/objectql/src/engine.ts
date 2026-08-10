@@ -1737,12 +1737,16 @@ export class ObjectQL implements IObjectQLEngine {
   ): HookContext[] {
     const schema = this._registry.getObject(object);
     const options = (batchCtx.input as { options?: unknown } | undefined)?.options;
-    return rows.map((row) => ({
+    return rows.map((row, index) => ({
       ...batchCtx,
       event,
       input: payload
         ? { id: (row as { id?: unknown }).id, data: { ...payload }, options }
         : { id: (row as { id?: unknown }).id, options },
+      // [#6966] `mode` and `scope` ride over from the batch context; only the
+      // position differs. Spreading `batchCtx` would carry index 0 onto every
+      // row, which is the one member a per-row consumer keys "do this once" on.
+      dispatch: { ...(batchCtx.dispatch as object), index } as HookContext['dispatch'],
       previous: coerceBooleanFields(schema as any, row as any),
       result: payload
         ? coerceBooleanFields(schema as any, { ...row, ...payload } as any)
@@ -1811,12 +1815,19 @@ export class ObjectQL implements IObjectQLEngine {
   ): Promise<void> {
     const schema = this._registry.getObject(object);
     const carriesPayload = event === 'beforeUpdate';
-    for (const row of rows) {
+    for (let index = 0; index < rows.length; index++) {
+      const row = rows[index];
       const rowId = (row as { id?: unknown }).id;
       const options = (batchCtx.input as { options?: unknown }).options;
       const rowCtx = {
         ...batchCtx,
         event,
+        // [#6966] See `buildPerRowAfterContexts` — same rule. The `scope`
+        // identity carried over from `batchCtx` is what lets a `before*`
+        // handler leave something an `after*` handler can still find: a per-row
+        // context is a fresh object, so a stash written on the context itself
+        // dies with the row that held it.
+        dispatch: { ...(batchCtx.dispatch as object), index } as HookContext['dispatch'],
         // D3: THE payload, read fresh so a previous row's REPLACEMENT is what
         // this row sees. Never a copy.
         input: carriesPayload
@@ -6386,11 +6397,19 @@ export class ObjectQL implements IObjectQLEngine {
       // consumer built for the single shape — the flat-input proxy read
       // `undefined`s, declarative `condition`s evaluated against an array,
       // audit rows and flow-trigger contexts came out mangled (#2922).
+      //
+      // [#6966] Which is exactly why the fan-out has to be STATED rather than
+      // inferred: the shape is deliberately identical, so nothing about a
+      // context tells a handler whether it is one row of a batch. The scratch
+      // is created once per CALL and shared by every row's context, before and
+      // after — see `HookContext.dispatch`.
+      const insertScope: Record<string, unknown> = {};
       const rowHookContexts: HookContext[] = (isBatch ? (defaultedData as any[]) : [defaultedData]).map(
-        (row) => ({
+        (row, rowIndex) => ({
           object,
           event: 'beforeInsert',
           input: { data: row, options: opCtx.options },
+          dispatch: { mode: isBatch ? 'per-row' : 'record', index: rowIndex, scope: insertScope },
           session: this.buildSession(opCtx.context),
           provenance: this.buildProvenance(opCtx.context),
           user: this.buildUser(opCtx.context),
@@ -6847,7 +6866,8 @@ export class ObjectQL implements IObjectQLEngine {
      };
 
      // [#3407] Structured strip observability. The readonly/readonlyWhen strips
-     // below are LEGAL semantics (the write still succeeds without the locked
+     // below — and, since #6437, the primary-key strip at each branch's head —
+     // are LEGAL semantics (the write still succeeds without the dropped
      // fields), but until now the only trace was a server-side logger warn — a
      // caller that reports success per requested field (a flow's `update_record`
      // step) saw a clean success while the DB value never changed. When the
@@ -6878,10 +6898,19 @@ export class ObjectQL implements IObjectQLEngine {
      //    would otherwise report a partial success for a write that never
      //    happened. Quiet-and-observable or loud — one per call.
      //
-     // Drops accumulate across BOTH passes and throw ONCE (below, after the
+     // Drops accumulate across EVERY pass and throw ONCE (below, after the
      // static strip) so the caller gets every offending field in one error
      // instead of a round-trip per field. The throw lands before any driver
      // call, so nothing is written.
+     //
+     // [#6437] Adding a reason therefore adds a REFUSAL, and that is the
+     // contract rather than a side effect: `strictReadonlyWrites` is documented
+     // as covering "every drop `onFieldsDropped` reports" — a set DERIVED from
+     // what this helper reports, never an enumeration frozen at #5126. So the
+     // `primary_key` strip is refused under strict for exactly the reason the
+     // read-only ones are (don't half-apply my payload), and the refusal error
+     // composes its wording from `drops` so it never calls a stripped `id`
+     // read-only. Route a new strip through here ⇒ own both halves.
      const onFieldsDropped = options?.onFieldsDropped;
      const strictReadonlyWrites = options?.strictReadonlyWrites === true;
      const strictDrops: DroppedFieldsEvent[] = [];
@@ -6958,6 +6987,19 @@ export class ObjectQL implements IObjectQLEngine {
            // before anything is read.
            throw new Error(ENGINE_UPDATE_REJECT_MESSAGE);
        }
+
+       // [#6966] The ladder verdict, stated on the contract. Bound HERE and
+       // nowhere else: this is the one point that knows which branch the write
+       // takes, and re-deriving it downstream is what `asScalarId` stays
+       // unexported to prevent (#4434 / #4550). The batch context carries index
+       // 0; `dispatchPerRowBeforeHooks` and `buildPerRowAfterContexts` override
+       // only `index`, so `mode` and — load-bearing — the `scope` IDENTITY are
+       // shared by every dispatch of this call, in both phases.
+       hookContext.dispatch = {
+           mode: isPredicatePath ? 'per-row' : 'record',
+           index: 0,
+           scope: {},
+       };
 
        const updateSchema = this._registry.getObject(object);
        // Pre-update snapshot. Exposed to hooks via `hookContext.previous` in
@@ -7159,13 +7201,14 @@ export class ObjectQL implements IObjectQLEngine {
                //  - Per-driver skip lists (route C) are the #5240 / #4434 shape
                //    of five backends answering one question five ways.
                //
-               // Same choice as #6262 on the reporting seam: NOT routed through
-               // `reportDroppedFields`, because `DroppedFieldsEvent.reason` is a
-               // closed enum over the two READ-ONLY strips (`readonly` /
-               // `readonly_when`, #3407/#3042) and this drop is neither;
-               // widening that vocabulary is a `packages/spec` change with its
-               // own consumers (filed separately as #6437). The `warn` is the
-               // #4632 duty meanwhile — the caller is told the write succeeded.
+               // [#6437] REPORTED, on the same seam as the read-only strips.
+               // The vocabulary widened (`DroppedFieldsEvent.reason` gained
+               // `primary_key`), so the strip no longer has to choose between
+               // silence and a `reason` that lies — the choice #6262 / #6435
+               // were right to refuse. The `warn` below STAYS: it carries the
+               // remedy prose, and `onFieldsDropped` is opt-in, so a caller
+               // that registered no listener would otherwise lose the #4632
+               // signal entirely.
                const preIdById = hookContext.input.data as Record<string, unknown> | null | undefined;
                if (
                    preIdById &&
@@ -7184,6 +7227,7 @@ export class ObjectQL implements IObjectQLEngine {
                        `SELECT rows by an id set, put it in \`where\` ` +
                        `(\`{ where: { id: { $in: [...] } }, multi: true }\`).`,
                    );
+                   reportDroppedFields(preIdById, hookContext.input.data as Record<string, unknown>, 'primary_key');
                }
                await this.encryptSecretFields(object, hookContext.input.data as Record<string, unknown>, opCtx.context, hookContext.input.options);
                normalizeMultiValueFields(updateSchema, hookContext.input.data as Record<string, unknown>);
@@ -7349,14 +7393,16 @@ export class ObjectQL implements IObjectQLEngine {
                // `data.id` outranks both `where` and `multi` and never gets
                // here, and N rows cannot share one primary key anyway.
                //
-               // Deliberately NOT reported through `reportDroppedFields`:
-               // `DroppedFieldsEvent.reason` is a closed enum over the two
-               // READ-ONLY strips (`readonly` / `readonly_when`, #3407/#3042),
-               // and this drop is neither. Widening that vocabulary is a
-               // `packages/spec` change with its own consumers (batch + REST
-               // protocol responses), not a rider on an engine fix. The `warn`
-               // is the #4632 duty in the meantime: name the consequence and
-               // the remedy, since the caller is told the write succeeded.
+               // [#6437] REPORTED through `reportDroppedFields` under the
+               // `primary_key` reason. `DroppedFieldsEvent.reason` was a closed
+               // enum over the two READ-ONLY strips when this block landed, and
+               // this drop is neither — so PR #6433 emitted only the `warn`
+               // rather than force-fit an arm that would have lied. #6437
+               // widened the vocabulary instead (spec, plus the batch/REST
+               // protocol responses that carry it transitively), which is what
+               // lets the seam report it truthfully now. The `warn` STAYS: it
+               // carries the remedy prose, and a caller that registered no
+               // listener still needs the #4632 signal.
                const preIdMulti = hookContext.input.data as Record<string, unknown> | null | undefined;
                if (preIdMulti && typeof preIdMulti === 'object' && Object.prototype.hasOwnProperty.call(preIdMulti, 'id')) {
                    const { id: notAnId, ...withoutId } = preIdMulti;
@@ -7369,6 +7415,7 @@ export class ObjectQL implements IObjectQLEngine {
                        `scalar id (\`update(object, { id, ...fields })\` or \`{ where: { id } }\`) instead of ` +
                        `options.multi; to SELECT rows by an id set, put it in \`where\` (\`{ where: { id: { $in: [...] } }, multi: true }\`).`,
                    );
+                   reportDroppedFields(preIdMulti, hookContext.input.data as Record<string, unknown>, 'primary_key');
                }
                await this.encryptSecretFields(object, hookContext.input.data as Record<string, unknown>, opCtx.context, hookContext.input.options);
                normalizeMultiValueFields(updateSchema, hookContext.input.data as Record<string, unknown>);
@@ -7890,6 +7937,13 @@ export class ObjectQL implements IObjectQLEngine {
         // the id; with the ladder resolved first there is no such conversion.
         throw new Error(ENGINE_DELETE_REJECT_MESSAGE);
       }
+
+      // [#6966] See update()'s twin — same rule, same single binding point.
+      hookContext.dispatch = {
+        mode: isPredicatePath ? 'per-row' : 'record',
+        index: 0,
+        scope: {},
+      };
 
       if (isByIdDelete) {
         if (wantsPreImage) {

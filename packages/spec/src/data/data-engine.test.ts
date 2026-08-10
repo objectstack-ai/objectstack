@@ -23,6 +23,7 @@ import {
   DataEngineExecuteRequestSchema,
   DataEngineVectorFindRequestSchema,
   DataEngineRequestSchema,
+  DroppedFieldsEventSchema,
 } from './data-engine.zod';
 
 describe('DataEngineFilterSchema', () => {
@@ -1018,4 +1019,38 @@ describe('Integration Tests', () => {
     expect(aggregateRequest.query.aggregations).toHaveLength(3);
   });
 
+});
+
+describe('DroppedFieldsEventSchema.reason (#3407, widened by #6437)', () => {
+  // The ACCEPTANCE surface: this enum is what validates on the protocol
+  // responses that carry `droppedFields` (`api/batch.zod.ts`,
+  // `api/protocol.zod.ts`), so the accepted set is the contract, not a label.
+  it('accepts all three reasons the write path can report', () => {
+    for (const reason of ['readonly', 'readonly_when', 'primary_key'] as const) {
+      const parsed = DroppedFieldsEventSchema.safeParse({
+        object: 'task', fields: ['id'], reason,
+      });
+      expect(parsed.success, `reason ${reason} should be accepted`).toBe(true);
+    }
+  });
+
+  it('primary_key is the value the engine reports for the ruled-non-id strip (#6262/#6433, #6435)', () => {
+    const parsed = DroppedFieldsEventSchema.parse({
+      object: 'task', fields: ['id'], reason: 'primary_key',
+    });
+    expect(parsed).toEqual({ object: 'task', fields: ['id'], reason: 'primary_key' });
+  });
+
+  it('still REJECTS a reason outside the vocabulary — widening is deliberate, not open-ended', () => {
+    // The enum grows by decision (a new legal strip class), never by a
+    // producer inventing a string. Rejection is asserted on the issue's own
+    // `code` and `path`, not on truthiness of `success`.
+    const parsed = DroppedFieldsEventSchema.safeParse({
+      object: 'task', fields: ['id'], reason: 'dispatch_ruled',
+    });
+    expect(parsed.success).toBe(false);
+    const issue = parsed.success ? undefined : parsed.error.issues[0];
+    expect(issue?.code).toBe('invalid_value');
+    expect(issue?.path).toEqual(['reason']);
+  });
 });

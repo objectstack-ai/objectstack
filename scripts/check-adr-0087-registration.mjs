@@ -70,6 +70,36 @@
 // the PR diff, `git grep`, this gate's log, and `--list` -- while rendering as
 // nothing in a published changelog. It is not hidden from anyone who reviews.
 //
+// ## Which diff rows are judged (#7045)
+//
+// "Newly ADDS (or newly turns breaking)" is a statement about diff STATUS, and
+// the enumeration has to name every status a changeset can arrive under:
+//
+//   A  breaking at head                              -> judged (a new declaration)
+//   M  breaking at head, NOT breaking at base        -> judged (turned breaking)
+//   M  breaking at head, already breaking at base    -> skipped (inherited stock)
+//   R  breaking at head, NOT breaking at the OLD path-> judged (renamed into it)
+//   R  breaking at head, already breaking there      -> skipped (stock, moved)
+//
+// The last two rows arrived late. Git's rename detection is on by default
+// (`diff.renames`, since git 2.9), so a changeset renamed AND turned breaking in
+// one commit reports as `R`, and this file passed `--diff-filter=AM` until #7045
+// -- which drops the `R` row wholesale. A declared-breaking changeset arriving
+// that way carried no ADR-0087 disposition and was never asked for one, which is
+// #6148 again through a door nobody had checked. Measured on git 2.43.0, renaming
+// `.changeset/old.md` to `.changeset/new.md` while adding the breaking declaration
+// reports `R077<TAB>.changeset/old.md<TAB>.changeset/new.md`, and the same diff
+// under `AM` prints nothing at all.
+//
+// The fix is `AMR` plus reading the base side at the OLD path -- field 2 of an
+// `R` row, not field 3. It costs nothing: a PURE move of an already-breaking
+// stock changeset compares breaking-at-base and stays skipped, so no author is
+// asked to re-dispose of somebody else's declaration for renaming a file.
+// `check-changeset-no-major.mjs` made the same one-letter correction first
+// (#7005 / PR #7048); this gate and `check-empty-changeset.mjs` followed in
+// #7045, separately, because each of the three owns its own fixtures and its own
+// messages.
+//
 // ## Why the escape hatch is the MAJORITY path, and why that is fine (measured)
 //
 // Measured over the last 400 first-parent commits on main: 32 newly-added
@@ -187,10 +217,18 @@ const isChangesetFile = (p) => p.startsWith('.changeset/') && p.endsWith('.md') 
 /**
  * Split a changeset into its frontmatter bump entries and its body.
  *
- * The entry regex is deliberately the SAME shape `check-changeset-no-major.mjs`
- * and `check-empty-changeset.mjs` use. Three gates reading one block must agree on
- * what counts as a declaration, or one of them is judging a different file than it
- * appears to.
+ * The entry regex is deliberately the SAME shape `check-changeset-no-major.mjs`,
+ * `check-empty-changeset.mjs` and `objectui-changeset-digest.mjs` use. Four
+ * readers of one block must agree on what counts as a declaration, or one of them
+ * is judging a different file than it appears to. `check-empty-changeset.mjs`'s
+ * self-test asserts that agreement byte-for-byte across all four (#7004).
+ *
+ * This parser's stake in #7004 is signal (1) of `breakingDeclaration` below: a
+ * `major` carrying a trailing YAML comment (or a quoted bump value) used to read
+ * as no bump at all, so the frontmatter signal went missing and only signals (2)
+ * `**BREAKING` and (3) the `!` summary could still carry the declaration. A
+ * changeset using (1) alone — which the ADR-0087 worklist treats as a full
+ * declaration — was invisible to this gate.
  *
  * @param {string} text
  * @returns {{ fenced: boolean, bumps: {pkg: string, bump: string}[], body: string }}
@@ -205,7 +243,10 @@ export function parseChangeset(text) {
   let end = -1;
   for (let j = i + 1; j < lines.length; j++) {
     if (lines[j].trim() === '---') { end = j; break; }
-    const m = /^\s*["']?([^"':]+)["']?\s*:\s*([A-Za-z]+)\s*$/.exec(lines[j]);
+    if (/^\s*#/.test(lines[j])) continue; // a whole-line YAML comment declares nothing
+    // "<name>": <bump>   |   '<name>': <bump>   |   <name>: <bump>
+    // with an optionally quoted bump value and an optional trailing ` # comment`.
+    const m = /^\s*["']?([^"':]+)["']?\s*:\s*["']?([A-Za-z]+)["']?(?:\s+#.*)?\s*$/.exec(lines[j]);
     if (m) bumps.push({ pkg: m[1].trim(), bump: m[2].trim().toLowerCase() });
   }
   if (end < 0) return { fenced: false, bumps: [], body: text };
@@ -259,15 +300,23 @@ export function breakingDeclaration(parsed) {
 //
 // ## What replaced it
 //
-// Four branches, unioned, each ADDED without touching the ones before it, so the
-// detector is a strict SUPERSET at every step: nothing that used to be refused can
-// now slip through, and the `no-migration-prescription` exemption can only have got
-// harder to claim, never easier.
+// Four branches, unioned. Branches 2-4 were each ADDED without touching the ones
+// before it, so across #6419 / #6497 / #6559 the detector was a strict SUPERSET at
+// every step: nothing that used to be refused could slip through, and the
+// `no-migration-prescription` exemption could only get harder to claim.
 //
-//   1. THE LABEL CONVENTION -- `FROM`/`TO` used as a section label, table header
+// ⚠️ That is no longer true of the WHOLE detector, and saying so is the point:
+// #6967 NARROWED branch 1, because a superset-only detector can only ever add false
+// positives, and branch 1 had one that hard-blocked its author (see the #6967
+// section below for what left and what was measured). The superset property still
+// holds among branches 2-4 and is still structural there.
+//
+//   1. THE LABEL CONVENTION -- `FROM`/`TO` USED as a section label, table header
 //      or code comment. Measured: this is a genuine house convention, not one
 //      changeset's quirk (`## FROM → TO` x16, `FROM → TO:` x15, `**FROM → TO**`
-//      x11, `Migration (FROM → TO):` x4 in the current stock).
+//      x11, `Migration (FROM → TO):` x4 in the current stock). Since #6967 the
+//      word USED is load-bearing: an occurrence that is merely MENTIONED --
+//      `carries its FROM → TO guide` -- evidences nothing (see below).
 //
 //   2. A FRAMING-ANCHORED REWRITE -- a REWRITE (`X → Y` where both sides are
 //      code-ish: a backticked span, or a dotted/slashed identifier path) that
@@ -436,6 +485,71 @@ export function breakingDeclaration(parsed) {
 //     different criterion (2+ replacements in code spans on a line with an
 //     imperative verb), whose false-positive surface is intuitively much larger:
 //     any changeset enumerating API usage would hit it. Falsify before implementing.
+//
+// ## #6967 -- the first NARROWING, and why the direction reversed
+//
+// #6419, #6497 and #6559 all fixed UNDER-matching, and each is written above as a
+// strict superset. #6967 is the mirror image: branch 1 read a REFERENCE to a
+// prescription as a prescription. The specimen is `.changeset/v17-rc-anchor.md`,
+// the v17 version anchor, whose only migration text is
+//
+//     Migration: each breaking change's own changeset carries its FROM → TO guide
+//     (grep the CHANGELOG for `!:` entries)
+//
+// It retires nothing; it says where the prescriptions live. And unlike a
+// false-positive in a reporting tool, this one HARD-BLOCKS: all four dispositions
+// were closed to its author at once -- the catch-all refused by the contradiction
+// check below, `registered` and `already-registered` with no entry to name, and
+// `unpublished` false because `@objectstack/spec` publishes. The author's only
+// remaining move was to reword a truthful sentence, which is a gate editing prose.
+//
+// The rule: an occurrence of the placeholder counts when it is USED as a label --
+// nothing but markup, a sentence boundary or a framing word immediately before it
+// -- or, when a word DOES govern it, when the body independently carries a concrete
+// rewrite (`labelPositioned` / `carriesConcreteRewrite`). Every occurrence is now
+// scanned rather than only the first, because a body can cite the convention in one
+// paragraph and use it in the next.
+//
+// Measured over the 1578-changeset stock (264 declared-breaking), old detector vs
+// new: 169 hits / 126 breaking -> 167 hits / 125 breaking. TWO changesets leave, ONE
+// of them declared-breaking, and both are mentions on inspection:
+// `v17-rc-anchor.md` (the specimen) and `direct-mount-follows-apipath.md`
+// (`唯一的 FROM → TO 落在部署方自己的代理配置上` -- in a paragraph that says in the same
+// breath that ADR-0087 has nothing to register). ZERO changesets newly flagged and
+// ZERO changed branch, so no arm added by #6419 / #6497 / #6559 moved at all.
+//
+// A THIRD count moved and is reported because it is what an author argues with: 50
+// hits changed their EVIDENCE LINE, 48 of them from an EMPTY string. Branch 1's
+// first alternative may consume the newline ENDING the previous line as its
+// `[^A-Za-z]` delimiter, and the old code derived the line number from the match's
+// start -- so every placeholder opening a line was evidenced by the line above it,
+// blank whenever a paragraph break sat there. `--audit-stock` had been printing
+// `prescription (from-to-label):` with nothing after the colon for those rows.
+//
+// ⚠️ The WIDER narrowing was written first and REJECTED on measurement: "the prefix
+// contains no letters at all" reads a label that follows a finished sentence on the
+// same line (`it. FROM → TO:`) as prose, and cost FIVE real prescriptions,
+// `app-dead-authoring-keys.md` (`**Removed keys and their prescriptions
+// (FROM → TO):**`, declared-breaking) among them. Governance is ONE character; "a
+// letter appears somewhere to the left" is a whole clause. P42-P45 pin the
+// difference.
+//
+// ⚠️ Also rejected, and it is the card's own first suggestion (#6967): requiring the
+// framed region to contain a concrete rewrite pair, full stop. Measured before it
+// was written -- 97 of the 133 placeholder-bearing changesets carry NO arrow between
+// two coded operands anywhere, and most are ordinary prescriptions
+// (`FROM → TO: delete the block. \`os migrate meta --from 16\` removes it
+// automatically`). The imperative-sentence prescription named in the residue list
+// above is exactly that shape. So corroboration is a FALLBACK for the ambiguous
+// case, never the criterion.
+//
+// The residual blind spot, stated rather than hidden: prose here is HARD-WRAPPED at
+// ~80 columns, so a mention that happens to wrap onto a fresh line puts its
+// placeholder at column 0 with its governing word on the line above, and reads as a
+// label. `changelog-ships-in-tarball.md` is that shape (`…carry their\nFROM → TO
+// migration because…`) and stays a false positive. It declares no breaking change,
+// so it is never judged; a cross-line prefix was not attempted because a wrapped
+// LABEL is just as common and nothing distinguishes the two from the line above.
 //
 // Anyone widening this later should start with the first two, with these numbers to
 // beat, and should re-measure the false-positive surface FIRST -- as #6419, #6497
@@ -631,9 +745,159 @@ function headerFramesRewrite(line) {
 export const MIGRATION_FRAMING_RE =
   /迁移|改写|改名|升级|\bmigrat(?:e|es|ed|ing|ion|ions)\b|\brename[sd]?\b|\brewrit(?:e|es|ten|ing)\b|\bupgrade[sd]?\b/i;
 
-/** The `FROM`/`TO` label convention -- branch 1, unchanged from #6148. */
+/** The `FROM`/`TO` label convention -- branch 1's pattern, unchanged from #6148. */
 const FROM_TO_LABEL_RE =
   /(?:^|[^A-Za-z])FROM(?:\s|\*|`|\)|:)[^\n]{0,60}?(?:→|->|—>)[^\n]{0,60}?TO(?![A-Za-z])|^\s*\|?\s*\**FROM\**\s*(?:\(|\|)|^\s*\/\/\s*FROM\b|迁移[^\n]{0,12}FROM\s*(?:→|->)\s*TO/m;
+
+/**
+ * The same pattern, scanned over EVERY occurrence rather than the first (#6967).
+ *
+ * `exec` on the stateless copy answers "where is the first placeholder", which was
+ * enough while every occurrence counted. Now that an occurrence can be a MENTION,
+ * the first one is no longer the whole answer -- a body may cite the convention in
+ * one paragraph and use it as a label in the next
+ * (`tool-requires-confirmation-removed.md` does exactly that), and the label is the
+ * one that evidences a prescription. Kept as a separate constant because a `g`
+ * regex carries `lastIndex` state and the stateless copy above is used inside
+ * conditions where that state would be a bug.
+ */
+const FROM_TO_LABEL_G = new RegExp(FROM_TO_LABEL_RE.source, 'gm');
+
+/**
+ * Does an ordinary WORD directly govern the token that follows this prefix?
+ *
+ * The two spellings are not symmetric, and the asymmetry is the corpus's rather
+ * than a simplification. English words are space-delimited, so a governing word
+ * leaves an ASCII LETTER as the last character before the token
+ * (`carries its ⟦FROM⟧`). Chinese is written without those spaces, but this repo's
+ * prose puts one before every Latin token as a matter of typography -- so an
+ * adjacent CJK character says nothing at all, and the governing signal is the
+ * ATTRIBUTIVE PARTICLE `的`: `唯一的 ⟦FROM → TO⟧ 落在…` ("the only FROM → TO lands
+ * on…"). Reading ANY CJK character as governance was measured first and refused:
+ * it turns `匹配语义 FROM → TO:` -- a noun-phrase label with a rewrite table under
+ * it -- into a mention.
+ */
+const GOVERNING_WORD_RE = /(?:[A-Za-z]|的)$/;
+
+/**
+ * A migration-framing word sitting immediately before the placeholder FRAMES it; it
+ * does not govern it (`Migration FROM → TO`, `迁移 FROM → TO`). Anchored at the end
+ * because that is the only position where the distinction can arise.
+ */
+const FRAMING_TAIL_RE =
+  /(?:迁移|改写|改名|升级|migrat(?:e|es|ed|ing|ion|ions)|rename[sd]?|rewrit(?:e|es|ten|ing)|upgrade[sd]?)$/i;
+
+/**
+ * The two halves of a VERTICAL `FROM`/`TO` pair -- the placeholder spelled as two
+ * consecutive blocks rather than across one arrow. Each must OPEN its line (past a
+ * comment marker, bullet or emphasis) and be closed by `:`, `—`, whitespace or the
+ * end of the line, so `FROMAGE` and a sentence beginning "To be clear" cannot open
+ * one. Used only by `carriesConcreteRewrite`, which grants and never refuses.
+ */
+const VERTICAL_FROM_RE = /^\s{0,3}(?:(?:\/\/|#|-|\*|>)\s*)*\**FROM\**\s*(?::|—|-|$|\s)/;
+const VERTICAL_TO_RE = /^\s{0,3}(?:(?:\/\/|#|-|\*|>)\s*)*\**TO\**\s*(?::|—|-|$|\s)/;
+
+/**
+ * Is this placeholder occurrence USED as the convention's label, or merely
+ * MENTIONED inside a running sentence? (#6967)
+ *
+ * `FROM → TO` is a TEMPLATE PLACEHOLDER, and branch 1 is the only branch that
+ * accepts a bare-word arrow at all -- every other branch demands code-ish operands,
+ * because "an arrow is not a prescription" (see above). What buys branch 1 that
+ * exemption is the CONVENTION: in this repo the two uppercase words open a
+ * prescription block. That is a claim about how the token is USED, and a token can
+ * also be MENTIONED -- talked about rather than deployed:
+ *
+ *     Migration: each breaking change's own changeset carries its FROM → TO guide
+ *
+ * That is `.changeset/v17-rc-anchor.md`, the v17 version anchor, which retires
+ * nothing and prescribes nothing; it says where the prescriptions live. Read as a
+ * prescription it left its author with no legal disposition at all (#6967): the
+ * catch-all is refused by the contradiction check, `registered` /
+ * `already-registered` have no entry to name, and `@objectstack/spec` is published
+ * so `unpublished` is false. A false positive here does not merely misreport -- it
+ * hard-blocks a PR, which is why this direction is worth a rule of its own.
+ *
+ * The distinction is GRAMMATICAL, and it is read off the one character that
+ * separates the two readings: whether an ordinary WORD directly governs the
+ * placeholder. A label opens its segment, so what stands immediately before it is
+ * markup, a sentence boundary or a framing word -- `**FROM → TO`, `## FROM → TO`,
+ * `- FROM …`, `| FROM |`, `// FROM`, `Migration (FROM → TO)`,
+ * `### Migration — FROM → TO`, `迁移:FROM → TO`, `it. FROM → TO:`,
+ * `Corrected names, FROM → TO`. A mention is the HEAD OF A NOUN PHRASE and has a
+ * word attached to it: `carries its FROM → TO guide`, `carry their FROM → TO
+ * migration because …`, `唯一的 FROM → TO 落在部署方自己的代理配置上`.
+ *
+ * ⚠️ The WIDER rule -- "no letters anywhere in the prefix" -- was written first and
+ * measured before it was believed, which is what killed it. It reads a label that
+ * merely follows a finished sentence on the same line as prose, and over the stock
+ * it took FIVE real prescriptions with it, `app-dead-authoring-keys.md`
+ * (`**Removed keys and their prescriptions (FROM → TO):**`, declared-breaking)
+ * among them. Governance is one character; "a letter appears somewhere to the left"
+ * is a whole clause, and the two are not the same claim.
+ *
+ * A markdown HEADING is a label by construction, whatever words it carries, so it
+ * short-circuits: `## 升级:翻译包键的 FROM → TO` is a title and not a sentence, and it
+ * ends in the very particle the Chinese arm reads as governance.
+ *
+ * ⚠️ Prose in this repo is HARD-WRAPPED at ~80 columns, so "starts its line" is NOT
+ * the test and never could be -- `carry their\nFROM → TO migration` puts a mention
+ * at column 0. The prefix examined is the prefix WITHIN the line, which is why a
+ * mention wrapped onto a fresh line is the one shape this rule cannot see. Stated
+ * rather than hidden: `changelog-ships-in-tarball.md` is exactly that shape and
+ * stays a false positive (it declares no breaking change, so it is never judged).
+ *
+ * @param {string} line the line the `FROM` token sits on
+ * @param {number} col  its column within that line
+ */
+function labelPositioned(line, col) {
+  if (/^\s{0,3}#{1,6}\s/.test(line)) return true;
+  const prefix = line.slice(0, col).replace(/\s+$/, '').replace(FRAMING_TAIL_RE, '');
+  return !GOVERNING_WORD_RE.test(prefix);
+}
+
+/**
+ * Does the body carry a CONCRETE rewrite anywhere -- an arrow between two code-ish
+ * operands, a table row reading as a rewrite, or a FROM block answered by a TO
+ * block? (#6967)
+ *
+ * This is the SECOND way a placeholder occurrence qualifies, and it exists so the
+ * positional rule above cannot invent false negatives. A prose-governed sentence is
+ * ambiguous on its own -- `the FROM → TO mappings baked into it include:`
+ * (`unknown-key-strictness-tier-a.md`) is governed by `the` and is a real
+ * prescription -- so when the body independently SHOWS the goods, the placeholder is
+ * taken at face value wherever it sits.
+ *
+ * The VERTICAL pair is here because it is how #6048's own changeset was written and
+ * how several since have been: the two words head consecutive lines instead of
+ * flanking an arrow, in a code fence (`// FROM` … `// TO`) or as a bullet pair
+ * (`- **FROM:** …` / `- **TO:** …`, `tool-requires-confirmation-removed.md`).
+ * `FROM_TO_LABEL_RE` cannot see that shape -- both its arrow alternatives need one
+ * line -- so without this arm a changeset whose ONLY machine-readable prescription
+ * is vertical would rest entirely on whatever prose happened to mention the
+ * convention, which is precisely the accident #6967 is about.
+ *
+ * Note the direction: this predicate can only ever ADD a hit back, never take one
+ * away, so the looseness that would be unacceptable in a trigger (`REWRITE_RE` alone
+ * fires on 480 changesets, per the measurements above) is harmless here. It is
+ * consulted only for bodies that ALREADY carry the placeholder -- 133 changesets in
+ * the current stock -- and only to grant, never to refuse.
+ *
+ * @param {string} body
+ */
+function carriesConcreteRewrite(body) {
+  let inTable = false;
+  let sawFromBlock = false;
+  for (const line of body.split(/\r?\n/)) {
+    if (REWRITE_RE.test(line)) return true;
+    if (VERTICAL_FROM_RE.test(line)) sawFromBlock = true;
+    else if (sawFromBlock && VERTICAL_TO_RE.test(line)) return true;
+    if (TABLE_DELIM_RE.test(line)) { inTable = true; continue; }
+    if (!TABLE_ROW_RE.test(line)) { inTable = false; continue; }
+    if (inTable && isRewriteRow(line)) return true;
+  }
+  return false;
+}
 
 /**
  * The prescription this changeset carries, with the LINE that evidences it, or
@@ -653,10 +917,27 @@ const FROM_TO_LABEL_RE =
  * @returns {{ branch: 'from-to-label' | 'framed-line' | 'framed-section' | 'framed-table' | 'header-framed-table', line: string } | null}
  */
 export function findMigrationPrescription(body) {
-  const label = FROM_TO_LABEL_RE.exec(body);
-  if (label) {
-    const at = body.slice(0, label.index).split(/\r?\n/).length - 1;
-    return { branch: 'from-to-label', line: (body.split(/\r?\n/)[at] ?? label[0]).trim() };
+  const lines = body.split(/\r?\n/);
+  // Branch 1. Every placeholder occurrence is considered, and each one has to be
+  // either LABEL-POSITIONED or corroborated by a concrete rewrite elsewhere in the
+  // body (#6967) -- a placeholder that is merely talked about evidences nothing.
+  // The corroboration is computed at most once, and only if some occurrence needs it.
+  let corroborated = null;
+  FROM_TO_LABEL_G.lastIndex = 0;
+  for (let m = FROM_TO_LABEL_G.exec(body); m; m = FROM_TO_LABEL_G.exec(body)) {
+    // The match may open with the delimiter `[^A-Za-z]` consumed before `FROM`
+    // (frequently the NEWLINE ending the previous line), so the token's own offset
+    // is what locates it. Taking the match's start instead reported the PRECEDING
+    // line as evidence whenever that delimiter was a newline -- two stock rows
+    // audited with a blank evidence line for exactly that reason.
+    const at = m.index + m[0].indexOf('FROM');
+    const lineStart = body.lastIndexOf('\n', at - 1) + 1;
+    const lineNo = body.slice(0, at).split(/\r?\n/).length - 1;
+    if (!labelPositioned(lines[lineNo] ?? '', at - lineStart)) {
+      if (corroborated === null) corroborated = carriesConcreteRewrite(body);
+      if (!corroborated) continue;
+    }
+    return { branch: 'from-to-label', line: (lines[lineNo] ?? m[0]).trim() };
   }
 
   // A heading carrying migration framing opens a framed region that runs to the
@@ -681,7 +962,7 @@ export function findMigrationPrescription(body) {
   let headerTable = null;
   let headerFramed = false;
   let prev = '';
-  for (const line of body.split(/\r?\n/)) {
+  for (const line of lines) {
     if (/^\s{0,3}#{1,6}\s/.test(line)) {
       framedSection = MIGRATION_FRAMING_RE.test(line);
       inTable = false; // a table cannot span a heading
@@ -1053,14 +1334,24 @@ export function scan({ cwd, base, head = 'HEAD' }) {
   let pkgsCache = null;
   const packages = () => (pkgsCache ??= workspacePackagesAt(head, cwd));
 
-  const out = git(['diff', '--name-status', '--diff-filter=AM', from, head, '--', '.changeset/*.md'], cwd);
+  // `AMR`, not `AM`: see "Which diff rows are judged" in the header (#7045). An
+  // `R` row is how a declared-breaking changeset used to arrive unseen.
+  const out = git(['diff', '--name-status', '--diff-filter=AMR', from, head, '--', '.changeset/*.md'], cwd);
   const problems = [];
   const judged = [];
   const skipped = [];
 
   for (const line of out.split('\n')) {
     if (!line.trim()) continue;
-    const [status, file] = line.split('\t');
+    const fields = line.split('\t');
+    // `R` is `R<score>\t<old path>\t<new path>`; `A` and `M` are `<status>\t<path>`.
+    // One character wide, because the `R` letter carries a similarity score and
+    // `=== 'R'` against the whole field would never match.
+    const status = fields[0][0];
+    const file = status === 'R' ? fields[2] : fields[1];
+    // The path the branch-point side is READ at: the same one for `M`, the
+    // PRE-RENAME one for `R`. Field 2 either way.
+    const basePath = fields[1];
     if (!file || !isChangesetFile(file)) continue;
 
     const headText = showOrNull(head, file, cwd);
@@ -1070,11 +1361,23 @@ export function scan({ cwd, base, head = 'HEAD' }) {
     const decl = breakingDeclaration(parsed);
     if (!decl.breaking) { skipped.push(file); continue; }
 
-    // A changeset that was ALREADY breaking at base is inherited, not introduced.
-    // Same philosophy as check-empty-changeset: this gate judges what a PR brings,
-    // never the stock it forked from.
-    if (status === 'M') {
-      const baseText = showOrNull(from, file, cwd);
+    // A changeset that was ALREADY breaking at the branch point is inherited, not
+    // introduced. Same philosophy as check-empty-changeset: this gate judges what a
+    // PR brings, never the stock it forked from.
+    //
+    // `R` is read at `basePath` -- its pre-rename name -- which is the only thing
+    // the rename status changes here (#7045). The statuses are spelled out rather
+    // than written `!== 'A'` so that widening the filter again some day cannot
+    // silently grant an unlisted status the inheritance exemption; an unknown
+    // status falls through and gets JUDGED, which is the safe direction.
+    //
+    // `isChangesetFile(basePath)` because git pairs renames by CONTENT, not by
+    // name: an `R` row can arrive as `.changeset/README.md -> .changeset/x.md`,
+    // and README is documentation that declares nothing. Inheriting "already
+    // breaking" from it would exempt a genuinely new breaking changeset. For `M`
+    // the guard is a no-op -- `basePath` is the path already accepted above.
+    if ((status === 'M' || status === 'R') && isChangesetFile(basePath)) {
+      const baseText = showOrNull(from, basePath, cwd);
       if (baseText !== null && breakingDeclaration(parseChangeset(baseText)).breaking) {
         skipped.push(file);
         continue;
@@ -1525,8 +1828,13 @@ function selfTest() {
   /**
    * Build a two-commit repo: base carries the ledger + a breaking changeset in
    * stock (so the convention assertion is satisfied), head adds `files`.
+   *
+   * `baseFiles` puts extra files on the BASE commit, and a `null` in `files`
+   * deletes one at head. Together they are how a RENAME is expressed (#7045):
+   * git infers `R` from a delete plus an add of similar content, so the fixture
+   * has to be able to say both halves.
    */
-  const build = ({ baseIds = ['old-entry-one', 'old-entry-two'], headIds = null, files = {}, pkgs = null }) => {
+  const build = ({ baseIds = ['old-entry-one', 'old-entry-two'], headIds = null, files = {}, baseFiles = {}, pkgs = null }) => {
     const dir = mkdtempSync(join(tmpdir(), 'adr0087-'));
     const w = (rel, text) => {
       mkdirSync(dirname(join(dir, rel)), { recursive: true });
@@ -1544,6 +1852,7 @@ function selfTest() {
     for (const [name, p] of Object.entries(pkgs ?? { '@objectstack/spec': { dir: 'packages/spec', private: false } })) {
       w(`${p.dir}/package.json`, JSON.stringify({ name, version: '1.0.0', ...(p.private ? { private: true } : {}) }));
     }
+    for (const [rel, text] of Object.entries(baseFiles)) w(rel, text);
     git(['add', '-A'], dir);
     git(['commit', '-qm', 'base'], dir);
     const base = git(['rev-parse', 'HEAD'], dir).trim();
@@ -1552,7 +1861,10 @@ function selfTest() {
       w(LEDGER_SOURCES[0], REG(headIds));
       w(SPEC_CHANGES, SPEC_CHANGES_JSON(headIds));
     }
-    for (const [rel, text] of Object.entries(files)) w(rel, text);
+    for (const [rel, text] of Object.entries(files)) {
+      if (text === null) rmSync(join(dir, rel));
+      else w(rel, text);
+    }
     git(['add', '-A'], dir);
     // `--allow-empty`: some cases deliberately add nothing at head (the "this PR
     // touches no changeset" and "inherited changeset" shapes), and an empty commit
@@ -1815,6 +2127,50 @@ function selfTest() {
     },
   })));
 
+  // ---- G9: THE #6967 SHAPE -- a changeset that POINTS AT prescriptions --------
+  // The mirror image of R1/R10/R12/R13, and the first case in this family whose
+  // failure mode is a hard block rather than a missed entry. The body below is
+  // `.changeset/v17-rc-anchor.md`'s migration sentence verbatim: a version anchor
+  // that retires nothing and says where the real prescriptions live. Read as a
+  // prescription it left the author with no legal disposition at all -- the
+  // catch-all refused as a contradiction, `registered` / `already-registered` with
+  // no entry to name, `unpublished` false because `@objectstack/spec` publishes.
+  //
+  // This is the RED set under reverse verification: restore the branch-1 limb
+  // (accept every placeholder occurrence) and this case goes red -- verified.
+  green('G9 the #6967 shape (a POINTER to prescriptions is not a prescription)', run(mk({
+    files: {
+      '.changeset/v17-anchor.md': CS({
+        body:
+          'release!: promote the accumulated launch-window train to v17.0.0\n\n' +
+          'Anchor changeset for the v17 major. The lockstep group applies the highest\n' +
+          'bump across all pending changesets to every package.\n\n' +
+          "Migration: each breaking change's own changeset carries its FROM → TO guide\n" +
+          '(grep the CHANGELOG for `!:` entries).\n\n' +
+          '<!-- adr-0087: not-required (no-migration-prescription) the anchor retires no surface at all; it only moves the version number -->\n',
+      }),
+    },
+  })));
+
+  // ---- R14: ...and the SAME sentence with the goods still refuses the catch-all
+  // The floor under G9, and what keeps it from being a hole: a body may both cite
+  // the convention AND carry a rewrite, and then the citation is taken at face
+  // value. `unknown-key-strictness-tier-a.md` is this shape in the stock (`the
+  // FROM → TO mappings baked into it include:` over a list of real renames), so the
+  // pair G9/R14 pins that the rule separates POINTERS from PRESCRIPTIONS and not
+  // prose from markup.
+  red('R14 a cited FROM → TO with the rewrites present still contradicts the catch-all', run(mk({
+    files: {
+      '.changeset/x.md': CS({
+        body:
+          '**BREAKING** unknown keys are rejected\n\n' +
+          'The error message carries the fix; the FROM → TO mappings baked into it include:\n\n' +
+          '- Permission set: `objectPermissions` → `objectPermission`\n\n' +
+          '<!-- adr-0087: not-required (no-migration-prescription) the rejection message is the whole story and nothing stored has to move -->\n',
+      }),
+    },
+  })), [/contradicts the changeset's own body/, /Evidence \(from-to-label\)/, /mappings baked into it/]);
+
   // ---- G6: a changeset that was ALREADY breaking at base is inherited -------
   {
     const r = mk({ files: {} });
@@ -1823,6 +2179,94 @@ function selfTest() {
     writeFileSync(join(r.dir, '.changeset/stock-breaking.md'), CS({ body: 'stock\n\n**BREAKING** something, now with more prose\n' }));
     git(['commit', '-qam', 'touch stock'], r.dir);
     green('G6 inherited breaking changeset not re-judged', run(r));
+  }
+
+  // ---- The `R` rows (#7045) -------------------------------------------------
+  //
+  // `--diff-filter=AM` -- what this gate passed until #7045 -- drops an `R` row
+  // wholesale, so R15 below was GREEN with an undisposed breaking declaration
+  // sitting in the diff. Both cases carry a CONTROL asserting that git really
+  // emitted `R`: rename detection is a SIMILARITY score, and a short body degrades
+  // to add-plus-delete, at which point R15 is an ordinary `A` case that would have
+  // been caught before the fix too -- green for a reason that is not the fix.
+  const RENAMEABLE_BODY =
+    'a summary line, with a body long enough that git scores the move below as a\n' +
+    'rename rather than as an add plus a delete. The `R` status is the entire\n' +
+    'subject of these two cases, so the fixture may not be allowed to degrade.\n';
+  /** The `R` row for `old -> new` in this repo's diff, or null. */
+  const renameRow = (dir, base, oldPath, newPath) =>
+    git(['diff', '--name-status', base, 'HEAD', '--', '.changeset/*.md'], dir)
+      .split('\n')
+      .find((l) => new RegExp(`^R\\d+\t${oldPath}\t${newPath}$`).test(l)) ?? null;
+
+  // ---- R15: a changeset RENAMED AND turned breaking in the same commit ------
+  // The #7045 shape, and R1's own shape with a `git mv` bolted on: a declaration
+  // this PR introduces, arriving at a path that did not exist at the branch point,
+  // saying nothing about the ledger.
+  {
+    const r = mk({
+      baseFiles: { '.changeset/pending.md': CS({ bumps: [['@objectstack/spec', 'patch']], body: RENAMEABLE_BODY }) },
+      files: {
+        '.changeset/pending.md': null,
+        '.changeset/pending-renamed.md': CS({ bumps: [['@objectstack/spec', 'major']], body: `**BREAKING** ${RENAMEABLE_BODY}` }),
+      },
+    });
+    assert(
+      renameRow(r.dir, r.base, '\\.changeset/pending\\.md', '\\.changeset/pending-renamed\\.md') !== null,
+      `R15 control: git must really report this as \`R\`, or the case below is an ordinary \`A\` -- got ${JSON.stringify(git(['diff', '--name-status', r.base, 'HEAD', '--', '.changeset/*.md'], r.dir))}`,
+    );
+    red('R15 the #7045 shape (renamed AND turned breaking, no disposition)', run(r), [
+      /pending-renamed/,
+      /no `adr-0087:` disposition marker/,
+      /#6148/,
+    ]);
+  }
+
+  // ---- G10: a PURE rename of an ALREADY-breaking stock changeset ------------
+  // The paired control, and the reason `AMR` costs nothing: the declaration was
+  // already at the branch point, so moving the file asks nobody to dispose of it
+  // again. This case can only be green through the `R` path -- were the rename to
+  // degrade to add-plus-delete the new path would arrive as `A`, and `A` never
+  // reads the base side at all, so it would be RED.
+  {
+    const r = mk({ files: {} });
+    git(['mv', '.changeset/stock-breaking.md', '.changeset/stock-breaking-moved.md'], r.dir);
+    git(['commit', '-qm', 'move the stock changeset'], r.dir);
+    assert(
+      renameRow(r.dir, r.base, '\\.changeset/stock-breaking\\.md', '\\.changeset/stock-breaking-moved\\.md') !== null,
+      'G10 control: git must really report the move as `R`',
+    );
+    const res = run(r);
+    green('G10 a pure move of an inherited breaking changeset is not re-judged', res);
+    assert(
+      res.skipped.includes('.changeset/stock-breaking-moved.md'),
+      `G10: ...and it is reported as SKIPPED at its new path, not silently absent -- got ${JSON.stringify(res.skipped)}`,
+    );
+  }
+
+  // ---- R16: an `R` row whose BASE side is README.md inherits NOTHING --------
+  // Git pairs renames by CONTENT, not by name, so an `R` row can arrive as
+  // `.changeset/README.md -> .changeset/x.md` (measured, git 2.43.0). README is
+  // documentation and declares nothing, so reading "already breaking at base" off
+  // it would exempt a genuinely new breaking changeset. Delete the
+  // `isChangesetFile(basePath)` guard in the scan and this case goes green.
+  {
+    const BREAKING_README = `# Changesets\n\n**BREAKING** ${RENAMEABLE_BODY}`;
+    const r = mk({
+      baseFiles: { '.changeset/README.md': BREAKING_README },
+      files: {
+        '.changeset/README.md': null,
+        '.changeset/was-the-readme.md': `---\n'@objectstack/spec': major\n---\n\n${BREAKING_README}`,
+      },
+    });
+    assert(
+      renameRow(r.dir, r.base, '\\.changeset/README\\.md', '\\.changeset/was-the-readme\\.md') !== null,
+      `R16 control: git must really pair the new changeset with README.md -- got ${JSON.stringify(git(['diff', '--name-status', r.base, 'HEAD', '--', '.changeset/*.md'], r.dir))}`,
+    );
+    red('R16 a breaking changeset paired with README.md by rename detection is still judged', run(r), [
+      /was-the-readme/,
+      /no `adr-0087:` disposition marker/,
+    ]);
   }
 
   // ---- Input assertions (#4690) --------------------------------------------
@@ -1984,6 +2428,63 @@ function selfTest() {
     'P38: the header frames, but the ROW still has to read as a rewrite -- one coded cell is a description',
   );
 
+  // #6967 -- the placeholder MENTIONED rather than USED. P39-P41 are the RED set
+  // under reverse verification (restore the "every occurrence counts" limb and all
+  // three go red); P42-P50 are what keeps the rule from over-reaching, and they are
+  // the half that cost the most to get right -- the first draft refused a label
+  // that merely followed a finished sentence and took five real prescriptions with
+  // it, `app-dead-authoring-keys.md` (declared-breaking) among them.
+  assert(
+    !hasMigrationPrescription("Migration: each breaking change's own changeset carries its FROM → TO guide\n(grep the CHANGELOG for `!:` entries).\n"),
+    'P39: THE #6967 SHAPE -- `carries its FROM → TO guide` POINTS AT prescriptions and is not one',
+  );
+  assert(
+    !hasMigrationPrescription('唯一的 FROM → TO 落在部署方自己的代理配置上,而这些部署今天本就是 split-brain。\n'),
+    'P40: the Chinese spelling of the same mention -- `的` is the attributive particle, so a word governs it',
+  );
+  assert(
+    !hasMigrationPrescription('The checklist requires breaking changesets to carry their FROM → TO migration.\n'),
+    'P41: `their FROM → TO migration` -- a governing word beats the framing word that follows',
+  );
+  // --- the floors: labels that are NOT mentions, and mentions that ARE evidenced --
+  assert(
+    findMigrationPrescription('**Removed keys and their prescriptions (FROM → TO):**\n\n- `App.version` → an app is versioned by its package\n')?.branch === 'from-to-label',
+    'P42: a parenthesised label is opened by `(`, not governed by `prescriptions` -- `app-dead-authoring-keys.md`',
+  );
+  assert(
+    findMigrationPrescription('The RLS compiler never read it. FROM → TO: a set a policy needs is now supplied\n')?.branch === 'from-to-label',
+    'P43: a label that FOLLOWS a finished sentence on the same line is still a label',
+  );
+  assert(
+    findMigrationPrescription('Corrected names, FROM → TO (the fix if you referenced an old `$id`)\n')?.branch === 'from-to-label',
+    'P44: ...and one that follows a comma -- punctuation is a boundary, not governance',
+  );
+  assert(
+    findMigrationPrescription('匹配语义 FROM → TO:\n\n| | FROM | TO |\n|:---|:---|:---|\n| `apiKey` | `a` | `b` |\n')?.branch === 'from-to-label',
+    'P45: a CJK noun phrase with NO `的` does not govern -- the space before a Latin token is typography',
+  );
+  assert(
+    findMigrationPrescription('## 升级:翻译包键的 FROM → TO\n')?.branch === 'from-to-label',
+    'P46: a HEADING is a label by construction, `的` and all -- `views-translation-key-runtime-identity.md`',
+  );
+  assert(
+    findMigrationPrescription('The error carries the fix; the FROM → TO mappings include:\n\n- `objectPermissions` → `objectPermission`\n')?.branch === 'from-to-label',
+    'P47: a governed placeholder is taken at face value once the body SHOWS a concrete rewrite',
+  );
+  assert(
+    !hasMigrationPrescription('The error carries the fix; the FROM → TO mappings are baked into the message.\n'),
+    'P48: ...and is refused when it does not -- P47 turns on the rewrite, not on the sentence',
+  );
+  assert(
+    findMigrationPrescription('the error carries the FROM → TO above\n\n## Migration\n\n- **FROM:** `requiresConfirmation: true`\n- **TO:** put it behind an action\n')?.branch === 'from-to-label',
+    'P49: a VERTICAL `FROM:`/`TO:` block pair corroborates -- `tool-requires-confirmation-removed.md`, and #6048 wrote the same shape in a fence',
+  );
+  // the evidence line, which is the only thing an author can argue with (#6419)
+  assert(
+    findMigrationPrescription('prose that wraps at eighty columns and ends the line here\nFROM → TO:\n\n- `a.b` → `a.c`\n')?.line === 'FROM → TO:',
+    'P50: the evidence line is the placeholder\'s OWN line -- the match may open on the newline that ends the line above, which used to be reported instead',
+  );
+
   // ---- S1-S5: the `--audit-stock` classifier (#6350) ------------------------
   //
   // The stock audit's classifier decides which rows a human ever reads, so a
@@ -2030,6 +2531,45 @@ function selfTest() {
 
   assert(breakingDeclaration(parseChangeset(CS({ body: 'feat(spec)!: x\n' }))).breaking, 'P6: a conventional-commit bang is a declaration');
   assert(!breakingDeclaration(parseChangeset(CS({ bumps: [['a', 'patch']], body: 'plain\n' }))).breaking, 'P7: a plain patch is not');
+
+  // ---- P9-P14 (#7004): the shapes the old entry anchor hid from signal (1) ---
+  //
+  // This gate's stake in #7004 is the PARTIAL miss: `breakingDeclaration` reads
+  // three signals, and a `major` wearing a trailing YAML comment (or a quoted
+  // bump value) used to vanish from signal (1) — leaving (2) `**BREAKING` and
+  // (3) the `!` summary to carry a declaration they may not carry at all. So
+  // each fixture below states the bump WITHOUT either of the other two signals:
+  // a plain body, so `major` is the only thing that can make it breaking.
+  //
+  // Predicted direction on reverse verification: restoring the old anchor
+  // (`([A-Za-z]+)\s*$`) turns P9-P13 red (breaking goes false, signals loses
+  // `major`) and P14 red in the other direction (a phantom `# note` bump).
+  const PLAIN = 'a summary line\n\nsome prose that is quite long indeed and explains the change.\n';
+  const bumpsOf = (text) => parseChangeset(text).bumps.map((b) => `${b.pkg}=${b.bump}`);
+  assert(
+    bumpsOf(`---\n'@objectstack/spec': major # keep\n---\n\n${PLAIN}`).join(',') === '@objectstack/spec=major',
+    'P9 (#7004): a trailing YAML comment still yields the `major` bump — changesets reads it as one',
+  );
+  assert(
+    breakingDeclaration(parseChangeset(`---\n'@objectstack/spec': major # keep\n---\n\n${PLAIN}`)).signals.includes('major'),
+    'P10 (#7004): signal (1) fires on a comment-bearing major, with no `**BREAKING` and no `!` in the body to carry it instead',
+  );
+  assert(
+    breakingDeclaration(parseChangeset(`---\n'@objectstack/spec': "major"\n---\n\n${PLAIN}`)).signals.includes('major'),
+    'P11 (#7004): signal (1) fires on a QUOTED bump value',
+  );
+  assert(
+    breakingDeclaration(parseChangeset(`---\n'@objectstack/spec': 'major' # keep\n---\n\n${PLAIN}`)).signals.includes('major'),
+    'P12 (#7004): signal (1) fires on a quoted bump value carrying a comment',
+  );
+  assert(
+    !breakingDeclaration(parseChangeset(`---\n'@objectstack/spec': minor # keep\n---\n\n${PLAIN}`)).breaking,
+    'P13 (#7004): control — the same comment-bearing shape with `minor` is NOT breaking, so P9-P12 are about the bump word and not about the comment merely being tolerated',
+  );
+  assert(
+    bumpsOf(`---\n# note: major\n'@objectstack/real': patch\n---\n\n${PLAIN}`).join(',') === '@objectstack/real=patch',
+    'P14 (#7004): a whole-line comment containing a colon is not a bump — it used to parse as a package named `# note` bumped major, i.e. a phantom breaking declaration',
+  );
   assert(extractIds("  id: 'object-titleFormat-to-nameField',\n").length === 1, 'P8: an id with a capital letter must be extracted');
 
   // ---- I1 (#6566): a bare `import` of this module must NOT run the gate -----

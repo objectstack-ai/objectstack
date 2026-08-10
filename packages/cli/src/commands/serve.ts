@@ -2003,14 +2003,22 @@ export default class Serve extends Command {
             // Pair: SecurityPlugin (RBAC) — optional
             try {
               const securityPkg = '@objectstack/plugin-security';
-              const { SecurityPlugin, appDefaultPermissionSetName } = await import(/* webpackIgnore: true */ securityPkg);
+              const { SecurityPlugin, appSecurityPluginOptions } = await import(/* webpackIgnore: true */ securityPkg);
               // ADR-0056 D7 — honor an app-declared default profile. A stack
-              // permission set marked `isDefault` becomes the
-              // fallback for users with no explicit grants. The SecurityPlugin's
-              // own scan only sees its built-in sets, so the CLI passes the
-              // declared name through explicitly (undefined → built-in default).
-              const appDefaultProfile = appDefaultPermissionSetName((config as any)?.permissions);
-              await kernel.use(new SecurityPlugin(appDefaultProfile ? { fallbackPermissionSet: appDefaultProfile } : undefined));
+              // permission set marked `isDefault` becomes the baseline for
+              // users with no explicit grants. The SecurityPlugin's own scan
+              // only sees its built-in sets, so the declared name is passed
+              // through explicitly (undefined → built-in default).
+              //
+              // [#7001] Resolved through the SHARED helper rather than
+              // open-coded here. This was the only boot path that did it at
+              // all: `@objectstack/verify`'s `bootStack` constructed a vanilla
+              // `new SecurityPlugin()`, so an app's own dogfood suite ran
+              // against a boot without the profile the CLI gave its users. The
+              // two now agree by construction — one helper, one call shape, and
+              // `serve-verify-security-parity.contract.test.ts` fails if either
+              // side open-codes its way back out.
+              await kernel.use(new SecurityPlugin(appSecurityPluginOptions(config)));
               trackPlugin('Security');
             } catch {
               // optional

@@ -178,10 +178,122 @@ describe('RangeOperatorSchema', () => {
   });
 
   it('should accept $between with date range', () => {
-    const filter = { 
+    const filter = {
       $between: [new Date('2024-01-01'), new Date('2024-12-31')] as [Date, Date]
     };
     expect(() => RangeOperatorSchema.parse(filter)).not.toThrow();
+  });
+
+  // ==========================================================================
+  // #6571 — BOTH endpoints accept the STRING the platform itself produces.
+  //
+  // Before this was pinned each endpoint union was `number | Date |
+  // FieldReference`, so every accepted shape below threw — including the shape
+  // this package's own `temporal-conformance.ts` corpus states as the expected
+  // cross-driver behaviour. `$between` is the sibling of the four ordering
+  // slots #5685 fixed; a range IS its two ordering bounds. See
+  // `RangeOperatorSchema`'s docblock for why the union is a bare `string`
+  // rather than an ISO refinement.
+  //
+  // These assert through `safeParse` rather than a bare `toThrow()` so a
+  // rejection names WHICH endpoint was refused: a tuple carries two independent
+  // unions and `toThrow()` cannot tell a min-side refusal from a max-side one.
+  // (The ADR-0112 `code`/`status` envelope does not apply here — these are Zod
+  // parse verdicts on a declaration surface, not runtime refusals.)
+  // ==========================================================================
+
+  describe('string endpoints (#6571)', () => {
+    /**
+     * `resolveFilterTokens`' `walk` descends into arrays, and every branch of
+     * the resolver returns a string, so a token range resolves to two strings:
+     * `['{current_year_start}', '{current_year_end}']` -> `['2026-01-01', '2026-12-31']`.
+     */
+    it('accepts the two calendar-day strings a token range resolves to', () => {
+      const resolved = RangeOperatorSchema.safeParse({ $between: ['2026-01-01', '2026-12-31'] });
+      expect(resolved.success).toBe(true);
+    });
+
+    /** The sub-day tokens (`{now}`, `{N_hours_ago}`) emit a full `.toISOString()`. */
+    it('accepts a range of full ISO instants', () => {
+      const result = RangeOperatorSchema.safeParse({
+        $between: ['2026-08-08T04:32:56.000Z', '2026-08-09T04:32:56.000Z'],
+      });
+      expect(result.success).toBe(true);
+    });
+
+    /**
+     * `temporal-conformance.ts`: "time: $between spans the working day
+     * inclusively" — `{ at: { $between: ['08:00:00', '18:00:00'] } }` on a
+     * `Field.time` column. `CLOCK_TIME_TYPES` declares this form NOT
+     * `Date.parse`-able, which is why an ISO refinement was rejected.
+     */
+    it('accepts the wall-clock range the temporal conformance corpus pins', () => {
+      const result = RangeOperatorSchema.safeParse({ $between: ['08:00:00', '18:00:00'] });
+      expect(result.success).toBe(true);
+    });
+
+    /**
+     * Endpoints are widened independently, which is what a partially-resolved
+     * range actually looks like — one literal `Date` and one resolved macro.
+     */
+    it('accepts mixed endpoints, each union resolved on its own', () => {
+      expect(RangeOperatorSchema.safeParse({
+        $between: [new Date('2026-01-01'), '2026-12-31'],
+      }).success).toBe(true);
+      expect(RangeOperatorSchema.safeParse({
+        $between: ['2026-01-01', { $field: 'contract.end_date' }],
+      }).success).toBe(true);
+    });
+
+    it('still accepts numbers, Dates and field references — widening is additive', () => {
+      expect(RangeOperatorSchema.safeParse({ $between: [18, 65] }).success).toBe(true);
+      expect(RangeOperatorSchema.safeParse({
+        $between: [new Date('2024-01-01'), new Date('2024-12-31')],
+      }).success).toBe(true);
+      expect(RangeOperatorSchema.safeParse({
+        $between: [{ $field: 'a.min' }, { $field: 'a.max' }],
+      }).success).toBe(true);
+    });
+
+    /**
+     * The shapes that were rejected before stay rejected, and the failure is
+     * attributed to the offending endpoint rather than to the tuple as a whole.
+     */
+    it('still rejects an endpoint that is rangeable at no backend', () => {
+      const boolMax = RangeOperatorSchema.safeParse({ $between: ['2026-01-01', true] });
+      expect(boolMax.success).toBe(false);
+      expect(boolMax.error?.issues[0]?.path).toEqual(['$between', 1]);
+
+      const objectMin = RangeOperatorSchema.safeParse({ $between: [{ nope: 1 }, '2026-12-31'] });
+      expect(objectMin.success).toBe(false);
+      expect(objectMin.error?.issues[0]?.path).toEqual(['$between', 0]);
+    });
+
+    /** Arity is the tuple's own contract and is untouched by the widening. */
+    it('still rejects a range that is not a two-element [min, max]', () => {
+      expect(RangeOperatorSchema.safeParse({ $between: ['2026-01-01'] }).success).toBe(false);
+      expect(RangeOperatorSchema.safeParse({
+        $between: ['2026-01-01', '2026-06-30', '2026-12-31'],
+      }).success).toBe(false);
+      expect(RangeOperatorSchema.safeParse({ $between: '2026-01-01' }).success).toBe(false);
+    });
+
+    /**
+     * The documentation copy above and the ENFORCED copy must not drift: it is
+     * `FieldOperatorsSchema` that `NormalizedFilterSchema` validates against and
+     * that the exported `FieldOperators` type is inferred from. #5685 shipped
+     * the sibling ordering slots and had to come back for this same second
+     * spelling, so both are pinned here.
+     */
+    it('is matched by the enforced copy — FieldOperatorsSchema and the normalized AST', () => {
+      expect(FieldOperatorsSchema.safeParse({ $between: ['2026-01-01', '2026-12-31'] }).success)
+        .toBe(true);
+      expect(FieldOperatorsSchema.safeParse({ $between: ['08:00:00', '18:00:00'] }).success)
+        .toBe(true);
+      expect(NormalizedFilterSchema.safeParse({
+        $and: [{ close_date: { $between: ['2026-01-01', '2026-12-31'] } }],
+      }).success).toBe(true);
+    });
   });
 });
 
@@ -556,6 +668,42 @@ describe('TypeScript Type System', () => {
     expect([resolvedMacro, stillTakesDate, clockTime, numeric]).toHaveLength(4);
   });
 
+  /**
+   * #6571 — the TYPED half of the range contract, the exact mirror of the
+   * ordering block above. Checked by `pnpm typecheck`, NOT by the runtime
+   * expectation below: vitest never typechecks, so reverting `filter.zod.ts`
+   * leaves this test GREEN under vitest and RED under `tsc`. Measured on the
+   * reverted guard, the errors land in this block:
+   *   `$between: ['2026-01-01', '2026-12-31']` on a Date field
+   *     -> TS2322 Type 'string' is not assignable to type 'Date'
+   *   `$between: ['08:00:00', '18:00:00']` on a string field
+   *     -> TS2322 ... not assignable to type 'undefined'
+   * (the second reads `undefined`, not `never`, for the same reason #5685
+   * recorded: the old guard's `never` meets the slot's own `?`, and an optional
+   * `never` IS `undefined`.)
+   */
+  it('accepts a resolved macro range on a Date field and ranges string fields (#6571)', () => {
+    interface Deal {
+      close_date: Date;      // a resolved token range arrives as two 'YYYY-MM-DD'
+      shift_start: string;   // Field.time — 'HH:MM[:SS[.fff]]'
+      amount: number;
+    }
+
+    const resolvedMacroRange: Filter<Deal> = { close_date: { $between: ['2026-01-01', '2026-12-31'] } };
+    const stillTakesDates: Filter<Deal> = {
+      close_date: { $between: [new Date('2026-01-01'), new Date('2026-12-31')] },
+    };
+    // A partially-resolved range: endpoints are widened independently.
+    const halfResolved: Filter<Deal> = { close_date: { $between: [new Date('2026-01-01'), '2026-12-31'] } };
+    // The shape `temporal-conformance.ts` pins for a Field.time column.
+    const workingDay: Filter<Deal> = { shift_start: { $between: ['08:00:00', '18:00:00'] } };
+    // A number field stays numbers-only.
+    const numericRange: Filter<Deal> = { amount: { $between: [1000, 5000] } };
+
+    expect([resolvedMacroRange, stillTakesDates, halfResolved, workingDay, numericRange])
+      .toHaveLength(5);
+  });
+
   it('should support logical operators', () => {
     interface Task {
       title: string;
@@ -596,6 +744,8 @@ describe('Filter Operator Constants', () => {
     expect(FILTER_OPERATORS).toContain('$contains');
     expect(FILTER_OPERATORS).toContain('$startsWith');
     expect(FILTER_OPERATORS).toContain('$endsWith');
+    // [#6520] Enforced, not merely declared, since every JS face got an arm.
+    expect(FILTER_OPERATORS).toContain('$icontains');
     expect(FILTER_OPERATORS).toContain('$null');
     expect(FILTER_OPERATORS).toContain('$exists');
   });

@@ -43,11 +43,25 @@
  * shape cannot be resolved at all is a hard FAILURE rather than a pass: the
  * walker not understanding a schema is exactly when this test would otherwise
  * go quiet.
+ *
+ * ## Two iterations, one walker (#6931)
+ *
+ * The invariant above runs over `listMetadataTypeSchemaTypes()`, the REGISTERED
+ * kind set. A second `describe` below runs the envelope half — and only that
+ * half — over `listUnregisteredKindSchemaTypes()`, the non-KIND stack
+ * collections `UNREGISTERED_KIND_SCHEMAS` binds. Both call the same
+ * `objectShapes` walker and the same `rejectedEnvelopeKeys` probe defined here,
+ * so the two iterations cannot drift into judging the property differently;
+ * only the SET each walks differs, which is the whole point of the split.
  */
 
 import { describe, expect, it } from 'vitest';
 
-import { listMetadataTypeSchemaTypes, getMetadataTypeSchema } from './metadata-type-schemas';
+import {
+  listMetadataTypeSchemaTypes,
+  listUnregisteredKindSchemaTypes,
+  getMetadataTypeSchema,
+} from './metadata-type-schemas';
 
 /** The ADR-0010 stamp the loader puts on every registered item. */
 const STAMP = { _packageId: 'pkg_probe', _provenance: 'package' as const };
@@ -206,6 +220,137 @@ describe('registered metadata types', () => {
       expect(
         shapes.some((shape) => '_packageId' in shape),
         `'${type}' now declares the envelope — remove it from UNDECLARED_ENVELOPE.`,
+      ).toBe(false);
+    },
+  );
+});
+
+/**
+ * Non-KIND collections that resolve a schema but do not declare the envelope.
+ *
+ * The exact counterpart of `UNDECLARED_ENVELOPE` above, kept as a SEPARATE
+ * constant on purpose: the two lists exempt from two different iterations, and
+ * merging them would be the first step toward treating the two sets as one —
+ * which is precisely the status this suite must not grant (see the fence on the
+ * describe below).
+ *
+ * It is EMPTY, and — like its registered sibling — that is the end state, not a
+ * reason to delete it. All three bound kinds declare the envelope as of PR
+ * #6900; keeping the empty set means the case below runs over ALL of them with
+ * no exemptions, so a FOURTH entry added to `UNREGISTERED_KIND_SCHEMAS` without
+ * the spread fails immediately instead of being quietly added here. Adding a
+ * name back is a bug being filed, not an exemption being granted.
+ */
+const UNDECLARED_ENVELOPE_UNREGISTERED = new Set<string>([]);
+
+/**
+ * The same ADR-0010 envelope invariant, over the collections the registered
+ * walk cannot see (#6931).
+ *
+ * ## Why these need their own iteration
+ *
+ * `webhook` / `connector` / `sharing_rule` are bound in
+ * `UNREGISTERED_KIND_SCHEMAS` and wired to `PUT /api/v1/meta/:type/:name` by
+ * #6245 — real parse doors — while `listMetadataTypeSchemaTypes()` deliberately
+ * excludes them, so the invariant above never ran over any of them. The gate's
+ * empty debt list nevertheless read as total coverage. All three were therefore
+ * judged ONE AT A TIME, BY HAND, for a property this file already automates:
+ * `sharing_rule` is `.strict()`, so its undeclared envelope surfaced as a hard
+ * 422 that #6245 hit; `connector` is a plain `z.object`, so it silently stripped
+ * all seven keys and needed a separate card and a hand-written probe roughly a
+ * day later (#6362 / PR #6900); `webhook` happened to be fine from #4001 batch
+ * 11, but nothing verified that either — #6362 had to measure it by hand to find
+ * out, which is what a gate is for.
+ *
+ * ## The fence — this enrolls them in a TEST ITERATION, nothing else
+ *
+ * Triage ruling on #6931: "the fix enrolls them in the **test's iteration only**
+ * (assert envelope posture or an explicit debt entry); it must NOT grant them
+ * KIND status — #2657's B/C decision stays open, exactly as the schemas file's
+ * comment intends."
+ *
+ * So this block asserts the envelope property and NOTHING else. The obligations
+ * of being a KIND stay where they were and keep walking the registered set
+ * alone: the #4001 closure campaign and its count (the `describe` below),
+ * `metadata-create-seeds`, `MetadataTypeSchema` membership,
+ * `DEFAULT_METADATA_TYPE_REGISTRY` descriptors. In particular there is
+ * deliberately NO unknown-key/posture case here — `sharing_rule` is strict and
+ * `connector` is not, and choosing between them is #2657's decision to make, not
+ * this suite's.
+ */
+describe('#6931 — the envelope invariant also covers UNREGISTERED_KIND_SCHEMAS', () => {
+  const bound = listUnregisteredKindSchemaTypes();
+
+  it('is a non-empty set — guards the derivation returning nothing', () => {
+    // `it.each([])` registers no cases and reports green, so an export that
+    // silently answered `[]` would restore the exact blind spot this closes.
+    expect(bound.length).toBeGreaterThan(0);
+  });
+
+  it('stays OUT of the registered-kind set — the #6245 fence, pinned', () => {
+    // The scope fence, made mechanical: enrollment here must never leak into
+    // `listMetadataTypeSchemaTypes()`, which is what would attach the KIND
+    // obligations #2657 has not decided to attach. Should #2657 later resolve to
+    // promote one of these, that is a deliberate act — it moves the name into
+    // BUILTIN_METADATA_TYPE_SCHEMAS with its create seed, registry entry and
+    // campaign-count update, and this pin is what makes the move visible rather
+    // than a veto on making it.
+    const registered = listMetadataTypeSchemaTypes();
+    for (const type of bound) {
+      expect(registered, `'${type}' is now a registered kind`).not.toContain(type);
+    }
+  });
+
+  it.each(bound)('%s resolves to a schema', (type) => {
+    expect(getMetadataTypeSchema(type), `no schema bound for '${type}'`).toBeDefined();
+  });
+
+  /** The same no-silent-skip guard the registered walk carries, same walker. */
+  it.each(bound)('%s resolves to at least one object shape the walker understands', (type) => {
+    expect(
+      objectShapes(getMetadataTypeSchema(type)).length,
+      `the structural walker cannot resolve '${type}' to an object shape, so the `
+      + 'envelope assertion below would silently skip it. Teach `objectShapes` the '
+      + 'wrapper this schema uses.',
+    ).toBeGreaterThan(0);
+  });
+
+  it.each(bound)('%s does not REJECT the protection envelope', (type) => {
+    // `sharing_rule`'s class: strict + undeclared ⇒ a hard 422 on the write door.
+    expect(
+      rejectedEnvelopeKeys(type),
+      `'${type}' is strict and does not declare the ADR-0010 envelope, so a body `
+      + 'carrying the stamped keys fails to parse — a hard 422 on `PUT /meta/'
+      + `${type}/:name\`. Add \`...MetadataProtectionFields\` to its schema.`,
+    ).toEqual([]);
+  });
+
+  it.each(bound.filter((t) => !UNDECLARED_ENVELOPE_UNREGISTERED.has(t)))(
+    '%s DECLARES the protection envelope',
+    (type) => {
+      // `connector`'s class: non-strict + undeclared ⇒ a SILENT strip, no 422,
+      // nothing in any log. The quieter half, and the one that survived #6245.
+      const shapes = objectShapes(getMetadataTypeSchema(type));
+      expect(
+        shapes.some((shape) => '_packageId' in shape),
+        `'${type}' does not declare \`_packageId\`, so the envelope is dropped on every `
+        + 'parse through `PUT /meta` — silently, if the schema is not strict. Add '
+        + '`...MetadataProtectionFields` to its schema.',
+      ).toBe(true);
+    },
+  );
+
+  it.each([...UNDECLARED_ENVELOPE_UNREGISTERED])(
+    '%s is still on the undeclared-envelope debt list (remove it once fixed)',
+    (type) => {
+      // The reverse pin, as above: fixing one fails this until the list shrinks,
+      // so the debt list cannot outlive the debt.
+      expect(bound).toContain(type);
+      const shapes = objectShapes(getMetadataTypeSchema(type));
+      expect(
+        shapes.some((shape) => '_packageId' in shape),
+        `'${type}' now declares the envelope — remove it from `
+        + 'UNDECLARED_ENVELOPE_UNREGISTERED.',
       ).toBe(false);
     },
   );

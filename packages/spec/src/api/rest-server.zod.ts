@@ -127,7 +127,8 @@ export const RestApiConfigSchema = lazySchema(() => z.object({
     + 'is now always denied — auth is a kernel concern, not a deployment posture. Delete the key. '
     + 'To publish something publicly, declare it: a public form view (`sharing.allowAnonymous`), a '
     + "share link, or `book.audience: 'public'` — each derives its own narrow authorization instead of "
-    + 'opening the whole data plane.',
+    + 'opening the whole data plane. '
+    + 'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
   ),
 
   /**

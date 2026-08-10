@@ -77,7 +77,7 @@ describe('driver-sqlite-wasm — temporal conformance', () => {
           on: r.on,
           why: r.why,
         },
-        { bypassTenantAudit: true } as any,
+        { bypassTenantAudit: true },
       );
     }
   });
@@ -121,7 +121,7 @@ describe('driver-sqlite-wasm — Field.time conformance', () => {
           at: r.writerForm === 'native' ? new Date(`1970-01-01T${r.at}Z`) : r.at,
           why: r.why,
         },
-        { bypassTenantAudit: true } as any,
+        { bypassTenantAudit: true },
       );
     }
   });

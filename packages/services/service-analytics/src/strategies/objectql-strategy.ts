@@ -12,7 +12,7 @@ import {
 } from './filter-normalizer.js';
 import { compileScopedFilterToSql } from '../read-scope-sql.js';
 import { invalidMemberError } from '../dataset-refusal.js';
-import { likePattern, LIKE_ESCAPE_CHAR, type LikeShape } from '../like-pattern.js';
+import { likePattern, LIKE_ESCAPE_CHAR, asciiLowerSqlExpr, type LikeShape } from '../like-pattern.js';
 import { nextUtcCalendarDay } from '@objectstack/core';
 import {
   rebucketCrossObject,
@@ -45,11 +45,16 @@ const SCALAR_SQL_OPS: Record<string, string> = {
  * than the query it claims to reproduce whenever the comparand carried a `_` or
  * `%` — the #3601 / #3602 / #3650 failure this render block exists to prevent.
  */
-const LIKE_SQL_OPS: Record<string, { sql: string; shape: LikeShape }> = {
+const LIKE_SQL_OPS: Record<string, { sql: string; shape: LikeShape; fold?: boolean }> = {
   contains: { sql: 'LIKE', shape: 'contains' },
   notContains: { sql: 'NOT LIKE', shape: 'contains' },
   startsWith: { sql: 'LIKE', shape: 'starts' },
   endsWith: { sql: 'LIKE', shape: 'ends' },
+  // [#6520] `$icontains`: the same escaped pattern and bound `ESCAPE` as its
+  // four case-EXACT neighbours, with `fold` adding the ASCII-only case fold to
+  // both sides of the comparison. The flag is on this row alone — the family
+  // above it is case-sensitive by ruling (#4706 Q2 = A).
+  icontains: { sql: 'LIKE', shape: 'contains', fold: true },
 };
 
 /** One cross-object grouping dimension planned for FK-expand (#3654). */
@@ -704,7 +709,13 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
       params.push(likePattern(like.shape, values[0]));
       const patternRef = `$${params.length}`;
       params.push(LIKE_ESCAPE_CHAR);
-      return `${col} ${like.sql} ${patternRef} ESCAPE $${params.length}`;
+      // [#6520] The fold, when the operator carries one, wraps BOTH sides:
+      // folding only the comparand compares a folded needle against a raw column
+      // and returns just the rows that were already lower-case — a wrong row set
+      // that looks like a working predicate.
+      const lhs = like.fold ? asciiLowerSqlExpr(col) : col;
+      const rhs = like.fold ? asciiLowerSqlExpr(patternRef) : patternRef;
+      return `${lhs} ${like.sql} ${rhs} ESCAPE $${params.length}`;
     }
 
     const op = SCALAR_SQL_OPS[operator];

@@ -199,6 +199,8 @@
     "gen:sbom": "tsx scripts/generate-sbom.ts",
     "gen:api-surface": "tsx scripts/build-api-surface.ts",
     "check:api-surface": "tsx scripts/build-api-surface.ts --check",
+  "gen:export-origins": "tsx scripts/build-export-origins.ts",
+  "check:export-origins": "tsx scripts/build-export-origins.ts --self-test && tsx scripts/build-export-origins.ts --check",
     "check:exported-any": "tsx scripts/check-exported-any.ts --self-test && tsx scripts/check-exported-any.ts",
     "check:dual-source-exports": "tsx scripts/check-dual-source-exports.ts --self-test && tsx scripts/check-dual-source-exports.ts",
     "check:authorable-surface": "OS_EAGER_SCHEMAS=1 tsx scripts/build-schemas.ts --check",

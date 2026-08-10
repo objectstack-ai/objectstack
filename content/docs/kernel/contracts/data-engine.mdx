@@ -282,9 +282,11 @@ interface WriteObservabilityOptions {
 }
 
 interface DroppedFieldsEvent {
-  object: string;                        // resolved object name
-  fields: string[];                      // caller-supplied fields that were dropped
-  reason: 'readonly' | 'readonly_when';  // why they were dropped
+  object: string;   // resolved object name
+  fields: string[]; // caller-supplied fields that were dropped
+  // why they were dropped — an OPEN vocabulary that grows with the write
+  // path's legal strips; branch on it exhaustively, never with a binary test
+  reason: 'readonly' | 'readonly_when' | 'primary_key';
 }
 ```
 
@@ -357,10 +359,15 @@ interface AggregationNode {
   function: 'count' | 'sum' | 'avg' | 'min' | 'max' | 'count_distinct';
   field?: string;           // Field to aggregate (optional for COUNT(*))
   alias: string;            // Result column alias
-  distinct?: boolean;       // Apply DISTINCT before aggregation
   filter?: FilterCondition; // Per-aggregation FILTER WHERE
 }
 ```
+
+`distinct?: boolean` was **removed** from `AggregationNode` in protocol 17 (#6815,
+ADR-0049). Only the engine's in-memory fallback ever honoured it — every SQL face
+ignored it — so the same query answered a deduplicated `sum` or an ordinary one
+depending on which backend served it. For a deduplicated count use the
+`count_distinct` function, which every face computes.
 
 ---
 

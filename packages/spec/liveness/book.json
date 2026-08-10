@@ -60,8 +60,9 @@
         },
         "translations": {
           "status": "dead",
-          "verifiedAt": "2026-08-02",
-          "note": "REMOVED 2026-08-02 (#4667) — tombstoned at the schema (retiredKey carries the prescription; authoring it is a tsc error and a parse error) and stripped from sources by the protocol-17 conversion. The entry stays because retiredKey keeps the key in the walked shape (the rls.priority precedent). TOMBSTONE rather than delete because BookGroupSchema is a plain z.object with NO .strict() — a bare delete would have zod silently strip the key, trading one silent no-op for another. No resolver read inline book/group translations; group labels rendered verbatim in every locale. Localize the DOCS instead: doc.translations is live on every doc render path."
+          "verifiedAt": "2026-08-09",
+          "evidenceScope": "cross-repo",
+          "note": "CROSS-REPO RE-VERIFIED 2026-08-09 against objectui @c2fd1223 (#4895 task 1): confirmed. objectui models the book spine independently (apps/console/src/pages/book-nav.ts `Book` / `BookGroup`) and neither interface declares `translations`, so no renderer ever consumed the inline maps. REMOVED 2026-08-02 (#4667) — tombstoned at the schema (retiredKey carries the prescription; authoring it is a tsc error and a parse error) and stripped from sources by the protocol-17 conversion. The entry stays because retiredKey keeps the key in the walked shape (the rls.priority precedent). TOMBSTONE rather than delete because BookGroupSchema is a plain z.object with NO .strict() — a bare delete would have zod silently strip the key, trading one silent no-op for another. No resolver read inline book/group translations; group labels rendered verbatim in every locale. Localize the DOCS instead: doc.translations is live on every doc render path."
         },
         "order": {
           "status": "live",

@@ -13,8 +13,8 @@
     },
     "driver": {
       "status": "live",
-      "evidence": "packages/services/service-datasource/src/default-datasource-driver-factory.ts:334",
-      "note": "factory dispatch; `resolveDriverId` normalizes aliases before the switch."
+      "evidence": "packages/services/service-datasource/src/default-datasource-driver-factory.ts:345",
+      "note": "factory dispatch; `resolveDriverId` normalizes aliases before the switch. Since #6345 that table is also what both boot hosts read for `OS_DATABASE_DRIVER` / `--database-driver`, and the canonical mongo id is `mongodb` (stored `mongo` converges via the ADR-0087 conversion `datasource-driver-mongo-to-mongodb`; the alias stays accepted). Every builtin id now has an explicit construction arm — the trailing `memory` fall-through is gone."
     },
     "config": {
       "status": "live",

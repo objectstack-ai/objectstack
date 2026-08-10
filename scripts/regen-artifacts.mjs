@@ -80,6 +80,12 @@ export const REGEN_ARTIFACTS = Object.freeze([
     check: 'check:api-surface',
     readsDist: true,
   },
+  // The #4796 declaration-origin baseline: which source declaration each entry
+  // point's exports resolve to. Sharded per entry point for the same
+  // merge-queue reason `api-surface/` is, and rewritten by every retirement PR
+  // — the exact churn profile the driver exists for. NO `readsDist`: it reads
+  // `src/`, so a merge that moved sources is all it needs to be re-run against.
+  { path: 'packages/spec/export-origins/**', gen: 'gen:export-origins', check: 'check:export-origins' },
   // `readsSchemaTree` is the `readsDist` above, one artifact over (#4723). Both
   // `gen:docs` and `check:docs` render from `packages/spec/json-schema/`, which is
   // GITIGNORED — a merge therefore never delivers it, and a leftover tree from

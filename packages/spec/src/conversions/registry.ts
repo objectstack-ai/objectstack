@@ -540,8 +540,10 @@ const viewVisibleOnToVisibleWhen: MetadataConversion = {
 /**
  * Page component `visibility` → `visibleWhen` (protocol 15, ADR-0089 D2).
  *
- * The page-component spelling of the same predicate. Applies to
- * `pages[].regions[].components[]`. **Live window**, same terms as
+ * The page-component spelling of the same predicate. Applies to every page
+ * component {@link mapPageComponents} reaches — `regions[].components[]`,
+ * `slots.<slot>`, and the containers a component nests under its `properties`
+ * (#6776, #6775). **Live window**, same terms as
  * {@link viewVisibleOnToVisibleWhen}. (An AI agent's `visibility` property is
  * a different, unrelated surface and is not touched.)
  */
@@ -570,9 +572,28 @@ const pageComponentVisibilityToVisibleWhen: MetadataConversion = {
               components: [
                 { type: 'record:list', visibility: "page.selectedId != ''" },
                 { type: 'element:divider' },
+                // Nested one container down (#6775): the predicate means the
+                // same thing inside a card as it does at region level, so the
+                // walk reaches it there too.
+                {
+                  type: 'page:card',
+                  properties: {
+                    title: 'Selected',
+                    children: [{ type: 'record:detail', visibility: "page.selectedId != ''" }],
+                  },
+                },
               ],
             },
           ],
+        },
+        // …and in a named slot on a slotted record page (#6776).
+        {
+          name: 'crm_lead_record',
+          kind: 'slotted',
+          regions: [],
+          slots: {
+            highlights: { type: 'record:detail', visibility: "record.stage == 'won'" },
+          },
         },
       ],
     },
@@ -586,13 +607,28 @@ const pageComponentVisibilityToVisibleWhen: MetadataConversion = {
               components: [
                 { type: 'record:list', visibleWhen: "page.selectedId != ''" },
                 { type: 'element:divider' },
+                {
+                  type: 'page:card',
+                  properties: {
+                    title: 'Selected',
+                    children: [{ type: 'record:detail', visibleWhen: "page.selectedId != ''" }],
+                  },
+                },
               ],
             },
           ],
         },
+        {
+          name: 'crm_lead_record',
+          kind: 'slotted',
+          regions: [],
+          slots: {
+            highlights: { type: 'record:detail', visibleWhen: "record.stage == 'won'" },
+          },
+        },
       ],
     },
-    expectedNotices: 1,
+    expectedNotices: 3,
   },
 };
 
@@ -2364,10 +2400,16 @@ const dashboardWidgetResponsiveRemoved: MetadataConversion = {
  * the two places an upgrading author actually reads. All are `toMajor: 17`, so a
  * stored dashboard carrying keys from several of them is cleaned in one replay.
  *
- * `colorVariant`, the fifth key #5010 lists, is deliberately NOT here: its
- * disposition is unresolved (the rewrite target `options.colorVariant` measured
- * dead on the ADR-0021 dataset path too), and 16 authored sites depend on the
- * answer. Retiring it later is a new entry, not an edit to this one.
+ * `colorVariant`, the fifth key #5010 lists, is deliberately NOT here — and the
+ * reason has since been SETTLED, in the other direction. When this entry was
+ * written its disposition was open: the rewrite target its triage assumed,
+ * `options.colorVariant`, measured dead on the ADR-0021 dataset path too, and
+ * 16 authored sites depended on the answer. #5010 ruling B answered ENFORCE —
+ * the declaration stays and objectui implements it — which objectui#3359 /
+ * PR objectui#3799 did, absorbed here by the `.objectui-sha` pin `09987b68`.
+ * The key is `live` in `liveness/dashboard.json` as of #6774, so nothing is
+ * owed: no retirement, no later entry. Read this paragraph as "not being
+ * removed", not as "not removed yet".
  */
 const dashboardWidgetActionAriaRemoved: MetadataConversion = {
   id: 'dashboard-widget-action-aria-removed',
@@ -3173,7 +3215,11 @@ const DATASOURCE_CONFIG_KEY_ALIASES: Readonly<
   'sqlite-wasm': [['file', 'filename'], ['database', 'filename']],
   postgres: [['connectionString', 'url'], ['user', 'username']],
   mysql: [['connectionString', 'url'], ['user', 'username']],
-  mongo: [['uri', 'url'], ['user', 'username']],
+  // `mongodb` since #6345 — the canonical id was renamed from `mongo` so the
+  // contract canon matches what both boot hosts, the driver package and every
+  // URL scheme already said. Keyed by the CANONICAL id `resolveDriverId`
+  // returns, so a stored `driver: 'mongo'` still lands here through the alias.
+  mongodb: [['uri', 'url'], ['user', 'username']],
 };
 
 /**
@@ -3269,6 +3315,85 @@ const datasourceConfigDriverKeyAliases: MetadataConversion = {
     },
     // app_db 1 + archive_db 1 + warehouse 2 + orders 1 + events 1 + scratch 0.
     expectedNotices: 6,
+  },
+};
+
+/**
+ * `datasource.driver: 'mongo'` → `'mongodb'` (protocol 17, #6345).
+ *
+ * ## Why a stored value has to move at all
+ *
+ * `mongo` and `mongodb` have both been accepted spellings since #4410, and both
+ * still are — this conversion does NOT rescue a broken boot, and a deployment
+ * that never runs it keeps connecting exactly as before. What moved is the
+ * CANONICAL id: #6345's ruling renamed it to `mongodb`, the spelling both boot
+ * hosts, the driver package (`@objectstack/driver-mongodb`) and every URL scheme
+ * already used, so that the id which selects a driver and the id which selects
+ * its config contract are one string with no mapping layer between them.
+ *
+ * That rename is visible in data because the canonical id is PUBLISHED as
+ * `DRIVER_CATALOG.id` (`@objectstack/service-datasource`), documented as "used
+ * as `datasource.driver`" — it is literally what Studio's connection form writes
+ * into a datasource row. After the rename the form emits `mongodb`, while every
+ * row written before it carries `mongo`. Left alone, one deployment's datasource
+ * list holds two spellings of one driver, and any surface that matches a stored
+ * `driver` against the published catalog id (a form pre-selecting the current
+ * driver, a grouped list, an equality filter) silently fails to match the older
+ * rows. So the stored value converges here rather than each reader learning to
+ * accept both.
+ *
+ * ## Why D2 and not D3
+ *
+ * There is a concrete stored value with a lossless, behaviour-preserving
+ * rewrite, which is the D2 test exactly. `mongo` and `mongodb` resolve to the
+ * same contract and build the same driver, before and after, so replaying this
+ * cannot change where any data lives — contrast
+ * {@link datasourceConfigDriverKeyAliases}, whose scope guard exists because
+ * rewriting a sqlite `path:` WOULD have moved a database.
+ *
+ * ## Why it stays on the LIVE load path
+ *
+ * Unlike the key-alias conversion above, `mongo` is not a spelling the authoring
+ * gate rejects — it is still a legal alias, deliberately, so that nothing breaks
+ * for a deployment that skipped the migration. There is therefore no loud
+ * rejection for a live-window entry to pre-empt, and every rehydration seam
+ * converging on one spelling is the whole point.
+ */
+const datasourceDriverMongoToMongodb: MetadataConversion = {
+  id: 'datasource-driver-mongo-to-mongodb',
+  toMajor: 17,
+  surface: 'datasource.driver',
+  summary:
+    "datasource driver id 'mongo' → 'mongodb' — the canonical id both boot hosts, the driver "
+    + 'package and the published DRIVER_CATALOG already used (#6345)',
+  apply(stack, emit) {
+    return mapDatasources(stack, (ds, path) => {
+      // Only the exact legacy canon, trimmed and lower-cased the same way
+      // `resolveDriverId` reads it. `mongodb` is already canonical, and any other
+      // spelling (a plugin driver, a typo) is not this conversion's business.
+      if (typeof ds.driver !== 'string' || ds.driver.trim().toLowerCase() !== 'mongo') return ds;
+      emit({ from: 'mongo', to: 'mongodb', path: `${path}.driver` });
+      return { ...ds, driver: 'mongodb' };
+    });
+  },
+  fixture: {
+    before: {
+      datasources: [
+        { name: 'events', driver: 'mongo', config: { url: 'mongodb://mongo.internal:27017/events' } },
+        // Already canonical — untouched, and emits nothing.
+        { name: 'audit', driver: 'mongodb', config: { url: 'mongodb://mongo.internal:27017/audit' } },
+        // A different driver whose id merely CONTAINS the string: never rewritten.
+        { name: 'cache', driver: 'com.vendor.mongolike', config: { url: 'x://y' } },
+      ],
+    },
+    after: {
+      datasources: [
+        { name: 'events', driver: 'mongodb', config: { url: 'mongodb://mongo.internal:27017/events' } },
+        { name: 'audit', driver: 'mongodb', config: { url: 'mongodb://mongo.internal:27017/audit' } },
+        { name: 'cache', driver: 'com.vendor.mongolike', config: { url: 'x://y' } },
+      ],
+    },
+    expectedNotices: 1,
   },
 };
 
@@ -4611,6 +4736,17 @@ const PAGE_HEADER_COMPONENT_TYPES = new Set(['page:header', 'page-header']);
  * is a live declared prop elsewhere on the same surface (`element:text_input`
  * helper text), and those components are not this entry's business.
  *
+ * **This entry is why the walker's reach had to grow (#6775).** Every other
+ * page-component entry leans on a tombstone to cover the sites a conversion
+ * cannot reach; this one has none to lean on, because `description` stays a
+ * live declared prop on other components, so `properties.description` parses
+ * green at ANY position. Until the walker descended into `slots.*` (#6776) and
+ * into container `properties` (#6775), a header on a `kind: 'slotted'` record
+ * page or inside a card/tab panel was rewritten by nobody and reported by
+ * nobody — and objectui's `subtitle ?? description` fallback could not retire
+ * without those pages silently losing their second line, the exact failure
+ * shape this entry exists to prevent. The fixture pins all three positions.
+ *
  * **Live window**; retires at 18.
  */
 const pageHeaderSubtitleAlias: MetadataConversion = {
@@ -4654,6 +4790,66 @@ const pageHeaderSubtitleAlias: MetadataConversion = {
             },
           ],
         },
+        // The slotted record page — `regions: []`, header in a named slot. This
+        // is the shape objectui's own guide prescribes for a customized record
+        // header, and a region-only walk visited none of it (#6776).
+        {
+          name: 'crm_account_detail',
+          kind: 'slotted',
+          regions: [],
+          slots: {
+            header: { type: 'page:header', properties: { title: '{name}', description: 'Account overview' } },
+          },
+        },
+        // Container nesting (#6775): a header inside a card's `children`, one in
+        // its `footer`, one inside a tab panel, and one two levels down. All are
+        // spec-valid (`properties` is an open bag) and all were invisible to the
+        // region-only walk — with no tombstone to catch them at parse time.
+        {
+          name: 'crm_pipeline_dashboard',
+          regions: [
+            {
+              name: 'main',
+              components: [
+                {
+                  type: 'page:card',
+                  properties: {
+                    title: 'Pipeline',
+                    children: [
+                      { type: 'page-header', properties: { title: 'Open', description: 'This quarter' } },
+                    ],
+                    footer: [
+                      { type: 'page:header', properties: { title: 'Closed', description: 'Last quarter' } },
+                    ],
+                  },
+                },
+                {
+                  type: 'page:tabs',
+                  properties: {
+                    tabStyle: 'line',
+                    items: [
+                      {
+                        label: 'Activity',
+                        children: [
+                          { type: 'page:header', properties: { title: 'Recent', description: 'Last 7 days' } },
+                          // Two levels down — the recursion, not just one hop.
+                          {
+                            type: 'page:card',
+                            properties: {
+                              children: [
+                                { type: 'page:header', properties: { title: 'Nested', description: 'Deep' } },
+                              ],
+                            },
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                },
+              ],
+            },
+          ],
+        },
       ],
     },
     after: {
@@ -4672,9 +4868,61 @@ const pageHeaderSubtitleAlias: MetadataConversion = {
             },
           ],
         },
+        {
+          name: 'crm_account_detail',
+          kind: 'slotted',
+          regions: [],
+          slots: {
+            header: { type: 'page:header', properties: { title: '{name}', subtitle: 'Account overview' } },
+          },
+        },
+        {
+          name: 'crm_pipeline_dashboard',
+          regions: [
+            {
+              name: 'main',
+              components: [
+                {
+                  type: 'page:card',
+                  properties: {
+                    title: 'Pipeline',
+                    children: [
+                      { type: 'page-header', properties: { title: 'Open', subtitle: 'This quarter' } },
+                    ],
+                    footer: [
+                      { type: 'page:header', properties: { title: 'Closed', subtitle: 'Last quarter' } },
+                    ],
+                  },
+                },
+                {
+                  type: 'page:tabs',
+                  properties: {
+                    tabStyle: 'line',
+                    items: [
+                      {
+                        label: 'Activity',
+                        children: [
+                          { type: 'page:header', properties: { title: 'Recent', subtitle: 'Last 7 days' } },
+                          {
+                            type: 'page:card',
+                            properties: {
+                              children: [
+                                { type: 'page:header', properties: { title: 'Nested', subtitle: 'Deep' } },
+                              ],
+                            },
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                },
+              ],
+            },
+          ],
+        },
       ],
     },
-    expectedNotices: 2,
+    expectedNotices: 7,
   },
 };
 
@@ -4691,14 +4939,15 @@ const pageHeaderSubtitleAlias: MetadataConversion = {
  * contract" — so the honoured keys were declared and the unread ones retire
  * here.
  *
- * **Region level is the reach, deliberately.** {@link mapPageComponents} walks
- * `pages[].regions[].components[]` and stops: `PageComponentSchema` declares no
- * children key, so a picker nested inside a card's `children` sits in another
- * component's free-form `properties` and is not typed page-component shape.
- * Same boundary as {@link pageHeaderSubtitleAlias}, drawn for the same reason.
- * The tombstones are what cover the rest: they type the key `never`, so a
- * nested authoring site fails `tsc` and carries its own prescription at parse
- * time whether or not a conversion could reach it.
+ * **The reach is every position a picker can be authored in** (#6775).
+ * {@link mapPageComponents} walks `regions[].components[]`, `slots.<slot>` and
+ * the containers a component nests under its `properties` — the same set
+ * `walkPageComponents` lints — so a picker inside a card's `children` or a tab
+ * panel is rewritten where it sits. The tombstones still carry the refusal at
+ * parse time for anything a conversion declines to touch (a disagreeing pair
+ * under {@link renameKey}'s house rule, or a source no migration ran over);
+ * what changed is that "run `os migrate meta`" is now a promise the rewrite can
+ * keep at a nested site, not only at region level.
  *
  * All three are **retired from the load path**: each key is tombstoned in
  * `ui/component.zod.ts`, so the loader rejects it loudly with the prescription
@@ -4759,9 +5008,31 @@ const recordPickerDisplayFieldToLabelField: MetadataConversion = {
                 // `displayField` is a live LOOKUP-FIELD key elsewhere on the
                 // surface — a different component's business, untouched here.
                 { type: 'element:form', properties: { object: 'c', displayField: 'title' } },
+                // Nested one container down (#6775) — a picker inside a card is
+                // where a form-shaped page actually puts one.
+                {
+                  type: 'page:card',
+                  properties: {
+                    title: 'Link a project',
+                    children: [
+                      { type: 'element:record_picker', properties: { object: 'd', displayField: 'code' } },
+                    ],
+                  },
+                },
               ],
             },
           ],
+        },
+        // A slotted page's named slot — same component, other authoring shape.
+        {
+          name: 'showcase_project_detail',
+          kind: 'slotted',
+          regions: [],
+          slots: {
+            details: [
+              { type: 'element:record_picker', properties: { object: 'e', displayField: 'label' } },
+            ],
+          },
         },
       ],
     },
@@ -4777,13 +5048,32 @@ const recordPickerDisplayFieldToLabelField: MetadataConversion = {
                 { type: 'element:record_picker', properties: { object: 'a', labelField: 'name' } },
                 { type: 'element:record_picker', properties: { object: 'b', labelField: 'name', displayField: 'title' } },
                 { type: 'element:form', properties: { object: 'c', displayField: 'title' } },
+                {
+                  type: 'page:card',
+                  properties: {
+                    title: 'Link a project',
+                    children: [
+                      { type: 'element:record_picker', properties: { object: 'd', labelField: 'code' } },
+                    ],
+                  },
+                },
               ],
             },
           ],
         },
+        {
+          name: 'showcase_project_detail',
+          kind: 'slotted',
+          regions: [],
+          slots: {
+            details: [
+              { type: 'element:record_picker', properties: { object: 'e', labelField: 'label' } },
+            ],
+          },
+        },
       ],
     },
-    expectedNotices: 2,
+    expectedNotices: 4,
   },
 };
 
@@ -4833,9 +5123,34 @@ const recordPickerInertKeysRemoved: MetadataConversion = {
                 // `multiple` is a live FIELD key (lookup fields) — a different
                 // surface entirely, and not this entry's business.
                 { type: 'element:form', properties: { object: 'a', multiple: true } },
+                // Inside a tab panel (#6775): `page:tabs` hangs its sub-tree off
+                // `properties.items[].children`, which the walk now descends.
+                {
+                  type: 'page:tabs',
+                  properties: {
+                    tabStyle: 'line',
+                    items: [
+                      {
+                        label: 'Pick one',
+                        children: [
+                          { type: 'element:record_picker', properties: { object: 'b', multiple: true } },
+                        ],
+                      },
+                    ],
+                  },
+                },
               ],
             },
           ],
+        },
+        // The named-slot shape, on a slotted record page.
+        {
+          name: 'picker_detail',
+          kind: 'slotted',
+          regions: [],
+          slots: {
+            details: { type: 'element:record_picker', properties: { object: 'c', searchFields: ['name'] } },
+          },
         },
       ],
     },
@@ -4849,13 +5164,35 @@ const recordPickerInertKeysRemoved: MetadataConversion = {
               components: [
                 { type: 'element:record_picker', properties: { object: 'showcase_project' } },
                 { type: 'element:form', properties: { object: 'a', multiple: true } },
+                {
+                  type: 'page:tabs',
+                  properties: {
+                    tabStyle: 'line',
+                    items: [
+                      {
+                        label: 'Pick one',
+                        children: [
+                          { type: 'element:record_picker', properties: { object: 'b' } },
+                        ],
+                      },
+                    ],
+                  },
+                },
               ],
             },
           ],
         },
+        {
+          name: 'picker_detail',
+          kind: 'slotted',
+          regions: [],
+          slots: {
+            details: { type: 'element:record_picker', properties: { object: 'c' } },
+          },
+        },
       ],
     },
-    expectedNotices: 2,
+    expectedNotices: 4,
   },
 };
 
@@ -4915,9 +5252,31 @@ const pageCardBodyToChildren: MetadataConversion = {
                 },
                 // `body` on a component that is not a card — not this entry's key.
                 { type: 'record:alert', properties: { body: 'Confirm the work before marking it done.' } },
+                // A card nested in a card (#6775). The OUTER rename moves the
+                // sub-tree from `body` to `children`, and the descent reads the
+                // MAPPED component, so the inner card is visited exactly once —
+                // under the canonical key, not once per spelling.
+                {
+                  type: 'page:card',
+                  properties: {
+                    title: 'Outer',
+                    body: [
+                      { type: 'page:card', properties: { title: 'Inner', body: [{ type: 'element:text' }] } },
+                    ],
+                  },
+                },
               ],
             },
           ],
+        },
+        // The named-slot shape: a card authored into a slotted page's `details`.
+        {
+          name: 'my_work_detail',
+          kind: 'slotted',
+          regions: [],
+          slots: {
+            details: { type: 'page:card', properties: { title: 'Detail', body: [{ type: 'element:text' }] } },
+          },
         },
       ],
     },
@@ -4938,13 +5297,30 @@ const pageCardBodyToChildren: MetadataConversion = {
                   properties: { children: [{ type: 'element:text' }], body: [{ type: 'element:image' }] },
                 },
                 { type: 'record:alert', properties: { body: 'Confirm the work before marking it done.' } },
+                {
+                  type: 'page:card',
+                  properties: {
+                    title: 'Outer',
+                    children: [
+                      { type: 'page:card', properties: { title: 'Inner', children: [{ type: 'element:text' }] } },
+                    ],
+                  },
+                },
               ],
             },
           ],
         },
+        {
+          name: 'my_work_detail',
+          kind: 'slotted',
+          regions: [],
+          slots: {
+            details: { type: 'page:card', properties: { title: 'Detail', children: [{ type: 'element:text' }] } },
+          },
+        },
       ],
     },
-    expectedNotices: 1,
+    expectedNotices: 4,
   },
 };
 
@@ -4996,12 +5372,13 @@ const pageCardBodyToChildren: MetadataConversion = {
  * already-present `bodyExtra` WINS and a differing object-form `params` is left
  * exactly where it sits, for the author to reconcile (#4923).
  *
- * Region level is the reach, as for {@link pageHeaderSubtitleAlias} and
- * {@link pageCardBodyToChildren}: `PageComponentSchema` declares no children
- * key, so a button nested inside another component's free-form `properties` is
- * not typed page-component shape. The array-only field is what covers the rest
- * — it refuses the object form with a message naming `bodyExtra`, whether or
- * not a conversion could reach the site.
+ * The reach is every position a button can be authored in, as for
+ * {@link pageHeaderSubtitleAlias} and {@link pageCardBodyToChildren} (#6775):
+ * `regions[].components[]`, `slots.<slot>`, and the containers a component
+ * nests under its `properties` — which is where a submit button most often
+ * sits, inside the card that holds the form. The array-only field still covers
+ * anything the rewrite declines to touch: it refuses the object form with a
+ * message naming `bodyExtra`, at any position.
  *
  * **Live window**; retires at 18.
  */
@@ -5087,9 +5464,43 @@ const inlineActionApiParamsToBodyExtra: MetadataConversion = {
                     action: { type: 'url', target: '/x?id=${param.id}', params: { id: 'abc' } },
                   },
                 },
+                // The shape a pure-SDUI form is actually built in (#6775): the
+                // submit button sits in the card's `footer`, one container down.
+                {
+                  type: 'page:card',
+                  properties: {
+                    title: 'Contact us',
+                    footer: [
+                      {
+                        type: 'element:button',
+                        properties: {
+                          label: 'Send',
+                          action: { type: 'api', target: '/api/v1/forms/send', params: { note: '{{page.note}}' } },
+                        },
+                      },
+                    ],
+                  },
+                },
               ],
             },
           ],
+        },
+        // The named-slot shape: an action button in a slotted page's `actions`.
+        {
+          name: 'showcase_contact_detail',
+          kind: 'slotted',
+          regions: [],
+          slots: {
+            actions: [
+              {
+                type: 'element:button',
+                properties: {
+                  label: 'Resend',
+                  action: { type: 'api', target: '/api/v1/forms/resend', params: { id: '{{record.id}}' } },
+                },
+              },
+            ],
+          },
         },
       ],
     },
@@ -5143,13 +5554,44 @@ const inlineActionApiParamsToBodyExtra: MetadataConversion = {
                     action: { type: 'url', target: '/x?id=${param.id}', params: { id: 'abc' } },
                   },
                 },
+                {
+                  type: 'page:card',
+                  properties: {
+                    title: 'Contact us',
+                    footer: [
+                      {
+                        type: 'element:button',
+                        properties: {
+                          label: 'Send',
+                          action: { type: 'api', target: '/api/v1/forms/send', bodyExtra: { note: '{{page.note}}' } },
+                        },
+                      },
+                    ],
+                  },
+                },
               ],
             },
           ],
         },
+        {
+          name: 'showcase_contact_detail',
+          kind: 'slotted',
+          regions: [],
+          slots: {
+            actions: [
+              {
+                type: 'element:button',
+                properties: {
+                  label: 'Resend',
+                  action: { type: 'api', target: '/api/v1/forms/resend', bodyExtra: { id: '{{record.id}}' } },
+                },
+              },
+            ],
+          },
+        },
       ],
     },
-    expectedNotices: 1,
+    expectedNotices: 3,
   },
 };
 
@@ -5189,11 +5631,15 @@ const inlineActionApiParamsToBodyExtra: MetadataConversion = {
  * DISAGREEING pair is left for the author to reconcile rather than the loader
  * picking a look.
  *
- * Region level is the reach, as for {@link pageCardBodyToChildren}:
- * `PageComponentSchema` declares no children key, so a `page:tabs` nested inside
- * another component's free-form `properties` is not typed page-component shape.
- * The tombstone covers the rest — `tsc` at the authoring site and the parse at
- * load, both carrying the prescription whether or not the walk reaches there.
+ * The reach is every position, as for {@link pageCardBodyToChildren} (#6775):
+ * a `page:tabs` nested inside another component's `properties` is rewritten
+ * where it sits. The discriminator matters more here than anywhere else, since
+ * the key being renamed shares a name with the node's dispatch key — so the
+ * fixture pins that descending into a props bag does NOT turn some other
+ * component's inner `type` (an action's `type: 'url'`, a tab item's fields)
+ * into a rewrite target: only `properties.type` on a node whose own `type` is
+ * `page:tabs` moves. The tombstone still carries the refusal at the authoring
+ * site (`tsc`) and at load (the parse), whatever the walk reached.
  *
  * `retiredFromLoadPath: true`: no alias window, deliberately. The tombstone owns
  * the refusal; this entry exists so `spec-changes.json`, the upgrade guide and
@@ -5233,11 +5679,39 @@ const pageTabsTypeToTabStyle: MetadataConversion = {
                 // rather than the loader picking for them.
                 { type: 'page:tabs', properties: { tabStyle: 'pill', type: 'card', items: [] } },
                 // A `type` one level down inside another component's properties
-                // is a different key entirely — the walk is region-level and
-                // never descends into a props bag.
+                // is a different key entirely: `action.type` is the action's
+                // discriminator, and the walk descends into CONTAINER keys
+                // (`children` / `items[].children` / `body` / `footer`), never
+                // into an arbitrary props value.
                 {
                   type: 'element:button',
                   properties: { label: 'Open', action: { type: 'url', target: '/x' } },
+                },
+                // Tabs nested in a card, and tabs inside a tab panel (#6775):
+                // the rewrite reaches both, and the outer strip's own `items`
+                // stay ordinary tab records, not components.
+                {
+                  type: 'page:card',
+                  properties: {
+                    title: 'Related',
+                    children: [
+                      { type: 'page:tabs', properties: { type: 'pill', items: [{ label: 'Notes' }] } },
+                    ],
+                  },
+                },
+                {
+                  type: 'page:tabs',
+                  properties: {
+                    tabStyle: 'line',
+                    items: [
+                      {
+                        label: 'Nested',
+                        children: [
+                          { type: 'page:tabs', properties: { type: 'card', items: [] } },
+                        ],
+                      },
+                    ],
+                  },
                 },
               ],
             },
@@ -5271,6 +5745,29 @@ const pageTabsTypeToTabStyle: MetadataConversion = {
                   type: 'element:button',
                   properties: { label: 'Open', action: { type: 'url', target: '/x' } },
                 },
+                {
+                  type: 'page:card',
+                  properties: {
+                    title: 'Related',
+                    children: [
+                      { type: 'page:tabs', properties: { tabStyle: 'pill', items: [{ label: 'Notes' }] } },
+                    ],
+                  },
+                },
+                {
+                  type: 'page:tabs',
+                  properties: {
+                    tabStyle: 'line',
+                    items: [
+                      {
+                        label: 'Nested',
+                        children: [
+                          { type: 'page:tabs', properties: { tabStyle: 'card', items: [] } },
+                        ],
+                      },
+                    ],
+                  },
+                },
               ],
             },
           ],
@@ -5284,7 +5781,406 @@ const pageTabsTypeToTabStyle: MetadataConversion = {
         },
       ],
     },
+    expectedNotices: 5,
+  },
+};
+
+/**
+ * `page:header.icon` and `page:card.actions` — two declared page-component props
+ * with NO renderer read point at all (protocol 17, #6946, ADR-0049).
+ *
+ * Maintainer ruling 2026-08-09 (decision-inbox round, 「全部接受」) on
+ * objectui#3829, **route (c)**: retire both upstream. That card had put three
+ * shapes on the table — wire the key, publish it with a KNOWN GAP marker (the
+ * `record:activity.showSubscriptionToggle` precedent), or retire it here — and
+ * the ruling took the third, so the platform contract loses two keys rather
+ * than growing two features nobody asked for.
+ *
+ * What "no read point" means, per key, measured against objectui at the
+ * `.objectui-sha` pin (`09987b68`) rather than inherited from the card:
+ *
+ *   - **`page:header.icon`** — `PageHeaderRenderer` resolves `icon` only inside
+ *     the ACTION pipeline (`action.icon`, per button); the header's own props
+ *     bag is never asked for one. `@object-ui/layout`'s `<PageHeader>` does
+ *     draw an `icon`, but only from a REACT prop a host passes: unlike
+ *     `actions`, which four lines away falls back to `schema?.actions ??
+ *     schema?.properties?.actions`, `icon` has no schema fallback, so an
+ *     authored node cannot reach it. The registration publishes no `icon`
+ *     input either.
+ *   - **`page:card.actions`** — `PageCardRenderer` builds its `<Card>` from
+ *     `title`, `bordered`, `body ?? children` and `footer`, full stop. There is
+ *     no actions area in the markup and no `actions` input in the
+ *     registration. Its sibling `page:header` DOES read `actions` off the bag,
+ *     which is exactly why the divergence survived: the two declarations look
+ *     identical.
+ *
+ * Both keys are in objectui's own `UNPUBLISHED_EXEMPTIONS` map as B-class
+ * ("spec declares it, NO renderer read point") entries pointing at objectui#3829
+ * — an independent measurement of the same fact, taken in the other repo.
+ *
+ * **Pure lossless deletes.** Neither key ever had an effect to lose, and
+ * neither has a lossless rewrite target: the header has no second icon slot
+ * (its identity is the record chrome), and the card has no actions area to move
+ * a list into — buttons belong in `children`/`footer` as components, which is a
+ * page rewrite and not a mechanical one. So this strips, exactly as
+ * {@link recordPickerInertKeysRemoved} does for the picker's two inert keys.
+ *
+ * ⚠️ `page:header.actions` is NOT touched — it is read (`containers.tsx`, and
+ * `@object-ui/layout`'s header) and stays. One key name, two components, one
+ * of them live: the strip is scoped by component `type`, never by key name.
+ *
+ * objectui#3829 (drop the two exemptions) is Blocked-by #6946 and proceeds on
+ * the next pin bump.
+ */
+const pageStructureInertKeysRemoved: MetadataConversion = {
+  id: 'page-structure-inert-keys-removed',
+  toMajor: 17,
+  retiredFromLoadPath: true,
+  surface: 'page.component.page:header.icon / page.component.page:card.actions',
+  summary:
+    "page:header prop 'icon' and page:card prop 'actions' removed (#6946 — neither has a renderer "
+    + 'read point in objectui; the header resolves icons per action and the card renders '
+    + 'title/children/footer only)',
+  apply(stack, emit) {
+    return mapPageComponents(stack, (component, path) => {
+      const properties = component.properties;
+      if (!isDict(properties)) return component;
+      // Scoped by component type: `actions` is LIVE on `page:header` and `icon`
+      // is live on half a dozen other components, so a key-name-only strip
+      // would delete working metadata.
+      const key =
+        component.type === 'page:header' ? 'icon'
+          : component.type === 'page:card' ? 'actions'
+            : null;
+      if (!key) return component;
+      const stripped = stripKeys(properties, [key], emit, `${path}.properties`);
+      if (stripped === properties) return component;
+      return { ...component, properties: stripped };
+    });
+  },
+  fixture: {
+    before: {
+      pages: [
+        {
+          name: 'connect_agent',
+          regions: [
+            {
+              name: 'header',
+              components: [
+                // The published platform-page shape: title + subtitle + a
+                // decorative icon nothing drew.
+                {
+                  type: 'page:header',
+                  properties: { title: 'Connect an Agent', subtitle: 'Governed MCP access.', icon: 'bot' },
+                },
+                // `page:header.actions` SURVIVES — the live half of the same key
+                // name (see the ⚠️ above).
+                { type: 'page:header', properties: { title: 'Lead', actions: ['convert_lead'], icon: 'user' } },
+                // `icon` on a component that is not a page header — not this
+                // entry's key, and live on that one.
+                { type: 'element:button', properties: { label: 'Open', icon: 'external-link' } },
+                {
+                  type: 'page:card',
+                  properties: { title: 'Shortcuts', actions: ['new_task'], footer: [{ type: 'element:text' }] },
+                },
+                // A card nested inside a card's `children` (#6775 reach): the
+                // descent visits it, so the inner `actions` goes too.
+                {
+                  type: 'page:card',
+                  properties: {
+                    title: 'Outer',
+                    children: [
+                      { type: 'page:card', properties: { title: 'Inner', actions: ['edit'] } },
+                    ],
+                  },
+                },
+              ],
+            },
+          ],
+        },
+        // The named-slot shape (#6776): a header authored into a slotted
+        // record page's `details` slot.
+        {
+          name: 'connect_agent_detail',
+          kind: 'slotted',
+          regions: [],
+          slots: {
+            details: { type: 'page:header', properties: { title: 'Agent', icon: 'bot' } },
+          },
+        },
+      ],
+    },
+    after: {
+      pages: [
+        {
+          name: 'connect_agent',
+          regions: [
+            {
+              name: 'header',
+              components: [
+                {
+                  type: 'page:header',
+                  properties: { title: 'Connect an Agent', subtitle: 'Governed MCP access.' },
+                },
+                { type: 'page:header', properties: { title: 'Lead', actions: ['convert_lead'] } },
+                { type: 'element:button', properties: { label: 'Open', icon: 'external-link' } },
+                {
+                  type: 'page:card',
+                  properties: { title: 'Shortcuts', footer: [{ type: 'element:text' }] },
+                },
+                {
+                  type: 'page:card',
+                  properties: {
+                    title: 'Outer',
+                    children: [
+                      { type: 'page:card', properties: { title: 'Inner' } },
+                    ],
+                  },
+                },
+              ],
+            },
+          ],
+        },
+        {
+          name: 'connect_agent_detail',
+          kind: 'slotted',
+          regions: [],
+          slots: {
+            details: { type: 'page:header', properties: { title: 'Agent' } },
+          },
+        },
+      ],
+    },
+    expectedNotices: 5,
+  },
+};
+
+/**
+ * `record:details.layout` — a mode selector whose two declared modes were never
+ * implemented (protocol 17, #6946, ADR-0049).
+ *
+ * Maintainer ruling 2026-08-09 (decision-inbox round, 「全部接受」) on
+ * objectui#3818: the removal direction.
+ *
+ * This one is NOT a zero-read-point key, and the distinction is the whole
+ * finding. `RecordDetailsRenderer` does read it — and reads it against values
+ * this schema never permitted:
+ *
+ *     const layout = schema.layout === 'inline' || schema.layout === 'compact'
+ *       ? 'horizontal' : 'vertical';
+ *
+ * The declared enum is `auto | custom`. Neither matches, so both legal values
+ * take the same `vertical` branch: the key was accepted, read, and could not
+ * change anything. Its `.describe()` meanwhile promised "auto uses object
+ * highlightFields, custom uses explicit sections" — a behaviour the renderer
+ * implements, but keyed off whether `sections` is authored at all, never off
+ * this flag.
+ *
+ * **Why every gate stayed green over it.** `check:react-declaration-parity`
+ * compares two DECLARATIONS, not a declaration against an implementation
+ * (AGENTS.md) — and objectui's registry declared `layout` with the SAME
+ * `auto | custom` enum, so the gate saw perfect agreement over a key nothing
+ * honoured. A third spelling, `stacked | inline | compact`, sat in
+ * `@object-ui/types`' `RecordDetailsComponentProps` mirror. Three declarations
+ * of one key, none of them the branch the renderer takes.
+ *
+ * **A PURE STRIP, deliberately.** There is no value to carry: `auto` and
+ * `custom` were behaviourally identical to each other and to omission, so a
+ * rewrite would have nowhere lossless to go. What already decides the body is
+ * what the author wrote — `sections` for explicit groups, its absence for the
+ * object's `highlightFields`.
+ *
+ * ⚠️ `record:highlights.layout` is a DIFFERENT, live key (`horizontal |
+ * vertical`, honoured) and is untouched: this entry is scoped by component
+ * `type`.
+ *
+ * objectui#3818 (delete the `layout` input and the dead `inline|compact`
+ * branch) is Blocked-by #6946 and proceeds on the next pin bump.
+ */
+const recordDetailsLayoutRemoved: MetadataConversion = {
+  id: 'record-details-layout-removed',
+  toMajor: 17,
+  retiredFromLoadPath: true,
+  surface: 'page.component.record:details.layout',
+  summary:
+    "record:details component prop 'layout' removed (#6946 — the declared auto|custom modes were "
+    + 'never implemented; the renderer branches only on inline|compact, values the schema never '
+    + 'permitted, so both legal values selected nothing)',
+  apply(stack, emit) {
+    return mapPageComponents(stack, (component, path) => {
+      if (component.type !== 'record:details') return component;
+      const properties = component.properties;
+      if (!isDict(properties)) return component;
+      const stripped = stripKeys(properties, ['layout'], emit, `${path}.properties`);
+      if (stripped === properties) return component;
+      return { ...component, properties: stripped };
+    });
+  },
+  fixture: {
+    before: {
+      pages: [
+        {
+          name: 'task_detail_layout',
+          regions: [
+            {
+              name: 'main',
+              components: [
+                // The `custom` spelling, alongside the `sections` that actually
+                // decides the body.
+                {
+                  type: 'record:details',
+                  properties: {
+                    layout: 'custom',
+                    columns: '2',
+                    sections: [{ name: 'basics', fields: ['subject'] }],
+                  },
+                },
+                // The `auto` spelling — the declared default, written out.
+                { type: 'record:details', properties: { layout: 'auto' } },
+                // `layout` on a component that is not `record:details`:
+                // `record:highlights.layout` is LIVE and must survive.
+                { type: 'record:highlights', properties: { layout: 'horizontal', fields: ['status'] } },
+              ],
+            },
+          ],
+        },
+        {
+          name: 'task_detail_layout_slotted',
+          kind: 'slotted',
+          regions: [],
+          slots: {
+            details: [
+              { type: 'record:details', properties: { layout: 'custom', fields: ['name'] } },
+            ],
+          },
+        },
+      ],
+    },
+    after: {
+      pages: [
+        {
+          name: 'task_detail_layout',
+          regions: [
+            {
+              name: 'main',
+              components: [
+                {
+                  type: 'record:details',
+                  properties: {
+                    columns: '2',
+                    sections: [{ name: 'basics', fields: ['subject'] }],
+                  },
+                },
+                { type: 'record:details', properties: {} },
+                { type: 'record:highlights', properties: { layout: 'horizontal', fields: ['status'] } },
+              ],
+            },
+          ],
+        },
+        {
+          name: 'task_detail_layout_slotted',
+          kind: 'slotted',
+          regions: [],
+          slots: {
+            details: [
+              { type: 'record:details', properties: { fields: ['name'] } },
+            ],
+          },
+        },
+      ],
+    },
     expectedNotices: 3,
+  },
+};
+
+/**
+ * `app.hidden: true` → `app._unpublished: true` on **stored** rows (protocol 17,
+ * #4829, ADR-0045 amended 2026-08-09).
+ *
+ * ADR-0045 §3 originally hung its publish gate on `app.hidden`, citing an
+ * "ADR-0019 launcher contract" that does not exist — ADR-0019 contains no
+ * `hidden`. `hidden` already had a contract of its own, written in
+ * `ui/app.zod.ts` the day the key was born: navigation presentation, *"hidden
+ * apps stay fully routable and permission-checked"*, for personal-settings apps
+ * reached from the avatar menu. One boolean, two contracts, contradicting each
+ * other on the only question that matters — and the platform's own `account`
+ * app, authored `hidden: true` on purpose, was therefore withheld from every
+ * user without builder access. The gate now reads the machine-managed
+ * `_unpublished`; this entry carries the existing population across.
+ *
+ * **Why the rewrite is unambiguous.** Under the old regime a `hidden: true` row
+ * in `sys_metadata` could only have come from the materialization path, because
+ * that value *was* the gate: an app stored that way was invisible to every
+ * non-builder, so nobody stored it to mean "keep me out of the switcher". The
+ * one app that really does mean that is code-declared (`platform-objects`'
+ * ACCOUNT_APP), and code-declared artifacts never enter `sys_metadata`. The
+ * Studio app form has no `hidden` control either (`ui/app.form.ts`), so no
+ * authoring path could have produced a second meaning.
+ *
+ * **`retiredFromLoadPath: true` — load-bearing here, not bookkeeping.**
+ * Retirement is what confines this rewrite to *stored* rows. `hidden` is NOT
+ * retired as an authorable key — it keeps its birth contract, narrowed to
+ * navigation — so a conversion running on the load path would rewrite
+ * `defineApp({ hidden: true })`, and ACCOUNT_APP itself, into unpublished apps
+ * and reproduce #4829 through the conversion layer. Excluded from the load path,
+ * it replays only where the old meaning is the only meaning: the stored-row
+ * rehydration seams (`applyConversionsToStoredItem`, which pins
+ * `includeRetired`) and `os migrate meta`.
+ *
+ * That split is also the answer for anyone who later wants a *stored* app to be
+ * nav-hidden: declare it on the app artifact, which this entry never touches. If
+ * a stored-row spelling is ever wanted it needs its own decision — a Studio
+ * control, and a rule for how the two populations coexist — not this entry
+ * quietly ceasing to fire.
+ *
+ * A row that already carries `_unpublished` is left ALONE, both keys intact
+ * ({@link renameKey}'s house rule, #4923): the machine has already spoken about
+ * that row, and a disagreeing pair is for a human to reconcile rather than for
+ * the loader to pick a winner. It is also what makes a second pass a no-op.
+ */
+const appHiddenToUnpublished: MetadataConversion = {
+  id: 'app-hidden-to-unpublished',
+  toMajor: 17,
+  retiredFromLoadPath: true,
+  surface: 'app.hidden',
+  summary:
+    "stored app publish gate 'hidden' → '_unpublished' (#4829, ADR-0045 amended — `hidden` carried BOTH the publish gate and 'keep out of the App Switcher', so the built-in Account app was withheld from every non-builder; the gate is now the machine-managed `_unpublished`, and `hidden` is navigation presentation only, never an access gate. Stored rows only — an authored `hidden: true` is left untouched)",
+  apply(stack, emit) {
+    return mapCollection(stack, 'apps', (app, path) => {
+      if (app.hidden !== true) return app;
+      if (app._unpublished != null) return app;
+      const next = { ...app };
+      delete next.hidden;
+      next._unpublished = true;
+      emit({ from: 'hidden', to: '_unpublished', path: `${path}._unpublished` });
+      return next;
+    });
+  },
+  fixture: {
+    // DISJOINT from every other app fixture: none of these apps carries a key
+    // another entry strips, so each replays through the whole table hitting
+    // only its own.
+    before: {
+      apps: [
+        // The materialized build mid-flight — the population this exists for.
+        { name: 'production_management', label: '生产管理', hidden: true, navigation: [] },
+        // Published and listed: `hidden: false` meant exactly that under both
+        // regimes, so there is nothing to rewrite.
+        { name: 'crm', label: 'CRM', hidden: false, navigation: [] },
+        // Already carries the canonical gate. Left verbatim — the loader does
+        // not reconcile a disagreeing pair on the author's behalf (#4923), and
+        // this is what makes a second pass a no-op.
+        { name: 'team_settings', hidden: true, _unpublished: false, navigation: [] },
+      ],
+    },
+    after: {
+      apps: [
+        { name: 'production_management', label: '生产管理', _unpublished: true, navigation: [] },
+        { name: 'crm', label: 'CRM', hidden: false, navigation: [] },
+        { name: 'team_settings', hidden: true, _unpublished: false, navigation: [] },
+      ],
+    },
+    expectedNotices: 1,
   },
 };
 
@@ -5329,6 +6225,12 @@ export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConv
     jobIdRemoved,
     translationValidationMessagesRemoved,
     datasourceConfigDriverKeyAliases,
+    // AFTER `datasourceConfigDriverKeyAliases`: that one keys its rename pairs
+    // by canonical driver id, and a stored `driver: 'mongo'` reaches them
+    // through the alias either way — but running the id rename second keeps the
+    // two notices in the order an operator reads them (config keys fixed under
+    // the driver they were written for, then the driver id itself converged).
+    datasourceDriverMongoToMongodb,
     // AFTER `flowNodeScriptConfigAliases`: the shorthand-`actionType` rule asks
     // whether `config.function` is set, and that rename is what sets it.
     flowNodeScriptBranchKeysRemoved,
@@ -5347,6 +6249,9 @@ export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConv
     pageCardBodyToChildren,
     inlineActionApiParamsToBodyExtra,
     pageTabsTypeToTabStyle,
+    pageStructureInertKeysRemoved,
+    recordDetailsLayoutRemoved,
+    appHiddenToUnpublished,
   ],
 };
 

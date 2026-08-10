@@ -570,6 +570,22 @@ const step17: MigrationStep = {
     + 'driver it is a canonical key and is untouched. Retired from the load path not for lying '
     + 'but because the authoring gate already rejects the spellings loudly; the chain and the '
     + 'stored-row replay are the seams that accept them.\n\n'
+    + 'Finishing the same datasource surface, the canonical driver id `mongo` is renamed to '
+    + '`mongodb` (#6345). The two spellings have both been accepted since #4410 and both still '
+    + 'are, so no boot breaks and no data moves — what changed is which one is CANONICAL, and '
+    + 'that string is published as `DRIVER_CATALOG.id` and is what the Studio connection form '
+    + 'writes into `datasource.driver`. Every row written before the rename therefore carries '
+    + '`mongo` while the form now emits `mongodb`, leaving one deployment with two spellings of '
+    + 'one driver and any reader that matches a stored driver against the published catalog id '
+    + 'silently missing the older rows. The `datasource-driver-mongo-to-mongodb` conversion '
+    + 'converges the stored value at every rehydration seam; it stays on the LIVE load path '
+    + '(unlike the config-key aliases beside it) precisely because `mongo` is still legal — '
+    + 'there is no loud rejection for it to pre-empt, and nothing to lose by converging early. '
+    + 'The rename is what let the driver-selection id and the config-contract id become one '
+    + 'string: `packages/spec`\'s driver vocabulary is now a single table both boot hosts read, '
+    + 'which closed the last fork where `OS_DATABASE_DRIVER=pg` booted under `os start` and was '
+    + 'refused by `os migrate`. `turso`/libSQL joins the same table with a real config contract, '
+    + 'so a libSQL `config` is validated instead of waved through.\n\n'
     + 'The `script` flow node converges on its one real path (#4343). It had four ways to name '
     + 'what it ran and only one of them ran anything: `config.actionType: \'email\' | \'slack\'` '
     + 'were logger-backed stubs that wrote a line, reported success and delivered nothing under '
@@ -1118,6 +1134,37 @@ const step17: MigrationStep = {
     + 'objectui publishes and the renderer already reads first in the flat carriers — which is '
     + '`displayField` → `labelField` again: converge on the spelling that works, not the one '
     + 'that declares well, and keep one spelling rather than two (Prime Directive #12).\n\n'
+    + '#6946 closes that reconciliation from the other side, on three keys the two earlier '
+    + 'passes left standing (maintainer ruling 2026-08-09, decision-inbox round: objectui#3829 '
+    + 'route (c) and objectui#3818). Two are the plain B class — declared here, read NOWHERE. '
+    + '`page:header.icon` is resolved by objectui only per header ACTION (`action.icon`); the '
+    + "header's own props bag is never asked for one, and `@object-ui/layout`'s `<PageHeader>` "
+    + 'takes an `icon` React prop from a host with no schema fallback beside the '
+    + '`schema?.actions ?? schema?.properties?.actions` fallback four lines away. '
+    + '`page:card.actions` has no actions area to render into at all: the card renderer builds '
+    + 'its `<Card>` from `title`, `bordered`, `children` and `footer`, full stop. Both sat in '
+    + "objectui's own unpublished-exemption map as \"spec declares it, NO renderer read point\", "
+    + 'which is what put the contract decision — wire it, publish it with a KNOWN GAP marker, or '
+    + 'retire it — in front of the maintainer; the ruling retired it. Neither has a lossless '
+    + 'rewrite target (a header has no second icon slot, and moving a card\'s action ids into '
+    + '`children` as components is a page rewrite, not a mechanical one), so both are pure '
+    + 'strips. ⚠️ `page:header.actions` is LIVE and untouched — the strip is scoped by component '
+    + 'type, never by key name.\n\n'
+    + 'The third, `record:details.layout`, is a sharper shape and the one worth reading twice: '
+    + 'it IS read. The renderer computes '
+    + "`schema.layout === 'inline' || schema.layout === 'compact' ? 'horizontal' : 'vertical'`, "
+    + 'while the declared enum is `auto | custom` — so neither legal value can match, both take '
+    + 'the same branch, and a key that was accepted and read still selected nothing, under a '
+    + '`.describe()` promising "auto uses object highlightFields, custom uses explicit sections". '
+    + 'The behaviour that prose describes is real, but the renderer keys it off whether '
+    + '`sections` was authored, never off this flag. Every gate stayed green because '
+    + '`check:react-declaration-parity` compares two DECLARATIONS and objectui declared the same '
+    + '`auto | custom` enum — perfect agreement over a key nothing honoured — while a THIRD '
+    + "spelling (`stacked | inline | compact`) sat in `@object-ui/types`' mirror. A pure strip "
+    + 'for the same reason: `auto`, `custom` and omission were behaviourally identical, so there '
+    + 'is no value to carry. ⚠️ `record:highlights.layout` is a different, live, honoured key '
+    + 'and is untouched. objectui#3829 and objectui#3818 drop the exemptions, the input and the '
+    + 'dead branch on the next pin bump.\n\n'
     + 'Finally it narrows the aggregation vocabulary: `array_agg` and `string_agg` leave '
     + '`AggregationFunction` (#6188, ADR-0049). The enum declared eight functions and the SQL '
     + 'family compiles five — `SqlDriver.mapAggregateFunc` and the Turso '
@@ -1147,6 +1194,37 @@ const step17: MigrationStep = {
     + 'surface with no stored source — one semantic TODO below. The mongodb and in-memory '
     + 'backends that implemented these two are inside the #5499 freeze and are untouched; their '
     + 'code is simply no longer reachable through a spec-valid request.\n\n'
+    + 'The same aggregation node loses one more member, and it is the sharper class of the two: '
+    + '`aggregations[].distinct` is removed (#6815, ADR-0049, maintainer ruling 2026-08-09). '
+    + 'The functions above were declared and UNLOWERED — a caller on a SQL datasource got a '
+    + 'refusal. This flag was declared and lowered by exactly ONE of the six faces that read an '
+    + 'aggregation: the engine\'s in-memory fallback deduplicated the values before applying the '
+    + 'function, while `SqlDriver.aggregate`, the Turso `RemoteTransport.aggregate`, '
+    + '`driver-mongodb`\'s `buildAggregationStage`, `driver-memory`\'s `computeAggregate` and '
+    + 'service-analytics\' `AGGREGATE_SQL` all ignored it. So the same query answered a '
+    + 'deduplicated `sum` on the fallback path and an ordinary `sum` on every SQL datasource, '
+    + 'with the engine choosing between the two per query — by driver, by a non-UTC date bucket, '
+    + 'by whether the driver aggregates natively at all. That is the divergence class #6203 and '
+    + '#5907 each closed on this axis, still open on this key, and it is worse to sit on because '
+    + 'the wrong answer is a PLAUSIBLE NUMBER rather than a refusal: no error, no log, nothing '
+    + 'for a dashboard author to notice. It survived the #4286 sweep of this very schema because '
+    + 'that sweep asked which members no executor reads, and this one had a reader — the wrong '
+    + 'question for a key whose defect is WHICH executor reads it. Remove rather than enforce, '
+    + 'per the ruling: `count_distinct` (which just took the enforce leg above, and whose SQL '
+    + 'lowering #6409 landed) already covers the only deduplicating spelling with measured '
+    + 'demand, while `SUM(DISTINCT …)` / `AVG(DISTINCT …)` are near-universally a modelling '
+    + 'mistake and would have to be lowered across five faces, two of them frozen under #5499, '
+    + 'to buy it. The blast radius inside the fallback is narrower than the key suggests and was '
+    + 'measured rather than assumed: only `sum` and `avg` ever changed answer — `count` returned '
+    + 'from its own branch before reaching the dedupe, `count_distinct` fed a Set, and dedupe '
+    + 'does not move `min`/`max`. `AggregationNodeSchema` is non-strict, so the key is '
+    + '`retiredKey()`-tombstoned rather than bare-deleted: a plain deletion would have made zod '
+    + 'silently STRIP what callers still send, trading a divergent flag for an ignored one '
+    + '(#3733, ADR-0104). One tombstone covers every aggregation door, because '
+    + '`QuerySchema.aggregations` and `EngineAggregateOptionsSchema.aggregations` reuse that one '
+    + 'schema by reference. No conversion: a request surface with no stored source — one '
+    + 'semantic TODO below, the disposition every other `data.query.*` retirement in this major '
+    + 'already takes.\n\n'
     + 'One entry in this step is not a removal at all but a SECURE-DEFAULT FLIP, the shape '
     + "protocol 12 last used for `api.requireAuth`: an omitted `ActionDescriptor.resumeAuthority` "
     + "resolves to `'service'` instead of `'any'`, so a pausing node type that never states who "
@@ -1170,7 +1248,22 @@ const step17: MigrationStep = {
     + 'two the runtime honoured. It is tombstoned rather than deleted, so the answer arrives '
     + 'as a rejection carrying the fix; and because a descriptor lives in executor TypeScript '
     + 'rather than in stored metadata, its prescription is a semantic entry below rather than '
-    + 'a conversion `os migrate meta` could replay.',
+    + 'a conversion `os migrate meta` could replay.\n\n'
+    + 'The plugin manifest loses its whole `loading` block in this step (#4914, ADR-0049, '
+    + 'maintainer ruling 2026-08-04) — the same enforce-or-remove question asked of a block '
+    + 'rather than a key, and answered REMOVE on measurement: every reference to '
+    + '`manifest.loading.*` in objectstack, cloud and objectui lived inside `packages/spec` '
+    + 'itself, so a full loading policy parsed, entered the manifest, and configured nothing. '
+    + 'The reason it outranked ordinary inert-key cleanup is that one of its members was '
+    + '`sandboxing`, declaring process / vm / iframe / web-worker isolation and a service ACL: '
+    + 'an inert SECURITY control is worse than an absent one, because an author (very often an '
+    + 'AI, ADR-0033) reads the vocabulary as proof the isolation exists and stops looking. Hot '
+    + 'reload was a two-source defect on top of that — the retired `PluginHotReloadSchema` was '
+    + 'the dead one of two vocabularies, and the ruling converges on the live one, '
+    + '`HotReloadConfigSchema`, which `HotReloadManager` actually reads and which is KEPT '
+    + 'unenforced as the starting point for a separate future decision. Like `isAsync`, its '
+    + 'prescription is a semantic entry rather than a conversion: a manifest is not a stack '
+    + 'collection, so `os migrate meta` has no seam at which to rewrite one.',
   conversionIds: [
     'action-execute-to-target',
     'field-conditionalRequired-to-requiredWhen',
@@ -1204,6 +1297,7 @@ const step17: MigrationStep = {
     'flow-node-wait-timeout-keys-removed',
     'datasource-read-replicas-removed',
     'datasource-config-driver-key-aliases',
+    'datasource-driver-mongo-to-mongodb',
     'flow-node-script-branch-keys-removed',
     'object-managed-by-system-to-system-data',
     'retry-policy-converged',
@@ -1223,6 +1317,9 @@ const step17: MigrationStep = {
     'dataset-measure-array-string-agg-removed',
     'inline-action-api-params-to-body-extra',
     'page-tabs-type-to-tab-style',
+    'page-structure-inert-keys-removed',
+    'record-details-layout-removed',
+    'app-hidden-to-unpublished',
   ],
   semantic: [
     {
@@ -1522,6 +1619,54 @@ const step17: MigrationStep = {
         + 'as a stored field. A query still carrying either value fails to parse with the '
         + 'removal prescription naming it, and authoring it is a `tsc` error at the call site; '
         + '`count_distinct` continues to parse and is unaffected.',
+    },
+    {
+      id: 'aggregation-node-distinct-retired',
+      surface: 'data.query.aggregations[].distinct',
+      replacement:
+        'the `count_distinct` aggregation FUNCTION for a deduplicated count — the one '
+        + 'deduplicating spelling every face computes, lowered to `COUNT(DISTINCT field)` on '
+        + 'both SQL faces since #6409. `SUM(DISTINCT …)` / `AVG(DISTINCT …)` get no '
+        + 'replacement: no backend ever computed them here, and a per-row measure that needs '
+        + 'deduplicating before summing is a modelling problem to fix in the data',
+      reason:
+        'A DIVERGENCE, not an inert declaration — which is why it outlived the #4286 sweep '
+        + 'that dispositioned every other `data.query.*` member. That sweep asked which keys '
+        + 'no executor reads; this one HAD an executor, exactly one out of six. The engine\'s '
+        + 'in-memory fallback (`objectql/src/in-memory-aggregation.ts`) deduplicated the '
+        + 'values before applying the function, while `SqlDriver.aggregate`, the Turso '
+        + '`RemoteTransport.aggregate`, `driver-mongodb`\'s `buildAggregationStage`, '
+        + '`driver-memory`\'s `computeAggregate` and service-analytics\' `AGGREGATE_SQL` all '
+        + 'ignored the key. So `{ function: \'sum\', field: \'amount\', distinct: true }` '
+        + 'answered a deduplicated sum when the engine fell back in memory and an ordinary sum '
+        + 'on every SQL datasource: one query, two numbers, chosen by which backend happened '
+        + 'to serve it — and unlike the #6203 / #5907 divergences closed on the same axis, the '
+        + 'wrong answer here is a plausible NUMBER rather than a refusal, so nothing surfaced '
+        + 'it to the author. Measured blast radius inside the fallback: `sum` and `avg` only — '
+        + '`count` returned from its own branch before reaching the dedupe, `count_distinct` '
+        + 'fed the values into a Set (dedupe-then-Set is Set), and dedupe does not move '
+        + '`min`/`max`. ENFORCE was weighed and rejected (maintainer ruling 2026-08-09): '
+        + '`count_distinct` already covers the only spelling anyone has measured demand for, '
+        + 'and lowering `SUM(DISTINCT …)` across five faces — two of them frozen under #5499 — '
+        + 'buys a shape that is near-universally a modelling mistake. A REQUEST surface — '
+        + '`QueryAST` is the client SDK builder\'s output and the `POST /data/:object/query` '
+        + 'body, never stored in stack metadata — so there is no source for the chain to '
+        + 'rewrite and callers move their own queries: the #4286 disposition for '
+        + '`joins`/`cursor`/`distinct`/`windowFunctions`, applied verbatim one level down. '
+        + 'ADR-0049, #6815.',
+      acceptanceCriteria:
+        'No caller sends `distinct` inside an `aggregations[]` entry, on the wire or through '
+        + 'the SDK; a deduplicated count is written as `{ function: \'count_distinct\', field }` '
+        + 'and reads the same number on every backend. A query still carrying the key fails to '
+        + 'parse with the removal prescription — including through '
+        + '`EngineAggregateOptionsSchema`, which reuses `AggregationNodeSchema` by reference — '
+        + 'and `POST /api/v1/data/:object/query` answers `400 VALIDATION_FAILED` with a '
+        + '`fields[]` entry at `aggregations.<i>.distinct` instead of serving a number. '
+        + 'Authoring it is a `tsc` error at the call site. ⚠️ The observable NUMBERS change on '
+        + 'exactly one path and that is the point of the change: a `sum`/`avg` that used to be '
+        + 'deduplicated by the in-memory fallback now answers what every SQL face has always '
+        + 'answered for the same query. Verify against the SQL answer, not against the '
+        + 'pre-upgrade fallback answer — the two disagreed, which is why the key is gone.',
     },
     {
       id: 'workflow-service-slot-retired',
@@ -2979,6 +3124,238 @@ const step17: MigrationStep = {
         + 'reports the total across the whole matching inbox rather than the window. A caller '
         + 'that omitted `limit` receives the same 50 rows it always received.',
     },
+    {
+      id: 'plugin-manifest-loading-retired',
+      surface:
+        'manifest.loading (the whole block: strategy / preload / codeSplitting / dynamicImport / '
+        + 'initialization / dependencyResolution / hotReload / caching / sandboxing / monitoring)',
+      replacement:
+        'nothing to re-declare — delete the key. Plugins are composed at boot: `defineStack` '
+        + 'registers them and the kernel runs `init` then `start` in an order topologically '
+        + "resolved from each composed plugin's own `dependencies` / `optionalDependencies` "
+        + '(`resolvePluginOrder` in `packages/core/src/plugin-order.ts`). For the isolation '
+        + '`loading.sandboxing` appeared to configure, use the plugin trust tier '
+        + '(`manifest.runtime`, ADR-0025 §3.6) and the manifest permission declarations, which '
+        + 'are the surfaces the platform actually enforces',
+      reason:
+        'ADR-0049 enforce-or-remove; maintainer ruling 2026-08-04 on #4914. The block declared a '
+        + 'complete plugin loading policy and NOTHING read it. A bare-name scan of all three '
+        + 'repos — objectstack, cloud (measured 2026-08-09) and objectui (measured at pickup), '
+        + 'each with a control probe proving the scan saw the tree — put every hit inside '
+        + '`packages/spec` itself: this module\'s own declaration, its own unit tests, the '
+        + '`Manifest.loading` embed and the generated artifacts. `manifest.loading.*` had zero '
+        + 'readers in `packages/core`, `packages/runtime` and `packages/metadata`. So the key '
+        + 'parsed, entered the manifest, and changed nothing — #3950, at the scale of a whole '
+        + 'block. What made it outrank ordinary inert-key cleanup is `sandboxing`: it declared '
+        + 'process / vm / iframe / web-worker isolation, IPC transports and an `allowedServices` '
+        + 'ACL, so an AI author (ADR-0033) reading that vocabulary concluded the platform '
+        + 'isolates plugins, wrote the config, and received a clean parse and zero isolation. An '
+        + 'inert security control is worse than an absent one because it is believed. Hot reload '
+        + 'was additionally a TWO-SOURCE defect: the docs pointed at this dead '
+        + '`PluginHotReloadSchema` while the only implementation body, `HotReloadManager` '
+        + '(`packages/core/src/hot-reload.ts`), reads a different vocabulary — '
+        + '`HotReloadConfigSchema` in `plugin-lifecycle-advanced.zod.ts`. Ruling §2 converges on '
+        + 'the surviving side: that schema is KEPT as the starting point for a future enforce '
+        + 'decision (it has an implementation body but no runtime composes it yet), and '
+        + 'enforcing it is deliberately a separate decision, not this retirement. '
+        + 'Why D3 semantic and not a D2 conversion: the chain walks a normalized STACK and '
+        + '`applyConversionsToStoredItem` maps a metadata type onto one of its collections. A '
+        + 'package manifest is neither — `PLURAL_TO_SINGULAR` has no `packages` / `plugins` '
+        + 'entry, so a manifest is not a stack collection member and a stored manifest row '
+        + 'passes that seam through unchanged. A conversion would be a transform with no seam '
+        + 'that ever runs.',
+      acceptanceCriteria:
+        'No `objectstack.plugin.json` and no stored package manifest carries a `loading` key. '
+        + 'The enforced channel is the one place a manifest is parsed with an author present: '
+        + '`os plugin build` runs `ManifestSchema.safeParse` and exits non-zero, printing the '
+        + 'tombstone prescription, so a manifest still declaring `loading` fails its build '
+        + 'rather than shipping. TypeScript authors get it earlier still — `loading` is typed '
+        + '`never`, so assigning it is a `tsc` error. ⚠️ Runtime behaviour is deliberately '
+        + 'UNCHANGED and must be verified as such: nothing ever read the block, so removing it '
+        + 'removes no behaviour. A package ALREADY INSTALLED whose stored manifest carries '
+        + '`loading` keeps working — the registry\'s `validate()` is an explicit diagnostic and '
+        + 'not a gate (it catches, logs `[metadata_spec_invalid]`, and registers the item '
+        + 'anyway, deliberately, so bad metadata is never a data outage), so such a row '
+        + 'degrades to one log line at registration rather than a boot failure. Clear it by '
+        + 'deleting the key from the source manifest and reinstalling.',
+    },
+    {
+      id: 'api-runtime-create-withdrawn',
+      surface: 'PUT /api/v1/meta/api/{name} (runtime-authored `api` endpoints, draft and active alike)',
+      replacement:
+        'Declare the endpoint as a stack artifact (`**/*.api.ts`, or `defineStack({ apis })`) '
+        + 'and ship it through `publishPackage`',
+      reason:
+        'The `api` registry entry declared `allowRuntimeCreate: true` and the runtime never '
+        + 'honoured it. Measured on a real showcase boot (#5488): `PUT /api/v1/meta/api/'
+        + 'e8_backdoor` answered 200 with `{"success":true,…,"message":"Saved …"}`, and the '
+        + 'declared route then answered 404 forever — with NO `[EndpointMatcher] … EXCLUDED` '
+        + 'line, because the endpoint was never in the index to be excluded from. The serving '
+        + 'criterion belongs to `IMetadataService.matchEndpoint` -> `EndpointMatcher` -> '
+        + "`MetadataManager.listForIndex('api')`, which reads the manager's registry plus its "
+        + 'registered loaders (`["filesystem","memory"]` on dev/serve); a runtime write lands '
+        + 'in `sys_metadata`, which is in neither. A declared capability the runtime does not '
+        + 'honour is ADR-0049 false compliance, and a write that answers "Saved" and then 404s '
+        + 'forever is its most dangerous shape for the AI authors ADR-0033 targets. The '
+        + 'maintainer ruled REMOVE on 2026-08-07 rather than converge the read path, because '
+        + 'making the matcher read `sys_metadata` re-opens cache, invalidation, tenancy and '
+        + "the ADR-0110 D3 miss-vs-outage distinction on a new read path, and there is no "
+        + 'business pull for Studio-authored endpoints today (zero `.api.*` artifacts author '
+        + 'them at runtime; showcase uses the artifact route, #5040 E8 LIVE). '
+        + 'There is NO D2 conversion, for the reason this list exists: nothing in an authored '
+        + 'source spells this key. `allowRuntimeCreate` is a PLATFORM registry value, not an '
+        + 'authorable one, and the artifact route it points authors toward is untouched — a '
+        + '`**/*.api.ts` file valid before this change is valid after it, byte for byte. What '
+        + 'changed is a runtime HTTP verdict, so it is one semantic TODO for operators and '
+        + 'Studio callers rather than a stack conversion — the same disposition '
+        + '`BatchOptions.validateOnly` (#4052) takes. Consequently `gateApiDraftsForPublish` '
+        + '(PR #5279) is retired with it: it gated a promotion into a state the matcher can '
+        + 'never read, and with the inlet closed no `api` draft can exist for it to judge. '
+        + 'Re-entry is recorded in the ruling: if #2657 Part B promotes `apis` to a registered '
+        + 'type WITH A REAL CONSUMPTION PATH, the flag flips back then — implementation first, '
+        + 'declaration second. ADR-0049 / ADR-0121, #5488 (subsumes #5311).',
+      acceptanceCriteria:
+        'No caller creates or updates an `api` item through the runtime metadata API. '
+        + '`PUT /api/v1/meta/api/{name}` answers 403 with `code: "NOT_CREATABLE"` and a body '
+        + 'naming both flags (`allowRuntimeCreate=false, allowOrgOverride=false`) and the '
+        + 'prescription `Declare it in source (**/*.api.ts) and redeploy` — in `?mode=draft` '
+        + 'as well as direct-active, because the gate runs before the draft/publish branch and '
+        + 'does not read `mode`. ⚠️ Verify the artifact route is UNAFFECTED, which is the whole '
+        + 'point of the change: a stack declaring `apis:` still compiles, still passes '
+        + '`validateApiEndpointDeclarations` at publish (`publishPackage`, #5189) and at load '
+        + '(`buildEndpointIndex`, PR #5203), and its endpoints still SERVE — that route was '
+        + 'always the only one that served. An operator who genuinely needs the runtime door '
+        + 'back on one deployment sets `OS_METADATA_WRITABLE=api`, the same single escape '
+        + 'hatch `job` / `agent` / `capability` use; note that this unlocks the WRITE only, and '
+        + 'the endpoint still will not be served, which is why it is a diagnostic and not a '
+        + 'workaround. Any `api` rows already sitting in `sys_metadata` from before this change '
+        + 'were never served either; they can be deleted (`deleteMetaItem` is deliberately not '
+        + 'gated by this refusal, so repair stays possible).',
+    },
+    {
+      id: 'import-run-automations-declared-default-corrected',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
+      // code span AND a table cell (see the note on `spec-type-alias-input-suffix-retired`).
+      surface:
+        'api.ImportRequest runAutomations — the declared default of the key on BOTH import '
+        + 'bodies, POST /api/v1/data/:object/import (ImportRequest) and its async twin POST '
+        + '/api/v1/data/:object/import/jobs (CreateImportJobRequest, which IS the same schema '
+        + 'object). It was declared default(false) and described as "off by default for '
+        + 'bulk"; it is now default(true), which is what the server has always done',
+      replacement:
+        'an explicit runAutomations: false on any import request that is meant to load rows '
+        + 'without firing triggers/hooks. That spelling is unchanged and has always been the '
+        + 'only one the server read — what changes is that omitting the key now DECLARES what '
+        + 'it already DID. Callers who want automations on need write nothing',
+      reason:
+        'A DECLARATION corrected to match a runtime that did not move — the inverse of a '
+        + "behaviour flip, and registered here for the reason protocol 12's "
+        + '`rest-requireauth-default-flip` and this major\'s '
+        + '`action-descriptor-resume-authority-default-flip` are: whether a given import was '
+        + 'meant to fire triggers is a judgment no transform can make, so the prescription is '
+        + 'a TODO rather than a rewrite. The server decides in import-prepare.ts with '
+        + '`body?.runAutomations !== false`, i.e. an omitted flag runs automations, and has '
+        + 'since #2922 — automations always ran on import historically (the engine ignored '
+        + 'the flag entirely before then), so opt-out was made the explicit act, matching '
+        + 'platform convention. The schema said the opposite in both machine-readable and '
+        + "human-readable form, and both SHIPPED: `.default(false)` in `@objectstack/spec`'s "
+        + 'JSON Schema, and the describe prose in the published reference tables for both '
+        + 'defs. '
+        + '⚠️ Nothing in this repo reconciled the two and NO deployed caller changes '
+        + 'behaviour: no request path parses an import body through this schema — the route '
+        + 'reads the raw body, and the sole reference to `CreateImportJobRequestSchema` is '
+        + 'the declarative `ImportJobApiContracts` catalog entry, a declaration and not a '
+        + 'parse. That is exactly why this needed a ruling rather than a docs edit: the '
+        + 'divergence was unobservable in-tree and observable only to a consumer OUTSIDE it. '
+        + 'A client or SDK that validated its request through the published schema '
+        + 'materialised `runAutomations: false` from the declared default and sent it '
+        + 'explicitly, and the server honoured it — so the same request body produced '
+        + 'opposite behaviour depending on whether the caller validated before sending, with '
+        + 'the validating caller silently losing its triggers. Nothing rejected it, nothing '
+        + 'warned, and the reference page told an author the wrong thing in the other '
+        + 'direction. There is deliberately NO schema tombstone and no D2 conversion: no key '
+        + 'is removed, and an HTTP request body is neither authored nor persisted — the same '
+        + 'disposition `notification-list-cursor-retired` (#6361) takes for the sibling '
+        + 'default on this major, and `batch-options-validate-only-retired` before it. The '
+        + 'declared move itself is recorded mechanically, per key, in '
+        + 'DEFAULT_CHANGES_BY_MAJOR[17] (#4666), whose `from`/`to` fingerprints are '
+        + 're-derived on every build. Maintainer ruling 2026-08-09 (#6704, disposition A: '
+        + 'the spec follows the runtime). ADR-0049 / ADR-0078.',
+      acceptanceCriteria:
+        'Every import request of yours that must NOT fire triggers sends `runAutomations: '
+        + 'false` explicitly, rather than omitting the key and trusting the old declared '
+        + 'default. The check is worth doing precisely where it looks unnecessary: if you '
+        + 'build the body by parsing it through `ImportRequestSchema` (or the published JSON '
+        + 'Schema) and then send the PARSED object, your bulk loads were running with '
+        + 'automations OFF and will now run with them ON — that is the only class whose '
+        + 'behaviour changes, and it changes toward what an unvalidated caller always got. '
+        + '⚠️ Behaviour on the wire is deliberately UNCHANGED and should be verified as '
+        + 'such: a body that omits `runAutomations` fired triggers before this change and '
+        + 'fires them after, and `runAutomations: false` turns them off before and after. '
+        + 'Nothing starts being refused — the route never validated this body against the '
+        + 'schema and does not begin to. `dryRun` is unaffected and still runs NO automations '
+        + 'whatever the flag says (#6037).',
+    },
+    {
+      id: 'view-filter-rule-value-shaped-by-operator',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
+      // code span (see the note on the entry above).
+      surface:
+        'ui.ViewFilterRule value — the third key of a view filter rule, on every carrier of '
+        + 'ViewFilterRuleSchema: ListView.filter, a list view tab filter, Page.filterBy, a '
+        + 'related-list component filter and a lookup picker filter. It accepted any declared '
+        + 'scalar or array for EVERY operator; the accepted shape is now decided by the rule '
+        + 'operator — in / not_in require an array, between requires exactly two bounds, and '
+        + 'every other operator is unchanged',
+      replacement:
+        'an ARRAY for in / not_in (a single value becomes a one-element list: value: "won" '
+        + 'becomes value: ["won"]), and a two-element [min, max] array for between. The empty '
+        + 'list [] stays legal for in / not_in and keeps its meaning. Nothing else moves: a '
+        + 'scalar operator carrying an array, a string operator carrying a number, and a unary '
+        + 'operator carrying an ignored value all still parse',
+      reason:
+        'A publish-time gate catching up to a query-time one, not a new rule. #5869 / PR '
+        + '#6209 closed the RUNTIME half: `assertListComparandShapes` '
+        + '(@objectstack/objectql, filter-comparand-shape.ts) refuses a lowered '
+        + '`{ stage: { $nin: "won" } }` with a named 400 INVALID_FILTER, and before that it '
+        + 'was a 500. The authoring surface stayed silent, so the failure was two-stage: the '
+        + 'view published cleanly and only broke when someone opened it. That file names this '
+        + 'very schema as the reachable authoring source of the defect. The tightening MIRRORS '
+        + 'that gate exactly — three constraints, one for one — and deliberately goes no '
+        + 'further, because #5685 already ruled on the opposite error: a schema stricter than '
+        + 'the runtime "in ways the runtime deliberately allows" was the WRONG side and was '
+        + 'widened to match. So `in: []` is still accepted (a declared predicate both drivers '
+        + 'implement), `equals: ["a","b"]` is still accepted (it lowers to a deep-equality '
+        + 'comparand), and `is_empty: ""` is still accepted (the null predicates take their '
+        + 'direction from the operator NAME — convertComparison ignores the value position, '
+        + 'and the ObjectUI client deliberately sends a truthy placeholder there). '
+        + '⚠️ Metadata AT REST is deliberately NOT rewritten, and there is no D2 conversion. '
+        + 'A D2 entry replays a shape the platform once WROTE and renamed; this shape was '
+        + 'never written by any first-party producer (every in / not_in rule in this repo, in '
+        + 'objectui and in the cloud repo already carries an array — measured) and has never '
+        + 'EXECUTED, since it 400s on first render today. Coercing it at load would be the '
+        + 'platform guessing intent rather than replaying a rename, and it cannot guess '
+        + 'honestly: value: "" would become the predicate [""] (a real filter on the empty '
+        + 'string) rather than the "not filled in yet" a console row means, and between: 5 has '
+        + 'no defensible second bound at all. The read path does not re-validate stored rows '
+        + '(applyConversionsToStoredItem never validates, by its own contract), so no stored '
+        + 'view becomes unreadable; what changes is that RE-SAVING such a view is refused at '
+        + 'the write gate naming `value`, instead of storing a filter that 400s. '
+        + 'ADR-0049 / ADR-0078 / ADR-0112.',
+      acceptanceCriteria:
+        'Grep your authored views, pages and related-list components for a filter rule whose '
+        + 'operator is in, not_in or between (including the alias spellings nin / notIn / '
+        + 'notin) and whose value is not an array of the right arity, then wrap or complete '
+        + 'it. `os validate` / `os lint` now report each one by path with the operator, the '
+        + 'received shape and the corrected shape, so the sweep is mechanical rather than by '
+        + 'eye. Two checks are worth doing where it looks unnecessary: a rule reading '
+        + '`operator: "in", value: ""` is an UNFINISHED row, not a filter — decide what it was '
+        + 'meant to select rather than mechanically rewriting it to [""], which is a real and '
+        + 'different predicate. And a view that already carried one of these shapes was never '
+        + 'returning filtered rows: it answered 400 INVALID_FILTER on render (#5869), so '
+        + 're-check what the view is supposed to show rather than assuming the old result set '
+        + 'was correct.',
+    },
   ],
 };
 
@@ -3139,6 +3516,66 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // callers rather than a stack conversion").
     'api/ListNotificationsRequest:cursor',
     'api/ListNotificationsResponse:cursor',
+    // #4914 — ADR-0049 enforce-or-remove on the plugin manifest's whole
+    // `loading` block (maintainer ruling 2026-08-04). ONE tombstoned key here,
+    // because `loading` was the single carrier: every schema underneath it
+    // (`PluginLoadingConfig` and the ten members it combined) leaves the
+    // published set as a whole-def removal and is registered in
+    // `RETIRED_DEFS_BY_MAJOR` below, not as ~27 individual key entries.
+    //
+    // Registered here but NOT in `src/conversions/registry.ts`, for the reason
+    // `automation/ActionDescriptor:isAsync` above gives: the conversion chain
+    // walks a normalized STACK (`mapCollection(stack, 'objects' | 'views' | …)`)
+    // and `applyConversionsToStoredItem` maps a metadata type onto one of those
+    // collections. A package manifest is neither — there is no `packages` /
+    // `plugins` entry in `PLURAL_TO_SINGULAR`, so a manifest is not a stack
+    // collection member and a stored manifest row passes that seam through
+    // unchanged. A MetadataConversion here would be a transform with no seam
+    // that ever runs. The prescription reaches authors instead through the
+    // tombstone at the one place a manifest is parsed with an author present
+    // (`os plugin build` → `ManifestSchema.safeParse`, which exits non-zero),
+    // and through the D3 semantic entry `plugin-manifest-loading-retired`.
+    'kernel/Manifest:loading',
+    // #6815 — the per-aggregation DISTINCT flag, retired under ADR-0049 by
+    // maintainer ruling 2026-08-09. ONE key, and one entry, because
+    // `AggregationNodeSchema` is reused BY REFERENCE rather than `.extend()`ed:
+    // `QuerySchema.aggregations` and `EngineAggregateOptionsSchema.
+    // aggregations` are both `z.array(AggregationNodeSchema)`, so the walked
+    // shape has a single `data/AggregationNode` def and the baseline marks one
+    // line `[RETIRED]`. Contrast the `shared/FieldMapping:transform` trio at
+    // the top of this list, where two `.extend()`s copied the property into
+    // three walked shapes and each needed its own registration.
+    //
+    // Registered here but NOT in `src/conversions/registry.ts`, for the same
+    // reason as the notification pair above: `QueryAST` is a REQUEST surface —
+    // the client SDK builder's output and the `POST /data/:object/query` body
+    // — never stored in stack metadata, so there is no authored source or
+    // `sys_metadata` row for a D2 conversion to rewrite. The prescription
+    // reaches consumers as the D3 semantic entry
+    // `aggregation-node-distinct-retired` plus this tombstone, which is the
+    // disposition every other `data.query.*` retirement in this major already
+    // takes (`query-joins-retired` / `query-cursor-retired` /
+    // `query-distinct-retired` / `query-window-functions-retired`, #4286).
+    'data/AggregationNode:distinct',
+    // #6946 — three SDUI page-component props, retired by maintainer ruling
+    // 2026-08-09 (decision-inbox round, 「全部接受」): objectui#3829 route (c)
+    // for the first two, objectui#3818 for the third. Registered per key, as
+    // gate (b) reads them — nothing radiates from a neighbouring key, and this
+    // family needs that literally: `ui/PageHeaderProps:actions` and
+    // `ui/RecordHighlightsProps:layout` are LIVE keys sharing these leaf names.
+    //
+    // The first two are the B class — declared here, read NOWHERE in objectui
+    // (the header resolves icons per action; the card renders
+    // title/bordered/children/footer and has no actions area), and carried in
+    // that repo's own `UNPUBLISHED_EXEMPTIONS` map as exactly that.
+    'ui/PageCardProps:actions',
+    'ui/PageHeaderProps:icon',
+    // The third is a sharper shape: `layout` IS read, but only against
+    // `inline`/`compact` — values its `auto | custom` enum never permitted — so
+    // both legal values took the same branch. Declared on BOTH sides with the
+    // same enum, which is why the declaration-parity ratchet (two declarations,
+    // never a declaration vs an implementation) reported agreement over it.
+    'ui/RecordDetailsProps:layout',
   ],
 };
 
@@ -3288,5 +3725,29 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     'automation/ETLTransformationType',
     'automation/ETLSyncMode',
     'automation/ETLRunStatus',
+    // #4914 — the plugin manifest's `loading` block (ADR-0049 enforce-or-remove,
+    // maintainer ruling 2026-08-04). `PluginLoadingConfig` was reachable from
+    // authored metadata ONLY through `Manifest.loading`, and the ten members
+    // below were embedded only by it, so retiring the carrier key unpublishes
+    // the whole closure. The carrier itself is a `retiredKey()` tombstone
+    // registered one level up in `RETIRED_KEYS_BY_MAJOR`.
+    //
+    // ⚠️ `kernel/PluginLoadingEvent` and `kernel/PluginLoadingState` are
+    // deliberately NOT here. They live in the same module and share its prefix,
+    // but neither was ever embedded in `PluginLoadingConfig` — they are the
+    // observational half (a lifecycle event and a per-plugin state), they are
+    // not authorable, and they still emit. Module adjacency is not evidence,
+    // the `system/ServerRateLimitConfig` note above applies verbatim.
+    'kernel/PluginLoadingConfig',
+    'kernel/PluginLoadingStrategy',
+    'kernel/PluginPreloadConfig',
+    'kernel/PluginCodeSplitting',
+    'kernel/PluginDynamicImport',
+    'kernel/PluginInitialization',
+    'kernel/PluginDependencyResolution',
+    'kernel/PluginHotReload',
+    'kernel/PluginCaching',
+    'kernel/PluginSandboxing',
+    'kernel/PluginPerformanceMonitoring',
   ],
 };

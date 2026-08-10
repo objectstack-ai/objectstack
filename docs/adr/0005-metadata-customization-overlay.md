@@ -3,7 +3,7 @@
 > **v5.0 update (2026):** Throughout this document, the term *project* has been renamed to *environment* (no aliases; CLI flags, URL paths, schemas, env vars all hard-renamed). See ADR-0006 for the rationale and `.changeset/v5-project-to-environment-rename.md` for the breaking-change list. The body below is preserved verbatim for historical context.
 
 
-**Status**: Accepted (2026-05-16) · **Amended** (2026-05-22, see "Amendment: post-ADR-0006 v4 scope") · **Amended** (2026-04-13, branch concept removed — see [ADR-0008 §0](./0008-metadata-repository-and-change-log.md#0-2026-04-13-amendment--drop-project-and-branch-from-metaref))
+**Status**: Accepted (2026-05-16) · **Amended** (2026-05-22, see "Amendment: post-ADR-0006 v4 scope") · **Amended** (2026-04-13, branch concept removed — see [ADR-0008 §0](./0008-metadata-repository-and-change-log.md#0-2026-04-13-amendment--drop-project-and-branch-from-metaref)) · **Amended** (2026-08-09, #6825 — the Phase-1 overlay-index migration is deleted; see "Amendment (2026-08-09, #6825): overlay-index delivery after the Phase-1 migration was deleted")
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0003](./0003-package-as-first-class-citizen.md) (Package as first-class citizen), [ADR-0004](./0004-cloud-multi-kernel.md) (Cloud + per-project kernels)
 **Amended by**: [ADR-0006 v4](./0006-project-environment-split.v4.md) (drops `sys_project` entirely), [ADR-0008](./0008-metadata-repository-and-change-log.md) (re-expresses overlay as `LayeredRepository`; subsequently drops `project`/`branch` from `MetaRef`)
@@ -382,6 +382,15 @@ required is in `metadata-plugin.zod.ts`:
 
 ### Overlay-uniqueness index (`schema-index`)
 
+> ⚠️ **Historical — superseded.** Everything in this subsection describes the
+> Phase-1 (2026-05-16) mechanism, and it is retained verbatim for traceability
+> rather than rewritten. The migration it names was **deleted** (#6771 / PR
+> #6824), its premise about drivers ignoring `indexes` declarations is **false
+> today**, and two keys its example spells (`project_id`, `partial`) have since
+> left the spec for reasons of their own. Read it against **"Amendment
+> (2026-08-09, #6825): overlay-index delivery after the Phase-1 migration was
+> deleted"** at the end of this record, which carries the present tense.
+
 The `sys_metadata` schema previously declared a UNIQUE index on
 `(type, name, project_id)`. Pre-overlay this was correct; post-overlay it
 would forbid two organizations from each having their own customization of
@@ -634,3 +643,94 @@ status (modified / added / removed / unchanged) so admins can see at a
 glance what their overlay actually changes — instead of eyeballing
 three blobs of JSON. Code / Overlay / Effective JSON tabs remain
 available for full payload inspection.
+
+---
+
+## Amendment (2026-08-09, #6825): overlay-index delivery after the Phase-1 migration was deleted
+
+**Decides nothing new.** This amendment records changes that already landed in
+code, and corrects the record so a reader is not sent to a mechanism that no
+longer exists. The overlay-uniqueness *decision* — at most one active
+customization of a given `(type, name)` per organization — is unchanged. What
+changed is **who delivers it**.
+
+The block amended is "Overlay-uniqueness index (`schema-index`)" in *Addendum —
+2026-05-16 (d)*. That block is left standing as written (Prime Directive #13: an
+accepted record is not silently edited to make the past look like it always said
+the present), so this section is where the present tense lives.
+
+### The three claims, and what is true today
+
+| Addendum (d) says | Today | Superseded by |
+|:---|:---|:---|
+| "`addSysMetadataOverlayIndex(driver)` — exported from `@objectstack/metadata/migrations`" | **Deleted.** The export and its module are gone; `packages/metadata/src/migrations/index.ts` carries a tombstone in their place that records the measurement and forbids re-introducing a producer for `idx_sys_metadata_overlay_active` in that package. | #6771 (PR #6824, merged 2026-08-08); `.changeset/overlay-index-single-producer.md` |
+| "a new idempotent migration is provided and run automatically by `DatabaseLoader.ensureSchema()`" | **No overlay-index DDL is issued from that method at all**, on either of its two paths — both call sites went with the export. What `ensureSchema()` still runs is the `project_id` → `environment_id` forward migration, which is a different concern. | #6771 (PR #6824) |
+| "Drivers ignore `indexes` declarations on synced tables today" | **False** — and this one is *not* a consequence of #6771. `SqlDriver.syncDeclaredIndexes` materializes every declared index, through knex's `table.unique(fields, { indexName })` / `table.index(fields, name)`, skipping by name for idempotence. | The driver itself. The spec records the same fact where the `IDataDriver` capability bit `indexes` was retired for having no reader: "Declared indexes are materialised by the driver itself during schema sync (`SqlDriver.syncDeclaredIndexes`)". |
+
+The third sentence is the most misleading of the three, because it is the exact
+inverse of the finding that made #6771's deletion safe: measured against real
+SQLite, a plain `DatabaseLoader` boot already stores
+`CREATE UNIQUE INDEX idx_sys_metadata_overlay_active ON sys_metadata (type, name, organization_id, package_id)`
+— the **declared** index, with the current key, present without any help from a
+migration. The deleted producer could therefore only ever no-op (while reporting
+`status: 'created'`) or, in its one non-no-op window, install the retired key
+that nothing afterwards repaired.
+
+### Two staleness items in the same block that PREDATE #6771
+
+The YAML example there is stale for reasons of its own; attributing them to
+#6771 would be wrong.
+
+- **`project_id`** — renamed to `environment_id` platform-wide in v5.0 (see the
+  note at the top of this record, and ADR-0006), then retired as a scope key:
+  `saveMetaItem` no longer writes it, overlay reads never consult it, and it is
+  not in the discriminator. The field survives on `sys-metadata.object.ts` marked
+  `@deprecated`, NULL on every new row, awaiting a drop migration.
+- **`partial: "state = 'active'"`** — `indexes[].partial` (with `indexes[].type`)
+  was removed from the object spec at protocol 17 under ADR-0049
+  enforce-or-remove (#5248 / #4943): no driver ever emitted the `WHERE` clause,
+  so a declared partial index was materialized as an unrestricted one, which is
+  the ADR-0078 inert-metadata shape. Stored and authored spellings are stripped
+  by the ADR-0087 conversion `object-index-type-partial-removed`.
+- **`scope`** is likewise not part of the current discriminator; **`package_id`**
+  joined it under ADR-0048, so two installed packages shipping the same
+  `(type, name)` each keep their own customization row.
+
+### What delivers overlay uniqueness today — exactly two owners
+
+1. **`metadata-protocol`'s `ensureMetadataOverlayIndexes`**
+   (`packages/metadata-protocol/src/migrations/overlay-index.ts`, run at most once
+   per protocol instance through its own `ensureOverlayIndex`) — the tier this ADR
+   actually wants. Raw SQL, partial and NULL-safe:
+   `(type, name, organization_id, COALESCE(package_id, ''))` `WHERE state = 'active'`,
+   with a sibling `idx_sys_metadata_overlay_draft` so an active row and a draft row
+   for one key can coexist. `COALESCE` is what constrains package-less (global)
+   overlays, which a plain UNIQUE leaves unconstrained because SQL treats NULLs as
+   distinct. On a dialect that cannot build the partial form it degrades to a
+   **non-unique** composite index — deliberately, since an unrestricted UNIQUE
+   would reject the active/draft coexistence — and reports that uniqueness is not
+   enforced instead of claiming success. It builds under a throwaway name first and
+   only then replaces the real one, so a failure keeps the previous index; every
+   failure is reported in the ADR-0120 D4 shape and none blocks the boot.
+2. **The declaration in `metadata-core`'s `sys-metadata.object.ts`** —
+   `{ name: 'idx_sys_metadata_overlay_active', fields: ['type', 'name', 'organization_id', 'package_id'], unique: true }`,
+   materialized by `SqlDriver.syncDeclaredIndexes`. This is the coarse fallback a
+   stack assembled without the runtime migration gets: it still prevents duplicate
+   active overlays, at the cost of also colliding with archived and reset rows, and
+   it stays NULL-distinct on `package_id`. It cannot express either refinement —
+   knex's `table.unique()` has no `WHERE` and no `COALESCE` — which is why the
+   runtime tier exists rather than a richer declaration.
+
+Both owners deliberately use the **same index name**, and that is load-bearing
+rather than an accident to be tidied away: `syncDeclaredIndexes` skips by name, so
+the runtime migration claiming the name is exactly what stops the coarser declared
+form from being re-imposed over it.
+
+### Anchors
+
+Both files above are registered in `scripts/adr-anchors.json` against ADR-0005, so
+the next author to edit either one is told which decision they are standing on.
+That is the recurrence guard Prime Directive #13 names and the one thing this
+amendment adds beyond prose: the producer that was deleted had no anchor, and
+neither surviving owner had one either — which is how a document could go on
+describing a mechanism nobody was maintaining.

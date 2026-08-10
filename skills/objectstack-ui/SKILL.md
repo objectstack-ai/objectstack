@@ -403,6 +403,7 @@ result, no result at all.
 | a renamed / mistyped column | `searchable-field-unknown` | `400 INVALID_FIELD` |
 | a dotted path (`account_id.name`) | `searchable-field-unknown` | `400 INVALID_FIELD` |
 | a real column outside the allowed set | `searchable-field-unsearchable` | `400 INVALID_FIELD` |
+| a virtual `formula` column — nothing stored to scan (#6674) | `searchable-field-unsearchable` | `400 INVALID_FIELD` |
 
 Both diagnostics are **errors**, not warnings — `os validate` fails the build.
 The two you will actually hit, verbatim:
@@ -1027,7 +1028,6 @@ export const LeadDetailPage = definePage({
           properties: {
             title: '{first_name} {last_name}',
             subtitle: '{company}',
-            icon: 'user-plus',
             breadcrumb: true,
             actions: [ConvertLeadAction],   // inline action buttons in header
           },

@@ -98,7 +98,6 @@
     "ui/RecordChatterProps:defaultCollapsed = false",
     "ui/RecordChatterProps:position = \"sidebar\"",
     "ui/RecordDetailsProps:columns = \"2\"",
-    "ui/RecordDetailsProps:layout = \"auto\"",
     "ui/RecordHighlightsProps:layout = \"horizontal\"",
     "ui/RecordRelatedListProps:limit = 5",
     "ui/RecordRelatedListProps:relationshipValueField = \"id\"",

@@ -17,7 +17,7 @@
     "data/AddressValue:state",
     "data/AddressValue:street",
     "data/AggregationNode:alias",
-    "data/AggregationNode:distinct",
+    "data/AggregationNode:distinct [RETIRED]",
     "data/AggregationNode:field",
     "data/AggregationNode:filter",
     "data/AggregationNode:function",
@@ -456,6 +456,7 @@
     "data/FullTextSearch:operator",
     "data/FullTextSearch:query",
     "data/HookContext:api",
+    "data/HookContext:dispatch",
     "data/HookContext:event",
     "data/HookContext:id",
     "data/HookContext:input",
@@ -856,6 +857,14 @@
     "data/StringOperator:$notContains",
     "data/StringOperator:$startsWith",
     "data/TenancyConfig:enabled",
-    "data/TenancyConfig:tenantField"
+    "data/TenancyConfig:tenantField",
+    "data/TursoConfig:authToken",
+    "data/TursoConfig:concurrency",
+    "data/TursoConfig:encryptionKey",
+    "data/TursoConfig:mode",
+    "data/TursoConfig:sync",
+    "data/TursoConfig:syncUrl",
+    "data/TursoConfig:timeout",
+    "data/TursoConfig:url"
   ]
 }

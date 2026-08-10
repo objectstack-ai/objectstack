@@ -430,6 +430,9 @@ jobs:
     # means a future shard-count change cannot deadlock the repo. `name:` and
     # `if: always()` are therefore both load-bearing: this must not become
     # `if: !cancelled()` (see dogfood-gate), and it must not be renamed.
+    # Both halves are now asserted rather than only written down: the `name:`
+    # literal by `check:required-contexts` (#6865), the `if: always()` and the
+    # attestation roster by `check:shard-attestation` (#6082).
     #
     # ── It COUNTS credentials; it does not read one aggregate word (#6082) ──
     #
@@ -519,7 +522,8 @@ jobs:
   # temporal conformance matrix holds to one standard. Its NAME still says
   # "live PG + MySQL" on purpose: the name IS the required check, so renaming
   # it would silently drop the gate wherever branch protection lists it — the
-  # same trap the dogfood shards note below.
+  # same trap the dogfood shards note below. `check:required-contexts` pins
+  # this literal, parenthetical and all (#6865).
   temporal-conformance:
     name: Temporal Conformance (live PG + MySQL)
     needs: filter
@@ -960,7 +964,10 @@ jobs:
     # EVERY pull request in the repo sat permanently BLOCKED (mergeable, all
     # checks green, merge button dead). #3622's own comment called for updating
     # branch protection; keeping the contract HERE instead means a future
-    # shard-count change cannot deadlock the repo a second time.
+    # shard-count change cannot deadlock the repo a second time — and since
+    # #6865 the bare name is pinned by `check:required-contexts` rather than
+    # only described here, so a rename fails in the ESLint job instead of in
+    # the queue.
     #
     # Also aggregates dogfood-verify (the CLI pass that used to ride shard 1),
     # so the one required context still covers everything it covered before
@@ -1040,8 +1047,9 @@ jobs:
     needs: filter
     # See THE FILTER CONTRACT on the filter job's outputs (#4928). No
     # aggregation gate stands behind this job — its own name IS the required
-    # context — so this `if:` is the only thing between a filter flake and a
-    # green "Build Core" that built nothing.
+    # context, pinned by `check:required-contexts` since #6865 — so this `if:`
+    # is the only thing between a filter flake and a green "Build Core" that
+    # built nothing.
     if: ${{ !cancelled() && needs.filter.outputs.core != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -1273,7 +1281,8 @@ jobs:
   #
   # The NAME is the required-check contract — the same trap the dogfood shards
   # note above: renaming it silently drops the gate wherever branch protection
-  # lists it, with every PR still green.
+  # lists it, with every PR still green. Pinned by `check:required-contexts`
+  # since #6865.
   console-pin:
     name: Console Pin Gate
     needs: filter

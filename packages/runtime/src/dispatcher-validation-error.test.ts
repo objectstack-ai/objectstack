@@ -71,7 +71,20 @@ function makeDispatcher(publishError: unknown) {
         getService: resolve,
         getServiceAsync: async (name: string) => resolve(name),
     };
-    return new HttpDispatcher(kernel);
+    const dispatcher = new HttpDispatcher(kernel);
+    // [#7033 / #7023] `POST /packages/:id/publish-drafts` now demands the
+    // `manage_metadata` capability on top of the anonymous floor. These cases
+    // are about ERROR MAPPING (a returned VALIDATION_FAILED becomes a 400 with
+    // fields[], an ordinary throw keeps its 500), so the caller must clear the
+    // write gate to reach the mapping under test — otherwise every case stops at
+    // the 401/403 gate. `dispatch()` re-resolves the context and this stub has no
+    // auth/objectql identity source, so the resolved caller carries no
+    // capabilities; only that is stubbed, the mapping and expected statuses are
+    // unchanged.
+    (dispatcher as any).timedResolveExecutionContext = async () => ({
+        userId: 'u1', systemPermissions: ['manage_metadata'],
+    });
+    return dispatcher;
 }
 
 async function publishPackage(publishError: unknown) {

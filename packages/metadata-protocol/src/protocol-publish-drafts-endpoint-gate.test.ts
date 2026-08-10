@@ -13,36 +13,56 @@ import { identityFreeEndpointGateFailure, ApiEndpointSchema } from '@objectstack
 import { ObjectStackProtocolImplementation } from './protocol.js';
 
 /**
- * Regression for #5206 step 2 (engine half) — `publishPackageDrafts` runs the
- * ADR-0121 / #5040 E7 endpoint publish gates on `api` drafts.
+ * RETIREMENT PINS (#5488) — this file used to pin `gateApiDraftsForPublish`,
+ * the ADR-0121 / #5040 E7 endpoint publish gate that #5206 step 2 (PR #5279)
+ * added to `publishPackageDrafts`. That gate is GONE, deliberately, and these
+ * tests now pin the reason it can never be needed again.
  *
- * ## What was open
+ * ## What the retired gate did, and why it went
  *
- * `protocol.publishPackageDrafts` is the REAL entry point behind Studio's
- * "publish everything" (ADR-0033 / ADR-0067 D2). Its only type-aware pre-flight
- * was the object namespace-prefix rule (`validateObjectNamespacePrefix`, gated
- * on `d.type === 'object'`), so an `api` draft was promoted draft→active having
- * met no gate at all — the same shape #5189 closed on
- * `MetadataManager.publishPackage`, one path over.
+ * It judged whether an `api` draft was fit to be promoted draft→active in
+ * `sys_metadata`. The measurement that ended it (#5488, real showcase boot) is
+ * that **no such row is ever served**: the serving criterion belongs to
+ * `IMetadataService.matchEndpoint` → `EndpointMatcher` →
+ * `MetadataManager.listForIndex('api')`, which reads the manager's registry
+ * plus its filesystem/memory loaders. A runtime write lands in `sys_metadata`,
+ * which is in neither — so `PUT /api/v1/meta/api/:name` answered 200 "Saved"
+ * and the declared route then 404'd forever, with no `[EndpointMatcher] …
+ * EXCLUDED` line, because the endpoint was never in the index to be excluded
+ * from. The gate was a correct verdict about a state with no consumer.
  *
- * The SECURITY consequence was already contained by PR #5203: the endpoint
- * matcher re-judges every stored item at index-build time with the same
- * `firstFailure`, so an anonymous zero-quota endpoint that skipped publish is
- * EXCLUDED from the index and named at `error` level. What was still broken is
- * WHEN the author is told: ADR-0121 says publish refuses, and the author is
- * owed a prescription naming the offending key at publish time — not a line in
- * a boot log. These tests pin the earlier door; the last one is asserted to
- * still be there (`identityFreeEndpointGateFailure`, bottom of the file).
+ * The maintainer ruled on 2026-08-07T16:59Z (Option B): flip the `api` registry
+ * entry to `allowRuntimeCreate: false` and let the existing #5086 inlet refuse
+ * loudly — ADR-0049's remove side, since a capability that is declared and not
+ * honoured is false compliance. The flip makes `api` code-only, and the #5086
+ * inlet runs BEFORE persistence and BEFORE the draft/publish branch (it does
+ * not read `mode`), so no `api` draft can be authored at all. A gate for a row
+ * that cannot exist is a phantom check, so it was removed with the door.
  *
- * ## Failure granularity — mirrored, not invented
+ * ## What these tests pin instead
  *
- * The pre-existing posture for a namespace-prefix violation is a WHOLE-BATCH
- * refusal found before anything is promoted: `success: false`,
- * `publishedCount: 0`, `published: []`, every violation in `failed[]`. The
- * endpoint gate joins that same pre-flight and behaves identically (ADR-0067
- * D2's "a commit cannot half-land", and what #5189 does on the sibling path
- * with `itemsPublished: 0`). Tests below assert the healthy siblings of a bad
- * `api` draft stay drafts.
+ * 1. The refusal, in the ADR-0112 envelope — `code` AND `status`, not merely
+ *    "it threw" (#6142): a bare throw would stay green on a driver that throws
+ *    the wrong error, which is the whole defect class here.
+ * 2. That the refusal covers the DRAFT door too, not just direct-active — that
+ *    is the specific prediction the #5271 tripwire comments made, and it is now
+ *    the intended behaviour rather than a warning.
+ * 3. That nothing is persisted by the refused write.
+ * 4. That `publishPackageDrafts` is otherwise untouched: non-`api` drafts
+ *    publish exactly as before.
+ *
+ * ## What still judges endpoints (unchanged, and asserted at the bottom)
+ *
+ * `validateApiEndpointDeclarations` / `identityFreeEndpointGateFailure`
+ * (`spec/api/endpoint-publish-gate`) on the route that actually serves — the
+ * stack schema, `publishPackage` (#5189), and again at load in
+ * `buildEndpointIndex` (PR #5203). ADR-0121's "publish REJECTS" ruling is
+ * intact on that route; only the runtime-authored-draft door it also used to
+ * cover is gone, because that door opened onto nothing.
+ *
+ * Re-entry, as the ruling recorded it: if #2657 Part B promotes `apis` to a
+ * registered type WITH A REAL CONSUMPTION PATH, the flag and this gate come
+ * back together — implementation first, declaration second.
  */
 
 interface Row {
@@ -201,193 +221,127 @@ const objectBody = (name: string) => ({
     fields: { title: { type: 'text', label: 'Title' } },
 });
 
-/** Save one `api` draft the way the ungated Studio direct-write path does. */
-async function saveApiDraft(
+/**
+ * Attempt one `api` write the way Studio's direct-write path does, and return
+ * the thrown error. `mode` is the point of the parameter: the #5086 inlet runs
+ * before the draft/publish branch and never reads it, so BOTH doors must refuse.
+ */
+async function attemptApiWrite(
     protocol: ObjectStackProtocolImplementation,
     name: string,
     item: unknown,
-): Promise<void> {
-    await protocol.saveMetaItem({ type: 'api', name, item: item as any, packageId: PKG, mode: 'draft' });
+    opts: { mode?: 'draft' | 'publish'; organizationId?: string } = {},
+): Promise<any> {
+    try {
+        await protocol.saveMetaItem({
+            type: 'api',
+            name,
+            item: item as any,
+            packageId: PKG,
+            ...(opts.mode ? { mode: opts.mode } : {}),
+            ...(opts.organizationId ? { organizationId: opts.organizationId } : {}),
+        } as any);
+    } catch (err) {
+        return err;
+    }
+    throw new Error(`expected the #5086 inlet to refuse the api write '${name}', but it resolved`);
+}
+
+/**
+ * The ADR-0112 envelope a code-only refusal must carry. Asserted as `code` AND
+ * `status` — never `rejects.toThrow()` alone (#6142): the unfixed shape here
+ * ALSO throws (or, on the pre-#5488 build, resolves with a 200 receipt), so a
+ * throw-only assertion carries one bit where the defect has two.
+ */
+function expectCodeOnlyRefusal(err: any, expectedCode: 'NOT_CREATABLE' | 'NOT_OVERRIDABLE') {
+    expect(err.code).toBe(expectedCode);
+    expect(err.status).toBe(403);
+    // The prescription must point at the route that DOES serve endpoints — the
+    // stack artifact compiled and shipped through `publishPackage`. It is
+    // derived from the registry entry's own `filePatterns[0]`, so it cannot
+    // drift from the declaration that produced the refusal.
+    expect(err.message).toContain('**/*.api.ts');
+    expect(err.message).toContain('allowRuntimeCreate=false');
 }
 
 const draftRows = (rows: Map<string, Row>) => Array.from(rows.values()).filter((r) => r.state === 'draft');
 const activeRows = (rows: Map<string, Row>) => Array.from(rows.values()).filter((r) => r.state === 'active');
 
-describe('publishPackageDrafts — the ADR-0121 endpoint publish gate (#5206 step 2)', () => {
-    it('refuses an anonymous, unmetered `api` draft (D6) and NAMES the key to fix', async () => {
+describe('`api` runtime writes are refused at the inlet — the retired gate’s replacement (#5488)', () => {
+    it('refuses a DIRECT-ACTIVE `api` write with the ADR-0112 envelope, and persists nothing', async () => {
         const { engine, rows } = makeStubEngine('showcase');
         const protocol = new ObjectStackProtocolImplementation(engine);
 
-        // The exact shape ADR-0121 D6 exists to prevent, and the one the
-        // runtime honours faithfully: anonymous + no armed budget.
-        await saveApiDraft(protocol, 'open_things', validEndpoint({ name: 'open_things', authRequired: false }));
+        // A body that is perfectly schema-valid and perfectly servable-looking.
+        // That matters: only a body nothing else would reject proves the
+        // refusal came from the registry consult (#5086), not from a 422.
+        const err = await attemptApiWrite(protocol, 'list_things', validEndpoint());
 
-        // Before this fix: { success: true, publishedCount: 1 } — promoted
-        // straight to active, ungated.
-        const res = await protocol.publishPackageDrafts({ packageId: PKG });
-
-        expect(res).toMatchObject({ success: false, publishedCount: 0, failedCount: 1 });
-        expect(res.published).toEqual([]);
-        expect(res.failed).toHaveLength(1);
-        expect(res.failed[0]).toMatchObject({ type: 'api', name: 'open_things', code: 'ENDPOINT_GATE' });
-        // The gate's OWN message — named endpoint, named key, prescription.
-        expect(res.failed[0].error).toContain("Endpoint 'open_things'");
-        expect(res.failed[0].error).toContain('`authRequired: false` without an ARMED rate limit');
-        expect(res.failed[0].error).toContain('rateLimit: { enabled: true');
-
-        // Nothing was promoted: the draft is still a draft.
+        expectCodeOnlyRefusal(err, 'NOT_CREATABLE');
+        // #5264 — a refused write asks the engine for nothing at all.
+        expect(rows.size).toBe(0);
         expect(activeRows(rows)).toHaveLength(0);
-        expect(draftRows(rows).map((r) => r.name)).toEqual(['open_things']);
     });
 
-    it('a `rateLimit` that is present but NOT armed is still refused (D6 is not a presence check)', async () => {
-        const { engine } = makeStubEngine('showcase');
-        const protocol = new ObjectStackProtocolImplementation(engine);
-
-        await saveApiDraft(
-            protocol,
-            'open_things',
-            validEndpoint({
-                name: 'open_things',
-                authRequired: false,
-                // `enabled` defaults to false → a budget that meters nothing.
-                rateLimit: { windowMs: 60000, maxRequests: 100 },
-            }),
-        );
-
-        const res = await protocol.publishPackageDrafts({ packageId: PKG });
-        expect(res).toMatchObject({ success: false, publishedCount: 0, failedCount: 1 });
-        expect(res.failed[0].error).toContain('`enabled` is not `true`');
-    });
-
-    it('publishes a valid `api` draft (the gate refuses shapes, not the type)', async () => {
+    it('refuses a DRAFT `api` write too — the inlet runs before the draft/publish branch', async () => {
+        // THE pin of this file. The #5271 tripwire comments predicted exactly
+        // this consequence of flipping the flag ("`api` DRAFTS would become
+        // impossible, and #5206 step 2's endpoint gate would have nothing left
+        // to gate"), and it is now intended: `saveMetaItem` consults
+        // `isRuntimeCreateAllowed` before it ever looks at `request.mode`.
         const { engine, rows } = makeStubEngine('showcase');
         const protocol = new ObjectStackProtocolImplementation(engine);
 
-        await saveApiDraft(protocol, 'list_things', validEndpoint());
+        const err = await attemptApiWrite(protocol, 'list_things', validEndpoint(), { mode: 'draft' });
 
-        const res = await protocol.publishPackageDrafts({ packageId: PKG });
-
-        expect(res.failed).toEqual([]);
-        expect(res).toMatchObject({ success: true, publishedCount: 1, failedCount: 0 });
-        expect(res.published.map((p) => p.name)).toEqual(['list_things']);
+        expectCodeOnlyRefusal(err, 'NOT_CREATABLE');
         expect(draftRows(rows)).toHaveLength(0);
-        expect(activeRows(rows).map((r) => r.name)).toEqual(['list_things']);
+        expect(rows.size).toBe(0);
     });
 
-    it('an anonymous endpoint WITH an armed budget publishes (D6 is satisfiable, not a ban)', async () => {
+    it('refuses on an ORG-SCOPED kernel as well — #5086 is not a topology carve-out', async () => {
+        const { engine, rows } = makeStubEngine('showcase');
+        const protocol = new ObjectStackProtocolImplementation(engine, () => new Map(), 'env_test');
+
+        const err = await attemptApiWrite(protocol, 'list_things', validEndpoint(), {
+            mode: 'draft',
+            organizationId: 'org_1',
+        });
+
+        expectCodeOnlyRefusal(err, 'NOT_CREATABLE');
+        expect(rows.size).toBe(0);
+    });
+
+    it('refuses the D6 shape the retired gate used to catch — now one door earlier', async () => {
+        // The anonymous, unmetered endpoint ADR-0121 D6 exists to prevent. The
+        // retired gate refused it at PUBLISH with `code: 'ENDPOINT_GATE'`;
+        // it is now refused at AUTHORING with `code: 'NOT_CREATABLE'`, because
+        // the row it would have been promoted into is unreachable either way.
+        // The D6 criterion itself is untouched and still asserted at the bottom
+        // of this file on the route that serves.
         const { engine, rows } = makeStubEngine('showcase');
         const protocol = new ObjectStackProtocolImplementation(engine);
 
-        await saveApiDraft(
+        const err = await attemptApiWrite(
             protocol,
             'open_things',
-            validEndpoint({
-                name: 'open_things',
-                authRequired: false,
-                rateLimit: { enabled: true, windowMs: 60000, maxRequests: 100 },
-            }),
+            validEndpoint({ name: 'open_things', authRequired: false }),
+            { mode: 'draft' },
         );
 
-        const res = await protocol.publishPackageDrafts({ packageId: PKG });
-        expect(res).toMatchObject({ success: true, publishedCount: 1, failedCount: 0 });
-        expect(activeRows(rows).map((r) => r.name)).toEqual(['open_things']);
+        expectCodeOnlyRefusal(err, 'NOT_CREATABLE');
+        expect(rows.size).toBe(0);
     });
 
-    it('refuses a path outside the stack carve-out, and a duplicate METHOD+path claim', async () => {
-        const { engine } = makeStubEngine('showcase');
-        const protocol = new ObjectStackProtocolImplementation(engine);
-
-        await saveApiDraft(
-            protocol,
-            'stray',
-            validEndpoint({ name: 'stray', path: '/api/v1/things' }),
-        );
-        const strayRes = await protocol.publishPackageDrafts({ packageId: PKG });
-        expect(strayRes).toMatchObject({ success: false, publishedCount: 0, failedCount: 1 });
-        expect(strayRes.failed[0].error).toContain("not inside this stack's endpoint carve-out");
-        expect(strayRes.failed[0].error).toContain('/api/v1/apps/showcase/');
-
-        // Two drafts in ONE batch claiming the same METHOD + normalized path.
-        const dup = makeStubEngine('showcase');
-        const dupProtocol = new ObjectStackProtocolImplementation(dup.engine);
-        await saveApiDraft(dupProtocol, 'a_things', validEndpoint({ name: 'a_things' }));
-        await saveApiDraft(
-            dupProtocol,
-            'b_things',
-            validEndpoint({ name: 'b_things', path: '/api/v1/apps/showcase/things/' }),
-        );
-        const dupRes = await dupProtocol.publishPackageDrafts({ packageId: PKG });
-        expect(dupRes).toMatchObject({ success: false, publishedCount: 0 });
-        expect(dupRes.failed.some((f) => /already claimed by endpoint/.test(f.error))).toBe(true);
-        expect(dup.rows.size).toBe(2);
-        expect(activeRows(dup.rows)).toHaveLength(0);
-    });
-
-    it('refuses an `api` draft whose body does not even satisfy ApiEndpointSchema', async () => {
+    it('publishPackageDrafts can no longer receive an `api` draft to gate', async () => {
+        // The structural claim behind retiring `gateApiDraftsForPublish`: with
+        // the inlet closed there is no way to reach a state the gate judged.
+        // A batch publish therefore sees an empty `api` set by construction,
+        // and reports no ENDPOINT_GATE / ENDPOINT_SCHEMA code ever again.
         const { engine, rows } = makeStubEngine('showcase');
         const protocol = new ObjectStackProtocolImplementation(engine);
 
-        // [#5271] This comment used to read "`api` has no entry in
-        // BUILTIN_METADATA_TYPE_SCHEMAS (that half is #5271, the spec lane), so
-        // the direct-write path stores arbitrary JSON verbatim" — and it minted
-        // the garbage draft through `saveMetaItem`. That half has now landed:
-        // `api` resolves `ApiEndpointSchema`, so this body is refused with a
-        // 422 at the EARLIEST door and the draft can no longer be created at
-        // all. That is the "一处修,两面得" outcome #5206 asked for, and it is
-        // asserted on the spec lane's side (packages/objectql
-        // /src/protocol-meta.test.ts, "refuses a spec-INVALID `api` item").
-        //
-        // The `ENDPOINT_SCHEMA` branch this case pins is therefore no longer
-        // reachable from the Studio write path — it is exactly what the module
-        // header calls it, a BACKSTOP, for a row that reached the store some
-        // other way: a direct `metadata.register()`, a migration, or a row
-        // written before #5271. Deleting the case would leave a live branch
-        // with no test; re-spelling the body would only re-test the 422. So the
-        // fixture PLANTS such a row instead of minting one — it saves a valid
-        // draft through the real write path (so every bookkeeping column is
-        // byte-for-byte what production writes) and then corrupts only the
-        // stored body, which is the one thing the earlier door cannot police.
-        await saveApiDraft(protocol, 'garbage', validEndpoint({ name: 'garbage' }));
-        const planted = Array.from(rows.values()).find((r) => r.name === 'garbage' && r.state === 'draft');
-        expect(planted, 'the valid draft must exist before it is corrupted').toBeDefined();
-        planted!.metadata = JSON.stringify({ name: 'garbage', totally: 'not an endpoint' });
-
-        const res = await protocol.publishPackageDrafts({ packageId: PKG });
-        expect(res).toMatchObject({ success: false, publishedCount: 0 });
-        expect(res.failed[0]).toMatchObject({ type: 'api', name: 'garbage', code: 'ENDPOINT_SCHEMA' });
-        expect(res.failed[0].error).toContain('does not satisfy ApiEndpointSchema');
-        expect(activeRows(rows)).toHaveLength(0);
-    });
-
-    it('refuses when the package declares NO namespace — the D2 precondition, reported once', async () => {
-        // `getPackage` → undefined: the object namespace-prefix rule
-        // grandfathers this (a bare object name is a naming smell), but an
-        // endpoint with no namespace is an UNOWNABLE URL, so the endpoint gate
-        // runs unconditionally and its own precondition fires.
-        const { engine, rows } = makeStubEngine(undefined);
-        const protocol = new ObjectStackProtocolImplementation(engine);
-
-        await saveApiDraft(protocol, 'list_things', validEndpoint());
-        await saveApiDraft(protocol, 'other_things', validEndpoint({ name: 'other_things', path: '/api/v1/apps/showcase/others' }));
-
-        const res = await protocol.publishPackageDrafts({ packageId: PKG });
-
-        expect(res).toMatchObject({ success: false, publishedCount: 0 });
-        // ONE report, not one per endpoint — the missing namespace is a
-        // property of the package, so it is unattributed (`name: ''`).
-        expect(res.failed).toHaveLength(1);
-        expect(res.failed[0]).toMatchObject({ type: 'api', name: '', code: 'ENDPOINT_GATE' });
-        expect(res.failed[0].error).toContain('MUST declare an explicit `manifest.namespace`');
-        // …plus THIS path's remedy (where to set it from here).
-        expect(res.failed[0].error).toContain('From `publishPackageDrafts` specifically');
-        expect(activeRows(rows)).toHaveLength(0);
-    });
-
-    it('fails the WHOLE batch — healthy siblings of a bad `api` draft stay drafts', async () => {
-        const { engine, rows } = makeStubEngine('showcase');
-        const protocol = new ObjectStackProtocolImplementation(engine);
-
+        await attemptApiWrite(protocol, 'open_things', validEndpoint({ name: 'open_things', authRequired: false }), { mode: 'draft' });
         await protocol.saveMetaItem({
             type: 'object',
             name: 'showcase_thing',
@@ -395,40 +349,19 @@ describe('publishPackageDrafts — the ADR-0121 endpoint publish gate (#5206 ste
             packageId: PKG,
             mode: 'draft',
         });
-        await saveApiDraft(protocol, 'list_things', validEndpoint());
-        await saveApiDraft(protocol, 'open_things', validEndpoint({ name: 'open_things', path: '/api/v1/apps/showcase/open', authRequired: false }));
 
         const res = await protocol.publishPackageDrafts({ packageId: PKG });
 
-        // Mirrors the namespace-prefix posture exactly: pre-flight refusal,
-        // nothing promoted — NOT "publish the two good ones".
-        expect(res).toMatchObject({ success: false, publishedCount: 0, failedCount: 1 });
-        expect(res.published).toEqual([]);
-        expect(res.failed.map((f) => f.name)).toEqual(['open_things']);
-        expect(draftRows(rows).map((r) => r.name).sort()).toEqual(['list_things', 'open_things', 'showcase_thing']);
-        expect(activeRows(rows)).toHaveLength(0);
-    });
-
-    it('reports object namespace-prefix AND endpoint violations in ONE report', async () => {
-        const { engine } = makeStubEngine('showcase');
-        const protocol = new ObjectStackProtocolImplementation(engine);
-
-        await protocol.saveMetaItem({
-            type: 'object',
-            name: 'thing', // missing the `showcase_` prefix
-            item: objectBody('thing'),
-            packageId: PKG,
-            mode: 'draft',
-        });
-        await saveApiDraft(protocol, 'open_things', validEndpoint({ name: 'open_things', authRequired: false }));
-
-        const res = await protocol.publishPackageDrafts({ packageId: PKG });
-
-        expect(res).toMatchObject({ success: false, publishedCount: 0, failedCount: 2 });
-        expect(res.failed.map((f) => f.code).sort()).toEqual(['ENDPOINT_GATE', 'NAMESPACE_PREFIX']);
+        expect(res).toMatchObject({ success: true, publishedCount: 1, failedCount: 0 });
+        expect(res.failed.map((f: { code?: string }) => f.code)).toEqual([]);
+        expect(activeRows(rows).map((r) => r.name)).toEqual(['showcase_thing']);
+        expect(draftRows(rows)).toHaveLength(0);
     });
 
     it('leaves non-`api` drafts alone — no endpoint gate, no behaviour change', async () => {
+        // Survives the retirement unchanged: it pinned that the gate was
+        // type-scoped, and it now pins that removing it changed nothing for
+        // every other type.
         const { engine, rows } = makeStubEngine('showcase');
         const protocol = new ObjectStackProtocolImplementation(engine);
 

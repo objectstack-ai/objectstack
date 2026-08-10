@@ -2,6 +2,11 @@
 
 import { describe, it, expect } from 'vitest';
 
+import {
+  EXPORT_ENTRY_POINTS,
+  exportNamesOf,
+  holdersOf,
+} from '../../scripts/lib/export-origins-testkit';
 // ─── [#4657] `ActivationEventSchema` / `ActivationEvent` are REMOVED ─────────
 //
 // ADR-0049 enforce-or-remove, ruled REMOVE: the activation-event vocabulary
@@ -31,64 +36,23 @@ import { describe, it, expect } from 'vitest';
 // carried the tombstoned key — was removed whole, so this file's kernel-side
 // parse assertion is gone. See the block above the studio test.)
 describe('[#4657] ActivationEventSchema removal — no entry exports the name', () => {
-  it('resolves the export surface: the retired names have ZERO holders across every public entry', async () => {
-    const ts = (await import('typescript')).default;
-    const { resolve, relative } = await import('node:path');
-    const { dirname } = await import('node:path');
-    const { fileURLToPath } = await import('node:url');
-    const { readFileSync } = await import('node:fs');
-
-    const specDir = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
-    // Every public entry point, read from package.json's exports map so a
-    // future entry cannot silently escape the absence pins below.
-    const pkg = JSON.parse(readFileSync(resolve(specDir, 'package.json'), 'utf8')) as {
-      exports: Record<string, unknown>;
-    };
-    const entries: Record<string, string> = {};
-    for (const sub of Object.keys(pkg.exports)) {
-      if (sub === '.') entries[sub] = resolve(specDir, 'src/index.ts');
-      else if (/^\.\/[a-z-]+$/.test(sub)) entries[sub] = resolve(specDir, `src/${sub.slice(2)}/index.ts`);
-      // './openapi.json' / './package.json' are not TypeScript entry points.
-    }
-    // Anti-vacuity: the enumeration must have found the real surface — the two
-    // entries that used to export the retired names most of all.
+  it('resolves the export surface: the retired names have ZERO holders across every public entry', () => {
+    // Anti-vacuity: the baseline must cover the real surface. (This used to
+    // enumerate package.json's exports map and build its own `ts.createProgram`
+    // right here; `export-origins/` IS that resolution, computed once at build
+    // time and checked in — #4796. `holdersOf` is now the baseline's query, and
+    // `export-origins.test.ts` pins that it discriminates.)
     for (const needed of ['./kernel', './studio']) {
-      expect(Object.keys(entries), `exports map must include ${needed}`).toContain(needed);
+      expect(EXPORT_ENTRY_POINTS, `exports map must include ${needed}`).toContain(needed);
     }
-    expect(Object.keys(entries).length).toBeGreaterThan(10);
-
-    const program = ts.createProgram(Object.values(entries), {
-      module: ts.ModuleKind.ESNext,
-      moduleResolution: ts.ModuleResolutionKind.Bundler,
-      skipLibCheck: true,
-      noEmit: true,
-    });
-    const checker = program.getTypeChecker();
-
-    const exportsOf = (sub: string) => {
-      const sf = program.getSourceFile(entries[sub]);
-      const moduleSym = sf && checker.getSymbolAtLocation(sf);
-      // Without this guard a resolution failure would make every `not.toContain`
-      // below pass vacuously — the exact way a gate goes dormant (#4642).
-      expect(moduleSym, `${sub} module symbol must resolve`).toBeTruthy();
-      return checker.getExportsOfModule(moduleSym!);
-    };
-
-    /** Every entry that exports `name` — for a removal this must be []. */
-    const holdersOf = (name: string) => {
-      const out: string[] = [];
-      for (const sub of Object.keys(entries)) {
-        if (exportsOf(sub).some((e) => e.getName() === name)) out.push(sub);
-      }
-      return out;
-    };
+    expect(EXPORT_ENTRY_POINTS.length).toBeGreaterThan(10);
 
     // 1. Anti-vacuity on the two surfaces that carried the names: both still
     //    export a non-trivial surface (so "does not contain" cannot pass by
     //    resolving nothing), and the SURVIVING neighbours stand — the parents
     //    whose keys were retired most of all.
-    const kernelNames = exportsOf('./kernel').map((e) => e.getName());
-    const studioNames = exportsOf('./studio').map((e) => e.getName());
+    const kernelNames = exportNamesOf('./kernel');
+    const studioNames = exportNamesOf('./studio');
     expect(kernelNames.length, './kernel must export a non-trivial surface').toBeGreaterThan(40);
     expect(studioNames.length, './studio must export a non-trivial surface').toBeGreaterThan(40);
     // (The kernel anchors used to be `DynamicLoadRequestSchema` /

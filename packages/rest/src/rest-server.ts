@@ -8,6 +8,7 @@ import {
     isMcpServerEnabled,
     looksLikeInternalErrorLeak,
     isUniqueViolationError,
+    matchMissingColumnOfRelation,
     declaresServerFault,
     INTERNAL_ERROR_MESSAGE,
 } from '@objectstack/types';
@@ -211,8 +212,8 @@ function valueAtPath(input: unknown, path: unknown): unknown {
 }
 
 /**
- * How many levels of nested `invalid_union` are expanded below a top-level
- * issue, and how many equally-informative branches are emitted at one level.
+ * How many levels of nested issues are expanded below a top-level issue, and
+ * how many equally-informative union branches are emitted at one level.
  *
  * Both bounds — and the whole selection policy below — are the ones
  * `formatZodError` landed for the CLI/spec side of this defect (#4971,
@@ -222,8 +223,21 @@ function valueAtPath(input: unknown, path: unknown): unknown {
  * the same, or one mistake gets two different prescriptions depending on whether
  * the author published from the terminal or POSTed to the API (#5014).
  */
-const UNION_EXPANSION_DEPTH_LIMIT = 3;
+const NESTED_EXPANSION_DEPTH_LIMIT = 3;
 const UNION_BRANCH_EMIT_LIMIT = 3;
+
+/**
+ * [#5389] The issue codes that hang their real diagnosis on `issue.issues`
+ * rather than on `invalid_union`'s `issue.errors`.
+ *
+ * `invalid_key` is raised when `z.record(K, V)`'s KEY schema rejects a key (and
+ * by `z.map` for a non-`PropertyKey` key); `invalid_element` when `z.map`'s
+ * VALUE schema rejects the value under such a key. Both carry a bare wrapper
+ * message ("Invalid key in record") with everything the client needs one level
+ * down — the same defect as #5014, one property name over. Kept in step with
+ * `CONTAINER_ISSUE_CODES` in `spec/src/shared/error-map.zod.ts`.
+ */
+const CONTAINER_ISSUE_CODES: ReadonlySet<string> = new Set(['invalid_key', 'invalid_element']);
 
 /** A Zod issue path, normalised to the array Zod always produces. */
 function issuePathOf(issue: any): Array<string | number> {
@@ -307,6 +321,14 @@ function selectUnionBranches(branches: readonly (readonly any[])[]): readonly (r
  * the branches that explain it, with `field` resolved against the union's own
  * path — branch paths are relative to it.
  *
+ * [#5389] An `invalid_key` / `invalid_element` behaves the same way one property
+ * name over: its own entry (zod's `"Invalid key in record"`, also
+ * `invalid_shape`) followed by the entries on `issue.issues`, whose paths are
+ * likewise relative. The one difference from a union: those issues are not
+ * competing candidates, so they are NOT ranked or capped — every one of them is
+ * a true statement about the value, and dropping any would be dropping a real
+ * diagnosis rather than declining to guess.
+ *
  * The union's entry is kept rather than replaced: it is the only entry naming
  * the slot the client sent, existing clients already read it, and when every
  * branch is uninformative it is still the whole answer. So the expansion is
@@ -342,7 +364,11 @@ function collectIssueFields(
     const branches: readonly (readonly any[])[] = issue?.code === 'invalid_union' && Array.isArray(issue?.errors)
         ? issue.errors.filter((branch: unknown): branch is any[] => Array.isArray(branch))
         : [];
-    const expandable = branches.length > 0 && depth < UNION_EXPANSION_DEPTH_LIMIT;
+    const contained: readonly any[] = CONTAINER_ISSUE_CODES.has(issue?.code) && Array.isArray(issue?.issues)
+        ? issue.issues
+        : [];
+    const expandable = (branches.length > 0 || contained.length > 0)
+        && depth < NESTED_EXPANSION_DEPTH_LIMIT;
 
     const entry = {
         field,
@@ -360,10 +386,17 @@ function collectIssueFields(
     out.push(entry);
     if (!expandable) return;
 
-    for (const branch of selectUnionBranches(branches)) {
-        for (const nested of branch) {
-            collectIssueFields(nested, path, depth + 1, seen, input, inputProvided, out);
+    if (branches.length > 0) {
+        for (const branch of selectUnionBranches(branches)) {
+            for (const nested of branch) {
+                collectIssueFields(nested, path, depth + 1, seen, input, inputProvided, out);
+            }
         }
+        return;
+    }
+
+    for (const nested of contained) {
+        collectIssueFields(nested, path, depth + 1, seen, input, inputProvided, out);
     }
 }
 
@@ -903,13 +936,18 @@ export function mapDataError(error: any, object?: string): { status: number; bod
     // NOTE: this is a last-resort safety net — the validation layer should
     // ideally reject these before they reach the driver (see follow-ups on
     // unknown-field rejection + provenance-aware required checks).
+    // [#6615] The Postgres limb is the shared `matchMissingColumnOfRelation`
+    // rather than a fourth open-coded copy of that phrase: its message contains
+    // a legal missing-TABLE phrase as a substring, and `service-analytics` and
+    // `metadata` each had to repair the same superstring hole. Same regex as
+    // before, same position last in the chain — only its owner moved.
     const unknownColumn =
-        /has no column named\s+["'`]?([a-z0-9_]+)/i.exec(raw) ||
-        /no such column:\s*["'`]?([a-z0-9_.]+)/i.exec(raw) ||
-        /unknown column\s+["'`]([a-z0-9_]+)["'`]/i.exec(raw) ||
-        /column\s+["'`]([a-z0-9_]+)["'`]\s+of relation\s+\S+\s+does not exist/i.exec(raw);
+        /has no column named\s+["'`]?([a-z0-9_]+)/i.exec(raw)?.[1] ??
+        /no such column:\s*["'`]?([a-z0-9_.]+)/i.exec(raw)?.[1] ??
+        /unknown column\s+["'`]([a-z0-9_]+)["'`]/i.exec(raw)?.[1] ??
+        matchMissingColumnOfRelation(raw);
     if (unknownColumn) {
-        const field = unknownColumn[1]?.split('.').pop();
+        const field = unknownColumn.split('.').pop();
         return {
             status: 400,
             body: {
@@ -2308,6 +2346,21 @@ export class RestServer {
     }
 
     /**
+     * [#7033 / #7023] Resolve a caller's execution context for a DIRECT-MOUNT
+     * package route (`@objectstack/rest`'s `registerPackageRoutes`), which does
+     * not run inside a `registerXxxEndpoints` handler and so cannot reach the
+     * private {@link resolveExecCtx} on its own. The package gate reads the
+     * SAME identity/RBAC resolution the `/meta` REST gate does — never a second
+     * source — so the two capability cohorts cannot drift. `environmentId` comes
+     * from the scoped route param (`/environments/:environmentId/packages`) when
+     * present, `undefined` for the unscoped mount.
+     */
+    resolvePackageRouteExecutionContext(req: any): Promise<any | undefined> {
+        const environmentId = req?.params?.environmentId ?? undefined;
+        return this.resolveExecCtx(environmentId, req).catch(() => undefined);
+    }
+
+    /**
      * [ADR-0046 §6.7] The audience-evaluation view of the caller for book/doc
      * gating. `permissionSets` resolves through the security service's
      * `resolvePermissionSetNames` — the SAME resolution as data-plane
@@ -2615,6 +2668,9 @@ export class RestServer {
     /**
      * Filter an `App` metadata item by the current user's `systemPermissions`.
      *
+     * - Drops the app entirely when it is UNPUBLISHED (`_unpublished: true`,
+     *   ADR-0045 §3) and the caller is not a builder. Note the key: `hidden` is
+     *   navigation presentation and is deliberately NOT consulted (#4829).
      * - Drops the app entirely if its top-level `requiredPermissions` are not
      *   a subset of the user's system permissions.
      * - Recursively strips child navigation entries (groups, items) whose
@@ -2633,9 +2689,9 @@ export class RestServer {
      * pinned in `rest.test.ts`: server-side CEL needs a bound `user` context
      * that this layer does not have, and is its own change.
      *
-     * Returns `null` when the app should be hidden from the user. Returns a
-     * shallow copy with filtered `navigation` / `areas` otherwise — the original
-     * is never mutated so cached metadata stays clean.
+     * Returns `null` when the app should be withheld from the user entirely.
+     * Returns a shallow copy with filtered `navigation` / `areas` otherwise —
+     * the original is never mutated so cached metadata stays clean.
      *
      * Takes the **app document itself**, never the `getMetaItem` envelope
      * (#5563). Both callers now hand it a document: the list path always did,
@@ -2647,11 +2703,23 @@ export class RestServer {
      */
     private filterAppForUser(item: any, sysPerms: Set<string>, serviceGate?: (name: string) => boolean): any | null {
         if (!item || typeof item !== 'object') return item;
-        // ADR-0045: an unpublished app (`hidden: true`) is externally
-        // unobservable — only builders (studio/setup access) receive it at all,
-        // for direct-URL preview. The launcher's client-side hidden filter is a
-        // listing courtesy; THIS is the visibility gate.
-        if (item.hidden === true && !sysPerms.has('studio.access') && !sysPerms.has('setup.access')) {
+        // ADR-0045 §3 (as revised 2026-08, #4829) — the publish gate. An
+        // UNPUBLISHED app is externally unobservable, not merely unlisted: only
+        // builders (studio/setup access) receive it at all, for direct-URL
+        // preview. THIS is the visibility gate; the launcher's client-side
+        // filtering is a listing courtesy.
+        //
+        // ⛔ It judges `_unpublished`, the machine-managed key, and NOT `hidden`.
+        // `hidden` is navigation presentation — "not in the App Switcher, reach
+        // it from the avatar menu" — and reading it here made those two
+        // contracts one boolean. #4829 measured the cost: `account`, the
+        // platform's own personal-settings app, is authored `hidden: true` for
+        // exactly the reason its spec docblock gives, so this branch erased it
+        // from `GET /meta/app` for every user without builder access — password,
+        // avatar, sessions, inbox all 404 — while any admin saw a healthy
+        // system. A hidden app is fully routable and permission-checked here;
+        // only `_unpublished` withholds it.
+        if (item._unpublished === true && !sysPerms.has('studio.access') && !sysPerms.has('setup.access')) {
             return null;
         }
         const reqApp = Array.isArray(item.requiredPermissions) ? item.requiredPermissions : [];
@@ -5111,6 +5179,48 @@ export class RestServer {
             handler: async (req: any, res: any) => {
                 try {
                     const environmentId = isScoped ? req.params?.environmentId : undefined;
+                    // [#6603] Authoring capability gate — the SAME mechanism
+                    // `POST /meta/_migrate-stored` uses next door, deliberately
+                    // not a second way of demanding the same capability.
+                    //
+                    // Two independent reasons, either sufficient:
+                    //
+                    //  1. **The ADR-0106 round-trip.** D1 removes an unreadable
+                    //     field WHOLE from a served object schema, and this
+                    //     route persists the body it is handed. So a non-exempt
+                    //     caller's ordinary GET → edit a label → PUT used to
+                    //     store the schema back MINUS the fields masked out of
+                    //     their own read — silent deletion of fields they were
+                    //     never allowed to see, with nothing in the exchange
+                    //     saying so. Refusing the write is the write-side answer
+                    //     the masking needs: it makes "whoever may write a
+                    //     schema is whoever sees all of it" an enforced
+                    //     invariant instead of a coincidence, rather than
+                    //     teaching `saveMetaItem` that absent means keep (which
+                    //     would make field DELETION inexpressible for everyone).
+                    //  2. It closes a hole that predates masking entirely: any
+                    //     authenticated session could clobber any metadata item.
+                    //
+                    // Gate FIRST — before the protocol is resolved — so an
+                    // unauthorized caller cannot use the 501-vs-200 answer to
+                    // probe which kernels implement saving, and so nothing is
+                    // written before the refusal. `manage_metadata` is
+                    // ADR-0066 D1's authoring capability and saving a metadata
+                    // item is authoring; `isSystem` bypasses, matching every
+                    // other capability gate on the platform.
+                    const ctx = await this.resolveExecCtx(environmentId, req).catch(() => undefined);
+                    const held = new Set<string>(
+                        Array.isArray(ctx?.systemPermissions) ? ctx!.systemPermissions : [],
+                    );
+                    if (!ctx?.isSystem && !held.has('manage_metadata')) {
+                        res.status(403).json({
+                            error: {
+                                code: 'FORBIDDEN',
+                                message: 'Saving a metadata item requires the `manage_metadata` capability.',
+                            },
+                        });
+                        return;
+                    }
                     const p = await this.resolveProtocol(environmentId, req);
                     if (!p.saveMetaItem) {
                         res.status(501).json({ error: 'Save operation not supported by protocol implementation', code: 'NOT_IMPLEMENTED' });
@@ -5189,6 +5299,40 @@ export class RestServer {
             handler: async (req: any, res: any) => {
                 try {
                     const environmentId = isScoped ? req.params?.environmentId : undefined;
+                    // [#7019] Same gate, same mechanism as the `PUT` twins —
+                    // but the argument for it is NOT the ADR-0106 round trip,
+                    // and saying so matters. Nothing is masked here and nothing
+                    // is round-tripped: this route discards a customization
+                    // overlay outright, so before this gate an authenticated
+                    // session holding no authoring capability at all could
+                    // reset any customized metadata item in the deployment to
+                    // its artifact default — and with `?dropStorage=true`, drop
+                    // the object's physical table with it.
+                    //
+                    // It belongs with the two PUTs because deleting a
+                    // customization is authoring it (ADR-0066 D1), and because
+                    // the fix is the same four lines — not because it is the
+                    // same argument.
+                    //
+                    // Gate FIRST — before the protocol is resolved — so the
+                    // 501-vs-200 answer leaks no kernel capability, and, the
+                    // point here, so the refusal happens with the overlay row
+                    // still intact. A gate that answers 403 after
+                    // `deleteMetaItem` has run would still be the bug.
+                    // `isSystem` bypasses, as everywhere else.
+                    const ctx = await this.resolveExecCtx(environmentId, req).catch(() => undefined);
+                    const held = new Set<string>(
+                        Array.isArray(ctx?.systemPermissions) ? ctx!.systemPermissions : [],
+                    );
+                    if (!ctx?.isSystem && !held.has('manage_metadata')) {
+                        res.status(403).json({
+                            error: {
+                                code: 'FORBIDDEN',
+                                message: 'Resetting a metadata item requires the `manage_metadata` capability.',
+                            },
+                        });
+                        return;
+                    }
                     const p = await this.resolveProtocol(environmentId, req);
                     if (!(p as any).deleteMetaItem) {
                         res.status(501).json({
@@ -5515,6 +5659,42 @@ export class RestServer {
             handler: async (req: any, res: any) => {
                 try {
                     const environmentId = isScoped ? req.params?.environmentId : undefined;
+                    // [#7019] The compound-name twin of the gate #6603 put on
+                    // `PUT /meta/:type/:name` — WORD FOR WORD the same
+                    // mechanism, because it is word for word the same
+                    // operation: one generic `saveMetaItem`, reached by a name
+                    // spelled in two segments instead of one.
+                    //
+                    // Gating only the single-segment door left this one as a
+                    // bypass of it, and that was measured rather than reasoned:
+                    // with #6603's gate in place, the identical ADR-0106
+                    // GET → edit a label → PUT still round-tripped a MASKED
+                    // object schema back into the store through here, deleting
+                    // the fields the caller was never allowed to see. Same
+                    // caller, same object, same loss, one route over.
+                    //
+                    // Independently of masking, this door also served the older
+                    // hole for EVERY metadata type: any authenticated session
+                    // could clobber any metadata item.
+                    //
+                    // Gate FIRST — before the protocol is resolved — so an
+                    // unauthorized caller cannot use the 501-vs-200 answer to
+                    // probe which kernels implement saving, and so nothing is
+                    // written before the refusal. `isSystem` bypasses, matching
+                    // every other capability gate on the platform.
+                    const ctx = await this.resolveExecCtx(environmentId, req).catch(() => undefined);
+                    const held = new Set<string>(
+                        Array.isArray(ctx?.systemPermissions) ? ctx!.systemPermissions : [],
+                    );
+                    if (!ctx?.isSystem && !held.has('manage_metadata')) {
+                        res.status(403).json({
+                            error: {
+                                code: 'FORBIDDEN',
+                                message: 'Saving a metadata item requires the `manage_metadata` capability.',
+                            },
+                        });
+                        return;
+                    }
                     const p = await this.resolveProtocol(environmentId, req);
                     if (!p.saveMetaItem) {
                         res.status(501).json({ error: 'Save operation not supported by protocol implementation', code: 'NOT_IMPLEMENTED' });
@@ -7110,12 +7290,14 @@ export class RestServer {
                     //
                     // Do NOT reach for the submit handler as the backstop here.
                     // It enforces a field whitelist on WRITES, which cannot
-                    // bound a READ disclosure — and its own accepted set
-                    // degenerates identically for a section-less form
-                    // (`allowedFields.size === 0 ||` below), so narrowing this
-                    // schema to "what submit would accept" would have
-                    // republished precisely the set being removed. That
-                    // write-side twin is tracked separately in #6920.
+                    // bound a READ disclosure — and when #6601 landed, its own
+                    // accepted set still degenerated identically for a
+                    // section-less form (`allowedFields.size === 0 ||`), so
+                    // narrowing this schema to "what submit would accept" would
+                    // have republished precisely the set being removed. #6920
+                    // has since closed that write-side twin, so the two planes
+                    // now agree — but they agree by each enforcing the
+                    // declaration itself, NOT by one deferring to the other.
                     let objectSchema: any = null;
                     try {
                         const p = await this.resolveProtocol(environmentId, req);
@@ -7262,14 +7444,56 @@ export class RestServer {
                             else if (f?.field) allowedFields.add(f.field);
                         }
                     }
+                    // [#6920] A form that declares NO fields collects nothing, so
+                    // it has nothing to accept — refuse instead of inserting.
+                    //
+                    // The filter below used to read
+                    // `allowedFields.size === 0 || allowedFields.has(k)`, and that
+                    // fall-through was not "accept every field of the object": it
+                    // accepted every KEY THE CALLER SENT, minus the anchors and the
+                    // three prototype keys — measured as
+                    // `["email","internal_margin","internal_tier","not_even_a_field",
+                    // "status","subject"]` on a `sections: []` form, `not_even_a_field`
+                    // not being a field of the object at all. On an ANONYMOUS surface
+                    // that is unbounded mass assignment across the target object, and
+                    // the form created-before-its-sections-are-wired mid-state reaches
+                    // it without anything exotic.
+                    //
+                    // Symmetric with #6601 on the read side of the same pair: declare
+                    // it or it is not published / not accepted, one rule on both planes
+                    // (AGENTS.md "Explicit composition over default magic"). Post-#6601
+                    // such a form publishes `fields: {}`, so no legitimate client can
+                    // even learn what to send here.
+                    //
+                    // REFUSAL, not a silent discard: dropping the keys would leave the
+                    // `201` intact while swallowing data the caller believes it wrote —
+                    // exactly the silence AGENTS.md's warn-vs-error rule forbids. The
+                    // author's fix is to wire the sections, so the message says that;
+                    // the code is the standard ADR-0112 catalog's generic 400
+                    // (`HttpStatusErrorCodeMap[400]`), not a minted synonym, and the
+                    // message names no object, field or slug — this reply is readable
+                    // by anyone on the internet.
+                    //
+                    // NOTE the #3022 pin ('zero declared sections: business fields fall
+                    // through, anchors do NOT') asserted this fall-through as intended.
+                    // Re-judged by maintainer ruling 5229989845 (2026-08-09): the
+                    // anchor half is preserved and still pinned; the fall-through half
+                    // was the wrong invariant.
+                    if (allowedFields.size === 0) {
+                        res.status(400).json({
+                            code: 'VALIDATION_ERROR',
+                            error: 'This form declares no fields, so it cannot accept a submission. '
+                                + "Wire the fields it collects into the form's sections and publish it again.",
+                        });
+                        return;
+                    }
                     // [#3022] System-managed anchors (owner_id, organization_id,
                     // audit columns, id, …) are NEVER client-suppliable on this
-                    // anonymous surface — not via an explicit section declaration,
-                    // and not via the zero-declared-sections fallback below (which
-                    // otherwise passes the raw body through and previously let a
-                    // visitor forge record ownership). The SecurityPlugin's
-                    // publicFormGrant branch strips the same set at the data layer,
-                    // so this filter and the engine boundary cannot drift.
+                    // anonymous surface, even when a FormView explicitly declares
+                    // one in a section (the insert-forge of #3004, with no
+                    // credentials at all). The SecurityPlugin's publicFormGrant
+                    // branch strips the same set at the data layer, so this filter
+                    // and the engine boundary cannot drift.
                     const rawBody = (req.body && typeof req.body === 'object') ? req.body : {};
                     const filteredData: Record<string, unknown> = {};
                     for (const [k, v] of Object.entries(rawBody)) {
@@ -7278,7 +7502,7 @@ export class RestServer {
                         // here would REPLACE filteredData's prototype and smuggle
                         // inherited anchors past every own-property check downstream.
                         if (k === '__proto__' || k === 'constructor' || k === 'prototype') continue;
-                        if (allowedFields.size === 0 || allowedFields.has(k)) filteredData[k] = v;
+                        if (allowedFields.has(k)) filteredData[k] = v;
                     }
 
                     // ADR-0056 (Option A): authorization DERIVED from the declared

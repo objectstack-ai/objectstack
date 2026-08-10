@@ -108,7 +108,7 @@ describe('SqlDriver — defaultValue runtime tokens never become a column DEFAUL
 
     // A system/anonymous write: exactly the seed-replay shape that produced the
     // two dangling `sys_user:current_user` references #4551's audit reported.
-    await driver.create('field_zoo', { id: 'z1', title: 'specimen' }, { bypassTenantAudit: true } as any);
+    await driver.create('field_zoo', { id: 'z1', title: 'specimen' }, { bypassTenantAudit: true });
 
     const row = await knexInstance('field_zoo').where('id', 'z1').first();
     expect(row.f_owner).toBeNull();
@@ -118,7 +118,7 @@ describe('SqlDriver — defaultValue runtime tokens never become a column DEFAUL
   it('an explicitly supplied user id is still stored (the column is a normal lookup)', async () => {
     const driver = makeDriver();
     await driver.initObjects(fieldZoo as any);
-    await driver.create('field_zoo', { id: 'z2', title: 't', f_owner: 'usr_42' }, { bypassTenantAudit: true } as any);
+    await driver.create('field_zoo', { id: 'z2', title: 't', f_owner: 'usr_42' }, { bypassTenantAudit: true });
     const row = await knexInstance('field_zoo').where('id', 'z2').first();
     expect(row.f_owner).toBe('usr_42');
   });
@@ -128,7 +128,7 @@ describe('SqlDriver — defaultValue runtime tokens never become a column DEFAUL
   it("REGRESSION: 'NOW()' still gets its driver-native default and stores a canonical instant", async () => {
     const driver = makeDriver();
     await driver.initObjects(fieldZoo as any);
-    await driver.create('field_zoo', { id: 'z3', title: 't' }, { bypassTenantAudit: true } as any);
+    await driver.create('field_zoo', { id: 'z3', title: 't' }, { bypassTenantAudit: true });
     const row = await knexInstance('field_zoo').where('id', 'z3').first();
     expect(row.f_seen_at).toMatch(ISO_Z);
     expect(String(row.f_seen_at)).not.toContain('NOW()');
@@ -217,7 +217,7 @@ describe('SqlDriver — defaultValue runtime tokens never become a column DEFAUL
     expect(info.f_owner.defaultValue ?? null).toBeNull();
     expect(await driver.detectManagedDrift(fieldZoo as any)).toEqual([]);
 
-    await driver.create('field_zoo', { id: 'after', title: 'C' }, { bypassTenantAudit: true } as any);
+    await driver.create('field_zoo', { id: 'after', title: 'C' }, { bypassTenantAudit: true });
     const row = await knexInstance('field_zoo').where('id', 'after').first();
     expect(row.f_owner).toBeNull();
   });
@@ -244,7 +244,7 @@ describe('SqlDriver — defaultValue runtime tokens never become a column DEFAUL
     expect(String(info.f_seen_at.defaultValue ?? '')).toContain('strftime');
     expect(String(info.f_status.defaultValue ?? '')).toContain('open');
 
-    await driver.create('field_zoo', { id: 'post', title: 'D' }, { bypassTenantAudit: true } as any);
+    await driver.create('field_zoo', { id: 'post', title: 'D' }, { bypassTenantAudit: true });
     const row = await knexInstance('field_zoo').where('id', 'post').first();
     expect(row.f_seen_at).toMatch(ISO_Z);
     expect(row.f_status).toBe('open');

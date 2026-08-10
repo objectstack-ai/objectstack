@@ -23,6 +23,17 @@
  * The last test here pins that separation directly, because a registry entry
  * that grew a second opinion about servability is the one way this change
  * could go wrong later.
+ *
+ * ## …and WHICH channel the shape door stands in (updated by #5488)
+ *
+ * `api` is now CODE-ONLY (`allowRuntimeCreate: false` + `allowOrgOverride:
+ * false`, maintainer ruling 2026-08-07T16:59Z). The declaration schema is
+ * therefore consulted on the ARTIFACT route — stack compile, `publishPackage`,
+ * loader ingest — and no longer on `PUT /api/v1/meta/api/:name`, which the
+ * #5086 inlet refuses with 403 `NOT_CREATABLE` before any body validation
+ * runs. The schema cases below are unchanged and still correct: they assert
+ * `ApiEndpointSchema` itself, which is the same object either route reaches.
+ * Only the door it stands in moved. See the retirement pins below for why.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -97,25 +108,50 @@ describe('`api` is a declared metadata kind', () => {
 });
 
 describe('`api` registry flags — the authorization verdict, written down', () => {
-  it('declares `allowRuntimeCreate: true`', () => {
-    // NOT a new grant. With no static entry, `isRuntimeCreateAllowed`
-    // (metadata-protocol) and `assertAllowed` (sys-metadata-repository) both
-    // fall through to "no registry entry ⇒ runtime-creatable", and both name
-    // `api` in that comment — so runtime writes were already accepted, just
-    // unvalidated. Flipping this to `false` (with allowOrgOverride also false)
-    // would make the type CODE-ONLY under #5086, turning today's 200 into a
-    // 403 and leaving #5206 step 2's `publishPackageDrafts` endpoint gate
-    // (PR #5279) with no draft it could ever gate.
-    expect(apiEntry()!.allowRuntimeCreate).toBe(true);
+  // ── RETIREMENT PINS (#5488) ───────────────────────────────────────────────
+  //
+  // These two cases REPLACE the #5271 tripwire pins that asserted the opposite
+  // (`allowRuntimeCreate: true`, "is NOT code-only"). Those pins were doing
+  // their job: their comments predicted, verbatim, that flipping this flag
+  // would make the type code-only under #5086 and leave PR #5279's
+  // `publishPackageDrafts` endpoint gate with no draft it could ever gate.
+  // Both predictions were correct, and both outcomes are now INTENDED —
+  // maintainer ruling 2026-08-07T16:59Z (Option B), implemented by #5488.
+  //
+  // What the tripwires could not see is why: the runtime create door they were
+  // protecting opened onto nothing. `matchEndpoint` → `EndpointMatcher` →
+  // `MetadataManager.listForIndex('api')` reads the manager's registry plus the
+  // filesystem/memory loaders; a runtime write lands in `sys_metadata`, which
+  // is in neither, so a runtime-created endpoint 404s forever (real boot,
+  // #5488). ADR-0049 calls a declared-but-unhonoured capability false
+  // compliance and requires enforce-or-remove; this is the remove side.
+  //
+  // Re-entry path, as the ruling recorded it: if #2657 Part B promotes `apis`
+  // to a registered type WITH A REAL CONSUMPTION PATH, flip back then —
+  // implementation first, declaration second. Until then these pins are what
+  // makes a silent re-flip loud.
+
+  it('declares `allowRuntimeCreate: false` — the runtime create door is retired (#5488)', () => {
+    expect(apiEntry()!.allowRuntimeCreate).toBe(false);
   });
 
-  it('is NOT code-only: at least one runtime write channel stays declared', () => {
+  it('IS code-only: no runtime write channel is declared (#5086 refuses the inlet)', () => {
     // The exact predicate #5086 (PR #5263) refuses on, spelled as the gate
-    // spells it, so a future flag edit fails here rather than in a 403 nobody
-    // expected.
+    // spells it. `true` here is what makes `PUT /api/v1/meta/api/:name` answer
+    // 403 `NOT_CREATABLE` instead of 200 "Saved" — in draft mode too, since the
+    // inlet runs before the draft/publish branch and does not look at `mode`.
     const entry = apiEntry()!;
     const codeOnly = entry.allowRuntimeCreate === false && entry.allowOrgOverride === false;
-    expect(codeOnly).toBe(false);
+    expect(codeOnly).toBe(true);
+  });
+
+  it('keeps `filePatterns` non-empty, so the 403 can prescribe the artifact route', () => {
+    // `codeOnlySourceHint` reads `filePatterns[0]` straight back into the
+    // refusal body ("Declare it in source (…) and redeploy"). An empty array
+    // would refuse the write and then say nothing about the route that DOES
+    // serve endpoints — the stack artifact compiled through `publishPackage`.
+    // Same reason `capability` pins this (ADR-0066 D1 / #5961).
+    expect(apiEntry()!.filePatterns[0]).toMatch(/\.api\./);
   });
 
   it('declares `allowOrgOverride: false` — an endpoint is the publisher’s outward URL', () => {
@@ -139,7 +175,7 @@ describe('`api` registry flags — the authorization verdict, written down', () 
   });
 });
 
-describe('the save-time shape door `api` just gained', () => {
+describe('the declaration shape door (artifact / publish route — see the header note)', () => {
   it('accepts the E8-migrated showcase endpoints (object_operation + flow)', () => {
     // A VALUE verdict — the rule judges the body, not whether a key is an
     // authoring surface — so the criterion is a fully green `safeParse`, not

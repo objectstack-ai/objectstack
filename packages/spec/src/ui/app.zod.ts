@@ -1164,6 +1164,29 @@ const HOME_PAGE_ID_RETIRED =
   + 'should own the root landing. Run `os migrate meta --from 16` to rewrite existing sources '
   + 'automatically.';
 
+/**
+ * The prescription for every author-shaped spelling of the ADR-0045 publish
+ * gate (#4829).
+ *
+ * The gate's key is `_unpublished`, and the `_` prefix is load-bearing: it
+ * marks the channel tooling stamps onto artifacts (ADR-0010's `_lock` /
+ * `_provenance` envelope, and the prefix `lintAuthoredRecordKeys` skips), so
+ * "the machine writes this" is legible from the key alone. That property is
+ * only worth having if the near-miss spellings do not route an author onto it,
+ * which is why this text tells them to stop rather than to rename.
+ *
+ * `published` and `draft` are here for the same reason as `unpublished`: an
+ * author reaching for publish state on an app reaches for one of the three, and
+ * the honest answer to all three is that publish state is not authored — it is
+ * the outcome of `POST /packages/:id/publish-drafts`.
+ */
+const UNPUBLISHED_IS_MACHINE_MANAGED =
+  'Publish state is not authorable on an app. The ADR-0045 publish gate is the machine-managed '
+  + '`_unpublished` key: the AI materialization path sets it, and `POST /packages/:id/publish-drafts` '
+  + '(the "Publish" button) clears it. Delete this key. If you wanted to keep the app out of the App '
+  + 'Switcher — the personal-settings case, e.g. Account — that is `hidden: true`, which is navigation '
+  + 'presentation ONLY and never affects access (#4829).';
+
 export const AppSchema = lazySchema(() => strictObject(
   {
     surface: 'this app',
@@ -1203,6 +1226,13 @@ export const AppSchema = lazySchema(() => strictObject(
       home: HOME_PAGE_ID_RETIRED,
       homepage: HOME_PAGE_ID_RETIRED,
       landingpage: HOME_PAGE_ID_RETIRED,
+      // #4829 — the publish gate is `_unpublished`, and it is MACHINE-managed.
+      // An explicit entry rather than the edit-distance suggester, which would
+      // answer this spelling with a bare "did you mean `_unpublished`?" and so
+      // teach the one thing the key exists to prevent: an author writing it.
+      unpublished: UNPUBLISHED_IS_MACHINE_MANAGED,
+      published: UNPUBLISHED_IS_MACHINE_MANAGED,
+      draft: UNPUBLISHED_IS_MACHINE_MANAGED,
     },
     history:
       'Until #4001 these were dropped silently — the app still parsed, so navigation or ' +
@@ -1223,7 +1253,8 @@ export const AppSchema = lazySchema(() => strictObject(
   version: retiredKey(
     '`App.version` was removed in @objectstack/spec 17.0.0 (2026-06 liveness audit — ' +
     'no consumer in framework or objectui). An app is versioned by its owning package: ' +
-    'use `manifest.version`. Delete the key.',
+    'use `manifest.version`. Delete the key. ' +
+    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
   ),
 
   /** Description */
@@ -1253,11 +1284,55 @@ export const AppSchema = lazySchema(() => strictObject(
    * Mirrors GitHub Settings / Google account chip / Salesforce
    * "Personal Settings" — visible to every user, but reached from the
    * avatar rather than the app launcher.
+   *
+   * ⛔ **NOT an access gate, and never was one on this surface.** Between
+   * ADR-0045 (2026-06-12) and its 2026-08 revision the REST metadata gate
+   * (`filterAppForUser`, `packages/rest/src/rest-server.ts`) read THIS key as
+   * "unpublished ⇒ externally unobservable", which is a second, contradictory
+   * contract on one boolean. The measured cost (#4829): the platform's own
+   * `account` app is authored `hidden: true` for exactly the reason this
+   * docblock gives, so every user without `studio.access`/`setup.access` had it
+   * erased from `GET /meta/app` — password, avatar, sessions and inbox all
+   * unreachable, while any admin saw a healthy system. Presentation and
+   * lifecycle are orthogonal; the publish gate now rides its own machine-managed
+   * key, `_unpublished` (declared directly below). Authoring `hidden: true` affects
+   * navigation and nothing else.
    */
   hidden: z.boolean().optional()
-    .describe('Hide from the App Switcher; the shell surfaces hidden apps via the avatar menu instead'),
-  
-  /** 
+    .describe('Hide from the App Switcher; the shell surfaces hidden apps via the avatar menu instead (navigation only — never an access gate)'),
+
+  /**
+   * ADR-0045 §3 — the **publish gate**. `true` means the app is *unpublished*:
+   * externally unobservable, not merely unlisted. `filterAppForUser` drops it
+   * from every metadata response except a builder's (`studio.access` /
+   * `setup.access`, for direct-URL preview); ADR-0045's discovery, direct-API
+   * and outbound-side-effect gates hang off the same bit.
+   *
+   * **Machine-managed — do not author it.** It is written by the AI additive
+   * materialization path (which lands a real, invisible app) and cleared by
+   * `POST /packages/:id/publish-drafts` (the visibility flip that IS "Publish").
+   * The `_` prefix is this repo's marker for the channel tooling stamps onto
+   * artifacts rather than an author writing it — the same channel as ADR-0010's
+   * `_lock` / `_provenance` / `_packageId` envelope, and the prefix
+   * `lintAuthoredRecordKeys` already exempts from the unknown-authoring-key
+   * report for that reason.
+   *
+   * Why a dedicated key and not `hidden` (#4829, maintainer ruling 2026-08-04):
+   * `hidden: true` is a spelling an author — very often an AI (ADR-0033) —
+   * reaches for naturally on a personal-settings app, and under the old regime
+   * that spelling silently 404'd the app for every non-builder. Nobody reaches
+   * for `_unpublished` by accident, so the failure mode this key can produce is
+   * bounded to the machine that owns it.
+   *
+   * It is declared here (rather than omitted) because the write path validates
+   * against this very schema — `saveMetaItem` answers 422 on an off-spec body,
+   * and `Registry.validate('app', …)` runs `AppSchema.parse` — so the flip and
+   * the ADR-0087 conversion of stored rows both need the key to be legal.
+   */
+  _unpublished: z.boolean().optional()
+    .describe('Machine-managed publish gate (ADR-0045 §3) — true = unpublished, externally unobservable. Written by AI materialization, cleared by publish-drafts. Never authored.'),
+
+  /**
    * Full Navigation Tree — supports unlimited nesting depth.
    * Pages are referenced by name via `type: 'page'` items.
    * Groups can contain other groups for arbitrary sidebar depth.
@@ -1320,7 +1395,8 @@ export const AppSchema = lazySchema(() => strictObject(
     '`App.objects` was removed in @objectstack/spec 17.0.0 (2026-06 liveness audit — ' +
     'never read; the spec itself labelled it "config file convenience"). Objects belong ' +
     'to the stack (`defineStack({ objects })`); an app reaches them through its ' +
-    'navigation items. Delete the key.',
+    'navigation items. Delete the key. ' +
+    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
   ),
   apis: retiredKey(
     '`App.apis` was removed in @objectstack/spec 17.0.0 (2026-06 liveness audit — ' +
@@ -1338,7 +1414,8 @@ export const AppSchema = lazySchema(() => strictObject(
     '`rateLimit: { enabled: true, windowMs, maxRequests }`. Read the ' +
     '`declarative-apis-endpoints-live` entry of the protocol upgrade guide first; it is a ' +
     'security review, not a rename. A route that genuinely needs handler CODE still ' +
-    'belongs in a plugin manifest `contributes.routes` entry.',
+    'belongs in a plugin manifest `contributes.routes` entry. ' +
+    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
   ),
 
   /**
@@ -1352,12 +1429,14 @@ export const AppSchema = lazySchema(() => strictObject(
     '`App.sharing` was removed in @objectstack/spec 17.0.0 (2026-06 liveness audit / ' +
     'ADR-0049 enforce-or-remove) — no public-app route ever read it, so it declared ' +
     'sharing that did not exist. Public access is granted per FORM VIEW ' +
-    '(`FormView.sharing`, the public-data-collection surface). Delete the key.',
+    '(`FormView.sharing`, the public-data-collection surface). Delete the key. ' +
+    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
   ),
   embed: retiredKey(
     '`App.embed` was removed in @objectstack/spec 17.0.0 (2026-06 liveness audit / ' +
     'ADR-0049) — no iframe route ever read it. Embedding is a per-form-view surface ' +
-    '(`FormView.sharing`), not an app-level switch. Delete the key.',
+    '(`FormView.sharing`), not an app-level switch. Delete the key. ' +
+    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
   ),
 
   /**
@@ -1369,7 +1448,8 @@ export const AppSchema = lazySchema(() => strictObject(
   mobileNavigation: retiredKey(
     '`App.mobileNavigation` was removed in @objectstack/spec 17.0.0 (2026-06 liveness ' +
     'audit — fully unimplemented; no renderer, including packages/mobile, ever read ' +
-    'it). Delete the key; the block returns if/when a real mobile navigation ships.',
+    'it). Delete the key; the block returns if/when a real mobile navigation ships. ' +
+    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
   ),
 
   /**
@@ -1408,7 +1488,8 @@ export const AppSchema = lazySchema(() => strictObject(
     '`App.aria` was removed in @objectstack/spec 17.0.0 (2026-06 liveness audit — no ' +
     'renderer read app-level ARIA attributes). Declare `aria` on the page component ' +
     'that renders the DOM node instead (`page.components[].aria`; `page.aria` and the ' +
-    'list view `aria` are live too). Delete the key.',
+    'list view `aria` are live too). Delete the key. ' +
+    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
   ),
 
   /**

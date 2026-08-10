@@ -84,7 +84,19 @@ function harness(options: { protocol?: boolean } = {}) {
     listen: async () => {},
     close: async () => {},
   } as any;
-  registerPackageRoutes(server, svc as any, '/api/v1', opts);
+  // [#7033 / #7023] The package routes now carry an authorization gate that runs
+  // BEFORE the `?version=` multiplicity check these cases pin. GET is a read
+  // route and DELETE a write route, so the caller is stubbed to hold BOTH the
+  // read set (`studio.access` / `setup.access`) and the write key
+  // (`manage_metadata`) — every case here then reaches the multiplicity rule it
+  // is named after. The gate itself is pinned in
+  // `package-envelope.conformance.test.ts`'s `packages authz` describe.
+  registerPackageRoutes(server, svc as any, '/api/v1', {
+    resolveExecutionContext: async () => ({
+      userId: 'u_pkg', systemPermissions: ['manage_metadata', 'studio.access', 'setup.access'],
+    }),
+    ...opts,
+  });
 
   const drive = async (method: 'GET' | 'DELETE', query: Record<string, any>): Promise<Captured> => {
     const handler = routes.get(`${method}:${PKGS}/:id`);

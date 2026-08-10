@@ -76,11 +76,11 @@ import { DEFAULT_METADATA_TYPE_REGISTRY } from './metadata-plugin.zod';
  *
  * The converse does NOT hold: presence here is about schema RESOLUTION
  * (validation, diagnostics, generated docs), not about the runtime-create
- * door. `agent` (ADR-0063 §2) and `job` (#4509) are both listed and both carry
- * `allowRuntimeCreate: false` in `DEFAULT_METADATA_TYPE_REGISTRY` — they are
- * authored in code and still need their schema resolvable. That registry is
- * the authority on who may write at runtime; this map only says what shape a
- * given type has.
+ * door. `agent` (ADR-0063 §2), `job` (#4509), `capability` (#5961) and `api`
+ * (#5488) are all listed and all carry `allowRuntimeCreate: false` in
+ * `DEFAULT_METADATA_TYPE_REGISTRY` — they are authored in code and still need
+ * their schema resolvable. That registry is the authority on who may write at
+ * runtime; this map only says what shape a given type has.
  */
 const BUILTIN_METADATA_TYPE_SCHEMAS: Partial<Record<MetadataType, z.ZodType>> = {
   // Data Protocol
@@ -123,9 +123,23 @@ const BUILTIN_METADATA_TYPE_SCHEMAS: Partial<Record<MetadataType, z.ZodType>> = 
   // them. Without this entry `resolveOverlaySchema('api', …)` returned
   // `undefined`, so `saveMetaItem` took its documented "unregistered type →
   // store without validation" branch and `PUT /meta/api/:name` accepted ANY
-  // JSON. With it, the existing 422 `invalid_metadata` path applies to `api`
-  // like every other kind, and `/meta/types` emits a real JSON Schema so the
-  // metadata-admin engine renders a form instead of a raw-JSON textarea.
+  // JSON.
+  //
+  // ⚠️ [#5488] WHICH DOOR THIS SCHEMA NOW STANDS IN. The paragraph above used
+  // to continue "…and `/meta/types` emits a real JSON Schema so the
+  // metadata-admin engine renders a form instead of a raw-JSON textarea".
+  // That is no longer the point of the binding: `api` is CODE-ONLY as of #5488
+  // (`allowRuntimeCreate: false` + `allowOrgOverride: false`, maintainer ruling
+  // 2026-08-07), because a runtime-created endpoint was never served — the
+  // matcher reads `listForIndex('api')`, and a runtime write lands in
+  // `sys_metadata`, which it does not read. So `PUT /meta/api/:name` is refused
+  // by the #5086 inlet with 403 `NOT_CREATABLE` BEFORE any body validation, and
+  // the 422 `invalid_metadata` path is no longer reachable for this kind from
+  // the runtime write door. The entry stays, and is still load-bearing, for the
+  // reason the header docblock gives: schema RESOLUTION is not the write door.
+  // `api` items are validated on the ARTIFACT route — stack compile, loader
+  // ingest, `publishPackage` — exactly like `job` and `agent`, which are listed
+  // here and code-only for their own reasons.
   //
   // This is a SHAPE check only. Whether a well-shaped endpoint is SERVABLE
   // (ADR-0121 D1/D2 namespace carve-out, D6 anonymous-needs-armed-budget,
@@ -290,6 +304,33 @@ export function listMetadataTypeSchemaTypes(): string[] {
 // bound above for SHAPE VALIDATION precisely because they are not kinds, so
 // enrolling them here would claim a status this change is careful not to grant
 // (and #2657's B/C decision is exactly the one left open).
+
+/**
+ * Snapshot of the non-KIND stack collections bound in
+ * `UNREGISTERED_KIND_SCHEMAS` — today `webhook` / `connector` / `sharing_rule`.
+ *
+ * [#6931] This exists so a check can ENUMERATE that map, and for nothing else.
+ * The exclusion documented directly above is about {@link
+ * listMetadataTypeSchemaTypes} being the REGISTERED-KIND set that carries KIND
+ * obligations; it was never about the names being unknowable. The side effect
+ * was: `metadata-type-schemas.test.ts` holds the ADR-0010 envelope-declaration
+ * invariant and walks that other list, so these three parse doors — bound to
+ * `PUT /api/v1/meta/:type/:name` by #6245 — sat outside the one gate that exists
+ * to catch "declares no envelope", and each had to be judged by hand instead
+ * (`sharing_rule` by a 422, `connector` only after a silent strip and a separate
+ * card, #6362 / PR #6900).
+ *
+ * ⚠️ Being listed by this function grants NOTHING. It returns names, not
+ * schemas, not descriptors: no `MetadataTypeSchema` enum membership, no
+ * `DEFAULT_METADATA_TYPE_REGISTRY` entry, no create seed, no authorization
+ * verdict, no place in the #4001 campaign count. Every boundary #6245 drew is
+ * where it was, and #2657's B/C decision on whether these should become kinds
+ * stays open and unprejudged. Do not use this to derive a kind set — if you
+ * need one, that is `listMetadataTypeSchemaTypes()` and the answer is no.
+ */
+export function listUnregisteredKindSchemaTypes(): string[] {
+  return Object.keys(UNREGISTERED_KIND_SCHEMAS).sort();
+}
 
 // ==========================================
 // Metadata Type Actions (type-level buttons)

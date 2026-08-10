@@ -822,8 +822,21 @@ jobs:
         # never the event payload. Its comment block carries the argument: what the
         # payload read cost, where this diverges from #5580's `skip-changeset` read
         # and why, the residual it leaves, and what re-arms the whole thing.
+        #
+        # `--base` takes the same merge base the two gates above take, for the
+        # same #6129 reason one defect along (#7005). This script used to read
+        # the whole `.changeset` directory with no branch point, so its verdict
+        # was a function of what main carried rather than of what the author
+        # wrote. That was invisible while pre-mode held and would have become
+        # visible all at once at `changeset pre exit`: 171 consumed-but-undeleted
+        # major changesets sit on main until the post-exit `changeset version`
+        # removes them, so every unlabelled PR open in that window would have
+        # gone red listing files it never touched, with `allow-major` -- a label
+        # meaning "a whole-stack major is intended HERE" -- as its only way out.
         if: >-
           steps.labels.outputs.skip != 'true'
           && steps.labels_settled.outputs.skip != 'true'
           && steps.allow_major.outputs.allow != 'true'
-        run: node scripts/check-changeset-no-major.mjs
+        env:
+          MERGE_BASE: ${{ steps.diffbase.outputs.merge_base }}
+        run: node scripts/check-changeset-no-major.mjs --base "$MERGE_BASE"
