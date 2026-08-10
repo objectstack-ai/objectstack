@@ -175,6 +175,17 @@ export type {
 } from './validate-visibility-predicates.js';
 
 export {
+  validatePredicatePathRefs,
+  PREDICATE_PATH_UNRESOLVED,
+  PREDICATE_PATH_UNROOTED,
+} from './validate-predicate-path-refs.js';
+export type {
+  PredicatePathFinding,
+  PredicatePathSeverity,
+  PredicatePathOptions,
+} from './validate-predicate-path-refs.js';
+
+export {
   validateCapabilityReferences,
   CAPABILITY_REFERENCE_UNKNOWN,
 } from './validate-capability-references.js';
