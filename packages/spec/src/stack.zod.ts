@@ -1153,6 +1153,51 @@ function validateCrossReferences(config: ObjectStackDefinition): string[] {
     }
   }
 
+  // The SAME two target checks, one more traversal: actions authored directly
+  // on an object (`config.objects[].actions[]`) — #7397, the #6889 defect one
+  // authoring position over.
+  //
+  // Why the registered walk above cannot cover it: `validateCrossReferences`
+  // runs BEFORE `mergeActionsIntoObjects`, and that merge only ever copies
+  // top-level → object (by `objectName`), never the reverse. An action authored
+  // ONLY on the object therefore never appears in `config.actions` and reached
+  // no cross-reference check at all — measured on #7397, where an embedded
+  // `type: 'modal', target: 'probe_nowhere'` built clean while the identical
+  // action in the registered position was refused.
+  //
+  // This position carries the FULL `ActionSchema` (`object.zod.ts`'s
+  // `actions: z.array(ActionSchema)`) — the identical symbol the registered
+  // collection uses at `:256`, not a narrower embedded shape — so `name` is
+  // required here and `target` has already been canonicalized by the parse
+  // this function runs after. Only the SUBJECT of the message differs from the
+  // registered rule: an embedded action is located by its owning object.
+  //
+  // Scope of the modal branch is the same #6739 ruling the other two arms
+  // read: a `type: 'modal'` target names a PAGE, only.
+  //
+  // `objectName` is deliberately NOT checked here. The key exists on this
+  // shape (unlike the inline one), but what it should MEAN on an action
+  // already embedded on an object — a mere existence check, or a consistency
+  // check against the owning object's name — is an open contract question,
+  // filed separately rather than settled as a side effect of this walk.
+  if (config.objects) {
+    for (const obj of config.objects) {
+      for (const action of obj.actions ?? []) {
+        if (action.type === 'flow' && action.target && flowNames.size > 0 && !flowNames.has(action.target)) {
+          errors.push(
+            `Action '${action.name}' on object '${obj.name}' references flow '${action.target}' which is not defined in flows.`,
+          );
+        }
+
+        if (action.type === 'modal' && action.target && pageNames.size > 0 && !pageNames.has(action.target)) {
+          errors.push(
+            `Action '${action.name}' on object '${obj.name}' references page '${action.target}' (via modal target) which is not defined in pages.`,
+          );
+        }
+      }
+    }
+  }
+
   // The SAME two target checks, one more traversal: inline (page-element)
   // actions (#6889). Same rule, same message tail — only the subject differs,
   // because an inline action is located by page + path rather than by a

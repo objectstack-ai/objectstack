@@ -1,6 +1,7 @@
 /**
- * `defineStack` cross-reference validation reaches INLINE (page-element)
- * actions — #6889.
+ * `defineStack` cross-reference validation reaches every authoring position an
+ * action's modal/flow `target` can be written in — INLINE page-element actions
+ * (#6889) and OBJECT-EMBEDDED actions (#7397).
  *
  * An action authored inline on a page element (`element:button` →
  * `properties.action`, an `InlineActionSchema`) never enters `config.actions`,
@@ -21,6 +22,28 @@
  * (2026-08-09): "A — a `type: 'modal'` target names a PAGE, only." So inline
  * mirrors registered exactly — same rule, same message tail, one more
  * traversal.
+ *
+ * The SECOND half of this file is the same defect one authoring position over
+ * (#7397). `config.objects[].actions[]` carries the FULL `ActionSchema` — the
+ * identical symbol the registered collection uses — yet it too was never
+ * target-validated, because `validateCrossReferences` runs BEFORE
+ * `mergeActionsIntoObjects` and that merge only ever copies top-level →
+ * object. An action authored only on the object therefore never appeared in
+ * the validated `config.actions`. Measured on `main` @ `d13ce33`, with the
+ * registered twin of each row built from the same helper and the same
+ * arguments as the control:
+ *
+ * ```
+ * a embedded   modal -> page    :  ACCEPTED   (h registered: ACCEPTED)
+ * b embedded   modal -> nothing :  ACCEPTED   (f registered: REJECTED) ← split
+ * c embedded   flow  -> nothing :  ACCEPTED   (g registered: REJECTED) ← split
+ * d embedded   modal -> object  :  ACCEPTED   (i registered: REJECTED) ← split
+ * e embedded   flow  -> flow    :  ACCEPTED   (j registered: ACCEPTED)
+ * ```
+ *
+ * Rows b/f, c/g and d/i are the same action object in two authoring positions
+ * with opposite verdicts; a/h and e/j confirm the legitimate shapes survive in
+ * both. Row d's verdict is fixed by the same #6739 ruling, not re-decided here.
  *
  * Message shape is contract here (one condition ⇒ one wording), so these pin
  * full message text rather than `toThrow()` alone: a bare throw assertion
@@ -250,5 +273,206 @@ describe('defineStack — inline action cross-references: what the walk must NOT
     expect(refusals(inlineStack({
       name: 'showcase_new_task', type: 'form', target: 'probe_task.edit', refreshAfter: true,
     }))).toEqual([]);
+  });
+});
+
+// ─── #7397 — the OBJECT-EMBEDDED position ────────────────────────────
+
+const pages = [pageWith([])];
+
+/**
+ * A stack whose ONLY action is embedded on the object — no `config.actions` at
+ * all, which is exactly the shape the top-level → object merge can never
+ * reach.
+ */
+const embeddedStack = (action: unknown, extra: Record<string, unknown> = {}) => ({
+  manifest: baseManifest,
+  objects: [{ ...objects[0], actions: [action] }],
+  pages,
+  ...extra,
+});
+
+/** The same action in the REGISTERED position — the control for each row. */
+const registeredStack = (action: unknown, extra: Record<string, unknown> = {}) => ({
+  manifest: baseManifest,
+  objects,
+  pages,
+  actions: [action],
+  ...extra,
+});
+
+const modalAction = (target: string) => ({ name: 'probe_new_task', label: 'New', type: 'modal' as const, target });
+const flowAction = (target: string) => ({ name: 'probe_run', label: 'Run', type: 'flow' as const, target });
+
+describe('defineStack — object-embedded action cross-references: modal targets (#7397)', () => {
+  it('rejects a dangling embedded modal target (probe row b) with the registered rule\'s wording', () => {
+    expect(refusals(embeddedStack(modalAction('probe_nowhere')))).toEqual([
+      "Action 'probe_new_task' on object 'probe_task' "
+      + "references page 'probe_nowhere' (via modal target) which is not defined in pages.",
+    ]);
+  });
+
+  it('rejects an embedded modal target naming an OBJECT — #6739 ruling A, a modal target names a page (probe row d)', () => {
+    expect(refusals(embeddedStack(modalAction('probe_task')))).toEqual([
+      "Action 'probe_new_task' on object 'probe_task' "
+      + "references page 'probe_task' (via modal target) which is not defined in pages.",
+    ]);
+  });
+
+  it('accepts an embedded modal target naming a declared page — the legitimate shape survives (probe row a)', () => {
+    expect(refusals(embeddedStack(modalAction('probe_home')))).toEqual([]);
+  });
+
+  it('skips embedded modal targets when the stack declares NO pages — same size gate as the registered rule', () => {
+    // The referenced page may be provided by a plugin; embedded must not be
+    // stricter than registered.
+    expect(refusals({
+      manifest: baseManifest,
+      objects: [{ ...objects[0], actions: [modalAction('probe_nowhere')] }],
+    })).toEqual([]);
+  });
+});
+
+describe('defineStack — object-embedded action cross-references: flow targets (#7397)', () => {
+  it('rejects an embedded flow target that names no declared flow (probe row c)', () => {
+    expect(refusals(embeddedStack(flowAction('probe_nowhere'), { flows }))).toEqual([
+      "Action 'probe_run' on object 'probe_task' "
+      + "references flow 'probe_nowhere' which is not defined in flows.",
+    ]);
+  });
+
+  it('accepts an embedded flow target that names a declared flow (probe row e)', () => {
+    expect(refusals(embeddedStack(flowAction('probe_flow'), { flows }))).toEqual([]);
+  });
+
+  it('skips embedded flow targets when the stack declares NO flows — same size gate as the registered rule', () => {
+    expect(refusals(embeddedStack(flowAction('probe_nowhere')))).toEqual([]);
+  });
+});
+
+describe('defineStack — object-embedded action cross-references: the b/f, c/g, d/i splits (#7397)', () => {
+  it.each([
+    ['modal → nothing (rows b/f)', modalAction('probe_nowhere')],
+    ['modal → object  (rows d/i)', modalAction('probe_task')],
+    ['flow  → nothing (rows c/g)', flowAction('probe_nowhere')],
+  ])('gives the same verdict embedded or registered: %s', (_label, action) => {
+    expect(refusals(embeddedStack(action, { flows })).length).toBe(1);
+    expect(refusals(registeredStack(action, { flows })).length).toBe(1);
+  });
+
+  it.each([
+    ['modal → declared page (rows a/h)', modalAction('probe_home')],
+    ['flow  → declared flow (rows e/j)', flowAction('probe_flow')],
+  ])('accepts in BOTH positions: %s', (_label, action) => {
+    expect(refusals(embeddedStack(action, { flows }))).toEqual([]);
+    expect(refusals(registeredStack(action, { flows }))).toEqual([]);
+  });
+});
+
+describe('defineStack — object-embedded action cross-references: the traversal itself (#7397)', () => {
+  it('labels each offender with ITS OWN object, not a fixed subject', () => {
+    const config = {
+      manifest: baseManifest,
+      objects: [
+        { ...objects[0], actions: [modalAction('probe_nowhere')] },
+        {
+          name: 'probe_note',
+          label: 'Probe Note',
+          fields: { body: { type: 'text' as const } },
+          actions: [flowAction('probe_elsewhere')],
+        },
+      ],
+      pages,
+      flows,
+    };
+
+    expect(refusals(config)).toEqual([
+      "Action 'probe_new_task' on object 'probe_task' "
+      + "references page 'probe_nowhere' (via modal target) which is not defined in pages.",
+      "Action 'probe_run' on object 'probe_note' "
+      + "references flow 'probe_elsewhere' which is not defined in flows.",
+    ]);
+  });
+
+  it('reports every offending action on one object, not just the first', () => {
+    const config = {
+      manifest: baseManifest,
+      objects: [{
+        ...objects[0],
+        actions: [
+          { name: 'probe_one', label: 'One', type: 'modal' as const, target: 'probe_nowhere' },
+          { name: 'probe_two', label: 'Two', type: 'flow' as const, target: 'probe_elsewhere' },
+        ],
+      }],
+      pages,
+      flows,
+    };
+
+    expect(refusals(config)).toEqual([
+      "Action 'probe_one' on object 'probe_task' "
+      + "references page 'probe_nowhere' (via modal target) which is not defined in pages.",
+      "Action 'probe_two' on object 'probe_task' "
+      + "references flow 'probe_elsewhere' which is not defined in flows.",
+    ]);
+  });
+
+  it('reports a registered action ONCE, not twice — the merge runs AFTER validation', () => {
+    // `mergeActionsIntoObjects` copies a top-level action carrying `objectName`
+    // into that object's `actions`. It runs at the END of `defineStack`, so the
+    // embedded walk must not see the copy. If validation is ever reordered
+    // ahead of the merge, this case starts reporting the same action twice —
+    // once as registered, once as embedded — and goes red.
+    const config = {
+      manifest: baseManifest,
+      objects,
+      pages,
+      actions: [{ ...modalAction('probe_nowhere'), objectName: 'probe_task' }],
+    };
+
+    expect(refusals(config)).toEqual([
+      "Action 'probe_new_task' references page 'probe_nowhere' (via modal target) which is not defined in pages.",
+    ]);
+  });
+
+  it('still checks the target of an embedded action that also names its object', () => {
+    expect(refusals(embeddedStack({ ...modalAction('probe_nowhere'), objectName: 'probe_task' }))).toEqual([
+      "Action 'probe_new_task' on object 'probe_task' "
+      + "references page 'probe_nowhere' (via modal target) which is not defined in pages.",
+    ]);
+  });
+
+  it('leaves an object with no actions array alone', () => {
+    expect(refusals({ manifest: baseManifest, objects, pages, flows })).toEqual([]);
+  });
+});
+
+describe('defineStack — object-embedded action cross-references: what the walk must NOT refuse (#7397)', () => {
+  it.each([
+    ['form', { name: 'probe_form', label: 'Form', type: 'form', target: 'probe_task.edit' }],
+    ['url', { name: 'probe_url', label: 'Url', type: 'url', target: '/environments' }],
+    ['api', { name: 'probe_api', label: 'Api', type: 'api', target: '/api/v1/x', method: 'POST' }],
+    ['script', { name: 'probe_script', label: 'Script', type: 'script', target: 'doThing' }],
+  ])('leaves an embedded `%s` action alone — only modal and flow targets are cross-referenced', (_type, action) => {
+    expect(refusals(embeddedStack(action, { flows }))).toEqual([]);
+  });
+
+  it('is vacuity-guarded: the ordinary merged shape a shipped stack produces still builds', () => {
+    // `objects[].actions[]` is overwhelmingly WRITTEN by the merge rather than
+    // by hand — a top-level action with `objectName` lands there on the way
+    // out of `defineStack`. Feeding that output back in must stay clean, or the
+    // corpus census in PR #7397 has gone stale.
+    const built = build({
+      manifest: baseManifest,
+      objects,
+      pages,
+      flows,
+      actions: [
+        { ...modalAction('probe_home'), objectName: 'probe_task' },
+        { ...flowAction('probe_flow'), objectName: 'probe_task' },
+      ],
+    });
+
+    expect(built.objects?.[0]?.actions?.map((a) => a.name)).toEqual(['probe_new_task', 'probe_run']);
+    expect(refusals(built)).toEqual([]);
   });
 });
