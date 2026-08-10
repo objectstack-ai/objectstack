@@ -8970,6 +8970,41 @@ export class SqlDriver implements IDataDriver {
    * 3. **Objects** — Expression envelopes (`{ dialect, source }`), evaluated
    *    app-side; never a column DEFAULT.
    * 4. **Everything else** — a real literal, emitted verbatim.
+   *
+   * # What this deliberately does NOT read: `options[].default` (#7246)
+   *
+   * A select field's option-level `default: true` is now a real initial value —
+   * `ObjectQL.applyFieldDefaults` falls back to the marked option when the field
+   * declares no `defaultValue`. It gets NO physical column DEFAULT here, and
+   * that asymmetry with case 4 is the decision, not an omission.
+   *
+   * The #4560 discipline does not forbid it: an option's `value` is a plain
+   * literal, not a runtime token, so it *could* be emitted. The reasons not to:
+   *
+   *  - **One resolver owns the precedence.** `defaultValue` beats the option
+   *    flag, and that ordering lives in the engine. A column DEFAULT is a
+   *    second resolver that fires only where the engine did not, so keeping it
+   *    out means there is exactly one place the question is answered.
+   *  - **The shape has no scalar DDL form.** On `multiple: true` the default is
+   *    an ARRAY of the marked options. Emitting would need a "…except for
+   *    multi-selects" carve-out invisible to the author.
+   *  - **It would divide deployments silently.** This method runs for a FRESH
+   *    column ({@link createColumn}) and a re-materialized one
+   *    ({@link rebuildSqliteTablePatched}) — never a retrofit of an existing
+   *    table. Emitting would give new databases (and any SQLite rebuild) a
+   *    DEFAULT that older databases on identical metadata lack, and
+   *    `detectDrift`'s only `default_mismatch` producer is the #4560 token
+   *    check — there is no general declared-literal-vs-physical comparison — so
+   *    nothing would ever report the divergence.
+   *  - **It would make SQL the odd driver out.** The engine fallback serves
+   *    memory, mongodb, sql and turso identically from day one; a SQL-only
+   *    second enforcement point is exactly the per-datasource split #4597 and
+   *    #4560 were both about.
+   *
+   * The value the engine resolves is what every ObjectStack write path stores;
+   * only a writer bypassing the engine entirely sees NULL, and that writer is
+   * not reading `options` either. Pinned by
+   * `sql-driver-option-default-ddl.test.ts`.
    */
   protected applyDeclaredColumnDefault(col: Knex.ColumnBuilder, field: any, type: string): void {
     const dv = field?.defaultValue;

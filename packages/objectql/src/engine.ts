@@ -2567,6 +2567,78 @@ export class ObjectQL implements IObjectQLEngine {
   }
 
   /**
+   * The initial value a field's OPTION LIST declares — the option marked
+   * `default: true` — or `undefined` when it declares none (#7246).
+   *
+   * `SelectOption.default` has been authorable and spec-valid since the schema
+   * was written, and until this method nothing on the insert path read it: a
+   * create that omitted the field stored `null`, not the marked option. The one
+   * consumer anywhere was lint's `isNullableField`, which concluded the column
+   * was always-valued — a **build-breaking** verdict resting on a declaration
+   * the engine did not honour. Enforcing it here is what makes that heuristic
+   * true rather than merely asserted.
+   *
+   * Deliberate decisions, each of which could reasonably have gone the other
+   * way:
+   *
+   *  - **Precedence: `defaultValue` wins.** Not decided here — decided by the
+   *    caller, which only reaches this method when `defaultValue == null`. The
+   *    field-level key is the more specific declaration (it names a value for
+   *    THIS field; the option flag describes the shared option list), and it is
+   *    the spelling every other consumer already honours. When both are
+   *    declared and disagree, the option flag is inert exactly as it is today.
+   *
+   *  - **Type-agnostic, like the lint heuristic.** `options` is a field-level
+   *    key on `FieldSchema`, not gated on `type: 'select'`, and
+   *    `isNullableField` reads it without a type test. Matching that keeps the
+   *    two sides honest BY CONSTRUCTION: there is no field the lint calls
+   *    always-valued that this method leaves empty.
+   *
+   *  - **`multiple: true` assembles an ARRAY.** That field stores an
+   *    Array/JSON (`FieldSchema.multiple`: "Stores as Array/JSON"), so the
+   *    shape of its default follows the field, not the number of marked
+   *    options — one marked option on a multi-select defaults to a
+   *    one-element array, never a bare scalar that the driver would then store
+   *    with the wrong shape. Refusing (throwing) was rejected: the metadata is
+   *    spec-valid, and a runtime throw on spec-valid input is a worse answer
+   *    than a well-defined value. Ignoring it was rejected too — it would
+   *    preserve, for multi-selects only, precisely the inertness this change
+   *    removes, and an author cannot see that carve-out from the schema.
+   *
+   *  - **Several options marked on a SINGLE-valued field: the FIRST wins.**
+   *    There is one slot, so declaration order decides — deterministic, and
+   *    the same option a picker preselects when it takes the first match.
+   *    Neither the `Field.select` builder nor the schema dedupes the flag, so
+   *    this case is reachable; the alternative (throw) again fails a
+   *    spec-valid declaration at runtime. Nothing in the shipped corpus marks
+   *    more than one.
+   *
+   *  - **Only the canonical `default` spelling is read.** The authoring
+   *    aliases (`isDefault`, `selected`) are normalized by
+   *    `SelectOptionSchema`'s alias layer before metadata reaches the engine,
+   *    and lint reads the canonical key only. Reading the aliases here would
+   *    make the engine honour raw shapes lint calls nullable — the two would
+   *    disagree in the direction that produces a false "always-valued".
+   */
+  private resolveOptionDefault(field: { options?: unknown; multiple?: unknown }): unknown {
+    const options = field.options;
+    if (!Array.isArray(options)) return undefined;
+    const marked: unknown[] = [];
+    for (const o of options) {
+      if (!o || typeof o !== 'object') continue;
+      if ((o as { default?: unknown }).default !== true) continue;
+      const value = (o as { value?: unknown }).value;
+      // An option marked default but carrying no value declares nothing this
+      // method can apply — skipped rather than stored as `null`, which would
+      // be indistinguishable from "no default" downstream.
+      if (value === undefined || value === null) continue;
+      marked.push(value);
+    }
+    if (marked.length === 0) return undefined;
+    return field.multiple === true ? marked : marked[0];
+  }
+
+  /**
    * Apply field defaults to an incoming insert payload. Defaults that are
    * Expression envelopes (e.g. `{ dialect: 'cel', source: 'today()' }`,
    * `{ dialect: 'cel', source: 'os.user.id' }`) are evaluated via
@@ -2588,6 +2660,11 @@ export class ObjectQL implements IObjectQLEngine {
    * Implements ROADMAP §M9.9b — `defaultValue` accepts Expression so authors
    * can replace "write a hook to default to today/current-user" with a
    * declarative `defaultValue: cel\`today()\``.
+   *
+   * A field that declares NO `defaultValue` falls back to the option marked
+   * `default: true` ({@link resolveOptionDefault}, #7246) — the select idiom,
+   * which until then was authorable, spec-valid, and read by nothing on this
+   * path.
    */
   private applyFieldDefaults(
     object: string,
@@ -2599,7 +2676,9 @@ export class ObjectQL implements IObjectQLEngine {
     const fieldsRaw = (schema as any)?.fields;
     if (!fieldsRaw || typeof fieldsRaw !== 'object') return record;
     // `fields` may be a Record<string, Field> (canonical) or an array (legacy).
-    const fieldEntries: Array<{ name: string; type?: unknown; defaultValue?: unknown }> = Array.isArray(fieldsRaw)
+    const fieldEntries: Array<{
+      name: string; type?: unknown; defaultValue?: unknown; options?: unknown; multiple?: unknown;
+    }> = Array.isArray(fieldsRaw)
       ? fieldsRaw
       : Object.entries(fieldsRaw).map(([name, def]) => ({ name, ...(def as object) }));
     const out = { ...record };
@@ -2610,7 +2689,25 @@ export class ObjectQL implements IObjectQLEngine {
       // real value (including `''`) is respected. Insert-only path, so an
       // intentional "set to null" on update is never touched here.
       if (out[f.name] != null) continue;
-      if (f.defaultValue == null) continue;
+      if (f.defaultValue == null) {
+        // No `defaultValue` — fall back to the option marked `default: true`.
+        //
+        // Reached ONLY through this branch, which is the whole point of putting
+        // it here (#7246): an option's `value` is a plain literal by
+        // construction (`SystemIdentifierSchema`), never one of the runtime
+        // TOKENS below, so it must not be handed to `isCurrentUserDefaultToken`
+        // / `isNowDefaultToken`. An option literally spelled `current_user`
+        // stores those twelve characters — it is a picklist value, not an
+        // instruction — and that is pinned by test.
+        //
+        // The `dv == null` gate above is the presence test that decides
+        // precedence: `defaultValue: ''` is a REAL default (`'' == null` is
+        // false), so it wins and this fallback never fires for it, exactly as
+        // `''` supplied by a caller is respected as a real value.
+        const fromOption = this.resolveOptionDefault(f);
+        if (fromOption !== undefined) out[f.name] = fromOption;
+        continue;
+      }
       const dv = f.defaultValue;
       if (typeof dv === 'object' && dv !== null && (dv as any).dialect && typeof (dv as any).source === 'string') {
         const result = ExpressionEngine.evaluate(dv as any, {

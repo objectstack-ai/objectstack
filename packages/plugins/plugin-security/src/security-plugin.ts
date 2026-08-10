@@ -217,6 +217,36 @@ interface RlsFilterOptions {
  * The map value for each managed `managed_by` is the human owner label used in
  * the (business-message-only) deny text.
  */
+/**
+ * [#7281] The scope `checkAuthoredRowWrite`'s probe read runs under.
+ *
+ * The method asks ONE question — "does the declared, app-authored widener admit
+ * this row for this operation?" — and that question is about the row and the
+ * declaration, never about what the CALLER may see. Resolving it under the
+ * caller's own context folded a READ decision into a WRITE question: on a
+ * `private`-OWD object `plugin-sharing`'s read filter scopes every re-read to
+ * owner-match OR shares, so a cross-owner row was invisible to the probe and
+ * the verdict was `abstain` for a row the declaration names by predicate. The
+ * by-id widener surface was therefore structurally dead on `private` — the
+ * posture #5493 built it for (maintainer ruling, 2026-08-10: reading 2).
+ *
+ * Elevating the READ does not widen the ANSWER, because the predicate carries
+ * the whole of the question and travels in the `where`, not in the scope:
+ * `{ id } AND layer0(tenant wall) AND layer1(app-authored policies)`. Both
+ * layers are computed from the CALLER's permission sets and the CALLER's
+ * tenant BEFORE the read (see {@link SecurityPlugin.checkAuthoredRowWrite}), so
+ * a row in another tenant, a row no authored policy matches, and a caller
+ * holding no authored policy at all are all still `abstain` — measured, not
+ * asserted (`authored-row-write-verdict.test.ts`, and the real-stack pin
+ * `packages/qa/dogfood/test/authored-row-write-scope.dogfood.test.ts`).
+ *
+ * Principal-less on purpose: it carries no `userId`, so nothing downstream can
+ * mistake it for the caller acting with more authority than they hold. It is
+ * SPREAD at the single call site rather than passed by reference, so no
+ * middleware can stamp state onto a shared object.
+ */
+const AUTHORED_ROW_WRITE_PROBE_CONTEXT = { isSystem: true, positions: [], permissions: [] } as const;
+
 const SYSTEM_ROW_PROVENANCE: Record<
   string,
   { noun: string; pluralNoun: string; managed: Record<string, string> }
@@ -2652,10 +2682,31 @@ export class SecurityPlugin implements Plugin {
    * {@link hasWriteBypass} and {@link resolveWriteScope} fail closed on it), an
    * unresolvable probe and a thrown lookup all return `abstain`.
    *
-   * The pre-image read is the same `findOne` shape the by-id write gate uses,
-   * with the caller's own context — so a row the caller cannot READ is not
-   * "admitted by declaration" here either, which is the non-widening direction
-   * and matches what the enforcement path already does with the same read.
+   * **[#7281] The probe read is ELEVATED, and that is the whole of the fix
+   * this method received.** It used to run under the CALLER's own context,
+   * which re-entered the middleware chain and picked up `plugin-sharing`'s
+   * READ filter: on a `private`-OWD object that scopes every read to
+   * owner-match OR shares, so a cross-owner row was invisible and the verdict
+   * was `abstain` for a row the declaration names — measured on the real stack
+   * across two objects identical but for their OWD (#7281: `public_read` →
+   * `admit`, `private` → `abstain`, same widener, same principal, same row
+   * shape). That made the by-id widener structurally dead on exactly the
+   * posture #5493 built it for, and it did so by folding a READ decision into
+   * a question about a declaration. The maintainer ruled it (2026-08-10,
+   * reading 2): this method answers the declaration; the write decision stays
+   * with the pre-image gate.
+   *
+   * Nothing about the ANSWER widens with the scope: `{id} AND layer0 AND
+   * layer1` is still the entire predicate, both layers still compile from the
+   * caller's own permission sets and tenant, and `admit` is still evidence
+   * rather than authorization — the by-id write pre-image gate re-resolves the
+   * write under the caller's own context and refuses on its own terms.
+   * ⚠️ One consequence, measured and deliberately NOT papered over: because
+   * that gate performs the same caller-scoped `findOne`, a `private`-OWD
+   * cross-owner by-id write is still refused end-to-end after this fix, now by
+   * the row-level gate rather than by the sharing middleware. The verdict is
+   * correct; reviving the by-id widener on `private` end-to-end is a separate
+   * contract question about the pre-image gate's own read scope.
    */
   async checkAuthoredRowWrite(
     object: string,
@@ -2701,7 +2752,18 @@ export class SecurityPlugin implements Plugin {
       if (layer1 == null) return 'abstain';
 
       const parts = [{ id: recordId }, ...(layer0 ? [layer0] : []), layer1];
-      const row = await this.ql.findOne(object, { where: { $and: parts }, context });
+      // [#7281] The predicate is the question; the scope is not. Read ELEVATED
+      // (see AUTHORED_ROW_WRITE_PROBE_CONTEXT) so the answer is decided by
+      // `{id} AND layer0 AND layer1` alone, and projected to `id` so the probe
+      // can only ever learn EXISTENCE — no column of a row the caller may not
+      // read is materialised, let alone returned. The verdict remains evidence,
+      // never authorization: the by-id write pre-image gate still resolves the
+      // write under the caller's own context.
+      const row = await this.ql.findOne(object, {
+        where: { $and: parts },
+        fields: ['id'],
+        context: { ...AUTHORED_ROW_WRITE_PROBE_CONTEXT },
+      });
       return row ? 'admit' : 'abstain';
     } catch (e) {
       this.logger.warn?.(

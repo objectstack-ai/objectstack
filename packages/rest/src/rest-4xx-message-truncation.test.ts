@@ -142,21 +142,44 @@ describe('mapDataError: short 4xx messages are byte-for-byte unchanged (#5423)',
             .toBe('Request failed');
     });
 
-    it('5xx never enters this branch at all (unchanged: sanitizing heuristics own it)', () => {
+    it('a 5xx never reaches this truncation at all — its message is dropped whole', () => {
+        // [#5582] This case was "5xx never enters this branch at all
+        // (unchanged: sanitizing heuristics own it)". The heuristics no longer
+        // own it: `mapDataError`'s passthrough now runs 400-599, the same door
+        // `resolveErrorResponse` opens, so the declared 502 IS preserved on
+        // this direct-call path — the parenthetical the #5489 note left here
+        // ("out of #5489's scope") is what that issue closed.
+        //
+        // What this file is about is unchanged and is the point of keeping the
+        // case: TRUNCATION is a 4xx disposition only. A 4xx message is the
+        // caller's remedy and is bounded; a 5xx message is the operator's and
+        // is dropped whole — never sliced, never ellipsised, never partially
+        // visible. That is why a 600-character 5xx is asserted here rather than
+        // a short one.
+        const r = mapDataError(
+            Object.assign(new Error('connect ECONNREFUSED 10.0.0.5:5432 '.repeat(20)), {
+                status: 502,
+                code: 'UPSTREAM_UNAVAILABLE',
+            }),
+        );
+        expect(r.status).toBe(502);
+        expect(r.body.code).toBe('UPSTREAM_UNAVAILABLE');
+        // Withheld, not truncated: no prefix of the original, no ellipsis.
+        expect(r.body.error).toBe(INTERNAL_ERROR_MESSAGE);
+        expect(String(r.body.error).endsWith('…')).toBe(false);
+        expect(String(r.body.error)).not.toContain('10.0.0.5');
+        expect(String(r.body.error)).not.toContain('ECONNREFUSED');
+    });
+
+    it('a 5xx with no declared code keeps its status and gains no invented one', () => {
+        // The exact shape this section used to carry (no `code`). Pinned here
+        // too so the file still covers the half-declaration it was written on.
         const r = mapDataError(
             Object.assign(new Error('connect ECONNREFUSED 10.0.0.5:5432 '.repeat(20)), { status: 502 }),
         );
-        expect(r.status).not.toBe(502);
-        // [#5489] `not.toBe(502)` was true of the OLD landing too, and that
-        // landing was `400` with every byte of the ECONNREFUSED text — host and
-        // port included — on the wire. The negative assertion could not tell
-        // the two apart, so what it actually lands on is pinned here: this
-        // declared 5xx now leaves `mapDataError` through the terminal
-        // `UNCLASSIFIED_FAULT`, sanitised and in the server band. (The declared
-        // 502 is still not preserved on this direct-call path — that is
-        // `resolveErrorResponse`'s branch, and out of #5489's scope.)
-        expect(r.status).toBe(500);
-        expect(r.body.code).toBe('INTERNAL_ERROR');
+        expect(r.status).toBe(502);
+        expect(r.body.code).toBeUndefined();
+        expect(r.body.error).toBe(INTERNAL_ERROR_MESSAGE);
         expect(String(r.body.error)).not.toContain('10.0.0.5');
     });
 });

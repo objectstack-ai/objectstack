@@ -41,8 +41,13 @@
 // `created_by` ownership floor is deliberately absent from `AUTHORED_POLICIES`,
 // which is the whole point of probe E-A — plus `abstain` for an unknown row, a
 // principal-less context and a delegated one. The REAL service driving the REAL
-// composition is measured end-to-end in plugin-security's
-// `row-write-widener-composition.test.ts` (#5493 control, flipped by this PR);
+// composition is measured end-to-end on the REAL stack, in
+// `packages/qa/dogfood/test/authored-row-write-scope.dogfood.test.ts`
+// ([#7281] — plugin-security's `row-write-widener-composition.test.ts` was named
+// here until that card measured that its fake engine registers no middleware
+// chain: nested re-reads there are never scoped by this plugin's READ filter, so
+// it cannot see read scoping and is not an end-to-end measurement of anything
+// that depends on it);
 // what THIS file owns is the consumer half: which outcomes widen, which do not,
 // and that everything that is not a literal `admit` leaves the refusal intact.
 import { describe, it, expect, beforeEach, vi } from 'vitest';

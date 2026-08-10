@@ -13,6 +13,7 @@ import {
   GENERIC_CONNECT_FAILURE_REMEDY,
   isUnbuiltWorkspaceFailure,
 } from '../connect-failure-remedy.js';
+import { missingSqliteWasmDriverMessage } from '../default-datasource-driver-factory.js';
 
 /** One `markDatasourceUnavailable` call, as the engine would receive it. */
 type UnavailableCall = { name: string; kind: 'blocked' | 'failed'; publicDetail?: string };
@@ -484,11 +485,21 @@ describe('fail-fast remedy is chosen by CAUSE (#5794)', () => {
     });
 
     it('by message alone: the factory-wrapped optional-driver form, no code', async () => {
+      // Built from the factory's OWN message rather than a copy of its wording
+      // (#7385): this fixture used to spell the pre-#7385 sentence by hand, so
+      // it would have gone on asserting a shape the factory no longer emits.
+      // The property under test is unchanged — the wrapper drops the `code`, so
+      // the classifier has only the interpolated `Cannot find module` text to
+      // work with — and it is now pinned against the real wrapper.
       const err = await failFast(
         factoryThrowing(
           new Error(
-            'sqlite-wasm driver requested but @objectstack/driver-sqlite-wasm is not installed ' +
-            "(Cannot find module '/w/node_modules/@objectstack/driver-sqlite-wasm/dist/index.mjs').",
+            missingSqliteWasmDriverMessage({
+              datasource: 'default',
+              cause: new Error(
+                "Cannot find module '/w/node_modules/@objectstack/driver-sqlite-wasm/dist/index.mjs'",
+              ),
+            }),
           ),
         ),
       );

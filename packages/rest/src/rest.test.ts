@@ -2329,20 +2329,49 @@ describe('mapDataError — schema/constraint envelopes', () => {
     expect(r.body.error).toContain('insufficient privileges');
   });
 
-  it('does NOT pass through an explicit 5xx status (message stays sanitized)', () => {
+  // [#5582] This case was "does NOT pass through an explicit 5xx status
+  // (message stays sanitized)", and BOTH halves of that title have now been
+  // ruled on separately — which is why it is two cases.
+  //
+  // The status half was the defect: `mapDataError`'s passthrough stopped at
+  // 4xx while `resolveErrorResponse`'s went to 599, so one declared error got
+  // two answers depending on which door caught it, and on the data routes a
+  // declared 502/503 was rewritten to 500 by a message-text heuristic. The
+  // passthrough is now the same 400-599 both sides (#5437 / PR #5464 is the
+  // ruling it now matches).
+  //
+  // The message half was never in question and is unchanged: a 5xx's own words
+  // never reach the client.
+  it('passes an explicit 5xx status through, with its code and WITHOUT its message', () => {
+    const r = mapDataError(
+      Object.assign(new Error('connect ECONNREFUSED 10.0.0.5:5432 (internal pool)'), {
+        status: 502,
+        code: 'UPSTREAM_UNAVAILABLE',
+      }),
+    );
+    // The declared status and the machine-readable code both survive...
+    expect(r.status).toBe(502);
+    expect(r.body.code).toBe('UPSTREAM_UNAVAILABLE');
+    // ...and neither is the degraded answer this used to give.
+    expect(r.status).not.toBe(500);
+    expect(r.body.code).not.toBe('INTERNAL_ERROR');
+    // The sanitization half of the old assertion, kept verbatim.
+    expect(String(r.body.error)).not.toContain('ECONNREFUSED');
+    expect(JSON.stringify(r.body)).not.toContain('10.0.0.5');
+  });
+
+  it('a 5xx that declares NO code passes its status and invents no code', () => {
+    // The shape this case originally carried. `declaresServerFault` — the
+    // `@objectstack/types` criterion the 5xx arm reads for the `code` half —
+    // needs a non-empty string `code`, and ADR-0112 says the PRODUCER names the
+    // condition: the declared half is honoured, the undeclared half is left
+    // empty rather than filled with an invented `INTERNAL_ERROR`. Same answer
+    // `resolveErrorResponse` already gives this shape.
     const r = mapDataError(
       Object.assign(new Error('connect ECONNREFUSED 10.0.0.5:5432 (internal pool)'), { status: 502 }),
     );
-    // 5xx bypasses the passthrough and falls into the sanitizing heuristics.
-    expect(r.status).not.toBe(502);
-    expect(r.body.code).not.toBe('FORBIDDEN');
-    // [#5489] Both negatives above were satisfied by the OLD landing as well —
-    // a 400 carrying `connect ECONNREFUSED 10.0.0.5:5432 (internal pool)`
-    // verbatim, which is a server fault wearing a client-error status AND the
-    // leak the sanitizing heuristics were supposed to stop. Pinned positively
-    // now that the terminal branch is a sanitised 500.
-    expect(r.status).toBe(500);
-    expect(r.body.code).toBe('INTERNAL_ERROR');
+    expect(r.status).toBe(502);
+    expect(r.body.code).toBeUndefined();
     expect(String(r.body.error)).not.toContain('ECONNREFUSED');
   });
 
