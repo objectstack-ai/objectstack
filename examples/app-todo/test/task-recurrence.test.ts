@@ -258,6 +258,16 @@ describe('#7037 — the recurrence branch computes a real next due date', () => 
       expect(no.target).toBe('end');
     });
 
+    it('GUARD: the dead function name is gone from the app\'s authored metadata', () => {
+      // Named explicitly, not just covered by the shape check below. The reason
+      // this card insists on the name is that an invented function in a SHIPPED
+      // example is the exact thing an AI author copies — so its absence is
+      // asserted rather than merely current. (The name still appears in this
+      // file and in the flow's comments, describing the defect; what must never
+      // come back is an authored VALUE containing it.)
+      expect(JSON.stringify(allFlows)).not.toContain('DATEADD');
+    });
+
     it('GUARD: no write node in any app flow puts function-call text in a field value', () => {
       // The class, not the instance. `fields` values are interpolated, never
       // evaluated, so ANY `NAME(...)` text in one reaches the driver verbatim —
