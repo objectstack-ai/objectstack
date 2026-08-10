@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import type { JobRunOutcome } from '@objectstack/spec/contracts';
 import { DbJobAdapter } from './db-job-adapter.js';
 import { IntervalJobAdapter } from './interval-job-adapter.js';
@@ -39,7 +40,12 @@ function makeFakeEngine() {
       tables.set(table, t);
       return { id: data.id };
     },
-    async update(table: string, patch: any) {
+    async update(table: string, patch: any, options?: any) {
+      // Bind the double to the producer's own dispatch rule rather than
+      // mirroring it by hand: `DbJobAdapter` always updates by a scalar
+      // payload id, and a fake that accepts a call a real server answers 500
+      // to would let that drift through unnoticed.
+      assertEngineUpdateDispatch(patch, options);
       const t = tables.get(table) ?? [];
       const r = t.find((x) => x.id === patch.id);
       if (!r) throw new Error(`row ${patch.id} not in ${table}`);

@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
+import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { DbJobAdapter } from '@objectstack/service-job';
 import type { IJobService, JobSchedule, JobHandler } from '@objectstack/spec/contracts';
 import { AutomationEngine } from '../engine.js';
@@ -66,7 +67,11 @@ function makeFakeEngine() {
       tables.set(table, t);
       return { id: data.id };
     },
-    async update(table: string, patch: any) {
+    async update(table: string, patch: any, options?: any) {
+      // Same binding as the sibling double in `service-job`: the fake refuses
+      // exactly what `ObjectQLEngine.update` refuses, so the audit writes this
+      // test asserts are writes a real server would have accepted.
+      assertEngineUpdateDispatch(patch, options);
       const t = tables.get(table) ?? [];
       const r = t.find((x) => x.id === patch.id);
       if (!r) throw new Error(`row ${patch.id} not in ${table}`);

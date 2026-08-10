@@ -24,6 +24,7 @@
   },
   "devDependencies": {
     "@objectstack/driver-sql": "workspace:*",
+    "@objectstack/metadata-core": "workspace:*",
     "@objectstack/objectql": "workspace:*",
     "@objectstack/plugin-security": "workspace:*",
     "@objectstack/service-job": "workspace:*",

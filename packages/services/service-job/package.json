@@ -25,6 +25,7 @@
     "croner": "^10.0.1"
   },
   "devDependencies": {
+    "@objectstack/metadata-core": "workspace:*",
     "@types/node": "^26.1.2",
     "typescript": "^6.0.3",
     "vitest": "^4.1.10"
