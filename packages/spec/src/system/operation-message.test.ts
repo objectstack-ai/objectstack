@@ -151,11 +151,14 @@ describe('operation message catalog — permission_denied (#7414)', () => {
   });
 
   it('ships no unfilled placeholder in any locale — the sentence takes no params', () => {
-    // ⚠️ This case is HYGIENE, not a revert-detector: it also passes on a
-    // catalog with the key removed entirely (the fallback is the bare
-    // messageKey, which has no braces either). Its value is catching a
-    // template that shipped a `{{name}}` / `{name}` nobody fills — the #7333
-    // class of bug, where the two brace conventions in this repo are mixed up.
+    // Asserts on the CATALOG ENTRY, not on the rendering, and that is the
+    // difference between a guard and a decoration. Rendering a removed key
+    // yields the bare messageKey — which has no braces either, so a
+    // rendering-based version of this case would stay green on a catalog that
+    // lost the key entirely. Reading the entry makes it bite twice: on a
+    // missing locale (the entry is `undefined`) and on a template that shipped
+    // a `{{name}}` / `{name}` nobody fills, which is the #7333 class of bug
+    // where this repo's two brace conventions get mixed up.
     for (const [locale, catalog] of Object.entries(BUILTIN_OPERATION_MESSAGES)) {
       expect(catalog.permission_denied, `${locale} defines permission_denied`).toBeTypeOf('string');
       expect(catalog.permission_denied, `${locale} placeholder-free`).not.toMatch(/[{}]/);

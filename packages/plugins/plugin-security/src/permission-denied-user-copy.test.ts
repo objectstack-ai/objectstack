@@ -38,6 +38,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { FileI18nAdapter } from '@objectstack/service-i18n';
 import { PermissionSetSchema } from '@objectstack/spec/security';
 import type { PermissionSet } from '@objectstack/spec/security';
@@ -126,8 +127,29 @@ function makeEngine() {
       return (await this.find(object, options))[0] ?? null;
     },
     async insert(object: string, data: any) { (tables[object] ??= []).push({ ...data }); return data; },
-    async update(_object: string, data: any) { return data; },
-    async delete() { return true; },
+    // Both write verbs open with the PRODUCER's own dispatch predicate, never a
+    // hand-mirrored guard: a fake looser than `ObjectQL` collects greens from
+    // call shapes the engine would refuse. Nothing in this file reaches them
+    // (the gate refuses first, which is the point), so they exist to keep the
+    // double honest for whatever case is added next.
+    async update(object: string, data: any, options?: any) {
+      const dispatch = assertEngineUpdateDispatch(data, options);
+      const rows = (tables[object] ??= []);
+      const targets = dispatch.kind === 'by-id'
+        ? rows.filter((r) => r.id === dispatch.id)
+        : rows.filter((r) => matches(r, options?.where));
+      for (const r of targets) Object.assign(r, data);
+      return dispatch.kind === 'by-id' ? (targets[0] ?? null) : targets.length;
+    },
+    async delete(object: string, options?: any) {
+      const dispatch = assertEngineDeleteDispatch(options);
+      const rows = (tables[object] ??= []);
+      const targets = dispatch.kind === 'by-id'
+        ? rows.filter((r) => r.id === dispatch.id)
+        : rows.filter((r) => matches(r, options?.where));
+      tables[object] = rows.filter((r) => !targets.includes(r));
+      return dispatch.kind === 'by-id' ? targets.length > 0 : targets.length;
+    },
   };
 }
 
