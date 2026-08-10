@@ -391,20 +391,31 @@ one. `sys_metadata` overlay rows are not in any config file, so there is no
 | View references — form targets, view-key collisions (#2554) | ✓ | ✓ | ✓ | — |
 | Flow authoring anti-patterns (#1874) | ✓ | ✓ | ✓ | ✓ᶠ |
 | Flow trigger readiness — a flow that looks armed and never launches (#5762) | ✓ | ✓ | ✓ | ✓ᶠ |
+| `views[]` conditional-visibility predicates — CEL syntax, parse budget, bare identifiers, binding-root layer, schema path refs (ADR-0089 D3b, #7010) | ✓ | ✓ | ✓ | ✓ᵛ |
 | Advisory: record titles, semantic field pointers (ADR-0085), seed replay/state safety, capability references, liveness | ✓ | ✓ | ✓ | — |
 | Package docs — flatness, prefixes, links (ADR-0046) | ✓ | ✓ | ✓ | — |
 | Undeclared authoring keys — every metadata collection (#3786) and the stack's own top-level keys (#4167) | ✓ | ✓ | — | — |
 | Naming, labels, data-model conventions, i18n coverage | — | — | ✓ | — |
 | Emits `dist/objectstack.json` | — | ✓ | — | — |
 
-**`✓ᶠ` means the rule runs at that door for `flow` writes.** `flow` is the only
-metadata type any rule declares there today — #4463 shipped P1 as one type and
-four rule families, and widening is a data edit nobody has made yet. So an
-object, view, page or dashboard save is checked by the schema parse and by
+**`✓ᶠ` means the rule runs at that door for `flow` writes; `✓ᵛ` for `view`
+writes.** Those are the two metadata types rules declare there today — #4463
+shipped P1 as one type and four rule families, and #7220 added the second type
+by moving the whole `views[]` visibility-predicate family across in one edit. So
+an object, page or dashboard save is still checked by the schema parse and by
 nothing else, and the `—` cells above are `—` for two different reasons: some
 rules read a stack-wide collection a one-item write does not carry (pages,
 dashboards, navigation, permission sets), and some parse authored source through
 `typescript`, which the kernel boot path must never load.
+
+The visibility family crossed **together**, and that is the point rather than an
+implementation detail. An earlier attempt wired one of its rules alone, which
+would have refused a `view` whose predicate names an unresolvable path while a
+predicate that does not parse *at all* saved clean through the same door —
+sibling verdicts about one predicate, one enforced, none predictable. A rule
+family is a wall, and a half-wired wall is worse than an unwired one, so
+`authoring-rule-wiring.test.ts` pins the property directly: every rule on that
+surface is gated at this door, or none is.
 
 Both halves of a gate's behaviour are on this door. Gating findings **refuse**
 the write, as the same `422 invalid_metadata` envelope a schema failure
