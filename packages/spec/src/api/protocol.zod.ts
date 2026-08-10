@@ -421,6 +421,46 @@ export const GetMetaItemLayeredResponseSchema = lazySchema(() => z.object({
 }));
 
 /**
+ * One finding from the #4463 runtime authoring gate — the fourth door.
+ *
+ * The gate runs the SHARED author-time rule registry (`@objectstack/lint`'s
+ * `AUTHORING_RULES`, the same table `os validate` / `os build` / `os lint` run)
+ * over a body about to go `active`, and partitions its findings by severity.
+ * The `error` half becomes the 422 `invalid_metadata` envelope's `issues[]`;
+ * the rest are ADVISORY — they do not block the write, and #4463 D3 decided
+ * they ride the 2xx response instead of being discarded.
+ *
+ * This is that ONE element shape, declared once and used by both halves, which
+ * is the whole point of D3's "reuse the Zod envelope": a consumer reads the
+ * same six keys whether the verdict arrived on a refusal or on a success.
+ * `@objectstack/metadata-protocol` re-exports this type as its
+ * `RuntimeAuthoringIssue` rather than declaring a second interface (#4717).
+ */
+export const RuntimeAuthoringIssueSchema = lazySchema(() => z.object({
+  rule: z.string().describe(
+    'Stable diagnostic rule id (`flow-multi-write-unfiltered`, '
+    + '`approval-expression-invalid`, …). Machine-readable and stable across '
+    + 'releases — the key a renderer groups or suppresses by.',
+  ),
+  path: z.string().describe(
+    'Config path inside the SUBMITTED body (`flows[0].nodes[1].config.multi`), '
+    + 'so an editor can jump to the offending key. May be empty when the '
+    + 'finding is about the item as a whole.',
+  ),
+  where: z.string().describe(
+    'Human-readable location — `flow "leave_approval" · node "approve"`. Prose '
+    + 'for a person; use `path` for anything mechanical.',
+  ),
+  message: z.string().describe('What is wrong, in the rule author\'s own words.'),
+  hint: z.string().describe('How to fix it.'),
+  severity: z.enum(['error', 'warning', 'info']).describe(
+    'How the gate treated this finding. `error` means the write was REFUSED '
+    + '(these appear on the 422, never on a 2xx); `warning` / `info` are '
+    + 'advisory — the write succeeded and the finding is FYI.',
+  ),
+}));
+
+/**
  * Save Metadata Item Request
  * Create or update a metadata item
  */
@@ -485,6 +525,24 @@ export const SaveMetaItemResponseSchema = lazySchema(() => z.object({
     + 'Best-effort by design — a projector failure is reported here and logged, '
     + 'never thrown, so a caller that needs the read model to be live must check '
     + '`projectionApplied.success` rather than rely on the 200.',
+  ),
+  advisories: z.array(RuntimeAuthoringIssueSchema).optional().describe(
+    'Non-gating findings from the #4463 runtime authoring gate — the same '
+    + 'shared author-time rules `os validate` / `os build` / `os lint` run, '
+    + 'applied to this body on its way to `active`. The write SUCCEEDED; these '
+    + 'are what the gate has to say about it anyway (#4717, closing #4463 D3). '
+    + 'Present ONLY when at least one advisory was raised — an empty array is '
+    + 'never emitted, so a clean save\'s response bytes are unchanged and '
+    + 'absence means "nothing to report", never "the gate did not run". '
+    + 'Advisory by construction: every entry has `severity` `warning` or '
+    + '`info`, because an `error` finding refuses the write and arrives as the '
+    + '422 `invalid_metadata` envelope instead of here. A caller that ignores '
+    + 'this key behaves exactly as before. Runtime-only: the CLI surfaces the '
+    + 'same findings on its own stdout, and a Studio / MCP / AI author has no '
+    + 'CLI at all, which is the gap #4463 exists to close. NOTE the door '
+    + 'asymmetry — `POST /meta/:type/:name/publish` does not carry this field '
+    + 'yet (its declaration landed separately as #7294); the gate runs on both '
+    + 'doors, only the save door reports.',
   ),
   message: z.string().optional(),
 }));
@@ -1724,6 +1782,12 @@ export type GetMetaItemsResponse = z.input<typeof GetMetaItemsResponseSchema>;
 export type GetMetaItemRequest = z.input<typeof GetMetaItemRequestSchema>;
 export type GetMetaItemResponse = z.input<typeof GetMetaItemResponseSchema>;
 export type GetMetaItemLayeredResponse = z.input<typeof GetMetaItemLayeredResponseSchema>;
+/**
+ * One #4463 runtime authoring-gate finding. The SINGLE declaration of the shape;
+ * `@objectstack/metadata-protocol` re-exports this rather than declaring its own
+ * (#4717), so the 422 `issues[]` and the 2xx `advisories[]` cannot drift apart.
+ */
+export type RuntimeAuthoringIssue = z.input<typeof RuntimeAuthoringIssueSchema>;
 export type SaveMetaItemRequest = z.input<typeof SaveMetaItemRequestSchema>;
 export type SaveMetaItemResponse = z.input<typeof SaveMetaItemResponseSchema>;
 export type PublishMetaItemResponse = z.input<typeof PublishMetaItemResponseSchema>;

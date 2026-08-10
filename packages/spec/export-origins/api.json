@@ -831,6 +831,8 @@
     "RouterConfig": "src/api/router.zod.ts#RouterConfig (type)",
     "RouterConfigParsed": "src/api/router.zod.ts#RouterConfigParsed (type)",
     "RouterConfigSchema": "src/api/router.zod.ts#RouterConfigSchema (const)",
+    "RuntimeAuthoringIssue": "src/api/protocol.zod.ts#RuntimeAuthoringIssue (type)",
+    "RuntimeAuthoringIssueSchema": "src/api/protocol.zod.ts#RuntimeAuthoringIssueSchema (const)",
     "SERVICE_SELF_INFO_KEY": "src/api/discovery.zod.ts#SERVICE_SELF_INFO_KEY (const)",
     "SaveMetaItemRequest": "src/api/protocol.zod.ts#SaveMetaItemRequest (type)",
     "SaveMetaItemRequestSchema": "src/api/protocol.zod.ts#SaveMetaItemRequestSchema (const)",

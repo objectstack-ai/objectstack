@@ -855,3 +855,105 @@ describe('PublishMetaItemResponseSchema (#7294 — declares the full publish res
     expect(PublishMetaItemResponseSchema.safeParse(realResponse).success).toBe(true);
   });
 });
+
+import { RuntimeAuthoringIssueSchema } from './protocol.zod';
+
+/**
+ * #4717 — `advisories`, the #4463 D3 advisory half, on the save response.
+ *
+ * The gate runs the shared author-time rule registry over every body going
+ * `active` and splits its findings by severity. `error` becomes the 422; the
+ * rest are advisory — they do not block the write, and until #4717 they went
+ * only to a process-deduped `console.warn`, which is unreachable by exactly the
+ * Studio / MCP / AI authors #4463 exists for.
+ *
+ * ⚠️ This field is CONDITIONAL, and that has a consequence worth stating where
+ * the next reader will meet it: the producer-side conformance gate
+ * (`packages/objectql/src/save-meta-response-conformance.test.ts`) works by
+ * asserting that nothing was stripped, and a key that is absent strips nothing.
+ * So it stays green whether or not this declaration exists — measured, not
+ * assumed (the PR's R1/R3 rows). The declaration is deliberate rather than
+ * test-driven, and these cases are what make it checkable at all.
+ */
+describe('SaveMetaItemResponseSchema.advisories (#4717 — #4463 D3 on the response)', () => {
+  const realResponse = {
+    success: true,
+    version: 'sha256:7aad99c8d969efb5067fff275fb3e5be7ec90f9cd610d41709fcddbf8c34b1f0',
+    seq: 1,
+    state: 'active',
+    message: 'Saved flow \'nightly_purge\' (env-wide, state=active) [seq=1]',
+  };
+
+  /** A verbatim capture of a real finding — `lintFlowPatterns`, warning tier. */
+  const advisory = {
+    rule: 'flow-multi-write-unfiltered',
+    path: 'flow \'nightly_purge\' · node \'purge\' (delete_record)',
+    where: 'flow \'nightly_purge\' · node \'purge\' (delete_record)',
+    message: 'declares `multi: true` with no `filter` key — this is a WHOLE-OBJECT write.',
+    hint: 'Add a `filter`, or state the whole-object intent explicitly.',
+    severity: 'warning' as const,
+  };
+
+  it('carries a real advisory through parse without stripping it', () => {
+    const parsed = SaveMetaItemResponseSchema.parse({ ...realResponse, advisories: [advisory] });
+    expect(parsed.advisories).toEqual([advisory]);
+  });
+
+  it('is OPTIONAL — absence means "nothing to report", never "the gate did not run"', () => {
+    expect(SaveMetaItemResponseSchema.safeParse(realResponse).success).toBe(true);
+    expect(SaveMetaItemResponseSchema.parse(realResponse).advisories).toBeUndefined();
+  });
+
+  it('does not fabricate an empty array when the key is absent', () => {
+    // The producer omits the key rather than emitting `[]`, so a clean save's
+    // response bytes are unchanged. A `.default([])` here would quietly undo
+    // that on the consumer side: every caller would see a key the server never
+    // sent, and "absent" would stop being distinguishable at all.
+    expect('advisories' in SaveMetaItemResponseSchema.parse(realResponse)).toBe(false);
+  });
+
+  it('rejects a non-array, so a single issue object cannot masquerade as the list', () => {
+    expect(
+      SaveMetaItemResponseSchema.safeParse({ ...realResponse, advisories: advisory }).success,
+    ).toBe(false);
+  });
+});
+
+/**
+ * The element shape itself — declared once (#4717) and re-exported by
+ * `@objectstack/metadata-protocol` as its `RuntimeAuthoringIssue`, so the 422's
+ * `issues[]` and the 2xx's `advisories[]` cannot drift into two dialects.
+ */
+describe('RuntimeAuthoringIssueSchema (#4717 — the ONE finding shape)', () => {
+  const issue = {
+    rule: 'flow-multi-write-unfiltered',
+    path: 'flows[0].nodes[1].config.multi',
+    where: 'flow "nightly_purge" · node "purge"',
+    message: 'unbounded bulk delete',
+    hint: 'add a filter',
+    severity: 'warning',
+  };
+
+  it('accepts a finding with all six keys', () => {
+    expect(RuntimeAuthoringIssueSchema.parse(issue)).toEqual(issue);
+  });
+
+  it('requires every one of the six — a partial finding is not a finding', () => {
+    for (const missing of ['rule', 'path', 'where', 'message', 'hint', 'severity'] as const) {
+      const body: Record<string, unknown> = { ...issue };
+      delete body[missing];
+      expect(
+        RuntimeAuthoringIssueSchema.safeParse(body).success,
+        `omitting '${missing}' must fail parse`,
+      ).toBe(false);
+    }
+  });
+
+  it('closes severity to the three the gate emits', () => {
+    for (const severity of ['error', 'warning', 'info']) {
+      expect(RuntimeAuthoringIssueSchema.safeParse({ ...issue, severity }).success).toBe(true);
+    }
+    expect(RuntimeAuthoringIssueSchema.safeParse({ ...issue, severity: 'advisory' }).success).toBe(false);
+    expect(RuntimeAuthoringIssueSchema.safeParse({ ...issue, severity: 'fatal' }).success).toBe(false);
+  });
+});

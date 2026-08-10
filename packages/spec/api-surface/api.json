@@ -831,6 +831,8 @@
     "RouterConfig (type)",
     "RouterConfigParsed (type)",
     "RouterConfigSchema (const)",
+    "RuntimeAuthoringIssue (type)",
+    "RuntimeAuthoringIssueSchema (const)",
     "SERVICE_SELF_INFO_KEY (const)",
     "SaveMetaItemRequest (type)",
     "SaveMetaItemRequestSchema (const)",

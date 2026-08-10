@@ -57,21 +57,20 @@ import { runRuntimeAuthoringRules, type AuthoringFinding } from '@objectstack/li
 // may only reach that package through its kernel-safe `/runtime` entry (the
 // wiring guard's third invariant), and `walkFlowNodes` is not on it.
 import { FLOW_REGION_SLOTS_BY_TYPE } from '@objectstack/spec/automation';
+import type { RuntimeAuthoringIssue } from '@objectstack/spec/api';
 
-/** The structured issue shape a 422 carries — D3's "reuse the Zod envelope". */
-export interface RuntimeAuthoringIssue {
-    /** Stable diagnostic rule id (`approval-expression-invalid`, …). */
-    rule: string;
-    /** Config path inside the submitted body. */
-    path: string;
-    /** Human-readable location (`flow "leave_approval" · node "approve"`). */
-    where: string;
-    /** What is wrong. */
-    message: string;
-    /** How to fix it. */
-    hint: string;
-    severity: 'error' | 'warning' | 'info';
-}
+/**
+ * The structured issue shape a 422 carries — D3's "reuse the Zod envelope".
+ *
+ * [#4717] Declared ONCE, in `packages/spec` as `RuntimeAuthoringIssueSchema`,
+ * and re-exported here under the name this package has always used. It became a
+ * spec declaration the moment D3's other half landed: the advisory findings ride
+ * `SaveMetaItemResponseSchema.advisories`, which is a public wire contract, and
+ * a hand-written interface next to a Zod schema for the same six keys is exactly
+ * the two-dialect drift Prime Directive #1 exists to prevent. The name and the
+ * import path callers use are unchanged.
+ */
+export type { RuntimeAuthoringIssue };
 
 /**
  * The escape hatch (#4463 D4).
@@ -345,15 +344,51 @@ const toIssue = (f: AuthoringFinding): RuntimeAuthoringIssue => ({
 });
 
 /**
- * Judge an about-to-be-published metadata body and return the `Error` the
- * caller must throw, or `null` to allow the write.
+ * The gate's whole verdict on one write — both severities, in one value.
+ *
+ * [#4717] This type IS the change #4717 asked for. Until it existed the
+ * function was typed `=> Error | null`, so the success path had no return
+ * channel at all: the advisory findings the rules had already produced were
+ * walked into a deduped `console.warn` and went out of scope. That is the same
+ * "ran the rule, discarded the verdict" shape #4463 was filed to close, one
+ * notch quieter — and it was unreachable by exactly the authors the gate exists
+ * for, since a Studio tenant or an MCP/AI author never sees server stdout.
+ *
+ * So this is an ADDED channel, not a threaded value, and it is deliberately a
+ * record rather than a widened `Error | Issue[] | null` union: both halves of
+ * the verdict are always answered, and a caller cannot read one while forgetting
+ * the other exists.
+ */
+export interface RuntimeAuthoringVerdict {
+    /**
+     * The 422 the caller MUST throw, or `null` when the write may proceed.
+     * Exactly the value this function used to return on its own.
+     */
+    error: Error | null;
+    /**
+     * The non-gating findings — `severity` `warning` or `info`. Always an
+     * array, possibly empty; `saveMetaItem` puts it on the response under
+     * `advisories` and omits the key entirely when it is empty, so a clean save
+     * is byte-identical to before (`SaveMetaItemResponseSchema`, #4717).
+     *
+     * Populated alongside a non-null `error` too, but that combination never
+     * reaches a response: the caller throws, and a 422 carries its own
+     * `issues[]`. Nothing here is a substitute for reading `error`.
+     */
+    advisories: RuntimeAuthoringIssue[];
+}
+
+/**
+ * Judge an about-to-be-published metadata body and return BOTH halves of the
+ * verdict: the `Error` the caller must throw (or `null` to allow the write),
+ * and the advisory findings that do not block it.
  *
  * Returning the error rather than throwing it mirrors
  * {@link ObjectStackProtocolImplementation.assertLockAllowsWrite}: the caller
  * owns the audit trail and the throw site.
  *
  * @param args.state Lifecycle the body is being written into. Anything but
- *   `'active'` returns `null` immediately (D1).
+ *   `'active'` returns an empty verdict immediately (D1).
  */
 export function evaluateRuntimeAuthoringGate(args: {
     /** Singular metadata type (`flow`, …). */
@@ -384,9 +419,10 @@ export function evaluateRuntimeAuthoringGate(args: {
      * every call site that can know the answer states it.
      */
     orgWallEnforced?: boolean;
-}): Error | null {
+}): RuntimeAuthoringVerdict {
     // D1 — drafts are never gated. Publishing one runs this same function.
-    if (args.state !== 'active') return null;
+    // No rules ran, so there is nothing to report on either half.
+    if (args.state !== 'active') return { error: null, advisories: [] };
 
     const result = runRuntimeAuthoringRules({
         type: args.type,
@@ -410,10 +446,14 @@ export function evaluateRuntimeAuthoringGate(args: {
         orgWallEnforced: args.orgWallEnforced === true,
     });
 
-    // P1 gates on `error` only. Advisories are surfaced as a deduped log rather
-    // than dropped — running a rule and discarding its verdict is the same
-    // "declared ≠ enforced" shape this gate exists to close, one notch quieter.
-    // Putting them on the response (and rendering them in Studio) is P2.
+    // [#4717] The advisory half of D3, now with somewhere to go. The deduped
+    // log below is KEPT — it is the operator's channel and costs one Set lookup
+    // — but it is no longer the only one: these travel back to the caller in
+    // `advisories` and `saveMetaItem` puts them on the 2xx response, which is
+    // the channel the Studio / MCP / AI author this gate exists for can
+    // actually read.
+    const advisories = result.advisories.map(toIssue);
+
     for (const advisory of result.advisories) {
         const key = `${args.type}|${args.name}|${advisory.rule}|${advisory.path}`;
         if (_advisoryWarned.has(key)) continue;
@@ -424,7 +464,7 @@ export function evaluateRuntimeAuthoringGate(args: {
         );
     }
 
-    if (result.errors.length === 0 && localIssues.length === 0) return null;
+    if (result.errors.length === 0 && localIssues.length === 0) return { error: null, advisories };
 
     const issues = [...result.errors.map(toIssue), ...localIssues];
     const summary = issues
@@ -450,7 +490,13 @@ export function evaluateRuntimeAuthoringGate(args: {
             + `The rules that ran: ${rulesRun.join(', ')}. Unset the variable once the metadata is fixed; `
             + `the runtime will execute this body as published.`,
         );
-        return null;
+        // [#4717] The hatch converts a REFUSAL into a log; it does not promote
+        // the gating findings into the advisory channel. `advisories` means
+        // "did not block this write", and a finding that only failed to block
+        // because an operator set a migration flag is not that — it is in the
+        // un-deduped refusal log above, in full, every time. Widening this to
+        // carry them would put `severity: 'error'` entries on a 2xx.
+        return { error: null, advisories };
     }
 
     const err = new Error(
@@ -463,5 +509,7 @@ export function evaluateRuntimeAuthoringGate(args: {
     // "nothing ran" without guessing (route 3 of the surface-ownership rules:
     // absence must be loud).
     (err as any).rulesRun = rulesRun;
-    return err;
+    // The caller throws `error`; `advisories` rides along for symmetry and is
+    // dropped with the response that never happens.
+    return { error: err, advisories };
 }

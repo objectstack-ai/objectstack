@@ -265,7 +265,7 @@ import type * as M167 from './ui/view.zod.js';
 import type * as M170 from './ui/component.zod.js';
 
 // ---------------------------------------------------------------------------
-// 825 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
+// 826 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
 //
 // That number is machine-checked, not hand-kept. The runtime companion at the
 // bottom of this file recomputes the pin count from the source and asserts that
@@ -471,6 +471,7 @@ export type Iso833 = Assert<Eq< z.input< typeof M28.GetMetaItemLayeredResponseSc
 export type Iso135 = Assert<Eq< z.input< typeof M28.SaveMetaItemRequestSchema >, z.infer< typeof M28.SaveMetaItemRequestSchema > >>;
 export type Iso136 = Assert<Eq< z.input< typeof M28.SaveMetaItemResponseSchema >, z.infer< typeof M28.SaveMetaItemResponseSchema > >>;
 export type Iso836 = Assert<Eq< z.input< typeof M28.PublishMetaItemResponseSchema >, z.infer< typeof M28.PublishMetaItemResponseSchema > >>;
+export type Iso837 = Assert<Eq< z.input< typeof M28.RuntimeAuthoringIssueSchema >, z.infer< typeof M28.RuntimeAuthoringIssueSchema > >>;
 export type Iso137 = Assert<Eq< z.input< typeof M28.DeleteMetaItemRequestSchema >, z.infer< typeof M28.DeleteMetaItemRequestSchema > >>;
 export type Iso138 = Assert<Eq< z.input< typeof M28.DeleteMetaItemResponseSchema >, z.infer< typeof M28.DeleteMetaItemResponseSchema > >>;
 export type Iso139 = Assert<Eq< z.input< typeof M28.GetMetaItemCachedRequestSchema >, z.infer< typeof M28.GetMetaItemCachedRequestSchema > >>;
@@ -1624,7 +1625,7 @@ describe('ADR-0122 type-alias convention', () => {
   // this title and the section header above the pin list — are now asserted
   // against the recomputed count below, so neither can go stale without a red
   // test naming it.
-  it('still declares all 825 isomorphic pins', () => {
+  it('still declares all 826 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -1798,9 +1799,22 @@ describe('ADR-0122 type-alias convention', () => {
     // `XParsed`. Its id is `Iso836`, the next free one, not a number near its
     // neighbours: the ids are claims about pins and not positions (the same
     // rule the #4914 decrease and the #6604 entry above both record).
+    //
+    // 825 -> 826 is #4717's `RuntimeAuthoringIssueSchema` — the ONE element
+    // shape the #4463 runtime authoring gate reports a finding in, on both
+    // halves of D3: the 422 `issues[]` and the new 2xx `advisories[]` on
+    // `SaveMetaItemResponseSchema` (`Iso136`). Isomorphism MEASURED, not
+    // assumed: five `z.string()`s and one `z.enum` — no `.default()`,
+    // `.transform()`, `.catch()`, `.optional()` or `.pipe()` anywhere — so the
+    // two shapes coincide and ADR-0122 gives it a pin rather than an
+    // `XParsed`. Adding the OPTIONAL `advisories` key to
+    // `SaveMetaItemResponseSchema` contributes 0 of its own: `.optional()`
+    // widens input and output identically, so `Iso136` still holds and the
+    // count moves by exactly the one new schema. Its id is `Iso837`, the next
+    // free one — the ids are claims about pins, not positions.
     const self = readFileSync(fileURLToPath(import.meta.url), 'utf8');
     const pins = self.match(/^export type Iso\d+ = Assert</gm) ?? [];
-    expect(pins).toHaveLength(825);
+    expect(pins).toHaveLength(826);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until #6605 nothing read either

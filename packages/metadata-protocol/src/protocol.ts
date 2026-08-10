@@ -12,6 +12,7 @@ import { readEnvWithDeprecation, resolveTenancyPosture } from '@objectstack/type
 import { postureEnforcesWall } from '@objectstack/spec/security';
 import type { MetadataHostEngine } from './host-engine.js';
 import { evaluateRuntimeAuthoringGate } from './runtime-authoring-gate.js';
+import type { RuntimeAuthoringIssue } from './runtime-authoring-gate.js';
 // [#6418] `sys_metadata`'s overlay-uniqueness indexes: probe-first DDL plus the
 // ADR-0120 D4 reporting that replaced this file's empty `catch` blocks.
 import { ensureMetadataOverlayIndexes } from './migrations/overlay-index.js';
@@ -2834,6 +2835,16 @@ export class ObjectStackProtocolImplementation implements
      * and passed as arguments, so `evaluateRuntimeAuthoringGate` stays a pure
      * function of its inputs and a test can drive both postures without
      * mutating the process.
+     *
+     * [#4717] Throws on the gating half, RETURNS the advisory half. Advisories
+     * do not block anything, so the only honest place for them is the 2xx the
+     * write earns — `saveMetaItem` attaches them to its response, and the only
+     * other caller (the draft→active promotion in `publishMetaItem`) simply
+     * ignores the value, which is why adding this channel could not change what
+     * either door does.
+     * Returns an empty array on every early return: no rules ran, so there is
+     * nothing to report, and "clean" is told apart from "nothing ran" by the
+     * gate's own `rulesRun`, not by this.
      */
     private assertRuntimeAuthoringRules(evt: {
         type: string; name: string; state: 'draft' | 'active'; body: unknown; source?: string;
@@ -2843,7 +2854,7 @@ export class ObjectStackProtocolImplementation implements
          * which is one limb of the #6285 refusal combination.
          */
         organizationId?: string | null;
-    }): void {
+    }): RuntimeAuthoringIssue[] {
         // [#6710] The ADR-0005 carve-out, now DECLARED instead of inferred.
         //
         // This line used to read `if (this.environmentId === undefined)
@@ -2876,8 +2887,8 @@ export class ObjectStackProtocolImplementation implements
         //
         // `environmentId` keeps every other job it has, including the #3050
         // authoring gate's own scope check below.
-        if (this.authoringChannel === 'package-author') return;
-        if (evt.state !== 'active') return;
+        if (this.authoringChannel === 'package-author') return [];
+        if (evt.state !== 'active') return [];
         // `os migrate meta --stored --apply` rewrites rows that ALREADY EXIST
         // into the current dialect. It is not an author publishing anything —
         // it is the platform healing its own storage — and #4463 D4 is explicit
@@ -2892,7 +2903,7 @@ export class ObjectStackProtocolImplementation implements
         // no caller can spell its way past the gate. `duplicatePackage` is
         // deliberately NOT here — it mints brand-new rows under new names, and
         // a copy of a broken flow is a new broken flow.
-        if (evt.source === 'migrate-stored') return;
+        if (evt.source === 'migrate-stored') return [];
         const singular = PLURAL_TO_SINGULAR[evt.type] ?? evt.type;
 
         // Resolution context. Best-effort: a host without a registry (a
@@ -2908,7 +2919,7 @@ export class ObjectStackProtocolImplementation implements
             objects = [];
         }
 
-        const err = evaluateRuntimeAuthoringGate({
+        const verdict = evaluateRuntimeAuthoringGate({
             type: singular,
             name: evt.name,
             state: evt.state,
@@ -2917,7 +2928,8 @@ export class ObjectStackProtocolImplementation implements
             ...(evt.organizationId !== undefined ? { organizationId: evt.organizationId } : {}),
             orgWallEnforced: this.orgWallEnforced(),
         });
-        if (err) throw err;
+        if (verdict.error) throw verdict.error;
+        return verdict.advisories;
     }
 
     /**
@@ -9368,7 +9380,13 @@ export class ObjectStackProtocolImplementation implements
         // immediately after the schema check because a rule reads a body the
         // schema already accepted — a Zod failure is the more basic verdict and
         // must be the one the author sees first.
-        this.assertRuntimeAuthoringRules({
+        //
+        // [#4717] The advisory half of D3 starts its journey here. `errors` is
+        // thrown above as the 422; `advisories` never blocks anything, so it is
+        // captured and rides the 2xx this write is about to earn. Held in a
+        // local rather than on `this`: the gate is per-write and two concurrent
+        // saves must not read each other's findings.
+        const runtimeAdvisories = this.assertRuntimeAuthoringRules({
             type: request.type,
             name: request.name,
             state: mode === 'draft' ? 'draft' : 'active',
@@ -9579,6 +9597,24 @@ export class ObjectStackProtocolImplementation implements
                 version: result.version,
                 seq: result.seq,
                 ...(projectionApplied ? { projectionApplied } : {}),
+                // [#4717] #4463 D3's advisory half, finally on the response.
+                //
+                // CONDITIONAL on purpose, and the condition is the contract:
+                // the key is omitted — never `[]` — when the gate had nothing
+                // to say, so a clean save's response bytes are exactly what
+                // they were before this field existed and no existing caller
+                // sees a new key. `SaveMetaItemResponseSchema.advisories` is
+                // declared optional for that reason, and the conformance suite
+                // pins BOTH directions (present with findings, absent without),
+                // because an optional key is precisely what a conformance gate
+                // built on "nothing was stripped" cannot notice on its own.
+                //
+                // Save door only. The gate also runs on the draft→active
+                // promotion (#4463 D1, so `?mode=draft` + publish is not a
+                // bypass) and that door does NOT carry this field yet — its own
+                // response contract only just landed as #7294. The asymmetry is
+                // deliberate and stated in the changeset.
+                ...(runtimeAdvisories.length > 0 ? { advisories: runtimeAdvisories } : {}),
                 // #5745 — the literal union, not `string`. An object-literal
                 // property widens a two-literal ternary to `string`, which made
                 // this method fail to satisfy `MetadataProtocol.saveMetaItem`

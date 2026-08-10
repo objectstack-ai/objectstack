@@ -345,6 +345,7 @@
     "api/RouteHealthEntry",
     "api/RouteHealthReport",
     "api/RouterConfig",
+    "api/RuntimeAuthoringIssue",
     "api/SaveMetaItemRequest",
     "api/SaveMetaItemResponse",
     "api/ScheduleExportRequest",
