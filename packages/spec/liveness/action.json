@@ -10,6 +10,12 @@
       "status": "live",
       "note": "display."
     },
+    "description": {
+      "status": "live",
+      "verifiedAt": "2026-08-10",
+      "evidence": "objectui @5e52495 packages/app-shell/src/views/ActionParamDialog.tsx:215 renders it as the dialog's DialogDescription; objectui @5e52495 packages/app-shell/src/hooks/useConsoleActionRuntime.tsx:206 and objectui packages/app-shell/src/views/RecordDetailView.tsx:586 both feed it as `description: actionDescription(objForI18n, action?.name, action?.description)`; objectui packages/i18n/src/useObjectLabel.ts:463 resolves objects.{o}._actions.{a}.description then globalActions.{a}.description then this literal; framework: packages/cli/src/utils/i18n-extract.ts emits the key and packages/spec/src/system/translation.zod.ts declares the translation slot.",
+      "note": "Added #7367 — the RENDERER half predates the key by design: the consumer chain above shipped while `ActionSchema` (strictObject) refused `description`, so no producer could reach it (the mirror image of declared-but-unenforced). Live from the moment this key exists: the dialog reads `action.description` directly, no second input required. Mechanism for the 2026-08-10 ruling on #7278 — an action with `params` carries its confirm question here instead of in `confirmText`, so one decision is one dialog."
+    },
     "objectName": {
       "status": "live",
       "evidence": "packages/services/service-ai/src/tools/action-tools.ts:535",

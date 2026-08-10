@@ -21,6 +21,7 @@
     "ui/Action:bulkEnabled [RETIRED]",
     "ui/Action:component",
     "ui/Action:confirmText",
+    "ui/Action:description",
     "ui/Action:disabled",
     "ui/Action:errorMessage",
     "ui/Action:execute [RETIRED]",

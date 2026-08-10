@@ -35,13 +35,14 @@
  *   objects.<name>._views.<view>.description
  *   objects.<name>._views.<view>.emptyState.title / .message
  *   objects.<name>._actions.<action>.label
+ *   objects.<name>._actions.<action>.description
  *   objects.<name>._actions.<action>.confirmText
  *   objects.<name>._actions.<action>.successMessage
  *   objects.<name>._actions.<action>.params.<param>.label / .helpText / .placeholder
  *   objects.<name>._actions.<action>.params.<param>.options.<value>
  *   objects.<name>._actions.<action>.resultDialog.title / .description / .acknowledge
  *   objects.<name>._actions.<action>.resultDialog.fields.<path>
- *   globalActions.<action>.label / .confirmText / .successMessage
+ *   globalActions.<action>.label / .description / .confirmText / .successMessage
  *   globalActions.<action>.params.<param>.* / .resultDialog.* (same shape as object actions)
  *   apps.<app>.label / .description
  *   apps.<app>.navigation.<id>.label
@@ -687,6 +688,7 @@ export function collectExpectedEntries(config: any): ExpectedEntry[] {
         const aname = action.name as string;
         const aroot = ['objects', objectName, '_actions', aname];
         pushDerived(out, [...aroot, 'label'], action.label ?? aname, inlineText(action.label), 'action', { objectName });
+        pushOptional(out, [...aroot, 'description'], action.description, 'action', { objectName });
         pushOptional(out, [...aroot, 'confirmText'], action.confirmText, 'action', { objectName });
         pushOptional(out, [...aroot, 'successMessage'], action.successMessage, 'action', { objectName });
         pushActionParams(out, ['objects', objectName, '_actions', aname], action, 'action', objectName);
@@ -760,6 +762,12 @@ export function collectExpectedEntries(config: any): ExpectedEntry[] {
       : ['globalActions', action.name];
     const kind: ExpectedEntry['source'] = objectName ? 'action' : 'globalAction';
     pushDerived(out, [...root, 'label'], action.label ?? action.name, inlineText(action.label), kind, { objectName });
+    // `description` is OPTIONAL-not-derived, exactly like confirmText: the
+    // param dialog falls back to its own generic `actionDialog.description`
+    // string when the action declares none, so an undeclared description is
+    // not an i18n gap to seed (`pushDerived` would invent an English source
+    // string nothing authored). #7367.
+    pushOptional(out, [...root, 'description'], action.description, kind, { objectName });
     pushOptional(out, [...root, 'confirmText'], action.confirmText, kind, { objectName });
     pushOptional(out, [...root, 'successMessage'], action.successMessage, kind, { objectName });
     pushActionParams(out, root, action, kind, objectName);

@@ -809,6 +809,35 @@ const actionObject = () => strictObject({
   /** Display label */
   label: I18nLabelSchema.describe('Display label'),
 
+  /**
+   * Explanatory line shown in the action's PARAM DIALOG, under the title.
+   *
+   * The renderer half already exists and predates this key: objectui's
+   * `ActionParamDialog` renders it as the dialog's `DialogDescription`
+   * (`objectui packages/app-shell/src/views/ActionParamDialog.tsx:215`, falling
+   * back to the generic `actionDialog.description` string), fed by
+   * `actionDescription(objectName, actionName, action.description)` from two
+   * independent handlers — `useConsoleActionRuntime.tsx:206` and
+   * `RecordDetailView.tsx:586`. The resolver
+   * (`objectui packages/i18n/src/useObjectLabel.ts:463`) reads
+   * `objects.{object}._actions.{action}.description`, falls back to
+   * `globalActions.{action}.description`, then to this literal. Until #7367 no
+   * producer could reach any of it: this shape refused the key.
+   *
+   * **Use it for the question the dialog is asking.** An action that collects
+   * params and ALSO sets `confirmText` shows the user two dialogs for one
+   * decision — the confirm, then the param prompt. The maintainer's 2026-08-10
+   * ruling on #7278 is to carry the confirm question here instead: one
+   * condition, one wording, one dialog, nothing sent until its own Confirm.
+   * `confirmText` stays correct for a param-LESS action, where the confirm IS
+   * the only dialog.
+   *
+   * **Not `ai.description`.** That one is the LLM-facing tool contract
+   * (≥40 chars, required when `ai.exposed`); this one is human-facing dialog
+   * copy and is never sent to a model.
+   */
+  description: I18nLabelSchema.optional().describe('Explanatory line shown under the title in the action\'s param dialog. Carries the confirm question for an action that collects params (one dialog, not two — #7278). Not the LLM-facing `ai.description`.'),
+
   /** Target object this action belongs to (optional, snake_case) */
   objectName: z.string().regex(/^[a-z_][a-z0-9_]*$/).optional().describe('Target object this action belongs to. When set, the action is auto-merged into the object\'s actions array by defineStack().'),
   
@@ -944,6 +973,32 @@ const actionObject = () => strictObject({
    * bare "expected array, received object" an author cannot act on. Sources
    * still carrying the object form are rewritten at load by the
    * `inline-action-api-params-to-body-extra` conversion (ADR-0087 D2).
+   *
+   * **The api prescription is not universal, which #6828 measured and the
+   * maintainer's 2026-08-10 ruling closed.** On a `type:'url'` action the
+   * object form meant a THIRD thing again — objectui's `ActionRunner` read a
+   * non-array `params` as the `${param.X}` interpolation scope for `target`,
+   * and `params.newTab` as a legacy new-tab flag. Sending that author to
+   * `bodyExtra` is a wrong instruction: an api request-body key is not an
+   * interpolation scope (the same asymmetry is why the conversion above guards
+   * on `type === 'api'` — rewriting a url action's object `params` would be
+   * lossy, and ADR-0087 D2 requires losslessness). The ruling **retired** the
+   * url meaning rather than giving it a key: the scope is already expressible
+   * as `target`-string interpolation, and the flag is already {@link openIn}.
+   * So the refusal below prescribes per action type — `bodyExtra` for `api`,
+   * the sanctioned url spellings for `url` — and nothing new enters the
+   * vocabulary. A future authorable interpolation-scope key needs a spec
+   * proposal that demonstrates pull, not a third arm of this one.
+   *
+   * The branch is stated IN THE TEXT rather than selected at runtime because
+   * zod cannot see a sibling from a property-level error map: the map receives
+   * only `{ code, expected, input, inst, path }` for the offending value, and
+   * an object-level `.check()`/`.superRefine()` — which would see `type` — is
+   * skipped once a property has already failed (probed on zod 4.4.3). Reading
+   * `type` here would mean restructuring `ActionSchema` behind a
+   * `z.preprocess`, which erases `z.input<typeof ActionSchema>` (the authoring
+   * type `defineAction` publishes) — a far larger change than the guidance
+   * defect warrants, and one that moves surfaces this issue must not move.
    */
   params: z.array(ActionParamSchema, {
     error: (iss) => (
@@ -951,8 +1006,11 @@ const actionObject = () => strictObject({
         && iss.input !== null
         && typeof iss.input === 'object'
         && !Array.isArray(iss.input)
-        ? "`params` is the parameter DEFINITION array (fields collected from the user before the action runs), not the request payload. "
+        ? "`params` is the parameter DEFINITION array (fields collected from the user before the action runs), not a values map. "
           + "For a `type:'api'` action's static request body — including `{{page.<var>}}` tokens — use `bodyExtra: { … }` instead (#5777). "
+          + "For a `type:'url'` action there is nowhere to move it to, by decision: put static values straight into the `target` string "
+          + "(`${param.X}` interpolates a value collected by the params dialog, `${ctx.X}` one from the action context), and open a new tab with "
+          + "`openIn: 'new-tab'`. The url-side readings of an object `params` — a static `${param.X}` scope, and `params.newTab` — are RETIRED, not renamed (#6828). "
           + 'Expected an array of ActionParam, received an object.'
         : undefined
     ),

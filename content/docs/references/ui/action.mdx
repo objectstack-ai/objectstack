@@ -62,6 +62,7 @@ const result = ActionSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | ✅ | Machine name (lowercase snake_case) |
 | **label** | `string \| Record<string, string>` | ✅ | Display label |
+| **description** | `string \| Record<string, string>` | optional | Explanatory line shown under the title in the action's param dialog. Carries the confirm question for an action that collects params (one dialog, not two — #7278). Not the LLM-facing `ai.description`. |
 | **objectName** | `string` | optional | Target object this action belongs to. When set, the action is auto-merged into the object's actions array by defineStack(). |
 | **icon** | `string` | optional | Icon name |
 | **locations** | `Enum<'list_toolbar' \| 'list_item' \| 'record_header' \| 'record_more' \| 'record_related' \| 'record_section'>[]` | optional | Locations where this action is visible |

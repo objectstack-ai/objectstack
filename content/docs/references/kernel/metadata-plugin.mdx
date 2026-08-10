@@ -209,7 +209,7 @@ const result = MetadataBulkResultSchema.parse(data);
 | **executionPinned** | `boolean` | optional | Transaction rows reference a specific version_hash; history GC is disabled and getByHash() MUST resolve old hashes (ADR-0009) |
 | **loadOrder** | `integer` | optional | Loading priority (lower = earlier) |
 | **domain** | `Enum<'data' \| 'ui' \| 'automation' \| 'system' \| 'security' \| 'ai'>` | ✅ | Protocol domain |
-| **actions** | `{ name: string; label: string \| Record<string, string>; objectName?: string; icon?: string; … }[]` | optional | Declarative type-level actions (e.g. datasource "Test connection"), reusing ActionSchema; merged with plugin-registered actions when emitted |
+| **actions** | `{ name: string; label: string \| Record<string, string>; description?: string \| Record<string, string>; objectName?: string; … }[]` | optional | Declarative type-level actions (e.g. datasource "Test connection"), reusing ActionSchema; merged with plugin-registered actions when emitted |
 
 ### Allowed Values: `MetadataTypeRegistryEntry.type`
 
