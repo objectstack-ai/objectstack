@@ -354,8 +354,19 @@ const lastType = (storeFor: (o: string) => Map<string, Record<string, unknown>>)
  *    incidental: a zero-read guard only guards on a row that HAS references to
  *    read. Measured on PR #7291, hot-path cases run against a reference-free row
  *    stay green under the very regression they exist to catch, because there is
- *    nothing on the row to read. Every zero-read case below therefore runs
- *    against `deal_2`.
+ *    nothing on the row to read.
+ *
+ * Every zero-read case below therefore runs against `deal_2` — with ONE
+ * deliberate exception, written down here rather than left for the next reader
+ * to trip over. `a reference token whose value is EMPTY pays ZERO reads` must
+ * run against `deal_1`, because an empty reference is the thing that case
+ * measures and `deal_2` has none to offer. It is therefore NOT a placement
+ * guard: on a row with nothing to read, EVERY placement pays zero, so it cannot
+ * tell one from another. That is measured rather than reasoned — it was the
+ * single case in this file that stayed GREEN under the mutation moving the read
+ * before `matchMilestone`, the placement the other zero-read cases exist to
+ * reject. It is retained for the empty-value rule alone; the placement is
+ * guarded by its neighbours, all of which run against `deal_2`.
  */
 async function seed(engine: any) {
   await engine.insert('crm_account', { id: 'acc_1', name: 'Acme Corp' });
@@ -631,6 +642,13 @@ describe('[#7290] the milestone read is paid only on the transition, and only fo
     const { engine, reads } = await boot();
     await seed(engine);
 
+    // ⚠️ NOT a placement guard — and deliberately not counted as one. This case
+    // has to use `deal_1`, the reference-free row, because an empty reference is
+    // exactly what it measures; on a row with nothing to read, every candidate
+    // placement pays zero. Measured: this was the ONE case in this file that
+    // stayed GREEN when the read was moved before `matchMilestone` — the
+    // placement its neighbours exist to reject. Retained for the empty-value
+    // rule only. See the note in `seed()` above.
     const delta = await targetReads(reads, () => moveStage(engine, 'deal_1', 'unassigned'));
 
     expect(delta).toEqual(ZERO);
