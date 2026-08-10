@@ -1078,10 +1078,9 @@ function selfTest() {
       const oldMinor = '---\n"@objectstack/spec": minor\n---' + long;
       const newMajor = '---\n"@objectstack/spec": major\n---' + long;
       const { dir, base } = makeRepo({ '.changeset/old.md': oldMinor }, { '.changeset/old.md': null, '.changeset/new.md': newMajor });
-      const raw = git(['diff', '--name-status', base, 'HEAD', '--', '.changeset/*.md'], dir);
       assert(
-        /^R\d/.test(raw.trim()),
-        `control: git must really report this as a rename, or the row below is about an ordinary add — got ${JSON.stringify(raw.trim())}`,
+        renameRow(dir, base, '\\.changeset/old\\.md', '\\.changeset/new\\.md') !== null,
+        `control: git must really pair .changeset/old.md with .changeset/new.md as a rename, or the row below is about an ordinary add — got ${JSON.stringify(git(['diff', '--name-status', base, 'HEAD', '--', '.changeset/*.md'], dir))}`,
       );
       const { introduced } = scan({ cwd: dir, base });
       assert(
