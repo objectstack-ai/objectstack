@@ -205,6 +205,18 @@ function fieldEntries(obj: AnyRec): Array<[string, AnyRec]> {
  * always-valued when it is `required`, carries a `defaultValue`, declares a
  * default option (`options: [{ …, default: true }]` — the select idiom), or is
  * an autonumber the platform populates.
+ *
+ * The select-idiom branch is grounded, not assumed (#7246). It was the only
+ * consumer of `SelectOption.default` anywhere in the repo while the insert path
+ * ignored the key entirely, so it concluded "always valued" about a column that
+ * really did store `null` — a build-breaking verdict resting on a declaration
+ * nothing honoured, and a predicate reading such a field could be silenced by
+ * it. `ObjectQL.applyFieldDefaults` now falls back to the marked option when
+ * the field declares no `defaultValue`, so the premise this branch always
+ * stated is true on the write path. The two sides are kept honest BY
+ * CONSTRUCTION: the engine reads the canonical `default` spelling, without a
+ * `type` test, exactly as this does — so there is no field this calls
+ * always-valued that the engine leaves empty.
  */
 function isNullableField(def: AnyRec): boolean {
   if (def.required === true) return false;
