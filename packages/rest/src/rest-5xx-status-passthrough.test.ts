@@ -64,7 +64,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
-import { mapDataError, RestServer } from './rest-server';
+import { mapDataError, RestServer } from './rest-server.js';
 
 const DATA_LIST = '/api/v1/data/:object';
 
@@ -398,7 +398,7 @@ async function callDataList(rest: any, object: string) {
 
 let errorSpy: ReturnType<typeof vi.spyOn>;
 const loggedText = (needle: string) =>
-    errorSpy.mock.calls.some((call) => JSON.stringify(call.map(String)).includes(needle));
+    errorSpy.mock.calls.some((call: unknown[]) => JSON.stringify(call.map(String)).includes(needle));
 
 beforeEach(() => { errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {}); });
 afterEach(() => { errorSpy.mockRestore(); });
