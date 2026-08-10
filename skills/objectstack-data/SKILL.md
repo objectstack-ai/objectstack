@@ -568,8 +568,8 @@ export const accountExtension = defineObjectExtension({
 - `priority` controls merge order (default `200`; range `0–999`)
 - Extensions can add fields, validations, and indexes — but cannot remove them
 - Do **not** author `ownership: 'extend'` on an object schema — the object-level
-  `ownership` property is the *record-ownership* enum (`'user' | 'org' | 'none'`),
-  unrelated to extensions
+  `ownership` property is the *record-ownership* enum
+  (`'user' | 'business_unit' | 'org' | 'none'`), unrelated to extensions
 
 ---
 
@@ -761,28 +761,41 @@ should be visible to a **platform admin env-wide** but hidden from members —
 e.g. identity tables a plugin writes via its own adapter (`sys_sso_provider`,
 OAuth clients). These hit a non-obvious interaction:
 
-- The default `member_default` ships a **wildcard `tenant_isolation` RLS**
-  (`organization_id == current_user.organization_id`). Any row whose
-  `organization_id` is **null or absent** (common for adapter-written rows that
-  never get the tenant stamp) is **denied** — the list renders empty.
-- A platform admin's `viewAllRecords` superuser bypass is **posture-gated**: it
-  fires **only** for objects marked `access.default: 'private'` **or**
-  `tenancy: { enabled: false }`. On ordinary tenant objects it deliberately does
-  **not** grant cross-tenant visibility — so the admin sees 0 rows too.
+- Reads of a tenant object pass the **Layer 0 tenant wall** (ADR-0095 D1): an
+  `organization_id == <the caller's organization>` filter AND-composed ahead of
+  every business RLS policy. Any row whose `organization_id` is **null or
+  absent** (common for adapter-written rows that never get the tenant stamp) is
+  **denied** — the list renders empty. Single-tenant deployments never hit this;
+  the wall is inert there.
+- The `viewAllRecords` superuser bit is **posture-gated and wall-blind**: it
+  short-circuits **business RLS only**, and only on objects whose posture allows
+  it (`access.default: 'private'`, `tenancy: { enabled: false }`, or a
+  better-auth-managed identity table). It never crosses the Layer 0 wall —
+  crossing takes a *true platform admin* (the superuser bit **and** a
+  platform-exclusive capability: `manage_metadata`, `manage_platform_settings`,
+  `studio.access`, `manage_users`) on one of those same postures. So an org
+  admin holding the superuser bit stays org-scoped, and on an ordinary tenant
+  object nobody crosses — the admin sees 0 rows too.
 
 **Recipe — env-global, admin-only object that admins can fully see:**
 
 ```typescript
-tenancy: { enabled: false }, // env IS the tenant; admin viewAllRecords bypass applies
-requiredPermissions: ['manage_platform_settings'], // object-level gate → members get 403
+tenancy: { enabled: false }, // not a tenant object → Layer 0 contributes nothing
+requiredPermissions: ['manage_platform_settings'], // capability AND-gate → members get 403
 ```
 
-> ⚠️ **Don't use either flag alone.** `tenancy.enabled:false` *by itself* drops
-> the wildcard RLS, and `member_default`'s `'*': allowRead` then **leaks every
-> row to all authenticated users**. `access.default:'private'` *by itself* opts
-> the admin's `'*'` grant out too, so the **admin sees nothing**. The
-> `tenancy.enabled:false` + `requiredPermissions` pair is the correct combo
-> (admin sees all, non-admins 403). Posture model: ADR-0066.
+> ⚠️ **Both keys are load-bearing — neither works alone.**
+> `tenancy: { enabled: false }` *by itself* switches the wall off for **every**
+> caller, and any permission set carrying a wildcard (`'*'`) read grant then
+> reads every row env-wide — the shipped `viewer_readonly` still carries one, as
+> may an app-declared default profile or a customer-authored set. (The
+> `member_default` baseline is **not** one of them: it is explicit-allow and
+> grants only the objects it names.) `requiredPermissions` *by itself* leaves the
+> object a tenant object, so the wall keeps denying the untagged rows and even a
+> platform admin sees nothing. The pair is the correct combo (admin sees all,
+> non-admins 403), and `requiredPermissions` is the half that holds however
+> permissive the caller's grants are — it is an AND-gate checked **before** the
+> CRUD grant. Posture model: ADR-0066; tenant wall: ADR-0095 D1.
 
 ### Cross-skill notes
 

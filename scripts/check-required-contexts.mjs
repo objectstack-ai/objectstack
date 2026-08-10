@@ -188,6 +188,13 @@ export const REQUIRED_CONTEXTS = [
     authorized: '#5617 closing ruling 2026-08-09, second batch',
     carries: 'the live-server datetime conformance axis (#3912/#3942)',
   },
+  {
+    workflow: 'adr-merge-approval.yml',
+    job: 'adr-merge-approval',
+    context: 'ADR maintainer approval',
+    authorized: '#7022 maintainer settings action, confirmed to the devx PM seat 2026-08-10 ~02:3xZ (screenshot of the `main` ruleset)',
+    carries: 'the #6741 ruling that only the maintainer own-account approval may land a docs/adr/** merge (#6942/#6962 landed unapproved while this context sat outside the required set)',
+  },
 ];
 
 /** Repository root, resolved from this file rather than from the cwd. */
@@ -426,6 +433,7 @@ async function selfTest() {
   const sources = {
     'lint.yml': readFileSync(join(root, '.github', 'workflows', 'lint.yml'), 'utf8'),
     'ci.yml': readFileSync(join(root, '.github', 'workflows', 'ci.yml'), 'utf8'),
+    'adr-merge-approval.yml': readFileSync(join(root, '.github', 'workflows', 'adr-merge-approval.yml'), 'utf8'),
   };
 
   /** Judge the real workflows with one file's text replaced by `source`. */
@@ -479,6 +487,20 @@ async function selfTest() {
   assert(
     renamedTemporal.problems.some((p) => p.includes("job 'temporal-conformance'") && p.includes('Temporal Conformance (live PG + MySQL)')),
     'dropping the "(live PG + MySQL)" suffix ⇒ red — the parenthetical is part of the contract, not decoration',
+  );
+
+  // The #7022 addition: a third workflow file, registered for the first time.
+  // Same reverse-verification shape as the ESLint/Build Core renames above —
+  // a pin that has never been exercised for its own entry is exactly the
+  // "registered but nothing checks it" gap this script exists to close.
+  const renamedAdrApproval = fixture('rename ADR maintainer approval', 'adr-merge-approval.yml', (s) =>
+    s.replace('    name: ADR maintainer approval\n', '    name: ADR Merge Approval\n'),
+  );
+  assert(
+    renamedAdrApproval.problems.some(
+      (p) => p.includes("job 'adr-merge-approval'") && p.includes('"ADR Merge Approval"') && p.includes("'ADR maintainer approval'"),
+    ),
+    'renaming adr-merge-approval.yml\'s job ⇒ red, naming the job, the new name and the required context (#7022)',
   );
 
   // ── (2) the job disappearing entirely ─────────────────────────────────────
@@ -565,19 +587,30 @@ async function selfTest() {
     judge({ registry: REQUIRED_CONTEXTS, workflows: new Map() }).problems.some((p) => p.includes('was never read')),
     'a workflow that was never read ⇒ red',
   );
+  // These three generic-scanner assertions deliberately use a fixed two-file
+  // registry rather than the real REQUIRED_CONTEXTS: they exercise
+  // scanWorkflows' file-level handling (missing / no-jobs / unparseable), not
+  // any particular entry, so pinning them to two arbitrary files keeps them
+  // stable as the registry grows (#7022 learned this the hard way — the first
+  // draft used REQUIRED_CONTEXTS directly and broke the moment a third
+  // workflow file was registered, for a reason unrelated to what it tests).
+  const twoFileRegistry = [
+    { workflow: 'lint.yml', job: 'placeholder', context: 'Placeholder Lint' },
+    { workflow: 'ci.yml', job: 'placeholder', context: 'Placeholder CI' },
+  ];
   assert(
-    judge({ registry: REQUIRED_CONTEXTS, workflows: new Map([['lint.yml', { error: 'boom' }], ['ci.yml', { error: 'boom' }]]) }).problems.every((p) => p.includes('boom')),
+    judge({ registry: twoFileRegistry, workflows: new Map([['lint.yml', { error: 'boom' }], ['ci.yml', { error: 'boom' }]]) }).problems.every((p) => p.includes('boom')),
     'an unparseable workflow ⇒ red',
   );
   const empty = mkdtempSync(join(tmpdir(), 'required-contexts-'));
   try {
-    assert((await scanWorkflows(empty)).problems.some((p) => p.includes('does not exist')), 'a missing workflow file ⇒ red, never a pass');
+    assert((await scanWorkflows(empty, twoFileRegistry)).problems.some((p) => p.includes('does not exist')), 'a missing workflow file ⇒ red, never a pass');
     mkdirSync(join(empty, '.github', 'workflows'), { recursive: true });
     writeFileSync(join(empty, '.github', 'workflows', 'lint.yml'), 'name: Lint\non: push\n');
     writeFileSync(join(empty, '.github', 'workflows', 'ci.yml'), 'name: CI\non: push\n');
-    assert((await scanWorkflows(empty)).problems.every((p) => p.includes('no jobs')), 'a workflow with no jobs: map ⇒ red');
+    assert((await scanWorkflows(empty, twoFileRegistry)).problems.every((p) => p.includes('no jobs')), 'a workflow with no jobs: map ⇒ red');
     writeFileSync(join(empty, '.github', 'workflows', 'lint.yml'), 'jobs: [oops\n  - :\n');
-    assert((await scanWorkflows(empty)).problems.some((p) => p.includes('could not be read as YAML')), 'an unparseable workflow ⇒ red');
+    assert((await scanWorkflows(empty, twoFileRegistry)).problems.some((p) => p.includes('could not be read as YAML')), 'an unparseable workflow ⇒ red');
   } finally {
     rmSync(empty, { recursive: true, force: true });
   }

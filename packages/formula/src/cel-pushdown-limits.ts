@@ -59,6 +59,32 @@
  * lint suites pin "the lint verdict IS the consumer's verdict" in both
  * directions — so authoring-time reporting flips with the runtime, by
  * construction, and cannot drift from it.
+ *
+ * ### The third gate is NOT downstream of this switch — and that is fine (#7073)
+ *
+ * "Nothing else needs to move" is the right conclusion but the two-gate list
+ * above is not the whole set. A **third** lint gate reaches the same
+ * `sharingRules[].condition` field: `validateStackExpressions`, which goes
+ * through ADR-0032's shared `validateExpression` → `celEngine.compile`. That
+ * path applies {@link DEFAULT_LIMITS} **unconditionally** and never reads this
+ * switch (measured on #6833: `celPushdownLimitsMode` appears nowhere in
+ * `validate.ts` or `cel-engine.ts`'s compile path), so it is mode-agnostic by
+ * construction rather than by oversight.
+ *
+ * The consequence, stated plainly so the next reader does not "discover" it as
+ * a bug: **during the grace window lint is STRICTER than the runtime.** An
+ * over-budget `condition` is a gating lint ERROR today, while the pushdown path
+ * still compiles it under `rc-grace`. That divergence runs in the tightening
+ * direction — the author is told at authoring time about a source that will be
+ * refused at GA — and it **self-heals at GA**, when the runtime catches up to
+ * the position lint already holds. #6833's measurement graded it benign on
+ * exactly those grounds. Loosening lint to chase the grace window would be a
+ * regression, not a fix: it would restore the silent acceptance #6132 closed.
+ *
+ * So the GA checklist is unchanged. What #7073 corrected on that third gate is
+ * the message's PRESCRIPTION, not its verdict: an over-budget expression used
+ * to be told "predicates are bare CEL", the dialect trailer, which sends the
+ * author to rewrite a dialect that was never wrong.
  */
 
 /** How the pushdown path answers a source that overruns a `DEFAULT_LIMITS` bound. */

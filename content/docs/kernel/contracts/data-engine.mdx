@@ -110,10 +110,10 @@ interface EngineQueryOptions {
   limit?: number;                            // LIMIT
   offset?: number;                           // OFFSET
   top?: number;                              // Alias for limit (OData compat)
-  cursor?: Record<string, unknown>;          // Keyset pagination
-  search?: FullTextSearch;                   // Full-text search
+  search?: string | FullTextSearch;          // Full-text search — the bare query text
+                                             // is canonical (ADR-0061 D1); the object
+                                             // form carries the Tier-2 knobs (#7178)
   expand?: Record<string, QueryAST>;         // Recursive relation loading
-  distinct?: boolean;                        // SELECT DISTINCT
   context?: ExecutionContext;            // Identity, tenant, transaction — any subset
 }
 ```
@@ -122,6 +122,30 @@ interface EngineQueryOptions {
 with defaults applied, is `ExecutionContextParsed`). Supply what you have, the engine reads what it needs. A system read passes
 `{ isSystem: true }`; an automation run with no resolvable identity passes only
 its run id (`{ flowRunId }`), a context that deliberately carries no principal.
+
+#### Removed in protocol 17: `cursor` and `distinct`
+
+Both keys were **removed** from `EngineQueryOptions` in protocol 17 (#4286,
+ADR-0049), alongside the identically-named keys on `Query`. They are not merely
+absent: the schema keeps a tombstone for each, so a query still carrying one is
+**rejected by name** with the migration prose below rather than silently ignored.
+
+- `cursor?: Record<string, unknown>` (keyset pagination) — no driver ever
+  implemented it, so the cursor was accepted and ignored and every page came back
+  identical (a caller looping "until `hasMore` is false" never terminates).
+  `QueryBuilder.cursor()` was removed with it. Express the keyset as an ordinary
+  `where` predicate on your sort key — `where: { created_at: { $gt: last.created_at } }`
+  with the matching `orderBy` — which every driver executes with canonicalised
+  comparands. A first-class cursor, if ever built, will be a response-minted
+  opaque token, not this caller-built record.
+- `distinct?: boolean` (SELECT DISTINCT) — no driver ever rendered it, and the
+  flag's only observable effect was MIS-WIRED: the REST list path treated a
+  distinct query as not countable and silently degraded `total`/`hasMore` to a
+  page-local estimate while still returning duplicate rows. `QueryBuilder.distinct()`
+  was removed with it, and the count suppression is gone (`total` is truthful
+  again). For unique values of one column use the SQL/memory drivers'
+  `distinct(object, field)` door; for unique combinations, `groupBy`; for a
+  deduplicated count, the `count_distinct` aggregation.
 
 ### FilterCondition (where)
 
@@ -267,18 +291,28 @@ interface EngineUpdateOptions {
 
 ### WriteObservabilityOptions
 
-The write methods (`insert` / `update`) additionally accept an **in-process**
-`onFieldsDropped` listener. The engine invokes it when caller-supplied write
-fields are legally stripped from the payload before the driver write — static
-`readonly` fields or a TRUE `readonlyWhen` predicate. The write still succeeds;
-the listener exists so callers that report per-field success (e.g. the flow
-engine's `update_record` step) can surface a warning instead of a silent
-success.
+The write methods (`insert` / `update`) additionally accept two **in-process**
+options that govern what happens when caller-supplied write fields are legally
+stripped from the payload before the driver write: observe the strip
+(`onFieldsDropped`) or refuse the write outright (`strictReadonlyWrites`).
+
+The strips these two options cover are the engine's legal ones:
+
+| Strip | `reason` | Verbs | Writers it skips |
+|:---|:---|:---|:---|
+| Static `readonly: true` (#2948) | `readonly` | `update` | `isSystem` |
+| A TRUE `readonlyWhen` predicate (#3042) | `readonly_when` | `update` | none — every caller, `isSystem` included |
+| Implicitly-readonly runtime-owned type (#5503 — `RUNTIME_OWNED_FIELD_TYPES`, today `autonumber`) | `readonly` | `insert` **and** `update` | `isSystem`, `preserveAudit` (#3493) |
+| Primary-key strip of a payload `id` the update dispatch already ruled is not an identifier (#6437) | `primary_key` | `update` | none |
+
+The two AUTHOR-DECLARED strips are insert-exempt at this seam by design (#3413) —
+see **On `insert`** below.
 
 {/* os:check */}
 ```typescript
 interface WriteObservabilityOptions {
   onFieldsDropped?: (event: DroppedFieldsEvent) => void;
+  strictReadonlyWrites?: boolean;  // refuse instead of stripping. Default: false
 }
 
 interface DroppedFieldsEvent {
@@ -290,12 +324,75 @@ interface DroppedFieldsEvent {
 }
 ```
 
+#### `onFieldsDropped` — quiet and observable
+
+The engine invokes the listener once per strip pass that dropped at least one
+caller-supplied field. **The write still succeeds** and commits without those
+fields; the listener exists so callers that report per-field success (e.g. the
+flow engine's `update_record` step) can surface a warning instead of a silent
+success. Branch on `reason` exhaustively — it is an OPEN vocabulary that grows
+with the write path's legal strips, never a binary test.
+
+#### `strictReadonlyWrites` — loud instead (#5126)
+
+Default `false`. When `true`, a write whose payload WOULD have caller-supplied
+fields stripped **throws before the driver is touched** instead of committing the
+remainder. Nothing is written: not the stripped fields, not the fields that would
+have survived. The strip passes still run — that is how the engine learns WHICH
+fields would go — but their result is discarded.
+
+Its coverage is DERIVED from what `onFieldsDropped` reports, not an enumeration
+frozen at #5126: every strip in the table above is refused, and a new `reason`
+adds a new refusal by construction. Covering only the static arm would leave a
+trusted caller — the very caller this option exists for, one that already passes
+`{ context: { isSystem: true } }` and is therefore exempt from the static strip —
+still losing `readonlyWhen` fields in silence. The flag's NAME is narrower than
+its coverage and stays that way on purpose; the coverage sentence, not the name,
+is the contract.
+
+The refusal is `ReadonlyFieldRejectedError`, code `ERR_READONLY_FIELD_REJECTED`
+(registered in `ERROR_CODE_LEDGER` under `@objectstack/objectql`), carrying the
+FULL list of rejected fields accumulated across every strip pass the operation
+runs — one error naming everything, so a caller fixes its payload once instead of
+one round-trip per field. Catch it by `code`, not `instanceof`, and read `drops`
+for the per-reason breakdown; the code is stable across reasons deliberately, so
+adding a reason never adds an error code.
+
+`onFieldsDropped` does **not** fire on a write this option refuses. The two are
+alternative outputs of one seam, not a sequence: `DroppedFieldsEvent` means
+"fields dropped and the write completed without them", and under strict the write
+does not complete. Quiet-and-observable or loud — pick one per call.
+
+**On `insert`.** The two AUTHOR-DECLARED strips are deliberately insert-exempt at
+this seam (#3413: an in-process create may seed a `readonly: true` field's initial
+value, and `readonlyWhen` cannot lock anything on a create at all), so an insert
+refusal can only ever be about a runtime-owned value — a caller-supplied record
+number. With the option `true` that insert throws (`operation: 'insert'`) and
+nothing is written; without it the value is stripped, the write completes, and
+`onFieldsDropped` fires with `reason: 'readonly'`. The engine-level writers exempt
+from that strip — and therefore never refused — are the two the error message
+itself names: `isSystem`, and the `preserveAudit` historical import reinstating
+legacy record numbers (#3493).
+
 <Callout type="warn">
-`onFieldsDropped` is a **TS-contract-level, in-process-only** channel. It is
-deliberately not part of the serializable Zod options schemas: a function is
-unrepresentable in JSON Schema and cannot cross the RPC (Virtual Data Engine)
-boundary, so remote callers never receive these events. A listener that throws
-never breaks the write — the engine catches and logs.
+**Layering — this is the engine seam.** The exemption pair above is *this*
+in-process seam's. The DataProtocol ingress enforces its own author-declared
+`readonly` policy on create (#3043), where `preserveAudit` is UPDATE-only (#6640)
+and runtime-owned types are left to the engine strip — see `FieldSchema.readonly`.
+Nothing on this page widens or narrows that ingress policy.
+</Callout>
+
+<Callout type="warn">
+`WriteObservabilityOptions` is a **TS-contract-level, in-process-only** bag —
+both members. It is deliberately not part of the serializable Zod options schemas:
+a function is unrepresentable in JSON Schema and cannot cross the RPC (Virtual
+Data Engine) boundary, so remote callers never receive these events; and putting
+`strictReadonlyWrites` in the serializable bag would let any client toggle
+write-refusal on a security-adjacent path (#5126 ruling). A remote caller can set
+neither and gets NEITHER behaviour: its write is stripped and committed, silently
+from its side — a 200 whose read-only columns kept their stored values. Widening
+strict to the wire is a SEPARATE decision. A listener that throws never breaks the
+write — the engine catches and logs.
 </Callout>
 
 ### delete

@@ -32,8 +32,13 @@
  *  2. probe D — under an exclusion face, an object nobody enumerated is covered
  *     BY DEFAULT, which is the whole reason this shape was chosen over
  *     enumerating the complement;
- *  3. the two refused shapes (`''`/`['']`, `'*'`), following #4281's ruling on
- *     empty hook targets, plus the `[]` that is deliberately accepted;
+ *  3. the two refused EXCLUSION shapes (`''`/`['']`, `'*'`), following #4281's
+ *     ruling on empty hook targets, plus the `[]` that is deliberately accepted
+ *     on that face;
+ *  3b. [#6573] the refused ALLOW shapes — `''`, `[]`, `['']` — and the scope
+ *     whose two faces cancel out. #4281 closed these on the metadata path only;
+ *     `registerHook` is the code path it never reached. Refused at the door,
+ *     with `hookMatchesObject`'s reading left deliberately unchanged;
  *  4. **the property**: the `hasHooksFor` gate is never TIGHTER than the
  *     `triggerHooks` dispatch. Both now call one `hookMatchesObject`, so this is
  *     structurally true today — the test is what keeps it true, and it asserts
@@ -211,6 +216,158 @@ describe('[#5928] refused exclusion faces (#4281 / ADR-0078 lineage)', () => {
   });
 });
 
+/*
+ * ── [#6573] The allow face gets #4281's door too ────────────────────────────
+ *
+ * #4281 ("an empty target is not *no* target") was closed in two places, both
+ * on the METADATA path: `HookSchema.object`'s refine in `packages/spec`, and
+ * `normalizeObjects` in `hook-binder.ts`. `engine.registerHook` — the CODE path
+ * — went through neither, so all three spellings still reached the matcher:
+ *
+ *   `object: ''`   falsy ⇒ allow half skipped ⇒ registers GLOBAL   (#4281's
+ *                  headline failure mode, on the path it never covered)
+ *   `object: []`   truthy, admits nothing ⇒ can never fire          (ADR-0078)
+ *   `object: ['']` same, via a name nothing is called               (ADR-0078)
+ *
+ * And #5928's exclusion face added a fourth, reached by arithmetic rather than
+ * by one bad name: an allow face fully cancelled by the exclusion face. #5928's
+ * ruling named only `''` / `['']` / `'*'`-in-excludes, so this fell outside its
+ * letter and was deliberately left.
+ *
+ * All four are refused HERE, at the door — never by changing what
+ * `hookMatchesObject` reads. That distinction is the card: teaching the matcher
+ * that `''` is an unmatchable name would turn a hook firing on every object
+ * into one firing on none, silently. Same defect, opposite direction.
+ */
+describe('[#6573] refused allow faces (#4281 on the code path)', () => {
+  it("refuses `''` — falsy, so it would have registered a GLOBAL hook", () => {
+    const engine = makeEngine();
+    expect(() => engine.registerHook(EVENT, () => {}, { object: '' }))
+      .toThrow(/empty `object` target/);
+  });
+
+  it("refuses `[]` and `['']` — an allow face that admits nothing can never fire", () => {
+    const engine = makeEngine();
+    expect(() => engine.registerHook(EVENT, () => {}, { object: [] }))
+      .toThrow(/empty `object` target/);
+    expect(() => engine.registerHook(EVENT, () => {}, { object: [''] }))
+      .toThrow(/empty `object` target/);
+    // One blank member poisons an otherwise valid list, as on the exclude face.
+    expect(() => engine.registerHook(EVENT, () => {}, { object: ['account', '  '] }))
+      .toThrow(/empty `object` target/);
+  });
+
+  it('leaves every legitimate allow face registrable', () => {
+    const engine = makeEngine();
+    expect(() => engine.registerHook(EVENT, () => {}, {})).not.toThrow();
+    expect(() => engine.registerHook(EVENT, () => {}, { object: '*' })).not.toThrow();
+    expect(() => engine.registerHook(EVENT, () => {}, { object: 'account' })).not.toThrow();
+    expect(() => engine.registerHook(EVENT, () => {}, { object: ['account', 'contact'] }))
+      .not.toThrow();
+    // `undefined` is "no target" and stays the spelling of a global hook — the
+    // refusal is about a target that was WRITTEN and names nothing.
+    expect(() => engine.registerHook(EVENT, () => {}, { object: undefined })).not.toThrow();
+  });
+
+  it('registers nothing when it refuses', async () => {
+    const engine = makeEngine();
+    expect(() => register(engine, 'blank', { object: '' })).toThrow();
+
+    // The refusal exists to prevent an inert (here: accidentally global) entry;
+    // pushing it anyway would deliver exactly that entry.
+    expect(await dispatch(engine, 'account')).toEqual([]);
+    expect(gateOpen(engine, 'account')).toBe(false);
+  });
+
+  it("names the fix in the message, and reuses #4281's wording", () => {
+    const engine = makeEngine();
+    const message = (() => {
+      try { engine.registerHook(EVENT, () => {}, { object: '' }); return ''; }
+      catch (e) { return (e as Error).message; }
+    })();
+    expect(message).toContain('An empty target is not "no target"');
+    expect(message).toContain("object: 'account'");
+    expect(message).toContain("object: '*'");
+    expect(message).toContain('ADR-0078');
+  });
+});
+
+describe('[#6573] refused scopes whose two faces cancel out', () => {
+  it('refuses a single name excluded by name', () => {
+    const engine = makeEngine();
+    expect(() => engine.registerHook(EVENT, () => {}, {
+      object: 'account',
+      excludeObjects: 'account',
+    })).toThrow(/excludes every object its `object` target admits/);
+  });
+
+  it('refuses a list whose every member is excluded', () => {
+    const engine = makeEngine();
+    expect(() => engine.registerHook(EVENT, () => {}, {
+      object: ['account', 'contact'],
+      excludeObjects: ['account', 'contact'],
+    })).toThrow(/can never fire/);
+    // A wider exclusion list still cancels the allow face entirely.
+    expect(() => engine.registerHook(EVENT, () => {}, {
+      object: ['account'],
+      excludeObjects: ['account', 'contact', 'lead'],
+    })).toThrow(/ADR-0078/);
+  });
+
+  it('accepts a PARTIAL cancellation — that is what the exclusion face is for', async () => {
+    const engine = makeEngine();
+    register(engine, 'pair', { object: ['account', 'contact'], excludeObjects: ['contact'] });
+
+    expect(await dispatch(engine, 'account')).toEqual(['pair']);
+    expect(await dispatch(engine, 'contact')).toEqual([]);
+  });
+
+  it('leaves an OPEN allow face alone — a finite list cannot empty it', () => {
+    const engine = makeEngine();
+    // `'*'` and an absent `object` admit objects that do not exist yet (probe D
+    // above), so no enumerated exclusion list can prove the entry inert. The one
+    // exclusion that would — `'*'` — is already refused by #5928.
+    expect(() => engine.registerHook(EVENT, () => {}, {
+      object: '*',
+      excludeObjects: ['account', 'contact'],
+    })).not.toThrow();
+    expect(() => engine.registerHook(EVENT, () => {}, {
+      excludeObjects: ['account', 'contact'],
+    })).not.toThrow();
+  });
+
+  it('does not fire on a non-overlapping exclusion', () => {
+    const engine = makeEngine();
+    expect(() => engine.registerHook(EVENT, () => {}, {
+      object: 'account',
+      excludeObjects: 'lead',
+    })).not.toThrow();
+  });
+
+  it('registers nothing when it refuses', async () => {
+    const engine = makeEngine();
+    expect(() => register(engine, 'dead', {
+      object: 'account',
+      excludeObjects: 'account',
+    })).toThrow();
+
+    expect(await dispatch(engine, 'account')).toEqual([]);
+    expect(gateOpen(engine, 'account')).toBe(false);
+  });
+
+  it('reports both faces in the message so the overlap is visible', () => {
+    const engine = makeEngine();
+    const message = (() => {
+      try {
+        engine.registerHook(EVENT, () => {}, { object: 'account', excludeObjects: 'account' });
+        return '';
+      } catch (e) { return (e as Error).message; }
+    })();
+    expect(message).toContain('["account"]');
+    expect(message).toContain('ADR-0078');
+  });
+});
+
 describe('[#5928] registration log reports the exclusion face', () => {
   it("carries `excludeObjects` in the 'Registered hook' debug record", () => {
     const logger = makeLogger();
@@ -255,7 +412,10 @@ describe('[#5928] property: hasHooksFor is never tighter than triggerHooks', () 
     { object: '*', excludeObjects: 'account' },
     { object: '*', excludeObjects: ['account', 'sys_job'] },
     { object: ['account', 'contact'], excludeObjects: 'contact' },
-    { object: ['account', 'contact'], excludeObjects: ['account', 'contact'] },
+    // `{ object: ['account','contact'], excludeObjects: ['account','contact'] }`
+    // used to sit here. #6573 refuses a fully-cancelled scope at registration,
+    // so it can no longer be registered at all — and a scope that cannot exist
+    // cannot violate the gate/dispatch property. Its refusal is pinned below.
     { object: 'account', excludeObjects: 'lead' },
     { excludeObjects: [] },
   ];
@@ -337,18 +497,16 @@ describe('[#5928] hookMatchesObject — the one shared rule', () => {
     expect(hookMatchesObject({ object: [] }, 'account')).toBe(false);
   });
 
-  it('preserves the pre-existing `object: \'\'` reading unchanged (out of scope)', async () => {
-    // Both replaced copies tested `object` for TRUTHINESS, so `''` registers a
-    // GLOBAL hook — #4281's "blank intent becomes the broadest blast radius",
-    // surviving on the code path that ruling did not cover (it closed the
-    // authorable schema and the binder). Flipping it inside this PR would
-    // silently convert a fires-on-everything hook into a fires-on-nothing one.
-    // Pinned as UNCHANGED, not as correct; filed separately.
+  it("keeps the truthiness read of `object: ''` — #6573 closed the door, not the matcher", () => {
+    // #5928 pinned this reading as preserved-not-endorsed and filed #6573.
+    // #6573's ruling: refuse `''` at REGISTRATION, and leave this read alone —
+    // flipping it would silently convert a fires-on-everything hook into a
+    // fires-on-nothing one, the same defect pointing the other way. So the
+    // matcher still answers "global" for a hand-built entry...
     expect(hookMatchesObject({ object: '' }, 'account')).toBe(true);
-
+    // ...and no live entry can carry `''`, because registration refuses it.
+    // (The refusal itself is pinned in the #6573 block below.)
     const engine = makeEngine();
-    register(engine, 'blank', { object: '' });
-    expect(await dispatch(engine, 'account')).toEqual(['blank']);
-    expect(gateOpen(engine, 'account')).toBe(true);
+    expect(() => register(engine, 'blank', { object: '' })).toThrow();
   });
 });

@@ -3,9 +3,14 @@
 import { SqlDriver } from './sql-driver.js';
 
 export { SqlDriver };
+// The absent-file open decision (#6743). Exported as a VALUE because the
+// service layer's native→wasm step-down resolves the same answer for its
+// fallback rung — one judgement, two call sites, no second `existsSync`.
+export { resolveSqliteAbsentFileTarget } from './sql-driver.js';
 export type {
   SqlDriverConfig,
   SqliteJournalMode,
+  SqliteAbsentFileMode,
   IntrospectedSchema,
   IntrospectedTable,
   IntrospectedColumn,

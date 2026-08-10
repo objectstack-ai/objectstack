@@ -2,13 +2,22 @@
 // check-agent-model-declared — asserts that every agent definition under
 // .claude/agents/ declares a `model:` in its frontmatter (#6803).
 //
-// WHY THIS EXISTS. The Agent tool resolves a subagent's model in three steps: an
-// explicit `model` argument on the dispatch call → the agent definition's
-// frontmatter → **inherit from the parent session**. When the first two are absent
-// the third always applies, silently. That makes "what model does this role run
-// on" a property of whoever happened to dispatch it, at whatever moment their own
-// session was on, rather than a property of the role — and it changes with no
-// signal, mid-term, invisibly.
+// WHY THIS EXISTS. Claude Code resolves a subagent's model in four steps (verified
+// 2026-08-09 against the subagent documentation, "Claude Code resolves the
+// subagent's model in this order"): the `CLAUDE_CODE_SUBAGENT_MODEL` environment
+// variable, when set → an explicit `model` argument on the dispatch call → the
+// agent definition's frontmatter → **inherit from the parent session**. When the
+// first three are absent the last always applies, silently. That makes "what
+// model does this role run on" a property of whoever happened to dispatch it, at
+// whatever moment their own session was on, rather than a property of the role —
+// and it changes with no signal, mid-term, invisibly. (`CLAUDE_CODE_SUBAGENT_MODEL`
+// outranks every other step, including this gate's own pin — see
+// `.claude/agents/os-dev.md` for the full order and both adjacent traps.)
+//
+// A second, smaller nuance in that same order: a value blocked by the
+// organization's `availableModels` allowlist does NOT fall back to the frontmatter
+// pin below — it falls back to the INHERITED model, i.e. straight into the
+// silent-inheritance failure mode this gate exists to catch.
 //
 // That is measured, not theoretical, and it fails in a shape worth naming:
 //

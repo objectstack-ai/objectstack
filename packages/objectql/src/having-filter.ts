@@ -40,6 +40,10 @@
 //    driver-memory / driver-mongodb still answer the old way only because
 //    #5499 freezes them; the divergence is against a frozen face, not against
 //    the ruling.
+//
+// [#7158] A THIRD divergence has been REMOVED rather than added: this face had
+// no comparand-shape gate, which is what the five sibling faces refuse an
+// unevaluable `$icontains` comparand with. See {@link icontainsComparandError}.
 
 import type { FilterCondition } from '@objectstack/spec/data';
 // [#5702] The retired operators and the prescription a refusal prints. HAVING is
@@ -51,6 +55,10 @@ import { RETIRED_FILTER_OPERATORS } from '@objectstack/spec/data';
 // of one vocabulary, and it reads the fold from the spec for the same reason it
 // reads the retirement prescriptions from there: one rule, one definition.
 import { asciiCaseInsensitiveContains } from '@objectstack/spec/data';
+// [#7047] The ADR-0112 envelope this face's refusals used to omit. Shared with
+// `filter-comparand-shape.ts` rather than re-declared here — see the note on
+// {@link invalidFilterError} and on {@link unknownOperator} below.
+import { invalidFilterError } from './filter-comparand-shape.js';
 
 const LOGICAL_OPERATORS = ['$and', '$or', '$not'] as const;
 
@@ -72,6 +80,38 @@ const CONDITION_OPERATORS = [
   '$contains', '$notContains', '$startsWith', '$endsWith', '$icontains',
 ] as const;
 
+/**
+ * The refusal this face raises for an operator it will not evaluate — retired
+ * (`$regex`, `$options`) or simply unknown (`$nand`, `$median`).
+ *
+ * ## [#7047] BOTH returns carry the ADR-0112 envelope now
+ *
+ * They were bare `new Error(...)`. The refusal was happening and its message was
+ * already right — it printed `RETIRED_FILTER_OPERATORS[op].why` verbatim, like
+ * the four driver faces — but `code` and `status` were `undefined`, so `rest`
+ * served it through the unclassified-fault branch as a 500-shaped body for what
+ * is a 400-class AUTHOR mistake. Measured across all five refusal faces by
+ * EXECUTION rather than grep (#6993), this face was the only disagreement:
+ *
+ * | face | `code` | `status` |
+ * |:--|:--|:--|
+ * | driver-sql, driver-sqlite-wasm, driver-turso (both transports) | `INVALID_FILTER` | 400 |
+ * | driver-memory (`filter-refusal.ts`), driver-mongodb | `INVALID_FILTER` | 400 |
+ * | **objectql `having`** (here) | **undefined** | **undefined** |
+ *
+ * That is the half of #5324 the refusal itself does not fix, and the half
+ * `FilterTextRejectionCase.code` exists to pin: a suite that only asserts THREW
+ * stays green while the envelope is missing (#6142/#6050), which is exactly how
+ * this survived the retirement PR that wrote the messages.
+ *
+ * Both branches, deliberately. Enveloping only the retired path would leave
+ * `{ $nand: [...] }` and `{ k: { $median: 3 } }` arriving 500-shaped — the same
+ * defect, one operator name away, and the more likely of the two to be typed.
+ *
+ * The code is `INVALID_FILTER` because this joins the contract the other four
+ * faces already speak; it is not a new one. A caller swapping HAVING for a
+ * driver-side `where` must not have to catch two shapes for one mistake.
+ */
 function unknownOperator(
   op: string,
   where: 'logical' | 'condition',
@@ -90,7 +130,7 @@ function unknownOperator(
         + `${alsoRetired.map((key) => `'${key}'`).join(', ')} — one '${retired.to}' replaces the `
         + `whole shape, so this is ONE mistake with ONE fix, not one per key.`
       : '';
-    return new Error(
+    return invalidFilterError(
       `Filter operator '${op}' in \`having\` is RETIRED and is no longer evaluated.${replacement} `
       + `${retired.why}${also}`,
     );
@@ -98,11 +138,56 @@ function unknownOperator(
   const supported = where === 'logical'
     ? `${LOGICAL_OPERATORS.join(', ')} (or a column condition)`
     : CONDITION_OPERATORS.join(', ');
-  return new Error(
+  return invalidFilterError(
     `Unsupported operator '${op}' in \`having\`. HAVING filters the aggregated rows `
     + `(aggregation aliases + groupBy projections) and supports: ${supported}. `
     + `An unknown operator is refused rather than ignored — ignoring it would silently `
     + `return unfiltered aggregates (#4286, ADR-0078).`,
+  );
+}
+
+/**
+ * [#7158] `$icontains` received a comparand that is not a non-empty string.
+ *
+ * ## Two rejections, one constructor
+ *
+ * Word for word `driver-memory`'s `icontainsComparandError` (`filter-refusal.ts`)
+ * and `driver-sql`'s twin of it — deliberately, because they are ONE mistake at
+ * ONE position and #5240's rule (one condition keeps one wording) applies across
+ * packages, not only within one:
+ *
+ * - **non-string** — `StringOperatorSchema` declares `$icontains: z.string()`,
+ *   so coercing `42` to `"42"` would answer a query nobody wrote. Evaluated
+ *   here, it answered `false` — "no rows" — which is the silent-wrong-answer
+ *   shape #4706 retired `$regex` over.
+ * - **empty string** — every string contains the empty substring, so the
+ *   predicate constrains nothing. A predicate that constrains nothing does not
+ *   narrow a query, it WIDENS it (#3948), and on an RLS read scope that is a
+ *   permission bypass rather than a degraded filter. Evaluated here, it matched
+ *   ALL NINE `FILTER_TEXT_ROWS` — the author wrote a constraint and got the
+ *   unfiltered aggregate back, with no error.
+ *
+ * ## Why this face is the last to get the gate
+ *
+ * HAVING is the SIXTH JS evaluation face of one filter vocabulary (#6520 gave it
+ * the shared ASCII fold) and was the only one with no comparand gate at all,
+ * because it is the one face no conformance table drove until #7047 wrote
+ * `having-filter-text-conformance.test.ts`. That file pinned the two exclusions
+ * as measurements so the gap was red-on-change; this is the change.
+ *
+ * The `at ${path}` position is spelled from the `having` root (`having.total`,
+ * `having.$and[0].name`) where the driver faces spell it from `where` — the
+ * clause is the difference, and a caller reading a 400 needs to know which of
+ * the two they mis-wrote. Everything after the position is verbatim.
+ */
+function icontainsComparandError(field: string, value: unknown, path: string): Error {
+  const shown = typeof value === 'string' ? `""` : JSON.stringify(value) ?? String(value);
+  return invalidFilterError(
+    `Operator "$icontains" on field "${field}" at ${path} requires a NON-EMPTY string comparand, `
+    + `received ${shown}. "$icontains" is a case-insensitive LITERAL substring search, so its `
+    + `comparand is the text to look for — an empty one matches every row (a predicate that `
+    + `constrains nothing), and a non-string one would have to be coerced into text this query `
+    + `never asked for.`,
   );
 }
 
@@ -137,34 +222,42 @@ export function applyHaving(rows: any[], having: FilterCondition | null | undefi
   return rows.filter((row) => matchesHaving(row, having));
 }
 
-/** Evaluate one aggregated row against a HAVING FilterCondition. */
-export function matchesHaving(row: Record<string, any>, cond: any): boolean {
+/**
+ * Evaluate one aggregated row against a HAVING FilterCondition.
+ *
+ * [#7158] `path` is the position of `cond` inside the clause the caller wrote —
+ * `having`, `having.$and[0]`, `having.$not` — carried down so a comparand
+ * refusal can NAME where the offending key sits. It defaults, so this stays the
+ * two-argument function every existing caller (and `applyHaving` below) uses.
+ */
+export function matchesHaving(row: Record<string, any>, cond: any, path = 'having'): boolean {
   if (!cond || typeof cond !== 'object') return true;
   for (const [key, value] of Object.entries(cond)) {
+    const here = `${path}.${key}`;
     if (key === '$and') {
       const branches = Array.isArray(value) ? value : [value];
-      if (!branches.every((c) => matchesHaving(row, c))) return false;
+      if (!branches.every((c, i) => matchesHaving(row, c, `${here}[${i}]`))) return false;
       continue;
     }
     if (key === '$or') {
       const branches = Array.isArray(value) ? value : [value];
-      if (!branches.some((c) => matchesHaving(row, c))) return false;
+      if (!branches.some((c, i) => matchesHaving(row, c, `${here}[${i}]`))) return false;
       continue;
     }
     if (key === '$not') {
-      if (matchesHaving(row, value)) return false;
+      if (matchesHaving(row, value, here)) return false;
       continue;
     }
     if (key.startsWith('$')) throw unknownOperator(key, 'logical');
     // Aggregated rows are flat (aliases + group projections) — direct access,
     // no dotted-path resolution.
-    if (!checkCondition(row?.[key], value)) return false;
+    if (!checkCondition(row?.[key], value, key, here)) return false;
   }
   return true;
 }
 
 /** One column's condition — implicit equality or an operator object. */
-function checkCondition(value: any, condition: any): boolean {
+function checkCondition(value: any, condition: any, field: string, path: string): boolean {
   // Implicit equality (primitives, null, Date, array exact-match) — loose `==`
   // to mirror the Filter Protocol's memory evaluation.
   if (
@@ -192,6 +285,15 @@ function checkCondition(value: any, condition: any): boolean {
     // file refuses unknown operators to avoid. It now falls to `default:` and is
     // refused with the spec's prescription.
     const target = (condition as Record<string, any>)[op];
+    // [#7158] The comparand-shape gate, ABOVE the no-value exit on purpose. The
+    // shape of a comparand is a property of the FILTER, not of the row being
+    // judged: below the exit, `{ missing_column: { $icontains: '' } }` would be
+    // answered `false` for every row that lacks the column and refused only for
+    // the rows that carry it — one filter, two verdicts, decided by the data.
+    // See {@link icontainsComparandError}.
+    if (op === '$icontains' && (typeof target !== 'string' || target === '')) {
+      throw icontainsComparandError(field, target, `${path}.${op}`);
+    }
     if (value === undefined && !NO_VALUE_ANSWERED_BY_OPERATOR.has(op)) return false;
     switch (op) {
       // eslint-disable-next-line eqeqeq
@@ -234,8 +336,18 @@ function checkCondition(value: any, condition: any): boolean {
       // contain a substring — and the same fold every other JS face uses, from
       // the spec, so an aggregate filtered HERE and the same predicate run as a
       // `where` on any driver select the same rows.
+      //
+      // [#7158] The `typeof target !== 'string'` limb this arm used to carry is
+      // GONE — not relaxed, HOISTED. It was the whole of this face's opinion
+      // about a bad comparand, and its opinion was `return false`: "no rows",
+      // silently, for a comparand the declared type does not permit. The gate
+      // above now refuses that input before the arm is reached, so the limb was
+      // dead code that read as a check. What survives here is the guard on the
+      // COLUMN VALUE, which is a different judgement and stays: a value that is
+      // not text cannot contain a substring, so it does not match — the same
+      // answer `$contains` gives, about the row rather than about the filter.
       case '$icontains':
-        if (typeof value !== 'string' || typeof target !== 'string'
+        if (typeof value !== 'string'
           || !asciiCaseInsensitiveContains(value, target)) return false;
         break;
       // [#5702] The `$regex` arm is GONE. It built `new RegExp(target, $options)`

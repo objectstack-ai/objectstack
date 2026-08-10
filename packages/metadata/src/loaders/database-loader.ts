@@ -22,7 +22,7 @@ import type {
 import { SysMetadataObject, SysMetadataHistoryObject } from '@objectstack/metadata-core';
 import { applyConversionsToStoredItem } from '@objectstack/spec';
 import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
-import type { IDataDriver, IDataEngine } from '@objectstack/spec/contracts';
+import type { IDataDriver, IDataEngine, DriverQuery } from '@objectstack/spec/contracts';
 import type { MetadataLoader } from './loader-interface.js';
 import { calculateChecksum } from '../utils/metadata-history-utils.js';
 import { LRUCache } from '../utils/lru-cache.js';
@@ -225,25 +225,43 @@ export class DatabaseLoader implements MetadataLoader {
   // Internal CRUD helpers (driver vs engine)
   // ==========================================
 
-  private async _find(table: string, query: Record<string, unknown>): Promise<Record<string, unknown>[]> {
+  // NOTE (#6231, closed out by #7178): BOTH branches below now take `query`
+  // unchanged and uncast. `DriverQuery` is `Omit<QueryAST, 'object'>`, so the
+  // object name travels as argument one only — that was always enough for the
+  // driver branch. The ENGINE branch used to carry `as any`, for one reason:
+  // `EngineQueryOptionsSchema.search` admitted only the structured
+  // `FullTextSearchSchema`, while `QueryAST.search` (hence `DriverQuery`) also
+  // admits the bare query string that ADR-0061 D1 calls the canonical Tier-1
+  // spelling and that the engine actually serves, so `DriverQuery` was not
+  // assignable to `EngineQueryOptionsParsed`. #7178 aligned the two schemas;
+  // the casts are now genuinely vestigial and are gone, which restores real
+  // `where`/`orderBy`/`fields` checking on the metadata main read path — this
+  // schema is not `.strict()`, so an unknown key here is SILENTLY DROPPED
+  // (`check:query-options-erasure`'s own rationale) and the erased type was
+  // the only thing standing between a typo and that silence.
+  //
+  // If a future edit makes one of these stop compiling, the honest fix is to
+  // reconcile the two schemas again — not to reinstate the cast.
+
+  private async _find(table: string, query: DriverQuery): Promise<Record<string, unknown>[]> {
     if (this.engine) {
-      return this.engine.find(table, query as any);
+      return this.engine.find(table, query);
     }
-    return this.driver!.find(table, { object: table, ...query } as any);
+    return this.driver!.find(table, query);
   }
 
-  private async _findOne(table: string, query: Record<string, unknown>): Promise<Record<string, unknown> | null> {
+  private async _findOne(table: string, query: DriverQuery): Promise<Record<string, unknown> | null> {
     if (this.engine) {
-      return this.engine.findOne(table, query as any);
+      return this.engine.findOne(table, query);
     }
-    return this.driver!.findOne(table, { object: table, ...query } as any);
+    return this.driver!.findOne(table, query);
   }
 
-  private async _count(table: string, query: Record<string, unknown>): Promise<number> {
+  private async _count(table: string, query: DriverQuery): Promise<number> {
     if (this.engine) {
-      return this.engine.count(table, query as any);
+      return this.engine.count(table, query);
     }
-    return this.driver!.count(table, { object: table, ...query } as any);
+    return this.driver!.count(table, query);
   }
 
   private async _create(table: string, data: Record<string, unknown>): Promise<Record<string, unknown>> {

@@ -255,6 +255,21 @@ ObjectSchema.create({ /* ... */ external: { remoteName: 'orders', writable: true
 
 With either gate off, insert/update/delete on the federated object is rejected.
 
+<Callout type="warn">
+**This gate is federation-only — it does nothing on a managed datasource.**
+`allowWrites` answers *who owns this external database*, not *is this connection
+read-only*. You cannot even declare it on a local database — the parse rejects
+an `external` block whose `schemaMode` is `managed` — and
+`ObjectQLEngine.assertWriteAllowed` returns early for `managed` (or an absent
+`schemaMode`) before it reads the flag at all.
+
+A managed datasource has **no** platform read-only gate, deliberately: read-only
+for a database ObjectStack owns is a database account privilege (`GRANT SELECT`).
+See [Read-only: grant it at the database, not in metadata](/docs/data-modeling/drivers#read-only-grant-it-at-the-database-not-in-metadata)
+for why an application-layer flag is the wrong boundary
+([#4584](https://github.com/objectstack-ai/objectstack/issues/4584)).
+</Callout>
+
 ## 6. Analytics over external objects
 
 Dashboards and reports over a federated object aggregate against the **correct**
@@ -272,7 +287,9 @@ default allows all connects (subject to the gating above).
 
 ## See also
 
-- [Database Drivers](/docs/data-modeling/drivers) — managed multi-datasource routing.
+- [Database Drivers](/docs/data-modeling/drivers) — managed multi-datasource routing,
+  [read-only via database privileges](/docs/data-modeling/drivers#read-only-grant-it-at-the-database-not-in-metadata),
+  and [why the platform does not route read replicas](/docs/data-modeling/drivers#read-replicas-the-platform-does-not-route).
 - [Datasource reference](/docs/references/data/datasource) — every `defineDatasource` field.
 - The `examples/app-showcase` `showcase_external` datasource — a runnable end-to-end demo.
 - ADR-0015 (federation spec) and ADR-0062 (external-datasource runtime).

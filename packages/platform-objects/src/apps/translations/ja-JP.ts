@@ -68,6 +68,7 @@ export const jaJP: TranslationData = {
         nav_api_keys: { label: 'API キー' },
         nav_connect_agent: { label: 'エージェントを接続' },
 
+        nav_approvals_inbox: { label: '承認センター' },
         nav_approval_requests: { label: 'リクエスト' },
         nav_approval_actions: { label: 'アクション履歴' },
         nav_approval_delegations: { label: '委任 (不在時)' },

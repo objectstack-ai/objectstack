@@ -2,7 +2,7 @@
   "name": "@objectstack/plugin-reports",
   "version": "17.0.0-rc.5",
   "license": "Apache-2.0",
-  "description": "Saved reports + scheduled email digests for ObjectStack — sys_saved_report + sys_report_schedule + IReportService.",
+  "description": "Saved reports + scheduled email digests for ObjectStack \u2014 sys_saved_report + sys_report_schedule + IReportService.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
@@ -24,6 +24,8 @@
     "croner": "^10.0.1"
   },
   "devDependencies": {
+    "@objectstack/driver-sql": "workspace:*",
+    "@objectstack/objectql": "workspace:*",
     "@types/node": "^26.1.2",
     "typescript": "^6.0.3",
     "vitest": "^4.1.10"

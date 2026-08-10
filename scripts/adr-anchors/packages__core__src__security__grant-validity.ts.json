@@ -1,0 +1,7 @@
+{
+  "file": "packages/core/src/security/grant-validity.ts",
+  "adrs": [
+    "ADR-0091"
+  ],
+  "invariant": "A grant row outside its validity window must not resolve, and correctness lives at RESOLUTION time — never in a cleanup job (ADR-0049: no unenforced security properties). Half-open `[from, until)` in UTC; absent bounds are unbounded; a present-but-unparseable bound disables the grant, fail closed."
+}

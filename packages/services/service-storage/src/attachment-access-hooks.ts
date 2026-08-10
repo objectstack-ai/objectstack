@@ -1,5 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
+import type { ExecutionContext } from '@objectstack/spec/kernel';
+
 import type {
   AttachmentLifecycleEngine,
   AttachmentLifecycleLogger,
@@ -66,18 +68,89 @@ function asIdList(id: unknown): Array<string | number> | null {
   return null;
 }
 
+/**
+ * Keys plugin-security's middleware STAMPS onto the operation context, resolved
+ * for the object of the CURRENT operation — `sys_attachment` here.
+ *
+ * They are middleware-private vocabulary, not fields of `ExecutionContext`, and
+ * they are all read as WIDENING inputs by whoever consumes them: the ADR-0057
+ * D1 access DEPTH the sharing owner-match expands to (`__readScope` /
+ * `__writeScope`, plus the ADR-0090 D10 delegator halves
+ * `__delegatorReadScope` / `__delegatorWriteScope` — `sc.__readScope = …`,
+ * `security-plugin.ts`), and the engine's internal privilege markers on the
+ * same channel (`__expandRead` waives the object-level CRUD check for a lookup
+ * expansion, `__referentialFieldClear` the referential-clear write).
+ *
+ * Every gate in this module asks about the PARENT record's object, never about
+ * `sys_attachment`, so carrying any of these across is one object's widening
+ * applied to another object's question — the exact stale-scope leak
+ * `resolveWriteScopeForSharing` was extracted to prevent ("a stale value can
+ * never leak in through a spread", `security-plugin.ts`). They are therefore
+ * dropped by PREFIX rather than by a name list: the `__` convention is what
+ * marks a key as belonging to the operation in flight, and a list would go
+ * stale the day the middleware stamps a fifth one.
+ */
+const OPERATION_PRIVATE_KEY_PREFIX = '__';
+
+/**
+ * The caller's execution envelope, minus the operation-private keys above.
+ *
+ * [#7145] A FRESH object every time, so a callee that stamps its own
+ * `__writeScope` onto what it receives (which is exactly what plugin-security
+ * does before it calls the sharing service) can never write back into the
+ * operation context this hook was handed.
+ */
+function withoutOperationPrivateKeys(exec: Record<string, unknown>): ExecutionContext {
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(exec)) {
+    if (key.startsWith(OPERATION_PRIVATE_KEY_PREFIX)) continue;
+    out[key] = value;
+  }
+  return out as ExecutionContext;
+}
+
 /** The caller's ExecutionContext rides on the operation options — the
- * session snapshot lacks `permissions`, which sharing bypasses need. */
-function callerContext(ctx: any): Record<string, unknown> {
+ * session snapshot lacks `permissions`, which sharing bypasses need.
+ *
+ * [#7145] Forwarded as the full envelope, which is what `ISharingService`
+ * declares for every parameter this value is handed to and what the #6206
+ * ruling requires of every caller: they "MUST NOT rebuild a subset of it"
+ * (#6523). The five-field projection this replaced (`userId` / `tenantId` /
+ * `positions` / `permissions` / `isSystem`) was doing two jobs at once, and
+ * only one of them was correct — same defect, same kit, one package over from
+ * `comment-access-hooks.ts` (#7141 / PR #7143), which this mirrors:
+ *
+ *  - dropping the middleware-private keys — CORRECT, and preserved above by
+ *    {@link withoutOperationPrivateKeys}: `return exec;` would hand
+ *    `sys_attachment`'s access depth to the parent object's owner-match;
+ *  - dropping the PRINCIPAL fields — the defect. Two of them decide the
+ *    verdict the gate then trusts:
+ *    * `onBehalfOf` — `ISecurityService.hasWriteBypass`, the `modifyAllRecords`
+ *      probe `SharingService.canEdit` consults last, is documented to fail
+ *      CLOSED on a delegated context and implements that by reading exactly
+ *      `context?.onBehalfOf?.userId` (`security-plugin.ts`). Stripped, that
+ *      guard could never fire here, and a `/mcp` OAuth agent principal (which
+ *      `resolve-execution-context.ts` builds WITH the delegation link) reached
+ *      the bypass probe looking like an ordinary direct call.
+ *    * `principalKind` — `resolvePermissionSetsForContext` keys the ADR-0090
+ *      D10 rule "an agent's grants are EXACTLY its scope-derived ceiling" on
+ *      `principalKind === 'agent'`; stripped, the additive human baseline was
+ *      appended to an agent's ceiling on this path, so the sets the bypass
+ *      probe evaluated were a SUPERSET of what the user consented to.
+ *
+ *    `systemPermissions`, `accessible_org_ids`, `posture`, `audience` and
+ *    `rlsMembership` were dropped by the same projection; they are forwarded
+ *    now for the same reason — the envelope is the contract's unit.
+ *
+ * Note what deliberately did NOT change: no access DEPTH is synthesised for the
+ * parent object. Absent depth leaves the sharing owner-match at its narrowest
+ * (`own`) — the safe direction, and byte-for-byte the behaviour the projection
+ * produced. Resolving the parent's own depth would WIDEN this gate and is a
+ * separate decision, tracked as #7144. */
+function callerContext(ctx: any): ExecutionContext {
   const exec = ctx?.input?.options?.context;
   if (exec && typeof exec === 'object') {
-    return {
-      userId: exec.userId,
-      tenantId: exec.tenantId,
-      positions: exec.positions,
-      permissions: exec.permissions,
-      isSystem: exec.isSystem,
-    };
+    return withoutOperationPrivateKeys(exec as Record<string, unknown>);
   }
   const s = ctx?.session ?? {};
   return { userId: s.userId, tenantId: s.tenantId, positions: s.positions };
@@ -340,6 +413,18 @@ async function computeParentVisibilityFilter(
 
   // 2. Per parent_object, the visible id subset via the CALLER's context —
   //    the parent object's own RLS/OWD/sharing applies.
+  //
+  //    [#7145] The caller's envelope, minus the operation-private keys: this
+  //    probe reads a DIFFERENT object than the one the middleware resolved its
+  //    depth for, and `__readScope` / `__expandRead` are widening inputs that
+  //    would arrive attached to the wrong question (the security middleware
+  //    re-stamps the depth for THIS object when it resolves any set, so the
+  //    only thing dropping them can do is leave the owner-match at its
+  //    narrowest — the safe direction). Same rule as `callerContext` above,
+  //    and the same half of #7141 / PR #7143 the comment kit already carries.
+  const callerEnvelope = withoutOperationPrivateKeys(
+    (ctx.context ?? {}) as Record<string, unknown>,
+  );
   const clauses: Array<Record<string, unknown>> = [];
   for (const [parentObject, idSet] of byObject) {
     const ids = [...idSet];
@@ -349,7 +434,7 @@ async function computeParentVisibilityFilter(
         where: { id: { $in: ids } },
         fields: ['id'],
         limit: ids.length,
-        context: { ...ctx.context },
+        context: { ...callerEnvelope },
       });
       visible = rows.map((r) => String(r.id)).filter(Boolean);
     } catch {

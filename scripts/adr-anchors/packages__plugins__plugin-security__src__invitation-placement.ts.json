@@ -1,0 +1,7 @@
+{
+  "file": "packages/plugins/plugin-security/src/invitation-placement.ts",
+  "adrs": [
+    "ADR-0105"
+  ],
+  "invariant": "Placement intent is authorized at ISSUANCE by dry-running `DelegatedAdminGate` against the very `sys_user_position` rows acceptance would write — an invitation can never place what its issuer could not have assigned directly. Acceptance runs under system context, so skipping the issuance check ('acceptance re-checks anyway') would be an escalation hole, not a simplification."
+}

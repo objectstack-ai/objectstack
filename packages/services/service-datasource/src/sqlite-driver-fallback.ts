@@ -33,6 +33,8 @@
  * hoists it into one place shared by every sqlite construction site.
  */
 
+import type { SqliteAbsentFileMode } from '@objectstack/driver-sql';
+
 /** Which engine the resolver ultimately produced. */
 export type SqliteFallbackEngine = 'better-sqlite3' | 'sqlite-wasm' | 'memory';
 
@@ -56,6 +58,13 @@ export interface ResolveSqliteDriverOptions {
   autoMigrate?: 'off' | 'safe';
   /** Forwarded to the SQL drivers (external schema mode, ADR-0015). */
   schemaMode?: string;
+  /**
+   * What to do when {@link filename} names a file that does not exist (#6743).
+   * Forwarded to the native driver, and applied to the wasm rung too — a
+   * step-down must not create the file the caller asked us not to create.
+   * Defaults to `'create'`, i.e. SQLite's own behaviour.
+   */
+  sqliteAbsentFile?: SqliteAbsentFileMode;
   /**
    * Warning sink for the step-down messages. Defaults to `console.warn`.
    * `serve.ts` passes a `chalk.yellow` wrapper so the banner stays consistent.
@@ -113,7 +122,7 @@ export async function resolveSqliteDriver(
       }
     });
 
-  const { SqlDriver } = await import('@objectstack/driver-sql');
+  const { SqlDriver, resolveSqliteAbsentFileTarget } = await import('@objectstack/driver-sql');
 
   const buildNative = () =>
     new SqlDriver({
@@ -122,7 +131,17 @@ export async function resolveSqliteDriver(
       useNullAsDefault: true,
       ...(opts.autoMigrate ? { autoMigrate: opts.autoMigrate } : {}),
       ...(opts.schemaMode ? { schemaMode: opts.schemaMode } : {}),
+      ...(opts.sqliteAbsentFile ? { sqliteAbsentFile: opts.sqliteAbsentFile } : {}),
     } as any);
+
+  /**
+   * The filename the wasm rung must open (#6743). `SqliteWasmDriver` has no
+   * `sqliteAbsentFile` of its own — it is constructed straight from a filename
+   * — so the step-down resolves the driver's OWN judgement here rather than
+   * re-deciding it, and a fresh project that falls through to wasm still
+   * leaves no file behind.
+   */
+  const wasmFilename = resolveSqliteAbsentFileTarget(filename, opts.sqliteAbsentFile).filename;
 
   // Production: never silently swap engines. Construct the native driver and
   // hand it back UNPROBED — exactly the historical behavior. A native load
@@ -165,11 +184,11 @@ export async function resolveSqliteDriver(
   try {
     const { SqliteWasmDriver } = await import('@objectstack/driver-sqlite-wasm');
     wasmDriver = new SqliteWasmDriver({
-      filename,
+      filename: wasmFilename,
       // Match the existing construction sites: ephemeral DBs flush on
       // disconnect; a persistent file flushes on every write so AI-authored
       // data survives an unclean dev-server kill.
-      persist: isEphemeralFilename(filename) ? 'on-disconnect' : 'on-write',
+      persist: isEphemeralFilename(wasmFilename) ? 'on-disconnect' : 'on-write',
     } as any);
     await wasmDriver.connect();
     wasmOk = true;

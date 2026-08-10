@@ -335,8 +335,10 @@ const CASE_SETS = [
 //      Each site now prints `RETIRED_FILTER_OPERATORS[op].why` verbatim, so the
 //      five refusals say one thing; driver-mongodb's `default:` arm was
 //      additionally routed through its own `INVALID_FILTER` helper, which is the
-//      `code` half the case-set requires and the last place a bare `new Error`
-//      escaped the ADR-0112 envelope.
+//      `code` half the case-set requires and the last bare `new Error` in the
+//      DRIVER family (this gate's own scope, `packages/drivers/*`). The sixth
+//      refusal face — objectql's `having` (`having-filter.ts`) — was outside
+//      that scope and kept its bare `new Error` until #7047.
 //
 // ## AGGREGATION_CASES: two DEBT rows on arrival, and they are the same pair
 //

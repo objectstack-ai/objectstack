@@ -53,13 +53,18 @@
  * normalized tier, and none was affected by the retirement.
  *
  * One advisory rule (`warning` — nothing is broken, a mis-rooted predicate just
- * never matches) plus TWO **gating** rules (`error` — the predicate can never
+ * never matches) plus THREE **gating** rules (`error` — the predicate can never
  * evaluate at all):
  *
  * - `visibility-predicate-syntax` (**error**, #6253) — a predicate the canonical
- *   CEL front end refuses outright (`country === "USA"` — `===` is not CEL). See
- *   the §Syntax block below for why this surface has to say it and who owns the
- *   verdict.
+ *   CEL front end refuses as not being CEL (`country === "USA"` — `===` is not
+ *   CEL). See the §Syntax block below for why this surface has to say it and who
+ *   owns the verdict.
+ * - `visibility-predicate-over-budget` (**error**, #7217) — a predicate the same
+ *   front end refuses for its SIZE: flawless bare CEL that overruns a
+ *   `DEFAULT_LIMITS` parse bound (`maxAstNodes` 256, `maxDepth` 32, …). Same
+ *   verdict, same severity, different EDIT — see §Syntax for why that is worth
+ *   its own id.
  * - `visibility-bare-identifier` (**error**, #6128 / #5149 requirement 3) — a
  *   predicate referencing a top-level identifier that no binding root can
  *   resolve (`status == 'active'` instead of `record.status == 'active'`). See
@@ -134,10 +139,34 @@
  * `compile()` would silently overturn it from the syntax branch, widening an
  * `error`-level gate from "does not parse" to "does not type-check" on a surface
  * whose predicates are overwhelmingly `dyn`. The ruling says syntax; the parse
- * verdict is exactly syntax. `parseCelToAst` also refuses a `DEFAULT_LIMITS`
- * overrun, which is a bounds fault rather than a syntax one; it is reported here
- * too, quoting the front end's own words, exactly as ADR-0032 already reports it
- * under the same "invalid CEL predicate" heading.
+ * verdict is exactly syntax.
+ *
+ * ### The refusal is one verdict and TWO edits (#7217)
+ *
+ * The canonical front end also refuses a source that overruns a
+ * `DEFAULT_LIMITS` bound — valid CEL, merely too big — and `parseCelToAst`
+ * returns the same `null` for it as for `===`. That collapse is deliberate on
+ * the producer's side and right for a caller that only wants an AST; it is wrong
+ * for a caller whose job is to REPORT, and until #7217 this gate was the caller
+ * paying for it: an 80-clause conjunction was announced as "not valid CEL" and
+ * handed the dialect prescription ("write `==` not `===`, `&&` not `and` …"),
+ * which is advice that cannot succeed on a source already spelled in bare CEL.
+ * An author who follows the last sentence they were given — an LLM author above
+ * all — rewrites operators that were never wrong and returns with the same
+ * over-budget predicate.
+ *
+ * So the two classes are separated **in the explanation, never in the verdict**.
+ * The red/green boundary is still exactly what the canonical front end accepts:
+ * {@link celRefusal} asks `parseCelToAstWithReason`, which `parseCelToAst` is
+ * literally implemented as (same env, same limits, reason discarded), so no
+ * source changes colour. Identical inputs are refused before and after; one
+ * class of them is told the truth about why, under its own id
+ * (`visibility-predicate-over-budget`) for the reason the RLS gate split
+ * `rls-predicate-over-budget` off `rls-predicate-unparseable` in #6778 /
+ * PR #6831: the consequence is identical, the FIX is not, and `--json` consumers
+ * and allowlists key on the id. #7073 / PR #7209 made the same correction at
+ * ADR-0032's shared producer, which this gate deliberately does not go through
+ * (that is the paragraph above) — hence the same defect had to be fixed here too.
  *
  * ## Bare identifiers — the gap between two gates that both wave it through
  *
@@ -204,10 +233,12 @@
  *   returns `null` there, so the declaredness check has no AST to reason about
  *   and this rule gives no BARE-IDENTIFIER verdict on it. That is a division of
  *   labour, not silence: since #6253 the same source is reported by
- *   `visibility-predicate-syntax` (§Syntax above), and the two are mutually
- *   exclusive by construction — a predicate that parses cannot be a syntax
- *   fault, and one that does not parse yields no identifiers to judge. A single
- *   broken predicate therefore produces exactly one finding, never two.
+ *   `visibility-predicate-syntax` — or, since #7217, by
+ *   `visibility-predicate-over-budget` when the refusal was a size fault — and
+ *   the rules are mutually exclusive by construction: a predicate that parses
+ *   cannot be a refusal, and one that does not parse yields no identifiers to
+ *   judge. A single broken predicate therefore produces exactly one finding,
+ *   never two.
  * - **Nested composite / repeater sub-fields** (`fields[].fields[]`,
  *   `view.zod.ts:1477`). The traversal stops at a section's direct fields. A
  *   sub-field of a repeater row is evaluated against a binding this rule cannot
@@ -224,15 +255,29 @@
  *   build error — pinned by a test so it reads as a decision.
  */
 
-import { collectCelRootIdentifiers, firstUndeclaredReference, parseCelToAst } from '@objectstack/formula';
-import type { CelAstNode } from '@objectstack/formula';
+import {
+  collectCelRootIdentifiers,
+  firstUndeclaredReference,
+  parseCelToAst,
+  parseCelToAstWithReason,
+} from '@objectstack/formula';
+import type { CelAstNode, CelBoundsOverrun } from '@objectstack/formula';
 
+import { collectionEntries } from './collection-entries.js';
 import { walkPageComponents } from './page-walk.js';
 import { formViewSites } from './view-walk.js';
 
 export const VISIBILITY_ROOT_MISLAYERED = 'visibility-root-mislayered';
 export const VISIBILITY_BARE_IDENTIFIER = 'visibility-bare-identifier';
 export const VISIBILITY_PREDICATE_SYNTAX = 'visibility-predicate-syntax';
+/**
+ * Valid CEL that overruns a `DEFAULT_LIMITS` parse bound (`maxAstNodes` 256,
+ * `maxDepth` 32, `maxListElements` 64, …) — #7217. A separate id from
+ * {@link VISIBILITY_PREDICATE_SYNTAX} for the reason `rls-predicate-over-budget`
+ * is a separate id from `rls-predicate-unparseable` (#6778 / PR #6831): the
+ * consequence is identical, the FIX is not, and `--json` consumers key on the id.
+ */
+export const VISIBILITY_PREDICATE_OVER_BUDGET = 'visibility-predicate-over-budget';
 
 export type VisibilitySeverity = 'error' | 'warning';
 
@@ -252,8 +297,9 @@ export interface VisibilityOptions {
 export interface VisibilityFinding {
   /**
    * `warning` for the ADR-0089 D3b advisory (`visibility-root-mislayered`);
-   * `error` for the two rules that gate — `visibility-predicate-syntax` and
-   * `visibility-bare-identifier` (see module note).
+   * `error` for the three rules that gate — `visibility-predicate-syntax`,
+   * `visibility-predicate-over-budget` and `visibility-bare-identifier` (see
+   * module note).
    */
   severity: VisibilitySeverity;
   /** Diagnostic rule id, e.g. `visibility-root-mislayered`. */
@@ -278,32 +324,6 @@ type AnyRec = Record<string, unknown>;
  */
 const CANONICAL = 'visibleWhen';
 
-/**
- * Every record in a collection authored either as an array or as a name-keyed
- * map, each with its config PATH — `pages[2]` for the array shape,
- * `pages.my_page` for the map. Findings on this surface are consumed as edit
- * targets (`os lint --json`, Studio's finding renderer), so a map-shaped
- * collection must not report a synthetic index nobody can look up. The map
- * shape also contributes the entry's KEY as its `name`, which is how an
- * unnamed-but-keyed view still locates itself in a message.
- */
-function collectionEntries(v: unknown, base: string): Array<{ rec: AnyRec; path: string }> {
-  if (Array.isArray(v)) {
-    const out: Array<{ rec: AnyRec; path: string }> = [];
-    for (let i = 0; i < v.length; i++) {
-      const rec = v[i];
-      if (rec && typeof rec === 'object' && !Array.isArray(rec)) out.push({ rec: rec as AnyRec, path: `${base}[${i}]` });
-    }
-    return out;
-  }
-  if (v && typeof v === 'object') {
-    return Object.entries(v as AnyRec)
-      .filter(([, def]) => !!def && typeof def === 'object' && !Array.isArray(def))
-      .map(([name, def]) => ({ rec: { name, ...(def as AnyRec) }, path: `${base}.${name}` }));
-  }
-  return [];
-}
-
 /** Extract the CEL source from a predicate value (string, or `{ source }` envelope). */
 function predicateSource(v: unknown): string | undefined {
   if (typeof v === 'string') return v;
@@ -321,7 +341,8 @@ function usesRoot(source: string, root: string): boolean {
   return new RegExp(`(^|[^.\\w$])${root}\\.\\w`).test(source);
 }
 
-// ── `visibility-predicate-syntax` (#6253) ───────────────────────────
+// ── `visibility-predicate-syntax` (#6253) /
+//    `visibility-predicate-over-budget` (#7217) ──────────────────────
 
 /**
  * `source` with every string literal blanked out — same length, so nothing else
@@ -378,11 +399,25 @@ const NON_CEL_SPELLINGS: ReadonlyArray<{
 
 /** What the canonical front end refused, and the corrective wording for it. */
 interface CelSyntaxFault {
+  kind: 'syntax';
   /** The front end's own one-line diagnostic, quoted rather than paraphrased. */
   detail: string;
   /** The recognised non-CEL spelling, when the source contains one. */
   token: { wrote: string; cel: string; example: string } | null;
 }
+
+/** Valid CEL the front end refused only for being too big (#7217). */
+interface CelBoundsFault {
+  kind: 'bounds';
+  /** WHICH bound, its platform value, and the front end's own summary line. */
+  overrun: CelBoundsOverrun;
+}
+
+/**
+ * The two classes of refusal this file reports, kept apart because the EDIT
+ * they call for is different — which is the whole of #7217.
+ */
+type CelRefusal = CelSyntaxFault | CelBoundsFault;
 
 /** The predicate as it appears in a message — whitespace flattened, long sources elided. */
 function quoteSource(source: string): string {
@@ -397,28 +432,73 @@ function quoteSource(source: string): string {
  * this function neither parses with an environment of its own nor reaches for
  * `celEngine.compile` / `validateExpression`, which would widen the gate from
  * "does not parse" to "does not type-check".
+ *
+ * ## Why `parseCelToAstWithReason` is NOT that widening (#7217)
+ *
+ * The verdict is still `parseCelToAst`'s, by construction and not by
+ * convention: `parseCelToAst` IS `parseCelToAstWithReason` with the reason
+ * thrown away (`cel-engine.ts`: `const parsed = parseCelToAstWithReason(source);
+ * return parsed.ok ? parsed.ast : null;`). Identical env, identical limits,
+ * identical accept/reject set — so swapping the entrance moves no source across
+ * the red/green boundary, which is exactly the property the paragraph above is
+ * protecting and exactly what `compile()` would have broken. What the sister
+ * entrance adds is the one bit `null` cannot carry: WHICH refusal it was.
+ *
+ * That bit matters here because `parseCelToAst` collapses "this is not CEL" and
+ * "this is CEL, and too big" into one `null` (documented as deliberate on the
+ * producer's side, and right for a caller that only needs an AST). A reporter is
+ * the caller it is wrong for: until #7217 an 80-clause conjunction — flawless
+ * bare CEL, merely past `maxAstNodes` — was announced as "not valid CEL" and
+ * prescribed the dialect, i.e. told the author to change the one thing that was
+ * never wrong. An author who obeys the last sentence they were handed (an LLM
+ * author above all) rewrites the operators and comes back with the same
+ * over-budget predicate. Same defect family as #7073 at the producer and
+ * #6778 / PR #6831 on the RLS side.
  */
-function celSyntaxFault(source: string): CelSyntaxFault | null {
-  // A blank predicate is not a syntax fault. `parseCelToAst` returns `null` for
-  // an empty or whitespace-only source too, so without this guard the rule would
-  // report `visibleWhen: '   '` — which is "no predicate", exactly what the
-  // author meant, and what `validateExpression` itself short-circuits on.
+function celRefusal(source: string): CelRefusal | null {
+  // A blank predicate is not a fault at all. The front end answers `empty` for a
+  // whitespace-only source, and without this the rule would report
+  // `visibleWhen: '   '` — which is "no predicate", exactly what the author
+  // meant, and what `validateExpression` itself short-circuits on. Kept as an
+  // explicit guard as well as a handled `kind`, so the intent is readable at
+  // both ends.
   if (!source.trim()) return null;
-  // The verdict, from the one entry that owns it (#4812).
-  if (parseCelToAst(source) !== null) return null;
-  // The MESSAGE, from the same package's parse-only classifier — `compile()`
-  // would answer a wider question, and re-throwing the parse ourselves would be
-  // the private front end #4812 removed.
-  const parsed = collectCelRootIdentifiers(source);
-  const detail = parsed.ok
+  // The verdict, from the one entry that owns it (#4812) — reached through the
+  // reason-carrying sister entrance, which answers the SAME parse question.
+  const parsed = parseCelToAstWithReason(source);
+  if (parsed.ok || parsed.kind === 'empty') return null;
+  // Valid CEL, over budget. The bound and its value come from the front end's
+  // own structured overrun, never from re-reading its prose (#6223).
+  if (parsed.kind === 'bounds') return { kind: 'bounds', overrun: parsed.overrun };
+  // A genuine syntax fault: unchanged from #6253, deliberately. The MESSAGE
+  // comes from the same package's parse-only classifier — `compile()` would
+  // answer a wider question, and re-throwing the parse ourselves would be the
+  // private front end #4812 removed.
+  const identifiers = collectCelRootIdentifiers(source);
+  const detail = identifiers.ok
     // Unreachable while both entries parse the same source through the same env
     // under the same limits. Kept as a truthful fallback rather than a `!`
     // assertion, so a future divergence degrades to a vaguer message instead of
     // throwing inside a linter.
     ? 'the expression could not be parsed'
-    : parsed.error.split('\n')[0].trim();
+    : identifiers.error.split('\n')[0].trim();
   const scannable = withoutStringLiterals(source);
-  return { detail, token: NON_CEL_SPELLINGS.find((s) => s.re.test(scannable)) ?? null };
+  return { kind: 'syntax', detail, token: NON_CEL_SPELLINGS.find((s) => s.re.test(scannable)) ?? null };
+}
+
+/**
+ * The exceeded bound named in prose, with the platform's value for it.
+ *
+ * `limit` is `null` only for a bounds fault `@objectstack/formula` cannot NAME
+ * (unreachable on cel-js 8.0.0, where `Parser#limitExceeded` always phrases it
+ * `Exceeded <key> (<n>)`). Degrade honestly there rather than guess a key, which
+ * would send the author to shorten the wrong axis — the same choice the RLS gate
+ * makes on the same field.
+ */
+function boundName(overrun: CelBoundsOverrun): string {
+  return overrun.limit && overrun.limitValue !== null
+    ? `the \`${overrun.limit}\` budget (platform limit ${overrun.limitValue})`
+    : "one of the platform's parse budgets";
 }
 
 // ── `visibility-bare-identifier` (#6128) ────────────────────────────
@@ -590,22 +670,51 @@ function checkElement(
   // at the severity every other predicate surface already applies to a syntax
   // fault (ADR-0032 via `validateExpression`); this surface is the one that had
   // no such gate, so a `===` shipped clean and then failed OPEN in the console.
-  const syntaxFault = source ? celSyntaxFault(source) : null;
-  if (source && syntaxFault) {
+  //
+  // #7217 splits the refusal in two — same verdict, two different edits. A
+  // predicate that is flawless CEL and merely over a `DEFAULT_LIMITS` bound gets
+  // a SIZE finding under its own id; only a genuine dialect/syntax fault keeps
+  // the wording (and the id) #6253 shipped.
+  const refusal = source ? celRefusal(source) : null;
+  if (source && refusal?.kind === 'bounds') {
+    const bound = boundName(refusal.overrun);
+    const root = CANONICAL_ROOT_BY_LAYER[layer];
+    findings.push({
+      severity: 'error',
+      rule: VISIBILITY_PREDICATE_OVER_BUDGET,
+      where,
+      path,
+      message:
+        `visibility predicate is syntactically valid CEL but overruns ${bound} ` +
+        `(${refusal.overrun.summary}) (predicate: \`${quoteSource(source)}\`). The canonical front ` +
+        `end refuses it, so it can never evaluate, and the console falls OPEN: the element renders ` +
+        `unconditionally and looks exactly like one with no predicate at all (#5149).`,
+      hint:
+        `There is no syntax or dialect error to correct here — this is a SIZE fault, not a dialect ` +
+        `mistake, so re-spelling the predicate will not fix it. Make it smaller, or move the work ` +
+        `off the predicate: (1) collapse a long \`${root}.f == 'a' || ${root}.f == 'b' || …\` chain ` +
+        `into a single \`${root}.f in ['a', 'b', …]\`, which is far fewer AST nodes ` +
+        `(\`maxListElements\` is 64, so a very large set needs option 2); (2) precompute the heavy ` +
+        `part into a formula/rollup field on the object and test that one field instead. Logic ` +
+        `genuinely this large is not element visibility — compute it once on the record rather ` +
+        `than re-deriving it in every predicate that needs it.`,
+    });
+  }
+  if (source && refusal?.kind === 'syntax') {
     findings.push({
       severity: 'error',
       rule: VISIBILITY_PREDICATE_SYNTAX,
       where,
       path,
       message:
-        `visibility predicate is not valid CEL — ${syntaxFault.detail} ` +
+        `visibility predicate is not valid CEL — ${refusal.detail} ` +
         `(predicate: \`${quoteSource(source)}\`). A predicate that does not parse can never ` +
         `evaluate, and the console falls OPEN: the element renders unconditionally and looks ` +
         `exactly like one with no predicate at all (#5149).`,
-      hint: syntaxFault.token
-        ? `\`${syntaxFault.token.wrote}\` is not a CEL operator — CEL spells it ` +
-          `\`${syntaxFault.token.cel}\`. Replace \`${syntaxFault.token.wrote}\` with ` +
-          `\`${syntaxFault.token.cel}\`, e.g. \`${syntaxFault.token.example}\`.`
+      hint: refusal.token
+        ? `\`${refusal.token.wrote}\` is not a CEL operator — CEL spells it ` +
+          `\`${refusal.token.cel}\`. Replace \`${refusal.token.wrote}\` with ` +
+          `\`${refusal.token.cel}\`, e.g. \`${refusal.token.example}\`.`
         : `Visibility predicates are bare CEL, e.g. \`record.status == 'open'\`. Spellings from ` +
           `other languages do not parse: write \`==\` (not \`===\`), \`!=\` (not \`!==\` or \`<>\`), ` +
           `\`&&\` (not \`and\`), \`||\` (not \`or\`), \`!\` (not \`not\`).`,
@@ -618,12 +727,13 @@ function checkElement(
   // layer, under neither a total nor a sparse record (#4953) — so there is no
   // reading of the metadata under which it was going to work.
   //
-  // Skipped when (2) fired: the declaredness check needs an AST, and a source
-  // that does not parse has none. Written as an explicit `else` rather than
-  // relying on `firstBareIdentifier`'s own null-AST guard, so the one-finding
-  // -per-broken-predicate property is visible at the call site instead of
-  // depending on a callee's internals.
-  if (source && !syntaxFault) {
+  // Skipped when (2) fired — in EITHER of its arms (#7217): the declaredness
+  // check needs an AST, and a source the front end refused has none, whether it
+  // was refused for its dialect or for its size. Written as an explicit `else`
+  // rather than relying on `firstBareIdentifier`'s own null-AST guard, so the
+  // one-finding-per-broken-predicate property is visible at the call site
+  // instead of depending on a callee's internals.
+  if (source && !refusal) {
     const bare = firstBareIdentifier(source);
     if (bare) {
       const root = CANONICAL_ROOT_BY_LAYER[layer];
@@ -664,9 +774,9 @@ function isFieldObject(entry: unknown): entry is AnyRec {
  * error elsewhere would have stopped the parse. See `AuthoringRuleInputTier`.)
  *
  * Returns findings (empty = clean). `visibility-root-mislayered` is advisory
- * (`warning`); `visibility-predicate-syntax` (#6253) and
- * `visibility-bare-identifier` (#6128) are `error` and the caller is expected to
- * fail the build on them.
+ * (`warning`); `visibility-predicate-syntax` (#6253),
+ * `visibility-predicate-over-budget` (#7217) and `visibility-bare-identifier`
+ * (#6128) are `error` and the caller is expected to fail the build on them.
  *
  * The binding-root check is layer-directional (ADR-0089 D3): pass
  * `opts.layer = 'metadata'` when linting a `*.form.ts` metadata-editing form (so a

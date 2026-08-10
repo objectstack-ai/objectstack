@@ -100,6 +100,23 @@ Three optional target fields refine where the entry lands. They are **mutually e
   filters: { owner_id: '{current_user_id}', status: 'open' }, icon: 'user-check' }
 ```
 
+A fourth optional field composes with any **list** landing (`viewName`,
+`filters`, or the default view) instead of choosing one:
+
+- `runAction` — deep-link auto-run ("navigate = run action"): after the entry
+  lands on the object's list surface, the shell runs this declared action once
+  (e.g. the create dialog is already open on arrival). The name must resolve to
+  an action defined in the stack — `defineStack` and lint reject a reference to
+  nothing — and it cannot be combined with `recordId` (a record detail has no
+  list toolbar to auto-run). The slot is declared contract-first: until the
+  shell consumes it, lint's liveness advisory tells you the auto-run does not
+  fire from this declaration yet.
+
+```typescript
+{ id: 'nav_envs', type: 'object', label: 'Environments', objectName: 'sys_environment',
+  runAction: 'create_environment', icon: 'server' }
+```
+
 ### Dashboard Navigation
 
 Links to a dashboard:

@@ -1808,7 +1808,7 @@ export class HttpDispatcher {
         // ordering is not overhead to optimize away: moving the domain-registry
         // resolve (further down) above these lines would un-gate every migrated
         // domain at once and hand handlers a context whose per-request kernel was
-        // never resolved (#5155). Anchored in scripts/adr-anchors.json.
+        // never resolved (#5155). Anchored in scripts/adr-anchors/.
         await this.resolveRequestScope(context, cleanPath);
 
         // ── ADR-0069 Authentication-policy gate ──

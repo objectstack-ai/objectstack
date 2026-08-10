@@ -9,8 +9,14 @@ import type {
   ReportFormat,
   SaveReportInput,
   ScheduleReportInput,
-  SharingExecutionContext,
 } from '@objectstack/spec/contracts';
+// [#7135] The full `resolveAuthzContext` envelope — what `IReportService`
+// declares for every one of these context parameters since #6523 (the #6206
+// ruling: enforcement adjudicates on the whole envelope, never a per-site
+// subset). A scheduled run resolves a REAL owner context through
+// `OwnerContextResolver`; naming the retired six-field shape here made this
+// file's own type say it could not see what that resolver returns.
+import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { Cron } from 'croner';
 
 /**
@@ -168,6 +174,51 @@ function renderSubject(template: string | undefined, vars: Record<string, string
   return tpl.replace(/\{\{\s*(\w+)\s*\}\}/g, (_m, k) => vars[String(k)] ?? '');
 }
 
+// ─── Caller envelope ──────────────────────────────────────────────
+
+/**
+ * Keys plugin-security's middleware STAMPS onto the operation context, resolved
+ * for the object of the operation in flight.
+ *
+ * They are middleware-private vocabulary, not fields of `ExecutionContext`, and
+ * every one of them is read as a WIDENING input: the ADR-0057 D1 access DEPTH
+ * the sharing owner-match expands to (`__readScope` / `__writeScope`, plus the
+ * ADR-0090 D10 delegator halves, stamped in place by `security-plugin.ts` —
+ * `sc.__readScope = …`), and the engine's internal privilege markers on the
+ * same channel (`__expandRead` waives the object-level CRUD check for a lookup
+ * expansion, `__referentialFieldClear` the referential-clear write).
+ *
+ * A report read asks about `report.object_name`, which is not necessarily the
+ * object the caller's envelope last carried a depth for — a REST request that
+ * touched another object before reaching `/reports/:id/run` hands over an
+ * envelope the middleware has already written into, and plugin-security only
+ * OVERWRITES `__readScope` when it resolves permission sets for the new object
+ * (`if (permissionSets.length > 0)`). A stale depth therefore survives into a
+ * question it was never resolved for. Dropped by PREFIX rather than by a name
+ * list: the `__` convention is what marks a key as belonging to the operation
+ * in flight, and a list would go stale the day the middleware stamps another
+ * one. Same shape as `plugin-audit`'s and `service-storage`'s kits (#7141 /
+ * #7145).
+ */
+const OPERATION_PRIVATE_KEY_PREFIX = '__';
+
+/**
+ * The caller's execution envelope, minus the operation-private keys above.
+ *
+ * A FRESH object every time, in both directions: the engine's middleware
+ * stamps `__readScope` for `report.object_name` onto whatever it is handed, so
+ * forwarding the caller's own envelope by reference would write that depth
+ * back into the REQUEST context the route goes on using.
+ */
+function withoutOperationPrivateKeys(exec: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(exec)) {
+    if (key.startsWith(OPERATION_PRIVATE_KEY_PREFIX)) continue;
+    out[key] = value;
+  }
+  return out;
+}
+
 // ─── Service ──────────────────────────────────────────────────────
 
 /**
@@ -182,7 +233,7 @@ function renderSubject(template: string | undefined, vars: Record<string, string
  */
 export type OwnerContextResolver = (
   ownerId: string,
-) => Promise<SharingExecutionContext | null>;
+) => Promise<ExecutionContext | null>;
 
 export interface ReportServiceOptions {
   engine: ReportEngine;
@@ -267,7 +318,7 @@ export class ReportService implements IReportService {
   private async assertExportAllowed(
     object: string,
     format: string,
-    context: SharingExecutionContext | undefined,
+    context: ExecutionContext | undefined,
   ): Promise<void> {
     if (!BULK_EXPORT_FORMATS.has(format)) return;
     if (context?.isSystem) return;
@@ -297,7 +348,7 @@ export class ReportService implements IReportService {
    * report by id (#2980). An explicit elevated context (`isSystem`) — the
    * scheduler / server tooling — sees everything.
    */
-  private canAccessReport(row: { owner_id?: unknown } | null | undefined, context: SharingExecutionContext | undefined): boolean {
+  private canAccessReport(row: { owner_id?: unknown } | null | undefined, context: ExecutionContext | undefined): boolean {
     if (!row) return false;
     if (context?.isSystem) return true;
     const userId = context?.userId;
@@ -322,7 +373,7 @@ export class ReportService implements IReportService {
 
   // ── Report CRUD ────────────────────────────────────────────────
 
-  async saveReport(input: SaveReportInput, context: SharingExecutionContext): Promise<SavedReport> {
+  async saveReport(input: SaveReportInput, context: ExecutionContext): Promise<SavedReport> {
     if (!input.name) throw new Error('VALIDATION_FAILED: name is required');
     if (!input.object) throw new Error('VALIDATION_FAILED: object is required');
     if (!input.query) throw new Error('VALIDATION_FAILED: query is required');
@@ -366,7 +417,7 @@ export class ReportService implements IReportService {
 
   async listReports(
     filter: { object?: string; ownerId?: string } | undefined,
-    context: SharingExecutionContext,
+    context: ExecutionContext,
   ): Promise<SavedReport[]> {
     const f: any = {};
     if (filter?.object) f.object_name = filter.object;
@@ -387,14 +438,14 @@ export class ReportService implements IReportService {
     return Array.isArray(rows) ? rows.map(rowFromSaved) : [];
   }
 
-  async getReport(reportId: string, context: SharingExecutionContext): Promise<SavedReport | null> {
+  async getReport(reportId: string, context: ExecutionContext): Promise<SavedReport | null> {
     const row = await this.loadReportRow(reportId);
     // Unauthorized reads are indistinguishable from a genuine miss (#2980).
     if (!this.canAccessReport(row, context)) return null;
     return rowFromSaved(row);
   }
 
-  async deleteReport(reportId: string, context: SharingExecutionContext): Promise<void> {
+  async deleteReport(reportId: string, context: ExecutionContext): Promise<void> {
     if (!reportId) throw new Error('VALIDATION_FAILED: reportId is required');
     const row = await this.loadReportRow(reportId);
     if (!row) return; // idempotent — nothing to drop
@@ -415,13 +466,13 @@ export class ReportService implements IReportService {
 
   // ── Execution ───────────────────────────────────────────────────
 
-  async run(reportId: string, context: SharingExecutionContext): Promise<ReportRunResult> {
+  async run(reportId: string, context: ExecutionContext): Promise<ReportRunResult> {
     const report = await this.getReport(reportId, context);
     if (!report) throw new Error(`REPORT_NOT_FOUND: ${reportId}`);
     return this.executeReport(report, context);
   }
 
-  async runAdHoc(input: SaveReportInput, context: SharingExecutionContext): Promise<ReportRunResult> {
+  async runAdHoc(input: SaveReportInput, context: ExecutionContext): Promise<ReportRunResult> {
     if (!input.object) throw new Error('VALIDATION_FAILED: object is required');
     if (!input.query) throw new Error('VALIDATION_FAILED: query is required');
     const adhoc: SavedReport = {
@@ -436,7 +487,7 @@ export class ReportService implements IReportService {
 
   private async executeReport(
     report: SavedReport,
-    context: SharingExecutionContext,
+    context: ExecutionContext,
     stamp = true,
   ): Promise<ReportRunResult> {
     // [#3544 / #3710] The export axis, BEFORE any row is read — a refusal must
@@ -452,9 +503,35 @@ export class ReportService implements IReportService {
       // Reports execute with the caller's identity so sharing rules
       // (if installed) apply. Falls back to system bypass only when
       // the report definition was created by a system writer.
+      //
+      // [#7204] The WHOLE envelope, not a rebuilt subset of it — the #6206
+      // ruling (#6523): a read that adjudicates on the caller's identity
+      // adjudicates on the whole `resolveAuthzContext` envelope. The
+      // five-field projection this replaced (`userId` / `tenantId` /
+      // `positions` / `permissions` / `isSystem`) was doing two jobs, and
+      // only one of them was correct:
+      //
+      //  - dropping the middleware-private keys — CORRECT, and preserved
+      //    above by {@link withoutOperationPrivateKeys};
+      //  - dropping the PRINCIPAL fields — the defect. `accessible_org_ids`
+      //    (ADR-0105 D2) is the one that changes rows: `buildDriverOptions`
+      //    reads it BY NAME to widen the driver's native tenant scope to the
+      //    caller's membership union under the `group` posture, and an absent
+      //    set makes drivers "fall back to equality: fail toward isolation".
+      //    So the same query returned the union in an interactive list view
+      //    and collapsed to active-org equality inside a saved or scheduled
+      //    report — silently short rows, no error. `timezone` is read two
+      //    lines up in the same engine method (`hasTz`) and again by
+      //    `applyFormulaPlan` for read-time formula fields, and `posture`,
+      //    `org_user_ids`, `systemPermissions` and `onBehalfOf` went the same
+      //    way; they are forwarded now for the same reason — the envelope is
+      //    the contract's unit.
+      //
+      // The three defaults below are byte-for-byte what the projection
+      // produced for an envelope that omits them, and are kept so this change
+      // adds fields without changing any that were already there.
       context: {
-        userId: context.userId,
-        tenantId: context.tenantId,
+        ...withoutOperationPrivateKeys(context as unknown as Record<string, unknown>),
         positions: context.positions ?? [],
         permissions: context.permissions ?? [],
         isSystem: context.isSystem ?? false,
@@ -489,7 +566,7 @@ export class ReportService implements IReportService {
 
   // ── Schedules ──────────────────────────────────────────────────
 
-  async scheduleReport(input: ScheduleReportInput, context: SharingExecutionContext): Promise<ReportSchedule> {
+  async scheduleReport(input: ScheduleReportInput, context: ExecutionContext): Promise<ReportSchedule> {
     if (!input.reportId) throw new Error('VALIDATION_FAILED: reportId is required');
     if (!input.recipients || input.recipients.length === 0) {
       throw new Error('VALIDATION_FAILED: recipients must be a non-empty array');
@@ -540,7 +617,7 @@ export class ReportService implements IReportService {
     return rowFromSchedule(row);
   }
 
-  async unscheduleReport(scheduleId: string, context: SharingExecutionContext): Promise<void> {
+  async unscheduleReport(scheduleId: string, context: ExecutionContext): Promise<void> {
     if (!scheduleId) throw new Error('VALIDATION_FAILED: scheduleId is required');
     const schedule = await this.loadScheduleRow(scheduleId);
     if (!schedule) return; // idempotent — nothing to drop (mirrors deleteReport)
@@ -557,7 +634,7 @@ export class ReportService implements IReportService {
 
   async listSchedules(
     filter: { reportId?: string } | undefined,
-    context: SharingExecutionContext,
+    context: ExecutionContext,
   ): Promise<ReportSchedule[]> {
     // Schedules are owned through their report (#2980): a non-system caller may
     // only list the schedules of a report they can access. The route always

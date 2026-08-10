@@ -36,10 +36,20 @@ export const SysScimProvider = ObjectSchema.create({
   // [ADR-0066 D3/④] Admin-only identity config carrying a live credential
   // (`scim_token` — the bearer external IdPs authenticate provisioning calls
   // with). Object-level capability gate, mirroring the sibling
-  // `sys_sso_provider`: ordinary members are denied entirely (without it, the
-  // `member_default` wildcard `'*': allowRead` would expose SCIM connections
-  // to every authenticated user). better-auth's own endpoints read via a
-  // system context, so SCIM provisioning is unaffected.
+  // `sys_sso_provider`: ordinary members are denied entirely.
+  //
+  // [#6964] The exposure this used to name — `member_default`'s
+  // `'*': allowRead` — no longer exists: #5491 removed that wildcard and the
+  // platform baseline is explicit-allow. The gate is not thereby redundant, and
+  // its live reason is the stronger one: `requiredPermissions` is a capability
+  // AND-gate evaluated BEFORE the CRUD grant (`security-plugin.ts` step 1.5), so
+  // a caller missing the capability is denied "regardless of how permissive
+  // their grants are" — including a grant an app-declared default profile or a
+  // customer-authored permission set names on this object. Without it the
+  // table's only protection would be that no set happens to grant it today.
+  //
+  // better-auth's own endpoints read via a system context, so SCIM provisioning
+  // is unaffected.
   requiredPermissions: ['manage_platform_settings'],
   // ADR-0010 §3.7 — managed by better-auth; tenants may not edit schema.
   protection: {

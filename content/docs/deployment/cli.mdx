@@ -1020,6 +1020,12 @@ os test --url http://localhost:4000    # Custom server URL
 os test --token my-api-key            # With authentication
 ```
 
+Each file is validated against `TestSuiteSchema` **before it runs**. A suite that
+does not match is refused at load time, naming the file and every offending path,
+and counts as one failed suite — the rest of the glob still runs. This is what
+stops a malformed suite from reporting success: a misspelled `steps` key used to
+produce a scenario that passed having executed nothing.
+
 #### `os doctor`
 
 Checks your development environment and reports issues:
@@ -1112,6 +1118,28 @@ that report failure also set exit code `1`.
 
 Before this was declared, `os login --json` wrote a compact record followed by a
 pretty-printed one, which parsed as neither a single document nor as NDJSON.
+
+##### `--json` is non-interactive: it refuses rather than prompting
+
+`--json` has one audience, a program, so it never asks a question. If a `--json`
+run has no `--email` and no `--password` to work from and cannot use the device
+flow, it does not fall back to a prompt — it emits one record and exits `1`:
+
+```console
+$ os login --json --url https://api.example.com < /dev/null
+{"success":false,"error":"email and password are required in a non-interactive shell"}
+$ echo $?
+1
+```
+
+The same applies when only one of the two is supplied, which is the usual shape
+of the mistake: a CI step whose `--password` secret interpolated and whose
+`--email` did not gets that record, not a `Password: ` prompt.
+
+Without `--json`, `os login` still prompts on a pipe as before. What changed for
+that path is the ending: if stdin reaches end of input before a prompt is
+answered, the command reports it and exits `1`, rather than being torn down by
+Node with an exit code the CLI does not define.
 
 #### `os logout`
 

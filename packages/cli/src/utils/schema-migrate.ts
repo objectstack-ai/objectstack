@@ -190,6 +190,28 @@ export async function bootSchemaStack(
      */
     deferSchemaDdl?: boolean;
     /**
+     * Boot WITHOUT BRINGING A DATABASE INTO EXISTENCE (#6743).
+     *
+     * `deferSchemaDdl` stopped the boot from writing DDL and seed rows, but the
+     * sqlite driver still opened its target in SQLite's default create-if-absent
+     * mode — so `os migrate plan` on a never-started project left a 0-table
+     * `.objectstack/data/objectstack.db` (plus its `-wal`/`-shm` on an unclean
+     * exit) behind: a write side effect from a command that calls itself a dry
+     * run, and one that makes "this project has no database yet" unobservable
+     * to the next command.
+     *
+     * With this set, a missing sqlite file is opened as an empty `:memory:`
+     * database instead. A database with zero tables is exactly what a freshly
+     * created empty file is, so the plan is byte-for-byte the one printed
+     * before — the report was never the defect and must not pay for the fix.
+     *
+     * ⚠️ NOT implied by `deferSchemaDdl`, and it must not become so:
+     * `os migrate apply` also boots deferred, then FLUSHES the deferred DDL
+     * once the operator confirms. Writes into the `:memory:` stand-in would be
+     * discarded at disconnect, so `apply` keeps the default.
+     */
+    readOnlyProbe?: boolean;
+    /**
      * Project root the booted stack scopes its on-disk state to — the default
      * sqlite database and the metadata FileSystemRepository
      * (`<projectRoot>/.objectstack/…`). Defaults to `process.cwd()`, which is
@@ -216,6 +238,7 @@ export async function bootSchemaStack(
     projectRoot: opts.projectRoot ?? process.cwd(),
     ...(opts.databaseUrl ? { databaseUrl: opts.databaseUrl } : {}),
     ...(defer ? { skipSeedData: true } : {}),
+    ...(opts.readOnlyProbe ? { sqliteAbsentFile: 'empty-in-memory' as const } : {}),
   });
 
   // No HTTP, no cluster — this is a one-shot schema operation.

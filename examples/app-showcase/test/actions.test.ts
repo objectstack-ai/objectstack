@@ -3,7 +3,8 @@
 import { describe, it, expect } from 'vitest';
 import { actionBodyRunnerFactory, QuickJSScriptRunner } from '@objectstack/runtime';
 
-import { allActions, MarkDoneAction, PortfolioSnapshotAction } from '../src/ui/actions/index.js';
+import * as pages from '../src/ui/pages/index.js';
+import { allActions, MarkDoneAction, NewTaskAction, PortfolioSnapshotAction } from '../src/ui/actions/index.js';
 
 /**
  * Execution-path coverage for declared actions.
@@ -152,5 +153,140 @@ describe('showcase actions — the object-less (`global`) specimen', () => {
       projects: 5,
       invoices: 13,
     });
+  });
+});
+
+/**
+ * `type: 'modal'` targets a PAGE, only — the corpus pin (#6739).
+ *
+ * `showcase_new_task` used to declare `type: 'modal'` +
+ * `target: 'showcase_component_gallery'`: a command labelled "New Task" whose
+ * target named the showcase HOME PAGE. The dispatch was measured in a browser
+ * while #6597 was being fixed — the dialog rendered the welcome page inside
+ * itself, with **zero** form controls.
+ *
+ * The tempting one-key fix (point the modal at the `showcase_task` OBJECT) is
+ * a BUILD ERROR, not a fix: `defineStack`'s cross-reference walk
+ * (`packages/spec/src/stack.zod.ts`) accepts only declared PAGE names for a
+ * modal target, which is also what the spec TSDoc and the published docs say.
+ * objectui's page-then-object resolution is consumer leniency the renderer
+ * itself labels "Back-compat" and is being retired (maintainer ruling on
+ * #6739). Opening an object's form is `type: 'form'`'s job.
+ *
+ * These assertions pin the ruled shape on BOTH sites the name appears at, so
+ * the corpus — which is reference material humans and AI authors copy — cannot
+ * drift back:
+ *  - registered actions: no `type: 'modal'` target that is not a declared page.
+ *    That mirrors the build gate, so a regression fails here first with a
+ *    readable message instead of as an import-time crash in nine other files;
+ *  - INLINE page-element actions: the same rule, which the build gate does NOT
+ *    enforce — the cross-reference walk visits `config.actions` only and never
+ *    an inline action (#6889). This is the corpus's own guard over that hole,
+ *    and it is exactly how the old `element:button` line built while depending
+ *    on the object branch;
+ *  - `showcase_new_task` itself is `type: 'form'` at a FORM view, structurally
+ *    identical to `showcase_log_time`.
+ */
+describe("showcase actions — a `type: 'modal'` target names a page (#6739)", () => {
+  type AnyAction = { name?: unknown; type?: unknown; target?: unknown };
+  type AnyComponent = { type?: unknown; properties?: Record<string, unknown> };
+
+  /** Every page name the showcase declares — the set a modal target may name. */
+  const pageNames = new Set(
+    (Object.values(pages) as unknown[])
+      .filter(
+        (p): p is { name: string } =>
+          !!p && typeof p === 'object' && !Array.isArray(p) && typeof (p as { name?: unknown }).name === 'string',
+      )
+      .map((p) => p.name),
+  );
+
+  /** Every component on every page — regions and slots alike, nesting included. */
+  function allComponents(page: Record<string, unknown>): AnyComponent[] {
+    const out: AnyComponent[] = [];
+    const visit = (node: unknown): void => {
+      if (!node || typeof node !== 'object' || Array.isArray(node)) return;
+      const component = node as AnyComponent;
+      out.push(component);
+      const props = component.properties;
+      if (!props) return;
+      for (const item of Array.isArray(props.items) ? props.items : []) {
+        const children = (item as { children?: unknown })?.children;
+        for (const child of Array.isArray(children) ? children : []) visit(child);
+      }
+      for (const child of Array.isArray(props.children) ? props.children : []) visit(child);
+    };
+    for (const region of (page.regions as { components?: unknown[] }[] | undefined) ?? []) {
+      for (const c of region.components ?? []) visit(c);
+    }
+    for (const slot of Object.values((page.slots as Record<string, unknown>) ?? {})) {
+      for (const c of Array.isArray(slot) ? slot : [slot]) visit(c);
+    }
+    return out;
+  }
+
+  /** Inline actions authored on a page element (`element:button`'s `action`). */
+  const inlineActions = (): { page: string; action: AnyAction }[] => {
+    const out: { page: string; action: AnyAction }[] = [];
+    for (const page of Object.values(pages) as unknown[]) {
+      if (!page || typeof page !== 'object' || Array.isArray(page)) continue;
+      const p = page as Record<string, unknown>;
+      if (typeof p.name !== 'string') continue;
+      for (const component of allComponents(p)) {
+        const action = component.properties?.action;
+        if (action && typeof action === 'object' && !Array.isArray(action)) {
+          out.push({ page: p.name, action: action as AnyAction });
+        }
+      }
+    }
+    return out;
+  };
+
+  it('the page set the corpus can target is non-empty', () => {
+    // Guards the assertions below against passing vacuously: an empty page set
+    // would make "targets a declared page" trivially unfalsifiable.
+    expect(pageNames.size).toBeGreaterThan(10);
+    expect(pageNames.has('showcase_component_gallery')).toBe(true);
+  });
+
+  it('every REGISTERED modal action targets a declared page', () => {
+    const modals = (allActions as AnyAction[]).filter((a) => a.type === 'modal');
+    // Keep the modal-targeting-a-page specimen alive: if this ever hits zero
+    // the rule below stops being exercised by anything.
+    expect(modals.length).toBeGreaterThan(0);
+    for (const a of modals) {
+      expect(
+        pageNames.has(String(a.target)),
+        `action '${String(a.name)}': a modal target names a PAGE, but '${String(a.target)}' is not a declared page — ` +
+          `use type: 'form' with an <object>.<view> target to open a form (#6739)`,
+      ).toBe(true);
+    }
+  });
+
+  it('every INLINE page-element modal action targets a declared page too', () => {
+    // The build gate cannot see these (#6889): `defineStack`'s cross-reference
+    // walk visits `config.actions` only. This is the corpus's own guard.
+    const inline = inlineActions();
+    expect(inline.length).toBeGreaterThan(0);
+    for (const { page, action } of inline) {
+      if (action.type !== 'modal') continue;
+      expect(
+        pageNames.has(String(action.target)),
+        `page '${page}': inline action '${String(action.name)}' is type:'modal' targeting ` +
+          `'${String(action.target)}', which is not a declared page (#6739)`,
+      ).toBe(true);
+    }
+  });
+
+  it("`showcase_new_task` opens the Task form — type: 'form' at a FORM view", () => {
+    expect(NewTaskAction.type).toBe('form');
+    expect(NewTaskAction.target).toBe('showcase_task.edit');
+
+    // Both sites carrying the name agree, so the corpus teaches one shape.
+    const inline = inlineActions()
+      .map(({ action }) => action)
+      .filter((a) => a.name === 'showcase_new_task');
+    expect(inline).toHaveLength(1);
+    expect(inline[0]).toMatchObject({ type: 'form', target: 'showcase_task.edit' });
   });
 });

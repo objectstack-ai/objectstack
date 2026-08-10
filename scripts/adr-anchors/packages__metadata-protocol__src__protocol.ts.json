@@ -1,0 +1,7 @@
+{
+  "file": "packages/metadata-protocol/src/protocol.ts",
+  "adrs": [
+    "ADR-0119"
+  ],
+  "invariant": "`batchData`'s `atomic` is REAL or REFUSED, never silent best-effort. An explicitly atomic batch runs inside ONE `engine.transaction()`, so a failure rolls back every prior write and the response reports zero successes (rows marked ROLLED_BACK / NOT_ATTEMPTED — reporting a rolled-back row as `success: true` was the original bug, not merely the missing transaction). A runtime that cannot roll back gets 501 NOT_IMPLEMENTED; degrading to best-effort is how the flag came to lie."
+}

@@ -1,0 +1,7 @@
+{
+  "file": "packages/runtime/src/domain-handler-registry.ts",
+  "adrs": [
+    "ADR-0076"
+  ],
+  "invariant": "ADR-0076 D11's thin dispatcher registry — the framework-agnostic port a capability's routes enter through, as a NORMALIZED handler (`DomainRequest` to `HttpDispatcherResult`), never as framework-specific routes: registering Hono `app.route` from plugin space couples every plugin to Hono and forfeits the multi-adapter property `packages/qa/http-conformance` validates on a second, zero-dependency `node:http` adapter. Deliberately WITHOUT wildcards, params or middleware — routing power belongs to the adapters below the port, and growing it here re-grows the god implementation D11 decomposed. Registration stays dispatcher-owned because most slots are MULTI-PROVIDER (`i18n`: service-i18n OR the AppPlugin in-memory fallback; `analytics`: service-analytics OR the ObjectQLPlugin fallback), so a route bridges to a SLOT and not to a package — moving registration into one provider 404s every stack served by another; a package that owns its slot exclusively self-registers through `HttpDispatcher.registerDomainHandler`. `DomainHandlerDeps` is the WHOLE dependency contract of an extracted body, and every kernel-reading facility takes the request FIRST (#5155): one dispatcher instance serves every tenant, so a cached 'kernel of the request in flight' resolved a request that resumed after an await against whichever environment was most recent — one tenant reading another tenant's data source."
+}

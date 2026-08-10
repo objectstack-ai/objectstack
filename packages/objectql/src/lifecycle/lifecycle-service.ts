@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { Lifecycle } from '@objectstack/spec/data';
+import type { DriverQuery } from '@objectstack/spec/contracts';
 import { parseLifecycleDuration } from './duration.js';
 import type {
   DanglingReferenceAuditOptions,
@@ -296,6 +297,20 @@ interface RotationCapableDriver extends ReclaimCapableDriver {
     objectDef: LifecycleObjectLike,
     nowMs?: number,
   ): Promise<{ object: string; current: string; shards: string[]; dropped: string[] }>;
+}
+
+/**
+ * Driver surface the governance counter (P4) uses.
+ *
+ * `query` is the driver contract's {@link DriverQuery}: the object name
+ * travels as argument ONE and is deliberately absent from the AST, so a
+ * caller cannot state it twice (objectstack#5181, #6231). Typing it as the
+ * contract rather than as a loose bag is the point — the previous
+ * `Record<string, unknown>` accepted the redundant `object` key, and would
+ * equally have accepted a `where` the filter dialect does not have.
+ */
+interface CountCapableDriver {
+  count?(object: string, query?: DriverQuery, options?: unknown): Promise<number>;
 }
 
 /** Driver surface the Archiver uses on both the hot and the cold store. */
@@ -782,13 +797,11 @@ export class LifecycleService {
     const gov = this.governance;
     const nextCounts = new Map<string, number>();
     for (const obj of declared) {
-      const driver = engine.getDriverForObject(obj.name) as
-        | { count?(object: string, query?: Record<string, unknown>): Promise<number> }
-        | undefined;
+      const driver = engine.getDriverForObject(obj.name) as CountCapableDriver | undefined;
       if (!driver || typeof driver.count !== 'function') continue;
       let rowCount: number;
       try {
-        rowCount = await driver.count(obj.name, { object: obj.name });
+        rowCount = await driver.count(obj.name);
       } catch {
         continue;
       }

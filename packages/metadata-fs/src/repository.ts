@@ -16,6 +16,9 @@
  *     log is a denormalised history index.
  *   - chokidar-driven external edits are translated into MetadataEvents
  *     by hashing the new content and comparing to the last-known hash.
+ *   - The root directory is created **on the first write, not on attach**
+ *     (#7000). Attaching and reading a repository whose root does not exist
+ *     is legal and answers "empty"; see `start()` / `ensureRoot()`.
  */
 
 import fs from 'node:fs/promises';
@@ -46,7 +49,6 @@ import {
   itemPath,
   parseItemPath,
   typeDir,
-  logDir,
   logFile,
 } from './layout.js';
 import { JsonlLog } from './jsonl-log.js';
@@ -108,21 +110,55 @@ export class FileSystemRepository implements MetadataRepository {
 
   // ── Lifecycle ───────────────────────────────────────────────────────
 
+  /**
+   * Attach the repository. **Creates nothing on disk** (#7000).
+   *
+   * Attaching is not a write. `start()` used to `mkdir` both the root and
+   * `<root>/.objectstack/.log` unconditionally, which meant every read-only
+   * boot that merely attaches a repository left a skeleton behind — most
+   * visibly `os migrate plan`, a declared dry run, on a project that has
+   * never been started. That is the same property #6743 ruled on for
+   * `.objectstack/data/`: a dry run leaves nothing behind, and the existence
+   * of `.objectstack/` has to stay a usable "this project has been started"
+   * signal.
+   *
+   * Every read path below already treats a missing root as an empty
+   * repository (`scanHeads` swallows ENOENT, `JsonlLog` guards on
+   * `existsSync`, `get` guards on `existsSync`), so the root is materialized
+   * by `ensureRoot()` on the first write instead.
+   */
   async start(): Promise<void> {
     if (this.started) return;
     this.started = true;
-    await fs.mkdir(this.layout.root, { recursive: true });
-    await fs.mkdir(logDir(this.layout), { recursive: true });
 
-    // 1) Scan body files to build the head index.
+    // 1) Scan body files to build the head index. No-op on a missing root.
     await this.scanHeads();
 
-    // 2) Hydrate nextSeq from the existing log.
+    // 2) Hydrate nextSeq from the existing log. No-op on a missing log.
     const highest = await this.log.highestSeq();
     this.nextSeq = highest + 1;
 
-    // 3) Start the watcher (unless disabled).
-    if (!this.disableWatch) this.startWatcher();
+    // 3) Start the watcher (unless disabled). chokidar cannot watch a path
+    //    that does not exist yet: measured on chokidar 5 with `usePolling`,
+    //    a root created AFTER `watch()` produces no events at all, ever. So
+    //    when the root is absent the watcher is armed later, by the
+    //    `ensureRoot()` call that brings the root into existence — otherwise
+    //    dropping the `mkdir` above would silently kill external-edit
+    //    detection for the whole life of the process.
+    if (!this.disableWatch && existsSync(this.layout.root)) this.startWatcher();
+  }
+
+  /**
+   * Bring the repository root into existence. Called by every write path
+   * immediately before it touches the disk — `start()` deliberately does not
+   * create it (#7000), so this is the single seam where the root appears.
+   *
+   * It is also where a watcher that `start()` could not arm (missing root)
+   * gets armed, so "external edits are detected" survives the change.
+   */
+  private async ensureRoot(): Promise<void> {
+    await fs.mkdir(this.layout.root, { recursive: true });
+    if (this.started && !this.disableWatch && !this.watcher) this.startWatcher();
   }
 
   async close(): Promise<void> {
@@ -258,6 +294,8 @@ export class FileSystemRepository implements MetadataRepository {
       const seq = this.nextSeq++;
       const ts = this.now().toISOString();
       const file = itemPath(this.layout, ref.type, ref.name);
+      // First write of the process materializes the root (#7000).
+      await this.ensureRoot();
       await fs.mkdir(typeDir(this.layout, ref.type), { recursive: true });
       this.selfWrites.add(file);
       try {
@@ -309,6 +347,8 @@ export class FileSystemRepository implements MetadataRepository {
         throw new ConflictError(ref, opts.parentVersion, currentHead);
       }
       const file = itemPath(this.layout, ref.type, ref.name);
+      // A delete appends a tombstone to the change log, so it is a write too.
+      await this.ensureRoot();
       this.selfWrites.add(file);
       try {
         if (existsSync(file)) await fs.unlink(file);
@@ -394,8 +434,12 @@ export class FileSystemRepository implements MetadataRepository {
   }
 
   private startWatcher(): void {
-    const w = chokidar.watch(this.layout.root, {
-      ignored: [/(^|[\\/])\../], // skip dotfiles incl. .objectstack
+    const root = this.layout.root;
+    const w = chokidar.watch(root, {
+      // Skip dotfiles under the root — including the repository's own
+      // `.objectstack/` bookkeeping subtree — matched on the path RELATIVE
+      // to the watch root (#7150). See `isIgnoredWatchPath`.
+      ignored: (p: string) => isIgnoredWatchPath(root, p),
       ignoreInitial: true,
       depth: 2,
       awaitWriteFinish: { stabilityThreshold: 50, pollInterval: 20 },
@@ -466,6 +510,43 @@ export class FileSystemRepository implements MetadataRepository {
 }
 
 // ── Utilities ─────────────────────────────────────────────────────────
+
+/**
+ * Watcher ignore matcher — "everything under the root, except the
+ * repository's own bookkeeping" (#7150).
+ *
+ * chokidar hands its matcher **absolute** paths, and applies it to the
+ * watched root itself as well as to entries discovered underneath it. The
+ * previous matcher was a bare dotfile regex (`/(^|[\\/])\../`), which
+ * therefore matched the `.objectstack` segment of the root path the plugin
+ * actually uses (`<project>/.objectstack/metadata`, `REPO_SUBDIR` in
+ * `packages/metadata/src/plugin.ts`) and ignored the whole watch. Measured on
+ * chokidar 5 with this repository's own options, two identical trees
+ * differing only in whether the root sits under a dot-directory:
+ *
+ *   plain root      getWatched: ['<root>', 'view']   events: add+change
+ *   dot-rooted      getWatched: []                   events: none
+ *
+ * So the intent is kept and only the *frame of reference* is fixed: judge the
+ * path relative to the root, so dot segments belonging to the root itself are
+ * never considered.
+ *
+ * Why not drop the matcher entirely and lean on `parseItemPath`, which already
+ * rejects `.objectstack`? Measured: `parseItemPath` rejects that ONE name, so
+ * a dot-directory at the type level leaks — `<root>/.cache/x.json` parses as
+ * type `.cache`, and `<root>/view/.scratch.json` as an item named `.scratch`.
+ * Both would be published as `MetadataEvent`s while `scanHeads` skips every
+ * dot entry on boot, leaving the boot scan and the watcher disagreeing about
+ * what the repository contains. Dropping it also puts `.objectstack/.log/` in
+ * the poll set, so every one of the repository's own log appends wakes
+ * `handleFsChange` only to be discarded.
+ */
+function isIgnoredWatchPath(root: string, absPath: string): boolean {
+  const rel = path.relative(root, absPath);
+  // The watched root itself, and anything outside it, are not ours to judge.
+  if (rel === '' || rel.startsWith('..')) return false;
+  return rel.split(/[\\/]/).some((segment) => segment.startsWith('.'));
+}
 
 async function readJson(file: string): Promise<unknown | null> {
   try {

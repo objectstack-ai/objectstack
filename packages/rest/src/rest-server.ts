@@ -2,6 +2,7 @@
 
 import {
     IHttpServer, resolveAuthzContext, resolveLocalizationContext, isAuthGateAllowlisted,
+    assembleExecutionContext,
     shouldDenyAnonymous, ANONYMOUS_DENY_BODY, ANONYMOUS_DENY_STATUS,
 } from '@objectstack/core';
 import {
@@ -2556,6 +2557,11 @@ export class RestServer {
                 try { return await api.getSession({ headers: h }); } catch { return undefined; }
             };
             const authz = await resolveAuthzContext({ ql, headers, getSession });
+            // [#6216] The anonymous contract IS the shared assembler's default
+            // entry: no resolved principal → no context → 401. Taken early here
+            // only so an anonymous request does not pay for the localization and
+            // auth-gate reads it would never use; `assembleExecutionContext`
+            // below re-affirms the same rule.
             if (!authz.userId) return undefined;
 
             const settings = this.settingsServiceProvider
@@ -2580,69 +2586,49 @@ export class RestServer {
                 }
             } catch { /* gate is best-effort — never break context resolution */ }
 
-            // [#3957] The request's OWN locale wins over the workspace default.
-            // Metadata (labels, option text) is already translated per
-            // `Accept-Language` / `?locale` — so if the write path read only the
-            // workspace `localization.locale`, one screen could show a Chinese
-            // field label next to an English rejection message for that same
-            // field. `localization.locale` stays the fallback for a caller that
-            // expresses no preference (a server-to-server client, a job).
-            const effectiveLocale = this.extractLocale(req) ?? localization.locale;
+            // [#6216 — maintainer ruling 2026-08-08, Option A] The assembly of
+            // the ExecutionContext itself is now the SINGLE shared one
+            // (`assembleExecutionContext`, @objectstack/core), the same module
+            // the runtime / MCP dispatcher assembles through. Before this, the
+            // step AFTER `resolveAuthzContext` was two hand-written copies and
+            // the copies drifted: #6071 (this face never set `principalKind`,
+            // so every enforcement judgment reading it was silently never-true
+            // here) and #6206 / #6551 (a dropped `accessible_org_ids` produced
+            // real 403s on the share-link faces). The field set is closed by
+            // type there, so a new `ExecutionContext` field cannot land on one
+            // face and miss another.
+            //
+            // This face takes the FAIL-CLOSED DEFAULT entry — no resolved
+            // principal → no context → `enforceAuth` answers 401. The runtime
+            // face takes the explicit guest entry instead. Both behaviours are
+            // unchanged; the divergence is now named API rather than drift.
+            const base = assembleExecutionContext({
+                authz,
+                // OAuth access tokens are honoured on the `/mcp` door alone
+                // (`acceptOAuthAccessToken`), precisely so coarse tool-family
+                // scopes cannot ride onto REST — so `principalKind: 'agent'`,
+                // `onBehalfOf` and `oauthScopes` are not representable here.
+                oauth: undefined,
+                localization,
+                // [#3957] The request's OWN locale wins over the workspace
+                // default; the precedence itself lives in the shared assembler.
+                requestLocale: this.extractLocale(req),
+                // A NAMED divergence, deliberately preserved (#6216): this
+                // transport has never carried the better-auth session bearer on
+                // the envelope, and `ExecutionContext.accessToken` is a
+                // PUBLISHED hook surface (`session.accessToken`, hook.zod.ts).
+                // Widening it to a second transport is a product decision, not
+                // a refactor — so REST withholds it on the record.
+                accessToken: undefined,
+            });
+            // Unreachable: the anonymous early-return above already took this
+            // branch. Kept because the shared entry — not this method — is the
+            // authority on what an anonymous request yields.
+            if (!base) return undefined;
 
             const execCtx = {
-                userId: authz.userId,
-                tenantId: authz.tenantId,
-                email: authz.email,
-                positions: authz.positions,
-                permissions: authz.permissions,
-                systemPermissions: authz.systemPermissions,
-                ...(authz.tabPermissions ? { tabPermissions: authz.tabPermissions } : {}),
-                // [ADR-0095 D2 / #2947] Carry the derived posture rung so the
-                // enforcement side reads the SAME value the resolver computed,
-                // instead of dropping it here (the boundary this issue closes).
-                ...(authz.posture ? { posture: authz.posture } : {}),
-                // [ADR-0090 D9/D10 / #6071] Principal taxonomy, resolved by the
-                // SAME rule the runtime / MCP entry applies
-                // (`packages/runtime/src/security/resolve-execution-context.ts`)
-                // so the two transports can no longer disagree about WHO is
-                // asking. Enforcement reads this field
-                // (`plugin-security/explain-engine.ts` derivePosture,
-                // `security-plugin.ts` agent baseline, `perf-timing.ts`
-                // disclosure gate), and until now it arrived on the dispatcher
-                // face only — every such judgment was silently never-true on
-                // REST.
-                //
-                // `'human'` is the ONLY kind this transport can produce, and
-                // that is the runtime rule restricted to the provenances this
-                // door accepts, not a second derivation:
-                //  - `agent` (+ the `onBehalfOf` delegation link, which ONLY
-                //    the agent arm sets) requires an OAuth access token naming
-                //    an authorized client. This transport never accepts one:
-                //    OAuth bearers are honoured on the `/mcp` door alone
-                //    (`acceptOAuthAccessToken`, set solely by the dispatcher's
-                //    `/mcp` path match) precisely so coarse tool-family scopes
-                //    cannot ride onto REST. So `onBehalfOf` is not
-                //    representable here — same as every human principal on the
-                //    dispatcher face, which also leaves it undefined.
-                //  - `guest` is not representable either: this method returned
-                //    `undefined` above when the envelope carried no `userId`,
-                //    so an anonymous REST caller gets NO context at all (and
-                //    `enforceAuth` 401s it). Anonymous REST is unchanged.
-                //  - A session-backed OR API-key-backed principal is `human` on
-                //    both faces (pinned on the runtime side by
-                //    resolve-execution-context.test.ts, "an authenticated
-                //    (API-key) request resolves as a human principal").
-                principalKind: 'human',
-                isSystem: false,
-                org_user_ids: authz.org_user_ids,
-                // [ADR-0105 D2] The caller's org access set — the `group`
-                // posture's Layer 0 wall reads it directly, so it must reach
-                // enforcement on every transport, not just this one.
-                accessible_org_ids: authz.accessible_org_ids,
+                ...base,
                 ...(authGate ? { authGate } : {}),
-                ...(localization.timezone ? { timezone: localization.timezone } : {}),
-                ...(effectiveLocale ? { locale: effectiveLocale } : {}),
-                ...(localization.currency ? { currency: localization.currency } : {}),
                 // Internal: resolved kernel so the nav-serving path can probe
                 // requiresService capability gates (ADR-0057 D10). NOT an
                 // authorization input — never read by RLS/permission logic.
@@ -5223,7 +5209,23 @@ export class RestServer {
                     }
                     const p = await this.resolveProtocol(environmentId, req);
                     if (!p.saveMetaItem) {
-                        res.status(501).json({ error: 'Save operation not supported by protocol implementation', code: 'NOT_IMPLEMENTED' });
+                        // [#7035] ADR-0112 envelope: the semantic code lives at
+                        // `error.code`, NOT as a sibling of `error`. This site
+                        // used to answer `{ error: '<msg>', code: 'NOT_IMPLEMENTED' }`
+                        // while `POST /meta/_migrate-stored` a few hundred lines
+                        // up answered the nested shape for the same condition,
+                        // so a client reading `err.error.code` got `undefined`
+                        // here — and `undefined` takes the "no code" branch, not
+                        // an error branch. `NOT_IMPLEMENTED` is unchanged: it is
+                        // already the standard-catalog code ADR-0112 maps 501 to
+                        // (`spec/src/api/errors.zod.ts` — the catalog member and
+                        // `standardErrorCodeForHttpStatus(501)`).
+                        res.status(501).json({
+                            error: {
+                                code: 'NOT_IMPLEMENTED',
+                                message: 'Save operation not supported by protocol implementation',
+                            },
+                        });
                         return;
                     }
 
@@ -5335,8 +5337,17 @@ export class RestServer {
                     }
                     const p = await this.resolveProtocol(environmentId, req);
                     if (!(p as any).deleteMetaItem) {
+                        // [#7035] ADR-0112 envelope. This site was the worst of
+                        // the three shapes: a BARE STRING `error`, with no code
+                        // at all — so neither `err.error.code` nor `err.code`
+                        // resolved, and `err.error.message` read `undefined`
+                        // too. `NOT_IMPLEMENTED` is the standard-catalog code
+                        // for 501 (ADR-0112; `standardErrorCodeForHttpStatus`).
                         res.status(501).json({
-                            error: 'Reset operation not supported by protocol implementation',
+                            error: {
+                                code: 'NOT_IMPLEMENTED',
+                                message: 'Reset operation not supported by protocol implementation',
+                            },
                         });
                         return;
                     }
@@ -5697,7 +5708,20 @@ export class RestServer {
                     }
                     const p = await this.resolveProtocol(environmentId, req);
                     if (!p.saveMetaItem) {
-                        res.status(501).json({ error: 'Save operation not supported by protocol implementation', code: 'NOT_IMPLEMENTED' });
+                        // [#7035] ADR-0112 envelope. Converged together with the
+                        // single-segment `PUT /meta/:type/:name` above, because
+                        // the two refusals were BYTE-IDENTICAL (see the comment
+                        // block on the gate: "WORD FOR WORD the same mechanism").
+                        // Fixing one and leaving its literal twin would leave the
+                        // wrong template in the file next to the right one, which
+                        // is the harm #7035 is about — a copier copies whichever
+                        // line they scrolled to.
+                        res.status(501).json({
+                            error: {
+                                code: 'NOT_IMPLEMENTED',
+                                message: 'Save operation not supported by protocol implementation',
+                            },
+                        });
                         return;
                     }
 

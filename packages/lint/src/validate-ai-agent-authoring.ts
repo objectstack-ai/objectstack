@@ -26,9 +26,28 @@
  * that names the runtime consequence is honest for both readers; the runtime
  * is what actually gates. Deliberately NOT a Zod refine — an existing stack
  * must keep parsing (ADR-0078 non-goal #1).
+ *
+ * ## The value half (issue #6041)
+ *
+ * The rule above catches a stack that *declares* a withdrawn agent record.
+ * It never looked at `app.defaultAgent` — a plain
+ * `SnakeCaseIdentifierSchema` string, so any snake_case value parses, builds,
+ * and passes `os:check` even when it names nothing the runtime will ever
+ * resolve. #5985 measured the blind spot directly: replaying the bad example
+ * `defaultAgent: 'sales_copilot'` left `check:skill-examples` at 208 green,
+ * EXIT=0. `app.defaultAgent` silently falls back to the platform default at
+ * runtime (ADR-0063 §1) instead of crashing, which is why this limb is
+ * **warning**, not error, same as the rule above — the maintainer ruling on
+ * #6041 (2026-08-07, reaffirmed 2026-08-09) is option A: add the value check
+ * at warning tier, reusing `PLATFORM_AGENT_NAMES` rather than narrowing the
+ * schema to an enum (a breaking authoring change ADR-0063 already walked
+ * back once).
  */
 
 export const AGENT_AUTHORING_WITHDRAWN = 'agent-authoring-withdrawn';
+
+/** `app.defaultAgent` names something outside the platform agent roster. */
+export const DEFAULT_AGENT_OUTSIDE_ROSTER = 'default-agent-outside-roster';
 
 export type AiAgentAuthoringSeverity = 'error' | 'warning';
 
@@ -62,9 +81,12 @@ function strName(v: unknown): string | undefined {
 }
 
 /**
- * The two platform agent ids. A stack that re-declares one of these is doing
- * something different from inventing a custom persona (it is shadowing a
- * platform record), so it gets its own wording.
+ * The two platform agent ids (`ask`, `build`) plus their two legacy aliases
+ * (`data_chat` → `ask`, `metadata_assistant` → `build`, registered via the
+ * cloud alias registry — ADR-0063 §2). A stack that re-declares any of these
+ * four names is doing something different from inventing a custom persona
+ * (it is shadowing a platform record, directly or through its alias), so it
+ * gets its own wording.
  */
 const PLATFORM_AGENT_NAMES = new Set(['ask', 'build', 'data_chat', 'metadata_assistant']);
 
@@ -107,6 +129,32 @@ export function validateAiAgentAuthoring(stack: AnyRec): AiAgentAuthoringFinding
               `already carry the capability — they attach to the platform agent by \`surface\` ` +
               `affinity, so nothing is lost by dropping the persona.`
             : ``),
+    });
+  }
+
+  const roster = [...PLATFORM_AGENT_NAMES].join(', ');
+  const apps = asArray(stack.apps);
+  for (let appIdx = 0; appIdx < apps.length; appIdx++) {
+    const app = apps[appIdx];
+    const defaultAgent = strName(app.defaultAgent);
+    if (!defaultAgent || PLATFORM_AGENT_NAMES.has(defaultAgent)) continue;
+
+    const appName = strName(app.name) ?? `#${appIdx}`;
+    findings.push({
+      severity: 'warning',
+      rule: DEFAULT_AGENT_OUTSIDE_ROSTER,
+      where: `app "${appName}".defaultAgent`,
+      path: `apps[${appIdx}].defaultAgent`,
+      message:
+        `app "${appName}" pins \`defaultAgent\` to "${defaultAgent}", which is not in the ` +
+        `platform agent roster (${roster}). The kernel ships exactly two agents (ADR-0063 §2) ` +
+        `and resolves this key against them and their legacy aliases only — an unrecognized ` +
+        `name is not rejected, it silently falls back to the platform default at runtime, so ` +
+        `the pin has no effect and the value drifts from what actually serves the app.`,
+      hint:
+        `Set \`defaultAgent\` to one of the platform agent names: ${roster}. If the goal is a ` +
+        `dedicated persona or capability, express it as skills instead — they attach to "ask" ` +
+        `/ "build" by surface affinity, not as a custom \`defaultAgent\` value.`,
     });
   }
 

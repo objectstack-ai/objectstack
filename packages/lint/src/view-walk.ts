@@ -98,12 +98,15 @@
  * record keeps that a consumer's choice instead of freezing one rule's answer
  * into the shared walk.
  *
- * **Which object a site binds to.** The three consumers compose their binding
- * ladders differently on purpose — `validate-form-layout` falls back to the
- * container, `validate-translatable-sections` falls back to the container and
- * then to the default `list`'s binding, and `validate-visibility-predicates`
- * needs no binding at all. Folding those into one walk would change verdicts,
- * which a refactor may not do.
+ * **How a site's binding is COMPOSED.** The BASE ladder — which keys on ONE
+ * record name an object — is shared, and lives here as {@link viewObjectName}
+ * (#6662). What each consumer wraps around it is its own and stays its own:
+ * `validate-form-layout` falls back to the container,
+ * `validate-translatable-sections` falls back to the container and then to the
+ * default `list`'s binding, `validate-translation-references` falls back to the
+ * record, and `validate-visibility-predicates` needs no binding at all. Folding
+ * those fallbacks into one walk would change verdicts, which a refactor may not
+ * do; sharing the rung they all start from cannot.
  */
 
 type AnyRec = Record<string, unknown>;
@@ -139,6 +142,47 @@ export interface ViewSite {
 
 function isRec(v: unknown): v is AnyRec {
   return !!v && typeof v === 'object' && !Array.isArray(v);
+}
+
+function strName(v: unknown): string | undefined {
+  return typeof v === 'string' && v.length > 0 ? v : undefined;
+}
+
+/**
+ * The object ONE record — a `views[]` entry, or one of its sub-containers —
+ * binds to, across the shapes it is authored in: `objectName` → `object` →
+ * `data.object`.
+ *
+ * This is the BASE rung only. It had three byte-identical copies under two
+ * names (#6662): `boundObject` in `validate-form-layout.ts`, `viewObjectName`
+ * in `validate-translatable-sections.ts` and in
+ * `validate-translation-references.ts`. The majority spelling wins here, and it
+ * is also the CLI i18n extractor's (`packages/cli/src/utils/i18n-extract.ts`)
+ * and the spec resolver's (`packages/spec/src/system/i18n-resolver.ts`), so
+ * every walker in the repo now agrees on which object a record belongs to by
+ * reading the same four lines. Disagreeing here would mean warning about the
+ * wrong object — a container retargeted at another object keys its headings
+ * there.
+ *
+ * What is NOT folded in is the per-rule FALLBACK composition (see the module
+ * docblock): on the canonical container shape the binding lives INSIDE the
+ * sub-container (`form.data.object` / `list.data.object`) while the container
+ * itself carries `object`, so each rule resolves the site first and then falls
+ * back its own way. A record-level lookup alone resolves to nothing on the
+ * shape real apps ship.
+ *
+ * `name` is deliberately NOT a rung. A stack-level container's `name` may be
+ * the object name (`view.zod.ts` says so for object-scoped containers), but a
+ * form view's `name` is its own — `contract_form`, not `contract` — and reading
+ * it here would bind the wrong object and report every field on the form as
+ * unknown.
+ */
+export function viewObjectName(view: AnyRec): string | undefined {
+  return (
+    strName(view.objectName) ??
+    strName(view.object) ??
+    (isRec(view.data) ? strName(view.data.object) : undefined)
+  );
 }
 
 /**

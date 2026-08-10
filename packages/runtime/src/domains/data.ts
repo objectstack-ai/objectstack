@@ -12,7 +12,7 @@
  * "the indirection buys nothing" cleanup — re-couples the data plane to
  * dispatcher state and restarts the accretion D11 decomposed. Dispatcher
  * facilities are reachable only through `DomainHandlerDeps`. Anchored in
- * scripts/adr-anchors.json.
+ * scripts/adr-anchors/.
  */
 
 import * as actionExec from '../action-execution.js';

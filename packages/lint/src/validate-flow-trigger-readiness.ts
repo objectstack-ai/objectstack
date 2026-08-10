@@ -43,11 +43,13 @@
 //      the one bind-time warn rule 3's case gets.
 //
 //   5. A `type: 'record_change'` flow whose start-node `triggerType` the engine
-//      routes NOWHERE — `triggerType: 'onCreate'` (#6637). The quietest member
-//      of the family: rules 3 and 4 are about one key's shape, this one is
-//      about a flow that declares WHAT it is and then contradicts it. See 1f
-//      for the measured silence — every named runtime channel skips it because
-//      they all key off the same resolution that already gave up.
+//      routes NOWHERE — present but off-grammar (`triggerType: 'onCreate'`,
+//      #6637's original specimen) or absent entirely (the omission shape,
+//      widened into this same id by #7215 once #7039 had repaired the corpus's
+//      one live instance). Both are a flow that declares WHAT it is and then
+//      never arms it — two spellings of one defect. See 1f for the measured
+//      silence — every named runtime channel skips it because they all key off
+//      the same resolution that already gave up.
 //
 // The spec import is deliberate and is what makes rule 3 possible without a
 // second copy of the descriptor's shape living in this file. It stays inside the
@@ -150,7 +152,10 @@ export const FLOW_TIME_RELATIVE_DESCRIPTOR_UNROUTABLE = 'flow-time-relative-desc
 /**
  * #6637 — a `type: 'record_change'` flow whose start-node `triggerType` the
  * engine routes to NO trigger at all, so the flow is silently demoted to a
- * manual one.
+ * manual one. Widened by #7215 to also cover the token being ABSENT
+ * entirely — the omission shape is exactly as dead at runtime as the
+ * contradiction shape this id originally caught, so one id and one severity
+ * cover both (see 1f for the history of why the widening waited).
  *
  * A separate id from `flow-trigger-unknown-event`, on the same distinction that
  * separates the two `timeRelative` ids: whether the engine ROUTES the value.
@@ -161,9 +166,10 @@ export const FLOW_TIME_RELATIVE_DESCRIPTOR_UNROUTABLE = 'flow-time-relative-desc
  *     ROUTES it to the record-change trigger, which maps it to zero hook events
  *     and says so in a bind-time warn. That is `…-UNKNOWN-EVENT`, and this rule
  *     file moves that warn earlier.
- *   - anything else (`onCreate`, `on_update`, `''`, `['onCreate']`) — the engine
- *     routes it NOWHERE. That is this id, and there is no runtime channel to
- *     move earlier from: see 1f for the three call sites that each skip it.
+ *   - anything else (`onCreate`, `on_update`, `''`, `['onCreate']`, or the key
+ *     absent entirely) — the engine routes it NOWHERE. That is this id, and
+ *     there is no runtime channel to move earlier from: see 1f for the three
+ *     call sites that each skip it.
  */
 export const FLOW_TRIGGER_UNROUTABLE = 'flow-trigger-unroutable';
 
@@ -560,18 +566,8 @@ export function validateFlowTriggerReadiness(stack: AnyRec): FlowTriggerReadines
     //     are the types a genuinely manual flow declares, and neither reaches
     //     here. That is what makes this decidable at authoring time.
     //
-    //     Two shapes are deliberately NOT this rule's, each pinned by a test:
+    //     One shape is deliberately NOT this rule's, pinned by a test:
     //
-    //       - `triggerType` ABSENT on a `record_change` flow. Dead the same way
-    //         and arguably worse, but it is an omission rather than a
-    //         contradiction, and the corpus measurement (#6637) found a live
-    //         instance of it in `examples/app-todo` whose repair is a judgement
-    //         about that app's semantics, not a lint decision (#6882 — the flow
-    //         also writes its predicate to a `triggerCondition` key nothing
-    //         reads, so arming it is not a one-token edit). Widening this
-    //         criterion to cover it would gate a shipped example app on a guess.
-    //         The criterion here requires the key to be PRESENT so that widening
-    //         is a deliberate act, not a side effect.
     //       - a `record_change` flow that ALSO declares something the engine
     //         does route (`config.schedule`, `triggerType: 'api'`). That flow
     //         binds and fires — on the wrong trigger's terms. A real defect, a
@@ -579,6 +575,24 @@ export function validateFlowTriggerReadiness(stack: AnyRec): FlowTriggerReadines
     //         severity argument to make. `routesToSomeTrigger` below is the
     //         engine's chain character for character precisely so this rule
     //         stays silent there instead of guessing at a second verdict.
+    //
+    //     The criterion covers BOTH ways a `record_change` flow ends up
+    //     unrouted: `triggerType` PRESENT but off-grammar (the contradiction —
+    //     `triggerType: 'onCreate'`, #6637's original specimen) and
+    //     `triggerType` ABSENT entirely (the omission — dead the same way,
+    //     arguably worse, and previously excluded on purpose). They were not
+    //     always one rule's concern: at #6637 time the omission shape had a
+    //     live instance in `examples/app-todo` (`TaskCompletionFlow`, #6882)
+    //     whose repair was a judgement about that app's semantics rather than a
+    //     lint decision, so covering the omission then would have gated a
+    //     shipped example app on a guess — the criterion required the key to be
+    //     PRESENT and the omission was tracked separately (#7041 item 2).
+    //     #7039 repaired that instance (`TaskCompletionFlow` now declares
+    //     `triggerType: 'record-after-update'`), which put a green corpus
+    //     under the open question; #7215 (maintainer-ruled) decided to widen
+    //     now rather than wait for the next omission instance to make landing
+    //     costly again. Both shapes are equally dead at runtime — two
+    //     spellings of one defect — so they share this id and severity.
     const routesToSomeTrigger =
       isRecordTriggered ||
       isArrayRecordTriggered ||
@@ -587,7 +601,8 @@ export function validateFlowTriggerReadiness(stack: AnyRec): FlowTriggerReadines
       flow.type === 'schedule' ||
       flow.type === 'api' ||
       triggerType === 'api';
-    if (start && flow.type === 'record_change' && config.triggerType != null && !routesToSomeTrigger) {
+    if (start && flow.type === 'record_change' && !routesToSomeTrigger) {
+      const hasTriggerType = config.triggerType != null;
       findings.push({
         // `error` (#5762's criterion, applied to a fourth id). The verdict is
         // the engine's own routing chain — literal `startsWith`/`typeof` tests
@@ -601,12 +616,15 @@ export function validateFlowTriggerReadiness(stack: AnyRec): FlowTriggerReadines
         where: `flow "${flowName}" › start node`,
         path: `flows[${flowIndex}].nodes[${start.index}].config.triggerType`,
         message:
-          `declares type: 'record_change' but its start node's triggerType is ` +
-          `${renderTriggerToken(config.triggerType)}, which the engine routes to NO trigger — it binds a ` +
-          `record-change flow only for a token starting with 'record-', so this flow is demoted to a manual ` +
-          `one and never fires. Nothing NAMES it: the unbound-flow audit resolves the same binding and skips ` +
-          `the flow as "manual — nothing to bind", so neither the boot warning nor the startup summary lists ` +
-          `it; the only trace is the banner's flow count being one higher than its bound count.`,
+          `declares type: 'record_change' but ` +
+          (hasTriggerType
+            ? `its start node's triggerType is ${renderTriggerToken(config.triggerType)}, which the engine ` +
+              `routes to NO trigger`
+            : `its start node has no triggerType at all, so there is nothing for the engine to route`) +
+          ` — it binds a record-change flow only for a token starting with 'record-', so this flow is demoted ` +
+          `to a manual one and never fires. Nothing NAMES it: the unbound-flow audit resolves the same binding ` +
+          `and skips the flow as "manual — nothing to bind", so neither the boot warning nor the startup ` +
+          `summary lists it; the only trace is the banner's flow count being one higher than its bound count.`,
         hint:
           `Use record-{before,after}-{create,update,delete,write} ('write' is create OR update in one flow, ` +
           `#3427; create/insert are synonyms). If the flow really is launched by hand or from a screen, ` +

@@ -53,6 +53,7 @@ import type {
   DatasourceDriverHandle,
 } from './contracts/index.js';
 import { assertDatasourcePoolSupported } from './datasource-pool-support.js';
+import type { SqliteAbsentFileMode } from '@objectstack/driver-sql';
 
 /**
  * Driver-id resolution comes from the spec since #4410 — this file used to keep
@@ -331,6 +332,23 @@ export interface DefaultDatasourceDriverFactoryOptions {
    * failure is NOT silently swapped for a different engine (fail-closed).
    */
   dev?: boolean;
+  /**
+   * What a `sqlite` construction does when its file does not exist (#6743).
+   * `'empty-in-memory'` opens an ephemeral database instead of creating the
+   * file — for hosts that only READ (`os migrate plan`). Defaults to
+   * `'create'`, so no existing host changes behaviour.
+   *
+   * A host-composition option rather than a datasource `config` key on
+   * purpose: it describes what THIS BOOT is allowed to do, not a property of
+   * the datasource, and `SqliteConfigSchema` is strict — an authorable key
+   * here would invite `objectstack.config.ts` to declare a database that
+   * silently never persists.
+   *
+   * Applies to the `sqlite` kind only. `sqlite-wasm` is constructed directly
+   * from a filename and is deliberately left alone; every other kind connects
+   * to a server that this process cannot bring into existence anyway.
+   */
+  sqliteAbsentFile?: SqliteAbsentFileMode;
 }
 
 export function createDefaultDatasourceDriverFactory(
@@ -403,6 +421,7 @@ export function createDefaultDatasourceDriverFactory(
           dev: options.dev,
           ...(schemaMode ? { schemaMode } : {}),
           ...(autoMigrate ? { autoMigrate } : {}),
+          ...(options.sqliteAbsentFile ? { sqliteAbsentFile: options.sqliteAbsentFile } : {}),
         });
         return toHandle(resolved.driver, () => sqlServerVersion(resolved.driver, 'sqlite'));
       }

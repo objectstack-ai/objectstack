@@ -170,6 +170,42 @@ const PHANTOM_PATHS = [
   '/api/.well-known/objectstack',
 ];
 
+/**
+ * The `paths` section the static artifact carried until #5744 — rebuilt here
+ * as a FIXTURE, because the artifact no longer supplies one.
+ *
+ * #5821 pinned "no artifact path leaks into the served document" by reading
+ * the artifact's OWN `paths` and looping over them. That was the right input
+ * while spec still emitted a route section. #5744 then removed the emission —
+ * correctly, ADR-0076: a section can only be produced by the package that
+ * mounts the routes — and the pin's input silently became the empty set.
+ * Re-measured on this branch through the same `loadOpenApiSpec` seam the pin
+ * uses (#6894):
+ *
+ *     #5821 pin input set (stale paths): [] -> size 0
+ *     loop body executions: 0
+ *
+ * A `for` over nothing asserts nothing, and the case stayed green saying so.
+ * The other direction — waiting for the artifact to carry a route section
+ * again — would mean asking the producer to keep a removed defect alive in
+ * order to feed a test, so the input is constructed here instead.
+ */
+function staleArtifactPaths(): Record<string, any> {
+  const operation = (operationId: string) => ({
+    operationId,
+    responses: { '200': { description: 'OK' } },
+  });
+  const section: Record<string, any> = {};
+  for (const path of PHANTOM_PATHS) {
+    section[path] = { get: operation(`stale ${path}`) };
+  }
+  // The historical section's other defect, kept so the fixture is the shape
+  // that really shipped rather than a uniform one: it documented PUT on a
+  // record, a verb this server answers 405 to.
+  section['/api/{object}/{id}'].put = operation('stale put record');
+  return section;
+}
+
 describe('#5588 — built-in routes come from rest, not from the static artifact', () => {
   it('publishes no path the server does not mount', async () => {
     // The converse of the bug, asserted as a set relation rather than by
@@ -273,23 +309,53 @@ describe('#5588 — built-in routes come from rest, not from the static artifact
     expect(names).toEqual(['environmentId', 'object']);
   });
 
-  it('discards the static artifact section even though spec still emits it', async () => {
-    // Leg 2 (#5744) removes the spec-side generation. Until it lands, the
-    // bundled artifact really does carry `/api/{object}` & co — so the serve
-    // path has to DISCARD, not merge. Proven against the artifact this
-    // runtime actually loads.
+  it('passes the half of the document `packages/spec` owns through serve untouched', async () => {
+    // The artifact's surviving half — `components.schemas`, `securitySchemes`,
+    // `info` — is the contract, and serve-time enrichment must not touch it.
     const rest = makeRest(makeProtocol({ object: [], api: [] }).protocol);
     const artifact = await (rest as any).loadOpenApiSpec();
     expect(artifact, 'the bundled artifact must be loadable for this pin to mean anything').toBeTruthy();
-    const stale = Object.keys(artifact.paths ?? {});
+    // Recorded rather than assumed, because the pin below depends on it: since
+    // #5744 the artifact is the contract half ONLY and describes no routes, so
+    // the discard case has to plant its own section to have anything to check.
+    expect(
+      artifact.paths,
+      'since #5744 the artifact emits no route section — if this ever comes back, feed it to the discard pin below instead of a fixture',
+    ).toBeUndefined();
+
+    const { body } = await serveOpenApiFrom(rest);
+    expect(Object.keys(body.components.schemas)).toEqual(Object.keys(artifact.components.schemas));
+    expect(body.components.securitySchemes).toEqual(artifact.components.securitySchemes);
+    expect(body.info.title).toBe(artifact.info.title);
+  });
+
+  it('discards a `paths`-carrying artifact instead of merging it', async () => {
+    // #5588 ruling C: the serve path DISCARDS whatever route section the
+    // static artifact carries rather than merging it, because a merge with a
+    // wrong section republishes the wrong section. Today's artifact carries
+    // none (#5744), so the only honest way to keep asserting the discard is to
+    // hand the handler one that does — see `staleArtifactPaths` for why the
+    // input is a fixture and not the artifact's own key any more (#6894).
+    const rest = makeRest(makeProtocol({ object: [], api: [] }).protocol);
+    const artifact = await (rest as any).loadOpenApiSpec();
+    expect(artifact, 'the bundled artifact must be loadable for this pin to mean anything').toBeTruthy();
+    // `loadOpenApiSpec` caches per instance and hands back the cached object
+    // itself, so planting the section on it is what the handler will read.
+    artifact.paths = staleArtifactPaths();
+
+    // Read the input back THROUGH the loader, and require it to be non-empty.
+    // This assertion is the one that would have caught #6894: it turns "the
+    // loop found nothing to check" from a silent pass into a failure, so the
+    // layer cannot go hollow again without saying so.
+    const stale = Object.keys((await (rest as any).loadOpenApiSpec()).paths ?? {});
+    expect(
+      stale.length,
+      'the pin input set is empty — the loop below would assert nothing (#6894)',
+    ).toBeGreaterThan(0);
 
     const { body } = await serveOpenApiFrom(rest);
     for (const path of stale) {
       expect(body.paths[path], `stale artifact path '${path}' leaked into the served document`).toBeUndefined();
     }
-    // What spec genuinely owns survives untouched.
-    expect(Object.keys(body.components.schemas)).toEqual(Object.keys(artifact.components.schemas));
-    expect(body.components.securitySchemes).toEqual(artifact.components.securitySchemes);
-    expect(body.info.title).toBe(artifact.info.title);
   });
 });

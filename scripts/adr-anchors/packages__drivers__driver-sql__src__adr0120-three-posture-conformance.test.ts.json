@@ -1,0 +1,8 @@
+{
+  "file": "packages/drivers/driver-sql/src/adr0120-three-posture-conformance.test.ts",
+  "adrs": [
+    "ADR-0120",
+    "ADR-0105"
+  ],
+  "invariant": "ADR-0120's posture-portability acceptance test: ONE fixture app, booted under `single | group | isolated`, must materialize BYTE-IDENTICAL unique shapes — 'no index shape reads the posture' is false the moment any two differ, and a posture flip must emit zero drift ops. The cross-posture comparison is a sameness assertion, so it is paired with a positive assertion against EXPECTED_UNIQUE_KEY_PARTS: three identically-empty runs must not read as agreement. S6's un-closed NULL hole is pinned as the honest status quo (zero forced drift), not papered over."
+}

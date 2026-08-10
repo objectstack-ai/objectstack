@@ -258,8 +258,16 @@ function withoutOperationPrivateKeys(exec: Record<string, unknown>): ExecutionCo
  * Note what deliberately did NOT change: no access DEPTH is synthesised for the
  * parent object. Absent depth leaves the sharing owner-match at its narrowest
  * (`own`) — the safe direction, and byte-for-byte the behaviour the projection
- * produced. Resolving the parent's own depth (the other candidate shape) would
- * WIDEN this gate and is a separate decision; see #7141's PR discussion. */
+ * produced.
+ *
+ * [#7144] That is now the RULED shape, not a pending question: the maintainer's
+ * ruling of 2026-08-10 keeps these gates at `own`, deliberately tighter than
+ * the parent's real edit authority. The reasoning — including the fail-open in
+ * `ISecurityService.resolveWriteScope` that makes the widening unsafe to wire
+ * today — is recorded once on the contract that owns this gate's meaning
+ * (`@objectstack/spec` — `ISharingService`, "Write DEPTH is an input the CALLER
+ * supplies"), because the `sys_attachment` kit reaches the same gate from
+ * another package; it is not restated here. */
 function callerContext(ctx: any): ExecutionContext {
   const exec = ctx?.input?.options?.context;
   if (exec && typeof exec === 'object') {

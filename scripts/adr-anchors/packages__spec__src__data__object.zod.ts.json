@@ -1,0 +1,7 @@
+{
+  "file": "packages/spec/src/data/object.zod.ts",
+  "adrs": [
+    "ADR-0120"
+  ],
+  "invariant": "`IndexSchema.unique` scope contract (ADR-0120 D1, amending #3696): `'global'` = verbatim columns (no organization column injected); `'organization'` = the driver prepends the NULL-safe organization key part (COALESCE(organization_id, '__global__')) at registration; bare `true` = deprecated positional spelling of `'global'` — warned in 17.x (lint unique/unscoped-declared-index), rejected at protocol 18 (#5082). Do NOT re-broaden the describe() back to 'true and global are synonyms, list the tenant column yourself' — that is the #4986 trap, and the hand-written composite is not NULL-safe (#5030)."
+}

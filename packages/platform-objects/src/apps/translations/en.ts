@@ -98,7 +98,9 @@ export const en: TranslationData = {
         nav_api_keys: { label: 'API Keys' },
         nav_connect_agent: { label: 'Connect an Agent' },
 
-        // Approvals
+        // Approvals. `nav_approvals_inbox` is the working surface (#7234); the
+        // three below it are the engine's raw tables, kept as the admin view.
+        nav_approvals_inbox: { label: 'Approvals Inbox' },
         nav_approval_requests: { label: 'Requests' },
         nav_approval_actions: { label: 'Action History' },
         nav_approval_delegations: { label: 'Delegations (OOO)' },

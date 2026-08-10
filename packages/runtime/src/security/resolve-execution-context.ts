@@ -27,6 +27,8 @@ import { preferredLocaleFromHeader } from '@objectstack/spec/system';
 import {
   resolveAuthzContext,
   resolveLocalizationContext,
+  assembleExecutionContextOrGuest,
+  type EntryLocalization,
 } from '@objectstack/core';
 
 /**
@@ -162,108 +164,63 @@ export async function resolveExecutionContext(opts: ResolveOptions): Promise<Exe
 
   const authz = await resolveAuthzContext({ ql, headers, getSession: getSessionForProvenance });
 
-  const ctx: ExecutionContext = {
-    positions: authz.positions,
-    permissions: authz.permissions,
-    systemPermissions: authz.systemPermissions,
-    isSystem: false,
-  };
-  // [ADR-0090 D9/D10] Principal taxonomy at the HTTP entry: a session-backed
-  // request is a human principal; a sessionless one is a guest, holding the
-  // built-in `guest` position implicitly and exclusively. Internal engine
-  // calls that construct bare contexts are untouched (they never pass
-  // through this resolver), so the security plugin's empty-context skip
-  // path keeps its meaning.
-  if (authz.userId) {
-    if (oauthPrincipal?.clientId) {
-      // [ADR-0090 D10 — agent principal] An OAuth access token that names an
-      // authorized client (`azp`) is an AI agent acting ON BEHALF OF the human
-      // `sub` (OAuth bearers reach here only on the `/mcp` surface — a
-      // deliberately agent-only door). The agent's OWN grants are its
-      // scope-derived CEILING (`data:read`→read-only, `data:write`→CRUD,
-      // neither→no data), NOT the user's — so we REPLACE the user-derived
-      // positions/permissions/systemPermissions with that ceiling. The human
-      // is the delegator (`onBehalfOf`); the security engine intersects the
-      // two so the agent can never exceed EITHER its consented scope OR the
-      // user's own reach (confused-deputy prevention). `userId` stays the human
-      // so owner-stamping and `current_user.*` RLS resolve to them.
-      ctx.principalKind = 'agent';
-      ctx.onBehalfOf = { userId: authz.userId, principalKind: 'human' };
-      ctx.permissions = scopesToAgentPermissionSets(oauthPrincipal.scopes);
-      ctx.positions = [];
-      // [ADR-0090 D10] System capabilities on the agent principal gate business
-      // ACTION invocation (`actionPermissionError` reads `ctx.systemPermissions`)
-      // — a door SEPARATE from the object CRUD/FLS/RLS intersection, which is
-      // driven by the resolved ceiling SETS (they carry no caps, so cap-gated
-      // OBJECT access stays denied to the agent regardless of this line).
-      //
-      // The `actions:execute` scope IS the user's consent to let this agent
-      // invoke actions on their behalf, so when it is granted we DELEGATE the
-      // user's action capabilities to the gate; without it the agent holds none
-      // (and the MCP tool surface hides the action tools anyway). This never
-      // widens data reach: whatever an action reads/writes still flows through
-      // the object ceiling ∩ user intersection — e.g. a `data:read` agent that
-      // invokes a writing action is still blocked at the write, and even a
-      // `data:write` agent cannot touch better-auth-managed tables. The residual
-      // is a cap-gated action whose effect is purely EXTERNAL (email, webhook) —
-      // exactly what `actions:execute` consents to. Per-action agent scoping
-      // (tighter than this all-or-nothing scope) is the per-client-grants
-      // follow-up.
-      ctx.systemPermissions =
-        oauthPrincipal.scopes?.includes(MCP_OAUTH_SCOPE_ACTIONS)
-          ? (authz.systemPermissions ?? [])
-          : [];
-    } else {
-      ctx.principalKind = 'human';
-    }
-  } else {
-    ctx.principalKind = 'guest';
-    ctx.positions = ['guest'];
-  }
-  if (authz.userId) ctx.userId = authz.userId;
-  if (authz.tenantId) ctx.tenantId = authz.tenantId;
-  if (authz.email) ctx.email = authz.email;
-  if (authz.accessToken) ctx.accessToken = authz.accessToken;
-  if (authz.tabPermissions) ctx.tabPermissions = authz.tabPermissions;
-  // [ADR-0095 D2 / #2947] Carry the derived posture rung down the runtime /
-  // MCP entry too, so this path and the REST path present enforcement the same
-  // value. Present only for an authenticated principal (guest → absent).
-  if (authz.posture) ctx.posture = authz.posture;
-  (ctx as any).org_user_ids = authz.org_user_ids;
-  // [ADR-0105 D2] The caller's org access set — the `group` posture's Layer 0
-  // wall reads it directly, so every transport must carry it.
-  (ctx as any).accessible_org_ids = authz.accessible_org_ids;
-
-  // OAuth provenance: surface the token's granted scopes so the MCP
-  // dispatcher can narrow the exposed tool families (undefined for every
-  // other provenance = not scope-limited).
-  if (oauthPrincipal && ctx.userId === oauthPrincipal.userId) {
-    ctx.oauthScopes = oauthPrincipal.scopes;
-  }
+  // [#6216 — maintainer ruling 2026-08-08, Option A] The ExecutionContext
+  // ASSEMBLY now lives in ONE place too (`assembleExecutionContext*`,
+  // @objectstack/core), shared with the REST face. Everything above is
+  // transport-specific plumbing; the field set is closed by type over there, so
+  // a new `ExecutionContext` field can no longer reach one face and miss
+  // another (the #6071 drift class), and the per-face divergences are named
+  // inputs rather than silent omissions.
+  //
+  // This face takes the EXPLICIT GUEST entry: a sessionless request on the
+  // runtime / MCP door is a first-class guest principal, and enforcement
+  // consumers read it (`plugin-security/explain-engine.ts`: guest ⇒ `EXTERNAL`
+  // posture). The REST face takes the fail-closed default entry instead
+  // (no session → no ctx → 401), unchanged.
 
   // Anonymous → skip localization (no scope to resolve against); keep the engine
   // default. Authenticated → resolve reference timezone/locale/currency.
+  let localization: EntryLocalization | undefined;
   if (authz.userId) {
     const settings = await Promise.resolve(opts.getService('settings')).catch(() => undefined);
-    const localization = await resolveLocalizationContext({
+    localization = await resolveLocalizationContext({
       ql,
       settings,
       tenantId: authz.tenantId,
       userId: authz.userId,
     });
-    ctx.timezone = localization.timezone;
-    // [#3957] The request's OWN language preference wins over the workspace
-    // default. `ExecutionContext.locale` drives the write path's message catalog
-    // (rejected-write messages, field labels inside them), and metadata is
-    // already translated per `Accept-Language` — reading only the workspace
-    // locale here would put an English rejection next to the Chinese label of
-    // the very field it names. The workspace value stays the fallback for a
-    // caller that expresses no preference (a job, a server-to-server client).
-    ctx.locale = preferredLocaleFromHeader(headers.get('accept-language')) ?? localization.locale;
-    if (localization.currency) ctx.currency = localization.currency;
   }
 
-  return ctx;
+  return assembleExecutionContextOrGuest({
+    authz,
+    // The OAuth SCOPE VOCABULARY is interpreted here, at the only door that
+    // speaks it (`acceptOAuthAccessToken` is set solely by the `/mcp` path
+    // match), and the shared assembler receives the already-derived grant. It
+    // decides what that ceiling REPLACES on the envelope — the part that
+    // drifted — without `@objectstack/core` taking a dependency on the AI
+    // subdomain. See `OAuthTokenProvenance`.
+    oauth: oauthPrincipal && {
+      ...oauthPrincipal,
+      // [ADR-0090 D10] `data:read` → read-only, `data:write` → CRUD, neither →
+      // no data access. The agent's OWN grants, never the user's.
+      scopePermissions: scopesToAgentPermissionSets(oauthPrincipal.scopes),
+      // The `actions:execute` scope IS the user's consent to let this agent
+      // invoke actions on their behalf; without it the agent holds none.
+      delegatesActions: oauthPrincipal.scopes?.includes(MCP_OAUTH_SCOPE_ACTIONS) ?? false,
+    },
+    localization,
+    // [#3957] The request's OWN language preference wins over the workspace
+    // default — `ExecutionContext.locale` drives the write path's message
+    // catalog, and metadata is already translated per `Accept-Language`, so
+    // reading only the workspace locale would put an English rejection next to
+    // the Chinese label of the very field it names. The PRECEDENCE lives in the
+    // shared assembler so the two faces cannot disagree about it.
+    requestLocale: preferredLocaleFromHeader(headers.get('accept-language')),
+    // A NAMED divergence (#6216): this face has always carried the session
+    // bearer down to hooks (`session.accessToken`); the REST face never has.
+    // Both are preserved — see the assembler's `accessToken` doc.
+    accessToken: authz.accessToken,
+  });
 }
 
 /**

@@ -40,6 +40,16 @@ import {
  * printed a single line is now REPORTED as pending work instead of performed.
  * A database another process is using is reported too — as a warning, not a
  * refusal, since a plan writes nothing either way.
+ *
+ * Since #6743 the dry run also stops short of CREATING the database. The
+ * deferral #3917 introduced covered the DDL and the seed but not the open
+ * itself, so a `plan` in a never-started project still left a 0-table
+ * `.objectstack/data/objectstack.db` behind — a write side effect from a
+ * read-only command, and one that made "this project has no database yet"
+ * unobservable to whatever ran next. A missing sqlite target is now opened as
+ * an empty in-memory database: the plan is unchanged (an empty database is an
+ * empty database, and "every table needs creating" is the true answer for a
+ * fresh project), and nothing is written to disk.
  */
 export default class MigratePlan extends Command {
   static override description =
@@ -77,7 +87,19 @@ export default class MigratePlan extends Command {
 
     let stack;
     try {
-      stack = await bootSchemaStack({ jsonOutput: flags.json, databaseUrl: flags['database-url'], deferSchemaDdl: true });
+      stack = await bootSchemaStack({
+        jsonOutput: flags.json,
+        databaseUrl: flags['database-url'],
+        deferSchemaDdl: true,
+        // A plan writes nothing — so it must not bring a database file into
+        // existence either (#6743). On a never-started project the target is
+        // opened as an empty in-memory database: the plan below is unchanged
+        // (an empty database is an empty database), and no file, `-wal` or
+        // `-shm` is left behind. `os migrate apply` deliberately does NOT set
+        // this — it flushes the deferred DDL after confirmation and needs a
+        // real file to flush into.
+        readOnlyProbe: true,
+      });
     } catch (error: any) {
       if (flags.json) { await emitJson({ error: error.message }, 0, { compact: true }); this.exit(1); }
       printError(error.message || String(error));

@@ -115,8 +115,29 @@ export const EngineQueryOptionsSchema = lazySchema(() => BaseEngineOptionsSchema
   /** Keyset cursor — REMOVED (#4286); same tombstone as `QuerySchema.cursor`. */
   cursor: retiredKey(QUERY_CURSOR_REMOVED),
 
-  /** Full-text search configuration */
-  search: FullTextSearchSchema.optional(),
+  /**
+   * Full-Text Search.
+   *
+   * The bare string IS the canonical Tier-1 contract (ADR-0061 D1: "the
+   * client sends only the query text; the server resolves which fields to
+   * search from object metadata") — it is what every surface sends, what the
+   * engine's `$search` expansion actually serves, and what the dogfood HTTP
+   * proof (`showcase-search.dogfood.test.ts`) pins. The structured
+   * `FullTextSearchSchema` form remains for the declared Tier-2 knobs.
+   *
+   * The union is schema-side drift REPAIR, not a new dialect — the same
+   * repair `BaseQuerySchema.search` (`query.zod.ts`) already carries, and for
+   * the same reason: this schema declared only the object form while the
+   * executor and the ADR's own conformance ledger served the string. Here the
+   * divergence surfaced as a type error rather than a validation failure
+   * (#7178): `DriverQuery` (= `Omit<QueryAST, 'object'>`, which inherits the
+   * union) was not assignable to `EngineQueryOptionsParsed` purely because of
+   * this key, so every engine caller wanting the canonical spelling had to
+   * `as any` the whole query — switching off `where`/`orderBy`/`fields`
+   * checking too, and, since this schema is not `.strict()`, arming exactly
+   * the silent-key-drop that `check:query-options-erasure` exists to stop.
+   */
+  search: z.union([z.string(), FullTextSearchSchema]).optional(),
 
   /**
    * Fields the `search` expansion may match against — intersected with the

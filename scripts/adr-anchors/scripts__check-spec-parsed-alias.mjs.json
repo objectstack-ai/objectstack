@@ -1,0 +1,7 @@
+{
+  "file": "scripts/check-spec-parsed-alias.mjs",
+  "adrs": [
+    "ADR-0122"
+  ],
+  "invariant": "ADR-0122 D7: every bare `z.infer` alias in `packages/spec/src/**/*.zod.ts` must either be paired with its `XParsed` or be pinned isomorphic in the pin file. The exemption list deliberately does NOT live in this script — it lives in the pin file where tsc proves each entry, because an exemption a comment merely asserts is the declared-but-unenforced shape this repo keeps paying to fix. Moving the list in here to 'simplify' the gate would make it a phantom check. The gate also belongs HERE rather than in `packages/lint`: that package's contract is an in-memory metadata graph with 'no I/O, no runtime, no filesystem', and a rule reading our own TypeScript source cannot live there."
+}

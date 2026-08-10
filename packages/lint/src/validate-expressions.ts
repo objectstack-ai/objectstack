@@ -768,7 +768,14 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
                   ? `\`actionType: '${action}'\` named a registered function — move it to \`function: '${action}'\`. `
                   : `Use a \`notify\` node for mail, a \`connector_action\` (Slack connector) or \`http\` node ` +
                     `for Slack, and a registered function for logic. `) +
-                `Run \`os migrate meta --from 16\` to rewrite it automatically.`,
+                // #6856 route D (maintainer-ruled): the house sentence names the TOOL's
+                // behaviour, never the retired key's fate — "rewrite it" reads two ways
+                // over a branch that DELETES the key (template/recipients/variables/script),
+                // "rewrite existing sources" only one. Plain-quoted (not a template literal)
+                // so this site is a member of `retired-key-migrate-sentence.test.ts`'s
+                // widened scan (#7030) on the same textual shape as the spec corpus — no
+                // interpolation lives in this clause, so nothing is lost switching quote style.
+                'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
               source: JSON.stringify({ id: node.id, type: node.type, config: cfg }),
             });
           } else if (!fn) {

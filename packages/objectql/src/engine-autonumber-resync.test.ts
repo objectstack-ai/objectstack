@@ -26,7 +26,8 @@
  *
  *  - **Adopt** (`adoptExplicitAutonumber`): lift the counter from the value an
  *    exempt writer supplied, read by #6468's anchoring rules — the SAME reading
- *    the seeding scan performs, now shared as `readAutonumberCounter`. Costs one
+ *    the seeding scan performs, shared as `readStoredAutonumberCounter` (whose
+ *    anchored half is spec's `readAutonumberCounter`, #6560). Costs one
  *    string parse and NO query, and makes the warm counter converge on what a
  *    cold re-seed of the same store would answer.
  *  - **Re-seed on collision** (`createWithAutonumberResync`): drop the stale

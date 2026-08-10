@@ -177,26 +177,47 @@ export const LogTimeAction = defineAction({
 });
 
 /**
- * modal — headless (`locations: []`).
+ * headless command action — "New Task" (`locations: []`).
  *
- * This action used to declare `locations: ['global_nav']`, which #6888 retired:
- * no product surface ever rendered that location, so the declaration placed the
- * action nowhere. Its live entry point is elsewhere and always was — the
- * Overview page's "Create Task" CTA (`../pages/index.ts`) carries an INLINE
- * action of the same name, which is the path a user actually clicks. So the
- * registered action keeps its declaration and states the truth about its UI
- * surface (`[]` — "nowhere, deliberately") rather than naming a location
- * nothing serves. No replacement placement was invented for it here: choosing
- * one is a product decision about the showcase, not a consequence of the
- * retirement (flagged on #6888).
+ * `type: 'form'` + an `<object>.<view>` FORM-view target, structurally
+ * identical to `LogTimeAction` above. It used to be `type: 'modal'` +
+ * `target: 'showcase_component_gallery'` — a command labelled "New Task" whose
+ * target named the showcase HOME PAGE, so the dispatch opened the welcome page
+ * inside a dialog with zero form controls and nothing to create a task with
+ * (#6739).
+ *
+ * The fix is the TYPE, not the target. A `type: 'modal'` target names a PAGE
+ * and only a page: the spec TSDoc (`packages/spec/src/ui/action.zod.ts`), the
+ * published docs (`content/docs/ui/actions.mdx`) and `defineStack`'s
+ * cross-reference walk (`packages/spec/src/stack.zod.ts`) all say so, and the
+ * walk REJECTS a registered modal action whose target is not a declared page —
+ * so "just point the modal at `showcase_task`" is a build error, not a fix
+ * (maintainer ruling, #6739). Opening an object's form is what `type: 'form'`
+ * is for, and it is validated: a form target pointing at a LIST view is itself
+ * a build error (#2554, see LogTimeAction).
+ *
+ * Coverage is not lost: `QuickViewAction` above is the corpus's
+ * modal-targeting-a-page specimen, and there the "open a dialog/page" semantics
+ * match its "Quick View" label.
+ *
+ * Its PLACEMENT is the separate fork of the same card. This declared
+ * `locations: ['global_nav']` until #6888 retired that value: no product
+ * surface ever rendered it, so the declaration placed the action nowhere. It is
+ * headless now — `[]`, "nowhere, deliberately" — rather than naming a location
+ * nothing serves. Nothing is stranded by that: the showcase's live "Create
+ * Task" path is the Overview page's `element:button` CTA (`../pages/index.ts`),
+ * which carries an INLINE action of the same name and is what a user actually
+ * clicks. No replacement placement was invented here — choosing one is a
+ * product decision about the showcase, not a consequence of the retirement
+ * (flagged on #6888).
  */
 export const NewTaskAction = defineAction({
   name: 'showcase_new_task',
   label: 'New Task',
   icon: 'plus',
   objectName: task,
-  type: 'modal',
-  target: 'showcase_component_gallery',
+  type: 'form',
+  target: 'showcase_task.edit',
   locations: [],
   refreshAfter: true,
 });
