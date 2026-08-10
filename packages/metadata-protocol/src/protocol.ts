@@ -1506,6 +1506,174 @@ const WIRE_QUERY_ALIAS_SLOTS: readonly QueryAliasSlot[] = (() => {
 })();
 
 /**
+ * The OData `$`-prefixed spelling of each bare wire parameter this normalizer
+ * consumes, hoisted out of the loop in `findData` that used to own it so the
+ * arity survey below and that loop read ONE table (#7321). Adding a `$` alias
+ * in one place and not the other is exactly how a parameter ends up folded but
+ * unchecked.
+ *
+ * `$filter` / `$expand` are deliberately absent: they are declared as slot
+ * aliases on {@link WIRE_QUERY_ALIAS_SLOTS} instead, because they fold straight
+ * to a canonical key rather than to a bare wire spelling.
+ */
+const WIRE_DOLLAR_ALIASES: readonly (readonly [string, string])[] = [
+    ['$top', 'top'],
+    ['$skip', 'skip'],
+    ['$orderby', 'orderBy'],
+    ['$select', 'select'],
+    ['$count', 'count'],
+    ['$search', 'search'],
+    ['$searchFields', 'searchFields'],
+];
+
+/**
+ * [#7321] The list-query slots whose DECLARED value type admits an array, by
+ * canonical key. Everything else this normalizer reads — including a leftover
+ * key lowered into an implicit field filter — is single-valued, and an array on
+ * it is a repeated wire parameter (see {@link assertQueryParamArity}).
+ *
+ * This set is the whole judgement. `IHttpRequest.query` is
+ * `Record< string, string | string[] >` and the array arm is produced by a real
+ * first-party adapter (`NodeHttpServer` hands `?x=1&x=2` through as
+ * `['1','2']`, measured over a socket on #6878), so `Array.isArray` at this
+ * boundary means one of exactly two things: a repeated querystring parameter,
+ * or a JSON array in a `POST /data/:object/query` body. This normalizer serves
+ * BOTH ingresses and cannot tell them apart — which is why the rule keys off the
+ * declared TYPE rather than off the request. On a slot that never declares an
+ * array, `Array.isArray` is unambiguous evidence of repetition; on a slot that
+ * does, it is the ordinary shape and must not be touched.
+ *
+ * Per member, why the array is legal (`packages/spec/src/data/query.zod.ts`):
+ *  - `fields`        — `z.array(FieldNodeSchema)`; `?$select=a&$select=b` IS the
+ *                      projection `['a','b']`.
+ *  - `orderBy`       — `z.array(SortNodeSchema)`, and `normalizeSortNodes` has an
+ *                      explicit `string[]` arm: repetition COMPOSES into a
+ *                      multi-key sort (`?sort=name&sort=-age`), it does not
+ *                      conflict.
+ *  - `expand`        — the name-array arm lowers to `{name: {object: name}}`.
+ *  - `searchFields`  — `z.array(z.string())`; the engine reads the comma-string
+ *                      and the array from either slot.
+ *  - `where`         — a FILTER AST is an array (`['status','=','open']`), so a
+ *                      blanket arity refusal here would reject the AST body form
+ *                      outright. A repeated `?filter=` is still refused, one
+ *                      block down, by `isFilterAST` failing to read it.
+ *  - `groupBy`       — `z.array(GroupByNodeSchema)`.
+ *  - `aggregations`  — `z.array(AggregationNodeSchema)`.
+ *  - `joins` / `windowFunctions` — retired ARRAY keys (#4286). The tombstone,
+ *                      not an arity refusal, must stay their answer.
+ *
+ * Deliberately NOT here, each because the spec declares a scalar: `limit`/`top`
+ * and `offset` (`z.number()`), `search` (`string | FullTextSearch`), `object`
+ * (`z.string()`), `having` (a `FilterCondition` OBJECT — the engine has no AST
+ * arm for it), the `count` response flag, and the retired scalars `cursor` /
+ * `distinct`.
+ */
+const ARRAY_VALUED_QUERY_SLOTS: readonly string[] = [
+    'fields', 'orderBy', 'expand', 'searchFields', 'where',
+    'groupBy', 'aggregations', 'joins', 'windowFunctions',
+];
+
+/**
+ * [#7321] {@link ARRAY_VALUED_QUERY_SLOTS} expanded to every WIRE spelling that
+ * reaches it, derived from the same two tables the fold uses so a new alias
+ * cannot silently lose its array arm — the failure mode would be `?$select=a&
+ * $select=b` starting to 400, i.e. the damage case this card exists to avoid.
+ */
+const ARRAY_VALUED_LIST_QUERY_PARAMS: ReadonlySet<string> = (() => {
+    const names = new Set<string>(ARRAY_VALUED_QUERY_SLOTS);
+    for (const slot of WIRE_QUERY_ALIAS_SLOTS) {
+        if (!names.has(slot.canonical)) continue;
+        for (const alias of slot.aliases) names.add(alias);
+    }
+    for (const [dollar, bare] of WIRE_DOLLAR_ALIASES) {
+        if (names.has(bare)) names.add(dollar);
+    }
+    return names;
+})();
+
+/**
+ * [#7321] A parameter this normalizer reads as single-valued, supplied more
+ * than once.
+ *
+ * ## Why a refusal, and why this code
+ *
+ * `?$top=1&$top=2` is a well-formed request carrying two irreconcilable
+ * intents. Picking one is the silent drop itself, and coercing the pair is
+ * worse: `Number(['1','2'])` is `NaN`, so the window reached the driver as
+ * `limit: NaN` — driver-dependent behaviour under a 200, never an error. That
+ * is the same class #6928 / PR #7299 refused one layer over on
+ * `GET /api/v1/notifications`, and the same rule #6307 / #6877 landed in
+ * `packages/rest` (`readSingleQueryValue`); the wording below is theirs
+ * verbatim so a caller who repeats a parameter on two different routes is told
+ * the same thing twice, not two things once.
+ *
+ * `INVALID_REQUEST` / 400 is what {@link conflictingQueryParamsError} in this
+ * same normalizer already answers for the IDENTICAL condition reached the other
+ * way — two SPELLINGS of one slot carrying different values (#4181 → #3795).
+ * One slot given two values is one defect; it must not carry two codes
+ * depending on whether the caller repeated `filter` or wrote `filter` and
+ * `where`. (The rest layer spells its 400 `VALIDATION_ERROR` and the runtime
+ * layer `VALIDATION_FAILED`; those are each package's house catalog member for
+ * a 400, registered per package in `error-code-ledger.zod.ts`. The RULE and the
+ * status are what have to agree across the three, and do.)
+ *
+ * ## Why the count and not the values
+ *
+ * Two identical values are still two occurrences and are still refused: "at
+ * most one DISTINCT value" would be a de-duplication rule no caller can
+ * predict, while "supply it at most once" is checkable client-side without
+ * knowing anything about our semantics (#6877).
+ */
+function repeatedQueryParamError(param: string, count: number): Error {
+    const err: any = new Error(
+        `The '${param}' query parameter was supplied ${count} times. Supply it at most once — `
+        + 'this endpoint will not choose between conflicting values. It was NOT applied as a '
+        + 'list: a single-valued parameter given an array coerces to a value nobody asked for '
+        + `(Number(['1','2']) is NaN), which the driver then answers under a 200.`,
+    );
+    err.status = 400;
+    err.code = 'INVALID_REQUEST';
+    err.param = param;
+    return err;
+}
+
+/**
+ * [#7321] Refuse a repeated occurrence of any list-query parameter this
+ * normalizer reads as single-valued, and normalise the benign one-element array
+ * away so nothing below has to know the union existed.
+ *
+ * Runs at the TOP of `findData`, ahead of the `$`-alias pass and the #3795 slot
+ * fold, for two reasons:
+ *
+ *  1. The message then quotes the parameter the caller actually wrote — the
+ *     #4226 discipline. After the fold, `?$top=1&$top=2` would be reported as
+ *     `'limit'`, a name absent from the request.
+ *  2. The fold compares slot spellings by `JSON.stringify`, so an unchecked
+ *     `?top=1&top=2&limit=1` reaches it as `['1','2']` vs `'1'` and is refused
+ *     as a "conflicting query parameters" problem — a true refusal with a false
+ *     diagnosis. Checking arity first means the caller is told what is actually
+ *     wrong.
+ *
+ * Length 0 is DELETED rather than set to `undefined` (which is what the rest
+ * layer's `refuseRepeatedQueryParams` does with it): the leftover-key bucket
+ * below reads `Object.keys(options)`, so a key left behind carrying `undefined`
+ * would be lowered into an implicit `{field: undefined}` predicate. "Not
+ * supplied" has to mean absent here, not present-and-empty.
+ */
+function assertQueryParamArity(options: Record<string, unknown>): void {
+    for (const name of Object.keys(options)) {
+        const value = options[name];
+        if (!Array.isArray(value)) continue;
+        if (ARRAY_VALUED_LIST_QUERY_PARAMS.has(name)) continue;
+        if (value.length > 1) throw repeatedQueryParamError(name, value.length);
+        // length 1 → one occurrence an adapter encoded as an array; length 0 →
+        // no occurrence at all.
+        if (value.length === 0) delete options[name];
+        else options[name] = value[0];
+    }
+}
+
+/**
  * [#4181 → #3795] Spellings of ONE slot carrying DIFFERENT values. Two values
  * for one slot cannot be reconciled — merging them would invent an intent the
  * caller never expressed, and picking one is the silent drop itself — so an
@@ -5653,6 +5821,20 @@ export class ObjectStackProtocolImplementation implements
         // `context` unconditionally: the protocol must not depend on a gate
         // above it staying switched on.
         delete options.context;
+
+        // [#7321] Arity BEFORE any read, fold or coercion. `IHttpRequest.query`
+        // is `Record< string, string | string[] >`; the array arm is real (the
+        // `node:http` adapter hands `?x=1&x=2` through as `['1','2']`, measured
+        // over a socket on #6878), and every coercion below was written for the
+        // string arm. `Number(['1','2'])` is `NaN`, so `?$top=1&$top=2` used to
+        // reach the driver as `limit: NaN` — a wrong answer served as a 200.
+        //
+        // Single-vs-multi is a PER-PARAMETER judgement, never a sweep: `$select`
+        // / `$expand` / `$searchFields` / `$orderby` accept the array arm on
+        // purpose and are untouched here. See
+        // {@link ARRAY_VALUED_QUERY_SLOTS} for the full disposition.
+        assertQueryParamArity(options);
+
         // Forward the dispatcher's ExecutionContext so RBAC/RLS middleware
         // can apply per-request enforcement. The protocol layer is purely
         // a normalizer — it must never strip security context.
@@ -5675,16 +5857,12 @@ export class ObjectStackProtocolImplementation implements
         // arrived under, so a rejection quotes the parameter the caller
         // actually wrote. Telling someone who sent `?$orderby=…` that
         // "'orderBy' is invalid" names a parameter absent from their request.
+        //
+        // [#7321] The table itself now lives at module scope
+        // ({@link WIRE_DOLLAR_ALIASES}) so the arity survey above and this fold
+        // cannot drift apart on which `$` spellings exist.
         const wireSpelling: Record<string, string> = {};
-        for (const [dollar, bare] of [
-            ['$top', 'top'],
-            ['$skip', 'skip'],
-            ['$orderby', 'orderBy'],
-            ['$select', 'select'],
-            ['$count', 'count'],
-            ['$search', 'search'],
-            ['$searchFields', 'searchFields'],
-        ] as const) {
+        for (const [dollar, bare] of WIRE_DOLLAR_ALIASES) {
             if (options[dollar] != null && options[bare] == null) {
                 options[bare] = options[dollar];
                 wireSpelling[bare] = dollar;
