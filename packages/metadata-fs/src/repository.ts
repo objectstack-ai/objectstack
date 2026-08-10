@@ -305,6 +305,9 @@ export class FileSystemRepository implements MetadataRepository {
         // we keep it in selfWrites for one debounce tick.
         setTimeout(() => this.selfWrites.delete(file), 200);
       }
+      // The watcher must not depend on its own directory scan to notice a
+      // path we created ourselves (#7282). See `trackWrittenPath`.
+      this.trackWrittenPath(file);
       this.heads.set(key, hash);
 
       const evt: MetadataEvent = {
@@ -431,6 +434,53 @@ export class FileSystemRepository implements MetadataRepository {
       if (evt.hash === hash) last = evt;
     }
     return last;
+  }
+
+  /**
+   * Register a path this repository just wrote with the watcher (#7282).
+   *
+   * chokidar's initial scan is asynchronous, and every write path here can be
+   * running **while it is still walking the tree** — `start()` arms the watcher
+   * and the caller may `put()` on the next tick, and `ensureRoot()` arms it in
+   * the middle of the very first write. With `usePolling` that combination has
+   * a permanently-blinding interleaving, measured on chokidar 5 with this
+   * repository's own options:
+   *
+   *   1. chokidar reads `<root>/<type>/` and finds it EMPTY — the atomic
+   *      `rename` in `writeJsonAtomic` has not landed yet.
+   *   2. the rename lands; the directory's mtime changes.
+   *   3. chokidar calls `watchFile()` on that directory, and libuv takes its
+   *      polling baseline stat — which already reflects step 2.
+   *
+   * From then on the directory's stat never changes again, so no poll ever
+   * fires for it, `_handleRead` never re-runs, the item file is never added to
+   * the watched set, and no per-file watcher is ever created. chokidar emits
+   * neither `add` nor `change` for that path **for the life of the process** —
+   * `getWatched()` reports the type directory as `[]` forever while the file
+   * sits in it. That is the whole of #7282: the four merge-queue ejections all
+   * waited out their deadlines (20s, then 25541ms against 25s) on an event that
+   * was never going to be delivered, which is why widening the deadline and
+   * widening the pre-edit sleep both changed nothing, and why lowering
+   * `interval` would change nothing either — a shorter poll re-compares against
+   * the same unchanged directory stat.
+   *
+   * The window is exactly "files that exist at baseline time but were absent
+   * from the snapshot read a moment earlier", and the only writer that can be
+   * inside it is us. So we close it at the source: tell the watcher explicitly
+   * about every path we create, instead of hoping its scan happened to see it.
+   *
+   * `add()` is idempotent here — `_handleFile` returns early when the parent
+   * directory already tracks the basename — and it emits nothing, because
+   * chokidar treats an explicit `add()` as an initial add and `ignoreInitial`
+   * is set. Its effect is the one we need: `_watchWithNodeFs` registers the
+   * basename with the parent directory (without which chokidar drops `change`
+   * events for the file) and starts the per-file poll.
+   */
+  private trackWrittenPath(file: string): void {
+    const w = this.watcher;
+    // `add()` clears `closed`, so never hand a closing watcher a new path.
+    if (!w || w.closed) return;
+    w.add(file);
   }
 
   private startWatcher(): void {
