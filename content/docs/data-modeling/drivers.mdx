@@ -540,3 +540,110 @@ export const AuditLog = ObjectSchema.create({
   fields: { /* ... */ },
 });
 ```
+
+### Read-only: grant it at the database, not in metadata
+
+<Callout type="warn">
+**A managed datasource has no platform-level read-only gate, and this is
+deliberate.** Read-only for a database ObjectStack owns is a **database account
+privilege** — `GRANT SELECT` — not a key on the datasource. There is no
+metadata you can write that makes a managed connection read-only.
+</Callout>
+
+Point the datasource's `config` at a role that can only read:
+
+```sql
+-- PostgreSQL: a login that can read the schema and nothing else.
+CREATE ROLE analytics_ro LOGIN PASSWORD '…';
+GRANT CONNECT ON DATABASE analytics TO analytics_ro;
+GRANT USAGE ON SCHEMA public TO analytics_ro;
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO analytics_ro;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO analytics_ro;
+```
+
+```typescript
+import { defineDatasource } from '@objectstack/spec/data';
+
+export const Analytics = defineDatasource({
+  name: 'analytics',
+  label: 'Analytics (read-only account)',
+  driver: 'postgres',
+  // The connection itself cannot write. Nothing in the app can talk past it.
+  config: { url: process.env.ANALYTICS_RO_URL },
+  active: true,
+});
+```
+
+(`external.credentialsRef` is a *federation* key — the parse rejects an
+`external` block on a `managed` datasource — so a managed connection carries its
+credentials in `config`, from the environment as above.)
+
+Note that a read-only account also refuses **DDL**, so such a datasource cannot
+run ObjectStack's boot-time schema sync or migrations. That is the honest
+consequence of a real boundary: a database you only read is a database you do
+not own the schema of. If you want ObjectStack to keep the schema in step, it
+needs a writable account — or the datasource belongs on the federation path
+(`schemaMode: 'external'`), where DDL is forbidden by design and the write gate
+is enforced (see below).
+
+#### Why the platform does not offer the flag
+
+The obvious-looking alternative — a `readOnly` boolean on the datasource — is
+the exact shape [#4583](https://github.com/objectstack-ai/objectstack/issues/4583)
+removed. `datasource.capabilities.readOnly` shipped for three releases, read as
+a safety property, and gated nothing: no write path consulted it, so a
+datasource labelled a read replica accepted inserts exactly like the primary.
+The shipped CRM example called one of its datasources a "Read Replica" on the
+strength of it.
+
+Rebuilding it as a *working* ObjectQL check would not fix the underlying
+problem, only make it harder to see. Such a gate stops writes that go through
+`ObjectQLEngine`; it cannot stop a direct `psql` session, a migration, a
+`syncSchema()` DDL statement, a background job holding its own driver handle, or
+any other process on the same connection string. A boundary that holds in one
+path and not the others is not a boundary — and a flag that *looks* like one is
+worse than no flag at all, because it is trusted. The database account has no
+such gap: there is no code path in ObjectStack, or anywhere else, that can write
+through a connection the server will not let write
+([#4584](https://github.com/objectstack-ai/objectstack/issues/4584)).
+
+#### The one enforced write gate is federation-only
+
+`external.allowWrites: false` **is** enforced, by
+`ObjectQLEngine.assertWriteAllowed` before every insert/update/delete — but it
+answers a question about *ownership*, not about connections: which side may
+write to a database ObjectStack does not own. You cannot reach for it on a local
+database: the parse rejects an `external` block whose `schemaMode` is `managed`,
+and the engine check itself returns early for `managed` (and for a definition
+that declares no `schemaMode`) before it ever reads `allowWrites`. See
+[Writes (double opt-in)](/docs/data-modeling/external-datasources#5-writes-double-opt-in).
+
+| What you want | What actually does it |
+| :--- | :--- |
+| A **managed** datasource that cannot be written | A database account with `SELECT` only. No metadata key. |
+| A **federated** datasource that cannot be written | `external: { allowWrites: false }` — the default — enforced by the engine. |
+| A federated datasource writable for **some** objects | `external.allowWrites: true` on the datasource **and** `external.writable: true` on each object. |
+
+### Read replicas: the platform does not route
+
+<Callout type="warn">
+**There is no read/write splitting in ObjectStack.** No query path distinguishes
+a read from a write, so there is nothing to route to a replica. `datasource.readReplicas`
+was removed in 17.0.0 ([#4468](https://github.com/objectstack-ai/objectstack/issues/4468))
+because it described replica connections nothing ever opened.
+</Callout>
+
+Put the replicas behind a single endpoint and let the database tier route:
+**pgpool-II**, **ProxySQL**, or an **RDS / Aurora reader endpoint**. Point
+`config` at that endpoint.
+
+This is the correct answer, not a stopgap
+([#4479](https://github.com/objectstack-ai/objectstack/issues/4479)). The hard
+parts of read/write splitting are not the replica connections — they are
+deciding what counts as a read (a `find` inside a transaction that just issued
+an `update` must go to the primary, or the app cannot read its own writes),
+declaring the staleness a query will tolerate, and ejecting a replica that falls
+behind. A proxy is a component built to do exactly that, and it does it better
+than a field on a datasource could. Should the platform ever need to pick a
+consistency level from business semantics, the schema shape will be decided by
+that routing path — it will not be bolted on ahead of it.
