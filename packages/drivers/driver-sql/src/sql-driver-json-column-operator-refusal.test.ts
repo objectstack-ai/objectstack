@@ -318,7 +318,10 @@ describe('[#7398] SqlDriver refuses scalar-comparison operators on JSON/multi-va
       [
         'aggregate',
         (where) =>
-          driver.aggregate('team', { where, aggregations: [{ function: 'count', alias: 'n' }] } as any),
+          driver.aggregate('team', {
+            where,
+            aggregations: [{ function: 'count', field: '*', alias: 'n' }],
+          }),
       ],
       ['distinct', (where) => driver.distinct('team', 'name', where)],
       ['updateMany', (where) => driver.updateMany('team', { where }, { name: 'Beta' })],
