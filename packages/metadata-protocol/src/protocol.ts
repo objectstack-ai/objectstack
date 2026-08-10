@@ -839,6 +839,96 @@ export function graftNormalizedOperators(authored: unknown, parsed: unknown): un
 }
 
 /**
+ * Persist the `groups` → `sections` fold the spec's own schema performed, and
+ * nothing else. #7134, the save-path half of #6926 / PR #7128.
+ *
+ * `FormViewSchema` carries `foldFormGroupsIntoSections` as a `.overwrite()`
+ * check, so a form authored with the legacy `groups` alias parses to one
+ * carrying canonical `sections` — and then the result was thrown away, because
+ * `saveMeta` persists the authored body verbatim (deliberately: `parsed.data`
+ * strips the Studio-only auxiliary fields that ride along with an overlay). A
+ * Studio-saved public form therefore reached every `sections`-reading consumer
+ * still spelled `groups`, and `packages/rest`'s three `/forms/:slug` routes
+ * degrade on exactly that: an empty published field schema, an empty
+ * `allowedFields` whitelist on submit (#6920), and `403 LOOKUP_NOT_PUBLIC` for
+ * every field. Same shape of gap as {@link graftNormalizedOperators}, and the
+ * same consequence — while saves keep minting the authored spelling, the alias
+ * can never be retired and the objectui-side folds cannot be removed.
+ *
+ * ## Why this is a SIBLING of {@link graftNormalizedOperators}, not a parameter
+ *
+ * That function walks authored and parsed in lockstep by structure and copies
+ * across a changed SCALAR at a key both sides carry. `groups` → `sections` is a
+ * KEY MOVE — one key removed, another added — which its per-key loop cannot
+ * express: it iterates the AUTHORED keys and only ever patches a key already
+ * there, so it can neither drop `groups` nor introduce `sections`. Measured, not
+ * assumed (#7134).
+ *
+ * ## How the fold is DETECTED, rather than guessed
+ *
+ * At each structural position the fold is taken to have happened iff the author
+ * wrote `groups`, the parse did NOT keep it, and the parse produced `sections`
+ * in its place. That is the exact post-condition of
+ * `foldFormGroupsIntoSections`, so no list of "places a form can live" is
+ * maintained here: the top-level flattened overlay, `config` on a `ViewItem`,
+ * and `form` / `formViews.*` on a container are all covered by the same walk,
+ * and a form slot added later is covered without an edit. A `groups` key the
+ * schema keeps (a different vocabulary — `app.zod`'s nav groups, a passthrough
+ * record) fails the middle test and is left alone.
+ *
+ * ## What is moved is the AUTHORED array, not the parsed one
+ *
+ * `parsed.data`'s sections carry schema defaults (`collapsible`, `collapsed`,
+ * `columns`); persisting those would be the wholesale swap this whole design
+ * avoids. The authored array moves verbatim — the producer's fold is
+ * `FormSectionSchema` → `FormSectionSchema` with no sub-key rewriting, so the
+ * moved value is already the canonical one. When the author wrote BOTH keys the
+ * producer keeps `sections` and drops `groups`, empty array included; so does
+ * this.
+ *
+ * Returns the input itself when nothing changed, so the common case allocates
+ * nothing.
+ */
+export function graftFoldedFormSections(authored: unknown, parsed: unknown): unknown {
+    if (Array.isArray(authored)) {
+        if (!Array.isArray(parsed)) return authored;
+        let changed = false;
+        const out = authored.map((entry, i) => {
+            const next = graftFoldedFormSections(entry, parsed[i]);
+            if (next !== entry) changed = true;
+            return next;
+        });
+        return changed ? out : authored;
+    }
+
+    if (!authored || typeof authored !== 'object') return authored;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return authored;
+
+    const a = authored as Record<string, unknown>;
+    const p = parsed as Record<string, unknown>;
+
+    // The post-condition of `foldFormGroupsIntoSections`, read off this position.
+    const folded = a.groups !== undefined && p.groups === undefined && p.sections !== undefined;
+
+    let patch: Record<string, unknown> | undefined;
+    for (const [key, value] of Object.entries(a)) {
+        // When the fold fired, the parsed node structurally corresponding to the
+        // authored `groups` is `sections` — descending against `p.groups` there
+        // would silently stop walking at the one key this function is about.
+        const counterpart = folded && key === 'groups' ? p.sections : p[key];
+        const next = graftFoldedFormSections(value, counterpart);
+        if (next !== value) (patch ??= {})[key] = next;
+    }
+
+    if (!folded) return patch ? { ...a, ...patch } : authored;
+
+    const { groups, ...rest } = patch ? { ...a, ...patch } : a;
+    // `sections` wins when the author wrote it — including as an empty array,
+    // which is what the producer's fold does and therefore what already renders.
+    return rest.sections !== undefined ? rest : { ...rest, sections: groups };
+}
+
+/**
  * #2555 — compute the identity fields (`viewKind`, `object`, `label`) a view
  * overlay is missing but the registry entry it shadows carries. The overlay's
  * own fields always win. Returns `null` (nothing to inherit) for `defineView`
@@ -9474,11 +9564,25 @@ export class ObjectStackProtocolImplementation implements
                     (err as any).issues = issues;
                     throw err;
                 }
-                // Keep the body verbatim, but not its *legacy operator
-                // spellings*: the schema just folded them to canonical and the
-                // result would otherwise be discarded, so every save minted new
-                // alias rows. See {@link graftNormalizedOperators}.
-                request.item = graftNormalizedOperators(request.item, parsed.data);
+                // Keep the body verbatim, but not its *legacy spellings*: the
+                // schema just folded them to canonical and the result would
+                // otherwise be discarded, so every save minted new alias rows.
+                // Two normalizations are grafted back, each by its own walk —
+                // filter `operator` values ({@link graftNormalizedOperators},
+                // objectui#2945) and the form `groups` → `sections` key move
+                // ({@link graftFoldedFormSections}, #7134). A key move is not
+                // expressible in the scalar walk, which is why there are two.
+                //
+                // The fold runs FIRST so the operator walk meets `sections`
+                // lined up with the parsed tree rather than a `groups` key the
+                // parsed side no longer has. Form sections carry no `operator`
+                // today (`visibleWhen` is a CEL string), so this ordering is
+                // structural hygiene rather than a measured fix — but it is the
+                // ordering that stays correct if one ever does.
+                request.item = graftNormalizedOperators(
+                    graftFoldedFormSections(request.item, parsed.data),
+                    parsed.data,
+                );
             }
         }
 
