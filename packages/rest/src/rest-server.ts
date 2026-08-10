@@ -2772,7 +2772,11 @@ export class RestServer {
      *   a subset of the user's system permissions.
      * - Recursively strips child navigation entries (groups, items) whose
      *   `requiredPermissions` are not satisfied. Empty groups collapse so
-     *   the sidebar doesn't render a label with no children.
+     *   the sidebar doesn't render a label with no children — [#7380] a
+     *   `type: 'group'` with no SURVIVING children is dropped whether it was
+     *   emptied by the gate or authored `children: []`. Only `group` collapses;
+     *   an `object` entry is its own target and is served however many children
+     *   it has. See the rule at the `filterNav` branch for the measurement.
      * - [#4722] Applies the SAME item gate to every `areas[].navigation` tree.
      *   Both trees are the same shape and the keys mean the same thing in both,
      *   so `filterNav` is reused — there is deliberately no second
@@ -2839,13 +2843,57 @@ export class RestServer {
                 const req = Array.isArray(e.requiredPermissions) ? e.requiredPermissions : [];
                 if (req.length > 0 && !req.every((p: string) => sysPerms.has(p))) continue;
                 if (typeof e.requiresService === 'string' && serviceGate && serviceGate(e.requiresService) === false) continue;
-                if (Array.isArray(e.children) && e.children.length > 0) {
+                // [#7380] A `group` is judged on what SURVIVES, never on how it
+                // got there. Both childless shapes render the same dead sidebar
+                // label, so both are dropped:
+                //   - BECAME empty — authored with children, all gated away;
+                //   - STARTED empty — authored `children: []`.
+                // The old guard (`children.length > 0`) sent the second shape
+                // down the else branch, which never reaches the drop rule, so a
+                // declared-empty group shipped as a bare label the docblock
+                // above already promised it would not. That shape is not a
+                // corner case: `setup.app.ts` is authored entirely out of it —
+                // nine `children: []` contribution slots (ADR-0029 D7) that
+                // `Registry.applyNavContributions` fills on read, BEFORE this
+                // filter runs. So a slot a capability plugin filled arrives here
+                // with children and survives; a slot left empty because its
+                // capability is disabled arrives `[]` and is now dropped, which
+                // is exactly the "a disabled capability contributes nothing and
+                // its slot stays empty" case `setup.app.ts` documents.
+                //
+                // The rule is `type === 'group'` ONLY, and stays that way. The
+                // union nests on two branches (`NAV_VARIANTS_ACCEPTING_CHILDREN`
+                // = `object` | `group`), and an `object` entry is its own
+                // navigation target — `{ type: 'object', objectName: 'lead',
+                // children: [] }` is a live link to the lead list, not a label,
+                // so emptiness says nothing about whether to serve it. A group
+                // cannot be a target: `GroupNavItemSchema` is a `strictObject`
+                // over the base keys plus `expanded`/`children` and declares no
+                // `objectName` / `pageName` / `componentRef` / `url` — it
+                // REJECTS them — and its docblock reads "Does not perform
+                // navigation itself." Measured against that before the change
+                // (#7380): 41 `type: 'group'` entries across the shipped apps
+                // (`account`, `setup`, `studio`), the examples (`app-crm`,
+                // `app-showcase`, `app-todo`) and the spec's nav type-assertion
+                // fixtures. 16 are childless — the 9 `setup` slots and 7 spec
+                // fixtures; the three example apps have none — and ZERO of the
+                // 41 carry `objectName` / `pageName` / `componentRef` / `url` or
+                // any other target. So the drop is unconditional: there is no
+                // standalone childless-group shape in the tree to spare.
+                //
+                // A group with NO `children` key is covered by the same rule for
+                // the same reason — same dead label. It is unreachable through
+                // the spec (`children` is required on both the input and output
+                // group branches; `app.nav-type-assertions.ts` pins that with a
+                // `@ts-expect-error`), but this filter reads untyped documents
+                // off the metadata store, so leaving it out would just reopen
+                // the bypass one keyword over.
+                if (Array.isArray(e.children)) {
                     const kids = filterNav(e.children);
-                    // Drop empty groups so the sidebar doesn't render a label
-                    // with nothing under it (matches AppSidebar UX).
                     if (e.type === 'group' && kids.length === 0) continue;
                     out.push({ ...e, children: kids });
                 } else {
+                    if (e.type === 'group') continue;
                     out.push(e);
                 }
             }
@@ -2858,11 +2906,25 @@ export class RestServer {
         // INSIDE an area, through the very same `filterNav` the top-level tree
         // uses, so the two trees can never disagree about what a key means.
         //
-        // Collapse rule, taken from what `filterNav` already does to a `group`:
-        // an area whose authored tree is emptied BY the gate is dropped (a bare
-        // area label with nothing reachable under it is not a useful response),
-        // while an area authored empty is passed through untouched — filtering
-        // reports what the caller may not see, it does not tidy the metadata.
+        // Collapse rule: an area whose authored tree is emptied BY the gate is
+        // dropped (a bare area label with nothing reachable under it is not a
+        // useful response), while an area authored `navigation: []` is passed
+        // through untouched — filtering reports what the caller may not see, it
+        // does not tidy the metadata.
+        //
+        // [#7380] That second half is where an area and a `group` now DIVERGE,
+        // deliberately: `filterNav` drops a childless group however it got that
+        // way, an area authored empty still ships. The reason is what the two
+        // shapes are. A group is a sidebar label and nothing else, so childless
+        // it renders dead — and the shipped `setup` app authors nine of them as
+        // contribution SLOTS, which makes "declared empty" the normal steady
+        // state of an unfilled one rather than an authoring slip. An area is a
+        // top-level workspace the shell can select and route to on its own; an
+        // author who ships `navigation: []` has declared an area that is not
+        // populated yet, and this filter is not the layer that judges that.
+        // What is NOT divergent is the walk: an area whose entries are all
+        // childless groups empties through the very same `filterNav` and is
+        // dropped by the rule above — one implementation, as everywhere else.
         const filterAreas = (list: any[]): any[] => {
             const out: any[] = [];
             for (const a of list) {

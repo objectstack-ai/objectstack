@@ -3310,6 +3310,290 @@ describe('filterAppForUser — the enforced permission layers (#4651, #4722)', (
 });
 
 // ---------------------------------------------------------------------------
+// #7380 — the empty-group drop rule is about the RESULT, not the provenance
+//
+// `filterNav`'s docblock has promised "Empty groups collapse so the sidebar
+// doesn't render a label with no children" since #4651, but the guard was
+// `Array.isArray(e.children) && e.children.length > 0`: a group authored
+// `children: []` never entered the branch that OWNS the drop rule, so it fell
+// through the else and shipped — the one shape the sentence most obviously
+// covers was the one shape it could not reach.
+//
+// This is not hypothetical metadata. `setup.app.ts` is authored ENTIRELY out of
+// that shape: nine `type: 'group'` anchors with `children: []`, filled on read
+// by `Registry.applyNavContributions` (ADR-0029 D7) from whichever capability
+// packages are installed. The merge runs in the protocol layer BEFORE this
+// filter, so at this seam a filled slot has children and an unfilled one does
+// not — which is precisely the signal the rule needs, and precisely what the
+// old guard threw away.
+//
+// The rule is `type === 'group'` and nothing else. The union nests on two
+// branches (`object` | `group`); an `object` entry navigates on its own
+// `objectName`, so `children: []` on one says nothing about serving it. A group
+// cannot navigate — `GroupNavItemSchema` is a `strictObject` that declares no
+// target key and rejects any, and its docblock says "Does not perform
+// navigation itself". Surveyed against that before writing this: 41 group
+// entries across the shipped apps (`account`, `setup`, `studio`), the examples
+// (`app-crm`, `app-showcase`, `app-todo`) and the spec's nav type-assertion
+// fixtures. 16 are childless — the 9 `setup` slots plus 7 spec fixtures, with
+// none in the three example apps — and zero of the 41 carry `objectName` /
+// `pageName` / `componentRef` / `url` or any other target. The drop is
+// therefore unconditional; there is no standalone group shape to spare.
+// ---------------------------------------------------------------------------
+
+describe('filterAppForUser — childless groups drop however they got that way (#7380)', () => {
+  const make = () => new RestServer(createMockServer() as any, createMockProtocol() as any, ANON_API as any);
+  const ids = (a: any): string[] => (a?.navigation ?? []).map((e: any) => e.id);
+  const areaIds = (a: any, i: number): string[] => (a?.areas?.[i]?.navigation ?? []).map((e: any) => e.id);
+
+  it('a group DECLARED `children: []` is dropped — the regression #7380 reports', () => {
+    const rest: any = make();
+    const app = {
+      name: 'setup',
+      navigation: [
+        { id: 'nav_home', type: 'object', objectName: 'home' },
+        { id: 'group_integrations', type: 'group', label: 'Integrations', children: [] },
+      ],
+    };
+    // No permission is involved: the caller here holds everything there is to
+    // hold, so a survival would be the authored shape leaking, not a gate.
+    expect(ids(rest.filterAppForUser(app, new Set(['setup.access'])))).toEqual(['nav_home']);
+    expect(ids(rest.filterAppForUser(app, new Set<string>()))).toEqual(['nav_home']);
+  });
+
+  it('a group emptied BY the gate is still dropped — the half that already worked', () => {
+    const rest: any = make();
+    const app = {
+      name: 'setup',
+      navigation: [
+        { id: 'nav_home', type: 'object', objectName: 'home' },
+        {
+          id: 'group_admin', type: 'group', label: 'Admin',
+          children: [{ id: 'nav_users', type: 'object', requiredPermissions: ['admin.access'] }],
+        },
+      ],
+    };
+    expect(ids(rest.filterAppForUser(app, new Set<string>()))).toEqual(['nav_home']);
+    expect(ids(rest.filterAppForUser(app, new Set(['admin.access']))))
+      .toEqual(['nav_home', 'group_admin']);
+  });
+
+  it('a group with surviving children is kept, with only the gated ones stripped', () => {
+    const rest: any = make();
+    const app = {
+      name: 'setup',
+      navigation: [{
+        id: 'group_mixed', type: 'group', label: 'Mixed',
+        children: [
+          { id: 'nav_public', type: 'object', objectName: 'public_thing' },
+          { id: 'nav_secret', type: 'object', objectName: 'secret_thing', requiredPermissions: ['admin.access'] },
+        ],
+      }],
+    };
+    const out = rest.filterAppForUser(app, new Set<string>());
+    expect(ids(out)).toEqual(['group_mixed']);
+    expect(out.navigation[0].children.map((c: any) => c.id)).toEqual(['nav_public']);
+    // The label survives intact — collapsing is about emptiness, not tidying.
+    expect(out.navigation[0].label).toBe('Mixed');
+  });
+
+  it('nesting: an outer group left holding only a dead inner group collapses too', () => {
+    // The recursion has to see the inner drop before it judges the outer one,
+    // which is only true because the rule lives inside `filterNav` itself.
+    const rest: any = make();
+    const app = {
+      name: 'setup',
+      navigation: [{
+        id: 'group_outer', type: 'group', label: 'Outer',
+        children: [{ id: 'group_inner', type: 'group', label: 'Inner', children: [] }],
+      }],
+    };
+    expect(ids(rest.filterAppForUser(app, new Set<string>()))).toEqual([]);
+  });
+
+  it('a group with no `children` key at all is the same dead label, and drops', () => {
+    // Unreachable through the spec — `children` is required on both the input
+    // and output `group` branches, pinned by `@ts-expect-error` in
+    // `app.nav-type-assertions.ts` — but this filter reads untyped documents
+    // off the metadata store, so the shape is reachable at runtime and would
+    // otherwise be the same bypass one keyword over.
+    const rest: any = make();
+    const app = {
+      name: 'setup',
+      navigation: [
+        { id: 'nav_home', type: 'object', objectName: 'home' },
+        { id: 'group_bare', type: 'group', label: 'Bare' },
+      ],
+    };
+    expect(ids(rest.filterAppForUser(app, new Set<string>()))).toEqual(['nav_home']);
+  });
+
+  // -- the boundary: NON-group entries are untouched by this rule -------------
+
+  it('a NON-group entry with `children: []` keeps today\'s behaviour — it is a target', () => {
+    // `{ type: 'object', objectName: 'lead', children: [] }` is a live link to
+    // the lead list that happens to nest nothing. Collapsing it would delete a
+    // reachable destination, which is the opposite of what the docblock rule
+    // says, and the rule says `group` for exactly this reason.
+    const rest: any = make();
+    const app = {
+      name: 'crm',
+      navigation: [
+        { id: 'nav_leads', type: 'object', objectName: 'lead', children: [] },
+        { id: 'nav_page', type: 'page', pageName: 'ops', children: [] },
+        { id: 'nav_link', type: 'url', url: 'https://example.com', children: [] },
+        { id: 'nav_sep', type: 'separator' },
+      ],
+    };
+    const out = rest.filterAppForUser(app, new Set<string>());
+    expect(ids(out)).toEqual(['nav_leads', 'nav_page', 'nav_link', 'nav_sep']);
+    // Served as authored — the empty array is not rewritten or removed either.
+    expect(out.navigation[0]).toMatchObject({ objectName: 'lead', children: [] });
+  });
+
+  it('a non-group entry still keeps its gated children stripped', () => {
+    const rest: any = make();
+    const app = {
+      name: 'crm',
+      navigation: [{
+        id: 'nav_leads', type: 'object', objectName: 'lead',
+        children: [
+          { id: 'nav_hot', type: 'object', objectName: 'hot_lead' },
+          { id: 'nav_all', type: 'object', objectName: 'all_leads', requiredPermissions: ['admin.access'] },
+        ],
+      }],
+    };
+    const out = rest.filterAppForUser(app, new Set<string>());
+    // Emptied to zero children it would STILL be served — it is a target.
+    expect(ids(out)).toEqual(['nav_leads']);
+    expect(out.navigation[0].children.map((c: any) => c.id)).toEqual(['nav_hot']);
+  });
+
+  it('an object entry emptied to zero children by the gate is still served', () => {
+    const rest: any = make();
+    const app = {
+      name: 'crm',
+      navigation: [{
+        id: 'nav_leads', type: 'object', objectName: 'lead',
+        children: [{ id: 'nav_all', type: 'object', requiredPermissions: ['admin.access'] }],
+      }],
+    };
+    const out = rest.filterAppForUser(app, new Set<string>());
+    expect(ids(out)).toEqual(['nav_leads']);
+    expect(out.navigation[0].children).toEqual([]);
+  });
+
+  // -- contribution slots: the shape this bug actually shipped ----------------
+
+  it('a contribution slot FILLED before the filter survives; an unfilled one drops', () => {
+    // The `setup` app's real lifecycle, in the order the runtime runs it:
+    // `Registry.applyNavContributions` merges each plugin's items into the slot
+    // it names (protocol layer), THEN the REST server gates the merged document.
+    // So the filter sees a filled slot as a normal group with children, and an
+    // unfilled slot as `children: []` — the app-showcase case and the app-crm
+    // case from #7380, one filter apart.
+    const rest: any = make();
+    const setupShell = () => ({
+      name: 'setup',
+      navigation: [
+        // Filled by an installed capability (e.g. plugin-webhooks, ADR-0029 K2.a).
+        {
+          id: 'group_integrations', type: 'group', label: 'Integrations',
+          children: [{ id: 'nav_webhooks', type: 'object', objectName: 'sys_webhook' }],
+        },
+        // Slot whose capability is not installed — "a disabled capability
+        // contributes nothing and its slot stays empty" (setup.app.ts).
+        { id: 'group_diagnostics', type: 'group', label: 'Diagnostics', children: [] },
+      ],
+    });
+    const out = rest.filterAppForUser(setupShell(), new Set(['setup.access']));
+    expect(ids(out)).toEqual(['group_integrations']);
+    expect(out.navigation[0].children.map((c: any) => c.id)).toEqual(['nav_webhooks']);
+    // The dead slot's label is gone from the body, not merely unrendered.
+    expect(JSON.stringify(out)).not.toContain('Diagnostics');
+  });
+
+  it('a filled slot whose contributed items are all gated away collapses like any other', () => {
+    // Being filled is not a licence to survive: the slot is judged on what the
+    // CALLER may see, so a contribution the caller cannot satisfy leaves the
+    // same dead label as no contribution at all.
+    const rest: any = make();
+    const app = () => ({
+      name: 'setup',
+      navigation: [{
+        id: 'group_diagnostics', type: 'group', label: 'Diagnostics',
+        children: [{ id: 'nav_logs', type: 'object', requiredPermissions: ['manage_platform_settings'] }],
+      }],
+    });
+    expect(ids(rest.filterAppForUser(app(), new Set(['setup.access'])))).toEqual([]);
+    expect(ids(rest.filterAppForUser(app(), new Set(['setup.access', 'manage_platform_settings']))))
+      .toEqual(['group_diagnostics']);
+  });
+
+  it('the ADR-0057 D10 service gate empties a slot the same way, and it drops', () => {
+    const rest: any = make();
+    const app = () => ({
+      name: 'setup',
+      navigation: [{
+        id: 'group_org', type: 'group', label: 'Organization',
+        children: [{ id: 'nav_orgs', type: 'object', objectName: 'sys_organization', requiresService: 'org-scoping' }],
+      }],
+    });
+    expect(ids(rest.filterAppForUser(app(), new Set<string>(), (n: string) => n !== 'org-scoping'))).toEqual([]);
+    expect(ids(rest.filterAppForUser(app(), new Set<string>(), () => true))).toEqual(['group_org']);
+  });
+
+  // -- one implementation: the same rule inside `areas[]` ---------------------
+
+  it('AREA level: the same rule runs inside `areas[]` — one `filterNav`, not two', () => {
+    const rest: any = make();
+    const app = {
+      name: 'crm',
+      areas: [{
+        id: 'area_ops', label: 'Ops',
+        navigation: [
+          { id: 'nav_tasks', type: 'object', objectName: 'task' },
+          { id: 'group_soon', type: 'group', label: 'Soon', children: [] },
+        ],
+      }],
+    };
+    expect(areaIds(rest.filterAppForUser(app, new Set<string>()), 0)).toEqual(['nav_tasks']);
+  });
+
+  it('AREA level: an area holding ONLY childless groups empties and is dropped', () => {
+    // Consequence of the above, pinned so it is deliberate rather than noticed
+    // later: the area-collapse rule reads `filterNav`'s output, and that output
+    // is now empty for this shape. An area authored `navigation: []` is still
+    // passed through (pinned in the #4651/#4722 block) — that divergence is
+    // explained at `filterAreas`.
+    const rest: any = make();
+    const app = {
+      name: 'crm',
+      areas: [
+        { id: 'area_dead', label: 'Dead', navigation: [{ id: 'group_soon', type: 'group', children: [] }] },
+        { id: 'area_authored_empty', label: 'Soon', navigation: [] },
+      ],
+    };
+    const out = rest.filterAppForUser(app, new Set<string>());
+    expect(out.areas.map((a: any) => a.id)).toEqual(['area_authored_empty']);
+  });
+
+  it('does not mutate the app it filters', () => {
+    const rest: any = make();
+    const app = {
+      name: 'setup',
+      navigation: [
+        { id: 'group_empty', type: 'group', label: 'Empty', children: [] },
+        { id: 'nav_home', type: 'object', objectName: 'home' },
+      ],
+    };
+    const before = JSON.stringify(app);
+    rest.filterAppForUser(app, new Set<string>());
+    expect(JSON.stringify(app)).toBe(before);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // ADR-0057 D10 — requiresService capability gate (filterAppForUser)
 // ---------------------------------------------------------------------------
 
