@@ -400,7 +400,8 @@ describe('ADR-0029 D9.7 — the delete is a SUBTRACTION, and #7012\'s guard is r
             .deleteMetaItem({ type: 'object', name: 'myapp_invoice' })
             .then(() => null, (e: any) => e);
         expect(refused).toBeInstanceOf(Error);
-        expect(String(refused.message)).toContain('NOT_OVERRIDABLE');
+        expect(refused.code).toBe('NOT_OVERRIDABLE');
+        expect(refused.status).toBe(403);
 
         const b = await bootWithPackage(seed, { controlPlane: true });
         await withObjectWritable(() => b.protocol.deleteMetaItem({ type: 'object', name: 'myapp_invoice' }));
