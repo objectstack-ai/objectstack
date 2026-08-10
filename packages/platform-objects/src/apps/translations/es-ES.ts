@@ -68,6 +68,7 @@ export const esES: TranslationData = {
         nav_api_keys: { label: 'Claves API' },
         nav_connect_agent: { label: 'Conectar un agente' },
 
+        nav_approvals_inbox: { label: 'Centro de aprobaciones' },
         nav_approval_requests: { label: 'Solicitudes' },
         nav_approval_actions: { label: 'Historial de Acciones' },
         nav_approval_delegations: { label: 'Delegaciones (ausencia)' },
