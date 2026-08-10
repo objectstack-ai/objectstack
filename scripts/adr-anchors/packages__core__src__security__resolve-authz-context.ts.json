@@ -1,0 +1,8 @@
+{
+  "file": "packages/core/src/security/resolve-authz-context.ts",
+  "adrs": [
+    "ADR-0068",
+    "ADR-0095"
+  ],
+  "invariant": "No enforcement-time code path may consult the better-auth role directly — `mapMembershipRole` is a grant-PROVISIONING concern here; posture and adjudication run off the resulting capability grants (ADR-0095 D3). `platform_admin` is DERIVED from an unscoped `admin_full_access` user grant — there is no trusted stored boolean (ADR-0068 D2)."
+}

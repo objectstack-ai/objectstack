@@ -1,0 +1,8 @@
+{
+  "file": "packages/objectql/src/validation/rule-validator.ts",
+  "adrs": [
+    "ADR-0057",
+    "ADR-0058"
+  ],
+  "invariant": "A declared field lock is the SERVER's to enforce (ADR-0057 D10 — the client grid is courtesy). A `readonlyWhen` whose predicate names a scope root the write path could not bind resolves to LOCKED, not to \"not locked\": \"could not check\" must never read as \"allowed\" on a field the author declared frozen. This narrows ADR-0058 D5's fail-soft tier deliberately and only for that case — a merely BROKEN predicate (undeclared key, null overload, parse fault, throw) still fails open, and requiredWhen / option visibleWhen are untouched."
+}

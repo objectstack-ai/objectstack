@@ -1,0 +1,7 @@
+{
+  "file": "packages/runtime/src/http-dispatcher.ts",
+  "adrs": [
+    "ADR-0076"
+  ],
+  "invariant": "What is left of ADR-0076 D11's 'clean port with a god implementation' after step ③: a thin core (request scope, gates, discovery, registry seeding) whose domain bodies live under `./domains/` behind thin delegates. Two orderings inside `dispatch()` carry the decision and both read like removable overhead. (1) `resolveRequestScope` then the ADR-0069 auth gate then project-membership enforcement run BEFORE the domain registry is consulted — hoisting the registry resolve above them as a fast path for migrated domains un-gates every extracted domain at once and hands handlers a context whose per-request kernel was never resolved. The domains cannot compensate: they add their OWN authorization (`/ai`'s declared per-route `auth`, `/keys`' identity gate) but nothing downstream re-runs these two, which are the dispatcher's half of the D11 contract. (2) The registry is consulted before the legacy if-chain, which is now EMPTY of domains and must stay empty: a re-added `startsWith` branch either shadows a registered domain or re-implements a path another package already owns — the 'one route, one owner' hazard whose two specimens (`GET /openapi.json`, the `apis:` `handleApiEndpoint`) were DELETED rather than repaired (#5093, #4936) exactly because grep found them and the runtime never ran them. The service entries this file computes for discovery are D12's honesty rule (`svcAvailable` + `isServiceServeable`), never a slot-presence test."
+}

@@ -1,0 +1,7 @@
+{
+  "file": "packages/platform-objects/src/identity/sys-member.object.ts",
+  "adrs": [
+    "ADR-0108"
+  ],
+  "invariant": "`role` is the closed four-name select. It is enforced on write, and that is the guardrail making an ungoverned capability grant unrepresentable — not a limitation to work around."
+}

@@ -1,0 +1,7 @@
+{
+  "file": "packages/plugins/plugin-auth/src/invitation-role-cap.ts",
+  "adrs": [
+    "ADR-0105"
+  ],
+  "invariant": "An invitation may add a person, never authority above the issuer's own grade. An issuer below admin grade may invite as plain `member` only."
+}

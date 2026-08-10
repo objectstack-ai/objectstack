@@ -1,0 +1,7 @@
+{
+  "file": "packages/metadata-core/src/objects/sys-metadata.object.ts",
+  "adrs": [
+    "ADR-0005"
+  ],
+  "invariant": "ADR-0005 overlay uniqueness (amended 2026-08-09, #6825) — the declared `idx_sys_metadata_overlay_active` on `(type, name, organization_id, package_id)` is the COARSE fallback a stack assembled without `metadata-protocol`'s runtime migration gets: unrestricted and NULL-distinct, so it also collides with archived/reset rows. That is deliberate, not an oversight to fix here — knex's `table.unique()`, which `SqlDriver.syncDeclaredIndexes` builds through, can express neither `WHERE state = 'active'` nor `COALESCE(package_id, '')`, which is why the runtime tier exists. Do NOT re-add a `partial:` key (retired at protocol 17, #5248 / #4943, ADR-0049 — no driver ever emitted the predicate) and do NOT put `environment_id` or `scope` back in the discriminator: `environment_id` is retired and NULL on new rows, `package_id` is in the key under ADR-0048 so two packages shipping the same (type, name) each keep their own overlay row."
+}

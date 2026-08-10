@@ -1,0 +1,7 @@
+{
+  "file": "packages/plugins/plugin-security/src/tenant-layer.ts",
+  "adrs": [
+    "ADR-0095"
+  ],
+  "invariant": "Layer 0 (the tenant wall) is an independent, always-first, AND-composed filter sharing no compiler, no merge step and no bypass bit with business RLS (D1). Merging it into the RLS compiler would let a Layer-1 change weaken tenant isolation and the superuser business-RLS bypass cross the wall."
+}

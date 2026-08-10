@@ -1,0 +1,7 @@
+{
+  "file": "packages/runtime/src/domains/i18n.ts",
+  "adrs": [
+    "ADR-0076"
+  ],
+  "invariant": "The concrete instance of D11's registration-ownership rule: the `i18n` slot is MULTI-PROVIDER — I18nServicePlugin when service-i18n is installed, else the AppPlugin in-memory fallback auto-registered for stacks that declare translation bundles — so the dispatcher registers this route, not the provider. Moving `/i18n` registration into service-i18n, the obvious-looking 'the owning package should own its route' cleanup, 404s every stack served by the other provider. The extracted body also keeps the legacy matching semantics deliberately (`match: 'prefix'`, so `/i18nxx` matches too, exactly as the old `startsWith` chain did): normalizing that edge is a behaviour change for the http-conformance suite to re-pin, not a tidy-up to slip into an unrelated diff. The 501 on an unserveable slot is D12's honest-capability rule and is narrow on purpose — both real in-memory providers self-declare `degraded` with `handlerReady: true` and keep serving, so the gate closes only on an occupant that would answer with invented strings."
+}

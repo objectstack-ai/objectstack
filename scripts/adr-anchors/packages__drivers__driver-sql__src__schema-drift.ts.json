@@ -1,0 +1,7 @@
+{
+  "file": "packages/drivers/driver-sql/src/schema-drift.ts",
+  "adrs": [
+    "ADR-0120"
+  ],
+  "invariant": "The organization key part of every organization-scoped unique index is the NULL-safe COALESCE form — `COALESCE(<tenantField>, '__global__')` — never the bare column: SQL UNIQUE is NULL-distinct, so the bare composite enforces NOTHING on NULL-organization rows, which on a single-tenant stack is every row (#5030). Declared-index `unique: 'global'`/bare `true` stays VERBATIM (the #3696 contract, now the 'global' arm of the vocabulary); `'organization'` prepends the key part at registration. Expected and physical sides compare through the SAME normalization, literal-agnostic on the COALESCE literal — two spellings of the literal are one constraint, never drift (#4884)."
+}

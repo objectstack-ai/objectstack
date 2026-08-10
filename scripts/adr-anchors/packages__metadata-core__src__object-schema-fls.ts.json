@@ -1,0 +1,7 @@
+{
+  "file": "packages/metadata-core/src/object-schema-fls.ts",
+  "adrs": [
+    "ADR-0106"
+  ],
+  "invariant": "ADR-0106 is the WHOLE decision this module realizes: object schemas are projected per caller (D1, unreadable fields removed whole), the projection runs in the dispatch layer after the protocol fetch (D2), the shared cache keeps one full copy and the caller's DENIED-set fingerprint is folded into the ETag (D3), isSystem and platform admins are exempt as a CALLER property (D4), and the failure posture is three tiers — no security service or exempt caller serve unmasked, an unresolvable field universe serves unmasked with telemetry and private/no-store, and a THROW refuses the request (D6). The tiers look asymmetric on purpose: failing closed on the middle tier converts a hydration window into a rendering outage and risks a bootstrap deadlock, because permission sets are themselves metadata. Anyone tempted to \"simplify\" a tier, to widen the exemption set, or to make the fingerprint hash the READABLE set (which would move every unrestricted caller's ETag and forfeit D3's zero-regression promise) is reversing a recorded decision."
+}
