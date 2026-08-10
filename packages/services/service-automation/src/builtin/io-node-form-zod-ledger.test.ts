@@ -94,6 +94,44 @@ describe('IO-node form ↔ Zod reconciliation (#4045)', () => {
     ).toEqual([]);
   });
 
+  // #7086 — the reconciliation above compares KEY SETS, which is why a key
+  // could agree on both sides while the two descriptions disagreed about the
+  // VALUES it accepts. `notify.severity` sat in exactly that gap: the form
+  // offered a free-text box and the Zod was a bare `z.string()`, while the
+  // describe on both sides spelled out a closed `info | warning | critical`
+  // that nothing enforced. Closing only the Zod would have produced the
+  // mirror-image drift — a Studio field inviting a value the gate refuses at
+  // execute time — so the closed set is pinned as ONE contract here.
+  it.each(NODES)('$nodeType: a closed vocabulary is closed on BOTH sides, with the same values', ({ nodeType, zod }) => {
+    const props = (engine.getActionDescriptor(nodeType)?.configSchema as
+      | { properties?: Record<string, { enum?: unknown }> }
+      | undefined)?.properties ?? {};
+    const shape = (zod as { shape?: Record<string, unknown> }).shape ?? {};
+
+    /** The declared value set, or `undefined` for an open field. */
+    const closedSet = (v: unknown): readonly string[] | undefined => {
+      // `.options` also exists on a ZodUnion, where it holds member SCHEMAS
+      // (`recipients`, `channels`) — a string-only array is what distinguishes
+      // a real value vocabulary from that.
+      const opts = (v as { options?: unknown })?.options;
+      return Array.isArray(opts) && opts.every((o) => typeof o === 'string')
+        ? (opts as readonly string[])
+        : undefined;
+    };
+
+    for (const key of Object.keys(shape)) {
+      const node = shape[key] as { unwrap?: () => unknown };
+      // Unwrap the `.optional()` wrapper before asking for the vocabulary.
+      const zodSet = closedSet(node) ?? closedSet(node?.unwrap?.());
+      const formSet = closedSet(props[key]) ?? (Array.isArray(props[key]?.enum) ? props[key]!.enum as string[] : undefined);
+
+      expect(
+        formSet,
+        `${nodeType}.${key}: the two descriptions disagree on whether the value set is closed`,
+      ).toEqual(zodSet);
+    }
+  });
+
   describe('connector_action: the contract is the connectorConfig sibling, not config', () => {
     it('publishes no configSchema (deliberately schemaless)', () => {
       // A published configSchema roots the schema-driven Studio form at

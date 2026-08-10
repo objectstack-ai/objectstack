@@ -159,7 +159,15 @@ export function registerNotifyNode(engine: AutomationEngine, ctx: PluginContext)
                         description: 'Channels to fan out to (default: inbox)',
                     },
                     topic: { type: 'string', description: 'Event topic (default: "notify")' },
-                    severity: { type: 'string', description: 'info | warning | critical' },
+                    // Closed vocabulary, declared as one so the Studio form
+                    // offers a choice instead of a free-text box the Zod gate
+                    // then refuses at execute time (#7086). Mirrors
+                    // `NotifyConfigSchema.severity`; the `screen` node's `mode`
+                    // is the in-repo precedent for enum-on-both-sides.
+                    severity: {
+                        type: 'string', enum: ['info', 'warning', 'critical'],
+                        description: 'Severity forwarded to the messaging service',
+                    },
                     // ── Click-through target (#2675) ─────────────────────────
                     sourceObject: {
                         type: 'string',
