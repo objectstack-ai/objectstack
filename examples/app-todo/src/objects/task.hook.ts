@@ -92,15 +92,22 @@ const taskHook: Hook = {
     }
 
     if (ctx.event === 'afterUpdate') {
+      // The kernel's logger, reached through the engine handle the context
+      // carries. Not `console`: a hook runs inside the server, so its output
+      // belongs on the platform logger, which honours the kernel's configured
+      // level (a test booting `{ logger: { level: 'silent' } }` stays silent).
+      // `ctx.ql` is declared `unknown` on `HookContextSchema`, hence the cast.
+      const logger = (ctx.ql as { logger?: { info?: (message: string) => void } } | undefined)?.logger;
+
       // Check if completed
       if (data.status === 'completed' && previous && previous.status !== 'completed') {
-        console.log(`Task ${ctx.input.id} completed by ${ctx.session?.userId || 'unknown'}`);
+        logger?.info?.(`Task ${ctx.input.id} completed by ${ctx.session?.userId || 'unknown'}`);
         // Could trigger notifications or integrations here
       }
 
       // Check if task became overdue
       if (data.is_overdue && previous && !previous.is_overdue) {
-        console.log(`Task ${ctx.input.id} is now overdue`);
+        logger?.info?.(`Task ${ctx.input.id} is now overdue`);
       }
     }
   }
