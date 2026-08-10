@@ -163,11 +163,11 @@ export function registerNotifyNode(engine: AutomationEngine, ctx: PluginContext)
                     // ── Click-through target (#2675) ─────────────────────────
                     sourceObject: {
                         type: 'string',
-                        description: 'Object name of the record the notification links to (writes sys_notification.source_object). Requires sourceId.',
+                        description: 'Object name of the record the notification links to (writes sys_notification.source_object). Only takes effect together with sourceId — a half-specified click-through target is dropped at execute time, so the inbox never renders a dead link.',
                     },
                     sourceId: {
                         type: 'string',
-                        description: 'Record id the notification links to (writes sys_notification.source_id). Requires sourceObject. The inbox synthesizes a `/{object}/{id}` deep-link from these.',
+                        description: 'Record id the notification links to (writes sys_notification.source_id). Only takes effect together with sourceObject — a half-specified click-through target is dropped at execute time, so the inbox never renders a dead link. The inbox synthesizes a `/{object}/{id}` deep-link from these.',
                     },
                     actorId: {
                         type: 'string',
