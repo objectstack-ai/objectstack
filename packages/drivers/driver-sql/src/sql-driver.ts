@@ -709,13 +709,16 @@ function undeclaredAggregateFunctionError(func: string): Error {
  * `UNSUPPORTED_TRANSFORM` belongs to `@objectstack/rest`'s import mapper.
  *
  * Measured consequence, recorded so it is not rediscovered as a bug: on the
- * `/data` routes `mapDataError`'s generic status passthrough is 4xx-ONLY, so
- * this declared 501 does not survive to the wire — it falls to
- * `UNCLASSIFIED_FAULT`'s `500 INTERNAL_ERROR`. That is a gap in the REST
- * boundary — #5582, which this is the first live producer for — not a reason
- * for the driver to misdescribe the fault as the caller's. The driver's job is
- * to state the condition truthfully at the throw site (ADR-0112), which is also
- * what reaches every in-process caller and the operator log.
+ * `/data` routes `mapDataError`'s generic status passthrough spans 400-599, so
+ * this declared 501 DOES survive to the wire as `501` / `NOT_IMPLEMENTED` —
+ * pinned end-to-end by `rest-5xx-status-passthrough.test.ts`. This paragraph
+ * read the opposite until #7402 closed #5582: the passthrough was 4xx-ONLY,
+ * this was its first live producer, and the status fell to
+ * `UNCLASSIFIED_FAULT`'s `500 INTERNAL_ERROR`. What that band does drop is the
+ * PROSE — a 5xx body is the generic `Internal server error` — so the driver's
+ * job at the throw site is unchanged: state the condition truthfully
+ * (ADR-0112), which is what reaches every in-process caller and the operator
+ * log.
  */
 function uncompilableAggregateFunctionError(func: string): Error {
   const err = new Error(
