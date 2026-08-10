@@ -261,4 +261,46 @@ describe('settings-routes', () => {
       }),
     ]);
   });
+
+  /**
+   * #7169 — the STATUS half of the fail-closed refusal.
+   *
+   * `SettingsValidationError` carries `code` and the service suite pins that; a
+   * rejection case's other required assertion is the HTTP `status`, and this
+   * surface mints it here rather than on the error (ADR-0112 envelope, same
+   * 400 + `SETTINGS_VALIDATION` mapping every other save-time refusal takes).
+   * Restore `catch { continue }` in `validatePatch` and this case answers 200.
+   */
+  it('PUT rejects an unparseable `visible` predicate with 400 + SETTINGS_VALIDATION + invalid_value', async () => {
+    const http = new MockHttp();
+    const svc = new SettingsService({ env: {} });
+    svc.registerManifest({
+      namespace: 'celns',
+      label: 'CEL namespace',
+      specifiers: [
+        { type: 'text', key: 'note', label: 'Note' },
+        // CEL the spec's `ExpressionInputSchema` declares legal and this
+        // service's evaluator cannot parse.
+        { type: 'text', key: 'api_key', label: 'API key', required: true,
+          visible: "${data.note in ['x']}" },
+      ],
+    } as any);
+    registerSettingsRoutes(http, svc, { contextFromRequest: adminProvider });
+
+    const h = http.routes.get('PUT /api/settings/:namespace')!;
+    const { req, res, state } = makeReqRes({
+      params: { namespace: 'celns' },
+      body: { note: 'anything' },
+    });
+    await h(req, res);
+    expect(state.status).toBe(400);
+    expect(state.body.error.code).toBe('SETTINGS_VALIDATION');
+    expect(state.body.error.details.fields).toEqual([
+      expect.objectContaining({
+        field: 'api_key',
+        code: 'invalid_value',
+        constraint: { visible: "data.note in ['x']" },
+      }),
+    ]);
+  });
 });

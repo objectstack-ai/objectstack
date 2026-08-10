@@ -508,6 +508,26 @@ const TARGET_REQUIRED_TYPES: ReadonlySet<string> = new Set(
  * Note: The action name is the configuration ID. JavaScript function names can use camelCase,
  * but the metadata ID must be lowercase snake_case.
  */
+// Retired-VALUE prescription. Declared with `//` (never `/** */`) and ABOVE the
+// enum's JSDoc deliberately: `build-docs.ts` takes a doc comment adjacent to the
+// declaration as the reference entry's blurb, so a `/** */` here would displace
+// the location table below. (House style set by the `crypto.hash` /
+// `HookBodyCapability` and `array_agg` / `AggregationFunction` enum-value
+// retirements — `data/hook-body.zod.ts`, `data/query.zod.ts`.)
+const GLOBAL_NAV_RETIRED =
+  '`global_nav` was removed from `ACTION_LOCATIONS` in @objectstack/spec 17 (#6888, ADR-0049 '
+  + 'enforce-or-remove) — no running-app surface ever rendered it. The console command palette '
+  + '(`⌘K`) builds its groups from nav items, objects, dashboards, pages, reports, recent items '
+  + 'and record search; it reads no action metadata at all, so an action declaring this location '
+  + 'never reached a user. The only thing that DID draw it was the Studio designer, which '
+  + 'previewed a command-palette frame for a surface the product does not have — an authoring '
+  + 'tool teaching authors to write dead metadata (ADR-0078). Place the action on a location a '
+  + 'renderer serves (`list_toolbar`, `list_item`, `record_header`, `record_more`, '
+  + '`record_related`, `record_section`), or — for an action that deliberately has no UI home, '
+  + 'such as an object-less one invoked over REST/MCP/AI — declare it headless with '
+  + '`locations: []`, which keeps its capability gate, param contract and audit trail. '
+  + 'Run `os migrate meta --from 16` to rewrite existing sources automatically.';
+
 /**
  * Action Location — where an action is allowed to surface in the UI.
  *
@@ -524,7 +544,23 @@ const TARGET_REQUIRED_TYPES: ReadonlySet<string> = new Set(
  * - `record_related`  — actions on a related list section inside a record.
  * - `record_section`  — actions surfaced inside a body section/tab of a record
  *                       (e.g. a Security tab grouping change-password, 2FA, etc.).
- * - `global_nav`      — global navigation/command-palette level actions.
+ *
+ * `global_nav` was REMOVED in 17 (#6888, maintainer ruling 2026-08-09). It had
+ * been declared here since the vocabulary was written and no product surface
+ * ever served it: the console's ⌘K palette composes its groups from nav items,
+ * objects, dashboards, pages, reports, recent items and record search, and
+ * references no action metadata. Four of the five references to the value in
+ * the whole UI repo were the Studio designer — which drew the author a mock
+ * "⌘K · Command palette" frame, promising a rendering the product cannot do
+ * (the ADR-0078 declares-renders-does-nothing shape, arriving through the
+ * location vocabulary rather than through a missing key). Retired rather than
+ * implemented: no user has asked for command-palette actions and the only two
+ * declarers were our own showcase corpus, so wiring the palette would have been
+ * capability expansion with no pull. This is an enum VALUE, not a key, so there
+ * is no `retiredKey()` tombstone — the prescription lives on the enum's own
+ * error map above, keyed on `issue.input` so that only the spelling which used
+ * to be legal is told it "was removed". An object-less action's honest
+ * declaration is `locations: []` (headless), not a location nothing renders.
  */
 export const ACTION_LOCATIONS = [
   'list_toolbar',
@@ -533,10 +569,15 @@ export const ACTION_LOCATIONS = [
   'record_more',
   'record_related',
   'record_section',
-  'global_nav',
 ] as const;
 
-export const ActionLocationSchema = z.enum(ACTION_LOCATIONS);
+export const ActionLocationSchema = z.enum(ACTION_LOCATIONS, {
+  // Only the spelling that USED to be legal gets the retirement message.
+  // Telling the author of `globalnav` that their value "was removed" would
+  // misinform, so everything else keeps zod's own enum error, which already
+  // lists the legal locations. (`array_agg` / `crypto.hash` precedent.)
+  error: (issue) => (issue.input === 'global_nav' ? GLOBAL_NAV_RETIRED : undefined),
+});
 export type ActionLocation = z.input<typeof ActionLocationSchema>;
 
 /**

@@ -40,6 +40,11 @@ export {
 export {
   evaluateVisibility,
   referencedKeys,
+  // #7169 — the `${…}` / envelope unwrapper. Published alongside the evaluator
+  // because a caller that now REFUSES an unparseable predicate has to be able
+  // to quote the source it refused, and re-deriving the unwrap in the consumer
+  // is how the two spellings drift apart.
+  visibilitySource,
   VisibilityParseError,
 } from './visibility-eval.js';
 export {

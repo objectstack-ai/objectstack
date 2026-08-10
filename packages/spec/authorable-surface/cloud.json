@@ -416,6 +416,7 @@
     "cloud/TemplateManifest:license",
     "cloud/TemplateManifest:manifestId",
     "cloud/TemplateManifest:name",
+    "cloud/TemplateManifest:namespace",
     "cloud/TemplateManifest:preview",
     "cloud/TemplateManifest:publisher",
     "cloud/TemplateManifest:readmePath",

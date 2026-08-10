@@ -308,6 +308,14 @@ export class SettingsForbiddenError extends Error {
  * batch is rejected; `fields` carries one entry per offending key, which
  * the UI can render inline against the input it addresses.
  *
+ * Since #7169 it also carries the one MANIFEST-side fault this surface refuses:
+ * a specifier whose `visible` predicate the save-time evaluator cannot parse
+ * (`invalid_value`, with the predicate in `constraint.visible`). Every other
+ * entry names something wrong with a submitted value; that one names something
+ * wrong with the manifest, and is here rather than in an error class of its own
+ * because it is refused on the same write, on the same envelope, and renders
+ * against the same input.
+ *
  * `fields` is `FieldError[]` — the field-level vocabulary ADR-0114 closed
  * (#3977) — rather than the `Record<key, message>` map it was until #4224.
  * The map predated that catalog and named the constraint only in prose, so

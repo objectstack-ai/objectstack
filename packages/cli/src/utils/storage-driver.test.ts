@@ -10,9 +10,22 @@ import {
   resolveDriverType,
   resolveStorageDefinition,
   loadTursoDriverFactory,
+  isTursoDriverId,
   MissingDriverPackageError,
+  TURSO_DRIVER_INSTALL_COMMAND,
   UnsupportedDriverError,
 } from './storage-driver.js';
+// #6268: the OTHER host's bindings, imported under their own names so the
+// identity assertions below compare two real module paths rather than one alias
+// of the same import. `@objectstack/runtime` resolves to the BUILT package here,
+// exactly as it does for `storage-driver.ts` itself — which is what makes the
+// identity pinned below the identity that ships.
+import {
+  loadTursoDriverFactory as loadRuntimeTursoDriverFactory,
+  isTursoDriverId as runtimeIsTursoDriverId,
+  MissingDriverPackageError as RuntimeMissingDriverPackageError,
+  TURSO_DRIVER_INSTALL_COMMAND as RUNTIME_TURSO_DRIVER_INSTALL_COMMAND,
+} from '@objectstack/runtime';
 
 describe('inferDriverTypeFromUrl', () => {
   it('maps each recognized URL scheme to its canonical driver kind', () => {
@@ -395,5 +408,99 @@ describe('loadTursoDriverFactory: the optional driver package (#5602)', () => {
     const pinned: TursoDriverConfig = config;
     expect(pinned.url).toBe('libsql://my-db.turso.io');
     expect(pinned.authToken).toBe('jwt-token');
+  });
+});
+
+// #6268 — the loader has ONE owner (`@objectstack/runtime`), and this file's
+// exports are that owner's declarations rather than hand-aligned copies.
+//
+// The property under test is CLASS IDENTITY, not wording. `serve.ts:1136` decides
+// whether a boot failure is fatal with
+//
+//     if (e instanceof MissingDriverPackageError) throw e;
+//
+// so a convergence that left two same-named classes — one per package — would
+// make that predicate stop matching and degrade a fatal branch to a non-fatal one
+// with no diagnostic anywhere. Nothing in the message would change, which is why
+// the first case below demonstrates, in-suite, that a message assertion is blind
+// to exactly this defect.
+describe('#6268 — one loader, one class identity across cli and runtime', () => {
+  it('the CLI export IS the runtime class object, not a same-named twin', () => {
+    expect(MissingDriverPackageError).toBe(RuntimeMissingDriverPackageError);
+    expect(isTursoDriverId).toBe(runtimeIsTursoDriverId);
+    expect(TURSO_DRIVER_INSTALL_COMMAND).toBe(RUNTIME_TURSO_DRIVER_INSTALL_COMMAND);
+  });
+
+  // THE pin. An error raised by the RUNTIME loader must satisfy the instanceof
+  // that `serve.ts` performs against the CLI-side binding.
+  it("an error raised by the runtime loader satisfies serve.ts's CLI-side instanceof", async () => {
+    const err = await loadRuntimeTursoDriverFactory({
+      importDriverPackage: async () => { throw new Error("Cannot find module '@objectstack/driver-turso'"); },
+    }).then(() => null, (e: unknown) => e);
+
+    // The predicate serve.ts runs, spelled the way serve.ts spells it.
+    expect(err instanceof MissingDriverPackageError).toBe(true);
+
+    // …and the demonstration that a message assertion could NOT have caught a
+    // broken identity: a twin declared right here carries the same message and
+    // the same fields, and passes every assertion except the one above.
+    class MissingDriverPackageErrorTwin extends Error {
+      constructor(readonly installCommand: string, message: string) {
+        super(message);
+        this.name = 'MissingDriverPackageError';
+      }
+    }
+    const twin = new MissingDriverPackageErrorTwin(
+      (err as MissingDriverPackageError).installCommand,
+      (err as Error).message,
+    );
+    expect(twin.message).toBe((err as Error).message);
+    expect(twin.name).toBe((err as Error).name);
+    expect(twin.installCommand).toBe(TURSO_DRIVER_INSTALL_COMMAND);
+    expect(twin instanceof MissingDriverPackageError).toBe(false);
+  });
+
+  it('and the reverse: the CLI loader raises an error the runtime binding matches', async () => {
+    const err = await loadTursoDriverFactory({
+      importDriverPackage: async () => { throw new Error('nope'); },
+    }).then(() => null, (e: unknown) => e);
+    expect(err instanceof RuntimeMissingDriverPackageError).toBe(true);
+    expect((err as MissingDriverPackageError).installCommand).toBe('npm install @objectstack/driver-turso');
+  });
+
+  // The one thing the convergence deliberately did NOT move: the dynamic
+  // import's specifier, whose RESOLUTION ROOT is the module that evaluates it.
+  // `@objectstack/driver-turso` is an optional PEER of `@objectstack/cli` and is
+  // not declared by `@objectstack/runtime` at all, so under pnpm's strict layout
+  // it is linked into the CLI's node_modules and not the runtime's. Had the CLI
+  // taken the runtime's default thunk, an operator who ran the exact install
+  // command this error prints would still be told the package was missing.
+  //
+  // This case pins the CLI half — the default thunk finds the package that is
+  // installed next to the CLI. The runtime half is pinned from the other side by
+  // `standalone-stack.libsql.test.ts`, where a `libsql://` boot with no injected
+  // thunk takes the missing-package arm precisely because the runtime does not
+  // declare it. Together they assert that the two roots are still distinct.
+  it('resolves the optional package from the CLI’s own node_modules by default', async () => {
+    const factory = await loadTursoDriverFactory();
+    expect(factory.supports('turso')).toBe(true);
+    expect(factory.supports('libsql')).toBe(true);
+    expect(factory.supports('sqlite')).toBe(false);
+  });
+
+  // The CLI-only semantics the ruling keeps on this side: a url-less turso config
+  // is refused as `UnsupportedDriverError`, which serve.ts re-throws as fatal —
+  // while the runtime's own default keeps raising its `[StandaloneStack]` error
+  // for the same message. Only the TYPE is host-chosen; the wording is shared.
+  it('keeps UnsupportedDriverError as the CLI’s url-less refusal, with the shared wording', async () => {
+    const factory = await loadTursoDriverFactory({
+      importDriverPackage: async () => ({ TursoDriver: class { constructor(_c: unknown) {} } }),
+    });
+    let err: unknown;
+    try { factory.create({ name: 'default', driver: 'turso', config: {} }); } catch (e) { err = e; }
+    expect(err).toBeInstanceOf(UnsupportedDriverError);
+    expect((err as Error).message).toMatch(/needs a libSQL url/);
+    // Not the standalone stack's prefix — that host keeps its own error type.
+    expect((err as Error).message).not.toMatch(/\[StandaloneStack\]/);
   });
 });

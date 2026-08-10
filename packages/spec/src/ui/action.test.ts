@@ -460,7 +460,7 @@ describe('ActionSchema', () => {
         'record_header',
         'record_more',
         'record_related',
-        'global_nav',
+        'record_section',
       ] as const;
 
       const action: ActionType = {
@@ -1432,7 +1432,6 @@ describe('ACTION_LOCATIONS — canonical source of truth', () => {
       'record_more',
       'record_related',
       'record_section',
-      'global_nav',
     ]);
   });
 
@@ -1446,6 +1445,71 @@ describe('ACTION_LOCATIONS — canonical source of truth', () => {
     expect(() => ActionLocationSchema.parse('record_quick_actions')).toThrow();
     expect(() => ActionLocationSchema.parse('detail_header')).toThrow();
     expect(() => ActionLocationSchema.parse('')).toThrow();
+  });
+
+  // ─── [#6888] `global_nav` retirement — the enum-VALUE tombstone ────────────
+  //
+  // The value is gone from the vocabulary and there is no `retiredKey()` to
+  // hang the prescription on (a value is not a key), so the enum's own error
+  // map carries it, keyed on `issue.input`. These pin the two halves that make
+  // the retirement audible instead of silent: the value is REFUSED, and the
+  // refusal SAYS WHY and what to do instead. A bare `.toThrow()` would pass on
+  // zod's generic "invalid option" message and would not notice the error map
+  // being dropped, which is the whole mechanism here.
+  describe('[#6888] `global_nav` is retired', () => {
+    it('is no longer a member of the vocabulary', () => {
+      expect([...ACTION_LOCATIONS]).not.toContain('global_nav');
+      // Anti-vacuity: the constant we just probed is the real one and still
+      // carries the surviving members, so `not.toContain` cannot pass by
+      // resolving an empty list.
+      expect(ACTION_LOCATIONS).toHaveLength(6);
+      expect([...ACTION_LOCATIONS]).toContain('record_section');
+    });
+
+    it('refuses the value WITH the prescription — bare enum and whole action alike', () => {
+      // The prescription: names the value, says it was removed, points at the
+      // live alternatives (a served location, or the headless `locations: []`),
+      // and closes with the house `os migrate meta` sentence (#6856 route D).
+      const prescribes = (fn: () => unknown) => {
+        expect(fn).toThrow(/`global_nav` was removed from `ACTION_LOCATIONS`/s);
+        expect(fn).toThrow(/#6888/s);
+        expect(fn).toThrow(/locations: \[\]/s);
+        expect(fn).toThrow(/os migrate meta --from 16/s);
+      };
+
+      prescribes(() => ActionLocationSchema.parse('global_nav'));
+      // The path an author actually travels — the value inside a real action.
+      prescribes(() =>
+        ActionSchema.parse({
+          name: 'palette_action',
+          label: 'Palette Action',
+          type: 'script',
+          target: 'true',
+          locations: ['global_nav'],
+        }),
+      );
+    });
+
+    it('tells ONLY the retired spelling that it "was removed"', () => {
+      // The error map is keyed on `issue.input` precisely so a typo is not
+      // misinformed that its value used to exist. `globalnav` never did.
+      expect(() => ActionLocationSchema.parse('globalnav')).toThrow();
+      expect(() => ActionLocationSchema.parse('globalnav')).not.toThrow(/was removed/s);
+      expect(() => ActionLocationSchema.parse('global_navigation')).not.toThrow(/was removed/s);
+    });
+
+    it('accepts the migrated shape: an action with no UI surface says so with `[]`', () => {
+      // What the D2 conversion rewrites `locations: ['global_nav']` INTO — the
+      // documented headless declaration, still a legal action.
+      const action = ActionSchema.parse({
+        name: 'portfolio_snapshot',
+        label: 'Portfolio Snapshot',
+        type: 'script',
+        target: 'true',
+        locations: [],
+      });
+      expect(action.locations).toEqual([]);
+    });
   });
 
   it('ActionSchema accepts a `locations: ActionLocation[]` field', () => {

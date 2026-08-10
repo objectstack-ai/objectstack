@@ -35,7 +35,12 @@ import {
   knownValueDomain,
   valueDomainPhrasing,
 } from './value-domains.js';
-import { evaluateVisibility, referencedKeys } from './visibility-eval.js';
+import {
+  evaluateVisibility,
+  referencedKeys,
+  visibilitySource,
+  VisibilityParseError,
+} from './visibility-eval.js';
 
 const DEFAULT_OBJECT = 'sys_setting';
 
@@ -1398,8 +1403,12 @@ export class SettingsService {
    * - `step` + non-empty numeric value that misses the declared grid
    *   (`min + k * step`, or `k * step` where no `min` is declared) → rejected
    *   (`invalid_value`, #6199).
-   * - All-null patches (namespace reset) and unparseable visibility
-   *   expressions skip validation rather than block the write.
+   * - All-null patches (namespace reset) skip validation rather than block the
+   *   write.
+   * - A `visible` predicate `evaluateVisibility` cannot parse → the write is
+   *   REFUSED (`invalid_value`, #7169). See §Unparseable `visible` below for
+   *   why this one is not lenient like its neighbours, and why it carries no
+   *   TOUCH gate.
    *
    * The TOUCH gate is what keeps the options check from being a regression
    * for existing workspaces: a value that pre-dates a manifest's current
@@ -1417,6 +1426,39 @@ export class SettingsService {
    * At most one `FieldError` per offending key: every branch above `continue`s
    * once it has spoken, so a client is handed the first constraint the value
    * broke rather than a pile it must rank itself.
+   *
+   * ## Unparseable `visible` — the one branch that fails CLOSED (#7169)
+   *
+   * Maintainer ruling, 2026-08-10: *"save-time validation must refuse a
+   * `visible` predicate the actual evaluator cannot parse — a silent skip of
+   * the `required` gate is the worst failure class this repo names."*
+   *
+   * Until then this branch read `catch { continue; // stay lenient }`, and the
+   * `continue` skipped the **whole specifier**. That is the asymmetry that
+   * justifies breaking ranks with the lenient neighbours listed above: an
+   * uncompilable `pattern` or a missing `options` table disables ONE check on
+   * ONE key, and the rest of the specifier is still judged. `visible` is the
+   * gate every other check hangs off, so an unparseable one switches off
+   * `required`, `options`, `pattern`, `valueDomain` and the value window at
+   * once — invisibly, with no diagnostic anywhere, for as long as the manifest
+   * stands.
+   *
+   * **No TOUCH gate here, deliberately.** The gate above exists for stored
+   * VALUES that pre-date a manifest's current constraints — data a workspace
+   * cannot fix from a settings page it would be locked out of. This is not a
+   * value fault: the defect is in the MANIFEST, it is the same for every
+   * workspace running that code, and the fix is a one-line edit by whoever
+   * ships the manifest. Gating it on touch would hide it again in exactly the
+   * shape #7169 measured — the console posts only its dirty keys, so a
+   * half-filled form never touches the empty `required` field whose predicate
+   * is broken, and the refusal would never fire on the incident it exists for.
+   * Resets still work: an all-null patch returns before this loop, so a
+   * namespace whose manifest is broken can always be cleared.
+   *
+   * The predicate source travels in `constraint.visible` and is NOT redacted
+   * for `encrypted` keys, unlike the value-bearing branches below: a `visible`
+   * expression is manifest content that `GET /api/settings/:ns` already serves
+   * to the console in full. It is the author's own text, never a stored secret.
    */
   private async validatePatch(
     namespace: string,
@@ -1453,21 +1495,48 @@ export class SettingsService {
       const type = String(spec.type ?? '');
       if (!key || LAYOUT_ONLY_TYPES.has(type)) continue;
 
+      const label = typeof spec.label === 'string' ? spec.label : key;
+
       let visible = true;
       let deps: string[] = [];
       if (typeof spec.visible !== 'undefined') {
         try {
           visible = evaluateVisibility(spec.visible, data);
           deps = referencedKeys(spec.visible);
-        } catch {
-          continue; // can't determine visibility — stay lenient
+        } catch (err) {
+          // Fail CLOSED (#7169) — see §Unparseable `visible` in the doc comment
+          // above for the ruling, the asymmetry with the lenient branches, and
+          // why there is no TOUCH gate on this one.
+          const source = visibilitySource(spec.visible) ?? String(spec.visible);
+          const detail = err instanceof VisibilityParseError
+            ? err.detail
+            : err instanceof Error ? err.message : String(err);
+          errors.push({
+            field: key,
+            // `invalid_value` is ADR-0114's declared slot for "rejected for a
+            // reason no other member names" — the same reading #5712 and #6199
+            // took. Nothing in the closed catalog names a manifest-side
+            // declaration fault, and inventing a member for one service's
+            // manifest format is precisely the friction that catalog is for.
+            code: 'invalid_value',
+            message:
+              `${label} declares a visibility predicate this service cannot evaluate: ${detail}. ` +
+              `The write is refused rather than accepted with this field's declared constraints ` +
+              `silently unenforced — fix the manifest's \`visible\` expression.`,
+            label,
+            // The predicate as a discrete value, so a client can name WHICH
+            // expression refused without parsing the sentence (`FieldError.
+            // constraint`, ADR-0114). Spelled `visible` — the manifest property
+            // it comes from — like every other constraint key here.
+            constraint: { visible: source },
+          });
+          continue;
         }
       }
       if (!visible) continue;
       if (!patchKeys.has(key) && !deps.some((d) => patchKeys.has(d))) continue;
 
       const value = data[key];
-      const label = typeof spec.label === 'string' ? spec.label : key;
       const empty =
         value === null || typeof value === 'undefined' ||
         (typeof value === 'string' && value.trim() === '');

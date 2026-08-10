@@ -24,6 +24,8 @@
   },
   "devDependencies": {
     "@objectstack/cli": "workspace:*",
+    "@objectstack/driver-sql": "workspace:*",
+    "@objectstack/objectql": "workspace:*",
     "typescript": "^6.0.3",
     "vitest": "^4.1.10"
   }

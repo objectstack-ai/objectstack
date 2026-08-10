@@ -62,6 +62,8 @@ else
   echo "✗ manifest generation failed (exit ${status})."
   echo "  If Playwright reported a missing browser, install it and retry:"
   echo "    pnpm exec playwright install chromium-headless-shell"
+  echo "  Can't install here (e.g. an agent dispatch container)? See docs/releases-maintenance.md"
+  echo "  'If the dispatch container's Playwright browser doesn't match the revision'."
   popd > /dev/null
   exit "$status"
 fi

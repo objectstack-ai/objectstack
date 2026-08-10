@@ -1819,7 +1819,6 @@ Register them under `defineStack({ actions: [...] })`.
 | `record_section` | Body section/tab of a record (e.g. a Security tab) |
 | `list_item`      | Per-row action in list views |
 | `list_toolbar`   | Bulk action on selected rows (`input.selectedIds`) |
-| `global_nav`     | Global navigation / command-palette level |
 
 ### Visibility, Disable & Feedback
 
