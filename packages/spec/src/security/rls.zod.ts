@@ -294,44 +294,74 @@ export const RowLevelSecurityPolicySchema = lazySchema(() => strictObject(
 
   /**
    * USING clause - Filter condition for SELECT/UPDATE/DELETE.
-   * 
-   * This is a constrained, SQL-like expression compiled into an ObjectQL
+   *
+   * A constrained CEL predicate (ADR-0058 D1) compiled into an ObjectQL
    * filter (see the supported grammar below). Only rows the compiled filter
    * matches are accessible.
    *
    * **Note**: For INSERT-only policies, USING is not required (only CHECK is needed).
    * For SELECT/UPDATE/DELETE operations, USING is required.
    *
-   * **Security Note**: the compiler maps each form to a structured filter and
-   * binds context values as parameters at the driver layer — context values
-   * are never string-concatenated into SQL. Policy `using` strings are
-   * authored by administrators, not end users.
+   * **Security Note**: the compiler lowers each predicate to a structured
+   * filter and binds context values as parameters at the driver layer —
+   * context values are never string-concatenated into SQL. Policy `using`
+   * strings are authored by administrators, not end users.
    *
    * **Supported expression grammar (reference compiler)**
    *
-   * ⚠️ **STALE — the enumeration below UNDER-states what compiles (#6919).**
-   * The `.describe()` on this property carries the current truth: `!=`, the
-   * ordering comparisons, `in` over an inline literal list, `&&`, `||` and a
-   * bare `true` all lower today. Rewriting this block is tracked in #6919; do
-   * not read the four-item list as the accepted set.
+   * There is no blessed list of forms to memorise here, and no count to
+   * quote: the grammar is defined by ONE question — *does the predicate lower
+   * to an ObjectQL filter?* `isSupportedRlsExpression`
+   * (`@objectstack/formula`, `src/rls-predicate.ts`) is that single decision
+   * procedure, and `@objectstack/lint` calls it at authoring time (ADR-0056
+   * D4) so a predicate that would never enforce is rejected instead of
+   * silently dropped. Anything that does not lower **fails closed** — the
+   * policy matches zero rows, never more.
    *
-   * The reference RLS compiler implements a deliberately **small, fixed
-   * grammar** rather than a general SQL parser. Exactly four forms compile;
-   * anything else fails closed (the policy matches zero rows). Keep `using`
-   * to one of:
+   * What lowers, written in canonical CEL:
    *
-   * 1. `field = current_user.<prop>` — equality against a context value
-   * 2. `field = 'literal'` — equality against a single-quoted string literal
-   * 3. `field IN (current_user.<array_prop>)` — set membership against a
-   *    pre-resolved id array (see "Dynamic membership" below)
-   * 4. `1 = 1` — always true / no restriction (privileged-position allow-all)
+   * - **Comparison** of a field against a literal or a `current_user.*`
+   *   context value with `==`, `!=`, `<`, `<=`, `>` or `>=` —
+   *   `owner_id == current_user.id`, `amount > 100`, `status != 'draft'`.
+   *   Either operand may be the field; `current_user.id == owner_id` lowers
+   *   to the same filter.
+   * - **Set membership** with `in`, against a pre-resolved `current_user.*`
+   *   array (see "Dynamic membership" below) or an inline CEL list literal —
+   *   `assigned_to_id in current_user.team_member_ids`,
+   *   `status in ['draft', 'pending']`.
+   * - **String prefix / suffix / substring** tests —
+   *   `name.startsWith('AC')`, `name.endsWith('_archived')`,
+   *   `name.contains('demo')`.
+   * - **Composition** of the above with `&&`, `||` and parentheses —
+   *   `organization_id == current_user.organization_id && status == 'published'`.
+   *   `!` negates a *parenthesised comparison* (`!(status == 'draft')`); it
+   *   cannot negate a bare field, because a bare field does not lower on its
+   *   own.
+   * - **Allow-all**: the bare literal `true` (the privileged-position escape
+   *   hatch). `1 == 1` lowers as an ordinary comparison and means the same.
+   *   There is no bare-`false` deny-all — to make a policy inert, set
+   *   `enabled: false`.
    *
-   * There is intentionally **no** support for `AND`/`OR`/`NOT`, comparison
-   * operators other than `=`, `IS NULL`/`IS NOT NULL`, `NOT IN`, `LIKE`/
-   * `ILIKE`, regex (`~`/`!~`), `ANY`/`ALL`, subqueries, or `NOW()`/
-   * `CURRENT_DATE`/`CURRENT_TIME`. Combine conditions by defining multiple
-   * policies (they OR-combine); express anything subquery-shaped as a
-   * pre-resolved `current_user.*` array instead.
+   * What does **not** lower, and therefore fails closed: SQL `AND` / `OR` /
+   * `NOT`, `NOT IN`, `IS NULL` / `IS NOT NULL`, `LIKE` / `ILIKE`, regex
+   * (`~` / `!~`), `ANY` / `ALL`, arithmetic (`amount + 1 > 2`), subqueries,
+   * `NOW()` / `CURRENT_DATE` / `CURRENT_TIME`, traversal across objects
+   * (`account.owner.id == current_user.id`), and a bare truthy field
+   * (`is_active`). Combine conditions with `&&` / `||`, or by defining
+   * multiple policies (they OR-combine); express anything subquery-shaped as
+   * a pre-resolved `current_user.*` array instead.
+   *
+   * **SQL spelling is a transitional bridge, not a second dialect.** Stored
+   * legacy predicates keep compiling because `sqlPredicateToCel`
+   * (`@deprecated` under ADR-0058 D1) rewrites `=` to `==` and `IN` to `in`
+   * before the one compiler sees them, so `owner_id = current_user.id`,
+   * `status = 'published'` and `assigned_to_id IN (current_user.team_member_ids)`
+   * still enforce. Only that subset is bridged. In particular SQL's
+   * parenthesised value list does **not** survive the bridge —
+   * `status IN ('draft', 'pending')` fails closed, where the CEL list
+   * `status in ['draft', 'pending']` lowers — and SQL keywords outside the
+   * subset (`AND`, `OR`, `NOT IN`, `IS NULL`, `LIKE`) are never rewritten.
+   * Author new policies in CEL.
    *
    * **Context values** — `current_user.*` resolves against the request's
    * execution context (camelCase fields map to snake_case placeholders):
@@ -348,16 +378,16 @@ export const RowLevelSecurityPolicySchema = lazySchema(() => strictObject(
    * need a subquery ("tasks assigned to anyone I manage", "accounts in my
    * territories") is resolved by the runtime into
    * `ExecutionContext.rlsMembership` under a stable key, then referenced as
-   * `field IN (current_user.<key>)`. This keeps the compiler subquery-free
+   * `field in current_user.<key>`. This keeps the compiler subquery-free
    * while still supporting hierarchy- and sharing-based access.
    *
    * **Prohibited**: Dynamic SQL, DDL statements, DML statements (INSERT/UPDATE/DELETE)
    *
-   * @example "organization_id = current_user.organization_id"
-   * @example "owner_id = current_user.id"
-   * @example "status = 'published'"
-   * @example "assigned_to_id IN (current_user.team_member_ids)" // §7.3.1 pre-resolved
-   * @example "1 = 1" // privileged-position allow-all
+   * @example "organization_id == current_user.organization_id"
+   * @example "owner_id == current_user.id"
+   * @example "status == 'published'"
+   * @example "assigned_to_id in current_user.team_member_ids" // §7.3.1 pre-resolved
+   * @example "true" // privileged-position allow-all
    */
   using: z.string()
     .optional()
