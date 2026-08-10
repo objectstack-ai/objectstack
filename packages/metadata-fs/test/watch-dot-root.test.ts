@@ -35,38 +35,91 @@ const ref = (name: string): MetaRef => ({ org: 'system', type: 'view', name });
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 /**
- * Deadline for a **positive** watcher assertion — the longest a case waits for
- * an event it expects to arrive. Each wait races this against the event
- * promise, so a healthy run still finishes in roughly the poll interval; the
- * number is only ever paid on the way to a failure.
- *
- * Sized for the merge queue, not for a quiet laptop. The queue runs the FULL
- * suite (PR-side CI runs only the affected subset), and this watcher rides
- * `usePolling: 1000ms` plus an `awaitWriteFinish` stability window — both are
- * wall-clock timers that stretch when the runner is saturated, while the
- * assertions themselves are unaffected. PR #7208 was ejected from the queue
- * twice on exactly that: first `fs-behavior.test.ts > chokidar: external file
- * change emits an update event` (3s deadline), then this file's positive case
- * (8s deadline) — both green on the identical SHA in PR CI and locally.
+ * Reserve held back from the case ceiling so that a missing event is reported
+ * by this file's own assertion ("expected length 1, received 0") rather than
+ * by a bare vitest timeout. Covers `sink.stop()`, `repo.close()` and the
+ * tmpdir teardown in `afterEach`.
  */
-const EVENT_WAIT_MS = 20_000;
+const TEARDOWN_RESERVE_MS = 5_000;
+
+/**
+ * Poll interval for `waitForEvent`. A healthy run leaves the wait on the first
+ * turn after delivery, so this is what a passing case pays, not the ceiling.
+ */
+const EVENT_POLL_MS = 50;
 
 /**
  * Quiet window for the **negative** assertion below. ⛔ Never shorten this: a
  * too-short quiet window cannot fail, it can only produce a FALSE PASS on an
- * empty-array assertion. Its liveness control uses `EVENT_WAIT_MS` like every
- * other positive wait — the control is a positive assertion and flakes under
- * load the same way.
+ * empty-array assertion.
+ *
+ * This one budget stays wall-clock, because you cannot wait for an absence —
+ * and that is a real limit, not a solved problem. Measured for #7369: under
+ * event-loop starvation heavy enough to push delivery to 32-36s, a 4s window
+ * is no longer a window at all and the emptiness below becomes a false pass.
+ * The case's *positive* control underneath is what still has teeth there, and
+ * it is now deadline-driven (`waitForEvent`) rather than fixed-budget.
  */
 const QUIET_WINDOW_MS = 4_000;
 
 /**
- * Per-case ceiling. Has to clear the quiet window plus a full `EVENT_WAIT_MS`
- * plus repository setup, or the case dies on the vitest timeout before its own
- * deadline is reached — which reports as a timeout rather than as the missing
- * event, and re-introduces the flake the deadlines above are widening away.
+ * Per-case ceiling — and, since #7369, the **source** of every positive wait's
+ * budget: `waitForEvent` waits until `caseDeadline()`, which is this value
+ * measured from the case's own start minus `TEARDOWN_RESERVE_MS`. There is no
+ * second, smaller wall-clock budget left in the file to expire first.
+ *
+ * Sized from measurement, not taste. Under in-process event-loop starvation
+ * (the loop blocked ~99.75% of the time) delivery of a single external edit
+ * was measured at 24-36s while still arriving every time; the quiet window and
+ * repository setup ahead of it stretch too. 120s clears that with margin, and
+ * a healthy run pays none of it — every wait exits on delivery.
  */
-const CASE_TIMEOUT_MS = 60_000;
+const CASE_TIMEOUT_MS = 120_000;
+
+/**
+ * The budget every positive wait in this file spends, measured from the start
+ * of the case that calls it. Call it as the case's first statement.
+ */
+const caseDeadline = (): number => Date.now() + CASE_TIMEOUT_MS - TEARDOWN_RESERVE_MS;
+
+/**
+ * Wait until the sink has delivered at least one event, or until `deadline`.
+ *
+ * ⛔ Never put a *fixed* wall-clock budget back here. The shape this replaced
+ * was `Promise.race([sink.first, sleep(EVENT_WAIT_MS)])` with a hard-coded
+ * `EVENT_WAIT_MS = 20_000`, and #7369 is what that costs: the budget is a
+ * constant while the thing it is timing is not. This watcher rides
+ * `usePolling: 1000ms` plus an `awaitWriteFinish` stability window, both of
+ * which stretch with runner load — and the merge queue, which runs the FULL
+ * suite while PR-side CI runs only the affected subset, is the most loaded
+ * context this file ever executes in. When the fixed budget expires first the
+ * case reports `received 0`, which reads as "the watcher is broken" and is
+ * really "the test stopped listening too early". PR #7333 was ejected from the
+ * queue by exactly that, having touched nothing in this package.
+ *
+ * Measured for #7369 on `18ff1dab1`, one external edit per iteration, under
+ * in-process event-loop starvation (the case blocks its own loop for BLOCK ms
+ * out of every BLOCK+GAP ms), external CPU oversubscription alongside:
+ *
+ *   BLOCK/GAP   n    delivery        old fixed-budget shape   this shape
+ *   (none)      60   650-707ms       green                    green
+ *   300/10      40   3.6-4.9s        green                    green
+ *   900/5       12   9.9-12.7s       green                    green
+ *   2000/5       8   24-36s          RED 5/8                  green 8/8
+ *
+ * The event arrived in 120 of 120 iterations — delivery goes *late*, never
+ * missing. (The failure mode where it never arrives at all was a different
+ * defect, #7282, fixed at the source in `ab07b5382`; it is not what this
+ * shape defends against.) So the only thing that decided pass or fail at the
+ * bottom row was whether the test was still listening, which is why the budget
+ * now comes from `CASE_TIMEOUT_MS` instead of a number chosen in advance.
+ */
+async function waitForEvent(
+  sink: { events: MetadataEvent[] },
+  deadline: number,
+): Promise<void> {
+  while (sink.events.length === 0 && Date.now() < deadline) await sleep(EVENT_POLL_MS);
+}
 
 describe('FileSystemRepository watcher — dot-rooted watch root (#7150)', () => {
   /** Stands in for the project directory. */
@@ -92,30 +145,26 @@ describe('FileSystemRepository watcher — dot-rooted watch root (#7150)', () =>
    */
   function collectEvents(r: FileSystemRepository): {
     events: MetadataEvent[];
-    first: Promise<void>;
     stop: () => Promise<void>;
   } {
     const iter = r.watch({ org: 'system' }, 999)[Symbol.asyncIterator]();
     const events: MetadataEvent[] = [];
-    let resolveFirst!: () => void;
-    const first = new Promise<void>((res) => { resolveFirst = res; });
     let stopped = false;
     void (async () => {
       while (!stopped) {
         const next = await iter.next();
         if (next.done) return;
         events.push(next.value as MetadataEvent);
-        resolveFirst();
       }
     })();
     return {
       events,
-      first,
       stop: async () => { stopped = true; await iter.return?.(undefined); },
     };
   }
 
   it('sees an external edit when the root is under a dot-directory', async () => {
+    const deadline = caseDeadline();
     repo = new FileSystemRepository({ root, org: 'system' }); // watcher ENABLED
     await repo.start();
 
@@ -136,9 +185,19 @@ describe('FileSystemRepository watcher — dot-rooted watch root (#7150)', () =>
       JSON.stringify({ label: 'externally edited' }, null, 2),
     );
 
-    await Promise.race([sink.first, sleep(EVENT_WAIT_MS)]);
+    await waitForEvent(sink, deadline);
     await sink.stop();
 
+    // ⚠️ The exact count is a GUARD, not evidence of de-duplication: a second
+    // chokidar delivery of this same write cannot produce a second
+    // `MetadataEvent`, because `handleFsChange` returns early on
+    // `currentHead === hash`. Measured for #7369 — 0 duplicates in 120
+    // iterations across four starvation levels, and 0 is the only number that
+    // branch can produce. What the count still has teeth for is a *different*
+    // event sneaking in: the repository's own `put` above escaping self-write
+    // suppression, or a dot entry leaking past `isIgnoredWatchPath`. That is
+    // why it stays exact — and why it is asserted only once the awaited event
+    // has actually arrived, so a slow runner cannot turn it into `received 0`.
     expect(sink.events).toHaveLength(1);
     expect(sink.events[0]!.op).toBe('update');
     expect(sink.events[0]!.ref.name).toBe('case_grid');
@@ -147,6 +206,7 @@ describe('FileSystemRepository watcher — dot-rooted watch root (#7150)', () =>
   }, CASE_TIMEOUT_MS);
 
   it('still ignores dot entries UNDER the root, including its own bookkeeping', async () => {
+    const deadline = caseDeadline();
     repo = new FileSystemRepository({ root, org: 'system' }); // watcher ENABLED
     await repo.start();
     await repo.put(ref('seed'), { label: 'seed' }, { parentVersion: null, actor: 'tester' });
@@ -178,7 +238,7 @@ describe('FileSystemRepository watcher — dot-rooted watch root (#7150)', () =>
       path.join(root, 'view', 'seed.json'),
       JSON.stringify({ label: 'really edited' }, null, 2),
     );
-    await Promise.race([sink.first, sleep(EVENT_WAIT_MS)]);
+    await waitForEvent(sink, deadline);
     await sink.stop();
 
     expect(sink.events).toHaveLength(1);
