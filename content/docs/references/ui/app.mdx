@@ -256,6 +256,7 @@ This schema accepts one of the following structures:
 | **recordId** | `string` | optional | Navigate directly to this record id instead of the list view. Supports template vars: `{current_user_id}`, `{current_org_id}`. |
 | **recordMode** | `Enum<'view' \| 'edit'>` | optional | Open the record in view (default) or edit mode. Only meaningful when `recordId` is set. |
 | **filters** | `Record<string, string>` | optional | URL filter conditions — targets the /:objectName/data bare surface via filter[`<field>`]=`<value>` params instead of a saved view. Values support template vars `{current_user_id}`, `{current_org_id}`. Mutually exclusive with recordId/viewName. |
+| **runAction** | `string` | optional | Auto-run this declared action once on arrival at the object's list surface (deep-link "navigate = run action", #4848). Must name an action defined in the stack; validated by defineStack and lint. Not combinable with recordId. |
 | **children** | `[NavigationItem](#navigationitem)[]` | optional | Child navigation items (e.g. specific views) |
 
 ---
@@ -464,6 +465,7 @@ This schema accepts one of the following structures:
 | **recordId** | `string` | optional | Navigate directly to this record id instead of the list view. Supports template vars: `{current_user_id}`, `{current_org_id}`. |
 | **recordMode** | `Enum<'view' \| 'edit'>` | optional | Open the record in view (default) or edit mode. Only meaningful when `recordId` is set. |
 | **filters** | `Record<string, string>` | optional | URL filter conditions — targets the /:objectName/data bare surface via filter[`<field>`]=`<value>` params instead of a saved view. Values support template vars `{current_user_id}`, `{current_org_id}`. Mutually exclusive with recordId/viewName. |
+| **runAction** | `string` | optional | Auto-run this declared action once on arrival at the object's list surface (deep-link "navigate = run action", #4848). Must name an action defined in the stack; validated by defineStack and lint. Not combinable with recordId. |
 
 
 ---

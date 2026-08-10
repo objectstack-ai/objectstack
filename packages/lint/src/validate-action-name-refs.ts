@@ -18,6 +18,8 @@
  *     so that tier had simply never been walked)
  *   - page components — `record:quick_actions` → `properties.actionNames[]`
  *   - app navigation — `{ type: 'action', actionDef: { actionName } }`
+ *   - app navigation deep-link auto-run — `{ type: 'object', runAction }`
+ *     (#4848 — the declared form of the `?runAction=<name>` URL contract)
  *
  * The HotCRM audit shipped `bulkActions: ['mass_update', 'mass_delete',
  * 'assign_owner']` with none of the three defined anywhere: the toolbar renders
@@ -314,6 +316,20 @@ export function validateActionNameRefs(stack: AnyRec): ActionNameRefFinding[] {
             `app "${appName}" · nav "${strName(nav.id) ?? `#${ni}`}"`,
             `${navPath}.actionDef.actionName`,
             'Navigation action item',
+          );
+        }
+        // `object` nav deep-link auto-run (#4848): `runAction` is the declared
+        // form of the `?runAction=<name>` URL contract — an action name bound
+        // by reference, dead in the same way as every other surface here when
+        // it resolves to nothing (the entry navigates, the auto-run silently
+        // never fires).
+        const runAction = strName(nav.runAction);
+        if (nav.type === 'object' && runAction) {
+          check(
+            runAction,
+            `app "${appName}" · nav "${strName(nav.id) ?? `#${ni}`}"`,
+            `${navPath}.runAction`,
+            'Navigation deep-link auto-run',
           );
         }
         if (Array.isArray(nav.children)) walkNav(nav.children, `${navPath}.children`);
