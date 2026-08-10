@@ -283,10 +283,40 @@ workflow uses the secret when present and the Actions identity otherwise, so
 configuring either one is enough and neither needs a workflow edit. Until one is
 configured the push step fails with that message and **nothing is published**.
 
-**The runtime image is not built here.** `release.yml`'s `release-integrity` lane
-runs on every push to `main` and requests the image once the version is on npm, so it
-follows within the next merge or two. For one immediately, dispatch `docker-publish.yml`
-with the version.
+**What happens to the standing Version Packages PR.** After a cut, the standing
+`chore: version packages (rc)` PR ([#6208](https://github.com/objectstack-ai/objectstack/pull/6208),
+branch `changeset-release/main`) comes to rest in one of two states, and *which* one
+depends on the push credential above — so it is written down here rather than
+rediscovered at 2am:
+
+- **Route (a), the Actions identity.** GitHub does not create workflow runs from
+  events triggered by the automatic `GITHUB_TOKEN` — the documented recursion guard,
+  whose only exceptions are `workflow_dispatch` and `repository_dispatch`. So the
+  version-commit push does **not** fire `release.yml`'s `push` lane, `version-pr`
+  never runs, and #6208 keeps showing a stale, already-consumed version bump until
+  some later unrelated push to `main` refreshes it. This repo already depends on that
+  guard elsewhere and says so: see `docker-publish.yml`'s header, which explains that
+  a `push: tags:` trigger "would never fire" because the release workflow pushes its
+  tags with `GITHUB_TOKEN`.
+- **Route (b), a PAT in `RELEASE_PUSH_TOKEN`.** A PAT is not the `GITHUB_TOKEN`, so
+  the push triggers normally, `version-pr` runs, and #6208 regenerates (or closes)
+  by itself.
+
+**A stale #6208 after an rc cut is EXPECTED AND HARMLESS — do not "fix" it by hand.**
+Its changesets were consumed by the cut and are recorded in `.changeset/pre.json`; the
+PR is bookkeeping, it carries no publish capability by construction (`release.yml`
+passes the changesets action no `publish:` script), and it regenerates correctly at
+the next push to `main` or the next GA cut. Editing or force-refreshing it manually
+only risks putting a version commit somewhere the publish lane can reach.
+
+**The runtime image is not built here.** `release.yml`'s `release-integrity` lane runs
+on every push to `main` and requests the image once the version is on npm, so it
+follows within the next merge or two. Note that this is a *later* push under **both**
+routes, not the cut's own: on route (a) the cut's push triggers nothing at all, and on
+route (b) it does trigger, but `release-integrity` runs its audit long before the
+publish step further down the cut has put the version on npm — so it reports "release
+pending a human" and exits green either way. For an image immediately, dispatch
+`docker-publish.yml` with the version.
 
 ### Cutting a GA release — the Version Packages PR flow
 
