@@ -2083,6 +2083,12 @@ to `mode:subagent`).
 可能缺席),定时器仍要挂,但频率可放宽,且每轮先核订阅已覆盖哪些面、只补
 盲区(会话停摆、未开 PR 的分支、姊妹仓动静)。
 
+**云卡归档(维护者 2026-08-10)**:PR 已 MERGED/关闭 **且**报告已收复核 ⇒
+`archive_session`;巡检顺手批扫 `list_sessions` 的 review_ready 存量。
+⛔ PR 合并前不归档 —— 活会话是 dirty 自救的执行手(#7265/#7325 实测:PM 一条
+PR 评论唤醒完工会话 merge+regen+重推);误归档可 `unarchive_session`,但容器
+现场已失,宁晚勿早。
+
 #### 座位 Routine 化(PM 侧的运行形态,#5472 第 5 点)
 
 上面两个 backend 决定**开发 agent** 跑在哪;这一段决定**PM 座位自己**怎么被
