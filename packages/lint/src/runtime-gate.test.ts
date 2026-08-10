@@ -14,6 +14,9 @@ import {
   runtimeGatedTypes,
   stackKeyForType,
 } from './runtime-gate.js';
+import type { AuthoringFinding } from './authoring-rules.js';
+import { validateVisibilityPredicates } from './validate-visibility-predicates.js';
+import { validatePredicatePathRefs } from './validate-predicate-path-refs.js';
 
 /** The issue's measured example: an approval flow whose expression approver is broken CEL. */
 const brokenApprovalFlow = {
@@ -204,5 +207,209 @@ describe('runtime publish gate (#4463)', () => {
     expect(() =>
       runRuntimeAuthoringRules({ type: 'flow', item: cyclic, context: { objects } }),
     ).not.toThrow();
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// #7220 — the `views[]` visibility-predicate FAMILY at the runtime door
+// ────────────────────────────────────────────────────────────────────────────
+//
+// The registry move is a two-word edit per entry, and a two-word edit that
+// nobody drives is indistinguishable from a declaration nobody reads (#4449,
+// and the reason `runtime-gate.test.ts` exists next to the wiring guard at all).
+// These tests drive the REAL dispatch path — `runRuntimeAuthoringRules`, the
+// same function `packages/metadata-protocol/src/runtime-authoring-gate.ts`
+// calls — with `view` bodies a Studio / REST `/meta` / MCP author could save,
+// and assert the door now answers.
+//
+// The card this closes is specifically about the FAMILY, so the last test here
+// is the one that matters most: it pins that no input exists on which one member
+// fires and another does not. That asymmetry — a `view` refused for an
+// unresolvable predicate PATH while a predicate that does not parse at all walks
+// through — is exactly what #7214's implementer built, measured and reverted.
+
+/** A plain runtime view: `record` / `current_user` are the bound roots. */
+const runtimeView = (visibleWhen: string) => ({
+  name: 'account_form',
+  label: 'Account',
+  object: 'account',
+  form: { sections: [{ label: 'Main', fields: [{ field: 'name', visibleWhen }] }] },
+});
+
+/**
+ * A schema-bound metadata FORM published as a view — `data` is the bound root.
+ * `validatePredicatePathRefs` judges only this shape (`#7010`: the `record.*`
+ * layer's addressable path set is not closed), so the family's path half needs
+ * it to be non-vacuous.
+ */
+const schemaBoundForm = (visibleWhen: string) => ({
+  name: 'field_editor',
+  label: 'Field editor',
+  form: {
+    data: { provider: 'schema', schemaId: 'field' },
+    sections: [{ label: 'Main', fields: [{ field: 'name', visibleWhen }] }],
+  },
+});
+
+/** A predicate that is flawless CEL and overruns `DEFAULT_LIMITS.maxAstNodes`. */
+const overBudget = Array.from({ length: 120 }, (_, i) => `record.name == 'n${i}'`).join(' || ');
+
+const gateView = (item: unknown) =>
+  runRuntimeAuthoringRules({ type: 'view', item, context: { objects: [] } });
+
+describe('the views[] visibility-predicate family at the runtime publish gate (#7220)', () => {
+  it('dispatches `view` writes to both family rules, from the shared table', () => {
+    expect(runtimeGatedTypes()).toContain('view');
+    expect(stackKeyForType('view')).toBe('views');
+    expect(runtimeAuthoringRulesFor('view').map((r) => r.name)).toEqual([
+      'validateVisibilityPredicates',
+      'validatePredicatePathRefs',
+    ]);
+  });
+
+  // ── fires: the four defects the card names, at the door they bypassed ──
+
+  it('REFUSES a predicate that does not parse as CEL', () => {
+    const { errors } = gateView(runtimeView("record.status === 'open'"));
+    const f = errors.find((e) => e.rule === 'visibility-predicate-syntax');
+    expect(
+      f,
+      `\`===\` is not CEL. Before #7220 this exact body saved clean through Studio and then failed `
+        + `OPEN in the console — the element renders unconditionally (#5149).`,
+    ).toBeDefined();
+    // The 422 envelope's four keys: the caller turns `errors` into
+    // `err.issues` verbatim, so a finding without them is a refusal an author
+    // cannot act on.
+    expect(f!.severity).toBe('error');
+    expect(f!.path).toBe('views[0].form.sections[0].fields[0]');
+    expect(f!.where.length).toBeGreaterThan(0);
+    expect(f!.message).toMatch(/not valid CEL/);
+    expect(f!.hint).toMatch(/==/);
+  });
+
+  it('REFUSES a bare identifier no binding root resolves', () => {
+    const { errors } = gateView(runtimeView("status == 'open'"));
+    const f = errors.find((e) => e.rule === 'visibility-bare-identifier');
+    expect(f, '`status` instead of `record.status` resolves nowhere on any layer').toBeDefined();
+    expect(f!.severity).toBe('error');
+    expect(f!.path).toBe('views[0].form.sections[0].fields[0]');
+    expect(f!.hint).toMatch(/record\.status/);
+  });
+
+  it('REFUSES a predicate that overruns the CEL parse budget', () => {
+    const { errors } = gateView(runtimeView(overBudget));
+    const f = errors.find((e) => e.rule === 'visibility-predicate-over-budget');
+    expect(f, 'same refusal as a syntax fault, different edit (#7217)').toBeDefined();
+    expect(f!.severity).toBe('error');
+  });
+
+  it('REFUSES a predicate path the target schema does not declare', () => {
+    const { errors } = gateView(schemaBoundForm("data.tpye == 'text'"));
+    const f = errors.find((e) => e.rule === 'predicate-path-unresolved');
+    expect(
+      f,
+      'this is the rule whose SOLO wiring #7214 reverted — it is here because its siblings are',
+    ).toBeDefined();
+    expect(f!.severity).toBe('error');
+    expect(f!.path).toBe('views[0].form.sections[0].fields[0].visibleWhen');
+    expect(f!.message).toMatch(/data\.tpye/);
+  });
+
+  it('REFUSES a schema key written without its binding root', () => {
+    const { errors } = gateView(schemaBoundForm("type == 'text'"));
+    expect(errors.map((e) => e.rule)).toContain('predicate-path-unrooted');
+  });
+
+  it('reports a MISLAYERED root through the advisory channel, not a refusal', () => {
+    // The one family member that is `warning` on every surface, so it must not
+    // 422 — and must not be silent either. #4717's `advisories` channel (the
+    // ruling's sequencing precondition) is what makes the second half true: it
+    // rides back on the 2xx `saveMetaItem` response, so the Studio / MCP author
+    // this gate exists for can actually read it. That channel landing is why
+    // this move was allowed to happen at all rather than running rules and
+    // discarding their verdicts (#4463's own shape, one notch quieter).
+    const result = gateView(runtimeView("data.status == 'open'"));
+    expect(result.errors).toEqual([]);
+    const f = result.advisories.find((a) => a.rule === 'visibility-root-mislayered');
+    expect(f, 'a wrong-layer paste must still reach the author').toBeDefined();
+    expect(f!.severity).toBe('warning');
+  });
+
+  // ── stays quiet ───────────────────────────────────────────────────────
+
+  it('a valid view still publishes, with the rules having RUN', () => {
+    const result = gateView(runtimeView("record.status == 'open'"));
+    expect(result.errors, JSON.stringify(result.errors)).toEqual([]);
+    expect(result.advisories, JSON.stringify(result.advisories)).toEqual([]);
+    // "clean" and "nothing ran" must stay distinguishable.
+    expect(result.rulesRun).toEqual([
+      'validateVisibilityPredicates',
+      'validatePredicatePathRefs',
+    ]);
+  });
+
+  it('does not blame a `view` write for a pre-existing violation elsewhere', () => {
+    // The D4 subtraction, on the newly gated type: a stored object carrying a
+    // broken predicate is not this write's to answer for.
+    const result = runRuntimeAuthoringRules({
+      type: 'view',
+      item: runtimeView("record.status == 'open'"),
+      context: {
+        objects: [
+          { name: 'account', fields: { name: { type: 'text', visibleWhen: 'broken ===' } } },
+        ],
+      },
+    });
+    expect(result.errors).toEqual([]);
+  });
+
+  // ── the family property the ruling is about ───────────────────────────
+
+  it('the runtime door and `os build` reach the SAME verdict on every family input', () => {
+    // The asymmetry #7220 exists to prevent, pinned as a property rather than a
+    // count: for every input below, the finding set at the runtime gate is
+    // IDENTICAL — id, severity and path — to the finding set the two rule
+    // functions produce on the CLI. So there is no input on which one member of
+    // the family fires at the door and another does not, and no input on which
+    // the door and `os build` disagree about the same predicate.
+    //
+    // Asserted by set equality, not by "both are non-empty": a half-wired wall
+    // is precisely the state where both sides are non-empty and disagree.
+    const corpus = [
+      runtimeView("record.status === 'open'"), // syntax
+      runtimeView("status == 'open'"), // bare identifier
+      runtimeView("data.status == 'open'"), // mislayered root
+      runtimeView(overBudget), // over budget
+      runtimeView("record.status == 'open'"), // clean
+      schemaBoundForm("data.tpye == 'text'"), // unresolvable path
+      schemaBoundForm("type == 'text'"), // unrooted schema key
+      schemaBoundForm("data.type == 'text'"), // resolvable path
+    ];
+
+    const fingerprints = (fs: readonly AuthoringFinding[]) =>
+      fs.map((f) => `${f.severity}:${f.rule}@${f.path}`).sort();
+
+    let sawError = false;
+    let sawAdvisory = false;
+
+    for (const item of corpus) {
+      const gate = gateView(item);
+      sawError ||= gate.errors.length > 0;
+      sawAdvisory ||= gate.advisories.length > 0;
+
+      const stack = { views: [item] };
+      const cli = [...validateVisibilityPredicates(stack), ...validatePredicatePathRefs(stack)];
+
+      expect(
+        fingerprints([...gate.errors, ...gate.advisories]),
+        `the runtime gate and os build disagree about ${JSON.stringify(item)} — one family member `
+          + `is enforced at a door the others are not, which is the partial-enforcement surface `
+          + `#7220 was filed to prevent`,
+      ).toEqual(fingerprints(cli));
+    }
+
+    // Non-vacuous: the corpus really does exercise both halves of the verdict.
+    expect(sawError, 'the corpus must contain a refusal').toBe(true);
+    expect(sawAdvisory, 'the corpus must contain an advisory').toBe(true);
   });
 });

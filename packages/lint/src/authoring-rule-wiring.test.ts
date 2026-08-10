@@ -448,6 +448,55 @@ describe('authoring-rule registry wiring (#4409)', () => {
       // A type nobody gated returns nothing rather than everything.
       expect(runtimeAuthoringRulesFor('translation')).toEqual([]);
     });
+
+    // ── #7220: a rule FAMILY crosses this wall together, or not at all ──
+    //
+    // The guard above makes each rule answer the surface question. It cannot
+    // catch the failure #7220 names, because every individual answer is
+    // well-formed: a family whose members split across the wall passes every
+    // assertion in this file and still ships a door where one verdict about a
+    // predicate is enforced and its siblings are not. #7214's implementer built
+    // exactly that state, measured it, and reverted it.
+    //
+    // So the family is pinned by NAME here. This is deliberately a stronger
+    // ratchet than a `surfaceReason` string: a reason is prose that goes stale
+    // silently, while this fails the moment someone moves one of the two entries
+    // and not the other — in either direction.
+    it('the `views[]` visibility-predicate family sits on ONE side of the wall', () => {
+      const FAMILY = ['validateVisibilityPredicates', 'validatePredicatePathRefs'];
+
+      const entries = FAMILY.map((name) => {
+        const entry = AUTHORING_RULES.find((r) => r.name === name);
+        expect(entry, `${name} left AUTHORING_RULES — re-point this pin or retire it`).toBeDefined();
+        return entry!;
+      });
+
+      const wired = entries.filter((e) => e.surfaces.includes('runtime-publish'));
+      expect(
+        wired.length === 0 || wired.length === entries.length,
+        `the views[] visibility-predicate family is SPLIT across the runtime publish gate: `
+          + `${wired.map((e) => e.name).join(', ') || '(none)'} run at the door and `
+          + `${entries.filter((e) => !e.surfaces.includes('runtime-publish')).map((e) => e.name).join(', ')} `
+          + `do not. All of these rules judge the SAME predicate on the SAME surface, so an author `
+          + `whose view is refused for one defect and waved through for a sibling defect cannot `
+          + `predict the door. Move them together (#7220's ruling) or not at all.`,
+      ).toBe(true);
+
+      // Same discipline on the type axis: two family rules gating different
+      // metadata types is the same split wearing a different hat.
+      const typeSets = new Set(entries.map((e) => [...(e.runtimeTypes ?? [])].sort().join(',')));
+      expect(
+        typeSets.size,
+        `the family's members declare different runtimeTypes (${[...typeSets].join(' vs ')}) — `
+          + `a view write would reach some of them and not others`,
+      ).toBe(1);
+
+      // Non-vacuous, and the record of where #7220 left this: both are wired,
+      // for `view`. Flipping the family back to CLI-only is a legal edit that
+      // must go through this line rather than around it.
+      expect(wired.map((e) => e.name)).toEqual(FAMILY);
+      expect(runtimeAuthoringRulesFor('view').map((r) => r.name)).toEqual(FAMILY);
+    });
   });
 
   it('every rule declares a source file that exists', () => {

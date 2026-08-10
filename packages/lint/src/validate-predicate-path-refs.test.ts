@@ -267,11 +267,15 @@ describe('registry wiring', () => {
     expect(entry, '#7010 rule missing from AUTHORING_RULES').toBeDefined();
     expect(entry!.tier).toBe('gating');
     expect([...entry!.commands].sort()).toEqual(['build', 'lint', 'validate']);
-    // CLI-only, with a reason that is a DECISION rather than a limitation: see
-    // `RUNTIME_VISIBILITY_FAMILY_IS_CLI_ONLY`. The whole `views[]` visibility
-    // family sits on this side of the wall, and it should move together.
-    expect([...entry!.surfaces]).toEqual(['cli']);
-    expect(entry!.surfaceReason).toBeTruthy();
+    // #7220 — the family moved to the runtime publish gate TOGETHER, so this
+    // rule is no longer CLI-only and carries no `surfaceReason`. It is wired
+    // here because its siblings are: the solo wiring this rule's own PR
+    // implemented was reverted, and `authoring-rule-wiring.test.ts` now pins the
+    // family property (all of the surface's ids, or none) rather than trusting a
+    // prose reason to keep the halves in step.
+    expect([...entry!.surfaces]).toEqual(['cli', 'runtime-publish']);
+    expect([...entry!.runtimeTypes!]).toEqual(['view']);
+    expect(entry!.surfaceReason).toBeUndefined();
   });
 });
 

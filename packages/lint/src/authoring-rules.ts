@@ -351,32 +351,6 @@ const RUNTIME_HEAVY_SOURCE_PARSE =
  * wrong 422 there is the whole product, so P1 does not gate them — the issue's
  * own worked example, and every acceptance criterion on it, is a flow.
  */
-/**
- * The rule judges a `views[]` conditional-visibility predicate — and every OTHER
- * rule on that surface (the three ADR-0089 D3b rules in
- * `validate-visibility-predicates.ts`) is CLI-only.
- *
- * This reason is deliberately NOT one of the three above: none of them is true
- * here. `validatePredicatePathRefs` needs nothing but the written item — its
- * oracle is the static `getMetadataTypeSchema` registry, not the tenant's other
- * metadata — so the per-write snapshot IS enough, `stackKeyForType('view')`
- * already exists, and wiring it would work today.
- *
- * It is not wired because a HALF-wired wall is worse than an unwired one. A
- * Studio `view` write would then be refused for an unresolvable predicate PATH
- * while a predicate that does not parse at all (`visibility-predicate-syntax`)
- * and one with no root at all (`visibility-bare-identifier`) walked straight
- * through the same door — three sibling verdicts about one predicate, one of
- * them enforced, and no author able to predict which. The surface should move to
- * `runtime-publish` as a FAMILY, in one measured edit, which is a decision about
- * `views` writes rather than a rider on #7010's corpus-counted gate.
- */
-const RUNTIME_VISIBILITY_FAMILY_IS_CLI_ONLY =
-  'Deliberate, and not a snapshot limitation: this rule needs only the written item, but every other '
-  + 'rule on the `views[]` visibility-predicate surface (validate-visibility-predicates.ts) is CLI-only. '
-  + 'Gating one of three sibling verdicts about the same predicate at the Studio door is less '
-  + 'predictable than gating none; move the family together, as one measured edit.';
-
 const RUNTIME_OBJECT_WRITES_P2 =
   'P2 (#4463): judges an object/field declaration. Object writes are the hottest metadata path in ' +
   'the product, so P1 gates `flow` first and widens once the gate has real traffic behind it.';
@@ -841,14 +815,45 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   // what decides whether any given diagnostic gates, exactly as `lintFlowPatterns`
   // has worked since #3760. The promotion follows the #5762 precedent: a family
   // that gains an `error` finding moves its registry tier in the same edit.
+  //
+  // ─── The `views[]` visibility-predicate FAMILY at the runtime door (#7220) ───
+  //
+  // This entry and `validatePredicatePathRefs` below moved to `runtime-publish`
+  // in ONE edit, on the maintainer's 2026-08-10 ruling, sequenced after #4717's
+  // `advisories` channel landed (PR #7435). Before that move a `view` written
+  // through Studio / REST `/meta` / MCP — the only door most tenants have, and
+  // the door AI authors use — was judged by NONE of the family's six rule ids.
+  //
+  // They move together on purpose, and the two entries carry one comment because
+  // they are one wall: #7214's implementer wired its own rule here alone and then
+  // REVERTED it, because a `view` refused for an unresolvable predicate PATH
+  // while a predicate that does not parse at all walks through the same door is
+  // less predictable than refusing neither. A half-wired wall is worse than an
+  // unwired one, so `authoring-rule-wiring.test.ts` now pins the family property
+  // directly: every id on this surface is gated at the runtime door, or none is.
+  //
+  // The previous `surfaceReason` on THIS entry was `RUNTIME_NEEDS_FULL_SNAPSHOT`,
+  // and re-measuring it at move time found it false: both rule functions read
+  // `stack.views` and `stack.pages` and NO other collection — never `objects` —
+  // so the per-write snapshot the gate builds is not partial for them, it is
+  // complete. (`pages` is simply absent on a `view` write, so the page half
+  // contributes zero findings to both differential passes rather than inventing
+  // any.) The reason was not describing this rule; it was the default a rule got
+  // when nobody measured, which is the #4409/#4463 defect one layer in.
+  //
+  // Runtime input tier: the gate hands the rules the body as persisted, without
+  // `normalizeStackInput`, so the ADR-0087 D2 alias fold does NOT run at this
+  // door. That costs the family nothing — `validateVisibilityPredicates` reads
+  // `visibleWhen ?? visibleOn ?? visibility` itself, canonical-first, precisely
+  // so a caller handing it a raw authored object still gets a verdict.
   {
     name: 'validateVisibilityPredicates',
     tier: 'gating',
     input: 'normalized',
     commands: ALL,
     source: 'packages/lint/src/validate-visibility-predicates.ts',
-    surfaces: CLI_ONLY,
-    surfaceReason: RUNTIME_NEEDS_FULL_SNAPSHOT,
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['view'],
     run: (stack) => validateVisibilityPredicates(stack),
   },
   // #7010 — the same predicate surface, one question further in. The three
@@ -871,8 +876,11 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     input: 'normalized',
     commands: ALL,
     source: 'packages/lint/src/validate-predicate-path-refs.ts',
-    surfaces: CLI_ONLY,
-    surfaceReason: RUNTIME_VISIBILITY_FAMILY_IS_CLI_ONLY,
+    // The second half of the #7220 family move — see the block above the
+    // `validateVisibilityPredicates` entry. This is the rule whose solo wiring
+    // was reverted; it is wired now because its siblings are.
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['view'],
     run: (stack) => validatePredicatePathRefs(stack),
   },
   // #1874 — flow authoring anti-patterns. Advisory by default; a finding marked
