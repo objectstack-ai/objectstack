@@ -215,43 +215,32 @@ export default class PackageInstall extends Command {
       printKV('  Runtime',   runtime);
       if (data.installedAt) printKV('  Installed', String(data.installedAt));
       console.log('');
-      // ⚠️ This path is a DESCRIPTION OF THE DEFAULT CONVENTION, deliberately
-      // left as a literal — not a consumer restating a value it could have read
-      // (#6643, the sibling half of #5996). Do not "fix" it into a reference to
-      // `DEFAULT_INSTALLED_PACKAGES_DIR`. Four measured reasons, in order:
+      // #6721: the cache directory is quoted from the RESPONSE, never from a
+      // literal or a locally-resolved constant. The directory lives on the
+      // REMOTE host — everything above this line came back over HTTP from
+      // `runtime`, and this command never touches the target's disk — so the
+      // only truthful source is the host itself. #6643 documented at length why
+      // no consumer-side answer works (a local constant describes the machine
+      // typing the command; it is only the *default*, wrong the moment a host
+      // configures `storageDir`; a static import of
+      // `@objectstack/cloud-connection` would make a pure-HTTP command fail at
+      // module load). The fix was upstream, and it landed: the POST response now
+      // carries `storageDir: this.storageDir` — the same resolved value
+      // (`ledger.dir`) its GET listing sibling already served.
       //
-      //   1. **The directory is on the REMOTE host.** Everything above this
-      //      line came back over HTTP from `runtime`; this command never
-      //      touches the target's disk. A constant resolved HERE describes the
-      //      machine typing the command, not the one that stored the manifest.
-      //   2. **The remote's directory is configurable, so the constant is only
-      //      its default.** `MarketplaceInstallLocalPlugin` builds its ledger as
-      //      `new LocalManifestSource(config.storageDir)` — the export is the
-      //      fallback that ctor applies when the host configured nothing.
-      //      Interpolating it would state a default as an observed fact.
-      //   3. **The response we just read does not carry the real answer.** The
-      //      POST returns `{ manifestId, version, versionId, installedAt,
-      //      hotLoaded, upgradedFrom, translationsLoaded, seeded, note }` — no
-      //      `storageDir`. The GET listing endpoint does carry one; this one
-      //      does not, and asking for it would be an extra round-trip (and a
-      //      new failure mode) bolted onto a success hint.
-      //   4. **Importing it would cost this command its independence.** Every
-      //      CLI reference to `@objectstack/cloud-connection` is a DYNAMIC load
-      //      behind `loadOptionalPackage()` (doctor.ts) or a guarded `import()`
-      //      (serve.ts), because the CLI must keep working where that package
-      //      is absent or unbuilt. A static import for one hint line would make
-      //      a pure-HTTP command fail at module load; a dynamic one needs a
-      //      literal fallback — the exact `??` Prime Directive #12 forbids and
-      //      #5996 deleted.
-      //
-      // So the divergence surface is accepted here, knowingly: if the constant
-      // ever changes value, this sentence goes stale and no gate will say so.
-      // The honest fix is upstream — the POST response carrying `storageDir`
-      // like its GET sibling — which would let this line quote the real remote
-      // directory. Tracked separately; `@objectstack/cloud-connection` is out
-      // of scope for #6643.
-      console.log('  The manifest is cached under .objectstack/installed-packages/ on the');
-      console.log('  runtime host and re-registers on every boot (survives restarts).');
+      // ⛔ No fallback. When the field is missing — an older host that predates
+      // the producer half — this block prints NOTHING. A `??
+      // '.objectstack/installed-packages/'` would re-introduce exactly the
+      // defect Prime Directive #12 forbids and #5996 deleted: a consumer
+      // inventing a value the producer declined to state. Saying less is
+      // correct; guessing is not. An empty or non-string value is the same
+      // "host did not state it" case, not a reason to print a blank path.
+      const storageDir = typeof data.storageDir === 'string' ? data.storageDir.trim() : '';
+      if (storageDir) {
+        console.log('  The manifest is cached on the runtime host and re-registers on every');
+        console.log('  boot (survives restarts):');
+        console.log(`    ${storageDir}`);
+      }
     } catch (error) {
       printError((error as Error).message);
       this.exit(1);

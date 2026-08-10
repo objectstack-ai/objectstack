@@ -1020,6 +1020,12 @@ os test --url http://localhost:4000    # Custom server URL
 os test --token my-api-key            # With authentication
 ```
 
+Each file is validated against `TestSuiteSchema` **before it runs**. A suite that
+does not match is refused at load time, naming the file and every offending path,
+and counts as one failed suite — the rest of the glob still runs. This is what
+stops a malformed suite from reporting success: a misspelled `steps` key used to
+produce a scenario that passed having executed nothing.
+
 #### `os doctor`
 
 Checks your development environment and reports issues:

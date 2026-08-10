@@ -1380,10 +1380,18 @@ const ObjectSchemaBase = strictObject(
    *
    *   - `user` (default) — per-record owner: injects the reassignable `owner_id`
    *     lookup, engaging owner-scoped RLS, "My" views, owner reports and
-   *     first-admin bootstrap.
-   *   - `org` / `none` — no per-record owner (Dataverse-style catalog / junction
-   *     tables); `owner_id` is NOT injected. (Platform-managed tables — `managedBy`
-   *     set, or the `sys_` namespace — skip owner injection regardless.)
+   *     first-admin bootstrap. Also carries `owning_business_unit_id`.
+   *   - `business_unit` — owned by an org UNIT, not by a person (inventory,
+   *     equipment ledgers, departmental budgets): `owner_id` is NOT injected,
+   *     `owning_business_unit_id` IS. [ADR-0117 D1]
+   *   - `org` / `none` — no per-record owner of EITHER kind (Dataverse-style
+   *     catalog / junction tables); neither anchor is injected. (Platform-managed
+   *     tables — `managedBy` set, or the `sys_` namespace — skip ownership
+   *     injection regardless.)
+   *
+   * The per-tier authority is `resolveInjectedSystemColumns`
+   * (`@objectstack/spec/data`) — its table, not this prose, is what
+   * `applySystemFields` and author-time lint both read.
    *
    * NOTE: this is the RECORD-ownership model, DISTINCT from the package
    * *contribution* kind (`own` | `extend` | `overlay`,
@@ -1391,12 +1399,12 @@ const ObjectSchemaBase = strictObject(
    * record and is set via `registerObject` — do not conflate the two despite
    * the shared word.
    */
-  ownership: z.enum(['user', 'org', 'none'], {
+  ownership: z.enum(['user', 'business_unit', 'org', 'none'], {
     error:
-      "`ownership` is the record-ownership model — one of 'user' (default) | 'org' | 'none'. " +
+      "`ownership` is the record-ownership model — one of 'user' (default) | 'business_unit' | 'org' | 'none'. " +
       "The package-contribution kind 'own'/'extend' is set via registerObject, not on the object schema.",
   }).optional().describe(
-    "Record-ownership model: user (default — injects reassignable owner_id) | org | none (no per-record owner, skips owner_id). Distinct from the package own/extend contribution kind.",
+    "Record-ownership model: user (default — injects reassignable owner_id plus owning_business_unit_id) | business_unit (unit-owned: owning_business_unit_id only, no owner_id) | org | none (no per-record owner, neither anchor). Distinct from the package own/extend contribution kind.",
   ),
 
   /**
@@ -1489,24 +1497,21 @@ const ObjectSchemaBase = strictObject(
    *   - `owner_id` — `lookup → sys_user`, auto-provisioned on user-authored
    *     business objects (auto-stamped to the creating user on insert;
    *     reassignable). Governed by the object-level `ownership` property
-   *     (`'user' | 'org' | 'none'`), NOT by `owner` below.
+   *     (`'user' | 'business_unit' | 'org' | 'none'`), NOT by `owner` below.
+   *     Injected under `'user'` and when `ownership` is omitted; withheld under
+   *     `'business_unit' | 'org' | 'none'`.
    *   - `owning_business_unit_id` — `lookup → sys_business_unit`, the
    *     record-level ORG-UNIT ownership tier between `owner_id` (a person) and
    *     `organization_id` (the tenant wall). [ADR-0117 D1, landed in #5677]
-   *     Governed by the same `ownership` property, on the same objects
-   *     `owner_id` is: injected under `'user'` and when `ownership` is omitted,
-   *     withheld under `'org' | 'none'`. Shaped after `organization_id`
-   *     (`readonly` + `hidden` + `system`), not after `owner_id` — it is a
-   *     server-stamped scope anchor. Provisioned but **inert**: the stamping
-   *     middleware (ADR-0117 D2/D4) has not landed, so nothing writes a value
-   *     yet.
-   *
-   *     ⚠️ D1 also defines a fourth tier, `ownership: 'business_unit'` (owning
-   *     unit, no owning person), which `applySystemFields` already implements —
-   *     but the `ownership` enum below is still `'user' | 'org' | 'none'`, so
-   *     that value is still deliberately REJECTED by this schema (the enum
-   *     member is #5678). The column being injected does NOT mean the tier is
-   *     authorable.
+   *     Governed by the same `ownership` property, but over a WIDER set of
+   *     tiers than `owner_id`: injected under `'user'`, when `ownership` is
+   *     omitted, and under `'business_unit'` (the tier that carries this anchor
+   *     and deliberately no `owner_id`); withheld under `'org' | 'none'`.
+   *     Shaped after `organization_id` (`readonly` + `hidden` + `system`), not
+   *     after `owner_id` — it is a server-stamped scope anchor. Provisioned but
+   *     **inert**: the stamping middleware (ADR-0117 D2/D4) has not landed, so
+   *     nothing writes a value yet — including on `'business_unit'` objects,
+   *     where the declaration is authorable (#5678) while the stamp is not.
    *
    * The authority on which of these an object actually carries is
    * `resolveInjectedSystemColumns` (`@objectstack/spec/data`): `applySystemFields`
@@ -1550,7 +1555,10 @@ const ObjectSchemaBase = strictObject(
             "object-level `ownership` property: `'user'` (or omitted) injects it, while " +
             "`'org'` and `'none'` BOTH skip it and no `owner_id` is injected at all — " +
             "`'org'` for an org-wide catalog (Dataverse-style), `'none'` for a junction/link " +
-            'table. `systemFields` controls only `tenant` (organization_id) and `audit` ' +
+            "table. `'business_unit'` skips it too, for a different reason: that tier is " +
+            'owned by an org UNIT rather than a person, so it carries ' +
+            '`owning_business_unit_id` and deliberately no `owner_id` (ADR-0117 D1). ' +
+            '`systemFields` controls only `tenant` (organization_id) and `audit` ' +
             '(created_at/created_by/updated_at/updated_by).',
           ownership:
             '`ownership` is a TOP-LEVEL object key, not a `systemFields` key — write it ' +

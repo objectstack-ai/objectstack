@@ -98,13 +98,35 @@ export const ACCOUNT_APP: App = {
           requiresObject: 'sys_inbox_message',
         },
         {
+          // #7234 — the DESTINATION is the Approvals Inbox component, not the
+          // raw `sys_approval_request` grid. The engine-owned table has no
+          // decision actions for an end user: all eight are gated on
+          // `record.viewer.can_act || record.viewer.can_override`, and the
+          // `viewer` block is attached ONLY on the approvals REST path
+          // (`approval-service.ts`, `attachViewers()`), never on the generic
+          // data API. So the object route could only ever render a read-only
+          // list of rows an approver cannot act on. The inbox component calls
+          // the approvals REST path and therefore carries the decision
+          // actions, business vocabulary, node progress and drawer.
+          //
+          // The ref is the component-registry KEY, never a console path — that
+          // indirection is the whole contract (objectui#2763; the key is
+          // registered by objectui#4071).
           id: 'nav_account_approvals',
-          type: 'object',
+          type: 'component',
           label: 'Approvals',
-          objectName: 'sys_approval_request',
-          viewName: 'my_pending',
+          componentRef: 'approvals:inbox',
           icon: 'check-circle',
-          requiresObject: 'sys_approval_request',
+          // `requiresObject` cannot gate a component item — it names the
+          // object the entry ROUTES to, and this one routes to a component.
+          // The capability that must be present is the approvals SERVICE
+          // (`ctx.registerService('approvals', …)` in plugin-approvals), which
+          // is also what backs the REST path the inbox reads. Same shape as
+          // `nav_account_memberships` below, and enforced server-side by
+          // `filterAppForUser`/`filterNav` (ADR-0057 D10) — without it the
+          // entry would render a dead component route wherever
+          // plugin-approvals is not installed.
+          requiresService: 'approvals',
         },
         {
           id: 'nav_account_memberships',

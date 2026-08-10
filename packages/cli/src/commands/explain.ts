@@ -35,7 +35,7 @@ export const SCHEMAS: Record<string, SchemaInfo> = {
       { name: 'label', type: 'string', description: 'Human-readable display name' },
       { name: 'pluralLabel', type: 'string', description: 'Plural display name' },
       { name: 'description', type: 'string', description: 'Documentation for the object' },
-      { name: 'ownership', type: "'user' | 'org' | 'none'", description: 'Record-ownership model: user (default, injects a reassignable owner_id) | org | none (no per-record owner). Distinct from the package own/extend contribution kind.' },
+      { name: 'ownership', type: "'user' | 'business_unit' | 'org' | 'none'", description: 'Record-ownership model: user (default, injects a reassignable owner_id plus owning_business_unit_id) | business_unit (owned by an org unit, not a person: owning_business_unit_id only, no owner_id) | org | none (no per-record owner). Distinct from the package own/extend contribution kind.' },
       { name: 'enable', type: 'ObjectCapabilities', description: 'Feature flags (trackHistory, apiEnabled, etc.)' },
       { name: 'icon', type: 'string', description: 'Icon identifier for UI display' },
     ],

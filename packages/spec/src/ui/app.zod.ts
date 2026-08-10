@@ -421,6 +421,36 @@ export const ObjectNavItemSchema = lazySchema(() => strictObject(navItemSurface(
   filters: z.record(z.string(), z.string()).optional().describe(
     'URL filter conditions — targets the /:objectName/data bare surface via filter[<field>]=<value> params instead of a saved view. Values support template vars {current_user_id}, {current_org_id}. Mutually exclusive with recordId/viewName.',
   ),
+  /**
+   * Deep-link auto-run (#4848): after landing on the object's LIST surface,
+   * the shell runs this declared action once — the entry navigates AND opens
+   * the action (e.g. a create dialog) in one click, instead of dropping the
+   * user on the list to find the toolbar button themselves.
+   *
+   * This is the declared form of the `?runAction=<actionName>` URL contract
+   * that cloud#844 shipped as two private string halves (objectui's
+   * `CloudOnboardingNext.tsx` concatenating the query, its
+   * `EnvironmentListToolbar.tsx` consuming it by literal match) — an implicit
+   * cross-repo contract neither side's rename turned red. Declaring the
+   * reference here is what makes it validatable: `defineStack`'s
+   * cross-reference walk and `validate-action-name-refs` (lint) both reject a
+   * name that resolves to no defined action.
+   *
+   * The name resolves against the stack's declared actions (global
+   * `stack.actions` + any object's `actions`) — the same "defined ANYWHERE"
+   * scope every other name-bound action surface uses. It does NOT additionally
+   * assert the action is placed on this object's list toolbar; that is the
+   * consumer's dispatch concern (same deliberate scope note as
+   * `validate-action-name-refs`).
+   *
+   * List-surface semantics only, so it composes with `viewName`, `filters`,
+   * or the default view — but not with `recordId` (a record detail has no
+   * list toolbar to auto-run; rejected by `objectNavTargetExclusivity` so the
+   * dead combination is unrepresentable rather than silently ignored).
+   */
+  runAction: z.string().optional().describe(
+    'Auto-run this declared action once on arrival at the object\'s list surface (deep-link "navigate = run action", #4848). Must name an action defined in the stack; validated by defineStack and lint. Not combinable with recordId.',
+  ),
 }));
 
 /**
@@ -433,7 +463,7 @@ export const ObjectNavItemSchema = lazySchema(() => strictObject(navItemSurface(
  * ignored when recordId is set".
  */
 const objectNavTargetExclusivity = (
-  item: { filters?: unknown; recordId?: unknown; viewName?: unknown },
+  item: { filters?: unknown; recordId?: unknown; viewName?: unknown; runAction?: unknown },
   ctx: z.RefinementCtx,
 ): void => {
   if (item.filters && (item.recordId || item.viewName)) {
@@ -444,6 +474,21 @@ const objectNavTargetExclusivity = (
         '`filters` cannot be combined with `recordId` or `viewName` — pick ONE landing: '
         + 'recordId (record deep-link), filters (/data slice), or viewName (named view). '
         + 'Remove the extra field(s); runtime precedence would silently ignore them.',
+    });
+  }
+  // `runAction` is a LIST-surface contract (#4848): the consumer auto-runs the
+  // action from the list toolbar on arrival. A `recordId` entry lands on a
+  // record detail instead, so the declared auto-run would silently do nothing —
+  // the exact dead affordance the declared reference exists to make impossible.
+  if (item.runAction && item.recordId) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['runAction'],
+      message:
+        '`runAction` cannot be combined with `recordId` — the auto-run fires on the object\'s '
+        + 'LIST surface, and a recordId entry lands on a record detail instead, so the declared '
+        + 'action would never run. Remove `recordId` to keep the list deep-link, or remove '
+        + '`runAction` to keep the record deep-link.',
     });
   }
 };

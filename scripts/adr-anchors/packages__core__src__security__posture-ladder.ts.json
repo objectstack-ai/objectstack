@@ -1,0 +1,7 @@
+{
+  "file": "packages/core/src/security/posture-ladder.ts",
+  "adrs": [
+    "ADR-0095"
+  ],
+  "invariant": "Posture DERIVES from held capability grants, never from a better-auth role (D3) — re-reading the role here reopens the #2836 dual-track class. The ladder is monotonic: each rung's visible set contains the rung below's, one rung maps to exactly one injection rule, and EXTERNAL is deny-by-default (explicit shares only; OWD never widens it)."
+}

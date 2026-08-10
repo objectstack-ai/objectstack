@@ -1,0 +1,7 @@
+{
+  "file": "packages/lint/src/data-model-rules.ts",
+  "adrs": [
+    "ADR-0120"
+  ],
+  "invariant": "The uniqueness rules judge SPELLINGS only, never inferred tenancy or posture (authoring-time tenancy inference is impossible — `organization_id` is kernel-injected; the dead end is documented on #4698). `unique/unscoped-declared-index` (D5a) fires on bare declared `unique: true` — warning in 17.x, the protocol-18 gate rejects the spelling (#5082). `unique/double-declaration` (D5b) is the four-quadrant scope matrix: cross-scope = contradiction (the installation-wide side wins physically), same-scope = redundancy. Fix texts speak the `'organization'`/`'global'` vocabulary — never resurrect the hand-written `['organization_id', …]` advice (not NULL-safe, #5030). `unique/legacy-organization-composite` (D5c) is the S6 respelling NUDGE and stays ADVISORY forever: the legacy hand-written composite is valid indefinitely and forces ZERO drift, so this rule must never gain an auto-fix or an `error` severity — opting in is a physical tightening that goes through the D4 duplicate pre-flight."
+}

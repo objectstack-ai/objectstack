@@ -71,6 +71,9 @@ export const zhCN: TranslationData = {
         nav_api_keys: { label: 'API 密钥' },
         nav_connect_agent: { label: '连接智能体' },
 
+        // 审批中心 = the Approvals Inbox component (#7234) — the surface with
+        // decision actions. The three below are the engine's raw tables.
+        nav_approvals_inbox: { label: '审批中心' },
         nav_approval_requests: { label: '审批申请' },
         nav_approval_actions: { label: '审批历史' },
         // `审批委派` matches sys_approval_delegation's object label; `(外出)`

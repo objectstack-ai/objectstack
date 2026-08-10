@@ -1,0 +1,7 @@
+{
+  "file": "packages/plugins/plugin-security/src/delegated-admin-gate.ts",
+  "adrs": [
+    "ADR-0090"
+  ],
+  "invariant": "Administration is a scoped capability (D12). Writes to the RBAC link tables and `sys_member` are governed: subtree anchoring, assignable-set allowlist, strict containment."
+}

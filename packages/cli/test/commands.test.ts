@@ -73,14 +73,23 @@ describe('os explain — schema catalog accuracy', () => {
   // `ownership` field as the package-contribution kind (`"own" | "extend"`),
   // which is a DISTINCT concept (`ObjectOwnershipEnum`, set via registerObject).
   // The real `ObjectSchema.ownership` field is the record-ownership model —
-  // `z.enum(['user','org','none'])` — see packages/spec/src/data/object.zod.ts.
+  // `z.enum(['user','business_unit','org','none'])` — see
+  // packages/spec/src/data/object.zod.ts.
+  //
+  // The token set is asserted EXACTLY, and that exactness is the point: this
+  // catalog (`packages/cli/src/commands/explain.ts`) is hand-maintained and does
+  // NOT derive from the spec enum, so a spec-side enum change that stops here is
+  // invisible to any review that only reads `packages/spec`. #5678 (ADR-0117 D1's
+  // fourth tier, `'business_unit'`) is the case that proved it — without the
+  // co-update, `os explain object` keeps telling authors a legal tier does not
+  // exist. Widen this set only together with the enum it mirrors.
   it('documents object.ownership as the record-ownership model, not the own/extend contribution kind (#3244)', () => {
     const ownership = SCHEMAS.object.optional.find((f) => f.name === 'ownership');
     expect(ownership, 'object schema should document an `ownership` field').toBeDefined();
 
     // The type string must enumerate exactly the record-ownership enum values.
     const tokens = (ownership!.type.match(/'[^']+'|"[^"]+"/g) ?? []).map((t) => t.slice(1, -1));
-    expect(new Set(tokens)).toEqual(new Set(['user', 'org', 'none']));
+    expect(new Set(tokens)).toEqual(new Set(['user', 'business_unit', 'org', 'none']));
 
     // …and must never regress back to the contribution-kind values.
     expect(ownership!.type).not.toBe('"own" | "extend"');

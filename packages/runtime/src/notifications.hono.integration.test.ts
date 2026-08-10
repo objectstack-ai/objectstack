@@ -131,6 +131,39 @@ describe('in-app notifications over a real hono server (integration, #3362)', ()
     expect(res.status).toBe(401);
   });
 
+  it('[#6928] refuses `?limit=abc` on the wire with 400 VALIDATION_FAILED, and still serves a valid window', async () => {
+    // The defect, over a real socket. `Number('abc')` was `NaN`, `listInbox`'s
+    // clamp (`Math.min(Math.max(NaN ?? 50, 1), 200)`) passed it through — `??`
+    // does not catch NaN — and `data.find({ limit: NaN })` reached the driver,
+    // whose behaviour is its own business. The caller was never told.
+    //
+    // This lives at the wire and not only under the handler because the ADR-0112
+    // envelope is assembled by the dispatcher plugin's error exit, not by the
+    // domain: the handler throws the house `VALIDATION_FAILED` shape and only
+    // this path proves it lands as a 400 with the code in `error.code`. A
+    // throw-only assertion could not tell that apart from the driver's own
+    // rejection of NaN, which is exactly what used to happen on some drivers.
+    const refused = await authed('/api/v1/notifications?limit=abc');
+    expect(refused.status).toBe(400);
+    // Typed rather than `any`: the envelope's three load-bearing fields are the
+    // assertion, so naming them here keeps this case out of the package's
+    // TEST_DEBT ledger instead of adding to it.
+    const body = await refused.json() as {
+      error: { code: string; httpStatus: number; details: { fields: unknown[] } };
+    };
+    expect(body.error.code).toBe('VALIDATION_FAILED');
+    expect(body.error.httpStatus).toBe(400);
+    expect(body.error.details.fields).toEqual([
+      { field: 'limit', code: 'invalid_number', message: expect.stringContaining('`limit`') },
+    ]);
+
+    // The other half, and the one a refusal is cheap to break: a well-formed
+    // window is answered exactly as before.
+    const served = await authed('/api/v1/notifications?limit=5&read=false');
+    expect(served.status).toBe(200);
+    expect((await served.json() as { success: boolean }).success).toBe(true);
+  });
+
   it('lists, marks specific read, then marks all read — flipping receipts and clearing the unread count', async () => {
     // Deliver two unread notifications to the user through the real pipeline.
     await messaging.emit({ topic: 'deal.won', audience: [TEST_USER], payload: { title: 'Deal one', body: 'first' } });

@@ -1,0 +1,9 @@
+{
+  "file": "packages/objectql/src/hook-wrappers.ts",
+  "adrs": [
+    "ADR-0049",
+    "ADR-0058",
+    "ADR-0112"
+  ],
+  "invariant": "An unevaluable hook `condition` ABORTS the operation (ADR-0058's write-path addendum, #4775) — `onError` never sees it and cannot soften it back into a silent skip. The BULK-WRITE branch of that diagnosis is RETIRED (#5574, ADR-0058 Addendum II): a predicate (`multi: true`) write dispatches `before*` once per matched row now, exactly as `after*` has since #5038, so every dispatch carries a bound `previous` and a `previous`-reading condition evaluates as authored instead of rejecting the batch. With no batch-scoped dispatch left, `isPredicateBulkWrite` had no true case, and `HookConditionLimitation` (`bulk_write_previous_unbound`, `bulk_write_stored_state_unavailable`) plus the `predicateBulkWrite` flag had neither producer nor reachable consumer — removed under ADR-0049 enforce-or-remove, with the reasoning pinned in the file. Do not reintroduce them: the honest signal that a dispatch cannot bind `previous` is that no such dispatch exists. What survives unchanged is the plain diagnosis for the case that IS the author's (a condition naming a key the record does not carry), and the rule that its discriminators are never `error.code` — ADR-0112 makes `error.code` a closed wire vocabulary and the REST layer promotes a thrown error's `.code` onto the envelope, so naming one `code` would mint an unregistered wire code by side effect."
+}

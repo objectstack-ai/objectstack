@@ -91,6 +91,20 @@ export {
   type ResolveLocalizationInput,
 } from './resolve-authz-context.js';
 
+// #6216 (maintainer ruling 2026-08-08, Option A) — the SINGLE ExecutionContext
+// assembly shared by every transport entry point, with the anonymous face as
+// two NAMED entries (fail-closed default / explicit guest) instead of drift.
+export {
+  assembleExecutionContext,
+  assembleExecutionContextOrGuest,
+  ENTRY_EXECUTION_CONTEXT_FIELDS,
+  type EntryExecutionContextField,
+  type ExecutionContextEntryFields,
+  type ExecutionContextAssemblyInput,
+  type OAuthTokenProvenance,
+  type EntryLocalization,
+} from './assemble-execution-context.js';
+
 // ADR-0095 D2/D3 — the monotonic posture ladder: derivation from capability
 // grants + the rung→injection-rule mapping and its tested invariants.
 export {

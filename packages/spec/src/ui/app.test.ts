@@ -106,6 +106,20 @@ describe('ObjectNavItemSchema', () => {
     };
     expect(() => ObjectNavItemSchema.parse(navItem)).toThrow();
   });
+
+  // Deep-link auto-run (#4848) — the declared form of `?runAction=<name>`.
+  it('should accept runAction composed with the list-surface landings', () => {
+    const bare = {
+      id: 'nav_envs',
+      label: 'Environments',
+      type: 'object' as const,
+      objectName: 'sys_environment',
+      runAction: 'create_environment',
+    };
+    expect(() => ObjectNavItemSchema.parse(bare)).not.toThrow();
+    expect(() => ObjectNavItemSchema.parse({ ...bare, viewName: 'all' })).not.toThrow();
+    expect(() => ObjectNavItemSchema.parse({ ...bare, filters: { status: 'active' } })).not.toThrow();
+  });
 });
 
 describe('DashboardNavItemSchema', () => {
@@ -315,6 +329,18 @@ describe('NavigationItemSchema (Recursive)', () => {
       filters: { status: 'open' },
     };
     expect(() => NavigationItemSchema.parse(item)).toThrow();
+  });
+
+  it('rejects runAction combined with recordId (no list surface to auto-run on, #4848)', () => {
+    const item = {
+      id: 'nav_bad3',
+      label: 'Bad',
+      type: 'object' as const,
+      objectName: 'sys_environment',
+      recordId: '{current_user_id}',
+      runAction: 'create_environment',
+    };
+    expect(() => NavigationItemSchema.parse(item)).toThrow(/runAction.*cannot be combined with.*recordId/s);
   });
 
   it('tolerates the legacy recordId + viewName combination (documented: viewName ignored)', () => {

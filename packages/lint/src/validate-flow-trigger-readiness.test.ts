@@ -798,6 +798,51 @@ describe('validateFlowTriggerReadiness', () => {
       expect(findings.some((f) => f.rule === FLOW_TRIGGER_UNKNOWN_EVENT)).toBe(false);
     });
 
+    // ── #7215 — the omission shape ────────────────────────────────────────
+    //
+    // Widened from the original #6637 contradiction-only criterion (`triggerType`
+    // present but off-grammar) to also cover `triggerType` ABSENT entirely. Both
+    // fall through `AutomationEngine.resolveTriggerBinding` to `undefined` by the
+    // exact same chain, so both are equally dead at runtime — two spellings of
+    // one defect, not a new one.
+    //
+    // At #6637 time the omission shape had a live instance in `examples/app-todo`
+    // (`TaskCompletionFlow`, #6882) whose repair was a judgement about that app's
+    // semantics rather than a lint decision, so covering it then would have gated
+    // a shipped example app on a guess — the criterion required the key to be
+    // PRESENT and the omission was tracked separately (#7041 item 2, carried by
+    // the now-deleted `an ABSENT triggerType` pin this block replaces). #7039
+    // repaired that instance and #7215 (maintainer-ruled, disposition 1) widened
+    // the criterion now that the corpus is green for it (verified at branch time:
+    // zero omission instances in-tree).
+    it('flags a record_change flow with triggerType entirely absent (the omission shape)', () => {
+      const findings = validateFlowTriggerReadiness(unroutable({}));
+      expect(findings.map((f) => f.rule)).toEqual([FLOW_TRIGGER_UNROUTABLE]);
+      expect(findings[0].severity).toBe('error');
+      expect(findings[0].path).toBe('flows[0].nodes[0].config.triggerType');
+      expect(findings[0].message).toMatch(/no triggerType at all/i);
+      // The message must not misreport the absent value as the literal word
+      // "undefined" (the `renderNonObject`/`renderTriggerToken` lesson applied
+      // to this new branch too).
+      expect(findings[0].message).not.toContain('undefined');
+    });
+
+    it('reports the same rule, severity and path whether the token is wrong or missing', () => {
+      // "Same rule, same severity: two spellings of one defect" is the issue's
+      // own framing — assert it directly rather than trusting two separate
+      // tests to agree by construction.
+      const present = validateFlowTriggerReadiness(unroutable({ triggerType: 'onCreate' }))[0];
+      const absent = validateFlowTriggerReadiness(unroutable({}))[0];
+      expect(absent.rule).toBe(present.rule);
+      expect(absent.severity).toBe(present.severity);
+      expect(absent.path).toBe(present.path);
+      // Both still carry the measured audit claim from 1f's comment.
+      expect(absent.message).toMatch(/record_change/);
+      expect(absent.message).toMatch(/never fires/i);
+      expect(absent.message).toMatch(/audit/i);
+      expect(absent.message).toMatch(/count/i);
+    });
+
     describe('does NOT flag (each paired with the mutation that makes it fire)', () => {
       it('a canonical record-* token — the whole point of declaring record_change', () => {
         expect(validateFlowTriggerReadiness(unroutable({ triggerType: 'record-after-update' }))).toEqual([]);
@@ -859,30 +904,54 @@ describe('validateFlowTriggerReadiness', () => {
         ).toEqual([FLOW_TRIGGER_UNROUTABLE]);
       });
 
-      it('an ABSENT triggerType — dead too, deliberately deferred (#6637 corpus)', () => {
-        // Scope boundary, pinned rather than left to memory. A `record_change`
-        // flow with no triggerType at all resolves to no binding by the same
-        // fall-through and is just as dead — but it is an omission rather than a
-        // contradiction, and at the time this criterion was cut (#6637) the
-        // corpus measurement found a LIVE instance of it in `examples/app-todo`
-        // (`TaskCompletionFlow`, tracked as #6882). Covering it then would have
-        // gated a shipped example app on a guess about that app's semantics, so
-        // the criterion requires the key to be PRESENT and the omission case was
-        // filed separately. That instance has since been repaired by #7039 —
-        // `TaskCompletionFlow` now declares `triggerType: 'record-after-update'`
-        // and routes correctly, so there is no live instance in the tree as of
-        // this writing. Whether the omission shape should now be covered too is
-        // a separate, undecided question (#7041 item 2) — this test still pins
-        // the deliberate non-coverage of it. Widening this is then a deliberate
-        // edit that has to delete this test, not a side effect of touching the
-        // predicate.
+      it('an omission with a sibling key the engine DOES route — same exclusion, absent token', () => {
+        // The omission counterpart of the test above (#7215). `triggerType` is
+        // missing outright, but something else on the start node routes — the
+        // same `routesToSomeTrigger` chain that excludes the present-but-routed
+        // case excludes this one too, character for character.
+        for (const extra of [
+          { schedule: { type: 'interval', intervalMs: 60000 } },
+          { timeRelative: { object: 'app_candidate', dateField: 'due_at', withinDays: 7 } },
+        ]) {
+          expect(
+            validateFlowTriggerReadiness(unroutable({ ...extra })).map((f) => f.rule),
+            JSON.stringify(extra),
+          ).not.toContain(FLOW_TRIGGER_UNROUTABLE);
+        }
+        // Drop the routed sibling and the same (still keyless) flow is dead.
         expect(
           validateFlowTriggerReadiness(unroutable({})).map((f) => f.rule),
-        ).not.toContain(FLOW_TRIGGER_UNROUTABLE);
-        // Non-vacuous: add the key back, and the same fixture fires.
-        expect(
-          validateFlowTriggerReadiness(unroutable({ triggerType: 'onCreate' })).map((f) => f.rule),
         ).toEqual([FLOW_TRIGGER_UNROUTABLE]);
+      });
+
+      it('a genuinely manual flow with no triggerType at all — autolaunched/screen stay silent (#7215)', () => {
+        // The omission widening still only speaks for `record_change`: 1f's
+        // guard is `flow.type === 'record_change'`, so a flow that is
+        // legitimately manual (`autolaunched`/`screen`, which have no
+        // triggerType to be missing) must not start getting flagged just
+        // because the key happens to be absent. Mirrors the present-token
+        // scope-boundary test above, one key over.
+        for (const type of ['autolaunched', 'screen']) {
+          expect(
+            validateFlowTriggerReadiness(unroutable({}, { type })).map((f) => f.rule),
+            type,
+          ).not.toContain(FLOW_TRIGGER_UNROUTABLE);
+        }
+        // Same fixture, type flipped back to record_change: now it fires.
+        expect(
+          validateFlowTriggerReadiness(unroutable({}, { type: 'record_change' })).map((f) => f.rule),
+        ).toContain(FLOW_TRIGGER_UNROUTABLE);
+      });
+
+      it('every non-record_change flow type stays silent with triggerType absent — flow.type is read literally', () => {
+        // Enumerated from the code rather than guessed: 1f's guard is
+        // `flow.type === 'record_change'`, an exact string match against
+        // `Flow.type`'s enum. Every other declared type — plus a flow with no
+        // `type` at all — never reaches this criterion, omission or not.
+        for (const type of ['autolaunched', 'screen', 'schedule', 'api', undefined]) {
+          const findings = validateFlowTriggerReadiness(unroutable({}, { type }));
+          expect(findings.map((f) => f.rule), String(type)).not.toContain(FLOW_TRIGGER_UNROUTABLE);
+        }
       });
 
       it('a flow with no start node at all', () => {

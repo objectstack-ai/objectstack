@@ -1,0 +1,7 @@
+{
+  "file": "packages/spec/src/kernel/metadata-plugin.zod.ts",
+  "adrs": [
+    "ADR-0005"
+  ],
+  "invariant": "The `allowOrgOverride` column of DEFAULT_METADATA_TYPE_REGISTRY is the machine-readable form of ADR-0005's tenant-customizable whitelist (docs/adr/0005-metadata-customization-overlay.md:53-64) — `view`/`dashboard`/`report` (plus `email_template`/`translation` per the system row) opt in; every other type is `false` until an ADR-0005 revision ratifies its admission pair (an overlay schema `resolveOverlaySchema()` accepts AND a written render-only rationale). The 2026-08-08 maintainer ruling on #6483 rolled back nine unratified `true` flags (`page`/`app`/`action`/`dataset`/`book`/`permission`/`position`/`tool`/`skill`; `flow` fell the same way in #6283), so a flag flip here is an ADR-0005 whitelist change and needs the ADR revised, not just this file edited. `OVERLAY_ALLOWED_TYPES` (metadata-protocol/src/protocol.ts) and the repository's `assertAllowed` allow-list both DERIVE from this column (Prime Directive #8) — never re-grow a parallel list."
+}

@@ -568,8 +568,8 @@ export const accountExtension = defineObjectExtension({
 - `priority` controls merge order (default `200`; range `0–999`)
 - Extensions can add fields, validations, and indexes — but cannot remove them
 - Do **not** author `ownership: 'extend'` on an object schema — the object-level
-  `ownership` property is the *record-ownership* enum (`'user' | 'org' | 'none'`),
-  unrelated to extensions
+  `ownership` property is the *record-ownership* enum
+  (`'user' | 'business_unit' | 'org' | 'none'`), unrelated to extensions
 
 ---
 

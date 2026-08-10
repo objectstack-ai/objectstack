@@ -82,12 +82,23 @@ export class ApprovalsServicePlugin implements Plugin {
       // ADR-0029 D7 — contribute the Approvals entries into the Setup app's
       // `group_approvals` slot. This plugin owns these objects (K2.b), so it
       // ships their menu too; when the plugin isn't installed the slot is empty.
+      //
+      // #7234 — order inside the slot is ARRAY ORDER: `applyNavContributions`
+      // does `group.children.push(...c.items)` per contribution (sorted by
+      // `priority`), so the inbox being first in this array is what puts it
+      // above the raw tables. Do not reorder without meaning to.
+      //
+      // The inbox entry is the working surface (decision actions, node
+      // progress, drawer); the three object entries below stay as the
+      // admin/diagnostic view of the engine's own tables — reachable only here,
+      // behind `group_approvals`' `manage_platform_settings` gate.
       navigationContributions: [
         {
           app: 'setup',
           group: 'group_approvals',
           priority: 100,
           items: [
+            { id: 'nav_approvals_inbox', type: 'component', label: 'Approvals Inbox', componentRef: 'approvals:inbox', icon: 'list-checks' },
             { id: 'nav_approval_requests', type: 'object', label: 'Requests', objectName: 'sys_approval_request', icon: 'inbox', requiresObject: 'sys_approval_request' },
             { id: 'nav_approval_actions', type: 'object', label: 'Action History', objectName: 'sys_approval_action', icon: 'history', requiresObject: 'sys_approval_action' },
             { id: 'nav_approval_delegations', type: 'object', label: 'Delegations (OOO)', objectName: 'sys_approval_delegation', icon: 'user-clock', requiresObject: 'sys_approval_delegation' },

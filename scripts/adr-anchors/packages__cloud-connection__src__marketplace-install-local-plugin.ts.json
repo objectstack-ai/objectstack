@@ -1,0 +1,8 @@
+{
+  "file": "packages/cloud-connection/src/marketplace-install-local-plugin.ts",
+  "adrs": [
+    "ADR-0120",
+    "ADR-0104"
+  ],
+  "invariant": "The ADR-0120 D5e gate runs at the INSTALL seam only, BEFORE hot-register and before any ledger write — a stopped install must leave the runtime exactly as it found it so the installer can respell to `'organization'` and retry without an uninstall. The confirmation is recorded in the install manifest (`InstalledManifestEntry.globalUniqueAttestation`, ADR-0104 attestation style: fact + who + when + under which posture) and CARRIED ACROSS reinstalls, which is the whole '之后不复问' half of the decision — moving it to memory would re-ask on every process boot, i.e. exactly the #4884 boot-time nagging the ADR forbids. Confirmations accumulate; a partial confirmation still stops on the remainder. Rehydrate at `kernel:ready` never evaluates the gate."
+}
