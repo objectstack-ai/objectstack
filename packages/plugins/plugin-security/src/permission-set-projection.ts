@@ -287,8 +287,11 @@ const isProjectionEcho = (v: any): boolean =>
  * Read the DECLARED (artifact) body for a permission set from the engine's
  * SchemaRegistry — the same source `bootstrapDeclaredPermissions` seeds from,
  * and the one store the env projection never writes, so it can't be poisoned
- * by our own registry sync. Used as the reset target when an env overlay is
- * deleted off a declared set.
+ * by our own registry sync. It is the body for a declared set with no overlay
+ * at all, and the reset target when an overlay IS lifted off one — which since
+ * ADR-0094 D5-R means a LEGACY (pre-#6483) row removed through the operator
+ * hatch, not a data-door delete: #6960 measures that delete refusing with 403
+ * `NOT_OVERRIDABLE`.
  *
  * Items tagged `_packageId: 'sys_metadata'` are RUNTIME SHADOWS — hydrated
  * into the registry from overlay rows (loadMetaFromDb / getMetaItems), not
@@ -328,13 +331,49 @@ function hasSchemaRegistry(ql: any): boolean {
  * (`managed_by:'admin'` — A4 #2920 unified vocab, formerly 'user'; a
  * Studio-authored set appears in Setup, where the
  * #2867 band-aid declined to create). A PACKAGE-OWNED row is also projected —
- * an env-scope overlay is the platform's standard customization of a packaged
- * definition (ADR-0005; direction confirmed 2026-07-14, reversing the earlier
- * refuse-the-env-door rule): the facets update to the EFFECTIVE (overlay-wins)
- * body while the `managed_by:'package'` + `package_id` provenance is
- * PRESERVED — the row still belongs to the package; the overlay is a
- * customization of it, and deleting the overlay resets the row to the shipped
- * declaration (the layered read reveals the baseline again).
+ * its facets follow the body this pass is handed, while the
+ * `managed_by:'package'` + `package_id` provenance is PRESERVED: the row
+ * still belongs to the package.
+ *
+ * WHICH body that is, is the part this comment used to get wrong. The
+ * 2026-07-14 direction confirmation that used to sit here — "an env-scope
+ * overlay is the platform's standard ADR-0005 customization of a packaged
+ * definition, and deleting the overlay resets the row to the shipped
+ * declaration" — is **RETIRED**, in BOTH halves (ADR-0094 D5-R, 2026-08-09;
+ * #6609 ruling A executed by #6858; the file header above records the same
+ * retirement). Since #6483 / PR #6608 rolled `permission` back to
+ * `allowOrgOverride: false`:
+ *
+ *  - **no new overlay of a packaged set can be minted.** A metadata write
+ *    against a CODE-DECLARED (artifact-backed) set — `*.permission.ts`, a
+ *    stack's `permissionSets` — is refused by the producer with 403
+ *    `NOT_OVERRIDABLE`, so for those names the body reaching here is the
+ *    DECLARED one and the projected facets ARE the shipped declaration. The
+ *    supported way to change them is the one ADR-0086 always named: edit the
+ *    package and re-publish. What survives is the neighbouring
+ *    `allowRuntimeCreate` tier (still `true`) — a set whose definition lives
+ *    only in `sys_metadata`, created through the data door or authored and
+ *    published through the METADATA door (ADR-0070). That tier edits the
+ *    single stored definition IN PLACE: no code-vs-overlay layering, and
+ *    nothing to reset to (ADR-0094 D5-R calls it the surviving neighbour, not
+ *    D5's successor);
+ *  - **`customized` therefore badges LEGACY state, not a supported channel.**
+ *    `supportsOverlay` is unchanged, so an overlay row authored BEFORE the
+ *    rollback still merges overlay-wins at read time
+ *    ({@link projectPermissionMutation} hands us `overlay ?? declared`) and
+ *    this pass still stamps the flag for it. The in-repo corpus had zero such
+ *    rows when PR #6608 measured it;
+ *  - **"delete = reset" must NOT be read back into that.** #6960 measures the
+ *    ordinary delete path refusing to lift exactly such a legacy overlay: on
+ *    an environment-scoped kernel `deleteMetaItem` throws `NOT_OVERRIDABLE` /
+ *    403 for an artifact-backed target of a non-overridable type BEFORE it
+ *    probes for the row, and a kernel with no `environmentId` refuses the
+ *    same write as `override-artifact` intent — leaving the operator hatch
+ *    (`OS_METADATA_WRITABLE=permission`) as the only documented removal. With
+ *    no overlay to lift — the normal case — the delete is a no-op success and
+ *    the row keeps projecting the declaration. {@link readDeclaredBody} stays
+ *    the correct reset target IF an overlay is ever lifted; it is no longer a
+ *    path the data door can walk.
  */
 export async function upsertEnvPermissionSet(
   ql: any,
