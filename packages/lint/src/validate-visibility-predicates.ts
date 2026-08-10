@@ -227,6 +227,7 @@
 import { collectCelRootIdentifiers, firstUndeclaredReference, parseCelToAst } from '@objectstack/formula';
 import type { CelAstNode } from '@objectstack/formula';
 
+import { collectionEntries } from './collection-entries.js';
 import { walkPageComponents } from './page-walk.js';
 import { formViewSites } from './view-walk.js';
 
@@ -277,32 +278,6 @@ type AnyRec = Record<string, unknown>;
  * alias-KEY rule, and went with it (#6318).
  */
 const CANONICAL = 'visibleWhen';
-
-/**
- * Every record in a collection authored either as an array or as a name-keyed
- * map, each with its config PATH — `pages[2]` for the array shape,
- * `pages.my_page` for the map. Findings on this surface are consumed as edit
- * targets (`os lint --json`, Studio's finding renderer), so a map-shaped
- * collection must not report a synthetic index nobody can look up. The map
- * shape also contributes the entry's KEY as its `name`, which is how an
- * unnamed-but-keyed view still locates itself in a message.
- */
-function collectionEntries(v: unknown, base: string): Array<{ rec: AnyRec; path: string }> {
-  if (Array.isArray(v)) {
-    const out: Array<{ rec: AnyRec; path: string }> = [];
-    for (let i = 0; i < v.length; i++) {
-      const rec = v[i];
-      if (rec && typeof rec === 'object' && !Array.isArray(rec)) out.push({ rec: rec as AnyRec, path: `${base}[${i}]` });
-    }
-    return out;
-  }
-  if (v && typeof v === 'object') {
-    return Object.entries(v as AnyRec)
-      .filter(([, def]) => !!def && typeof def === 'object' && !Array.isArray(def))
-      .map(([name, def]) => ({ rec: { name, ...(def as AnyRec) }, path: `${base}.${name}` }));
-  }
-  return [];
-}
 
 /** Extract the CEL source from a predicate value (string, or `{ source }` envelope). */
 function predicateSource(v: unknown): string | undefined {
