@@ -1296,6 +1296,54 @@ function toRowApiError(err: any): ApiError {
 }
 
 /**
+ * [#7426] Carry a wrapped error's `code` onto its re-wrap — but only when that
+ * code is part of the DECLARED vocabulary.
+ *
+ * ## What it fixes
+ *
+ * {@link ObjectStackProtocolImplementation.deleteMetaItem} is the one verb in
+ * this file that re-wraps rather than rethrows: its two catches build a fresh
+ * `Error` carrying the "failed to delete" context, and they carried `status`
+ * forward while dropping `code`. Every sibling verb translates `ConflictError`
+ * and then `throw err`s the original untouched, so `code` survives there. The
+ * consequence was topology-dependent: a `SysMetadataRepository` refusal — the
+ * only refusal a CONTROL-PLANE kernel can produce for these types, since
+ * `deleteMetaItem`'s own two-tier block is skipped when `environmentId` is
+ * undefined — reached the caller as **403 with `code: undefined`**, its code
+ * surviving only as prose inside the message, while the identical refusal on a
+ * project kernel arrived with `NOT_OVERRIDABLE` intact. ADR-0112 makes the code
+ * the machine-readable half of a refusal; a 403 without one is what the ledger
+ * exists to prevent.
+ *
+ * ## Why it is a PREDICATE and not `e.code = err.code`
+ *
+ * That re-wrap is the exit of every non-conflict failure on the path — genuine
+ * driver faults as much as refusals — so an unconditional copy would put a
+ * driver's own dialect (`42P01`, `SQLITE_CONSTRAINT`, `ECONNREFUSED`) into the
+ * field `ApiErrorSchema.code` declares as a closed union (ADR-0112 D4), which
+ * is the drift the ledger exists to stop. The gate is therefore membership in
+ * `StandardErrorCode ∪ ERROR_CODE_LEDGER` — verbatim the predicate
+ * {@link toRowApiError} above already applies to decide which thrown code may
+ * become a wire code. One rule, one place to change it, and a code the engine
+ * DID register (`ERR_DATASOURCE_UNAVAILABLE`) is as welcome as one this package
+ * threw.
+ *
+ * ## What it deliberately does not touch
+ *
+ * `status`. The repository catch's `err?.status ?? 500` and the legacy catch's
+ * literal `500` are unchanged — the second is a path with no authorization gate
+ * on it, where every failure really is a fault, and moving either is a separate
+ * contract decision. Only the `code` rule is unified across the two exits, so
+ * the envelope does not vary by which failure kind produced it.
+ */
+function carryCatalogedErrorCode(target: Error, source: unknown): void {
+    const code = (source as { code?: unknown } | null | undefined)?.code;
+    if (typeof code === 'string' && ErrorCode.safeParse(code).success) {
+        (target as Error & { code?: string }).code = code;
+    }
+}
+
+/**
  * A batch row that names no record id for an operation that needs one — a
  * caller error, so it carries VALIDATION_FAILED / 400 rather than falling
  * through {@link toRowApiError}'s unclassified-throw default (#4793).
@@ -12340,6 +12388,13 @@ export class ObjectStackProtocolImplementation implements
                 }
                 const e = new Error(`Failed to delete customization overlay: ${err.message ?? err}`);
                 (e as any).status = err?.status ?? 500;
+                // [#7426] …and the SAME treatment for `code`, gated on the
+                // declared vocabulary. This is the exit a control-plane
+                // kernel's repository refusal leaves by — `NOT_OVERRIDABLE` /
+                // 403 for a `supportsOverlay: false` type — and until now only
+                // its `status` made it out. See {@link carryCatalogedErrorCode}
+                // for why an unconditional copy is the wrong shape here.
+                carryCatalogedErrorCode(e, err);
                 throw e;
             }
         }
@@ -12425,6 +12480,15 @@ export class ObjectStackProtocolImplementation implements
         } catch (err: any) {
             const e = new Error(`Failed to delete customization overlay: ${err.message}`);
             (e as any).status = 500;
+            // [#7426] The SECOND re-wrap exit, and it gets the same `code` rule
+            // — otherwise the verb would answer an envelope that varies by
+            // which path served the delete, which is harder to reason about
+            // than the gap it replaced. Only refusals cannot arrive here (this
+            // path is deliberately ungated, #5264), so in practice what it
+            // carries is an engine code the ledger registered; the literal 500
+            // stays as it is, for the reason {@link carryCatalogedErrorCode}
+            // gives.
+            carryCatalogedErrorCode(e, err);
             throw e;
         }
     }

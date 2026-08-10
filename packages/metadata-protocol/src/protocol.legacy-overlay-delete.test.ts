@@ -380,24 +380,38 @@ describe('#6960 — the boundary holds: the `object` tier does NOT move', () => 
      *
      * On a CONTROL-PLANE kernel that block is skipped and the refusal comes
      * from `SysMetadataRepository`, whose error `deleteMetaItem` re-wraps in
-     * its `catch`: `new Error('Failed to delete customization overlay: …')`
-     * carries `status` forward (`err?.status ?? 500` → 403) but NOT `code`.
-     * So `code` is `undefined` there — a pre-existing envelope gap this card
-     * did not create and is not scoped to change (filed as #7426; ADR-0029
-     * D9's own control-plane pin hit the same wall and asserts the message
-     * substring for the same reason). This file states the gap instead of
-     * asserting around it, and
-     * carries the FULL `code`+`status` envelope for the same refusal one
-     * layer down, in the repository suite below, where nothing re-wraps it.
+     * its `catch`: `new Error('Failed to delete customization overlay: …')`.
+     *
+     * ⚠️ **UPDATED BY #7426 — this used to be a topology-dependent
+     * assertion.** The re-wrap carried `status` forward (`err?.status ?? 500` →
+     * 403) but NOT `code`, so the control-plane leg could only reach the code
+     * as a substring of the prose and this helper branched on the topology to
+     * say so. #7426 carries the code forward too — gated on the declared
+     * ADR-0112 vocabulary — so the same refusal now answers the same envelope
+     * on both kernels, and the branch is gone: **every leg asserts `code` AND
+     * `status`**, which is the minimum a refusal case owes.
+     *
+     * The message check survives as an ADDITIONAL assertion rather than a
+     * substitute one: the prose is what an operator reads, and #7426 adds a
+     * field to the envelope without restating the sentence.
+     *
+     * ⚠️ …and it is deliberately CASE-INSENSITIVE, which is a measurement, not
+     * a convenience. Promoting the old control-plane-only substring check to
+     * every leg turned the project-kernel legs red: the two producers spell the
+     * marker inside their *prose* differently — `deleteMetaItem`'s own block
+     * writes `[not_overridable]`, `SysMetadataRepository` writes
+     * `[NOT_OVERRIDABLE]`. Only the `code` FIELD is uniform, which is exactly
+     * ADR-0112's point (the catalog governs `error.code`; message prose is a
+     * different surface) and exactly why the field is the assertion that
+     * belongs here. Recorded rather than papered over — the prose divergence is
+     * pre-existing and outside #7426's scope.
      */
     const expectRefused = (err: any, environmentId: string | undefined, ctx: string) => {
+        void environmentId;
         expect(err, `${ctx}: the delete was accepted`).toBeInstanceOf(Error);
         expect(err.status, ctx).toBe(403);
-        if (environmentId !== undefined) {
-            expect(err.code, ctx).toBe('NOT_OVERRIDABLE');
-        } else {
-            expect(String(err.message), ctx).toContain('NOT_OVERRIDABLE');
-        }
+        expect(err.code, ctx).toBe('NOT_OVERRIDABLE');
+        expect(String(err.message).toUpperCase(), ctx).toContain('NOT_OVERRIDABLE');
     };
 
     for (const { label, environmentId } of KERNELS) {
