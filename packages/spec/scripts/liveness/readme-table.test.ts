@@ -14,8 +14,14 @@ import { describe, it, expect } from 'vitest';
 import {
   README_ORPHAN_ROW_GUIDANCE,
   README_TABLE_GUIDANCE,
+  STATE_COUNTS_GEN_COMMAND,
+  STATE_COUNTS_GUIDANCE,
+  STATE_COUNTS_PATH,
+  foldStateCounts,
   parseStateTable,
   reconcileReadmeTable,
+  reconcileStateCounts,
+  renderStateCounts,
 } from './readme-table.mts';
 
 /** A miniature README with the same section shape as the real one. */
@@ -201,5 +207,158 @@ describe('the prescriptions', () => {
     const text = README_ORPHAN_ROW_GUIDANCE.join('\n');
     expect(text).toContain('GOVERNED');
     expect(text).toContain('delete the row');
+  });
+});
+
+/* ── the count columns as a generated artifact (#7377) ──────────────────────
+ *
+ * Same argument as the block above, one direction over: on a green tree the
+ * artifact is current and the README carries no numbers, so `check:liveness`
+ * passing proves nothing about whether these three legs can fire. That proof is
+ * here (the logic) and in check-liveness.test.ts (the real gate, against a
+ * mutated copy of the real ledger root, reaching a real `process.exit(1)`).
+ */
+
+const COUNTS = [
+  { type: 'object', live: 49, experimental: 0, dead: 0, planned: 1 },
+  { type: 'field', live: 66, experimental: 0, dead: 0, planned: 0 },
+  { type: 'api', live: 25, experimental: 0, dead: 0, planned: 2 },
+];
+
+/** The 2-column README the split produced — prose only, no numbers. */
+function proseReadme(rows = ['| object | notes |', '| field | notes |', '| api | notes |']) {
+  return readme({ rows });
+}
+
+describe('foldStateCounts', () => {
+  it('reads one row per governed type, in GOVERNED order', () => {
+    const rows = foldStateCounts(['field', 'object'], {
+      object: { live: 49, planned: 1 },
+      field: { live: 66 },
+    });
+    expect(rows.map((r) => r.type)).toEqual(['field', 'object']);
+    expect(rows[1]).toEqual({ type: 'object', live: 49, experimental: 0, dead: 0, planned: 1 });
+  });
+
+  // "Not measured" and "measured as nothing" must not render the same. A skipped
+  // row would make the artifact silently shorter than GOVERNED, which is the
+  // completeness shape #7257 was filed about.
+  it('renders a type the report does not carry as zeroes rather than skipping it', () => {
+    const rows = foldStateCounts(['object', 'ghost'], { object: { live: 49 } });
+    expect(rows.map((r) => r.type)).toEqual(['object', 'ghost']);
+    expect(rows[1]).toEqual({ type: 'ghost', live: 0, experimental: 0, dead: 0, planned: 0 });
+  });
+});
+
+describe('renderStateCounts', () => {
+  it('publishes a row per type, a classified column, and a total', () => {
+    const out = renderStateCounts(COUNTS);
+    expect(out).toContain('| `object` | 49 | 0 | 0 | 1 | 50 |');
+    expect(out).toContain('| **total** | **140** | **0** | **0** | **3** | **143** |');
+  });
+
+  it('says it is generated and names the one command that rewrites it', () => {
+    const out = renderStateCounts(COUNTS);
+    expect(out).toContain('GENERATED — DO NOT EDIT BY HAND');
+    expect(out).toContain(STATE_COUNTS_GEN_COMMAND);
+  });
+
+  // The whole scheme rests on the generator and the gate rendering the same
+  // bytes from the same model. A renderer that varied by call would make the
+  // freshness check fail on a file it had itself just written.
+  it('is deterministic — the same model renders the same bytes', () => {
+    expect(renderStateCounts(COUNTS)).toBe(renderStateCounts(COUNTS));
+  });
+});
+
+describe('reconcileStateCounts — what it must catch', () => {
+  const rendered = renderStateCounts(COUNTS);
+
+  it('is quiet when the artifact is current and the README carries prose only', () => {
+    const r = reconcileStateCounts({ table: parseStateTable(proseReadme()), rendered, onDisk: rendered });
+    expect(r).toEqual({ artifactErrors: [], rowSetErrors: [], handCountErrors: [] });
+  });
+
+  it('catches a MISSING artifact', () => {
+    const r = reconcileStateCounts({ table: parseStateTable(proseReadme()), rendered, onDisk: null });
+    expect(r.artifactErrors).toHaveLength(1);
+    expect(r.artifactErrors[0]).toContain('MISSING');
+    expect(r.artifactErrors[0]).toContain(STATE_COUNTS_PATH);
+  });
+
+  // The leg that replaces what the hand-edit used to buy: touching a schema
+  // forced you back through the table. A stale artifact must be loud, and it must
+  // point at the line that moved rather than at the file.
+  it('catches a SKEWED count and names the first differing line', () => {
+    const onDisk = rendered.replace('| `field` | 66 |', '| `field` | 67 |');
+    const r = reconcileStateCounts({ table: parseStateTable(proseReadme()), rendered, onDisk });
+    expect(r.artifactErrors).toHaveLength(1);
+    expect(r.artifactErrors[0]).toContain('STALE');
+    expect(r.artifactErrors[0]).toContain('- | `field` | 67 |');
+    expect(r.artifactErrors[0]).toContain('+ | `field` | 66 |');
+  });
+
+  it('catches a type with counts and no README row', () => {
+    const table = parseStateTable(proseReadme(['| object | notes |', '| field | notes |']));
+    const r = reconcileStateCounts({ table, rendered, onDisk: rendered });
+    expect(r.rowSetErrors).toEqual([expect.stringContaining('api')]);
+  });
+
+  it('catches the mirror — a README row with no counts', () => {
+    const table = parseStateTable(proseReadme([...['| object | n |', '| field | n |', '| api | n |'], '| ghost | n |']));
+    const r = reconcileStateCounts({ table, rendered, onDisk: rendered });
+    expect(r.rowSetErrors).toEqual([expect.stringContaining('ghost')]);
+  });
+
+  // The leg neither of the other two can see. A re-added column leaves the
+  // artifact fresh and the row sets equal, so the table would publish two sets of
+  // numbers with only one of them enforced — strictly worse than the drift #7377
+  // started from.
+  it('catches a count column coming back into the README', () => {
+    const table = parseStateTable(proseReadme(['| object | 49 | – | 0 | 1 | notes |', '| field | n |', '| api | n |']));
+    const r = reconcileStateCounts({ table, rendered, onDisk: rendered });
+    expect(r.handCountErrors).toHaveLength(1);
+    expect(r.handCountErrors[0]).toContain('object');
+    // `–` counts: it is the spelling the old table used for "none of these", so
+    // treating it as prose would let half a column back in.
+    expect(r.handCountErrors[0]).toContain('–');
+    expect(r.artifactErrors).toEqual([]);
+    expect(r.rowSetErrors).toEqual([]);
+  });
+
+  // A Notes cell is prose about measurements and says numbers constantly
+  // ("Dead 9 = the seven #4142 tombstones"). Only a cell that is NOTHING BUT a
+  // number is a column; anything looser would make the pin unsatisfiable.
+  it('stays quiet on a Notes cell that merely mentions numbers', () => {
+    const table = parseStateTable(proseReadme(['| object | Dead 9 = the seven #4142 tombstones + 2 | ', '| field | n |', '| api | n |']));
+    const r = reconcileStateCounts({ table, rendered, onDisk: rendered });
+    expect(r.handCountErrors).toEqual([]);
+  });
+
+  it('reconciles the row set against the RENDERED artifact, not the stale copy on disk', () => {
+    // Otherwise a stale artifact missing a row would report the same defect twice,
+    // under two headings, and the second one would be a lie about the row set.
+    const onDisk = rendered.split('\n').filter((l) => !l.startsWith('| `api` |')).join('\n');
+    const r = reconcileStateCounts({ table: parseStateTable(proseReadme()), rendered, onDisk });
+    expect(r.artifactErrors).toHaveLength(1);
+    expect(r.rowSetErrors).toEqual([]);
+  });
+});
+
+describe('the counts prescription', () => {
+  it('names the generator and forbids both ways of hand-writing a number', () => {
+    const text = STATE_COUNTS_GUIDANCE.join('\n');
+    expect(text).toContain(STATE_COUNTS_GEN_COMMAND);
+    expect(text).toContain('Never hand-patch a number');
+    expect(text).toContain('never put a count column back');
+  });
+
+  // The half of the hand-edit worth keeping: a moved number means a Note beside
+  // it may now describe a set it no longer has. If that sentence leaves, the
+  // regeneration becomes the mechanical rewrite #7377 refused to do.
+  it('tells the author to READ the diff, not just run the command', () => {
+    const text = STATE_COUNTS_GUIDANCE.join('\n');
+    expect(text).toContain('READ the diff');
+    expect(text).toContain('Notes cell');
   });
 });

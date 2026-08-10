@@ -207,6 +207,102 @@ describe('check:liveness — the README state table (#7257)', () => {
   });
 });
 
+// The generated count artifact (#7377). Same argument as the block above and the
+// same mechanism: on a green tree the artifact is current and the README carries
+// no numbers, so `pnpm check:liveness` passing says nothing about whether these
+// legs can fire. `--ledger-root` points the REAL gate at a copy — which `cpSync`
+// carries `state-counts.md` into alongside README.md — so a case can delete the
+// artifact, skew one number, or put a column back and read the real exit code.
+describe('check:liveness — the generated count artifact (#7377)', () => {
+  let tmp: string;
+
+  beforeAll(() => {
+    tmp = mkdtempSync(path.join(tmpdir(), 'os-liveness-counts-'));
+  });
+  afterAll(() => rmSync(tmp, { recursive: true, force: true }));
+
+  /** Copy the real ledger root (README + artifact included) and mutate one file in the copy. */
+  function withCopy(name: string, edit: (root: string) => void): string {
+    const root = path.join(tmp, name);
+    cpSync(LEDGERS, root, { recursive: true });
+    edit(root);
+    return root;
+  }
+
+  it('FAILS when the artifact is gone — the numbers are published by nothing', () => {
+    const root = withCopy('missing', (r) => rmSync(path.join(r, 'state-counts.md')));
+
+    const { status, output } = runGate(root);
+    expect(status, output).toBe(1);
+    expect(output).toContain('the generated count artifact is not current');
+    expect(output).toContain('is MISSING');
+    expect(output).toContain('gen:liveness-counts');
+  });
+
+  // The leg that replaces what the hand-edit used to buy. It must name the line
+  // that moved: "the file is stale" sends the next reader to diff 30 rows, and
+  // the point of the failure is the ONE row whose Note may no longer hold.
+  it('FAILS on a single skewed count, and names the line', () => {
+    const root = withCopy('skewed', (r) => {
+      const f = path.join(r, 'state-counts.md');
+      const md = readFileSync(f, 'utf8');
+      const before = md.match(/^\| `view` \| (\d+) \|/m);
+      expect(before, 'the view row moved — repoint this case').not.toBeNull();
+      writeFileSync(f, md.replace(before![0], `| \`view\` | ${Number(before![1]) + 1} |`));
+    });
+
+    const { status, output } = runGate(root);
+    expect(status, output).toBe(1);
+    expect(output).toContain('is STALE');
+    expect(output).toContain('first difference at line');
+    expect(output).toContain('`view`');
+    // The half of the hand-edit worth keeping — regenerate AND re-read the Note.
+    expect(output).toContain('READ the diff');
+  });
+
+  // The leg neither of the others can see: a re-added column leaves the artifact
+  // fresh and the row sets equal, so the table would publish two sets of numbers
+  // with only one of them enforced.
+  it('FAILS when a count column comes back into the README', () => {
+    const root = withCopy('hand-count', (r) => {
+      const f = path.join(r, 'README.md');
+      writeFileSync(f, readFileSync(f, 'utf8').replace(/^\| object \| /m, '| object | 49 | – | 0 | 1 | '));
+    });
+
+    const { status, output } = runGate(root);
+    expect(status, output).toBe(1);
+    expect(output).toContain('carrying a COUNT COLUMN');
+    expect(output).toMatch(/^ {4}line \d+ \(object\)/m);
+  });
+
+  // Row-set drift between the two halves. `qa` is the most recently added row, so
+  // deleting it reproduces the #7257 state with the artifact still complete —
+  // both headings must fire, because they say different things: one that the
+  // index fell behind GOVERNED, one that a measurement is published with no
+  // explanation beside it.
+  it('FAILS when a type has counts and no README row', () => {
+    const root = withCopy('row-set', (r) => {
+      const f = path.join(r, 'README.md');
+      writeFileSync(f, readFileSync(f, 'utf8').split('\n').filter((l) => !l.startsWith('| qa | ')).join('\n'));
+    });
+
+    const { status, output } = runGate(root);
+    expect(status, output).toBe(1);
+    expect(output).toContain('where README.md and state-counts.md disagree');
+    expect(output).toContain('qa — counted in state-counts.md, no row in the README table');
+  });
+
+  // The control for all four: the same copy, unedited, is green and says so.
+  // Without it every "exit 1" above is also satisfied by the copy being unusable.
+  it('is green against a verbatim copy, and says the artifact is current', () => {
+    const root = path.join(tmp, 'verbatim');
+    cpSync(LEDGERS, root, { recursive: true });
+    const { status, output } = runGate(root);
+    expect(status, output).toBe(0);
+    expect(output).toMatch(/state-counts\.md is current — the same \d+ row\(s\), no count column left/);
+  });
+});
+
 describe('check:liveness — the evidence summary line (#5623)', () => {
   let tmp: string;
 

@@ -212,6 +212,7 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "check:liveness": "tsx scripts/liveness/check-liveness.mts",
+    "gen:liveness-counts": "tsx scripts/liveness/build-state-counts.mts",
     "check:empty-state": "tsx scripts/liveness/check-empty-state.mts",
     "check:variant-docs": "tsx scripts/check-variant-docs.mts",
     "gen:strictness-ledger": "tsx scripts/build-strictness-ledger-counts.mts",

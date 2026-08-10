@@ -42,8 +42,17 @@
 # cleanly because they do not overlap, and the subtotal merges clean and WRONG
 # (seven cases in one day). Note it is the counts file, not the ledger — the
 # ledger's prose is hand-written and must never be resolved by regenerating.
+#
+# The liveness state table's counts joined at #7377 for the same reason, one file
+# over — 9 of its 30 rows had drifted from the gate before anyone re-ran the
+# documented snippet. Same split and the same caveat: `liveness/state-counts.md`
+# is the numbers and is driver-managed; `liveness/README.md` is the Notes prose —
+# hand-written measurement of how each type got where it is — and is NOT.
+# Regenerating a Note would fabricate a verdict, which that README calls worse
+# than a missing row.
 
 packages/spec/spec-changes.json                              merge=os-regen
+packages/spec/liveness/state-counts.md                       merge=os-regen
 packages/spec/authorable-surface/**                          merge=os-regen
 packages/spec/authorable-surface.base.json                   merge=os-regen
 packages/spec/authorable-defaults/**                         merge=os-regen

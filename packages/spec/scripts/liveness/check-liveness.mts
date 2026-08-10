@@ -134,8 +134,14 @@ import {
 import {
   README_ORPHAN_ROW_GUIDANCE,
   README_TABLE_GUIDANCE,
+  STATE_COUNTS_FILE,
+  STATE_COUNTS_GUIDANCE,
+  STATE_COUNTS_PATH,
+  foldStateCounts,
   parseStateTable,
   reconcileReadmeTable,
+  reconcileStateCounts,
+  renderStateCounts,
 } from './readme-table.mts';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -380,6 +386,9 @@ const report: any = {
   readmeHeadingErrors: [] as string[], // "N governed types" disagrees with the rows / with GOVERNED
   readmeMalformedRows: [] as string[], // a table line the row parser could not read — never silently skipped
   readmeRowCount: 0, // rows the parser found, printed every run so the number is visible rather than believed
+  countsArtifactErrors: [] as string[], // state-counts.md is missing, or its bytes are not what the gate measures (#7377)
+  countsRowSetErrors: [] as string[], // the README's row set and the artifact's disagree
+  countsHandEdited: [] as string[], // a count column is back in the README — a hand-maintained number in the merge path
   verification: null as VerificationReport | null, // `verifiedAt` ages — the re-verification worklist
   producers: null as ProducerReport | null, // `producer` / `evidenceScope` — the #4837 / #4895 worklists
   producerMissing: [] as string[], // a `producer` pointer into thin air — FAILS, like a rotted `evidence`
@@ -606,6 +615,26 @@ if (!existsSync(readmeFile)) {
   report.readmeHeadingErrors = readme.headingErrors;
   report.readmeMalformedRows = readme.malformed;
   report.readmeRowCount = stateTable.rows.length;
+
+  // ── the count columns, now a generated artifact (#7377) ──
+  // Read from `ledgerRoot` for the same reason the table above is: it is what
+  // lets the self-test point the REAL gate at a copy with one number skewed and
+  // read the exit code. An artifact the gate could only ever find in its own
+  // green state is an artifact whose check is unproven.
+  const countsFile = join(ledgerRoot, STATE_COUNTS_FILE);
+  const counts = reconcileStateCounts({
+    table: stateTable,
+    rendered: renderStateCounts(
+      foldStateCounts(
+        GOVERNED,
+        Object.fromEntries(Object.entries<any>(report.types).map(([t, v]) => [t, v.byStatus])),
+      ),
+    ),
+    onDisk: existsSync(countsFile) ? readFileSync(countsFile, 'utf8') : null,
+  });
+  report.countsArtifactErrors = counts.artifactErrors;
+  report.countsRowSetErrors = counts.rowSetErrors;
+  report.countsHandEdited = counts.handCountErrors;
 }
 
 // ── verifiedAt: how old is each claim? ──
@@ -663,7 +692,10 @@ const failed =
   report.readmeMissingRows.length > 0 ||
   report.readmeOrphanRows.length > 0 ||
   report.readmeHeadingErrors.length > 0 ||
-  report.readmeMalformedRows.length > 0;
+  report.readmeMalformedRows.length > 0 ||
+  report.countsArtifactErrors.length > 0 ||
+  report.countsRowSetErrors.length > 0 ||
+  report.countsHandEdited.length > 0;
 if (asJson) {
   process.stdout.write(JSON.stringify(report, null, 2) + '\n');
 } else {
@@ -810,6 +842,39 @@ if (asJson) {
     );
     report.readmeMalformedRows.forEach((s: string) => console.log(`    ${s}`));
   }
+  if (report.countsArtifactErrors.length) {
+    console.log(`\n✗ the generated count artifact is not current:`);
+    report.countsArtifactErrors.forEach((s: string) => console.log(`    ${s}`));
+    console.log('');
+    STATE_COUNTS_GUIDANCE.forEach((line) => console.log(line ? `   ${line}` : ''));
+  }
+  if (report.countsRowSetErrors.length) {
+    console.log(
+      `\n✗ ${report.countsRowSetErrors.length} row(s) where README.md and ${STATE_COUNTS_FILE} disagree:`,
+    );
+    report.countsRowSetErrors.forEach((s: string) => console.log(`    ${s}`));
+    console.log(
+      '\n   The prose and the numbers are two halves of one table (#7377). A type with\n' +
+      '   counts and no Note publishes a measurement nobody explained; a Note with no\n' +
+      '   counts publishes an explanation of nothing. Both halves, or neither.',
+    );
+  }
+  if (report.countsHandEdited.length) {
+    console.log(
+      `\n✗ ${report.countsHandEdited.length} README state-table row(s) carrying a COUNT COLUMN — ` +
+      'the numbers are generated:',
+    );
+    report.countsHandEdited.forEach((s: string) => console.log(`    ${s}`));
+    console.log(
+      `\n   The count columns moved to ${STATE_COUNTS_PATH} at #7377, on #5107's\n` +
+      '   precedent: a hand-maintained number is a number in the merge path, and these\n' +
+      '   merge clean and WRONG — two PRs each move a different row by their own correct\n' +
+      '   delta, the rows do not overlap, and git composes a table nobody wrote. A column\n' +
+      '   re-added here would be invisible to the freshness check above, so the table\n' +
+      '   would publish two sets of numbers with only one of them enforced. Delete the\n' +
+      '   cell; the Notes prose is what this table is for.',
+    );
+  }
   // ── re-verification clock ──
   // Annotated at the boundary: `report` is deliberately `any` (see its
   // declaration), so without this every `v.*` below is `any` too — which is how
@@ -907,6 +972,10 @@ if (asJson) {
       'every container inheritance is declared, every `live` entry\'s repo-local evidence path ' +
       'resolves, all bound high-risk proofs resolve, and the README state table carries a row ' +
       `for each of the ${report.readmeRowCount} governed type(s) it claims to index.`,
+    );
+    console.log(
+      `✓ ${STATE_COUNTS_PATH} is current — the same ${report.readmeRowCount} row(s), ` +
+      'no count column left in the README.',
     );
     if (report.undrilledChildKeys) {
       console.log(

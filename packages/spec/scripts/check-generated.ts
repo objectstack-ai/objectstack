@@ -117,6 +117,23 @@ const GATED: ReadonlyArray<{
     gen: 'gen:strictness-ledger',
     artifact: 'docs/audits/2026-07-unknown-key-strictness-ledger.counts.md',
   },
+  // Moved out of NO_GENERATOR at #7377, by the same precedent as its neighbour
+  // above and for the same measured reason: the liveness README's "Current state"
+  // table published its counts by hand, 9 of its 30 rows had drifted from the gate
+  // before anyone re-ran the documented snippet, and hand-maintained counts merge
+  // clean and wrong. The numbers are now an artifact this gate proves fresh; the
+  // Notes prose stays hand-written, so — exactly like the strictness ledger —
+  // `gen:` repairs only the half of what this reports that is arithmetic. The
+  // other half is an unclassified property, a rotted evidence pointer or a row set
+  // that no longer matches GOVERNED, and the failure says which.
+  //
+  // Last among the non-`ratchet` entries on the cheapest-first rule: it eagerly
+  // loads every Zod schema and walks all 30 governed types.
+  {
+    check: 'check:liveness',
+    gen: 'gen:liveness-counts',
+    artifact: 'liveness/state-counts.md',
+  },
   // GATED by the definition above — it compares a checked-in artifact
   // (test-typecheck-debt.json) against what `tsc -p tsconfig.test.json` measures
   // right now, and `gen:test-typecheck-debt` is that artifact's writer. It is NOT
@@ -151,7 +168,10 @@ const GATED: ReadonlyArray<{
  * so a failure is a code change, not a `gen:` command.
  */
 const NO_GENERATOR: ReadonlyArray<{ check: string; why: string }> = [
-  { check: 'check:liveness', why: 'audits whether declared spec properties have a reader — no artifact' },
+  // `check:liveness` used to sit here — "audits whether declared spec properties
+  // have a reader — no artifact". #7377 gave it one (the state table's NUMBERS
+  // became an artifact; its Notes prose stayed hand-written), so it moved to GATED
+  // above. The audit half is unchanged and is still the bulk of what it reports.
   { check: 'check:empty-state', why: 'audits empty-state coverage — no artifact' },
   { check: 'check:skill-examples', why: 'validates skill examples parse — no artifact' },
   // #7319. Reads `src/` and the shipped template trees and writes nothing: a

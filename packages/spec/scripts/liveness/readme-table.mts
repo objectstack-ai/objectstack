@@ -29,13 +29,32 @@
 // re-create the original defect one layer up: this README's own verdict is that a
 // permanently-noisy check is a check nobody reads.
 //
-// WHAT IT DOES NOT CHECK, deliberately: the count COLUMNS and the Notes cell. The
-// counts are regenerated from `check-liveness.mts --json` (the method fixed in
-// #4488) and the Notes cell is hand-written measurement — "how this type got where
-// it is", the one part of the table a script cannot author. Holding the numbers to
-// the gate is a separate, larger job than holding the ROW SET to `GOVERNED`, and
-// conflating them would have made this check unlandable. Presence is the claim the
-// heading makes; presence is what this resolves.
+// WHAT IT DID NOT CHECK, and why that changed at #7377. The count COLUMNS were
+// scoped out here on purpose: holding the numbers to the gate was a larger job
+// than holding the ROW SET to `GOVERNED`, and conflating them would have made
+// this check unlandable — 9 of 30 rows disagreed with `--json` at the time, and
+// several Notes cells enumerate their own dead sets BY HAND, so regenerating the
+// numbers without re-reading each Note would have left a row saying `dead 6` next
+// to a sentence naming four. That is worse than the drift, because the prose is
+// the part a reader believes.
+//
+// #7377 did that per-row reconciliation and then removed the columns from the
+// README altogether, on #5107's precedent: hand-maintained counts merge CLEAN AND
+// WRONG. Two PRs each move a different row by their own correct delta, the rows
+// do not overlap, and git composes a table nobody wrote. So the numbers are a
+// generated artifact carrying `merge=os-regen` and the README keeps the Notes
+// prose — hand-written measurement, "how this type got where it is", the one part
+// of the table a script cannot author.
+//
+// This module therefore serves two reconciliations over one parse:
+//
+//   - `reconcileReadmeTable` — the row set against `GOVERNED` (#7257, unchanged);
+//   - `reconcileStateCounts` — the artifact against the gate's own report, the
+//     README's row set against the artifact's, and the README against a count
+//     column coming back (#7377).
+//
+// STILL NOT CHECKED, and it must stay that way: the Notes cell's CONTENT. A
+// manufactured Note is worse than a missing row.
 
 /** One parsed row of the "Current state" table. */
 export interface StateTableRow {
@@ -43,6 +62,12 @@ export interface StateTableRow {
   type: string;
   /** 1-based line number in the README — so a failure can be opened, not hunted. */
   line: number;
+  /**
+   * Every cell of the row, trimmed, first cell included. Kept so the count-column
+   * pin below can see a number coming back into the README without a second parse
+   * of the same line (#7377).
+   */
+  cells: string[];
 }
 
 /** The "Current state" section, as data. */
@@ -121,10 +146,11 @@ export function parseStateTable(markdown: string): ParsedStateTable {
     if (line.startsWith('## ')) break; // the section ended
     if (!line.startsWith('|')) continue;
 
-    const first = line.slice(1).split('|')[0].trim();
+    const cells = line.replace(/^\|/, '').replace(/\|$/, '').split('|').map((c) => c.trim());
+    const first = cells[0];
     if (first === 'Type') continue;                 // the header row
     if (SEPARATOR_CELL_RE.test(first)) continue;    // the `|---|` rule
-    if (TYPE_CELL_RE.test(first)) { result.rows.push({ type: first, line: i + 1 }); continue; }
+    if (TYPE_CELL_RE.test(first)) { result.rows.push({ type: first, line: i + 1, cells }); continue; }
     result.malformed.push(`line ${i + 1}: ${line.slice(0, 80)}`);
   }
 
@@ -224,4 +250,242 @@ export const README_ORPHAN_ROW_GUIDANCE = [
   'row, one level up: it claims coverage of something this gate does not govern,',
   'and it inflates the row count the heading is checked against. Either govern the',
   'type (add it to GOVERNED and seed its ledger) or delete the row.',
+];
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * The count columns, as a generated artifact (#7377)
+ * ══════════════════════════════════════════════════════════════════════════ */
+
+/** Where the generated counts live, relative to the ledger root. */
+export const STATE_COUNTS_FILE = 'state-counts.md';
+
+/** Its repo-relative path, for failure messages a reader can open. */
+export const STATE_COUNTS_PATH = `packages/spec/liveness/${STATE_COUNTS_FILE}`;
+
+/** The one command that rewrites it. Named in every failure below. */
+export const STATE_COUNTS_GEN_COMMAND = 'pnpm --filter @objectstack/spec gen:liveness-counts';
+
+/** The four status columns the table published, in the order it published them. */
+export const STATUS_COLUMNS = ['live', 'experimental', 'dead', 'planned'] as const;
+export type StatusColumn = (typeof STATUS_COLUMNS)[number];
+
+/** One governed type's counts, exactly as `types.<type>.byStatus` reports them. */
+export interface StateCountsRow {
+  type: string;
+  live: number;
+  experimental: number;
+  dead: number;
+  planned: number;
+}
+
+/**
+ * Fold the gate's `types.<type>.byStatus` into one row per governed type, in
+ * `GOVERNED` order.
+ *
+ * A type the report does not carry becomes a row of zeroes rather than being
+ * skipped: a missing row would make the artifact silently shorter than
+ * `GOVERNED`, and "not measured" and "measured as nothing" must not render the
+ * same. The row-set reconciliation above is what catches the governance gap; this
+ * function must not also hide it.
+ */
+export function foldStateCounts(
+  governed: readonly string[],
+  byStatus: Readonly<Record<string, Readonly<Record<string, number>> | undefined>>,
+): StateCountsRow[] {
+  return governed.map((type) => {
+    const b = byStatus[type] ?? {};
+    return {
+      type,
+      live: b.live ?? 0,
+      experimental: b.experimental ?? 0,
+      dead: b.dead ?? 0,
+      planned: b.planned ?? 0,
+    };
+  });
+}
+
+/**
+ * Render the whole artifact. The generator writes this; the gate renders it again
+ * and compares BYTES.
+ *
+ * Byte comparison, deliberately not a second parser — #5107's rule, and the
+ * reason it is a rule: two implementations of the same truth eventually disagree,
+ * and the one that wins is whichever the gate happens to call, which is how a
+ * green check ends up standing over a wrong file. Regeneration is WHOLESALE; this
+ * function never patches a number in place and neither should anyone.
+ */
+export function renderStateCounts(rows: readonly StateCountsRow[]): string {
+  const total = rows.reduce(
+    (a, r) => ({
+      type: 'total',
+      live: a.live + r.live,
+      experimental: a.experimental + r.experimental,
+      dead: a.dead + r.dead,
+      planned: a.planned + r.planned,
+    }),
+    { type: 'total', live: 0, experimental: 0, dead: 0, planned: 0 },
+  );
+
+  const body = rows.map(
+    (r) => `| \`${r.type}\` | ${r.live} | ${r.experimental} | ${r.dead} | ${r.planned} | ${r.live + r.experimental + r.dead + r.planned} |`,
+  );
+
+  return [
+    '<!-- GENERATED — DO NOT EDIT BY HAND. -->',
+    `<!-- Regenerate: ${STATE_COUNTS_GEN_COMMAND} -->`,
+    '',
+    '# Liveness state table — the counts (generated)',
+    '',
+    'Every number the [liveness ledger README](./README.md)\'s "Current state" table',
+    'used to publish, computed by the gate that enforces them —',
+    '`scripts/liveness/check-liveness.mts --json`, `types.<type>.byStatus`, the',
+    'counting method fixed in #4488. The Notes prose, which is hand-written',
+    'measurement of how each type got where it is, stays in the README and is never',
+    'regenerated.',
+    '',
+    'Split out at #7377 on #5107\'s precedent. Nine of the thirty rows had drifted',
+    'from the gate by the time anyone re-ran the documented snippet, and',
+    'hand-maintained counts merge in the one way that hides: two PRs each move a',
+    'different row by their own correct delta, the rows do not overlap, git merges',
+    'them without complaint, and the result is a table nobody wrote down. The',
+    'correct resolution was always "recompute from the merged tree", so this path',
+    'carries `merge=os-regen` (#4675) and the recomputation is mandatory rather than',
+    'remembered. **Never hand-patch a number here** — fix the ledger or the schema',
+    'and regenerate.',
+    '',
+    'Counts are at the gate\'s one-level walk granularity and include the ADR-0010',
+    'protection envelope, which the gate auto-classifies `live` on every type that',
+    'spreads `MetadataProtectionFields`. See the README\'s counting-method section',
+    'for both corollaries.',
+    '',
+    '| Type | live | exp | dead | planned | classified |',
+    '|---|---|---|---|---|---|',
+    ...body,
+    `| **total** | **${total.live}** | **${total.experimental}** | **${total.dead}** | **${total.planned}** | **${total.live + total.experimental + total.dead + total.planned}** |`,
+    '',
+  ].join('\n');
+}
+
+/** What `reconcileStateCounts` found. Separate from `ReadmeReconciliation` on purpose — one population per failure heading. */
+export interface StateCountsReconciliation {
+  /** The artifact is absent, or its bytes are not what the gate renders right now. */
+  artifactErrors: string[];
+  /** The README's row set and the artifact's disagree, in either direction. */
+  rowSetErrors: string[];
+  /** A count column has come back into the README — a hand-maintained number in the merge path again. */
+  handCountErrors: string[];
+}
+
+/** A cell that is a bare count, or the `–` this table used for "none of these". */
+const COUNT_CELL_RE = /^(\d+|[–—-])$/;
+
+/**
+ * Reconcile the generated artifact against the gate, and the README against the
+ * artifact.
+ *
+ * Three legs, and each fails for a reason the other two cannot see:
+ *
+ *   A. FRESHNESS — the artifact equals what the gate measures right now. This is
+ *      the leg the hand-edit used to buy for free: touching a schema forced you
+ *      back through the table to confirm the Note beside the number still held.
+ *      It still does, and the failure says so — `gen:` then READ the diff.
+ *   B. ROW SET — every artifact row has a README row and back. The README's rows
+ *      are reconciled against `GOVERNED` separately (#7257) and the artifact is
+ *      generated FROM `GOVERNED`, so in a green tree this is implied; it is
+ *      checked anyway because "implied by two other checks" is how the heading's
+ *      completeness claim survived unfalsifiable for a year.
+ *   C. NO HAND COUNTS — a README row whose cells beyond the type name include a
+ *      bare number. The whole point of the split is that a number in that file is
+ *      back in the merge path, and a re-added column would be *invisible* to legs
+ *      A and B: both would stay green while the table published two sets of
+ *      numbers, which is strictly worse than the drift #7377 started from.
+ */
+export function reconcileStateCounts({
+  table,
+  rendered,
+  onDisk,
+}: {
+  /** The parsed README section — rows and their cells. */
+  table: ParsedStateTable;
+  /** What `renderStateCounts` produces from the gate's report right now. */
+  rendered: string;
+  /** The artifact's bytes, or `null` when the file does not exist. */
+  onDisk: string | null;
+}): StateCountsReconciliation {
+  const artifactErrors: string[] = [];
+  const rowSetErrors: string[] = [];
+  const handCountErrors: string[] = [];
+
+  if (onDisk === null) {
+    artifactErrors.push(`${STATE_COUNTS_PATH} is MISSING — the table's numbers are published by nothing.`);
+  } else if (onDisk !== rendered) {
+    artifactErrors.push(
+      `${STATE_COUNTS_PATH} is STALE — it does not match what the gate measures right now.\n` +
+        `    ${firstStateCountsDifference(onDisk, rendered)}`,
+    );
+  }
+
+  // Leg B reads the artifact the gate just RENDERED, not the copy on disk: on a
+  // stale artifact leg A has already fired, and reconciling against a file we
+  // know to be wrong would report the same defect twice under two headings.
+  const artifactTypes = parseRenderedCountRows(rendered);
+  const readmeTypes = table.rows.map((r) => r.type);
+  const readmeSet = new Set(readmeTypes);
+  const artifactSet = new Set(artifactTypes);
+  for (const t of artifactTypes) {
+    if (!readmeSet.has(t)) rowSetErrors.push(`${t} — counted in ${STATE_COUNTS_FILE}, no row in the README table`);
+  }
+  for (const t of readmeTypes) {
+    if (!artifactSet.has(t)) rowSetErrors.push(`${t} — a README row with no counts in ${STATE_COUNTS_FILE}`);
+  }
+
+  for (const row of table.rows) {
+    const counts = row.cells.slice(1).filter((c) => COUNT_CELL_RE.test(c));
+    if (counts.length) {
+      handCountErrors.push(
+        `line ${row.line} (${row.type}) — ${counts.length} count cell(s): ${counts.join(', ')}`,
+      );
+    }
+  }
+
+  return { artifactErrors, rowSetErrors, handCountErrors };
+}
+
+/** The type names the rendered artifact publishes, in its own order. */
+function parseRenderedCountRows(rendered: string): string[] {
+  const out: string[] = [];
+  for (const line of rendered.split('\n')) {
+    const m = line.match(/^\|\s*`([a-z][a-z0-9_]*)`\s*\|/);
+    if (m) out.push(m[1]);
+  }
+  return out;
+}
+
+/** The first differing line pair, as `- on disk` / `+ expected`. */
+function firstStateCountsDifference(actual: string, expected: string): string {
+  const a = actual.split('\n');
+  const b = expected.split('\n');
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    if (a[i] === b[i]) continue;
+    return `first difference at line ${i + 1}:\n      - ${a[i] ?? '(end of file)'}\n      + ${b[i] ?? '(end of file)'}`;
+  }
+  return 'the files differ but no line does — a trailing-newline difference.';
+}
+
+/** The prescription printed under a stale or missing artifact. */
+export const STATE_COUNTS_GUIDANCE = [
+  `The count columns are GENERATED (#7377). Regenerate them, wholesale:`,
+  '',
+  `  ${STATE_COUNTS_GEN_COMMAND}`,
+  '',
+  'Then READ the diff. A count that moved means a property entered or left the',
+  'walked shape, or a ledger verdict changed — and the Notes cell beside that row',
+  'in README.md may now describe a set it no longer has. That re-read is exactly',
+  'what the hand-edited number used to force, and it is the half of it worth',
+  'keeping: #7377 found `translation` publishing `dead 2` next to a sentence',
+  'naming one key, and that key had already been removed.',
+  '',
+  '⛔ Never hand-patch a number in the artifact, and never put a count column back',
+  'into the README table. Both put the numbers back in the merge path, where they',
+  'merge clean and wrong (#5107).',
 ];

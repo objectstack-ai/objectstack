@@ -106,6 +106,27 @@ export const REGEN_ARTIFACTS = Object.freeze([
     gen: 'gen:strictness-ledger',
     check: 'check:strictness-ledger',
   },
+  // #7377. The liveness ledger's "Current state" table, split the way its
+  // strictness neighbour above was: the NUMBERS here, the Notes prose left in
+  // `packages/spec/liveness/README.md`, which is emphatically NOT driver-managed —
+  // a Note is hand-written measurement, and regenerating one would manufacture a
+  // verdict. The drift that forced the split was 9 of 30 rows disagreeing with the
+  // gate, several beside Notes cells that enumerate their dead sets by hand.
+  //
+  // Two things distinguish it from the entry above. Its input is not the AST but
+  // the LIVENESS GATE's own report (`check-liveness.mts --json`, the counting
+  // method fixed in #4488), spawned by the generator rather than re-implemented —
+  // a second walker would be a second definition of "classified", and the one that
+  // wins would be whichever the artifact happened to be rendered from. And its
+  // `check` is that same gate, so freshness is proven by the instrument that
+  // produces the numbers rather than by a parser reading them back. No
+  // `readsDist`: the gate walks `src/` Zod schemas through tsx, so a merge that
+  // moved sources is all it needs to be re-run against.
+  {
+    path: 'packages/spec/liveness/state-counts.md',
+    gen: 'gen:liveness-counts',
+    check: 'check:liveness',
+  },
 ]);
 
 /**
