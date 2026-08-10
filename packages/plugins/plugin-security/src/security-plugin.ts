@@ -381,8 +381,21 @@ export { describeHighPrivilegeBits } from '@objectstack/spec/security';
  * The i18n service is optional and resolved per call: it is registered by a
  * different plugin, may register after this one, and a deployment that runs
  * without it still gets the built-in catalog in the caller's locale.
+ *
+ * [#7451] `messageKey` is a PARAMETER rather than the hard-coded
+ * `permission_denied` it started as, because the end-user gates of this
+ * middleware refuse for three different reasons and a user in one of them can
+ * do something different from a user in another (catalog table: their grants do
+ * not cover the action / they may not touch THIS record / they may not put it
+ * into THAT state). One wire code, several sentences, is the rule #7307 set
+ * with `delete_restricted` and `delete_restricted_required`; the unit is the
+ * situation, never the code.
  */
-function userFacingDenialMessage(ctx: PluginContext, locale: string | undefined): string {
+function userFacingDenialMessage(
+  ctx: PluginContext,
+  messageKey: 'permission_denied' | 'record_access_denied' | 'record_change_not_allowed',
+  locale: string | undefined,
+): string {
   let translate:
     | ((key: string, loc: string, params?: Record<string, unknown>) => string)
     | undefined;
@@ -397,7 +410,7 @@ function userFacingDenialMessage(ctx: PluginContext, locale: string | undefined)
     // later than this one). The built-in catalog still renders the caller's
     // locale without it.
   }
-  return renderOperationMessage({ messageKey: 'permission_denied' }, { locale, translate });
+  return renderOperationMessage({ messageKey }, { locale, translate });
 }
 
 export class SecurityPlugin implements Plugin {
@@ -1176,9 +1189,38 @@ export class SecurityPlugin implements Plugin {
             : [];
           if (missing.length > 0 || missingDel.length > 0) {
             const allMissing = [...new Set([...missing, ...missingDel])];
-            throw new PermissionDeniedError(
+            // [#7451] Two messages, two audiences — the #7414 split, applied to
+            // the gate one step above the CRUD grant.
+            //
+            // The user's half REUSES `permission_denied` rather than adding a
+            // key, and that is the classification, not laziness. A caller
+            // missing a CRUD bit and a caller missing a `requiredPermissions`
+            // capability are in the SAME situation: their grants do not cover
+            // this action and an administrator is the remedy. "Capability" vs
+            // "object permission" is a fact about our authorization model, and
+            // the model is precisely what must not reach a toast — the sentence
+            // would have to name capability IDs (`manage_x`) to say anything
+            // more, which is internal vocabulary by construction.
+            //
+            // The developer half is the previous sentence BYTE FOR BYTE, logged
+            // at the throw site and attached as a SIBLING of `details` (never a
+            // member — `details` is what the runtime dispatcher serialises to
+            // the browser; #7414 measured that, and #7450 tracks the disclosure
+            // that already exists there). `code` / `statusCode` / `details`,
+            // including `requiredPermissions` and `missingPermissions`, are
+            // untouched: which gate answered stays fully legible to a developer.
+            const developerMessage =
               `[Security] Access denied: '${opCtx.object}' (operation '${opCtx.operation}') requires capability ` +
-                `[${required.join(', ')}] — ${missing.length > 0 ? 'caller' : 'the delegator'} is missing [${allMissing.join(', ')}]`,
+              `[${required.join(', ')}] — ${missing.length > 0 ? 'caller' : 'the delegator'} is missing [${allMissing.join(', ')}]`;
+            ctx.logger.warn(developerMessage, {
+              operation: opCtx.operation,
+              object: opCtx.object,
+              requiredPermissions: required,
+              missingPermissions: allMissing,
+              userId: opCtx.context?.userId ?? 'unknown',
+            });
+            throw new PermissionDeniedError(
+              userFacingDenialMessage(ctx, 'permission_denied', opCtx.context?.locale),
               {
                 operation: opCtx.operation,
                 object: opCtx.object,
@@ -1187,6 +1229,7 @@ export class SecurityPlugin implements Plugin {
                 requiredPermissions: required,
                 missingPermissions: allMissing,
               },
+              developerMessage,
             );
           }
         }
@@ -1247,7 +1290,7 @@ export class SecurityPlugin implements Plugin {
             userId: opCtx.context?.userId ?? 'unknown',
           });
           throw new PermissionDeniedError(
-            userFacingDenialMessage(ctx, opCtx.context?.locale),
+            userFacingDenialMessage(ctx, 'permission_denied', opCtx.context?.locale),
             { operation: opCtx.operation, object: opCtx.object, positions, permissionSets: explicitPermissionSets },
             developerMessage,
           );
@@ -1430,9 +1473,32 @@ export class SecurityPlugin implements Plugin {
               visible = null;
             }
             if (!visible) {
-              throw new PermissionDeniedError(
+              // [#7451] The refusal an ordinary business user is most likely to
+              // meet: they hold the object grant, and the ROW is what they may
+              // not touch. A DIFFERENT situation from the CRUD-grant denial
+              // above, so a different catalog key — `record_access_denied`. The
+              // remedy differs too, which is the test: "ask an administrator"
+              // is wrong here, because the record's owner can often share it.
+              //
+              // The sentence names nothing, and unlike #7414's gate this one
+              // COULD have named honestly (the row is the one the caller just
+              // addressed by id). It still does not: the only spellings
+              // available here are the object's API name and an opaque row id,
+              // and reaching a LABEL means the ladder whose last rung is the
+              // API name — the exact leak #7414 refused. The user knows which
+              // record they clicked.
+              const developerMessage =
                 `[Security] Access denied: not permitted to ${opCtx.operation} this ` +
-                  `'${opCtx.object}' record (row-level security)`,
+                `'${opCtx.object}' record (row-level security)`;
+              ctx.logger.warn(developerMessage, {
+                operation: opCtx.operation,
+                object: opCtx.object,
+                recordId: targetId,
+                positions,
+                userId: opCtx.context?.userId ?? 'unknown',
+              });
+              throw new PermissionDeniedError(
+                userFacingDenialMessage(ctx, 'record_access_denied', opCtx.context?.locale),
                 {
                   operation: opCtx.operation,
                   object: opCtx.object,
@@ -1440,6 +1506,7 @@ export class SecurityPlugin implements Plugin {
                   permissionSets: explicitPermissionSets,
                   recordId: targetId,
                 },
+                developerMessage,
               );
             }
           }
@@ -1782,9 +1849,29 @@ export class SecurityPlugin implements Plugin {
             this.logger.warn?.(
               `[Security] RLS check FAILED on ${opCtx.operation} '${opCtx.object}' — write denied (fail-closed)`,
             );
+            // [#7451] The third end-user situation, and the only one of the
+            // three the user can resolve THEMSELVES: they may edit this record,
+            // just not into the state they asked for (showcase authors exactly
+            // this — `check: 'owner == current_user.email'`, so a contributor
+            // cannot reassign an invoice they own). Hence its own key, and copy
+            // that says "change what you entered" rather than "ask an admin".
+            //
+            // It names nothing for a reason particular to this gate: the
+            // post-image failed an authored predicate over the WHOLE row, and
+            // the gate does not know which field carried the offending value.
+            // Naming the object without the field would send the user hunting.
+            const developerMessage =
+              `[Security] Access denied: the ${opCtx.operation} would violate a row-level CHECK on '${opCtx.object}'`;
+            ctx.logger.warn(developerMessage, {
+              operation: opCtx.operation,
+              object: opCtx.object,
+              positions,
+              userId: opCtx.context?.userId ?? 'unknown',
+            });
             throw new PermissionDeniedError(
-              `[Security] Access denied: the ${opCtx.operation} would violate a row-level CHECK on '${opCtx.object}'`,
+              userFacingDenialMessage(ctx, 'record_change_not_allowed', opCtx.context?.locale),
               { operation: opCtx.operation, object: opCtx.object, positions, permissionSets: explicitPermissionSets },
+              developerMessage,
             );
           }
         }

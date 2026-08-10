@@ -12,6 +12,7 @@ import { RLSCompiler, RLS_DENY_FILTER } from './rls-compiler.js';
 import { isSupportedRlsExpression } from '@objectstack/formula';
 import type { PermissionSet } from '@objectstack/spec/security';
 import { RLS } from '@objectstack/spec/security';
+import { BUILTIN_OPERATION_MESSAGES } from '@objectstack/spec/system';
 
 // ---------------------------------------------------------------------------
 // SecurityPlugin – basic metadata
@@ -1023,9 +1024,18 @@ describe('SecurityPlugin', () => {
         object: 'task', operation: 'find', ast: { where: undefined },
         context: { userId: 'u1', tenantId: 'org-1', positions: [], permissions: [] },
       };
+      // [#7451] Re-spelled, not weakened. `requires capability` was the
+      // capability AND-gate's DEVELOPER sentence; it is now `developerMessage`
+      // (logged at the throw site, never shipped), and `message` is the
+      // user-facing catalog entry — the same `permission_denied` the CRUD gate
+      // renders, deliberately, because a caller missing a capability and a
+      // caller missing a CRUD bit are in the same situation and have the same
+      // remedy. Asserted against the catalog CONSTANT so a copy edit needs no
+      // re-spell here; the developer half still pins WHICH gate answered.
       await expect(harness.run(opCtx)).rejects.toMatchObject({
         name: 'PermissionDeniedError',
-        message: expect.stringContaining('requires capability'),
+        message: BUILTIN_OPERATION_MESSAGES.en.permission_denied,
+        developerMessage: expect.stringContaining('requires capability'),
       });
     });
 
@@ -1159,9 +1169,16 @@ describe('SecurityPlugin', () => {
         object: 'task', operation: 'insert', data: { name: 'A' },
         context: { userId: 'u1', tenantId: 'org-1', positions: [], permissions: [] },
       };
+      // [#7451] Re-spelled onto `developerMessage`, which is where the machine
+      // detail now lives; `message` is the user-facing catalog entry. What this
+      // case proves is unchanged and still proved: the refusal came from the
+      // capability gate FOR THE INSERT operation, i.e. the per-operation
+      // narrowing (ADR-0066 ⑤) really is per-operation — the sibling case above
+      // shows `find` on the same object is admitted.
       await expect(harness.run(opCtx)).rejects.toMatchObject({
         name: 'PermissionDeniedError',
-        message: expect.stringContaining("operation 'insert'"),
+        message: BUILTIN_OPERATION_MESSAGES.en.permission_denied,
+        developerMessage: expect.stringContaining("operation 'insert'"),
       });
     });
 

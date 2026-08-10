@@ -179,3 +179,118 @@ describe('operation message catalog — permission_denied (#7414)', () => {
       .toBe(BUILTIN_OPERATION_MESSAGES['zh-CN'].permission_denied);
   });
 });
+
+/**
+ * #7451 — the two sentences the END-USER-facing row-level gates render. The
+ * call sites are pinned in
+ * `packages/plugins/plugin-security/src/security-denial-user-copy.test.ts`,
+ * against the real middleware and a real `II18nService`.
+ *
+ * `permission_denied` is NOT re-listed here: #7451's third converted gate (the
+ * capability AND-gate) deliberately reuses it, so its catalog coverage above is
+ * already the coverage for that gate.
+ */
+describe('operation message catalog — the row-level user copy (#7451)', () => {
+  /**
+   * The vocabulary a business user must never read in a row-level refusal. It
+   * is the #7414 list plus the two nouns these particular gates leaked:
+   * `row-level` (the mechanism) and `CHECK` (the clause).
+   */
+  const DEVELOPER_VOCABULARY = [
+    'positions', 'permissionSets', 'permission set', 'capability',
+    '[Security]', 'Access denied', 'operation', 'row-level', 'CHECK',
+  ];
+
+  const KEYS = ['record_access_denied', 'record_change_not_allowed'] as const;
+
+  it('renders the caller locale, not English', () => {
+    expect(renderOperationMessage({ messageKey: 'record_access_denied' }, { locale: 'zh-CN' }))
+      .toBe('您无权访问这条记录,如需访问请联系该记录的负责人或管理员。');
+    expect(renderOperationMessage({ messageKey: 'record_access_denied' }, { locale: 'en' }))
+      .toBe('You do not have access to this record. Contact the person who owns it, or your administrator, if you need access.');
+    expect(renderOperationMessage({ messageKey: 'record_change_not_allowed' }, { locale: 'zh-CN' }))
+      .toBe('您无权将这条记录保存为当前填写的内容,请修改后重试,或联系管理员。');
+  });
+
+  it('matches a base language against a regional catalog key (ja → ja-JP)', () => {
+    for (const key of KEYS) {
+      expect(renderOperationMessage({ messageKey: key }, { locale: 'ja' }))
+        .toBe(BUILTIN_OPERATION_MESSAGES['ja-JP'][key]);
+    }
+  });
+
+  it('falls back to the en sentence for a locale the catalog does not carry', () => {
+    // `de-DE` has no catalog entry and no base-language sibling.
+    for (const key of KEYS) {
+      expect(renderOperationMessage({ messageKey: key }, { locale: 'de-DE' }))
+        .toBe(BUILTIN_OPERATION_MESSAGES.en[key]);
+    }
+  });
+
+  it('names no object, no record id and no authorization mechanism — in EVERY locale', () => {
+    const locales = Object.keys(BUILTIN_OPERATION_MESSAGES);
+    // Guard the guard: a catalog that lost its locales would make the loop
+    // below vacuously true, which is exactly the shape of an assertion that
+    // cannot fail.
+    expect(locales.length).toBeGreaterThanOrEqual(4);
+    for (const locale of locales) {
+      for (const key of KEYS) {
+        const rendered = renderOperationMessage({ messageKey: key }, { locale });
+        // Non-empty and locale-specific, so the absence assertions below cannot
+        // be satisfied by an empty string.
+        expect(rendered).toBe(BUILTIN_OPERATION_MESSAGES[locale][key]);
+        expect(rendered.length).toBeGreaterThan(10);
+        for (const word of DEVELOPER_VOCABULARY) {
+          expect(rendered.toLowerCase(), `${locale}.${key} must not say "${word}"`)
+            .not.toContain(word.toLowerCase());
+        }
+      }
+    }
+  });
+
+  it('says something DIFFERENT from the grant denial — three situations, three sentences', () => {
+    // The whole reason these are separate keys: a user blocked by row-level
+    // security can often ask the record's owner, and a user whose post-image
+    // failed a CHECK can simply change what they typed. Collapsing them into
+    // `permission_denied` would send both to an administrator for nothing.
+    for (const locale of Object.keys(BUILTIN_OPERATION_MESSAGES)) {
+      const denied = BUILTIN_OPERATION_MESSAGES[locale].permission_denied;
+      for (const key of KEYS) {
+        expect(BUILTIN_OPERATION_MESSAGES[locale][key], `${locale}.${key}`).not.toBe(denied);
+      }
+      expect(BUILTIN_OPERATION_MESSAGES[locale].record_access_denied)
+        .not.toBe(BUILTIN_OPERATION_MESSAGES[locale].record_change_not_allowed);
+    }
+  });
+
+  it('ships no unfilled placeholder in any locale — these sentences take no params', () => {
+    // Asserts on the CATALOG ENTRY, not on the rendering, and that is the
+    // difference between a guard and a decoration. Rendering a removed key
+    // yields the bare messageKey — which has no braces either, so a
+    // rendering-based version of this case would stay green on a catalog that
+    // lost the key entirely.
+    for (const [locale, catalog] of Object.entries(BUILTIN_OPERATION_MESSAGES)) {
+      for (const key of KEYS) {
+        expect(catalog[key], `${locale} defines ${key}`).toBeTypeOf('string');
+        expect(catalog[key], `${locale}.${key} placeholder-free`).not.toMatch(/[{}]/);
+      }
+    }
+  });
+
+  it('a deployment translation override wins, under the shared `errors.` address', () => {
+    for (const key of KEYS) {
+      expect(operationMessageTranslationKey(key)).toBe(`errors.${key}`);
+      const translate = (k: string) => (k === `errors.${key}` ? '部署自定义文案。' : k);
+      expect(renderOperationMessage({ messageKey: key }, { locale: 'zh-CN', translate }))
+        .toBe('部署自定义文案。');
+    }
+  });
+
+  it('a throwing i18n service does not turn a 403 into a 500', () => {
+    const translate = () => { throw new Error('service down'); };
+    for (const key of KEYS) {
+      expect(renderOperationMessage({ messageKey: key }, { locale: 'zh-CN', translate }))
+        .toBe(BUILTIN_OPERATION_MESSAGES['zh-CN'][key]);
+    }
+  });
+});

@@ -76,6 +76,7 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
 import { bootStack, type VerifyStack } from '@objectstack/verify';
 import { resolveAuthzContext } from '@objectstack/core';
 import { SecurityPlugin, securityDefaultPermissionSets } from '@objectstack/plugin-security';
+import { BUILTIN_OPERATION_MESSAGES } from '@objectstack/spec/system';
 
 // ── the two objects under probe ────────────────────────────────────────────
 
@@ -430,10 +431,26 @@ describe('[#7281] checkAuthoredRowWrite answers the declaration, not the caller 
     expect(res.status, 'still refused — the pre-image gate reads as the caller').toBe(403);
     const envelope: any = await res.json().catch(() => ({}));
     expect(envelope?.code, 'ADR-0112 error code').toBe('PERMISSION_DENIED');
+    // [#7451] Re-spelled against the catalog CONSTANT. The English developer
+    // sentence this used to match is now `developerMessage`, logged at the
+    // throw site and never shipped; what a caller reads is the localized
+    // `record_access_denied` entry (`en` here — this caller declares no
+    // locale). It still discriminates exactly as before: the sharing
+    // middleware's refusal is a different code AND a different sentence
+    // (`FORBIDDEN: insufficient privileges`), so matching the row gate's own
+    // catalog entry still proves which gate answered.
     expect(
       String(envelope?.error ?? ''),
       'the row-level gate refused, NOT the sharing middleware (that shape would be `FORBIDDEN: insufficient privileges`)',
-    ).toContain(`not permitted to update this '${CLOSED}' record (row-level security)`);
+    ).toBe(BUILTIN_OPERATION_MESSAGES.en.record_access_denied);
+    // And the developer half stays off the wire — this is the END-TO-END
+    // measurement behind #7414's decision to log rather than ship it. REST's
+    // `mapDataError` builds `{ error, code, object? }` and never reads
+    // `error.details`, so a developer sentence naming the object and the
+    // row-level gate would reach a browser through nothing but the message.
+    const serialized = JSON.stringify(envelope ?? {});
+    expect(serialized, 'no developer half on the wire').not.toContain('[Security]');
+    expect(serialized, 'no developer half on the wire').not.toContain('row-level security');
     expect((await rowById(CLOSED, target))?.body, 'the row is untouched').toBe('seed');
   });
 

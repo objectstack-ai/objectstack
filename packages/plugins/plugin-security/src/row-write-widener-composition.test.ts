@@ -64,6 +64,7 @@ import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objects
 import { SharingService, buildSharingMiddleware } from '@objectstack/plugin-sharing';
 import { PermissionSetSchema } from '@objectstack/spec/security';
 import type { PermissionSet } from '@objectstack/spec/security';
+import { BUILTIN_OPERATION_MESSAGES } from '@objectstack/spec/system';
 import { SecurityPlugin } from './security-plugin.js';
 import { defaultPermissionSets } from './objects/default-permission-sets.js';
 
@@ -279,7 +280,10 @@ interface WriteOutcome {
   /** ADR-0112 envelope of the refusal — asserted, never a bare `toThrow()`. */
   code?: string;
   status?: number;
+  /** [#7451] The END USER's half — a localized catalog sentence since #7451. */
   message: string;
+  /** [#7451] The DEVELOPER's half — the sentence `message` used to be. */
+  developerMessage?: string;
 }
 
 interface Stack {
@@ -356,6 +360,7 @@ async function makeStack(): Promise<Stack> {
           code: e?.code,
           status: e?.statusCode,
           message: String(e?.message ?? e),
+          developerMessage: e?.developerMessage,
         };
       }
       return reached
@@ -386,12 +391,25 @@ const WIDENED_CTX = ctxFor('u_widened', 'crm_rep_widened');
  * threw". A bare `toThrow()` carries one bit where the defect has three: which
  * gate refused, with what code, at what status. The row-level pre-image gate is
  * the only place that produces this exact sentence.
+ *
+ * [#7451] Re-spelled, not weakened — and it now discriminates on TWO axes
+ * instead of one. That sentence is no longer `message`: it is
+ * `developerMessage` (logged at the throw site, never shipped), while `message`
+ * is the user-facing catalog entry for `record_access_denied` rendered in
+ * `ExecutionContext.locale` — `en` here, since `ctxFor` declares no locale.
+ * The user half is asserted against the catalog CONSTANT rather than a literal,
+ * so a future copy edit needs no re-spell in this file; the developer half is
+ * still asserted verbatim, which is what keeps "the row-level pre-image gate is
+ * the one that answered" a measured fact rather than an inference from a
+ * generic 403.
  */
 function expectRowLevelDenial(outcome: WriteOutcome, operation: 'update' | 'delete', object: string) {
   expect(outcome.ok, `expected a refusal, got a completed ${operation}`).toBe(false);
   expect(outcome.code, 'ADR-0112 error code').toBe('PERMISSION_DENIED');
   expect(outcome.status, 'ADR-0112 HTTP status').toBe(403);
-  expect(outcome.message).toContain(
+  expect(outcome.message, 'the user half is the localized catalog sentence')
+    .toBe(BUILTIN_OPERATION_MESSAGES.en.record_access_denied);
+  expect(outcome.developerMessage, 'the developer half names WHICH gate refused').toContain(
     `[Security] Access denied: not permitted to ${operation} this '${object}' record (row-level security)`,
   );
 }
