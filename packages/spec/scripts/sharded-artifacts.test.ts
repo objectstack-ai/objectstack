@@ -329,6 +329,38 @@ describe('sharded artifacts — the aggregate reads the whole directory (#5837)'
     expect(message).toContain('#5837');
   });
 
+  /**
+   * The fourth sharded artifact, held to the message #6751 established for the
+   * other three (#7076). `api-surface/` is not routed by `categoryOfDefKey`, so
+   * that fix could not reach it: its rows went straight from `Array.isArray` —
+   * a statement about the CONTAINER — into a `Record<string, string[]>`.
+   *
+   * Deliberately adjacent to the three cases above rather than in a file of its
+   * own: what has to stay true is that these readers say the SAME thing, and the
+   * shared middle (`<field>[<i>] is <type>, not a string (#5837): <value>`) is
+   * only reviewable when the assertions sit next to each other.
+   */
+  it('names the shard file, the entry index and the anchor for a non-string export row', () => {
+    const apiDir = path.join(dir, 'api');
+    writeShards(apiDir, apiSurfaceShardTexts({ './data': ['Field (type)', 'Object (type)'] }));
+    rewriteShard(apiDir, 'data', (doc) => {
+      (doc.exports as unknown[])[1] = { name: 'Object' };
+    });
+
+    const message = messageOf(() => aggregateApiSurfaceShards(apiDir));
+    expect(message, 'names the shard file').toContain('api-surface/data.json');
+    expect(message, 'names the entry, in the artifact’s own field').toContain('exports[1]');
+    expect(message, 'carries the issue anchor').toContain('#5837');
+    expect(message, 'says what was found instead').toContain('is an object, not a string');
+    expect(message, 'quotes the offending value').toContain('{"name":"Object"}');
+    // The reverse direction is NOT "threw a worse error before" — it is `messageOf`'s
+    // own `expect.fail`: unfixed, this reader RETURNS the corrupt row as a
+    // `string` and the diff in `build-api-surface.ts` reports it as a REMOVED
+    // export, demanding a major bump for an export that never existed. So the
+    // pin is that the reader rejects at all, and then that it rejects in the
+    // shared words.
+  });
+
   it('refuses a stray file in a generator-owned directory', () => {
     writeShards(dir, authorableSurfaceShardTexts(KEYS));
     fs.writeFileSync(path.join(dir, 'notes.txt'), 'scratch\n');
@@ -426,6 +458,67 @@ describe('sharded artifacts — the historical baseline reader (#5837)', () => {
       fs.writeFileSync(path.join(pkg, 'placeholder.txt'), 'x\n');
     });
     expect(readShardedKeysAtRev(gitIn(root), rev, AUTHORABLE_SURFACE_DIR_NAME, 'keys')).toBeNull();
+  });
+
+  /**
+   * The same defect class as the aggregate's fourth case (#6751), on the reader
+   * that cannot throw it (#7076). This one reports by `{ error }` — its callers
+   * in `build-schemas.ts` print that string under the gate's own name and exit —
+   * so the assertion is on the returned string, not on a thrown one, and the
+   * message skeleton has to be identical while the carrier is not.
+   *
+   * Why it matters more here than a bare container check: an unchecked entry was
+   * forwarded into the baseline SET, and the three gates that consume that set
+   * each fail somewhere else — `entry.replace is not a function` in the
+   * authorable-surface deletion check, a demand for a `RETIRED_DEFS_BY_MAJOR`
+   * registration in the manifest removal check, and "the anchor is not the
+   * baseline it claims to be" in `compareAnchorKeys`. None of the three can name
+   * the file the value came from; only this reader knows it.
+   */
+  it('reports a non-string entry as an error naming the file, the entry and the anchor', () => {
+    const { root, rev } = repoWith((pkg) => {
+      const surfaceDir = path.join(pkg, AUTHORABLE_SURFACE_DIR_NAME);
+      writeShards(surfaceDir, authorableSurfaceShardTexts(KEYS));
+      const file = path.join(surfaceDir, 'ui.json');
+      const doc = JSON.parse(fs.readFileSync(file, 'utf-8'));
+      doc.keys[1] = 12345;
+      fs.writeFileSync(file, JSON.stringify(doc, null, 2) + '\n');
+    });
+
+    const read = readShardedKeysAtRev(gitIn(root), rev, AUTHORABLE_SURFACE_DIR_NAME, 'keys');
+    // Not `toThrow`, and not `entries` either: unfixed, this call SUCCEEDS and
+    // hands 12345 to the gates as a key. The pin is that it refuses instead.
+    expect(read, 'refuses rather than forwarding the bad entry').toHaveProperty('error');
+    const message = (read as { error: string }).error;
+    expect(message, 'names the shard file').toContain(`${AUTHORABLE_SURFACE_DIR_NAME}/ui.json`);
+    expect(message, 'names the revision it read').toContain(rev.slice(0, 12));
+    expect(message, 'names the entry, in the artifact’s own field').toContain('keys[1]');
+    expect(message, 'carries the issue anchor').toContain('#5837');
+    expect(message, 'says what was found instead').toContain('is a number, not a string');
+    expect(message, 'quotes the offending value').toContain('12345');
+  });
+
+  it('reports a non-string entry in the retired single-file layout the same way', () => {
+    // The legacy branch reads immutable history — a commit from before #5837 —
+    // so it is the one place where "regenerate the artifact" is not advice
+    // anyone can take. All the more reason for the message to name the file and
+    // the entry itself.
+    const { root, rev } = repoWith((pkg) => {
+      fs.writeFileSync(
+        path.join(pkg, 'authorable-surface.json'),
+        JSON.stringify({ description: 'legacy', keys: [...KEYS.slice(0, 2), null] }, null, 2) + '\n',
+      );
+    });
+
+    const read = readShardedKeysAtRev(gitIn(root), rev, AUTHORABLE_SURFACE_DIR_NAME, 'keys');
+    expect(read).toHaveProperty('error');
+    const message = (read as { error: string }).error;
+    expect(message, 'names the retired single file').toContain('authorable-surface.json');
+    expect(message, 'names the entry').toContain('keys[2]');
+    expect(message, 'carries the issue anchor').toContain('#5837');
+    // `typeof null === 'object'` is the trap `jsonTypeLabel` exists for, and it
+    // has to survive the trip through the `{ error }` carrier unchanged.
+    expect(message, 'distinguishes null from an object').toContain('is null, not a string');
   });
 
   it('reads the manifest layout by the same rule', () => {
