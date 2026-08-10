@@ -27,7 +27,7 @@ Documentation-only. No schema shape changes; the `capabilities.readOnly`
 tombstone now carries the answer instead of an open issue reference:
 
 - **Database Drivers** gains *Read-only: grant it at the database, not in
-  metadata* (a worked `GRANT SELECT` role, the DDL/schema-sync consequence, why
+  metadata* (a worked `GRANT SELECT` account, the DDL/schema-sync consequence, why
   the platform declines the flag, and a table of what actually enforces what)
   and *Read replicas: the platform does not route* — the #4479 dual conclusion:
   no query path separates reads from writes, so put replicas behind pgpool /

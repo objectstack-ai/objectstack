@@ -550,11 +550,11 @@ privilege** — `GRANT SELECT` — not a key on the datasource. There is no
 metadata you can write that makes a managed connection read-only.
 </Callout>
 
-Point the datasource's `config` at a role that can only read:
+Point the datasource's `config` at an account that can only read:
 
 ```sql
 -- PostgreSQL: a login that can read the schema and nothing else.
-CREATE ROLE analytics_ro LOGIN PASSWORD '…';
+CREATE USER analytics_ro PASSWORD '…';
 GRANT CONNECT ON DATABASE analytics TO analytics_ro;
 GRANT USAGE ON SCHEMA public TO analytics_ro;
 GRANT SELECT ON ALL TABLES IN SCHEMA public TO analytics_ro;
