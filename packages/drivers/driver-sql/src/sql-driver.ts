@@ -8,7 +8,7 @@
  */
 
 import type { DriverOptions, FilterCondition, SchemaMode } from '@objectstack/spec/data';
-import { parseAutonumberFormat, renderAutonumber, readAutonumberCounter, missingFieldValues, isTenancyDisabled, type AutonumberToken } from '@objectstack/spec/data';
+import { parseAutonumberFormat, renderAutonumber, resolveAutonumberFormat, readAutonumberCounter, missingFieldValues, isTenancyDisabled, type AutonumberToken } from '@objectstack/spec/data';
 // The DECLARED aggregate vocabulary (#5907). Read from the spec so this driver's
 // "the protocol has no such function" refusal cannot drift from what
 // `AggregationNodeSchema.function` actually admits.
@@ -5353,10 +5353,7 @@ export class SqlDriver implements IDataDriver {
         if (type === 'datetime') datetimeCols.push(name);
         if (type === 'time') timeCols.push(name);
         if (type === 'auto_number' || type === 'autonumber') {
-          const rawFmt = (typeof field.autonumberFormat === 'string' && field.autonumberFormat)
-            ? field.autonumberFormat
-            : (typeof field.format === 'string' && field.format ? field.format : '');
-          const fmt = rawFmt || '{0000}';
+          const fmt = resolveAutonumberFormat(field);
           autoNumberCols.push({ name, format: fmt, tokens: parseAutonumberFormat(fmt), tenantField });
         }
       }
@@ -5433,12 +5430,7 @@ export class SqlDriver implements IDataDriver {
             (this.timeFields[tableName] ??= new Set()).add(name);
           }
           if (type === 'auto_number' || type === 'autonumber') {
-            // Honor either the spec-canonical `autonumberFormat` or the
-            // shorthand `format` (both appear in metadata) — see #1603.
-            const rawFmt = (typeof field.autonumberFormat === 'string' && field.autonumberFormat)
-              ? field.autonumberFormat
-              : (typeof field.format === 'string' && field.format ? field.format : '');
-            const fmt = rawFmt || '{0000}';
+            const fmt = resolveAutonumberFormat(field);
             // Tokenize once: the renderer resolves date tokens (`{YYYYMMDD}`),
             // field interpolation (`{island_zone}`) and the sequence slot at
             // fill time. The counter scopes to whatever renders before the slot.
@@ -6761,8 +6753,30 @@ export class SqlDriver implements IDataDriver {
    *
    * Used both for sync idempotency ({@link getExistingIndexNames}) and for index
    * drift detection (#3728), which needs the full definition rather than just
-   * the name. Failures are swallowed: at worst we attempt a create and absorb
-   * the "already exists" error in {@link syncDeclaredIndexes}.
+   * the name.
+   *
+   * ⚠️ A failed read is an ERROR, not an empty table (#7332). This used to wrap
+   * the whole dialect dispatch in a bare `catch {}` and return `byName` in
+   * whatever half-built state it had reached, so the caller could not tell "this
+   * table genuinely has no such index" from "the read failed and I am guessing".
+   * Downstream, `diffManagedIndexes` takes its declared-index-missing branch on
+   * exactly that input: a transient SQLITE_BUSY, or a WAL read landing
+   * mid-flush, was laundered into a confident, specific and FALSE
+   * `actual: '(absent)'` — *"metadata declares index 'x' but the database has no
+   * such index"* — about an index that was there the whole time.
+   *
+   * The swallow's justification, *"let creation handle conflicts"*, is sound
+   * only where it was written: {@link getExistingIndexNames}, whose caller
+   * {@link syncDeclaredIndexes} corrects an optimistic wrong reading by
+   * attempting the create and absorbing the "already exists" error. Detection
+   * has no such backstop, and it inherited the swallow only because #3728 wired
+   * a second consumer onto the same function. So the split is by CALL SITE:
+   * `onFailure: 'partial'` is the creation seam's opt-in, and everything else —
+   * detection included — sees the throw. Its callers are already built for it:
+   * {@link reconcileAndWarnDrift} catches and warns "could not introspect
+   * '<table>' for drift detection", and `os migrate plan` / `apply` both catch,
+   * print the error and exit non-zero. The sibling read in the same detect
+   * path, {@link introspectColumns}, has never swallowed.
    *
    * Postgres reads `pg_index` rather than `pg_indexes` so indexes backing a
    * UNIQUE CONSTRAINT (which is exactly what knex's old `col.unique()` produced)
@@ -6778,7 +6792,17 @@ export class SqlDriver implements IDataDriver {
    * what tells the differ this index is none of its business
    * (`isSyncReproducibleIndex`).
    */
-  protected async introspectIndexes(tableName: string): Promise<PhysicalIndex[]> {
+  protected async introspectIndexes(
+    tableName: string,
+    opts: {
+      /**
+       * What a failed read means to THIS caller (#7332). `'throw'` (the
+       * default) surfaces it; `'partial'` returns whatever was read before the
+       * failure — correct only where a short read is self-correcting.
+       */
+      onFailure?: 'throw' | 'partial';
+    } = {},
+  ): Promise<PhysicalIndex[]> {
     const byName = new Map<string, PhysicalIndex>();
     const upsert = (name: string, unique: boolean, primary: boolean): PhysicalIndex => {
       let e = byName.get(name);
@@ -6858,8 +6882,9 @@ export class SqlDriver implements IDataDriver {
           else if (r.EXPRESSION != null) applyIndexKeyParts(entry, [String(r.EXPRESSION)]);
         }
       }
-    } catch {
-      // Best-effort — fall through and let creation handle conflicts.
+    } catch (e) {
+      // Only a caller that can CORRECT a short read may ask for one (#7332).
+      if (opts.onFailure !== 'partial') throw e;
     }
     return [...byName.values()];
   }
@@ -6867,9 +6892,18 @@ export class SqlDriver implements IDataDriver {
   /**
    * Names of the indexes that already exist on a table. Used to make
    * declared-index sync idempotent across repeated runs.
+   *
+   * Best-effort by design (#7332), and the one caller entitled to be: every
+   * consumer of this set uses it to decide whether to SKIP a create, so a name
+   * missing from a short read costs at most one redundant `CREATE INDEX` —
+   * which {@link syncDeclaredIndexes} absorbs as "already exists" — and a
+   * throw here would instead take the whole boot down on a transient read.
+   * The presence probes in {@link applyIndexDriftOp} fail the same safe way:
+   * a false absence keeps the legacy index in place and under-reports what was
+   * applied, never the reverse.
    */
   protected async getExistingIndexNames(tableName: string): Promise<Set<string>> {
-    return new Set((await this.introspectIndexes(tableName)).map((i) => i.name));
+    return new Set((await this.introspectIndexes(tableName, { onFailure: 'partial' })).map((i) => i.name));
   }
 
   /**

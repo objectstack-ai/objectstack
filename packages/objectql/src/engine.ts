@@ -664,6 +664,106 @@ function planFormulaProjection(
 }
 
 /**
+ * [#7095] ORDER BY a field whose value is computed on read — refused HERE, on
+ * the engine's own public boundary, and no longer only at the REST ingress.
+ *
+ * #6994 closed this at `assertSortFieldsExist` (`400 INVALID_SORT`), which
+ * covers everything reaching `findData`: the REST list route,
+ * `POST /data/:object/query`, the export route and the RPC dispatcher. It could
+ * not cover a caller that reaches {@link ObjectQL.find} / {@link
+ * ObjectQL.findOne} DIRECTLY, and that half was not hypothetical — measured on
+ * this file's base (real `ObjectQL`, a driver that really sorts):
+ *
+ * ```
+ * engine.find(o, { orderBy: [{ field: <formula>, order: 'asc'  }] }) -> C A E B D  (insertion order)
+ * engine.find(o, { orderBy: [{ field: <formula>, order: 'desc' }] }) -> C A E B D  (byte-identical)
+ * ```
+ *
+ * `asc` and `desc` coming back identical is what makes it a DROPPED sort rather
+ * than a coincidence, and the rows carrying the very values they were asked to
+ * be ordered by is what makes it invisible. `planFormulaProjection` above drops
+ * the virtual NAME from the projection (it must — the driver has no column and
+ * `SELECT sort_key` fails as "no such column"); nothing did the equivalent for
+ * the sort, so the ORDER BY reached the driver, found nothing, and the #3821
+ * unknown-column backstop returned the rows unordered under a success.
+ *
+ * WHY A REFUSAL AND NOT AN OBSERVABLE DROP (the card offered both): ruled
+ * 2026-08-10 on #7095 — an ORDER BY the engine cannot apply is a 4xx with
+ * guidance prose, never a silent drop, the same direction as the analytics
+ * dataset refusal envelope and #6924's sort-hint prescription. The engine's
+ * documented internal-caller tolerance (`assertProjectionFieldsExist`'s
+ * docblock) was to survive only behind a pinned internal path and only if a
+ * measured internal call site relied on it; the #7095 sweep found none, so
+ * there is no internal path and no option to opt back into the drop. That sweep
+ * is recorded in the changeset — if you are adding a caller that WANTS the old
+ * behaviour, the answer is a stored field, not a flag.
+ *
+ * ⚠️ Post-hoc sorting after {@link applyFormulaPlan} evaluates the formulas is
+ * a TRAP, written down here because it looks like the generous fix: `driver.find`
+ * has already applied `limit`/`offset`, so re-sorting reorders an ARBITRARY
+ * PAGE. It would pass every small-result-set test and be wrong the moment
+ * pagination is involved.
+ *
+ * SCOPE — deliberately the third verdict only. `unknown` and `dotted` names are
+ * NOT judged here: the ingress gate's precedence is `unknown` > `dotted` >
+ * unmaterializable (#4226 / #4256 / #6994), and the engine has always tolerated
+ * an unknown projection name by design (the `SELECT *` tolerance a few lines
+ * below). Widening this door to those two is a separate posture change on two
+ * more axes, not a free extension of this one — so a dotted path keeps reaching
+ * the driver exactly as before, including one whose head is a formula field.
+ *
+ * A registry-less host (`schema` undefined) returns early, exactly as the
+ * ingress gate returns early when `resolveQueryFields` cannot answer: a door
+ * that cannot see the field map must not invent a verdict about it.
+ */
+function assertOrderByIsMaterializable(
+  object: string,
+  operation: 'find' | 'findOne',
+  schema: any,
+  orderBy: unknown,
+): void {
+  if (!Array.isArray(orderBy) || orderBy.length === 0) return;
+  if (!schema?.fields) return;
+  const names = orderBy.map((node) =>
+    typeof node === 'string' ? node : String((node as any)?.field ?? ''));
+  const unmaterialized = names.filter((f) =>
+    f !== '' && !f.includes('.') && (schema.fields as any)[f]?.type === 'formula');
+  if (unmaterialized.length === 0) return;
+  const first = unmaterialized[0];
+  const type = String((schema.fields as any)[first]?.type);
+  const err: any = new Error(
+    `ObjectQL.${operation}('${object}') sorts by '${first}', a ${type} field on '${object}' — `
+    + `a ${type} value is computed on read, so no driver materialises a column to order by`
+    + (unmaterialized.length > 1 ? ` (also: ${unmaterialized.slice(1).join(', ')})` : '')
+    + '. It was not applied, and an unapplied sort returns the rows in an arbitrary order — '
+    + "which 'limit'/'offset' then slices into an arbitrary page."
+    // Deliberately the SAME remedy, in the same words, as the ingress door's
+    // formula and dotted refusals (#6994, #6924) and #6673's SEARCH-axis
+    // correction. One vocabulary across the doors: a caller refused at the REST
+    // boundary and a caller refused here must not be sent two different ways.
+    // `query-expression-conformance.test.ts` pins the three wordings as EQUAL
+    // rather than each separately, because separate wordings is exactly how
+    // #4256 and #6673 drifted apart in the first place.
+    + ` Denormalise the value onto '${object}' (a stored field, written when the`
+    + ' source changes) and sort by that. A formula field is virtual: with no'
+    + ' column behind it the ORDER BY reaches the driver, finds nothing, and is'
+    + ' dropped — the arbitrary order this refusal replaces.',
+  );
+  // `INVALID_SORT`, not a new code, and 400 rather than 500: the ingress door
+  // reasoned that one condition — "this sort was not applied as written" —
+  // keeps ONE wire code however the caller reached it, and a caller reaching
+  // the engine directly has not stopped being that condition. A host that
+  // surfaces engine errors over HTTP therefore answers the same envelope on
+  // both doors instead of turning the direct path into an unhandled 500.
+  err.status = 400;
+  err.code = 'INVALID_SORT';
+  err.field = first;
+  err.fields = unmaterialized;
+  err.object = object;
+  throw err;
+}
+
+/**
  * Evaluate formula virtual fields against the raw rows a driver handed back —
  * the read path (`find` / `findOne`) and, since #5504, the write path's
  * response hydration.
@@ -6262,6 +6362,11 @@ export class ObjectQL implements IObjectQLEngine {
     const _findSchema = this._registry.getObject(object);
 
     this.expandSearchOnAst(ast, _findSchema);
+    // [#7095] Before the projection is planned and before anything is handed to
+    // a driver: an ORDER BY this engine cannot materialise is refused, not
+    // dropped. `fillQueryAstDefaults` has already normalised `orderBy` into
+    // `SortNode[]`, so the names read here are the ones the driver would get.
+    assertOrderByIsMaterializable(object, 'find', _findSchema, ast.orderBy);
     const _findFormula = planFormulaProjection(_findSchema, ast.fields);
     if (_findFormula.projected) ast.fields = _findFormula.projected;
 
@@ -6408,6 +6513,11 @@ export class ObjectQL implements IObjectQLEngine {
     // counts as the predicate it is (#4419).
     this.expandSearchOnAst(ast, _findOneSchema);
     this.requireFindOnePredicate(objectName, ast);
+    // [#7095] Same refusal as `find`, and it matters MORE here: `findOne`
+    // applies `limit: 1`, so `orderBy` is the whole of "which record" — a
+    // dropped sort does not merely reorder the answer, it returns a DIFFERENT
+    // record, and the one it returns looks exactly as legitimate.
+    assertOrderByIsMaterializable(objectName, 'findOne', _findOneSchema, ast.orderBy);
     const _findOneFormula = planFormulaProjection(_findOneSchema, ast.fields);
     if (_findOneFormula.projected) ast.fields = _findOneFormula.projected;
 

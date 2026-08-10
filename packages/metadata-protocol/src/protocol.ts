@@ -1506,6 +1506,174 @@ const WIRE_QUERY_ALIAS_SLOTS: readonly QueryAliasSlot[] = (() => {
 })();
 
 /**
+ * The OData `$`-prefixed spelling of each bare wire parameter this normalizer
+ * consumes, hoisted out of the loop in `findData` that used to own it so the
+ * arity survey below and that loop read ONE table (#7321). Adding a `$` alias
+ * in one place and not the other is exactly how a parameter ends up folded but
+ * unchecked.
+ *
+ * `$filter` / `$expand` are deliberately absent: they are declared as slot
+ * aliases on {@link WIRE_QUERY_ALIAS_SLOTS} instead, because they fold straight
+ * to a canonical key rather than to a bare wire spelling.
+ */
+const WIRE_DOLLAR_ALIASES: readonly (readonly [string, string])[] = [
+    ['$top', 'top'],
+    ['$skip', 'skip'],
+    ['$orderby', 'orderBy'],
+    ['$select', 'select'],
+    ['$count', 'count'],
+    ['$search', 'search'],
+    ['$searchFields', 'searchFields'],
+];
+
+/**
+ * [#7321] The list-query slots whose DECLARED value type admits an array, by
+ * canonical key. Everything else this normalizer reads — including a leftover
+ * key lowered into an implicit field filter — is single-valued, and an array on
+ * it is a repeated wire parameter (see {@link assertQueryParamArity}).
+ *
+ * This set is the whole judgement. `IHttpRequest.query` is
+ * `Record< string, string | string[] >` and the array arm is produced by a real
+ * first-party adapter (`NodeHttpServer` hands `?x=1&x=2` through as
+ * `['1','2']`, measured over a socket on #6878), so `Array.isArray` at this
+ * boundary means one of exactly two things: a repeated querystring parameter,
+ * or a JSON array in a `POST /data/:object/query` body. This normalizer serves
+ * BOTH ingresses and cannot tell them apart — which is why the rule keys off the
+ * declared TYPE rather than off the request. On a slot that never declares an
+ * array, `Array.isArray` is unambiguous evidence of repetition; on a slot that
+ * does, it is the ordinary shape and must not be touched.
+ *
+ * Per member, why the array is legal (`packages/spec/src/data/query.zod.ts`):
+ *  - `fields`        — `z.array(FieldNodeSchema)`; `?$select=a&$select=b` IS the
+ *                      projection `['a','b']`.
+ *  - `orderBy`       — `z.array(SortNodeSchema)`, and `normalizeSortNodes` has an
+ *                      explicit `string[]` arm: repetition COMPOSES into a
+ *                      multi-key sort (`?sort=name&sort=-age`), it does not
+ *                      conflict.
+ *  - `expand`        — the name-array arm lowers to `{name: {object: name}}`.
+ *  - `searchFields`  — `z.array(z.string())`; the engine reads the comma-string
+ *                      and the array from either slot.
+ *  - `where`         — a FILTER AST is an array (`['status','=','open']`), so a
+ *                      blanket arity refusal here would reject the AST body form
+ *                      outright. A repeated `?filter=` is still refused, one
+ *                      block down, by `isFilterAST` failing to read it.
+ *  - `groupBy`       — `z.array(GroupByNodeSchema)`.
+ *  - `aggregations`  — `z.array(AggregationNodeSchema)`.
+ *  - `joins` / `windowFunctions` — retired ARRAY keys (#4286). The tombstone,
+ *                      not an arity refusal, must stay their answer.
+ *
+ * Deliberately NOT here, each because the spec declares a scalar: `limit`/`top`
+ * and `offset` (`z.number()`), `search` (`string | FullTextSearch`), `object`
+ * (`z.string()`), `having` (a `FilterCondition` OBJECT — the engine has no AST
+ * arm for it), the `count` response flag, and the retired scalars `cursor` /
+ * `distinct`.
+ */
+const ARRAY_VALUED_QUERY_SLOTS: readonly string[] = [
+    'fields', 'orderBy', 'expand', 'searchFields', 'where',
+    'groupBy', 'aggregations', 'joins', 'windowFunctions',
+];
+
+/**
+ * [#7321] {@link ARRAY_VALUED_QUERY_SLOTS} expanded to every WIRE spelling that
+ * reaches it, derived from the same two tables the fold uses so a new alias
+ * cannot silently lose its array arm — the failure mode would be `?$select=a&
+ * $select=b` starting to 400, i.e. the damage case this card exists to avoid.
+ */
+const ARRAY_VALUED_LIST_QUERY_PARAMS: ReadonlySet<string> = (() => {
+    const names = new Set<string>(ARRAY_VALUED_QUERY_SLOTS);
+    for (const slot of WIRE_QUERY_ALIAS_SLOTS) {
+        if (!names.has(slot.canonical)) continue;
+        for (const alias of slot.aliases) names.add(alias);
+    }
+    for (const [dollar, bare] of WIRE_DOLLAR_ALIASES) {
+        if (names.has(bare)) names.add(dollar);
+    }
+    return names;
+})();
+
+/**
+ * [#7321] A parameter this normalizer reads as single-valued, supplied more
+ * than once.
+ *
+ * ## Why a refusal, and why this code
+ *
+ * `?$top=1&$top=2` is a well-formed request carrying two irreconcilable
+ * intents. Picking one is the silent drop itself, and coercing the pair is
+ * worse: `Number(['1','2'])` is `NaN`, so the window reached the driver as
+ * `limit: NaN` — driver-dependent behaviour under a 200, never an error. That
+ * is the same class #6928 / PR #7299 refused one layer over on
+ * `GET /api/v1/notifications`, and the same rule #6307 / #6877 landed in
+ * `packages/rest` (`readSingleQueryValue`); the wording below is theirs
+ * verbatim so a caller who repeats a parameter on two different routes is told
+ * the same thing twice, not two things once.
+ *
+ * `INVALID_REQUEST` / 400 is what {@link conflictingQueryParamsError} in this
+ * same normalizer already answers for the IDENTICAL condition reached the other
+ * way — two SPELLINGS of one slot carrying different values (#4181 → #3795).
+ * One slot given two values is one defect; it must not carry two codes
+ * depending on whether the caller repeated `filter` or wrote `filter` and
+ * `where`. (The rest layer spells its 400 `VALIDATION_ERROR` and the runtime
+ * layer `VALIDATION_FAILED`; those are each package's house catalog member for
+ * a 400, registered per package in `error-code-ledger.zod.ts`. The RULE and the
+ * status are what have to agree across the three, and do.)
+ *
+ * ## Why the count and not the values
+ *
+ * Two identical values are still two occurrences and are still refused: "at
+ * most one DISTINCT value" would be a de-duplication rule no caller can
+ * predict, while "supply it at most once" is checkable client-side without
+ * knowing anything about our semantics (#6877).
+ */
+function repeatedQueryParamError(param: string, count: number): Error {
+    const err: any = new Error(
+        `The '${param}' query parameter was supplied ${count} times. Supply it at most once — `
+        + 'this endpoint will not choose between conflicting values. It was NOT applied as a '
+        + 'list: a single-valued parameter given an array coerces to a value nobody asked for '
+        + `(Number(['1','2']) is NaN), which the driver then answers under a 200.`,
+    );
+    err.status = 400;
+    err.code = 'INVALID_REQUEST';
+    err.param = param;
+    return err;
+}
+
+/**
+ * [#7321] Refuse a repeated occurrence of any list-query parameter this
+ * normalizer reads as single-valued, and normalise the benign one-element array
+ * away so nothing below has to know the union existed.
+ *
+ * Runs at the TOP of `findData`, ahead of the `$`-alias pass and the #3795 slot
+ * fold, for two reasons:
+ *
+ *  1. The message then quotes the parameter the caller actually wrote — the
+ *     #4226 discipline. After the fold, `?$top=1&$top=2` would be reported as
+ *     `'limit'`, a name absent from the request.
+ *  2. The fold compares slot spellings by `JSON.stringify`, so an unchecked
+ *     `?top=1&top=2&limit=1` reaches it as `['1','2']` vs `'1'` and is refused
+ *     as a "conflicting query parameters" problem — a true refusal with a false
+ *     diagnosis. Checking arity first means the caller is told what is actually
+ *     wrong.
+ *
+ * Length 0 is DELETED rather than set to `undefined` (which is what the rest
+ * layer's `refuseRepeatedQueryParams` does with it): the leftover-key bucket
+ * below reads `Object.keys(options)`, so a key left behind carrying `undefined`
+ * would be lowered into an implicit `{field: undefined}` predicate. "Not
+ * supplied" has to mean absent here, not present-and-empty.
+ */
+function assertQueryParamArity(options: Record<string, unknown>): void {
+    for (const name of Object.keys(options)) {
+        const value = options[name];
+        if (!Array.isArray(value)) continue;
+        if (ARRAY_VALUED_LIST_QUERY_PARAMS.has(name)) continue;
+        if (value.length > 1) throw repeatedQueryParamError(name, value.length);
+        // length 1 → one occurrence an adapter encoded as an array; length 0 →
+        // no occurrence at all.
+        if (value.length === 0) delete options[name];
+        else options[name] = value[0];
+    }
+}
+
+/**
  * [#4181 → #3795] Spellings of ONE slot carrying DIFFERENT values. Two values
  * for one slot cannot be reconciled — merging them would invent an intent the
  * caller never expressed, and picking one is the silent drop itself — so an
@@ -4944,16 +5112,37 @@ export class ObjectStackProtocolImplementation implements
      * member of the family with no door — which is why a `formula` field
      * reached a driver that has no column for it.
      *
-     * SCOPE, stated because it is a real limit and not an oversight: this is an
-     * INGRESS gate, so it covers what reaches {@link findData} — the REST list
-     * route, `POST /data/:object/query`, the export route (which funnels its
-     * `$orderby` through here) and the RPC dispatcher. An internal caller that
-     * reaches `engine.find()` directly — hooks, flows, reports, expand
-     * sub-reads — still gets the silent drop, exactly as the projection and
-     * search axes note for themselves. Closing that half means deciding whether
-     * `engine.find` REFUSES or keeps its deliberate internal-caller tolerance,
-     * which is an engine-core contract decision rather than a gate fix; it is
-     * tracked separately.
+     * SCOPE: this is an INGRESS gate, so it covers what reaches {@link findData}
+     * — the REST list route, `POST /data/:object/query`, the export route (which
+     * funnels its `$orderby` through here) and the RPC dispatcher.
+     *
+     * [#7095] It is no longer the ONLY door for this verdict, and the half it
+     * cannot reach is now closed rather than merely noted. A caller reaching
+     * `engine.find()` / `engine.findOne()` directly — hooks, flows, reports,
+     * expand sub-reads — used to get the silent drop;
+     * `assertOrderByIsMaterializable` (`@objectstack/objectql`, `engine.ts`)
+     * refuses it there with the SAME `400 INVALID_SORT` and the same remedy
+     * sentence this gate emits, ruled on #7095 (an ORDER BY the engine cannot
+     * apply is a refusal with guidance prose, never a silent drop). What made
+     * leaving it at ingress untenable is that the direct path is AUTHOR-
+     * reachable, not merely internal: a saved report's `query.orderBy` is
+     * forwarded verbatim into `engine.find` (`plugin-reports`), and it never
+     * passes through here.
+     *
+     * ONE EDGE, measured and deliberately left: a nested `expand` sort is also
+     * forwarded into the expansion sub-read (`expandRelatedRecords`), and the
+     * engine door does fire there — but that sub-read sits inside a pre-existing
+     * graceful-degradation `catch` that swallows EVERY expand failure and
+     * retains the raw foreign keys. So that one path improves from silent to
+     * OBSERVABLE (a warning carrying the field and the remedy) rather than
+     * becoming a refusal. Reversing that backstop is the #3821-family swallow —
+     * a separate decision on all expand failure modes, not a rider on this one.
+     *
+     * This gate is UNCHANGED and still the first door: it keeps the `param` name
+     * in the message (which the engine cannot know) and the `unknown` >
+     * `dotted` > unmaterializable precedence. The engine door deliberately
+     * judges only the third verdict — see its docblock for why it does not
+     * inherit the other two.
      */
     private assertSortFieldsExist(object: string, orderBy: ReadonlyArray<{ field: string }>, param: string): void {
         if (orderBy.length === 0) return;
@@ -5071,9 +5260,24 @@ export class ObjectStackProtocolImplementation implements
      * `?status=<typo>` is a 400 and `?select=<typo>` is not, on one endpoint,
      * about the same field map.
      *
-     * The engine's tolerance is untouched: it guards INTERNAL callers (hooks,
-     * flows, expand sub-reads, registry-less hosts) that never pass through
-     * this ingress, exactly like the object-existence gate above.
+     * The engine's tolerance on THIS axis is untouched: it guards INTERNAL
+     * callers (hooks, flows, expand sub-reads, registry-less hosts) that never
+     * pass through this ingress, exactly like the object-existence gate above.
+     * An unknown projection name is dropped and the projection falls back to
+     * `*`, so the engine still over-returns rather than throwing.
+     *
+     * [#7095] That tolerance is PER-AXIS, and this docblock used to be read as
+     * a statement about the engine in general — it is not one any more, so the
+     * limit is written here rather than left to be inferred. On the SORT axis
+     * the engine now REFUSES an ORDER BY it cannot materialise
+     * (`assertOrderByIsMaterializable`, `@objectstack/objectql`), because the
+     * two axes fail differently: a dropped projection name returns MORE than
+     * asked (every column, inspectable in the response), while a dropped sort
+     * returns the right rows in an order the response cannot be distinguished
+     * from a satisfied one — and with `limit`, an arbitrary page of them. The
+     * #7095 sweep found no in-tree internal caller relying on the sort drop, so
+     * narrowing it cost no caller anything; nothing equivalent has been measured
+     * for the projection axis, and this sentence is not a licence to assume it.
      *
      * [#4196] It also owns the projection's SHAPE, which is a different
      * question from its names and is answered first — see below.
@@ -5653,6 +5857,20 @@ export class ObjectStackProtocolImplementation implements
         // `context` unconditionally: the protocol must not depend on a gate
         // above it staying switched on.
         delete options.context;
+
+        // [#7321] Arity BEFORE any read, fold or coercion. `IHttpRequest.query`
+        // is `Record< string, string | string[] >`; the array arm is real (the
+        // `node:http` adapter hands `?x=1&x=2` through as `['1','2']`, measured
+        // over a socket on #6878), and every coercion below was written for the
+        // string arm. `Number(['1','2'])` is `NaN`, so `?$top=1&$top=2` used to
+        // reach the driver as `limit: NaN` — a wrong answer served as a 200.
+        //
+        // Single-vs-multi is a PER-PARAMETER judgement, never a sweep: `$select`
+        // / `$expand` / `$searchFields` / `$orderby` accept the array arm on
+        // purpose and are untouched here. See
+        // {@link ARRAY_VALUED_QUERY_SLOTS} for the full disposition.
+        assertQueryParamArity(options);
+
         // Forward the dispatcher's ExecutionContext so RBAC/RLS middleware
         // can apply per-request enforcement. The protocol layer is purely
         // a normalizer — it must never strip security context.
@@ -5675,16 +5893,12 @@ export class ObjectStackProtocolImplementation implements
         // arrived under, so a rejection quotes the parameter the caller
         // actually wrote. Telling someone who sent `?$orderby=…` that
         // "'orderBy' is invalid" names a parameter absent from their request.
+        //
+        // [#7321] The table itself now lives at module scope
+        // ({@link WIRE_DOLLAR_ALIASES}) so the arity survey above and this fold
+        // cannot drift apart on which `$` spellings exist.
         const wireSpelling: Record<string, string> = {};
-        for (const [dollar, bare] of [
-            ['$top', 'top'],
-            ['$skip', 'skip'],
-            ['$orderby', 'orderBy'],
-            ['$select', 'select'],
-            ['$count', 'count'],
-            ['$search', 'search'],
-            ['$searchFields', 'searchFields'],
-        ] as const) {
+        for (const [dollar, bare] of WIRE_DOLLAR_ALIASES) {
             if (options[dollar] != null && options[bare] == null) {
                 options[bare] = options[dollar];
                 wireSpelling[bare] = dollar;
@@ -8196,17 +8410,117 @@ export class ObjectStackProtocolImplementation implements
         if (request.type !== 'object' && request.type !== 'objects') return;
         this.engine.registry.registerItem(request.type, request.item, 'name');
         try {
+            const layer = this.classifyObjectContribution(request.name, request.packageId);
+            if (layer.kind === 'mismatch') {
+                // Unreachable from `saveMetaItem`, which refuses this row at
+                // the producer (D9.9) — but `applyRegistryWriteThrough` has
+                // other callers (rollback, publish promotion), and registering
+                // the layer anyway would put `sys_metadata` and the registry
+                // back into the disagreement D9.9 exists to prevent.
+                throw ObjectStackProtocolImplementation.overlayPackageMismatchError(
+                    request.name, layer.packageId, layer.ownerPackageId,
+                );
+            }
             this.engine.registry.registerObject(
                 { ...(request.item as Record<string, unknown>), _provenance: 'org' } as any,
-                // `||`, not `??`: an empty-string binding is "no package", the
-                // same normalisation the boot branch applies to `package_id`.
-                request.packageId || 'sys_metadata',
+                layer.packageId,
+                undefined,
+                // [ADR-0029 D9.8] The KIND, chosen by asking the registry a
+                // question it can answer: does a PACKAGED owner already hold
+                // this name? Registering unconditionally as `'own'` is what
+                // made this seam splice the packaged contributor out and
+                // destroy the code definition at write time (#6853).
+                layer.kind,
             );
         } catch (err: any) {
             console.warn(
                 `[Protocol] registerObject failed for ${request.name}: ${err?.message ?? err}`,
             );
         }
+    }
+
+    /**
+     * [ADR-0029 D9.8/D9.9] Which contributor KIND a `sys_metadata` object row
+     * registers as — and whether it may register at all.
+     *
+     * ```
+     * packaged `own` contributor already registered for this name?
+     *   no  -> `own`      (a runtime-authored object; today's behaviour, keyed
+     *                      by the row's package_id or the sentinel)
+     *   yes -> `overlay`  (a tenant layer over the code definition)
+     * ```
+     *
+     * Every row this classifies came out of `sys_metadata` and is therefore
+     * tenant-authored by definition, which is why the question is only about
+     * the OTHER side: a runtime-authored object's owner IS the tenant's own
+     * row, and re-writing it stays an ordinary re-registration rather than
+     * becoming a layer over itself.
+     *
+     * The row's `package_id` (`P`) is provenance ON the layer, never an
+     * ownership claim (D9.9), so against the packaged owner's id `O`:
+     *
+     * | case | verdict |
+     * |:--|:--|
+     * | `P == O` | the normal case — one overlay layer over `O`'s object. |
+     * | `P` empty / absent (the `'sys_metadata'` sentinel) | **accepted** — a package-less env-wide overlay is ADR-0005's platform-global shape. Before D9 this THREW `already owned by package "O"`, an artefact of the borrowed `own` slot rather than a decision (#6995, measured as P2). |
+     * | `P == Q`, some other package | **mismatch** — refused loudly. |
+     *
+     * Falls back to `'own'` — today's behaviour — for a registry that does not
+     * offer the discriminator, so a duck-typed engine double is never made to
+     * fail by a question it cannot answer.
+     */
+    private classifyObjectContribution(
+        name: string,
+        rowPackageId: string | null | undefined,
+    ):
+        | { kind: 'own' | 'overlay'; packageId: string }
+        | { kind: 'mismatch'; packageId: string; ownerPackageId: string } {
+        // `||`, not `??`: an empty-string binding is "no package", the same
+        // normalisation both hydration seams apply to `package_id`.
+        const binding = rowPackageId || '';
+        const registry: any = (this.engine as any)?.registry;
+        const owner = typeof registry?.getPackagedObjectOwner === 'function'
+            ? registry.getPackagedObjectOwner(name)
+            : undefined;
+        const ownerPackageId: unknown = owner?.packageId;
+        if (typeof ownerPackageId !== 'string' || ownerPackageId === '') {
+            return { kind: 'own', packageId: binding || 'sys_metadata' };
+        }
+        if (binding !== '' && binding !== ownerPackageId) {
+            return { kind: 'mismatch', packageId: binding, ownerPackageId };
+        }
+        return { kind: 'overlay', packageId: binding || 'sys_metadata' };
+    }
+
+    /**
+     * [ADR-0029 D9.9] The mis-bound overlay refusal.
+     *
+     * The overlay-uniqueness index keys on
+     * `(type, name, organization_id, COALESCE(package_id, ''))` (ADR-0005
+     * amendment, #6825), so `sys_metadata` can legitimately hold two active
+     * rows for one `(type, name)` bound to two packages. For every other type
+     * that is fine — two packages really can ship `page/home`. For `object` it
+     * is not representable: `computeFQN` is identity, so the registry holds
+     * exactly one entry per object name and could never serve two. Refusing
+     * the mis-bound row is what keeps the two stores in agreement instead of
+     * letting `sys_metadata` describe a shape the registry cannot hold.
+     */
+    private static overlayPackageMismatchError(
+        name: string, rowPackageId: string, ownerPackageId: string,
+    ): Error {
+        const err: any = new Error(
+            `[object_overlay_package_mismatch] Cannot layer object '${name}': the overlay is bound to package `
+            + `'${rowPackageId}', but the object is owned by package '${ownerPackageId}'. `
+            + `An object has exactly one registry entry, so it can carry exactly one overlay layer — bind the `
+            + `customization to '${ownerPackageId}', or have '${rowPackageId}' extend the object instead. `
+            + `See docs/adr/0029-kernel-object-ownership-and-platform-objects-decomposition.md.`,
+        );
+        err.code = 'OBJECT_OVERLAY_PACKAGE_MISMATCH';
+        err.status = 422;
+        err.packageId = rowPackageId;
+        err.ownerPackageId = ownerPackageId;
+        err.docs = 'docs/adr/0029-kernel-object-ownership-and-platform-objects-decomposition.md';
+        return err;
     }
 
     /**
@@ -8470,6 +8784,30 @@ export class ObjectStackProtocolImplementation implements
         try {
             const registry: any = this.engine.registry;
             const singular = PLURAL_TO_SINGULAR[type] ?? type;
+
+            // ── [ADR-0029 D9.7] THE OBJECT HALF'S LAYER SUBTRACTION ──
+            //
+            // Runs AHEAD of the tier walk, not inside tier 3, and the reason is
+            // the same asymmetry #6808 was filed for — one layer down. Tier 1
+            // (`removeRuntimeShadow`) returns as soon as it heals the generic
+            // `metadata` map, so an object whose plain-key shadow it can heal
+            // would never reach a tier-3 limb, and its overlay LAYER would stay
+            // registered in `objectContributors` — the deleted customization
+            // still being served by `getObject`, which is what the data plane
+            // dispatches on.
+            //
+            // Unconditionally correct for `object`, which is why it needs no
+            // tier: the row is gone, so its layer goes with it, and whatever
+            // was underneath — a packaged owner, or nothing — is what should be
+            // served next. When a packaged owner IS underneath, this is the
+            // whole restoration: it is already there, at its own priority, in
+            // its own namespace, with its own definition, so nothing has to be
+            // reconstructed from values that no longer exist (#6853's measured
+            // wall).
+            if (singular === 'object' && typeof registry.removeObjectOverlay === 'function') {
+                registry.removeObjectOverlay(name);
+            }
+
             let healed = false;
             if (typeof registry.removeRuntimeShadow === 'function') {
                 healed = registry.removeRuntimeShadow(singular, name);
@@ -8538,8 +8876,7 @@ export class ObjectStackProtocolImplementation implements
             // which for `object` reads the contributor definition and applies
             // exactly the artifact test the sibling verb applies to the plain
             // key), so this limb inherits that judgement instead of open-coding
-            // a second one — PLUS the package-binding check below, which exists
-            // because that inherited judgement is measurably falsifiable here.
+            // a second one.
             //
             // Not theoretical, and NOT already covered by the gate at the top of
             // `deleteMetaItem`: that two-tier authorization — which refuses an
@@ -8551,138 +8888,51 @@ export class ObjectStackProtocolImplementation implements
             // take that object off the whole data plane until restart, because
             // `assertObjectRegistered` fails closed.
             //
-            // The check lives HERE rather than in the verb because it is a
-            // statement about LAYERS, which is what this walk reasons about;
-            // `unregisterObject` stays a general removal whose only refusal is
-            // ADR-0029's extender rule.
+            // ── [ADR-0029 D9.7] THE LAYER-ADDRESSED VERB RUNS FIRST ──
+            //
+            // When a packaged owner survives underneath, the tenant's delete
+            // removes ONE thing: its overlay LAYER. The packaged definition is
+            // already there — its own priority, its own namespace, its own body
+            // — so restoring the artifact view is a SUBTRACTION, not a
+            // reconstruction. That is what dissolves #6853's measured wall
+            // (the delete-time heal needed five values and three of them no
+            // longer existed by the time it ran): the judgement moved to write
+            // time, where the packaged owner is one lookup away.
+            //
+            // It also retires #7012's package-binding guard, deliberately and
+            // measurably rather than by tidiness. That guard existed because
+            // `isArtifactBacked` was FALSIFIED here — an overlay row bound to
+            // the packaged owner's id destroyed the packaged contributor at
+            // write time, so the predicate answered "not shipped" for an object
+            // the package still ships. D9 removes the falsification at its
+            // source: the packaged `own` contributor is never spliced out, so
+            // the predicate is honest and the case the guard protected cannot
+            // reach the retirement limb at all (`removeObjectOverlay` returns
+            // first, and `isArtifactBacked` is true besides). What the guard
+            // still reached after that was only its own ACCEPTED COST — a
+            // package-bound RUNTIME-authored object (Studio's package
+            // workspace, #4636), indistinguishable from a shipped one by
+            // binding alone, kept listable-but-rowless until restart. With the
+            // predicate honest that is no longer the cheap direction, it is
+            // simply the wrong answer: nothing ships the name, the row WAS the
+            // item, and the operator asked for it to be gone.
             if (
                 singular === 'object'
                 && !this.isArtifactBacked(singular, name)
                 && typeof registry.unregisterObject === 'function'
             ) {
-                // [#7012] …AND `isArtifactBacked` ALONE CANNOT SEE THAT.
-                // See {@link installedPackageBindingForObject} for the whole
-                // argument; the one-line version is that an overlay row bound
-                // to the packaged owner's id DESTROYS the packaged contributor
-                // at write time, which turns the predicate above `false` for an
-                // object the package still ships.
-                const boundPackageId = this.installedPackageBindingForObject(name);
-                if (boundPackageId !== undefined) {
+                try {
+                    registry.unregisterObject(name);
+                } catch (err: any) {
                     console.warn(
                         `[Protocol] object '${name}' was deleted from sys_metadata but stays registered: `
-                        + `its owner contributor is bound to installed package '${boundPackageId}'. `
-                        + `A package-shipped object must not be retired by an overlay delete, and this seam `
-                        + `cannot tell one from a package-bound runtime-authored object (#7012 / #6853), so `
-                        + `the entry survives — listable, and rowless if the delete really was the whole item `
-                        + `— until the next restart.`,
+                        + `${err?.message ?? err}`,
                     );
-                } else {
-                    try {
-                        registry.unregisterObject(name);
-                    } catch (err: any) {
-                        console.warn(
-                            `[Protocol] object '${name}' was deleted from sys_metadata but stays registered: `
-                            + `${err?.message ?? err}`,
-                        );
-                    }
                 }
             }
         } catch {
             // Best-effort registry refresh; next read fixes it anyway
         }
-    }
-
-    /**
-     * [#7012] The package binding of a registered `object`, but only when it
-     * names a package this process has actually INSTALLED. `undefined` means
-     * "no installed package answers for this object" — the only state in which
-     * {@link restoreArtifactRegistryView}'s tier 3 may unregister it.
-     *
-     * ## Why tier 3 needs a second predicate at all
-     *
-     * `isArtifactBacked` is the natural question ("does a code package ship
-     * this?") and it is the WRONG question at this exact point, because the
-     * thing it reads has already been destroyed by the time the walk runs.
-     *
-     * `SchemaRegistry.registerObject` splices out the same-package `own`
-     * contributor before pushing the new one. So an overlay row whose
-     * `package_id` equals the packaged owner's id does not SHADOW the packaged
-     * definition — it REPLACES it, and no second copy exists anywhere in the
-     * registry. {@link loadMetaFromDb} replays that replacement on every boot,
-     * with no authorization gate and no log, stamping `_provenance: 'org'`
-     * server-side (deliberately — cloud#970). `getArtifactItem` for an `object`
-     * is exactly `_provenance !== 'org'`, so `isArtifactBacked` answers `false`
-     * for an object a code package still ships, and tier 3 then took the whole
-     * entry. Measured end to end on a tenant kernel with no escape hatch:
-     *
-     * ```
-     * loadMetaFromDb -> {"loaded":1,"errors":0,"invalid":0}   warnings: []
-     * DELETE         -> {"success":true,"reset":true}
-     * objectContributors: []   getObject: null
-     * data CRUD: OBJECT_NOT_FOUND / 404   (while the table still holds the rows)
-     * ```
-     *
-     * ## Why the BINDING is trustworthy where the definition is not
-     *
-     * The replacement rule fires only when the two package ids MATCH, so the
-     * surviving contributor provably carries the packaged owner's id — the one
-     * fact the overwrite cannot change, precisely because it is the overwrite's
-     * own precondition. The second half, "is that package installed", is a fact
-     * about the PROCESS rather than about the destroyed body:
-     * `SchemaRegistry.installPackage` writes the record and
-     * `ObjectQL.registerApp` calls it immediately before registering the
-     * manifest's objects, so a package-shipped object always has one. Durable
-     * packages (`sys_packages`) are re-installed at boot by `service-package`,
-     * and nested `registerPlugin` objects are keyed to the PARENT package,
-     * which `registerApp` installed. The `'sys_metadata'` sentinel — the key an
-     * overlay row bound to no package keeps — is handled by construction rather
-     * than by a special case: nothing installs a package under it, so it never
-     * resolves to a record.
-     *
-     * ## What this deliberately does NOT ask
-     *
-     * - NOT `enabled` / `status`. `disablePackage` flips lifecycle flags and
-     *   removes no contributor, so a disabled package's objects stay registered
-     *   and stay dispatchable; reading the flag here would unregister a
-     *   definition nothing else removes — the same outage through a second door.
-     * - NOT the manifest's `objects` list. That would re-ask "is this
-     *   code-shipped", which is the question whose answer was destroyed; it is
-     *   also absent for `registerPlugin`-contributed objects.
-     *
-     * ## The accepted cost, ruled and not to be worked around
-     *
-     * A package-bound RUNTIME-authored object (Studio's package workspace,
-     * #4636) carries a real `package_id` too, so it is indistinguishable from a
-     * package-shipped one by binding alone: some genuinely deleted objects stay
-     * registered until restart. Per this walk's own REGISTER WIDE / RETIRE
-     * NARROW argument that is the cheap direction — a surplus entry degrades to
-     * "listable but rowless" and the next reload heals it, a wrongly retired one
-     * 404s data CRUD for every tenant. The honest fix for the distinguishability
-     * itself is #6853's direction B (the tenant overlay registers as its own
-     * contributor layer instead of splicing out the packaged `own`), which
-     * re-arms `isArtifactBacked` here and at `saveMetaItem`'s overlay gate; it is
-     * an ADR-0029 amendment and a separate card by maintainer ruling
-     * (2026-08-09).
-     *
-     * Name-addressed, like every other verb in the walk: `getObjectOwner` reads
-     * the contributor list under the same key `getObject` and
-     * {@link SchemaRegistry.unregisterObject} resolve (`computeFQN` is identity,
-     * so the registry key IS the object name), which is what keeps the decision
-     * and the removal talking about the same entry.
-     */
-    private installedPackageBindingForObject(name: string): string | undefined {
-        const registry: any = (this.engine as any)?.registry;
-        if (
-            !registry
-            || typeof registry.getObjectOwner !== 'function'
-            || typeof registry.getPackage !== 'function'
-        ) {
-            return undefined;
-        }
-        const packageId: unknown = registry.getObjectOwner(name)?.packageId;
-        if (typeof packageId !== 'string' || packageId === '') return undefined;
-        const installed = registry.getPackage(packageId);
-        return installed === undefined || installed === null ? undefined : packageId;
     }
 
     /**
@@ -8914,11 +9164,35 @@ export class ObjectStackProtocolImplementation implements
             if (lockErr) throw lockErr;
         }
 
+        const singularType = PLURAL_TO_SINGULAR[request.type] ?? request.type;
+
+        // [ADR-0029 D9.9 / #6995] The refusal that is about REPRESENTABILITY
+        // rather than authorization: an `object` overlay bound to a package
+        // that does not own the object. See
+        // {@link overlayPackageMismatchError} for why one object name can
+        // carry at most one overlay layer while `sys_metadata` can hold two
+        // rows for it.
+        //
+        // AT THE PRODUCER, deliberately. Before D9 this row reached
+        // `registerObject`, which threw `already owned by package "…"` into
+        // `applyObjectRegistryMutation`'s best-effort `console.warn` — and
+        // `saveMetaItem` still returned a SUCCESS RECEIPT for a write the
+        // runtime had discarded (#6995, the silent write-side divergence).
+        // The receipt and the registry now agree because the write never
+        // happens: this precedes `ensureOverlayIndex` and every `put`.
+        if (singularType === 'object') {
+            const layer = this.classifyObjectContribution(request.name, request.packageId);
+            if (layer.kind === 'mismatch') {
+                throw ObjectStackProtocolImplementation.overlayPackageMismatchError(
+                    request.name, layer.packageId, layer.ownerPackageId,
+                );
+            }
+        }
+
         // Phase 3a-destructive: for object/field writes, diff against the
         // current schema and 409 if the change would drop data — unless the
         // caller has acknowledged the risk with `force: true`. The admin UI
         // surfaces the structured `issues` payload in a confirmation dialog.
-        const singularType = PLURAL_TO_SINGULAR[request.type] ?? request.type;
         if (!request.force && (singularType === 'object' || singularType === 'field')) {
             try {
                 const existing = await this.getMetaItem({
@@ -9766,6 +10040,18 @@ export class ObjectStackProtocolImplementation implements
          * same contract as `seedApplied` — surfaced, never thrown.
          */
         materializeApplied?: PublishMaterializeResult;
+        /**
+         * Present when an ADR-0094 mutation projector is registered for this
+         * type: the outcome of the awaited post-persist projection. The
+         * draft→active promotion runs the projector exactly as a direct active
+         * save does, so this is the same receipt `saveMetaItem` returns.
+         *
+         * [#7294] It was ASSIGNED below and missing from this annotation, so
+         * the method's declared type denied a key the wire body carried — the
+         * same declared-≠-returned gap one layer down from the one #7294
+         * closed on the spec side.
+         */
+        projectionApplied?: MutationProjectionOutcome;
     }> {
         const { singularType, orgId, result } = await this.promoteDraftForPublish(request);
         const response: {
@@ -12110,9 +12396,30 @@ export class ObjectStackProtocolImplementation implements
                         // the write path's `request.packageId || 'sys_metadata'`:
                         // an empty binding is "no package", and the sentinel
                         // marks exactly that one thing.
+                        //
+                        // [ADR-0029 D9.8] …and the KIND is chosen, not
+                        // defaulted. Registering every row as `'own'` is what
+                        // made this seam replay a destruction of the packaged
+                        // definition on EVERY boot, silently and with a clean
+                        // `{loaded:1,errors:0,invalid:0}` receipt (#6853 P6).
+                        // [D9.9] A row bound to a package that does NOT own the
+                        // object throws here on purpose: the per-record catch
+                        // below counts it in `errors` with its reason, which is
+                        // the boot-side half of the write-path refusal.
+                        const layer = this.classifyObjectContribution(
+                            String(record.name),
+                            (record as { package_id?: string | null }).package_id,
+                        );
+                        if (layer.kind === 'mismatch') {
+                            throw ObjectStackProtocolImplementation.overlayPackageMismatchError(
+                                String(record.name), layer.packageId, layer.ownerPackageId,
+                            );
+                        }
                         this.engine.registry.registerObject(
                             { ...(data as Record<string, unknown>), _provenance: 'org' } as any,
-                            (record as { package_id?: string | null }).package_id || 'sys_metadata',
+                            layer.packageId,
+                            undefined,
+                            layer.kind,
                         );
                     } else {
                         // Same rule as the getMetaItems read-side hydration and

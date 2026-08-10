@@ -301,6 +301,7 @@
     "api/PresenceStatus",
     "api/PresenceUpdate",
     "api/PresignedUrlResponse",
+    "api/PublishMetaItemResponse",
     "api/QueryAdapterConfig",
     "api/QueryAdapterTarget",
     "api/QueryOptimizationConfig",

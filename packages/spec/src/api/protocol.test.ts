@@ -750,3 +750,108 @@ describe('SaveMetaItemResponseSchema (#5745 — declares the full save response)
     ).toBe(false);
   });
 });
+
+import { PublishMetaItemResponseSchema } from './protocol.zod';
+
+/**
+ * #7294 — the same suite one door over, for `POST /meta/:type/:name/publish`.
+ *
+ * The publish door had NO declaration at all: `PublishMetaItem` appeared
+ * nowhere under `packages/spec/src/`, so its `version` — the same ADR-0008 OCC
+ * token the save door already declares — rode the wire with no contract behind
+ * it, and `PublishMetaItemResponse` could not be named at the type level.
+ *
+ * Optionality is measured, not assumed (evidence in the PR): the sole producer
+ * is `ObjectStackProtocolImplementation.publishMetaItem`, whose single response
+ * literal always sets `success` / `version` / `seq`, and attaches each of the
+ * three `*Applied` receipts only when the matching side effect ran.
+ */
+describe('PublishMetaItemResponseSchema (#7294 — declares the full publish response)', () => {
+  /** A verbatim capture of a real `publishMetaItem` return (promotion path). */
+  const realResponse = {
+    success: true,
+    version: 'sha256:7aad99c8d969efb5067fff275fb3e5be7ec90f9cd610d41709fcddbf8c34b1f0',
+    seq: 2,
+    message: 'Published draft — type=view, name=cases [seq=2]',
+  };
+
+  it('round-trips a real response without stripping any field', () => {
+    const parsed = PublishMetaItemResponseSchema.parse(realResponse);
+    expect(Object.keys(parsed).sort()).toEqual(Object.keys(realResponse).sort());
+    expect(parsed).toEqual(realResponse);
+  });
+
+  it('carries the ADR-0008 OCC token: version survives parse as the If-Match value', () => {
+    expect(PublishMetaItemResponseSchema.parse(realResponse).version).toBe(realResponse.version);
+  });
+
+  it('keeps seq as an integer and rejects a fractional one', () => {
+    expect(PublishMetaItemResponseSchema.parse(realResponse).seq).toBe(2);
+    expect(PublishMetaItemResponseSchema.safeParse({ ...realResponse, seq: 2.5 }).success).toBe(false);
+  });
+
+  it('requires success / version / seq — the producer always emits them', () => {
+    for (const missing of ['success', 'version', 'seq'] as const) {
+      const body: Record<string, unknown> = { ...realResponse };
+      delete body[missing];
+      expect(
+        PublishMetaItemResponseSchema.safeParse(body).success,
+        `omitting '${missing}' must fail parse`,
+      ).toBe(false);
+    }
+  });
+
+  it('carries seedApplied — present only when a `seed` was published', () => {
+    expect(PublishMetaItemResponseSchema.safeParse(realResponse).success).toBe(true);
+    const withSeed = PublishMetaItemResponseSchema.parse({
+      ...realResponse,
+      seedApplied: { success: true, inserted: 3, updated: 1 },
+    });
+    expect(withSeed.seedApplied).toEqual({ success: true, inserted: 3, updated: 1 });
+    // The loader's per-record failure list is part of the shape, not extra
+    // baggage the schema drops on the floor.
+    const withErrors = PublishMetaItemResponseSchema.parse({
+      ...realResponse,
+      seedApplied: { success: false, inserted: 0, updated: 0, errors: [{ row: 1, reason: 'bad ref' }] },
+    });
+    expect(withErrors.seedApplied?.errors).toHaveLength(1);
+  });
+
+  it('seedApplied counters are required integers once the key is present', () => {
+    expect(
+      PublishMetaItemResponseSchema.safeParse({ ...realResponse, seedApplied: { success: true } }).success,
+    ).toBe(false);
+    expect(
+      PublishMetaItemResponseSchema.safeParse({
+        ...realResponse, seedApplied: { success: true, inserted: 1.5, updated: 0 },
+      }).success,
+    ).toBe(false);
+  });
+
+  it('carries materializeApplied — present only when an ADR-0086 P2 materializer is registered', () => {
+    const parsed = PublishMetaItemResponseSchema.parse({
+      ...realResponse,
+      materializeApplied: { success: false, inserted: 0, updated: 0, error: 'boom-from-materializer' },
+    });
+    expect(parsed.materializeApplied)
+      .toEqual({ success: false, inserted: 0, updated: 0, error: 'boom-from-materializer' });
+  });
+
+  it('carries projectionApplied — the same ADR-0094 receipt the save door declares', () => {
+    const parsed = PublishMetaItemResponseSchema.parse({
+      ...realResponse,
+      projectionApplied: { success: false, error: 'boom-from-projector' },
+    });
+    expect(parsed.projectionApplied).toEqual({ success: false, error: 'boom-from-projector' });
+    expect(
+      PublishMetaItemResponseSchema.safeParse({ ...realResponse, projectionApplied: { error: 'x' } }).success,
+    ).toBe(false);
+  });
+
+  it('leaves all three receipts optional — absent means that side effect did not run', () => {
+    for (const key of ['seedApplied', 'materializeApplied', 'projectionApplied'] as const) {
+      expect(realResponse).not.toHaveProperty(key);
+    }
+    expect(PublishMetaItemResponseSchema.safeParse(realResponse).success).toBe(true);
+  });
+});

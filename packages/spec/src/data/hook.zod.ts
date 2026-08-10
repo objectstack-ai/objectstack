@@ -310,6 +310,15 @@ export const HookContextSchema = lazySchema(() => z.object({
    * Input Parameters (Mutable)
    * Modify this to change the behavior of the operation.
    *
+   * TWO SURFACES, and they do NOT hand a handler the same `input`. The rows
+   * immediately below are the RAW ENVELOPE the engine builds — what a handler
+   * registered through `engine.registerHook` receives, and only that. Every
+   * DECLARATIVE hook — a metadata `Hook`, i.e. everything an app author writes
+   * in `defineStack({ hooks })` — is handed a FLAT RECORD VIEW of that
+   * envelope instead. If you are authoring a `Hook`, the rows you need are the
+   * DECLARATIVE SURFACE block that follows the envelope rows; read the
+   * envelope rows as the shape being viewed, not as what you will see.
+   *
    * These shapes are exactly what the engine BUILDS — `packages/objectql`'s
    * `engine.ts` is the only producer of a `HookContext`. A key this table
    * lists but no producer sets reads back `undefined` at every call site, and
@@ -330,8 +339,61 @@ export const HookContextSchema = lazySchema(() => z.object({
    * - delete (bulk, multi:true) — before, PER MATCHED ROW: { id: ID, options: EngineDeleteOptions }
    * - delete (bulk, multi:true) — after, PER MATCHED ROW: { id: ID, options: DriverOptions }
    *
+   * DECLARATIVE SURFACE — what an app author is actually handed
+   *
+   * `bindHooksToEngine` wraps every metadata `Hook` in `wrapDeclarativeHook`,
+   * which calls `installFlatInput` (`packages/objectql/src/hook-wrappers.ts`)
+   * for the duration of the handler call: `ctx.input` is swapped for a Proxy
+   * presenting a flat record view over the envelope above, then restored in a
+   * `finally`, so the engine's own downstream `input.data` read still picks up
+   * whatever the handler wrote. That produces TWO shapes, not one — measured
+   * (#7254) on a real kernel and the real QuickJS runner, with persisted-row
+   * assertions:
+   *
+   * - declarative `handler` (code): `input.<field>` IS the record field. Reads
+   *   of any non-wrapper key resolve against `data`; writes ALWAYS land in
+   *   `data` (created if missing), which is how `input.field = value` reaches
+   *   the driver — and on a bulk write that IS the one batch-scoped payload
+   *   (D3 below), so the flat spelling scopes a rewrite no better than
+   *   `input.data.field` did. The wrapper keys `data` / `id` / `options` / `ast` still
+   *   pass THROUGH to the envelope, so `input.data.<field>` also happens to
+   *   work here — redundantly, and it is the spelling that breaks on the other
+   *   surface. Enumeration is flat-only: `Object.keys(input)`, spread and
+   *   `for…in` list the record fields and hide the wrapper keys (the proxy's
+   *   `ownKeys` trap), so a diff written as
+   *   `Object.keys(input).filter(k => input[k] !== previous[k])` sees fields.
+   * - declarative `body` (L2 sandboxed JS): `ctx.input` IS the flat record —
+   *   a plain snapshot the runner takes as `unwrapProxyToPlain(engineCtx.input)`
+   *   (`packages/runtime/src/sandbox/body-runner.ts`), i.e. `Object.entries`
+   *   over that proxy, so it materialises exactly what `ownKeys` exposes and
+   *   nothing else. There is NO `data` key at all: `input.data` is `undefined`,
+   *   and the envelope spelling `input.data.<field>` is a **TypeError** — which
+   *   ABORTS the caller's write on a hook whose `onError` is `abort` — which is
+   *   this schema's DEFAULT, and what shipped showcase body hooks declare
+   *   explicitly. `id`, `options` and `ast` are
+   *   absent for the same reason; on `find` and `delete`, whose envelopes carry
+   *   no `data`, the whole snapshot is `{}`. A body that needs the row reads
+   *   `ctx.previous` — the pre-image, `id` included, bound on update and delete.
+   *   Writes the script makes to `ctx.input` are copied back onto the live proxy
+   *   after it returns (`applyMutationsToInput`), so `input.field = value` still
+   *   lands in `data` through the same `set` trap.
+   *
+   * There is therefore no single spelling that works everywhere:
+   * `input.<field>` is correct on BOTH declarative surfaces, and
+   * `input.data.<field>` only off the raw `registerHook` envelope. #7225 is
+   * what naming just one half costs: a careful reader holding only the envelope
+   * rows concluded that three shipped, working example hooks were silent
+   * no-ops, and prescribed re-spelling them to `input.data` — which would have
+   * converted the showcase's public web-to-lead insert into a hard refusal of
+   * every submission. The two declarative shapes are pinned against a real
+   * kernel in `examples/app-showcase/test/hook-body-persisted-writes.test.ts`
+   * (#7258); the envelope rows stay pinned in objectql's
+   * `hook-input-shape-contract.test.ts`. Whether the two surfaces should
+   * CONVERGE is a separate question, deliberately not decided here (#7254) —
+   * the split is stated so it cannot be mistaken for an oversight.
+   *
    * PHASE — `input.options` is the one slot whose TYPE depends on when you read
-   * it, on every path above. The engine builds the context with the CALLER's
+   * it, on every envelope path above. The engine builds the context with the CALLER's
    * own options bag (`EngineQueryOptions` / `DataEngineInsertOptions` /
    * `EngineUpdateOptions` / `EngineDeleteOptions`) and only AFTER the `before*`
    * handlers return — before the driver call — merges the driver-facing keys
@@ -340,7 +402,7 @@ export const HookContextSchema = lazySchema(() => z.object({
    * `after*` handler and the driver read the `DriverOptions` view. The merge is
    * ADDITIVE — it spreads the caller's bag and adds keys, never strips one — so
    * the widening is one-way and nothing a `before*` handler saw disappears.
-   * #5997 corrected the two `before` rows above, which had said `DriverOptions`
+   * #5997 corrected the two `before` envelope rows above, which had said `DriverOptions`
    * (a type that declares no `where` and no `multi`): that is not what the
    * engine builds there, and not what the two consumers named below read.
    * Measured and pinned in the same contract test as the rest of this table.
@@ -354,7 +416,7 @@ export const HookContextSchema = lazySchema(() => z.object({
    * (D1–D7) with its budget ceiling is `data/bulk-write-hook-conformance.ts`
    * (ADR-0058 Addendum II).
    *
-   * Two things a reader of the rows above still has to know:
+   * Two things a reader of the envelope rows above still has to know:
    *
    *  - The PAYLOAD stays BATCH-scoped (D3). Every per-row `beforeUpdate`
    *    context carries THE one payload, not a copy — `driver.updateMany` takes

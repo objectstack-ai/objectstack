@@ -61,6 +61,14 @@
 // one and the authored value was never read. An optional `"producer"` cites the
 // call site; its paths resolve exactly like `evidence`.
 //
+// THE README'S OWN INDEX (#7257): the ledger README ends with a "Current state"
+// table, one row per governed type, under a heading that claims complete
+// registry coverage. Nothing reconciled that table against `GOVERNED`, so the
+// heading's number was the count of ROWS rather than of governed types, and
+// `api` and `capability` were governed for days with no row at all. Same shape
+// as #4956 one level up: a completeness sentence that no build could fail. See
+// readme-table.mts.
+//
 // EVIDENCE SCOPE (`evidenceScope`, #4895): four measured verdicts have been
 // reached by searching this repo alone and published as if they covered every
 // consumer (`app.homePageId`, `flow.…position`, `HttpMethod`,
@@ -123,6 +131,12 @@ import {
   reconcileContainerCoverage,
   type ContainerCoverage,
 } from './drill.mts';
+import {
+  README_ORPHAN_ROW_GUIDANCE,
+  README_TABLE_GUIDANCE,
+  parseStateTable,
+  reconcileReadmeTable,
+} from './readme-table.mts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const specRoot = resolve(here, '../..'); // packages/spec
@@ -361,6 +375,11 @@ const report: any = {
   brokenDeferrals: [] as string[], // a declared deferral whose target is missing, drifted, or double-declared
   deferredContainers: [] as string[], // containers whose subtree IS classified elsewhere — resolved, not believed
   deferredChildKeys: 0, // how many child keys those resolved deferrals actually cover
+  readmeMissingRows: [] as string[], // a GOVERNED type with no row in the README state table (#7257)
+  readmeOrphanRows: [] as string[], // a README row for a type GOVERNED does not contain
+  readmeHeadingErrors: [] as string[], // "N governed types" disagrees with the rows / with GOVERNED
+  readmeMalformedRows: [] as string[], // a table line the row parser could not read — never silently skipped
+  readmeRowCount: 0, // rows the parser found, printed every run so the number is visible rather than believed
   verification: null as VerificationReport | null, // `verifiedAt` ages — the re-verification worklist
   producers: null as ProducerReport | null, // `producer` / `evidenceScope` — the #4837 / #4895 worklists
   producerMissing: [] as string[], // a `producer` pointer into thin air — FAILS, like a rotted `evidence`
@@ -567,6 +586,28 @@ report.undrilledChildKeys = coverage.inheritedChildKeys;
 report.deferredContainers = undrilledBaseline.deferred.map((d) => `${d.container} → ${d.to}`);
 report.deferredChildKeys = coverage.deferredChildKeys;
 
+// ── the README's own index: does the state table cover GOVERNED? ──
+// The gate's fourth direction (#7257). The three above ask whether the LEDGERS
+// are honest; this asks whether the file that indexes them is. It reads the
+// README from the ledger root so the self-test can point it at a mutated copy —
+// the same `--ledger-root` trick the evidence guard uses, and for the same
+// reason: a gate that fails is worth exactly as much as the proof that it fails,
+// and this table is complete on a green tree.
+const readmeFile = join(ledgerRoot, 'README.md');
+if (!existsSync(readmeFile)) {
+  report.readmeHeadingErrors.push(`${readmeFile} does not exist — the ledger index is gone`);
+} else {
+  const stateTable = parseStateTable(readFileSync(readmeFile, 'utf8'));
+  const readme = reconcileReadmeTable({ governed: GOVERNED, table: stateTable });
+  report.readmeMissingRows = readme.missingRows;
+  report.readmeOrphanRows = readme.orphanRows.concat(
+    readme.duplicateRows.map((d) => `${d} — duplicate row`),
+  );
+  report.readmeHeadingErrors = readme.headingErrors;
+  report.readmeMalformedRows = readme.malformed;
+  report.readmeRowCount = stateTable.rows.length;
+}
+
 // ── verifiedAt: how old is each claim? ──
 // Age never fails the gate — re-verification is a worklist, not a merge gate.
 // A MALFORMED value does fail: it silently disables the staleness check for
@@ -618,7 +659,11 @@ const failed =
   report.stalePending.length > 0 ||
   report.undrilledNew.length > 0 ||
   report.undrilledStale.length > 0 ||
-  report.brokenDeferrals.length > 0;
+  report.brokenDeferrals.length > 0 ||
+  report.readmeMissingRows.length > 0 ||
+  report.readmeOrphanRows.length > 0 ||
+  report.readmeHeadingErrors.length > 0 ||
+  report.readmeMalformedRows.length > 0;
 if (asJson) {
   process.stdout.write(JSON.stringify(report, null, 2) + '\n');
 } else {
@@ -732,6 +777,39 @@ if (asJson) {
       '   `containers` list and admit the keys are classified nowhere.',
     );
   }
+  if (report.readmeMissingRows.length) {
+    console.log(
+      `\n✗ ${report.readmeMissingRows.length} governed type(s) with NO row in the README's ` +
+      '"Current state" table — the index fell behind its own registry:',
+    );
+    report.readmeMissingRows.forEach((t: string) => console.log(`    ${t}`));
+    console.log('');
+    README_TABLE_GUIDANCE.forEach((line) => console.log(line ? `   ${line}` : ''));
+  }
+  if (report.readmeOrphanRows.length) {
+    console.log(`\n✗ ${report.readmeOrphanRows.length} README state-table row(s) that GOVERNED does not back:`);
+    report.readmeOrphanRows.forEach((t: string) => console.log(`    ${t}`));
+    console.log('');
+    README_ORPHAN_ROW_GUIDANCE.forEach((line) => console.log(line ? `   ${line}` : ''));
+  }
+  if (report.readmeHeadingErrors.length) {
+    console.log(`\n✗ ${report.readmeHeadingErrors.length} README state-table heading error(s):`);
+    report.readmeHeadingErrors.forEach((s: string) => console.log(`    ${s}`));
+    console.log(
+      '\n   "N governed types (complete registry coverage)" is a completeness CLAIM, and\n' +
+      '   until #7257 nothing could falsify it: N was the count of rows, not of governed\n' +
+      '   types, so the two agreed only by coincidence — until `api` and `capability` were\n' +
+      '   governed with no row and the sentence stayed true-looking. Fix the number and the\n' +
+      '   rows together; they are checked against each other AND against GOVERNED.',
+    );
+  }
+  if (report.readmeMalformedRows.length) {
+    console.log(
+      `\n✗ ${report.readmeMalformedRows.length} unreadable line(s) in the README state table —` +
+      ' a row this parser cannot see is a row it cannot govern:',
+    );
+    report.readmeMalformedRows.forEach((s: string) => console.log(`    ${s}`));
+  }
   // ── re-verification clock ──
   // Annotated at the boundary: `report` is deliberately `any` (see its
   // declaration), so without this every `v.*` below is `any` too — which is how
@@ -827,7 +905,8 @@ if (asJson) {
       '\n✓ every governed-type property at the walk\'s one-level granularity is classified, every ' +
       'registered type is governed or explicitly pending, no ledger row outlives its property, ' +
       'every container inheritance is declared, every `live` entry\'s repo-local evidence path ' +
-      'resolves, and all bound high-risk proofs resolve.',
+      'resolves, all bound high-risk proofs resolve, and the README state table carries a row ' +
+      `for each of the ${report.readmeRowCount} governed type(s) it claims to index.`,
     );
     if (report.undrilledChildKeys) {
       console.log(

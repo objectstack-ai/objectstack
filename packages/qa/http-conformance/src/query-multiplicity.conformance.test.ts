@@ -1,77 +1,97 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * A REPEATED query parameter — cross-adapter conformance (#6878, route 1).
+ * A REPEATED query parameter — cross-adapter conformance (#6878, route 2).
  *
- * ## What this file is, and what it deliberately is NOT
+ * ## What this file is
  *
- * It is a **divergence record**, not a contract. The two `IHttpServer`
- * implementations hand a handler two DIFFERENT `req.query` shapes for one and
- * the same request, and **both are legal today**: the contract in
+ * It is now a **contract**: every `IHttpServer` implementation hands a handler
+ * the SAME `req.query` shape for one and the same request —
+ *
+ *     a repeated key  ⇒ an array, in wire order
+ *     a single key    ⇒ a plain string
+ *
+ * It did not start that way. It was written under #6878 route 1 (PR #6941) as
+ * a **divergence record**, because at that time the two adapters answered the
+ * same request differently and both answers were legal: the contract in
  * `packages/spec/src/contracts/http-server.ts` declares
- * `query: Record<string, string | string[]>`, and a repeated key landing on
- * either arm of that union satisfies it. Neither adapter has a bug here.
+ * `query: Record<string, string | string[]>`, and either arm of that union
+ * satisfies it. The file therefore recorded each adapter's MEASURED shape and
+ * refused to assert a unified one, since asserting one would have settled the
+ * open contract question through the back door of a test file.
  *
- * So this file does NOT assert one unified answer. There isn't one. Asserting
- * one would be encoding a wish — and worse, it would settle #6878's open
- * contract question through the back door of a test file. Each adapter row
- * below carries the shape that adapter was **measured** to produce, and the
- * last describe states the disagreement out loud.
+ * The cli-lane seat then ruled the fork (2026-08-10, #6878 comment 5236010909):
+ * **route 2 adopted** — a repeated parameter is always an array — and the Hono
+ * adapter was flipped to `c.req.queries()` with a `length` normalisation. This
+ * file was collapsed into the single expected shape exactly as its own previous
+ * header instructed, which is what that header's "expected to go red on
+ * purpose" clause was for. The declared type in `packages/spec` is UNCHANGED:
+ * the union already permitted arrays, so nothing about the contract's shape
+ * moved — what moved is the platform's answer, from "depends on which server
+ * booted" to one answer.
  *
- * ## The measurement (re-taken for this PR, not copied from the card)
+ * ## The measurements
  *
- * Measured 2026-08-09 on `origin/main` @ 9d425a94d, hono@4.12.34 resolved,
- * over a real socket through the same public entry points as production:
+ * BEFORE (2026-08-09, `origin/main` @ 9d425a94d, hono@4.12.34, real socket):
  *
  *     GET /probe?version=1.0.0&version=2.0.0&single=9
  *
  *     [NodeHttpServer]  { version: ['1.0.0', '2.0.0'], single: '9' }   // array
  *     [HonoHttpServer]  { version: '1.0.0',            single: '9' }   // first value
  *
+ * AFTER (2026-08-10, this change, same probe, same real socket): both adapters
+ * yield `{ version: ['1.0.0','2.0.0'], single: '9' }`.
+ *
  *  - `NodeHttpServer` (this package's reference adapter, `./adapter.ts`) reads
  *    `url.searchParams.getAll(key)` and keeps the array when `length > 1`.
- *  - `HonoHttpServer` (`plugin-hono-server/src/adapter.ts`) reads
- *    `c.req.query()`, which yields the FIRST value per key. It has two such
- *    construction sites — the route handler seam and the `use()` middleware
- *    seam — so both must move together whenever #6878 is decided.
+ *    Unchanged — it was already the shape route 2 adopted.
+ *  - `HonoHttpServer` (`plugin-hono-server/src/adapter.ts`) now reads
+ *    `c.req.queries()` through one `readQuery(c)` helper, normalised by
+ *    `length`. It has TWO construction sites — the route handler seam and the
+ *    `use()` middleware seam — and both moved together, which is what the
+ *    per-adapter rows below (driven through a real socket, not a double) and
+ *    the middleware case at the end of this file each hold down.
  *
- * ## Why the gap existed until now
+ * ## ⚠️ The normalisation is load-bearing — the control case is why
  *
- * The node half was already pinned, but only ADAPTER-LOCALLY, in
- * `adapter.test.ts` ('routes :param and multi-value query', `?a=1&b=x&b=y`).
+ * On hono@4.12.x, `c.req.queries()` returns an array for EVERY key, including
+ * single-valued ones (`{ version: ['1.0.0','2.0.0'], single: ['9'] }`). A bare
+ * swap would therefore have turned every existing single-value read point on
+ * the production adapter into an array. The `single`-key control case below is
+ * the tripwire for exactly that: PR #6941 measured a bare, un-normalised
+ * `queries()` at `4 failed | 2 passed`, failing with
+ * `expected { single: ['9'] } to deeply equal { single: '9' }`. ⛔ Do not
+ * weaken or delete the control case — it is the only assertion separating
+ * "arrays on repeats" from "arrays on everything".
+ *
+ * ## Why this suite is the right home for it
+ *
+ * The node half was pinned before this file existed, but only ADAPTER-LOCALLY,
+ * in `adapter.test.ts` ('routes :param and multi-value query', `?a=1&b=x&b=y`).
  * Nothing ran the same request against Hono, and no case in either
  * `describe.each(ADAPTERS)` suite (`conformance.integration.test.ts`,
- * `fallback-seam.conformance.test.ts`) repeated a parameter at all. The one
- * place the adapters visibly disagree was therefore the one place this package
- * — whose entire purpose is "everything registered through `IHttpServer`
- * behaves the same on a non-Hono server" — was not looking.
+ * `fallback-seam.conformance.test.ts`) repeated a parameter at all.
  *
- * Consumer-side tests do not close that gap either: `packages/rest`'s
+ * Consumer-side tests do not cover it either: `packages/rest`'s
  * `package-routes-query-multiplicity.test.ts` (#6307) hand-constructs
  * `query: { version: [...] }` and drives the handler directly, so it asserts a
- * shape that no adapter is obliged to produce. A hand-built double can produce
- * anything, which is precisely why the suite was green.
+ * shape no adapter is obliged to produce. A hand-built double can produce
+ * anything, which is precisely why that suite stayed green while the adapters
+ * disagreed. These cases go over a real socket for that reason.
  *
- * ## THIS FILE IS EXPECTED TO GO RED — on purpose — when #6878 is decided
+ * ## What a future red here means
  *
- * #6878 offers three dispositions; route 1 (this file) pins the divergence as
- * KNOWN without removing it. If route 2 lands ("a repeated parameter is always
- * an array": Hono switches to `c.req.queries()` normalised by `length`) or
- * route 3 lands ("always single, first value wins": node collapses), the rows
- * below stop matching and the divergence describe fails. That red is the
- * REMINDER, not a regression: collapse the per-adapter `measuredQuery` rows
- * into one shared expectation and delete the divergence describe.
- *
- * One datum for that decision, gathered here: the `single` key is a control.
- * On hono@4.12.34, `c.req.queries()` returns an array for EVERY key
- * (`{ version: ['1.0.0','2.0.0'], single: ['9'] }`), so route 2 cannot be a
- * bare swap — without the `length` normalisation, `single` would arrive as
- * `['9']` and this file's node/hono agreement on single-valued keys, asserted
- * below, is what would catch it.
+ * A failure is no longer a reminder — it is a regression. Either an adapter
+ * stopped honouring the convention, or a dependency bump changed how it parses
+ * a query string. The rest-side gates that DEPEND on this convention being
+ * live are #6877 (PR #7324 — 63 single-valued parameter slots that now refuse
+ * repetition) and #7321 (PR #7386); they were landed BEFORE this flip precisely
+ * so that arrays reaching production handlers meet a gate rather than a
+ * `String(…)` coercion. Fix the adapter, do not relax these rows.
  */
 
 import { describe, it, expect, afterEach } from 'vitest';
-import type { IHttpRequest, RouteHandler } from '@objectstack/core';
+import type { IHttpRequest, Middleware, RouteHandler } from '@objectstack/core';
 import { HonoHttpServer } from '@objectstack/plugin-hono-server';
 
 import { NodeHttpServer } from './adapter.js';
@@ -79,6 +99,7 @@ import { NodeHttpServer } from './adapter.js';
 /** The `IHttpServer` surface these cases drive — one GET route, one socket. */
 interface QueryProbeServer {
     get(path: string, handler: RouteHandler): void;
+    use(pathOrHandler: string | Middleware, handler?: Middleware): void;
     listen(port: number): Promise<void>;
     close?(): Promise<void>;
     getPort(): number;
@@ -91,27 +112,35 @@ interface QueryProbeServer {
  */
 const PROBE_QUERY = 'version=1.0.0&version=2.0.0&single=9';
 
+/**
+ * The ONE shape every `IHttpServer` implementation must hand a handler for
+ * `?${PROBE_QUERY}` — repeated key as an array in wire order, single key as a
+ * plain string (#6878 route 2, ruled 2026-08-10).
+ *
+ * This constant replaced a per-adapter `measuredQuery` field, which is exactly
+ * the collapse the previous revision's header prescribed for the day the fork
+ * was decided. Its being shared is the assertion: there is no longer a place
+ * for an adapter to record a shape of its own.
+ */
+const EXPECTED_QUERY: Record<string, string | string[]> = {
+    version: ['1.0.0', '2.0.0'],
+    single: '9',
+};
+
 type AdapterCase = {
     label: 'node' | 'hono';
     make: () => QueryProbeServer;
-    /**
-     * The shape this adapter was MEASURED to hand the handler for
-     * `?${PROBE_QUERY}` — recorded, not chosen. See the file header: both
-     * shapes satisfy `IHttpRequest.query` today, and which one is "right" is
-     * exactly what #6878 has not decided yet.
-     */
-    measuredQuery: Record<string, string | string[]>;
 };
 
 const ADAPTERS: AdapterCase[] = [
     {
         label: 'node',
-        make: () => new NodeHttpServer(0),
         // `url.searchParams.getAll(key)`, kept as an array when length > 1.
-        measuredQuery: { version: ['1.0.0', '2.0.0'], single: '9' },
+        make: () => new NodeHttpServer(0),
     },
     {
         label: 'hono',
+        // `c.req.queries()` through `readQuery(c)`, normalised by length.
         make: () => {
             const server = new HonoHttpServer(0);
             // The standard composed state `HonoServerPlugin.start()` produces —
@@ -121,8 +150,6 @@ const ADAPTERS: AdapterCase[] = [
             server.installNotFoundSeam();
             return server;
         },
-        // `c.req.query()`, which yields the first value per key.
-        measuredQuery: { version: '1.0.0', single: '9' },
     },
 ];
 
@@ -137,9 +164,27 @@ function probeRoute(server: QueryProbeServer): { received: () => IHttpRequest | 
     return { received: () => received };
 }
 
+/**
+ * Register a middleware capturing the `req` the adapter builds for the
+ * MIDDLEWARE seam — a different construction site from the route handler's on
+ * both adapters, and on Hono a physically separate one (`adapter.ts` builds
+ * `query` at the route-handler seam AND inside `installMiddlewareSeam()`).
+ * Without this, half of route 2's two-point change is unpinned: flipping only
+ * the handler seam would leave every `use()` middleware still reading a
+ * collapsed first value, and every case above would stay green.
+ */
+function probeMiddleware(server: QueryProbeServer): { received: () => IHttpRequest | undefined } {
+    let received: IHttpRequest | undefined;
+    server.use((req, _res, next) => {
+        received = req;
+        return next();
+    });
+    return { received: () => received };
+}
+
 describe.each(ADAPTERS)(
-    'repeated query parameter on $label adapter (#6878 — divergence record, not a contract)',
-    ({ make, measuredQuery }) => {
+    'repeated query parameter on $label adapter (#6878 route 2 — the platform convention)',
+    ({ make }) => {
         const opened: QueryProbeServer[] = [];
 
         async function boot(server: QueryProbeServer): Promise<string> {
@@ -152,7 +197,7 @@ describe.each(ADAPTERS)(
             await Promise.all(opened.splice(0).map((s) => s.close?.()));
         });
 
-        it('hands the handler its measured query shape, over a real socket', async () => {
+        it('surfaces a repeated key as an array and a single key as a string', async () => {
             const server = make();
             const probe = probeRoute(server);
             const base = await boot(server);
@@ -160,16 +205,18 @@ describe.each(ADAPTERS)(
             const res = await fetch(`${base}/probe?${PROBE_QUERY}`);
             expect(res.status).toBe(200);
 
-            // Exact shape, not a subset: this is the record of what this
-            // adapter does TODAY. Both the repeated key and the single key
-            // are pinned, so a change to either is visible.
-            expect(probe.received()?.query).toEqual(measuredQuery);
+            // Exact shape, not a subset, and the SHARED expectation — both the
+            // repeated key and the single key are pinned, so a change to
+            // either is visible on either adapter.
+            expect(probe.received()?.query).toEqual(EXPECTED_QUERY);
         });
 
         it('leaves a single-valued key a plain string (the control)', async () => {
-            // Without this, "arrays on repeats" and "arrays on everything"
-            // read identically — and they are different adapters' futures
-            // under #6878 route 2. See the file header.
+            // ⛔ Load-bearing, do not delete. Without this, "arrays on repeats"
+            // and "arrays on everything" read identically — and the latter is
+            // what an un-normalised `c.req.queries()` produces on the Hono
+            // adapter. PR #6941 measured that mistake at `4 failed | 2 passed`,
+            // failing here with `{ single: ['9'] }`. See the file header.
             const server = make();
             const probe = probeRoute(server);
             const base = await boot(server);
@@ -177,19 +224,36 @@ describe.each(ADAPTERS)(
             await fetch(`${base}/probe?single=9`);
             expect(probe.received()?.query).toEqual({ single: '9' });
         });
+
+        it('applies the same convention at the middleware seam', async () => {
+            // The SECOND construction site. On Hono these are two independent
+            // pieces of code (`adapter.ts`: the route-handler seam and
+            // `installMiddlewareSeam()`), so a half-applied route 2 lands
+            // exactly here and nowhere else.
+            const server = make();
+            const mw = probeMiddleware(server);
+            probeRoute(server);
+            const base = await boot(server);
+
+            await fetch(`${base}/probe?${PROBE_QUERY}`);
+            expect(mw.received()?.query).toEqual(EXPECTED_QUERY);
+        });
     },
 );
 
 /**
- * The divergence itself, asserted in ONE place so it cannot be read as two
- * unrelated per-adapter facts. This describe is the deliverable of #6878
- * route 1: the platform's answer to a repeated query parameter currently
- * depends on which server booted, and from here on a gate says so.
+ * The AGREEMENT, asserted in ONE place, side by side in a single test — so it
+ * cannot be read as two unrelated per-adapter facts that happen to match.
+ * This describe is the deliverable of #6878 route 2, and it replaces the
+ * divergence describe the route-1 revision (PR #6941) put here.
  *
- * It fails the day the two adapters agree — see the file header for why that
- * red is the intended alarm and what to do about it.
+ * The per-adapter cases above already pin each adapter to `EXPECTED_QUERY`;
+ * what this adds is the cross-adapter claim itself — two live servers, one
+ * request shape, one answer — which is the sentence `packages/qa` exists to
+ * defend ("everything registered through `IHttpServer` behaves the same on a
+ * non-Hono server").
  */
-describe('node ↔ hono: the repeated-parameter answer depends on which server booted (#6878)', () => {
+describe('node ↔ hono: the repeated-parameter answer no longer depends on which server booted (#6878)', () => {
     const opened: QueryProbeServer[] = [];
 
     async function bootProbe(adapter: AdapterCase) {
@@ -204,7 +268,7 @@ describe('node ↔ hono: the repeated-parameter answer depends on which server b
         await Promise.all(opened.splice(0).map((s) => s.close?.()));
     });
 
-    it('agrees on a single-valued key and DISAGREES on a repeated one', async () => {
+    it('agrees on BOTH the single-valued key and the repeated one', async () => {
         const node = await bootProbe(ADAPTERS[0]);
         const hono = await bootProbe(ADAPTERS[1]);
 
@@ -217,25 +281,27 @@ describe('node ↔ hono: the repeated-parameter answer depends on which server b
         const nodeQuery = node.probe.received()?.query;
         const honoQuery = hono.probe.received()?.query;
 
-        // Same status, same route, same request — and not the same answer.
-        expect(nodeQuery?.single).toBe('9');
-        expect(honoQuery?.single).toBe('9');
-        expect(nodeQuery?.version).toEqual(['1.0.0', '2.0.0']);
-        expect(honoQuery?.version).toBe('1.0.0');
+        // Same status, same route, same request — and now the same answer.
+        expect(nodeQuery).toEqual(EXPECTED_QUERY);
+        expect(honoQuery).toEqual(EXPECTED_QUERY);
         expect(
-            nodeQuery?.version,
-            'the adapters now AGREE on a repeated query parameter — #6878 route 2/3 has ' +
-            'presumably landed, so collapse the per-adapter `measuredQuery` rows into one ' +
-            'shared expectation and delete this describe',
-        ).not.toEqual(honoQuery?.version);
+            honoQuery,
+            'the adapters disagree on a repeated query parameter again — #6878 route 2 is ' +
+            'the platform convention, so fix the adapter that drifted rather than relaxing ' +
+            'this expectation',
+        ).toEqual(nodeQuery);
     });
 
-    it('a consumer reading the FIRST value gets a different operand on each adapter', async () => {
-        // Why the shape difference is not cosmetic: this is the read #6307
-        // found on `DELETE /api/v1/packages/:id`, where a truthy `version`
-        // silently narrows a destructive operation's scope. Same request, two
-        // operands — `'1.0.0'` on Hono, an ARRAY on node:http — and the
-        // consumer cannot tell which server it is running on.
+    it('hands a consumer the SAME operand on either adapter — the ambiguity is visible, not collapsed', async () => {
+        // Why the shape agreement is not cosmetic: this is the read #6307
+        // found on `DELETE /api/v1/packages/:id`, where a truthy single
+        // `version` silently narrowed a destructive operation's scope. Before
+        // route 2 the operand differed by server — `'1.0.0'` on Hono, an ARRAY
+        // on node:http — and the consumer could not tell which it was running
+        // on. Now both hand over the array, which is what lets the rest-side
+        // gates from #6877 (PR #7324) refuse it with a 400 instead of coercing
+        // it; a consumer that WANTS one value must now say so and reject the
+        // repetition, rather than being handed a first value by the transport.
         const node = await bootProbe(ADAPTERS[0]);
         const hono = await bootProbe(ADAPTERS[1]);
 
@@ -245,7 +311,10 @@ describe('node ↔ hono: the repeated-parameter answer depends on which server b
         ]);
 
         const asOperand = (q: IHttpRequest['query'] | undefined) => q?.version;
-        expect(typeof asOperand(hono.probe.received()?.query)).toBe('string');
-        expect(Array.isArray(asOperand(node.probe.received()?.query))).toBe(true);
+        const nodeOperand = asOperand(node.probe.received()?.query);
+        const honoOperand = asOperand(hono.probe.received()?.query);
+        expect(Array.isArray(nodeOperand)).toBe(true);
+        expect(Array.isArray(honoOperand)).toBe(true);
+        expect(honoOperand).toEqual(nodeOperand);
     });
 });

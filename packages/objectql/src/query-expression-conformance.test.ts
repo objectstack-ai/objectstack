@@ -52,6 +52,7 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
+import type { EngineQueryOptions } from '@objectstack/spec/data';
 import { ObjectQL } from './engine.js';
 
 const projectObject = {
@@ -629,10 +630,17 @@ describe('#4226 — sort / select / expand on the list path (real ObjectQL engin
         expect(err.message).not.toMatch(/formula or rollup/);
     });
 
-    it('the two refusals agree word-for-word on the remedy', async () => {
+    it('the three refusals agree word-for-word on the remedy', async () => {
         // Pins the AGREEMENT itself rather than each wording separately: this
-        // goes red if either door's remedy is reworded without the other, which
+        // goes red if any door's remedy is reworded without the others, which
         // is exactly how #4256 and #6673 drifted apart in the first place.
+        //
+        // [#7095] Three doors now, not two: the engine's own boundary emits the
+        // same sentence as the two ingress verdicts. It is the whole reason the
+        // engine door duplicates the prose instead of importing it —
+        // `metadata-protocol` is assembled FROM an engine, so the engine cannot
+        // import from it without inverting the layering. This pin is what keeps
+        // the duplication honest.
         const remedy = /Denormalise the value onto 'showcase_task' \(a stored field, written when the source changes\) and sort by that\./;
         const dotted: any = await protocol
             .findData({ object: 'showcase_task', query: { sort: 'project_id.name' } })
@@ -640,8 +648,12 @@ describe('#4226 — sort / select / expand on the list path (real ObjectQL engin
         const formula: any = await protocol
             .findData({ object: 'showcase_task', query: { sort: 'sort_key' } })
             .then(() => null, (e: unknown) => e);
+        const direct: any = await engine
+            .find('showcase_task', { orderBy: [{ field: 'sort_key', order: 'asc' }] })
+            .then(() => null, (e: unknown) => e);
         expect(dotted.message).toMatch(remedy);
         expect(formula.message).toMatch(remedy);
+        expect(direct.message).toMatch(remedy);
     });
 
     it.each([
@@ -657,24 +669,166 @@ describe('#4226 — sort / select / expand on the list path (real ObjectQL engin
             .rejects.toMatchObject({ status: 400, code: 'INVALID_SORT', field });
     });
 
-    it('RECORD OF A KNOWN HOLE — `engine.find` still drops a formula sort silently (#6994 is ingress-only)', async () => {
-        // NOT a defence of this behaviour: a pin on the half the ingress gate
-        // cannot reach, so it is measured rather than assumed closed. Internal
-        // callers (hooks, flows, reports, expand sub-reads) never pass through
-        // `findData`, so they still get the 200-in-arbitrary-order this axis
-        // refuses at the door. Closing it means deciding whether `engine.find`
-        // REFUSES or keeps its documented internal-caller tolerance — an
-        // engine-core contract decision, tracked separately.
+    // ─────────────────────────────────────────────────────────────
+    // [#7095] THE HOLE THIS FILE USED TO RECORD, now closed.
+    //
+    // Until #7095 the test below was `RECORD OF A KNOWN HOLE`: it asserted that
+    // `engine.find` returned INSERTION_ORDER for both `asc` and `desc`, and
+    // said in as many words that it should go red the day the engine grew this
+    // refusal. This is that day, and this is that test, inverted.
+    //
+    // Ruled 2026-08-10 on #7095: an ORDER BY the engine cannot materialise is a
+    // 4xx with guidance prose at the PUBLIC boundary, never a silent drop. The
+    // internal-caller tolerance was to survive only behind a pinned internal
+    // path and only if a measured internal call site relied on it — the sweep
+    // found NONE (see the changeset), so no internal path exists and the pins
+    // below include a negative one saying so.
+    // ─────────────────────────────────────────────────────────────
+
+    it('a real column still sorts through `engine.find` — the control this refusal needs', async () => {
+        // FIRST, because every rejection pin under it is vacuous against an
+        // engine whose sort is simply broken. The direct path must still SORT.
+        const asc = await engine.find('showcase_task', { orderBy: [{ field: 'title', order: 'asc' }] });
+        const desc = await engine.find('showcase_task', { orderBy: [{ field: 'title', order: 'desc' }] });
+        expect(asc.map((r: any) => r.title)).toEqual(['A', 'B', 'C', 'D', 'E']);
+        expect(desc.map((r: any) => r.title)).toEqual(['E', 'D', 'C', 'B', 'A']);
+        // And a `summary` field still sorts here too — the family is `formula`,
+        // not "computed". This is what goes red if the engine door is ever
+        // widened to the spec's `COMPUTED_VALUE_TYPES` (the WRITE contract).
+        const bySummary = await engine.find('showcase_task', { orderBy: [{ field: 'subtask_total', order: 'asc' }] });
+        expect(bySummary.map((r: any) => r.title)).toEqual(['E', 'C', 'D', 'B', 'A']);
+    });
+
+    // Typed as the contract rather than asserted through it: these three sorts
+    // are perfectly well-formed `SortNode[]` — it is the FIELD they name that
+    // the engine refuses, not their shape. An `as any` here would erase the one
+    // channel that enforces `{ field, order }` on a direct engine call
+    // (`query-options/no-any-erasure`, #4674/#4918), and would have hidden the
+    // very `direction`-vs-`order` mistake that rule exists to catch.
+    const REFUSED_SORTS: Array<[string, NonNullable<EngineQueryOptions['orderBy']>]> = [
+        ['ascending', [{ field: 'sort_key', order: 'asc' }]],
+        ['descending', [{ field: 'sort_key', order: 'desc' }]],
+        ['second of two', [{ field: 'title', order: 'asc' }, { field: 'sort_key', order: 'asc' }]],
+    ];
+
+    it.each(REFUSED_SORTS)('`engine.find` REFUSES a formula ORDER BY instead of dropping it — %s', async (_label, orderBy) => {
+        // The public boundary, reached directly — no protocol, no ingress gate.
+        // This is the exact call that answered 200-in-insertion-order before
+        // #7095, for both directions, byte-identically.
+        await expect(engine.find('showcase_task', { orderBy }))
+            .rejects.toMatchObject({
+                status: 400,
+                code: 'INVALID_SORT',
+                field: 'sort_key',
+                object: 'showcase_task',
+            });
+    });
+
+    it('`engine.findOne` refuses it too — there `orderBy` decides WHICH record', async () => {
+        // Worse than find's arbitrary order: `findOne` applies `limit: 1`, so a
+        // dropped sort returns a DIFFERENT record, and it looks as legitimate
+        // as the right one. `where` is present so this is the sort verdict and
+        // not `requireFindOnePredicate` answering first.
+        await expect(engine.findOne('showcase_task', {
+            where: { status: 'open' },
+            orderBy: [{ field: 'sort_key', order: 'desc' }],
+        })).rejects.toMatchObject({
+            status: 400,
+            code: 'INVALID_SORT',
+            field: 'sort_key',
+            object: 'showcase_task',
+        });
+    });
+
+    it('the engine refusal names the field, the type and the fix — guidance prose, not just a throw', async () => {
+        const err: any = await engine
+            .find('showcase_task', { orderBy: [{ field: 'sort_key', order: 'asc' }] })
+            .then(() => null, (e: unknown) => e);
+        expect(err).toBeTruthy();
+        // ADR-0112 envelope — a rejection case asserts code AND status.
+        expect(err.status).toBe(400);
+        expect(err.code).toBe('INVALID_SORT');
+        // It must name the entry point, or a caller who never wrote a query
+        // parameter cannot tell which door refused them.
+        expect(err.message).toMatch(/ObjectQL\.find\('showcase_task'\)/);
+        expect(err.message).toMatch(/a formula field on 'showcase_task'/);
+        expect(err.message).toMatch(/computed on read/);
+        // ...and it must never prescribe the thing it is refusing.
+        expect(err.message).not.toMatch(/formula or rollup/);
+    });
+
+    it('an `expand` sub-read raises the refusal, which the expand backstop downgrades to a warning', async () => {
+        // MEASURED, not assumed, and it is the one place the refusal does not
+        // reach the caller as a 4xx. A nested `expand` sort is forwarded into
+        // `expandRelatedRecords`' own `this.find(...)`, which never passes
+        // through `assertSortFieldsExist` — so the engine door IS what fires
+        // there. But that sub-read sits inside a pre-existing graceful-
+        // degradation `catch` ("if expand fails, keep original IDs") which
+        // swallows EVERY expand failure, this one included:
         //
-        // When that lands, this test SHOULD go red. Update it then; do not
-        // reach for it as evidence that the direct path is fine.
-        const asc = await engine.find('showcase_task', { orderBy: [{ field: 'sort_key', order: 'asc' }] });
-        const desc = await engine.find('showcase_task', { orderBy: [{ field: 'sort_key', order: 'desc' }] });
-        expect(asc.map((r: any) => r.title)).toEqual(INSERTION_ORDER);
-        // Direction-blind, and the rows carry the values they were meant to be
-        // ordered by — the exact signature from the issue's transcript.
-        expect(desc.map((r: any) => r.title)).toEqual(asc.map((r: any) => r.title));
-        expect(asc.map((r: any) => r.sort_key)).toEqual(INSERTION_ORDER);
+        //   WARN Failed to expand relationship field; retaining foreign key IDs
+        //        { field: 'parent_id', error: "ObjectQL.find('showcase_task') sorts by
+        //          'sort_key', a formula field … Denormalise the value onto … " }
+        //
+        // So the outcome here improves from SILENT (a wrongly-ordered expansion,
+        // no signal at all) to OBSERVABLE (a warning carrying the field name and
+        // the fix) — but it is not a refusal, and this pin says so rather than
+        // implying #7095 closed it. Reversing that catch is the #3821-family
+        // swallow, a separate contract decision on every expand failure mode,
+        // deliberately NOT ridden in on this card. Tracked as follow-up.
+        const rows: any = await engine.find('showcase_task', {
+            expand: { parent_id: { orderBy: [{ field: 'sort_key', order: 'asc' }] } },
+        });
+        // The call succeeds and the FK ids are retained UNEXPANDED — that is
+        // the backstop's contract, and what makes this observable-not-refused.
+        expect(rows).toHaveLength(5);
+        expect(rows.filter((r: any) => typeof r.parent_id === 'object' && r.parent_id !== null)).toHaveLength(0);
+        expect(rows.some((r: any) => r.parent_id === 't_A')).toBe(true);
+        // CONTROL — a real column in the same nested position really does
+        // expand, so the assertion above is about the refusal and not about
+        // expand being broken for every sort.
+        const ok: any = await engine.find('showcase_task', {
+            expand: { parent_id: { orderBy: [{ field: 'title', order: 'asc' }] } },
+        });
+        expect(ok.some((r: any) => typeof r.parent_id === 'object' && r.parent_id !== null)).toBe(true);
+    });
+
+    it('NEGATIVE PIN — no internal path exists to opt back into the drop', async () => {
+        // §The ruling allowed a pinned INTERNAL path only if a measured internal
+        // call site relied on the tolerance. The #7095 sweep found none, so no
+        // such path shipped — and this pin is what keeps one from being added
+        // quietly on the PUBLIC options shape, which the ruling forbids outright.
+        //
+        // `rejectUnknownEngineOptions` refuses any option key not in
+        // ENGINE_FIND_OPTION_KEYS, so a flag smuggled onto the public bag is a
+        // refusal about the OPTION, never a tolerated sort. (That refusal is a
+        // plain `Error` with no `status` — it is #4371's option-shape door, not
+        // the ADR-0112 wire envelope — so this asserts the message, which is
+        // what a caller reaching for such a flag would actually be told.)
+        for (const smuggled of ['allowUnmaterializedSort', 'internal', '__internal', 'tolerateDroppedSort']) {
+            // `as unknown as EngineQueryOptions`, never a bare `as any`: this
+            // input is DELIBERATELY off-contract — that is the whole subject of
+            // the assertion — so the cast names the contract being bypassed and
+            // greps as an intentional act, while the rest of the call stays
+            // type-checked (#4918's prescription for exactly this case).
+            await expect(engine.find('showcase_task', {
+                orderBy: [{ field: 'sort_key', order: 'asc' }],
+                [smuggled]: true,
+            } as unknown as EngineQueryOptions)).rejects.toThrow(new RegExp(`does not recognise option.*'${smuggled}'`));
+        }
+        // And the tolerance really is gone rather than merely unreachable: the
+        // shape the old hole answered 200 for now throws.
+        await expect(engine.find('showcase_task', { orderBy: [{ field: 'sort_key', order: 'asc' }] }))
+            .rejects.toMatchObject({ code: 'INVALID_SORT' });
+    });
+
+    it('a formula field is still SELECTABLE and still computed — only the ORDER BY is refused', async () => {
+        // The blast radius, pinned: #7095 narrows one axis. Reading a formula
+        // field, and the projection tolerance the ingress docblock describes,
+        // are untouched — a refusal that also stopped formulas being returned
+        // would be a much larger change wearing this one's clothes.
+        const rows = await engine.find('showcase_task', { fields: ['id', 'title', 'sort_key'] });
+        expect(rows.map((r: any) => r.sort_key).sort()).toEqual(['A', 'B', 'C', 'D', 'E']);
     });
 
     // ─────────────────────────────────────────────────────────────

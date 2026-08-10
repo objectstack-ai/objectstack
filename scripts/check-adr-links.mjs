@@ -139,54 +139,14 @@ const CONVENTION_ILLUSTRATIVE_TARGETS = [
  * longer matches a live finding fails as STALE, so a fixed link cannot silently
  * regress back under cover of its own grandfather clause.
  *
- * All 8 are ADR → source-tree links, not ADR → ADR links: the cross-record
- * surface this gate was filed for is clean at the time of writing. Their fix
- * is not mechanical — `apps/studio/**` moved to the `cloud` repository and the
- * runtime/spec files were deleted outright — so it is tracked separately in
- * **#6726** rather than guessed at here. Closing that issue empties this list.
+ * **The list is EMPTY, and that is the finished state.** The 8 ADR → source-tree
+ * links it was seeded with (#6592) were repaired under #6726: each target had
+ * genuinely left this repository, so each link became a plain unlinked path plus
+ * a short note saying where the code went. The ADR → ADR surface this gate was
+ * filed for was already clean. An empty baseline means the gate is now a gate
+ * rather than a grandfather clause — do not re-seed it.
  */
-const KNOWN_DEAD_TARGETS = [
-  {
-    file: `${ADR_DIR}/0004-cloud-multi-kernel.md`,
-    target: '../../packages/runtime/src/kernel-manager.ts',
-    why: 'KernelManager was never a file at this path in this repo; cloud multi-kernel code lives in the cloud repo',
-  },
-  {
-    file: `${ADR_DIR}/0004-cloud-multi-kernel.md`,
-    target: '../../packages/runtime/src/project-kernel-factory.ts',
-    why: 'same move as kernel-manager.ts',
-  },
-  {
-    file: `${ADR_DIR}/0004-cloud-multi-kernel.md`,
-    target: '../../apps/studio/src/routes/projects.index.tsx',
-    why: 'apps/studio/ is not in this repository (apps/ holds only docs/)',
-  },
-  {
-    file: `${ADR_DIR}/0004-cloud-multi-kernel.md`,
-    target: '../../apps/studio/src/routes/projects.$projectId.index.tsx',
-    why: 'apps/studio/ is not in this repository (apps/ holds only docs/)',
-  },
-  {
-    file: `${ADR_DIR}/0020-state-machine-converge-and-enforce.md`,
-    target: '../../packages/spec/src/contracts/workflow-service.ts#L58',
-    why: 'no workflow-service.ts under packages/spec/src/contracts/ any more',
-  },
-  {
-    file: `${ADR_DIR}/0020-state-machine-converge-and-enforce.md`,
-    target: '../../examples/app-crm/src/workflows/stale-opportunity.workflow.ts#L19',
-    why: 'examples/app-crm has no src/workflows/ directory any more',
-  },
-  {
-    file: `${ADR_DIR}/0020-state-machine-converge-and-enforce.md`,
-    target: '../../examples/app-crm/src/flows/high-value-deal.flow.ts',
-    why: 'examples/app-crm/src/flows/ no longer carries this flow file',
-  },
-  {
-    file: `${ADR_DIR}/0020-state-machine-converge-and-enforce.md`,
-    target: '../../examples/app-crm/src/flows/stale-opportunity.flow.ts',
-    why: 'examples/app-crm/src/flows/ no longer carries this flow file',
-  },
-];
+const KNOWN_DEAD_TARGETS = [];
 
 /**
  * Blank out fenced code blocks, preserving line count so findings keep their

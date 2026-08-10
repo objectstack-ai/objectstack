@@ -55,6 +55,7 @@
  * load-bearing.
  */
 
+import { withoutOperationPrivateKeys } from '@objectstack/core';
 import type { ISharingService } from '@objectstack/spec/contracts';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 
@@ -181,45 +182,22 @@ function asIdList(id: unknown): Array<string | number> | null {
 }
 
 /**
- * Keys plugin-security's middleware STAMPS onto the operation context, resolved
- * for the object of the CURRENT operation — `sys_comment` here.
+ * Why this module strips the operation-private keys before forwarding an
+ * envelope — the LOCAL half of the argument.
  *
- * They are middleware-private vocabulary, not fields of `ExecutionContext`, and
- * they are all read as WIDENING inputs by whoever consumes them: the ADR-0057
- * D1 access DEPTH the sharing owner-match expands to (`__readScope` /
- * `__writeScope`, plus the ADR-0090 D10 delegator halves
- * `__delegatorReadScope` / `__delegatorWriteScope`, `security-plugin.ts` — `sc.__readScope = …`),
- * and the engine's internal privilege markers on the same channel
- * (`__expandRead` waives the object-level CRUD check for a lookup expansion,
- * `__referentialFieldClear` the referential-clear write).
+ * plugin-security's middleware stamps `__`-prefixed keys onto the operation
+ * context resolved for the object of the CURRENT operation, which here is
+ * `sys_comment`. Every gate in this module asks about the PARENT record's
+ * object, never about `sys_comment`, so carrying any of them across is one
+ * object's widening applied to another object's question.
  *
- * Every gate in this module asks about the PARENT record's object, never about
- * `sys_comment`, so carrying any of these across is one object's widening
- * applied to another object's question — the exact stale-scope leak
- * `resolveWriteScopeForSharing` was extracted to prevent ("a stale value can
- * never leak in through a spread", `security-plugin.ts`). They are therefore
- * dropped by PREFIX rather than by a name list: the `__` convention is what
- * marks a key as belonging to the operation in flight, and a list would go
- * stale the day the middleware stamps a fifth one.
+ * [#7141] The general rule — which keys those are, why they are dropped by
+ * PREFIX rather than by a name list, and why the copy is load-bearing in both
+ * directions — is `withoutOperationPrivateKeys` in `@objectstack/core`. It was
+ * hand-copied into this file, `service-storage`'s attachment kit and
+ * `plugin-reports` before #7284 gave it one owner; ⛔ import it, never re-derive
+ * it locally (`operation-private-keys.pin.test.ts` catches the fourth copy).
  */
-const OPERATION_PRIVATE_KEY_PREFIX = '__';
-
-/**
- * The caller's execution envelope, minus the operation-private keys above.
- *
- * [#7141] A FRESH object every time, so a callee that stamps its own
- * `__writeScope` onto what it receives (which is exactly what plugin-security
- * does before it calls the sharing service) can never write back into the
- * operation context this hook was handed.
- */
-function withoutOperationPrivateKeys(exec: Record<string, unknown>): ExecutionContext {
-  const out: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(exec)) {
-    if (key.startsWith(OPERATION_PRIVATE_KEY_PREFIX)) continue;
-    out[key] = value;
-  }
-  return out as ExecutionContext;
-}
 
 /** The caller's ExecutionContext rides on the operation options — the session
  * snapshot lacks `permissions`, which sharing bypasses need.

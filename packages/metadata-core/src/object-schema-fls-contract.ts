@@ -149,6 +149,13 @@ export const OBJECT_SCHEMA_MASK_CASES: readonly ObjectSchemaMaskCase[] = [
         expect: { kind: 'unmasked' },
     },
     {
+        id: 'write-capable-caller/exempt',
+        why: '[#7020] D4 is DERIVED from the #6603 write gate — whoever may write a schema sees all of it, by construction. A `manage_metadata`-only caller passes every write gate, so a projected GET here is the round trip that PUTs the invisible fields away. Holds NEITHER builder capability on purpose: that is the shape the two hand-kept sets used to separate.',
+        context: { userId: 'u_author', systemPermissions: ['manage_metadata'] },
+        readable: ['id'],
+        expect: { kind: 'unmasked' },
+    },
+    {
         id: 'guest-fallback/D7',
         why: 'D7 — a caller resolving to zero permission sets goes through the fallback set rather than the everything-default; the exit sees whatever that resolution answers and projects it like any other. (The resolution itself is pinned in plugin-security; a truly ANONYMOUS caller never reaches an exit on a requireAuth deployment, which D7 says in as many words.)',
         context: { userId: 'u_guest', positions: [], permissions: [], systemPermissions: [] },

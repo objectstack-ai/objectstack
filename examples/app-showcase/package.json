@@ -35,8 +35,12 @@
   },
   "devDependencies": {
     "@objectstack/cli": "workspace:*",
+    "@objectstack/core": "workspace:*",
     "@objectstack/formula": "workspace:*",
     "@objectstack/objectql": "workspace:*",
+    "@objectstack/plugin-approvals": "workspace:*",
+    "@objectstack/service-automation": "workspace:*",
+    "@objectstack/service-messaging": "workspace:*",
     "@playwright/test": "^1.62.1",
     "typescript": "^6.0.3",
     "vitest": "^4.1.10"

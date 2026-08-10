@@ -728,6 +728,8 @@
     "PresignedUrlResponse (type)",
     "PresignedUrlResponseParsed (type)",
     "PresignedUrlResponseSchema (const)",
+    "PublishMetaItemResponse (type)",
+    "PublishMetaItemResponseSchema (const)",
     "QueryAdapterConfig (type)",
     "QueryAdapterConfigParsed (type)",
     "QueryAdapterConfigSchema (const)",

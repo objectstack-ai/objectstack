@@ -1026,6 +1026,15 @@ and counts as one failed suite — the rest of the glob still runs. This is what
 stops a malformed suite from reporting success: a misspelled `steps` key used to
 produce a scenario that passed having executed nothing.
 
+An assertion the runner **cannot evaluate** fails, it does not pass. `contains`
+is defined over an array (membership) and a string (substring); point it at
+anything else — most often a `field` path the response does not carry, because it
+was misspelled or the shape moved — and it fails, naming the field, the operator
+and the runtime type it actually found. Until #7256 that case fell out of the
+switch and reported ✅, so a `contains` against a missing path was a test that
+silently deleted itself. Assert absence with `is_null`; compare a scalar with
+`equals`.
+
 #### `os doctor`
 
 Checks your development environment and reports issues:

@@ -128,30 +128,68 @@ describe('[#5146] memory-matcher — $not over records with no value', () => {
     });
   });
 
-  // ── Where this matcher and `formula` disagree — pinned, not harmonised ─────
+  // ── The three cells #5299 ruled on — behaviour FROZEN, annotation current ──
 
-  describe('known disagreements with formula.matchesFilterCondition (NOT ruled on by #5146)', () => {
+  /**
+   * [#5299, ruled 2026-08-10] These three cells were filed as "known
+   * disagreements with `formula`, not ruled on by #5146". They are ruled now:
+   * SQL's native three-valued logic is the common denominator, so **negative
+   * operators never match no-value rows; the only ways to select "no value" are
+   * `$exists: false` / `$null: true`.**
+   *
+   * ⛔ Nothing below is flipped, and the reason is not inertia. This package is
+   * inside the #5499 investment freeze, and the ruling itself says
+   * `checkCondition`'s early-exit guard STAYS AS IT IS. What the ruling changed
+   * is the annotation: the section is no longer "a divergence nobody has ruled
+   * on", it is "a ruled target, with this matcher's distance from it measured".
+   *
+   * Re-measured on `60f0dd8`, because the old wording had gone stale in a way
+   * that mattered — it named `formula` as the key-presence reader on `$exists`,
+   * and `formula` stopped being that in PR #5962 (#5298 ③ / #5369). Where each
+   * cell actually stands:
+   *
+   *   `$exists`      CONVERGED, and this matcher was already right. Both
+   *                  evaluators read "has a value"; the formula-side assertion
+   *                  lives in `matches-filter-not-null-safe.test.ts`. Kept here
+   *                  because the two OTHER faces of this package — the live
+   *                  mingo query path and the analytics face — still read
+   *                  key-presence, so the package disagrees with itself and this
+   *                  test is the face that is correct.
+   *   `$notContains` This matcher ALREADY answers the ruled semantics; every
+   *                  other surface in the repo (including all four SQL
+   *                  compilers, deliberately, via #5298's `nullSafeNegative`)
+   *                  answers the opposite. Here the gap is theirs, not ours.
+   *   `$nin`         HALF right: a missing key already does not match, a
+   *                  present-but-null value still does. The ruled answer is "no"
+   *                  for both. Frozen at this state.
+   */
+  describe('[#5299] the ruled no-value cells — target recorded, behaviour frozen (#5499)', () => {
     it('$nin: an ABSENT field is treated differently from a null one', () => {
       // The early `value === undefined` guard in `checkCondition` exempts only
       // `$exists` / `$ne` / `$null`, so an absent field fails `$nin` outright
-      // while a null field passes it. `formula` answers "not among" for both.
-      // Pinned as measured; the ruling belongs to the issue that records it.
+      // while a null field passes it. The ruling keeps this guard; the NULL half
+      // is the part still short of the ruled answer, and it is frozen.
       expect(ids(NULLED, { $not: { stage: { $nin: ['won'] } } })).toEqual(['1']);
       expect(ids(MISSING, { $not: { stage: { $nin: ['won'] } } })).toEqual(['1', '3', '4']);
     });
 
-    it('$notContains: a value-less field does NOT satisfy it here', () => {
-      // `typeof null !== 'string'` → false, so the negation matches. `formula`
-      // answers true for the same record, and `driver-sql` follows `formula`.
+    it('$notContains: a value-less field does NOT satisfy it here — the RULED answer', () => {
+      // `typeof null !== 'string'` → false, so the negation matches. This is
+      // what #5299 ruled canonical. `formula` and all four SQL compilers answer
+      // the opposite today; moving them is a cross-backend programme, not a
+      // change to this file.
       expect(matched({ $not: { stage: { $notContains: 'w' } } })).toEqual(['1', '3', '4']);
     });
 
-    it('$exists: a present-but-null field counts as NOT existing here', () => {
-      // `formula` reads `$exists` as "the key is present" (a null value exists);
-      // this matcher reads it as "has a value". Same answer for an absent field,
-      // different for a null one.
+    it('$exists: a present-but-null field counts as NOT existing here — CONVERGED', () => {
+      // Both readings of "no value" answer alike, and `formula` now agrees:
+      // "has a value", the strict mirror of `$null` (#5298 ③ / #5369, PR #5962).
+      // No longer a disagreement — the assertion is kept because this package's
+      // other two filter faces still read key-presence.
       expect(ids(NULLED, { $not: { stage: { $exists: true } } })).toEqual(['3', '4']);
       expect(ids(MISSING, { $not: { stage: { $exists: true } } })).toEqual(['3', '4']);
+      expect(ids(NULLED, { stage: { $exists: true } })).toEqual(['1', '2']);
+      expect(ids(NULLED, { stage: { $exists: true } })).toEqual(ids(NULLED, { stage: { $null: false } }));
     });
   });
 });

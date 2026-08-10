@@ -248,6 +248,26 @@ construction — exist at all.
   (generated tokens, export links).
 - **`variant` / `icon` / `order`** — presentation and sort position.
 
+<Callout type="warn">
+**`params` is an array of parameter *definitions*, never a map of values.**
+Writing `params: { … }` is rejected at authoring time, and what to write
+instead depends on the action's `type`:
+
+| You wanted | Write this instead |
+|:---|:---|
+| A static request body for `type: 'api'` | `bodyExtra: { name: '{{page.inquiryName}}' }` — merged last, `{{page.<var>}}` tokens resolved by the runtime |
+| A value to interpolate into a `type: 'url'` `target` | Put it in the `target` string itself. `${param.X}` interpolates a value the params **dialog** collected; `${ctx.X}` one from the action context |
+| A new tab for `type: 'url'` | `openIn: 'new-tab'` (for an *async* handler that redirects, use `opensInNewTab` instead) |
+
+There is no object form of `params` on a url action to migrate to: the two
+things it used to mean in the renderer — a statically authored `${param.X}`
+scope, and a `params.newTab` flag — were **retired**, not renamed
+([#6828](https://github.com/objectstack-ai/objectstack/issues/6828)). Both are
+already expressible with the keys above, so a third meaning of `params` earns
+nothing; if you have a case the `target` string genuinely cannot express, that
+is a spec proposal for a properly named key, not a values map under this one.
+</Callout>
+
 ## Permissions and visibility
 
 - **`requiredPermissions: ['can_close_tickets']`** is a **dual-surface gate**

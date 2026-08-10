@@ -1,5 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
+import { withoutOperationPrivateKeys } from '@objectstack/core';
 import type {
   IReportService,
   SavedReport,
@@ -177,47 +178,25 @@ function renderSubject(template: string | undefined, vars: Record<string, string
 // ─── Caller envelope ──────────────────────────────────────────────
 
 /**
- * Keys plugin-security's middleware STAMPS onto the operation context, resolved
- * for the object of the operation in flight.
- *
- * They are middleware-private vocabulary, not fields of `ExecutionContext`, and
- * every one of them is read as a WIDENING input: the ADR-0057 D1 access DEPTH
- * the sharing owner-match expands to (`__readScope` / `__writeScope`, plus the
- * ADR-0090 D10 delegator halves, stamped in place by `security-plugin.ts` —
- * `sc.__readScope = …`), and the engine's internal privilege markers on the
- * same channel (`__expandRead` waives the object-level CRUD check for a lookup
- * expansion, `__referentialFieldClear` the referential-clear write).
+ * Why this module strips the operation-private keys before forwarding an
+ * envelope — the LOCAL half of the argument.
  *
  * A report read asks about `report.object_name`, which is not necessarily the
- * object the caller's envelope last carried a depth for — a REST request that
- * touched another object before reaching `/reports/:id/run` hands over an
- * envelope the middleware has already written into, and plugin-security only
- * OVERWRITES `__readScope` when it resolves permission sets for the new object
- * (`if (permissionSets.length > 0)`). A stale depth therefore survives into a
- * question it was never resolved for. Dropped by PREFIX rather than by a name
- * list: the `__` convention is what marks a key as belonging to the operation
- * in flight, and a list would go stale the day the middleware stamps another
- * one. Same shape as `plugin-audit`'s and `service-storage`'s kits (#7141 /
- * #7145).
- */
-const OPERATION_PRIVATE_KEY_PREFIX = '__';
-
-/**
- * The caller's execution envelope, minus the operation-private keys above.
+ * object the caller's envelope last carried a `__`-prefixed depth for: a REST
+ * request that touched another object before reaching `/reports/:id/run` hands
+ * over an envelope plugin-security's middleware has already written into, and
+ * that middleware only OVERWRITES `__readScope` when it resolves permission sets
+ * for the new object (`if (permissionSets.length > 0)`). A stale depth therefore
+ * survives into a question it was never resolved for.
  *
- * A FRESH object every time, in both directions: the engine's middleware
- * stamps `__readScope` for `report.object_name` onto whatever it is handed, so
- * forwarding the caller's own envelope by reference would write that depth
- * back into the REQUEST context the route goes on using.
+ * [#7204] The general rule — which keys those are, why they are dropped by
+ * PREFIX rather than by a name list, and why the copy is load-bearing in both
+ * directions — is `withoutOperationPrivateKeys` in `@objectstack/core`. It was
+ * hand-copied into this file, `plugin-audit`'s comment kit and
+ * `service-storage`'s attachment kit before #7284 gave it one owner; ⛔ import
+ * it, never re-derive it locally (`operation-private-keys.pin.test.ts` catches
+ * the fourth copy).
  */
-function withoutOperationPrivateKeys(exec: Record<string, unknown>): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(exec)) {
-    if (key.startsWith(OPERATION_PRIVATE_KEY_PREFIX)) continue;
-    out[key] = value;
-  }
-  return out;
-}
 
 // ─── Service ──────────────────────────────────────────────────────
 

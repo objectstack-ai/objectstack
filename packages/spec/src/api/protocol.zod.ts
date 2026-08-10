@@ -490,6 +490,120 @@ export const SaveMetaItemResponseSchema = lazySchema(() => z.object({
 }));
 
 /**
+ * Publish Metadata Item Response
+ *
+ * Describes the FULL body `POST /api/v1/meta/:type/:name/publish` returns
+ * (#7294 — the #5745 discipline carried one door over). The publish door is the
+ * sibling write surface of the save door: `saveMetaItem` writes a body, and
+ * `publishMetaItem` promotes an already-written DRAFT body to `active`. Until
+ * this declaration the route was served with no contract behind it at all —
+ * the string `PublishMetaItem` appeared nowhere under `packages/spec/src/`, so
+ * `version` here sat in exactly the undeclared state `version` on the save
+ * response sat in before #5745, despite being the same ADR-0008
+ * optimistic-concurrency token with the same "echo it back as `If-Match`" job.
+ *
+ * Presence was measured against `origin/main`, not assumed. The sole producer
+ * is `ObjectStackProtocolImplementation.publishMetaItem`, which builds ONE
+ * response object and the REST route hands it to `res.json()` verbatim. That
+ * object literal always sets `success` / `version` / `seq`, so the three are
+ * REQUIRED; the three `*Applied` receipts are each attached only when the
+ * corresponding side effect ran, so each is optional — and their absence means
+ * "that side effect did not run", NEVER "it failed".
+ *
+ * **The three conditional receipts, and what makes each conditional**
+ * (`runPublishSideEffects`, phase 2 of the ADR-0067 D2 split):
+ *
+ * - `seedApplied` — only when the published type is `seed`. Publishing a seed
+ *   is what makes its rows live, so the row materialization rides along.
+ * - `materializeApplied` — only when an ADR-0086 P2 publish materializer is
+ *   registered for the type (e.g. `permission` → `sys_permission_set`).
+ * - `projectionApplied` — only when an ADR-0094 mutation projector is
+ *   registered for the type. Same field, same meaning, as on
+ *   {@link SaveMetaItemResponseSchema}: both write doors run the projector.
+ *
+ * All three are **best-effort by contract**: publishing the metadata always
+ * succeeds independently, and a side-effect failure is SURFACED here rather
+ * than thrown. So `success: true` on the envelope does not mean the data plane
+ * caught up — a caller that needs it live must read the receipt's own
+ * `success`, which is why every receipt carries one.
+ */
+export const PublishMetaItemResponseSchema = lazySchema(() => z.object({
+  success: z.boolean().describe(
+    'Always true on a 2xx — the draft was promoted. It does NOT cover the '
+    + 'best-effort side effects below, each of which reports its own `success`.',
+  ),
+  version: z.string().describe(
+    'Content hash of the just-promoted body, and the token the ADR-0008 '
+    + 'optimistic-concurrency chain runs on: send it back as the `If-Match` '
+    + 'request header on the next write to that item and a concurrent edit is '
+    + 'reported as 409 `metadata_conflict` instead of silently overwritten. '
+    + 'Opaque to callers — echo it verbatim, never parse it. Currently emitted '
+    + 'as `sha256:<64 hex chars>`, but the format is not part of this contract.',
+  ),
+  seq: z.number().int().describe(
+    'Monotonic sequence number of the `op=\'publish\'` metadata event this '
+    + 'promotion appended to the item history (sys_metadata_history.event_seq). '
+    + 'Orders writes; unlike `version` it is not an OCC token.',
+  ),
+  seedApplied: z.object({
+    success: z.boolean().describe(
+      'False when the seed rows did not fully land. The publish itself still '
+      + 'succeeded — check this rather than assuming data went live.',
+    ),
+    inserted: z.number().int().describe('Rows created by the externalId-keyed upsert.'),
+    updated: z.number().int().describe('Rows updated by the externalId-keyed upsert.'),
+    error: z.string().optional().describe(
+      'Single failure message, present when the seed apply threw before the '
+      + 'loader ran (including "no readable seed bodies").',
+    ),
+    errors: z.array(z.unknown()).optional().describe(
+      'Per-record failures reported by the seed loader. Present only when the '
+      + 'loader ran and returned a non-empty error list.',
+    ),
+  }).optional().describe(
+    'Outcome of materializing a published `seed` body into data rows. Present '
+    + 'ONLY when the published type is `seed` — publishing a seed is what makes '
+    + 'its rows live, so the load rides along with the metadata promotion. '
+    + 'Best-effort: a seed-load problem is surfaced here, never thrown, so a '
+    + 'caller must check `seedApplied.success` instead of assuming the 200 '
+    + 'covered the data. Absent on the batch path, which suppresses the '
+    + 'per-item apply and loads every seed body in one later pass.',
+  ),
+  materializeApplied: z.object({
+    success: z.boolean().describe('False when the materializer threw or reported failure; the publish still succeeded.'),
+    inserted: z.number().int().describe('Data-plane rows created by the materializer.'),
+    updated: z.number().int().describe('Data-plane rows updated by the materializer.'),
+    error: z.string().optional().describe('Materializer failure message, present only when `success` is false.'),
+  }).optional().describe(
+    'Outcome of the ADR-0086 P2 publish-time materializer — the step that '
+    + 'projects the published body into its data-plane row (e.g. `permission` '
+    + '→ `sys_permission_set`, under the owning package). Present ONLY when a '
+    + 'materializer is registered for this metadata type, which is why it is '
+    + 'optional: its absence means "no materializer ran", never "it failed". '
+    + 'Best-effort, same contract as `seedApplied`.',
+  ),
+  projectionApplied: z.object({
+    success: z.boolean().describe('False when the projector threw; the metadata promotion itself still succeeded.'),
+    error: z.string().optional().describe('Projector failure message, present only when `success` is false.'),
+  }).optional().describe(
+    'Outcome of the awaited ADR-0094 mutation projector — the post-persist step '
+    + 'that materializes this metadata into its derived data-plane read model. '
+    + 'The same receipt {@link SaveMetaItemResponseSchema} carries, because the '
+    + 'projector runs on BOTH write doors: a direct active save and this '
+    + 'draft→active promotion. Present ONLY when a projector is registered for '
+    + 'this metadata type. Best-effort — a projector failure is reported here '
+    + 'and logged, never thrown.',
+  ),
+  message: z.string().optional().describe(
+    'Human-readable receipt, e.g. `Published draft — type=view, name=cases '
+    + '[seq=3]`. The producer sets it on every publish today; it stays optional '
+    + 'to match the producer\'s own signature and its `SaveMetaItemResponse` '
+    + 'twin, and because an absent human-readable string strips no data — the '
+    + 'failure mode #5745 exists to prevent.',
+  ),
+}));
+
+/**
  * Delete Metadata Item Request
  * Removes a customization overlay row from sys_metadata (ADR-0005).
  */
@@ -1612,6 +1726,7 @@ export type GetMetaItemResponse = z.input<typeof GetMetaItemResponseSchema>;
 export type GetMetaItemLayeredResponse = z.input<typeof GetMetaItemLayeredResponseSchema>;
 export type SaveMetaItemRequest = z.input<typeof SaveMetaItemRequestSchema>;
 export type SaveMetaItemResponse = z.input<typeof SaveMetaItemResponseSchema>;
+export type PublishMetaItemResponse = z.input<typeof PublishMetaItemResponseSchema>;
 export type DeleteMetaItemRequest = z.input<typeof DeleteMetaItemRequestSchema>;
 export type DeleteMetaItemResponse = z.input<typeof DeleteMetaItemResponseSchema>;
 export type GetMetaItemCachedRequest = z.input<typeof GetMetaItemCachedRequestSchema>;

@@ -475,9 +475,17 @@ describe('plugin-rest-api.zod', () => {
       // projection, previously reachable only as an undeclared `?layers=true`
       // variant of `GET /:type/:name`, now its own path with its own
       // `GetMetaItemLayeredResponseSchema`.
-      expect(DEFAULT_METADATA_ROUTES.endpoints).toHaveLength(5);
+      // 5 -> 6: `POST /:type/:name/publish` (#7294) — the draft→active
+      // promotion door. Served by `@objectstack/rest` all along and absent
+      // from this table, so its response body had no contract behind it; it
+      // now declares `PublishMetaItemResponseSchema`, the #5745 discipline one
+      // door over from `PUT /:type/:name`.
+      expect(DEFAULT_METADATA_ROUTES.endpoints).toHaveLength(6);
       expect(DEFAULT_METADATA_ROUTES.endpoints?.map((e) => `${e.method} ${e.path}`)).toContain(
         'GET /:type/:name/layers',
+      );
+      expect(DEFAULT_METADATA_ROUTES.endpoints?.map((e) => `${e.method} ${e.path}`)).toContain(
+        'POST /:type/:name/publish',
       );
       expect(DEFAULT_METADATA_ROUTES.middleware).toBeDefined();
     });

@@ -27,7 +27,7 @@ import { PageSchema } from './ui/page.zod';
 import { DashboardSchema } from './ui/dashboard.zod';
 import { ReportSchema } from './ui/report.zod';
 import { DatasetSchema } from './ui/dataset.zod';
-import { ActionSchema } from './ui/action.zod';
+import { ActionSchema, InlineActionSchema } from './ui/action.zod';
 import { ThemeSchema } from './ui/theme.zod';
 
 // Automation Protocol
@@ -779,6 +779,118 @@ function collectObjectNames(config: ObjectStackDefinition): Set<string> {
 }
 
 /**
+ * One inline action found on a page, plus the subject string that identifies it
+ * in an error message.
+ */
+interface InlineActionSite {
+  /** Canonical action shape — post-{@link InlineActionSchema}, so `to` is already `target`. */
+  action: { type?: string; name?: string; target?: string };
+  /** Message subject, e.g. `Inline action 'new_task' on page 'home' (regions.0.components.2)`. */
+  where: string;
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+/** A node is component-shaped when it is an object carrying a string `type`. */
+const isComponentNode = (value: unknown): value is Record<string, unknown> =>
+  isRecord(value) && typeof value.type === 'string';
+
+/**
+ * Every inline action a page's component tree carries, each with a locatable
+ * path — the traversal `validateCrossReferences` needs and `config.actions`
+ * cannot supply (#6889).
+ *
+ * An action authored **inline** on a page element (`element:button` →
+ * `properties.action`, an {@link InlineActionSchema}) never enters
+ * `config.actions`, so before this walk NO cross-reference check visited one: a
+ * dangling `type: 'modal'` target built clean and failed only when a user
+ * clicked, while the identical target on a *registered* action was a build
+ * error. Inline is also the shape AI authoring emits most readily — a button
+ * with its behaviour written right there — so it is the surface that most needs
+ * authoring-time rejection.
+ *
+ * Two traversal facts make this a walk rather than a loop:
+ *
+ * - **Roots are plural.** Components hang off `regions[].components[]` AND off
+ *   `slots.<name>`, where each slot is one component *or* an array of them.
+ * - **Containers nest through a loose record.** `PageComponentSchema.properties`
+ *   is `z.record(z.string(), z.unknown())`, and container props declare their
+ *   children as `z.array(z.unknown())` (`children`, plus a card's `footer`), so
+ *   a button nested inside a container survives parse as raw data. We recurse
+ *   into any array under `properties` whose entries are component-shaped, which
+ *   reaches every container spelling without this walk enumerating them.
+ *
+ * Candidates are normalized by parsing with `InlineActionSchema` rather than
+ * read key-by-key: that schema's preprocess is what canonicalizes the legacy
+ * `to` spelling onto `target`, and page-component `properties` are a loose
+ * record, so a raw node has NOT been through it. Reading `action.target ??
+ * action.to` here would be a second, hand-mirrored copy of the producer's
+ * normalization — the consumer-side leniency Prime Directive #12 rejects.
+ *
+ * When that parse fails the node is still checked, from its raw `type`/`target`
+ * strings. A node that is not a valid inline action is broken on some *other*
+ * axis (a key page-component `properties` does not validate today), and the
+ * fallback neither invents a target nor accepts one — it only keeps a dangling
+ * reference from hiding behind an unrelated defect. The legacy `to` spelling is
+ * deliberately NOT read there: canonicalization stays the schema's job.
+ */
+function collectInlinePageActions(page: unknown): InlineActionSite[] {
+  if (!isRecord(page)) return [];
+  const pageName = typeof page.name === 'string' ? page.name : '(unnamed)';
+  const sites: InlineActionSite[] = [];
+
+  const visitComponent = (node: unknown, path: string): void => {
+    if (!isComponentNode(node)) return;
+    const props = isRecord(node.properties) ? node.properties : undefined;
+    if (!props) return;
+
+    if (isRecord(props.action)) {
+      const parsed = InlineActionSchema.safeParse(props.action);
+      const action = parsed.success
+        ? (parsed.data as InlineActionSite['action'])
+        : {
+          type: typeof props.action.type === 'string' ? props.action.type : undefined,
+          name: typeof props.action.name === 'string' ? props.action.name : undefined,
+          target: typeof props.action.target === 'string' ? props.action.target : undefined,
+        };
+      // An inline action's `name` is optional (the button supplies its own
+      // label), so the path is the only identity an anonymous one has.
+      const subject = action.name ? `Inline action '${action.name}'` : 'Inline action';
+      sites.push({ action, where: `${subject} on page '${pageName}' (${path})` });
+    }
+
+    for (const [key, value] of Object.entries(props)) {
+      if (!Array.isArray(value)) continue;
+      value.forEach((child, index) => {
+        if (isComponentNode(child)) visitComponent(child, `${path}.properties.${key}.${index}`);
+      });
+    }
+  };
+
+  if (Array.isArray(page.regions)) {
+    page.regions.forEach((region, regionIndex) => {
+      if (!isRecord(region) || !Array.isArray(region.components)) return;
+      region.components.forEach((component, componentIndex) => {
+        visitComponent(component, `regions.${regionIndex}.components.${componentIndex}`);
+      });
+    });
+  }
+
+  if (isRecord(page.slots)) {
+    for (const [slot, value] of Object.entries(page.slots)) {
+      if (Array.isArray(value)) {
+        value.forEach((component, index) => visitComponent(component, `slots.${slot}.${index}`));
+      } else {
+        visitComponent(value, `slots.${slot}`);
+      }
+    }
+  }
+
+  return sites;
+}
+
+/**
  * Perform strict cross-reference validation on a parsed stack definition.
  * Returns an array of error messages (empty if valid).
  */
@@ -998,21 +1110,25 @@ function validateCrossReferences(config: ObjectStackDefinition): string[] {
   // Note: When no flows/pages are defined (size === 0), targets are not validated
   // because the referenced items may be provided by a plugin.
   // This is consistent with dashboard/page/report validation in navigation.
+  //
+  // The name sets are hoisted out of the `config.actions` guard because the
+  // INLINE walk below needs them too, and a stack whose only actions are inline
+  // has no `config.actions` at all (#6889 probe row E was exactly that stack).
+  const flowNames = new Set<string>();
+  if (config.flows) {
+    for (const flow of config.flows) {
+      flowNames.add(flow.name);
+    }
+  }
+
+  const pageNames = new Set<string>();
+  if (config.pages) {
+    for (const page of config.pages) {
+      pageNames.add(page.name);
+    }
+  }
+
   if (config.actions) {
-    const flowNames = new Set<string>();
-    if (config.flows) {
-      for (const flow of config.flows) {
-        flowNames.add(flow.name);
-      }
-    }
-
-    const pageNames = new Set<string>();
-    if (config.pages) {
-      for (const page of config.pages) {
-        pageNames.add(page.name);
-      }
-    }
-
     for (const action of config.actions) {
       // Validate flow-type actions reference a defined flow
       if (action.type === 'flow' && action.target && flowNames.size > 0 && !flowNames.has(action.target)) {
@@ -1033,6 +1149,37 @@ function validateCrossReferences(config: ObjectStackDefinition): string[] {
         errors.push(
           `Action '${action.name}' references object '${action.objectName}' which is not defined in objects.`,
         );
+      }
+    }
+  }
+
+  // The SAME two target checks, one more traversal: inline (page-element)
+  // actions (#6889). Same rule, same message tail — only the subject differs,
+  // because an inline action is located by page + path rather than by a
+  // registry entry, and its `name` is optional.
+  //
+  // `objectName` has no inline counterpart to check: `InlineActionSchema` does
+  // not pick that key, so an inline action cannot bind an object by name.
+  //
+  // Scope of the modal branch is the maintainer's #6739 ruling (2026-08-09):
+  // "A — a `type: 'modal'` target names a PAGE, only." That is why the inline
+  // branch mirrors the registered one exactly instead of also accepting an
+  // object name — objectui's page-then-object resolution is consumer leniency
+  // (self-labelled "Back-compat") and is being retired on its own card.
+  if (config.pages) {
+    for (const page of config.pages) {
+      for (const { action, where } of collectInlinePageActions(page)) {
+        if (action.type === 'flow' && action.target && flowNames.size > 0 && !flowNames.has(action.target)) {
+          errors.push(
+            `${where} references flow '${action.target}' which is not defined in flows.`,
+          );
+        }
+
+        if (action.type === 'modal' && action.target && pageNames.size > 0 && !pageNames.has(action.target)) {
+          errors.push(
+            `${where} references page '${action.target}' (via modal target) which is not defined in pages.`,
+          );
+        }
       }
     }
   }

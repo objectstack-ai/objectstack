@@ -267,6 +267,7 @@ export const ERROR_CODE_LEDGER = {
     'NOT_ATTEMPTED',              // atomic data-batch row never ran — an earlier row's failure aborted the batch (#4793)
     'NOT_CREATABLE',
     'NOT_OVERRIDABLE',
+    'OBJECT_OVERLAY_PACKAGE_MISMATCH',  // [ADR-0029 D9.9] object overlay row bound to a package that does not own the object
     'ROLLED_BACK',                // atomic data-batch row was written, then undone by the batch rollback (#4793)
     'UNSUPPORTED_QUERY_PARAM',
     'VALIDATION_FAILED',
