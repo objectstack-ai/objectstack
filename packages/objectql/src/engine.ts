@@ -43,6 +43,8 @@ import {
   FILE_REFERENCES_MIGRATION_ID,
   VALUE_SHAPES_MIGRATION_ID,
   isDataMigrationFlagVerified,
+  renderOperationMessage,
+  objectLabelKey,
 } from '@objectstack/spec/system';
 import { ExecutionContext, ExecutionContextSchema } from '@objectstack/spec/kernel';
 import type { FlowFunctionEffect } from '@objectstack/spec/automation';
@@ -133,7 +135,7 @@ import { ExpressionEngine } from '@objectstack/formula';
 import type { Expression } from '@objectstack/spec';
 import { isAggregatedViewContainer, expandViewContainer } from '@objectstack/spec';
 import { bindHooksToEngine } from './hook-binder.js';
-import { validateRecord, normalizeMultiValueFields, coerceBooleanFields, ValidationError, buildFieldError, valueShapePostureSetByEnv, mediaPostureSetByEnv, isScannableValueShapeField, valueShapeStrictEffective, mediaStrictEffective } from './validation/record-validator.js';
+import { validateRecord, normalizeMultiValueFields, coerceBooleanFields, ValidationError, buildFieldError, resolveFieldLabel, valueShapePostureSetByEnv, mediaPostureSetByEnv, isScannableValueShapeField, valueShapeStrictEffective, mediaStrictEffective } from './validation/record-validator.js';
 import type { AdmittedValueShapeViolation, AdmittedValueShapeViolationSink } from './validation/record-validator.js';
 import { evaluateValidationRules, needsPriorRecord, stripReadonlyWhenFields, stripReadonlyWhenFieldsMulti, hasReadonlyWhenInPayload, hasParentScopedReadonlyWhenInPayload, hasParentScopedRequiredWhen, stripReadonlyFields, stripRuntimeOwnedFields } from './validation/rule-validator.js';
 import { resolveMasterDetailRelation } from './master-detail.js';
@@ -3829,6 +3831,37 @@ export class ObjectQL implements IObjectQLEngine {
       locale: context?.locale,
       translate: t ? (key, locale, params) => t.call(this.i18nService, key, locale, params) : undefined,
     };
+  }
+
+  /**
+   * An OBJECT's display name in the caller's locale: translation bundle →
+   * declared `label` → API name (#7307).
+   *
+   * The object-level twin of `resolveFieldLabel` (`record-validator.ts`), and
+   * deliberately the same three-step ladder with the same last resort: the API
+   * name is what a user must not be shown, so it is where the ladder ENDS, not
+   * where it starts. It stays available to clients on the structured fields
+   * (`object` / `dependentObject`) and on `developerMessage`.
+   */
+  private objectDisplayLabel(
+    objectName: string,
+    declaredLabel: unknown,
+    ctx: { locale?: string; translate?: (key: string, locale: string, params?: Record<string, unknown>) => string },
+  ): string {
+    if (ctx.translate && ctx.locale) {
+      const key = objectLabelKey(objectName);
+      try {
+        const translated = ctx.translate(key, ctx.locale);
+        // II18nService echoes the key back on a miss.
+        if (typeof translated === 'string' && translated.length > 0 && translated !== key) {
+          return translated;
+        }
+      } catch {
+        // A misbehaving i18n service must not turn a 409 into a 500.
+      }
+    }
+    const declared = typeof declaredLabel === 'string' ? declaredLabel.trim() : '';
+    return declared.length > 0 ? declared : objectName;
   }
 
   /**
@@ -8161,13 +8194,52 @@ export class ObjectQL implements IObjectQLEngine {
         if (!dependents || dependents.length === 0) continue;
 
         if (behavior === 'restrict') {
-          const reason = fdef.deleteBehavior !== 'restrict' && fdef.required === true
-            ? ` (${fieldName} is required, so it cannot be cleared)`
-            : '';
+          // [#7307] TWO messages, two audiences — because this error has two
+          // and they were sharing one string.
+          //
+          // `message` is what a BUSINESS USER reads: REST ships it verbatim as
+          // `body.error` in the flat 409 envelope (`mapDataError`), and Console
+          // renders that as-is in a toast. It was composed English-only with the
+          // API names concatenated in and a metadata-authoring instruction on
+          // the end, so an operator deleting a 部门 in a fully Chinese app got an
+          // English sentence naming two tables and a column they have never
+          // seen, ending in advice only a developer can act on. It is now
+          // rendered through the operation-message catalog in the caller's
+          // locale against resolved LABELS — the same fix #3957 made one layer
+          // down for field constraints, reached from the operation side.
+          //
+          // `developerMessage` is what the DEVELOPER reads, and is the previous
+          // sentence unchanged, byte for byte: English, API names, and the
+          // `deleteBehavior:'cascade'` hint — which is correct and useful, and
+          // is not lost, it is addressed. It rides the structured half of the
+          // envelope alongside `dependentObject` / `dependentCount`, which
+          // already carry API names, so it discloses nothing new; no
+          // user-facing surface reads it.
+          //
+          // The wire code does NOT split: one `DELETE_RESTRICTED` (ADR-0112),
+          // two SENTENCES, exactly as the field catalog splits a message key
+          // without splitting `FieldErrorCode`.
+          const required = fdef.deleteBehavior !== 'restrict' && fdef.required === true;
+          const msgCtx = this.validationMessageContext(object, context);
+          const parent = objects.find((o) => (o as any)?.name === object);
           const err: any = new Error(
-            `Cannot delete ${object} (${id}): ${dependents.length} dependent ${childName} record(s) reference it via ${fieldName}${reason}. ` +
-            `Delete or reassign them first, or set deleteBehavior:'cascade' on ${childName}.${fieldName}.`,
+            renderOperationMessage(
+              {
+                messageKey: required ? 'delete_restricted_required' : 'delete_restricted',
+                params: {
+                  object: this.objectDisplayLabel(object, (parent as any)?.label, msgCtx),
+                  dependentObject: this.objectDisplayLabel(childName, (child as any)?.label, msgCtx),
+                  field: resolveFieldLabel(fieldName, fdef, { ...msgCtx, objectName: childName }),
+                  count: dependents.length,
+                },
+              },
+              { locale: msgCtx.locale, translate: msgCtx.translate },
+            ),
           );
+          err.developerMessage =
+            `Cannot delete ${object} (${id}): ${dependents.length} dependent ${childName} record(s) reference it via ${fieldName}` +
+            `${required ? ` (${fieldName} is required, so it cannot be cleared)` : ''}. ` +
+            `Delete or reassign them first, or set deleteBehavior:'cascade' on ${childName}.${fieldName}.`;
           err.code = 'DELETE_RESTRICTED';
           err.status = 409;
           err.object = object;
@@ -8544,7 +8616,17 @@ export class ObjectQL implements IObjectQLEngine {
           if (summaryFailures.length > 0) throw new SummaryRecomputeError(summaryFailures, hookContext.result);
           return hookContext.result;
       } catch (e) {
-          this.logger.error('Delete operation failed', e as Error, { object });
+          // [#7307] `Error.message` is now the END USER's localized sentence for
+          // a `DELETE_RESTRICTED`, and the logger serializes only `message` +
+          // `stack` — so without this the operator-facing half (API names, the
+          // `deleteBehavior:'cascade'` remedy) would reach no channel at all,
+          // and the server log of a zh-CN deployment would read in Chinese. An
+          // error that carries no `developerMessage` logs exactly as before.
+          const devDetail = (e as any)?.developerMessage;
+          this.logger.error('Delete operation failed', e as Error, {
+            object,
+            ...(typeof devDetail === 'string' && devDetail.length > 0 ? { developerMessage: devDetail } : {}),
+          });
           throw e;
       }
     });

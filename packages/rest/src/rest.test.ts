@@ -2390,6 +2390,40 @@ describe('mapDataError — schema/constraint envelopes', () => {
     expect(r.body.dependentCount).toBe(1);
   });
 
+  // [#7307] Two audiences, two fields. `error` is what Console renders verbatim
+  // in a toast; `developerMessage` is where the API names and the
+  // `deleteBehavior` remedy live. The transport must carry both and must not
+  // merge them.
+  it('ships DELETE_RESTRICTED developerMessage alongside the user-facing error', () => {
+    const r = mapDataError(
+      Object.assign(new Error('该部门正被 1 条零星申请记录通过「申报部门」引用,请先删除或改派这些记录。'), {
+        code: 'DELETE_RESTRICTED',
+        status: 409,
+        developerMessage:
+          "Cannot delete sys_business_unit (b1): 1 dependent os_ehr_app record(s) reference it via apply_dept. " +
+          "Delete or reassign them first, or set deleteBehavior:'cascade' on os_ehr_app.apply_dept.",
+        dependentObject: 'os_ehr_app',
+        dependentCount: 1,
+      }),
+      'sys_business_unit',
+    );
+    expect(r.status).toBe(409);
+    expect(r.body.error).toBe('该部门正被 1 条零星申请记录通过「申报部门」引用,请先删除或改派这些记录。');
+    expect(r.body.error).not.toMatch(/deleteBehavior/);
+    expect(r.body.developerMessage).toContain("set deleteBehavior:'cascade' on os_ehr_app.apply_dept");
+  });
+
+  it('omits developerMessage entirely when the thrower carries none', () => {
+    const r = mapDataError(
+      Object.assign(new Error('Cannot delete sys_position (p1): 1 dependent record'), {
+        code: 'DELETE_RESTRICTED',
+        status: 409,
+      }),
+      'sys_position',
+    );
+    expect(r.body).not.toHaveProperty('developerMessage');
+  });
+
   it('maps SQLite "has no column named" → 400 INVALID_FIELD with the field', () => {
     const r = mapDataError(
       sqliteError(

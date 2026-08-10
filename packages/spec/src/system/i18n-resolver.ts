@@ -1196,6 +1196,22 @@ export function objectFieldLabelKey(objectName: string, fieldName: string): stri
   return `objects.${objectName}.fields.${fieldName}.label`;
 }
 
+/**
+ * Dot-notation i18n key for an OBJECT's translated label —
+ * `objects.<object>.label`.
+ *
+ * The same location {@link translateObject} reads out of a bundle (through
+ * `lookupObjectField(bundle, name, 'label')`), spelled for consumers that hold
+ * an `II18nService` (which takes a key) rather than a `TranslationBundle` —
+ * exactly the relationship {@link objectFieldLabelKey} has to
+ * {@link resolveObjectFieldLabels}. Used by the engine to name an object in the
+ * caller's language when a data operation is refused (#7307), the way the field
+ * key already names the offending field (#3957).
+ */
+export function objectLabelKey(objectName: string): string {
+  return `objects.${objectName}.label`;
+}
+
 export function resolveObjectFieldLabels(
   data: TranslationData | undefined,
   objectName: string,

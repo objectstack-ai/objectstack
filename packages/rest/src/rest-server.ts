@@ -601,6 +601,19 @@ export function mapDataError(error: any, object?: string): { status: number; bod
             body: {
                 error: error?.message ?? 'Cannot delete: dependent records exist',
                 code: 'DELETE_RESTRICTED',
+                // [#7307] `error` is the END USER's half — localized, labels
+                // only — because Console renders it verbatim in a toast.
+                // `developerMessage` is the other half the engine now splits
+                // out: the API names and the `deleteBehavior:'cascade'` remedy,
+                // in a field no user-facing surface reads. Shipping it here is
+                // what keeps the guidance REACHABLE for the app builder who is
+                // hitting this over HTTP — dropping it at the transport would
+                // move the defect rather than fix it. It discloses nothing the
+                // envelope did not already carry: `dependentObject` and
+                // `object` are API names on the same body.
+                ...(typeof error?.developerMessage === 'string' && error.developerMessage.length > 0
+                    ? { developerMessage: error.developerMessage }
+                    : {}),
                 ...(error?.dependentObject ? { dependentObject: error.dependentObject } : {}),
                 ...(typeof error?.dependentCount === 'number' ? { dependentCount: error.dependentCount } : {}),
                 ...(object ? { object } : {}),
