@@ -124,7 +124,7 @@ export function retryPolicyShape() {
       'has ONE spelling for its base delay across every surface that carries it: `job.retryPolicy`, ' +
       "a `try_catch` node's `retry` and `flow.errorHandling`. " +
       'Rename the key to `backoffMs`; the value (milliseconds before the first retry) ' +
-      'is unchanged. `os migrate meta --from 16` rewrites it for you.',
+      'is unchanged. Run `os migrate meta --from 16` to rewrite existing sources automatically.',
     ),
   };
 }

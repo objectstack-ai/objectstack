@@ -205,6 +205,13 @@ const TYPE_COLLECTIONS: Array<{ type: string; key: string }> = [
   // checks every widget on the dashboard. Registering it here is not optional
   // bookkeeping: without it the ledger would be newly correct and newly
   // silent, which is the shape this lint exists to prevent.
+  //
+  // As of #6774 the dashboard ledger warns on NOTHING — four of those five were
+  // retired in 17.0.0 (#5010) and `colorVariant` went `live` when objectui#3799
+  // gave it a renderer. The type STAYS listed, the resolved state `webhook` and
+  // `email_template` already sit in: a zero-warn entry costs one empty map
+  // lookup, and it means a future regression that re-deadens a widget key warns
+  // on its own instead of waiting for someone to notice this list again.
   { type: 'dashboard', key: 'dashboards' },
 ];
 

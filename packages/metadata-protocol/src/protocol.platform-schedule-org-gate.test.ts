@@ -480,17 +480,30 @@ describe('#6285 refusal through saveMetaItem / publishMetaItem', () => {
         expect(err.status).toBe(422);
     });
 
-    it('allows an ORG-SCOPED write of the same flow — the row already names its organization', async () => {
-        // The limb negation at the caller face, and worth driving end-to-end
-        // rather than only on the pure function: #6283 flipped flow's
-        // `allowOrgOverride` to `false`, so the ADR-0005 gate now 403s an org
-        // overlay of a PACKAGED flow. A brand-new runtime-created flow is a
-        // different door (`allowRuntimeCreate: true` survived that flip), and
-        // this pins which of the two an org-scoped write of a new flow takes.
+    it('[#6190] an ORG-SCOPED write of the same flow is now refused BEFORE this rule runs', async () => {
+        // Replaced wholesale rather than re-spelled, because what changed is
+        // this case's REACHABILITY, and a fixture that keeps asserting a
+        // verdict nothing can produce is green for an empty reason.
+        //
+        // It used to pin the limb NEGATION at the caller face: an org-scoped
+        // write escaped #6285's 422 because "the row already names its
+        // organization". The 2026-08-08 ruling on #6190 refuses an org-scoped
+        // write of any non-org-overridable type — `flow` among them — at a gate
+        // that runs EARLIER than `assertRuntimeAuthoringRules`. So the negation
+        // is no longer reachable through `saveMetaItem`/`publishMetaItem` for
+        // `flow`: the write never gets far enough to be judged by this rule.
+        //
+        // Recorded here, not acted on: whether #6285's org-present limb should
+        // survive at all now that nothing can reach it through these two doors
+        // is a question for that rule's own owner (#6710 is in flight in that
+        // region), and this PR deliberately does not touch it. What this case
+        // pins is the honest current fact — which refusal an org-scoped
+        // platform-schedule flow actually gets.
         const { protocol, rows } = makeProtocol();
-        const result = await save(protocol, scheduledSweep(), { organizationId: 'org_a' });
-        expect(result.success).toBe(true);
-        expect(flowRows(rows).map((r) => r.organization_id)).toEqual(['org_a']);
+        const err = await save(protocol, scheduledSweep(), { organizationId: 'org_a' }).catch((e: any) => e);
+        expect(err.code).toBe('NOT_OVERRIDABLE');
+        expect(err.status).toBe(403);
+        expect(flowRows(rows)).toEqual([]);
     });
 
     it('allows a DRAFT of the identical body, and refuses the publish that promotes it', async () => {
@@ -526,16 +539,20 @@ describe('#6285 refusal through saveMetaItem / publishMetaItem', () => {
         expect(shouted[0]).toContain(PLATFORM_SCHEDULE_CREATE_RECORD_ORG_MISSING);
     });
 
-    it('does not gate control-plane (package-author) writes — the pre-existing carve-out', async () => {
-        // The dispatch's STOP item. `environmentId === undefined` is the
-        // control-plane / package-author channel, and the short-circuit is
-        // EXISTING DESIGN (`protocol.runtime-authoring-gate.test.ts` pins it for
-        // the other 26 rules). It does not put this guardrail out of reach:
-        // every serving path binds an environment id (`env_local` /
-        // `proj_local` / a cloud project), which is the case the test above
-        // drives.
+    it('does not gate a DECLARED package-author (control-plane) channel — the pre-existing carve-out', async () => {
+        // The dispatch's STOP item, re-spelled by #6710. The carve-out is
+        // unchanged and still EXISTING DESIGN
+        // (`protocol.runtime-authoring-gate.test.ts` pins it for all 26 rules);
+        // what changed is how a kernel claims it. This case used to construct
+        // the protocol with no `environmentId` and rely on that meaning
+        // "control plane" — a row-scoping key standing in for a topology, which
+        // #6710 measured to be false for the CLI's host-config assembler. The
+        // channel is declared now, so the carve-out this case is about is
+        // stated rather than inferred.
         const { engine, rows } = makeStubEngine();
-        const protocol = new ObjectStackProtocolImplementation(engine, () => new Map()) as any;
+        const protocol = new ObjectStackProtocolImplementation(
+            engine, () => new Map(), undefined, 'package-author',
+        ) as any;
         const result = await protocol.saveMetaItem({
             type: 'flow',
             name: 'nightly_sweep',
@@ -543,6 +560,24 @@ describe('#6285 refusal through saveMetaItem / publishMetaItem', () => {
         });
         expect(result.success).toBe(true);
         expect(flowRows(rows).length).toBe(1);
+    });
+
+    it('[#6710] DOES gate an unscoped kernel that never declared the channel', async () => {
+        // The other half of the re-spelling, and the reason it is not merely
+        // cosmetic: this guardrail is one of the 26 shared rules, so #6710
+        // widened ITS reach too. An unscoped kernel that has not claimed the
+        // package-author channel is a host-config app server — an end-user
+        // surface — and #6285's refusal now applies there. Without this case
+        // the file would assert only the side that stayed the same.
+        const { engine, rows } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine, () => new Map()) as any;
+        const err = await protocol
+            .saveMetaItem({ type: 'flow', name: 'nightly_sweep', item: scheduledSweep() })
+            .catch((e: any) => e);
+        expect(err?.code).toBe('INVALID_METADATA');
+        expect(err?.status).toBe(422);
+        expect(err.issues.map((i: any) => i.rule)).toContain(PLATFORM_SCHEDULE_CREATE_RECORD_ORG_MISSING);
+        expect(flowRows(rows)).toEqual([]);
     });
 
     it('does not gate `os migrate meta --stored`, which rewrites rows that already exist', async () => {

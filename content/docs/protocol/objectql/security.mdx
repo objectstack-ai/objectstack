@@ -325,7 +325,12 @@ await data.update('attendance', { id, work_duration: 480 }, {
 ```
 
 `reason` is `'readonly'` for this static lock and `'readonly_when'` for a conditional
-[`readonlyWhen`](/docs/references/data/field) predicate. The listener is an in-process
+[`readonlyWhen`](/docs/references/data/field) predicate. A third value,
+`'primary_key'`, reports the one legal strip that is **not** a read-only lock: an
+`update` payload whose `id` the engine has already ruled is not an identifier is
+dropped rather than written over the targeted row's primary key. The vocabulary is
+open — it grows as the write path gains legal strips — so branch on `reason`
+exhaustively rather than treating "not `readonly_when`" as "read-only". The listener is an in-process
 callback: it is delivered by the local engine, and does **not** cross the RPC / Virtual
 Data Engine boundary, so a remote caller never receives these events. Without a listener,
 the only trace is a server-side `WARN` naming the object, the field, and both remedies.

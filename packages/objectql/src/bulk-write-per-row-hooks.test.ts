@@ -922,6 +922,183 @@ describe('[#5574 / D7] the matched row set is read ONCE, and serves everything',
 });
 
 /* ────────────────────────────────────────────────────────────────────────────
+ * 8. [#6966] The dispatch marker — the fact D1/D2's indistinguishability erased
+ *
+ * Sections 1–7 make a per-row context deliberately indistinguishable from a
+ * single-id one, which is what lets a handler written for one record work
+ * unchanged on a batch. The cost is that "am I one of N?" became unanswerable,
+ * and the guards that had been answering it from `input.id`'s shape — "no id
+ * means bulk" — silently inverted rather than failing. `HookContext.dispatch`
+ * is that question restored as an engine-stated fact.
+ *
+ * Pinned here rather than in a file of its own for section 7's reason: the
+ * marker exists to describe THIS fan-out, and a marker that drifts from the
+ * dispatch it describes is worse than none.
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+describe('[#6966] every dispatched context carries the marker, on all four write paths', () => {
+  const seenOn = async (event: string, drive: (engine: ObjectQL, ids: string[]) => Promise<unknown>) => {
+    const seen: Array<{ mode: unknown; index: unknown; id: unknown }> = [];
+    const { engine } = await boot([hook('marker', event, (ctx) => {
+      const d = (ctx as any).dispatch;
+      seen.push({ mode: d?.mode, index: d?.index, id: (ctx.input as any)?.id });
+    })]);
+    const rows = await seedTasks(engine, [
+      { title: 'a', status: 'todo' },
+      { title: 'b', status: 'todo' },
+    ]);
+    await drive(engine, rows.map((r) => String(r.id)));
+    return seen;
+  };
+
+  it('single-id UPDATE ⇒ one dispatch, mode "record", index 0', async () => {
+    for (const event of ['beforeUpdate', 'afterUpdate']) {
+      const seen = await seenOn(event, (engine, ids) =>
+        engine.update('task', { status: 'done' }, { where: { id: ids[0] } }));
+      expect(seen, event).toEqual([{ mode: 'record', index: 0, id: seen[0].id }]);
+    }
+  });
+
+  it('single-id DELETE ⇒ one dispatch, mode "record", index 0', async () => {
+    for (const event of ['beforeDelete', 'afterDelete']) {
+      const seen = await seenOn(event, (engine, ids) => engine.delete('task', { where: { id: ids[0] } } as any));
+      expect(seen, event).toEqual([{ mode: 'record', index: 0, id: seen[0].id }]);
+    }
+  });
+
+  it('predicate UPDATE ⇒ N dispatches, mode "per-row", index counting 0..N-1', async () => {
+    for (const event of ['beforeUpdate', 'afterUpdate']) {
+      const seen = await seenOn(event, (engine) =>
+        engine.update('task', { status: 'done' }, { multi: true, where: { status: 'todo' } }));
+      expect(seen.map((s) => s.mode), event).toEqual(['per-row', 'per-row']);
+      // The INDEX is the member a consumer keys "do this once per batch" on, so
+      // it must count rather than repeat the batch context's 0.
+      expect(seen.map((s) => s.index), event).toEqual([0, 1]);
+      expect(new Set(seen.map((s) => s.id)).size, event).toBe(2);
+    }
+  });
+
+  it('predicate DELETE ⇒ N dispatches, mode "per-row", index counting 0..N-1', async () => {
+    for (const event of ['beforeDelete', 'afterDelete']) {
+      const seen = await seenOn(event, (engine) =>
+        engine.delete('task', { multi: true, where: { status: 'todo' } } as any));
+      expect(seen.map((s) => s.mode), event).toEqual(['per-row', 'per-row']);
+      expect(seen.map((s) => s.index), event).toEqual([0, 1]);
+      expect(new Set(seen.map((s) => s.id)).size, event).toBe(2);
+    }
+  });
+
+  it('a batch INSERT is per-row too, and a single insert is not', async () => {
+    const batch: any[] = [];
+    const { engine } = await boot([hook('marker', 'beforeInsert', (ctx) => {
+      batch.push((ctx as any).dispatch);
+    })]);
+    await engine.insert('task', [{ title: 'a' }, { title: 'b' }, { title: 'c' }] as any);
+    expect(batch.map((d) => [d.mode, d.index])).toEqual([['per-row', 0], ['per-row', 1], ['per-row', 2]]);
+
+    batch.length = 0;
+    await engine.insert('task', { title: 'solo' } as any);
+    expect(batch.map((d) => [d.mode, d.index])).toEqual([['record', 0]]);
+  });
+
+  it('NO handler is ever dispatched on a context without the marker', async () => {
+    // The contract the JSDoc states, pinned as an invariant rather than
+    // path-by-path. It is what makes `ctx.dispatch?.mode` safe to read without
+    // a "what if the engine did not bind it" branch — and it covers the one
+    // context a reader might worry about: `update()`/`delete()` keep a
+    // BATCH-scoped `hookContext` on the predicate path, and the claim is that
+    // no handler ever sees it (the per-row loop runs whenever `hasHooksFor` is
+    // true, and when it is false no handler runs at all).
+    const unmarked: string[] = [];
+    const events = [
+      'beforeInsert', 'afterInsert',
+      'beforeUpdate', 'afterUpdate',
+      'beforeDelete', 'afterDelete',
+    ];
+    const { engine } = await boot(events.map((e) => hook(`probe_${e}`, e, (ctx) => {
+      const d = (ctx as any).dispatch;
+      if (!d || (d.mode !== 'record' && d.mode !== 'per-row') || typeof d.index !== 'number' || !d.scope) {
+        unmarked.push(`${e}:${JSON.stringify(d)}`);
+      }
+    })));
+
+    // Every write shape this engine can take, in one pass.
+    await engine.insert('task', { title: 'solo', status: 'todo' } as any);
+    const batch: any = await engine.insert('task', [
+      { title: 'a', status: 'todo' },
+      { title: 'b', status: 'todo' },
+    ] as any);
+    await engine.update('task', { status: 'mid' }, { where: { id: batch[0].id } });
+    await engine.update('task', { status: 'done' }, { multi: true, where: { status: 'todo' } });
+    await engine.delete('task', { where: { id: batch[0].id } } as any);
+    await engine.delete('task', { multi: true, where: { status: 'done' } } as any);
+
+    expect(unmarked).toEqual([]);
+  });
+});
+
+describe('[#6966] `scope` is one object per WRITE, spanning both phases', () => {
+  it('carries a before-phase stash to the after phase of a predicate update', async () => {
+    // The regression this closes: a per-row `before*` context is freshly built,
+    // so a handler stashing on the CONTEXT (which is what every consumer did,
+    // because a single-id write reuses one context across its pair) wrote to an
+    // object the after phase never sees.
+    const arrived: unknown[] = [];
+    const { engine } = await boot([
+      hook('stash', 'beforeUpdate', (ctx) => {
+        const scope = (ctx as any).dispatch.scope as Record<string, unknown>;
+        ((scope.ids ??= []) as unknown[]).push((ctx.input as any).id);
+      }),
+      hook('read', 'afterUpdate', (ctx) => {
+        arrived.push(JSON.stringify(((ctx as any).dispatch.scope as any).ids));
+      }),
+    ]);
+    const rows = await seedTasks(engine, [
+      { title: 'a', status: 'todo' },
+      { title: 'b', status: 'todo' },
+    ]);
+    const ids = rows.map((r) => String(r.id));
+
+    await engine.update('task', { status: 'done' }, { multi: true, where: { status: 'todo' } });
+
+    // Every after dispatch sees the WHOLE batch's collection — all before
+    // dispatches complete before the write, so the union is closed by then.
+    expect(arrived).toEqual([JSON.stringify(ids), JSON.stringify(ids)]);
+  });
+
+  it('is per WRITE — a second call gets a fresh scope, never the first call\'s', async () => {
+    const scopes: unknown[] = [];
+    const { engine } = await boot([hook('mark', 'beforeUpdate', (ctx) => {
+      const scope = (ctx as any).dispatch.scope as Record<string, unknown>;
+      scopes.push(scope);
+      scope.touched = true;
+    })]);
+    const rows = await seedTasks(engine, [{ title: 'a', status: 'todo' }]);
+
+    await engine.update('task', { status: 'mid' }, { where: { id: rows[0].id } });
+    await engine.update('task', { status: 'done' }, { where: { id: rows[0].id } });
+
+    expect(scopes).toHaveLength(2);
+    expect(scopes[0]).not.toBe(scopes[1]);
+  });
+
+  it('is the SAME object across a single-id write\'s before/after pair', async () => {
+    const scopes: unknown[] = [];
+    const grab = (ctx: HookContext) => { scopes.push((ctx as any).dispatch.scope); };
+    const { engine } = await boot([
+      hook('b', 'beforeUpdate', grab),
+      hook('a', 'afterUpdate', grab),
+    ]);
+    const rows = await seedTasks(engine, [{ title: 'a', status: 'todo' }]);
+
+    await engine.update('task', { status: 'done' }, { where: { id: rows[0].id } });
+
+    expect(scopes).toHaveLength(2);
+    expect(scopes[0]).toBe(scopes[1]);
+  });
+});
+
+/* ────────────────────────────────────────────────────────────────────────────
  * Harness
  * ──────────────────────────────────────────────────────────────────────────── */
 

@@ -63,19 +63,42 @@
 // and a roster of 182 names would be a high-water mark that rots on the first
 // merge. "Absent-or-non-empty at base" is the same statement with no maintenance.
 //
-// Two diff statuses are judged, and the second one is why the rule is phrased
-// about the SET of empty declarations rather than about added files:
+// Three diff statuses are judged, and everything after the first row is why the
+// rule is phrased about the SET of empty declarations rather than about added
+// files ("at base" below always means at the MERGE BASE, see the next section):
 //
-//   A  added, empty at head                     -> violation (a new empty file)
-//   M  empty at head, NON-empty at base         -> violation (emptied in place)
-//   M  empty at head, already empty at base     -> exempt    (stock, untouched)
-//   *  non-empty at head                        -> ok
+//   A  added, empty at head                       -> violation (a new empty file)
+//   M  empty at head, NON-empty at base           -> violation (emptied in place)
+//   M  empty at head, already empty at base       -> exempt    (stock, untouched)
+//   R  empty at head, NON-empty at the OLD path   -> violation (renamed and emptied)
+//   R  empty at head, already empty at that path  -> exempt    (stock, moved)
+//   R  empty at head, OLD path is README.md       -> violation (not inherited from
+//                                                   documentation; see the scan)
+//   *  non-empty at head                          -> ok
 //
 // Row 2 costs a few lines and removes the obvious bypass: taking a stock
 // non-empty changeset and deleting its frontmatter entries produces a brand-new
 // empty declaration -- exactly the harm -- while `--diff-filter=A` alone sees
 // nothing. Row 3 is what keeps the stock exempt even when a PR edits an existing
 // empty file's prose, which is a legitimate thing to do and releases nothing new.
+//
+// Rows 4 and 5 are that same argument one status letter along (#7045). Git's
+// rename detection is on by default (`diff.renames`, since git 2.9), so emptying
+// a stock changeset and `git mv`-ing it in one commit is reported as `R`, and
+// `--diff-filter=AM` -- what this file passed until #7045 -- DROPPED that row
+// entirely. The gate never saw the file, so row 2's bypass simply reopened under
+// a different letter. Measured on git 2.43.0, renaming `.changeset/old.md` to
+// `.changeset/new.md` while emptying its frontmatter reports
+//
+//   R077<TAB>.changeset/old.md<TAB>.changeset/new.md
+//
+// and the same diff under `--diff-filter=AM` prints nothing at all. `AMR`, plus
+// reading the base side at the OLD path (field 2 of an `R` row, not field 3),
+// closes it and costs nothing: row 5 leaves a PURE move of a stock empty changeset
+// exempt, so nobody goes red for tidying a filename. `check-changeset-no-major.mjs`
+// made the identical one-letter correction first, off the same measurement
+// (#7005 / PR #7048); this file and `check-adr-0087-registration.mjs` followed in
+// #7045 because each of the three owns its own fixtures and its own messages.
 //
 // ## Where the diff starts (#6129)
 //
@@ -128,13 +151,29 @@ const REPO_ROOT = resolve(__dirname, '..');
 /**
  * The bump entries declared in a changeset's YAML frontmatter.
  *
- * The entry regex is deliberately the SAME shape `check-changeset-no-major.mjs`
- * uses to find `major` bumps. Two gates reading the same block must agree on
- * what counts as a declaration, or one of them is judging a different file than
- * it appears to.
+ * The entry regex is deliberately the SAME shape `check-changeset-no-major.mjs`,
+ * `check-adr-0087-registration.mjs` and `objectui-changeset-digest.mjs` use.
+ * Four readers of the same block must agree on what counts as a declaration, or
+ * one of them is judging a different file than it appears to. That agreement is
+ * asserted mechanically in this file's self-test (see "the family reads one
+ * block one way"), not merely claimed here (#7004).
  *
  * A file with no opening `---` fence declares nothing either, and is reported as
  * its own kind so the message can say which of the two shapes it is.
+ *
+ * ## Why a comment-bearing entry is this gate's FALSE-RED half (#7004)
+ *
+ * The regex used to end `([A-Za-z]+)\s*$`, which accepts nothing after the bump
+ * word. So `"@objectstack/spec": major # keep` — a real major to
+ * @changesets/parse@0.4.3 — declared nothing here, and a PR that added a
+ * perfectly valid changeset was rejected as empty-frontmatter under #5471. Same
+ * anchor, same miss, for a QUOTED bump value (`: "major"`).
+ *
+ * The opposite direction was this gate's FALSE-GREEN half, and it is the one
+ * that mattered more: a whole-line comment containing a colon (`# note: major`)
+ * is entry-shaped, so a frontmatter block holding only comments parsed as a
+ * declaration of a package named `# note` — i.e. as NON-empty. That is exactly
+ * the #4898 input this gate exists to refuse.
  *
  * @param {string} text
  * @returns {{ fenced: boolean, packages: string[] }}
@@ -148,8 +187,10 @@ export function declaredBumpsIn(text) {
   const packages = [];
   for (let j = i + 1; j < lines.length; j++) {
     if (lines[j].trim() === '---') break; // end of frontmatter
+    if (/^\s*#/.test(lines[j])) continue; // a whole-line YAML comment declares nothing
     // "<name>": <bump>   |   '<name>': <bump>   |   <name>: <bump>
-    const m = /^\s*["']?([^"':]+)["']?\s*:\s*([A-Za-z]+)\s*$/.exec(lines[j]);
+    // with an optionally quoted bump value and an optional trailing ` # comment`.
+    const m = /^\s*["']?([^"':]+)["']?\s*:\s*["']?([A-Za-z]+)["']?(?:\s+#.*)?\s*$/.exec(lines[j]);
     if (m) packages.push(m[1].trim());
   }
   return { fenced: true, packages };
@@ -215,7 +256,7 @@ export function mergeBase(base, head, cwd) {
  * lived in the CLI could be dropped from it without a single fixture noticing.
  *
  * @param {{ cwd: string, base: string, head?: string }} opts
- * @returns {{ violations: {file: string, kind: string}[], exempt: string[], ok: string[], base: string }}
+ * @returns {{ violations: {file: string, kind: string, from?: string}[], exempt: string[], ok: string[], base: string }}
  * @throws when `base` and `head` have no merge base (#4690: not a pass)
  */
 export function scan({ cwd, base, head = 'HEAD' }) {
@@ -226,7 +267,9 @@ export function scan({ cwd, base, head = 'HEAD' }) {
         'Refusing to fall back to the raw base, which is the #6129 defect.',
     );
   }
-  const out = git(['diff', '--name-status', '--diff-filter=AM', from, head, '--', '.changeset/*.md'], cwd);
+  // `AMR`, not `AM`: an `R` row is where the row-2 bypass reappears under another
+  // status letter -- see "Three diff statuses are judged" in the header (#7045).
+  const out = git(['diff', '--name-status', '--diff-filter=AMR', from, head, '--', '.changeset/*.md'], cwd);
 
   const violations = [];
   const exempt = [];
@@ -234,7 +277,16 @@ export function scan({ cwd, base, head = 'HEAD' }) {
 
   for (const line of out.split('\n')) {
     if (!line.trim()) continue;
-    const [status, file] = line.split('\t');
+    const fields = line.split('\t');
+    // `R` is `R<score>\t<old path>\t<new path>`; `A` and `M` are `<status>\t<path>`.
+    // The status is read one character wide because the `R` letter carries a
+    // similarity score, so `=== 'R'` on the whole field would never match.
+    const status = fields[0][0];
+    const file = status === 'R' ? fields[2] : fields[1];
+    // Where the branch-point side is READ. For `A` the path is not there at all
+    // and `showOrNull` answers null, which is the right answer; for `R` it is the
+    // PRE-RENAME name, which is the whole reason an `R` row can be judged.
+    const basePath = fields[1];
     if (!file || !isChangesetFile(file)) continue;
 
     const headText = showOrNull(head, file, cwd);
@@ -249,10 +301,21 @@ export function scan({ cwd, base, head = 'HEAD' }) {
       continue;
     }
 
-    // Modified. Exempt only if it was ALREADY an empty declaration at base --
-    // i.e. this PR did not create the empty declaration, it inherited it.
-    const baseText = showOrNull(from, file, cwd);
+    // Modified, or renamed. Exempt only if it was ALREADY an empty declaration at
+    // the branch point -- i.e. this PR did not create the empty declaration, it
+    // inherited it. `basePath` is what makes that read survive a rename: for `M`
+    // it is the same path, for `R` it is the pre-rename one.
+    //
+    // ...and it is read ONLY when that path was itself a changeset. Git pairs
+    // renames by CONTENT, not by name, so an `R` row can legitimately arrive as
+    // `.changeset/README.md -> .changeset/anything.md` (measured, git 2.43.0).
+    // README is documentation and declares nothing by definition; inheriting
+    // "already empty at base" from it would hand out the exemption for free, on
+    // a head file that really is a brand-new empty changeset. For `M` this guard
+    // is a no-op, because `basePath` is the path already accepted above.
+    const baseText = isChangesetFile(basePath) ? showOrNull(from, basePath, cwd) : null;
     if (baseText !== null && isEmptyDeclaration(baseText)) exempt.push(file);
+    else if (status === 'R') violations.push({ file, kind: 'renamed-empty', from: basePath });
     else violations.push({ file, kind: 'emptied' });
   }
 
@@ -265,11 +328,19 @@ const KIND_NOTE = {
   'added-empty': 'new file, empty frontmatter -- declares no package',
   'added-unfenced': 'new file, no frontmatter block at all -- declares no package',
   emptied: 'existing changeset emptied by this PR -- declares no package any more',
+  // #7045. Named apart from `emptied` because the head path is BRAND NEW: telling
+  // an author "existing changeset emptied" while pointing at a filename that does
+  // not exist at the branch point sends them looking for the wrong history. The
+  // note stops at what is true for every `R` row -- what stood at the OLD path is
+  // named separately, because it is not always a changeset (see the scan).
+  'renamed-empty': 'renamed into this path, and empty here -- declares no package',
 };
 
 function report(violations) {
   console.error('This PR adds an empty-frontmatter changeset:\n');
-  for (const { file, kind } of violations) console.error(`   ${file}\n     ${KIND_NOTE[kind]}`);
+  for (const { file, kind, from } of violations) {
+    console.error(`   ${file}\n     ${KIND_NOTE[kind]}${from ? `\n     (the branch-point path is ${from} -- read the diff there)` : ''}`);
+  }
   console.error(
     [
       '',
@@ -505,7 +576,7 @@ function selfTest() {
 
     // ── GREEN 4: a stock EMPTY changeset whose prose is edited ───────────────
     // Still empty at base, so this PR created no new empty declaration. This is
-    // the row that keeps the exemption honest under `--diff-filter=AM`.
+    // the row that keeps the exemption honest under `--diff-filter=AMR`.
     {
       const { dir, base } = makeRepo(
         { '.changeset/stock-empty.md': EMPTY },
@@ -528,6 +599,108 @@ function selfTest() {
       const { dir, base } = makeRepo({}, { '.changeset/README.md': '# Changesets\n\nhow to write one\n' });
       const r = scan({ cwd: dir, base });
       assert(r.violations.length === 0, 'GREEN 5: .changeset/README.md must never be judged as a changeset');
+    }
+
+    // ── The `R` rows (#7045) ─────────────────────────────────────────────────
+    //
+    // Rows 4-6 of the header table. `--diff-filter=AM` -- what this file passed
+    // until #7045 -- drops an `R` row wholesale, so RED 4 below was GREEN with a
+    // violation sitting in the diff. Every case here carries a CONTROL asserting
+    // that git really emitted `R`: rename detection is a SIMILARITY score, and a
+    // short body degrades to add-plus-delete, at which point the case is about an
+    // ordinary `A` and passes for a reason that has nothing to do with the fix.
+    // Hence `RENAMEABLE` -- a body long enough to score, in every fixture below.
+    const RENAMEABLE =
+      'feat(spec): a body long enough that git scores the move as a rename rather\n' +
+      'than as an add plus a delete -- the whole point of these cases is the `R`\n' +
+      'status, and a short body silently turns them into `A` cases instead.\n';
+    const RENAMEABLE_DECLARING = `---\n"@objectstack/spec": minor\n---\n\n${RENAMEABLE}`;
+    const RENAMEABLE_EMPTY = `---\n---\n\n${RENAMEABLE}`;
+    /** The `R` row for `old -> new`, or null. Fails loudly rather than quietly. */
+    const renameRow = (dir, base, oldPath, newPath) =>
+      git(['diff', '--name-status', base, 'HEAD', '--', '.changeset/*.md'], dir)
+        .split('\n')
+        .find((l) => new RegExp(`^R\\d+\t${oldPath}\t${newPath}$`).test(l)) ?? null;
+
+    // ── RED 4: a stock non-empty changeset RENAMED AND EMPTIED in one commit ──
+    // Exactly RED 2 with a `git mv` bolted on -- the same brand-new empty
+    // declaration, spelled so that `AM` could not see it at all.
+    {
+      const { dir, base } = makeRepo(
+        { '.changeset/was-declaring.md': RENAMEABLE_DECLARING },
+        { '.changeset/was-declaring.md': null, '.changeset/now-renamed.md': RENAMEABLE_EMPTY },
+      );
+      const row = renameRow(dir, base, '\\.changeset/was-declaring\\.md', '\\.changeset/now-renamed\\.md');
+      assert(row !== null, `RED 4 control: git must really report this as \`R\`, or the case below is an ordinary \`A\` -- got ${JSON.stringify(git(['diff', '--name-status', base, 'HEAD', '--', '.changeset/*.md'], dir))}`);
+      const r = scan({ cwd: dir, base });
+      assert(r.violations.length === 1, `RED 4: renaming a stock changeset while emptying it must go red (\`--diff-filter=AM\` dropped this row entirely) -- got ${JSON.stringify(r.violations)}`);
+      assert(r.violations[0]?.file === '.changeset/now-renamed.md', 'RED 4: the violation names the HEAD path (field 3 of the `R` row)');
+      assert(r.violations[0]?.kind === 'renamed-empty', 'RED 4: kind must be renamed-empty, not emptied -- the head path is brand new');
+      assert(r.violations[0]?.from === '.changeset/was-declaring.md', 'RED 4: ...and it carries the BRANCH-POINT path (field 2), which is where the author has to look');
+    }
+
+    // ── GREEN 6: a PURE rename of a stock EMPTY changeset stays exempt ────────
+    // The paired control, and the reason `AMR` costs nothing: moving a stock file
+    // introduces no new empty declaration, so widening the filter must not turn
+    // tidying a filename into a red. Note this case can ONLY be green through the
+    // `R` path -- were the rename to degrade to add-plus-delete, the new path
+    // would arrive as `A` + empty, which is RED 1.
+    {
+      const { dir, base } = makeRepo(
+        { '.changeset/stock-empty.md': RENAMEABLE_EMPTY },
+        { '.changeset/stock-empty.md': null, '.changeset/stock-empty-moved.md': RENAMEABLE_EMPTY },
+      );
+      assert(
+        renameRow(dir, base, '\\.changeset/stock-empty\\.md', '\\.changeset/stock-empty-moved\\.md') !== null,
+        'GREEN 6 control: git must really report this as `R`',
+      );
+      const r = scan({ cwd: dir, base });
+      assert(r.violations.length === 0, `GREEN 6: a pure move of a stock empty changeset must not go red -- got ${JSON.stringify(r.violations)}`);
+      assert(r.exempt.join() === '.changeset/stock-empty-moved.md', `GREEN 6: it is exempt at its NEW path -- got ${JSON.stringify(r.exempt)}`);
+    }
+
+    // ── GREEN 7: a pure rename of a stock DECLARING changeset is simply ok ────
+    {
+      const { dir, base } = makeRepo(
+        { '.changeset/stock-declaring.md': RENAMEABLE_DECLARING },
+        { '.changeset/stock-declaring.md': null, '.changeset/stock-declaring-moved.md': RENAMEABLE_DECLARING },
+      );
+      assert(
+        renameRow(dir, base, '\\.changeset/stock-declaring\\.md', '\\.changeset/stock-declaring-moved\\.md') !== null,
+        'GREEN 7 control: git must really report this as `R`',
+      );
+      const r = scan({ cwd: dir, base });
+      assert(r.violations.length === 0, 'GREEN 7: moving a changeset that still declares a package is nobody\'s violation');
+      assert(r.ok.join() === '.changeset/stock-declaring-moved.md', `GREEN 7: it is simply ok -- got ${JSON.stringify(r.ok)}`);
+    }
+
+    // ── RED 5: an `R` row whose BASE side is README.md is not "inherited" ─────
+    //
+    // The fixture renames `.changeset/README.md` to a changeset filename, and the
+    // general reason such a row is reachable at all is that git pairs renames by
+    // CONTENT, not by name -- measured on git 2.43.0, where two identically-bodied
+    // files paired across unrelated names, and the pathspec kept the pairing
+    // inside `.changeset/`. Either way README declares nothing BY DEFINITION
+    // (GREEN 5), so reading "already empty at base" off it would hand the
+    // exemption out for free on a head file that is a brand-new empty changeset.
+    // This is the case the `isChangesetFile(basePath)` guard in the scan exists
+    // for; delete the guard and this row goes green as `exempt`.
+    {
+      const README = `# Changesets\n\n${RENAMEABLE}`;
+      const { dir, base } = makeRepo(
+        { '.changeset/README.md': README },
+        { '.changeset/README.md': null, '.changeset/copied-the-readme.md': README },
+      );
+      assert(
+        renameRow(dir, base, '\\.changeset/README\\.md', '\\.changeset/copied-the-readme\\.md') !== null,
+        'RED 5 control: git must really pair the new changeset with README.md, or this case is about something else',
+      );
+      const r = scan({ cwd: dir, base });
+      assert(
+        r.violations.length === 1 && r.violations[0]?.file === '.changeset/copied-the-readme.md',
+        `RED 5: a changeset paired with README.md by rename detection inherits NOTHING -- got ${JSON.stringify(r.violations)}`,
+      );
+      assert(r.exempt.length === 0, 'RED 5: and it is certainly not exempt');
     }
 
     // ── #6129: main drift must not move the verdict, in EITHER direction ─────
@@ -686,6 +859,14 @@ function selfTest() {
         /git merge-base "refs\/remotes\/origin\/\$BASE_REF" HEAD/.test(yaml),
         'consumer: the Check Changeset job must derive its diff base from `git merge-base origin/<base ref> HEAD`',
       );
+      // What this pins is the ENDPOINT ($MERGE_BASE), and the `A` is incidental to
+      // it. Deliberately NOT widened to `AMR` alongside the scan (#7045): the
+      // workflow's `A` is a route-detection COUNT -- "did this PR write a
+      // changeset, or does it owe a `skip-changeset` label" -- not a violation
+      // scan. A rename adds no changeset, so counting `R` there would hand the
+      // label exemption to a PR that wrote nothing, which is the loosening
+      // direction. `A` fails CLOSED here and that is the answer this count wants;
+      // `AMR` in the scan fails closed there. Same family, opposite obligations.
       assert(
         /--diff-filter=A "\$MERGE_BASE" HEAD -- '\.changeset\/\*\.md'/.test(yaml),
         'consumer: the changeset COUNT must diff from $MERGE_BASE (never the frozen base.sha) -- that count going green on main drift is #6129',
@@ -905,6 +1086,139 @@ function selfTest() {
       );
     }
 
+    // ── The second consumer: where THIS SELF-TEST runs (#6509) ───────────────
+    //
+    // Everything above pins the job that runs the REAL scan. This block pins the
+    // job that runs the self-test, and it exists because for a long time they
+    // were the same job -- which made the assertions above skippable by a label.
+    //
+    // The defect, stated once. `changeset-check` is exempt WHOLESALE when a PR
+    // carries `skip-changeset`, and a PR that edits a CI-internal script is the
+    // textbook case for that label (it releases nothing; the workflow itself
+    // prescribes the label for exactly that). So a PR editing this file was
+    // routinely the PR that skipped this file's own fixtures. Measured specimen,
+    // not a worry: PR #6876 (#5620, merged) added the five `allow-major`
+    // assertions above and NONE of them executed on its own CI -- it carried the
+    // label, and on run 31289894461 the step that runs `--self-test` reports
+    // `conclusion: skipped`. Both directions of that gap are real, and they are
+    // not symmetric: a BROKEN assertion is merely deferred onto the next
+    // unlabelled PR (an unrelated author eats the red), while a DELETED one is
+    // silent forever, because nothing afterwards remembers it existed.
+    //
+    // The fix is wiring, so the fixture for it has to read the wiring. Without
+    // this block `lint.yml`'s step could be deleted tomorrow with every
+    // assertion above still green -- the same "phantom check" shape (#4690) this
+    // whole family is written against.
+    //
+    // What is pinned is the property that closes the gap, not the step's prose:
+    // the self-test halves run in a job NO PR-level exemption reaches, and the
+    // merge-base-dependent halves stay out of it.
+    //
+    // RESIDUAL, recorded rather than implied. This assertion is run BY the step
+    // it pins, so a PR that deletes that step AND carries `skip-changeset` is
+    // still not caught -- both places that would have run it are gone in the
+    // same diff. That is a strictly smaller hole than the one it replaces (which
+    // swallowed EVERY labelled PR, including one that merely edits an
+    // assertion), it is a deletion visible in a `.github/**` diff rather than a
+    // silent no-op, and closing it entirely would need a gate outside this
+    // family asserting this family's wiring, which is a coupling with its own
+    // cost. Stated so the next reader inherits the fact and not a false sense of
+    // closure.
+    {
+      const lintPath = join(REPO_ROOT, '.github/workflows/lint.yml');
+      const lintPresent = existsSync(lintPath);
+      assert(lintPresent, 'consumer: .github/workflows/lint.yml must exist -- it is where this self-test runs unconditionally (#6509)');
+      const lintYaml = lintPresent ? readFileSync(lintPath, 'utf8') : '';
+      const uncommented = (text) => text.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
+
+      // Scoped to the `lint` job: `typecheck` is a separate required job with a
+      // separate purpose, and a step landing there instead would be a different
+      // fact than the one asserted here.
+      const lintJobStart = lintYaml.indexOf('\n  lint:');
+      const lintJobEnd = lintYaml.indexOf('\n  typecheck:');
+      const lintJob = lintJobStart === -1 ? '' : lintYaml.slice(lintJobStart, lintJobEnd === -1 ? undefined : lintJobEnd);
+      const lintSteps = lintJob.split(/\n(?=      - name: )/).map(uncommented);
+      const wiredSteps = lintSteps.filter((s) => /run: pnpm check:changeset-gate-self-tests\b/.test(s));
+      assert(
+        wiredSteps.length === 1,
+        `consumer: the ESLint job of lint.yml must run \`pnpm check:changeset-gate-self-tests\` exactly once (found ${wiredSteps.length}) -- that step is the only place these two checkers' fixtures are executed on a PR carrying \`skip-changeset\` (#6509)`,
+      );
+      // The load-bearing half. A conditioned step is the defect again with one
+      // more hop: whatever the condition reads, it is a way for a PR to arrange
+      // that this self-test does not run on it.
+      assert(
+        wiredSteps.every((s) => !/^\s*if:/m.test(s)),
+        'consumer: the changeset-family self-test step in lint.yml must carry NO `if:` -- an exemptable self-test is #6509 itself, and the exemption it must not have is the one that hid PR #6876\'s five assertions',
+      );
+      // Same property, one level up: a label read anywhere in this workflow
+      // would mean some step of it can be waived by the author of the PR under
+      // test.
+      assert(
+        !/skip-changeset/.test(uncommented(lintYaml)),
+        'consumer: lint.yml must not read the `skip-changeset` label anywhere -- the whole point of running the self-tests here is that this workflow has no PR-level exemption',
+      );
+      // And one level up again: "runs on every PR" is what "unconditional"
+      // means in practice. A `paths:` filter is a condition written in the
+      // trigger instead of in an `if:`, and it would silently restore the gap
+      // for every PR whose file list misses the glob.
+      const onBlock = uncommented((lintYaml.match(/\non:\n([\s\S]*?)\n(?=[A-Za-z_])/) ?? ['', ''])[1]);
+      assert(
+        /^\s+pull_request:/m.test(onBlock),
+        'consumer: lint.yml must keep its `pull_request:` trigger -- a self-test that does not run on pull requests is not wired at all (#6509)',
+      );
+      assert(
+        !/\bpaths(-ignore)?\s*:/.test(onBlock),
+        'consumer: lint.yml must carry no `paths:`/`paths-ignore:` filter -- a path-filtered trigger is an exemption written one level up, and this self-test may not have one (#6509)',
+      );
+
+      // The other half of the split: the merge-base-dependent scans stay out of
+      // this job. `check:empty-changeset` / `check:adr-0087-registration` chain
+      // the REAL scan, whose verdict is a function of the PR's diff; this job
+      // has no branch point, so running one here reads stock and reports main's
+      // drift against the author -- #6129 in the false-RED direction.
+      const strayScans = uncommented(lintYaml)
+        .split('\n')
+        .filter((l) => /check-empty-changeset\.mjs|check-adr-0087-registration\.mjs|pnpm check:empty-changeset\b|pnpm check:adr-0087-registration\b/.test(l));
+      assert(
+        strayScans.length === 0,
+        `consumer: lint.yml must invoke these gates ONLY through \`pnpm check:changeset-gate-self-tests\` (found ${strayScans.length} direct invocation(s)) -- the real scans need $MERGE_BASE and this job has no branch point, which is #6129 in the false-RED direction`,
+      );
+
+      // What that pnpm script actually is. The step above is a name; this is the
+      // thing the name resolves to, and it is where "self-test halves only" and
+      // "BOTH of them" are actually true or false.
+      const pkgPath = join(REPO_ROOT, 'package.json');
+      const pkgPresent = existsSync(pkgPath);
+      assert(pkgPresent, 'consumer: the repository root package.json must exist -- it carries the script lint.yml runs');
+      let wiring = '';
+      try {
+        wiring = JSON.parse(pkgPresent ? readFileSync(pkgPath, 'utf8') : '{}').scripts?.['check:changeset-gate-self-tests'] ?? '';
+      } catch {
+        wiring = '';
+      }
+      assert(
+        /check-empty-changeset\.mjs --self-test/.test(wiring),
+        'consumer: `check:changeset-gate-self-tests` must run `check-empty-changeset.mjs --self-test` -- the step in lint.yml is only as real as the script it resolves to',
+      );
+      assert(
+        /check-adr-0087-registration\.mjs --self-test/.test(wiring),
+        'consumer: `check:changeset-gate-self-tests` must run `check-adr-0087-registration.mjs --self-test` too -- both checkers live in the same exempted job and both were unwired by it (#6509).',
+      );
+      // The third member of the family, added in #6923. It was absent from this
+      // step until then for a stated reason -- it had no `--self-test` to run --
+      // and that reason expired the moment it grew one. Its REAL scan stays in
+      // pr-automation.yml (its `allow-major` escape hatch lives there), so what
+      // joins this step is the self-test half only, exactly like the other two.
+      assert(
+        /check-changeset-no-major\.mjs --self-test/.test(wiring),
+        'consumer: `check:changeset-gate-self-tests` must run `check-changeset-no-major.mjs --self-test` as well -- it is the third checker of this family, and its fixtures land in the same exemption-free job (#6923)',
+      );
+      assert(
+        !/check-(?:empty-changeset|adr-0087-registration|changeset-no-major)\.mjs(?! --self-test)/.test(wiring),
+        'consumer: every invocation in `check:changeset-gate-self-tests` must carry `--self-test` -- chaining a real scan into the lint job is the #6129 direction this split exists to avoid',
+      );
+    }
+
     // ── Parser unit rows ─────────────────────────────────────────────────────
     assert(isEmptyDeclaration('---\n---\n\nbody\n'), 'parser: the canonical empty shape is empty');
     assert(isEmptyDeclaration('\n---\n\n---\n\nbody\n'), 'parser: blank lines around/inside the fence stay empty');
@@ -918,6 +1232,114 @@ function selfTest() {
       'parser: multiple declarations count',
     );
     assert(declaredBumpsIn('no fence here\n').fenced === false, 'parser: a fenceless file reports fenced=false');
+
+    // ── THE FIX (#7004): comments and quoted bump values ─────────────────────
+    //
+    // This gate's FALSE-RED half. Every fixture here is a changeset that
+    // @changesets/parse@0.4.3 reads as a real release; before #7004 each one
+    // declared nothing to this parser, so a PR adding a perfectly valid
+    // changeset was rejected as empty-frontmatter under #5471.
+    //
+    // Predicted direction on reverse verification: restoring the old anchor
+    // (`([A-Za-z]+)\s*$`) turns exactly these red — `isEmptyDeclaration` goes
+    // true and the gate rejects a valid file.
+    const declares = (label, text, expected) => {
+      const { packages } = declaredBumpsIn(text);
+      assert(
+        packages.length === expected.length && expected.every((p) => packages.includes(p)),
+        `parser: ${label} ⇒ ${JSON.stringify(expected)} — got ${JSON.stringify(packages)}`,
+      );
+    };
+    declares('a trailing YAML comment (#7004)', '---\n"@objectstack/spec": minor # keep\n---\n\nbody\n', ['@objectstack/spec']);
+    declares('a trailing comment after a tab (#7004)', '---\n"@objectstack/spec": minor\t# keep\n---\n\nbody\n', ['@objectstack/spec']);
+    declares('a trailing comment containing a colon (#7004)', '---\n"@objectstack/spec": minor # note: keep\n---\n\nbody\n', [
+      '@objectstack/spec',
+    ]);
+    declares('a double-quoted bump value (#7004)', '---\n"@objectstack/spec": "minor"\n---\n\nbody\n', ['@objectstack/spec']);
+    declares('a single-quoted bump value (#7004)', '---\n"@objectstack/spec": \'minor\'\n---\n\nbody\n', ['@objectstack/spec']);
+    declares('a quoted bump value AND a comment (#7004)', '---\n"@objectstack/spec": "minor" # keep\n---\n\nbody\n', ['@objectstack/spec']);
+    assert(
+      !isEmptyDeclaration('---\n"@objectstack/spec": minor # keep\n---\n\nbody\n'),
+      'parser: a comment-bearing declaration is NOT an empty changeset — the #7004 false-RED, stated in this gate own vocabulary',
+    );
+
+    // The other direction, and this gate FALSE-GREEN half. A whole-line comment
+    // containing a colon is entry-shaped; it used to parse as a package named
+    // `# note`, so a frontmatter block of nothing but comments read as NON-empty
+    // and sailed through the very check that exists to refuse it (#4898).
+    assert(
+      isEmptyDeclaration('---\n# note: minor\n---\n\nbody\n'),
+      'parser: a frontmatter holding only a colon-bearing comment IS empty — it declares no package (#7004 false-GREEN half)',
+    );
+    assert(
+      isEmptyDeclaration('---\n   # note: minor\n# another: patch\n---\n\nbody\n'),
+      'parser: indented and repeated comment lines are still no declaration (#7004)',
+    );
+    assert(
+      declaredBumpsIn('---\n# note: minor\n---\n\nbody\n').fenced === true,
+      'parser: control — that comment-only fixture IS fenced, so the emptiness above is about the entries and not a missing fence',
+    );
+    declares('control — a real entry beside a colon-bearing comment line', '---\n# note: minor\n"@objectstack/real": patch\n---\n\nbody\n', [
+      '@objectstack/real',
+    ]);
+
+    // YAML needs whitespace before an inline `#`, so this is the scalar
+    // `minor# keep` and @changesets/parse THROWS on it. Reading it as no
+    // declaration is agreement with changesets, not a residual gap.
+    assert(
+      isEmptyDeclaration('---\n"@objectstack/spec": minor# keep\n---\n\nbody\n'),
+      'parser: `minor# keep` (no space before #) is not a YAML comment — changesets throws on it, so declaring nothing here agrees with it (#7004)',
+    );
+
+    // ── The family reads one block one way (#7004) ───────────────────────────
+    //
+    // Until now that claim was four prose comments asserting each other. It is
+    // the load-bearing invariant of this family — the moment two of these
+    // parsers disagree, one gate is judging a different file than it appears to
+    // — so it is checked against the actual file text instead.
+    //
+    // #7004 is what a comment-only invariant costs: the trailing-comment gap
+    // reached all four carriers at once, and the fourth
+    // (`objectui-changeset-digest.mjs`) was not even named in the report,
+    // because nothing mechanical connected it to the other three.
+    {
+      const FAMILY = [
+        'scripts/check-changeset-no-major.mjs',
+        'scripts/check-empty-changeset.mjs',
+        'scripts/check-adr-0087-registration.mjs',
+        'scripts/objectui-changeset-digest.mjs',
+      ];
+      const literals = new Map();
+      for (const rel of FAMILY) {
+        const path = join(REPO_ROOT, rel);
+        assert(existsSync(path), `family: ${rel} must exist — it is one of the four readers of a changeset frontmatter block`);
+        const src = existsSync(path) ? readFileSync(path, 'utf8') : '';
+        const found = src.match(/\/\^\\s\*\["'\]\?.*?\/\.exec\(/g) ?? [];
+        // Anti-vacuous-green (#6983): an extraction that stops matching yields
+        // an empty set, and "all zero literals agree" is a green that judged
+        // nothing at all. So each file is asserted to have yielded exactly one.
+        assert(found.length === 1, `family: exactly one entry regex must be extractable from ${rel} — found ${found.length} (the extraction went stale, and the agreement below would compare nothing)`);
+        if (found.length === 1) literals.set(rel, found[0]);
+      }
+      const distinct = new Set(literals.values());
+      assert(
+        distinct.size === 1,
+        `family: all four changeset frontmatter parsers must use a byte-identical entry regex — found ${distinct.size} distinct spellings: ${JSON.stringify([...literals])}`,
+      );
+      // And the shared spelling must actually be the comment-aware one, so this
+      // block cannot go green on four identically-STALE copies.
+      assert(
+        [...distinct][0]?.includes('(?:\\s+#.*)?'),
+        'family: the shared entry regex must carry the `(?:\\s+#.*)?` trailing-comment arm — four identical copies of the OLD anchor would satisfy the agreement check above while re-opening #7004',
+      );
+      for (const rel of FAMILY) {
+        const src = existsSync(join(REPO_ROOT, rel)) ? readFileSync(join(REPO_ROOT, rel), 'utf8') : '';
+        assert(
+          /\/\^\\s\*#\/\.test\(lines\[[ij]\]\)\) continue;/.test(src),
+          `family: ${rel} must skip whole-line YAML comments — without it a colon-bearing comment parses as a package named \`# note\` (#7004)`,
+        );
+      }
+    }
 
     // ── Missing input is a failure, never a pass (#4690) ─────────────────────
     {

@@ -109,6 +109,14 @@ const CASES: GateCase[] = [
       [{ limit: 5 }],       // array body
       { limit: 'ten' },     // mistyped clause — used to be forwarded as-is
       { joins: [] },        // retired key (#4286) — the tombstone must be audible
+      // #6815 — the per-aggregation `distinct` flag, retired under ADR-0049.
+      // It is the one retired key on this route that is NOT top-level: it sits
+      // inside an `aggregations[]` entry, so the tombstone is only audible if
+      // entry validation descends into the array. Before the retirement this
+      // body parsed clean and answered a DEDUPLICATED sum on an in-memory
+      // fallback and an ordinary sum on every SQL datasource — one query, two
+      // numbers, both plausible.
+      { aggregations: [{ function: 'sum', field: 'amount', alias: 'total', distinct: true }] },
     ],
     valid: { where: { status: 'active' }, limit: 5 },
     spy: 'findData',

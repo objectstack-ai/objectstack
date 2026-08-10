@@ -277,12 +277,20 @@ describe('#5961 — capability: the runtime write door is closed, and validated 
         ObjectStackProtocolImplementation.resetEnvWritableCache();
         const { protocol, rows } = makeProtocol([], 'env_prod');
 
+        // [#6190] The `organizationId` this case used to pass was incidental —
+        // the door under test is the SCHEMA one, not the org one. Since the
+        // #6190 ruling an org-scoped write of a non-org-overridable type is
+        // refused BEFORE the schema is consulted (and `OS_METADATA_WRITABLE`
+        // deliberately does not unlock the org dimension), so keeping the org
+        // here would have turned this into a test of that other refusal and
+        // left the 422 unmeasured. Env-wide keeps it pointed at the schema.
+        // The hatch-plus-org interaction is pinned in
+        // `protocol.org-scoped-write-refused.test.ts` (case R7).
         await expect(
             protocol.saveMetaItem({
                 type: 'capability',
                 name: 'billing.refund',
                 item: NOT_A_CAPABILITY,
-                organizationId: 'org_alpha',
             }),
         ).rejects.toMatchObject({ code: 'INVALID_METADATA', status: 422 });
         expect(rows.size).toBe(0);
@@ -300,7 +308,6 @@ describe('#5961 — capability: the runtime write door is closed, and validated 
             type: 'capability',
             name: 'billing.refund',
             item: CAPABILITY,
-            organizationId: 'org_alpha',
         });
 
         expect(result.success).toBe(true);

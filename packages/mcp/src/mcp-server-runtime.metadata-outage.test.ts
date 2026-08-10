@@ -282,9 +282,18 @@ describe('object_schema resource — a metadata outage is not "Object not found"
     const svc = holding(OBJECT);
     await buildObjectSchemaResource(svc, 'acct');
 
-    // `getObject` stays the resolver (it is its own contract member, and
-    // `MetadataFacade.getObject` is NOT `get('object', name)`); the diagnosed
-    // read is a verdict probe on the MISS path only.
+    // `getObject` stays the resolver: it is its own contract member, and #6055
+    // declined to presume an equivalence the contract did not then document
+    // (Prime Directive #12).
+    //
+    // [#6724] The parenthetical that used to sit here claimed that the facade's
+    // `getObject` is NOT `get('object', name)`. That was false: the two hand
+    // back the identical object on every implementation this repo ships (pinned by
+    // `packages/objectql/src/metadata-service-getobject-equivalence.test.ts`,
+    // PR #6839; documented on `IMetadataService.getObject` by PR #6723).
+    // Whether the resolver should change is a separate call this correction
+    // does not make. What this case pins is unchanged either way: the
+    // diagnosed read is a verdict probe on the MISS path only.
     expect((svc as AnyRecord).getObject).toHaveBeenCalledWith('acct');
     expect((svc as AnyRecord).getDiagnosed).not.toHaveBeenCalled();
   });

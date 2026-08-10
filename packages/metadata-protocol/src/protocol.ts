@@ -45,6 +45,7 @@ import {
     parseFilterAST, isFilterAST, VALID_AST_OPERATORS, REFERENCE_VALUE_TYPES, referenceTargetOf,
     AggregationFunction, DateGranularity, resolveSearchFieldResolution,
     SEARCHABLE_TEXTUAL_TYPES, SEARCHABLE_ENUM_TYPES, SEARCH_AUTO_EXCLUDED_FIELDS,
+    isVirtualSearchField,
     RUNTIME_OWNED_FIELD_TYPES,
     RPC_QUERY_ALIAS_SLOTS, foldQueryAliasSlots,
     type QueryAliasConflict, type QueryAliasSlot,
@@ -65,15 +66,15 @@ import {
 } from '@objectstack/spec/kernel';
 import { validateObjectNamespacePrefix, deriveNamespaceFromPackageId } from '@objectstack/spec/kernel';
 import { stripReadDecorations } from '@objectstack/spec/kernel';
-// [#5206 step 2, #5040 E7 / ADR-0121] The endpoint publish gates, reused
-// verbatim — see `gateApiDraftsForPublish`. `validateApiEndpointDeclarations`
-// is the ONE judge of what is servable; this module calls it, it never restates
-// a criterion.
-import {
-    ApiEndpointSchema,
-    validateApiEndpointDeclarations,
-    type ApiEndpoint,
-} from '@objectstack/spec/api';
+// [#5488] The `@objectstack/spec/api` import that stood here — `ApiEndpointSchema`,
+// `validateApiEndpointDeclarations`, `type ApiEndpoint` — went with
+// `gateApiDraftsForPublish` (see its retirement note in `publishPackageDrafts`).
+// This module no longer judges endpoints at all: `api` is code-only since #5488,
+// so no `api` draft can be authored here, and the ONE judge of what is servable
+// stays `validateApiEndpointDeclarations` on the artifact route (stack schema,
+// `publishPackage` #5189, and `buildEndpointIndex` at load, PR #5203). An
+// endpoint-shaped import left behind with no caller reads as a capability this
+// module still has (#3950), so it is removed rather than parked.
 import { z } from 'zod';
 import {
     computeMetadataDiagnostics,
@@ -221,22 +222,12 @@ function stripServedSystemColumns<T>(type: string, item: T): T {
     return canonicalMetaType(type) === 'object' ? stripInjectedSystemColumns(item) : item;
 }
 
-/**
- * [#5206 step 2] Where an author of THIS path sets the namespace the ADR-0121
- * D2 gate demands.
- *
- * The criterion itself is the endpoint gate's — this sentence only answers the
- * follow-up question "so where do I put it, from here?", which differs per
- * publish path (`MetadataManager.publishPackage` has its own, #5189). It is
- * appended to the gate's own message, never in place of it.
- */
-const PUBLISH_DRAFTS_NAMESPACE_REMEDY =
-    "From `publishPackageDrafts` specifically: the namespace is read from the package's registered "
-    + '`manifest.namespace`, so declare it on the manifest and re-install/update the package '
-    + '(`installPackage` derives a default from the package id for Studio-authored packages, so an '
-    + 'absent one means the package is not in the runtime registry or its manifest predates that). '
-    + 'Alternatively publish the endpoints as part of a stack artifact (`defineStack` → compile → '
-    + 'artifact ingest), which carries the manifest and runs these same gates at parse time.';
+// [#5488] `PUBLISH_DRAFTS_NAMESPACE_REMEDY` stood here (#5206 step 2): the
+// "so where do I declare the namespace, from here?" sentence appended to the
+// ADR-0121 D2 gate's own message on this path. It is retired with
+// `gateApiDraftsForPublish`, the only thing that ever appended it — this path
+// no longer reports endpoint violations, because it can no longer receive an
+// `api` draft to violate anything.
 
 /**
  * [#3770] One-shot flag for the "engine has no schema registry" warning emitted
@@ -1566,6 +1557,42 @@ function unusableFilterError(param: string, detail: string): Error {
 }
 
 /**
+ * [#6994] Field types whose value NO driver materialises, so no driver can
+ * ORDER BY them.
+ *
+ * `formula` is the whole set today, and deliberately not a synonym for
+ * "computed": the three computed types diverge exactly here.
+ *
+ * | type | column | sortable |
+ * |---|---|---|
+ * | `formula` | none — `SqlDriver.createColumn` returns early; `driver-turso`'s transport skips it with the same `Virtual — no column` note | **no** |
+ * | `summary` | `table.float`, maintained by the engine | yes (measured #6924: `orderBy <summary> desc` -> E D C B A over 5 4 3 2 1) |
+ * | `autonumber` | `table.string`, engine-assigned | yes |
+ *
+ * So the spec's own `COMPUTED_VALUE_TYPES` (`formula`/`summary`/`autonumber`)
+ * is the WRITE contract — "never client-written" — and is the wrong set to
+ * gate a sort with: it would refuse the two types that sort correctly.
+ *
+ * This is a local set rather than a shared spec constant because the same fact
+ * is currently spelled in five places, none of them in `packages/spec`:
+ * `driver-sql`'s `fieldHasColumn` and `createColumn`, `driver-turso`'s
+ * `remote-transport`, `objectql`'s `planFormulaProjection` and
+ * `search-companion`, and `plugin-audit`'s `VIRTUAL_FIELD_TYPES`.
+ * Consolidating them is a cross-package change and is filed separately; adding
+ * a sixth local spelling here — with that ledger written down — keeps this fix
+ * inside one package rather than opening a spec-wide edit for one string.
+ *
+ * One deliberate divergence from `fieldHasColumn`: that helper short-circuits
+ * on `multiple` (a `multiple` field is a JSON column whatever its type), so it
+ * would answer "has a column" for a `multiple` formula. This set does not,
+ * because the questions differ — `fieldHasColumn` asks whether DDL emits a
+ * column, this asks whether there is a persisted VALUE to order by, and a
+ * formula's value is computed on read and never written, so that JSON column
+ * is always empty. Ordering by it degrades exactly as the bare case does.
+ */
+const UNMATERIALIZED_SORT_TYPES: ReadonlySet<string> = new Set(['formula']);
+
+/**
  * [#4226] A sort the normalizer cannot turn into a usable `SortNode[]`, or one
  * that names a field the object does not have — or, since #4256, a dotted path
  * (`account.company_name`) that would have to cross into a related record no
@@ -2282,6 +2309,43 @@ export interface MetadataAuthoringGateContext {
 export type MetadataAuthoringGate = (ctx: MetadataAuthoringGateContext) => void | Promise<void>;
 
 /**
+ * Which authoring channel a kernel's metadata writes arrive on (#6710).
+ *
+ * ADR-0005 carves out "the package author's own bootstrap channel" from the
+ * runtime authoring rules: a control-plane kernel installing a package is not
+ * an author publishing into a live tenant, and gating it would refuse the very
+ * bodies the platform ships. The carve-out is legitimate and stays.
+ *
+ * What #6710 changed is **how a kernel says it is that channel**. Until this
+ * type existed the answer was inferred from `environmentId === undefined` — a
+ * ROW-SCOPING key pressed into service as a topology signal. That proxy lies:
+ * the CLI's lightweight host-config assembler (`serve.ts`'s auto-register
+ * branch, `new ObjectQLPlugin()` with no options) also leaves `environmentId`
+ * undefined, and it serves an END-USER `PUT /api/v1/meta/*`. Both topologies
+ * read identically, so the whole #4463 gate — all 26 shared `AUTHORING_RULES`
+ * — was disengaged on a self-hosted app server. #5086 had already moved the
+ * code-only refusal off the same proxy for the same reason ("keying
+ * authorization off a row-scoping key is what made a type-level declaration
+ * depend on deployment topology; the declaration decides it here instead").
+ *
+ * So the channel is now DECLARED, not inferred:
+ *
+ * - `'environment'` — metadata arrives from an author (Studio tenant, MCP/AI
+ *   agent, `PUT /api/v1/meta/*`). The gate runs. **This is the default**, and
+ *   the default is the whole point: an assembly that forgets to declare gets
+ *   MORE enforcement, never less, so the next assembly variant nobody thought
+ *   about cannot silently reopen this hole.
+ * - `'package-author'` — this kernel IS the package author's own bootstrap
+ *   channel. Only the genuine control-plane assembly may state this.
+ *
+ * Deliberately a channel NAME and not a boolean: `skipAuthoringRules: true`
+ * would be the same bytes with the opposite meaning — a kill switch any
+ * assembly could reach for to make a red publish go away. A caller has to
+ * claim to BE the package author to be treated as one.
+ */
+export type MetadataAuthoringChannel = 'environment' | 'package-author';
+
+/**
  * Implements the per-domain contracts this class ACTUALLY provides (ADR-0076
  * D10 — the facade never implemented the other domains; those live in their
  * owning services and are reached through the discovery `services` registry,
@@ -2300,8 +2364,26 @@ export class ObjectStackProtocolImplementation implements
      * saveMetaItem insert/update and loadMetaFromDb query is filtered by
      * `environment_id = environmentId`, so per-project kernels see only their own
      * metadata even if several projects share the same physical database.
+     *
+     * [#6710] Row scoping ONLY. This key keeps every one of its other jobs —
+     * the `environment_id` stamp/filter, the ADR-0005 overlay-whitelist gate,
+     * the #3050 authoring-gate scope, the local metadata-storage provisioning
+     * decision — but it no longer decides whether the #4463 runtime authoring
+     * rules run. See {@link authoringChannel}.
      */
     private environmentId?: string;
+
+    /**
+     * The declared authoring channel (#6710). Defaults to `'environment'`,
+     * which is what makes the #4463 gate active on every kernel that does not
+     * explicitly claim to be the package author's own bootstrap channel.
+     *
+     * Read by {@link assertRuntimeAuthoringRules} and nothing else — this is
+     * deliberately NOT a general-purpose authorization key. The ADR-0005
+     * overlay gate and the #3050 authoring gate keep reading `environmentId`,
+     * because those two really are about row scope.
+     */
+    private authoringChannel: MetadataAuthoringChannel;
 
     /**
      * Lazily-instantiated SysMetadataRepository per organization. Keyed by
@@ -2460,14 +2542,23 @@ export class ObjectStackProtocolImplementation implements
         return (name, body) => canonicalize.call(automation, name, body);
     }
 
+    /**
+     * @param authoringChannel [#6710] which channel this kernel's metadata
+     * writes arrive on. Omitted ⇒ `'environment'` ⇒ the #4463 runtime
+     * authoring gate is ACTIVE. Only the genuine control-plane assembly passes
+     * `'package-author'`. The default is the fail-safe direction on purpose:
+     * a caller that forgets this argument gets more enforcement, never less.
+     */
     constructor(
         engine: IDataEngine,
         getServicesRegistry?: () => Map<string, any>,
         environmentId?: string,
+        authoringChannel: MetadataAuthoringChannel = 'environment',
     ) {
         this.engine = engine as MetadataHostEngine;
         this.getServicesRegistry = getServicesRegistry;
         this.environmentId = environmentId;
+        this.authoringChannel = authoringChannel;
     }
 
     /**
@@ -2585,25 +2676,39 @@ export class ObjectStackProtocolImplementation implements
          */
         organizationId?: string | null;
     }): void {
-        // Environment writes only. `environmentId === undefined` is the
-        // package author's own control-plane channel — the same carve-out the
-        // ADR-0005 authorization gate and the #3050 authoring gate below both
-        // make, and pinned as deliberate by `protocol.runtime-authoring-gate.
-        // test.ts` ("does not gate control-plane (package-author) writes").
+        // [#6710] The ADR-0005 carve-out, now DECLARED instead of inferred.
         //
-        // [#6285] Measured before adding a guardrail behind it, because the
-        // dispatch asked whether the short-circuit makes the new refusal
-        // unreachable in the deployment shape it protects: it does not. Every
-        // serving path binds an environment id — `os dev` / `os start` default
-        // to `env_local` (`cli/src/commands/dev.ts:225`, `start.ts:197`), the
-        // standalone artifact stack to `proj_local`
-        // (`runtime/src/standalone-stack.ts:378`), and a cloud per-project
-        // kernel to its own — so a multi-organization deployment reaches this
-        // gate. What sits behind the short-circuit is the control-plane
-        // bootstrap kernel, which authors no tenant metadata. Widening it is
-        // therefore not this issue's business (and would change the blast
-        // radius of all 26 shared rules, not just this one).
-        if (this.environmentId === undefined) return;
+        // This line used to read `if (this.environmentId === undefined)
+        // return;` — the carve-out keyed off a ROW-SCOPING key. #6285 measured
+        // that short-circuit and found every *regular* serving path safely on
+        // the gated side (`os dev` / `os start` bind `env_local`, the
+        // standalone artifact stack `proj_local`, a cloud per-project kernel
+        // its own), and concluded the only thing behind it was the
+        // control-plane bootstrap kernel. That conclusion was incomplete, and
+        // #6710 measured the counter-example at boot level: the CLI's
+        // lightweight host-config assembler (`serve.ts`'s
+        // `config.objects && !hasObjectQL` branch → `new ObjectQLPlugin()`
+        // with no options) ALSO leaves `environmentId` undefined, and it
+        // serves an end-user `PUT /api/v1/meta/*`. `isHostConfig` →
+        // `shouldBootWithLibrary === false` is the flagship showcase's own
+        // boot shape, so a self-hosted app server ran all 26 shared
+        // `AUTHORING_RULES` on exactly nothing — and for a Studio tenant or an
+        // MCP/AI author this gate is not the weakest of four doors, it is the
+        // ONLY one (#4463's filing reason).
+        //
+        // Two topologies, one key, opposite intents: that is the definition of
+        // a proxy signal, and #5086 had already retired the same proxy for the
+        // code-only refusal a few hundred lines below. So the channel is now
+        // stated by the assembly (`assembleMetadataProtocol` ← the plugin
+        // option) rather than guessed from row scope, and the DEFAULT is the
+        // gated one. An assembly that forgets to declare gets more
+        // enforcement, never less — the direction matters more than the
+        // mechanism, because the failure mode being designed out is precisely
+        // "a new assembly variant nobody thought about".
+        //
+        // `environmentId` keeps every other job it has, including the #3050
+        // authoring gate's own scope check below.
+        if (this.authoringChannel === 'package-author') return;
         if (evt.state !== 'active') return;
         // `os migrate meta --stored --apply` rewrites rows that ALREADY EXIST
         // into the current dialect. It is not an author publishing anything —
@@ -4605,6 +4710,26 @@ export class ObjectStackProtocolImplementation implements
      *   both boot hydration (`loadMetaFromDb`) and runtime authoring
      *   (`applyObjectRegistryMutation`) register the schema before its table
      *   is reachable.
+     *
+     *   [#6190] That justification rested on a premise the WRITE path did not
+     *   enforce until this note was written. `allowOrgOverride: false` closed
+     *   the overlay tier only; `object` is also `allowRuntimeCreate: true`, and
+     *   that tier stamped `organization_id` on the row like any other — so a
+     *   Studio-authored `object` COULD legitimately exist as a per-org row,
+     *   invisible to boot hydration, and this gate's fail-closed answer meant
+     *   404 for every record in a table that still held the data. The premise
+     *   is now true by enforcement: {@link orgScopedWriteRefusal} refuses an
+     *   org-scoped write of any type the registry declares non-org-overridable,
+     *   on both minting paths, so the only org-scoped `object` rows that can
+     *   exist are residue written before that gate (#6190's ruling 2 = A:
+     *   handled non-destructively — made audible by
+     *   {@link reportUnhydratableOrgScopedRows} and disposed of operationally,
+     *   NOT rewritten by a migration). Fail-closed stays the right answer for
+     *   those: the registry entry is genuinely absent, and serving the table
+     *   would serve one org's rows to every org. Pinned by
+     *   `protocol.org-scoped-write-refused.test.ts`, which keeps `object` as
+     *   its named specimen precisely so this paragraph cannot go stale
+     *   silently again.
      * - **No registry on the engine at all → skip.** There is no source of
      *   truth to consult, so the check cannot answer; failing closed would
      *   break every registry-less host (edge/Lite embeddings, engine doubles)
@@ -4741,6 +4866,63 @@ export class ObjectStackProtocolImplementation implements
      * gets a message that says which relationship it tried to cross and
      * prescribes what `query-syntax.mdx` has prescribed since #4240:
      * denormalise the value onto the queried object and sort by that.
+     *
+     * [#6924] WHAT to denormalise onto was wrong, and this overturns #4256's
+     * own recorded wording. That issue chose "a formula or rollup field that
+     * copies it into a real column" — a prescription the platform cannot
+     * deliver, so the refusal handed the author a dead end at the exact moment
+     * they asked for help. Measured on a REAL `SqlDriver` (better-sqlite3) and
+     * on `InMemoryDriver`, with a `formula` field named directly — which at the
+     * time was NOT dotted and NOT unknown, so this gate let it through
+     * (#6994 closes that, third verdict below):
+     *
+     * ```
+     * control  orderBy title asc    -> A B C D E      (a real column sorts)
+     * baseline no sort              -> C A E B D      (insertion order)
+     * orderBy  <formula field> asc  -> C A E B D  200 (insertion order)
+     * orderBy  <formula field> desc -> C A E B D  200 (direction-blind)
+     * ```
+     *
+     * No column exists to order by (`SqlDriver.createColumn` returns early for
+     * `formula`; sqlite answers `no such column`), the #3821 unknown-column
+     * backstop retries WITHOUT the sort, and the response is 200 with every
+     * row present in an arbitrary order — the very failure #4226/#4256 exist
+     * to stop. Following the old hint therefore landed the author back inside
+     * the defect they had just been refused for.
+     *
+     * `rollup`/`summary` was the other half of that wording and is NOT broken
+     * the same way — it does get a real, maintained column (`table.float`;
+     * measured: `orderBy <summary> desc` -> E D C B A over values 5 4 3 2 1).
+     * It is dropped from the hint because it cannot do THIS job: a rollup
+     * aggregates CHILD records (count/sum/min/max/avg), so it cannot carry a
+     * looked-up parent's column (`account.company_name`) onto this object.
+     * Wrong tool, not a broken one — naming it here still sends the author
+     * somewhere that cannot work.
+     *
+     * "Stored" is #6673's vocabulary for the same correction on the SEARCH
+     * axis (`validate-searchable-fields.ts`, "a stored text field"); the two
+     * axes deliberately say the same word.
+     *
+     * [#6994] The non-dotted half of that same defect, refused as the THIRD
+     * verdict below. It is the SORT axis finally growing the verdict its two
+     * neighbours in this class already have: `assertSearchFieldsExist` splits
+     * `unknown` from `unsearchable` (a known field whose TYPE search cannot
+     * scan) and `assertExpandFieldsExist` splits `unknown` from `notRelations`
+     * (a known field whose TYPE cannot be expanded). Sort had only `unknown`
+     * and `dotted`, so "known field, wrong type for this axis" was the one
+     * member of the family with no door — which is why a `formula` field
+     * reached a driver that has no column for it.
+     *
+     * SCOPE, stated because it is a real limit and not an oversight: this is an
+     * INGRESS gate, so it covers what reaches {@link findData} — the REST list
+     * route, `POST /data/:object/query`, the export route (which funnels its
+     * `$orderby` through here) and the RPC dispatcher. An internal caller that
+     * reaches `engine.find()` directly — hooks, flows, reports, expand
+     * sub-reads — still gets the silent drop, exactly as the projection and
+     * search axes note for themselves. Closing that half means deciding whether
+     * `engine.find` REFUSES or keeps its deliberate internal-caller tolerance,
+     * which is an engine-core contract decision rather than a gate fix; it is
+     * tracked separately.
      */
     private assertSortFieldsExist(object: string, orderBy: ReadonlyArray<{ field: string }>, param: string): void {
         if (orderBy.length === 0) return;
@@ -4763,23 +4945,78 @@ export class ObjectStackProtocolImplementation implements
             );
         }
         const dotted = names.filter((f) => f.includes('.'));
-        if (dotted.length === 0) return;
-        const first = dotted[0];
-        const head = first.split('.')[0];
-        const headDef: any = gate.fields[head];
-        const crossesRelation = headDef != null && REFERENCE_VALUE_TYPES.has(headDef.type);
+        if (dotted.length > 0) {
+            const first = dotted[0];
+            const head = first.split('.')[0];
+            const headDef: any = gate.fields[head];
+            const crossesRelation = headDef != null && REFERENCE_VALUE_TYPES.has(headDef.type);
+            throw invalidSortError(
+                param,
+                (crossesRelation
+                    ? `sorts by '${first}', which follows the relationship '${head}' into another object — `
+                      + `sort reaches only columns of '${object}' itself`
+                    : `sorts by '${first}', a dotted path — sort reaches only whole columns of '${object}', `
+                      + "not values inside them")
+                + (dotted.length > 1 ? ` (also: ${dotted.slice(1).join(', ')})` : ''),
+                {
+                    hint: ` Denormalise the value onto '${object}' (a stored field, written when the`
+                        + ' source changes) and sort by that. Not a formula field: it is virtual,'
+                        + ' no driver materialises a column for one, and ORDER BY on it is silently'
+                        + ' dropped.',
+                    extra: { field: first, fields: dotted, object },
+                },
+            );
+        }
+
+        // [#6994] The third verdict on this axis: a name that is a REAL,
+        // non-dotted field of this object and still cannot be ordered by,
+        // because its TYPE materialises no column ({@link
+        // UNMATERIALIZED_SORT_TYPES} — `formula`, today the whole set).
+        //
+        // This is the shape the doc comment above already describes and this
+        // gate already let through: being in `gate.known` is what carried it
+        // past the unknown check, being undotted is what carried it past the
+        // check just above. Re-measured on this branch's base (real `SqlDriver`
+        // over better-sqlite3, real `ObjectQL`, real protocol on top):
+        //
+        // ```
+        // FORMULA  orderBy sort_key asc  -> ["C","A","E","B","D"]  5 rows, 200
+        //   its sort_key values          -> ["C","A","E","B","D"]
+        // FORMULA  orderBy sort_key desc -> ["C","A","E","B","D"]  asc === desc
+        // RAW SQL  order by sort_key     -> sqlite: no such column: sort_key
+        // ```
+        //
+        // The response literally carries the values it was asked to sort by,
+        // out of order, under a 200 — so the answer contradicts the request in
+        // plain view and still reports success.
+        //
+        // PRECEDENCE — `unknown` > `dotted` > this. It is last for the same
+        // reason the expand gate reports `unknown` before `not-a-reference`:
+        // identity errors first, then shape, then type. The two above are
+        // therefore unchanged verdict-for-verdict, and a dotted path whose head
+        // is a formula field keeps the dotted answer (it is wrong about the
+        // shape too, and the shape is what the caller wrote).
+        const unmaterialized = names.filter(
+            (f) => UNMATERIALIZED_SORT_TYPES.has(String(gate.fields[f]?.type ?? '')),
+        );
+        if (unmaterialized.length === 0) return;
+        const virtualFirst = unmaterialized[0];
+        const virtualType = String(gate.fields[virtualFirst]?.type);
         throw invalidSortError(
             param,
-            (crossesRelation
-                ? `sorts by '${first}', which follows the relationship '${head}' into another object — `
-                  + `sort reaches only columns of '${object}' itself`
-                : `sorts by '${first}', a dotted path — sort reaches only whole columns of '${object}', `
-                  + "not values inside them")
-            + (dotted.length > 1 ? ` (also: ${dotted.slice(1).join(', ')})` : ''),
+            `sorts by '${virtualFirst}', a ${virtualType} field on '${object}' — a ${virtualType} `
+            + 'value is computed on read, so no driver materialises a column to order by'
+            + (unmaterialized.length > 1 ? ` (also: ${unmaterialized.slice(1).join(', ')})` : ''),
             {
-                hint: ` Denormalise the value onto '${object}' (a formula or rollup field that`
-                    + ' copies it into a real column) and sort by that.',
-                extra: { field: first, fields: dotted, object },
+                // Deliberately the same remedy, in the same words, as the
+                // dotted refusal above and as #6673's SEARCH-axis correction:
+                // one vocabulary across the doors, so an author refused twice
+                // is not sent two different ways.
+                hint: ` Denormalise the value onto '${object}' (a stored field, written when the`
+                    + ' source changes) and sort by that. A formula field is virtual: with no'
+                    + ' column behind it the ORDER BY reaches the driver, finds nothing, and is'
+                    + ' dropped — the arbitrary order this refusal replaces.',
+                extra: { field: virtualFirst, fields: unmaterialized, object },
             },
         );
     }
@@ -4959,11 +5196,16 @@ export class ObjectStackProtocolImplementation implements
      * export would stop downloading "the unsearched superset … in a file that
      * looks authoritative".
      *
-     * Two rejections, one code, different messages, because the fixes differ
-     * (the same split the expand axis draws): a name that is no field at all
-     * is a typo, while a REAL field outside the searchable set needs the
-     * OBJECT changed — added to a declared `searchableFields`, or declared
-     * searchable at all when the auto-default excludes its type. The allowed
+     * Rejections share one code and differ in message, because the fixes
+     * differ (the same split the expand axis draws): a name that is no field
+     * at all is a typo, while a REAL field outside the searchable set needs
+     * the OBJECT changed — added to a declared `searchableFields`, or declared
+     * searchable at all when the auto-default excludes its type. [#6674] adds
+     * the one case where changing the OBJECT cannot help either: a VIRTUAL
+     * (`formula`) field has no stored column on any driver, so declaring it
+     * searchable is not a narrower search but a scan of nothing — it used to
+     * clear this gate precisely BECAUSE the object declared it, the fail-open
+     * shape this axis exists to refuse. The allowed
      * set itself comes from {@link resolveSearchFieldResolution} in
      * `@objectstack/spec/data` — the same function the engine's search
      * expansion consumes — so this gate cannot admit a field the engine would
@@ -5035,10 +5277,24 @@ export class ObjectStackProtocolImplementation implements
         const declaredSet = new Set<string>(Array.isArray(gate.schema?.searchableFields) ? gate.schema.searchableFields : []);
         const unknown = names.filter((n) => !allowedSet.has(n) && !gate.known.has(n) && !declaredSet.has(n));
         const staleDeclared = names.filter((n) => !allowedSet.has(n) && !gate.known.has(n) && declaredSet.has(n));
-        const unsearchable = names.filter((n) => !allowedSet.has(n) && gate.known.has(n));
+        // [#6674] A VIRTUAL field is its own rejection, split out of
+        // `unsearchable` before the source branch below rather than after it,
+        // because BOTH of that branch's messages are wrong for it. The declared
+        // one ("a field outside it cannot be a search target until it is added
+        // there") is false — it may already BE in the list, which is exactly the
+        // shape this closes; the auto one prescribes "declare `searchableFields`
+        // to choose the searchable set explicitly", which for a formula field is
+        // an instruction to author the refused declaration. The fix is neither:
+        // the value has no column anywhere, so it must be mirrored onto a stored
+        // one. Judged by the same `@objectstack/spec/data` predicate the
+        // resolution applies, so gate and engine cannot disagree about which
+        // types have a column.
+        const virtual = names.filter((n) => !allowedSet.has(n) && gate.known.has(n) && isVirtualSearchField(gate.fields[n]));
+        const unsearchable = names.filter((n) => !allowedSet.has(n) && gate.known.has(n) && !isVirtualSearchField(gate.fields[n]));
         const [offenders, reason] =
             unknown.length > 0 ? [unknown, 'unknown' as const]
             : staleDeclared.length > 0 ? [staleDeclared, 'stale-declared' as const]
+            : virtual.length > 0 ? [virtual, 'virtual' as const]
             : [unsearchable, 'unsearchable' as const];
         if (offenders.length === 0) return;
         const first = offenders[0];
@@ -5049,6 +5305,18 @@ export class ObjectStackProtocolImplementation implements
                 + (offenders.length > 1 ? ` (also: ${offenders.slice(1).join(', ')})` : '')
                 + '. The declaration is stale — searching it can never match, and the engine '
                 + "silently skipped it. Fix the object's 'searchableFields' to name real fields.";
+        } else if (reason === 'virtual') {
+            const vtype = gate.fields[first]?.type ?? 'formula';
+            detail = `Field '${first}' on object '${object}' is a virtual '${vtype}' field and cannot be searched`
+                + (offenders.length > 1 ? ` (also: ${offenders.slice(1).join(', ')})` : '')
+                + `. Its value is computed on read and never stored, so no driver materializes a `
+                + `column for 'search' to scan and the entry can never match — measured as 0 rows, `
+                + 'with no error, on both the in-memory and the SQL backends.'
+                + (declaredSet.has(first)
+                    ? ` The object's 'searchableFields' declares it, which is what made the entry `
+                      + 'look like coverage; remove it there as well.'
+                    : '')
+                + ` Mirror the computed value onto a stored text field on '${object}' and search that instead.`;
         } else if (reason === 'unknown') {
             // A dotted path is a special unknown: plausible vocabulary from the
             // select/sort axes, but search scans this object's own columns.
@@ -7413,6 +7681,110 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
+     * [#6190] The org-scope half of the same family: a write that would stamp
+     * `sys_metadata.organization_id` on a type the registry declares has NO
+     * per-org channel. Returns the refusal, or `null` when the write is fine.
+     *
+     * ## Why a write-time refusal and not a read-time repair
+     *
+     * `allowOrgOverride` and `allowRuntimeCreate` are orthogonal tiers (see
+     * {@link isRuntimeCreateAllowed}), and the runtime-create tier never
+     * consulted the ORG dimension: `SysMetadataRepository.put` stamps
+     * `organization_id: this.organizationId` whatever the type is, so a
+     * Studio-authored item of an `allowOrgOverride: false` type persisted a
+     * per-org row that the platform can never read back. Cold boot
+     * (`loadMetaFromDb`, `organization_id: null`) walks past it and the
+     * env-wide consumers never ask for it — the write path was strictly more
+     * permissive than the read path, which is the false-compliance shape
+     * ADR-0049 forbids. Measured consequences, both silent before this gate:
+     *
+     *  - `flow` — the row binds its triggers for the life of the process that
+     *    wrote it and stops firing after the next restart, with no log line
+     *    (#6190's original report; the cold-boot warn that made the residue
+     *    audible shipped separately, see
+     *    {@link reportUnhydratableOrgScopedRows}).
+     *  - `object` — worse, and fails CLOSED: the object is absent from the
+     *    registry after boot while its physical table still holds the data, so
+     *    {@link assertObjectRegistered} answers 404 `OBJECT_NOT_FOUND` for
+     *    every record in it.
+     *
+     * Maintainer ruling 2026-08-08 on #6190 (option A of three): refuse the
+     * write. Option B — silently coercing the row to env-wide — was rejected
+     * because it rewrites the tenancy statement the author made; option D —
+     * the log alone — leaves declared ≠ enforced.
+     *
+     * ## Shape decisions
+     *
+     *  - **Registry-derived, never a hand-written type list** (Prime Directive
+     *    #8): the predicate is {@link isOverlayAllowed} — the same one the
+     *    sibling refusal below it uses, over the same derived
+     *    {@link OVERLAY_ALLOWED_TYPES} set. A type that gains
+     *    `allowOrgOverride: true` tomorrow is admitted here the same day, with
+     *    nothing to keep in sync.
+     *  - **The operator hatch stays ONE door.** Because the predicate is
+     *    `isOverlayAllowed`, `OS_METADATA_WRITABLE` unlocks org scoping exactly
+     *    as it unlocks the overlay — which is what this file already promises a
+     *    few lines down ("unlocking a type there unlocks it here too") and what
+     *    the ruling asked for by naming this the *sibling* of the
+     *    `NOT_OVERRIDABLE` refusal. Two differently-keyed notions of
+     *    "overridable" inside one method would be the drift, not the safety.
+     *
+     *    The DIAGNOSTIC is deliberately wider than the refusal:
+     *    {@link reportUnhydratableOrgScopedRows} ignores the hatch and reports
+     *    an org-scoped row of any non-org-overridable type, because the hatch
+     *    unlocks the write and cannot teach `loadMetaFromDb` to read the row
+     *    back. So an operator who deliberately opens the door still gets told,
+     *    at every boot, that what they wrote did not survive it. Warning is
+     *    free and should be maximal; refusing removes a capability, and the
+     *    declaration — including its documented override — decides that.
+     *  - **Statically-declared types only.** A type with no entry in
+     *    `DEFAULT_METADATA_TYPE_REGISTRY` is plugin-registered at runtime, and
+     *    both existing gates ({@link isRuntimeCreateAllowed} here,
+     *    `assertAllowed` in the repository) treat that family as permissive by
+     *    construction — `getMetaTypes()` synthesises `allowRuntimeCreate: true`
+     *    for it. Refusing those here would extend a ruling measured over the
+     *    registry to a surface nobody measured, so they keep today's behaviour.
+     *    Their org rows are skipped by cold boot too; that gap is stated in the
+     *    PR rather than silently widened here.
+     *  - **`NOT_OVERRIDABLE`, not a new code.** The condition IS "this type has
+     *    no per-org override channel", the sentence `NOT_OVERRIDABLE` already
+     *    carries, and the code vocabulary is a closed set owned by
+     *    `packages/spec`'s ledger (ADR-0112 D3) — a cross-package edit this
+     *    card is not authorised to make. The message carries the distinction.
+     *
+     * Pinned by `protocol.org-scoped-write-refused.test.ts`.
+     */
+    private static orgScopedWriteRefusal(
+        type: string,
+        name: string,
+        organizationId: string | null | undefined,
+    ): Error | null {
+        if (!organizationId) return null;
+        const singular = PLURAL_TO_SINGULAR[type] ?? type;
+        if (this.isOverlayAllowed(type)) return null;
+        if (!this.STATIC_REGISTRY_TYPES.has(singular) && !this.STATIC_REGISTRY_TYPES.has(type)) return null;
+        const err: any = new Error(
+            `[not_overridable] Metadata item '${type}/${name}' cannot be written org-scoped `
+            + `(organization '${organizationId}'). `
+            + `The metadata-type registry declares allowOrgOverride=false for '${singular}', so the platform has `
+            + `no per-org channel for it: boot hydration loads env-wide rows only, so this row would be absent `
+            + `from the registry after the next restart — a '${singular}' that answered today would stop `
+            + `(an 'object' answers 404 OBJECT_NOT_FOUND for every record in its still-populated table, a 'flow' `
+            + `silently stops firing). Save it env-wide instead (retry with no active organization), or ship the `
+            + `per-org variant as its own deployment (ADR-0005: "Per-org variants are a deployment, not an `
+            + `overlay"). An operator may set OS_METADATA_WRITABLE=${singular} to grant a runtime escape hatch, `
+            + `but note the row still will not survive a restart — the hatch unlocks the write, not the read, `
+            + `and boot logs every such row it walks past. `
+            + `See docs/adr/0005-metadata-customization-overlay.md and #6190.`
+        );
+        err.code = 'NOT_OVERRIDABLE';
+        err.status = 403;
+        err.organizationId = organizationId;
+        err.docs = 'docs/adr/0005-metadata-customization-overlay.md';
+        return err;
+    }
+
+    /**
      * Does an artifact (npm-package-loaded) item exist at `(type, name)`?
      *
      * The schema registry's `_packageId` tag is set only when
@@ -8135,7 +8507,8 @@ export class ObjectStackProtocolImplementation implements
             // which for `object` reads the contributor definition and applies
             // exactly the artifact test the sibling verb applies to the plain
             // key), so this limb inherits that judgement instead of open-coding
-            // a second one.
+            // a second one — PLUS the package-binding check below, which exists
+            // because that inherited judgement is measurably falsifiable here.
             //
             // Not theoretical, and NOT already covered by the gate at the top of
             // `deleteMetaItem`: that two-tier authorization — which refuses an
@@ -8156,18 +8529,129 @@ export class ObjectStackProtocolImplementation implements
                 && !this.isArtifactBacked(singular, name)
                 && typeof registry.unregisterObject === 'function'
             ) {
-                try {
-                    registry.unregisterObject(name);
-                } catch (err: any) {
+                // [#7012] …AND `isArtifactBacked` ALONE CANNOT SEE THAT.
+                // See {@link installedPackageBindingForObject} for the whole
+                // argument; the one-line version is that an overlay row bound
+                // to the packaged owner's id DESTROYS the packaged contributor
+                // at write time, which turns the predicate above `false` for an
+                // object the package still ships.
+                const boundPackageId = this.installedPackageBindingForObject(name);
+                if (boundPackageId !== undefined) {
                     console.warn(
                         `[Protocol] object '${name}' was deleted from sys_metadata but stays registered: `
-                        + `${err?.message ?? err}`,
+                        + `its owner contributor is bound to installed package '${boundPackageId}'. `
+                        + `A package-shipped object must not be retired by an overlay delete, and this seam `
+                        + `cannot tell one from a package-bound runtime-authored object (#7012 / #6853), so `
+                        + `the entry survives — listable, and rowless if the delete really was the whole item `
+                        + `— until the next restart.`,
                     );
+                } else {
+                    try {
+                        registry.unregisterObject(name);
+                    } catch (err: any) {
+                        console.warn(
+                            `[Protocol] object '${name}' was deleted from sys_metadata but stays registered: `
+                            + `${err?.message ?? err}`,
+                        );
+                    }
                 }
             }
         } catch {
             // Best-effort registry refresh; next read fixes it anyway
         }
+    }
+
+    /**
+     * [#7012] The package binding of a registered `object`, but only when it
+     * names a package this process has actually INSTALLED. `undefined` means
+     * "no installed package answers for this object" — the only state in which
+     * {@link restoreArtifactRegistryView}'s tier 3 may unregister it.
+     *
+     * ## Why tier 3 needs a second predicate at all
+     *
+     * `isArtifactBacked` is the natural question ("does a code package ship
+     * this?") and it is the WRONG question at this exact point, because the
+     * thing it reads has already been destroyed by the time the walk runs.
+     *
+     * `SchemaRegistry.registerObject` splices out the same-package `own`
+     * contributor before pushing the new one. So an overlay row whose
+     * `package_id` equals the packaged owner's id does not SHADOW the packaged
+     * definition — it REPLACES it, and no second copy exists anywhere in the
+     * registry. {@link loadMetaFromDb} replays that replacement on every boot,
+     * with no authorization gate and no log, stamping `_provenance: 'org'`
+     * server-side (deliberately — cloud#970). `getArtifactItem` for an `object`
+     * is exactly `_provenance !== 'org'`, so `isArtifactBacked` answers `false`
+     * for an object a code package still ships, and tier 3 then took the whole
+     * entry. Measured end to end on a tenant kernel with no escape hatch:
+     *
+     * ```
+     * loadMetaFromDb -> {"loaded":1,"errors":0,"invalid":0}   warnings: []
+     * DELETE         -> {"success":true,"reset":true}
+     * objectContributors: []   getObject: null
+     * data CRUD: OBJECT_NOT_FOUND / 404   (while the table still holds the rows)
+     * ```
+     *
+     * ## Why the BINDING is trustworthy where the definition is not
+     *
+     * The replacement rule fires only when the two package ids MATCH, so the
+     * surviving contributor provably carries the packaged owner's id — the one
+     * fact the overwrite cannot change, precisely because it is the overwrite's
+     * own precondition. The second half, "is that package installed", is a fact
+     * about the PROCESS rather than about the destroyed body:
+     * `SchemaRegistry.installPackage` writes the record and
+     * `ObjectQL.registerApp` calls it immediately before registering the
+     * manifest's objects, so a package-shipped object always has one. Durable
+     * packages (`sys_packages`) are re-installed at boot by `service-package`,
+     * and nested `registerPlugin` objects are keyed to the PARENT package,
+     * which `registerApp` installed. The `'sys_metadata'` sentinel — the key an
+     * overlay row bound to no package keeps — is handled by construction rather
+     * than by a special case: nothing installs a package under it, so it never
+     * resolves to a record.
+     *
+     * ## What this deliberately does NOT ask
+     *
+     * - NOT `enabled` / `status`. `disablePackage` flips lifecycle flags and
+     *   removes no contributor, so a disabled package's objects stay registered
+     *   and stay dispatchable; reading the flag here would unregister a
+     *   definition nothing else removes — the same outage through a second door.
+     * - NOT the manifest's `objects` list. That would re-ask "is this
+     *   code-shipped", which is the question whose answer was destroyed; it is
+     *   also absent for `registerPlugin`-contributed objects.
+     *
+     * ## The accepted cost, ruled and not to be worked around
+     *
+     * A package-bound RUNTIME-authored object (Studio's package workspace,
+     * #4636) carries a real `package_id` too, so it is indistinguishable from a
+     * package-shipped one by binding alone: some genuinely deleted objects stay
+     * registered until restart. Per this walk's own REGISTER WIDE / RETIRE
+     * NARROW argument that is the cheap direction — a surplus entry degrades to
+     * "listable but rowless" and the next reload heals it, a wrongly retired one
+     * 404s data CRUD for every tenant. The honest fix for the distinguishability
+     * itself is #6853's direction B (the tenant overlay registers as its own
+     * contributor layer instead of splicing out the packaged `own`), which
+     * re-arms `isArtifactBacked` here and at `saveMetaItem`'s overlay gate; it is
+     * an ADR-0029 amendment and a separate card by maintainer ruling
+     * (2026-08-09).
+     *
+     * Name-addressed, like every other verb in the walk: `getObjectOwner` reads
+     * the contributor list under the same key `getObject` and
+     * {@link SchemaRegistry.unregisterObject} resolve (`computeFQN` is identity,
+     * so the registry key IS the object name), which is what keeps the decision
+     * and the removal talking about the same entry.
+     */
+    private installedPackageBindingForObject(name: string): string | undefined {
+        const registry: any = (this.engine as any)?.registry;
+        if (
+            !registry
+            || typeof registry.getObjectOwner !== 'function'
+            || typeof registry.getPackage !== 'function'
+        ) {
+            return undefined;
+        }
+        const packageId: unknown = registry.getObjectOwner(name)?.packageId;
+        if (typeof packageId !== 'string' || packageId === '') return undefined;
+        const installed = registry.getPackage(packageId);
+        return installed === undefined || installed === null ? undefined : packageId;
     }
 
     /**
@@ -8350,6 +8834,24 @@ export class ObjectStackProtocolImplementation implements
             throw this.isArtifactBacked(request.type, request.name)
                 ? ObjectStackProtocolImplementation.codeOnlyOverrideError(request.type, request.name)
                 : ObjectStackProtocolImplementation.codeOnlyCreateError(request.type);
+        }
+
+        // [#6190] …and the ORG dimension of the same declaration, on the tier
+        // that never consulted it. Placed HERE — before the topology carve-out
+        // below, before the destructive diff, before the schema parse — for the
+        // two reasons #5086 put its own refusal first: the verdict depends on
+        // nothing but the type and the requested scope, and "refused, not
+        // refused after writing" is the property the issue was filed about, so
+        // the gate must precede every path that could persist a row. Draft
+        // saves are gated identically (the branch is below): a draft is the
+        // first half of the SECOND minting path this closes, and #4463 D1
+        // recorded what happens when only one of the two doors gates.
+        // See {@link orgScopedWriteRefusal} for the ruling and the shape.
+        {
+            const orgRefusal = ObjectStackProtocolImplementation.orgScopedWriteRefusal(
+                request.type, request.name, request.organizationId,
+            );
+            if (orgRefusal) throw orgRefusal;
         }
 
         if (this.environmentId !== undefined) {
@@ -9293,6 +9795,21 @@ export class ObjectStackProtocolImplementation implements
             err.status = 403;
             throw err;
         }
+        // [#6190] The draft→active promotion is the OTHER way an org-scoped row
+        // of a non-org-overridable type reaches `active` — `publishMetaItem`
+        // and, behind Studio's "publish whole app", `publishPackageDrafts`.
+        // `saveMetaItem`'s gate now refuses to MINT such a draft, so what this
+        // door closes is the promotion of residue that predates the refusal:
+        // a legacy org-scoped draft row must not be promotable into a fresh
+        // active phantom. Exactly the #4463 D1 posture — gating one door and
+        // not the other makes the refusal bypassable by anyone who saves
+        // `?mode=draft` and then POSTs `/publish`.
+        {
+            const orgRefusal = ObjectStackProtocolImplementation.orgScopedWriteRefusal(
+                request.type, request.name, request.organizationId,
+            );
+            if (orgRefusal) throw orgRefusal;
+        }
         // ADR-0010 L3 — lock blocks publish too (publishing is a write).
         const _publishLockErr = await this.assertLockAllowsWrite({
             type: request.type,
@@ -9550,140 +10067,6 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
-     * [#5206 step 2, #5189, #5040 E7 / ADR-0121] Run the endpoint publish gates
-     * over a batch's `api` drafts and report every failure as a publish-blocking
-     * violation.
-     *
-     * ## Why it exists on THIS path
-     *
-     * E7 (#5111) hung the per-endpoint gates on `ObjectStackDefinitionSchema`,
-     * so every path that parses a STACK is covered. `publishPackageDrafts`
-     * parses no stack: it reads `sys_metadata` draft rows and promotes them.
-     * #5189 closed the same hole on `MetadataManager.publishPackage`; this is
-     * the other door, and the one Studio's "publish everything" button actually
-     * goes through (ADR-0033 / ADR-0067 D2). Until now the only type-aware
-     * pre-flight here was the object namespace-prefix check, so an `api` draft
-     * — anonymous, unmetered, whatever — became `active` unjudged.
-     *
-     * ## One judge, never a second criteria set
-     *
-     * Everything this method decides comes from
-     * {@link validateApiEndpointDeclarations}: the same function the stack
-     * schema runs, the same function `publishPackage` runs, and (minus the two
-     * identity-bearing gates) the same `firstFailure` the endpoint matcher's
-     * load-time backstop runs. The messages are the gate's own — they already
-     * name the endpoint, the offending key and the fix, which is the whole
-     * point of refusing HERE instead of in a boot log. Nothing in this file
-     * restates a rule about what is servable.
-     *
-     * ## Why it can run the FULL gate, namespace included
-     *
-     * Unlike `publishPackage` — which indexes by `packageId`, holds no manifest
-     * and must be handed a `namespace` — this path already resolves the
-     * package's declared `manifest.namespace` for the object-prefix rule. So
-     * the namespace gate (ADR-0121 D1/D2) is judgeable here and is judged.
-     * Deliberately NOT conditional on the namespace being present: the gate's
-     * own precondition ("a stack that declares `apis:` MUST declare an explicit
-     * `manifest.namespace`") is a criterion, and skipping it when the answer is
-     * "there is none" would reopen the hole for exactly the packages least
-     * likely to have been through a stack compile. The object-prefix rule above
-     * grandfathers namespace-less packages because a bare object name is a
-     * naming smell; a namespace-less endpoint is an unownable URL.
-     *
-     * ## Boundaries, stated rather than silently assumed
-     *
-     * - Judged over the drafts BEING PROMOTED, mirroring the object-prefix rule
-     *   directly above it. A draft that collides with an already-`active`
-     *   endpoint of the same package is therefore not caught here; the matcher
-     *   resolves store-wide duplicate claims deterministically and names the
-     *   loser at `error` level (`buildEndpointIndex`). Widening this to the
-     *   package's whole active set would mean refusing a publish over something
-     *   the author is not publishing — a different contract, not a bug fix.
-     * - A draft row that vanished between `listDrafts` and here is skipped, not
-     *   invented into a gate failure: the promote loop reports the real
-     *   `no_draft` for it.
-     * - A store read that FAILS propagates. "Could not read the draft" must
-     *   never be answered with "the gate passed" (ADR-0110 D3's distinction,
-     *   same reason the matcher refuses to turn an outage into a 404).
-     *
-     * @param drafts the batch's draft headers, as `listDrafts` returned them.
-     * @param namespace the package's declared `manifest.namespace`, or
-     *   `undefined` when it declares none (the gate reports that itself).
-     * @returns one entry per violation, `[]` when the batch has no `api`
-     *   drafts (a package without endpoints is untouched by this pass).
-     */
-    private async gateApiDraftsForPublish(
-        drafts: ReadonlyArray<{ type: string; name: string; organizationId: string | null }>,
-        namespace: string | undefined,
-    ): Promise<Array<{ type: string; name: string; error: string; code: string }>> {
-        const apiDrafts = drafts.filter((d) => canonicalMetaType(d.type) === 'api');
-        if (apiDrafts.length === 0) return [];
-
-        const violations: Array<{ type: string; name: string; error: string; code: string }> = [];
-        /** Parsed endpoints, index-aligned with {@link gatedNames}. */
-        const endpoints: ApiEndpoint[] = [];
-        const gatedNames: string[] = [];
-
-        for (const d of apiDrafts) {
-            const draftOrgId = d.organizationId ?? null;
-            const draftRepo = this.getOverlayRepo(draftOrgId);
-            const ref = { type: 'api', name: d.name, org: draftOrgId ?? 'env' } as unknown as Parameters<typeof draftRepo.get>[0];
-            const draft = await draftRepo.get(ref, { state: 'draft' });
-            if (!draft) continue; // raced away — the promote loop reports `no_draft`
-
-            // Parsing is the gate's PRECONDITION, not a sixth gate: an
-            // `ApiEndpoint` is what `validateApiEndpointDeclarations` judges.
-            // Refusing an unparseable draft here is the same ruling #5189 made
-            // on the sibling path — a shape that cannot be gated could not be
-            // served either (the matcher's own loud skip refuses it at load),
-            // so publishing it would mint a route that answers 404 forever.
-            const parsed = ApiEndpointSchema.safeParse(draft.body);
-            if (!parsed.success) {
-                for (const issue of parsed.error.issues) {
-                    violations.push({
-                        type: 'api',
-                        name: d.name,
-                        error:
-                            `api draft '${d.name}' does not satisfy ApiEndpointSchema and cannot be published: `
-                            + `${issue.message} (at ${issue.path.join('.') || '<root>'}). An endpoint that does `
-                            + `not parse cannot be gated (ADR-0121) and would be EXCLUDED from endpoint `
-                            + `matching at load anyway, so its declared route would answer 404.`,
-                        code: 'ENDPOINT_SCHEMA',
-                    });
-                }
-                continue;
-            }
-            endpoints.push(parsed.data);
-            gatedNames.push(d.name);
-        }
-
-        for (const issue of validateApiEndpointDeclarations(endpoints, { namespace })) {
-            // The gate reports per-endpoint issues at `['apis', <index>, …]` and
-            // the namespace PRECONDITION once at `['apis']` — the latter is a
-            // property of the package, not of any one endpoint, so it is
-            // reported once, unattributed, with this path's own remedy appended.
-            const index = typeof issue.path[1] === 'number' ? issue.path[1] : undefined;
-            if (index === undefined) {
-                violations.push({
-                    type: 'api',
-                    name: '',
-                    error: `${issue.message} ${PUBLISH_DRAFTS_NAMESPACE_REMEDY}`,
-                    code: 'ENDPOINT_GATE',
-                });
-                continue;
-            }
-            violations.push({
-                type: 'api',
-                name: gatedNames[index] ?? '',
-                error: issue.message,
-                code: 'ENDPOINT_GATE',
-            });
-        }
-
-        return violations;
-    }
-
-    /**
      * Publish every pending DRAFT bound to a package in one shot (ADR-0033) —
      * the "publish whole app" action. Promotes each draft→active by reusing the
      * per-item {@link publishMetaItem} primitive (which runs the overridable /
@@ -9778,19 +10161,43 @@ export class ObjectStackProtocolImplementation implements
             }
         }
 
-        // [#5206 step 2, #5040 E7 / ADR-0121] The endpoint publish gates on the
-        // OTHER publish path. `MetadataManager.publishPackage` gained them in
-        // #5189; this function — the real entry point behind Studio's "publish
-        // everything" (ADR-0033 / ADR-0067 D2) — promoted `api` drafts to
-        // active without meeting a single gate. The security consequence is
-        // already caught one layer down (PR #5203 re-judges every stored item
-        // at index-build time and EXCLUDES the ones that never passed), so what
-        // this closes is the LATENESS: ADR-0121 says publish refuses, and an
-        // author is owed a prescription naming the offending key here, not an
-        // `error` line in a boot log they never read. The load-time backstop
-        // stays exactly where it is — this is the earlier door, not a
-        // replacement for the last one.
-        preflightViolations.push(...(await this.gateApiDraftsForPublish(drafts, pkgNamespace)));
+        // [#5488 — RETIRED GATE, recorded overturn of PR #5279]
+        //
+        // `gateApiDraftsForPublish` stood here (#5206 step 2, #5040 E7 /
+        // ADR-0121) and ran the endpoint publish gates over this batch's `api`
+        // drafts. It is deliberately REMOVED, two days after it landed, by the
+        // maintainer ruling of 2026-08-07T16:59Z implemented in #5488 — not
+        // deleted as dead weight and not lost in a refactor.
+        //
+        // Why it can go: the gate judged whether an `api` draft was fit to be
+        // PROMOTED TO ACTIVE in `sys_metadata`. No such row is ever served. The
+        // serving criterion belongs to `IMetadataService.matchEndpoint` →
+        // `EndpointMatcher` → `MetadataManager.listForIndex('api')`, which
+        // reads the manager's registry plus its filesystem/memory loaders;
+        // `sys_metadata` is in neither, so a promoted endpoint 404s forever
+        // (real boot, #5488 — no `EXCLUDED` line, because it was never in the
+        // index to be excluded from). The gate was a correct verdict about a
+        // state with no consumer.
+        //
+        // Why it MUST go rather than sit unreached: `api` is now code-only
+        // (`allowRuntimeCreate: false` + `allowOrgOverride: false`), and the
+        // #5086 inlet refuses the write BEFORE persistence and BEFORE the
+        // draft/publish branch — it does not look at `mode`. So no `api` draft
+        // row can be created any more, and this gate could never again see one.
+        // Leaving it would leave unreachable code asserting a rule about a row
+        // that cannot exist, which is the shape of a phantom check.
+        //
+        // What still judges endpoints, unchanged: `validateApiEndpointDeclarations`
+        // / `identityFreeEndpointGateFailure` (`api/endpoint-publish-gate.ts`)
+        // on the route that actually serves — the stack schema, `publishPackage`
+        // (#5189), and again at load in `buildEndpointIndex` (PR #5203). ADR-0121
+        // keeps its "publish REJECTS" ruling in full on that route; only the
+        // runtime-authored-draft door it used to also cover is gone, because
+        // that door opened onto nothing.
+        //
+        // Re-entry, as the ruling recorded it: if #2657 Part B promotes `apis`
+        // to a registered type WITH A REAL CONSUMPTION PATH, this gate comes
+        // back with it — implementation first, declaration second.
 
         if (preflightViolations.length > 0) {
             return {

@@ -134,6 +134,107 @@ export const SUPPORTED_WHERE_OPERATORS = [
   'ends_with',
 ] as const satisfies readonly WhereOperator[];
 
+// ---------------------------------------------------------------------------
+// Case-insensitive identifiers — the normalised set (#5814)
+// ---------------------------------------------------------------------------
+
+/**
+ * The identifier fields this adapter stores and compares **normalised**
+ * (lower-cased), per the maintainer's 2026-08-09 ruling on #5814.
+ *
+ * ## Why a declared table and not a name heuristic
+ *
+ * Membership is a contract with two obligations that must hold **together**:
+ *
+ *   1. every write through this adapter normalises the field
+ *      ({@link normaliseIdentifierWrite}), and
+ *   2. a `mode: 'insensitive'` comparand on the field is normalised the same
+ *      way ({@link convertWhere}), which is then an EXACT match against (1).
+ *
+ * Honour (2) without (1) and you get the mirror-image defect of the one #5814
+ * was filed on: the query stops matching rows it used to match. So the set is
+ * spelled out, keyed by better-auth model name, and both directions are driven
+ * from this one declaration — a field cannot be added to one half only. A
+ * heuristic (`/email$/`, `endsWith('_email')`) would let a field into the
+ * compare half without anyone deciding that its writes are normalised, which is
+ * exactly the widening this table exists to prevent.
+ *
+ * `sys_user.email` is the whole set today because it is the whole demand:
+ * `@better-auth/scim` maps SCIM's `userName` onto better-auth's **`email`**
+ * field (`SCIMUserFilterAttributeFields = { userName: "email" }`,
+ * `@better-auth/scim@1.7.0-rc.1/dist/index.mjs:531`) and marks it
+ * `caseExact: false` (`:409-417`, RFC 7643), so the where clause that reaches
+ * this adapter is `{ field: 'email', operator: 'eq', mode: 'insensitive' }` on
+ * model `user`. Adding a member is a deliberate act: it must ALSO be provable
+ * that every producer of that field writes it normalised, and
+ * `scim-case-insensitive-identifier.test.ts` pins the set so the addition
+ * cannot be quiet.
+ *
+ * Keyed by better-auth **model** name (`user`), not by the protocol object name
+ * (`sys_user`), because that is the name every call site in this file already
+ * holds and the name `Where.field` has been transformed against. `user` is not
+ * one of the bridged models (see `AUTH_MODEL_TO_PROTOCOL`), so its field names
+ * reach `convertWhere` untouched by `remapWhere`, and `email` is spelled
+ * identically on both sides (`auth-schema-config.ts` maps only the names that
+ * actually differ).
+ */
+export const NORMALISED_IDENTIFIER_FIELDS: Readonly<Record<string, readonly string[]>> = {
+  user: ['email'],
+};
+
+/** Is `field` on `model` stored and compared lower-cased? */
+function isNormalisedIdentifier(model: string, field: string): boolean {
+  return NORMALISED_IDENTIFIER_FIELDS[model]?.includes(field) ?? false;
+}
+
+/**
+ * Lower-case a comparand, element-wise for the array-valued operators
+ * (`in` / `not_in`).
+ *
+ * Non-strings are returned untouched: better-auth's own `Where.mode` doc says
+ * the flag "Only applies to string values", and an identifier column holding a
+ * number/boolean/Date has no case to fold.
+ */
+function normaliseComparand(value: unknown): unknown {
+  if (typeof value === 'string') return value.toLowerCase();
+  if (Array.isArray(value)) return value.map((v) => (typeof v === 'string' ? v.toLowerCase() : v));
+  return value;
+}
+
+/**
+ * Normalise the identifier fields of an outgoing write payload (#5814).
+ *
+ * This is obligation (1) of {@link NORMALISED_IDENTIFIER_FIELDS} — the half
+ * that makes the comparand normalisation in {@link convertWhere} an *exact*
+ * match rather than a hopeful one.
+ *
+ * It is deliberately NOT a redundant belt over better-auth's own lower-casing.
+ * better-auth's `internalAdapter` does lower-case `user.email` on
+ * `createUser` / `createOAuthUser` / `updateUser` / `updateUserByEmail`
+ * (`better-auth@1.7.0-rc.2/dist/db/internal-adapter.mjs:120,139,594,607`), but
+ * that is an *internal* of a **prerelease** dependency, invisible to any
+ * published type, and it does not cover the raw {@link createObjectQLAdapter}
+ * path (hand-built calls that never pass through better-auth at all). The
+ * invariant the read half depends on has to be owned where it is relied upon.
+ *
+ * Idempotent by construction, so a payload better-auth already normalised is
+ * unchanged — which is why this adds no behaviour to any existing write.
+ */
+function normaliseIdentifierWrite<T extends Record<string, any>>(model: string, data: T): T {
+  const fields = NORMALISED_IDENTIFIER_FIELDS[model];
+  if (!fields) return data;
+  let out: Record<string, any> | undefined;
+  for (const field of fields) {
+    const value = data[field];
+    if (typeof value !== 'string') continue;
+    const lowered = value.toLowerCase();
+    if (lowered === value) continue;
+    out ??= { ...data };
+    out[field] = lowered;
+  }
+  return (out ?? data) as T;
+}
+
 /**
  * Convert better-auth where clause to ObjectQL query format.
  *
@@ -171,10 +272,44 @@ export const SUPPORTED_WHERE_OPERATORS = [
  * of this translation — better-auth's `Where.mode` defaults to `"sensitive"`,
  * and `$startsWith` / `$endsWith` are case-sensitive at the contract layer per
  * the #5701 Q2=A ruling — so the direct translation opens no contract seam.
- * (`mode: 'insensitive'` is a separate, still-unread field; see #5814. It is
- * NOT an operator and is deliberately not refused here.)
+ *
+ * ## `Where.mode` is read, never dropped (#5814)
+ *
+ * `mode` is better-auth's fourth `Where` field
+ * (`mode?: "sensitive" | "insensitive"`, `@default "sensitive"`); it is NOT an
+ * operator, and until #5814 this function did not read it at all. A dropped
+ * `mode: 'insensitive'` is the fail-OPEN direction of #5813's fail-closed
+ * defect: the query is answered, just case-sensitively, so whether it matches
+ * degrades to "however the driver under the auth path happens to compare
+ * strings". `@better-auth/scim` is the live producer — SCIM's `userName` is
+ * `caseExact: false` per RFC 7643 and maps onto `user.email` — and because
+ * SCIM's provisioning path is "look up, create if absent", the symptom of a
+ * missed match is a DUPLICATE USER rather than an error.
+ *
+ * Two arms, per the maintainer's 2026-08-09 ruling:
+ *
+ *   - **A normalised identifier** ({@link NORMALISED_IDENTIFIER_FIELDS}): the
+ *     comparand is lower-cased. The column is stored lower-cased
+ *     ({@link normaliseIdentifierWrite}), so this is an EXACT case-insensitive
+ *     match with no new query vocabulary — the request is honoured, not
+ *     approximated.
+ *   - **Any other field**: a loud `console.warn` naming the model, the field
+ *     and the operator, and stating that the query is being answered
+ *     case-sensitively. It does NOT throw: the ruling's own reasoning is that
+ *     fail-closed here would upgrade an occasional duplicate into "userName
+ *     queries entirely unavailable", and by AGENTS.md's degradation-level
+ *     question this is a functional degradation — the caller gets a narrower
+ *     answer than asked for and nothing claims to have persisted — so `warn`,
+ *     not `error`. The one thing it may not be is silent.
+ *
+ * Why no `$ieq`: adding a case-insensitive equality operator was **deferred**
+ * for demonstrated pull (#5814 option 1), and it would need an in-memory
+ * execution face before it could join `FILTER_OPERATORS` at all — the
+ * fail-closed reasoning `packages/spec/src/data/filter.zod.ts` records for
+ * `$icontains`. Downgrading `eq + insensitive` to `$icontains` was **rejected**
+ * (option 2): containment is not equality.
  */
-function convertWhere(where: CleanedWhere[]): Record<string, any> {
+function convertWhere(model: string, where: CleanedWhere[]): Record<string, any> {
   const filter: Record<string, any> = {};
 
   for (const condition of where) {
@@ -189,36 +324,69 @@ function convertWhere(where: CleanedWhere[]): Record<string, any> {
     // that IS spelled out must be in the vocabulary.
     const operator = condition.operator ?? 'eq';
 
+    // `mode` gets the same treatment as `operator` above and for the same
+    // reason: better-auth's factory materialises the documented default
+    // (`mode = "sensitive"` in `transformWhereClause`) before an adapter sees
+    // the clause, but the raw `createObjectQLAdapter` below is handed clauses
+    // that never passed through it — so the producer's own default is applied
+    // here explicitly rather than assumed present.
+    const mode = condition.mode ?? 'sensitive';
+    const insensitive = mode === 'insensitive';
+    const normalisedIdentifier = insensitive && isNormalisedIdentifier(model, fieldName);
+
+    if (insensitive && !normalisedIdentifier) {
+      // Loud, and it names all three things an operator needs to act: which
+      // query, which field, and what was actually done instead.
+      console.warn(
+        `[plugin-auth] Case-insensitive match requested on '${model}.${fieldName}' ` +
+          `(operator '${operator}', better-auth \`Where.mode: 'insensitive'\`), but ` +
+          `'${model}.${fieldName}' is not a normalised identifier field — the query is ` +
+          `being answered CASE-SENSITIVELY, so a differently-cased value will not match. ` +
+          `ObjectQL has no case-insensitive equality operator (#5814 deferred \`$ieq\` ` +
+          `until there is demonstrated pull for it). Normalised identifier fields: ` +
+          `${Object.entries(NORMALISED_IDENTIFIER_FIELDS)
+            .map(([m, fs]) => fs.map((f) => `${m}.${f}`).join(', '))
+            .join(', ')} ` +
+          `(packages/plugins/plugin-auth/src/objectql-adapter.ts).`,
+      );
+    }
+
+    // Honour the caller's DECLARED mode: a `sensitive` (or absent) clause keeps
+    // its comparand byte-for-byte, even on a normalised column. Folding case
+    // unasked would answer a different question than the one put — the same
+    // failure in the opposite direction.
+    const value = normalisedIdentifier ? normaliseComparand(condition.value) : condition.value;
+
     switch (operator) {
       case 'eq':
-        filter[fieldName] = condition.value;
+        filter[fieldName] = value;
         break;
       case 'ne':
-        filter[fieldName] = { $ne: condition.value };
+        filter[fieldName] = { $ne: value };
         break;
       case 'in':
-        filter[fieldName] = { $in: condition.value };
+        filter[fieldName] = { $in: value };
         break;
       case 'not_in':
-        filter[fieldName] = { $nin: condition.value };
+        filter[fieldName] = { $nin: value };
         break;
       case 'gt':
-        filter[fieldName] = { $gt: condition.value };
+        filter[fieldName] = { $gt: value };
         break;
       case 'gte':
-        filter[fieldName] = { $gte: condition.value };
+        filter[fieldName] = { $gte: value };
         break;
       case 'lt':
-        filter[fieldName] = { $lt: condition.value };
+        filter[fieldName] = { $lt: value };
         break;
       case 'lte':
-        filter[fieldName] = { $lte: condition.value };
+        filter[fieldName] = { $lte: value };
         break;
       case 'starts_with':
-        filter[fieldName] = { $startsWith: condition.value };
+        filter[fieldName] = { $startsWith: value };
         break;
       case 'ends_with':
-        filter[fieldName] = { $endsWith: condition.value };
+        filter[fieldName] = { $endsWith: value };
         break;
       case 'contains':
         // [#5710] `$contains`, NOT `$regex`. better-auth's `contains` is a
@@ -248,7 +416,7 @@ function convertWhere(where: CleanedWhere[]): Record<string, any> {
         // `driver-memory/src/filter-refusal.ts` means by "refusing it here would
         // break a live producer", and the reason #5702's loud refusal is ordered
         // after this flip.
-        filter[fieldName] = { $contains: condition.value };
+        filter[fieldName] = { $contains: value };
         break;
       default: {
         // Unreachable for the vocabulary this adapter is compiled against —
@@ -491,7 +659,8 @@ export function createObjectQLAdapterFactory(rawDataEngine: IDataEngine) {
       ): Promise<T> => {
         const objectName = resolveProtocolName(model);
         const bridged = objectName !== model;
-        const result = await dataEngine.insert(objectName, bridged ? remapKeys(data, camelToSnake) : data);
+        const payload = normaliseIdentifierWrite(model, data);
+        const result = await dataEngine.insert(objectName, bridged ? remapKeys(payload, camelToSnake) : payload);
         const norm = normaliseLegacyDates(model, result);
         return (bridged ? remapKeys(norm, snakeToCamel) : norm) as T;
       },
@@ -501,7 +670,7 @@ export function createObjectQLAdapterFactory(rawDataEngine: IDataEngine) {
       ): Promise<T | null> => {
         const objectName = resolveProtocolName(model);
         const bridged = objectName !== model;
-        const filter = convertWhere(bridged ? remapWhere(where) : where);
+        const filter = convertWhere(model, bridged ? remapWhere(where) : where);
         const fields = bridged && select ? select.map(camelToSnake) : select;
 
         const result = await dataEngine.findOne(objectName, { where: filter, fields });
@@ -518,7 +687,7 @@ export function createObjectQLAdapterFactory(rawDataEngine: IDataEngine) {
       ): Promise<T[]> => {
         const objectName = resolveProtocolName(model);
         const bridged = objectName !== model;
-        const filter = where ? convertWhere(bridged ? remapWhere(where) : where) : {};
+        const filter = where ? convertWhere(model, bridged ? remapWhere(where) : where) : {};
 
         const orderBy = sortBy
           ? [{ field: bridged ? camelToSnake(sortBy.field) : sortBy.field, order: sortBy.direction as 'asc' | 'desc' }]
@@ -542,7 +711,7 @@ export function createObjectQLAdapterFactory(rawDataEngine: IDataEngine) {
       ): Promise<number> => {
         const objectName = resolveProtocolName(model);
         const bridged = objectName !== model;
-        const filter = where ? convertWhere(bridged ? remapWhere(where) : where) : {};
+        const filter = where ? convertWhere(model, bridged ? remapWhere(where) : where) : {};
         return await dataEngine.count(objectName, { where: filter });
       },
 
@@ -551,13 +720,14 @@ export function createObjectQLAdapterFactory(rawDataEngine: IDataEngine) {
       ): Promise<T | null> => {
         const objectName = resolveProtocolName(model);
         const bridged = objectName !== model;
-        const filter = convertWhere(bridged ? remapWhere(where) : where);
+        const filter = convertWhere(model, bridged ? remapWhere(where) : where);
 
         // ObjectQL requires an ID for updates – find the record first
         const record = await dataEngine.findOne(objectName, { where: filter });
         if (!record) return null;
 
-        const patch = bridged ? remapKeys(update as any, camelToSnake) : (update as any);
+        const normalised = normaliseIdentifierWrite(model, update as any);
+        const patch = bridged ? remapKeys(normalised, camelToSnake) : normalised;
         const result = await dataEngine.update(objectName, { ...patch, id: record.id });
         if (!result) return null;
         const norm = normaliseLegacyDates(model, result);
@@ -569,11 +739,12 @@ export function createObjectQLAdapterFactory(rawDataEngine: IDataEngine) {
       ): Promise<number> => {
         const objectName = resolveProtocolName(model);
         const bridged = objectName !== model;
-        const filter = convertWhere(bridged ? remapWhere(where) : where);
+        const filter = convertWhere(model, bridged ? remapWhere(where) : where);
 
         // Sequential updates: ObjectQL requires an ID per update
         const records = await dataEngine.find(objectName, { where: filter });
-        const patch = bridged ? remapKeys(update, camelToSnake) : update;
+        const normalised = normaliseIdentifierWrite(model, update);
+        const patch = bridged ? remapKeys(normalised, camelToSnake) : normalised;
         for (const record of records) {
           await dataEngine.update(objectName, { ...patch, id: record.id });
         }
@@ -585,7 +756,7 @@ export function createObjectQLAdapterFactory(rawDataEngine: IDataEngine) {
       ): Promise<void> => {
         const objectName = resolveProtocolName(model);
         const bridged = objectName !== model;
-        const filter = convertWhere(bridged ? remapWhere(where) : where);
+        const filter = convertWhere(model, bridged ? remapWhere(where) : where);
 
         const record = await dataEngine.findOne(objectName, { where: filter });
         if (!record) return;
@@ -598,7 +769,7 @@ export function createObjectQLAdapterFactory(rawDataEngine: IDataEngine) {
       ): Promise<number> => {
         const objectName = resolveProtocolName(model);
         const bridged = objectName !== model;
-        const filter = convertWhere(bridged ? remapWhere(where) : where);
+        const filter = convertWhere(model, bridged ? remapWhere(where) : where);
 
         const records = await dataEngine.find(objectName, { where: filter });
         for (const record of records) {
@@ -615,7 +786,7 @@ export function createObjectQLAdapterFactory(rawDataEngine: IDataEngine) {
       ): Promise<T | null> => {
         const objectName = resolveProtocolName(model);
         const bridged = objectName !== model;
-        const filter = convertWhere(bridged ? remapWhere(where) : where);
+        const filter = convertWhere(model, bridged ? remapWhere(where) : where);
 
         const record = await dataEngine.findOne(objectName, { where: filter });
         if (!record) return null;
@@ -637,7 +808,7 @@ export function createObjectQLAdapterFactory(rawDataEngine: IDataEngine) {
       ): Promise<T | null> => {
         const objectName = resolveProtocolName(model);
         const bridged = objectName !== model;
-        const filter = convertWhere(bridged ? remapWhere(where) : where);
+        const filter = convertWhere(model, bridged ? remapWhere(where) : where);
 
         const record = await dataEngine.findOne(objectName, { where: filter });
         if (!record) return null;
@@ -682,20 +853,20 @@ export function createObjectQLAdapter(rawDataEngine: IDataEngine) {
   return {
     create: async <T extends Record<string, any>>({ model, data, select: _select }: { model: string; data: T; select?: string[] }): Promise<T> => {
       const objectName = resolveProtocolName(model);
-      const result = await dataEngine.insert(objectName, data);
+      const result = await dataEngine.insert(objectName, normaliseIdentifierWrite(model, data));
       return result as T;
     },
 
     findOne: async <T>({ model, where, select, join: _join }: { model: string; where: CleanedWhere[]; select?: string[]; join?: any }): Promise<T | null> => {
       const objectName = resolveProtocolName(model);
-      const filter = convertWhere(where);
+      const filter = convertWhere(model, where);
       const result = await dataEngine.findOne(objectName, { where: filter, fields: select });
       return result ? result as T : null;
     },
 
     findMany: async <T>({ model, where, limit, offset, sortBy, join: _join }: { model: string; where?: CleanedWhere[]; limit: number; offset?: number; sortBy?: { field: string; direction: 'asc' | 'desc' }; join?: any }): Promise<T[]> => {
       const objectName = resolveProtocolName(model);
-      const filter = where ? convertWhere(where) : {};
+      const filter = where ? convertWhere(model, where) : {};
       const orderBy = sortBy ? [{ field: sortBy.field, order: sortBy.direction as 'asc' | 'desc' }] : undefined;
       const results = await dataEngine.find(objectName, { where: filter, limit: limit || 100, offset, orderBy });
       return results as T[];
@@ -703,32 +874,36 @@ export function createObjectQLAdapter(rawDataEngine: IDataEngine) {
 
     count: async ({ model, where }: { model: string; where?: CleanedWhere[] }): Promise<number> => {
       const objectName = resolveProtocolName(model);
-      const filter = where ? convertWhere(where) : {};
+      const filter = where ? convertWhere(model, where) : {};
       return await dataEngine.count(objectName, { where: filter });
     },
 
     update: async <T>({ model, where, update }: { model: string; where: CleanedWhere[]; update: Record<string, any> }): Promise<T | null> => {
       const objectName = resolveProtocolName(model);
-      const filter = convertWhere(where);
+      const filter = convertWhere(model, where);
       const record = await dataEngine.findOne(objectName, { where: filter });
       if (!record) return null;
-      const result = await dataEngine.update(objectName, { ...update, id: record.id });
+      const result = await dataEngine.update(objectName, {
+        ...normaliseIdentifierWrite(model, update),
+        id: record.id,
+      });
       return result ? result as T : null;
     },
 
     updateMany: async ({ model, where, update }: { model: string; where: CleanedWhere[]; update: Record<string, any> }): Promise<number> => {
       const objectName = resolveProtocolName(model);
-      const filter = convertWhere(where);
+      const filter = convertWhere(model, where);
       const records = await dataEngine.find(objectName, { where: filter });
+      const patch = normaliseIdentifierWrite(model, update);
       for (const record of records) {
-        await dataEngine.update(objectName, { ...update, id: record.id });
+        await dataEngine.update(objectName, { ...patch, id: record.id });
       }
       return records.length;
     },
 
     delete: async ({ model, where }: { model: string; where: CleanedWhere[] }): Promise<void> => {
       const objectName = resolveProtocolName(model);
-      const filter = convertWhere(where);
+      const filter = convertWhere(model, where);
       const record = await dataEngine.findOne(objectName, { where: filter });
       if (!record) return;
       await dataEngine.delete(objectName, { where: { id: record.id } });
@@ -736,7 +911,7 @@ export function createObjectQLAdapter(rawDataEngine: IDataEngine) {
 
     deleteMany: async ({ model, where }: { model: string; where: CleanedWhere[] }): Promise<number> => {
       const objectName = resolveProtocolName(model);
-      const filter = convertWhere(where);
+      const filter = convertWhere(model, where);
       const records = await dataEngine.find(objectName, { where: filter });
       for (const record of records) {
         await dataEngine.delete(objectName, { where: { id: record.id } });

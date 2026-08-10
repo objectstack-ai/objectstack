@@ -7,7 +7,6 @@ import type {
   IHierarchyScopeResolver,
   RecordShare,
   GrantShareInput,
-  SharingExecutionContext,
   ShareAccessLevel,
   SharingWriteVerdict,
 } from '@objectstack/spec/contracts';
@@ -16,6 +15,12 @@ import {
   postureEnforcesWall,
   type TenancyPosture,
 } from '@objectstack/spec/security';
+// [#7136] Every enforcement method below takes the FULL `resolveAuthzContext`
+// envelope — the same type `ISharingService` declares for these parameters
+// since #6523 (the #6206 ruling: no per-site subset contracts). Annotating the
+// implementations with a narrower shape is what forced this file to cast its
+// way out of its own contract to read fields the caller had already supplied.
+import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { WRITE_ACCESS_LEVELS, normalizeAccessLevel } from './access-level.js';
 import {
   deleteRowsForDeletedRecords,
@@ -128,8 +133,8 @@ export function effectiveSharingModel(schema: any): 'private' | 'read' | 'public
  * organization": the contract types the field as `string | null`, and `null` is
  * the value a resolver's fail-closed obligation is written against.
  */
-function activeOrganizationId(context: SharingExecutionContext): string | null {
-  const org = (context as any)?.tenantId;
+function activeOrganizationId(context: ExecutionContext): string | null {
+  const org = context?.tenantId;
   return typeof org === 'string' && org.trim() !== '' ? org : null;
 }
 
@@ -276,7 +281,7 @@ export class SharingService implements ISharingService {
    */
   async buildReadFilter(
     object: string,
-    context: SharingExecutionContext,
+    context: ExecutionContext,
   ): Promise<unknown | null> {
     if (this.shouldBypass(object, context)) return null;
 
@@ -294,6 +299,15 @@ export class SharingService implements ISharingService {
     // [ADR-0057 D1] Access DEPTH widens the owner-match for this grant:
     // own → [me], unit → my BU members, unit_and_below → my BU subtree, org →
     // no owner filter. Sharing grants are still OR-ed in on top (additive).
+    //
+    // [#7136] This cast SURVIVES the annotation widening, on purpose. Unlike
+    // `userId` / `tenantId`, `__readScope` and `__writeScope` are not fields of
+    // `ExecutionContext` at all: they are private keys plugin-security's
+    // middleware stamps onto the context it forwards
+    // (`security-plugin.ts` — `sc.__readScope = …`). So the cast is not
+    // residue of the narrow contract and is NOT deletable here. ⛔ Nor is the
+    // fix to declare them on the envelope — that would publish a middleware
+    // seam as authorable, client-supplied vocabulary.
     const readScope = (context as any).__readScope as ('own' | 'own_and_reports' | 'unit' | 'unit_and_below' | 'org' | undefined);
     if (readScope === 'org') return null;
     const ownerIds = await this.resolveOwnerScopeIds(context, readScope);
@@ -343,7 +357,7 @@ export class SharingService implements ISharingService {
    */
   async buildWriteFilter(
     object: string,
-    context: SharingExecutionContext,
+    context: ExecutionContext,
     verb: 'update' | 'delete' = 'update',
   ): Promise<unknown | null> {
     if (this.shouldBypass(object, context)) return null;
@@ -358,6 +372,7 @@ export class SharingService implements ISharingService {
       return { id: '__deny_all__' };
     }
 
+    // Middleware-stamped, not a field of the envelope — see buildReadFilter().
     const writeScope = (context as any).__writeScope as ('own' | 'own_and_reports' | 'unit' | 'unit_and_below' | 'org' | undefined);
     if (writeScope === 'org') return null;
     const ownerIds = await this.resolveOwnerScopeIds(context, writeScope);
@@ -399,7 +414,7 @@ export class SharingService implements ISharingService {
   private async matchesOwnerScope(
     object: string,
     recordId: string,
-    context: SharingExecutionContext,
+    context: ExecutionContext,
   ): Promise<boolean> {
     const own = await this.engine.find(object, {
       where: { id: recordId },
@@ -409,6 +424,7 @@ export class SharingService implements ISharingService {
     });
     const owner = Array.isArray(own) && own[0] ? (own[0] as any)[OWNER_FIELD] : undefined;
     if (owner == null) return false;
+    // Middleware-stamped, not a field of the envelope — see buildReadFilter().
     const writeScope = (context as any).__writeScope as ('own' | 'own_and_reports' | 'unit' | 'unit_and_below' | 'org' | undefined);
     if (writeScope === 'org') return true;
     const owners = await this.resolveOwnerScopeIds(context, writeScope);
@@ -434,7 +450,7 @@ export class SharingService implements ISharingService {
    */
   private async hasModifyAllBypass(
     object: string,
-    context: SharingExecutionContext,
+    context: ExecutionContext,
   ): Promise<boolean> {
     const probe = this.securityService?.();
     if (!probe || typeof probe.hasWriteBypass !== 'function') return false;
@@ -462,7 +478,7 @@ export class SharingService implements ISharingService {
    */
   private bypassVerdict(
     object: string,
-    context: SharingExecutionContext,
+    context: ExecutionContext,
   ): SharingWriteVerdict | null {
     if (context?.isSystem) return 'allow';
     if (this.bypassObjects.has(object)) return 'abstain';
@@ -483,7 +499,7 @@ export class SharingService implements ISharingService {
     verb: 'update' | 'delete',
     object: string,
     recordId: string,
-    context: SharingExecutionContext,
+    context: ExecutionContext,
     err: unknown,
   ): SharingWriteVerdict {
     this.logger?.error?.(
@@ -520,7 +536,7 @@ export class SharingService implements ISharingService {
   async checkEdit(
     object: string,
     recordId: string,
-    context: SharingExecutionContext,
+    context: ExecutionContext,
   ): Promise<SharingWriteVerdict> {
     const bypass = this.bypassVerdict(object, context);
     if (bypass) return bypass;
@@ -577,7 +593,7 @@ export class SharingService implements ISharingService {
   async canEdit(
     object: string,
     recordId: string,
-    context: SharingExecutionContext,
+    context: ExecutionContext,
   ): Promise<boolean> {
     return (await this.checkEdit(object, recordId, context)) !== 'deny';
   }
@@ -603,7 +619,7 @@ export class SharingService implements ISharingService {
   async checkDelete(
     object: string,
     recordId: string,
-    context: SharingExecutionContext,
+    context: ExecutionContext,
   ): Promise<SharingWriteVerdict> {
     const bypass = this.bypassVerdict(object, context);
     if (bypass) return bypass;
@@ -641,7 +657,7 @@ export class SharingService implements ISharingService {
   async canDelete(
     object: string,
     recordId: string,
-    context: SharingExecutionContext,
+    context: ExecutionContext,
   ): Promise<boolean> {
     return (await this.checkDelete(object, recordId, context)) !== 'deny';
   }
@@ -683,7 +699,7 @@ export class SharingService implements ISharingService {
     object: string,
     recordId: string,
     operation: AuthoredRowWriteOperation,
-    context: SharingExecutionContext,
+    context: ExecutionContext,
   ): Promise<AuthoredRowWriteVerdict> {
     try {
       if (!context?.userId) return 'abstain';
@@ -728,7 +744,7 @@ export class SharingService implements ISharingService {
   async canManageShares(
     object: string,
     recordId: string,
-    context: SharingExecutionContext,
+    context: ExecutionContext,
   ): Promise<boolean> {
     if (context?.isSystem) return true;
     if (!object || !recordId || !context?.userId) return false;
@@ -792,7 +808,7 @@ export class SharingService implements ISharingService {
   private async isRecordVisible(
     object: string,
     recordId: string,
-    context: SharingExecutionContext,
+    context: ExecutionContext,
   ): Promise<boolean> {
     try {
       const rows = await this.engine.find(object, {
@@ -815,7 +831,7 @@ export class SharingService implements ISharingService {
   private async assertCanManageShares(
     object: string,
     recordId: string,
-    context: SharingExecutionContext,
+    context: ExecutionContext,
   ): Promise<void> {
     if (context?.isSystem) return;
     if (!(await this.isRecordVisible(object, recordId, context))) {
@@ -874,7 +890,7 @@ export class SharingService implements ISharingService {
    */
   async grant(
     input: GrantShareInput,
-    context: SharingExecutionContext,
+    context: ExecutionContext,
   ): Promise<RecordShare> {
     if (!input.object) throw new Error('VALIDATION_FAILED: object is required');
     if (!input.recordId) throw new Error('VALIDATION_FAILED: recordId is required');
@@ -975,7 +991,7 @@ export class SharingService implements ISharingService {
    */
   async revoke(
     shareId: string,
-    context: SharingExecutionContext,
+    context: ExecutionContext,
     scope?: { object: string; recordId: string },
   ): Promise<void> {
     if (!shareId) throw new Error('VALIDATION_FAILED: shareId is required');
@@ -1029,7 +1045,7 @@ export class SharingService implements ISharingService {
   async listShares(
     object: string,
     recordId: string,
-    context: SharingExecutionContext,
+    context: ExecutionContext,
   ): Promise<RecordShare[]> {
     if (!context?.isSystem) {
       await this.assertCanManageShares(object, recordId, context);
@@ -1164,10 +1180,10 @@ export class SharingService implements ISharingService {
    * posture-scoped rather than unconditional.
    */
   private async resolveOwnerScopeIds(
-    context: SharingExecutionContext,
+    context: ExecutionContext,
     scope: 'own' | 'own_and_reports' | 'unit' | 'unit_and_below' | 'org' | undefined,
   ): Promise<string[]> {
-    const me = String((context as any).userId);
+    const me = String(context.userId);
     if (!scope || scope === 'own' || scope === 'org') return [me];
     const resolver = this.hierarchyResolver?.();
     if (!resolver) return [me];
@@ -1203,7 +1219,7 @@ export class SharingService implements ISharingService {
           // The @deprecated compatibility alias, carried through unchanged for
           // resolvers that still read it. It is NOT the authority — a resolver
           // reading it alone is the shape #5858 ruled out.
-          tenantId: (context as any).tenantId ?? null,
+          tenantId: context.tenantId ?? null,
         },
         scope,
       );
@@ -1289,7 +1305,7 @@ export class SharingService implements ISharingService {
     return 'isolated';
   }
 
-  private shouldBypass(object: string, context: SharingExecutionContext): boolean {
+  private shouldBypass(object: string, context: ExecutionContext): boolean {
     if (context?.isSystem) return true;
     if (this.bypassObjects.has(object)) return true;
     return false;

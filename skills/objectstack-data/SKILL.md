@@ -142,9 +142,11 @@ also lands in the auto-default set when the object declares no
 driver materializes a column for it, so a `$contains` predicate against one has
 nothing to scan (the SQL driver would emit a `WHERE` over a column that does not
 exist). CEL also only reads this record's own fields (`record.<field>`), so a
-formula cannot fetch the related title in the first place. Nothing rejects the
-mistake: `searchableFields` admits any field the object declares, so a formula
-entry clears both lint and the ingress gate and then never matches.
+formula cannot fetch the related title in the first place. Since #6674 the
+mistake is **refused, not silent**: a `formula` entry in any `searchableFields`
+— the object's own set included — is an `os validate` error
+(`searchable-field-unsearchable`), and a request naming one is `400
+INVALID_FIELD`. It used to clear both and then never match.
 
 **Mirror maintenance is the trade-off** — a mirror is denormalized data, only as
 fresh as whatever writes it. Cover both write paths:
@@ -168,12 +170,10 @@ every entry is dropped.
 
 hint: 'search' scans this object's own columns, so a related record's column
 cannot be a search target — expand the relation and search the related object,
-or copy the value onto a formula field here. Clients echo this declaration
+or copy the value onto a stored text field here. Clients echo this declaration
 verbatim as the '$searchFields' override, so a stale entry becomes a 400
 INVALID_FIELD on list search (#4254), not just a quietly narrowed one.
 ```
-
-(The hint's "formula field" wording is loose — only a **stored** mirror works.)
 
 A request carrying the dotted path is `400 INVALID_FIELD`:
 

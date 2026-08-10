@@ -31,7 +31,7 @@
  *    refuses an operator it cannot map (`Unsupported filter operator …`), so the
  *    leaf operators that can ever reach this compiler are exactly what
  *    {@link fieldLeaves} emits for the spec's `FILTER_OPERATORS` — a finite,
- *    enumerable set. Driving all fifteen authorable spellings through the echo
+ *    enumerable set. Driving all sixteen authorable spellings through the echo (#6520 added `$icontains`)
  *    turns "the two tables drifted" from something a reader has to notice into a
  *    failing test, which is what #4128 asked for and did not get for this third
  *    compiler.
@@ -125,6 +125,12 @@ const OPERATOR_CASES: Record<string, FilterCondition> = {
   $nin: { stage: { $nin: ['won'] } },
   $between: { amount: { $between: [10, 20] } },
   $contains: { stage: { $contains: 'o' } },
+  // [#6520] Upper-case on purpose: the fixture's `stage` values are lower-case,
+  // so a comparand that only matches once the ASCII fold RUNS is the one that
+  // tells a working fold from an absent one. A case-exact rendering returns no
+  // rows here, which the row-result assertions below read as a wrong answer
+  // rather than as a passing count.
+  $icontains: { stage: { $icontains: 'O' } },
   $notContains: { stage: { $notContains: 'o' } },
   $startsWith: { stage: { $startsWith: 'w' } },
   $endsWith: { stage: { $endsWith: 'n' } },
@@ -367,12 +373,15 @@ describe('[#5333] `/analytics/sql` echo — every authorable operator renders a 
     });
 
     it('does not throw for anything the normalizer can actually emit', () => {
-      // The leaf operators `fieldLeaves` produces: `MONGO_TO_CUBE_OP`'s twelve,
+      // The leaf operators `fieldLeaves` produces: `MONGO_TO_CUBE_OP`'s thirteen,
       // plus `set` / `notSet` (the null predicates, `$eq: null` and a bare
-      // `null`) — `$between` lowers to `gte` / `lte`, already in the twelve.
+      // `null`) — `$between` lowers to `gte` / `lte`, already in the thirteen.
       const EMITTABLE = [
         'equals', 'notEquals', 'gt', 'gte', 'lt', 'lte',
         'in', 'notIn', 'contains', 'notContains', 'startsWith', 'endsWith',
+        // [#6520] `$icontains`' leaf. It renders through the same LIKE row as
+        // `contains`, with the ASCII fold wrapped around both sides.
+        'icontains',
         'set', 'notSet',
       ];
       for (const operator of EMITTABLE) {

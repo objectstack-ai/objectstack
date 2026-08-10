@@ -2,7 +2,7 @@
 
 import type { FilterCondition } from '@objectstack/spec/data';
 import type { RegisteredErrorCode } from '@objectstack/spec/api';
-import { likePattern, LIKE_ESCAPE_CHAR } from './like-pattern.js';
+import { likePattern, LIKE_ESCAPE_CHAR, asciiLowerSqlExpr } from './like-pattern.js';
 import {
   isBindableComparand,
   isRenderableTextComparand,
@@ -785,6 +785,31 @@ function compileOperator(col: string, op: string, val: unknown, field: string, p
     // [#5234] …and it must be a value `String()` can render, which is asserted
     // BEFORE `likePattern` sees it — see {@link assertRenderableText}.
     case '$contains': assertRenderableText(op, field, val); return `${col} LIKE ${bindLike(params, likePattern('contains', val))}`;
+    /**
+     * [#6520] `$icontains` on the READ-SCOPE lowering — the one compiler in this
+     * package where a wrong answer is an ADR-0021 scope over-reach rather than a
+     * loose chart filter, which is why the fold is the spec's ruled one and not
+     * `LOWER()`.
+     *
+     * `assertRenderableText` first, exactly as its case-exact twin above: the
+     * comparand has to be something `String()` renders faithfully before a
+     * pattern is built from it (#5234).
+     *
+     * The fold wraps BOTH the column and the bound pattern. Folding one side
+     * only would compare a folded needle against a raw column — matching just
+     * the rows already lower-case — and on a read scope that is a row set the
+     * policy author never wrote, in the narrowing direction here but in the
+     * WIDENING direction under a `$not`.
+     */
+    case '$icontains': {
+      assertRenderableText(op, field, val);
+      // The two binds are spelled out rather than taken from `bindLike`, because
+      // only the PATTERN placeholder is folded and the `ESCAPE` one must not be.
+      // Left-to-right, so the values land in `params` in placeholder order —
+      // the ordering invariant `bindLike`'s own comment states.
+      const patternRef = asciiLowerSqlExpr(bind(params, likePattern('contains', val)));
+      return `${asciiLowerSqlExpr(col)} LIKE ${patternRef} ESCAPE ${bind(params, LIKE_ESCAPE_CHAR)}`;
+    }
     // [#5298] NULL-safe: `NOT LIKE` is UNKNOWN for a NULL column, and "does not
     // contain" is true of a value that is not there.
     case '$notContains': assertRenderableText(op, field, val); return nullSafeNegative(col, `${col} NOT LIKE ${bindLike(params, likePattern('contains', val))}`);

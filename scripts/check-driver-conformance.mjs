@@ -293,14 +293,19 @@ const CASE_SETS = [
 //
 // What the case-set demands, and where each requirement stands:
 //
-//   1. `$icontains` — a NEW operator (ASCII-only case fold). **DONE on the SQL
-//      family** (#5702, retuned by #6518): every SQL face folds through the same
-//      emitter that carries the escaping, and the fold is now ASCII-only on
-//      Postgres and MySQL too rather than only on SQLite. Still REFUSED
-//      (fail-closed, an unimplemented capability rather than a live defect) on
-//      driver-memory and driver-mongodb, which are the #5499 frozen family —
-//      tracked as #6520, which also explains why the spec's `FILTER_OPERATORS`
-//      cannot take `$icontains` until those two have arms.
+//   1. `$icontains` — a NEW operator (ASCII-only case fold). **DONE
+//      EVERYWHERE** (#5702 + #6518 on the SQL family; #6520 on the rest). #6520
+//      lifted the #5499 freeze for this operator as a sanctioned one-off
+//      (maintainer ruling, 2026-08-08, semantic parity only) and gave every
+//      remaining face an arm in ONE PR with the spec word-list admission —
+//      driver-memory's three surfaces, driver-mongodb, objectql's `having`,
+//      formula, and service-analytics' three compilers. The ordering was the
+//      constraint, not the code: `FILTER_OPERATORS` is what driver-memory's
+//      shape gate derives from, so admitting the name a PR earlier would have
+//      turned this driver's loud refusal into a silently dropped predicate
+//      (#5701 measured it; #3948 is what a dropped predicate is on a read
+//      scope). Both rows below therefore keep their DEBT entry for
+//      requirement 2 ALONE.
 //   2. `$contains` / `$startsWith` / `$endsWith` / `$notContains` must be
 //      case-SENSITIVE (#4706 Q2 = A, superseding `filter.zod.ts`'s former
 //      "Case sensitivity should be handled at backend level"). **DONE on the SQL
@@ -372,11 +377,16 @@ const LEDGER = [
       + 'counts as a backend) uses String.prototype.includes and is case-SENSITIVE — i.e. this package '
       + 'answers one `$contains` two ways today, the divergence class #5374 fixed between the other two '
       + 'faces. Whichever suite clears this cell has to pick one and align both: tracked as #6682, which is '
-      + 'the successor #6518 left behind for exactly this pair of packages. `$icontains` is still refused on '
-      + "both faces (`SUPPORTED_FIELD_OPERATORS` derives from the spec's FILTER_OPERATORS, which deliberately "
-      + 'does not carry it yet) — unimplemented but fail-closed, requirement 1 open here and tracked as '
-      + '#6520. BOTH successors have to land before this row can go: coverage is judged by importing the '
-      + 'whole case-set, so a cell that answers one requirement and not the other must not import it.',
+      + 'the successor #6518 left behind for exactly this pair of packages. Requirement 1 is DONE here '
+      + 'since #6520: all THREE of this package\'s faces answer `$icontains` with the spec\'s shared '
+      + 'ASCII-only fold — the query path and the analytics face bind a pattern from '
+      + '`asciiCaseInsensitiveRegexSource` (no `i` flag, which folds Unicode), the reference matcher calls '
+      + '`asciiCaseInsensitiveContains`, and the NON-EMPTY-string comparand rule is driver-sql\'s word for '
+      + 'word. So this row now carries ONE open requirement, not two. It still cannot go: coverage is '
+      + 'judged by importing the WHOLE case-set, so a cell answering one requirement and not the other must '
+      + 'not import it — #6520\'s suites drive `FILTER_TEXT_ROWS` and spell their own `$icontains` cases '
+      + 'rather than naming the marker, which would flip this cell to covered and fail RECONCILED while '
+      + 'requirement 2 is open.',
     issue: 'https://github.com/objectstack-ai/objectstack/issues/6682',
   },
   {
@@ -396,7 +406,13 @@ const LEDGER = [
       + '`translateFieldOperators` lowers `$contains`/`$startsWith`/`$endsWith`/`$notContains` to `$regex` '
       + 'with a HARDCODED `$options: "i"` — tracked as #6682, the successor #6518 left behind for this pair '
       + 'of frozen packages. `escapeRegex` does escape metacharacters, so the literal-comparand cases hold. '
-      + '`$icontains` is still refused (#6520), and BOTH successors have to land before this row can go: '
+      + 'Requirement 1 is DONE here since #6520: `translateFieldOperators` has a `$icontains` arm, and it is '
+      + 'the ONE arm in that family that does not set `$options: "i"` — the fold lives in the pattern '
+      + '(`asciiCaseInsensitiveRegexSource`, one `[Aa]` class per ASCII letter), because mongo\'s `i` flag '
+      + 'folds the whole Unicode range and would fail the CAFÉ rows. The non-empty-string comparand rule '
+      + 'sits on the validating WALK beside `$null`\'s, not in the emitter, so it cannot be skipped by a '
+      + 'boolean identity settling the enclosing node. So this row now carries ONE open requirement, not '
+      + 'two. It still cannot go: '
       + 'coverage is judged by importing the whole case-set, so a half-answered cell must not import it. Note '
       + 'this package is in the #5499 frozen family: its real-mongod suites are opt-in, so whatever clears '
       + 'this cell needs a server-free half like `mongodb-filter-logic-translation.test.ts` has.',

@@ -184,7 +184,7 @@ This document serves as the **Grand Map** of the ObjectStack specification. It l
 | [`events.zod.ts`](src/kernel/events.zod.ts) | | **Kernel Events**. System lifecycle events. |
 | [`service-registry.zod.ts`](src/kernel/service-registry.zod.ts) | | **Service Registry**. Internal dependency injection. |
 | [`metadata-loader.zod.ts`](src/kernel/metadata-loader.zod.ts) | | **Loader**. Logic for loading definitions from disk/DB. |
-| [`plugin-loading.zod.ts`](src/kernel/plugin-loading.zod.ts) | ⭐ | **Plugin Loading**. Loading strategies, production-safe hot reload (`environment`, `productionSafety`), full plugin sandboxing (`scope`, `ipc`), code splitting, caching, and performance monitoring. |
+| [`plugin-loading.zod.ts`](src/kernel/plugin-loading.zod.ts) | | **Plugin Loading (observational only)**. The lifecycle event and per-plugin loading state. The configuration half — loading strategies, hot reload, sandboxing, code splitting, caching, performance monitoring, reached as `manifest.loading` — was REMOVED in v17 (#4914, ADR-0049 enforce-or-remove): it had no runtime reader in any repo. |
 | [`plugin-registry.zod.ts`](src/kernel/plugin-registry.zod.ts) | | **Plugin Registry**. Metadata for available plugins. |
 | [`plugin-security.zod.ts`](src/kernel/plugin-security.zod.ts) | | **Plugin Security**. Security verification for plugins. |
 | [`plugin-versioning.zod.ts`](src/kernel/plugin-versioning.zod.ts) | | **Versioning**. Semantic versioning rules for plugins. |

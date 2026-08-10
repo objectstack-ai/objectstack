@@ -647,3 +647,113 @@ describe('validateSearchableFields — objectstack-ui SKILL.md parity (#6675)', 
     expect(refused[0].message).toContain("of type 'lookup', which 'search' cannot scan");
   });
 });
+
+/**
+ * [#6674] A virtual `formula` entry — the one check that runs on the object's
+ * OWN set as well as on a view's narrowing.
+ *
+ * The card's shape: the entry names a real field, so the existence check passes
+ * it; the runtime's declared branch admitted it verbatim; and the search then
+ * matched nothing, because a formula value is computed on read and no driver
+ * materializes a column for it (0 rows on driver-memory, 0 rows WITH NO ERROR on
+ * driver-sql). Declared coverage, zero delivery — the fail-open #4254 closed on
+ * the unknown-name axis, surviving on the known-but-virtual one.
+ */
+describe('[#6674] validateSearchableFields — a virtual formula entry', () => {
+  const accountFields = {
+    name: { type: 'text' },
+    billing_email: { type: 'email' },
+    payload: { type: 'json' },
+    account_id: { type: 'lookup', reference: 'crm_account' },
+    display_label: { type: 'formula', expression: "record.name + ' · x'" },
+  };
+
+  it("flags it on the OBJECT's own searchableFields — previously clean", () => {
+    const findings = validateSearchableFields({
+      objects: [
+        {
+          name: 'crm_account',
+          fields: accountFields,
+          searchableFields: ['name', 'display_label'],
+        },
+      ],
+    });
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(SEARCHABLE_FIELD_UNSEARCHABLE);
+    expect(findings[0].severity).toBe('error');
+    expect(findings[0].path).toBe('objects[0].searchableFields[1]');
+    expect(findings[0].where).toBe('object "crm_account"');
+    expect(findings[0].message).toContain("is a virtual 'formula' field");
+    expect(findings[0].message).toContain('computed on read and never stored');
+    // The fix is a STORED mirror — the same prescription #6673 put on the
+    // neighbouring hints, and the only one that can work here.
+    expect(findings[0].hint).toContain('stored text field');
+    expect(findings[0].hint).toContain('400 INVALID_FIELD');
+  });
+
+  it('flags it on a list view narrowing too', () => {
+    const findings = validateSearchableFields({
+      objects: [
+        {
+          name: 'crm_account',
+          fields: accountFields,
+          listViews: { all: { type: 'grid', searchableFields: ['name', 'display_label'] } },
+        },
+      ],
+    });
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(SEARCHABLE_FIELD_UNSEARCHABLE);
+    expect(findings[0].path).toBe('objects[0].listViews.all.searchableFields[1]');
+    expect(findings[0].message).toContain("is a virtual 'formula' field");
+  });
+
+  it('CONTROL — a json or lookup entry on the OBJECT\'s own set stays clean', () => {
+    // The carve-out #4830 wrote down, deliberately preserved: the runtime's
+    // declared branch executes those (a `$contains` over the stored JSON text /
+    // the stored foreign key). Narrow and rarely useful, but a scan that CAN
+    // match — flagging it would reject metadata the runtime accepts (ADR-0072
+    // D1). If this control ever goes red, #6674 has quietly become "the declared
+    // branch is type-filtered", which it is not.
+    expect(
+      validateSearchableFields({
+        objects: [
+          {
+            name: 'crm_account',
+            fields: accountFields,
+            searchableFields: ['name', 'payload', 'account_id'],
+          },
+        ],
+      }),
+    ).toEqual([]);
+  });
+
+  it('CONTROL — a stale entry on the object\'s own set keeps the #4254 message', () => {
+    const findings = validateSearchableFields({
+      objects: [
+        { name: 'crm_account', fields: accountFields, searchableFields: ['name', 'gone'] },
+      ],
+    });
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(SEARCHABLE_FIELD_UNKNOWN);
+    expect(findings[0].message).toContain('is not a field on object');
+  });
+
+  it('an ALL-virtual declaration is reported, not silently swapped for the auto-default', () => {
+    // The degenerate case: at runtime the declaration filters to empty and
+    // resolution falls through to the auto-default, so the object silently
+    // searches a set the author never wrote. The build error is what stops that
+    // being invisible.
+    const findings = validateSearchableFields({
+      objects: [
+        { name: 'crm_account', fields: accountFields, searchableFields: ['display_label'] },
+      ],
+    });
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0].path).toBe('objects[0].searchableFields[0]');
+    expect(findings[0].message).toContain("is a virtual 'formula' field");
+  });
+});

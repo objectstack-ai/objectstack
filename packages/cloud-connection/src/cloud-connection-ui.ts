@@ -35,7 +35,7 @@ export const CloudConnectionSettingsPage: Page = {
                         subtitle:
                             'Connect this runtime to an ObjectStack control plane to browse your '
                             + 'organization\'s private packages and install them here.',
-                        icon: 'cloud',
+                        // `icon` removed here (#6946): `page:header` never drew one — retired from the spec.
                     },
                 },
             ],

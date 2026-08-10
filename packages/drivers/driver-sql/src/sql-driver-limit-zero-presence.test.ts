@@ -61,6 +61,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import knexLib from 'knex';
+import type { DriverOptions } from '@objectstack/spec/data';
 import { SqlDriver } from './index.js';
 
 const TABLE = 'os6577_zero_page';
@@ -96,7 +97,7 @@ function paginationTail(sql: string): string {
   return m ? m[0].toLowerCase() : '';
 }
 
-const READ = { bypassTenantAudit: true } as any;
+const READ: DriverOptions = { bypassTenantAudit: true };
 
 describe('driver-sql — `limit: 0` returns no records on every door (#6577)', () => {
   let driver: InspectableSqlDriver;

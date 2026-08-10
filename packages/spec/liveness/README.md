@@ -143,6 +143,101 @@ re-verify rather than back-filling guesses. **For objectui-side evidence, pin
 the commit** (`objectui @732b1bf`) — `action.undoable`'s reader line numbers had
 already drifted by 28 lines one day after the issue citing them was filed.
 
+### `producer` — a consumer is only HALF the call graph (#4837)
+
+`live` means **authoring the property changes runtime behaviour**. A cited
+consumer proves something *reads* the key. It does not prove the read has an
+effect, because a read can depend on a second input that nobody supplies.
+
+`seed.json` marked `Seed.env` **live**, evidence `seed-loader.ts` line 91, note
+*"filterByEnv drops datasets whose env list excludes the running
+environment."* Every word of that was checkable against the file, and the
+verdict was still false:
+
+> Line 91 really did call `filterByEnv(request.seeds, config.env)`. But none of
+> the **six** call sites that build a `SeedLoaderRequest` — app boot, per-org
+> replay, hot reload, package apply, draft publish, marketplace install — ever
+> passed `env`. So `config.env` was permanently `undefined`, `filterByEnv`
+> returned its input on its first line, and `dataset.env` was **never read at
+> all**. The evidence pointed at the consumer; the property was dead at the
+> **producer**.
+
+The unit test made it worse rather than better: `seed-loader.test.ts` has always
+had a passing `should handle environment filtering` case — because the test
+supplies `config.env` itself. The mechanism was correct throughout; only the
+wiring was missing, and the ledger and the test both looked exclusively at the
+mechanism. This is the shape Prime Directive #10 already names in another
+context: **a `case` label is not enforcement; check the call site** (#3106).
+
+Hence the criterion:
+
+> When a property's runtime effect depends on a **second input that some
+> producer must supply**, a `live` verdict requires evidence on the producer
+> side too. Cite it in `producer`.
+
+```jsonc
+"env": {
+  "status": "live",
+  "evidence": "packages/metadata-protocol/src/seed-loader.ts:191 (filterByEnv drops …)",
+  "producer": "packages/metadata-protocol/src/seed-loader.ts:174 — load() resolves the comparison environment itself (resolveEnvConfig), rather than trusting a caller to pass it"
+}
+```
+
+`producer` resolves through **the same resolver as `evidence`** — repo-rooted
+paths must exist or CI fails; cross-repo paths are attributed and counted. A
+call-site claim nothing can falsify is precisely what this field exists to
+remove, so it does not get a weaker standard than the pointer it completes.
+
+Which entries need one. The risk is highest for **optional config with a
+default**: those always "have a value" in the type system and can still be
+`undefined` at runtime.
+
+| Shape | Needs `producer`? |
+|---|---|
+| The consumer reads the authored value directly (`hook.priority` orders hooks) | no — the author IS the producer |
+| The consumer compares the authored value against something a caller supplies (`seed.env`) | **yes** — cite who supplies it |
+| The consumer reads it out of an options/config object built elsewhere (`job.timeout`) | **yes** — cite the threading site |
+| The property is `dead` | no — there is nothing to produce |
+
+Absence never fails CI (most of the ledger predates the field, and back-filling
+guesses is the sin this records). `pnpm check:liveness --producer-gap` prints
+every `live` entry citing a consumer only — an upper bound on the debt, to be
+triaged with the table above rather than read as a defect list. A **malformed**
+value does fail.
+
+### `evidenceScope` — how wide the last look actually was (#4895)
+
+Four measured verdicts were reached by searching **this repo only**, and
+published as though they covered every consumer:
+
+| # | Verdict | What the search missed |
+|---|---|---|
+| 1 | `app.homePageId` tombstoned "no shell ever read it" | objectui's `AppContent.resolveLandingRoute()` had been reading it all along (corrected in #4709) |
+| 2 | `flow.nodes.children.position` marked live, "designer canvas layout" | the designer wrote its own `ui:{x,y}` and **nothing** read `position` — a false *live*, the opposite direction |
+| 3 | `HttpMethod` reported unused | the scan matched only `import … from` |
+| 4 | `Notification` / `NotificationConfig` removed on "zero importers" | objectui re-exported them with `export … from`, and the real consumers imported from `@object-ui/types` — **two hops**, so even a scan covering `export … from` misses it while it matches on the spec specifier |
+
+Case 4 is the one that decides the method: **no amount of text or specifier
+matching is sufficient**. A negative cross-repo claim has to follow the resolved
+symbol graph through re-export chains, or it is a guess with a citation. Every
+barrel package adds a blind spot, and the renderer repo is all barrels.
+
+`evidenceScope` records what was actually done, as data:
+
+| Value | Means |
+|---|---|
+| `in-repo` | the call graph was closed inside this repo only |
+| `cross-repo` | a named foreign realm was walked too — say **which**, in the evidence, and **pin the commit** (`objectui @c2fd1223`): `action.undoable`'s reader line numbers drifted 28 lines in one day (#3714) |
+
+Absent = scope undeclared, a worklist row rather than a failure; the field is
+younger than nearly every entry. A value outside the vocabulary FAILS, the same
+asymmetry as `verifiedAt` — a value the parser cannot read would silently exempt
+that entry from every future sweep.
+
+⚠️ Neither `cross-repo` value in the tree today covers **`cloud`**: the closed
+runtime is not reachable from an open-source checkout, so a `cross-repo` claim
+means "the realms named in the evidence", never "everywhere".
+
 ### ⚠️ An authoring/preview renderer is NOT a runtime consumer
 
 `live` means **authoring the property changes runtime behaviour**. A Studio
@@ -522,10 +617,15 @@ over-share.
   silently. Same "pure + unit-tested" reasoning as `orphans.mts`, for the same reason.
 - `../scripts/liveness/check-empty-state.mts` — the empty-state gate (above);
   `empty-state-registry.mts` is its source of truth.
+- `../scripts/liveness/producer.mts` — the `producer` / `evidenceScope` fold
+  (#4837 / #4895). Pure + unit-tested for the same reason as `orphans.mts`: on
+  the shipped ledgers these checks are almost entirely quiet, so a green gate
+  proves nothing about whether they can fire.
 
 ```bash
 pnpm --filter @objectstack/spec check:liveness               # run the gate
 tsx packages/spec/scripts/liveness/check-liveness.mts --dump field   # inventory a type (seeding aid)
+tsx packages/spec/scripts/liveness/check-liveness.mts --producer-gap # live entries citing a consumer only
 ```
 
 CI: `.github/workflows/spec-liveness-check.yml` runs on PRs touching `packages/spec/**`.
@@ -586,8 +686,8 @@ for t, v in r['types'].items():
 | view | 79 | 0 | 4 | – | list/form drilled via `children` (#2998 Track B); list.{responsive,performance} + form.{defaultSort,aria} REMOVED 2026-07-30 (#3896 close-out sweep — list aria/data stay live); **form.data was that sweep's one CORRECTION** — the removal attempt broke the build (`defineForm` writes `data.provider='schema'` onto every metadata form, `metadata-protocol` serves it), so it stands `live` with re-verified evidence; form.{buttons,defaults} live (framework#1894 / #2998); audit-era DEAD lines superseded by re-verification; level-2 dead residue (userActions.buttons, addRecord.mode/formView, tabs[].order) noted on parents — one drill level only |
 
 | report | 21 | 0 | 0 | – | dataset-bound (ADR-0021); the aria/performance LEDGER entries were stale — the keys left the schema in the report-liveness close-out; deleted 2026-07-30 as hygiene. Audit-era `chart` DEAD superseded (framework#1890 / #3441) |
-| dashboard | 33 | 0 | 8 | – | ADR-0021 dataset widgets (#3251; DashboardWidgetSchema `.strict()`); `aria`/`performance` (and widget `performance` + PerformanceConfigSchema) REMOVED 2026-07-30 (#3896 close-out sweep — no renderer applied any of them); audit-era `globalFilters`/`dateRange` DEAD superseded (framework#2501) | **#4956**: `widgets` DRILLED — the row jumps 20 → 41 classified because all 22 widget-level keys enter the count at once. They had never been classified at all: the entry carried one blanket `live` plus a `note` asserting they were classified "in the DashboardWidgetSchema subtree", and no such subtree existed in any of the 28 ledger files. That gap, not any evidence, is what carried `widgets[].responsive` through the #3896 sweep that removed both its sibling `widgets[].performance` and its literal namesake `view.responsive` — `view` is drilled, so `list.responsive` got asked and went out. New dead 6 = `responsive` (retired #4876/#4995, tombstone keeps the row) + `colorVariant` + `actionUrl`/`actionType`/`actionIcon` + `aria`. The action trio is the sharpest: no renderer draws a per-widget action button at all (every `actionUrl` read in DashboardRenderer is scoped to `header.actions[]`), yet `validate-dashboard-action-refs.ts` enforces reference integrity on it and its docblock calls it "the per-widget button" — a lint guarding an affordance that does not exist. `requiresService` is the counter-example worth remembering: dead by every objectui measurement, and LIVE server-side (`filterDashboardForUser`, ADR-0057 D10) — judging a widget key from the renderer repo alone would have retired an enforced gate. `compareTo` is `live` on ONE path only (inline object-provider charts); on the ADR-0021 dataset path the string arms are dropped and `{ offset }` throws in the executor |
-| query | 16 | 1 | 4 | – | **not a metadata type** — the REQUEST surface (`QuerySchema`: client SDK QueryBuilder output; the `POST /data/:object/query` body), governed via `SPEC_ONLY_SCHEMAS` (#4286). The gate's one-level walk resolves 1 experimental; the 7 marker-experimental search affordances sit one level deeper, below the walk — resolved from `[EXPERIMENTAL — not enforced]` describe markers, not ledger entries (search `fuzzy`/`operator`/`boost`/`minScore`/`language`/`highlight` + `aggregations[].filter` — declared engine affordances no executor receives). The #4286 sweep closed out same-release: `having` ENFORCED 2026-07-31 (engine-side post-aggregation filter, both paths; was finding 1); dead 4 = the tombstoned removals `joins`/`windowFunctions`/`cursor`/`distinct` — REMOVED 2026-07-31 (retiredKey keeps each in the walked shape so the rows stay; protocol-17 semantic migrations; the JoinNode + WindowFunctionNode clusters and the `QueryBuilder.cursor()`/`.distinct()` producers deleted with their keys; `distinct`'s mis-wired REST count suppression deleted too — finding 2) |
+| dashboard | 34 | 0 | 7 | – | ADR-0021 dataset widgets (#3251; DashboardWidgetSchema `.strict()`); `aria`/`performance` (and widget `performance` + PerformanceConfigSchema) REMOVED 2026-07-30 (#3896 close-out sweep — no renderer applied any of them); audit-era `globalFilters`/`dateRange` DEAD superseded (framework#2501) | **#4956**: `widgets` DRILLED — the row jumps 20 → 41 classified because all 22 widget-level keys enter the count at once. They had never been classified at all: the entry carried one blanket `live` plus a `note` asserting they were classified "in the DashboardWidgetSchema subtree", and no such subtree existed in any of the 28 ledger files. That gap, not any evidence, is what carried `widgets[].responsive` through the #3896 sweep that removed both its sibling `widgets[].performance` and its literal namesake `view.responsive` — `view` is drilled, so `list.responsive` got asked and went out. New dead 6 = `responsive` (retired #4876/#4995, tombstone keeps the row) + `colorVariant` + `actionUrl`/`actionType`/`actionIcon` + `aria`. The action trio is the sharpest: no renderer draws a per-widget action button at all (every `actionUrl` read in DashboardRenderer is scoped to `header.actions[]`), yet `validate-dashboard-action-refs.ts` enforces reference integrity on it and its docblock calls it "the per-widget button" — a lint guarding an affordance that does not exist. `requiresService` is the counter-example worth remembering: dead by every objectui measurement, and LIVE server-side (`filterDashboardForUser`, ADR-0057 D10) — judging a widget key from the renderer repo alone would have retired an enforced gate. `compareTo` is `live` on ONE path only (inline object-provider charts); on the ADR-0021 dataset path the string arms are dropped and `{ offset }` throws in the executor. **#6774** moves the row 33/8 → 34/7: `colorVariant` CORRECTED dead → live 2026-08-09, the enforce leg of #5010 ruling B landing from the renderer side (objectui#3359 / PR objectui#3799, absorbed by pin `09987b68`). Worth reading beside `requiresService` above, because it is the same lesson from the other end — that row warns against judging a widget key from the renderer repo alone, and this one is a `dead` verdict that was correct in this repo AND correct in the renderer repo on the day it was measured, and stopped being either when a cross-repo decision was implemented. A ledger row is a claim with a timestamp; `verifiedAt` is what makes the claim re-askable. It also empties the dashboard warn set, so the author-side lint now says nothing about any widget key — `dashboard` stays in the lint's TYPE_COLLECTIONS all the same (the `webhook`/`email_template` resolved state) |
+| query | 15 | 1 | 5 | 0 | **not a metadata type** — the REQUEST surface (`QuerySchema`: client SDK QueryBuilder output; the `POST /data/:object/query` body), governed via `SPEC_ONLY_SCHEMAS` (#4286). The gate's one-level walk resolves 1 experimental; the 7 marker-experimental search affordances sit one level deeper, below the walk — resolved from `[EXPERIMENTAL — not enforced]` describe markers, not ledger entries (search `fuzzy`/`operator`/`boost`/`minScore`/`language`/`highlight` + `aggregations[].filter` — declared engine affordances no executor receives). The #4286 sweep closed out same-release: `having` ENFORCED 2026-07-31 (engine-side post-aggregation filter, both paths; was finding 1); dead 4 = the tombstoned removals `joins`/`windowFunctions`/`cursor`/`distinct` — REMOVED 2026-07-31 (retiredKey keeps each in the walked shape so the rows stay; protocol-17 semantic migrations; the JoinNode + WindowFunctionNode clusters and the `QueryBuilder.cursor()`/`.distinct()` producers deleted with their keys; `distinct`'s mis-wired REST count suppression deleted too — finding 2). **#6815** adds the 5th dead: `aggregations[].distinct` REMOVED 2026-08-09 (live → dead, `-1` live). It is the one member of this ledger the #4286 sweep could not have caught with the question it asked — that sweep looked for keys NO executor reads, and this one had a reader: the objectql in-memory fallback deduplicated before applying the function while all five other faces (driver-sql, driver-turso, driver-mongodb, driver-memory, service-analytics' `AGGREGATE_SQL`) ignored it, so one query answered two plausible NUMBERS depending on which backend served it. The lesson for the next audit is the question, not the key: a per-key `live` verdict is only as good as the count of faces it was measured across, and this row's 2026-07-31 evidence (`in-memory-aggregation.ts:167,204-206`) was TRUE and still the wrong verdict. `count_distinct` is the surviving spelling (enforce leg, #6409) |
 | datasource | 30 | 0 | 0 | 0 | seeded 2026-08-01 (#4487) — the **highest dead ratio of any governed type** (20 of 43), and it was ungoverned until now, which is not a coincidence: #4410/#4465/#4481 found six inert keys here by hand, two security-shaped (`schemaMode` left an external DB constructible as `managed` with DDL ungated; `ssl` configured nothing while looking configured). Dead set = `capabilities.*` (all 11 — the engine gates pushdown on the runtime driver's `supports.*` object, a non-overlapping vocabulary), `healthCheck.*` (3 — nothing schedules a datasource probe; the 20 `healthCheck` hits in the repo all belong to the PLUGIN health monitor and other surfaces), `retryPolicy.*` (4 — `retryPolicy` IS enforced on `hook` and `job`, which is what makes this one read alive; the shapes differ), `external.label`, `external.requirePermission`. **`capabilities.readOnly` is the one to know**: it reads as a safety switch, gates nothing, and two shipped prescriptions pointed authors at it until #4487 — `external.allowWrites: false` is the enforced write gate. `config` is a `z.record`, so its per-driver keys sit outside the walk (recorded in the entry's note, not silently skipped) **批 A CLOSED 2026-08-02 (#4583)**: the `capabilities` block — 11 flags, every one dead and authorWarn'd — was REMOVED rather than bridged; pushdown comes from the runtime driver's own `supports.*`, so there was nothing to connect it to. Its rows are deleted (strict-removal route), which is why dead falls 20 → 9. `readOnly` was the reason the audit was worth doing: it read as a safety switch, gated nothing, and had already been MOVED twice toward somewhere it might be enforced (#4410, #4465) — the shipped CRM example called a datasource a read replica on the strength of it while the datasource took writes. Removing it does NOT hand the author a working alternative: `external.allowWrites` only gates FEDERATED datasources, so a managed one has no read-only gate at all (#4584). Remaining 9 = healthCheck ×3 + retryPolicy ×4 + external ×2, batches B/C/D of #4583 **BATCHES B/C/D CLOSED 2026-08-02 — datasource now has ZERO dead properties**, down from the 20 it was seeded with (the highest dead ratio of any governed type). `retryPolicy` ×4 and `healthCheck` ×3 went as whole blocks, `external.label` / `external.requirePermission` as keys. None was bridgeable: each already had a different LIVE mechanism doing the job — the boot policy, the driver handle's on-demand `ping()`/`checkHealth()`, the top-level `label`, and ordinary permission sets + RLS. The `retryPolicy` rejection deliberately refuses to offer a rename: `hook`/`job` retryPolicy ARE enforced but spell the delay `backoffMs`, and that inconsistency is itself the evidence nothing read the datasource one (#4488's sharpest trap) |
 | webhook | 11 | 0 | 0 | – | **not a registered metadata type** — governed via the gate's spec-only schema override (`SPEC_ONLY_SCHEMAS`), not `getMetadataTypeSchema`; folding it onto the registry is the #3490 reassessment. This row once read 0/1/16 ("the ENTIRE authoring surface is dead", #3461) and both halves of that were CLOSED same-quarter: #3489 built the materializer bridge (authored `webhooks:` entries now land as `sys_webhook` dispatcher rows) and #3494 pruned the aspirational props outright — so the surviving surface is fully live. Kept in the table as the worked example that a dead verdict is a worklist entry, not a tombstone: enforce-or-remove resolved this one by ENFORCING |
 | app | 45 | – | 9 | – | seeded 2026-08-01 (#4488). Dead 9 = the seven #4142 `retiredKey` tombstones (version/aria/objects/apis/sharing/embed/mobileNavigation — rows stay while the tombstones hold the keys in the walked shape) + `homePageId` (#4667 tombstone — the landing IS the first nav item; root landing follows `isDefault` routing) + `areas.description` (benign, docs-shaped, kept and not warned). RETIRED 17.0.0 (#4509, rows deleted — the selector schema is strict): selector `includeAll` (deliberately DISOBEYED, not merely unread — selectors are mandatory-scope and an "All" row would clear the scope, leaking system metadata through Studio's package filter; STUDIO_APP authored it against a renderer that ignored it) and `placement` (no renderer read it; "topbar" placed nothing). Nav walk covers the union's `object` variant; other variants hand-verified live, and the `actionDef` dispatch gap closed in #4509 | **#4651**: the **fail-open area gates** `areas.visible` / `areas.requiredPermissions` — this ledger's most important app finding — are REMOVED, rows DELETED (strict removal; retained rows would report ORPHAN). They were not merely unread: `filterAppForUser` never reads `item.areas` at all and the shell renders every area, so a "hidden" or permission-gated area was served to everyone, while the identically named per-ITEM and per-APP keys ARE enforced. Route B (remove) over route A (enforce): enforcing needs semantics decided first (does filtering an area remove its items everywhere? does the server bind `user` for area CEL?), which the 17.0.0 window could not hold. Boundary unchanged and still recorded on `areas.navigation`: per-item gating inside an area is shell-side only. **#4667**: `homePageId` TOMBSTONED (row stays — retiredKey keeps it in the walked shape) and `areas.order` row DELETED (strict removal); `areas.order` read alive because the per-ITEM `order` really is sorted (NavigationRenderer.tsx:1154) while no renderer ever sorted areas. |

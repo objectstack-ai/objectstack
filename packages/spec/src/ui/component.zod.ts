@@ -224,7 +224,33 @@ export type PageContainerProps = z.input<typeof PageContainerProps>;
 export const PageHeaderProps = z.object({
   title: I18nLabelSchema.describe('Page title'),
   subtitle: I18nLabelSchema.optional().describe('Page subtitle'),
-  icon: z.string().optional().describe('Icon name'),
+  /**
+   * REMOVED (#6946, maintainer ruling 2026-08-09 「全部接受」 on objectui#3829,
+   * route (c) — retire upstream).
+   *
+   * A header icon nothing has ever drawn. `PageHeaderRenderer`
+   * (`containers.tsx`) resolves `icon` only per header ACTION (`action.icon`,
+   * inside the action pipeline) and never off the header's own props bag;
+   * `@object-ui/layout`'s `<PageHeader>` accepts an `icon` REACT prop from a
+   * host but — unlike `actions`, whose `schema?.actions ??
+   * schema?.properties?.actions` fallback sits four lines away in the same
+   * function — gives it no schema fallback, so an authored node cannot reach
+   * it. objectui's registration publishes no `icon` input either, which is
+   * what put this key in that repo's `UNPUBLISHED_EXEMPTIONS` map as a B-class
+   * "spec declares it, NO renderer read point" entry.
+   *
+   * The live mechanism is the record chrome (`recordChrome`, on by default)
+   * for the header's own identity, and each action's own `icon` for the
+   * buttons beside it.
+   */
+  icon: retiredKey(
+    '`page:header` property `icon` was removed in @objectstack/spec 17.0.0 (#6946, ADR-0087 D2) — '
+    + 'no renderer ever read it: objectui resolves `icon` only per header action (`action.icon`), '
+    + 'never off the header\'s own props bag, and the component registry never published it as an '
+    + 'input, so an authored value was accepted and dropped. Delete the key. The header\'s own '
+    + 'identity is drawn by the record chrome (`recordChrome`, on by default) and each action '
+    + 'carries its own `icon`. Run `os migrate meta --from 16` to rewrite existing sources automatically.',
+  ),
   breadcrumb: z.boolean().default(true).describe('Show breadcrumb'),
   actions: z.array(z.string()).optional().describe('Action IDs to show in header'),
   /**
@@ -304,7 +330,7 @@ export const PageTabsProps = z.object({
     + 'a props key named `type` collides with the page component\'s own dispatch key, so it is '
     + 'unauthorable in the flat and JSX carriers and was never validated in them. Rename the key '
     + 'to `tabStyle`; the value (`line` | `card` | `pill`) is unchanged. '
-    + 'Run `os migrate meta --from 16` to rewrite it automatically.',
+    + 'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
   ),
   position: z.enum(['top', 'left']).default('top'),
   items: z.array(z.object({
@@ -347,7 +373,32 @@ export const PageTabsProps = z.object({
 export const PageCardProps = z.object({
   title: I18nLabelSchema.optional(),
   bordered: z.boolean().default(true),
-  actions: z.array(z.string()).optional(),
+  /**
+   * REMOVED (#6946, maintainer ruling 2026-08-09 「全部接受」 on objectui#3829,
+   * route (c) — retire upstream).
+   *
+   * A card action list nothing has ever rendered. `PageCardRenderer`
+   * (`containers.tsx`) reads exactly four keys — `title`, `bordered`,
+   * `body ?? children`, `footer` — and returns a `<Card>` built from them;
+   * there is no actions area in the markup and no `actions` input in the
+   * registration, which is what put this key in objectui's
+   * `UNPUBLISHED_EXEMPTIONS` map as a B-class "spec declares it, NO renderer
+   * read point" entry. The card's sibling `page:header` DOES read `actions`
+   * off its bag, so the divergence was invisible to anyone reading the two
+   * declarations side by side.
+   *
+   * The live mechanism is composition: author the buttons as components in
+   * `children` or `footer` (`element:button`, `record:quick_actions`).
+   */
+  actions: retiredKey(
+    '`page:card` property `actions` was removed in @objectstack/spec 17.0.0 (#6946, ADR-0087 D2) — '
+    + 'no renderer ever read it: objectui\'s card renderer builds its `<Card>` from `title`, '
+    + '`bordered`, `children` and `footer` only, has no actions area, and the component registry '
+    + 'never published it as an input, so an authored value was accepted and dropped. Delete the '
+    + 'key and author the buttons as components in the card\'s `children` or `footer` '
+    + '(`element:button`, `record:quick_actions`), which is what actually renders. '
+    + 'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
+  ),
   /**
    * Card content, in order — the canonical composition slot, matching every
    * other container (`grid`, `flex`, `page:section`, `page:tabs` items).
@@ -369,7 +420,7 @@ export const PageCardProps = z.object({
     '`page:card` property `body` was removed in @objectstack/spec 17.0.0 (#5775, ADR-0087 D2) — '
     + 'it was a second spelling of the composition slot every other container calls `children`, '
     + 'and the renderer reads both. Rename the key to `children`; the value (an array of child '
-    + 'components) is unchanged. Run `os migrate meta --from 16` to rewrite it automatically.',
+    + 'components) is unchanged. Run `os migrate meta --from 16` to rewrite existing sources automatically.',
   ),
   /** Slot for footer content */
   footer: z.array(z.unknown()).optional().describe('Card footer components (slot)'),
@@ -385,7 +436,35 @@ export const PageCardProps = z.object({
 
 export const RecordDetailsProps = z.object({
   columns: z.enum(['1', '2', '3', '4']).default('2').describe('Number of columns for field layout (1-4)'),
-  layout: z.enum(['auto', 'custom']).default('auto').describe('Layout mode: auto uses object highlightFields, custom uses explicit sections'),
+  /**
+   * REMOVED (#6946, maintainer ruling 2026-08-09 「全部接受」 on objectui#3818 —
+   * the removal direction).
+   *
+   * The declared `auto` | `custom` semantics were never implemented. objectui's
+   * `RecordDetailsRenderer` does read `layout`, but only to test it against
+   * `inline` | `compact` — two values this enum never permitted — so BOTH legal
+   * values fell to the same `vertical` branch and the key selected nothing.
+   * That is why it survived `check:react-declaration-parity`: objectui's
+   * registry declared `layout` with the same `auto` | `custom` enum this schema
+   * did, and the gate compares two DECLARATIONS, never a declaration against a
+   * renderer (AGENTS.md). A third spelling, `stacked` | `inline` | `compact`,
+   * sat in `@object-ui/types`' mirror — three declarations of one key, none of
+   * them the branch the renderer takes.
+   *
+   * The live mechanism is what you author: `sections` renders the explicit
+   * groups (the old `custom`), and omitting it falls back to the object's
+   * `highlightFields` (the old `auto`). objectui#3818 deletes the input and the
+   * dead branch on the next pin bump.
+   */
+  layout: retiredKey(
+    '`record:details` property `layout` was removed in @objectstack/spec 17.0.0 (#6946, ADR-0087 D2) — '
+    + 'its declared `auto` | `custom` semantics were never implemented: the renderer tests `layout` '
+    + 'only against `inline` | `compact`, two values the schema never permitted, so both legal '
+    + 'values took the same branch and the key selected nothing. Delete the key — the body is '
+    + 'already chosen by what you author: `sections` renders the explicit groups (the old '
+    + '`custom`), and omitting it falls back to the object\'s `highlightFields` (the old `auto`). '
+    + 'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
+  ),
   /**
    * Field groups rendered as the detail body, IN ORDER.
    *
@@ -843,7 +922,7 @@ export const ElementRecordPickerPropsSchema = lazySchema(() => z.object({
     + '(#5775, ADR-0087 D2) — it was a required declaration no renderer ever read, while the '
     + 'renderer honoured `labelField` for the same thing and defaulted to `name`. Rename the key '
     + 'to `labelField`; the value (a field name) is unchanged. '
-    + 'Run `os migrate meta --from 16` to rewrite it automatically.',
+    + 'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
   ),
   /**
    * REMOVED (#5775). ADR-0049 enforce-or-remove: the control has no search
@@ -854,7 +933,7 @@ export const ElementRecordPickerPropsSchema = lazySchema(() => z.object({
     + '(#5775, ADR-0049) — the picker renders a plain single-select with no search input, so no '
     + 'renderer ever read it and it narrowed nothing. Delete the key. To restrict which records '
     + 'the picker offers, use `filter` (or the component-level `dataSource.filter`), which the '
-    + 'query path does apply. Run `os migrate meta --from 16` to remove it automatically.',
+    + 'query path does apply. Run `os migrate meta --from 16` to rewrite existing sources automatically.',
   ),
   /**
    * REMOVED (#5775). ADR-0049 enforce-or-remove: the control is a single-select
@@ -865,7 +944,7 @@ export const ElementRecordPickerPropsSchema = lazySchema(() => z.object({
     + '(#5775, ADR-0049) — the picker is a single-select `Select` and the bound page variable '
     + 'holds one record id, so `multiple: true` selected nothing extra and reported success. '
     + 'Delete the key; multi-record selection is not implemented on this element. '
-    + 'Run `os migrate meta --from 16` to remove it automatically.',
+    + 'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
   ),
   /** ARIA accessibility */
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),

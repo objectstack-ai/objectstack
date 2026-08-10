@@ -301,3 +301,198 @@ describe('comment access — beforeDelete (author or parent editor)', () => {
     ).resolves.toBeUndefined();
   });
 });
+
+
+// ─────────────────────────────────────────────────────────────────────────
+// #7141 — what the gate FORWARDS to the sharing service
+// ─────────────────────────────────────────────────────────────────────────
+
+/**
+ * The caller's execution envelope as a real transport builds it — an OAuth MCP
+ * agent principal acting on behalf of a human (`resolve-execution-context.ts`
+ * is the live producer of `principalKind: 'agent'` + `onBehalfOf`) — with the
+ * middleware-private keys plugin-security stamps for the object of the
+ * operation in flight (`sys_comment`) riding along, because that is exactly
+ * what `sc.__readScope = …` leaves on the context these hooks receive.
+ */
+const DELEGATED_ENVELOPE = {
+  userId: 'human_1',
+  tenantId: 'org_1',
+  email: 'human@example.com',
+  positions: [],
+  permissions: ['mcp_agent_data_write'],
+  systemPermissions: [],
+  principalKind: 'agent',
+  onBehalfOf: { userId: 'human_1', principalKind: 'human' },
+  audience: 'internal',
+  posture: 'authenticated',
+  accessible_org_ids: ['org_1'],
+  rlsMembership: { team: ['t1'] },
+  isSystem: false,
+  // Middleware-private, resolved for `sys_comment` — NOT for the parent.
+  __readScope: 'org',
+  __writeScope: 'org',
+  __delegatorReadScope: 'org',
+  __delegatorWriteScope: 'org',
+  __expandRead: true,
+} as const;
+
+/** The same context, shaped the way the write hooks receive it. */
+const envelopeWriteCtx = (
+  event: 'beforeUpdate' | 'beforeDelete',
+  input: any,
+  exec: Record<string, unknown>,
+) => ({
+  object: 'sys_comment',
+  event,
+  input: { ...input, options: { ...(input.options ?? {}), context: exec } },
+  session: { userId: exec.userId as string },
+  api: apiFor([]),
+});
+
+/** The deployment's `fallbackPermissionSet` (ADR-0056 D7: an app's `isDefault`
+ * profile, else the built-in `member_default`). */
+const DEPLOYMENT_BASELINE_SET = 'app_default_profile';
+
+/**
+ * `ISecurityService.hasWriteBypass` as plugin-security implements it
+ * (`security-plugin.ts`) — the three guard lines, then the `modifyAllRecords`
+ * set probe. A DOUBLE, not a copy of production logic: plugin-audit does not
+ * depend on plugin-security (dependency-free posture), so the only way to pin
+ * the OUTCOME on this side of the seam is to model the contract the gate is
+ * documented to be talking to. `setsWithBypass` names which permission sets
+ * carry the bit in the modelled deployment.
+ */
+function hasWriteBypassDouble(context: any, setsWithBypass: string[]): boolean {
+  if (context?.isSystem) return true;
+  if (!context?.userId) return false;
+  if (context?.onBehalfOf?.userId) return false; // documented fail-CLOSED on delegation
+  // `resolvePermissionSetsForContext`: positions + explicit sets, plus the
+  // ADDITIVE human baseline — which an ADR-0090 D10 agent principal must NOT
+  // receive (its grants are exactly its scope-derived ceiling).
+  const requested = [...(context?.positions ?? []), ...(context?.permissions ?? [])];
+  const resolved =
+    context?.principalKind === 'agent' ? requested : [...requested, DEPLOYMENT_BASELINE_SET];
+  return resolved.some((name: string) => setsWithBypass.includes(name));
+}
+
+/**
+ * `SharingService.checkEdit`'s positive bases, in order: ownership widened by
+ * the middleware-stamped write DEPTH (`matchesOwnerScope` — `__writeScope ===
+ * 'org'` short-circuits to true), then the `modifyAllRecords` bypass. The share
+ * branch is omitted (no grants in these fixtures).
+ */
+function sharingCanEditDouble(opts: { ownerId: string; setsWithBypass?: string[] }) {
+  return vi.fn(async (_object: string, _recordId: string, callerCtx: any) => {
+    if (callerCtx?.isSystem) return true;
+    if (!callerCtx?.userId) return false;
+    if ((callerCtx as any).__writeScope === 'org') return true; // depth fast-exit
+    if (String(callerCtx.userId) === opts.ownerId) return true;
+    return hasWriteBypassDouble(callerCtx, opts.setsWithBypass ?? []);
+  });
+}
+
+describe('#7141 — caller envelope forwarded to the sharing gate', () => {
+  const row = { id: 'c1', thread_id: 'crm_opportunity:opp1', author_id: 'someone_else', body: 'hi' };
+
+  it('forwards the whole envelope MINUS the operation-private keys', async () => {
+    const canEdit = vi.fn(async (_object: string, _recordId: string, _callerCtx: any) => true);
+    const { beforeDelete } = install({ comments: [row], sharing: { canEdit } });
+    await beforeDelete(envelopeWriteCtx('beforeDelete', { id: 'c1' }, { ...DELEGATED_ENVELOPE }));
+
+    const forwarded = canEdit.mock.calls[0]![2] as unknown as Record<string, unknown>;
+    // Every principal field survives — the #6523 contract's unit is the envelope
+    // and #6206 forbids rebuilding a subset of it.
+    expect(forwarded).toEqual({
+      userId: 'human_1',
+      tenantId: 'org_1',
+      email: 'human@example.com',
+      positions: [],
+      permissions: ['mcp_agent_data_write'],
+      systemPermissions: [],
+      principalKind: 'agent',
+      onBehalfOf: { userId: 'human_1', principalKind: 'human' },
+      audience: 'internal',
+      posture: 'authenticated',
+      accessible_org_ids: ['org_1'],
+      rlsMembership: { team: ['t1'] },
+      isSystem: false,
+    });
+    // …and every middleware-private key resolved for `sys_comment` is gone.
+    for (const key of ['__readScope', '__writeScope', '__delegatorReadScope', '__delegatorWriteScope', '__expandRead']) {
+      expect(forwarded).not.toHaveProperty(key);
+    }
+  });
+
+  it('hands the service a COPY, so a callee stamping its own depth cannot write back', async () => {
+    const exec: Record<string, unknown> = { ...DELEGATED_ENVELOPE };
+    const canEdit = vi.fn(async (_o: string, _r: string, callerCtx: any) => {
+      // What plugin-security does right before it calls the sharing service.
+      callerCtx.__writeScope = 'unit';
+      return true;
+    });
+    const { beforeDelete } = install({ comments: [row], sharing: { canEdit } });
+    await beforeDelete(envelopeWriteCtx('beforeDelete', { id: 'c1' }, exec));
+
+    expect(canEdit.mock.calls[0]![2]).not.toBe(exec);
+    expect(exec.__writeScope).toBe('org'); // untouched: still sys_comment's own
+  });
+
+  it('REFUSES a delegated principal whose sets carry modifyAllRecords (fail-closed, #7141)', async () => {
+    // The exploit shape the card names: an OAuth agent on the `/mcp` surface
+    // presenting sets that carry the super-user write bypass. `hasWriteBypass`
+    // is documented to fail CLOSED on `onBehalfOf` — it can only do that if the
+    // field reaches it.
+    const canEdit = sharingCanEditDouble({ ownerId: 'other_owner', setsWithBypass: ['admin_full_access'] });
+    const { beforeDelete } = install({ comments: [row], sharing: { canEdit } });
+    await expect(
+      beforeDelete(
+        envelopeWriteCtx('beforeDelete', { id: 'c1' }, {
+          ...DELEGATED_ENVELOPE,
+          permissions: ['admin_full_access'],
+        }),
+      ),
+    ).rejects.toMatchObject({ code: 'RECORD_NOT_ACCESSIBLE', status: 403 });
+    expect(canEdit).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps an AGENT principal capped at its ceiling — no additive human baseline (ADR-0090 D10)', async () => {
+    // `resolvePermissionSetsForContext` keys that rule on `principalKind`, which
+    // the old projection dropped: the agent was resolved as a human and the
+    // deployment's default profile was appended to its consented ceiling.
+    const canEdit = sharingCanEditDouble({
+      ownerId: 'other_owner',
+      setsWithBypass: [DEPLOYMENT_BASELINE_SET],
+    });
+    const { beforeDelete } = install({ comments: [row], sharing: { canEdit } });
+    await expect(
+      beforeDelete(
+        envelopeWriteCtx('beforeDelete', { id: 'c1' }, {
+          ...DELEGATED_ENVELOPE,
+          onBehalfOf: undefined, // isolate the ceiling rule from the delegation guard
+        }),
+      ),
+    ).rejects.toMatchObject({ code: 'RECORD_NOT_ACCESSIBLE', status: 403 });
+  });
+
+  it('does NOT carry sys_comment\'s access DEPTH into the parent\'s owner-match', async () => {
+    // The half of the old projection that was CORRECT and must survive: the
+    // context carries `__writeScope: 'org'` resolved for `sys_comment`, and the
+    // gate asks about `crm_opportunity`. Forwarding it whole would widen one
+    // object's question with another object's answer.
+    const canEdit = sharingCanEditDouble({ ownerId: 'other_owner' });
+    const { beforeDelete } = install({ comments: [row], sharing: { canEdit } });
+    await expect(
+      beforeDelete(
+        envelopeWriteCtx('beforeDelete', { id: 'c1' }, {
+          ...DELEGATED_ENVELOPE,
+          principalKind: 'human',
+          onBehalfOf: undefined,
+          userId: 'plain_member',
+          permissions: [],
+        }),
+      ),
+    ).rejects.toMatchObject({ code: 'RECORD_NOT_ACCESSIBLE', status: 403 });
+    expect((canEdit.mock.calls[0]![2] as any).__writeScope).toBeUndefined();
+  });
+});

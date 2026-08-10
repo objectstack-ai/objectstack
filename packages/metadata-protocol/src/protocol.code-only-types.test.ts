@@ -102,6 +102,30 @@ const PROBES: Record<string, { name: string; item: Record<string, unknown> }> = 
             packageId: 'com.example.probe',
         },
     },
+    // [#5488] The fourth flagged type. `api` declared `allowRuntimeCreate:
+    // true` and the runtime never honoured it: `matchEndpoint` reads
+    // `MetadataManager.listForIndex('api')` (the manager's registry plus its
+    // filesystem/memory loaders), while a runtime write lands in
+    // `sys_metadata` — so `PUT /api/v1/meta/api/:name` answered 200 "Saved"
+    // and the declared route 404'd forever. ADR-0049 enforce-or-remove, ruled
+    // REMOVE on 2026-08-07. Endpoints are authored as stack artifacts
+    // (`**/*.api.ts`) and shipped through `publishPackage`, which is untouched.
+    //
+    // Schema-valid on purpose, like the three above — and here it carries
+    // extra weight: `api` gained `ApiEndpointSchema` in #5271, so a minimal
+    // body would 422 before the registry consult and the probe would prove
+    // nothing about the code-only gate.
+    api: {
+        name: 'rc3_api_probe',
+        item: {
+            name: 'rc3_api_probe',
+            path: '/api/v1/apps/example_namespace/probe',
+            method: 'GET',
+            type: 'object_operation',
+            target: 'example_object',
+            objectParams: { object: 'example_object', operation: 'find' },
+        },
+    },
 };
 
 function makeStubEngine(artifacts: Array<{ type: string; name: string }> = []) {
@@ -203,14 +227,18 @@ describe('code-only metadata types are refused on every kernel (#5086)', () => {
     // ── the flags are data: keep the suite honest about new ones ──────────
 
     it('covers every code-only type the registry declares', () => {
-        // Today: job (#4509), agent (ADR-0063 §2) and capability (#5961,
-        // ADR-0066 D1). When a fourth type is flagged, this fails until it has
-        // a schema-valid probe above — which is the whole cost of covering it,
-        // and is exactly what happened when `capability` joined: this
-        // assertion and eleven generated cases went red on the spec-side
-        // registry edit alone, before a line of this file was touched.
+        // Today: job (#4509), agent (ADR-0063 §2), capability (#5961,
+        // ADR-0066 D1) and api (#5488, ADR-0049 remove side — the maintainer
+        // ruling of 2026-08-07 withdrew a runtime create door the endpoint
+        // matcher could never read). When a fifth type is flagged, this fails
+        // until it has a schema-valid probe above — which is the whole cost of
+        // covering it, and is exactly what happened when `capability` joined
+        // and again when `api` did: this assertion and the generated cases
+        // went red on the spec-side registry edit alone, before a line of this
+        // file was touched. That auto-enrolment is the point of deriving the
+        // set instead of listing it (Prime Directive #8).
         expect(CODE_ONLY_TYPES.length).toBeGreaterThan(0);
-        expect([...CODE_ONLY_TYPES].sort()).toEqual(['agent', 'capability', 'job']);
+        expect([...CODE_ONLY_TYPES].sort()).toEqual(['agent', 'api', 'capability', 'job']);
         for (const type of CODE_ONLY_TYPES) {
             expect(PROBES[type], `no probe payload for code-only type '${type}'`).toBeDefined();
         }
@@ -314,13 +342,19 @@ describe('code-only metadata types are refused on every kernel (#5086)', () => {
             // means only `allowRuntimeCreate` is required. This is the case the
             // #5086 gate must NOT catch — it is the difference between "code-only"
             // and "packaged items are locked".
+            // [#6190] The per-kernel `organizationId` was incidental scenery —
+            // what this case measures is that the #5086 code-only gate does
+            // NOT catch a type that merely lacks `allowOrgOverride`. Since the
+            // #6190 ruling an org-scoped write of such a type is refused by a
+            // DIFFERENT gate, so passing one here would have measured that
+            // refusal instead of this one. The two-kernel matrix, which is the
+            // point, is untouched.
             for (const { environmentId } of KERNELS) {
                 const { protocol, rows } = makeProtocol(environmentId);
                 const result = await protocol.saveMetaItem({
                     type: 'hook',
                     name: 'rc3_probe_hook',
                     item: { name: 'rc3_probe_hook', object: 'task', events: ['beforeUpdate'] },
-                    ...(environmentId ? { organizationId: 'org_alpha' } : {}),
                 });
                 expect(result.success).toBe(true);
                 expect(metaRows(rows).length).toBe(1);
@@ -436,11 +470,14 @@ describe('code-only metadata types are refused on every kernel (#5086)', () => {
                 it(`answers a ${type} save with a repository receipt on a ${label}`, async () => {
                     const { protocol, writes } = makeProtocol(environmentId);
 
+                    // [#6190] Env-wide on both kernels — see the note on the
+                    // `hook` case above. The receipt SHAPE (seq / state /
+                    // history row) is what this matrix measures, and it does
+                    // not vary with the row's org scope.
                     const result = await protocol.saveMetaItem({
                         type,
                         name: 'rc3_receipt_view',
                         item,
-                        ...(environmentId ? { organizationId: 'org_alpha' } : {}),
                     });
 
                     expect(result.success).toBe(true);

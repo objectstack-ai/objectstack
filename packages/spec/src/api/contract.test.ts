@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   ApiErrorSchema,
+  makeApiErrorSchema,
   BaseResponseSchema,
   CreateRequestSchema,
   UpdateRequestSchema,
@@ -570,5 +571,66 @@ describe('QueryOptimizationConfigSchema', () => {
   it('should require preventNPlusOne and maxQueryDepth', () => {
     expect(() => QueryOptimizationConfigSchema.parse({})).toThrow();
     expect(() => QueryOptimizationConfigSchema.parse({ preventNPlusOne: true })).toThrow();
+  });
+});
+
+/**
+ * The federated-ledger factory (#4805). `ERROR_CODE_LEDGER` registers framework
+ * packages only; a downstream product repo keeps its own ledger and needs the
+ * same envelope with `StandardErrorCode ∪ <its own ledger>` as the vocabulary.
+ *
+ * The pins below are stated in both directions on purpose. The factory is only
+ * worth having if it accepts something `ApiErrorSchema` refuses (otherwise it
+ * is a synonym), and it is only SAFE if that is the sole difference — an
+ * unregistered code must still fail, and `ApiErrorSchema` must not have been
+ * widened by the factory's existence.
+ */
+describe('makeApiErrorSchema (federated ledger, #4805)', () => {
+  const DOWNSTREAM_CODES = ['CONTACT_SALES_PLAN', 'PRODUCTION_ENV_LIMIT'] as const;
+  const DownstreamApiError = makeApiErrorSchema(DOWNSTREAM_CODES);
+
+  it('accepts the standard catalog both ways', () => {
+    for (const code of ['VALIDATION_ERROR', 'PERMISSION_DENIED'] as const) {
+      expect(ApiErrorSchema.parse({ code, message: 'x' }).code).toBe(code);
+      expect(DownstreamApiError.parse({ code, message: 'x' }).code).toBe(code);
+    }
+  });
+
+  it('accepts an extra code ONLY through the factory', () => {
+    for (const code of DOWNSTREAM_CODES) {
+      expect(DownstreamApiError.parse({ code, message: 'x' }).code).toBe(code);
+
+      const base = ApiErrorSchema.safeParse({ code, message: 'x' });
+      expect(base.success).toBe(false);
+      expect(base.error?.issues[0]?.path).toEqual(['code']);
+      expect(base.error?.issues[0]?.code).toBe('invalid_value');
+    }
+  });
+
+  it('rejects an unregistered code both ways', () => {
+    const body = { code: 'INVENTED_DIALECT_CODE', message: 'x' };
+
+    for (const schema of [ApiErrorSchema, DownstreamApiError]) {
+      const result = schema.safeParse(body);
+      expect(result.success).toBe(false);
+      expect(result.error?.issues[0]?.path).toEqual(['code']);
+      expect(result.error?.issues[0]?.code).toBe('invalid_value');
+    }
+  });
+
+  it('reuses the base envelope shape rather than restating it', () => {
+    expect(Object.keys(DownstreamApiError.shape).sort())
+      .toEqual(Object.keys(ApiErrorSchema.shape).sort());
+
+    const parsed = DownstreamApiError.parse({
+      code: 'CONTACT_SALES_PLAN',
+      message: 'Upgrade required',
+      category: 'billing',
+      httpStatus: 402,
+      details: { plan: 'starter' },
+      requestId: 'req_1',
+    });
+    expect(parsed.httpStatus).toBe(402);
+    expect(parsed.requestId).toBe('req_1');
   });
 });

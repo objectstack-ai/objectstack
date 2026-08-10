@@ -91,7 +91,8 @@ function mountRest(protocol: any) {
         protocol,
         { api: { requireAuth: false, enableBatch: true } } as any,
     );
-    (rest as any).resolveExecCtx = async () => ({ userId: 'u1' });
+    // [#6603] this route now demands `manage_metadata` — an authoring capability, not just a session.
+    (rest as any).resolveExecCtx = async () => ({ userId: 'u1', systemPermissions: ['manage_metadata'] });
     rest.registerRoutes();
     return rest;
 }

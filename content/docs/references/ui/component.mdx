@@ -152,9 +152,9 @@ const result = AIChatWindowProps.parse(data);
 | **targetVariable** | `string` | optional | Page variable to bind selected record ID(s) |
 | **placeholder** | `string \| Record<string, string>` | optional | Placeholder text |
 | **emptyText** | `string \| Record<string, string>` | optional | Text shown when the query returns no records (default "No records") |
-| **displayField** | `never` | optional | [REMOVED] `element:record_picker` property `displayField` was removed in @objectstack/spec 17.0.0 (#5775, ADR-0087 D2) — it was a required declaration no renderer ever read, while the renderer honoured `labelField` for the same thing and defaulted to `name`. Rename the key to `labelField`; the value (a field name) is unchanged. Run `os migrate meta --from 16` to rewrite it automatically. |
-| **searchFields** | `never` | optional | [REMOVED] `element:record_picker` property `searchFields` was removed in @objectstack/spec 17.0.0 (#5775, ADR-0049) — the picker renders a plain single-select with no search input, so no renderer ever read it and it narrowed nothing. Delete the key. To restrict which records the picker offers, use `filter` (or the component-level `dataSource.filter`), which the query path does apply. Run `os migrate meta --from 16` to remove it automatically. |
-| **multiple** | `never` | optional | [REMOVED] `element:record_picker` property `multiple` was removed in @objectstack/spec 17.0.0 (#5775, ADR-0049) — the picker is a single-select `Select` and the bound page variable holds one record id, so `multiple: true` selected nothing extra and reported success. Delete the key; multi-record selection is not implemented on this element. Run `os migrate meta --from 16` to remove it automatically. |
+| **displayField** | `never` | optional | [REMOVED] `element:record_picker` property `displayField` was removed in @objectstack/spec 17.0.0 (#5775, ADR-0087 D2) — it was a required declaration no renderer ever read, while the renderer honoured `labelField` for the same thing and defaulted to `name`. Rename the key to `labelField`; the value (a field name) is unchanged. Run `os migrate meta --from 16` to rewrite existing sources automatically. |
+| **searchFields** | `never` | optional | [REMOVED] `element:record_picker` property `searchFields` was removed in @objectstack/spec 17.0.0 (#5775, ADR-0049) — the picker renders a plain single-select with no search input, so no renderer ever read it and it narrowed nothing. Delete the key. To restrict which records the picker offers, use `filter` (or the component-level `dataSource.filter`), which the query path does apply. Run `os migrate meta --from 16` to rewrite existing sources automatically. |
+| **multiple** | `never` | optional | [REMOVED] `element:record_picker` property `multiple` was removed in @objectstack/spec 17.0.0 (#5775, ADR-0049) — the picker is a single-select `Select` and the bound page variable holds one record id, so `multiple: true` selected nothing extra and reported success. Delete the key; multi-record selection is not implemented on this element. Run `os migrate meta --from 16` to rewrite existing sources automatically. |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
 
 
@@ -215,9 +215,9 @@ const result = AIChatWindowProps.parse(data);
 | :--- | :--- | :--- | :--- |
 | **title** | `string \| Record<string, string>` | optional | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
 | **bordered** | `boolean` | ✅ |  |
-| **actions** | `string[]` | optional |  |
+| **actions** | `never` | optional | [REMOVED] `page:card` property `actions` was removed in @objectstack/spec 17.0.0 (#6946, ADR-0087 D2) — no renderer ever read it: objectui's card renderer builds its `<Card>` from `title`, `bordered`, `children` and `footer` only, has no actions area, and the component registry never published it as an input, so an authored value was accepted and dropped. Delete the key and author the buttons as components in the card's `children` or `footer` (`element:button`, `record:quick_actions`), which is what actually renders. Run `os migrate meta --from 16` to rewrite existing sources automatically. |
 | **children** | `any[]` | optional | Card content components, in order (the card body slot) |
-| **body** | `never` | optional | [REMOVED] `page:card` property `body` was removed in @objectstack/spec 17.0.0 (#5775, ADR-0087 D2) — it was a second spelling of the composition slot every other container calls `children`, and the renderer reads both. Rename the key to `children`; the value (an array of child components) is unchanged. Run `os migrate meta --from 16` to rewrite it automatically. |
+| **body** | `never` | optional | [REMOVED] `page:card` property `body` was removed in @objectstack/spec 17.0.0 (#5775, ADR-0087 D2) — it was a second spelling of the composition slot every other container calls `children`, and the renderer reads both. Rename the key to `children`; the value (an array of child components) is unchanged. Run `os migrate meta --from 16` to rewrite existing sources automatically. |
 | **footer** | `any[]` | optional | Card footer components (slot) |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
 
@@ -243,7 +243,7 @@ const result = AIChatWindowProps.parse(data);
 | :--- | :--- | :--- | :--- |
 | **title** | `string \| Record<string, string>` | ✅ | Page title |
 | **subtitle** | `string \| Record<string, string>` | optional | Page subtitle |
-| **icon** | `string` | optional | Icon name |
+| **icon** | `never` | optional | [REMOVED] `page:header` property `icon` was removed in @objectstack/spec 17.0.0 (#6946, ADR-0087 D2) — no renderer ever read it: objectui resolves `icon` only per header action (`action.icon`), never off the header's own props bag, and the component registry never published it as an input, so an authored value was accepted and dropped. Delete the key. The header's own identity is drawn by the record chrome (`recordChrome`, on by default) and each action carries its own `icon`. Run `os migrate meta --from 16` to rewrite existing sources automatically. |
 | **breadcrumb** | `boolean` | ✅ | Show breadcrumb |
 | **actions** | `string[]` | optional | Action IDs to show in header |
 | **recordChrome** | `boolean` | ✅ | Render the record chrome — the title as a record chip with its follow star and copy-id button. Set false on a non-record page (dashboard, landing) to fall back to the bare heading layout. |
@@ -261,7 +261,7 @@ const result = AIChatWindowProps.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **tabStyle** | `Enum<'line' \| 'card' \| 'pill'>` | optional | Tab-strip visual style: 'line' underlines the active tab, 'card' frames each tab, 'pill' renders rounded pills |
-| **type** | `never` | optional | [REMOVED] `page:tabs` property `type` was removed in @objectstack/spec 17.0.0 (#6776, ADR-0087 D2) — a props key named `type` collides with the page component's own dispatch key, so it is unauthorable in the flat and JSX carriers and was never validated in them. Rename the key to `tabStyle`; the value (`line` \| `card` \| `pill`) is unchanged. Run `os migrate meta --from 16` to rewrite it automatically. |
+| **type** | `never` | optional | [REMOVED] `page:tabs` property `type` was removed in @objectstack/spec 17.0.0 (#6776, ADR-0087 D2) — a props key named `type` collides with the page component's own dispatch key, so it is unauthorable in the flat and JSX carriers and was never validated in them. Rename the key to `tabStyle`; the value (`line` \| `card` \| `pill`) is unchanged. Run `os migrate meta --from 16` to rewrite existing sources automatically. |
 | **position** | `Enum<'top' \| 'left'>` | optional |  |
 | **items** | `{ label: string \| Record<string, string>; icon?: string; visibleWhen?: string \| object; value?: string; … }[]` | ✅ |  |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
@@ -314,7 +314,7 @@ const result = AIChatWindowProps.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **columns** | `Enum<'1' \| '2' \| '3' \| '4'>` | ✅ | Number of columns for field layout (1-4) |
-| **layout** | `Enum<'auto' \| 'custom'>` | ✅ | Layout mode: auto uses object highlightFields, custom uses explicit sections |
+| **layout** | `never` | optional | [REMOVED] `record:details` property `layout` was removed in @objectstack/spec 17.0.0 (#6946, ADR-0087 D2) — its declared `auto` \| `custom` semantics were never implemented: the renderer tests `layout` only against `inline` \| `compact`, two values the schema never permitted, so both legal values took the same branch and the key selected nothing. Delete the key — the body is already chosen by what you author: `sections` renders the explicit groups (the old `custom`), and omitting it falls back to the object's `highlightFields` (the old `auto`). Run `os migrate meta --from 16` to rewrite existing sources automatically. |
 | **sections** | `{ name?: string; label?: string \| Record<string, string>; columns?: integer; fields: string[] }[]` | optional | Field groups rendered as the detail body, in order. Object form: `{ name?, label?, columns?, fields }`. |
 | **fields** | `string[]` | optional | Explicit field list to display (optional, overrides highlightFields) |
 | **hideFields** | `string[]` | optional | Field names to omit from the body — applied to `fields` and to every section's `fields` (used to dedupe fields already shown in `record:highlights` or as the page title) |
