@@ -73,6 +73,71 @@ function resolveKind(driverId: string): ResolvedKind | undefined {
 }
 
 /**
+ * The optional package that provides the libSQL/Turso driver, and the exact
+ * command an operator runs to install it.
+ *
+ * Declared as constants rather than left inline so the pin test asserts the
+ * COMMAND rather than a sentence shape, and so a host that wants to render the
+ * remedy itself has one place to read it from. `@objectstack/runtime` currently
+ * declares its own equal pair (`TURSO_DRIVER_PACKAGE` /
+ * `TURSO_DRIVER_INSTALL_COMMAND` in `turso-driver-factory.ts`); converging the
+ * two onto these is a runtime-lane change — runtime already depends on this
+ * package, so that import direction is the legal one, while the reverse is not
+ * (#7314).
+ */
+export const TURSO_DRIVER_PACKAGE = '@objectstack/driver-turso';
+
+/** @see {@link TURSO_DRIVER_PACKAGE} */
+export const TURSO_DRIVER_INSTALL_COMMAND = `npm install ${TURSO_DRIVER_PACKAGE}`;
+
+/**
+ * What this factory says when the OPTIONAL libSQL driver package is absent
+ * (#7314).
+ *
+ * Until #7314 this arm said only *"turso driver requested but
+ * @objectstack/driver-turso is not installed (…)"* — the fault and nothing
+ * else. The host loader (`@objectstack/runtime`'s `loadTursoDriverFactory`,
+ * single owner since #6268) has answered the SAME missing package with the
+ * install command, the consequence and the reason for refusing since #5602, so
+ * an operator who booted with a libSQL url was told how to fix it while an
+ * admin who added the identical datasource in Setup was not. One missing
+ * package, two qualities of answer, decided by which door the request came
+ * through.
+ *
+ * Two deliberate differences from the host loader's wording, because this arm
+ * serves different doors — a datasource created in Setup, `testConnection`, a
+ * declared NON-default datasource — rather than a `default` that a host boots:
+ *
+ *  - It names the datasource, like the url-less refusal in the same arm, since
+ *    here there may be several and only one of them is libSQL.
+ *  - It does NOT mention `OS_DATABASE_URL` / `--database`. Those select the
+ *    HOST's `default` datasource and would do nothing for the datasource that
+ *    actually failed — advice that sends the reader to a knob which cannot
+ *    affect their problem is the `connect-failure-remedy.ts` failure (#5794) in
+ *    a new spelling. One fix, stated once, and no escape hatch named.
+ *
+ * The underlying import error is interpolated at the END and in full. That is
+ * load-bearing beyond context: this re-throw drops the original `code`, so
+ * `isUnbuiltWorkspaceFailure` (via `isModuleNotFoundError`) can only recognise
+ * an unbuilt/uninstalled workspace from the `Cannot find package` /
+ * `Cannot find module` TEXT it carries — the same reason the `sqlite-wasm` and
+ * `mongodb` arms interpolate theirs.
+ */
+export function missingTursoDriverMessage(args: { datasource?: string; cause: unknown }): string {
+  const cause = args.cause instanceof Error ? args.cause.message : String(args.cause);
+  return (
+    `datasource '${args.datasource ?? 'default'}': a libSQL/Turso datasource was requested, but the `
+    + `driver package ${TURSO_DRIVER_PACKAGE} is not installed. Install it next to the server that `
+    + `opens this datasource:\n\n    ${TURSO_DRIVER_INSTALL_COMMAND}\n\n`
+    + `(pnpm add ${TURSO_DRIVER_PACKAGE} / yarn add ${TURSO_DRIVER_PACKAGE}.) It is an OPTIONAL `
+    + 'package, so a default install stays free of @libsql/client and its native bindings. This '
+    + 'refuses rather than falling back to another engine: a silent fallback would open an empty '
+    + 'local database that accepts writes while your libSQL data stays untouched, and every write '
+    + `would land in the wrong database. Import error: ${cause}`
+  );
+}
+
+/**
  * Wrap a concrete engine driver in a probe handle. `ping`/`checkHealth` reuse
  * the driver's own health check; `driver` is the escape hatch the admin service
  * hands to `registerDriver()`.
@@ -500,13 +565,20 @@ export function createDefaultDatasourceDriverFactory(
         // seam), which wins over this one; this arm is what serves every OTHER
         // door — a runtime datasource created in Setup, `testConnection`, a
         // declared non-default datasource.
+        //
+        // The missing-package message states the install command, the
+        // consequence and the refusal — the same quality of answer the host
+        // loader has given since #5602, which this arm did not (#7314). The
+        // typed `MissingDriverPackageError` the host raises is deliberately NOT
+        // mirrored here: that class lives in `@objectstack/runtime`, which
+        // DEPENDS on this package, so importing it would invert the dependency,
+        // and declaring a second same-named class is precisely the identity
+        // hazard #6268 closed (`serve.ts` decides fatality with `instanceof`).
         let TursoDriver: any;
         try {
           ({ TursoDriver } = await import('@objectstack/driver-turso' as any));
         } catch (err: any) {
-          throw new Error(
-            `turso driver requested but @objectstack/driver-turso is not installed (${err?.message ?? err}).`,
-          );
+          throw new Error(missingTursoDriverMessage({ datasource: spec.name, cause: err }));
         }
         const url = typeof cfg.url === 'string' ? cfg.url.trim() : '';
         if (!url) {

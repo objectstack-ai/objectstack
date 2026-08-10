@@ -89,6 +89,17 @@ export type { PoolUnsupportedDriverId } from './datasource-pool-support.js';
 
 // Host glue: dev driver factory + fail-closed secret binder.
 export { createDefaultDatasourceDriverFactory } from './default-datasource-driver-factory.js';
+// The OPTIONAL libSQL/Turso package and its install command, plus the
+// missing-package message this factory raises (#7314) — exported so the answer
+// to "how do I install it" has one declaration a host can read rather than a
+// sentence to re-type. `@objectstack/runtime`'s host loader keeps its own equal
+// pair today; it depends on this package, so converging onto these is a legal
+// import direction whenever that lane takes it up.
+export {
+  TURSO_DRIVER_PACKAGE,
+  TURSO_DRIVER_INSTALL_COMMAND,
+  missingTursoDriverMessage,
+} from './default-datasource-driver-factory.js';
 // The "adopt a host-built driver instance" seam (ADR-0062 D1, #3826) — for
 // driver kinds outside open-core (cloud turso) and pooled instances whose
 // lifecycle outlives one kernel; keeps the connect + failure verdict on the
