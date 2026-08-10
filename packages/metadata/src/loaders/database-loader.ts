@@ -233,8 +233,8 @@ export class DatabaseLoader implements MetadataLoader {
   // `DriverQuery`) also admits the bare query string that ADR-0061 D1 calls the
   // canonical Tier-1 spelling and that the engine actually serves. Until those
   // two schemas agree, `DriverQuery` is not assignable to
-  // `EngineQueryOptionsParsed`. Filed as the follow-up named in the PR body; do
-  // not "fix" it by narrowing the cast.
+  // `EngineQueryOptionsParsed`. Tracked as #7178; do not "fix" it here by
+  // narrowing the cast.
 
   private async _find(table: string, query: DriverQuery): Promise<Record<string, unknown>[]> {
     if (this.engine) {
