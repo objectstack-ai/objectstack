@@ -786,11 +786,88 @@ export function mapDataError(error: any, object?: string): { status: number; bod
     // HTTP status (e.g. plugin-sharing's record-scope denial: status 403 +
     // code FORBIDDEN) — mirrors sendError's `.status` handling, which the
     // generic data routes bypass by calling mapDataError directly (#2926 ⑦).
-    // Placed AFTER the structured-code branches above (409s carry rich
-    // fields this envelope would drop) and deliberately limited to 4xx:
-    // 5xx messages keep going through the sanitizing heuristics below so
-    // internal/SQL details never reach the client verbatim.
-    if (typeof error?.status === 'number' && error.status >= 400 && error.status < 500) {
+    // Placed AFTER the structured-code branches above (409s carry rich fields
+    // this envelope would drop).
+    //
+    // [#5582] The range is 400–599, the same door {@link resolveErrorResponse}
+    // opens. It used to stop at 4xx, argued as "5xx messages keep going through
+    // the sanitizing heuristics below so internal/SQL details never reach the
+    // client verbatim" — which was the right FEAR and the wrong CURE, and
+    // #5437/#5464 already ruled on it one door over. Two consequences, both
+    // measured:
+    //
+    //  - **The declaration was destroyed to protect the prose.** The two
+    //    doors gave opposite answers to one question ("the producer declared a
+    //    status"): a `502` reporting an unreachable upstream came back as
+    //    `500 INTERNAL_ERROR` on every CRUD data route and as `502` on every
+    //    metadata/UI/discovery route. 502/503 are not synonyms of 500 — they
+    //    are `isExpectedDataStatus` lifecycle outcomes, and proxies and retry
+    //    policies read them differently.
+    //  - **The status was then re-derived from the message TEXT**, which is
+    //    exactly what {@link resolveErrorResponse}'s docblock forbids: an error
+    //    that declared its own condition had that condition overwritten by a
+    //    keyword heuristic, or (matching none) by `UNCLASSIFIED_FAULT`. Since
+    //    #5907 that is live rather than theoretical: `driver-sql` and
+    //    `driver-turso` throw `status: 501` / `code: NOT_IMPLEMENTED` for a
+    //    spec-declared aggregate function the backend cannot compile
+    //    (`count_distinct` / `array_agg` / `string_agg`), those functions clear
+    //    the protocol's shape gate, and the throw reaches these routes — so the
+    //    caller was told `500 INTERNAL_ERROR` ("the server fell over") instead
+    //    of `501 NOT_IMPLEMENTED` ("this backend does not implement that
+    //    declared capability"). The ADR-0112 code was overwritten, not just the
+    //    status.
+    //
+    // The fear is answered structurally instead, by the arm below: in the 5xx
+    // band the message is dropped UNCONDITIONALLY, so no phrasing a producer
+    // can pick — deliberately or by accident — carries driver text past this
+    // boundary. Sanitising here is strictly tighter than the old fallthrough,
+    // which shipped a 5xx's raw words verbatim whenever they tripped no
+    // keyword (`connect ECONNREFUSED 10.0.0.5:5432` did exactly that until
+    // #5489 turned the terminal branch into a sanitised 500).
+    //
+    // Not a diagnostics loss: every caller pairs this with
+    // `logUnexpectedRouteError`, whose `logWithheldServerFault` half (#5437)
+    // fires precisely when a response dropped the error's own message — so the
+    // 502/503 band that `isExpectedRouteError` keeps quiet still leaves the
+    // operator a line carrying the full original error.
+    if (typeof error?.status === 'number' && error.status >= 400 && error.status < 600) {
+        // [#5582] A declared server fault: keep the status, keep the
+        // machine-readable `code`, drop the prose. Byte-identical to
+        // {@link resolveErrorResponse}'s 5xx arm — one condition, one wire
+        // answer, whichever door caught it.
+        //
+        // The `code` rides along on {@link declaresServerFault}, the criterion
+        // `@objectstack/types` already owns for "this producer DECLARED a
+        // server fault" (`status >= 500` *and* a non-empty string `code`; PR
+        // #6122, pinned by `error-leak.test.ts`, read by the analytics route
+        // here and by `runtime`'s dispatcher). Inside this branch its status
+        // half is already true, so what it adds is the `code` half — and it
+        // adds it as a TESTED predicate rather than a fourth open-coded
+        // truthiness check, which is what keeps a numeric driver `errno` or an
+        // empty string from landing on the wire as an ADR-0112 code.
+        //
+        // A 5xx with NO code passes its status through carrying no code at all,
+        // deliberately: ADR-0112 says the PRODUCER names the condition, so a
+        // half-declaration is honoured for the half that was declared and
+        // nothing is invented for the half that was not. That is the answer
+        // `resolveErrorResponse` already gives the same shape
+        // (`rest-5xx-message-sanitization.test.ts` §"a dynamically-assigned
+        // status is treated identically"), and inventing `INTERNAL_ERROR` here
+        // would put a code on the wire the producer never wrote — while
+        // re-deriving the status from the message text is the defect this
+        // branch exists to remove.
+        if (error.status >= 500) {
+            return {
+                status: error.status,
+                body: {
+                    error: INTERNAL_ERROR_MESSAGE,
+                    ...(declaresServerFault(error) ? { code: error.code as string } : {}),
+                },
+            };
+        }
+        // [#5423] The 4xx arm is UNCHANGED by #5582: a 4xx message is addressed
+        // TO the caller and is the remedy, so it keeps its wording, its
+        // `object`, and the bound as a TRUNCATION rather than a replacement.
         // An over-long message is TRUNCATED, not swapped for generic text
         // (#5423) — see {@link truncateClientMessage}. A missing or empty one
         // still degrades to `'Request failed'`: there is nothing to truncate.
