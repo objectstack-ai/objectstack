@@ -1189,6 +1189,95 @@ function unrenderableTextComparandError(field: string, op: string, value: unknow
   );
 }
 
+/**
+ * [#7398] Operators whose SQL lowering compares a column's STORED SCALAR to a
+ * value — every spelling either of this driver's two comparison emitters
+ * answers ({@link SqlDriver.applyFilterCondition}'s plain-column switch and
+ * {@link SqlDriver.applyNormalizedComparison}'s normalised arms).
+ *
+ * The bare infix forms are here for the same reason they are in
+ * {@link SCALAR_COMPARAND_OPERATORS}: `applyNormalizedComparison` really does
+ * answer `in` / `nin` / `not_in` / `notin` / `=` / `<>` / `>` …, so a filter
+ * spelled that way against a normalised column compiles, and a gate that only
+ * knew the `$`-forms would leave the failure alive at a different spelling —
+ * the lesson #5234 already paid for in this file.
+ *
+ * `$between` is included although the card's minimum set stopped at the four
+ * ordering comparisons: it IS `>= AND <=` (this driver even decomposes a
+ * calendar-day `$between` into `$gte`/`$lt` a few lines above the emitter), so
+ * refusing the halves and compiling the compound would be the same wrong answer
+ * at one more spelling.
+ *
+ * Deliberately ABSENT, and this is the load-bearing half of the set: the `LIKE`
+ * family (`$contains`, `$notContains`, `$startsWith`, `$endsWith`,
+ * `$icontains`) and the null predicates (`$null`, `$exists`). `$contains` is
+ * the ONLY working membership spelling on a JSON-array column and downstream
+ * code depends on it (#7398's own tables), while `IS NULL` asks about the
+ * column's presence, which is a well-formed question whatever the column holds.
+ */
+const JSON_COLUMN_INCOMPATIBLE_OPERATORS: ReadonlySet<string> = new Set([
+  '$eq', '=', '==',
+  '$ne', '!=', '<>',
+  '$gt', '>', '$gte', '>=', '$lt', '<', '$lte', '<=',
+  '$in', 'in',
+  '$nin', 'nin', 'not_in', 'notin',
+  '$between', 'between',
+]);
+
+/**
+ * [#7398] A scalar-comparison operator met a column this driver stores as JSON
+ * TEXT, so the comparison can never mean what the caller wrote.
+ *
+ * The mechanism is one line of SQL. A `multiple: true` field is stored as the
+ * serialization `["U1","U2"]`, so `members in ('U1')` is FALSE — the text
+ * genuinely is not equal to that id — and `members not in ('U1')` is TRUE. The
+ * measured consequences on the issue's fixture, one row whose `members`
+ * contains `U1`:
+ *
+ * - `$in` / `$eq` / bare equality → **0 rows**, fail-CLOSED. Silent, and a
+ *   `200` with an empty array is byte-identical to a query that legitimately
+ *   matched nothing, so no caller has anything to key on.
+ * - `$nin` / `$ne` → **the row it was asked to exclude**, fail-OPEN. That is
+ *   the dangerous half and the reason this is a refusal rather than a
+ *   documented footgun: an exclusion that silently stops excluding WIDENS a
+ *   result set, the direction #3948 / #4209 / #5347 all ruled outranks a
+ *   narrowing one. The issue's downstream delete-guard
+ *   (`{ assignees: { $in: memberIds } }`) never fired once since it shipped.
+ * - The ordering comparisons are not even uniformly empty: `$lte` matched,
+ *   because `["usr_…"` sorts below `usr_…` on the leading `[`. A lexicographic
+ *   compare over a serialization is a wrong answer, not a narrow one.
+ *
+ * ADR-0112 class 1 — a caller mistake, so `INVALID_FILTER` / 400, the same
+ * envelope {@link unsupportedFilterError} gives the unknown-operator refusal
+ * one arm over. The message states the filter WAS NOT APPLIED for the reason
+ * that wording exists on the comparand-shape refusals: "no rows" is a
+ * legitimate answer to a legitimate query, so a caller must be told that this
+ * one was never asked.
+ *
+ * The prescription is `$contains` (and an `$or` of `$contains` for any-of)
+ * because that is the only spelling that works today — it lowers to
+ * `LIKE '%v%'` over the serialization. That it works at all is incidental
+ * rather than designed, which is the issue's ask 2 (`$overlaps` /
+ * `$containsAny`); ask 2 is a closed-spec-set question and is deliberately not
+ * answered here.
+ */
+function jsonColumnOperatorError(field: string, op: string, bare: boolean): Error {
+  const spelling = bare
+    ? `The bare equality spelling { "${field}": value }`
+    : `Operator "${op}"`;
+  const on = bare ? '' : ` on field "${field}"`;
+  return unsupportedFilterError(
+    `${spelling}${on} WAS NOT APPLIED: "${field}" is a multi-value (or otherwise JSON-valued) ` +
+      `field, stored by this driver as a JSON TEXT column (e.g. ["a","b"]), and "${op}" compares ` +
+      `that whole serialized text against a single value — it can never equal one member. ` +
+      `Use "$contains" for membership ({ "${field}": { "$contains": "a" } }), or an $or of ` +
+      `"$contains" for any-of ({ "$or": [{ "${field}": { "$contains": "a" } }, ` +
+      `{ "${field}": { "$contains": "b" } }] }). Refused rather than compiled because the answer ` +
+      `was silently wrong in BOTH directions: $in/$eq matched nothing, while $nin/$ne returned ` +
+      `the very rows they were asked to exclude (#7398).`,
+  );
+}
+
 /** A short, non-throwing rendering of an offending comparand for the message. */
 function safeShapePreview(value: unknown): string {
   try {
@@ -7963,6 +8052,68 @@ export class SqlDriver implements IDataDriver {
     return columnSql;
   }
 
+  /**
+   * [#7398] Is `localField` stored as a JSON TEXT column on `table`?
+   *
+   * Reads `jsonFields` — the per-table registry both `initObjects` and
+   * `registerExternalObject` fill from {@link SqlDriver.isJsonField}, i.e.
+   * `JSON_COLUMN_TYPES.has(type) || !!field.multiple`. Asking THAT registry
+   * rather than growing a second one is the whole point: `JSON_COLUMN_TYPES`
+   * already carries a header calling itself the single source for the DDL
+   * column-type switch and `isJsonField` "so the two can't drift", and a
+   * filter-side copy of "which columns are JSON" would be a third list to keep
+   * in step with the first two.
+   *
+   * It answers on the LOCAL field name, which is what the registry is keyed by
+   * (both writers enumerate `obj.fields`), not the possibly-remapped remote
+   * column an external `columnMap` produces.
+   *
+   * **A table with no entry answers `false`, deliberately.** A table this
+   * driver was never told about — one created straight through knex, as the
+   * conformance sweeps do — has no field types to consult, and inventing a
+   * refusal from an absent registry would refuse filters on ordinary columns.
+   * The gate fires only where the column type is KNOWN to be JSON.
+   */
+  protected isJsonColumn(table: string | null | undefined, localField: string): boolean {
+    if (!table) return false;
+    return this.jsonFields[table]?.includes(localField) === true;
+  }
+
+  /**
+   * [#7398] The column-type half of the filter gate: refuse a DECLARED operator
+   * that the column it was aimed at cannot give a meaningful answer for.
+   *
+   * The sibling of {@link assertCompilableComparand}, and called from the same
+   * three positions, one per lowering entry: the operator-object branch of
+   * {@link SqlDriver.applyFilterCondition}, that method's bare-value branch,
+   * and the plain `{ field: value }` loop in {@link SqlDriver.applyFilters}.
+   * The two gates ask different questions of the same comparison — that one
+   * asks whether the COMPARAND can be bound, this one whether the COLUMN can be
+   * compared — and #7398 is the square of that grid that had nothing on it.
+   *
+   * Placed BEFORE the calendar-day rewrites and before
+   * {@link SqlDriver.applyNormalizedComparison}, because a JSON column reaches
+   * BOTH emitters and only one of them is the site the issue named. A
+   * `multiple: true` datetime field on an external object (ADR-0015) has a
+   * `filterColumnExpr` — `registerExternalObject` never marks its datetime
+   * columns canonical, so `needsLegacyDatetimeRepair` stays true — and is
+   * therefore served by the normalised `whereRaw` arms, not by the plain
+   * `whereIn` / `where(field, op, v)` arms a managed `multiple: true` lookup
+   * goes through. Measured on both before this gate existed: `$in` → 0 rows,
+   * `$nin` → the excluded row, on each.
+   */
+  protected assertOperatorAppliesToColumn(
+    table: string | null | undefined,
+    localField: string,
+    column: string,
+    op: string,
+    bare = false,
+  ): void {
+    if (!JSON_COLUMN_INCOMPATIBLE_OPERATORS.has(op)) return;
+    if (!this.isJsonColumn(table, localField)) return;
+    throw jsonColumnOperatorError(column, op, bare);
+  }
+
   protected applyFilters(builder: Knex.QueryBuilder, filters: any) {
     if (!filters) return;
 
@@ -8025,6 +8176,10 @@ export class SqlDriver implements IDataDriver {
         // #5041 — the plain `{ field: value }` map compiles to an implicit `=`,
         // so it is a comparison emitter too and gets the same gate.
         assertCompilableComparand(column, '=', value);
+        // #7398 — and the column-type question the comparand gate cannot ask.
+        // This loop IS the bare `{ field: value }` spelling, one of the four
+        // the issue measured as silently answering zero rows on an array column.
+        this.assertOperatorAppliesToColumn(table, key, column, '=', true);
         const coerced = this.coerceFilterValue(table, key, value);
         const expr = this.filterColumnExpr(table, key, column);
         if (expr && this.applyNormalizedComparison(builder, 'and', expr, '=', coerced)) continue;
@@ -8305,6 +8460,11 @@ export class SqlDriver implements IDataDriver {
           // BEFORE any rewrite or coercion touches it, so the message names the
           // shape the caller actually sent.
           assertCompilableComparand(field, rawOp, opValue);
+          // #7398 — the column-type gate, on the operator AS WRITTEN and ahead
+          // of every rewrite and both emitters, so a JSON column cannot reach
+          // the plain `whereIn` arms below NOR the normalised `whereRaw` arms
+          // an external multi-value datetime column is routed to.
+          this.assertOperatorAppliesToColumn(table, localField, field, rawOp);
           // Calendar-day upper bounds first (#3777): `$lte` on a bare
           // `YYYY-MM-DD` against a datetime column compiles half-open, and a
           // `$between` whose max is a bare day decomposes into the same pair —
@@ -8453,6 +8613,11 @@ export class SqlDriver implements IDataDriver {
         const localField = this.mapSortField(key);
         const field = this.remoteColumn(table, key, localField);
         const method = logicalOp === 'or' ? 'orWhere' : 'where';
+        // #7398 — the bare `{ field: value }` spelling again, reached when the
+        // condition carries an operator SOMEWHERE (so `applyFilters` routed the
+        // whole node here) but not on this key. Same compilation, same gate:
+        // one condition must not have two verdicts depending on its siblings.
+        this.assertOperatorAppliesToColumn(table, localField, field, '=', true);
         const coerced = this.coerceFilterValue(table, localField, value);
         const columnExpr = this.filterColumnExpr(table, localField, field);
         if (columnExpr && this.applyNormalizedComparison(builder, logicalOp, columnExpr, '=', coerced)) continue;
