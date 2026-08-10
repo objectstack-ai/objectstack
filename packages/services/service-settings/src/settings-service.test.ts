@@ -11,6 +11,8 @@ import { localizationSettingsManifest } from './manifests/localization.manifest.
 import { companySettingsManifest } from './manifests/company.manifest.js';
 import { brandingSettingsManifest } from './manifests/branding.manifest.js';
 import { featureFlagsSettingsManifest } from './manifests/feature-flags.manifest.js';
+import { builtinSettingsManifests } from './manifests/index.js';
+import { evaluateVisibility, visibilitySource } from './visibility-eval.js';
 import { SettingsManifestSchema } from '@objectstack/spec/system';
 
 describe('reference manifests are spec-valid', () => {
@@ -2376,5 +2378,205 @@ describe('SettingsService — company.country adopts iso_3166_alpha2 (#6579)', (
     expect(okR.value).toBe('CH');
     expect(okR.source).toBe('env');
     expect(okErrors).toHaveLength(0);
+  });
+});
+
+/**
+ * #7169 — an unparseable `visible` predicate REFUSES the save.
+ *
+ * The producer/consumer split: `packages/spec`'s `settings-manifest.zod.ts`
+ * types both visibility slots as `ExpressionInputSchema`, which normalizes a
+ * bare string to `{ dialect: 'cel', source }` — so the spec LABELS these values
+ * CEL. `visibility-eval.ts` is not CEL. An author writing the dialect the spec
+ * declares got a `VisibilityParseError`, and `validatePatch` used to answer it
+ * with `catch { continue }` — skipping the whole specifier, so `required`,
+ * `options`, `pattern`, `valueDomain` and the value window all stopped being
+ * enforced on that key, with no diagnostic anywhere.
+ *
+ * Maintainer ruling (2026-08-10): fail closed at save time. These cases pin
+ * that, and they are written to go RED on the fail-open implementation —
+ * restoring `catch { continue }` turns every one of them into an accepted
+ * write. A `rejects.toThrow()`-shaped assertion could not do that (the
+ * fail-open path throws nothing at all), so each asserts the ADR-0112/0114
+ * envelope the surface actually emits: `code: 'SETTINGS_VALIDATION'` on the
+ * error, `code: 'invalid_value'` on the field entry, and the offending
+ * predicate under `constraint.visible`. The matching HTTP `status` (400) is
+ * pinned at the route boundary in `settings-routes.test.ts`, which is where
+ * this surface's status lives.
+ */
+describe('SettingsService — unparseable `visible` fails closed (#7169)', () => {
+  /** A manifest whose `api_key` predicate is CEL the evaluator cannot parse. */
+  function celService(): SettingsService {
+    const svc = new SettingsService({ env: {} });
+    svc.registerManifest({
+      namespace: 'celns',
+      label: 'CEL namespace',
+      specifiers: [
+        { type: 'select', key: 'provider', label: 'Provider',
+          options: [{ value: 'openai', label: 'OpenAI' }, { value: 'memory', label: 'Memory' }] },
+        // CEL membership via the stdlib — the exact spelling `ExpressionInputSchema`
+        // declares is legal, and the grammar reports `unsupported identifier "in"`.
+        { type: 'text', key: 'api_key', label: 'API key', required: true,
+          visible: "${data.provider in ['openai']}" },
+      ],
+    } as any);
+    return svc;
+  }
+
+  it('refuses the write and names the predicate', async () => {
+    const svc = celService();
+    const err = await svc.setMany('celns', { provider: 'openai', api_key: 'sk-live' }).catch((e) => e);
+    expect(err.code).toBe('SETTINGS_VALIDATION');
+    expect(err.fields).toEqual([
+      expect.objectContaining({
+        field: 'api_key',
+        code: 'invalid_value',
+        label: 'API key',
+        constraint: { visible: "data.provider in ['openai']" },
+      }),
+    ]);
+    // The parse reason travels in the sentence, so the author is told WHAT to fix.
+    expect(err.fields[0].message).toContain('unsupported identifier "in"');
+    expect(err.fields[0].message).toContain('visible');
+  });
+
+  it('fires on the half-filled form that never touches the broken key — the incident', async () => {
+    // The console posts only its dirty keys, so the empty `required` field is
+    // absent from the patch. This is the case a TOUCH gate would let through,
+    // and it is the one #7169 measured: fail-open, the save lands clean with
+    // `api_key` empty and `required` never consulted.
+    const svc = celService();
+    const err = await svc.setMany('celns', { provider: 'openai' }).catch((e) => e);
+    expect(err.code).toBe('SETTINGS_VALIDATION');
+    expect(err.fields[0]).toMatchObject({ field: 'api_key', code: 'invalid_value' });
+    // Nothing was persisted — the batch is atomic.
+    expect((await svc.get('celns', 'provider')).source).toBe('default');
+  });
+
+  it('refuses a predicate rooted anywhere but `data`, which carries no deps to gate on', async () => {
+    // `referencedKeys` is a `data.<ident>` scan, so a `record.`-rooted predicate
+    // yields no dependencies at all. Nothing about the patch can make this key
+    // look relevant, which is why the refusal is unconditional.
+    const svc = new SettingsService({ env: {} });
+    svc.registerManifest({
+      namespace: 'rootns',
+      label: 'Root namespace',
+      specifiers: [
+        { type: 'text', key: 'unrelated', label: 'Unrelated' },
+        { type: 'text', key: 'gated', label: 'Gated', required: true,
+          visible: "${record.status == 'open'}" },
+      ],
+    } as any);
+    const err = await svc.setMany('rootns', { unrelated: 'x' }).catch((e) => e);
+    expect(err.code).toBe('SETTINGS_VALIDATION');
+    expect(err.fields[0]).toMatchObject({
+      field: 'gated',
+      code: 'invalid_value',
+      constraint: { visible: "record.status == 'open'" },
+    });
+  });
+
+  it('still lets a broken namespace be RESET — the escape hatch', async () => {
+    // An all-null patch returns before the specifier loop, so a workspace whose
+    // manifest carries a bad predicate is never locked out of clearing it.
+    const svc = celService();
+    await expect(svc.resetNamespace('celns')).resolves.toBeGreaterThanOrEqual(0);
+    await expect(svc.setMany('celns', { provider: null, api_key: null })).resolves.toBeDefined();
+  });
+
+  it('leaves parseable predicates alone', async () => {
+    // Control: the same manifest with the grammar's own spelling. `==` IS in the
+    // grammar, so plain CEL that stays inside it was never affected.
+    const svc = new SettingsService({ env: {} });
+    svc.registerManifest({
+      namespace: 'okns',
+      label: 'OK namespace',
+      specifiers: [
+        { type: 'select', key: 'provider', label: 'Provider',
+          options: [{ value: 'openai', label: 'OpenAI' }, { value: 'memory', label: 'Memory' }] },
+        { type: 'text', key: 'api_key', label: 'API key', required: true,
+          visible: "${data.provider == 'openai'}" },
+      ],
+    } as any);
+    await expect(svc.setMany('okns', { provider: 'memory' })).resolves.toBeDefined();
+    await expect(svc.setMany('okns', { provider: 'openai' })).rejects.toMatchObject({
+      code: 'SETTINGS_VALIDATION',
+      fields: [expect.objectContaining({ field: 'api_key', code: 'required' })],
+    });
+  });
+
+  it('reports every broken specifier, not just the first', async () => {
+    const svc = new SettingsService({ env: {} });
+    svc.registerManifest({
+      namespace: 'twobad',
+      label: 'Two bad',
+      specifiers: [
+        { type: 'text', key: 'a', label: 'A', visible: '${data.x.map(y => y)}' },
+        { type: 'text', key: 'b', label: 'B', visible: '${window.location}' },
+      ],
+    } as any);
+    const err = await svc.setMany('twobad', { a: '1' }).catch((e) => e);
+    expect(err.fields.map((f: any) => f.field)).toEqual(['a', 'b']);
+    expect(err.fields.every((f: any) => f.code === 'invalid_value')).toBe(true);
+  });
+});
+
+/**
+ * #7169 — the in-repo instance of the same fail-open, and its repair.
+ *
+ * `auth.lockout_duration_minutes` declares `min: 1, max: 1440` and carries
+ * `visible: '${data.lockout_threshold > 0}'`. The grammar had no relational
+ * operator, so on `origin/main` the predicate threw, `catch { continue }`
+ * skipped the specifier, and the declared window was enforced on nobody —
+ * measured: `-5` and `99999` both saved clean, while the `visible`-free sibling
+ * `rate_limit_max` was refused correctly by the same branch.
+ */
+describe('auth lockout window is enforced again (#7169)', () => {
+  function authService(): SettingsService {
+    const svc = new SettingsService({ env: {} });
+    svc.registerManifest(authSettingsManifest);
+    return svc;
+  }
+
+  it('enforces min/max once the lockout is switched on', async () => {
+    await expect(
+      authService().setMany('auth', { lockout_threshold: 5, lockout_duration_minutes: 99999 }),
+    ).rejects.toMatchObject({
+      code: 'SETTINGS_VALIDATION',
+      fields: [expect.objectContaining({ field: 'lockout_duration_minutes', code: 'max_value' })],
+    });
+    await expect(
+      authService().setMany('auth', { lockout_threshold: 5, lockout_duration_minutes: -5 }),
+    ).rejects.toMatchObject({
+      fields: [expect.objectContaining({ field: 'lockout_duration_minutes', code: 'min_value' })],
+    });
+    await expect(
+      authService().setMany('auth', { lockout_threshold: 5, lockout_duration_minutes: 30 }),
+    ).resolves.toBeDefined();
+  });
+
+  it('still skips the window while the field is genuinely hidden', async () => {
+    // `lockout_threshold: 0` disables the lockout, so the duration field is not
+    // rendered and not validated — the predicate now EVALUATES to false instead
+    // of failing to parse, which is a different reason for the same outcome and
+    // the one the manifest intended.
+    await expect(
+      authService().setMany('auth', { lockout_threshold: 0, lockout_duration_minutes: 99999 }),
+    ).resolves.toBeDefined();
+  });
+
+  it('every bundled manifest predicate parses, so no builtin namespace is refused', async () => {
+    // The corpus measurement, kept as a regression: 94 `visible` predicates
+    // across the 10 bundled manifests, and a fail-closed save path means any
+    // one of them falling outside the grammar bricks writes to its namespace.
+    for (const manifest of builtinSettingsManifests as Array<Record<string, any>>) {
+      for (const spec of manifest.specifiers ?? []) {
+        if (typeof spec.visible === 'undefined') continue;
+        expect(
+          () => evaluateVisibility(spec.visible, {}),
+          `${manifest.namespace}.${spec.key ?? '(layout)'}: ${visibilitySource(spec.visible)}`,
+        ).not.toThrow();
+      }
+    }
   });
 });
