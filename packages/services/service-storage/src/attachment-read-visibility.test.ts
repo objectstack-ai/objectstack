@@ -88,7 +88,11 @@ function install(opts: {
   visible: Record<string, Record<string, string[]>>;
 }) {
   let mw!: (ctx: AttachmentReadMiddlewareCtx, next: () => Promise<void>) => Promise<void>;
-  const calls = { parentFinds: [] as Array<{ object: string; ids: string[]; userId?: string }> };
+  const calls = {
+    parentFinds: [] as Array<{ object: string; ids: string[]; userId?: string }>,
+    /** [#7145] The context each parent probe was handed, verbatim. */
+    parentFindContexts: [] as any[],
+  };
 
   const engine: AttachmentLifecycleEngine = {
     registerHook: () => {},
@@ -105,6 +109,7 @@ function install(opts: {
       const userId = options?.context?.userId as string | undefined;
       const ids: string[] = (options?.where?.id?.$in ?? []).map(String);
       calls.parentFinds.push({ object, ids, userId });
+      calls.parentFindContexts.push(options?.context);
       const vis = opts.visible[object]?.[userId ?? ''] ?? [];
       return ids.filter((id) => vis.includes(id)).map((id) => ({ id })) as any;
     },
@@ -276,6 +281,41 @@ describe('installAttachmentReadVisibility', () => {
     // probe was issued against sys_attachment.
     expect(where).toEqual({ id: '__attachment_parent_denied__' });
     expect(calls.parentFinds).toHaveLength(0);
+  });
+
+  // [#7145] The parent probe reads a DIFFERENT object than the one the security
+  // middleware resolved its depth for, so the caller's envelope crosses over
+  // but the operation-private keys must not: `__readScope` is
+  // `sys_attachment`'s access DEPTH and `__expandRead` waives the object-level
+  // CRUD check. Mirrors the same half of #7141 / PR #7143 in the comment kit.
+  it('probes the parent with the caller ENVELOPE, minus the operation-private keys', async () => {
+    const { mw, calls } = install(dataset);
+    await runRead(mw, {
+      context: {
+        userId: 'u1',
+        principalKind: 'agent',
+        onBehalfOf: { userId: 'human_1', principalKind: 'human' },
+        accessible_org_ids: ['org_1'],
+        posture: 'authenticated',
+        __readScope: 'org',
+        __delegatorReadScope: 'org',
+        __expandRead: true,
+      } as any,
+    });
+    const probed = calls.parentFindContexts;
+    expect(probed.length).toBeGreaterThan(0);
+    for (const c of probed) {
+      expect(c).toMatchObject({
+        userId: 'u1',
+        principalKind: 'agent',
+        onBehalfOf: { userId: 'human_1', principalKind: 'human' },
+        accessible_org_ids: ['org_1'],
+        posture: 'authenticated',
+      });
+      for (const key of ['__readScope', '__delegatorReadScope', '__expandRead']) {
+        expect(c).not.toHaveProperty(key);
+      }
+    }
   });
 });
 
