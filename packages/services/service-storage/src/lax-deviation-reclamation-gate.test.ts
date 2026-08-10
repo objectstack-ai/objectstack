@@ -83,15 +83,15 @@ function reapEngine() {
   const updates: Array<{ object: string; data: any }> = [];
   const engine: AttachmentLifecycleEngine & { updates: typeof updates } = {
     registerHook() {},
-    async find(object, options: any) {
+    async find(object: string, options: any) {
       const where = options?.where ?? {};
       return tables[object].filter((r) => Object.entries(where).every(([k, v]) => r[k] === v));
     },
-    async findOne(object, options: any) {
+    async findOne(object: string, options: any) {
       const where = options?.where ?? {};
       return tables[object].find((r) => Object.entries(where).every(([k, v]) => r[k] === v)) ?? null;
     },
-    async update(object, data: any, options?: any) {
+    async update(object: string, data: any, options?: any) {
       assertEngineUpdateDispatch(data, options);
       updates.push({ object, data });
       return data;
