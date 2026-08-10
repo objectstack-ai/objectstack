@@ -219,18 +219,9 @@ flaky 连踢五个互不相关的 PR,核对失败签名一致后原样重投,五
 
 **定点文本的写法纪律 —— 已删除的定时器仍会投递,且投递时文本可能已落后现实数轮。**
 上面第一条让定点文本**完整**(带全待执行状态),这一条让它**过期时仍然安全**;两条
-是同一枪的两面,都成立才够用。2026-08-07 跨两个座位三次实测,两种形态、同一个后果:
-
-- `domain:spec-surface` 席**两枪已 `delete_trigger`**(回包确认 `deleted trigger …`)
-  的定时器**照样投递**,文本都落后现实两轮。其中一枪写着「#5783 …… 判为不可靠、
-  交接、**重新派发一个 fresh os-dev**,worktree `objectstack-issue-5783` 已存在」;
-  投递时 #5783 的 PR #6389 早已交付并通过复核 —— 照文本执行就是把一个重复 agent
-  塞进一个活着且已完工的 worktree,正是认领协议要防的碰撞类,只不过这次是**从
-  自动化里**来的,而不是从抢跑的 PM 那里。
-- `domain:devx` 席的一枪**没被删,是被现实追上**:21:3x 挂、22:1x 投递,文本写的
-  「两个 dev 静默结束、未开 PR、未交报告 ⇒ 判定失效 ⇒ 重新派发一个新 dev」在投递
-  时前提已被推翻(两个 dev 都已回话正常推进,其中一个的 PR 已合并)。照做会向两个
-  活着且已有成果的任务各塞一个重复 dev。删与没删是两条路径,终点是同一个。
+是同一枪的两面,都成立才够用。2026-08-07 跨两个座位三次实测,两种形态、同一个后果
+—— 已删定时器照样投递×2、未删但被现实追上×1(两例实录见
+`references/incidents.md` §「定点文本两例实录」)。
 
 两条硬规则:
 
@@ -875,43 +866,9 @@ updated **by PR** — the taxonomy evolves deliberately, never per-claim.
 
 **⚠️ 读法**:本节是**沿革**,不是待办。生效的路由规则在上面的包家族表
 `spec-tooling` / `devx` 两行;本节解释那两行为什么长成那样,以及两条**已被
-事实推翻的旧裁决**为什么不能照抄执行。
-
-维护者 2026-08-06 裁决(#5469,原文引用、未翻译):
-
-> `domain:spec-tooling` 判为 **#5163 存续期的临时 program 车道**,不进 SKILL 包家族
-> 域表;其存量单由分诊按现行域表重标,重标完成后该标签退役
-
-⚠️ **该裁决所依据的前提(「临时、待退役」)在其后三天被反向的事实推翻,所以本节
-记录的是现状,不是那条裁决的执行结果**(2026-08-09 实测):
-
-- 裁决当天 15:03Z(裁决后约 9 小时)**新立了座位贴 #6018**,该席至今在任、经历
-  一次移交、一个任期内落了 9 个 PR;
-- **2026-08-07 维护者批准的 `spec` 拆分**(座位贴 #6298)在本文里写进了
-  `spec-surface` ↔ `spec-tooling` 的分界判据 —— 即维护者本人在裁决次日签发的
-  文本,把它当作活车道在用;
-- 标签仍在被分诊打:当前 **10 单 open**(#6833 / #6797 / #6751 / #6635 / #6350 /
-  #6232 / #6221 / #5828 / #5757 / #5163,其中 #6797、#6350 已 `pm:dispatched`),
-  67 单 closed,最近一次新打在 2026-08-08。
-
-⇒ 该标签是**在册车道,分诊照常打**。
-
-**维护者 2026-08-09 裁决(#5469,取代上面 2026-08-06 那条):判据切分,给行。**
-拖住补行的从来不是「它是否存在」,而是它与 `domain:devx` 的三处文件面重叠未裁 ——
-裁完即补,包家族表的 `spec-tooling` 行就是该裁决的登记:
-
-- **无争议、可直接路由的两处**:`packages/spec/scripts/**`、`packages/spec/docs/**`
-  ⇒ `domain:spec-tooling`。devx 从未声明这两处,依据是 #6018 座位贴的 Scope 段与
-  上面 2026-08-07 的 surface / tooling 分界(tooling 改「围着契约转的机器」)。
-- **曾争议的三处**:`packages/lint`、`content/docs/**`、`scripts/` —— 座位贴 #6018
-  与 #6023 **同时声明**这三处。这不是纸面问题,2026-08-09 实测两侧都在落地:
-  `domain:spec-tooling` 的 #6778 整单落在 `packages/lint/src/`(PR #6831),而同期
-  `domain:devx` 的 #5957 / #5330 / #6381 也落在 `packages/lint`。
-- ⇒ **按「是否围着 spec 契约转」逐卡判**:契约门禁/生成器/lint 规则/报错散文/
-  references 管线 ⇒ `spec-tooling`;一般开发工具面 ⇒ `devx`。这是 anchoring rule
-  在 `packages/spec` 内那条显式例外的**延伸,不是第二套规则** —— 2026-08-07 拆分
-  已写下判据的前半(「tooling 改围着契约转的机器」),本裁决把同一句话铺到这三处。
-  拿不准的按 rule 4 误标路径 FLAG 回分诊,⛔ 不由 dev 代拍。
+事实推翻的旧裁决**为什么不能照抄执行。沿革全文(两条旧裁决原文、推翻前提的
+2026-08-09 实测、判据切分的三处明细)已移
+`references/incidents.md` §「domain:spec-tooling 沿革」。
 
 **`engine` 一分为二(#5472,与 #5095 同批)。** 旧 `domain:engine` 同时覆盖
 objectql + metadata\* + platform-objects + core + formula + 全部 `driver-*`,
@@ -1440,17 +1397,8 @@ an issue to a later round, record the known trap on it before the round ends.
 - **派发被延后那一单之前**,用这个回答**重读它的选项与成本估计**,⛔ 不沿用立单时
   的那一份。
 
-本轮四种方向各出现过。**变便宜(且 issue 自己的成本估计同时过期)**:#5375(#5345)
-去掉了「cube 风格数组也可作为输入」这条腿,`{member, operator, values}` 三元组自此纯属
-私有中间表示,#5373 的 B 路线因此从正文写的「工作量最大」降为不跨 spec 的内部改动。
-**没变**:#5431(#5373)对 #5374 —— dev 明确回报「**没有**让它变简单,也**没有**顺带
-修好它」,调用点现在收到真值而非字符串化的值,但「`{$not: 'x'}` 约束不了任何东西」在
-算子层,与比较数编码正交。
-
-默认假设(「前一单大概让它变简单了」)本轮**错了两次、对了一次**,而两个方向的代价
-不对称:误以为变简单 → dev 按缩小的范围做,漏修;误以为没变 → 走一条已经没必要的贵
-路线。所以这不能由 PM 推,只能由在飞那单的 dev 答 —— 本轮正是该必答项的**否定**回答
-直接决定了 #5374 不能缩范围(见 PR #5445 的「范围之外」段)。适用判据:前后两单**共用
+一轮实测里四种方向各出现过、默认假设错了两次(实录见 `references/incidents.md`
+§「重新定价四方向实录」)。适用判据:前后两单**共用
 同一个契约或数据表示**;形态迥异的批次(纯 UI、纯文档)里前后单往往不共享成本面,这
 一项问不出信息,不必强加。
 
@@ -1842,11 +1790,8 @@ dev 都用实测顶回并保住了裁决意图 —— 因为派发令把两类�
 一起重开 —— 两个方向都是返工。
 
 **第三块是 2026-08-09 单班补的:前两块漏掉了最便宜的那一类 —— PM 顺口给的一个
-「看起来无害」的选项。** 同一班被证伪两次,两次 dev 拒绝都是对的:#6865 的卡自带
-一条「断言 job 上没有 `if:`」的验收写法,照做会把**四个正确的 job** 判红;#6893 的
-派发令把「把 `content/docs/releases/**` 排除出审计范围」写成「亦可辩护」的选项,
-而那正是 #4920 明确否决的 option A —— `scripts/docs-audit/check-audit-scope.mjs`
-在该目录**离开审计范围时直接 `process.exit(1)`**,脚本注释逐字点了 #4920 与 #6893。
+「看起来无害」的选项。** 同一班被证伪两次,两次 dev 拒绝都是对的(#6865 /
+#6893,实录见 `references/incidents.md` §「便宜选项两次证伪」)。
 ⇒ **把一个便宜选项写成已裁定,恰好招来相反的结果**:dev 要么照做产出一个红,要么
 为了顶回来花掉一轮往返。裁决那一块只写真裁决,凡是「我觉得可以这样」的一律降到
 第三块 —— 措辞的成本是零,读错的成本是一轮。
@@ -1965,8 +1910,10 @@ prompt:
 
 **过滤 / 谓词语义裁决:派发令枚举完整的编译面清单,PR 逐面申报 —— 派发令的标准
 条款(#5930 裁决的流程半边)。** 适用判据:本单会**改变一条过滤 / 谓词语义**(算子
-的 NULL 处理、组合子恒等、比较数形状、算子词表……)。满足时派发令**把下面那张表逐面
-抄进去**,并带这一句(原话):
+的 NULL 处理、组合子恒等、比较数形状、算子词表……)。满足时派发令**把编译面清单
+逐面抄进去** —— 清单连同其维护纪律与派发前复核串住
+`references/compile-surfaces.md`,派发前照它的复核串重验再抄,⛔ 不凭记忆 ——
+并带这一句(原话):
 
 > 本单改的这条语义由**多个互相独立的编译器 / 求值器**各自实现。派发令列出的**每一
 > 面**都必须在你的 PR 正文里有一个结论:**已改** / **本就合规**(给出证据)/
@@ -1974,44 +1921,10 @@ prompt:
 > 「漏掉的面」,不读作「不需要改」。
 
 **这条防的不是「做错」,是「做对了一部分然后以为做完了」。** 一个 `FilterCondition`
-语义由 **5 个互相独立的实现**承载(下表)⇒ 每条语义裁决的成本 ×5,而漏面**反复
-复发**,三次都留在代码注释里:
-
-- **#5146 → #5903**:裁决只落到面 1,面 2 是**不继承面 1 的独立编译器**,于是同一个
-  驱动的两种连接模式对同一条过滤给出两种答案。现场记录在
-  `driver-turso/src/remote-transport.ts:1731`:「LOCAL mode inherits that fix
-  (`TursoDriver extends SqlDriver`), this independent compiler inherited none of
-  it」。
-- **#5326 / #5335**:面 3 与面 4 各**又花一圈**才对齐,记录在
-  `spec/src/data/filter.zod.ts:370`。
-- **#5905**:#5298 的裁决由 PR #5962 落到 driver-sql / formula / service-analytics
-  与 conformance 表,**唯独漏了 HAVING 面** —— `objectql/src/having-filter.ts:37` 的
-  原话是「was not in that PR's inventory, which left this file as the lone
-  holdout」。**「inventory」这个词本身就是本条款的缺席证明**:那次派发确实有一份清
-  单,只是它不完整,而没有任何机制要求它完整。
-
-三次都不是难度问题,是**没有一份清单在问「还有几面」**。
-
-编译面清单(逐面实测 @ `main` `48f98b0`,2026-08-07):
-
-| # | 面 | 落点(file:line) | 备注 |
-| --- | --- | --- | --- |
-| 1 | `driver-sql` | `packages/drivers/driver-sql/src/sql-driver.ts:7083`(`applyFilterCondition`) | `driver-sqlite-wasm`(`sqlite-wasm-driver.ts:67`)与 **local 模式**的 `driver-turso`(`turso-driver.ts:174`)都 `extends SqlDriver`,**靠继承共用这一面**,不单独算面 |
-| 2 | turso RemoteTransport | `packages/drivers/driver-turso/src/remote-transport.ts:1526`(`private buildWhereSQL`) | **独立编译器,不继承面 1** —— 一个驱动的两面,由连接模式选中哪面 |
-| 3 | service-analytics read-scope-sql | `packages/services/service-analytics/src/read-scope-sql.ts:259`(`compileScopedFilterToSql`) | RLS 读侧 |
-| 4 | service-analytics filter-normalizer | `packages/services/service-analytics/src/strategies/filter-normalizer.ts:1235`(`lowerAnalyticsWhere`) | analytics / cube 侧 |
-| 5 | `formula` | `packages/formula/src/matches-filter.ts:73`(`matchesFilterCondition`) | RLS 写侧 `check` 与公式求值;JS 两值语义的基准面 |
-| 半面 | objectql `having-filter` | `packages/objectql/src/having-filter.ts:92` / `:98`(`applyHaving` / `matchesHaving`) | 聚合**后**过滤。算半面是因为词表是子集,**但申报义务不打折** —— 它是**唯一没有 conformance 表覆盖的面**(`FILTER_LOGIC_CASES` 不驱动 HAVING 路径),所以漏了它连门禁都不会红 |
-| 冻结 | `driver-memory` / `driver-mongodb` | — | #5499 冻结投入:**pin-annotate,不翻转**。冻结面仍要申报,结论是「不在范围 + #5499」。现场注释见 `read-scope-sql.ts:176`、`having-filter.ts:41` |
-
-**这张表本身由 PR 维护 —— 与域表同一纪律。** 增删一面(新驱动、新求值器、某面被合并
-或退役、冻结状态变化)的那个 PR 顺手改这里,不留给下一次裁决重新数。清单**会**过期是
-必然的,清单**没有维护者**才是缺陷。
-
-⚠️ 派发前复核一遍再抄,⛔ 不要凭这张表的记忆填派发令:本仓的包路径搬过家(驱动进
-`packages/drivers/`、服务进 `packages/services/`),行号更是每天在动。一条够用的复核
-串:`grep -rn 'matchesFilterCondition\|buildWhereSQL\|compileScopedFilterToSql'
-packages --include=*.ts | grep -v node_modules`。
+语义由 **5 个互相独立的实现**承载(清单见 `references/compile-surfaces.md`)⇒
+每条语义裁决的成本 ×5,而漏面**反复复发**,三次都留在代码注释里(#5146→#5903、
+#5326/#5335、#5905 —— 三例叙述见 `references/incidents.md`
+§「编译面清单三次漏面」)。三次都不是难度问题,是没有一份清单在问「还有几面」。
 
 **Issue 正文是线索,不是规格 —— and the dispatch wording is what makes an
 honest "the premise is dead" cheap to return.** Step 1's stale-premise check
@@ -2296,20 +2209,10 @@ message has already reported.
   没有基线就先建基线再判:同形态卡片各记一个「派发 → 推分支 / 开 PR」的端到端
   耗时,三五单即可用。**在基线之内的沉默不是证据。**
 - 两条实测基线**只是出处样例,⛔ 不是全车队常数** —— 卡片形态不同,区间没有理由
-  相同,driver 或 engine-core 的重活不适用下表:
+  相同,driver 或 engine-core 的重活不适用它们。样例表(两席九单,端到端
+  ~64 分钟到近 3 小时)与两个座位当天各一次的误判实录已移
+  `references/incidents.md` §「判死基线样例与两次误判」。
 
-  | 出处(车道 / 日期) | 卡片形态 | 实测端到端 |
-  |---|---|---|
-  | `domain:spec-surface` 席,2026-08-07(#6393) | 文本面卡:#5767 / #5622 / #5955 / #5783 | 93 / 96 / ~95 / ~110 分钟 |
-  | `domain:devx` 席,2026-08-07(#6393 认领评论) | 混合:#6251 / #6038 / #6405 / #6359 | ~67 / ~64 / ~160 / ~170 分钟(后两单含长 CI 等待) |
-
-  合两席九单:同一天、同一套工具下,端到端跨越 **~64 分钟到近 3 小时**。凡把单一
-  数字当判死线的读法,都会在这个跨度里翻车 —— 所以要建的是**你那一栏**的基线。
-- 两个座位当天各误判一次,都栽在这条线上:`domain:spec-surface` 席在 92 分钟处
-  写下「#5783 将判为不可靠」,而它在基线之内、几分钟后就推了分支;`domain:devx`
-  席在派发 2 小时处判两个 dev「静默结束」并把「重新派发」写进了下一枪定点,而两个
-  都在做深度取证。后者靠**先 SendMessage 问状态、而不是直接重派**救回 —— 那正是
-  上面五条的第一条。
 - 与既有两个数字的关系,一句话讲清:**45 分钟 = 探活门槛**(去问);**`mode:cloud`
   的 ~2h 静默 = 本轮收集边界**(记 `blocked`、本轮不再等,下一轮从 GitHub 重收);
   ⛔ 两者都不是判死。下面「报告丢失 ≠ 验收停摆」把 ≥2h 与**探活确认已死**并列成
@@ -2617,13 +2520,9 @@ grep os-regen .gitattributes   # 唯一权威清单;⛔ 别把结果抄进派发
 ⛔ **别只记住 `packages/spec/` 那几条** —— 清单里同时有**文档产物**
 (`docs/` 与 `content/docs/references/**`),它们同样会被静默吞。
 
-**这份清单不能有第二份拷贝 —— 本节曾亲自示范为什么(#6492)。** 协议此处一度
-内嵌一份路径拷贝,于是同一件事有了三个互相矛盾的读数:散文说「八条」、紧随其下的
-代码块列**九**条、`.gitattributes` 实际路由**十**条(缺的是
-`packages/spec/authorable-defaults/**`)。更要命的是漂移**还在加速**:#6492 分诊
-两次测量之间(同一天,相隔约一小时)清单本身又动过,两次读数就不一样。一份「读起来
-完整、实际不完整」的清单比没有清单更贵 —— 派发令照它枚举,dev 拿到的是一张自称
-齐全的漏项检查表,而 os-regen 的失败是**静默**的(见下)。所以本节只留取数命令:
+**这份清单不能有第二份拷贝 —— 本节曾亲自示范为什么(#6492:三个互相矛盾的读数、
+一小时内自漂移;实录见 `references/incidents.md` §「os-regen 清单第二份拷贝」)。**
+所以本节只留取数命令:
 散文没法被类型检查,唯一不会烂的拷贝是不存在的那份。同源条款见 step 5 的编译面
 清单(#5905)与 `Record` 反烂模式(#6322)。
 
