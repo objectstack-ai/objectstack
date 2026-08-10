@@ -234,31 +234,18 @@ export async function resolveExecutionContext(opts: ResolveOptions): Promise<Exe
 }
 
 /**
- * Typed sentinel error thrown by SecurityPlugin (and re-thrown here) when an
- * operation is denied. The dispatcher catches it and translates to HTTP 403.
+ * Typed sentinel error thrown by SecurityPlugin when an operation is denied.
+ * The dispatcher catches it and translates to HTTP 403.
  *
- * Kept structurally identical to `@objectstack/plugin-security`'s
- * `PermissionDeniedError` so `isPermissionDeniedError` matches whichever class
- * instance crosses the boundary, regardless of which package owns the actual
- * class identity at runtime.
+ * This module used to re-declare the class and its matcher character-for-character
+ * from `@objectstack/plugin-security`, with nothing enforcing the identity — two
+ * declarations of an ADR-0112 envelope (`code`, `statusCode`) free to drift apart
+ * silently. `@objectstack/plugin-security` is the package that THROWS these, so it
+ * owns the single declaration; this is a re-export, not a copy (#7270).
+ *
+ * Re-exported (rather than dropped) because `http-dispatcher.ts` already imports
+ * `isPermissionDeniedError` from this module path. The matcher stays duck-typed
+ * upstream, so an instance crossing a package boundary is still recognized when
+ * dual CJS/ESM output or bundling hands the two sides distinct class objects.
  */
-export class PermissionDeniedError extends Error {
-  readonly code = 'PERMISSION_DENIED';
-  readonly statusCode = 403;
-  readonly details?: Record<string, unknown>;
-  constructor(message: string, details?: Record<string, unknown>) {
-    super(message);
-    this.name = 'PermissionDeniedError';
-    this.details = details;
-  }
-}
-
-export function isPermissionDeniedError(e: unknown): e is PermissionDeniedError {
-  if (!e || typeof e !== 'object') return false;
-  const anyE = e as any;
-  return (
-    anyE.name === 'PermissionDeniedError' ||
-    anyE.code === 'PERMISSION_DENIED' ||
-    (typeof anyE.message === 'string' && anyE.message.startsWith('[Security] Access denied'))
-  );
-}
+export { PermissionDeniedError, isPermissionDeniedError } from '@objectstack/plugin-security';
