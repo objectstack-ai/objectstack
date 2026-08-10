@@ -1,6 +1,9 @@
 ---
 "@objectstack/objectql": major
+"@objectstack/spec": patch
 ---
+
+<!-- adr-0087: registered hook-register-empty-object-target-refused -->
 
 fix(objectql)!: `engine.registerHook` refuses an empty `object` target and a scope whose two faces cancel out (#6573)
 
