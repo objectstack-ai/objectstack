@@ -83,6 +83,65 @@
  * skipping what it cannot parse is how a gate comes to report success over a
  * surface it never read.
  *
+ * ## The second surface: spec TSDoc `@example` (#6763)
+ *
+ * A TSDoc `@example` is **not reachable from any import**, so no ordinary test
+ * can go red on it, and until this extension no gate read one. #6641 was the
+ * proof: `RowLevelSecurityPolicySchema.check` documented its enumerated-values
+ * idiom as `"status IN ('draft', 'pending')"`, which does not compile — an
+ * author copying the schema's own example got a policy that denies every row —
+ * and it was found by hand, months late. Ruled in on #6763 as a **scan-surface
+ * extension, not new machinery**: the judgment stays imported from
+ * `@objectstack/formula`; only the surface it is pointed at is new.
+ *
+ * Three things were measured on `origin/main` @ `5087ac6` before this was
+ * written, because two of them contradict the obvious design:
+ *
+ * 1. **The extraction half does NOT come for free.** Markdown TS fences and
+ *    TSDoc `@example` blocks are different shapes, and #6641's defect was not
+ *    in a fence at all — it was an INLINE `@example "<expr>" - caption` string
+ *    on a property. Pointing `ROOTS` at `packages/spec` would have read nothing.
+ * 2. **The existing admission rules admit ZERO on this surface.** All 424
+ *    `@example` tags under `packages/spec/src/**` were run through
+ *    {@link extractFormulaExpressions}: 0 admitted, 0 tripwires. There is no
+ *    `Field.formula(…)` or `type: 'formula'` example in the spec sources today.
+ *    Pass A below still applies that rule to this surface — it is the ruling's
+ *    literal instruction and it costs nothing — but a gate that admitted only
+ *    that would arrive green and **meaningless**, which is the one thing #6763's
+ *    condition 2 forbids. Hence pass B.
+ * 3. **Scope cannot be inferred from the slot's schema type.** 25 slots are
+ *    typed `ExpressionInputSchema`, and they do not share a scope: `hook.condition`
+ *    binds the record, `page.visibleWhen` also binds `page.<var>`, `flow.condition`
+ *    is flow-scoped. Judging them all as record-scoped would report
+ *    `page.selectedProjectId != ''` — a correct page predicate — as a bare
+ *    reference. That is the same false-red the discriminator note above exists to
+ *    prevent, one surface over.
+ *
+ * So pass B admits by a **declared slot registry** ({@link SPEC_EXAMPLE_SLOTS}):
+ * a `(declaration, property)` pair, its dialect, and the imported verdict for
+ * that dialect. Two entries today, both measured. The registry cannot rot
+ * quietly in either direction:
+ *
+ * - an entry matching **no** site is an error (rename the schema or delete the
+ *   examples and the gate says so, instead of shrinking in silence — the same
+ *   reasoning as {@link assertRootsResolvable});
+ * - a slot **typed** by an expression-input schema that carries an `@example`
+ *   but is **not** registered is an error, naming the slot. That is the tripwire
+ *   for the next expression slot someone documents: it cannot be admitted by
+ *   guessing its scope, so the gate refuses to guess and asks for a registry
+ *   entry (or an exemption) instead.
+ *
+ * ## Exemptions (#6763 condition 1) — named, reasoned, self-invalidating
+ *
+ * Deliberately partial snippets must be exemptable, so {@link EXEMPT_EXAMPLES}
+ * exists — same discipline as the parity-gate exemption lists and
+ * `check-error-code-casing.mjs`'s `EXEMPT_FILES`: an entry carries the site AND
+ * its reason, never a blanket path ignore. It is self-invalidating in both
+ * directions, which is what separates "we thought about this one" from a hole:
+ * an exemption matching no site is an error (stale), and an exemption whose site
+ * now judges **clean** is an error (unnecessary — delete it and let the rule
+ * cover the site again).
+ *
  * Usage:
  *   node scripts/check-doc-formula-expressions.mjs             # scan the corpus
  *   node scripts/check-doc-formula-expressions.mjs --self-test # prove both directions
@@ -93,7 +152,12 @@ import { join, relative, resolve, sep, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import ts from 'typescript';
-import { validateExpression } from '@objectstack/formula';
+import {
+  validateExpression,
+  isSupportedRlsExpression,
+  sqlPredicateToCel,
+  isPushdownableCel,
+} from '@objectstack/formula';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, '../../..');
@@ -130,7 +194,7 @@ const posix = (p) => p.split(sep).join('/');
  * silently smaller scan that still prints "clean".
  */
 function assertRootsResolvable() {
-  const missing = ROOTS.filter((r) => !existsSync(join(REPO_ROOT, r)));
+  const missing = [...ROOTS, SPEC_ROOT].filter((r) => !existsSync(join(REPO_ROOT, r)));
   if (missing.length > 0) {
     console.error(
       `✗ check:doc-formula-expressions — declared corpus root(s) do not exist: ${missing.join(', ')}\n` +
@@ -339,6 +403,360 @@ function scan(files) {
   return { violations, unextractable, blocks, checked };
 }
 
+// ── Surface 2: spec TSDoc `@example` (#6763) ─────────────────────────────────
+
+/**
+ * The spec sources whose TSDoc is authoring corpus. `src` and not the package
+ * root: `dist` is a build artifact of the same comments, and scanning both would
+ * report every finding twice.
+ */
+const SPEC_ROOT = 'packages/spec/src';
+
+/** The record-scoped CEL verdict, reused verbatim from surface 1. */
+function judgeRecordScoped(source) {
+  return judge(source).map((e) => e.message);
+}
+
+/**
+ * The ADR-0056 D4 RLS predicate verdict.
+ *
+ * The VERDICT is `isSupportedRlsExpression` and nothing else — the same single
+ * call `@objectstack/lint`'s `validateRlsPredicateEnforceability` and
+ * `RLSCompiler.compileExpression` stand on. `false` means "this predicate will
+ * never enforce", which at runtime is `RLS_DENY_FILTER`: a single-policy object
+ * matching zero rows.
+ *
+ * The `reason` below is **decoration on a decided verdict**, not a second
+ * opinion: it is only computed once the boolean has already said no, purely so
+ * the failure names the parse error instead of printing "false".
+ */
+function judgeRlsPredicate(source) {
+  if (isSupportedRlsExpression(source)) return [];
+  const bridged = sqlPredicateToCel(source);
+  const reason = isPushdownableCel(bridged).reason ?? 'does not lower to an ObjectQL filter';
+  return [
+    `RLS predicate does not compile (${reason}). After the deprecated SQL bridge this reads ` +
+      `${JSON.stringify(bridged)}. A predicate that does not lower fails CLOSED — the policy ` +
+      `matches zero rows, so an author who copies this example gets a policy that denies all access.`,
+  ];
+}
+
+/**
+ * The declared expression slots on the spec TSDoc surface. See the header for
+ * why admission here is a registry and not an inferred property of the slot's
+ * schema type.
+ *
+ * `declaration` is the enclosing `const` (the Zod schema), `properties` the slots
+ * on it. Every entry must match at least one `@example`, so a rename or a
+ * deletion fails loudly rather than shrinking the scan.
+ */
+const SPEC_EXAMPLE_SLOTS = [
+  {
+    id: 'rls-predicate',
+    declaration: 'RowLevelSecurityPolicySchema',
+    properties: ['using', 'check'],
+    dialect: 'RLS predicate (ADR-0056 D4)',
+    judge: judgeRlsPredicate,
+    // The slot #6641 was found in, by hand. Its `z.string()` type says nothing
+    // about the dialect, which is exactly why the registry names it.
+    why: 'the compiled RLS predicate grammar; a predicate that does not lower denies every row',
+  },
+  {
+    id: 'hook-record-condition',
+    declaration: 'HookSchema',
+    properties: ['condition'],
+    dialect: 'record-scoped CEL (ADR-0058 D1)',
+    judge: judgeRecordScoped,
+    why: "the slot's own .describe() pins the scope: \"Predicate (CEL); hook runs only when TRUE\", "
+      + 'evaluated against the record',
+  },
+];
+
+/**
+ * Slot types that MEAN "an expression is authored here". Used only for the
+ * tripwire — a slot of one of these types that carries an `@example` and is not
+ * registered is reported, never judged, because its scope is not knowable from
+ * the type (header, point 3).
+ */
+const EXPRESSION_SLOT_TYPES =
+  /\b(ExpressionInputSchema|PredicateInputSchema|CronExpressionInputSchema|TemplateExpressionInputSchema)\b/;
+
+/**
+ * Sites deliberately not judged, each with its reason. See the header: named,
+ * reasoned, and self-invalidating in both directions.
+ *
+ * `source` is the example's exact text, not a line number: a line number rots on
+ * the next edit anywhere above it, and the point of an exemption is to survive
+ * reflow while dying with the example it excuses.
+ */
+const EXEMPT_EXAMPLES = [
+  {
+    file: 'packages/spec/src/data/hook.zod.ts',
+    slot: 'HookSchema.condition',
+    source: "status = 'active' AND amount > 1000",
+    // NOT a partial snippet — a real defect, of exactly the #6641 class, found by
+    // this gate's own stock pass (#6763). It is SQL where the slot is CEL, and it
+    // contradicts the `.describe()` on the very next line, which spells the same
+    // idea as P`record.status == "closed" && record.amount > 1000`. Bare `status`
+    // and `amount` would resolve to nothing even after the operators were fixed.
+    // Exempted rather than corrected only because `packages/spec/src/**` belongs
+    // to the spec-surface seat and #6763 landed in spec-tooling; filed for
+    // transfer as #7175. Delete this entry with that fix — leaving it behind is
+    // itself an error (the "unnecessary" direction above), so the cleanup cannot
+    // be forgotten silently.
+    reason: 'REAL DEFECT pending cross-seat fix (#7175) — SQL `=`/`AND` and bare refs in a record-scoped CEL slot',
+  },
+];
+
+/** `packages/spec/src/**` sources, sorted. */
+function collectSpecFiles() {
+  const out = [];
+  const walk = (dir) => {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, e.name);
+      if (e.isDirectory()) {
+        if (!SKIP_DIRS.has(e.name)) walk(full);
+      } else if (/\.tsx?$/.test(e.name)) {
+        out.push(full);
+      }
+    }
+  };
+  walk(join(REPO_ROOT, SPEC_ROOT));
+  return out.sort();
+}
+
+/**
+ * Every `@example` body in a file, as text, with the 1-based source line of its
+ * first body line.
+ *
+ * Deliberately a text walk rather than an AST walk, and the two passes below
+ * disagree about this on purpose. `ts.getJSDocTags` only reaches comments the
+ * parser attached to a node, which on the spec sources is 110 of the 424
+ * `@example` tags — the rest sit on module docblocks and on the schema
+ * declaration itself, which is precisely where the fenced `typescript` examples
+ * live. Pass A must see all 424; pass B needs the node (to know the slot) and so
+ * is AST-bound by nature.
+ *
+ * The gutter strip is line-for-line, so a body line's index maps straight back to
+ * a file line.
+ */
+export function tsdocExampleBodies(text) {
+  const out = [];
+  const re = /\/\*\*[\s\S]*?\*\//g;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    const commentStartLine = text.slice(0, m.index).split('\n').length; // 1-based
+    const raw = m[0].split('\n');
+    const lines = raw.map((l, i) => {
+      let s = l;
+      if (i === 0) s = s.replace(/^\s*\/\*\*/, '');
+      if (i === raw.length - 1) s = s.replace(/\*\/\s*$/, '');
+      return s.replace(/^\s*\*( |$)/, '');
+    });
+    for (let i = 0; i < lines.length; i++) {
+      if (!/^\s*@example\b/.test(lines[i])) continue;
+      const body = [];
+      for (let j = i + 1; j < lines.length && !/^\s*@[a-zA-Z]/.test(lines[j]); j++) body.push(lines[j]);
+      out.push({ body: body.join('\n'), startLine: commentStartLine + i + 1 });
+    }
+  }
+  return out;
+}
+
+/**
+ * Pass A — the existing record-scoped formula discriminator, pointed at the
+ * fenced TS blocks inside spec TSDoc `@example` bodies.
+ *
+ * This is #6763's ruling taken literally: same admission, same verdict, new
+ * surface. It admits 0 sites today (header, point 2) and is kept because the
+ * rule it carries is live on surface 1, and the day a spec docblock grows a
+ * `Field.formula({ expression: 'qty * price' })` example it is judged here
+ * instead of shipping.
+ */
+function specFencedFormulaSites(rel, text) {
+  const sites = [];
+  const loud = [];
+  for (const ex of tsdocExampleBodies(text)) {
+    for (const b of fencedBlocks(ex.body)) {
+      const blockStart = ex.startLine + b.startLine - 1;
+      const found = extractFormulaExpressions(b.code);
+      if (found.length === 0) {
+        if (looksLikeFormulaBlock(b.code)) loud.push(`${rel}:${blockStart} (fenced @example)`);
+        continue;
+      }
+      for (const f of found) {
+        const where = `${rel}:${blockStart + f.line}`;
+        if (f.source === undefined) {
+          loud.push(`${where} (interpolated ${f.via} — source not statically knowable)`);
+          continue;
+        }
+        sites.push({
+          where, file: rel, rule: 'record-formula', slot: f.via,
+          dialect: 'record-scoped CEL', source: f.source, judge: judgeRecordScoped,
+        });
+      }
+    }
+  }
+  return { sites, loud };
+}
+
+/**
+ * The expression behind an inline `@example "<expr>" - caption`.
+ *
+ * #6641's shape, and the shape every registered slot uses: a double-quoted
+ * literal FIRST, then optional prose (` - Only allow certain statuses`) or a
+ * trailing `// §7.3.1 pre-resolved`. Anything after the literal is caption and is
+ * ignored; anything that does not START with a literal is not silently skipped —
+ * the caller reports it.
+ */
+export function inlineExampleSource(tagText) {
+  const m = /^\s*("(?:[^"\\]|\\.)*")/.exec(tagText ?? '');
+  if (!m) return undefined;
+  try {
+    return JSON.parse(m[1]);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Pass B — registered slots, plus the unregistered-expression-slot tripwire.
+ *
+ * Returns `matched` (registry ids that found at least one site) so the caller can
+ * fail a registry entry that has gone blind.
+ */
+function specSlotSites(rel, text) {
+  const sites = [];
+  const loud = [];
+  const matched = new Set();
+  const sf = ts.createSourceFile(rel, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+
+  const visit = (node) => {
+    if (ts.isPropertyAssignment(node) && node.name) {
+      const tags = ts.getJSDocTags(node).filter((t) => t.tagName.text === 'example');
+      if (tags.length > 0) {
+        const prop = ts.isIdentifier(node.name) || ts.isStringLiteralLike(node.name) ? node.name.text : undefined;
+        let anc = node.parent;
+        let decl;
+        while (anc) {
+          if (ts.isVariableDeclaration(anc) && ts.isIdentifier(anc.name)) { decl = anc.name.text; break; }
+          anc = anc.parent;
+        }
+        const entry = SPEC_EXAMPLE_SLOTS.find(
+          (s) => s.declaration === decl && s.properties.includes(prop),
+        );
+        const slot = `${decl ?? '(anonymous)'}.${prop ?? '(computed)'}`;
+        if (entry) {
+          matched.add(entry.id);
+          for (const t of tags) {
+            const line = ts.getLineAndCharacterOfPosition(sf, t.getStart(sf)).line + 1;
+            const raw = typeof t.comment === 'string'
+              ? t.comment
+              : (t.comment ?? []).map((c) => c.text ?? '').join('');
+            const source = inlineExampleSource(raw);
+            if (source === undefined) {
+              loud.push(
+                `${rel}:${line} [${slot}] — a registered ${entry.dialect} slot whose @example does not ` +
+                  `open with a quoted expression, so nothing was judged: ${JSON.stringify(raw.slice(0, 80))}`,
+              );
+              continue;
+            }
+            sites.push({
+              where: `${rel}:${line}`, file: rel, rule: entry.id, slot,
+              dialect: entry.dialect, source, judge: entry.judge,
+            });
+          }
+        } else if (node.initializer && EXPRESSION_SLOT_TYPES.test(node.initializer.getText(sf))) {
+          const line = ts.getLineAndCharacterOfPosition(sf, tags[0].getStart(sf)).line + 1;
+          loud.push(
+            `${rel}:${line} [${slot}] — an expression-typed slot carrying ${tags.length} @example(s) ` +
+              `that no entry in SPEC_EXAMPLE_SLOTS claims. Its SCOPE is not knowable from its schema ` +
+              `type (an ExpressionInputSchema slot may bind the record, a page, or a flow), so this ` +
+              `gate refuses to guess it. Add a registry entry naming the dialect, or an exemption.`,
+          );
+        }
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sf);
+  return { sites, loud, matched };
+}
+
+/**
+ * Reconcile judged sites against the exemption list — the whole exemption
+ * contract, as a pure function so the self-test can drive all three directions
+ * (covered, stale, unnecessary) without a corpus that happens to contain them.
+ *
+ * `judged` is `[{ where, file, slot, dialect, source, messages }]`.
+ */
+export function applyExemptions(judged, exemptions) {
+  const violations = [];
+  const used = new Set();
+  const unnecessary = [];
+  let cleared = 0;
+
+  for (const site of judged) {
+    const i = exemptions.findIndex(
+      (e) => e.file === site.file && e.slot === site.slot && e.source === site.source,
+    );
+    if (i !== -1) {
+      used.add(i);
+      // Self-invalidating the other way: an exemption over a site that now judges
+      // clean is dead weight pretending to be diligence.
+      if (site.messages.length === 0) unnecessary.push({ index: i, where: site.where });
+      continue;
+    }
+    cleared++;
+    for (const message of site.messages) {
+      violations.push({ where: site.where, via: `${site.slot} — ${site.dialect}`, source: site.source, message });
+    }
+  }
+
+  const stale = exemptions
+    .map((e, i) => ({ e, i }))
+    .filter(({ i }) => !used.has(i))
+    .map(({ e }) => `${e.file} [${e.slot}] ${JSON.stringify(e.source)}`);
+
+  return { violations, stale, unnecessary, cleared };
+}
+
+/**
+ * Judge every spec TSDoc site, applying the exemption list.
+ *
+ * Returns the violations, the loud-but-unjudged sites, the per-rule site counts
+ * (so a bare zero can never pass for a clean corpus), and the exemption
+ * bookkeeping the caller turns into stale/unnecessary errors.
+ */
+function scanSpecTsdoc(files) {
+  const loud = [];
+  const counts = new Map();
+  const matchedRules = new Set();
+  const judged = [];
+
+  for (const file of files) {
+    const rel = posix(relative(REPO_ROOT, file));
+    const text = readFileSync(file, 'utf8');
+    const a = specFencedFormulaSites(rel, text);
+    const b = specSlotSites(rel, text);
+    loud.push(...a.loud, ...b.loud);
+    for (const id of b.matched) matchedRules.add(id);
+
+    for (const site of [...a.sites, ...b.sites]) {
+      counts.set(site.rule, (counts.get(site.rule) ?? 0) + 1);
+      judged.push({ ...site, messages: site.judge(site.source) });
+    }
+  }
+
+  const { violations, stale, unnecessary, cleared } = applyExemptions(judged, EXEMPT_EXAMPLES);
+  const blindRules = SPEC_EXAMPLE_SLOTS.filter((s) => !matchedRules.has(s.id)).map((s) => s.id);
+
+  return {
+    violations, loud, counts, judged: cleared, blindRules,
+    staleExemptions: stale, exemptionsUnnecessary: unnecessary,
+  };
+}
+
 // ── Self-test ────────────────────────────────────────────────────────────────
 
 /**
@@ -405,6 +823,170 @@ const SELF_TEST_CASES = [
   },
 ];
 
+/**
+ * Surface 2's own both-directions test (#6763).
+ *
+ * `code` is a spec-source FRAGMENT, not an expression: the whole point of this
+ * surface is that the docblock, the slot it hangs on and the enclosing schema
+ * are all part of the admission decision, so a fixture that skipped straight to
+ * the string would test nothing that broke.
+ *
+ * The RED fixtures are the verbatim defects — #6641's `check` example as it
+ * shipped, and the `HookSchema.condition` example this gate's own stock pass
+ * found. This test therefore fails if the gate ever stops catching either.
+ */
+const SPEC_SELF_TEST_CASES = [
+  {
+    name: 'RED — #6641 verbatim: the RLS `check` example that compiles to a deny-everything policy',
+    code: 'const RowLevelSecurityPolicySchema = strictObject({\n'
+      + "  /** @example \"status IN ('draft', 'pending')\" - Only allow certain statuses */\n"
+      + '  check: z.string().optional(),\n});',
+    expect: { sites: 1, errors: 1, match: /does not compile/ },
+  },
+  {
+    name: 'GREEN — the shipped fix (#6729): the same idiom as a CEL bracket list',
+    code: 'const RowLevelSecurityPolicySchema = strictObject({\n'
+      + "  /** @example \"status in ['draft', 'pending']\" - Only allow certain statuses */\n"
+      + '  check: z.string().optional(),\n});',
+    expect: { sites: 1, errors: 0 },
+  },
+  {
+    name: 'GREEN — the `using` examples the SQL bridge still carries, caption and all',
+    code: 'const RowLevelSecurityPolicySchema = strictObject({\n'
+      + '  /**\n   * @example "organization_id = current_user.organization_id"\n'
+      + '   * @example "assigned_to_id IN (current_user.team_member_ids)" // §7.3.1 pre-resolved\n'
+      + '   * @example "1 = 1" // privileged-position allow-all\n   */\n'
+      + '  using: z.string().optional(),\n});',
+    expect: { sites: 3, errors: 0 },
+  },
+  {
+    name: 'RED — the record-scoped hook `condition` example is SQL where the slot is CEL (#6763 stock pass)',
+    code: 'const HookSchema = strictObject({\n'
+      + '  /** @example "status = \'active\' AND amount > 1000" */\n'
+      + '  condition: ExpressionInputSchema.optional(),\n});',
+    expect: { sites: 1, errors: 1, match: /invalid CEL/ },
+  },
+  {
+    name: 'NOT ADMITTED — a neighbouring slot\'s JSON @example is not an expression',
+    code: 'const RowLevelSecurityPolicySchema = strictObject({\n'
+      + '  /** @example ["sales_rep", "account_manager"]\n   * @example ["employee"] - Apply to all employees */\n'
+      + '  positions: z.array(z.string()).optional(),\n});',
+    expect: { sites: 0, loud: 0 },
+  },
+  {
+    name: 'LOUD — an expression-typed slot nobody registered is reported, never guessed at',
+    code: 'const PageComponentSchema = strictObject({\n'
+      + '  /** @example "page.selectedProjectId != \'\'" */\n'
+      + '  visibleWhen: ExpressionInputSchema.optional(),\n});',
+    expect: { sites: 0, loud: 1, loudMatch: /no entry in SPEC_EXAMPLE_SLOTS claims/ },
+  },
+  {
+    name: 'LOUD — a registered slot whose @example is prose carries no judged expression',
+    code: 'const HookSchema = strictObject({\n'
+      + '  /** @example see the cookbook for a worked predicate */\n'
+      + '  condition: ExpressionInputSchema.optional(),\n});',
+    expect: { sites: 0, loud: 1, loudMatch: /does not open with a quoted expression/ },
+  },
+  {
+    name: 'PASS A — a fenced formula example inside spec TSDoc is judged by the existing rule',
+    code: '/**\n * @example\n * ```ts\n'
+      + " * total: Field.formula({ expression: 'quantity * price' }),\n"
+      + ' * ```\n */\nexport const X = 1;',
+    expect: { sites: 1, errors: 1, match: /bare reference `quantity`/ },
+  },
+  {
+    name: 'PASS A — the canonical spelling in a fenced spec example is clean',
+    code: '/**\n * @example\n * ```ts\n'
+      + " * total: Field.formula({ expression: 'record.quantity * record.price' }),\n"
+      + ' * ```\n */\nexport const X = 1;',
+    expect: { sites: 1, errors: 0 },
+  },
+];
+
+/** The exemption contract's three directions, executed rather than described. */
+const EXEMPTION_SELF_TEST_CASES = [
+  {
+    name: 'EXEMPTION — a red site with a matching entry is cleared, and nothing is stale',
+    judged: [{ where: 'f.ts:1', file: 'f.ts', slot: 'S.c', dialect: 'd', source: 'bad', messages: ['boom'] }],
+    exemptions: [{ file: 'f.ts', slot: 'S.c', source: 'bad', reason: 'deliberately partial' }],
+    expect: { violations: 0, stale: 0, unnecessary: 0 },
+  },
+  {
+    name: 'EXEMPTION — an entry that matches no site is STALE, not a silent pass',
+    judged: [],
+    exemptions: [{ file: 'gone.ts', slot: 'S.c', source: 'bad', reason: 'r' }],
+    expect: { violations: 0, stale: 1, unnecessary: 0 },
+  },
+  {
+    name: 'EXEMPTION — an entry over a site that now judges clean is UNNECESSARY',
+    judged: [{ where: 'f.ts:1', file: 'f.ts', slot: 'S.c', dialect: 'd', source: 'ok', messages: [] }],
+    exemptions: [{ file: 'f.ts', slot: 'S.c', source: 'ok', reason: 'r' }],
+    expect: { violations: 0, stale: 0, unnecessary: 1 },
+  },
+  {
+    name: 'EXEMPTION — the match is exact: a near-miss source does NOT excuse the site',
+    judged: [{ where: 'f.ts:1', file: 'f.ts', slot: 'S.c', dialect: 'd', source: 'bad', messages: ['boom'] }],
+    exemptions: [{ file: 'f.ts', slot: 'S.c', source: 'bad ', reason: 'r' }],
+    expect: { violations: 1, stale: 1, unnecessary: 0 },
+  },
+];
+
+function specSelfTest() {
+  const problemsFor = (c) => {
+    const problems = [];
+    const a = specFencedFormulaSites('fixture.zod.ts', c.code);
+    const b = specSlotSites('fixture.zod.ts', c.code);
+    const sites = [...a.sites, ...b.sites];
+    const loud = [...a.loud, ...b.loud];
+    if (sites.length !== (c.expect.sites ?? 0)) {
+      problems.push(`admitted ${sites.length} site(s), expected ${c.expect.sites ?? 0}`);
+    }
+    if (c.expect.loud !== undefined && loud.length !== c.expect.loud) {
+      problems.push(`${loud.length} loud site(s), expected ${c.expect.loud}: ${loud.join(' | ')}`);
+    }
+    if (c.expect.loudMatch && !loud.some((l) => c.expect.loudMatch.test(l))) {
+      problems.push(`no loud site matched ${c.expect.loudMatch}`);
+    }
+    if (c.expect.errors !== undefined && sites.length > 0) {
+      const errs = sites.flatMap((s) => s.judge(s.source));
+      if (errs.length !== c.expect.errors) {
+        problems.push(`${errs.length} error(s), expected ${c.expect.errors}` +
+          (errs.length ? `: ${errs.map((e) => e.split('\n')[0]).join(' | ')}` : ''));
+      }
+      if (c.expect.match && !errs.some((e) => c.expect.match.test(e))) {
+        problems.push(`no error matched ${c.expect.match}`);
+      }
+    }
+    return problems;
+  };
+
+  const exemptionProblemsFor = (c) => {
+    const problems = [];
+    const r = applyExemptions(c.judged, c.exemptions);
+    if (r.violations.length !== c.expect.violations) {
+      problems.push(`${r.violations.length} violation(s), expected ${c.expect.violations}`);
+    }
+    if (r.stale.length !== c.expect.stale) problems.push(`${r.stale.length} stale, expected ${c.expect.stale}`);
+    if (r.unnecessary.length !== c.expect.unnecessary) {
+      problems.push(`${r.unnecessary.length} unnecessary, expected ${c.expect.unnecessary}`);
+    }
+    return problems;
+  };
+
+  let failed = 0;
+  for (const c of SPEC_SELF_TEST_CASES) {
+    const problems = problemsFor(c);
+    if (problems.length) { failed++; console.error(`  ✗ ${c.name}\n      ${problems.join('\n      ')}`); }
+    else console.log(`  ✓ ${c.name}`);
+  }
+  for (const c of EXEMPTION_SELF_TEST_CASES) {
+    const problems = exemptionProblemsFor(c);
+    if (problems.length) { failed++; console.error(`  ✗ ${c.name}\n      ${problems.join('\n      ')}`); }
+    else console.log(`  ✓ ${c.name}`);
+  }
+  return failed;
+}
+
 function selfTest() {
   let failed = 0;
   for (const c of SELF_TEST_CASES) {
@@ -434,11 +1016,13 @@ function selfTest() {
       console.log(`  ✓ ${c.name}`);
     }
   }
+  failed += specSelfTest();
+  const total = SELF_TEST_CASES.length + SPEC_SELF_TEST_CASES.length + EXEMPTION_SELF_TEST_CASES.length;
   if (failed > 0) {
     console.error(`\n✗ check:doc-formula-expressions self-test: ${failed} case(s) failed`);
     process.exit(1);
   }
-  console.log(`\n✓ check:doc-formula-expressions self-test: ${SELF_TEST_CASES.length} cases passed`);
+  console.log(`\n✓ check:doc-formula-expressions self-test: ${total} cases passed`);
 }
 
 // ── Main ─────────────────────────────────────────────────────────────────────
@@ -485,7 +1069,80 @@ if (violations.length > 0) {
   process.exit(1);
 }
 
+// ── Surface 2 — spec TSDoc `@example` (#6763) ────────────────────────────────
+
+const specFiles = collectSpecFiles();
+const spec = scanSpecTsdoc(specFiles);
+
+if (spec.blindRules.length > 0) {
+  console.error(
+    `✗ check:doc-formula-expressions — ${spec.blindRules.length} SPEC_EXAMPLE_SLOTS entr(y/ies) matched\n` +
+      `  NO @example anywhere under ${SPEC_ROOT}: ${spec.blindRules.join(', ')}\n\n` +
+      `  A registry entry that matches nothing is a gate that has gone blind while still\n` +
+      `  reporting success — the schema was renamed, the slot moved, or the examples were\n` +
+      `  deleted. Re-point the entry at where the slot lives now, or remove it deliberately.`,
+  );
+  process.exit(1);
+}
+
+if (spec.staleExemptions.length > 0 || spec.exemptionsUnnecessary.length > 0) {
+  console.error(`✗ check:doc-formula-expressions — the EXEMPT_EXAMPLES list no longer describes reality:\n`);
+  for (const s of spec.staleExemptions) {
+    console.error(`    STALE (matches no example): ${s}`);
+  }
+  for (const u of spec.exemptionsUnnecessary) {
+    console.error(`    UNNECESSARY (the example now judges clean): ${u.where}`);
+  }
+  console.error(
+    `\n  An exemption outlives the thing it excuses only by accident, and a list nobody has to\n` +
+      `  maintain is how a gate quietly stops covering its own corpus. Delete the entry — a\n` +
+      `  clean example needs no excuse, and a missing one has no site to excuse.`,
+  );
+  process.exit(1);
+}
+
+if (spec.loud.length > 0) {
+  console.error(
+    `✗ check:doc-formula-expressions — ${spec.loud.length} spec TSDoc @example site(s) look like they\n` +
+      `  carry an expression but were NOT judged:\n`,
+  );
+  for (const l of spec.loud) console.error(`    ${l}`);
+  console.error(
+    `\n  Same reason as the docs corpus above: a gate that silently drops what it cannot read\n` +
+      `  reports success over a surface it never looked at.`,
+  );
+  process.exit(1);
+}
+
+if (spec.violations.length > 0) {
+  console.error(
+    `✗ check:doc-formula-expressions — ${spec.violations.length} spec TSDoc @example(s) would be\n` +
+      `  REJECTED by the runtime that compiles them:\n`,
+  );
+  for (const v of spec.violations) {
+    console.error(`    ${v.where}  [${v.via}]`);
+    console.error(`      source: ${JSON.stringify(v.source)}`);
+    console.error(`      ${v.message.split('\n').join('\n      ')}\n`);
+  }
+  console.error(
+    `  A schema's own @example is the first-hand transcription source for an author — #6641\n` +
+      `  shipped one that compiled to a deny-everything policy and survived until someone read\n` +
+      `  it by hand. If a snippet is deliberately partial, add it to EXEMPT_EXAMPLES with the\n` +
+      `  reason; do not weaken the rule.`,
+  );
+  process.exit(1);
+}
+
+const specBreakdown = SPEC_EXAMPLE_SLOTS.map((s) => `${s.id}=${spec.counts.get(s.id) ?? 0}`)
+  .concat(`record-formula=${spec.counts.get('record-formula') ?? 0}`)
+  .join(', ');
+
 console.log(
   `✓ check:doc-formula-expressions: ${checked} record-scoped formula example(s) across ` +
     `${files.length} files / ${blocks} TS blocks judged clean by @objectstack/formula.`,
+);
+console.log(
+  `✓ check:doc-formula-expressions (spec TSDoc, #6763): ${spec.judged} @example(s) judged clean across ` +
+    `${specFiles.length} ${SPEC_ROOT} files — ${specBreakdown}; ` +
+    `${EXEMPT_EXAMPLES.length} exempt.`,
 );
