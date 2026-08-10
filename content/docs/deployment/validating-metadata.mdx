@@ -350,35 +350,72 @@ another package defines.
 
 `os validate`, `os build` (alias of `os compile`) and `os lint` run the **same**
 author-time rules, from one table — `AUTHORING_RULES` in
-`packages/cli/src/lint/authoring-rules.ts`:
+`packages/lint/src/authoring-rules.ts`.
 
-| | `os validate` | `os build` | `os lint` |
-|---|---|---|---|
-| Protocol schema (Zod) | ✓ | ✓ | — |
-| CEL / predicate validation (ADR-0032) | ✓ | ✓ | ✓ |
-| List-view navigation modes (ADR-0053) | ✓ | ✓ | ✓ |
-| View container shape | ✓ | ✓ | ✓ |
-| Widget-binding integrity (ADR-0021) | ✓ | ✓ | ✓ |
-| Dashboard action/route references (ADR-0049) | ✓ | ✓ | ✓ |
-| Filter placeholder resolvability (#3574) | ✓ | ✓ | ✓ |
-| Object & action name references (#3583) | ✓ | ✓ | ✓ |
-| Page-component field bindings (#3583) | ✓ | ✓ | ✓ |
-| React page block field bindings — §10 (#4340) | ✓ | ✓ | ✓ |
-| Chart bindings outside dashboards (#3583) | ✓ | ✓ | ✓ |
-| Navigation vs. granted access (ADR-0090 D6) | ✓ | ✓ | ✓ |
-| SDUI scoped styling (ADR-0065) | ✓ | ✓ | ✓ |
-| JSX / React page source parses (ADR-0080/0081) | ✓ | ✓ | ✓ |
-| Approval-node approvers (ADR-0090 D3) | ✓ | ✓ | ✓ |
-| Security posture (ADR-0090 — e.g. every custom object declares `sharingModel`) | ✓ | ✓ | ✓ |
-| Organization-axis red lines (ADR-0105 D6) | ✓ | ✓ | ✓ |
-| Autonumber `{field}` interpolation | ✓ | ✓ | ✓ |
-| View references — form targets, view-key collisions (#2554) | ✓ | ✓ | ✓ |
-| Flow authoring anti-patterns (#1874) | ✓ | ✓ | ✓ |
-| Advisory: flow trigger wiring, record titles, semantic field pointers (ADR-0085), seed replay/state safety, capability references, liveness, visibility aliases | ✓ | ✓ | ✓ |
-| Package docs — flatness, prefixes, links (ADR-0046) | ✓ | ✓ | ✓ |
-| Undeclared authoring keys — every metadata collection (#3786) and the stack's own top-level keys (#4167) | ✓ | ✓ | — |
-| Naming, labels, data-model conventions, i18n coverage | — | — | ✓ |
-| Emits `dist/objectstack.json` | — | ✓ | — |
+There is a fourth door, and it is not a command. Every metadata **write** —
+Studio's designer, `PUT /api/v1/meta/*`, an MCP/AI author — lands in
+`saveMetaItem`, and since #4463 a write going **`state: 'active'`** runs that
+same table before it persists. So does the draft→active promotion
+(`publishMetaItem`), because otherwise saving `?mode=draft` and then publishing
+would be the bypass. Draft saves themselves are deliberately never gated: a
+draft is allowed to be half-finished, and it cannot execute until it is
+published.
+
+For someone authoring in Studio that door is not one of four — it is the **only**
+one. `sys_metadata` overlay rows are not in any config file, so there is no
+`os lint` they could have run instead.
+
+| | `os validate` | `os build` | `os lint` | runtime publish |
+|---|---|---|---|---|
+| Protocol schema (Zod) | ✓ | ✓ | — | ✓ |
+| CEL / predicate validation (ADR-0032) | ✓ | ✓ | ✓ | ✓ᶠ |
+| List-view navigation modes (ADR-0053) | ✓ | ✓ | ✓ | — |
+| View container shape | ✓ | ✓ | ✓ | — |
+| Widget-binding integrity (ADR-0021) | ✓ | ✓ | ✓ | — |
+| Dashboard action/route references (ADR-0049) | ✓ | ✓ | ✓ | — |
+| Filter placeholder resolvability (#3574) | ✓ | ✓ | ✓ | — |
+| Empty filter combinators — `$and: []`, `$or: []`, `$not: {}` (#5330) | ✓ | ✓ | ✓ | ✓ᶠ |
+| Object & action name references (#3583) | ✓ | ✓ | ✓ | — |
+| Flow reference integrity — node writes, template paths, read-only writes (#3583) | ✓ | ✓ | ✓ | ✓ᶠ |
+| Page-component field bindings (#3583) | ✓ | ✓ | ✓ | — |
+| React page block field bindings — §10 (#4340) | ✓ | ✓ | ✓ | — |
+| Chart bindings outside dashboards (#3583) | ✓ | ✓ | ✓ | — |
+| Navigation vs. granted access (ADR-0090 D6) | ✓ | ✓ | ✓ | — |
+| SDUI scoped styling (ADR-0065) | ✓ | ✓ | ✓ | — |
+| JSX / React page source parses (ADR-0080/0081) | ✓ | ✓ | ✓ | — |
+| Approval-node approvers (ADR-0090 D3) | ✓ | ✓ | ✓ | ✓ᶠ |
+| Security posture (ADR-0090 — e.g. every custom object declares `sharingModel`) | ✓ | ✓ | ✓ | — |
+| Organization-axis red lines (ADR-0105 D6) | ✓ | ✓ | ✓ | — |
+| Platform-schedule `create_record` organization (#6285) | — | — | — | ✓ᶠ |
+| Autonumber `{field}` interpolation | ✓ | ✓ | ✓ | — |
+| View references — form targets, view-key collisions (#2554) | ✓ | ✓ | ✓ | — |
+| Flow authoring anti-patterns (#1874) | ✓ | ✓ | ✓ | ✓ᶠ |
+| Flow trigger readiness — a flow that looks armed and never launches (#5762) | ✓ | ✓ | ✓ | ✓ᶠ |
+| Advisory: record titles, semantic field pointers (ADR-0085), seed replay/state safety, capability references, liveness | ✓ | ✓ | ✓ | — |
+| Package docs — flatness, prefixes, links (ADR-0046) | ✓ | ✓ | ✓ | — |
+| Undeclared authoring keys — every metadata collection (#3786) and the stack's own top-level keys (#4167) | ✓ | ✓ | — | — |
+| Naming, labels, data-model conventions, i18n coverage | — | — | ✓ | — |
+| Emits `dist/objectstack.json` | — | ✓ | — | — |
+
+**`✓ᶠ` means the rule runs at that door for `flow` writes.** `flow` is the only
+metadata type any rule declares there today — #4463 shipped P1 as one type and
+four rule families, and widening is a data edit nobody has made yet. So an
+object, view, page or dashboard save is checked by the schema parse and by
+nothing else, and the `—` cells above are `—` for two different reasons: some
+rules read a stack-wide collection a one-item write does not carry (pages,
+dashboards, navigation, permission sets), and some parse authored source through
+`typescript`, which the kernel boot path must never load.
+
+Both halves of a gate's behaviour are on this door. Gating findings **refuse**
+the write, as the same `422 invalid_metadata` envelope a schema failure
+produces — `issues[]` carrying `rule`, `path`, `where`, `message` and `hint`, so
+Studio can point at the offending field. Advisory findings never block: they
+ride back on the save response under `advisories`, which is the channel a Studio
+or MCP/AI author can actually read — server logs are not. A clean save carries no
+`advisories` key at all. `OS_ALLOW_UNLINTED_METADATA_WRITES=1` degrades a
+refusal to a loud log for a migration window, so rows written before the gate
+existed stay re-savable; it converts refusals, and never promotes them into
+`advisories`.
 
 So `os validate` is the fast inner-loop check (no artifact), `os build` is what
 you run when you need the deployable artifact, and `os lint` adds its own style
@@ -386,17 +423,33 @@ rubric on top. **Any rule that can fail a build runs on all three**, so a green
 `os lint` means the build's gates are green too, and a stack cannot be published
 through the one command that happens to skip a check.
 
-Two rows are deliberately not universal, and both are one-directional (neither
-lets a stack through a gate another command enforces): the Zod parse and the
-undeclared-key diff need the pre-parse tier and the schema, which only the two
-commands that parse actually have; and `os lint`'s own rubric — snake_case
-names, missing labels, data-model conventions — is a lint verdict, not a publish
-gate. `os build` has never rejected a camelCase object name.
+The fourth door does not weaken that, because it is held to the CLI's verdicts
+rather than to its own: a test fails if a rule runs at the runtime publish gate
+but not on `os build` — the two publish verbs must not disagree. What that
+column narrows is which *types* it judges, never which *verdict* it reaches. The
+one deliberate exception is the platform-schedule row (#6285), runtime-only by ruling:
+both of its inputs are facts about the **deployment** (the organization this
+write lands in, and whether this deployment walls organizations), and a build
+machine's environment is a false signal for them — so `os build` must not judge
+it at all.
+
+Two rows are deliberately not universal across the three commands, and both are
+one-directional (neither lets a stack through a gate another command enforces):
+the Zod parse and the undeclared-key diff need the pre-parse tier and the schema,
+which only the two commands that parse actually have; and `os lint`'s own
+rubric — snake_case names, missing labels, data-model conventions — is a lint
+verdict, not a publish gate. `os build` has never rejected a camelCase object
+name.
 
 That invariant is enforced, not merely documented. Each rule declares its command
 coverage as data, and a CLI test fails if a rule that can emit `error` runs on
 fewer than all three, if a narrowed rule carries no written reason, or if any
-command reaches for a rule directly instead of going through the registry.
+command reaches for a rule directly instead of going through the registry. The
+fourth door is declared the same way, in the same entry, and checked by the same
+test: every rule says whether the runtime publish gate runs it — naming the
+metadata types it inspects when it does, and giving a written reason when it does
+not. There is no third option, so a rule cannot end up at that door, or off it,
+by nobody's decision.
 
 The enforcement exists because the contract drifted four separate times, and the
 last audit (#4409) found 23 of 26 rules running on some strict subset of the
@@ -431,8 +484,8 @@ see [the gate in action](/docs/getting-started/build-with-claude-code#4-the-gate
 for the bare-reference example verbatim.
 
 <Callout type="info">
-`os lint` runs every gate above **plus** its own style rubric (snake_case
-naming, required labels, namespace prefixes, data-model patterns, translation
+`os lint` runs every rule the three commands share **plus** its own style rubric
+(snake_case naming, required labels, namespace prefixes, data-model patterns, translation
 coverage). It does not replace `os validate` — it never parses against the Zod
 schema, so a schema error is `os validate`'s verdict to give — but a rule that
 can fail the build fails `os lint` too.
