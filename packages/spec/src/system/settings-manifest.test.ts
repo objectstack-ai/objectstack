@@ -302,6 +302,96 @@ describe('Specifier.valueDomain (#5933)', () => {
   });
 });
 
+describe('`visible` — the settings visibility grammar (#7327)', () => {
+  const withVisible = (visible: unknown) =>
+    SpecifierSchema.safeParse({ type: 'text', key: 'smtp_host', label: 'Host', visible });
+  const firstMessage = (visible: unknown): string => {
+    const result = withVisible(visible);
+    return result.success ? '' : result.error.issues[0].message;
+  };
+
+  // The shapes the ten bundled manifests are actually written in. The
+  // cross-package half — that this schema and `evaluateVisibility` accept the
+  // same set, measured against the real corpus — is pinned from the consumer
+  // side, in `service-settings/src/settings-visibility-declaration.pin.test.ts`.
+  it.each([
+    "${data.provider === 'smtp'}",
+    "${data.provider !== 'memory'}",
+    '${data.email_password_enabled !== false}',
+    '${data.mfa_required === true}',
+    '${data.lockout_threshold > 0}',
+    "${data.provider === 'resend' || data.provider === 'postmark'}",
+    "${data.embedder_provider && data.embedder_provider !== 'none'}",
+    '${!data.disabled}',
+    '${data.count <= 10 && (data.a == 1 || data.b != null)}',
+    '${data.ratio >= 0.5}',
+  ])('accepts %s', (visible) => {
+    expect(withVisible(visible).success).toBe(true);
+  });
+
+  it('accepts the unwrapped spelling and the `{ dialect, source }` envelope', () => {
+    expect(withVisible("data.provider === 'smtp'").success).toBe(true);
+    expect(withVisible({ dialect: 'cel', source: "${data.provider === 'smtp'}" }).success).toBe(true);
+    // An `ast`-only envelope is opaque at this layer — nothing to walk.
+    expect(withVisible({ dialect: 'cel', ast: { kind: 'opaque' } }).success).toBe(true);
+  });
+
+  it('normalises a bare string to the canonical envelope, unchanged by the narrowing', () => {
+    const parsed = SpecifierSchema.parse({
+      type: 'text', key: 'smtp_host', label: 'Host', visible: "${data.provider === 'smtp'}",
+    });
+    expect(parsed.visible).toEqual({ dialect: 'cel', source: "${data.provider === 'smtp'}" });
+  });
+
+  // The point of #7327: this slot never was CEL, and an author who wrote CEL
+  // here used to be told so only by a failing tenant save (#7169 / PR #7310).
+  it.each([
+    ["${data.provider in ['smtp', 'resend']}", 'unsupported identifier "in"'],
+    ['${size(data.recipients) > 0}', 'unsupported identifier "size"'],
+    ["${current_user.role === 'admin'}", 'unsupported identifier "current_user.role"'],
+    ['${data.nested.field === 1}', 'unsupported reference "data.nested.field"'],
+    ["${data.provider.startsWith('s')}", 'unsupported reference "data.provider.startsWith"'],
+  ])('refuses CEL %s', (visible, detail) => {
+    expect(withVisible(visible).success).toBe(false);
+    expect(firstMessage(visible)).toContain(detail);
+  });
+
+  it.each([
+    ['${data.provider ===}', 'unexpected end of expression'],
+    ["${data.a === 'x'} && ${data.b === 'y'}", 'unexpected character "}"'],
+    ['${-5 > data.x}', 'unexpected character "-"'],
+    ["${(data.a === 'x'}", 'missing closing parenthesis'],
+    ["${data.a 'x'}", 'trailing tokens'],
+  ])('refuses malformed %s', (visible, detail) => {
+    expect(withVisible(visible).success).toBe(false);
+    expect(firstMessage(visible)).toContain(detail);
+  });
+
+  it('prescribes the grammar rather than only naming the violation', () => {
+    // Every part an author needs to rewrite the predicate without leaving the
+    // error: the offending source, the reason, and the grammar itself.
+    const message = firstMessage("${data.provider in ['smtp']}");
+    expect(message).toContain("data.provider in ['smtp']");
+    expect(message).toContain('unsupported identifier "in"');
+    expect(message).toContain('not CEL');
+    expect(message).toContain('one-level member access');
+    expect(message).toContain('`===` `!==` `==` `!=` `>=` `<=` `>` `<`');
+    expect(message).toContain("`${data.x === 'a' || data.x === 'b'}`");
+  });
+
+  it('applies to the manifest-level slot too', () => {
+    const base = {
+      namespace: 'demo',
+      label: 'Demo',
+      specifiers: [{ type: 'text', key: 'smtp_host', label: 'Host' }],
+    };
+    expect(SettingsManifestSchema.safeParse({ ...base, visible: "${data.tier === 'pro'}" }).success).toBe(true);
+    const refused = SettingsManifestSchema.safeParse({ ...base, visible: "${data.tier in ['pro']}" });
+    expect(refused.success).toBe(false);
+    expect(refused.success ? [] : refused.error.issues[0].path).toEqual(['visible']);
+  });
+});
+
 describe('valueDomain membership definitions — the measurements service-settings must implement', () => {
   // These pin the TSDoc on `SpecifierValueDomainSchema`. `packages/spec` does
   // not enforce a domain (Prime Directive #2) — but the two halves have to agree
