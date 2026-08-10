@@ -1,0 +1,78 @@
+// Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+
+import type { SemanticMigration } from '../../types.js';
+
+export const entry: SemanticMigration = {
+  id: 'actor-user-roles-to-positions',
+  surface: 'action body / AI route: ctx.user.roles (req.user.roles)',
+  replacement:
+    'ctx.user.positions (an AI route handler reads `req.user.positions`) — the same array, '
+    + 'under the one spelling ADR-0090 D3 sanctions',
+  reason:
+    'The THIRD face of the ADR-0090 `roles` → `positions` rename, and the only one whose '
+    + 'surface the spec never declared. `ActorUser` '
+    + '(`packages/runtime/src/security/actor-user.ts`) is the ONE producer of the `user` '
+    + 'envelope handed to an action body as `ctx.user` and to an AI route handler as '
+    + '`req.user`; it declared `positions` and `roles` side by side and filled them from a '
+    + 'SINGLE assignment (`roles: core.positions`), so the two keys were verbatim identical '
+    + 'on every dispatch — a second spelling of the vocabulary ADR-0090 D3 reserves and bans, '
+    + 'published straight into author-written code. The maintainer ruled it closed IMMEDIATELY '
+    + '(2026-08-06 14:49Z, #6011): no deprecation window, no dual-emit, the alias simply gone '
+    + 'in 17 (PR #6048). '
+    + '⚠️ Do not read this entry across to its neighbour above: '
+    + '`action-session-roles-to-positions` governs `ctx.session`, a DIFFERENT object reached '
+    + 'through the same `ctx`, and that one KEEPS its one-window dual-emit (#5613). Same word, '
+    + 'same dispatch, two faces, two schedules — `ctx.user.roles` is absent in 17 while '
+    + '`ctx.session.roles` still answers for the length of its window. '
+    + 'What makes this entry different in KIND from both session-side siblings: `ctx.user` has '
+    + 'no spec schema and never had one. It is a runtime TS interface, so unlike '
+    + '`HookContext.session.roles` (tombstoned on a deliberately non-strict `HookContextSchema`, '
+    + '#5050) and unlike `ActionSessionSchema` (declared contract-first at #5697 precisely so '
+    + 'its key could be renamed), there is no schema key here to tombstone and no '
+    + '`retiredKey()` prescription that could reach anybody — nothing ever ran an `ActorUser` '
+    + 'through a `.parse()`, so a prescription there would have no one to reach. The enforced '
+    + 'channel is tsc, and it reports at the READ site inside the author\'s own body; for an '
+    + 'untyped or sandboxed body there is no enforced channel at all, which is exactly why '
+    + 'this ledger entry has to exist — `spec-changes.json` and the generated upgrade guide '
+    + 'are the ONLY way such a reader learns of the rename. It is the `findStream` (#4484) / '
+    + '`IStorageService.list` (#5540) disposition — a TS/API contract, no stored source, no '
+    + 'tombstone, tsc at the call site — applied to a surface that lives one layer further '
+    + 'out than either: those two are at least DECLARED in `packages/spec/src/contracts`, '
+    + 'this one only in `packages/runtime`. '
+    + 'Why it is a D3 semantic TODO and not a D2 conversion, on the same two independent '
+    + 'grounds as its session sibling: FIRST, there is no source to convert — an `ActorUser` '
+    + 'is constructed per dispatch and never persisted, so no `sys_metadata` row, example or '
+    + 'template can carry the key (the `openApi31` (#4579) / `activationEvents` (#4657) / '
+    + '`hook-context-session-roles-retired` (#5050) shape). SECOND, the only place the key is '
+    + 'ever SPELLED is inside an action body or an AI route handler: author-written JS/TS, or '
+    + 'a sandboxed script. A declarative transform cannot safely rewrite an identifier inside '
+    + 'free-form code — the same reason the ADR-0090 wave delegated `current_user.roles` to '
+    + 'the author at step 13 (`cel-current-user-roles-to-positions`) instead of substituting '
+    + 'text. '
+    + 'The removal\'s hard precondition was met before it landed, and the result is recorded '
+    + 'here because the ledger is where an upgrading consumer meets it: the declaration\'s own '
+    + 'comment claimed the alias was "kept for the REST/AI shapes", and that claim was '
+    + 'DISPROVEN face by face against `origin/main` — repo-wide `user.roles` was 4 hits, all '
+    + 'of them in the pins PR #6048 flipped; the four `ActorUser` construction sites build '
+    + 'server-side envelopes that never enter a response body; objectui\'s `.roles` reads '
+    + 'belong to two unrelated producers (the better-auth session, and the '
+    + '`/auth/me/permissions` payload). The `cloud` repo was NOT reachable in that session and '
+    + 'is the one consumer face left unverified — this entry, and the changeset\'s FROM/TO '
+    + 'prescription, are its disposition. ADR-0090 D3 / ADR-0049 / ADR-0087, #6011 (PR #6048).',
+  acceptanceCriteria:
+    'No action body reads `ctx.user.roles` and no AI route handler reads `req.user.roles`; '
+    + 'every such read is `.positions` and observes the SAME array — the value was '
+    + '`ExecutionContext.positions` on both sides, so this is a pure key rename and no value '
+    + 'has to be re-derived. Privilege is NOT re-derived from either spelling: a read that was '
+    + '`roles.includes(\'admin\')` as an access check is rewritten to ask the security service '
+    + '(capability grants / placements / derived posture, ADR-0095), never renamed to '
+    + '`positions.includes(\'admin\')` — renaming that read migrates the defect rather than the '
+    + 'code. Unlike `ctx.session` there is NO window to migrate inside: in 17 the key is '
+    + 'already absent, so a typed body fails `tsc` at the read while an untyped or sandboxed '
+    + 'one silently sees `undefined` — move the read AS you upgrade, not after it. Verify '
+    + 'against a real dispatch rather than a fixture: invoke an action (and an AI route) as a '
+    + 'caller holding positions, assert the body observed them under the canonical key, and '
+    + 'assert the old key is ABSENT by key existence (`\'roles\' in ctx.user === false`) rather '
+    + 'than by `undefined`, which cannot tell a removed key from one left behind holding '
+    + 'nothing — the runtime pin `action-ctx-user-shape.test.ts` asserts both halves that way.',
+};

@@ -36,6 +36,15 @@
 # WIDEN them), variant-docs.json and the migrations/conversions registries
 # (hand-written). Those conflicts are for a human. See NOT_DRIVER_MANAGED.
 #
+# The migrations registry is the interesting one since #7297: its three append
+# tables now come from `packages/spec/src/migrations/entries/` (one file per
+# entry, the `.changeset/*.md` shape), so the conflict two retirement cards used
+# to have is gone at the SOURCE — different entries are different files. The
+# file stays out of this list anyway, because it is now MIXED: a driver that
+# deferred it whole would resolve its still-hand-written prose by regenerating,
+# which loses an edit rather than a merge. `check:migration-registry` is what
+# guards the generated half instead.
+#
 # The strictness ledger's COUNTS file joined at #5107 — the ledger's numbers were
 # the repo's hottest conflict surface and merged in the one way that hides: two
 # batches each decrement a header by their own correct delta, the rows merge

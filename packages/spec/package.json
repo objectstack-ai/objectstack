@@ -204,6 +204,8 @@
     "check:exported-any": "tsx scripts/check-exported-any.ts --self-test && tsx scripts/check-exported-any.ts",
     "check:dual-source-exports": "tsx scripts/check-dual-source-exports.ts --self-test && tsx scripts/check-dual-source-exports.ts",
     "check:authorable-surface": "OS_EAGER_SCHEMAS=1 tsx scripts/build-schemas.ts --check",
+    "gen:migration-registry": "tsx scripts/build-migration-registry.ts",
+    "check:migration-registry": "tsx scripts/build-migration-registry.ts --self-test --check",
     "gen:spec-changes": "tsx scripts/build-spec-changes.ts",
     "check:spec-changes": "tsx scripts/build-spec-changes.ts --check",
     "gen:upgrade-guide": "tsx scripts/build-upgrade-guide.ts",

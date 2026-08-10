@@ -14,6 +14,28 @@
  * (`migrations.test.ts`). The support floor is an explicit release-policy knob —
  * how far back `migrate meta --from N` reaches — revisitable per major, never an
  * accident of deletion.
+ *
+ * ## ⚠️ The three tables below are GENERATED (#7297)
+ *
+ * Each step's `semantic` list, {@link RETIRED_KEYS_BY_MAJOR} and
+ * {@link RETIRED_DEFS_BY_MAJOR} are concatenated into their `<os-generated …>`
+ * regions from `./entries/`, **one file per entry**, sorted by entry id. Add an
+ * entry by adding a FILE and running
+ * `pnpm --filter @objectstack/spec gen:migration-registry` — never by typing
+ * between the markers. See `./entries/README.md`.
+ *
+ * They were three hand-authored APPEND tables, and every retirement card
+ * appended to the same tail line of the same two of them: `step17`'s semantic
+ * list and `RETIRED_KEYS_BY_MAJOR[17]` conflicted in **6 of 11** contended
+ * re-merge laps over 2026-08-06..10, for 613 hand-resolved lines of conflict
+ * markers in four days (#6957's measurement, ruling adopted 2026-08-10). The
+ * danger was never the wall-clock: **both tables are consumed as sets**, so a
+ * resolution that drops a sibling's entry produces no error anywhere and the
+ * retirement it declared silently stops being declared.
+ *
+ * Everything OUTSIDE the markers — this header, each step's `rationale` and
+ * `conversionIds`, and the two tables' load-bearing doc comments — is still
+ * hand-written and still merges as text.
  */
 
 import type { MigrationStep } from './types.js';
@@ -55,6 +77,10 @@ const step11: MigrationStep = {
     'object-compactLayout-to-highlightFields',
   ],
   semantic: [
+    // One file per entry under `entries/semantic/`, concatenated here sorted by
+    // entry id by `gen:migration-registry` (#7297). Add an entry by adding a
+    // FILE — never by editing between the markers, which is generated.
+    // <os-generated semantic:11>
     {
       id: 'object-titleFormat-to-nameField',
       surface: 'object.titleFormat',
@@ -81,6 +107,7 @@ const step11: MigrationStep = {
         'Every RLS predicate parses as CEL and `objectstack validate` reports no ' +
         'expression errors; row visibility is unchanged for a representative fixture set.',
     },
+    // </os-generated semantic:11>
   ],
 };
 
@@ -102,6 +129,10 @@ const step12: MigrationStep = {
     'data anonymously must now declare that posture explicitly.',
   conversionIds: [],
   semantic: [
+    // One file per entry under `entries/semantic/`, concatenated here sorted by
+    // entry id by `gen:migration-registry` (#7297). Add an entry by adding a
+    // FILE — never by editing between the markers, which is generated.
+    // <os-generated semantic:12>
     {
       id: 'rest-requireauth-default-flip',
       surface: 'api.requireAuth',
@@ -117,6 +148,7 @@ const step12: MigrationStep = {
         'warning); every other consumer verifies its clients authenticate. ' +
         '`objectstack validate` and the consumer test suite pass.',
     },
+    // </os-generated semantic:12>
   ],
 };
 
@@ -146,35 +178,10 @@ const step13: MigrationStep = {
     'sharing-recipient-role-to-position',
   ],
   semantic: [
-    {
-      id: 'permission-set-profile-removed',
-      surface: 'permissionSet.kind / permissionSet.isProfile',
-      replacement: 'position-based assignment + permission-set grants (ADR-0090 D2)',
-      reason:
-        'The Profile concept was removed: `isProfile` is gone from ' +
-        '`PermissionSetSchema` and the `profile` metadata kind folded into ' +
-        '`position`. Mapping a profile onto positions and permission-set grants is ' +
-        'an authorization-design decision, not a rename.',
-      acceptanceCriteria:
-        'No permission set declares `isProfile` or kind `profile`; the intended ' +
-        'assignees hold equivalent grants via positions/permission sets. The access ' +
-        'matrix (`os compile` access-matrix gate, where enabled) is reviewed and ' +
-        '`objectstack validate` passes.',
-    },
-    {
-      id: 'position-hierarchy-flattened',
-      surface: 'position.parent / sharingRule recipient role_and_subordinates',
-      replacement: 'business-unit tree + `unit_and_subordinates` (ADR-0090 D3)',
-      reason:
-        'Positions are flat in v2 — `parent` was removed and the ' +
-        '`role_and_subordinates` recipient with it; hierarchy lives on the ' +
-        'business-unit tree, which expands a DIFFERENT structure than the retired ' +
-        'role tree. Re-homing an org hierarchy is a judgment call.',
-      acceptanceCriteria:
-        'No position declares `parent`; former `role_and_subordinates` rules are ' +
-        're-expressed with `unit_and_subordinates` over an equivalent business-unit ' +
-        'tree. Row visibility is unchanged for a representative fixture set.',
-    },
+    // One file per entry under `entries/semantic/`, concatenated here sorted by
+    // entry id by `gen:migration-registry` (#7297). Add an entry by adding a
+    // FILE — never by editing between the markers, which is generated.
+    // <os-generated semantic:13>
     {
       id: 'cel-current-user-roles-to-positions',
       surface: 'CEL/formula: current_user.roles',
@@ -205,6 +212,35 @@ const step13: MigrationStep = {
         'representative fixture set.',
     },
     {
+      id: 'permission-set-profile-removed',
+      surface: 'permissionSet.kind / permissionSet.isProfile',
+      replacement: 'position-based assignment + permission-set grants (ADR-0090 D2)',
+      reason:
+        'The Profile concept was removed: `isProfile` is gone from ' +
+        '`PermissionSetSchema` and the `profile` metadata kind folded into ' +
+        '`position`. Mapping a profile onto positions and permission-set grants is ' +
+        'an authorization-design decision, not a rename.',
+      acceptanceCriteria:
+        'No permission set declares `isProfile` or kind `profile`; the intended ' +
+        'assignees hold equivalent grants via positions/permission sets. The access ' +
+        'matrix (`os compile` access-matrix gate, where enabled) is reviewed and ' +
+        '`objectstack validate` passes.',
+    },
+    {
+      id: 'position-hierarchy-flattened',
+      surface: 'position.parent / sharingRule recipient role_and_subordinates',
+      replacement: 'business-unit tree + `unit_and_subordinates` (ADR-0090 D3)',
+      reason:
+        'Positions are flat in v2 — `parent` was removed and the ' +
+        '`role_and_subordinates` recipient with it; hierarchy lives on the ' +
+        'business-unit tree, which expands a DIFFERENT structure than the retired ' +
+        'role tree. Re-homing an org hierarchy is a judgment call.',
+      acceptanceCriteria:
+        'No position declares `parent`; former `role_and_subordinates` rules are ' +
+        're-expressed with `unit_and_subordinates` over an equivalent business-unit ' +
+        'tree. Row visibility is unchanged for a representative fixture set.',
+    },
+    {
       id: 'sharing-model-secure-default',
       surface: 'object.sharingModel (absent, custom object with owner field)',
       replacement: 'an explicit `sharingModel` declaration',
@@ -218,6 +254,7 @@ const step13: MigrationStep = {
         'an explicit `sharingModel`; row visibility is verified for a ' +
         'representative fixture set (owners, non-owners, admins).',
     },
+    // </os-generated semantic:13>
   ],
 };
 
@@ -236,7 +273,13 @@ const step14: MigrationStep = {
     'ADR-0090 D9). A pure key rename, preserved as a retired conversion; there ' +
     'is no semantic residue.',
   conversionIds: ['book-audience-profile-to-permission-set'],
-  semantic: [],
+  semantic: [
+    // One file per entry under `entries/semantic/`, concatenated here sorted by
+    // entry id by `gen:migration-registry` (#7297). Add an entry by adding a
+    // FILE — never by editing between the markers, which is generated.
+    // <os-generated semantic:14>
+    // </os-generated semantic:14>
+  ],
 };
 
 /**
@@ -260,6 +303,10 @@ const step15: MigrationStep = {
     'is now a loud parse error instead of a silent strip (ADR-0049/0078).',
   conversionIds: ['view-visibleOn-to-visibleWhen', 'page-component-visibility-to-visibleWhen'],
   semantic: [
+    // One file per entry under `entries/semantic/`, concatenated here sorted by
+    // entry id by `gen:migration-registry` (#7297). Add an entry by adding a
+    // FILE — never by editing between the markers, which is generated.
+    // <os-generated semantic:15>
     {
       id: 'ui-schemas-strict-unknown-keys',
       surface: 'view form fields/sections · page components (undeclared keys)',
@@ -274,6 +321,7 @@ const step15: MigrationStep = {
         '`objectstack validate` passes with no unknown-key parse errors on form ' +
         'fields, form sections, or page components.',
     },
+    // </os-generated semantic:15>
   ],
 };
 
@@ -302,6 +350,10 @@ const step16: MigrationStep = {
     'because an arbitrary unknown key has no lossless canonical target.',
   conversionIds: [],
   semantic: [
+    // One file per entry under `entries/semantic/`, concatenated here sorted by
+    // entry id by `gen:migration-registry` (#7297). Add an entry by adding a
+    // FILE — never by editing between the markers, which is generated.
+    // <os-generated semantic:16>
     {
       id: 'dashboard-widget-strict-unknown-keys',
       surface: 'dashboard widgets (undeclared top-level keys — legacy inline ' +
@@ -319,6 +371,7 @@ const step16: MigrationStep = {
         '`objectstack validate` passes with no unknown-key parse errors on dashboard ' +
         'widgets.',
     },
+    // </os-generated semantic:16>
   ],
 };
 
@@ -1347,303 +1400,240 @@ const step17: MigrationStep = {
     'action-global-nav-location-removed',
   ],
   semantic: [
+    // One file per entry under `entries/semantic/`, concatenated here sorted by
+    // entry id by `gen:migration-registry` (#7297). Add an entry by adding a
+    // FILE — never by editing between the markers, which is generated.
+    // <os-generated semantic:17>
     {
-      id: 'dashboard-widget-compareto-offset',
-      surface: "dashboard.widgets[].compareTo: { offset: '7d' | '1M' | … } (every duration except '1y')",
-      replacement: "compareTo: { kind: 'previousPeriod' } plus an explicit window on the widget's own `filter`",
+      id: 'action-descriptor-is-async-retired',
+      surface: 'ActionDescriptor.isAsync (the descriptor an executor publishes via `registerNodeExecutor` / `defineActionDescriptor`)',
+      replacement:
+        'nothing to re-declare — delete the key. Suspension is `execute()` RETURNING '
+        + '`suspend: true`, and permission to suspend is `supportsPause: true` on the same '
+        + 'descriptor (with the `resumeAuthority` its pauses need)',
       reason:
-        'The widget declared three comparison arms; the analytics executor implements one shape, '
-        + '`{ kind, dimension? }`, with no `offset` concept in it at all. On the ADR-0021 dataset '
-        + 'path — the spec\'s single author-facing analytics shape — `{ offset }` was forwarded '
-        + 'verbatim into that contract and threw `compareTo requires a timeDimension "undefined"`, '
-        + 'taking the widget down; the arm ever only ran on the legacy inline chart path (#5011). '
-        + "The conversion rewrites `{ offset: '1y' }`, which IS `previousYear` by definition. Every "
-        + 'other duration has NO faithful target: `previousPeriod` shifts by the length of whatever '
-        + "window the widget's filter resolves to, which equals `7d` only when that window happens "
-        + 'to be seven days long. Rewriting mechanically would silently change which rows the '
-        + 'comparison column counts — a wrong number rather than a missing one, which is strictly '
-        + 'worse and exactly the class this convergence exists to end. Re-stating the intended '
-        + 'window is a judgment about the presentation, not a transform.',
+        'ADR-0049 enforce-or-remove. `isAsync` declared "this action suspends the flow '
+        + 'awaiting an external reply" and NOTHING read it: a fresh three-repo measurement '
+        + '(#6748, re-run at pickup) found zero property reads across objectstack, objectui '
+        + 'and cloud — every hit was the declaration itself, a generated baseline, one of '
+        + 'five shipped descriptors WRITING it, a test fixture pinning the shape, or prose. '
+        + 'So declaring it never made a node suspend and omitting it never stopped one, '
+        + 'which is the silently-inert declaration ADR-0049 exists to end. It was always a '
+        + 'second, weaker spelling of the capability `supportsPause` states, and the two '
+        + 'diverged in exactly the way a duplicated declaration does: `screen` declared '
+        + 'both, `map` and `wait` declared `isAsync` alongside `supportsPause`, and nothing '
+        + 'anywhere reconciled them. The sibling took the ENFORCE leg of the same ruling in '
+        + '#6667 — `AutomationEngine` now refuses a suspension whose type does not declare '
+        + '`supportsPause: true` — so the capability this key gestured at is now a real, '
+        + 'enforced fact under one name. This one had no consumer to grow into and takes '
+        + 'the remove leg. '
+        + 'Why D3 semantic and not a D2 conversion: an ActionDescriptor is published from '
+        + "an executor's TypeScript, never stored in stack metadata — no stack, example or "
+        + 'template carries the key — so there is no source for the chain to rewrite and '
+        + '`os migrate meta` cannot reach it. The schema tombstones it via `retiredKey()` '
+        + 'and descriptor authors delete the key themselves; that rejection (a `tsc` error '
+        + 'at the authoring site, and a parse error inside `defineActionDescriptor`) is the '
+        + 'channel a third-party plugin author actually meets. The '
+        + '`EnhancedApiError.fieldErrors` disposition, one layer down.',
       acceptanceCriteria:
-        'No dashboard widget declares `compareTo.offset`. Each former offset comparison states its '
-        + "window on the widget's `filter` and compares with `compareTo: { kind: 'previousPeriod' }` "
-        + "(or `'previousYear'`), and `dimension` is named wherever the selection dates more than one "
-        + 'time dimension. `objectstack validate` passes, and each affected widget renders a '
-        + '`<measure>__compare` column over the window its author intended.',
+        'No descriptor declares `isAsync` — not the five that shipped it (`screen`, `map`, '
+        + '`wait`, `approval`, `approval_revise`), not a plugin\'s. Every node type that '
+        + 'returns `suspend: true` from `execute()` declares `supportsPause: true` on its '
+        + 'descriptor together with a `resumeAuthority`, and its runs still pause and resume '
+        + 'as before: the behaviour never depended on `isAsync`, so deleting the key changes '
+        + 'no run. Authoring `isAsync` fails `tsc` at the descriptor literal and fails '
+        + '`defineActionDescriptor()` at runtime with the prescription, instead of parsing '
+        + 'clean and being stripped.',
     },
     {
-      id: 'job-retry-policy-constraints-tightened',
-      surface: 'job.retryPolicy.maxRetries (> 10) / job.retryPolicy.backoffMultiplier (< 1)',
-      replacement: 'maxRetries <= 10, and backoffMultiplier >= 1',
-      reason:
-        'The converged RetryPolicy (#4661) keeps the automation side\'s bounds, which the job '
-        + 'side never had: `maxRetries` is capped at 10 and `backoffMultiplier` floored at 1. '
-        + 'Neither has a lossless rewrite. Clamping `maxRetries: 20` to 10 would halve a '
-        + 'retry budget its author chose, and a `backoffMultiplier` below 1 describes a delay '
-        + 'that SHRINKS on each attempt — retrying a failing dependency ever faster, which is '
-        + 'the opposite of backoff and was never a shape the engine meant to offer. Both now '
-        + 'fail at parse time with the bound named, rather than being silently reinterpreted. '
-        + 'Choosing the replacement count (or accepting the cap) is the author\'s call.',
-      acceptanceCriteria:
-        'Every job declaring `retryPolicy` parses: no `maxRetries` above 10 and no '
-        + '`backoffMultiplier` below 1 remain, and each adjusted value was re-chosen knowing a '
-        + 'retry re-runs the handler with its writes and callouts. No job fails to register '
-        + 'with the retry-policy bound prescription.',
-    },
-    // `etl-retry-converged-onto-retry-policy` (#4962) stood here and was
-    // ABSORBED by `etl-pipeline-layer-retired` below (#6414), the §0 same-major
-    // rule: both land in the unreleased protocol 17, and composed, the rename
-    // `ETLPipeline.retry.maxAttempts` -> `maxRetries` has no observable effect
-    // because the shape carrying it does not survive the major. Leaving both
-    // would tell an upgrader to rewrite a key on a schema this same upgrade
-    // deletes, and would break the fixture-disjointness the replay contract
-    // asserts. The `agent.knowledge` / `WidgetManifest.performance` precedent:
-    // a tombstone goes with the shape that carried it, which is strictly
-    // stronger than the tombstone.
-    {
-      id: 'flow-retry-max-retries-required',
-      surface: "flow.errorHandling.maxRetries (under strategy: 'retry')",
-      replacement: 'an explicit count >= 1 (e.g. maxRetries: 3), or strategy: \'fail\'',
-      reason:
-        'maxRetries had two defaults — FlowSchema `.default(0)` and the engine\'s ' +
-        '`maxRetries ?? 3` — so an unstated count retried 0 times through the schema and 3 ' +
-        'times through a hand-built definition (#4247). With the engine\'s copy removed the ' +
-        'unstated count is unambiguously 0, and retrying zero times is exactly ' +
-        "`strategy: 'fail'`, so the schema now refuses the combination instead of it silently " +
-        'doing nothing. There is no lossless rewrite: 0 preserves the behaviour a parsed flow ' +
-        'got but contradicts what its author wrote, and any positive count is a NEW decision ' +
-        'about re-running the whole flow with its side effects. That choice is the author\'s.',
-      acceptanceCriteria:
-        "Every flow declaring `errorHandling.strategy: 'retry'` also declares " +
-        '`maxRetries` >= 1, and each count was chosen knowing a retry replays the flow FROM ' +
-        'THE START (records re-created, callouts re-fired); flows that never actually wanted ' +
-        "retries say `strategy: 'fail'`. No flow fails to register with the maxRetries " +
-        'prescription.',
-    },
-    {
-      id: 'analytics-query-request-envelope-retired',
-      surface: 'api.analyticsQueryRequest.query',
-      replacement: 'bare AnalyticsQuery body (top-level cube/measures/dimensions/where/...)',
-      reason:
-        'The { cube, query: {...} } envelope was an HTTP-wire dialect of the retired degraded ' +
-        'analytics shim (#3891), never stored in stack metadata — there is no source for the ' +
-        'chain to rewrite. Callers of POST /analytics/query and /analytics/sql must move the ' +
-        'query.* fields to the body top level themselves.',
-      acceptanceCriteria:
-        'Every /analytics/query and /analytics/sql call sends the bare AnalyticsQuery shape and ' +
-        'succeeds; no request answers 400 VALIDATION_FAILED with the envelope prescription.',
-    },
-    {
-      id: 'enhanced-api-error-field-errors-renamed',
-      surface: 'api.enhancedApiError.fieldErrors',
-      replacement: 'fields',
-      reason:
-        'The wire has always carried `fields` — the validators, import coercion, ' +
-        'validation-failure.ts, @objectstack/client and the console\'s field-error extractor ' +
-        'all say `fields`, and nothing ever emitted `fieldErrors`, so a reader keying on it ' +
-        'was reading a field no server sent (ADR-0078\'s silently-inert declaration, on the ' +
-        'error envelope). This is a RESPONSE surface: no stack, example or template carries ' +
-        'the key, so there is no source for the chain to rewrite — the schema tombstones it ' +
-        'via retiredKey() and consumers move their read themselves. ADR-0114 D4, #3977.',
-      acceptanceCriteria:
-        'No consumer reads `error.fieldErrors`; per-field validation detail is read from ' +
-        '`error.fields`, and constructing an EnhancedApiError with `fieldErrors` fails to parse ' +
-        'with the rename prescription instead of silently losing the array.',
-    },
-    {
-      id: 'analytics-query-request-format-retired',
-      surface: 'api.analyticsQueryRequest.format',
-      replacement: '(removed — responses are always the JSON envelope; use the export surface for CSV/XLSX)',
-      reason:
-        'The `format` key was declared but never implemented (declared ≠ enforced): every ' +
-        'response is the JSON envelope regardless of the requested value, so there is no ' +
-        'behaviour to preserve and nothing stored to rewrite.',
-      acceptanceCriteria:
-        'No /analytics/query or /analytics/sql call sends `format`; exports go through the ' +
-        'export surface.',
-    },
-    {
-      id: 'query-field-node-object-form-retired',
-      surface: 'data.query.fields',
-      replacement: "expand (`expand: { owner: { object: 'user', fields: ['name'] } }`), or a dotted path for a single related column (`fields: ['owner.name']`)",
-      reason:
-        'The `FieldNode` union declared a nested-select object form `{ field, fields, alias }` that '
-        + 'was inert end to end: no producer emitted it, and no consumer read `.fields` or `.alias` '
-        + '— objectql\'s formula projection and known-field filters, driver-sql\'s `select()` and '
-        + 'driver-memory\'s projection all treat the list as `string[]`, driver-mongodb keyed its '
-        + 'projection with the entry itself, and the REST ingress stringified it. Nested selection '
-        + 'is `expand`, which the engine resolves via batch `$in` queries. This is a REQUEST '
-        + 'surface — `QueryAST` is never stored in stack metadata (no view, dataset or report '
-        + 'authors one), so there is no source for the chain to rewrite: the schema narrows to '
-        + '`z.string()` and callers move their own select lists. ADR-0049 / ADR-0078, #4196.',
-      acceptanceCriteria:
-        'No caller puts an object in `fields[]`; related records are read through `expand` and '
-        + 'single related columns through dotted paths. A `fields` entry that is not a string '
-        + 'fails to parse with the removal prescription, and the list/query/export routes answer '
-        + '400 INVALID_FIELD naming the retired form instead of the field `"[object Object]"`.',
-    },
-    {
-      id: 'batch-options-validate-only-retired',
-      surface: 'api.batchOptions.validateOnly',
-      replacement: '(removed — no dry-run today; open an issue to design a no-commit batch preview)',
-      reason:
-        'The `validateOnly` key promised a dry-run ("validate records without persisting") but no '
-        + 'batch surface ever read it — updateManyData / deleteManyData / batchData persist '
-        + 'regardless. There is no behaviour to preserve and nothing stored to rewrite (it only '
-        + 'ever appeared in an HTTP request body). Callers must stop sending it.',
-      acceptanceCriteria:
-        'No /batch, /updateMany or /deleteMany call sends `options.validateOnly`; a request that '
-        + 'includes it answers 400 VALIDATION_FAILED with the retirement prescription.',
-    },
-    {
-      id: 'batch-row-result-schema-shape',
+      id: 'action-descriptor-resume-authority-default-flip',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code
+      // span AND a table cell (see the note on `spec-type-alias-input-suffix-retired`).
       surface:
-        'api.batchOperationResult — the per-row `results` entries of BatchUpdateResponse '
-        + '(`POST /data/:object/batch`, `/updateMany`, `/deleteMany`)',
+        'automation.ActionDescriptor.resumeAuthority — an OMITTED value on a pausing '
+        + 'node descriptor (supportsPause: true, or any executor whose execute() returns '
+        + 'suspend: true)',
       replacement:
-        '`errors: ApiError[]` (was `error: string` — read `row.errors?.[0]?.message`, branch on '
-        + '`row.errors?.[0]?.code`), `data` (was `record`), and `index` (new — the row\'s position '
-        + 'in the request array)',
+        "an explicit resumeAuthority: 'any' on the descriptor, for a pausing node whose "
+        + 'pauses really are meant to be continued through the generic resume route '
+        + '(POST /automation/:name/runs/:runId/resume) — a screen-style collected-input '
+        + "pause, or a signal wait an external producer resumes. Declare 'service' instead "
+        + 'if continuing is the tail of a decision your own service must authorize and '
+        + 'record first. Either value is a one-line addition; only the silence changed '
+        + 'meaning',
       reason:
-        'The rows the three bulk-write endpoints emitted had drifted from the schema that '
-        + 'declared them: `BatchOperationResultSchema`, the client SDK\'s exported '
-        + '`BatchOperationResult` type and the reference docs all said `errors: ApiError[]` / '
-        + '`data` / `index`, while the wire carried `error: string` / `record` and never sent '
-        + '`index` at all. A TypeScript consumer written against the published type compiled, '
-        + 'validated and read `undefined` at runtime — the declared-but-not-delivered shape this '
-        + 'registry exists to close, on the response envelope (ADR-0119 D4 deferred the '
-        + 'reconciliation off a bug fix; this is that tracked change, shipped in the 17 major '
-        + 'window). The ADR-0119/#4620 rollback marking is structured in the same move: the '
-        + '`ROLLED_BACK:` / `NOT_ATTEMPTED:` message-string prefixes become registered '
-        + '`ApiError.code` values (message keeps the human-readable cause and causal row index), '
-        + 'so "attempted and undone" vs "never ran" is machine-readable instead of a regex '
-        + 'convention. A RESPONSE surface — nothing stored in stack metadata carries a batch '
-        + 'row, so there is no source for the chain to rewrite; consumers of the legacy keys '
-        + 'move their reads themselves. Off-contract readers only: the legacy keys were never '
-        + 'in the schema or the SDK types, so a typed consumer needs no change. #4793.',
+        'A SECURE-DEFAULT FLIP with no metadata shape to rewrite — the same category as '
+        + "protocol 12's `rest-requireauth-default-flip`, and it is registered here for the "
+        + 'same reason: whether a given pause is genuinely open to the generic route is a '
+        + 'trust judgment no transform can make. The #3801 resume gate keys on the SUSPENDED '
+        + "NODE, and `ActionDescriptor.resumeAuthority` used to default to `'any'`, so a "
+        + 'pausing node type shipped raw-resumable unless its author remembered the field. '
+        + "It now resolves to `'service'` when absent: an unclaimed pause is refused on the "
+        + 'generic route with `PERMISSION_DENIED` / 403 until its descriptor states who may '
+        + 'continue it. #3823 is the incident that decided the direction — ADR-0044 pointed '
+        + "an approval's revise edge at a generic `wait`, `wait` is legitimately `'any'`, and "
+        + 'the pause standing in a service-owned position inherited a fail-open value nobody '
+        + 'chose; the demonstrated cost was an unaudited resubmit plus a destroyed remote '
+        + 'run. The two possible mistakes are asymmetric, which is the whole argument: '
+        + "guessing `'any'` walks past a decision nothing recorded and is silent, while "
+        + "guessing `'service'` returns a refusal naming the missing field. ⚠️ The surface "
+        + 'is a DESCRIPTOR FIELD set in plugin CODE, never stack metadata, so there is no '
+        + 'source for a D2 conversion to rewrite and deliberately no schema tombstone — the '
+        + 'disposition `data-driver-find-stream-retired` (#4484), `storage-service-list-retired` '
+        + '(#5540) and `actor-user-roles-to-positions` (#6011) already carry. It differs from '
+        + 'those in one way a reader should not have to infer: nothing is REMOVED, so tsc '
+        + 'reports nothing at all — the field was already optional after step one and an '
+        + 'omission still compiles. The enforced channels are all run-time: a registration '
+        + 'warning naming the node type (once per type per engine), the refusal message on '
+        + 'the resume itself, and `check:resume-authority-declared` for executors living in '
+        + 'this repo. For a third-party plugin the generated upgrade guide is the only '
+        + 'channel that arrives BEFORE a user hits a run that will not continue. In-tree the '
+        + 'flip moves nothing: all six shipped pausing types (screen, wait, subflow, map, '
+        + 'approval, approval_revise) declare their authority explicitly. ADR-0044 amendment '
+        + '(2026-07-28) and its 2026-08-08 landing section, ADR-0019 #3801 addendum, #5561.',
       acceptanceCriteria:
-        'No consumer reads `row.error` or `row.record` on a batch result row; failures are read '
-        + 'from `row.errors` (message via `errors[0].message`, rollback state via '
-        + '`errors[0].code` — ROLLED_BACK / NOT_ATTEMPTED), records from `row.data`, and rows '
-        + 'correlate to the request via `row.index`. Every row the three endpoints emit parses '
-        + 'under `BatchOperationResultSchema` with those keys present.',
+        'Every action descriptor your plugin registers for a node type that can suspend '
+        + 'declares `resumeAuthority`. Booting the stack logs no `declares supportsPause but '
+        + 'never declares resumeAuthority` warning naming one of your types, and a run parked '
+        + 'on each of your pausing nodes can still be continued the way you intend: a resume '
+        + "through the generic route succeeds for the ones you declared `'any'`, and answers "
+        + "403 (`PERMISSION_DENIED`) for the ones you declared `'service'`, which continue "
+        + 'through your own service API instead. ⚠️ `supportsPause` is no longer the '
+        + 'declaration nothing enforced (#5703, closed by #6667): an executor whose '
+        + '`execute()` returns `suspend: true` while leaving `supportsPause` false is still '
+        + 'warned about by neither warning channel, but '
+        + '`AutomationEngine.refuseUndeclaredSuspension` now refuses that suspension at the '
+        + 'one seam every suspension passes through — a guard-class failure no `fault` edge '
+        + 'routes — so it needs no hand-check. The residue that does: an executor registering '
+        + 'NO descriptor declares nothing for either warning or the refusal to read, so its '
+        + 'pauses are still created and refused only later, on the resume route (#5561).',
     },
     {
-      id: 'query-joins-retired',
-      surface: 'data.query.joins',
-      replacement:
-        "expand (`expand: { owner: { object: 'user', fields: ['name'] } }`), or a dotted "
-        + "`fields` path for a single related column (`fields: ['owner.name']`)",
+      id: 'action-session-roles-to-positions',
+      surface: 'ui.actionSession.roles',
+      replacement: 'ui.actionSession.positions (an action body reads `ctx.session.positions`)',
       reason:
-        'The `joins` array was declared-but-inert: no engine or driver read `query.joins` '
-        + 'anywhere on the query path, so a query carrying it behaved exactly as if the key were '
-        + 'absent — while the name squatted on the reserved REST parameter set. Related-record '
-        + 'retrieval already has a live spelling (`expand`, resolved by the engine via batch '
-        + '`$in` queries), so the removal deletes the second, broken spelling rather than the '
-        + 'capability, and the orphaned `JoinNode`/`JoinType`/`JoinStrategy` cluster goes with '
-        + 'the key. A REQUEST surface — `QueryAST` is never stored in stack metadata — so there '
-        + 'is no source for the chain to rewrite; callers move their own queries. '
-        + 'ADR-0049 / ADR-0078, #4286.',
+        'The MIRROR-IMAGE neighbour of the entry above, and the reason both are in this '
+        + 'step: the hook `ctx.session` carried `roles` declared-and-never-produced (removed '
+        + 'outright, #5050), while the ACTION body\'s `ctx.session` carries it '
+        + 'produced-and-really-populated. `buildActionSession()` '
+        + '(`packages/runtime/src/action-execution.ts`) copies `ExecutionContext.positions` '
+        + 'into a key spelled `roles` — the ADR-0090 D3 vocabulary handed to the author under '
+        + 'the one spelling that ADR bans — so a body author met two different answers to one '
+        + 'key name on one platform: rejected in a hook, live and full of values in an action. '
+        + '#5613 ruled contract-first (maintainer, 2026-08-06: "C skeleton + A semantics"): '
+        + 'phase 1 (#5697) declared the previously undeclared shape as `ActionSessionSchema`, '
+        + 'and phase 2 renames the key. `positions` is now the canonical key on that schema '
+        + 'and `roles` a deprecated alias of it (#5779); the producer emits both for one '
+        + 'deprecation window (#5613 runtime half), after which `roles` is removed on the path '
+        + 'the v11 session-alias removal already walked (#3280 deprecated → #3290 removed). '
+        + 'Why this is a D3 semantic TODO and not a D2 conversion, on two independent grounds: '
+        + 'FIRST, there is no source to convert — an action `ctx.session` is constructed per '
+        + 'dispatch and never persisted, so no `sys_metadata` row, example or template can '
+        + 'carry the key — the `openApi31` (#4579) / `activationEvents` (#4657) / '
+        + '`hook-context-session-roles-retired` (#5050) shape. SECOND, the only place the key '
+        + 'is ever SPELLED is inside an action body: author-written JS/TS, or a sandboxed '
+        + 'script whose `ScriptContext.session` is still `unknown`. A declarative transform '
+        + 'cannot safely rewrite an identifier inside free-form code — exactly the reason the '
+        + 'ADR-0090 wave delegated `current_user.roles` to the author at step 13 '
+        + '(`cel-current-user-roles-to-positions`) instead of substituting text. '
+        + 'Note what is deliberately NOT done here: the alias is not tombstoned. A '
+        + '`retiredKey()` REJECTS the key, and a deprecation window exists precisely so the '
+        + 'old spelling keeps working while its readers move — tombstoning during the window '
+        + 'would be the removal it is meant to defer. The tombstone (or the plain deletion the '
+        + 'authorable-surface ratchet adjudicates) belongs to the release that closes the '
+        + 'window. Until then this entry IS the channel: `spec-changes.json` and the generated '
+        + 'upgrade guide are how a reader learns the rename before the removal reaches them. '
+        + 'ADR-0090 D3, ADR-0087, #5613 / #5779.',
       acceptanceCriteria:
-        'No caller sends `joins`; related records are read through `expand` and single related '
-        + 'columns through dotted `fields` paths. A query that still carries `joins` fails to '
-        + 'parse with the removal prescription (even as an empty array), and authoring it is a '
-        + '`tsc` error at the call site.',
+        'No action body reads `ctx.session.roles`; every such read is `ctx.session.positions` '
+        + 'and observes the same array (the rename is a rename — the VALUE is '
+        + '`ExecutionContext.positions` on both sides, which the runtime pin '
+        + '`action-session-shape-contract.test.ts` asserts independently of the key name). '
+        + 'Privilege is NOT re-derived from either spelling: a read that was '
+        + '`roles.includes(\'admin\')` as an access check is rewritten to ask the security '
+        + 'service (capability grants / placements / derived posture, ADR-0095), never '
+        + 'renamed to `positions.includes(\'admin\')` — renaming that read migrates the defect '
+        + 'rather than the code. Verify against a real dispatch, not a fixture: invoke an '
+        + 'action as a caller holding positions and assert the body observed them under the '
+        + 'canonical key. During the window both keys are present and equal, so a reader can '
+        + 'be migrated and verified before the alias is removed; after it, `roles` is absent '
+        + 'and a body still reading it sees `undefined` — which is why the read must be moved '
+        + 'inside the window rather than at its close.',
     },
     {
-      id: 'query-window-functions-retired',
-      surface: 'data.query.windowFunctions',
+      id: 'actor-user-roles-to-positions',
+      surface: 'action body / AI route: ctx.user.roles (req.user.roles)',
       replacement:
-        '`aggregations` + `groupBy` for request-level analytics; '
-        + '`SqlDriver.findWithWindowFunctions(object, query)` for embedders on a SQL datasource',
+        'ctx.user.positions (an AI route handler reads `req.user.positions`) — the same array, '
+        + 'under the one spelling ADR-0090 D3 sanctions',
       reason:
-        'The `windowFunctions` array was declared-but-inert on the query path: `find()` never '
-        + 'applied a window function, so every OVER clause a caller declared was silently '
-        + 'dropped. The capability only ever ran behind `SqlDriver.findWithWindowFunctions()`, '
-        + 'a driver-level door that is not on the `IDataDriver` contract and whose flat input '
-        + 'shape (`{ function, alias, partitionBy?, orderBy? }`) the spec vocabulary never '
-        + 'matched — `WindowFunctionNodeSchema` declared `field`/`over`/`frame` members the door '
-        + 'never read, so that cluster is removed with the key rather than left as a false '
-        + 'affordance. A REQUEST surface, never stored; no source to rewrite. '
-        + 'ADR-0049 / ADR-0078, #4286.',
+        'The THIRD face of the ADR-0090 `roles` → `positions` rename, and the only one whose '
+        + 'surface the spec never declared. `ActorUser` '
+        + '(`packages/runtime/src/security/actor-user.ts`) is the ONE producer of the `user` '
+        + 'envelope handed to an action body as `ctx.user` and to an AI route handler as '
+        + '`req.user`; it declared `positions` and `roles` side by side and filled them from a '
+        + 'SINGLE assignment (`roles: core.positions`), so the two keys were verbatim identical '
+        + 'on every dispatch — a second spelling of the vocabulary ADR-0090 D3 reserves and bans, '
+        + 'published straight into author-written code. The maintainer ruled it closed IMMEDIATELY '
+        + '(2026-08-06 14:49Z, #6011): no deprecation window, no dual-emit, the alias simply gone '
+        + 'in 17 (PR #6048). '
+        + '⚠️ Do not read this entry across to its neighbour above: '
+        + '`action-session-roles-to-positions` governs `ctx.session`, a DIFFERENT object reached '
+        + 'through the same `ctx`, and that one KEEPS its one-window dual-emit (#5613). Same word, '
+        + 'same dispatch, two faces, two schedules — `ctx.user.roles` is absent in 17 while '
+        + '`ctx.session.roles` still answers for the length of its window. '
+        + 'What makes this entry different in KIND from both session-side siblings: `ctx.user` has '
+        + 'no spec schema and never had one. It is a runtime TS interface, so unlike '
+        + '`HookContext.session.roles` (tombstoned on a deliberately non-strict `HookContextSchema`, '
+        + '#5050) and unlike `ActionSessionSchema` (declared contract-first at #5697 precisely so '
+        + 'its key could be renamed), there is no schema key here to tombstone and no '
+        + '`retiredKey()` prescription that could reach anybody — nothing ever ran an `ActorUser` '
+        + 'through a `.parse()`, so a prescription there would have no one to reach. The enforced '
+        + 'channel is tsc, and it reports at the READ site inside the author\'s own body; for an '
+        + 'untyped or sandboxed body there is no enforced channel at all, which is exactly why '
+        + 'this ledger entry has to exist — `spec-changes.json` and the generated upgrade guide '
+        + 'are the ONLY way such a reader learns of the rename. It is the `findStream` (#4484) / '
+        + '`IStorageService.list` (#5540) disposition — a TS/API contract, no stored source, no '
+        + 'tombstone, tsc at the call site — applied to a surface that lives one layer further '
+        + 'out than either: those two are at least DECLARED in `packages/spec/src/contracts`, '
+        + 'this one only in `packages/runtime`. '
+        + 'Why it is a D3 semantic TODO and not a D2 conversion, on the same two independent '
+        + 'grounds as its session sibling: FIRST, there is no source to convert — an `ActorUser` '
+        + 'is constructed per dispatch and never persisted, so no `sys_metadata` row, example or '
+        + 'template can carry the key (the `openApi31` (#4579) / `activationEvents` (#4657) / '
+        + '`hook-context-session-roles-retired` (#5050) shape). SECOND, the only place the key is '
+        + 'ever SPELLED is inside an action body or an AI route handler: author-written JS/TS, or '
+        + 'a sandboxed script. A declarative transform cannot safely rewrite an identifier inside '
+        + 'free-form code — the same reason the ADR-0090 wave delegated `current_user.roles` to '
+        + 'the author at step 13 (`cel-current-user-roles-to-positions`) instead of substituting '
+        + 'text. '
+        + 'The removal\'s hard precondition was met before it landed, and the result is recorded '
+        + 'here because the ledger is where an upgrading consumer meets it: the declaration\'s own '
+        + 'comment claimed the alias was "kept for the REST/AI shapes", and that claim was '
+        + 'DISPROVEN face by face against `origin/main` — repo-wide `user.roles` was 4 hits, all '
+        + 'of them in the pins PR #6048 flipped; the four `ActorUser` construction sites build '
+        + 'server-side envelopes that never enter a response body; objectui\'s `.roles` reads '
+        + 'belong to two unrelated producers (the better-auth session, and the '
+        + '`/auth/me/permissions` payload). The `cloud` repo was NOT reachable in that session and '
+        + 'is the one consumer face left unverified — this entry, and the changeset\'s FROM/TO '
+        + 'prescription, are its disposition. ADR-0090 D3 / ADR-0049 / ADR-0087, #6011 (PR #6048).',
       acceptanceCriteria:
-        'No caller sends `windowFunctions` in a query; request-level analytics use '
-        + '`aggregations` + `groupBy`, and embedders needing OVER-clause SQL call the SQL '
-        + "driver's `findWithWindowFunctions` door directly. A query that still carries the key "
-        + 'fails to parse with the removal prescription naming that door.',
-    },
-    {
-      id: 'query-cursor-retired',
-      surface: 'data.query.cursor',
-      replacement:
-        'a `where` predicate on the sort key — `where: { created_at: { $gt: last.created_at } }` '
-        + 'with the matching `orderBy` (the documented manual-keyset pattern)',
-      reason:
-        'The `cursor` key promised keyset pagination and no driver implemented it: the cursor '
-        + 'was accepted and ignored, so every page came back identical — a caller looping '
-        + '"until hasMore is false" never terminates. Worse than inert, it had a shipped public '
-        + 'producer (`QueryBuilder.cursor()`, removed with the key). The caller-built '
-        + '`Record<string, unknown>` shape also leaks sort/storage detail and squats on the '
-        + 'reserved REST parameter set; a first-class cursor, if ever designed, will be a '
-        + 'response-minted opaque token — a different API, so keeping this one preserved a '
-        + 'wrong design rather than a roadmap. A REQUEST surface, never stored; nothing to '
-        + 'rewrite. ADR-0049 / ADR-0078, #4286.',
-      acceptanceCriteria:
-        'No caller sends `cursor` and no SDK call site uses `QueryBuilder.cursor()`; deep '
-        + 'pagination expresses the keyset as a `where` predicate on the sort key. A query '
-        + 'still carrying `cursor` fails to parse with the removal prescription, and authoring '
-        + 'it is a `tsc` error.',
-    },
-    {
-      id: 'query-distinct-retired',
-      surface: 'data.query.distinct',
-      replacement:
-        '`groupBy` for unique combinations; the `count_distinct` aggregation for deduplicated '
-        + "counts; the SQL/memory drivers' `distinct(object, field)` door for one column's values",
-      reason:
-        'The `distinct` flag promised SELECT DISTINCT and no driver ever rendered it — but it '
-        + 'was MIS-WIRED rather than merely dead (the harsher ADR-0078 class): the REST list '
-        + 'path treated a distinct query as not countable and silently degraded '
-        + '`total`/`hasMore` to a page-local estimate, so the caller got duplicate rows AND '
-        + 'worse pagination metadata, and a side effect that "confirmed" the flag was doing '
-        + 'something. It had a shipped public producer (`QueryBuilder.distinct()`, removed with '
-        + 'the key). The count suppression is deleted in the same change — `total` is truthful '
-        + 'for those queries again. A REQUEST surface, never stored; nothing to rewrite. '
-        + 'ADR-0049 / ADR-0078, #4286.',
-      acceptanceCriteria:
-        'No caller sends `distinct` and no SDK call site uses `QueryBuilder.distinct()`; '
-        + 'deduplication goes through `groupBy` / `count_distinct` / the drivers\' `distinct()` '
-        + 'door. A query still carrying the key fails to parse with the removal prescription, '
-        + 'and the REST list response reports a real `total` for queries that used to send it.',
-    },
-    {
-      id: 'query-array-string-agg-retired',
-      surface: "data.query.aggregations[].function ('array_agg' / 'string_agg')",
-      replacement:
-        'an ordinary `fields` query, shaped in the caller — or a stored field that materialises '
-        + 'the roll-up. For a deduplicated COUNT the live spelling is unchanged: '
-        + '`count_distinct` stays declared',
-      reason:
-        'The stored half of this retirement is a conversion '
-        + '(`dataset-measure-array-string-agg-removed`); this entry is the REQUEST half. '
-        + '`QueryAST` is never stored in stack metadata — it is the client SDK builder\'s output '
-        + 'and the `POST /data/:object/query` body — so there is no source for the chain to '
-        + 'rewrite and callers move their own queries. Both values were declared-but-unlowered '
-        + 'on the SQL family: `SqlDriver.mapAggregateFunc` and the Turso '
-        + '`RemoteTransport.aggregate` compile five functions and refuse the rest, so a caller '
-        + 'following the schema against a SQL datasource got a refusal, not an array. They did '
-        + 'run on `driver-mongodb` and on the engine\'s in-memory fallback, which is what makes '
-        + 'this the one narrowing in the batch that removes reachable behaviour: an aggregation '
-        + 'that worked on one backend and failed on another is exactly the unpredictability the '
-        + 'ruling ended, and #5499 has both of those backends frozen. `count_distinct` was '
-        + 'deliberately NOT retired with them (maintainer, 2026-08-07) — it takes ADR-0049\'s '
-        + 'enforce leg, and its SQL lowering is a separate drivers-side card. ADR-0049, #6188.',
-      acceptanceCriteria:
-        'No caller sends `array_agg` or `string_agg` in `aggregations[].function`; list-style '
-        + 'roll-ups are assembled by the caller from an ordinary `fields` query, or materialised '
-        + 'as a stored field. A query still carrying either value fails to parse with the '
-        + 'removal prescription naming it, and authoring it is a `tsc` error at the call site; '
-        + '`count_distinct` continues to parse and is unaffected.',
+        'No action body reads `ctx.user.roles` and no AI route handler reads `req.user.roles`; '
+        + 'every such read is `.positions` and observes the SAME array — the value was '
+        + '`ExecutionContext.positions` on both sides, so this is a pure key rename and no value '
+        + 'has to be re-derived. Privilege is NOT re-derived from either spelling: a read that was '
+        + '`roles.includes(\'admin\')` as an access check is rewritten to ask the security service '
+        + '(capability grants / placements / derived posture, ADR-0095), never renamed to '
+        + '`positions.includes(\'admin\')` — renaming that read migrates the defect rather than the '
+        + 'code. Unlike `ctx.session` there is NO window to migrate inside: in 17 the key is '
+        + 'already absent, so a typed body fails `tsc` at the read while an untyped or sandboxed '
+        + 'one silently sees `undefined` — move the read AS you upgrade, not after it. Verify '
+        + 'against a real dispatch rather than a fixture: invoke an action (and an AI route) as a '
+        + 'caller holding positions, assert the body observed them under the canonical key, and '
+        + 'assert the old key is ABSENT by key existence (`\'roles\' in ctx.user === false`) rather '
+        + 'than by `undefined`, which cannot tell a removed key from one left behind holding '
+        + 'nothing — the runtime pin `action-ctx-user-shape.test.ts` asserts both halves that way.',
     },
     {
       id: 'aggregation-node-distinct-retired',
@@ -1694,34 +1684,152 @@ const step17: MigrationStep = {
         + 'pre-upgrade fallback answer — the two disagreed, which is why the key is gone.',
     },
     {
-      id: 'workflow-service-slot-retired',
-      surface:
-        "CoreServiceName 'workflow' / IWorkflowService / WorkflowProtocol / "
-        + 'discovery routes.workflow / RestApiRouteCategory workflow',
-      replacement:
-        'the live mechanisms the slot only ever pointed at: `state_machine` validation rules '
-        + 'for record state machines, approval flow nodes on the approvals runtime (ADR-0019) '
-        + 'for approvals, lifecycle hooks + `record_change` flows (service-automation) for '
-        + 'record-triggered automation',
+      id: 'analytics-query-request-envelope-retired',
+      surface: 'api.analyticsQueryRequest.query',
+      replacement: 'bare AnalyticsQuery body (top-level cube/measures/dimensions/where/...)',
       reason:
-        'The workflow slot was declared end to end and implemented nowhere: no code in either '
-        + 'repository ever registered or resolved it (ADR-0115 Evidence 5 — the only touches '
-        + 'were plugin-dev\'s retired stub probe and the generic discovery walk), no '
-        + 'implementation of any WorkflowProtocol method ever existed, and no host ever '
-        + 'mounted `/api/v1/workflow` (the pre-#3586 DEFAULT_DISPATCHER_ROUTES listed it among '
-        + 'routes that never existed). Every part of it was ADR-0078\'s silently-inert '
-        + 'declaration: a CoreServiceName nothing filled, a contract nothing implemented, a '
-        + 'protocol nothing served, a discovery route field no builder could truthfully '
-        + 'populate. These are TS/API surfaces and a discovery RESPONSE field — never stored '
-        + 'in stack metadata, so there is no source for the chain to rewrite; consumers of the '
-        + 'deleted types move their imports themselves. ADR-0049 / ADR-0078, #4451.',
+        'The { cube, query: {...} } envelope was an HTTP-wire dialect of the retired degraded ' +
+        'analytics shim (#3891), never stored in stack metadata — there is no source for the ' +
+        'chain to rewrite. Callers of POST /analytics/query and /analytics/sql must move the ' +
+        'query.* fields to the body top level themselves.',
       acceptanceCriteria:
-        'No import of IWorkflowService, WorkflowProtocol or the Get/WorkflowState/Config/'
-        + 'Transition types resolves; no code calls getService(\'workflow\') or reads '
-        + 'discovery `routes.workflow` / `services.workflow`; record state machines, '
-        + 'approvals and record-triggered automation go through the replacement mechanisms. '
-        + 'Discovery output on a default boot is unchanged (the slot was always reported '
-        + 'unavailable; now it is simply absent).',
+        'Every /analytics/query and /analytics/sql call sends the bare AnalyticsQuery shape and ' +
+        'succeeds; no request answers 400 VALIDATION_FAILED with the envelope prescription.',
+    },
+    {
+      id: 'analytics-query-request-format-retired',
+      surface: 'api.analyticsQueryRequest.format',
+      replacement: '(removed — responses are always the JSON envelope; use the export surface for CSV/XLSX)',
+      reason:
+        'The `format` key was declared but never implemented (declared ≠ enforced): every ' +
+        'response is the JSON envelope regardless of the requested value, so there is no ' +
+        'behaviour to preserve and nothing stored to rewrite.',
+      acceptanceCriteria:
+        'No /analytics/query or /analytics/sql call sends `format`; exports go through the ' +
+        'export surface.',
+    },
+    {
+      id: 'api-runtime-create-withdrawn',
+      surface: 'PUT /api/v1/meta/api/{name} (runtime-authored `api` endpoints, draft and active alike)',
+      replacement:
+        'Declare the endpoint as a stack artifact (`**/*.api.ts`, or `defineStack({ apis })`) '
+        + 'and ship it through `publishPackage`',
+      reason:
+        'The `api` registry entry declared `allowRuntimeCreate: true` and the runtime never '
+        + 'honoured it. Measured on a real showcase boot (#5488): `PUT /api/v1/meta/api/'
+        + 'e8_backdoor` answered 200 with `{"success":true,…,"message":"Saved …"}`, and the '
+        + 'declared route then answered 404 forever — with NO `[EndpointMatcher] … EXCLUDED` '
+        + 'line, because the endpoint was never in the index to be excluded from. The serving '
+        + 'criterion belongs to `IMetadataService.matchEndpoint` -> `EndpointMatcher` -> '
+        + "`MetadataManager.listForIndex('api')`, which reads the manager's registry plus its "
+        + 'registered loaders (`["filesystem","memory"]` on dev/serve); a runtime write lands '
+        + 'in `sys_metadata`, which is in neither. A declared capability the runtime does not '
+        + 'honour is ADR-0049 false compliance, and a write that answers "Saved" and then 404s '
+        + 'forever is its most dangerous shape for the AI authors ADR-0033 targets. The '
+        + 'maintainer ruled REMOVE on 2026-08-07 rather than converge the read path, because '
+        + 'making the matcher read `sys_metadata` re-opens cache, invalidation, tenancy and '
+        + "the ADR-0110 D3 miss-vs-outage distinction on a new read path, and there is no "
+        + 'business pull for Studio-authored endpoints today (zero `.api.*` artifacts author '
+        + 'them at runtime; showcase uses the artifact route, #5040 E8 LIVE). '
+        + 'There is NO D2 conversion, for the reason this list exists: nothing in an authored '
+        + 'source spells this key. `allowRuntimeCreate` is a PLATFORM registry value, not an '
+        + 'authorable one, and the artifact route it points authors toward is untouched — a '
+        + '`**/*.api.ts` file valid before this change is valid after it, byte for byte. What '
+        + 'changed is a runtime HTTP verdict, so it is one semantic TODO for operators and '
+        + 'Studio callers rather than a stack conversion — the same disposition '
+        + '`BatchOptions.validateOnly` (#4052) takes. Consequently `gateApiDraftsForPublish` '
+        + '(PR #5279) is retired with it: it gated a promotion into a state the matcher can '
+        + 'never read, and with the inlet closed no `api` draft can exist for it to judge. '
+        + 'Re-entry is recorded in the ruling: if #2657 Part B promotes `apis` to a registered '
+        + 'type WITH A REAL CONSUMPTION PATH, the flag flips back then — implementation first, '
+        + 'declaration second. ADR-0049 / ADR-0121, #5488 (subsumes #5311).',
+      acceptanceCriteria:
+        'No caller creates or updates an `api` item through the runtime metadata API. '
+        + '`PUT /api/v1/meta/api/{name}` answers 403 with `code: "NOT_CREATABLE"` and a body '
+        + 'naming both flags (`allowRuntimeCreate=false, allowOrgOverride=false`) and the '
+        + 'prescription `Declare it in source (**/*.api.ts) and redeploy` — in `?mode=draft` '
+        + 'as well as direct-active, because the gate runs before the draft/publish branch and '
+        + 'does not read `mode`. ⚠️ Verify the artifact route is UNAFFECTED, which is the whole '
+        + 'point of the change: a stack declaring `apis:` still compiles, still passes '
+        + '`validateApiEndpointDeclarations` at publish (`publishPackage`, #5189) and at load '
+        + '(`buildEndpointIndex`, PR #5203), and its endpoints still SERVE — that route was '
+        + 'always the only one that served. An operator who genuinely needs the runtime door '
+        + 'back on one deployment sets `OS_METADATA_WRITABLE=api`, the same single escape '
+        + 'hatch `job` / `agent` / `capability` use; note that this unlocks the WRITE only, and '
+        + 'the endpoint still will not be served, which is why it is a diagnostic and not a '
+        + 'workaround. Any `api` rows already sitting in `sys_metadata` from before this change '
+        + 'were never served either; they can be deleted (`deleteMetaItem` is deliberately not '
+        + 'gated by this refusal, so repair stays possible).',
+    },
+    {
+      id: 'batch-options-validate-only-retired',
+      surface: 'api.batchOptions.validateOnly',
+      replacement: '(removed — no dry-run today; open an issue to design a no-commit batch preview)',
+      reason:
+        'The `validateOnly` key promised a dry-run ("validate records without persisting") but no '
+        + 'batch surface ever read it — updateManyData / deleteManyData / batchData persist '
+        + 'regardless. There is no behaviour to preserve and nothing stored to rewrite (it only '
+        + 'ever appeared in an HTTP request body). Callers must stop sending it.',
+      acceptanceCriteria:
+        'No /batch, /updateMany or /deleteMany call sends `options.validateOnly`; a request that '
+        + 'includes it answers 400 VALIDATION_FAILED with the retirement prescription.',
+    },
+    {
+      id: 'batch-row-result-schema-shape',
+      surface:
+        'api.batchOperationResult — the per-row `results` entries of BatchUpdateResponse '
+        + '(`POST /data/:object/batch`, `/updateMany`, `/deleteMany`)',
+      replacement:
+        '`errors: ApiError[]` (was `error: string` — read `row.errors?.[0]?.message`, branch on '
+        + '`row.errors?.[0]?.code`), `data` (was `record`), and `index` (new — the row\'s position '
+        + 'in the request array)',
+      reason:
+        'The rows the three bulk-write endpoints emitted had drifted from the schema that '
+        + 'declared them: `BatchOperationResultSchema`, the client SDK\'s exported '
+        + '`BatchOperationResult` type and the reference docs all said `errors: ApiError[]` / '
+        + '`data` / `index`, while the wire carried `error: string` / `record` and never sent '
+        + '`index` at all. A TypeScript consumer written against the published type compiled, '
+        + 'validated and read `undefined` at runtime — the declared-but-not-delivered shape this '
+        + 'registry exists to close, on the response envelope (ADR-0119 D4 deferred the '
+        + 'reconciliation off a bug fix; this is that tracked change, shipped in the 17 major '
+        + 'window). The ADR-0119/#4620 rollback marking is structured in the same move: the '
+        + '`ROLLED_BACK:` / `NOT_ATTEMPTED:` message-string prefixes become registered '
+        + '`ApiError.code` values (message keeps the human-readable cause and causal row index), '
+        + 'so "attempted and undone" vs "never ran" is machine-readable instead of a regex '
+        + 'convention. A RESPONSE surface — nothing stored in stack metadata carries a batch '
+        + 'row, so there is no source for the chain to rewrite; consumers of the legacy keys '
+        + 'move their reads themselves. Off-contract readers only: the legacy keys were never '
+        + 'in the schema or the SDK types, so a typed consumer needs no change. #4793.',
+      acceptanceCriteria:
+        'No consumer reads `row.error` or `row.record` on a batch result row; failures are read '
+        + 'from `row.errors` (message via `errors[0].message`, rollback state via '
+        + '`errors[0].code` — ROLLED_BACK / NOT_ATTEMPTED), records from `row.data`, and rows '
+        + 'correlate to the request via `row.index`. Every row the three endpoints emit parses '
+        + 'under `BatchOperationResultSchema` with those keys present.',
+    },
+    {
+      id: 'dashboard-widget-compareto-offset',
+      surface: "dashboard.widgets[].compareTo: { offset: '7d' | '1M' | … } (every duration except '1y')",
+      replacement: "compareTo: { kind: 'previousPeriod' } plus an explicit window on the widget's own `filter`",
+      reason:
+        'The widget declared three comparison arms; the analytics executor implements one shape, '
+        + '`{ kind, dimension? }`, with no `offset` concept in it at all. On the ADR-0021 dataset '
+        + 'path — the spec\'s single author-facing analytics shape — `{ offset }` was forwarded '
+        + 'verbatim into that contract and threw `compareTo requires a timeDimension "undefined"`, '
+        + 'taking the widget down; the arm ever only ran on the legacy inline chart path (#5011). '
+        + "The conversion rewrites `{ offset: '1y' }`, which IS `previousYear` by definition. Every "
+        + 'other duration has NO faithful target: `previousPeriod` shifts by the length of whatever '
+        + "window the widget's filter resolves to, which equals `7d` only when that window happens "
+        + 'to be seven days long. Rewriting mechanically would silently change which rows the '
+        + 'comparison column counts — a wrong number rather than a missing one, which is strictly '
+        + 'worse and exactly the class this convergence exists to end. Re-stating the intended '
+        + 'window is a judgment about the presentation, not a transform.',
+      acceptanceCriteria:
+        'No dashboard widget declares `compareTo.offset`. Each former offset comparison states its '
+        + "window on the widget's `filter` and compares with `compareTo: { kind: 'previousPeriod' }` "
+        + "(or `'previousYear'`), and `dimension` is named wherever the selection dates more than one "
+        + 'time dimension. `objectstack validate` passes, and each affected widget renders a '
+        + '`<measure>__compare` column over the window its author intended.',
     },
     {
       id: 'data-driver-find-stream-retired',
@@ -1758,42 +1866,6 @@ const step17: MigrationStep = {
         + 'through the export surface. Drivers and test doubles no longer implement the '
         + 'method — one left behind still compiles and is simply never reached, so removing '
         + 'it is cleanup rather than a break, while a CALLER of it no longer type-checks.',
-    },
-    {
-      id: 'data-field-changed-event-retired',
-      surface: "api.DataEventType 'data.field.changed'",
-      replacement:
-        "the `data.record.updated` event, whose payload already carries the per-field "
-        + 'detail: `changes` (the changed fields), plus `before` / `after`',
-      reason:
-        '`data.field.changed` was declared in `DataEventType` and emitted by nothing — the '
-        + 'engine\'s `publishDataEvent` sends `data.record.{created,updated,deleted}` and (since '
-        + '#4639) `data.records.{updated,deleted}`, and no other producer exists in either '
-        + 'repository. A subscriber that switched on it was waiting on an event no producer '
-        + 'sends: the branch never ran, and because the surrounding `switch` still compiled, '
-        + 'nothing anywhere reported the gap (ADR-0078\'s silently-inert declaration, on the '
-        + 'event vocabulary). `DataEventSchema` could not have carried the semantics even if '
-        + 'something had emitted it — the payload is record-shaped (`recordId`, `changes`, '
-        + '`before`, `after`) with no `field` / `oldValue` / `newValue` slot — so the member '
-        + 'promised a granularity the contract has no room for. Per-field detail is therefore '
-        + 'not lost: it has always ridden on `data.record.updated` as `changes`, which is one '
-        + 'event per write rather than N events on a wide table. This is a runtime EVENT '
-        + 'surface — no stack, example or template authors an event name (webhooks subscribe '
-        + 'through the separate authorable `WebhookTriggerType`, whose vocabulary was already '
-        + 'trimmed to producers that exist, #3196) — so there is no source for the chain to '
-        + 'rewrite, and deliberately no schema tombstone: a removed ENUM MEMBER cannot carry a '
-        + 'retiredKey() fix-it error the way an authorable object key can (the same limit the '
-        + 'sharing-rule `full` retirement hit above). The enforced channels are tsc, which '
-        + 'fails any consumer still naming the value in a `DataEventType` position, and the '
-        + 'enum parse, which now rejects the name instead of accepting an event that never '
-        + 'arrives. A genuine per-field stream, if one is ever wanted, gets its own honest '
-        + 'contract the way #4639 gave bulk writes theirs. ADR-0049 / ADR-0078, #4673.',
-      acceptanceCriteria:
-        'No consumer subscribes to or switches on `data.field.changed`; per-field change '
-        + 'detail is read from a `data.record.updated` event\'s `changes` map (with `before` / '
-        + '`after` for the surrounding state). Deleting the dead branch changes no observable '
-        + 'behaviour — it never executed — so the migration is removing code that could not '
-        + 'run, not rebuilding a capability.',
     },
     {
       id: 'data-engine-batch-retired',
@@ -1839,36 +1911,142 @@ const step17: MigrationStep = {
         + 'never reached; a CALLER of it no longer type-checks — and there were none.',
     },
     {
-      id: 'rest-server-openapi31-block-removed',
-      surface: 'restServer.openApi31',
+      id: 'data-field-changed-event-retired',
+      surface: "api.DataEventType 'data.field.changed'",
       replacement:
-        '(removed — no replacement key exists. Delete the key; for a real outbound webhook use '
-        + '`Webhook` from `@objectstack/spec/automation`. Config-driven OpenAPI 3.1 '
-        + 'webhooks/callbacks documentation returns, if ever, via the enforce route of ADR-0049 '
-        + 'through a new ADR)',
+        "the `data.record.updated` event, whose payload already carries the per-field "
+        + 'detail: `changes` (the changed fields), plus `before` / `after`',
       reason:
-        'The `openApi31` block (`webhooks` / `callbacks` / `jsonSchemaDialect` / '
-        + '`pathItemReferences`, typed by `OpenApi31ExtensionsSchema` with '
-        + '`OpenApiWebhookEventSchema` and `CallbackSchema` under it) promised OpenAPI 3.1 '
-        + "document synthesis nothing delivered: the REST server's `normalizeConfig` forwards "
-        + 'only `api`/`crud`/`metadata`/`batch`/`routes`, and the served /openapi.json is the '
-        + 'pre-generated @objectstack/spec contract enriched with the live server URL and the '
-        + 'registered objects — a webhook declared here never appeared in any served document '
-        + '(ADR-0049; the #3197 connector-webhook shape one layer up). There is no behaviour '
-        + 'to preserve and nothing stored to rewrite: `RestServerConfig` is plugin TS '
-        + 'configuration (REST plugin constructor / `plugin-hono-server` `restConfig`), never '
-        + "a `sys_metadata` shape — the stack tree's `api` block declares only its four "
-        + 'scoping/auth knobs. The three schemas are removed with the key (zero import-level '
-        + 'consumers in objectstack / cloud / objectui); the key itself is tombstoned because '
-        + 'the schema is not `.strict()` and a plain delete would strip it silently. #4579.',
+        '`data.field.changed` was declared in `DataEventType` and emitted by nothing — the '
+        + 'engine\'s `publishDataEvent` sends `data.record.{created,updated,deleted}` and (since '
+        + '#4639) `data.records.{updated,deleted}`, and no other producer exists in either '
+        + 'repository. A subscriber that switched on it was waiting on an event no producer '
+        + 'sends: the branch never ran, and because the surrounding `switch` still compiled, '
+        + 'nothing anywhere reported the gap (ADR-0078\'s silently-inert declaration, on the '
+        + 'event vocabulary). `DataEventSchema` could not have carried the semantics even if '
+        + 'something had emitted it — the payload is record-shaped (`recordId`, `changes`, '
+        + '`before`, `after`) with no `field` / `oldValue` / `newValue` slot — so the member '
+        + 'promised a granularity the contract has no room for. Per-field detail is therefore '
+        + 'not lost: it has always ridden on `data.record.updated` as `changes`, which is one '
+        + 'event per write rather than N events on a wide table. This is a runtime EVENT '
+        + 'surface — no stack, example or template authors an event name (webhooks subscribe '
+        + 'through the separate authorable `WebhookTriggerType`, whose vocabulary was already '
+        + 'trimmed to producers that exist, #3196) — so there is no source for the chain to '
+        + 'rewrite, and deliberately no schema tombstone: a removed ENUM MEMBER cannot carry a '
+        + 'retiredKey() fix-it error the way an authorable object key can (the same limit the '
+        + 'sharing-rule `full` retirement hit above). The enforced channels are tsc, which '
+        + 'fails any consumer still naming the value in a `DataEventType` position, and the '
+        + 'enum parse, which now rejects the name instead of accepting an event that never '
+        + 'arrives. A genuine per-field stream, if one is ever wanted, gets its own honest '
+        + 'contract the way #4639 gave bulk writes theirs. ADR-0049 / ADR-0078, #4673.',
       acceptanceCriteria:
-        'No `RestServerConfig` value passed to the REST plugin (or `plugin-hono-server` '
-        + '`restConfig`) carries `openApi31` — a config that includes it now fails the parse '
-        + 'with the retirement prescription instead of being silently stripped. No code '
-        + 'imports `OpenApi31Extensions(Schema)`, `Callback(Schema)` or '
-        + '`OpenApiWebhookEvent(Schema)` from `@objectstack/spec/api` (TS2305 after upgrade). '
-        + 'The served /openapi.json is byte-identical before and after — the block never '
-        + 'reached it.',
+        'No consumer subscribes to or switches on `data.field.changed`; per-field change '
+        + 'detail is read from a `data.record.updated` event\'s `changes` map (with `before` / '
+        + '`after` for the surrounding state). Deleting the dead branch changes no observable '
+        + 'behaviour — it never executed — so the migration is removing code that could not '
+        + 'run, not rebuilding a capability.',
+    },
+    {
+      id: 'declarative-apis-endpoints-live',
+      surface: 'stack.apis[] (every declared ApiEndpoint — REVIEW REQUIRED BEFORE UPGRADING)',
+      replacement:
+        'the same declarations, re-read as LIVE HTTP routes: `path` moved under '
+        + '`/api/v1/apps/<manifest.namespace>/<subpath>`, and every entry that declares '
+        + '`authRequired: false` re-confirmed as an intentionally anonymous endpoint carrying '
+        + '`rateLimit: { enabled: true, … }`',
+      reason:
+        'This is the one protocol-17 entry that turns metadata ON rather than off, so read it '
+        + 'as a SECURITY review item and not as a rename. Before 17 the declarative endpoint '
+        + 'surface executed NOTHING: no route was mounted for a declared `path`, no matcher '
+        + 'existed, and every key — `authRequired` included — parsed green and gated nothing '
+        + '(#4936, which refused a non-empty `apis:` outright for exactly that reason). '
+        + 'Protocol 17 ships the executor (#5040) and narrows that refusal to a per-endpoint '
+        + 'publish gate: an endpoint that PASSES the gate is mounted and serves real traffic as '
+        + 'soon as the stack is published. So an `apis:` block written against an older major — '
+        + 'or one restored from a pre-#4936 source, or authored from a doc that predates the '
+        + 'refusal — changes meaning without changing a byte: what used to be inert '
+        + 'documentation becomes an execution entry point into the data and automation '
+        + 'pipelines. Nothing about that transition can be applied mechanically, because the '
+        + 'judgment it needs is "did the author of this endpoint mean for the internet to reach '
+        + 'it?" — and the one key where a wrong answer is unrecoverable is `authRequired`. Its '
+        + 'schema default is `true`, so an omission is SAFE and needs no review; an EXPLICIT '
+        + '`authRequired: false` is the only thing that opens anonymous access, and under '
+        + 'ADR-0121 D6 it now also requires an armed `rateLimit` (`enabled: true` — the key '
+        + 'defaults to `false`, so a budget written without it meters nothing) or the stack '
+        + 'refuses to publish. ⚠️ If you author endpoints in TypeScript, annotate them with '
+        + '`ApiEndpoint` — the AUTHOR state — so that omitting `authRequired` compiles: '
+        + '`const e: ApiEndpoint = { name, path, method, type, target }` is legal and is the '
+        + 'safe shape this paragraph prescribes. `ApiEndpointParsed` is the POST-parse type '
+        + '(defaults materialized, ADR-0122), where `authRequired` is required — annotating a '
+        + 'declaration with it forces you to write the key out, and being made to think about a '
+        + 'key whose only unrecoverable value is `false` is the one thing this entry is trying '
+        + 'to avoid (#5227). Hold a parse RESULT with `ApiEndpointParsed`; write declarations '
+        + 'as `ApiEndpoint`. Grep every `apis:` entry for `authRequired: false` before you '
+        + 'upgrade, delete the ones that were never meant to be public, and arm a budget on the '
+        + 'ones that were. The path move is the mechanical-looking half and is still yours: '
+        + 'ADR-0121 D1/D2 confine a declared path to your own namespace carve-out '
+        + '(`/api/v1/apps/<namespace>/…`), the namespace comes from an explicit '
+        + '`manifest.namespace` with no derivation fallback, and the subpath is the only part '
+        + 'you name — rewriting it for you would silently change a URL third parties call.',
+      acceptanceCriteria:
+        'You have READ every entry of every `apis:` block, not just the ones that fail to '
+        + 'publish. Concretely: (1) each declared `path` is '
+        + '`/api/v1/apps/<your manifest.namespace>/<subpath>` and the stack declares that '
+        + '`manifest.namespace` explicitly; (2) every entry declaring `authRequired: false` is '
+        + 'one you INTEND to be reachable without a session, and each carries '
+        + '`rateLimit: { enabled: true, windowMs, maxRequests }` — entries that were not '
+        + 'intended to be anonymous have the key removed so the safe default (`true`) applies; '
+        + '(3) `objectstack validate` passes, which also proves no endpoint declares a shape '
+        + '17.x cannot execute (`type: script` / `proxy`, mapping `transform`, an '
+        + '`object_operation` missing `objectParams`, `cacheTtl` on a non-GET method, '
+        + '`inputMapping` on find/get/delete, or two endpoints claiming one METHOD + path); and '
+        + '(4) after publishing, each endpoint answers as you expect — an anonymous request to '
+        + 'a session-only endpoint returns 401 rather than data.',
+    },
+    {
+      id: 'driver-aggregate-undeclared-key-aliases-removed',
+      // No backticks in `surface`: the upgrade-guide renderer wraps this string
+      // in a code span of its own, and a nested pair renders as literal ticks.
+      surface: "driver aggregate() call argument — query.aggregate and aggregations[].func",
+      replacement:
+        'query.aggregations and aggregations[].function — the spellings QueryASTSchema and '
+        + 'AggregationNodeSchema have always declared',
+      reason:
+        '`SqlDriver.aggregate` and `RemoteTransport.aggregate` each read two aliases the '
+        + 'Query Protocol has never declared: `query.aggregations || query.aggregate` and '
+        + '`agg.function || agg.func`. "Never declared" is measured, not assumed — `git log '
+        + '-S` over `data/query.zod.ts` finds no commit that ever introduced either name, '
+        + 'there is no `retiredKey()` tombstone and no alias-table entry for them (the file\'s '
+        + 'only alias table is `SortNode`\'s `direction` → `order`), and neither appears in any '
+        + 'upgrade guide or release note. So this entry does not record a declared surface '
+        + 'being withdrawn; it records a LENIENCY being withdrawn, which is why it is here '
+        + 'rather than behind a tombstone. The only writers in this repository were the two '
+        + 'driver packages\' own fixtures — #4984\'s family, where a fixture spelling the alias '
+        + 'keeps the tolerant limb green forever and no test in existence can go red on its '
+        + 'deletion — so ADR-0049 enforce-or-remove applies once those are re-spelt. ⚠️ Do '
+        + 'NOT read this across to `dashboard`/`page` measures: `aggregate` IS the canonical '
+        + 'key there and `func` IS a declared, loudly-suggesting alias (`DatasetMeasureSchema`, '
+        + 'ui/dataset.zod.ts). That neighbouring vocabulary is untouched, and it is the most '
+        + 'likely reason an off-repo caller ever wrote these keys on a QUERY — one habit, two '
+        + 'surfaces, only one of which declared it. This is a driver CALL ARGUMENT — code, '
+        + 'never stack metadata — so there is no source for the D2 chain to rewrite and '
+        + 'deliberately no schema tombstone: nothing ever ran a query through '
+        + '`QueryASTSchema.parse()` on this path. The enforced channel is tsc at the call '
+        + 'site, once the parameter is `DriverQuery` — and for an untyped JS caller there is '
+        + 'no enforced channel at all, which is exactly why this ledger entry has to exist: '
+        + 'the generated upgrade guide is the only way such a reader learns of the rename. '
+        + 'Same disposition, and the same reason, as `data-driver-find-stream-retired` '
+        + '(#4484), `storage-service-list-retired` (#5540) and `actor-user-roles-to-positions` '
+        + '(#6011). ADR-0049 / ADR-0087, #6321 (PR #6404).',
+      acceptanceCriteria:
+        'No caller passes `aggregate:` to a driver\'s `aggregate()`, and no aggregation entry '
+        + 'spells its function `func:`; both are written `aggregations:` / `function:`. An '
+        + 'inline literal still using either old spelling no longer type-checks (TS2353 at the '
+        + 'call site). An untyped JS caller that keeps writing `aggregate:` silently receives '
+        + 'no aggregate column — the grouping still happens, the measure is simply absent — '
+        + 'and one that keeps writing `func:` receives INVALID_QUERY / 400 naming the '
+        + 'undeclared function, identically on the local driver and the Turso remote '
+        + 'transport.',
     },
     {
       id: 'driver-capabilities-inert-bits-removed',
@@ -1935,6 +2113,638 @@ const step17: MigrationStep = {
         + 'plugin.ts + engine.ts batched schema sync, verify date-bucket parity).',
     },
     {
+      id: 'driver-sql-distinct-bare-filter-typed',
+      // No backticks in `surface` — see the note on the entry above.
+      surface: 'SqlDriver.distinct() third argument — any value',
+      replacement:
+        'a bare FilterCondition (@objectstack/spec/data) — the same value find() carries '
+        + 'under query.where, never a query envelope',
+      reason:
+        'This entry records a TYPE being added, not a surface being withdrawn, and it says '
+        + 'so up front because the distinction decides who has to do anything. `distinct` is '
+        + 'not declared on `IDataDriver`, so #5181 / #6075 never reached it and it kept '
+        + '`filters?: any` while its body said something far more specific — '
+        + '`applyFilters(builder, filters)` is handed the ARGUMENT ITSELF, never a `.where` '
+        + 'off it. ⚠️ RUNTIME BEHAVIOUR IS UNCHANGED by this entry\'s change: not one '
+        + 'statement moved, so no upgrade breaks at run time and nothing that answered '
+        + 'correctly stops. What the annotation removes is a compile-time hole, measured '
+        + 'rather than assumed: a truthy NON-OBJECT third argument — '
+        + '`distinct(\'orders\', \'product\', \'completed\')` — used to type-check and resolve '
+        + 'the UNFILTERED set, because `applyFilters` emits no predicate at all for a truthy '
+        + 'non-object, non-array filter. A call meaning "which products among completed '
+        + 'orders" answered with EVERY product, silently. That spelling is now TS2345 at the '
+        + 'call site. This is a driver CALL ARGUMENT — code, never stack metadata — so there '
+        + 'is no source for the D2 chain to rewrite and deliberately no schema tombstone, the '
+        + 'disposition `data-driver-find-stream-retired` (#4484), `storage-service-list-retired` '
+        + '(#5540), `actor-user-roles-to-positions` (#6011) and '
+        + '`driver-aggregate-undeclared-key-aliases-removed` (#6321) already carry. ⚠️ It '
+        + 'differs from those four in ONE measured way a reader should not have to infer: '
+        + 'because nothing changed at run time, an untyped JS caller is not affected BY THE '
+        + 'UPGRADE at all. The entry is here for a different reason — such a caller is exactly '
+        + 'the one tsc can never reach, and the silent widening above is a defect they may '
+        + 'ALREADY be sitting on, before and after this major. The generated upgrade guide is '
+        + 'the only channel that reaches them, which is why the fix is written down rather '
+        + 'than left to the compiler. ⛔ The reverse mismatch is NOT closed and no type can '
+        + 'close it: `FilterCondition` is an open map (`[key: string]: any`) because a filter '
+        + 'key IS a field name, so a query envelope `{ object, where }` is structurally a '
+        + 'valid filter — one constraining columns named `object` and `where` — and so is a '
+        + 'FilterArray. Both reach `distinct` type-checked and are refused at run time, '
+        + 'loudly, with INVALID_FILTER / 400. `driver-memory`\'s opposite half — where the '
+        + 'BARE spelling returns the unfiltered set in silence — stays open under the #5499 '
+        + 'freeze (#6320). ADR-0087, #6320.',
+      acceptanceCriteria:
+        'No caller passes a non-object to `distinct()`\'s third argument. A scalar there is '
+        + 'now a compile error (`TS2345: Argument of type \'string\' is not assignable to '
+        + 'parameter of type \'FilterCondition\'`); rewrite it as the bare filter it was '
+        + 'always meant to be — `\'completed\'` becomes `{ status: \'completed\' }`. ⚠️ That '
+        + 'is NOT an equivalent rewrite: the old spelling returned the UNFILTERED set, so the '
+        + 'answer changes once fixed, and the changed answer is the one the call always meant. '
+        + 'An untyped JS caller gets no compile error and no behaviour change — for them this '
+        + 'entry is the only notice that the spelling never filtered anything. A query '
+        + 'envelope or a FilterArray in that slot still compiles and is rejected at run time '
+        + 'with INVALID_FILTER / 400.',
+    },
+    {
+      id: 'engine-find-formula-order-by-refused',
+      surface:
+        'engine.find(object, { orderBy }) and engine.findOne(object, { orderBy }) naming a '
+        + '`formula` field — the direct engine path, not the REST ingress',
+      replacement:
+        'denormalise the value onto the object (a stored field, written when the source '
+        + 'changes) and sort by that — the same remedy the REST ingress has prescribed since '
+        + '#6924 / #6994; a `summary` field is unaffected and still sorts, because it gets a '
+        + 'real maintained column',
+      reason:
+        '#4226 / #4256 / #6994 closed the SORT axis at the REST ingress '
+        + '(`assertSortFieldsExist`, `400 INVALID_SORT`), which covers everything reaching '
+        + '`findData`: the list route, `POST /data/:object/query`, the export route and the '
+        + 'RPC dispatcher. A caller reaching `engine.find()` / `engine.findOne()` DIRECTLY '
+        + 'passed through none of it, and a `formula` ORDER BY there was dropped in silence. '
+        + 'Measured on a real driver: `asc` and `desc` came back BYTE-IDENTICAL, in insertion '
+        + 'order, under a success, with the rows carrying the very values they were asked to '
+        + 'be ordered by. No column exists to order by (a formula is computed on read, so no '
+        + 'driver materialises one), so the ORDER BY reached the driver, found nothing, and '
+        + 'the unknown-column backstop returned the rows unordered.\n\n'
+        + 'Ruled 2026-08-10 on #7095: an ORDER BY the engine cannot apply is a 4xx with '
+        + 'guidance prose at the public boundary, never a silent drop — the same direction as '
+        + 'the analytics dataset refusal envelope and the #6924 sort-hint prescription. The '
+        + "engine's documented internal-caller tolerance (`assertProjectionFieldsExist`'s "
+        + 'docblock) was to survive only behind a pinned internal path, and only if a MEASURED '
+        + 'internal call site relied on it. The #7095 sweep of every in-tree `orderBy` reaching '
+        + 'the engine directly — hooks, flows, reports, queue/job adapters, sharing, metadata '
+        + 'loaders, expand sub-reads — found NONE: every hardcoded internal sort names a real '
+        + 'stored column (`created_at`, `updated_at`, `version`, `priority`, `scheduled_for`, '
+        + '`started_at`, `next_run_at`, `recorded_at`, `id`), and no shipped object in the repo '
+        + 'declares a `formula` field at all. So no internal path shipped, and there is no flag '
+        + 'to opt back into the drop.\n\n'
+        + 'This is a CODE-path API, not stored metadata, so — like '
+        + '`hook-register-empty-object-target-refused` at this step — there is no `sys_metadata` '
+        + 'row for the D2 chain to rewrite and the ledger entry is the notification channel. '
+        + 'No mechanical rewrite exists in either direction: the platform cannot invent the '
+        + 'stored column the remedy prescribes, and it must not sort post-hoc instead — '
+        + '`driver.find` has already applied `limit` / `offset`, so re-sorting after the '
+        + 'formulas are evaluated would reorder an ARBITRARY PAGE, which looks correct on small '
+        + 'result sets and is wrong the moment pagination is involved.\n\n'
+        + 'ONE AUTHOR-REACHABLE SURFACE reaches this indirectly and is why it is not purely a '
+        + "code-side note: a saved report's `query.orderBy` (`sys_saved_report`) is forwarded "
+        + 'verbatim into `engine.find` by `plugin-reports`, bypassing the ingress gate. A '
+        + 'report authored to sort by a formula field used to run and return rows in an '
+        + 'arbitrary order; it now fails loudly, with the remedy in the message. One further '
+        + 'path is deliberately NOT a refusal: a nested `expand` sort raises this refusal '
+        + 'inside `expandRelatedRecords`, whose pre-existing graceful-degradation `catch` '
+        + 'swallows every expand failure and retains the raw foreign keys — so that path moves '
+        + 'from silent to OBSERVABLE (a warning naming the field and the fix) rather than '
+        + 'refusing. Reversing that backstop is a separate decision on all expand failure '
+        + 'modes. #7095, #6994, #6924, #4226, #4256, #3821, ADR-0112.',
+      acceptanceCriteria:
+        'No `engine.find` / `engine.findOne` call site sorts by a `formula` field, and no saved '
+        + "report's `query.orderBy` names one — grep your report definitions for an `orderBy` "
+        + 'field whose object declares it as a `formula`, and denormalise it onto a stored '
+        + 'column written when the source changes. A `summary` / rollup field needs no action: '
+        + 'it has a real maintained column and sorts correctly. Reads complete with no '
+        + '`INVALID_SORT` naming a formula field, and no "Failed to expand relationship field" '
+        + 'warning whose error text names one.',
+    },
+    {
+      id: 'enhanced-api-error-field-errors-renamed',
+      surface: 'api.enhancedApiError.fieldErrors',
+      replacement: 'fields',
+      reason:
+        'The wire has always carried `fields` — the validators, import coercion, ' +
+        'validation-failure.ts, @objectstack/client and the console\'s field-error extractor ' +
+        'all say `fields`, and nothing ever emitted `fieldErrors`, so a reader keying on it ' +
+        'was reading a field no server sent (ADR-0078\'s silently-inert declaration, on the ' +
+        'error envelope). This is a RESPONSE surface: no stack, example or template carries ' +
+        'the key, so there is no source for the chain to rewrite — the schema tombstones it ' +
+        'via retiredKey() and consumers move their read themselves. ADR-0114 D4, #3977.',
+      acceptanceCriteria:
+        'No consumer reads `error.fieldErrors`; per-field validation detail is read from ' +
+        '`error.fields`, and constructing an EnhancedApiError with `fieldErrors` fails to parse ' +
+        'with the rename prescription instead of silently losing the array.',
+    },
+    {
+      id: 'etl-pipeline-layer-retired',
+      surface:
+        'automation.etlPipeline / automation.etlPipelineRun / automation.etlSource / '
+        + 'automation.etlDestination / automation.etlTransformation (the whole L2 layer of '
+        + 'automation/etl.zod.ts, its four enums and the `ETL` factory — 9 defs, 27 exported '
+        + 'names)',
+      replacement:
+        '(removed — no protocol surface replaces it, deliberately. Layer by layer: '
+        + 'connector-attached synchronisation is `ConnectorSchema.syncConfig` '
+        + '(`integration/connector.zod.ts`), which IS parsed and executed; per-field value '
+        + 'transformation on import is `shared/mapping.zod.ts`, whose `transform` is applied '
+        + 'row by row by the REST import path and recorded key by key in '
+        + '`packages/spec/liveness/mapping.json`; scheduling is `system/job.zod.ts`. What has '
+        + 'NO replacement is multi-source, multi-stage movement with joins and aggregations — '
+        + 'because it never had an implementation either. It returns through the ENFORCE route: '
+        + 'the engine first, the vocabulary second)',
+      reason:
+        'The reading #4738 used to retire L1 `DataSyncConfig`, re-measured one layer up and '
+        + 'identical: narrative-only. No engine ever parsed, scheduled or executed an '
+        + '`ETLPipeline`. Measured on origin/main immediately before the removal: the only '
+        + 'non-spec references in this repo are two fumadocs-generated documentation sources '
+        + '(`apps/docs/.source/*.ts`), not executors; objectui has no reference at all; there '
+        + 'is no `liveness/etl.json` or `pipeline.json`, so no ADR-0049 gate ever had a reading '
+        + 'on it — while the same file family\'s EXECUTED half does have one '
+        + '(`liveness/mapping.json`), which is the contrast that makes the absence meaningful '
+        + 'rather than an oversight. The `etl` string in this registry was the one untested '
+        + 'link the finding named, and it is not a loader path: it was the id of the #4962 '
+        + 'retry-vocabulary entry, absorbed here. '
+        + 'The layer was ADR-0078\'s asymmetry in its purest form — an author could write a '
+        + 'complete ten-stage pipeline, get no error, and get no execution. It was also '
+        + 'advertised: `packages/spec/docs/SYNC_ARCHITECTURE.md` named `ETLPipeline` as the '
+        + 'recommended destination for authors displaced by the L1 retirement (#4738) and '
+        + 'listed ten transformation types with copyable examples down to '
+        + '`script | Custom JavaScript/Python`. That document is rewritten in the same change; '
+        + 'a retirement whose own doc still recommends the retired layer is self-contradictory, '
+        + 'and forwarding L1\'s authors to a second layer with no executor was the defect '
+        + 'compounding rather than closing. '
+        + '⚠️ `etl-retry-converged-onto-retry-policy` (#4962) is SUBSUMED here, the '
+        + '#4657/#4834/#5055 way: both land in the unreleased protocol 17, so composed, a '
+        + 'rename of `retry.maxAttempts` on a shape that does not survive the major has no '
+        + 'observable effect — and keeping both would tell an upgrader to rewrite a key on a '
+        + 'schema the same upgrade deletes. The `maxAttempts` `retiredKey()` tombstone goes '
+        + 'with the shape that carried it, which is strictly stronger than the tombstone: there '
+        + 'is no longer a `retry` block to author the key into. Route 3 — no carrier key, no '
+        + 'parse site, so no D2 conversion and no tombstone; RETIRED_DEFS_BY_MAJOR plus this '
+        + 'entry are the declaration. ADR-0049, ADR-0078, #6414.',
+      acceptanceCriteria:
+        'No source imports `ETLPipeline`, `ETLPipelineParsed`, `ETLPipelineSchema`, '
+        + '`ETLPipelineRun(Schema)`, `ETLSource(Schema)`, `ETLDestination(Schema)`, '
+        + '`ETLTransformation(Schema)`, `ETLEndpointType(Schema)`, '
+        + '`ETLTransformationType(Schema)`, `ETLSyncMode(Schema)`, `ETLRunStatus(Schema)` or '
+        + 'the `ETL` factory from `@objectstack/spec/automation`; `tsc` reports TS2724/TS2305 '
+        + 'on any that survives. Every author who was pointed at L2 has been re-pointed by '
+        + 'name: SYNC_ARCHITECTURE.md no longer lists an L2 row, no longer recommends '
+        + '`ETLPipeline` as L1\'s destination and no longer advertises a transformation-type '
+        + 'table. The surviving layers still parse unchanged — a connector declaring '
+        + '`syncConfig` and an import declaring `mapping.transform` both behave exactly as they '
+        + 'did in 16.x.',
+    },
+    {
+      id: 'export-field-meta-constraints-retired',
+      surface:
+        '@objectstack/rest: ExportFieldMeta.required / .system / .readonly / .hasDefault / '
+        + '.min / .max / .minLength / .maxLength (the map built by `buildFieldMetaMap`, '
+        + 'reached as `PreparedImport.metaMap` from `prepareImportRequest`)',
+      replacement:
+        'the object schema you already hold — read `fields[name].required` / `.system` / '
+        + '`.readonly` / `.defaultValue` / `.min` / `.max` / `.minLength` / `.maxLength` off '
+        + 'the same `ObjectSchema` you passed to `buildFieldMetaMap`, which is where the '
+        + 'ENGINE reads them and therefore the only copy that cannot drift',
+      reason:
+        'ADR-0049 enforce-or-remove. These eight were never a source of truth: '
+        + '`buildFieldMetaMap(schema)` DERIVED each one from the very `schema` its caller '
+        + 'passed in, so the map carried a second copy of facts the caller already held. '
+        + "They existed for exactly one consumer — the import dry run's hand-copied "
+        + 'pre-check mirror (`firstMissingRequiredField` / `firstConstraintViolation`, '
+        + 'framework#3956) — and #4633 ruling D retired that mirror (PR #6532): the dry run '
+        + "now asks `DataProtocol.validateData` for the engine's verdict, which reads the "
+        + "object's own schema. That left all eight computed on every import and read by "
+        + 'NOTHING, which is the declared-and-unread shape ADR-0049 exists for; a constraint '
+        + 'vocabulary standing next to the presentation one with no enforcer behind it is '
+        + 'precisely the thing an AI-authored consumer mistakes for a contract. Verified '
+        + 'zero-reader before removal, per key and by type, across this repo (`packages/rest` '
+        + 'itself, and all five in-repo dependents of `@objectstack/rest`: runtime, cli, '
+        + "verify, plugin-auth, plugin-dev) and the `objectui` sibling; plugin-auth's "
+        + 'identity import forwards `prepared.metaMap` into `runImport` but reads only the '
+        + 'presentation keys through `coerceRow`. '
+        + 'Why this needs a ledger entry despite that sweep: it is the `findStream` (#4484) / '
+        + '`IStorageService.list` (#5540) / `actor-user-roles-to-positions` (#6011) '
+        + 'disposition — a published TS surface with NO spec schema, so there is no '
+        + '`retiredKey()` tombstone and no parse rejection that could carry a prescription, '
+        + 'and the ledger is the only channel that reaches an upgrader. It is if anything '
+        + 'blinder than those three: the keys shipped in a FINAL release (`@objectstack/rest` '
+        + '14.5.0) and have been published in every release since, and because they were '
+        + 'OPTIONAL keys on an interface that itself survives, a JavaScript consumer reading '
+        + '`meta.required` after the upgrade gets `undefined` with no error at all — tsc '
+        + 'reports at the read site only for a typed consumer. '
+        + 'Why D3 semantic and not a D2 conversion: there is nothing to convert. No authored '
+        + 'or stored metadata changes shape — `required` / `min` / `maxLength` and the rest '
+        + 'remain fully authorable on a field definition and fully enforced by the engine, '
+        + 'which is where they always lived. The only place these eight are ever spelled is '
+        + "inside a consumer's own TypeScript, so no `objectstack migrate meta` transform can "
+        + 'reach them. ADR-0049 / ADR-0087, #6536 (the sweep PR #6532 deliberately deferred).',
+      acceptanceCriteria:
+        'No code of yours reads any of the eight off a `buildFieldMetaMap` / '
+        + '`prepareImportRequest` result. Grep your sources for `.required` / `.hasDefault` / '
+        + '`.minLength` / `.maxLength` / `.min` / `.max` / `.system` / `.readonly` on an '
+        + '`ExportFieldMeta`-typed value; each hit moves to the object schema you already '
+        + 'passed in. ⚠️ Prove it against a RUN, not against tsc: these were optional keys, '
+        + 'so an untyped or `any`-typed read compiles clean and silently becomes `undefined` '
+        + '— assert that the constraint your code acts on is still observed on a real import, '
+        + 'not merely that the build is green. Note `hasDefault` has no one-to-one '
+        + "replacement key: it was the derived predicate `defaultValue != null`, mirroring the "
+        + "engine's `applyFieldDefaults` gate, so read `fields[name].defaultValue` and apply "
+        + 'that same `!= null` test yourself.',
+    },
+    {
+      id: 'filter-regex-options-retired',
+      // No backticks in `surface` — see the note two entries above.
+      surface:
+        'data.filter $regex / $options — in a STORED filter (dashboard widget filter and '
+        + 'globalFilters, report runtimeFilter, page and component filter, solution-blueprint '
+        + 'filter), and equally in the where clause of a query request',
+      replacement:
+        '$icontains for the case-insensitive substring match this was almost always used '
+        + 'for, or $contains for a case-sensitive one — a pattern that genuinely needs a '
+        + 'regular expression has no filter-level replacement',
+      reason:
+        'Like `driver-aggregate-undeclared-key-aliases-removed` and '
+        + '`driver-sql-distinct-bare-filter-typed`, this entry records a LENIENCY being '
+        + 'withdrawn rather than a declared surface: `$regex` was never in `FILTER_OPERATORS` '
+        + 'and never a key on `StringOperatorSchema`. That is measured, not assumed — `git '
+        + 'log -S\'$regex\'` over `packages/spec/src` returns only doc comments describing how '
+        + '`$contains` LOWERS to MongoDB (`Contains substring - SQL: LIKE %?% | MongoDB: '
+        + '$regex`), plus #5701 itself, which added the name solely as `RETIRED_FILTER_OPERATORS` '
+        + 'prescription data. ⚠️ But it differs from those two in the one way that decides the '
+        + 'disposition, so a reader should not have to infer it: those were driver CALL '
+        + 'ARGUMENTS, code and never stack metadata, whereas a filter IS stored metadata. '
+        + '`FilterConditionSchema` is an OPEN RECORD (`z.record(z.string(), z.unknown())`) '
+        + 'because a filter key is a field name, so a stored `{ name: { $regex: \'acme.*\' } }` '
+        + 'parses GREEN and always will — a `retiredKey()` tombstone cannot exist on an open '
+        + 'map, which is exactly why the ledger has to carry this. What such a stack used to '
+        + 'get was four different answers from four backends: `driver-sql` and Turso\'s remote '
+        + 'transport compiled it to a LIKE-escaped SUBSTRING (so `a.b` matched only the literal '
+        + '`a.b` and the regex was silently never a regex), `driver-memory` and objectql\'s '
+        + '`having` ran it as a real `RegExp` (so the same filter also matched `axb`, and an '
+        + 'INVALID pattern was caught and answered `false` — zero rows, in silence), and '
+        + '`driver-mongodb` refused it with a bare `Error` carrying no `code` and no `status`. '
+        + 'It is now refused everywhere with INVALID_FILTER / 400 naming the replacement. '
+        + 'There is deliberately NO D2 conversion and this sits in `semantic` rather than among '
+        + 'the mechanical transforms: rewriting `$regex` to `$icontains` is NOT lossless in '
+        + 'either direction — a regex metacharacter becomes a literal — so an auto-applied '
+        + 'rewrite would silently change which rows a dashboard, report or permission filter '
+        + 'selects, a wrong number rather than a missing one. Choosing the substring the '
+        + 'pattern MEANT is a judgment about the query, not a transform. ⚠️ This entry covers '
+        + 'BOTH HALVES of the #4706 ruling (B), not just the driver one: the contract half '
+        + '(#5701 — the `$icontains` declaration, the `$contains` family pinned '
+        + 'case-sensitive, and the `RETIRED_FILTER_OPERATORS` prescriptions) landed before the '
+        + 'ADR-0087 disposition gate (#6148) existed and so was never asked for a ledger entry; '
+        + 'the driver half (#5702) is where the refusal became executable. One surface, one '
+        + 'entry, registered from the half that made it observable. ADR-0049 / ADR-0087, '
+        + '#4706 / #5701 / #5702.',
+      acceptanceCriteria:
+        'No stored filter and no request `where` spells `$regex` or `$options` — grep the '
+        + 'stack for both. Each one is rewritten by asking what the pattern MEANT, not by '
+        + 'transliterating it: a bare substring pattern becomes `$icontains` (or `$contains` '
+        + 'when the match must stay case-sensitive), and its metacharacters are dropped rather '
+        + 'than escaped, because they were never honoured as a regex on the SQL family in the '
+        + 'first place. ⚠️ Expect the answer to CHANGE on any stack that ran on '
+        + '`driver-memory`, `driver-mongodb` or objectql `having`, where the pattern really was '
+        + 'evaluated as a regular expression; on the SQL family the rewritten filter returns '
+        + 'what it always returned. A pattern that genuinely needs alternation, anchoring or '
+        + 'character classes has no filter-level replacement — move that predicate into a '
+        + 'formula field or a server-side view, or open an issue for it. Verify by loading the '
+        + 'stack: a surviving `$regex` or `$options` is answered INVALID_FILTER / 400 with a '
+        + 'message naming the replacement, on every backend.',
+    },
+    // `etl-retry-converged-onto-retry-policy` (#4962) stood here and was
+    // ABSORBED by `etl-pipeline-layer-retired` below (#6414), the §0 same-major
+    // rule: both land in the unreleased protocol 17, and composed, the rename
+    // `ETLPipeline.retry.maxAttempts` -> `maxRetries` has no observable effect
+    // because the shape carrying it does not survive the major. Leaving both
+    // would tell an upgrader to rewrite a key on a schema this same upgrade
+    // deletes, and would break the fixture-disjointness the replay contract
+    // asserts. The `agent.knowledge` / `WidgetManifest.performance` precedent:
+    // a tombstone goes with the shape that carried it, which is strictly
+    // stronger than the tombstone.
+    {
+      id: 'flow-retry-max-retries-required',
+      surface: "flow.errorHandling.maxRetries (under strategy: 'retry')",
+      replacement: 'an explicit count >= 1 (e.g. maxRetries: 3), or strategy: \'fail\'',
+      reason:
+        'maxRetries had two defaults — FlowSchema `.default(0)` and the engine\'s ' +
+        '`maxRetries ?? 3` — so an unstated count retried 0 times through the schema and 3 ' +
+        'times through a hand-built definition (#4247). With the engine\'s copy removed the ' +
+        'unstated count is unambiguously 0, and retrying zero times is exactly ' +
+        "`strategy: 'fail'`, so the schema now refuses the combination instead of it silently " +
+        'doing nothing. There is no lossless rewrite: 0 preserves the behaviour a parsed flow ' +
+        'got but contradicts what its author wrote, and any positive count is a NEW decision ' +
+        'about re-running the whole flow with its side effects. That choice is the author\'s.',
+      acceptanceCriteria:
+        "Every flow declaring `errorHandling.strategy: 'retry'` also declares " +
+        '`maxRetries` >= 1, and each count was chosen knowing a retry replays the flow FROM ' +
+        'THE START (records re-created, callouts re-fired); flows that never actually wanted ' +
+        "retries say `strategy: 'fail'`. No flow fails to register with the maxRetries " +
+        'prescription.',
+    },
+    {
+      id: 'hook-context-session-roles-retired',
+      surface: 'data.hookContext.session.roles',
+      replacement:
+        '(removed — gate on `session.userId` / `session.isSystem`; for PRIVILEGE ask the '
+        + 'security service, which reads `permissions` / `positions` / posture off the '
+        + 'execution context, ADR-0095 D3)',
+      reason:
+        'Declared on the runtime hook context, read by exactly two consumers, produced by '
+        + 'nobody. The two readers were the approvals record lock and the delegation write '
+        + 'guard, each opening with `session.roles?.includes(\'admin\')`; ObjectQL\'s '
+        + '`buildSession()` builds the session field by field and has never written `roles`, '
+        + 'and nothing else feeds a HookContext in objectstack, cloud or objectui (cloud\'s hook '
+        + 'consumers read `hookContext?.session?.userId`; objectui\'s `roles` are the '
+        + '`/auth/me` user payload, a different surface; an ACTION body\'s `ctx.session` is a '
+        + 'different untyped object that does carry `roles`, tracked apart and unaffected). '
+        + 'Both branches were therefore dead on '
+        + 'every real engine path — an authorization decision in shape only, and a second admin '
+        + 'dialect competing with the one ADR-0090 D3 / ADR-0095 D3 sanction. #4839 (PR #5049) '
+        + 'removed the readers; this removes the declaration, per ADR-0049 enforce-or-remove. '
+        + 'This is a RUNTIME context, not stored metadata: the engine builds a HookContext per '
+        + 'operation and nothing persists one, so no `sys_metadata` row, example or template '
+        + 'can carry the key and there is no source for the D2 chain to rewrite — the '
+        + '`openApi31` (#4579) / `activationEvents` (#4657) shape, one semantic TODO rather '
+        + 'than a stack conversion. The key IS tombstoned (`HookContextSchema` is deliberately '
+        + 'not `.strict()` — a plain delete would strip it silently, #3733 / ADR-0104), so a '
+        + 'consumer that parses a context it was handed still meets the prescription. '
+        + 'ADR-0049, #5050.',
+      acceptanceCriteria:
+        'No hook reads `ctx.session.roles`; caller gating uses `ctx.session.userId` / '
+        + '`ctx.session.isSystem`, and privilege comes from the security service '
+        + '(`permissions` / `positions` / posture). Constructing a HookContext session with '
+        + '`roles` fails `tsc` (the input type is `never`) and fails `HookContextSchema.parse` '
+        + 'with the retirement prescription instead of being silently stripped. Nothing '
+        + 'regresses at runtime: the key had no producer, so no decision anywhere ever saw a '
+        + 'value in it.',
+    },
+    {
+      id: 'hook-register-empty-object-target-refused',
+      surface:
+        "engine.registerHook(event, handler, { object: '' | [] | [''] }), and a scope whose "
+        + '`excludeObjects` cancels its `object` entirely',
+      replacement:
+        "name the object(s) — `object: 'account'` / `object: ['account', 'contact']` — or, for "
+        + "a global hook, `object: '*'` or no `object` key at all; for a cancelled scope, widen "
+        + '`object` or drop the overlapping names from `excludeObjects`',
+      reason:
+        '#4281 ruled that an empty hook target is not "no target" and closed the shape at the '
+        + "two METADATA doors — `HookSchema.object`'s refine and `hook-binder.ts`'s "
+        + '`normalizeObjects`. `engine.registerHook`, the CODE door, goes through neither, so '
+        + 'all three spellings still registered, each producing a defect the author did not '
+        + "write: `''` is FALSY, so the allow face was skipped entirely and the entry became a "
+        + "GLOBAL hook (#4281's headline failure mode — blank intent taking the broadest "
+        + "possible blast radius); `[]` and `['']` are truthy but admit no object name, so the "
+        + 'entry could never fire. #5928 then added the `excludeObjects` face, which brought a '
+        + 'fourth shape reached by arithmetic rather than by one bad name: an `object` list '
+        + 'every member of which is also excluded admits nothing, so that entry can never fire '
+        + 'either. All four are ADR-0078 silently-inert declarations, and all four are now '
+        + 'refused at REGISTRATION.\n\n'
+        + 'No mechanical rewrite exists, in either direction. The refused values carry no '
+        + "recoverable intent — `object: ''` could have meant `'*'` (what it actually did) or a "
+        + 'specific object name the author forgot to fill in, and those are opposite '
+        + 'registrations; choosing between them is a judgment the chain cannot make. Nor could '
+        + "the MATCHING read be changed instead: teaching the matcher that `''` is an "
+        + 'unmatchable name would silently convert a hook firing on every object into one '
+        + 'firing on none — the same class of defect pointing the other way, which is why '
+        + '#5928 declined to do it in passing.\n\n'
+        + 'This is a RUNTIME registration API, not stored metadata, so — like '
+        + '`hook-context-session-roles-retired` at this step — there is no `sys_metadata` row '
+        + 'for the D2 chain to rewrite and the ledger entry is the notification channel. One '
+        + 'metadata surface reaches it INDIRECTLY and is the reason this is not purely a '
+        + "code-side note: a `record-change` flow's start node forwards `config.objectName` "
+        + 'verbatim into `registerHook` (`RecordChangeTrigger.start`), so a flow authored with '
+        + 'a blank `objectName` used to bind a trigger to EVERY object in the tenant. It now '
+        + "fails to bind instead, loudly — the automation engine's per-flow bind guard warns "
+        + 'and the `kernel:bootstrapped` binding audit re-reports it — which is the correct '
+        + 'end state, but it is an observable change for that flow. #6573, #4281, #4001, '
+        + '#5928, ADR-0078.',
+      acceptanceCriteria:
+        'No `registerHook` call site passes an empty `object` target, and none passes an '
+        + '`excludeObjects` list covering every name in its `object` list. Every `record-change` '
+        + 'flow start node declares a non-blank `config.objectName`, or omits the key if the '
+        + 'flow is genuinely meant to fire on every object. Boot completes with no '
+        + '"[ObjectQL] Hook ... declares an empty `object` target" throw and no '
+        + '"[record-change] ... not bound" warning naming a flow you expect to fire.',
+    },
+    {
+      id: 'http-server-runtime-vocabulary-retired',
+      surface:
+        'system.serverEvent / system.serverEventType / system.serverCapabilities / '
+        + 'system.serverStatus (the lifecycle-event, capability-report and status vocabulary of '
+        + 'system/http-server.zod.ts — 4 defs, 8 exported names)',
+      replacement:
+        '(removed — there is no replacement key, because there was never a key. Server lifecycle '
+        + 'is the transport plugin\'s own start/stop seam; per-request and per-server '
+        + 'observability is `system/metrics.zod.ts` and `system/logging.zod.ts` (plus '
+        + '`OS_SERVER_TIMING` for timings), and liveness is the `/health` endpoint. What a '
+        + 'transport plugin can DO it states by implementing the kernel plugin contract — the '
+        + 'seams it registers are the capability statement, and a self-described capability '
+        + 'record can only disagree with them. Server-level configuration that IS authorable '
+        + 'lives on `defineStack({ server })` / `StackServerConfigSchema`, which is unaffected)',
+      reason:
+        'The second and final ADR-0049 pass over `system/http-server.zod.ts`. #4938 removed the '
+        + 'CONFIG half (`HttpServerConfigSchema`, nine keys, zero readers, zero authoring '
+        + 'entry); this removes the RUNTIME half — a 7-member lifecycle event union with a '
+        + 'timestamped envelope, an eight-boolean capability report, and a five-state status '
+        + 'record with connection and request counters. Nothing ever emitted, consumed or '
+        + 'parsed any of them. '
+        + 'This card was HELD for four days rather than queued, on a specific and legitimate '
+        + 'doubt: a response/capability vocabulary can be a REFERENCE surface for host '
+        + 'implementers, so "zero consumers in this repo" is weaker evidence for one of those '
+        + 'than for an authorable key (the CSS-variable rebuttal). The hold was lifted by '
+        + 'measuring the reference reader itself rather than by re-running the same grep: '
+        + '`plugin-hono-server`, the one in-tree host implementation, neither implements nor '
+        + 'reports any of the three — it names no capability record, no status shape and no '
+        + 'event union, and what it registers is routes and middleware through the kernel '
+        + 'plugin contract. A declaration-site grep put every declaration in this one file, a '
+        + 'quoted-name sweep across objectstack and objectui found no reader outside it, and '
+        + 'the control passed in the SAME run: `MiddlewareConfig`, declared twelve lines away, '
+        + 'resolves to `packages/runtime/src/middleware.ts`. So the sweep could see a reader in '
+        + 'this file when there was one. '
+        + 'With no carrier key there is nothing to tombstone, and with no author there is no '
+        + 'source or `sys_metadata` row for a D2 conversion to rewrite: RETIRED_DEFS_BY_MAJOR '
+        + 'plus this entry are the declaration — route 3, the same shape as #4938 in this very '
+        + 'file, #4834, #4988 and #5055. If host-implementer conformance becomes a real '
+        + 'requirement it returns through the ENFORCE route: an adapter contract with a checker '
+        + 'behind it, vocabulary second. ADR-0049, #5295.',
+      acceptanceCriteria:
+        'No source imports `ServerEvent`, `ServerEventType`, `ServerEventSchema`, '
+        + '`ServerCapabilities`, `ServerCapabilitiesSchema`, `ServerCapabilitiesParsed`, '
+        + '`ServerStatus` or `ServerStatusSchema` from `@objectstack/spec/system` — a grep over '
+        + 'consumer code resolves none of them, and `tsc` reports TS2724/TS2305 on any that '
+        + 'survives. The route-registration half of the same module still resolves '
+        + '(`RouteHandlerMetadataSchema`, `MiddlewareType`, `MiddlewareConfigSchema`, '
+        + '`MiddlewareConfig`), and `StackServerConfigSchema` — the one authorable server '
+        + 'surface — is untouched: a stack declaring `server: { trustProxy, security }` parses '
+        + 'exactly as it did in 16.x.',
+    },
+    {
+      id: 'import-run-automations-declared-default-corrected',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
+      // code span AND a table cell (see the note on `spec-type-alias-input-suffix-retired`).
+      surface:
+        'api.ImportRequest runAutomations — the declared default of the key on BOTH import '
+        + 'bodies, POST /api/v1/data/:object/import (ImportRequest) and its async twin POST '
+        + '/api/v1/data/:object/import/jobs (CreateImportJobRequest, which IS the same schema '
+        + 'object). It was declared default(false) and described as "off by default for '
+        + 'bulk"; it is now default(true), which is what the server has always done',
+      replacement:
+        'an explicit runAutomations: false on any import request that is meant to load rows '
+        + 'without firing triggers/hooks. That spelling is unchanged and has always been the '
+        + 'only one the server read — what changes is that omitting the key now DECLARES what '
+        + 'it already DID. Callers who want automations on need write nothing',
+      reason:
+        'A DECLARATION corrected to match a runtime that did not move — the inverse of a '
+        + "behaviour flip, and registered here for the reason protocol 12's "
+        + '`rest-requireauth-default-flip` and this major\'s '
+        + '`action-descriptor-resume-authority-default-flip` are: whether a given import was '
+        + 'meant to fire triggers is a judgment no transform can make, so the prescription is '
+        + 'a TODO rather than a rewrite. The server decides in import-prepare.ts with '
+        + '`body?.runAutomations !== false`, i.e. an omitted flag runs automations, and has '
+        + 'since #2922 — automations always ran on import historically (the engine ignored '
+        + 'the flag entirely before then), so opt-out was made the explicit act, matching '
+        + 'platform convention. The schema said the opposite in both machine-readable and '
+        + "human-readable form, and both SHIPPED: `.default(false)` in `@objectstack/spec`'s "
+        + 'JSON Schema, and the describe prose in the published reference tables for both '
+        + 'defs. '
+        + '⚠️ Nothing in this repo reconciled the two and NO deployed caller changes '
+        + 'behaviour: no request path parses an import body through this schema — the route '
+        + 'reads the raw body, and the sole reference to `CreateImportJobRequestSchema` is '
+        + 'the declarative `ImportJobApiContracts` catalog entry, a declaration and not a '
+        + 'parse. That is exactly why this needed a ruling rather than a docs edit: the '
+        + 'divergence was unobservable in-tree and observable only to a consumer OUTSIDE it. '
+        + 'A client or SDK that validated its request through the published schema '
+        + 'materialised `runAutomations: false` from the declared default and sent it '
+        + 'explicitly, and the server honoured it — so the same request body produced '
+        + 'opposite behaviour depending on whether the caller validated before sending, with '
+        + 'the validating caller silently losing its triggers. Nothing rejected it, nothing '
+        + 'warned, and the reference page told an author the wrong thing in the other '
+        + 'direction. There is deliberately NO schema tombstone and no D2 conversion: no key '
+        + 'is removed, and an HTTP request body is neither authored nor persisted — the same '
+        + 'disposition `notification-list-cursor-retired` (#6361) takes for the sibling '
+        + 'default on this major, and `batch-options-validate-only-retired` before it. The '
+        + 'declared move itself is recorded mechanically, per key, in '
+        + 'DEFAULT_CHANGES_BY_MAJOR[17] (#4666), whose `from`/`to` fingerprints are '
+        + 're-derived on every build. Maintainer ruling 2026-08-09 (#6704, disposition A: '
+        + 'the spec follows the runtime). ADR-0049 / ADR-0078.',
+      acceptanceCriteria:
+        'Every import request of yours that must NOT fire triggers sends `runAutomations: '
+        + 'false` explicitly, rather than omitting the key and trusting the old declared '
+        + 'default. The check is worth doing precisely where it looks unnecessary: if you '
+        + 'build the body by parsing it through `ImportRequestSchema` (or the published JSON '
+        + 'Schema) and then send the PARSED object, your bulk loads were running with '
+        + 'automations OFF and will now run with them ON — that is the only class whose '
+        + 'behaviour changes, and it changes toward what an unvalidated caller always got. '
+        + '⚠️ Behaviour on the wire is deliberately UNCHANGED and should be verified as '
+        + 'such: a body that omits `runAutomations` fired triggers before this change and '
+        + 'fires them after, and `runAutomations: false` turns them off before and after. '
+        + 'Nothing starts being refused — the route never validated this body against the '
+        + 'schema and does not begin to. `dryRun` is unaffected and still runs NO automations '
+        + 'whatever the flag says (#6037).',
+    },
+    {
+      id: 'job-retry-policy-constraints-tightened',
+      surface: 'job.retryPolicy.maxRetries (> 10) / job.retryPolicy.backoffMultiplier (< 1)',
+      replacement: 'maxRetries <= 10, and backoffMultiplier >= 1',
+      reason:
+        'The converged RetryPolicy (#4661) keeps the automation side\'s bounds, which the job '
+        + 'side never had: `maxRetries` is capped at 10 and `backoffMultiplier` floored at 1. '
+        + 'Neither has a lossless rewrite. Clamping `maxRetries: 20` to 10 would halve a '
+        + 'retry budget its author chose, and a `backoffMultiplier` below 1 describes a delay '
+        + 'that SHRINKS on each attempt — retrying a failing dependency ever faster, which is '
+        + 'the opposite of backoff and was never a shape the engine meant to offer. Both now '
+        + 'fail at parse time with the bound named, rather than being silently reinterpreted. '
+        + 'Choosing the replacement count (or accepting the cap) is the author\'s call.',
+      acceptanceCriteria:
+        'Every job declaring `retryPolicy` parses: no `maxRetries` above 10 and no '
+        + '`backoffMultiplier` below 1 remain, and each adjusted value was re-chosen knowing a '
+        + 'retry re-runs the handler with its writes and callouts. No job fails to register '
+        + 'with the retry-policy bound prescription.',
+    },
+    {
+      id: 'notification-list-cursor-retired',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
+      // code span AND a table cell (see the note on `spec-type-alias-input-suffix-retired`).
+      surface:
+        'api.listNotifications cursor — the key on BOTH halves of GET /api/v1/notifications '
+        + '(ListNotificationsRequestSchema and ListNotificationsResponseSchema) and the cursor '
+        + 'argument of the client SDK call client.notifications.list(). The same entry covers '
+        + 'the limit default: the request schema no longer declares default(20)',
+      replacement:
+        'a larger `limit` — the route answers the newest N notifications and has no page 2. '
+        + 'There is no replacement for `cursor`, deliberately: nothing ever minted one, so no '
+        + 'caller holds a value to carry over. Callers that looped on it were re-reading the '
+        + 'first window and should read one window sized to what they display (the Console '
+        + 'bell polls exactly this way). For the removed `limit` default, send the number you '
+        + 'want explicitly if you were relying on 20 — omitting it takes the server window, '
+        + 'which is 50 on the platform inbox and clamped into 1..200, and has been since '
+        + 'before the declaration existed',
+      reason:
+        'One capability, both halves, never half-deleted (maintainer ruling 2026-08-07, '
+        + 'Option A, ruled jointly with #6363). `cursor` was declared on the request and on '
+        + 'the response and honoured on neither: the dispatcher domain reads `read` / `type` / '
+        + '`limit` and nothing else, and no emit site has ever written the response key. It '
+        + 'was worse than inert because it had a shipped PRODUCER — the SDK appended it to the '
+        + 'query string — so a caller paginating by the published contract looped on page 1 '
+        + 'forever, with no error and no 400. Measured over a real boot with 60 unread before '
+        + 'the removal: page2 === page1, both parsing green against the response schema, which '
+        + 'is why no conformance gate could see it. '
+        + 'This is `data.query.cursor` (#4286, `query-cursor-retired`) one layer up, with the '
+        + 'same verdict for the same reason, down to deleting the SDK producer alongside the '
+        + 'key. A first-class inbox cursor, if one is ever designed, will be a '
+        + 'response-minted opaque token — a different API — so keeping this one preserved a '
+        + 'wrong design rather than a roadmap. '
+        + 'The `limit` default goes with it because the FICTION WAS THE MECHANISM, not the '
+        + 'number: no request path parses a query string through this schema (#3899 wired the '
+        + "catalog's requestSchema to the real entry for BODIES only), so `.default(20)` never "
+        + 'stamped anything onto anything, and the server has always applied its own 50. '
+        + 'Re-spelling 20 as 50 — the other arm the ruling allowed — would have kept a '
+        + 'declaration that does not execute and merely made it coincide with the '
+        + 'implementation until someone moved the clamp; `.optional()` plus prose is true '
+        + 'about both the schema and the server. No constraint (`.int()` / `.max(200)`) is '
+        + 'declared either, because the service CLAMPS an out-of-range limit rather than '
+        + 'refusing it, and declaring a rejection the wire does not perform is the same defect '
+        + 'mirrored. '
+        + 'Route 2, and the split is worth stating exactly because the two halves of the '
+        + 'bookkeeping go different ways. There IS a tombstone: both schemas are non-strict, '
+        + 'so a bare deletion would have made Zod SILENTLY STRIP whatever a caller kept '
+        + 'sending — a clean parse and a parameter that never takes effect, which is this '
+        + "issue's own defect re-created one layer down (#3733, ADR-0104). So `cursor` is "
+        + '`retiredKey()` on both halves, typed `never` for tsc and raising the prescription '
+        + 'at any parse, and both keys are registered in RETIRED_KEYS_BY_MAJOR[17]. There is '
+        + 'NO D2 conversion: a conversion rewrites an authored source or a stored '
+        + '`sys_metadata` row, and these two shapes are HTTP-only — nobody authors a '
+        + '`ListNotificationsRequest` and nothing persists one. Request AND response shapes: '
+        + 'two semantic TODOs for API callers, no stack conversion — the same disposition '
+        + '`BatchOptions.validateOnly` (#4052) and the `AnalyticsQueryRequest` envelope keys '
+        + 'already take in this major. The `limit` default is declared separately and '
+        + 'mechanically, in DEFAULT_CHANGES_BY_MAJOR[17] (#4666), whose `from`/`to` '
+        + 'fingerprints are re-derived on every build. ADR-0049 / ADR-0078, #6361.',
+      acceptanceCriteria:
+        'No caller sends `cursor` to `GET /api/v1/notifications` and no SDK call site passes '
+        + 'it: `client.notifications.list({ cursor })` is a `tsc` error (TS2353, excess '
+        + 'property), which is the enforced channel — the removal is loud at compile time for '
+        + 'every TypeScript consumer. Reading `response.cursor` no longer type-checks either, '
+        + 'and always answered `undefined` before. ⚠️ Behaviour on the wire is deliberately '
+        + 'UNCHANGED and must be verified as such: a request still carrying `?cursor=…` is '
+        + 'IGNORED, not refused — the domain reads three named query keys and no route '
+        + 'validates this query against a schema, so an unknown key has never produced a 400 '
+        + 'and does not start doing so here. The declaration stopped promising what the wire '
+        + 'never did; the wire did not change. `unreadCount` is untouched (#6363) and still '
+        + 'reports the total across the whole matching inbox rather than the window. A caller '
+        + 'that omitted `limit` receives the same 50 rows it always received.',
+    },
+    {
       id: 'plugin-activation-events-retired',
       surface:
         'kernel.dynamicLoadRequest.activationEvents / studio.studioPluginManifest.activationEvents',
@@ -1980,6 +2790,61 @@ const step17: MigrationStep = {
         + 'code imports `ActivationEventSchema` / `ActivationEvent` from '
         + '`@objectstack/spec/kernel` or `@objectstack/spec/studio` (TS2305 after upgrade). '
         + 'Runtime behaviour is byte-identical: plugins loaded eagerly before and after.',
+    },
+    {
+      id: 'plugin-manifest-loading-retired',
+      surface:
+        'manifest.loading (the whole block: strategy / preload / codeSplitting / dynamicImport / '
+        + 'initialization / dependencyResolution / hotReload / caching / sandboxing / monitoring)',
+      replacement:
+        'nothing to re-declare — delete the key. Plugins are composed at boot: `defineStack` '
+        + 'registers them and the kernel runs `init` then `start` in an order topologically '
+        + "resolved from each composed plugin's own `dependencies` / `optionalDependencies` "
+        + '(`resolvePluginOrder` in `packages/core/src/plugin-order.ts`). For the isolation '
+        + '`loading.sandboxing` appeared to configure, use the plugin trust tier '
+        + '(`manifest.runtime`, ADR-0025 §3.6) and the manifest permission declarations, which '
+        + 'are the surfaces the platform actually enforces',
+      reason:
+        'ADR-0049 enforce-or-remove; maintainer ruling 2026-08-04 on #4914. The block declared a '
+        + 'complete plugin loading policy and NOTHING read it. A bare-name scan of all three '
+        + 'repos — objectstack, cloud (measured 2026-08-09) and objectui (measured at pickup), '
+        + 'each with a control probe proving the scan saw the tree — put every hit inside '
+        + '`packages/spec` itself: this module\'s own declaration, its own unit tests, the '
+        + '`Manifest.loading` embed and the generated artifacts. `manifest.loading.*` had zero '
+        + 'readers in `packages/core`, `packages/runtime` and `packages/metadata`. So the key '
+        + 'parsed, entered the manifest, and changed nothing — #3950, at the scale of a whole '
+        + 'block. What made it outrank ordinary inert-key cleanup is `sandboxing`: it declared '
+        + 'process / vm / iframe / web-worker isolation, IPC transports and an `allowedServices` '
+        + 'ACL, so an AI author (ADR-0033) reading that vocabulary concluded the platform '
+        + 'isolates plugins, wrote the config, and received a clean parse and zero isolation. An '
+        + 'inert security control is worse than an absent one because it is believed. Hot reload '
+        + 'was additionally a TWO-SOURCE defect: the docs pointed at this dead '
+        + '`PluginHotReloadSchema` while the only implementation body, `HotReloadManager` '
+        + '(`packages/core/src/hot-reload.ts`), reads a different vocabulary — '
+        + '`HotReloadConfigSchema` in `plugin-lifecycle-advanced.zod.ts`. Ruling §2 converges on '
+        + 'the surviving side: that schema is KEPT as the starting point for a future enforce '
+        + 'decision (it has an implementation body but no runtime composes it yet), and '
+        + 'enforcing it is deliberately a separate decision, not this retirement. '
+        + 'Why D3 semantic and not a D2 conversion: the chain walks a normalized STACK and '
+        + '`applyConversionsToStoredItem` maps a metadata type onto one of its collections. A '
+        + 'package manifest is neither — `PLURAL_TO_SINGULAR` has no `packages` / `plugins` '
+        + 'entry, so a manifest is not a stack collection member and a stored manifest row '
+        + 'passes that seam through unchanged. A conversion would be a transform with no seam '
+        + 'that ever runs.',
+      acceptanceCriteria:
+        'No `objectstack.plugin.json` and no stored package manifest carries a `loading` key. '
+        + 'The enforced channel is the one place a manifest is parsed with an author present: '
+        + '`os plugin build` runs `ManifestSchema.safeParse` and exits non-zero, printing the '
+        + 'tombstone prescription, so a manifest still declaring `loading` fails its build '
+        + 'rather than shipping. TypeScript authors get it earlier still — `loading` is typed '
+        + '`never`, so assigning it is a `tsc` error. ⚠️ Runtime behaviour is deliberately '
+        + 'UNCHANGED and must be verified as such: nothing ever read the block, so removing it '
+        + 'removes no behaviour. A package ALREADY INSTALLED whose stored manifest carries '
+        + '`loading` keeps working — the registry\'s `validate()` is an explicit diagnostic and '
+        + 'not a gate (it catches, logs `[metadata_spec_invalid]`, and registers the item '
+        + 'anyway, deliberately, so bad metadata is never a data outage), so such a row '
+        + 'degrades to one log line at registration rather than a boot failure. Clear it by '
+        + 'deleting the key from the source manifest and reinstalling.',
     },
     {
       id: 'plugin-runtime-family-retired',
@@ -2030,148 +2895,345 @@ const step17: MigrationStep = {
         + 'unchanged.',
     },
     {
-      id: 'declarative-apis-endpoints-live',
-      surface: 'stack.apis[] (every declared ApiEndpoint — REVIEW REQUIRED BEFORE UPGRADING)',
+      id: 'query-array-string-agg-retired',
+      surface: "data.query.aggregations[].function ('array_agg' / 'string_agg')",
       replacement:
-        'the same declarations, re-read as LIVE HTTP routes: `path` moved under '
-        + '`/api/v1/apps/<manifest.namespace>/<subpath>`, and every entry that declares '
-        + '`authRequired: false` re-confirmed as an intentionally anonymous endpoint carrying '
-        + '`rateLimit: { enabled: true, … }`',
+        'an ordinary `fields` query, shaped in the caller — or a stored field that materialises '
+        + 'the roll-up. For a deduplicated COUNT the live spelling is unchanged: '
+        + '`count_distinct` stays declared',
       reason:
-        'This is the one protocol-17 entry that turns metadata ON rather than off, so read it '
-        + 'as a SECURITY review item and not as a rename. Before 17 the declarative endpoint '
-        + 'surface executed NOTHING: no route was mounted for a declared `path`, no matcher '
-        + 'existed, and every key — `authRequired` included — parsed green and gated nothing '
-        + '(#4936, which refused a non-empty `apis:` outright for exactly that reason). '
-        + 'Protocol 17 ships the executor (#5040) and narrows that refusal to a per-endpoint '
-        + 'publish gate: an endpoint that PASSES the gate is mounted and serves real traffic as '
-        + 'soon as the stack is published. So an `apis:` block written against an older major — '
-        + 'or one restored from a pre-#4936 source, or authored from a doc that predates the '
-        + 'refusal — changes meaning without changing a byte: what used to be inert '
-        + 'documentation becomes an execution entry point into the data and automation '
-        + 'pipelines. Nothing about that transition can be applied mechanically, because the '
-        + 'judgment it needs is "did the author of this endpoint mean for the internet to reach '
-        + 'it?" — and the one key where a wrong answer is unrecoverable is `authRequired`. Its '
-        + 'schema default is `true`, so an omission is SAFE and needs no review; an EXPLICIT '
-        + '`authRequired: false` is the only thing that opens anonymous access, and under '
-        + 'ADR-0121 D6 it now also requires an armed `rateLimit` (`enabled: true` — the key '
-        + 'defaults to `false`, so a budget written without it meters nothing) or the stack '
-        + 'refuses to publish. ⚠️ If you author endpoints in TypeScript, annotate them with '
-        + '`ApiEndpoint` — the AUTHOR state — so that omitting `authRequired` compiles: '
-        + '`const e: ApiEndpoint = { name, path, method, type, target }` is legal and is the '
-        + 'safe shape this paragraph prescribes. `ApiEndpointParsed` is the POST-parse type '
-        + '(defaults materialized, ADR-0122), where `authRequired` is required — annotating a '
-        + 'declaration with it forces you to write the key out, and being made to think about a '
-        + 'key whose only unrecoverable value is `false` is the one thing this entry is trying '
-        + 'to avoid (#5227). Hold a parse RESULT with `ApiEndpointParsed`; write declarations '
-        + 'as `ApiEndpoint`. Grep every `apis:` entry for `authRequired: false` before you '
-        + 'upgrade, delete the ones that were never meant to be public, and arm a budget on the '
-        + 'ones that were. The path move is the mechanical-looking half and is still yours: '
-        + 'ADR-0121 D1/D2 confine a declared path to your own namespace carve-out '
-        + '(`/api/v1/apps/<namespace>/…`), the namespace comes from an explicit '
-        + '`manifest.namespace` with no derivation fallback, and the subpath is the only part '
-        + 'you name — rewriting it for you would silently change a URL third parties call.',
+        'The stored half of this retirement is a conversion '
+        + '(`dataset-measure-array-string-agg-removed`); this entry is the REQUEST half. '
+        + '`QueryAST` is never stored in stack metadata — it is the client SDK builder\'s output '
+        + 'and the `POST /data/:object/query` body — so there is no source for the chain to '
+        + 'rewrite and callers move their own queries. Both values were declared-but-unlowered '
+        + 'on the SQL family: `SqlDriver.mapAggregateFunc` and the Turso '
+        + '`RemoteTransport.aggregate` compile five functions and refuse the rest, so a caller '
+        + 'following the schema against a SQL datasource got a refusal, not an array. They did '
+        + 'run on `driver-mongodb` and on the engine\'s in-memory fallback, which is what makes '
+        + 'this the one narrowing in the batch that removes reachable behaviour: an aggregation '
+        + 'that worked on one backend and failed on another is exactly the unpredictability the '
+        + 'ruling ended, and #5499 has both of those backends frozen. `count_distinct` was '
+        + 'deliberately NOT retired with them (maintainer, 2026-08-07) — it takes ADR-0049\'s '
+        + 'enforce leg, and its SQL lowering is a separate drivers-side card. ADR-0049, #6188.',
       acceptanceCriteria:
-        'You have READ every entry of every `apis:` block, not just the ones that fail to '
-        + 'publish. Concretely: (1) each declared `path` is '
-        + '`/api/v1/apps/<your manifest.namespace>/<subpath>` and the stack declares that '
-        + '`manifest.namespace` explicitly; (2) every entry declaring `authRequired: false` is '
-        + 'one you INTEND to be reachable without a session, and each carries '
-        + '`rateLimit: { enabled: true, windowMs, maxRequests }` — entries that were not '
-        + 'intended to be anonymous have the key removed so the safe default (`true`) applies; '
-        + '(3) `objectstack validate` passes, which also proves no endpoint declares a shape '
-        + '17.x cannot execute (`type: script` / `proxy`, mapping `transform`, an '
-        + '`object_operation` missing `objectParams`, `cacheTtl` on a non-GET method, '
-        + '`inputMapping` on find/get/delete, or two endpoints claiming one METHOD + path); and '
-        + '(4) after publishing, each endpoint answers as you expect — an anonymous request to '
-        + 'a session-only endpoint returns 401 rather than data.',
+        'No caller sends `array_agg` or `string_agg` in `aggregations[].function`; list-style '
+        + 'roll-ups are assembled by the caller from an ordinary `fields` query, or materialised '
+        + 'as a stored field. A query still carrying either value fails to parse with the '
+        + 'removal prescription naming it, and authoring it is a `tsc` error at the call site; '
+        + '`count_distinct` continues to parse and is unaffected.',
     },
     {
-      id: 'ui-widget-i18n-family-retired',
-      surface:
-        'ui.widgetManifest / ui.widgetLifecycle / ui.widgetEvent / ui.widgetProperty '
-        + '/ ui.widgetSource / ui.i18nObject / ui.pluralRule / ui.numberFormat / ui.dateFormat '
-        + '/ ui.localeConfig (the widget-registration vocabulary of ui/widget.zod.ts, and the '
-        + 'five doorless shapes of ui/i18n.zod.ts — 10 defs, 26 exported names)',
+      id: 'query-cursor-retired',
+      surface: 'data.query.cursor',
       replacement:
-        '(removed — there is no replacement key, because there was never a key. A custom field '
-        + 'widget is still named the same way it always was: `field.widget` is a plain string '
-        + 'naming a component the RENDERER has registered, and objectui\'s registry has always '
-        + 'carried its own runtime manifest for that (`RuntimeWidgetManifest` / '
-        + '`RuntimeWidgetSource` in `@object-ui/types`, objectui#3161 / #4115), which models '
-        + 'different keys and never derived from these. For localisation: write the '
-        + 'default-language string on `label` / `description` — the framework generates the '
-        + 'translation key at registration time from the naming convention — and put '
-        + 'translations in translation files, which is the LIVE `system/translation.zod.ts` '
-        + 'surface. Widget registration and locale formatting as authorable protocol metadata '
-        + 'return via the ENFORCE route of ADR-0049 through a new ADR — the registry / loader / '
-        + 'formatter first, the vocabulary second)',
+        'a `where` predicate on the sort key — `where: { created_at: { $gt: last.created_at } }` '
+        + 'with the matching `orderBy` (the documented manual-keyset pattern)',
       reason:
-        '`ui/widget.zod.ts` published a complete widget-registration vocabulary — a manifest '
-        + 'with lifecycle hooks, custom events, configurable properties and an '
-        + 'npm/remote/inline implementation-source union — and `ui/i18n.zod.ts` published a '
-        + 'structured-label, plural-rule and locale-formatting vocabulary. NOTHING in the '
-        + 'protocol carried either. Three independent measurements, re-run on `origin/main` '
-        + 'immediately before the removal with their controls passing in the SAME run: (1) no '
-        + 'module under `packages/spec/src` imported `widget.zod` at all, and the only imports '
-        + 'of `i18n.zod` anywhere name `I18nLabelSchema` / `AriaPropsSchema` (both KEPT), so no '
-        + 'schema declared a carrier key — `field.widget` is a `z.string()` naming a registered '
-        + 'component and has never referenced `WidgetManifest`; (2) a BFS over the in-memory '
-        + 'Zod graph from all 24 metadata-type roots plus `defineStack`\'s `ObjectStackSchema` '
-        + 'reached none of them, while `PageSchema` / `ObjectListViewSchema` resolved `direct` '
-        + 'in the same run and a synthetic carrier flipped every one of them; (3) zero '
-        + '`.parse()` / `.safeParse()` in objectstack, objectui or cloud outside these files\' '
-        + 'own unit tests. `NumberFormat` / `DateFormat` DID have a carrier key '
-        + '(`LocaleConfig.numberFormat` / `.dateFormat`) but the carrier was itself doorless, '
-        + 'so the subtree was `no door` rather than `no gate` and goes whole — leaving the two '
-        + 'leaves behind would strand exported schemas with no consumer (#3950). '
-        + '`I18nObjectSchema` was additionally superseded by its own file-neighbour: '
-        + '`I18nLabelSchema`\'s documentation already says translation keys are generated at '
-        + 'registration time and translations live in translation files, and the live '
-        + 'translation surface is `system/translation.zod.ts`, which uses none of these shapes. '
-        + 'The 2026-08-06 ruling weighed giving them a carrier (option B) and rejected it: that '
-        + 'is a feature with a registry and a renderer behind it, not ledger clean-up. '
-        + 'Tightening them to `strictObject` was rejected earlier and explicitly (#4001 批 16) '
-        + '— strictness is a property of a PARSE and there is no parse, so it would spend a '
-        + 'breaking change to leave "a precisely validated dead slot, the more convincing lie" '
-        + '(#4583). With no carrier key there is nothing to tombstone and no `sys_metadata` row '
-        + 'or source file for a D2 conversion to rewrite: this entry is the D3 record, route 3, '
-        + 'the same shape as #4988 (the ui/ interaction config family), #4834 (kernel '
-        + 'plugin-runtime family) and #4938 (`HttpServerConfig`). '
-        + '⚠️ `WidgetManifest.performance`\'s own `retiredKey()` tombstone (#3896 close-out) is '
-        + 'SUBSUMED here, the #4657/#4834 way: it goes with the shape that carried it, which is '
-        + 'strictly stronger than the tombstone, because there is no longer a manifest to '
-        + 'author the key INTO. '
-        + '⚠️ One of the nine widget sites is deliberately NOT retired. '
-        + '`FieldWidgetPropsSchema` survives: it is a REACT PROPS CONTRACT rather than '
-        + 'authorable metadata (it never appeared in `authorable-surface/` or '
-        + '`json-schema.manifest/` — its `onChange` is a `z.function()`), so "zero parse" is its '
-        + 'design and not its defect, and it acquired a live cross-repo compile-time consumer '
-        + 'one day before 批 16 measured: objectui PR #3289 (2026-08-03) renamed '
-        + '`@object-ui/fields`\' validation slot onto the spec\'s `error` with no alias, the '
-        + 'form renderer began producing it, and '
-        + '`packages/fields/src/__tests__/spec-symbol-batch7.test.ts` pins the shape against '
-        + '`import type { FieldWidgetProps } from \'@objectstack/spec/ui\'` as an intentional '
-        + 'tripwire. Re-verified on objectui `origin/main` 2026-08-07. ADR-0049, #5055.',
+        'The `cursor` key promised keyset pagination and no driver implemented it: the cursor '
+        + 'was accepted and ignored, so every page came back identical — a caller looping '
+        + '"until hasMore is false" never terminates. Worse than inert, it had a shipped public '
+        + 'producer (`QueryBuilder.cursor()`, removed with the key). The caller-built '
+        + '`Record<string, unknown>` shape also leaks sort/storage detail and squats on the '
+        + 'reserved REST parameter set; a first-class cursor, if ever designed, will be a '
+        + 'response-minted opaque token — a different API, so keeping this one preserved a '
+        + 'wrong design rather than a roadmap. A REQUEST surface, never stored; nothing to '
+        + 'rewrite. ADR-0049 / ADR-0078, #4286.',
       acceptanceCriteria:
-        'No code imports `WidgetManifest(Schema|Parsed)`, `WidgetLifecycle(Schema)`, '
-        + '`WidgetEvent(Schema|Parsed)`, `WidgetProperty(Schema|Parsed)`, '
-        + '`WidgetSource(Schema|Parsed)`, `I18nObject(Schema)`, `PluralRule(Schema)`, '
-        + '`NumberFormat(Schema|Parsed)`, `DateFormat(Schema)` or '
-        + '`LocaleConfig(Schema|Parsed)` from `@objectstack/spec` or `@objectstack/spec/ui` — '
-        + 'every one is TS2305 after upgrade, on every public entry (pinned by resolved symbol '
-        + 'identity in `ui/widget-i18n-retirement.test.ts`). No metadata document needs '
-        + 'editing, because none could ever carry one of these shapes: a stack that parsed '
-        + 'before parses byte-for-byte the same after, and a `field.widget: "my_picker"` string '
-        + 'is untouched. `FieldWidgetProps` / `FieldWidgetPropsSchema` / '
-        + '`FieldWidgetPropsParsed`, `I18nLabel(Schema)` and `AriaProps(Schema)` all still '
-        + 'resolve on `@objectstack/spec/ui` and are asserted to. ⚠️ objectui needs a companion '
-        + 'PR in the same window: `packages/types/src/__tests__/page-nav-misc-spec-parity.test.ts` '
-        + 'asserts the spec STILL owns `WidgetManifest` / `WidgetSource` (it is the '
-        + '"a workaround should not outlive its reason" half of the objectui#3169 tripwire, '
-        + 'designed to go red exactly here), and `packages/types/src/widget.ts`\'s '
-        + '"Renamed off the spec\'s `WidgetManifest` name" comments now point at names that no '
-        + 'longer exist. Both are prescribed responses to this removal, not collateral damage.',
+        'No caller sends `cursor` and no SDK call site uses `QueryBuilder.cursor()`; deep '
+        + 'pagination expresses the keyset as a `where` predicate on the sort key. A query '
+        + 'still carrying `cursor` fails to parse with the removal prescription, and authoring '
+        + 'it is a `tsc` error.',
+    },
+    {
+      id: 'query-distinct-retired',
+      surface: 'data.query.distinct',
+      replacement:
+        '`groupBy` for unique combinations; the `count_distinct` aggregation for deduplicated '
+        + "counts; the SQL/memory drivers' `distinct(object, field)` door for one column's values",
+      reason:
+        'The `distinct` flag promised SELECT DISTINCT and no driver ever rendered it — but it '
+        + 'was MIS-WIRED rather than merely dead (the harsher ADR-0078 class): the REST list '
+        + 'path treated a distinct query as not countable and silently degraded '
+        + '`total`/`hasMore` to a page-local estimate, so the caller got duplicate rows AND '
+        + 'worse pagination metadata, and a side effect that "confirmed" the flag was doing '
+        + 'something. It had a shipped public producer (`QueryBuilder.distinct()`, removed with '
+        + 'the key). The count suppression is deleted in the same change — `total` is truthful '
+        + 'for those queries again. A REQUEST surface, never stored; nothing to rewrite. '
+        + 'ADR-0049 / ADR-0078, #4286.',
+      acceptanceCriteria:
+        'No caller sends `distinct` and no SDK call site uses `QueryBuilder.distinct()`; '
+        + 'deduplication goes through `groupBy` / `count_distinct` / the drivers\' `distinct()` '
+        + 'door. A query still carrying the key fails to parse with the removal prescription, '
+        + 'and the REST list response reports a real `total` for queries that used to send it.',
+    },
+    {
+      id: 'query-field-node-object-form-retired',
+      surface: 'data.query.fields',
+      replacement: "expand (`expand: { owner: { object: 'user', fields: ['name'] } }`), or a dotted path for a single related column (`fields: ['owner.name']`)",
+      reason:
+        'The `FieldNode` union declared a nested-select object form `{ field, fields, alias }` that '
+        + 'was inert end to end: no producer emitted it, and no consumer read `.fields` or `.alias` '
+        + '— objectql\'s formula projection and known-field filters, driver-sql\'s `select()` and '
+        + 'driver-memory\'s projection all treat the list as `string[]`, driver-mongodb keyed its '
+        + 'projection with the entry itself, and the REST ingress stringified it. Nested selection '
+        + 'is `expand`, which the engine resolves via batch `$in` queries. This is a REQUEST '
+        + 'surface — `QueryAST` is never stored in stack metadata (no view, dataset or report '
+        + 'authors one), so there is no source for the chain to rewrite: the schema narrows to '
+        + '`z.string()` and callers move their own select lists. ADR-0049 / ADR-0078, #4196.',
+      acceptanceCriteria:
+        'No caller puts an object in `fields[]`; related records are read through `expand` and '
+        + 'single related columns through dotted paths. A `fields` entry that is not a string '
+        + 'fails to parse with the removal prescription, and the list/query/export routes answer '
+        + '400 INVALID_FIELD naming the retired form instead of the field `"[object Object]"`.',
+    },
+    {
+      id: 'query-joins-retired',
+      surface: 'data.query.joins',
+      replacement:
+        "expand (`expand: { owner: { object: 'user', fields: ['name'] } }`), or a dotted "
+        + "`fields` path for a single related column (`fields: ['owner.name']`)",
+      reason:
+        'The `joins` array was declared-but-inert: no engine or driver read `query.joins` '
+        + 'anywhere on the query path, so a query carrying it behaved exactly as if the key were '
+        + 'absent — while the name squatted on the reserved REST parameter set. Related-record '
+        + 'retrieval already has a live spelling (`expand`, resolved by the engine via batch '
+        + '`$in` queries), so the removal deletes the second, broken spelling rather than the '
+        + 'capability, and the orphaned `JoinNode`/`JoinType`/`JoinStrategy` cluster goes with '
+        + 'the key. A REQUEST surface — `QueryAST` is never stored in stack metadata — so there '
+        + 'is no source for the chain to rewrite; callers move their own queries. '
+        + 'ADR-0049 / ADR-0078, #4286.',
+      acceptanceCriteria:
+        'No caller sends `joins`; related records are read through `expand` and single related '
+        + 'columns through dotted `fields` paths. A query that still carries `joins` fails to '
+        + 'parse with the removal prescription (even as an empty array), and authoring it is a '
+        + '`tsc` error at the call site.',
+    },
+    {
+      id: 'query-window-functions-retired',
+      surface: 'data.query.windowFunctions',
+      replacement:
+        '`aggregations` + `groupBy` for request-level analytics; '
+        + '`SqlDriver.findWithWindowFunctions(object, query)` for embedders on a SQL datasource',
+      reason:
+        'The `windowFunctions` array was declared-but-inert on the query path: `find()` never '
+        + 'applied a window function, so every OVER clause a caller declared was silently '
+        + 'dropped. The capability only ever ran behind `SqlDriver.findWithWindowFunctions()`, '
+        + 'a driver-level door that is not on the `IDataDriver` contract and whose flat input '
+        + 'shape (`{ function, alias, partitionBy?, orderBy? }`) the spec vocabulary never '
+        + 'matched — `WindowFunctionNodeSchema` declared `field`/`over`/`frame` members the door '
+        + 'never read, so that cluster is removed with the key rather than left as a false '
+        + 'affordance. A REQUEST surface, never stored; no source to rewrite. '
+        + 'ADR-0049 / ADR-0078, #4286.',
+      acceptanceCriteria:
+        'No caller sends `windowFunctions` in a query; request-level analytics use '
+        + '`aggregations` + `groupBy`, and embedders needing OVER-clause SQL call the SQL '
+        + "driver's `findWithWindowFunctions` door directly. A query that still carries the key "
+        + 'fails to parse with the removal prescription naming that door.',
+    },
+    {
+      id: 'rest-server-openapi31-block-removed',
+      surface: 'restServer.openApi31',
+      replacement:
+        '(removed — no replacement key exists. Delete the key; for a real outbound webhook use '
+        + '`Webhook` from `@objectstack/spec/automation`. Config-driven OpenAPI 3.1 '
+        + 'webhooks/callbacks documentation returns, if ever, via the enforce route of ADR-0049 '
+        + 'through a new ADR)',
+      reason:
+        'The `openApi31` block (`webhooks` / `callbacks` / `jsonSchemaDialect` / '
+        + '`pathItemReferences`, typed by `OpenApi31ExtensionsSchema` with '
+        + '`OpenApiWebhookEventSchema` and `CallbackSchema` under it) promised OpenAPI 3.1 '
+        + "document synthesis nothing delivered: the REST server's `normalizeConfig` forwards "
+        + 'only `api`/`crud`/`metadata`/`batch`/`routes`, and the served /openapi.json is the '
+        + 'pre-generated @objectstack/spec contract enriched with the live server URL and the '
+        + 'registered objects — a webhook declared here never appeared in any served document '
+        + '(ADR-0049; the #3197 connector-webhook shape one layer up). There is no behaviour '
+        + 'to preserve and nothing stored to rewrite: `RestServerConfig` is plugin TS '
+        + 'configuration (REST plugin constructor / `plugin-hono-server` `restConfig`), never '
+        + "a `sys_metadata` shape — the stack tree's `api` block declares only its four "
+        + 'scoping/auth knobs. The three schemas are removed with the key (zero import-level '
+        + 'consumers in objectstack / cloud / objectui); the key itself is tombstoned because '
+        + 'the schema is not `.strict()` and a plain delete would strip it silently. #4579.',
+      acceptanceCriteria:
+        'No `RestServerConfig` value passed to the REST plugin (or `plugin-hono-server` '
+        + '`restConfig`) carries `openApi31` — a config that includes it now fails the parse '
+        + 'with the retirement prescription instead of being silently stripped. No code '
+        + 'imports `OpenApi31Extensions(Schema)`, `Callback(Schema)` or '
+        + '`OpenApiWebhookEvent(Schema)` from `@objectstack/spec/api` (TS2305 after upgrade). '
+        + 'The served /openapi.json is byte-identical before and after — the block never '
+        + 'reached it.',
+    },
+    {
+      id: 'sharing-execution-context-retired',
+      surface:
+        '@objectstack/spec: the exported type `SharingExecutionContext` '
+        + '(`contracts/sharing-service`), and its re-export from '
+        + '@objectstack/plugin-sharing — the six-field context shape '
+        + '(`userId` / `tenantId` / `positions` / `permissions` / `systemPermissions` / '
+        + '`isSystem`) that sharing, approval and report enforcement signatures used to name',
+      replacement:
+        '`ExecutionContext` from `@objectstack/spec` — the complete '
+        + '`resolveAuthzContext` envelope the contracts have declared since #6523. Every one '
+        + 'of the retired type\'s six fields exists on it under the same name and type, so a '
+        + 'value that satisfied the old type already satisfies the envelope: only the '
+        + 'annotation is rewritten, never the value',
+      reason:
+        'ADR-0049 enforce-or-remove, completing the #6206 ruling (2026-08-07: enforcement '
+        + 'adjudicates on the WHOLE envelope, never a per-site subset). This type was the '
+        + 'declared context parameter of 36 signatures across three contracts — '
+        + '`ISharingService` / `ISharingRuleService`, `IApprovalService`, `IReportService` — '
+        + 'and it omitted four fields those gates need: `accessible_org_ids` (under the '
+        + '`group` tenancy posture this IS the Layer 0 wall, ADR-0105 D2), `org_user_ids`, '
+        + '`posture` (ADR-0095 D2) and `tabPermissions`. Its damage ran in the MIRROR '
+        + 'direction of the share-link twin (#6430 / PR #6511): nothing trimmed the VALUES — '
+        + "the engine middleware always handed the whole context down — it was the declared "
+        + 'TYPE that was narrow, so an implementation could not READ what it had been given '
+        + 'without casting out of its own contract (`const posture = (context as any).posture` '
+        + "in plugin-approvals' privileged-override gate). #6523 / PR #7068 converged the "
+        + 'contracts, PR #7140 and PR #7206 re-annotated the four implementations, and this '
+        + 'card removes the now-unreferenced declaration (#7070, #7218). '
+        + 'Why this needs a ledger entry despite nothing in-repo referencing it: it is the '
+        + '`export-field-meta-constraints-retired` / `hook-context-session-roles-retired` '
+        + 'disposition — a PUBLISHED TypeScript surface with no spec schema, so there is no '
+        + '`retiredKey()` tombstone and no parse rejection that could carry the prescription, '
+        + 'and the ledger is the only channel that reaches an upgrader. '
+        + 'Why D3 semantic and not a D2 conversion: nothing authored or stored changes shape. '
+        + 'The name is only ever spelled inside a consumer\'s own TypeScript, so no '
+        + '`objectstack migrate meta` transform can reach it, and no `sys_metadata` row '
+        + 'carries it. ADR-0049 / ADR-0087, #7218.',
+      acceptanceCriteria:
+        'No source of yours imports `SharingExecutionContext` from `@objectstack/spec` or '
+        + '`@objectstack/plugin-sharing`; each such import becomes `ExecutionContext` from '
+        + '`@objectstack/spec` and the build is green. tsc IS a sufficient detector here, '
+        + 'unlike the optional-key retirements at this step: the name is gone outright, so '
+        + 'every remaining reference is a hard resolution error rather than a silent '
+        + '`undefined`. ⚠️ Then check the direction tsc CANNOT see: widening an annotation '
+        + 'never rejects a value, so an enforcement path that only ever received a hand-built '
+        + 'six-field object still compiles and still under-adjudicates. Confirm each caller '
+        + 'passes the context it was HANDED, unchanged, rather than a literal it assembled — '
+        + 'and that any gate of yours reading `posture`, `accessible_org_ids`, `org_user_ids` '
+        + 'or `tabPermissions` now reads them declared, with no `as any` in the path.',
+    },
+    {
+      id: 'spec-type-alias-input-suffix-retired',
+      // Plain text, no markdown: build-upgrade-guide.ts renders this field inside a
+      // code span AND inside a table cell, so backticks here break both.
+      surface:
+        'type alias: the 102 XInput names of @objectstack/spec '
+        + '(ConnectorInput, AppInput, PageInput, ActionInput, ServiceObjectInput, '
+        + 'ExecutionContextInput, TaskInput, … — 52 files across api/ automation/ data/ '
+        + 'identity/ integration/ kernel/ security/ system/ ui/)',
+      replacement:
+        'the BARE name. ADR-0122 phase 2 moved the author state onto `X`, which makes `XInput` '
+        + 'a character-for-character synonym of it — the permanent synonym D3 forbids. Drop the '
+        + '`Input` suffix: `ConnectorInput` -> `Connector`. Symmetrically, a consumer that held '
+        + 'a PARSE RESULT under the bare name moves to `XParsed`, which phase 1 (16.x) already '
+        + 'declared for every schema whose two shapes differ, so the target name has existed for '
+        + 'a release. NINE `*Input` names are NOT retired and need no edit: `ExpressionInput`, '
+        + '`CronExpressionInput`, `TemplateExpressionInput` and `PredicateInput` are the bare '
+        + 'aliases of their own `…InputSchema`, and `FormFieldInput`, `QueryInput`, `FieldInput`, '
+        + '`ObjectStackDefinitionInput` and `NavigationItemInput` are composed (recursive or '
+        + '`Partial`-shaped) types no bare alias denotes.',
+      reason:
+        'This entry exists for the reason `data-driver-find-stream-retired` (#4484), '
+        + '`storage-service-list-retired` (#5540) and `actor-user-roles-to-positions` (#6011) '
+        + 'exist, and it is the same disposition: the surface is a TYPESCRIPT NAME, never stack '
+        + 'metadata, so there is no source for a D2 conversion to rewrite and deliberately no '
+        + 'schema tombstone — an `XInput` alias never had a carrier key, never emitted a def, '
+        + 'and no `.parse()` ever saw it. Measured and verified rather than assumed: '
+        + '`json-schema/`, `json-schema.manifest/` and `authorable-surface/` are BYTE-IDENTICAL '
+        + 'across this change, because those generators enumerate runtime `z.ZodType` exports '
+        + 'and never read a type alias. So nothing left the published metadata surface and '
+        + 'RETIRED_DEFS_BY_MAJOR is deliberately untouched — an entry there would falsely claim '
+        + 'the metadata contract shrank. The enforced channel is tsc: the name is gone, so every '
+        + 'consumer gets TS2724/TS2305 naming the import. That is loud but MUTE about the '
+        + 'replacement — a compile error says `ConnectorInput` does not exist, not that '
+        + '`Connector` now means what it meant. The generated upgrade guide is the only channel '
+        + 'that carries the second half, which is precisely the #6048 gap ADR-0087 registration '
+        + 'exists to close. ⚠️ Deliberately NOT registered alongside it: the 1384 bare aliases '
+        + 'the same change FLIPPED from `z.infer` to `z.input`. Those names all still exist and '
+        + 'still resolve; what moved is which of a schema\'s two shapes they denote, and only '
+        + 'where the two differ (663 of 1384 — the rest are isomorphic and the flip is a no-op '
+        + 'there, pinned as such). A consumer holding an authored literal is made MORE correct '
+        + 'by it, silently; one holding a parse result gets a tsc error at the first defaulted '
+        + 'key it reads. Registering that as a rename would misdescribe it — no name was '
+        + 'retired — and the changeset carries its own FROM -> TO for it. ADR-0122 D8/D9, '
+        + '#6083 (PR #6279).',
+      acceptanceCriteria:
+        'No source imports a name ending `Input` from `@objectstack/spec` except the nine listed '
+        + 'above: `rg "\\b\\w+Input\\b" --type ts` over consumer code resolves only to those. A '
+        + 'literal annotated with a bare spec type compiles while listing ONLY the keys the '
+        + 'author means — `const c: Connector = { name, label, type }` type-checks, which it did '
+        + 'not in 16.x — and a value read out of `XSchema.parse()` annotated with the bare name '
+        + 'no longer compiles at the first defaulted key it reads (TS18048/TS2532), the signal '
+        + 'that the annotation should be `XParsed`. `pnpm check:spec-parsed-alias` reports every '
+        + 'bare alias as `z.input` and refuses both a bare `z.infer` alias and a reintroduced '
+        + '`XInput` synonym.',
+    },
+    {
+      id: 'storage-service-list-retired',
+      surface: 'contracts.IStorageService.list',
+      replacement:
+        'track the keys you wrote (sys_file / file-reference records, queryable through '
+        + 'ObjectQL with real pagination) instead of enumerating the bucket — and where no '
+        + 'such record exists, the cursor-shaped `list(prefix, { cursor, limit })` this '
+        + 'entry reserved, restored in #6781',
+      reason:
+        '`list(prefix)` was an OPTIONAL contract method documented as "List files in a '
+        + 'directory/prefix", and the two shipped adapters answered the same call with two '
+        + 'different semantics — both of them silently incomplete. `LocalStorageAdapter.list` '
+        + 'was a single-level `readdir`, so a nested key `a/b/c` was invisible under '
+        + '`list(\'a\')` (only `a/b` came back), and a subdirectory that `stat` succeeded on '
+        + 'was pushed into the result as a file, yielding a `StorageFileInfo` whose `size` is '
+        + 'a directory inode and which cannot be downloaded at all. `S3StorageAdapter.list` '
+        + 'was RECURSIVE (`ListObjectsV2` matches the whole key) and read neither '
+        + '`IsTruncated` nor `ContinuationToken`, so past 1000 objects the "all files" a '
+        + 'caller received was the first page, with no signal. One contract method, two '
+        + 'dialects, both quietly incomplete — and the first feature that genuinely needed to '
+        + 'enumerate a prefix (backup, orphan sweep, migration audit) would have got two '
+        + 'different answers on two deployments without an error on either. #5172 was nearly '
+        + 'that feature: it planned to drive attachment reclamation off '
+        + '`list(EMAIL_ATTACHMENT_KEY_PREFIX)`, found the local adapter could not see one '
+        + 'level down, and switched to queue-driven deferred work instead. Nothing consumed '
+        + 'it afterwards: the only in-repo call site was the `SwappableStorageService` '
+        + 'pass-through (which itself rejects when the active adapter has no `list`), and '
+        + 'REST, CLI and the storage routes never called it. Remove was chosen over '
+        + 'align-and-tighten (maintainer ruling, 2026-08-05, #5266): aligning would grow a '
+        + 'conformance surface nobody walks, while a prefix listing that cannot paginate is '
+        + 'the wrong signature to inherit — when a real caller needs enumeration it returns '
+        + 'cursor-shaped, `list(prefix, { cursor, limit })`, with adapter-conformance cases '
+        + '(nested keys, directory entries, >1000 objects) proving both backends agree. This '
+        + 'is a TS/API contract surface — a storage adapter is CODE, never stack metadata — '
+        + 'so there is no source for the chain to rewrite, and deliberately no schema '
+        + 'tombstone: nothing ever ran an adapter through a `.parse()`, so a prescription '
+        + 'there would reach no one. The enforced channel is tsc, and it reports at the call '
+        + 'site. Same disposition, and the same reason, as '
+        + '`data-driver-find-stream-retired` (#4484). ADR-0049 / ADR-0087, #5540 '
+        + '(analysis #5266).',
+      acceptanceCriteria:
+        'No code calls `storage.list(...)` on the `file-storage` service or on any '
+        + '`IStorageService` value. Code that needed "which files are under this prefix" '
+        + 'reads the records it wrote — `sys_file` / file-reference rows carry the storage '
+        + 'key and page deterministically through ObjectQL — rather than asking the bucket, '
+        + 'which is also the only form that stays correct past 1000 objects and across both '
+        + 'adapters. An adapter that still IMPLEMENTS `list` keeps compiling (an extra '
+        + 'method is not an error on a class) and is simply unreachable through the '
+        + 'contract, so deleting it is cleanup that can follow. The break is on the CALLER '
+        + 'side: `storage.list(...)` no longer type-checks, and a PROXY typed against '
+        + '`IStorageService` that forwards to `inner.list` is exactly such a caller — the '
+        + 'one in `@objectstack/service-storage` goes with the adapters (#5541). '
+        + '⚠️ AMENDED 2026-08-09 (#6781, maintainer ruling on cloud#1203, option B): the '
+        + 'RESERVED route in the paragraph above was taken. `list` exists again on the '
+        + 'contract, cursor-shaped — `list(prefix, { cursor, limit })` returning '
+        + '`{ items, nextCursor }` — because cloud had two first-party callers this repo '
+        + 'could not see when the measurement said "nothing calls it" (tenant attachment '
+        + 'reclamation, marketplace snapshot GC). This does NOT un-retire anything and the '
+        + 'acceptance criterion above is unchanged for what it actually governs: the '
+        + 'single-argument `list(prefix): StorageFileInfo[]` is gone for good, a call written '
+        + 'against it still fails to compile, and the two dialects it had are now pinned '
+        + 'against each other in `storage-adapter-list.conformance.test.ts` rather than left '
+        + 'to diverge. What changed for an upgrader is only the destination: prefer the '
+        + 'records you wrote, and reach for the restored member when there are none.',
     },
     {
       id: 'ui-interaction-config-family-retired',
@@ -2308,1018 +3370,91 @@ const step17: MigrationStep = {
         + 'endpoints on `allowAnonymous` + `publicLink`.',
     },
     {
-      id: 'hook-context-session-roles-retired',
-      surface: 'data.hookContext.session.roles',
-      replacement:
-        '(removed — gate on `session.userId` / `session.isSystem`; for PRIVILEGE ask the '
-        + 'security service, which reads `permissions` / `positions` / posture off the '
-        + 'execution context, ADR-0095 D3)',
-      reason:
-        'Declared on the runtime hook context, read by exactly two consumers, produced by '
-        + 'nobody. The two readers were the approvals record lock and the delegation write '
-        + 'guard, each opening with `session.roles?.includes(\'admin\')`; ObjectQL\'s '
-        + '`buildSession()` builds the session field by field and has never written `roles`, '
-        + 'and nothing else feeds a HookContext in objectstack, cloud or objectui (cloud\'s hook '
-        + 'consumers read `hookContext?.session?.userId`; objectui\'s `roles` are the '
-        + '`/auth/me` user payload, a different surface; an ACTION body\'s `ctx.session` is a '
-        + 'different untyped object that does carry `roles`, tracked apart and unaffected). '
-        + 'Both branches were therefore dead on '
-        + 'every real engine path — an authorization decision in shape only, and a second admin '
-        + 'dialect competing with the one ADR-0090 D3 / ADR-0095 D3 sanction. #4839 (PR #5049) '
-        + 'removed the readers; this removes the declaration, per ADR-0049 enforce-or-remove. '
-        + 'This is a RUNTIME context, not stored metadata: the engine builds a HookContext per '
-        + 'operation and nothing persists one, so no `sys_metadata` row, example or template '
-        + 'can carry the key and there is no source for the D2 chain to rewrite — the '
-        + '`openApi31` (#4579) / `activationEvents` (#4657) shape, one semantic TODO rather '
-        + 'than a stack conversion. The key IS tombstoned (`HookContextSchema` is deliberately '
-        + 'not `.strict()` — a plain delete would strip it silently, #3733 / ADR-0104), so a '
-        + 'consumer that parses a context it was handed still meets the prescription. '
-        + 'ADR-0049, #5050.',
-      acceptanceCriteria:
-        'No hook reads `ctx.session.roles`; caller gating uses `ctx.session.userId` / '
-        + '`ctx.session.isSystem`, and privilege comes from the security service '
-        + '(`permissions` / `positions` / posture). Constructing a HookContext session with '
-        + '`roles` fails `tsc` (the input type is `never`) and fails `HookContextSchema.parse` '
-        + 'with the retirement prescription instead of being silently stripped. Nothing '
-        + 'regresses at runtime: the key had no producer, so no decision anywhere ever saw a '
-        + 'value in it.',
-    },
-    {
-      id: 'action-session-roles-to-positions',
-      surface: 'ui.actionSession.roles',
-      replacement: 'ui.actionSession.positions (an action body reads `ctx.session.positions`)',
-      reason:
-        'The MIRROR-IMAGE neighbour of the entry above, and the reason both are in this '
-        + 'step: the hook `ctx.session` carried `roles` declared-and-never-produced (removed '
-        + 'outright, #5050), while the ACTION body\'s `ctx.session` carries it '
-        + 'produced-and-really-populated. `buildActionSession()` '
-        + '(`packages/runtime/src/action-execution.ts`) copies `ExecutionContext.positions` '
-        + 'into a key spelled `roles` — the ADR-0090 D3 vocabulary handed to the author under '
-        + 'the one spelling that ADR bans — so a body author met two different answers to one '
-        + 'key name on one platform: rejected in a hook, live and full of values in an action. '
-        + '#5613 ruled contract-first (maintainer, 2026-08-06: "C skeleton + A semantics"): '
-        + 'phase 1 (#5697) declared the previously undeclared shape as `ActionSessionSchema`, '
-        + 'and phase 2 renames the key. `positions` is now the canonical key on that schema '
-        + 'and `roles` a deprecated alias of it (#5779); the producer emits both for one '
-        + 'deprecation window (#5613 runtime half), after which `roles` is removed on the path '
-        + 'the v11 session-alias removal already walked (#3280 deprecated → #3290 removed). '
-        + 'Why this is a D3 semantic TODO and not a D2 conversion, on two independent grounds: '
-        + 'FIRST, there is no source to convert — an action `ctx.session` is constructed per '
-        + 'dispatch and never persisted, so no `sys_metadata` row, example or template can '
-        + 'carry the key — the `openApi31` (#4579) / `activationEvents` (#4657) / '
-        + '`hook-context-session-roles-retired` (#5050) shape. SECOND, the only place the key '
-        + 'is ever SPELLED is inside an action body: author-written JS/TS, or a sandboxed '
-        + 'script whose `ScriptContext.session` is still `unknown`. A declarative transform '
-        + 'cannot safely rewrite an identifier inside free-form code — exactly the reason the '
-        + 'ADR-0090 wave delegated `current_user.roles` to the author at step 13 '
-        + '(`cel-current-user-roles-to-positions`) instead of substituting text. '
-        + 'Note what is deliberately NOT done here: the alias is not tombstoned. A '
-        + '`retiredKey()` REJECTS the key, and a deprecation window exists precisely so the '
-        + 'old spelling keeps working while its readers move — tombstoning during the window '
-        + 'would be the removal it is meant to defer. The tombstone (or the plain deletion the '
-        + 'authorable-surface ratchet adjudicates) belongs to the release that closes the '
-        + 'window. Until then this entry IS the channel: `spec-changes.json` and the generated '
-        + 'upgrade guide are how a reader learns the rename before the removal reaches them. '
-        + 'ADR-0090 D3, ADR-0087, #5613 / #5779.',
-      acceptanceCriteria:
-        'No action body reads `ctx.session.roles`; every such read is `ctx.session.positions` '
-        + 'and observes the same array (the rename is a rename — the VALUE is '
-        + '`ExecutionContext.positions` on both sides, which the runtime pin '
-        + '`action-session-shape-contract.test.ts` asserts independently of the key name). '
-        + 'Privilege is NOT re-derived from either spelling: a read that was '
-        + '`roles.includes(\'admin\')` as an access check is rewritten to ask the security '
-        + 'service (capability grants / placements / derived posture, ADR-0095), never '
-        + 'renamed to `positions.includes(\'admin\')` — renaming that read migrates the defect '
-        + 'rather than the code. Verify against a real dispatch, not a fixture: invoke an '
-        + 'action as a caller holding positions and assert the body observed them under the '
-        + 'canonical key. During the window both keys are present and equal, so a reader can '
-        + 'be migrated and verified before the alias is removed; after it, `roles` is absent '
-        + 'and a body still reading it sees `undefined` — which is why the read must be moved '
-        + 'inside the window rather than at its close.',
-    },
-    {
-      id: 'actor-user-roles-to-positions',
-      surface: 'action body / AI route: ctx.user.roles (req.user.roles)',
-      replacement:
-        'ctx.user.positions (an AI route handler reads `req.user.positions`) — the same array, '
-        + 'under the one spelling ADR-0090 D3 sanctions',
-      reason:
-        'The THIRD face of the ADR-0090 `roles` → `positions` rename, and the only one whose '
-        + 'surface the spec never declared. `ActorUser` '
-        + '(`packages/runtime/src/security/actor-user.ts`) is the ONE producer of the `user` '
-        + 'envelope handed to an action body as `ctx.user` and to an AI route handler as '
-        + '`req.user`; it declared `positions` and `roles` side by side and filled them from a '
-        + 'SINGLE assignment (`roles: core.positions`), so the two keys were verbatim identical '
-        + 'on every dispatch — a second spelling of the vocabulary ADR-0090 D3 reserves and bans, '
-        + 'published straight into author-written code. The maintainer ruled it closed IMMEDIATELY '
-        + '(2026-08-06 14:49Z, #6011): no deprecation window, no dual-emit, the alias simply gone '
-        + 'in 17 (PR #6048). '
-        + '⚠️ Do not read this entry across to its neighbour above: '
-        + '`action-session-roles-to-positions` governs `ctx.session`, a DIFFERENT object reached '
-        + 'through the same `ctx`, and that one KEEPS its one-window dual-emit (#5613). Same word, '
-        + 'same dispatch, two faces, two schedules — `ctx.user.roles` is absent in 17 while '
-        + '`ctx.session.roles` still answers for the length of its window. '
-        + 'What makes this entry different in KIND from both session-side siblings: `ctx.user` has '
-        + 'no spec schema and never had one. It is a runtime TS interface, so unlike '
-        + '`HookContext.session.roles` (tombstoned on a deliberately non-strict `HookContextSchema`, '
-        + '#5050) and unlike `ActionSessionSchema` (declared contract-first at #5697 precisely so '
-        + 'its key could be renamed), there is no schema key here to tombstone and no '
-        + '`retiredKey()` prescription that could reach anybody — nothing ever ran an `ActorUser` '
-        + 'through a `.parse()`, so a prescription there would have no one to reach. The enforced '
-        + 'channel is tsc, and it reports at the READ site inside the author\'s own body; for an '
-        + 'untyped or sandboxed body there is no enforced channel at all, which is exactly why '
-        + 'this ledger entry has to exist — `spec-changes.json` and the generated upgrade guide '
-        + 'are the ONLY way such a reader learns of the rename. It is the `findStream` (#4484) / '
-        + '`IStorageService.list` (#5540) disposition — a TS/API contract, no stored source, no '
-        + 'tombstone, tsc at the call site — applied to a surface that lives one layer further '
-        + 'out than either: those two are at least DECLARED in `packages/spec/src/contracts`, '
-        + 'this one only in `packages/runtime`. '
-        + 'Why it is a D3 semantic TODO and not a D2 conversion, on the same two independent '
-        + 'grounds as its session sibling: FIRST, there is no source to convert — an `ActorUser` '
-        + 'is constructed per dispatch and never persisted, so no `sys_metadata` row, example or '
-        + 'template can carry the key (the `openApi31` (#4579) / `activationEvents` (#4657) / '
-        + '`hook-context-session-roles-retired` (#5050) shape). SECOND, the only place the key is '
-        + 'ever SPELLED is inside an action body or an AI route handler: author-written JS/TS, or '
-        + 'a sandboxed script. A declarative transform cannot safely rewrite an identifier inside '
-        + 'free-form code — the same reason the ADR-0090 wave delegated `current_user.roles` to '
-        + 'the author at step 13 (`cel-current-user-roles-to-positions`) instead of substituting '
-        + 'text. '
-        + 'The removal\'s hard precondition was met before it landed, and the result is recorded '
-        + 'here because the ledger is where an upgrading consumer meets it: the declaration\'s own '
-        + 'comment claimed the alias was "kept for the REST/AI shapes", and that claim was '
-        + 'DISPROVEN face by face against `origin/main` — repo-wide `user.roles` was 4 hits, all '
-        + 'of them in the pins PR #6048 flipped; the four `ActorUser` construction sites build '
-        + 'server-side envelopes that never enter a response body; objectui\'s `.roles` reads '
-        + 'belong to two unrelated producers (the better-auth session, and the '
-        + '`/auth/me/permissions` payload). The `cloud` repo was NOT reachable in that session and '
-        + 'is the one consumer face left unverified — this entry, and the changeset\'s FROM/TO '
-        + 'prescription, are its disposition. ADR-0090 D3 / ADR-0049 / ADR-0087, #6011 (PR #6048).',
-      acceptanceCriteria:
-        'No action body reads `ctx.user.roles` and no AI route handler reads `req.user.roles`; '
-        + 'every such read is `.positions` and observes the SAME array — the value was '
-        + '`ExecutionContext.positions` on both sides, so this is a pure key rename and no value '
-        + 'has to be re-derived. Privilege is NOT re-derived from either spelling: a read that was '
-        + '`roles.includes(\'admin\')` as an access check is rewritten to ask the security service '
-        + '(capability grants / placements / derived posture, ADR-0095), never renamed to '
-        + '`positions.includes(\'admin\')` — renaming that read migrates the defect rather than the '
-        + 'code. Unlike `ctx.session` there is NO window to migrate inside: in 17 the key is '
-        + 'already absent, so a typed body fails `tsc` at the read while an untyped or sandboxed '
-        + 'one silently sees `undefined` — move the read AS you upgrade, not after it. Verify '
-        + 'against a real dispatch rather than a fixture: invoke an action (and an AI route) as a '
-        + 'caller holding positions, assert the body observed them under the canonical key, and '
-        + 'assert the old key is ABSENT by key existence (`\'roles\' in ctx.user === false`) rather '
-        + 'than by `undefined`, which cannot tell a removed key from one left behind holding '
-        + 'nothing — the runtime pin `action-ctx-user-shape.test.ts` asserts both halves that way.',
-    },
-    {
-      id: 'storage-service-list-retired',
-      surface: 'contracts.IStorageService.list',
-      replacement:
-        'track the keys you wrote (sys_file / file-reference records, queryable through '
-        + 'ObjectQL with real pagination) instead of enumerating the bucket — and where no '
-        + 'such record exists, the cursor-shaped `list(prefix, { cursor, limit })` this '
-        + 'entry reserved, restored in #6781',
-      reason:
-        '`list(prefix)` was an OPTIONAL contract method documented as "List files in a '
-        + 'directory/prefix", and the two shipped adapters answered the same call with two '
-        + 'different semantics — both of them silently incomplete. `LocalStorageAdapter.list` '
-        + 'was a single-level `readdir`, so a nested key `a/b/c` was invisible under '
-        + '`list(\'a\')` (only `a/b` came back), and a subdirectory that `stat` succeeded on '
-        + 'was pushed into the result as a file, yielding a `StorageFileInfo` whose `size` is '
-        + 'a directory inode and which cannot be downloaded at all. `S3StorageAdapter.list` '
-        + 'was RECURSIVE (`ListObjectsV2` matches the whole key) and read neither '
-        + '`IsTruncated` nor `ContinuationToken`, so past 1000 objects the "all files" a '
-        + 'caller received was the first page, with no signal. One contract method, two '
-        + 'dialects, both quietly incomplete — and the first feature that genuinely needed to '
-        + 'enumerate a prefix (backup, orphan sweep, migration audit) would have got two '
-        + 'different answers on two deployments without an error on either. #5172 was nearly '
-        + 'that feature: it planned to drive attachment reclamation off '
-        + '`list(EMAIL_ATTACHMENT_KEY_PREFIX)`, found the local adapter could not see one '
-        + 'level down, and switched to queue-driven deferred work instead. Nothing consumed '
-        + 'it afterwards: the only in-repo call site was the `SwappableStorageService` '
-        + 'pass-through (which itself rejects when the active adapter has no `list`), and '
-        + 'REST, CLI and the storage routes never called it. Remove was chosen over '
-        + 'align-and-tighten (maintainer ruling, 2026-08-05, #5266): aligning would grow a '
-        + 'conformance surface nobody walks, while a prefix listing that cannot paginate is '
-        + 'the wrong signature to inherit — when a real caller needs enumeration it returns '
-        + 'cursor-shaped, `list(prefix, { cursor, limit })`, with adapter-conformance cases '
-        + '(nested keys, directory entries, >1000 objects) proving both backends agree. This '
-        + 'is a TS/API contract surface — a storage adapter is CODE, never stack metadata — '
-        + 'so there is no source for the chain to rewrite, and deliberately no schema '
-        + 'tombstone: nothing ever ran an adapter through a `.parse()`, so a prescription '
-        + 'there would reach no one. The enforced channel is tsc, and it reports at the call '
-        + 'site. Same disposition, and the same reason, as '
-        + '`data-driver-find-stream-retired` (#4484). ADR-0049 / ADR-0087, #5540 '
-        + '(analysis #5266).',
-      acceptanceCriteria:
-        'No code calls `storage.list(...)` on the `file-storage` service or on any '
-        + '`IStorageService` value. Code that needed "which files are under this prefix" '
-        + 'reads the records it wrote — `sys_file` / file-reference rows carry the storage '
-        + 'key and page deterministically through ObjectQL — rather than asking the bucket, '
-        + 'which is also the only form that stays correct past 1000 objects and across both '
-        + 'adapters. An adapter that still IMPLEMENTS `list` keeps compiling (an extra '
-        + 'method is not an error on a class) and is simply unreachable through the '
-        + 'contract, so deleting it is cleanup that can follow. The break is on the CALLER '
-        + 'side: `storage.list(...)` no longer type-checks, and a PROXY typed against '
-        + '`IStorageService` that forwards to `inner.list` is exactly such a caller — the '
-        + 'one in `@objectstack/service-storage` goes with the adapters (#5541). '
-        + '⚠️ AMENDED 2026-08-09 (#6781, maintainer ruling on cloud#1203, option B): the '
-        + 'RESERVED route in the paragraph above was taken. `list` exists again on the '
-        + 'contract, cursor-shaped — `list(prefix, { cursor, limit })` returning '
-        + '`{ items, nextCursor }` — because cloud had two first-party callers this repo '
-        + 'could not see when the measurement said "nothing calls it" (tenant attachment '
-        + 'reclamation, marketplace snapshot GC). This does NOT un-retire anything and the '
-        + 'acceptance criterion above is unchanged for what it actually governs: the '
-        + 'single-argument `list(prefix): StorageFileInfo[]` is gone for good, a call written '
-        + 'against it still fails to compile, and the two dialects it had are now pinned '
-        + 'against each other in `storage-adapter-list.conformance.test.ts` rather than left '
-        + 'to diverge. What changed for an upgrader is only the destination: prefer the '
-        + 'records you wrote, and reach for the restored member when there are none.',
-    },
-    {
-      id: 'driver-aggregate-undeclared-key-aliases-removed',
-      // No backticks in `surface`: the upgrade-guide renderer wraps this string
-      // in a code span of its own, and a nested pair renders as literal ticks.
-      surface: "driver aggregate() call argument — query.aggregate and aggregations[].func",
-      replacement:
-        'query.aggregations and aggregations[].function — the spellings QueryASTSchema and '
-        + 'AggregationNodeSchema have always declared',
-      reason:
-        '`SqlDriver.aggregate` and `RemoteTransport.aggregate` each read two aliases the '
-        + 'Query Protocol has never declared: `query.aggregations || query.aggregate` and '
-        + '`agg.function || agg.func`. "Never declared" is measured, not assumed — `git log '
-        + '-S` over `data/query.zod.ts` finds no commit that ever introduced either name, '
-        + 'there is no `retiredKey()` tombstone and no alias-table entry for them (the file\'s '
-        + 'only alias table is `SortNode`\'s `direction` → `order`), and neither appears in any '
-        + 'upgrade guide or release note. So this entry does not record a declared surface '
-        + 'being withdrawn; it records a LENIENCY being withdrawn, which is why it is here '
-        + 'rather than behind a tombstone. The only writers in this repository were the two '
-        + 'driver packages\' own fixtures — #4984\'s family, where a fixture spelling the alias '
-        + 'keeps the tolerant limb green forever and no test in existence can go red on its '
-        + 'deletion — so ADR-0049 enforce-or-remove applies once those are re-spelt. ⚠️ Do '
-        + 'NOT read this across to `dashboard`/`page` measures: `aggregate` IS the canonical '
-        + 'key there and `func` IS a declared, loudly-suggesting alias (`DatasetMeasureSchema`, '
-        + 'ui/dataset.zod.ts). That neighbouring vocabulary is untouched, and it is the most '
-        + 'likely reason an off-repo caller ever wrote these keys on a QUERY — one habit, two '
-        + 'surfaces, only one of which declared it. This is a driver CALL ARGUMENT — code, '
-        + 'never stack metadata — so there is no source for the D2 chain to rewrite and '
-        + 'deliberately no schema tombstone: nothing ever ran a query through '
-        + '`QueryASTSchema.parse()` on this path. The enforced channel is tsc at the call '
-        + 'site, once the parameter is `DriverQuery` — and for an untyped JS caller there is '
-        + 'no enforced channel at all, which is exactly why this ledger entry has to exist: '
-        + 'the generated upgrade guide is the only way such a reader learns of the rename. '
-        + 'Same disposition, and the same reason, as `data-driver-find-stream-retired` '
-        + '(#4484), `storage-service-list-retired` (#5540) and `actor-user-roles-to-positions` '
-        + '(#6011). ADR-0049 / ADR-0087, #6321 (PR #6404).',
-      acceptanceCriteria:
-        'No caller passes `aggregate:` to a driver\'s `aggregate()`, and no aggregation entry '
-        + 'spells its function `func:`; both are written `aggregations:` / `function:`. An '
-        + 'inline literal still using either old spelling no longer type-checks (TS2353 at the '
-        + 'call site). An untyped JS caller that keeps writing `aggregate:` silently receives '
-        + 'no aggregate column — the grouping still happens, the measure is simply absent — '
-        + 'and one that keeps writing `func:` receives INVALID_QUERY / 400 naming the '
-        + 'undeclared function, identically on the local driver and the Turso remote '
-        + 'transport.',
-    },
-    {
-      id: 'spec-type-alias-input-suffix-retired',
-      // Plain text, no markdown: build-upgrade-guide.ts renders this field inside a
-      // code span AND inside a table cell, so backticks here break both.
+      id: 'ui-widget-i18n-family-retired',
       surface:
-        'type alias: the 102 XInput names of @objectstack/spec '
-        + '(ConnectorInput, AppInput, PageInput, ActionInput, ServiceObjectInput, '
-        + 'ExecutionContextInput, TaskInput, … — 52 files across api/ automation/ data/ '
-        + 'identity/ integration/ kernel/ security/ system/ ui/)',
+        'ui.widgetManifest / ui.widgetLifecycle / ui.widgetEvent / ui.widgetProperty '
+        + '/ ui.widgetSource / ui.i18nObject / ui.pluralRule / ui.numberFormat / ui.dateFormat '
+        + '/ ui.localeConfig (the widget-registration vocabulary of ui/widget.zod.ts, and the '
+        + 'five doorless shapes of ui/i18n.zod.ts — 10 defs, 26 exported names)',
       replacement:
-        'the BARE name. ADR-0122 phase 2 moved the author state onto `X`, which makes `XInput` '
-        + 'a character-for-character synonym of it — the permanent synonym D3 forbids. Drop the '
-        + '`Input` suffix: `ConnectorInput` -> `Connector`. Symmetrically, a consumer that held '
-        + 'a PARSE RESULT under the bare name moves to `XParsed`, which phase 1 (16.x) already '
-        + 'declared for every schema whose two shapes differ, so the target name has existed for '
-        + 'a release. NINE `*Input` names are NOT retired and need no edit: `ExpressionInput`, '
-        + '`CronExpressionInput`, `TemplateExpressionInput` and `PredicateInput` are the bare '
-        + 'aliases of their own `…InputSchema`, and `FormFieldInput`, `QueryInput`, `FieldInput`, '
-        + '`ObjectStackDefinitionInput` and `NavigationItemInput` are composed (recursive or '
-        + '`Partial`-shaped) types no bare alias denotes.',
+        '(removed — there is no replacement key, because there was never a key. A custom field '
+        + 'widget is still named the same way it always was: `field.widget` is a plain string '
+        + 'naming a component the RENDERER has registered, and objectui\'s registry has always '
+        + 'carried its own runtime manifest for that (`RuntimeWidgetManifest` / '
+        + '`RuntimeWidgetSource` in `@object-ui/types`, objectui#3161 / #4115), which models '
+        + 'different keys and never derived from these. For localisation: write the '
+        + 'default-language string on `label` / `description` — the framework generates the '
+        + 'translation key at registration time from the naming convention — and put '
+        + 'translations in translation files, which is the LIVE `system/translation.zod.ts` '
+        + 'surface. Widget registration and locale formatting as authorable protocol metadata '
+        + 'return via the ENFORCE route of ADR-0049 through a new ADR — the registry / loader / '
+        + 'formatter first, the vocabulary second)',
       reason:
-        'This entry exists for the reason `data-driver-find-stream-retired` (#4484), '
-        + '`storage-service-list-retired` (#5540) and `actor-user-roles-to-positions` (#6011) '
-        + 'exist, and it is the same disposition: the surface is a TYPESCRIPT NAME, never stack '
-        + 'metadata, so there is no source for a D2 conversion to rewrite and deliberately no '
-        + 'schema tombstone — an `XInput` alias never had a carrier key, never emitted a def, '
-        + 'and no `.parse()` ever saw it. Measured and verified rather than assumed: '
-        + '`json-schema/`, `json-schema.manifest/` and `authorable-surface/` are BYTE-IDENTICAL '
-        + 'across this change, because those generators enumerate runtime `z.ZodType` exports '
-        + 'and never read a type alias. So nothing left the published metadata surface and '
-        + 'RETIRED_DEFS_BY_MAJOR is deliberately untouched — an entry there would falsely claim '
-        + 'the metadata contract shrank. The enforced channel is tsc: the name is gone, so every '
-        + 'consumer gets TS2724/TS2305 naming the import. That is loud but MUTE about the '
-        + 'replacement — a compile error says `ConnectorInput` does not exist, not that '
-        + '`Connector` now means what it meant. The generated upgrade guide is the only channel '
-        + 'that carries the second half, which is precisely the #6048 gap ADR-0087 registration '
-        + 'exists to close. ⚠️ Deliberately NOT registered alongside it: the 1384 bare aliases '
-        + 'the same change FLIPPED from `z.infer` to `z.input`. Those names all still exist and '
-        + 'still resolve; what moved is which of a schema\'s two shapes they denote, and only '
-        + 'where the two differ (663 of 1384 — the rest are isomorphic and the flip is a no-op '
-        + 'there, pinned as such). A consumer holding an authored literal is made MORE correct '
-        + 'by it, silently; one holding a parse result gets a tsc error at the first defaulted '
-        + 'key it reads. Registering that as a rename would misdescribe it — no name was '
-        + 'retired — and the changeset carries its own FROM -> TO for it. ADR-0122 D8/D9, '
-        + '#6083 (PR #6279).',
+        '`ui/widget.zod.ts` published a complete widget-registration vocabulary — a manifest '
+        + 'with lifecycle hooks, custom events, configurable properties and an '
+        + 'npm/remote/inline implementation-source union — and `ui/i18n.zod.ts` published a '
+        + 'structured-label, plural-rule and locale-formatting vocabulary. NOTHING in the '
+        + 'protocol carried either. Three independent measurements, re-run on `origin/main` '
+        + 'immediately before the removal with their controls passing in the SAME run: (1) no '
+        + 'module under `packages/spec/src` imported `widget.zod` at all, and the only imports '
+        + 'of `i18n.zod` anywhere name `I18nLabelSchema` / `AriaPropsSchema` (both KEPT), so no '
+        + 'schema declared a carrier key — `field.widget` is a `z.string()` naming a registered '
+        + 'component and has never referenced `WidgetManifest`; (2) a BFS over the in-memory '
+        + 'Zod graph from all 24 metadata-type roots plus `defineStack`\'s `ObjectStackSchema` '
+        + 'reached none of them, while `PageSchema` / `ObjectListViewSchema` resolved `direct` '
+        + 'in the same run and a synthetic carrier flipped every one of them; (3) zero '
+        + '`.parse()` / `.safeParse()` in objectstack, objectui or cloud outside these files\' '
+        + 'own unit tests. `NumberFormat` / `DateFormat` DID have a carrier key '
+        + '(`LocaleConfig.numberFormat` / `.dateFormat`) but the carrier was itself doorless, '
+        + 'so the subtree was `no door` rather than `no gate` and goes whole — leaving the two '
+        + 'leaves behind would strand exported schemas with no consumer (#3950). '
+        + '`I18nObjectSchema` was additionally superseded by its own file-neighbour: '
+        + '`I18nLabelSchema`\'s documentation already says translation keys are generated at '
+        + 'registration time and translations live in translation files, and the live '
+        + 'translation surface is `system/translation.zod.ts`, which uses none of these shapes. '
+        + 'The 2026-08-06 ruling weighed giving them a carrier (option B) and rejected it: that '
+        + 'is a feature with a registry and a renderer behind it, not ledger clean-up. '
+        + 'Tightening them to `strictObject` was rejected earlier and explicitly (#4001 批 16) '
+        + '— strictness is a property of a PARSE and there is no parse, so it would spend a '
+        + 'breaking change to leave "a precisely validated dead slot, the more convincing lie" '
+        + '(#4583). With no carrier key there is nothing to tombstone and no `sys_metadata` row '
+        + 'or source file for a D2 conversion to rewrite: this entry is the D3 record, route 3, '
+        + 'the same shape as #4988 (the ui/ interaction config family), #4834 (kernel '
+        + 'plugin-runtime family) and #4938 (`HttpServerConfig`). '
+        + '⚠️ `WidgetManifest.performance`\'s own `retiredKey()` tombstone (#3896 close-out) is '
+        + 'SUBSUMED here, the #4657/#4834 way: it goes with the shape that carried it, which is '
+        + 'strictly stronger than the tombstone, because there is no longer a manifest to '
+        + 'author the key INTO. '
+        + '⚠️ One of the nine widget sites is deliberately NOT retired. '
+        + '`FieldWidgetPropsSchema` survives: it is a REACT PROPS CONTRACT rather than '
+        + 'authorable metadata (it never appeared in `authorable-surface/` or '
+        + '`json-schema.manifest/` — its `onChange` is a `z.function()`), so "zero parse" is its '
+        + 'design and not its defect, and it acquired a live cross-repo compile-time consumer '
+        + 'one day before 批 16 measured: objectui PR #3289 (2026-08-03) renamed '
+        + '`@object-ui/fields`\' validation slot onto the spec\'s `error` with no alias, the '
+        + 'form renderer began producing it, and '
+        + '`packages/fields/src/__tests__/spec-symbol-batch7.test.ts` pins the shape against '
+        + '`import type { FieldWidgetProps } from \'@objectstack/spec/ui\'` as an intentional '
+        + 'tripwire. Re-verified on objectui `origin/main` 2026-08-07. ADR-0049, #5055.',
       acceptanceCriteria:
-        'No source imports a name ending `Input` from `@objectstack/spec` except the nine listed '
-        + 'above: `rg "\\b\\w+Input\\b" --type ts` over consumer code resolves only to those. A '
-        + 'literal annotated with a bare spec type compiles while listing ONLY the keys the '
-        + 'author means — `const c: Connector = { name, label, type }` type-checks, which it did '
-        + 'not in 16.x — and a value read out of `XSchema.parse()` annotated with the bare name '
-        + 'no longer compiles at the first defaulted key it reads (TS18048/TS2532), the signal '
-        + 'that the annotation should be `XParsed`. `pnpm check:spec-parsed-alias` reports every '
-        + 'bare alias as `z.input` and refuses both a bare `z.infer` alias and a reintroduced '
-        + '`XInput` synonym.',
-    },
-    {
-      id: 'driver-sql-distinct-bare-filter-typed',
-      // No backticks in `surface` — see the note on the entry above.
-      surface: 'SqlDriver.distinct() third argument — any value',
-      replacement:
-        'a bare FilterCondition (@objectstack/spec/data) — the same value find() carries '
-        + 'under query.where, never a query envelope',
-      reason:
-        'This entry records a TYPE being added, not a surface being withdrawn, and it says '
-        + 'so up front because the distinction decides who has to do anything. `distinct` is '
-        + 'not declared on `IDataDriver`, so #5181 / #6075 never reached it and it kept '
-        + '`filters?: any` while its body said something far more specific — '
-        + '`applyFilters(builder, filters)` is handed the ARGUMENT ITSELF, never a `.where` '
-        + 'off it. ⚠️ RUNTIME BEHAVIOUR IS UNCHANGED by this entry\'s change: not one '
-        + 'statement moved, so no upgrade breaks at run time and nothing that answered '
-        + 'correctly stops. What the annotation removes is a compile-time hole, measured '
-        + 'rather than assumed: a truthy NON-OBJECT third argument — '
-        + '`distinct(\'orders\', \'product\', \'completed\')` — used to type-check and resolve '
-        + 'the UNFILTERED set, because `applyFilters` emits no predicate at all for a truthy '
-        + 'non-object, non-array filter. A call meaning "which products among completed '
-        + 'orders" answered with EVERY product, silently. That spelling is now TS2345 at the '
-        + 'call site. This is a driver CALL ARGUMENT — code, never stack metadata — so there '
-        + 'is no source for the D2 chain to rewrite and deliberately no schema tombstone, the '
-        + 'disposition `data-driver-find-stream-retired` (#4484), `storage-service-list-retired` '
-        + '(#5540), `actor-user-roles-to-positions` (#6011) and '
-        + '`driver-aggregate-undeclared-key-aliases-removed` (#6321) already carry. ⚠️ It '
-        + 'differs from those four in ONE measured way a reader should not have to infer: '
-        + 'because nothing changed at run time, an untyped JS caller is not affected BY THE '
-        + 'UPGRADE at all. The entry is here for a different reason — such a caller is exactly '
-        + 'the one tsc can never reach, and the silent widening above is a defect they may '
-        + 'ALREADY be sitting on, before and after this major. The generated upgrade guide is '
-        + 'the only channel that reaches them, which is why the fix is written down rather '
-        + 'than left to the compiler. ⛔ The reverse mismatch is NOT closed and no type can '
-        + 'close it: `FilterCondition` is an open map (`[key: string]: any`) because a filter '
-        + 'key IS a field name, so a query envelope `{ object, where }` is structurally a '
-        + 'valid filter — one constraining columns named `object` and `where` — and so is a '
-        + 'FilterArray. Both reach `distinct` type-checked and are refused at run time, '
-        + 'loudly, with INVALID_FILTER / 400. `driver-memory`\'s opposite half — where the '
-        + 'BARE spelling returns the unfiltered set in silence — stays open under the #5499 '
-        + 'freeze (#6320). ADR-0087, #6320.',
-      acceptanceCriteria:
-        'No caller passes a non-object to `distinct()`\'s third argument. A scalar there is '
-        + 'now a compile error (`TS2345: Argument of type \'string\' is not assignable to '
-        + 'parameter of type \'FilterCondition\'`); rewrite it as the bare filter it was '
-        + 'always meant to be — `\'completed\'` becomes `{ status: \'completed\' }`. ⚠️ That '
-        + 'is NOT an equivalent rewrite: the old spelling returned the UNFILTERED set, so the '
-        + 'answer changes once fixed, and the changed answer is the one the call always meant. '
-        + 'An untyped JS caller gets no compile error and no behaviour change — for them this '
-        + 'entry is the only notice that the spelling never filtered anything. A query '
-        + 'envelope or a FilterArray in that slot still compiles and is rejected at run time '
-        + 'with INVALID_FILTER / 400.',
-    },
-    {
-      id: 'filter-regex-options-retired',
-      // No backticks in `surface` — see the note two entries above.
-      surface:
-        'data.filter $regex / $options — in a STORED filter (dashboard widget filter and '
-        + 'globalFilters, report runtimeFilter, page and component filter, solution-blueprint '
-        + 'filter), and equally in the where clause of a query request',
-      replacement:
-        '$icontains for the case-insensitive substring match this was almost always used '
-        + 'for, or $contains for a case-sensitive one — a pattern that genuinely needs a '
-        + 'regular expression has no filter-level replacement',
-      reason:
-        'Like `driver-aggregate-undeclared-key-aliases-removed` and '
-        + '`driver-sql-distinct-bare-filter-typed`, this entry records a LENIENCY being '
-        + 'withdrawn rather than a declared surface: `$regex` was never in `FILTER_OPERATORS` '
-        + 'and never a key on `StringOperatorSchema`. That is measured, not assumed — `git '
-        + 'log -S\'$regex\'` over `packages/spec/src` returns only doc comments describing how '
-        + '`$contains` LOWERS to MongoDB (`Contains substring - SQL: LIKE %?% | MongoDB: '
-        + '$regex`), plus #5701 itself, which added the name solely as `RETIRED_FILTER_OPERATORS` '
-        + 'prescription data. ⚠️ But it differs from those two in the one way that decides the '
-        + 'disposition, so a reader should not have to infer it: those were driver CALL '
-        + 'ARGUMENTS, code and never stack metadata, whereas a filter IS stored metadata. '
-        + '`FilterConditionSchema` is an OPEN RECORD (`z.record(z.string(), z.unknown())`) '
-        + 'because a filter key is a field name, so a stored `{ name: { $regex: \'acme.*\' } }` '
-        + 'parses GREEN and always will — a `retiredKey()` tombstone cannot exist on an open '
-        + 'map, which is exactly why the ledger has to carry this. What such a stack used to '
-        + 'get was four different answers from four backends: `driver-sql` and Turso\'s remote '
-        + 'transport compiled it to a LIKE-escaped SUBSTRING (so `a.b` matched only the literal '
-        + '`a.b` and the regex was silently never a regex), `driver-memory` and objectql\'s '
-        + '`having` ran it as a real `RegExp` (so the same filter also matched `axb`, and an '
-        + 'INVALID pattern was caught and answered `false` — zero rows, in silence), and '
-        + '`driver-mongodb` refused it with a bare `Error` carrying no `code` and no `status`. '
-        + 'It is now refused everywhere with INVALID_FILTER / 400 naming the replacement. '
-        + 'There is deliberately NO D2 conversion and this sits in `semantic` rather than among '
-        + 'the mechanical transforms: rewriting `$regex` to `$icontains` is NOT lossless in '
-        + 'either direction — a regex metacharacter becomes a literal — so an auto-applied '
-        + 'rewrite would silently change which rows a dashboard, report or permission filter '
-        + 'selects, a wrong number rather than a missing one. Choosing the substring the '
-        + 'pattern MEANT is a judgment about the query, not a transform. ⚠️ This entry covers '
-        + 'BOTH HALVES of the #4706 ruling (B), not just the driver one: the contract half '
-        + '(#5701 — the `$icontains` declaration, the `$contains` family pinned '
-        + 'case-sensitive, and the `RETIRED_FILTER_OPERATORS` prescriptions) landed before the '
-        + 'ADR-0087 disposition gate (#6148) existed and so was never asked for a ledger entry; '
-        + 'the driver half (#5702) is where the refusal became executable. One surface, one '
-        + 'entry, registered from the half that made it observable. ADR-0049 / ADR-0087, '
-        + '#4706 / #5701 / #5702.',
-      acceptanceCriteria:
-        'No stored filter and no request `where` spells `$regex` or `$options` — grep the '
-        + 'stack for both. Each one is rewritten by asking what the pattern MEANT, not by '
-        + 'transliterating it: a bare substring pattern becomes `$icontains` (or `$contains` '
-        + 'when the match must stay case-sensitive), and its metacharacters are dropped rather '
-        + 'than escaped, because they were never honoured as a regex on the SQL family in the '
-        + 'first place. ⚠️ Expect the answer to CHANGE on any stack that ran on '
-        + '`driver-memory`, `driver-mongodb` or objectql `having`, where the pattern really was '
-        + 'evaluated as a regular expression; on the SQL family the rewritten filter returns '
-        + 'what it always returned. A pattern that genuinely needs alternation, anchoring or '
-        + 'character classes has no filter-level replacement — move that predicate into a '
-        + 'formula field or a server-side view, or open an issue for it. Verify by loading the '
-        + 'stack: a surviving `$regex` or `$options` is answered INVALID_FILTER / 400 with a '
-        + 'message naming the replacement, on every backend.',
-    },
-    {
-      id: 'http-server-runtime-vocabulary-retired',
-      surface:
-        'system.serverEvent / system.serverEventType / system.serverCapabilities / '
-        + 'system.serverStatus (the lifecycle-event, capability-report and status vocabulary of '
-        + 'system/http-server.zod.ts — 4 defs, 8 exported names)',
-      replacement:
-        '(removed — there is no replacement key, because there was never a key. Server lifecycle '
-        + 'is the transport plugin\'s own start/stop seam; per-request and per-server '
-        + 'observability is `system/metrics.zod.ts` and `system/logging.zod.ts` (plus '
-        + '`OS_SERVER_TIMING` for timings), and liveness is the `/health` endpoint. What a '
-        + 'transport plugin can DO it states by implementing the kernel plugin contract — the '
-        + 'seams it registers are the capability statement, and a self-described capability '
-        + 'record can only disagree with them. Server-level configuration that IS authorable '
-        + 'lives on `defineStack({ server })` / `StackServerConfigSchema`, which is unaffected)',
-      reason:
-        'The second and final ADR-0049 pass over `system/http-server.zod.ts`. #4938 removed the '
-        + 'CONFIG half (`HttpServerConfigSchema`, nine keys, zero readers, zero authoring '
-        + 'entry); this removes the RUNTIME half — a 7-member lifecycle event union with a '
-        + 'timestamped envelope, an eight-boolean capability report, and a five-state status '
-        + 'record with connection and request counters. Nothing ever emitted, consumed or '
-        + 'parsed any of them. '
-        + 'This card was HELD for four days rather than queued, on a specific and legitimate '
-        + 'doubt: a response/capability vocabulary can be a REFERENCE surface for host '
-        + 'implementers, so "zero consumers in this repo" is weaker evidence for one of those '
-        + 'than for an authorable key (the CSS-variable rebuttal). The hold was lifted by '
-        + 'measuring the reference reader itself rather than by re-running the same grep: '
-        + '`plugin-hono-server`, the one in-tree host implementation, neither implements nor '
-        + 'reports any of the three — it names no capability record, no status shape and no '
-        + 'event union, and what it registers is routes and middleware through the kernel '
-        + 'plugin contract. A declaration-site grep put every declaration in this one file, a '
-        + 'quoted-name sweep across objectstack and objectui found no reader outside it, and '
-        + 'the control passed in the SAME run: `MiddlewareConfig`, declared twelve lines away, '
-        + 'resolves to `packages/runtime/src/middleware.ts`. So the sweep could see a reader in '
-        + 'this file when there was one. '
-        + 'With no carrier key there is nothing to tombstone, and with no author there is no '
-        + 'source or `sys_metadata` row for a D2 conversion to rewrite: RETIRED_DEFS_BY_MAJOR '
-        + 'plus this entry are the declaration — route 3, the same shape as #4938 in this very '
-        + 'file, #4834, #4988 and #5055. If host-implementer conformance becomes a real '
-        + 'requirement it returns through the ENFORCE route: an adapter contract with a checker '
-        + 'behind it, vocabulary second. ADR-0049, #5295.',
-      acceptanceCriteria:
-        'No source imports `ServerEvent`, `ServerEventType`, `ServerEventSchema`, '
-        + '`ServerCapabilities`, `ServerCapabilitiesSchema`, `ServerCapabilitiesParsed`, '
-        + '`ServerStatus` or `ServerStatusSchema` from `@objectstack/spec/system` — a grep over '
-        + 'consumer code resolves none of them, and `tsc` reports TS2724/TS2305 on any that '
-        + 'survives. The route-registration half of the same module still resolves '
-        + '(`RouteHandlerMetadataSchema`, `MiddlewareType`, `MiddlewareConfigSchema`, '
-        + '`MiddlewareConfig`), and `StackServerConfigSchema` — the one authorable server '
-        + 'surface — is untouched: a stack declaring `server: { trustProxy, security }` parses '
-        + 'exactly as it did in 16.x.',
-    },
-    {
-      id: 'view-management-protocol-retired',
-      surface:
-        'api.listViews / api.getView / api.createView / api.updateView / api.deleteView '
-        + '(the ViewProtocol interface and its ten Request/Response schemas in '
-        + 'api/protocol.zod.ts — 10 defs, 25 exported names)',
-      replacement:
-        'the two view surfaces that are actually routed. For a view\'s STORED definition, the '
-        + 'generic metadata methods with `type: \'view\'` — `getMetaItem` / `getMetaItems` / '
-        + '`saveMetaItem` / `deleteMetaItem`, served at `/api/v1/meta/view/:name`. For the '
-        + 'RESOLVED render-time view, `getUiView` (`GetUiViewRequest` / `GetUiViewResponse`), '
-        + 'served at `/api/v1/ui/view/:object/:type`. Neither is addressed by a `viewId`, which '
-        + 'is the one thing the retired surface offered and the one thing nothing implemented',
-      reason:
-        'A complete viewId-addressed CRUD surface — list (with a list/form filter), read, '
-        + 'create, patch, delete — with none of the three things a protocol method needs. '
-        + 'Measured on origin/main immediately before the removal: no implementation '
-        + '(`packages/metadata-protocol/src/protocol.ts` declares no `listViews` / `getView` / '
-        + '`createView` / `updateView` / `deleteView`; its only view resolver is `getUiView`), '
-        + 'no route (`packages/rest/src/rest-server.ts` never mentions `viewId`, so nothing '
-        + 'viewId-addressed is reachable over HTTP at all), and no caller (the only '
-        + '`ViewProtocol` mention outside its own file was the services checklist, which '
-        + 'already recorded the five as declared-and-unrouted). The look-alike hits a bare-name '
-        + 'grep turns up are all different contracts: `metadata-manager.ts`\'s '
-        + '`getView(name: string)` is another class, and objectui\'s '
-        + '`getView(objectName, viewId)` resolves through `client.meta.getItem(\'view\', …)`, '
-        + 'i.e. the metadata route. '
-        + 'What makes this worth a removal rather than a note is that the cost is already '
-        + 'measured. A declared surface that is name-identical and semantics-adjacent to a real '
-        + 'one is an attractive nuisance in every grep, and it mis-directed a decision once: '
-        + '#5948\'s issue body AND its 2026-08-07 maintainer ruling both read '
-        + '`GetViewResponseSchema` (zero implementations) as the contract of '
-        + '`GET /ui/view/:object/:type`, whose declared response is `GetUiViewResponseSchema` — '
-        + 'one word apart, 250 lines up. That ruling\'s reasoning happened to survive the '
-        + 'mix-up ("nobody can consume `{object, view}` successfully today" was true, though '
-        + 'not for the stated reason), which is the luck this removal stops relying on. '
-        + 'Route 3: none of the ten was a key on an authorable shape, nothing parsed them, so '
-        + 'there is no tombstone and no D2 conversion — RETIRED_DEFS_BY_MAJOR plus this entry '
-        + 'are the declaration. If reading and writing ONE view by id becomes a real '
-        + 'requirement it returns implementation-first. ADR-0049, ADR-0087, maintainer ruling '
-        + '2026-08-07, #6239.',
-      acceptanceCriteria:
-        'No source imports `ListViewsRequest(Schema)`, `ListViewsResponse(Schema)`, '
-        + '`GetViewRequest(Schema)`, `GetViewResponse(Schema)`, `CreateViewRequest(Schema)`, '
-        + '`CreateViewResponse(Schema)`, `UpdateViewRequest(Schema)`, '
-        + '`UpdateViewResponse(Schema)`, `DeleteViewRequest(Schema)` or '
-        + '`DeleteViewResponse(Schema)` from `@objectstack/spec/api`, and no host declares a '
-        + '`ViewProtocol` member. Reading and writing views still works end to end through the '
-        + 'surfaces that were always the live ones: `GET /api/v1/meta/view/:name` returns the '
-        + 'stored definition and `GET /api/v1/ui/view/:object/:type` returns the resolved view, '
-        + 'both unchanged by this removal. `GetUiViewRequestSchema` / `GetUiViewResponseSchema` '
-        + 'still resolve — they are the shapes #5948 meant.',
-    },
-    {
-      id: 'etl-pipeline-layer-retired',
-      surface:
-        'automation.etlPipeline / automation.etlPipelineRun / automation.etlSource / '
-        + 'automation.etlDestination / automation.etlTransformation (the whole L2 layer of '
-        + 'automation/etl.zod.ts, its four enums and the `ETL` factory — 9 defs, 27 exported '
-        + 'names)',
-      replacement:
-        '(removed — no protocol surface replaces it, deliberately. Layer by layer: '
-        + 'connector-attached synchronisation is `ConnectorSchema.syncConfig` '
-        + '(`integration/connector.zod.ts`), which IS parsed and executed; per-field value '
-        + 'transformation on import is `shared/mapping.zod.ts`, whose `transform` is applied '
-        + 'row by row by the REST import path and recorded key by key in '
-        + '`packages/spec/liveness/mapping.json`; scheduling is `system/job.zod.ts`. What has '
-        + 'NO replacement is multi-source, multi-stage movement with joins and aggregations — '
-        + 'because it never had an implementation either. It returns through the ENFORCE route: '
-        + 'the engine first, the vocabulary second)',
-      reason:
-        'The reading #4738 used to retire L1 `DataSyncConfig`, re-measured one layer up and '
-        + 'identical: narrative-only. No engine ever parsed, scheduled or executed an '
-        + '`ETLPipeline`. Measured on origin/main immediately before the removal: the only '
-        + 'non-spec references in this repo are two fumadocs-generated documentation sources '
-        + '(`apps/docs/.source/*.ts`), not executors; objectui has no reference at all; there '
-        + 'is no `liveness/etl.json` or `pipeline.json`, so no ADR-0049 gate ever had a reading '
-        + 'on it — while the same file family\'s EXECUTED half does have one '
-        + '(`liveness/mapping.json`), which is the contrast that makes the absence meaningful '
-        + 'rather than an oversight. The `etl` string in this registry was the one untested '
-        + 'link the finding named, and it is not a loader path: it was the id of the #4962 '
-        + 'retry-vocabulary entry, absorbed here. '
-        + 'The layer was ADR-0078\'s asymmetry in its purest form — an author could write a '
-        + 'complete ten-stage pipeline, get no error, and get no execution. It was also '
-        + 'advertised: `packages/spec/docs/SYNC_ARCHITECTURE.md` named `ETLPipeline` as the '
-        + 'recommended destination for authors displaced by the L1 retirement (#4738) and '
-        + 'listed ten transformation types with copyable examples down to '
-        + '`script | Custom JavaScript/Python`. That document is rewritten in the same change; '
-        + 'a retirement whose own doc still recommends the retired layer is self-contradictory, '
-        + 'and forwarding L1\'s authors to a second layer with no executor was the defect '
-        + 'compounding rather than closing. '
-        + '⚠️ `etl-retry-converged-onto-retry-policy` (#4962) is SUBSUMED here, the '
-        + '#4657/#4834/#5055 way: both land in the unreleased protocol 17, so composed, a '
-        + 'rename of `retry.maxAttempts` on a shape that does not survive the major has no '
-        + 'observable effect — and keeping both would tell an upgrader to rewrite a key on a '
-        + 'schema the same upgrade deletes. The `maxAttempts` `retiredKey()` tombstone goes '
-        + 'with the shape that carried it, which is strictly stronger than the tombstone: there '
-        + 'is no longer a `retry` block to author the key into. Route 3 — no carrier key, no '
-        + 'parse site, so no D2 conversion and no tombstone; RETIRED_DEFS_BY_MAJOR plus this '
-        + 'entry are the declaration. ADR-0049, ADR-0078, #6414.',
-      acceptanceCriteria:
-        'No source imports `ETLPipeline`, `ETLPipelineParsed`, `ETLPipelineSchema`, '
-        + '`ETLPipelineRun(Schema)`, `ETLSource(Schema)`, `ETLDestination(Schema)`, '
-        + '`ETLTransformation(Schema)`, `ETLEndpointType(Schema)`, '
-        + '`ETLTransformationType(Schema)`, `ETLSyncMode(Schema)`, `ETLRunStatus(Schema)` or '
-        + 'the `ETL` factory from `@objectstack/spec/automation`; `tsc` reports TS2724/TS2305 '
-        + 'on any that survives. Every author who was pointed at L2 has been re-pointed by '
-        + 'name: SYNC_ARCHITECTURE.md no longer lists an L2 row, no longer recommends '
-        + '`ETLPipeline` as L1\'s destination and no longer advertises a transformation-type '
-        + 'table. The surviving layers still parse unchanged — a connector declaring '
-        + '`syncConfig` and an import declaring `mapping.transform` both behave exactly as they '
-        + 'did in 16.x.',
-    },
-    {
-      id: 'action-descriptor-resume-authority-default-flip',
-      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code
-      // span AND a table cell (see the note on `spec-type-alias-input-suffix-retired`).
-      surface:
-        'automation.ActionDescriptor.resumeAuthority — an OMITTED value on a pausing '
-        + 'node descriptor (supportsPause: true, or any executor whose execute() returns '
-        + 'suspend: true)',
-      replacement:
-        "an explicit resumeAuthority: 'any' on the descriptor, for a pausing node whose "
-        + 'pauses really are meant to be continued through the generic resume route '
-        + '(POST /automation/:name/runs/:runId/resume) — a screen-style collected-input '
-        + "pause, or a signal wait an external producer resumes. Declare 'service' instead "
-        + 'if continuing is the tail of a decision your own service must authorize and '
-        + 'record first. Either value is a one-line addition; only the silence changed '
-        + 'meaning',
-      reason:
-        'A SECURE-DEFAULT FLIP with no metadata shape to rewrite — the same category as '
-        + "protocol 12's `rest-requireauth-default-flip`, and it is registered here for the "
-        + 'same reason: whether a given pause is genuinely open to the generic route is a '
-        + 'trust judgment no transform can make. The #3801 resume gate keys on the SUSPENDED '
-        + "NODE, and `ActionDescriptor.resumeAuthority` used to default to `'any'`, so a "
-        + 'pausing node type shipped raw-resumable unless its author remembered the field. '
-        + "It now resolves to `'service'` when absent: an unclaimed pause is refused on the "
-        + 'generic route with `PERMISSION_DENIED` / 403 until its descriptor states who may '
-        + 'continue it. #3823 is the incident that decided the direction — ADR-0044 pointed '
-        + "an approval's revise edge at a generic `wait`, `wait` is legitimately `'any'`, and "
-        + 'the pause standing in a service-owned position inherited a fail-open value nobody '
-        + 'chose; the demonstrated cost was an unaudited resubmit plus a destroyed remote '
-        + 'run. The two possible mistakes are asymmetric, which is the whole argument: '
-        + "guessing `'any'` walks past a decision nothing recorded and is silent, while "
-        + "guessing `'service'` returns a refusal naming the missing field. ⚠️ The surface "
-        + 'is a DESCRIPTOR FIELD set in plugin CODE, never stack metadata, so there is no '
-        + 'source for a D2 conversion to rewrite and deliberately no schema tombstone — the '
-        + 'disposition `data-driver-find-stream-retired` (#4484), `storage-service-list-retired` '
-        + '(#5540) and `actor-user-roles-to-positions` (#6011) already carry. It differs from '
-        + 'those in one way a reader should not have to infer: nothing is REMOVED, so tsc '
-        + 'reports nothing at all — the field was already optional after step one and an '
-        + 'omission still compiles. The enforced channels are all run-time: a registration '
-        + 'warning naming the node type (once per type per engine), the refusal message on '
-        + 'the resume itself, and `check:resume-authority-declared` for executors living in '
-        + 'this repo. For a third-party plugin the generated upgrade guide is the only '
-        + 'channel that arrives BEFORE a user hits a run that will not continue. In-tree the '
-        + 'flip moves nothing: all six shipped pausing types (screen, wait, subflow, map, '
-        + 'approval, approval_revise) declare their authority explicitly. ADR-0044 amendment '
-        + '(2026-07-28) and its 2026-08-08 landing section, ADR-0019 #3801 addendum, #5561.',
-      acceptanceCriteria:
-        'Every action descriptor your plugin registers for a node type that can suspend '
-        + 'declares `resumeAuthority`. Booting the stack logs no `declares supportsPause but '
-        + 'never declares resumeAuthority` warning naming one of your types, and a run parked '
-        + 'on each of your pausing nodes can still be continued the way you intend: a resume '
-        + "through the generic route succeeds for the ones you declared `'any'`, and answers "
-        + "403 (`PERMISSION_DENIED`) for the ones you declared `'service'`, which continue "
-        + 'through your own service API instead. ⚠️ `supportsPause` is no longer the '
-        + 'declaration nothing enforced (#5703, closed by #6667): an executor whose '
-        + '`execute()` returns `suspend: true` while leaving `supportsPause` false is still '
-        + 'warned about by neither warning channel, but '
-        + '`AutomationEngine.refuseUndeclaredSuspension` now refuses that suspension at the '
-        + 'one seam every suspension passes through — a guard-class failure no `fault` edge '
-        + 'routes — so it needs no hand-check. The residue that does: an executor registering '
-        + 'NO descriptor declares nothing for either warning or the refusal to read, so its '
-        + 'pauses are still created and refused only later, on the resume route (#5561).',
-    },
-    {
-      id: 'export-field-meta-constraints-retired',
-      surface:
-        '@objectstack/rest: ExportFieldMeta.required / .system / .readonly / .hasDefault / '
-        + '.min / .max / .minLength / .maxLength (the map built by `buildFieldMetaMap`, '
-        + 'reached as `PreparedImport.metaMap` from `prepareImportRequest`)',
-      replacement:
-        'the object schema you already hold — read `fields[name].required` / `.system` / '
-        + '`.readonly` / `.defaultValue` / `.min` / `.max` / `.minLength` / `.maxLength` off '
-        + 'the same `ObjectSchema` you passed to `buildFieldMetaMap`, which is where the '
-        + 'ENGINE reads them and therefore the only copy that cannot drift',
-      reason:
-        'ADR-0049 enforce-or-remove. These eight were never a source of truth: '
-        + '`buildFieldMetaMap(schema)` DERIVED each one from the very `schema` its caller '
-        + 'passed in, so the map carried a second copy of facts the caller already held. '
-        + "They existed for exactly one consumer — the import dry run's hand-copied "
-        + 'pre-check mirror (`firstMissingRequiredField` / `firstConstraintViolation`, '
-        + 'framework#3956) — and #4633 ruling D retired that mirror (PR #6532): the dry run '
-        + "now asks `DataProtocol.validateData` for the engine's verdict, which reads the "
-        + "object's own schema. That left all eight computed on every import and read by "
-        + 'NOTHING, which is the declared-and-unread shape ADR-0049 exists for; a constraint '
-        + 'vocabulary standing next to the presentation one with no enforcer behind it is '
-        + 'precisely the thing an AI-authored consumer mistakes for a contract. Verified '
-        + 'zero-reader before removal, per key and by type, across this repo (`packages/rest` '
-        + 'itself, and all five in-repo dependents of `@objectstack/rest`: runtime, cli, '
-        + "verify, plugin-auth, plugin-dev) and the `objectui` sibling; plugin-auth's "
-        + 'identity import forwards `prepared.metaMap` into `runImport` but reads only the '
-        + 'presentation keys through `coerceRow`. '
-        + 'Why this needs a ledger entry despite that sweep: it is the `findStream` (#4484) / '
-        + '`IStorageService.list` (#5540) / `actor-user-roles-to-positions` (#6011) '
-        + 'disposition — a published TS surface with NO spec schema, so there is no '
-        + '`retiredKey()` tombstone and no parse rejection that could carry a prescription, '
-        + 'and the ledger is the only channel that reaches an upgrader. It is if anything '
-        + 'blinder than those three: the keys shipped in a FINAL release (`@objectstack/rest` '
-        + '14.5.0) and have been published in every release since, and because they were '
-        + 'OPTIONAL keys on an interface that itself survives, a JavaScript consumer reading '
-        + '`meta.required` after the upgrade gets `undefined` with no error at all — tsc '
-        + 'reports at the read site only for a typed consumer. '
-        + 'Why D3 semantic and not a D2 conversion: there is nothing to convert. No authored '
-        + 'or stored metadata changes shape — `required` / `min` / `maxLength` and the rest '
-        + 'remain fully authorable on a field definition and fully enforced by the engine, '
-        + 'which is where they always lived. The only place these eight are ever spelled is '
-        + "inside a consumer's own TypeScript, so no `objectstack migrate meta` transform can "
-        + 'reach them. ADR-0049 / ADR-0087, #6536 (the sweep PR #6532 deliberately deferred).',
-      acceptanceCriteria:
-        'No code of yours reads any of the eight off a `buildFieldMetaMap` / '
-        + '`prepareImportRequest` result. Grep your sources for `.required` / `.hasDefault` / '
-        + '`.minLength` / `.maxLength` / `.min` / `.max` / `.system` / `.readonly` on an '
-        + '`ExportFieldMeta`-typed value; each hit moves to the object schema you already '
-        + 'passed in. ⚠️ Prove it against a RUN, not against tsc: these were optional keys, '
-        + 'so an untyped or `any`-typed read compiles clean and silently becomes `undefined` '
-        + '— assert that the constraint your code acts on is still observed on a real import, '
-        + 'not merely that the build is green. Note `hasDefault` has no one-to-one '
-        + "replacement key: it was the derived predicate `defaultValue != null`, mirroring the "
-        + "engine's `applyFieldDefaults` gate, so read `fields[name].defaultValue` and apply "
-        + 'that same `!= null` test yourself.',
-    },
-    {
-      id: 'action-descriptor-is-async-retired',
-      surface: 'ActionDescriptor.isAsync (the descriptor an executor publishes via `registerNodeExecutor` / `defineActionDescriptor`)',
-      replacement:
-        'nothing to re-declare — delete the key. Suspension is `execute()` RETURNING '
-        + '`suspend: true`, and permission to suspend is `supportsPause: true` on the same '
-        + 'descriptor (with the `resumeAuthority` its pauses need)',
-      reason:
-        'ADR-0049 enforce-or-remove. `isAsync` declared "this action suspends the flow '
-        + 'awaiting an external reply" and NOTHING read it: a fresh three-repo measurement '
-        + '(#6748, re-run at pickup) found zero property reads across objectstack, objectui '
-        + 'and cloud — every hit was the declaration itself, a generated baseline, one of '
-        + 'five shipped descriptors WRITING it, a test fixture pinning the shape, or prose. '
-        + 'So declaring it never made a node suspend and omitting it never stopped one, '
-        + 'which is the silently-inert declaration ADR-0049 exists to end. It was always a '
-        + 'second, weaker spelling of the capability `supportsPause` states, and the two '
-        + 'diverged in exactly the way a duplicated declaration does: `screen` declared '
-        + 'both, `map` and `wait` declared `isAsync` alongside `supportsPause`, and nothing '
-        + 'anywhere reconciled them. The sibling took the ENFORCE leg of the same ruling in '
-        + '#6667 — `AutomationEngine` now refuses a suspension whose type does not declare '
-        + '`supportsPause: true` — so the capability this key gestured at is now a real, '
-        + 'enforced fact under one name. This one had no consumer to grow into and takes '
-        + 'the remove leg. '
-        + 'Why D3 semantic and not a D2 conversion: an ActionDescriptor is published from '
-        + "an executor's TypeScript, never stored in stack metadata — no stack, example or "
-        + 'template carries the key — so there is no source for the chain to rewrite and '
-        + '`os migrate meta` cannot reach it. The schema tombstones it via `retiredKey()` '
-        + 'and descriptor authors delete the key themselves; that rejection (a `tsc` error '
-        + 'at the authoring site, and a parse error inside `defineActionDescriptor`) is the '
-        + 'channel a third-party plugin author actually meets. The '
-        + '`EnhancedApiError.fieldErrors` disposition, one layer down.',
-      acceptanceCriteria:
-        'No descriptor declares `isAsync` — not the five that shipped it (`screen`, `map`, '
-        + '`wait`, `approval`, `approval_revise`), not a plugin\'s. Every node type that '
-        + 'returns `suspend: true` from `execute()` declares `supportsPause: true` on its '
-        + 'descriptor together with a `resumeAuthority`, and its runs still pause and resume '
-        + 'as before: the behaviour never depended on `isAsync`, so deleting the key changes '
-        + 'no run. Authoring `isAsync` fails `tsc` at the descriptor literal and fails '
-        + '`defineActionDescriptor()` at runtime with the prescription, instead of parsing '
-        + 'clean and being stripped.',
-    },
-    {
-      id: 'notification-list-cursor-retired',
-      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
-      // code span AND a table cell (see the note on `spec-type-alias-input-suffix-retired`).
-      surface:
-        'api.listNotifications cursor — the key on BOTH halves of GET /api/v1/notifications '
-        + '(ListNotificationsRequestSchema and ListNotificationsResponseSchema) and the cursor '
-        + 'argument of the client SDK call client.notifications.list(). The same entry covers '
-        + 'the limit default: the request schema no longer declares default(20)',
-      replacement:
-        'a larger `limit` — the route answers the newest N notifications and has no page 2. '
-        + 'There is no replacement for `cursor`, deliberately: nothing ever minted one, so no '
-        + 'caller holds a value to carry over. Callers that looped on it were re-reading the '
-        + 'first window and should read one window sized to what they display (the Console '
-        + 'bell polls exactly this way). For the removed `limit` default, send the number you '
-        + 'want explicitly if you were relying on 20 — omitting it takes the server window, '
-        + 'which is 50 on the platform inbox and clamped into 1..200, and has been since '
-        + 'before the declaration existed',
-      reason:
-        'One capability, both halves, never half-deleted (maintainer ruling 2026-08-07, '
-        + 'Option A, ruled jointly with #6363). `cursor` was declared on the request and on '
-        + 'the response and honoured on neither: the dispatcher domain reads `read` / `type` / '
-        + '`limit` and nothing else, and no emit site has ever written the response key. It '
-        + 'was worse than inert because it had a shipped PRODUCER — the SDK appended it to the '
-        + 'query string — so a caller paginating by the published contract looped on page 1 '
-        + 'forever, with no error and no 400. Measured over a real boot with 60 unread before '
-        + 'the removal: page2 === page1, both parsing green against the response schema, which '
-        + 'is why no conformance gate could see it. '
-        + 'This is `data.query.cursor` (#4286, `query-cursor-retired`) one layer up, with the '
-        + 'same verdict for the same reason, down to deleting the SDK producer alongside the '
-        + 'key. A first-class inbox cursor, if one is ever designed, will be a '
-        + 'response-minted opaque token — a different API — so keeping this one preserved a '
-        + 'wrong design rather than a roadmap. '
-        + 'The `limit` default goes with it because the FICTION WAS THE MECHANISM, not the '
-        + 'number: no request path parses a query string through this schema (#3899 wired the '
-        + "catalog's requestSchema to the real entry for BODIES only), so `.default(20)` never "
-        + 'stamped anything onto anything, and the server has always applied its own 50. '
-        + 'Re-spelling 20 as 50 — the other arm the ruling allowed — would have kept a '
-        + 'declaration that does not execute and merely made it coincide with the '
-        + 'implementation until someone moved the clamp; `.optional()` plus prose is true '
-        + 'about both the schema and the server. No constraint (`.int()` / `.max(200)`) is '
-        + 'declared either, because the service CLAMPS an out-of-range limit rather than '
-        + 'refusing it, and declaring a rejection the wire does not perform is the same defect '
-        + 'mirrored. '
-        + 'Route 2, and the split is worth stating exactly because the two halves of the '
-        + 'bookkeeping go different ways. There IS a tombstone: both schemas are non-strict, '
-        + 'so a bare deletion would have made Zod SILENTLY STRIP whatever a caller kept '
-        + 'sending — a clean parse and a parameter that never takes effect, which is this '
-        + "issue's own defect re-created one layer down (#3733, ADR-0104). So `cursor` is "
-        + '`retiredKey()` on both halves, typed `never` for tsc and raising the prescription '
-        + 'at any parse, and both keys are registered in RETIRED_KEYS_BY_MAJOR[17]. There is '
-        + 'NO D2 conversion: a conversion rewrites an authored source or a stored '
-        + '`sys_metadata` row, and these two shapes are HTTP-only — nobody authors a '
-        + '`ListNotificationsRequest` and nothing persists one. Request AND response shapes: '
-        + 'two semantic TODOs for API callers, no stack conversion — the same disposition '
-        + '`BatchOptions.validateOnly` (#4052) and the `AnalyticsQueryRequest` envelope keys '
-        + 'already take in this major. The `limit` default is declared separately and '
-        + 'mechanically, in DEFAULT_CHANGES_BY_MAJOR[17] (#4666), whose `from`/`to` '
-        + 'fingerprints are re-derived on every build. ADR-0049 / ADR-0078, #6361.',
-      acceptanceCriteria:
-        'No caller sends `cursor` to `GET /api/v1/notifications` and no SDK call site passes '
-        + 'it: `client.notifications.list({ cursor })` is a `tsc` error (TS2353, excess '
-        + 'property), which is the enforced channel — the removal is loud at compile time for '
-        + 'every TypeScript consumer. Reading `response.cursor` no longer type-checks either, '
-        + 'and always answered `undefined` before. ⚠️ Behaviour on the wire is deliberately '
-        + 'UNCHANGED and must be verified as such: a request still carrying `?cursor=…` is '
-        + 'IGNORED, not refused — the domain reads three named query keys and no route '
-        + 'validates this query against a schema, so an unknown key has never produced a 400 '
-        + 'and does not start doing so here. The declaration stopped promising what the wire '
-        + 'never did; the wire did not change. `unreadCount` is untouched (#6363) and still '
-        + 'reports the total across the whole matching inbox rather than the window. A caller '
-        + 'that omitted `limit` receives the same 50 rows it always received.',
-    },
-    {
-      id: 'plugin-manifest-loading-retired',
-      surface:
-        'manifest.loading (the whole block: strategy / preload / codeSplitting / dynamicImport / '
-        + 'initialization / dependencyResolution / hotReload / caching / sandboxing / monitoring)',
-      replacement:
-        'nothing to re-declare — delete the key. Plugins are composed at boot: `defineStack` '
-        + 'registers them and the kernel runs `init` then `start` in an order topologically '
-        + "resolved from each composed plugin's own `dependencies` / `optionalDependencies` "
-        + '(`resolvePluginOrder` in `packages/core/src/plugin-order.ts`). For the isolation '
-        + '`loading.sandboxing` appeared to configure, use the plugin trust tier '
-        + '(`manifest.runtime`, ADR-0025 §3.6) and the manifest permission declarations, which '
-        + 'are the surfaces the platform actually enforces',
-      reason:
-        'ADR-0049 enforce-or-remove; maintainer ruling 2026-08-04 on #4914. The block declared a '
-        + 'complete plugin loading policy and NOTHING read it. A bare-name scan of all three '
-        + 'repos — objectstack, cloud (measured 2026-08-09) and objectui (measured at pickup), '
-        + 'each with a control probe proving the scan saw the tree — put every hit inside '
-        + '`packages/spec` itself: this module\'s own declaration, its own unit tests, the '
-        + '`Manifest.loading` embed and the generated artifacts. `manifest.loading.*` had zero '
-        + 'readers in `packages/core`, `packages/runtime` and `packages/metadata`. So the key '
-        + 'parsed, entered the manifest, and changed nothing — #3950, at the scale of a whole '
-        + 'block. What made it outrank ordinary inert-key cleanup is `sandboxing`: it declared '
-        + 'process / vm / iframe / web-worker isolation, IPC transports and an `allowedServices` '
-        + 'ACL, so an AI author (ADR-0033) reading that vocabulary concluded the platform '
-        + 'isolates plugins, wrote the config, and received a clean parse and zero isolation. An '
-        + 'inert security control is worse than an absent one because it is believed. Hot reload '
-        + 'was additionally a TWO-SOURCE defect: the docs pointed at this dead '
-        + '`PluginHotReloadSchema` while the only implementation body, `HotReloadManager` '
-        + '(`packages/core/src/hot-reload.ts`), reads a different vocabulary — '
-        + '`HotReloadConfigSchema` in `plugin-lifecycle-advanced.zod.ts`. Ruling §2 converges on '
-        + 'the surviving side: that schema is KEPT as the starting point for a future enforce '
-        + 'decision (it has an implementation body but no runtime composes it yet), and '
-        + 'enforcing it is deliberately a separate decision, not this retirement. '
-        + 'Why D3 semantic and not a D2 conversion: the chain walks a normalized STACK and '
-        + '`applyConversionsToStoredItem` maps a metadata type onto one of its collections. A '
-        + 'package manifest is neither — `PLURAL_TO_SINGULAR` has no `packages` / `plugins` '
-        + 'entry, so a manifest is not a stack collection member and a stored manifest row '
-        + 'passes that seam through unchanged. A conversion would be a transform with no seam '
-        + 'that ever runs.',
-      acceptanceCriteria:
-        'No `objectstack.plugin.json` and no stored package manifest carries a `loading` key. '
-        + 'The enforced channel is the one place a manifest is parsed with an author present: '
-        + '`os plugin build` runs `ManifestSchema.safeParse` and exits non-zero, printing the '
-        + 'tombstone prescription, so a manifest still declaring `loading` fails its build '
-        + 'rather than shipping. TypeScript authors get it earlier still — `loading` is typed '
-        + '`never`, so assigning it is a `tsc` error. ⚠️ Runtime behaviour is deliberately '
-        + 'UNCHANGED and must be verified as such: nothing ever read the block, so removing it '
-        + 'removes no behaviour. A package ALREADY INSTALLED whose stored manifest carries '
-        + '`loading` keeps working — the registry\'s `validate()` is an explicit diagnostic and '
-        + 'not a gate (it catches, logs `[metadata_spec_invalid]`, and registers the item '
-        + 'anyway, deliberately, so bad metadata is never a data outage), so such a row '
-        + 'degrades to one log line at registration rather than a boot failure. Clear it by '
-        + 'deleting the key from the source manifest and reinstalling.',
-    },
-    {
-      id: 'api-runtime-create-withdrawn',
-      surface: 'PUT /api/v1/meta/api/{name} (runtime-authored `api` endpoints, draft and active alike)',
-      replacement:
-        'Declare the endpoint as a stack artifact (`**/*.api.ts`, or `defineStack({ apis })`) '
-        + 'and ship it through `publishPackage`',
-      reason:
-        'The `api` registry entry declared `allowRuntimeCreate: true` and the runtime never '
-        + 'honoured it. Measured on a real showcase boot (#5488): `PUT /api/v1/meta/api/'
-        + 'e8_backdoor` answered 200 with `{"success":true,…,"message":"Saved …"}`, and the '
-        + 'declared route then answered 404 forever — with NO `[EndpointMatcher] … EXCLUDED` '
-        + 'line, because the endpoint was never in the index to be excluded from. The serving '
-        + 'criterion belongs to `IMetadataService.matchEndpoint` -> `EndpointMatcher` -> '
-        + "`MetadataManager.listForIndex('api')`, which reads the manager's registry plus its "
-        + 'registered loaders (`["filesystem","memory"]` on dev/serve); a runtime write lands '
-        + 'in `sys_metadata`, which is in neither. A declared capability the runtime does not '
-        + 'honour is ADR-0049 false compliance, and a write that answers "Saved" and then 404s '
-        + 'forever is its most dangerous shape for the AI authors ADR-0033 targets. The '
-        + 'maintainer ruled REMOVE on 2026-08-07 rather than converge the read path, because '
-        + 'making the matcher read `sys_metadata` re-opens cache, invalidation, tenancy and '
-        + "the ADR-0110 D3 miss-vs-outage distinction on a new read path, and there is no "
-        + 'business pull for Studio-authored endpoints today (zero `.api.*` artifacts author '
-        + 'them at runtime; showcase uses the artifact route, #5040 E8 LIVE). '
-        + 'There is NO D2 conversion, for the reason this list exists: nothing in an authored '
-        + 'source spells this key. `allowRuntimeCreate` is a PLATFORM registry value, not an '
-        + 'authorable one, and the artifact route it points authors toward is untouched — a '
-        + '`**/*.api.ts` file valid before this change is valid after it, byte for byte. What '
-        + 'changed is a runtime HTTP verdict, so it is one semantic TODO for operators and '
-        + 'Studio callers rather than a stack conversion — the same disposition '
-        + '`BatchOptions.validateOnly` (#4052) takes. Consequently `gateApiDraftsForPublish` '
-        + '(PR #5279) is retired with it: it gated a promotion into a state the matcher can '
-        + 'never read, and with the inlet closed no `api` draft can exist for it to judge. '
-        + 'Re-entry is recorded in the ruling: if #2657 Part B promotes `apis` to a registered '
-        + 'type WITH A REAL CONSUMPTION PATH, the flag flips back then — implementation first, '
-        + 'declaration second. ADR-0049 / ADR-0121, #5488 (subsumes #5311).',
-      acceptanceCriteria:
-        'No caller creates or updates an `api` item through the runtime metadata API. '
-        + '`PUT /api/v1/meta/api/{name}` answers 403 with `code: "NOT_CREATABLE"` and a body '
-        + 'naming both flags (`allowRuntimeCreate=false, allowOrgOverride=false`) and the '
-        + 'prescription `Declare it in source (**/*.api.ts) and redeploy` — in `?mode=draft` '
-        + 'as well as direct-active, because the gate runs before the draft/publish branch and '
-        + 'does not read `mode`. ⚠️ Verify the artifact route is UNAFFECTED, which is the whole '
-        + 'point of the change: a stack declaring `apis:` still compiles, still passes '
-        + '`validateApiEndpointDeclarations` at publish (`publishPackage`, #5189) and at load '
-        + '(`buildEndpointIndex`, PR #5203), and its endpoints still SERVE — that route was '
-        + 'always the only one that served. An operator who genuinely needs the runtime door '
-        + 'back on one deployment sets `OS_METADATA_WRITABLE=api`, the same single escape '
-        + 'hatch `job` / `agent` / `capability` use; note that this unlocks the WRITE only, and '
-        + 'the endpoint still will not be served, which is why it is a diagnostic and not a '
-        + 'workaround. Any `api` rows already sitting in `sys_metadata` from before this change '
-        + 'were never served either; they can be deleted (`deleteMetaItem` is deliberately not '
-        + 'gated by this refusal, so repair stays possible).',
-    },
-    {
-      id: 'import-run-automations-declared-default-corrected',
-      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
-      // code span AND a table cell (see the note on `spec-type-alias-input-suffix-retired`).
-      surface:
-        'api.ImportRequest runAutomations — the declared default of the key on BOTH import '
-        + 'bodies, POST /api/v1/data/:object/import (ImportRequest) and its async twin POST '
-        + '/api/v1/data/:object/import/jobs (CreateImportJobRequest, which IS the same schema '
-        + 'object). It was declared default(false) and described as "off by default for '
-        + 'bulk"; it is now default(true), which is what the server has always done',
-      replacement:
-        'an explicit runAutomations: false on any import request that is meant to load rows '
-        + 'without firing triggers/hooks. That spelling is unchanged and has always been the '
-        + 'only one the server read — what changes is that omitting the key now DECLARES what '
-        + 'it already DID. Callers who want automations on need write nothing',
-      reason:
-        'A DECLARATION corrected to match a runtime that did not move — the inverse of a '
-        + "behaviour flip, and registered here for the reason protocol 12's "
-        + '`rest-requireauth-default-flip` and this major\'s '
-        + '`action-descriptor-resume-authority-default-flip` are: whether a given import was '
-        + 'meant to fire triggers is a judgment no transform can make, so the prescription is '
-        + 'a TODO rather than a rewrite. The server decides in import-prepare.ts with '
-        + '`body?.runAutomations !== false`, i.e. an omitted flag runs automations, and has '
-        + 'since #2922 — automations always ran on import historically (the engine ignored '
-        + 'the flag entirely before then), so opt-out was made the explicit act, matching '
-        + 'platform convention. The schema said the opposite in both machine-readable and '
-        + "human-readable form, and both SHIPPED: `.default(false)` in `@objectstack/spec`'s "
-        + 'JSON Schema, and the describe prose in the published reference tables for both '
-        + 'defs. '
-        + '⚠️ Nothing in this repo reconciled the two and NO deployed caller changes '
-        + 'behaviour: no request path parses an import body through this schema — the route '
-        + 'reads the raw body, and the sole reference to `CreateImportJobRequestSchema` is '
-        + 'the declarative `ImportJobApiContracts` catalog entry, a declaration and not a '
-        + 'parse. That is exactly why this needed a ruling rather than a docs edit: the '
-        + 'divergence was unobservable in-tree and observable only to a consumer OUTSIDE it. '
-        + 'A client or SDK that validated its request through the published schema '
-        + 'materialised `runAutomations: false` from the declared default and sent it '
-        + 'explicitly, and the server honoured it — so the same request body produced '
-        + 'opposite behaviour depending on whether the caller validated before sending, with '
-        + 'the validating caller silently losing its triggers. Nothing rejected it, nothing '
-        + 'warned, and the reference page told an author the wrong thing in the other '
-        + 'direction. There is deliberately NO schema tombstone and no D2 conversion: no key '
-        + 'is removed, and an HTTP request body is neither authored nor persisted — the same '
-        + 'disposition `notification-list-cursor-retired` (#6361) takes for the sibling '
-        + 'default on this major, and `batch-options-validate-only-retired` before it. The '
-        + 'declared move itself is recorded mechanically, per key, in '
-        + 'DEFAULT_CHANGES_BY_MAJOR[17] (#4666), whose `from`/`to` fingerprints are '
-        + 're-derived on every build. Maintainer ruling 2026-08-09 (#6704, disposition A: '
-        + 'the spec follows the runtime). ADR-0049 / ADR-0078.',
-      acceptanceCriteria:
-        'Every import request of yours that must NOT fire triggers sends `runAutomations: '
-        + 'false` explicitly, rather than omitting the key and trusting the old declared '
-        + 'default. The check is worth doing precisely where it looks unnecessary: if you '
-        + 'build the body by parsing it through `ImportRequestSchema` (or the published JSON '
-        + 'Schema) and then send the PARSED object, your bulk loads were running with '
-        + 'automations OFF and will now run with them ON — that is the only class whose '
-        + 'behaviour changes, and it changes toward what an unvalidated caller always got. '
-        + '⚠️ Behaviour on the wire is deliberately UNCHANGED and should be verified as '
-        + 'such: a body that omits `runAutomations` fired triggers before this change and '
-        + 'fires them after, and `runAutomations: false` turns them off before and after. '
-        + 'Nothing starts being refused — the route never validated this body against the '
-        + 'schema and does not begin to. `dryRun` is unaffected and still runs NO automations '
-        + 'whatever the flag says (#6037).',
+        'No code imports `WidgetManifest(Schema|Parsed)`, `WidgetLifecycle(Schema)`, '
+        + '`WidgetEvent(Schema|Parsed)`, `WidgetProperty(Schema|Parsed)`, '
+        + '`WidgetSource(Schema|Parsed)`, `I18nObject(Schema)`, `PluralRule(Schema)`, '
+        + '`NumberFormat(Schema|Parsed)`, `DateFormat(Schema)` or '
+        + '`LocaleConfig(Schema|Parsed)` from `@objectstack/spec` or `@objectstack/spec/ui` — '
+        + 'every one is TS2305 after upgrade, on every public entry (pinned by resolved symbol '
+        + 'identity in `ui/widget-i18n-retirement.test.ts`). No metadata document needs '
+        + 'editing, because none could ever carry one of these shapes: a stack that parsed '
+        + 'before parses byte-for-byte the same after, and a `field.widget: "my_picker"` string '
+        + 'is untouched. `FieldWidgetProps` / `FieldWidgetPropsSchema` / '
+        + '`FieldWidgetPropsParsed`, `I18nLabel(Schema)` and `AriaProps(Schema)` all still '
+        + 'resolve on `@objectstack/spec/ui` and are asserted to. ⚠️ objectui needs a companion '
+        + 'PR in the same window: `packages/types/src/__tests__/page-nav-misc-spec-parity.test.ts` '
+        + 'asserts the spec STILL owns `WidgetManifest` / `WidgetSource` (it is the '
+        + '"a workaround should not outlive its reason" half of the objectui#3169 tripwire, '
+        + 'designed to go red exactly here), and `packages/types/src/widget.ts`\'s '
+        + '"Renamed off the spec\'s `WidgetManifest` name" comments now point at names that no '
+        + 'longer exist. Both are prescribed responses to this removal, not collateral damage.',
     },
     {
       id: 'view-filter-rule-value-shaped-by-operator',
@@ -3382,166 +3517,89 @@ const step17: MigrationStep = {
         + 'was correct.',
     },
     {
-      id: 'hook-register-empty-object-target-refused',
+      id: 'view-management-protocol-retired',
       surface:
-        "engine.registerHook(event, handler, { object: '' | [] | [''] }), and a scope whose "
-        + '`excludeObjects` cancels its `object` entirely',
+        'api.listViews / api.getView / api.createView / api.updateView / api.deleteView '
+        + '(the ViewProtocol interface and its ten Request/Response schemas in '
+        + 'api/protocol.zod.ts — 10 defs, 25 exported names)',
       replacement:
-        "name the object(s) — `object: 'account'` / `object: ['account', 'contact']` — or, for "
-        + "a global hook, `object: '*'` or no `object` key at all; for a cancelled scope, widen "
-        + '`object` or drop the overlapping names from `excludeObjects`',
+        'the two view surfaces that are actually routed. For a view\'s STORED definition, the '
+        + 'generic metadata methods with `type: \'view\'` — `getMetaItem` / `getMetaItems` / '
+        + '`saveMetaItem` / `deleteMetaItem`, served at `/api/v1/meta/view/:name`. For the '
+        + 'RESOLVED render-time view, `getUiView` (`GetUiViewRequest` / `GetUiViewResponse`), '
+        + 'served at `/api/v1/ui/view/:object/:type`. Neither is addressed by a `viewId`, which '
+        + 'is the one thing the retired surface offered and the one thing nothing implemented',
       reason:
-        '#4281 ruled that an empty hook target is not "no target" and closed the shape at the '
-        + "two METADATA doors — `HookSchema.object`'s refine and `hook-binder.ts`'s "
-        + '`normalizeObjects`. `engine.registerHook`, the CODE door, goes through neither, so '
-        + 'all three spellings still registered, each producing a defect the author did not '
-        + "write: `''` is FALSY, so the allow face was skipped entirely and the entry became a "
-        + "GLOBAL hook (#4281's headline failure mode — blank intent taking the broadest "
-        + "possible blast radius); `[]` and `['']` are truthy but admit no object name, so the "
-        + 'entry could never fire. #5928 then added the `excludeObjects` face, which brought a '
-        + 'fourth shape reached by arithmetic rather than by one bad name: an `object` list '
-        + 'every member of which is also excluded admits nothing, so that entry can never fire '
-        + 'either. All four are ADR-0078 silently-inert declarations, and all four are now '
-        + 'refused at REGISTRATION.\n\n'
-        + 'No mechanical rewrite exists, in either direction. The refused values carry no '
-        + "recoverable intent — `object: ''` could have meant `'*'` (what it actually did) or a "
-        + 'specific object name the author forgot to fill in, and those are opposite '
-        + 'registrations; choosing between them is a judgment the chain cannot make. Nor could '
-        + "the MATCHING read be changed instead: teaching the matcher that `''` is an "
-        + 'unmatchable name would silently convert a hook firing on every object into one '
-        + 'firing on none — the same class of defect pointing the other way, which is why '
-        + '#5928 declined to do it in passing.\n\n'
-        + 'This is a RUNTIME registration API, not stored metadata, so — like '
-        + '`hook-context-session-roles-retired` at this step — there is no `sys_metadata` row '
-        + 'for the D2 chain to rewrite and the ledger entry is the notification channel. One '
-        + 'metadata surface reaches it INDIRECTLY and is the reason this is not purely a '
-        + "code-side note: a `record-change` flow's start node forwards `config.objectName` "
-        + 'verbatim into `registerHook` (`RecordChangeTrigger.start`), so a flow authored with '
-        + 'a blank `objectName` used to bind a trigger to EVERY object in the tenant. It now '
-        + "fails to bind instead, loudly — the automation engine's per-flow bind guard warns "
-        + 'and the `kernel:bootstrapped` binding audit re-reports it — which is the correct '
-        + 'end state, but it is an observable change for that flow. #6573, #4281, #4001, '
-        + '#5928, ADR-0078.',
+        'A complete viewId-addressed CRUD surface — list (with a list/form filter), read, '
+        + 'create, patch, delete — with none of the three things a protocol method needs. '
+        + 'Measured on origin/main immediately before the removal: no implementation '
+        + '(`packages/metadata-protocol/src/protocol.ts` declares no `listViews` / `getView` / '
+        + '`createView` / `updateView` / `deleteView`; its only view resolver is `getUiView`), '
+        + 'no route (`packages/rest/src/rest-server.ts` never mentions `viewId`, so nothing '
+        + 'viewId-addressed is reachable over HTTP at all), and no caller (the only '
+        + '`ViewProtocol` mention outside its own file was the services checklist, which '
+        + 'already recorded the five as declared-and-unrouted). The look-alike hits a bare-name '
+        + 'grep turns up are all different contracts: `metadata-manager.ts`\'s '
+        + '`getView(name: string)` is another class, and objectui\'s '
+        + '`getView(objectName, viewId)` resolves through `client.meta.getItem(\'view\', …)`, '
+        + 'i.e. the metadata route. '
+        + 'What makes this worth a removal rather than a note is that the cost is already '
+        + 'measured. A declared surface that is name-identical and semantics-adjacent to a real '
+        + 'one is an attractive nuisance in every grep, and it mis-directed a decision once: '
+        + '#5948\'s issue body AND its 2026-08-07 maintainer ruling both read '
+        + '`GetViewResponseSchema` (zero implementations) as the contract of '
+        + '`GET /ui/view/:object/:type`, whose declared response is `GetUiViewResponseSchema` — '
+        + 'one word apart, 250 lines up. That ruling\'s reasoning happened to survive the '
+        + 'mix-up ("nobody can consume `{object, view}` successfully today" was true, though '
+        + 'not for the stated reason), which is the luck this removal stops relying on. '
+        + 'Route 3: none of the ten was a key on an authorable shape, nothing parsed them, so '
+        + 'there is no tombstone and no D2 conversion — RETIRED_DEFS_BY_MAJOR plus this entry '
+        + 'are the declaration. If reading and writing ONE view by id becomes a real '
+        + 'requirement it returns implementation-first. ADR-0049, ADR-0087, maintainer ruling '
+        + '2026-08-07, #6239.',
       acceptanceCriteria:
-        'No `registerHook` call site passes an empty `object` target, and none passes an '
-        + '`excludeObjects` list covering every name in its `object` list. Every `record-change` '
-        + 'flow start node declares a non-blank `config.objectName`, or omits the key if the '
-        + 'flow is genuinely meant to fire on every object. Boot completes with no '
-        + '"[ObjectQL] Hook ... declares an empty `object` target" throw and no '
-        + '"[record-change] ... not bound" warning naming a flow you expect to fire.',
+        'No source imports `ListViewsRequest(Schema)`, `ListViewsResponse(Schema)`, '
+        + '`GetViewRequest(Schema)`, `GetViewResponse(Schema)`, `CreateViewRequest(Schema)`, '
+        + '`CreateViewResponse(Schema)`, `UpdateViewRequest(Schema)`, '
+        + '`UpdateViewResponse(Schema)`, `DeleteViewRequest(Schema)` or '
+        + '`DeleteViewResponse(Schema)` from `@objectstack/spec/api`, and no host declares a '
+        + '`ViewProtocol` member. Reading and writing views still works end to end through the '
+        + 'surfaces that were always the live ones: `GET /api/v1/meta/view/:name` returns the '
+        + 'stored definition and `GET /api/v1/ui/view/:object/:type` returns the resolved view, '
+        + 'both unchanged by this removal. `GetUiViewRequestSchema` / `GetUiViewResponseSchema` '
+        + 'still resolve — they are the shapes #5948 meant.',
     },
     {
-      id: 'engine-find-formula-order-by-refused',
+      id: 'workflow-service-slot-retired',
       surface:
-        'engine.find(object, { orderBy }) and engine.findOne(object, { orderBy }) naming a '
-        + '`formula` field — the direct engine path, not the REST ingress',
+        "CoreServiceName 'workflow' / IWorkflowService / WorkflowProtocol / "
+        + 'discovery routes.workflow / RestApiRouteCategory workflow',
       replacement:
-        'denormalise the value onto the object (a stored field, written when the source '
-        + 'changes) and sort by that — the same remedy the REST ingress has prescribed since '
-        + '#6924 / #6994; a `summary` field is unaffected and still sorts, because it gets a '
-        + 'real maintained column',
+        'the live mechanisms the slot only ever pointed at: `state_machine` validation rules '
+        + 'for record state machines, approval flow nodes on the approvals runtime (ADR-0019) '
+        + 'for approvals, lifecycle hooks + `record_change` flows (service-automation) for '
+        + 'record-triggered automation',
       reason:
-        '#4226 / #4256 / #6994 closed the SORT axis at the REST ingress '
-        + '(`assertSortFieldsExist`, `400 INVALID_SORT`), which covers everything reaching '
-        + '`findData`: the list route, `POST /data/:object/query`, the export route and the '
-        + 'RPC dispatcher. A caller reaching `engine.find()` / `engine.findOne()` DIRECTLY '
-        + 'passed through none of it, and a `formula` ORDER BY there was dropped in silence. '
-        + 'Measured on a real driver: `asc` and `desc` came back BYTE-IDENTICAL, in insertion '
-        + 'order, under a success, with the rows carrying the very values they were asked to '
-        + 'be ordered by. No column exists to order by (a formula is computed on read, so no '
-        + 'driver materialises one), so the ORDER BY reached the driver, found nothing, and '
-        + 'the unknown-column backstop returned the rows unordered.\n\n'
-        + 'Ruled 2026-08-10 on #7095: an ORDER BY the engine cannot apply is a 4xx with '
-        + 'guidance prose at the public boundary, never a silent drop — the same direction as '
-        + 'the analytics dataset refusal envelope and the #6924 sort-hint prescription. The '
-        + "engine's documented internal-caller tolerance (`assertProjectionFieldsExist`'s "
-        + 'docblock) was to survive only behind a pinned internal path, and only if a MEASURED '
-        + 'internal call site relied on it. The #7095 sweep of every in-tree `orderBy` reaching '
-        + 'the engine directly — hooks, flows, reports, queue/job adapters, sharing, metadata '
-        + 'loaders, expand sub-reads — found NONE: every hardcoded internal sort names a real '
-        + 'stored column (`created_at`, `updated_at`, `version`, `priority`, `scheduled_for`, '
-        + '`started_at`, `next_run_at`, `recorded_at`, `id`), and no shipped object in the repo '
-        + 'declares a `formula` field at all. So no internal path shipped, and there is no flag '
-        + 'to opt back into the drop.\n\n'
-        + 'This is a CODE-path API, not stored metadata, so — like '
-        + '`hook-register-empty-object-target-refused` at this step — there is no `sys_metadata` '
-        + 'row for the D2 chain to rewrite and the ledger entry is the notification channel. '
-        + 'No mechanical rewrite exists in either direction: the platform cannot invent the '
-        + 'stored column the remedy prescribes, and it must not sort post-hoc instead — '
-        + '`driver.find` has already applied `limit` / `offset`, so re-sorting after the '
-        + 'formulas are evaluated would reorder an ARBITRARY PAGE, which looks correct on small '
-        + 'result sets and is wrong the moment pagination is involved.\n\n'
-        + 'ONE AUTHOR-REACHABLE SURFACE reaches this indirectly and is why it is not purely a '
-        + "code-side note: a saved report's `query.orderBy` (`sys_saved_report`) is forwarded "
-        + 'verbatim into `engine.find` by `plugin-reports`, bypassing the ingress gate. A '
-        + 'report authored to sort by a formula field used to run and return rows in an '
-        + 'arbitrary order; it now fails loudly, with the remedy in the message. One further '
-        + 'path is deliberately NOT a refusal: a nested `expand` sort raises this refusal '
-        + 'inside `expandRelatedRecords`, whose pre-existing graceful-degradation `catch` '
-        + 'swallows every expand failure and retains the raw foreign keys — so that path moves '
-        + 'from silent to OBSERVABLE (a warning naming the field and the fix) rather than '
-        + 'refusing. Reversing that backstop is a separate decision on all expand failure '
-        + 'modes. #7095, #6994, #6924, #4226, #4256, #3821, ADR-0112.',
+        'The workflow slot was declared end to end and implemented nowhere: no code in either '
+        + 'repository ever registered or resolved it (ADR-0115 Evidence 5 — the only touches '
+        + 'were plugin-dev\'s retired stub probe and the generic discovery walk), no '
+        + 'implementation of any WorkflowProtocol method ever existed, and no host ever '
+        + 'mounted `/api/v1/workflow` (the pre-#3586 DEFAULT_DISPATCHER_ROUTES listed it among '
+        + 'routes that never existed). Every part of it was ADR-0078\'s silently-inert '
+        + 'declaration: a CoreServiceName nothing filled, a contract nothing implemented, a '
+        + 'protocol nothing served, a discovery route field no builder could truthfully '
+        + 'populate. These are TS/API surfaces and a discovery RESPONSE field — never stored '
+        + 'in stack metadata, so there is no source for the chain to rewrite; consumers of the '
+        + 'deleted types move their imports themselves. ADR-0049 / ADR-0078, #4451.',
       acceptanceCriteria:
-        'No `engine.find` / `engine.findOne` call site sorts by a `formula` field, and no saved '
-        + "report's `query.orderBy` names one — grep your report definitions for an `orderBy` "
-        + 'field whose object declares it as a `formula`, and denormalise it onto a stored '
-        + 'column written when the source changes. A `summary` / rollup field needs no action: '
-        + 'it has a real maintained column and sorts correctly. Reads complete with no '
-        + '`INVALID_SORT` naming a formula field, and no "Failed to expand relationship field" '
-        + 'warning whose error text names one.',
+        'No import of IWorkflowService, WorkflowProtocol or the Get/WorkflowState/Config/'
+        + 'Transition types resolves; no code calls getService(\'workflow\') or reads '
+        + 'discovery `routes.workflow` / `services.workflow`; record state machines, '
+        + 'approvals and record-triggered automation go through the replacement mechanisms. '
+        + 'Discovery output on a default boot is unchanged (the slot was always reported '
+        + 'unavailable; now it is simply absent).',
     },
-    {
-      id: 'sharing-execution-context-retired',
-      surface:
-        '@objectstack/spec: the exported type `SharingExecutionContext` '
-        + '(`contracts/sharing-service`), and its re-export from '
-        + '@objectstack/plugin-sharing — the six-field context shape '
-        + '(`userId` / `tenantId` / `positions` / `permissions` / `systemPermissions` / '
-        + '`isSystem`) that sharing, approval and report enforcement signatures used to name',
-      replacement:
-        '`ExecutionContext` from `@objectstack/spec` — the complete '
-        + '`resolveAuthzContext` envelope the contracts have declared since #6523. Every one '
-        + 'of the retired type\'s six fields exists on it under the same name and type, so a '
-        + 'value that satisfied the old type already satisfies the envelope: only the '
-        + 'annotation is rewritten, never the value',
-      reason:
-        'ADR-0049 enforce-or-remove, completing the #6206 ruling (2026-08-07: enforcement '
-        + 'adjudicates on the WHOLE envelope, never a per-site subset). This type was the '
-        + 'declared context parameter of 36 signatures across three contracts — '
-        + '`ISharingService` / `ISharingRuleService`, `IApprovalService`, `IReportService` — '
-        + 'and it omitted four fields those gates need: `accessible_org_ids` (under the '
-        + '`group` tenancy posture this IS the Layer 0 wall, ADR-0105 D2), `org_user_ids`, '
-        + '`posture` (ADR-0095 D2) and `tabPermissions`. Its damage ran in the MIRROR '
-        + 'direction of the share-link twin (#6430 / PR #6511): nothing trimmed the VALUES — '
-        + "the engine middleware always handed the whole context down — it was the declared "
-        + 'TYPE that was narrow, so an implementation could not READ what it had been given '
-        + 'without casting out of its own contract (`const posture = (context as any).posture` '
-        + "in plugin-approvals' privileged-override gate). #6523 / PR #7068 converged the "
-        + 'contracts, PR #7140 and PR #7206 re-annotated the four implementations, and this '
-        + 'card removes the now-unreferenced declaration (#7070, #7218). '
-        + 'Why this needs a ledger entry despite nothing in-repo referencing it: it is the '
-        + '`export-field-meta-constraints-retired` / `hook-context-session-roles-retired` '
-        + 'disposition — a PUBLISHED TypeScript surface with no spec schema, so there is no '
-        + '`retiredKey()` tombstone and no parse rejection that could carry the prescription, '
-        + 'and the ledger is the only channel that reaches an upgrader. '
-        + 'Why D3 semantic and not a D2 conversion: nothing authored or stored changes shape. '
-        + 'The name is only ever spelled inside a consumer\'s own TypeScript, so no '
-        + '`objectstack migrate meta` transform can reach it, and no `sys_metadata` row '
-        + 'carries it. ADR-0049 / ADR-0087, #7218.',
-      acceptanceCriteria:
-        'No source of yours imports `SharingExecutionContext` from `@objectstack/spec` or '
-        + '`@objectstack/plugin-sharing`; each such import becomes `ExecutionContext` from '
-        + '`@objectstack/spec` and the build is green. tsc IS a sufficient detector here, '
-        + 'unlike the optional-key retirements at this step: the name is gone outright, so '
-        + 'every remaining reference is a hard resolution error rather than a silent '
-        + '`undefined`. ⚠️ Then check the direction tsc CANNOT see: widening an annotation '
-        + 'never rejects a value, so an enforcement path that only ever received a hand-built '
-        + 'six-field object still compiles and still under-adjudicates. Confirm each caller '
-        + 'passes the context it was HANDED, unchanged, rather than a literal it assembled — '
-        + 'and that any gate of yours reading `posture`, `accessible_org_ids`, `org_user_ids` '
-        + 'or `tabPermissions` now reads them declared, with no `as any` in the path.',
-    },
+    // </os-generated semantic:17>
   ],
 };
 
@@ -3659,32 +3717,10 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
   // shapes and `authorable-surface.json` marks each `[RETIRED]` separately.
   // Registered per key, as the gate reads them — nothing radiates from the base.
   17: [
-    'data/ExternalFieldMapping:transform',
-    'integration/ConnectorFieldMapping:transform',
-    'shared/FieldMapping:transform',
-    // #5775 — the SDUI component-props reconciliation. Three keys on the record
-    // picker (`displayField` was the REQUIRED one, and the synonym of the key
-    // the renderer actually reads) and the card's second spelling of the
-    // composition slot every other container calls `children`.
-    'ui/ElementRecordPickerProps:displayField',
-    'ui/ElementRecordPickerProps:multiple',
-    'ui/ElementRecordPickerProps:searchFields',
-    'ui/PageCardProps:body',
-    // #6776 — #5775's count was incomplete. The tab strip's visual style is the
-    // one prop whose declared spelling collides with the page component's own
-    // dispatch key, so `type` could never be authored in a flat or JSX carrier
-    // and was skipped unvalidated by `sdui-parser`'s `BASE_PROPS`. Renamed to
-    // the `tabStyle` every carrier can express and the renderer already reads.
-    'ui/PageTabsProps:type',
-    // #6748 — ADR-0049 enforce-or-remove on the action-descriptor capability
-    // block. `isAsync` was a second spelling of `supportsPause` with ZERO
-    // readers on a fresh three-repo measurement; its sibling took the enforce
-    // leg in #6667 and this one takes the remove leg. Descriptors are published
-    // from executor TypeScript, not from stack metadata, so the D2 side is a D3
-    // `SemanticMigration` (`action-descriptor-is-async-retired`) rather than a
-    // MetadataConversion — there is no stored source for `os migrate meta` to
-    // rewrite. The `EnhancedApiError.fieldErrors` precedent.
-    'automation/ActionDescriptor:isAsync',
+    // One file per entry under `entries/retired-keys/`, concatenated here sorted by
+    // entry id by `gen:migration-registry` (#7297). Add an entry by adding a
+    // FILE — never by editing between the markers, which is generated.
+    // <os-generated retired-key:17>
     // #6361 — the notification-inbox pagination key, tombstoned on BOTH halves
     // of `GET /api/v1/notifications` because one capability is never half-
     // deleted (maintainer ruling 2026-08-07, ruled jointly with #6363). Two
@@ -3702,26 +3738,15 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // callers rather than a stack conversion").
     'api/ListNotificationsRequest:cursor',
     'api/ListNotificationsResponse:cursor',
-    // #4914 — ADR-0049 enforce-or-remove on the plugin manifest's whole
-    // `loading` block (maintainer ruling 2026-08-04). ONE tombstoned key here,
-    // because `loading` was the single carrier: every schema underneath it
-    // (`PluginLoadingConfig` and the ten members it combined) leaves the
-    // published set as a whole-def removal and is registered in
-    // `RETIRED_DEFS_BY_MAJOR` below, not as ~27 individual key entries.
-    //
-    // Registered here but NOT in `src/conversions/registry.ts`, for the reason
-    // `automation/ActionDescriptor:isAsync` above gives: the conversion chain
-    // walks a normalized STACK (`mapCollection(stack, 'objects' | 'views' | …)`)
-    // and `applyConversionsToStoredItem` maps a metadata type onto one of those
-    // collections. A package manifest is neither — there is no `packages` /
-    // `plugins` entry in `PLURAL_TO_SINGULAR`, so a manifest is not a stack
-    // collection member and a stored manifest row passes that seam through
-    // unchanged. A MetadataConversion here would be a transform with no seam
-    // that ever runs. The prescription reaches authors instead through the
-    // tombstone at the one place a manifest is parsed with an author present
-    // (`os plugin build` → `ManifestSchema.safeParse`, which exits non-zero),
-    // and through the D3 semantic entry `plugin-manifest-loading-retired`.
-    'kernel/Manifest:loading',
+    // #6748 — ADR-0049 enforce-or-remove on the action-descriptor capability
+    // block. `isAsync` was a second spelling of `supportsPause` with ZERO
+    // readers on a fresh three-repo measurement; its sibling took the enforce
+    // leg in #6667 and this one takes the remove leg. Descriptors are published
+    // from executor TypeScript, not from stack metadata, so the D2 side is a D3
+    // `SemanticMigration` (`action-descriptor-is-async-retired`) rather than a
+    // MetadataConversion — there is no stored source for `os migrate meta` to
+    // rewrite. The `EnhancedApiError.fieldErrors` precedent.
+    'automation/ActionDescriptor:isAsync',
     // #6815 — the per-aggregation DISTINCT flag, retired under ADR-0049 by
     // maintainer ruling 2026-08-09. ONE key, and one entry, because
     // `AggregationNodeSchema` is reused BY REFERENCE rather than `.extend()`ed:
@@ -3743,6 +3768,36 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // takes (`query-joins-retired` / `query-cursor-retired` /
     // `query-distinct-retired` / `query-window-functions-retired`, #4286).
     'data/AggregationNode:distinct',
+    'data/ExternalFieldMapping:transform',
+    'integration/ConnectorFieldMapping:transform',
+    // #4914 — ADR-0049 enforce-or-remove on the plugin manifest's whole
+    // `loading` block (maintainer ruling 2026-08-04). ONE tombstoned key here,
+    // because `loading` was the single carrier: every schema underneath it
+    // (`PluginLoadingConfig` and the ten members it combined) leaves the
+    // published set as a whole-def removal and is registered in
+    // `RETIRED_DEFS_BY_MAJOR` below, not as ~27 individual key entries.
+    //
+    // Registered here but NOT in `src/conversions/registry.ts`, for the reason
+    // `automation/ActionDescriptor:isAsync` above gives: the conversion chain
+    // walks a normalized STACK (`mapCollection(stack, 'objects' | 'views' | …)`)
+    // and `applyConversionsToStoredItem` maps a metadata type onto one of those
+    // collections. A package manifest is neither — there is no `packages` /
+    // `plugins` entry in `PLURAL_TO_SINGULAR`, so a manifest is not a stack
+    // collection member and a stored manifest row passes that seam through
+    // unchanged. A MetadataConversion here would be a transform with no seam
+    // that ever runs. The prescription reaches authors instead through the
+    // tombstone at the one place a manifest is parsed with an author present
+    // (`os plugin build` → `ManifestSchema.safeParse`, which exits non-zero),
+    // and through the D3 semantic entry `plugin-manifest-loading-retired`.
+    'kernel/Manifest:loading',
+    'shared/FieldMapping:transform',
+    // #5775 — the SDUI component-props reconciliation. Three keys on the record
+    // picker (`displayField` was the REQUIRED one, and the synonym of the key
+    // the renderer actually reads) and the card's second spelling of the
+    // composition slot every other container calls `children`.
+    'ui/ElementRecordPickerProps:displayField',
+    'ui/ElementRecordPickerProps:multiple',
+    'ui/ElementRecordPickerProps:searchFields',
     // #6946 — three SDUI page-component props, retired by maintainer ruling
     // 2026-08-09 (decision-inbox round, 「全部接受」): objectui#3829 route (c)
     // for the first two, objectui#3818 for the third. Registered per key, as
@@ -3755,13 +3810,21 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // title/bordered/children/footer and has no actions area), and carried in
     // that repo's own `UNPUBLISHED_EXEMPTIONS` map as exactly that.
     'ui/PageCardProps:actions',
+    'ui/PageCardProps:body',
     'ui/PageHeaderProps:icon',
+    // #6776 — #5775's count was incomplete. The tab strip's visual style is the
+    // one prop whose declared spelling collides with the page component's own
+    // dispatch key, so `type` could never be authored in a flat or JSX carrier
+    // and was skipped unvalidated by `sdui-parser`'s `BASE_PROPS`. Renamed to
+    // the `tabStyle` every carrier can express and the renderer already reads.
+    'ui/PageTabsProps:type',
     // The third is a sharper shape: `layout` IS read, but only against
     // `inline`/`compact` — values its `auto | custom` enum never permitted — so
     // both legal values took the same branch. Declared on BOTH sides with the
     // same enum, which is why the declaration-parity ratchet (two declarations,
     // never a declaration vs an implementation) reported agreement over it.
     'ui/RecordDetailsProps:layout',
+    // </os-generated retired-key:17>
   ],
 };
 
@@ -3874,43 +3937,31 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
   // LIVE server surface #5006 admitted, with an executor. Prefix adjacency is
   // not evidence.
   17: [
-    'shared/FieldMappingTransform',
-    'ui/WidgetManifest',
-    'ui/WidgetLifecycle',
-    'ui/WidgetEvent',
-    'ui/WidgetProperty',
-    'ui/WidgetSource',
-    'ui/I18nObject',
-    'ui/PluralRule',
-    'ui/NumberFormat',
-    'ui/DateFormat',
-    'ui/LocaleConfig',
-    // #5295 — system/http-server.zod.ts runtime vocabulary
-    'system/ServerEvent',
-    'system/ServerEventType',
-    'system/ServerCapabilities',
-    'system/ServerStatus',
+    // One file per entry under `entries/retired-defs/`, concatenated here sorted by
+    // entry id by `gen:migration-registry` (#7297). Add an entry by adding a
+    // FILE — never by editing between the markers, which is generated.
+    // <os-generated retired-def:17>
     // #6239 — api/protocol.zod.ts view-management operations
-    'api/ListViewsRequest',
-    'api/ListViewsResponse',
-    'api/GetViewRequest',
-    'api/GetViewResponse',
     'api/CreateViewRequest',
     'api/CreateViewResponse',
-    'api/UpdateViewRequest',
-    'api/UpdateViewResponse',
     'api/DeleteViewRequest',
     'api/DeleteViewResponse',
+    'api/GetViewRequest',
+    'api/GetViewResponse',
+    'api/ListViewsRequest',
+    'api/ListViewsResponse',
+    'api/UpdateViewRequest',
+    'api/UpdateViewResponse',
     // #6414 — automation/etl.zod.ts, the whole L2 layer
+    'automation/ETLDestination',
+    'automation/ETLEndpointType',
     'automation/ETLPipeline',
     'automation/ETLPipelineRun',
-    'automation/ETLSource',
-    'automation/ETLDestination',
-    'automation/ETLTransformation',
-    'automation/ETLEndpointType',
-    'automation/ETLTransformationType',
-    'automation/ETLSyncMode',
     'automation/ETLRunStatus',
+    'automation/ETLSource',
+    'automation/ETLSyncMode',
+    'automation/ETLTransformation',
+    'automation/ETLTransformationType',
     // #4914 — the plugin manifest's `loading` block (ADR-0049 enforce-or-remove,
     // maintainer ruling 2026-08-04). `PluginLoadingConfig` was reachable from
     // authored metadata ONLY through `Manifest.loading`, and the ten members
@@ -3924,16 +3975,33 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // observational half (a lifecycle event and a per-plugin state), they are
     // not authorable, and they still emit. Module adjacency is not evidence,
     // the `system/ServerRateLimitConfig` note above applies verbatim.
+    'kernel/PluginCaching',
+    'kernel/PluginCodeSplitting',
+    'kernel/PluginDependencyResolution',
+    'kernel/PluginDynamicImport',
+    'kernel/PluginHotReload',
+    'kernel/PluginInitialization',
     'kernel/PluginLoadingConfig',
     'kernel/PluginLoadingStrategy',
-    'kernel/PluginPreloadConfig',
-    'kernel/PluginCodeSplitting',
-    'kernel/PluginDynamicImport',
-    'kernel/PluginInitialization',
-    'kernel/PluginDependencyResolution',
-    'kernel/PluginHotReload',
-    'kernel/PluginCaching',
-    'kernel/PluginSandboxing',
     'kernel/PluginPerformanceMonitoring',
+    'kernel/PluginPreloadConfig',
+    'kernel/PluginSandboxing',
+    'shared/FieldMappingTransform',
+    // #5295 — system/http-server.zod.ts runtime vocabulary
+    'system/ServerCapabilities',
+    'system/ServerEvent',
+    'system/ServerEventType',
+    'system/ServerStatus',
+    'ui/DateFormat',
+    'ui/I18nObject',
+    'ui/LocaleConfig',
+    'ui/NumberFormat',
+    'ui/PluralRule',
+    'ui/WidgetEvent',
+    'ui/WidgetLifecycle',
+    'ui/WidgetManifest',
+    'ui/WidgetProperty',
+    'ui/WidgetSource',
+    // </os-generated retired-def:17>
   ],
 };

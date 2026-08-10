@@ -146,12 +146,24 @@ export const NOT_DRIVER_MANAGED = Object.freeze([
   {
     path: 'packages/spec/src/migrations/registry.ts',
     why:
-      'hand-written source. Conflicts here are two retirements appended at the same spot — '
-      + 'keeping both is usually right, but "usually" is a human judgement, not a merge rule.',
+      'a MIXED file since #7297, and the mix is exactly why the driver must not own it. Its three '
+      + 'append tables are now generated into marked regions from `src/migrations/entries/` (one file '
+      + 'per entry), so a conflict INSIDE a region is resolved by `gen:migration-registry` and nothing '
+      + 'else — `check:migration-registry` fails if it was resolved any other way, which is what stops '
+      + "a resolution from silently dropping one side's retirement (#6957). But everything OUTSIDE the "
+      + 'markers — the tables\' load-bearing doc comments and each step\'s `rationale` — is still '
+      + 'hand-written, and the driver defers the WHOLE file to one side. Routing it here would let a '
+      + "regeneration launder away a sibling's prose edit, trading the silent drop this change removed "
+      + 'for a quieter one. So the prose conflict stays a human\'s, as it always was.',
   },
   {
     path: 'packages/spec/src/conversions/registry.ts',
-    why: 'hand-written source, same as the migrations registry.',
+    why:
+      'hand-written source. Conflicts here are two conversions appended at the same spot — keeping '
+      + 'both is usually right, but "usually" is a human judgement, not a merge rule. Deliberately NOT '
+      + 'split per-entry alongside the migrations registry by #7297: the #6957 ruling names two append '
+      + 'registries and the other one is `scripts/adr-anchors.json` (#7301). Splitting this one too is '
+      + 'a follow-up with its own measurement, not a rider.',
   },
   {
     path: 'docs/audits/**',

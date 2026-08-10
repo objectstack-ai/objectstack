@@ -76,6 +76,16 @@ const GATED: ReadonlyArray<{
   readsSchemaTree?: string;
   ratchet?: true;
 }> = [
+  // First, because it is UPSTREAM of the two below and the cheapest thing in the
+  // list: it reads a directory and splices text, with no schema build. Both
+  // `spec-changes.json` and the upgrade guide are projections of the migration
+  // registry (#7297), so a registry left stale after an entry file was added
+  // reports as THREE stale artifacts, of which only this one names the cause.
+  {
+    check: 'check:migration-registry',
+    gen: 'gen:migration-registry',
+    artifact: 'src/migrations/registry.ts — its generated regions, from src/migrations/entries/',
+  },
   { check: 'check:spec-changes', gen: 'gen:spec-changes', artifact: 'spec-changes.json' },
   { check: 'check:upgrade-guide', gen: 'gen:upgrade-guide', artifact: 'docs/protocol-upgrade-guide.md' },
   { check: 'check:skill-docs', gen: 'gen:skill-docs', artifact: 'skill docs (from SKILL.md frontmatter)' },
