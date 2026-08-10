@@ -166,6 +166,7 @@ export {
   VISIBILITY_ROOT_MISLAYERED,
   VISIBILITY_BARE_IDENTIFIER,
   VISIBILITY_PREDICATE_SYNTAX,
+  VISIBILITY_PREDICATE_OVER_BUDGET,
 } from './validate-visibility-predicates.js';
 export type {
   VisibilityFinding,

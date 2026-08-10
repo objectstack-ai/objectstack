@@ -6,6 +6,7 @@ import {
   VISIBILITY_ROOT_MISLAYERED,
   VISIBILITY_BARE_IDENTIFIER,
   VISIBILITY_PREDICATE_SYNTAX,
+  VISIBILITY_PREDICATE_OVER_BUDGET,
 } from './validate-visibility-predicates.js';
 import { AUTHORING_RULES } from './authoring-rules.js';
 
@@ -713,19 +714,15 @@ describe('visibility-predicate-syntax (#6253)', () => {
       expect(validateVisibilityPredicates(formStack('type(record.x) == string'))).toEqual([]);
     });
 
-    it('a `DEFAULT_LIMITS` overrun is reported too, in the front end\'s own words', () => {
-      // `parseCelToAst` also returns null for a source over the platform bounds.
-      // That is a bounds fault, not a syntax one, and the message says so rather
-      // than pretending to have found a typo — the same way ADR-0032 already
-      // reports it under the "invalid CEL predicate" heading.
+    it('a `DEFAULT_LIMITS` overrun is NOT this rule any more — it is `over-budget` (#7217)', () => {
+      // Was: "reported too, in the front end's own words", asserted under
+      // `visibility-predicate-syntax`. #7217 keeps the verdict and moves the
+      // wording and the id; this case is now the exclusivity pin for the split,
+      // and its full coverage lives in the `over-budget` block below.
       const overrun = `record.a${' + record.b'.repeat(400)}`;
-      const findings = syntaxFindings(formStack(overrun));
-      expect(findings).toHaveLength(1);
-      expect(findings[0].message).toContain('Exceeded maxAstNodes');
-      // The echoed predicate is elided, so one runaway expression cannot flood
-      // the console with a 4KB finding.
-      expect(findings[0].message).not.toContain(overrun);
-      expect(findings[0].message).toContain('...');
+      expect(syntaxFindings(formStack(overrun))).toEqual([]);
+      expect(validateVisibilityPredicates(formStack(overrun)).map((f) => f.rule))
+        .toEqual([VISIBILITY_PREDICATE_OVER_BUDGET]);
     });
 
     it.each([
@@ -804,5 +801,148 @@ describe('visibility-predicate-syntax (#6253)', () => {
     expect(entry, 'validateVisibilityPredicates must be registered').toBeDefined();
     expect(entry!.tier).toBe('gating');
     expect([...entry!.commands].sort()).toEqual(['build', 'lint', 'validate']);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// `visibility-predicate-over-budget` — #7217.
+//
+// The defect this closes is an INSTRUCTION that makes an obedient author
+// worse. An over-budget `visibleWhen` is flawless bare CEL; the gate refused it
+// (correctly) as "not valid CEL" (false) and prescribed the dialect ("write
+// `==` not `===`, `&&` not `and` …"), which is advice that cannot succeed. An
+// LLM author follows the last sentence it was handed, rewrites operators that
+// were never wrong, and returns with the same 80-clause predicate.
+//
+// The verdict is untouched: the same sources are refused before and after, at
+// the same severity, one finding each. Only the class, the id and the words
+// changed. Both directions are pinned deliberately — a fix that turned EVERY
+// refusal into a size refusal would be green on the first block below, which is
+// why the syntax block re-asserts the dialect wording it must not lose.
+// ─────────────────────────────────────────────────────────────────────
+
+/** Only the over-budget findings. */
+function overBudgetFindings(stack: Record<string, unknown>, opts?: { layer: 'runtime' | 'metadata' }) {
+  return validateVisibilityPredicates(stack, opts).filter((f) => f.rule === VISIBILITY_PREDICATE_OVER_BUDGET);
+}
+
+/** The escalation's own shape — 80-term conjunction, `maxAstNodes` (#6833 / #7073). */
+const OVER_AST_NODES = Array.from({ length: 80 }, (_, i) => `record.f${i} == ${i}`).join(' && ');
+/** 60-level parenthesis nest — `maxDepth`. Recursion that leaves no AST node. */
+const OVER_DEPTH = `${'('.repeat(60)}record.a${')'.repeat(60)} == 1`;
+/** 200-element list literal — `maxListElements`. */
+const OVER_LIST = `record.id in [${Array.from({ length: 200 }, (_, i) => `'u${i}'`).join(',')}]`;
+
+describe('visibility-predicate-over-budget (#7217)', () => {
+  describe('the acceptance pair', () => {
+    it('an over-budget but valid predicate names the SIZE fault and the bound, never the dialect', () => {
+      const findings = validateVisibilityPredicates(formStack(OVER_AST_NODES));
+
+      // The whole reported set: one finding, the new id, still gating.
+      expect(findings.map((f) => f.rule)).toEqual([VISIBILITY_PREDICATE_OVER_BUDGET]);
+      expect(findings[0].severity).toBe('error');
+      expect(findings[0].path).toBe('views[0].sections[0].fields[0]');
+      expect(findings[0].where).toBe('view "task_form"');
+
+      // ⛔ The headline was FALSE: this IS valid CEL.
+      expect(findings[0].message).not.toContain('is not valid CEL');
+      expect(findings[0].message).toContain('syntactically valid CEL');
+      // The front end's own summary is quoted, and the bound is NAMED with the
+      // platform's value for it — which is what "shrink it to fit" needs.
+      expect(findings[0].message).toContain('Exceeded maxAstNodes (256)');
+      expect(findings[0].message).toContain('`maxAstNodes` budget (platform limit 256)');
+      // The consequence is unchanged: it still falls OPEN on screen.
+      expect(findings[0].message).toContain('#5149');
+
+      // ⛔ The defect itself: the dialect prescription must not reach this class.
+      expect(findings[0].hint).not.toMatch(/bare CEL/);
+      expect(findings[0].hint).not.toContain('`===`');
+      expect(findings[0].hint).toContain('SIZE fault, not a dialect mistake');
+      expect(findings[0].hint).toContain("`record.f in ['a', 'b', …]`");
+    });
+
+    it('the SAME predicate under budget is clean — paired so it cannot pass vacuously', () => {
+      // Delete the rule and the first expectation goes red; loosen the verdict
+      // (report everything) and the second does.
+      expect(overBudgetFindings(formStack(OVER_AST_NODES))).toHaveLength(1);
+      const underBudget = Array.from({ length: 8 }, (_, i) => `record.f${i} == ${i}`).join(' && ');
+      expect(validateVisibilityPredicates(formStack(underBudget))).toEqual([]);
+    });
+  });
+
+  it.each([
+    ['maxAstNodes (80-term conjunction)', OVER_AST_NODES, 'maxAstNodes', 256],
+    ['maxDepth (60-level nest)', OVER_DEPTH, 'maxDepth', 32],
+    ['maxListElements (200-element list)', OVER_LIST, 'maxListElements', 64],
+  ])('%s — the bound that was actually exceeded is the one named', (_name, source, limit, value) => {
+    // Not one hard-coded bound: the name and its value are read off the front
+    // end's structured overrun, so a source that overruns a DIFFERENT axis is
+    // sent to shorten that axis and not `maxAstNodes` by default.
+    const findings = overBudgetFindings(formStack(source as string));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].message).toContain(`\`${limit}\` budget (platform limit ${value})`);
+    expect(findings[0].hint).toContain('SIZE fault, not a dialect mistake');
+  });
+
+  it('a genuine dialect fault keeps the #6253 id, message and hint verbatim', () => {
+    // The flipped pin. The obvious way to get #7217 wrong is to turn EVERY
+    // refusal into a size refusal — green on every case above, and a total loss
+    // of the wording #6253 shipped.
+    const findings = validateVisibilityPredicates(formStack('country === "USA"'));
+    expect(findings.map((f) => f.rule)).toEqual([VISIBILITY_PREDICATE_SYNTAX]);
+    expect(findings[0].message).toContain('is not valid CEL');
+    expect(findings[0].hint).toContain('`===` is not a CEL operator');
+    expect(findings[0].hint).not.toMatch(/SIZE fault/);
+  });
+
+  it('a dialect fault with no single-token equivalent keeps the FALLBACK dialect hint', () => {
+    // The arm the card names: the fallback hint fires when no NON_CEL_SPELLINGS
+    // row matches — which is exactly the arm an over-budget source used to land
+    // in. It must still fire for a source that genuinely is not CEL.
+    const findings = validateVisibilityPredicates(formStack('record.stage @@ "won"'));
+    expect(findings.map((f) => f.rule)).toEqual([VISIBILITY_PREDICATE_SYNTAX]);
+    expect(findings[0].hint).toContain('Visibility predicates are bare CEL');
+    expect(findings[0].hint).not.toMatch(/SIZE fault/);
+  });
+
+  it('still exactly ONE finding — the bare-identifier rule stays out of the way', () => {
+    // An over-budget source yields no AST, so there are no identifiers to judge.
+    // The exclusivity property #6253/#6128 established survives the split.
+    const rootless = Array.from({ length: 80 }, (_, i) => `f${i} == ${i}`).join(' && ');
+    expect(validateVisibilityPredicates(formStack(rootless)).map((f) => f.rule))
+      .toEqual([VISIBILITY_PREDICATE_OVER_BUDGET]);
+  });
+
+  it('elides the echoed predicate — one runaway expression cannot flood the console', () => {
+    const findings = overBudgetFindings(formStack(OVER_AST_NODES));
+    expect(findings[0].message).not.toContain(OVER_AST_NODES);
+    expect(findings[0].message).toContain('...');
+  });
+
+  it('a blank predicate is still not a fault of any class', () => {
+    // `parseCelToAstWithReason` answers `empty` rather than `parse`; paired with
+    // a live case so the assertion can actually fail.
+    expect(overBudgetFindings(formStack(OVER_AST_NODES))).toHaveLength(1);
+    expect(validateVisibilityPredicates(formStack('   '))).toEqual([]);
+    expect(validateVisibilityPredicates(formStack(undefined))).toEqual([]);
+  });
+
+  it('speaks the LAYER\'s binding root in its remedy', () => {
+    // A `*.form.ts` author binds `data`, so a `record.`-flavoured example would
+    // be a second wrong prescription in a rule whose whole point is that the
+    // prescription must be followable.
+    const metadata = overBudgetFindings(formStack(OVER_AST_NODES), { layer: 'metadata' });
+    expect(metadata).toHaveLength(1);
+    expect(metadata[0].hint).toContain("`data.f in ['a', 'b', …]`");
+    expect(metadata[0].hint).not.toContain('`record.f in');
+  });
+
+  it('reaches page components too — the id is not view-only', () => {
+    const stack = {
+      pages: [{ name: 'p', regions: [{ components: [{ type: 'element:text', visibleWhen: OVER_AST_NODES }] }] }],
+    };
+    const findings = overBudgetFindings(stack);
+    expect(findings.map((f) => f.path)).toEqual(['pages[0].regions[0].components[0]']);
+    expect(findings[0].where).toBe('page "p"');
   });
 });
