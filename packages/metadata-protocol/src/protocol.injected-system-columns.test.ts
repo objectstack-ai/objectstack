@@ -311,6 +311,17 @@ describe('[#6562] the opt-out rows are the spec derivation’s, re-derived nowhe
         ['ownership: none — likewise',
             { ownership: 'none' },
             ['created_at', 'created_by', 'updated_at', 'updated_by', 'organization_id']],
+        // Not an opt-out row — the one tier that SPLITS the two anchors
+        // (ADR-0117 D1). It belongs in this table anyway: the read surface must
+        // report `owner_id` as ABSENT on a unit-owned object, and serving a
+        // person-owner on a row that has none is the same lie the rows above
+        // guard against, pointing the other way. Authorable since #5678, so this
+        // shape now arrives from authored metadata rather than only from an
+        // engine-side derivation no author could reach.
+        ['ownership: business_unit — the unit anchor WITHOUT owner_id',
+            { ownership: 'business_unit' },
+            ['created_at', 'created_by', 'updated_at', 'updated_by', 'organization_id',
+                'owning_business_unit_id']],
     ];
 
     for (const [label, opts, expected] of cases) {

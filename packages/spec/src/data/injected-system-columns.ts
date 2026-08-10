@@ -121,14 +121,15 @@ export interface InjectedSystemColumnPlan {
  * ownership tier inherits `owner_id` by accident, which for a unit-owned tier
  * is the exact inverse of what it means.
  *
- * ⚠️ The `ownership: 'business_unit'` row is implemented here AHEAD of the
- * acceptance surface: `ObjectSchema`'s `ownership` enum is still
- * `'user' | 'org' | 'none'`, so that value cannot be authored today and is
- * deliberately rejected (the enum member is #5678). The row exists so the tier's
- * first appearance is judged by D1's table rather than by a deny-list default —
- * it is not a claim that the tier is available. This function is deliberately
- * typed on `string` rather than the enum for exactly that reason; see the
- * `ownership` read below.
+ * The `ownership: 'business_unit'` row was implemented here AHEAD of the
+ * acceptance surface (#5677 before #5678), so that the tier's first appearance
+ * would be judged by D1's table rather than by a deny-list default. #5678 has
+ * since landed the enum member, so the row is now reachable from authored
+ * metadata: `ObjectSchema`'s `ownership` enum reads
+ * `'user' | 'business_unit' | 'org' | 'none'`. The `ownership` read below stays
+ * typed on `string` rather than the enum — this function accepts any bare record
+ * shaped like an object definition (`def: unknown`), including pre-parse input,
+ * so it must not presume a Zod-narrowed value.
  *
  * @param def An object definition, or any bare record shaped like one.
  */
@@ -162,9 +163,10 @@ export function resolveInjectedSystemColumns(def: unknown): InjectedSystemColumn
   // Platform-managed tables and the `sys_*` namespace never carry a per-record
   // ownership anchor, whichever tier is declared.
   const ownershipEligible = !managedBy && !name.startsWith('sys_');
-  // Widened to `string` on purpose (ADR-0117 D1 / #5677): the spec enum is
-  // `'user' | 'org' | 'none'` today and the `business_unit` tier lands later,
-  // so the engine must already recognise it — see the injection site.
+  // Widened to `string` on purpose (ADR-0117 D1 / #5677): this function takes
+  // `unknown` and is called on pre-parse input as well as on parsed schemas, so
+  // it reads the value rather than a Zod-narrowed enum. (It was ALSO how the
+  // `business_unit` tier could be honoured before #5678 made it authorable.)
   const ownership: string | undefined =
     typeof obj.ownership === 'string' ? obj.ownership : undefined;
 

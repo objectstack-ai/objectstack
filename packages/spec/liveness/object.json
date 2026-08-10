@@ -105,7 +105,7 @@
       "status": "live",
       "verifiedAt": "2026-07-30",
       "evidence": "packages/objectql/src/registry.ts:292 (applySystemFields reads schema.ownership)",
-      "note": "#3175 record-ownership model. applySystemFields injects the reassignable owner_id lookup by default (ownership:'user'); 'org'|'none' opt out (Dataverse-style catalog/junction tables). Proven in objectql/src/registry.test.ts. Evidence line refreshed 2026-07-30 (was :272, drifted)."
+      "note": "#3175 record-ownership model. applySystemFields injects the reassignable owner_id lookup by default (ownership:'user'); 'org'|'none' opt out of BOTH ownership anchors (Dataverse-style catalog/junction tables); ADR-0117 D1's 'business_unit' tier (engine #5677, enum member #5678) takes owning_business_unit_id and deliberately no owner_id. Per-tier authority is resolveInjectedSystemColumns (spec/data). Proven in objectql/src/registry.test.ts. Evidence line refreshed 2026-07-30 (was :272, drifted)."
     },
     "access": {
       "status": "live",
