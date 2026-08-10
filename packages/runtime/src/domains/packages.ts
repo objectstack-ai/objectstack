@@ -17,7 +17,14 @@ import {
 // [#7033 / #7023] The read gate reuses the SAME "builder" capability set the
 // object-schema mask exempts (ADR-0106 D4) — REFERENCED, never re-spelled, so
 // the package-read cohort cannot drift from the metadata mask's exemption.
-import { OBJECT_SCHEMA_MASK_EXEMPT_CAPABILITIES } from '@objectstack/metadata-core';
+// [#7020] That constant became the DERIVED union (write gate ∪ read-only
+// exemptions) when the maintainer ruled the two sets must not be hand-kept
+// separately. This gate wants the read-only half specifically: its cohort was
+// ruled on its own terms (#7033 / #7023) and pinned WRITE-only callers OUT
+// (`packages/rest/src/package-envelope.conformance.test.ts`), so it names
+// `OBJECT_SCHEMA_READ_ONLY_EXEMPT_CAPABILITIES` — same value it read before,
+// no re-ruling of the package cohort as a side effect of #7020.
+import { OBJECT_SCHEMA_READ_ONLY_EXEMPT_CAPABILITIES } from '@objectstack/metadata-core';
 import { organizationIdForMetaWrite } from '../meta-write-org-scope.js';
 import { setPackageDisabled } from '../package-state-store.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
@@ -74,10 +81,14 @@ function requireManageMetadata(deps: DomainHandlerDeps, context: HttpProtocolCon
  * `GET /packages/:id` detail, the `GET /packages/:id/commits` history and the
  * `GET /packages/:id/export` whole-package export (27 metadata types) — so each
  * requires one of the two "builder" capabilities the object-schema mask exempts
- * ({@link OBJECT_SCHEMA_MASK_EXEMPT_CAPABILITIES} = `studio.access` /
- * `setup.access`), or `isSystem`. The read cohort is deliberately BROADER than
- * the write cohort: an `organization_admin` holding `setup.access` (but not
- * `manage_metadata`) may inspect a package yet not publish or delete it.
+ * read-only ({@link OBJECT_SCHEMA_READ_ONLY_EXEMPT_CAPABILITIES} =
+ * `studio.access` / `setup.access`), or `isSystem`. The read cohort is not the
+ * write cohort: an `organization_admin` holding `setup.access` (but not
+ * `manage_metadata`) may inspect a package yet not publish or delete it, and a
+ * write-only caller holding `manage_metadata` alone is refused these reads —
+ * pinned in `packages/rest/src/package-envelope.conformance.test.ts`. (#7020
+ * unified the object-schema MASK exemption with the write gate; it did not
+ * re-rule this cohort, which is why this site names the read-only half.)
  *
  * Returns a 403 result to short-circuit on, or `null` to proceed. Callers MUST
  * run this BEFORE reading, so the answer never leaks the package inventory to a
@@ -86,7 +97,7 @@ function requireManageMetadata(deps: DomainHandlerDeps, context: HttpProtocolCon
 function requireReadCapability(deps: DomainHandlerDeps, context: HttpProtocolContext): HttpDispatcherResult | null {
     const ec: any = context?.executionContext;
     const held = new Set<string>(ec?.systemPermissions ?? []);
-    if (!ec?.isSystem && !OBJECT_SCHEMA_MASK_EXEMPT_CAPABILITIES.some((c) => held.has(c))) {
+    if (!ec?.isSystem && !OBJECT_SCHEMA_READ_ONLY_EXEMPT_CAPABILITIES.some((c) => held.has(c))) {
         return {
             handled: true,
             response: deps.error('Reading packages requires the `studio.access` or `setup.access` capability.', 403),

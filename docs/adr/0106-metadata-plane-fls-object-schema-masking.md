@@ -218,6 +218,35 @@ metadata read, so it is a stepping stone, not the end state.
 
 ### D4 — Exemptions: `isSystem` and platform admins
 
+> **Amendment (2026-08-10, #7020 — maintainer ruling, issue comment
+> `5236144046`).** The exemption set is no longer a hand-kept list. #6603's
+> ruling justified its write gate with an invariant — *"whoever can write a
+> schema is whoever can see the full schema"* — and #7020 measured that the two
+> sets were in fact different: the write gate demands `manage_metadata`, this
+> exemption listed `studio.access` / `setup.access`, and they met only on
+> `admin_full_access` carrying all three. A `manage_metadata`-only caller
+> therefore passed every write gate and still read a **projected** schema, so
+> its GET, edit and PUT round trip deleted the fields it could not see — the
+> exact hazard #6603 exists to close, left open for precisely the callers the
+> gate lets through.
+>
+> The write gate is now the **authoritative** set, and this exemption is
+> **derived** from it: `OBJECT_SCHEMA_WRITE_CAPABILITIES` (the #6603 key)
+> UNION `OBJECT_SCHEMA_READ_ONLY_EXEMPT_CAPABILITIES` (the two below). The
+> invariant holds by construction rather than by two lists staying
+> coincidentally equal.
+>
+> The derivation is **one-directional**: can-write implies can-see-all; it does
+> not imply the converse. The measurement found real principals that are exempt
+> and hold no write capability — `organization_admin` /
+> `organization_admin_no_bypass` (granted `setup.access` while `manage_metadata`
+> is withheld in as many words) and the showcase `showcase_ops` persona. Whether
+> those stay exempt is a follow-up ruling #7020 leaves open; until it lands,
+> nobody's current read access is narrowed.
+>
+> Unchanged by this amendment: the `/packages` read cohort (#7033 / #7023),
+> which names the read-only half specifically and was ruled on its own terms.
+
 `getReadableFields` already bypasses for `isSystem`. Platform-admin callers
 (the same `systemPermissions`-based judgment the `app` filter uses) are
 likewise exempt: Studio/Setup authoring requires the full schema, and

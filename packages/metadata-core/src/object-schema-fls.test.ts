@@ -16,7 +16,10 @@ import {
     objectFieldVisibilityFingerprint,
     resolveObjectSchemaMaskPosture,
     OBJECT_SCHEMA_MASK_DISABLE_ENV,
+    OBJECT_SCHEMA_MASK_EXEMPT_CAPABILITIES,
     OBJECT_SCHEMA_MASK_UNDETERMINED_METRIC,
+    OBJECT_SCHEMA_READ_ONLY_EXEMPT_CAPABILITIES,
+    OBJECT_SCHEMA_WRITE_CAPABILITIES,
     type ObjectSchemaMaskPosture,
 } from './object-schema-fls.js';
 
@@ -105,13 +108,77 @@ describe('[ADR-0106 D3] visibility fingerprint', () => {
 });
 
 describe('[ADR-0106 D4] exemptions are caller properties', () => {
-    it('exempts `isSystem` and the two builder capabilities, nothing else', () => {
+    it('exempts `isSystem` and the builder capabilities, nothing else', () => {
         expect(isObjectSchemaMaskExempt({ isSystem: true })).toBe(true);
         expect(isObjectSchemaMaskExempt({ systemPermissions: ['studio.access'] })).toBe(true);
         expect(isObjectSchemaMaskExempt({ systemPermissions: ['setup.access'] })).toBe(true);
         expect(isObjectSchemaMaskExempt({ systemPermissions: ['manage_users'] })).toBe(false);
         expect(isObjectSchemaMaskExempt({ userId: 'u' })).toBe(false);
         expect(isObjectSchemaMaskExempt(undefined)).toBe(false);
+    });
+});
+
+/**
+ * [#7020] The maintainer's 2026-08-10 ruling: the #6603 write gate is the
+ * authoritative set and the D4 read exemption is a DERIVATION of it, so
+ * "whoever can write a schema can see all of it" holds by construction.
+ *
+ * Before this change the two sets were disjoint apart from `admin_full_access`
+ * carrying all three capabilities, so a `manage_metadata`-only caller — a shape
+ * the write gate admits and pins as a 200 — read a PROJECTED schema and its
+ * GET → edit → PUT round trip deleted the fields it could not see.
+ */
+describe('[#7020] the D4 read exemption is derived from the write gate', () => {
+    it('exempts a caller holding `manage_metadata` and NEITHER builder capability', () => {
+        // The broken case: passes every #6603 write gate, was masked on read.
+        expect(isObjectSchemaMaskExempt({ userId: 'u_author', systemPermissions: ['manage_metadata'] })).toBe(true);
+    });
+
+    it('leaves the existing exempt principals exactly as they were', () => {
+        // `admin_full_access`'s shipped shape, and the two named read-only
+        // exemptions that hold no write capability (`organization_admin` /
+        // `showcase_ops`) — none of them lose access to anything.
+        expect(isObjectSchemaMaskExempt({
+            systemPermissions: ['manage_metadata', 'studio.access', 'setup.access'],
+        })).toBe(true);
+        expect(isObjectSchemaMaskExempt({
+            systemPermissions: ['manage_org_users', 'setup.access', 'setup.write'],
+        })).toBe(true);
+        expect(isObjectSchemaMaskExempt({ systemPermissions: ['setup.access', 'showcase.export_data'] })).toBe(true);
+    });
+
+    it('still masks a caller holding neither half', () => {
+        expect(isObjectSchemaMaskExempt({ userId: 'u_portal', systemPermissions: [] })).toBe(false);
+        expect(isObjectSchemaMaskExempt({ userId: 'u_member', systemPermissions: ['manage_org_users'] })).toBe(false);
+        // Adjacent-but-different capability names do not leak in.
+        expect(isObjectSchemaMaskExempt({ systemPermissions: ['manage_metadata_drafts'] })).toBe(false);
+    });
+
+    it('resolves the posture to `exempt` WITHOUT consulting the security service', async () => {
+        // D4 is decided before the service call, so the write cohort's exemption
+        // costs nothing and a sick service cannot turn it into a fault.
+        let asked = 0;
+        const posture = await resolveObjectSchemaMaskPosture({
+            objectName: 'account',
+            context: { userId: 'u_author', systemPermissions: ['manage_metadata'] },
+            security: { getMetadataReadableFields: () => { asked++; throw new Error('must not be consulted'); } },
+            enabled: true,
+        });
+        expect(posture).toEqual({ kind: 'passthrough', reason: 'exempt' });
+        expect(asked).toBe(0);
+    });
+
+    it('builds the exempt set BY CONSTRUCTION — not a third hand-kept list', () => {
+        // The point of the ruling: the union cannot drift from the write gate,
+        // because it is not written down twice.
+        expect(OBJECT_SCHEMA_MASK_EXEMPT_CAPABILITIES)
+            .toEqual([...OBJECT_SCHEMA_WRITE_CAPABILITIES, ...OBJECT_SCHEMA_READ_ONLY_EXEMPT_CAPABILITIES]);
+        // The write half is the #6603 gate's key, spelled once.
+        expect(OBJECT_SCHEMA_WRITE_CAPABILITIES).toEqual(['manage_metadata']);
+        // The read-only half is preserved verbatim pending #7020's follow-up
+        // ruling on `organization_admin` / `showcase_ops` — nobody's current
+        // read access is narrowed by this change.
+        expect(OBJECT_SCHEMA_READ_ONLY_EXEMPT_CAPABILITIES).toEqual(['studio.access', 'setup.access']);
     });
 });
 

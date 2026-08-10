@@ -1,7 +1,12 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { IHttpServer, shouldDenyAnonymous, ANONYMOUS_DENY_STATUS, ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_MESSAGE } from '@objectstack/core';
-import { OBJECT_SCHEMA_MASK_EXEMPT_CAPABILITIES } from '@objectstack/metadata-core';
+// [#7020] The read cohort names the READ-ONLY half of the ADR-0106 D4 exemption
+// on purpose: `OBJECT_SCHEMA_MASK_EXEMPT_CAPABILITIES` became the derived union
+// (write gate ∪ read-only exemptions) under the 2026-08-10 ruling, while this
+// gate's cohort was ruled separately (#7033 / #7023) and pins write-only callers
+// OUT. Same value it read before — no re-ruling by side effect.
+import { OBJECT_SCHEMA_READ_ONLY_EXEMPT_CAPABILITIES } from '@objectstack/metadata-core';
 import type { PackageService } from '@objectstack/service-package';
 // The declared envelope is written in ONE place for the whole platform (#3973).
 import { sendOk, sendError } from '@objectstack/types';
@@ -60,7 +65,7 @@ async function refusePackageRequest(
   const held = new Set<string>(Array.isArray(ctx?.systemPermissions) ? ctx.systemPermissions : []);
   const allowed = ctx?.isSystem || (kind === 'write'
     ? held.has('manage_metadata')
-    : OBJECT_SCHEMA_MASK_EXEMPT_CAPABILITIES.some((c) => held.has(c)));
+    : OBJECT_SCHEMA_READ_ONLY_EXEMPT_CAPABILITIES.some((c) => held.has(c)));
   if (!allowed) {
     // Same wrapped envelope, one FORBIDDEN code, message per cohort — the sibling
     // `/meta` REST capability gate's shape, built through the shared `sendError`.
