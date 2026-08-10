@@ -105,6 +105,22 @@ export const ShowcaseTranslationBundle = {
           total: { label: 'Total' },
         },
       },
+      // Translated at birth, like `globalActions` below and for the same
+      // reason: `incurred_at` is a NEW declared label (objectui#3569's inline-
+      // grid datetime fixture), and check-i18n-coverage freezes this example at
+      // its current untranslated count — a new label that skips zh-CN widens
+      // the debt and fails the ratchet.
+      //
+      // DELIBERATELY only this one field. The rest of the expense family
+      // (object labels, `incurred_on`, `merchant`, …) predates the ratchet and
+      // is part of the frozen baseline; translating it here too would push the
+      // count BELOW the baseline, which the same gate rejects as an
+      // un-ratcheted improvement. Paying that debt down is its own change.
+      showcase_expense_line: {
+        fields: {
+          incurred_at: { label: 'Incurred At' },
+        },
+      },
       showcase_preference: {
         label: 'Setting',
         pluralLabel: 'Settings',
@@ -370,6 +386,13 @@ export const ShowcaseTranslationBundle = {
           tax_rate: { label: '税率 (%)' },
           paid_on: { label: '付款日期' },
           total: { label: '合计' },
+        },
+      },
+      // See the `en` side for why this entry translates exactly ONE field and
+      // no more (check-i18n-coverage is a two-sided ratchet).
+      showcase_expense_line: {
+        fields: {
+          incurred_at: { label: '发生时间' },
         },
       },
       showcase_preference: {
