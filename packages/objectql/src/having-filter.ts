@@ -51,6 +51,10 @@ import { RETIRED_FILTER_OPERATORS } from '@objectstack/spec/data';
 // of one vocabulary, and it reads the fold from the spec for the same reason it
 // reads the retirement prescriptions from there: one rule, one definition.
 import { asciiCaseInsensitiveContains } from '@objectstack/spec/data';
+// [#7047] The ADR-0112 envelope this face's refusals used to omit. Shared with
+// `filter-comparand-shape.ts` rather than re-declared here — see the note on
+// {@link invalidFilterError} and on {@link unknownOperator} below.
+import { invalidFilterError } from './filter-comparand-shape.js';
 
 const LOGICAL_OPERATORS = ['$and', '$or', '$not'] as const;
 
@@ -72,6 +76,38 @@ const CONDITION_OPERATORS = [
   '$contains', '$notContains', '$startsWith', '$endsWith', '$icontains',
 ] as const;
 
+/**
+ * The refusal this face raises for an operator it will not evaluate — retired
+ * (`$regex`, `$options`) or simply unknown (`$nand`, `$median`).
+ *
+ * ## [#7047] BOTH returns carry the ADR-0112 envelope now
+ *
+ * They were bare `new Error(...)`. The refusal was happening and its message was
+ * already right — it printed `RETIRED_FILTER_OPERATORS[op].why` verbatim, like
+ * the four driver faces — but `code` and `status` were `undefined`, so `rest`
+ * served it through the unclassified-fault branch as a 500-shaped body for what
+ * is a 400-class AUTHOR mistake. Measured across all five refusal faces by
+ * EXECUTION rather than grep (#6993), this face was the only disagreement:
+ *
+ * | face | `code` | `status` |
+ * |:--|:--|:--|
+ * | driver-sql, driver-sqlite-wasm, driver-turso (both transports) | `INVALID_FILTER` | 400 |
+ * | driver-memory (`filter-refusal.ts`), driver-mongodb | `INVALID_FILTER` | 400 |
+ * | **objectql `having`** (here) | **undefined** | **undefined** |
+ *
+ * That is the half of #5324 the refusal itself does not fix, and the half
+ * `FilterTextRejectionCase.code` exists to pin: a suite that only asserts THREW
+ * stays green while the envelope is missing (#6142/#6050), which is exactly how
+ * this survived the retirement PR that wrote the messages.
+ *
+ * Both branches, deliberately. Enveloping only the retired path would leave
+ * `{ $nand: [...] }` and `{ k: { $median: 3 } }` arriving 500-shaped — the same
+ * defect, one operator name away, and the more likely of the two to be typed.
+ *
+ * The code is `INVALID_FILTER` because this joins the contract the other four
+ * faces already speak; it is not a new one. A caller swapping HAVING for a
+ * driver-side `where` must not have to catch two shapes for one mistake.
+ */
 function unknownOperator(
   op: string,
   where: 'logical' | 'condition',
@@ -90,7 +126,7 @@ function unknownOperator(
         + `${alsoRetired.map((key) => `'${key}'`).join(', ')} — one '${retired.to}' replaces the `
         + `whole shape, so this is ONE mistake with ONE fix, not one per key.`
       : '';
-    return new Error(
+    return invalidFilterError(
       `Filter operator '${op}' in \`having\` is RETIRED and is no longer evaluated.${replacement} `
       + `${retired.why}${also}`,
     );
@@ -98,7 +134,7 @@ function unknownOperator(
   const supported = where === 'logical'
     ? `${LOGICAL_OPERATORS.join(', ')} (or a column condition)`
     : CONDITION_OPERATORS.join(', ');
-  return new Error(
+  return invalidFilterError(
     `Unsupported operator '${op}' in \`having\`. HAVING filters the aggregated rows `
     + `(aggregation aliases + groupBy projections) and supports: ${supported}. `
     + `An unknown operator is refused rather than ignored — ignoring it would silently `
