@@ -62,9 +62,12 @@ function strName(v: unknown): string | undefined {
 }
 
 /**
- * The two platform agent ids. A stack that re-declares one of these is doing
- * something different from inventing a custom persona (it is shadowing a
- * platform record), so it gets its own wording.
+ * The two platform agent ids (`ask`, `build`) plus their two legacy aliases
+ * (`data_chat` → `ask`, `metadata_assistant` → `build`, registered via the
+ * cloud alias registry — ADR-0063 §2). A stack that re-declares any of these
+ * four names is doing something different from inventing a custom persona
+ * (it is shadowing a platform record, directly or through its alias), so it
+ * gets its own wording.
  */
 const PLATFORM_AGENT_NAMES = new Set(['ask', 'build', 'data_chat', 'metadata_assistant']);
 
