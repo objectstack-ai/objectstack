@@ -363,6 +363,11 @@ describe('#4001 批 20 — curation is anchored to the sibling contract that mak
       // Dataverse-style catalog vs junction table).
       expect(msg).toContain('org-wide catalog');
       expect(msg).toContain('junction/link');
+      // Since #5678 a THIRD value skips `owner_id`, for a different reason than
+      // the other two — the prescription has to say so, or an author reading
+      // "`'org'` and `'none'` BOTH skip it" concludes those are the only two.
+      expect(resolveInjectedSystemColumns({ ...OBJ, ownership: 'business_unit' }).owner).toBe(false);
+      expect(msg).toContain('business_unit');
     });
 
     it('`systemFields.ownership` names BOTH ownership anchors — since #5677 the property governs `owning_business_unit_id` too (#6365)', () => {
@@ -371,14 +376,22 @@ describe('#4001 批 20 — curation is anchored to the sibling contract that mak
       expect(msg).toContain('owner_id');
       expect(msg).toContain('owning_business_unit_id');
 
-      // The claim, against the authority: across the whole AUTHORABLE enum the
-      // two anchors move together — injected under `'user'`/omitted, withheld
-      // under `'org'`/`'none'`. (ADR-0117 D1's fourth tier is the one case that
-      // splits them, and it is deliberately unauthorable today — #5678.)
+      // The claim, against the authority: on three of the four tiers the two
+      // anchors move together — injected under `'user'`/omitted, withheld under
+      // `'org'`/`'none'`.
       for (const ownership of [undefined, 'user', 'org', 'none'] as const) {
         const plan = resolveInjectedSystemColumns({ ...OBJ, ownership });
         expect(plan.owningBusinessUnit, `ownership: ${String(ownership)}`).toBe(plan.owner);
       }
+
+      // …and ADR-0117 D1's fourth tier is the one case that SPLITS them. Since
+      // #5678 that split is a shape an author can actually reach, not a latent
+      // engine row — which is precisely why the guidance above has to name BOTH
+      // anchors rather than treating them as one lever.
+      accept(ObjectSchema, { ...OBJ, ownership: 'business_unit' });
+      const unitOwned = resolveInjectedSystemColumns({ ...OBJ, ownership: 'business_unit' });
+      expect(unitOwned.owner).toBe(false);
+      expect(unitOwned.owningBusinessUnit).toBe(true);
     });
 
     it('`external.allowWrites` names the DOUBLE opt-in — the datasource half and the object half', () => {

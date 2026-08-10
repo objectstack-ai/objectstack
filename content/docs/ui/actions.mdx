@@ -207,6 +207,10 @@ defineView({
 
 // App navigation — an action as a nav item
 { type: 'action', actionDef: { actionName: 'crm_convert_lead' } }
+
+// App navigation — deep-link auto-run on an object entry: land on the
+// object's list surface, then run the declared action once
+{ type: 'object', objectName: 'sys_environment', runAction: 'create_environment' }
 ```
 
 <Callout type="info">

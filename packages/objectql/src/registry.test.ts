@@ -754,22 +754,20 @@ describe('applySystemFields', () => {
     //   org                 ❌              ❌
     //   none                ❌              ❌
     //
-    // ⚠️ `ownership: 'business_unit'` is NOT a legal ObjectSchema value yet —
-    // the spec enum gains it in #5678, strictly AFTER this PR (that ordering is
-    // #5677's whole point: the engine must honour the tier before the schema
-    // can emit it, or the tier's first appearance gets the inverse result).
-    // These fixtures therefore duck-type the schema, exactly as every other
-    // opt-out case in this suite already does — `applySystemFields` takes a
-    // `ServiceObject`, and the registry reads `ownership` as a value, not as a
-    // Zod-parsed enum. When #5678 lands, the `as any` here can be dropped
-    // without changing a single assertion.
+    // `ownership: 'business_unit'` is a legal ObjectSchema value as of #5678,
+    // which landed strictly AFTER #5677 — that ordering is #5677's whole point:
+    // the engine must honour the tier before the schema can emit it, or the
+    // tier's first appearance gets the inverse result. These fixtures used to
+    // duck-type the schema through `as any` for exactly that gap; the casts are
+    // gone now that `ServiceObject` (`z.input<typeof ObjectSchemaBase>`) admits
+    // the value, and not one assertion below changed when they were removed.
     describe('[ADR-0117 D1] owning_business_unit_id injection', () => {
         it("does NOT inject owner_id for ownership: 'business_unit' — but DOES inject owning_business_unit_id", () => {
             // THE regression this issue exists to prevent. Under the old
             // deny-list this object was stamped `owner_id` (a person) even
             // though the tier's entire meaning is "owned by a unit, not a
             // person" — see #4611's one-shot probe.
-            const unitOwned: any = { ...baseLead, name: 'inventory_item', ownership: 'business_unit' };
+            const unitOwned: ServiceObject = { ...baseLead, name: 'inventory_item', ownership: 'business_unit' };
             const out = applySystemFields(unitOwned, { multiTenant: false });
 
             expect(out.fields.owner_id).toBeUndefined();
@@ -784,7 +782,7 @@ describe('applySystemFields', () => {
         });
 
         it("injects BOTH anchors on the default tier and on an explicit ownership: 'user'", () => {
-            for (const schema of [baseLead, { ...baseLead, ownership: 'user' } as any]) {
+            for (const schema of [baseLead, { ...baseLead, ownership: 'user' } satisfies ServiceObject]) {
                 const out = applySystemFields(schema, { multiTenant: false });
                 expect(out.fields.owner_id).toBeDefined();
                 expect(out.fields.owning_business_unit_id).toBeDefined();

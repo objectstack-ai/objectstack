@@ -912,6 +912,22 @@ function validateCrossReferences(config: ObjectStackDefinition): string[] {
         reportNames.add(r.name);
       }
     }
+    // Every action name the stack defines, global + object-embedded — the same
+    // "defined ANYWHERE in the stack" scope `validate-action-name-refs` (lint)
+    // resolves name-bound action references against.
+    const actionNames = new Set<string>();
+    if (config.actions) {
+      for (const a of config.actions) {
+        actionNames.add(a.name);
+      }
+    }
+    if (config.objects) {
+      for (const obj of config.objects) {
+        for (const a of obj.actions ?? []) {
+          actionNames.add(a.name);
+        }
+      }
+    }
 
     for (const app of config.apps) {
       const checkNavItems = (items: unknown[], appName: string) => {
@@ -942,6 +958,18 @@ function validateCrossReferences(config: ObjectStackDefinition): string[] {
           if (nav.type === 'report' && typeof nav.reportName === 'string' && reportNames.size > 0 && !reportNames.has(nav.reportName)) {
             errors.push(
               `App '${appName}' navigation references report '${nav.reportName}' which is not defined in reports.`,
+            );
+          }
+          // Deep-link auto-run (#4848): a `runAction` that resolves to no
+          // defined action is exactly the dead affordance the declared slot
+          // exists to reject — the entry navigates and the auto-run silently
+          // never fires. Size-gated like the dashboard/page/report checks
+          // above: a stack declaring NO actions may be referencing one
+          // provided by another package (lint's `validate-action-name-refs`
+          // still reports it there).
+          if (nav.type === 'object' && typeof nav.runAction === 'string' && actionNames.size > 0 && !actionNames.has(nav.runAction)) {
+            errors.push(
+              `App '${appName}' navigation deep-link references action '${nav.runAction}' (via runAction) which is not defined in actions (neither stack.actions nor any object's actions).`,
             );
           }
           // Recurse into children. NOT gated on `type === 'group'`: an `object`
