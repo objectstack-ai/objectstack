@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
+  SKILL_TRIGGER_LIST_VALUE_OPERATORS,
   SkillSchema,
   SkillTriggerConditionSchema,
   defineSkill,
@@ -7,14 +8,20 @@ import {
 } from './skill.zod';
 
 describe('SkillTriggerConditionSchema', () => {
-  it('should accept all operators', () => {
+  it('should accept all operators — each with the value shape it reads', () => {
+    // #7113: `value` is coupled to `operator`. This used to hand a scalar to
+    // ALL FIVE, which is precisely the shape the tightening refuses — `in` /
+    // `not_in` are membership tests and take the list. The list vocabulary is
+    // read from the schema's own export so a future operator cannot be added
+    // without being classified there.
     const operators = ['eq', 'neq', 'in', 'not_in', 'contains'] as const;
+    const listOperators = SKILL_TRIGGER_LIST_VALUE_OPERATORS as readonly string[];
 
     operators.forEach(operator => {
       expect(() => SkillTriggerConditionSchema.parse({
         field: 'objectName',
         operator,
-        value: 'support_case',
+        value: listOperators.includes(operator) ? ['support_case'] : 'support_case',
       })).not.toThrow();
     });
   });
