@@ -10,6 +10,7 @@ import * as datasets from './src/datasets/index.js';
 import * as reports from './src/reports/index.js';
 import * as views from './src/views/index.js';
 import { allFlows } from './src/flows/index.js';
+import { todoFunctions } from './src/functions/index.js';
 import * as apps from './src/apps/index.js';
 import { TodoSeedData } from './src/data/index.js';
 import * as translations from './src/translations/index.js';
@@ -53,6 +54,18 @@ export default defineStack({
   datasets: Object.values(datasets),
   reports: Object.values(reports),
   flows: allFlows,
+
+  // Named callables a `script` flow node invokes (#1870) — the automation
+  // plugin bridges this map to `AutomationEngine.resolveFunction`, so a node's
+  // `config.function` resolves by name at run time. A flow function is PURE: it
+  // takes `input`, RETURNS a value, and a later declarative node persists it
+  // (#4396), which is why none of these declares an `effect`.
+  //
+  // `computeNextTaskDueDate` is what makes `task_completion`'s recurrence branch
+  // work: no flow node evaluates a value-producing expression, so the next due
+  // date has to be computed before `create_next_task` runs (#7037).
+  functions: todoFunctions,
+
   apps: Object.values(apps),
 
   // I18n Configuration — per-locale file organization
