@@ -77,6 +77,12 @@ const makeAuth = () => ({
             const cookie = headers?.get?.('cookie');
             if (cookie === 'admin') return { user: { id: 'admin1' } };
             if (cookie === 'member') return { user: { id: 'member1' } };
+            // [#6216] A session that DOES carry a bearer token, so the
+            // `accessToken` pin below exercises a live branch of
+            // `resolveAuthzContext` rather than an absent value.
+            if (cookie === 'member-tok') {
+                return { user: { id: 'member1' }, session: { token: 'sess_tok_rest' } };
+            }
             return undefined;
         },
     },
@@ -216,5 +222,48 @@ describe('#6071 — activated-branch pin: the perf-disclosure gate (perf-timing.
         const gate = await resolveInGate({ cookie: 'admin' });
         expect(gate.allowed).toBe(true);
         expect(gate.privileged).toBe(true);
+    });
+});
+
+describe('#6216 — the REST face assembles through the SHARED assembler, output unchanged', () => {
+    // The maintainer ruling of 2026-08-08 (Option A) converged the two
+    // hand-written assemblies onto one module and is explicit that NEITHER
+    // surface changes runtime behaviour. The frozen-transcription parity matrix
+    // lives next to the assembler
+    // (`packages/core/src/security/assemble-execution-context.test.ts`); these
+    // two pins are the same claim measured on the WIRE, through the real
+    // `computeExecCtx` → `resolveAuthzContext` pipeline, because that is where a
+    // wiring mistake (wrong entry, wrong per-face input) would actually show.
+
+    it('emits exactly the pre-#6216 key set for a session-backed request', async () => {
+        const { ctx } = await request({ cookie: 'member' });
+
+        // Golden key set, not a subset check: a field ARRIVING that never used
+        // to (the direction a naive convergence fails in) is as much a
+        // behaviour change as a field going missing, and only an exact
+        // comparison catches both.
+        expect(new Set(Object.keys(ctx))).toEqual(new Set([
+            'positions', 'permissions', 'systemPermissions', 'isSystem', 'principalKind',
+            'userId', 'email', 'posture', 'org_user_ids', 'accessible_org_ids',
+            'timezone', 'locale',
+            // Not ExecutionContext fields — the REST face still adds these
+            // itself, after assembly (ADR-0069 gate posture / ADR-0057 D10).
+            '__kernel',
+        ]));
+    });
+
+    it('still WITHHOLDS accessToken — the named per-face divergence, not an omission', async () => {
+        // `ExecutionContext.accessToken` reaches hooks as `session.accessToken`
+        // (`objectql/engine.ts` buildSession, `spec/data/hook.zod.ts`), and the
+        // runtime / MCP face has always carried it. This transport never has.
+        // #6216 makes that an explicit `accessToken: undefined` input at this
+        // face rather than a silent gap — widening a published hook surface to
+        // a second transport is a product decision, not a refactor. If REST
+        // should carry it, this pin is the thing that must change, deliberately.
+        const { ctx } = await request({ cookie: 'member-tok' });
+
+        expect(ctx?.userId).toBe('member1');
+        expect(Object.keys(ctx)).not.toContain('accessToken');
+        expect(ctx.accessToken).toBeUndefined();
     });
 });
