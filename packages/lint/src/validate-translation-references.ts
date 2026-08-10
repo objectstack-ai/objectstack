@@ -69,6 +69,7 @@ import { expandViewContainer } from '@objectstack/spec';
 import { hasPlatformObjectPrefix, isPlatformProvidedObjectName } from '@objectstack/spec/system';
 import { walkPageComponents } from './page-walk.js';
 import { SYSTEM_FIELDS } from './system-fields.js';
+import { viewObjectName } from './view-walk.js';
 
 export const TRANSLATION_TARGET_UNKNOWN = 'translation-target-unknown';
 export const TRANSLATION_OPTION_KEY_UNKNOWN = 'translation-option-key-unknown';
@@ -401,15 +402,6 @@ function namedViewKeys(container: AnyRec): {
       .slice(0, count)
       .map((i) => bare(i.name));
   return { list: keysOf('list', listCount), form: keysOf('form', formCount) };
-}
-
-/** The object a view (or one of its containers) binds to, across the shapes it is authored in. */
-function viewObjectName(view: AnyRec): string | undefined {
-  return (
-    strName(view.objectName) ??
-    strName(view.object) ??
-    (isRec(view.data) ? strName(view.data.object) : undefined)
-  );
 }
 
 /**

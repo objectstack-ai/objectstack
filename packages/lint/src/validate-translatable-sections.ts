@@ -88,8 +88,9 @@
  * the map key IS the name.
  */
 
+import { collectionEntries } from './collection-entries.js';
 import { walkPageComponents } from './page-walk.js';
-import { viewContainerSites } from './view-walk.js';
+import { viewContainerSites, viewObjectName } from './view-walk.js';
 
 export const TRANSLATION_SECTION_NAME_MISSING = 'translation-section-name-missing';
 
@@ -118,42 +119,6 @@ function isRec(v: unknown): v is AnyRec {
 
 function strName(v: unknown): string | undefined {
   return typeof v === 'string' && v.length > 0 ? v : undefined;
-}
-
-/**
- * The object a view (or one of its containers) binds to, across the shapes it
- * is authored in. Same ladder as `validate-translation-references.ts` and the
- * CLI walker's `viewObjectName`, so all three agree on which object a heading
- * belongs to — a container retargeted at another object keys its headings
- * there, and disagreeing here would mean warning about the wrong object.
- */
-function viewObjectName(view: AnyRec): string | undefined {
-  return (
-    strName(view.objectName) ??
-    strName(view.object) ??
-    (isRec(view.data) ? strName(view.data.object) : undefined)
-  );
-}
-
-/**
- * Entries of a collection authored either as an array or as a name-keyed map,
- * each with the config path it actually sits at. The sibling rules coerce with
- * `asArray` and lose the path; a rule that reports a location cannot.
- */
-function collectionEntries(v: unknown, base: string): Array<{ rec: AnyRec; path: string }> {
-  if (Array.isArray(v)) {
-    const out: Array<{ rec: AnyRec; path: string }> = [];
-    for (let i = 0; i < v.length; i++) {
-      if (isRec(v[i])) out.push({ rec: v[i] as AnyRec, path: `${base}[${i}]` });
-    }
-    return out;
-  }
-  if (isRec(v)) {
-    return Object.entries(v)
-      .filter(([, def]) => isRec(def))
-      .map(([name, def]) => ({ rec: { name, ...(def as AnyRec) }, path: `${base}.${name}` }));
-  }
-  return [];
 }
 
 /** One `sections` array, with where it sits and which object it renders under. */
@@ -192,13 +157,14 @@ function joinWhere(...parts: string[]): string {
  * rung is how it reaches an object's own `listViews` container, which the module
  * docblock above declares as part of its section face.
  *
- * The BINDING ladder stays here, because it is this rule's own: it mirrors
+ * The binding COMPOSITION stays here, because it is this rule's own: it mirrors
  * `validate-translation-references.ts`'s `collectViewRecord` — a sub-container
  * resolves its own object first and falls back to the record's, then to the
  * default list's, because on the canonical shape the binding lives INSIDE the
  * container (`list.data.object`), not at the record root. The sibling rules
  * compose their fallbacks differently and folding them together would change
- * verdicts.
+ * verdicts. Only the base rung each of them starts from is shared
+ * (`viewObjectName`, `view-walk.ts`, #6662).
  *
  * One equivalence worth writing down, since it is what let the two branches
  * collapse into one: the entry's OWN site used to resolve `recordObject ??
