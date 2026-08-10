@@ -45,7 +45,7 @@
 // existing defect fail the executor's acceptance. Scope is the endpoint PATH
 // entries, which are this program's output.
 
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -57,6 +57,8 @@ import { ConnectorRestPlugin } from '@objectstack/connector-rest';
 import { ConnectorOpenApiPlugin } from '@objectstack/connector-openapi';
 import { ConnectorMcpPlugin } from '@objectstack/connector-mcp';
 import showcaseStack from '@objectstack/example-showcase';
+
+import { buildShapedArtifact, writeBuildShapedArtifact } from './build-shaped-artifact.js';
 
 /** The ADR-0121 D1 mount, spelled here as a caller would type it. */
 const TASKS = '/apps/showcase/tasks';
@@ -79,6 +81,8 @@ let tempDir: string;
 let prevCwd: string;
 let stack: VerifyStack;
 let adminToken: string;
+/** Read back off disk — what `MetadataPlugin` actually ingested, not what we meant to write. */
+let artifactOnDisk: Record<string, unknown>;
 
 /**
  * Boot the showcase the way a deployment boots it.
@@ -103,27 +107,23 @@ beforeAll(async () => {
   process.chdir(SHOWCASE_DIR);
   tempDir = mkdtempSync(join(tmpdir(), 'os-e8-endpoints-'));
   const artifactPath = join(tempDir, 'objectstack.json');
-  // `functions` is dropped DELIBERATELY, and saying so is the point (#4976).
+  // The artifact is written the way `objectstack build` writes one — the same
+  // `normalizeStackInput` → `lowerCallables` → `ObjectStackDefinitionSchema`
+  // pipeline `packages/cli/src/commands/compile.ts` runs, reusing those exact
+  // functions rather than re-deriving them (#6293).
   //
-  // This line stands in for `objectstack build`, but it is only half of it: the
-  // real build runs `lowerCallables` first, replacing every callable with a
-  // string ref and carrying the functions themselves in a sibling ESM module.
-  // A plain `JSON.stringify` has no such step — it simply omits function-valued
-  // keys — so this artifact never carried the showcase's functions at all. It
-  // merely LOOKED like it did, because a bare entry (`sweepProjectHealth: fn`)
-  // vanishes key and all and leaves `functions: {}` behind, which parses.
-  //
-  // That silence broke the moment the showcase spelled its writer the honest,
-  // declared way: `{ handler: fn, effect: 'writes' }` keeps the object and drops
-  // only `handler`, leaving `{ effect: 'writes' }` — an entry declaring an
-  // effect for a function it does not carry, which `FlowFunctionEntrySchema`
-  // refuses in all four of its members, exactly as it should.
-  //
-  // Nothing is lost by omitting the key: the functions this boot actually runs
-  // come from the LIVE stack handed to `bootStack` below, not from this file,
-  // whose job is to give `MetadataPlugin` the `apis:` block to ingest.
-  const { functions: _functionsLiveOnly, ...artifact } = showcaseStack as Record<string, unknown>;
-  writeFileSync(artifactPath, JSON.stringify(artifact));
+  // Until #6293 this line was `JSON.stringify(stack)` minus `functions`, and
+  // the omission was deliberate and declared (#4976) because the substitute
+  // could not carry them: `JSON.stringify` drops a bare callable KEY AND ALL
+  // and reduces a declared one (`{ handler: fn, effect }`) to the headless husk
+  // `{ effect }`. The husk at least fails the parse — that red CI job is how
+  // anybody found out — but the bare entry left `functions: {}` behind and
+  // parsed green, so this boot advertised "the way a deployment boots it" while
+  // ingesting zero of the showcase's two functions, invisibly, for its whole
+  // existence. Declaring the omission was honest; agreeing with the build BY
+  // CONSTRUCTION is better, and the first test below is what keeps it true.
+  writeBuildShapedArtifact(showcaseStack as Record<string, unknown>, artifactPath);
+  artifactOnDisk = JSON.parse(readFileSync(artifactPath, 'utf8')) as Record<string, unknown>;
 
   stack = await bootStack(showcaseStack, {
     // The `flow`-typed endpoint delegates to `IAutomationService.execute`;
@@ -152,6 +152,57 @@ afterAll(async () => {
   await stack?.stop();
   if (prevCwd) process.chdir(prevCwd);
   if (tempDir) rmSync(tempDir, { recursive: true, force: true });
+});
+
+// ============================================================================
+// 0. The artifact this boot ingests is the shape the build writes (#6293)
+// ============================================================================
+
+describe('[#6293] the stand-in artifact carries what a built one carries', () => {
+  it('holds BOTH showcase callables as string refs — the bare form and the declared one', () => {
+    // The assertion the old shape could not make, and the reason this file
+    // spent its whole existence green while carrying nothing. Both spellings
+    // are pinned because they fail DIFFERENTLY: the declared entry degrades
+    // into a husk the schema refuses (loud), the bare entry disappears without
+    // a trace (silent) — and it is the silent one that has to be asserted by
+    // name, since nothing downstream can miss what was never there.
+    const functions = artifactOnDisk.functions as Record<string, unknown> | undefined;
+    expect(functions, 'a built artifact carries `functions`; JSON.stringify would not').toBeDefined();
+
+    expect(
+      functions!.summarizeCompletedTask,
+      'the BARE callable must reach the artifact as a resolvable string ref',
+    ).toBe('summarizeCompletedTask');
+
+    expect(
+      functions!.sweepProjectHealth,
+      'the DECLARED callable keeps its declaration AND gains a ref — never one without the other',
+    ).toEqual({ handler: 'sweepProjectHealth', effect: 'writes' });
+  });
+
+  it('the substitute it replaced still drops them — the trap, pinned', () => {
+    // Not a test of `JSON.stringify`: a test of why the helper above exists,
+    // executable at the one call site that was bitten. If this ever stops
+    // holding, the helper's whole premise is up for re-reading.
+    const naive = JSON.parse(JSON.stringify(showcaseStack)) as Record<string, unknown>;
+    expect(
+      naive.functions,
+      'the bare entry vanishes key and all; the declared one is left a headless husk',
+    ).toEqual({ sweepProjectHealth: { effect: 'writes' } });
+  });
+
+  it('REFUSES to build an artifact out of that residue instead of quietly shrinking', () => {
+    // The reverse verification, kept in the suite rather than done once by hand:
+    // feed the helper the very thing this fixture used to write and it must
+    // fail, loudly, naming what went missing. Direction predicted before it was
+    // run — and the mechanism is NOT the one #4976 documented. The schema never
+    // sees the husk: `lowerCallables` rebuilds the `functions` map from the three
+    // shapes it recognises and deletes everything else, so the residue would have
+    // reached the parse as `functions: {}` and passed. The gate that speaks here
+    // is the helper's own key-for-key reconciliation.
+    const residue = JSON.parse(JSON.stringify(showcaseStack)) as Record<string, unknown>;
+    expect(() => buildShapedArtifact(residue)).toThrowError(/dropped 1 `functions` entr.*sweepProjectHealth/s);
+  });
 });
 
 // ============================================================================

@@ -33,6 +33,7 @@
     "@objectstack/verify": "workspace:*"
   },
   "devDependencies": {
+    "@objectstack/cli": "workspace:*",
     "@objectstack/core": "workspace:*",
     "@objectstack/driver-sql": "workspace:*",
     "@objectstack/driver-sqlite-wasm": "workspace:*",

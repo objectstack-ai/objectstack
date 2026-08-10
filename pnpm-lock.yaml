@@ -1812,6 +1812,9 @@ importers:
         specifier: workspace:*
         version: link:../../verify
     devDependencies:
+      '@objectstack/cli':
+        specifier: workspace:*
+        version: link:../../cli
       '@objectstack/core':
         specifier: workspace:*
         version: link:../../core
