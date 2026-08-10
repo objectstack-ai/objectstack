@@ -1021,6 +1021,73 @@ export type EngineMiddleware = (
 ) => Promise<void>;
 
 /**
+ * The stack collections the engine decomposes into individual registry items —
+ * ONE list, read by BOTH registration seams (the manifest seam in
+ * `registerApp()` and the nested-plugin seam in `registerPlugin()`).
+ *
+ * ## Why this is one constant and not two lists (#7049)
+ *
+ * It used to be two: `const metadataArrayKeys = [...]` declared separately
+ * inside each loop. They drifted, invisibly, because nothing compared them —
+ * `jobs`, `emailTemplates`, `tools` and `skills` were registered from a
+ * manifest and NOT from a nested plugin, so a package shipping any of the four
+ * from a nested plugin registered nothing and stamped no ADR-0010 provenance:
+ * no refusal, no diagnostic. `capabilities` hit the SAME divergence and was
+ * patched into the nested copy by hand (#5870) without anyone diffing the rest
+ * of the two lists, which is how the remaining four survived it.
+ *
+ * The two loops were measured against each other before this was merged. They
+ * differ in four ways — which object they read (`manifest` vs `plugin`), which
+ * package id they stamp (both resolve to the SAME parent package: a nested
+ * plugin contributes under its parent's ownership), a per-key `debug` line, and
+ * the manifest seam's aggregated-view expansion plus its warn-on-nameless-item.
+ * Every one of those lives in the loop BODY. Not one of them is a reason for
+ * the two seams to enumerate different collections, so the enumeration is
+ * shared and the divergence is now unrepresentable rather than merely unnoticed.
+ *
+ * `check:stack-collection-maps` pins this list against
+ * `ObjectStackDefinitionSchema` in both directions (#6242); it used to pin the
+ * two copies as two sites and carry a waiver row recording their divergence.
+ * That row is gone with the divergence.
+ */
+const METADATA_ARRAY_KEYS = [
+  // UI Protocol
+  'actions', 'views', 'pages', 'dashboards', 'reports', 'datasets', 'themes',
+  // Automation Protocol
+  'flows', 'workflows', 'approvals', 'webhooks',
+  'jobs',
+  // Security Protocol — `capabilities` is here for the same reason as
+  // `permissions` (#5870, #4967 Part 2): the ONLY seam that stamps
+  // ADR-0010 provenance is `registerItem` → `applyProtection`, so a
+  // collection missing from this list reaches no registry with a
+  // `_packageId`. `bootstrapDeclaredCapabilities` resolves the owning
+  // package as `cap._packageId ?? cap.packageId`; while `capabilities`
+  // sat outside this list the first half could never be satisfied and
+  // `readDeclared(ql, 'capability')` returned nothing, which made the
+  // author-side `packageId` — documented as the FALLBACK — mandatory,
+  // and its omission a silent, unenforced authorization declaration.
+  'roles', 'permissions', 'capabilities', 'profiles', 'sharingRules', 'policies',
+  // AI Protocol
+  'agents', 'tools', 'skills', 'ragPipelines',
+  // API Protocol
+  'apis',
+  // Data Extensions
+  'hooks', 'mappings', 'analyticsCubes',
+  // Integration Protocol
+  'connectors',
+  // System Protocol — outbound mail templates. Registered here so the
+  // email plugin's materializer can read them back into
+  // `sys_email_template` (#4509); without this key an authored
+  // `emailTemplates:` entry never reached the registry at all, which is
+  // the far end of the disconnect the bridge closes.
+  'emailTemplates',
+  // System Protocol — package documentation (ADR-0046); inert data
+  'docs',
+  // Documentation navigation spine (ADR-0046 §6)
+  'books',
+] as const;
+
+/**
  * Derive the registry key for a metadata item.
  *
  * Most metadata items expose a top-level `name` (or `id`). The `View`
@@ -3006,44 +3073,12 @@ export class ObjectQL implements IObjectQLEngine {
           });
       }
 
-      // 5. Register all other metadata types generically
-      const metadataArrayKeys = [
-        // UI Protocol
-        'actions', 'views', 'pages', 'dashboards', 'reports', 'datasets', 'themes',
-        // Automation Protocol
-        'flows', 'workflows', 'approvals', 'webhooks',
-        'jobs',
-        // Security Protocol — `capabilities` is here for the same reason as
-        // `permissions` (#5870, #4967 Part 2): the ONLY seam that stamps
-        // ADR-0010 provenance is `registerItem` → `applyProtection`, so a
-        // collection missing from this list reaches no registry with a
-        // `_packageId`. `bootstrapDeclaredCapabilities` resolves the owning
-        // package as `cap._packageId ?? cap.packageId`; while `capabilities`
-        // sat outside this list the first half could never be satisfied and
-        // `readDeclared(ql, 'capability')` returned nothing, which made the
-        // author-side `packageId` — documented as the FALLBACK — mandatory,
-        // and its omission a silent, unenforced authorization declaration.
-        'roles', 'permissions', 'capabilities', 'profiles', 'sharingRules', 'policies',
-        // AI Protocol
-        'agents', 'tools', 'skills', 'ragPipelines',
-        // API Protocol
-        'apis',
-        // Data Extensions
-        'hooks', 'mappings', 'analyticsCubes',
-        // Integration Protocol
-        'connectors',
-        // System Protocol — outbound mail templates. Registered here so the
-        // email plugin's materializer can read them back into
-        // `sys_email_template` (#4509); without this key an authored
-        // `emailTemplates:` entry never reached the registry at all, which is
-        // the far end of the disconnect the bridge closes.
-        'emailTemplates',
-        // System Protocol — package documentation (ADR-0046); inert data
-        'docs',
-        // Documentation navigation spine (ADR-0046 §6)
-        'books',
-      ];
-      for (const key of metadataArrayKeys) {
+      // 5. Register all other metadata types generically.
+      //    The collection list is `METADATA_ARRAY_KEYS` (module scope) and is
+      //    SHARED with the nested-plugin seam in `registerPlugin()` — see the
+      //    constant's docblock for why the two seams may not enumerate
+      //    different collections (#7049).
+      for (const key of METADATA_ARRAY_KEYS) {
           const items = (manifest as any)[key];
           if (Array.isArray(items) && items.length > 0) {
               this.logger.debug(`Registering ${key} from manifest`, { id, count: items.length });
@@ -3185,20 +3220,14 @@ export class ObjectQL implements IObjectQLEngine {
           }
       }
 
-      // Register metadata arrays (actions, views, triggers, etc.)
-      const metadataArrayKeys = [
-          'actions', 'views', 'pages', 'dashboards', 'reports', 'datasets', 'themes',
-          'flows', 'workflows', 'approvals', 'webhooks',
-          // `capabilities` per #5870 — same stamping seam, one level down: a
-          // nested plugin's declarations must carry the parent package's
-          // provenance too, or the same declared-≠-enforced hole reopens for
-          // packages that ship their capabilities from a nested plugin.
-          'roles', 'permissions', 'capabilities', 'profiles', 'sharingRules', 'policies',
-          'agents', 'ragPipelines', 'apis',
-          'hooks', 'mappings', 'analyticsCubes', 'connectors',
-          'docs', 'books',
-      ];
-      for (const key of metadataArrayKeys) {
+      // Register metadata arrays (actions, views, triggers, etc.) from the SAME
+      // list the manifest seam uses — same stamping seam, one level down: a
+      // nested plugin's declarations must carry the parent package's ADR-0010
+      // provenance too, or the declared-≠-enforced hole reopens for packages
+      // that ship a collection from a nested plugin (`capabilities` #5870;
+      // `jobs` / `emailTemplates` / `tools` / `skills` #7049, which is why the
+      // list is no longer copied here to be patched one name at a time).
+      for (const key of METADATA_ARRAY_KEYS) {
           const items = (plugin as any)[key];
           if (Array.isArray(items) && items.length > 0) {
               for (const item of items) {

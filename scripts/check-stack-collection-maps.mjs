@@ -12,12 +12,18 @@
 //
 // `ObjectStackDefinitionSchema` (`packages/spec/src/stack.zod.ts`) decides which
 // collections a stack may declare. SEVEN other places re-enumerate that same set
-// by hand -- eight enumerations in all, because ObjectQL declares its list twice:
-// the map-format field list, the plural->singular map, the artifact category
-// enum, the ObjectQL registration loops (x2), the artifact-ingest field map, the
-// runtime's app-payload probe and the showcase coverage manifest -- and until
-// this gate NOTHING compared any of them to the schema or to each other.
+// by hand: the map-format field list, the plural->singular map, the artifact
+// category enum, the ObjectQL registration seam, the artifact-ingest field map,
+// the runtime's app-payload probe and the showcase coverage manifest -- and
+// until this gate NOTHING compared any of them to the schema or to each other.
 // They drifted independently and invisibly:
+//
+// (Eight, when this gate was written: ObjectQL declared its list TWICE, once per
+// registration seam, and the two copies had drifted four collections apart --
+// recorded here as a waiver row until #7049 hoisted the single
+// `METADATA_ARRAY_KEYS` both seams now read. A divergence between two copies is
+// the one deviation no reading of either copy alone produces, which is the
+// argument for this gate in one line.)
 //
 //   - `PLURAL_TO_SINGULAR` carries `ragPipelines`, which the schema does not
 //     declare.
@@ -76,7 +82,9 @@ const repoRoot = resolve(here, '..');
  * Slice the balanced `{...}` / `[...]` body that follows `anchor` in `source`
  * (the anchor's last character must be the opening bracket). Returns `null` when
  * the anchor is absent. `from` lets a caller walk repeated occurrences of one
- * anchor -- ObjectQL declares `metadataArrayKeys` twice.
+ * anchor -- no SITE needs it since #7049 collapsed ObjectQL's two copies into
+ * one, but the next site that re-declares an anchor will, and the self-test
+ * keeps the behaviour pinned.
  */
 export function sliceBody(source, anchor, from = 0) {
   const at = source.indexOf(anchor, from);
@@ -417,11 +425,23 @@ const SITES = [
     ],
   },
   {
-    id: 'metadataArrayKeys (manifest)',
+    // ONE site, not two, since #7049. `engine.ts` used to declare this list
+    // twice -- once inside the manifest registration loop and once inside
+    // `registerPlugin` -- and the two copies had drifted: `jobs`,
+    // `emailTemplates`, `tools` and `skills` registered from a manifest and NOT
+    // from a nested plugin, so a package shipping them from a nested plugin
+    // registered nothing and stamped no ADR-0010 provenance. That divergence
+    // was recorded here as a waiver row on the nested copy; #7049 closed it by
+    // hoisting ONE `METADATA_ARRAY_KEYS` both seams read, so the row is gone
+    // with the thing it recorded and the gate now pins the single enumeration
+    // that remains. (Hand-adding the four names to the second copy was the
+    // available alternative and is what #5870 did for `capabilities`; it is
+    // what left the other four undiffed.)
+    id: 'METADATA_ARRAY_KEYS',
     file: 'packages/objectql/src/engine.ts',
-    what: 'collections the engine registers from a manifest (the ADR-0010 provenance seam)',
+    what: 'collections the engine registers from a manifest AND from a nested plugin (the ADR-0010 provenance seam)',
     extract: (src) => {
-      const b = sliceBody(src, 'const metadataArrayKeys = [');
+      const b = sliceBody(src, 'const METADATA_ARRAY_KEYS = [');
       return b && stringArrayItems(b.body);
     },
     waivers: [
@@ -451,41 +471,6 @@ const SITES = [
         reason:
           'ADR-0090 D3 positions reach the registry through the security bootstrap, which reads them off the '
           + 'stack directly; the loop\'s sibling `permissions` entry is what makes the absence look like a gap.',
-      },
-    ],
-  },
-  {
-    id: 'metadataArrayKeys (nested plugin)',
-    file: 'packages/objectql/src/engine.ts',
-    what: 'the same registration loop one level down, for a nested plugin',
-    extract: (src) => {
-      const first = sliceBody(src, 'const metadataArrayKeys = [');
-      if (!first) return null;
-      const b = sliceBody(src, 'const metadataArrayKeys = [', first.end);
-      return b && stringArrayItems(b.body);
-    },
-    waivers: [
-      {
-        direction: 'extra',
-        keys: ['workflows', 'approvals', 'roles', 'profiles', 'policies', 'ragPipelines'],
-        reason: 'the same six retired kinds as the manifest loop above — the two copies drift in lockstep (#6242 row 3).',
-      },
-      {
-        direction: 'missing',
-        keys: ['objects', 'objectExtensions', 'apps', 'translations', 'datasourceMapping', 'datasources', 'data', 'positions'],
-        reason: 'same seam split as the manifest loop above.',
-      },
-      {
-        direction: 'missing',
-        keys: ['jobs', 'emailTemplates', 'tools', 'skills'],
-        reason:
-          'DIVERGENCE BETWEEN THE TWO COPIES — the most valuable row in this table, and one no reading of '
-          + 'either list alone produces. These four ARE registered from a manifest and are NOT registered '
-          + 'from a nested plugin, so a package that ships them from a nested plugin registers nothing and '
-          + 'stamps no ADR-0010 provenance. `capabilities` was added to this copy for exactly that reason '
-          + '(#5870) after the hole was found on the manifest copy; nobody then asked what else the two '
-          + 'lists disagreed about. Recorded rather than fixed here: closing it changes what a nested plugin '
-          + 'registers at boot — `engine-core` behaviour owing its own verification (#6242 row 3).',
       },
     ],
   },
