@@ -4,8 +4,9 @@
 // booting from `dist/objectstack.json`, no host `objectstack.config.ts`) must
 // surface the artifact's app-declared RBAC — `permissions[]` and `positions[]`
 // — at the top level of the returned stack config. The CLI reads
-// `config.permissions` to honour an app-declared default profile (ADR-0056 D7 —
-// `appDefaultPermissionSetName` → SecurityPlugin `fallbackPermissionSet`); the
+// `config.permissions` to honour an app-declared default profile (ADR-0056 D7 /
+// ADR-0090 D5 — `appSecurityPluginOptions(config)` → SecurityPlugin
+// `fallbackPermissionSet`, one resolution for every boot path since #7001); the
 // positions are distributed through `sys_user_position`, never as organization
 // roles (ADR-0108). Before this was fixed, `createStandaloneStack`
 // surfaced `objects`/`requires`/`manifest` but dropped `permissions`/`roles`, so
@@ -19,6 +20,28 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createStandaloneStack } from './standalone-stack.js';
 import { createDefaultHostConfig, resolveDefaultArtifactPath } from './default-host.js';
+// The REAL resolution, imported — not reproduced. `@objectstack/plugin-security`
+// is a plain `dependencies` entry of this package (and another test in this same
+// package, src/domains/share-links-enforcement-context.test.ts, already imports
+// SecurityPlugin from it), so the "not a runtime dependency" that once justified
+// hand-copying the rule here does not hold. #7092: the copy WAS the defect —
+// a case titled "the exact CLI wiring" that could only ever prove a duplicate of
+// the rule equals itself, and would have stayed green through any change to the
+// real helper (last-`isDefault` instead of first, an anchor pre-filter, a shape
+// change) while `objectstack dev`/`serve` did something else.
+//
+// `appSecurityPluginOptions` is the anchor rather than the bare name helper
+// because it is what `serve.ts` actually calls today (#7001):
+// `new SecurityPlugin(appSecurityPluginOptions(config))`. That construction —
+// serve's side of it, and its parity with `bootStack` — is pinned in
+// packages/cli/src/commands/serve-verify-security-parity.contract.test.ts; the
+// helper's own contract (first-`isDefault` wins, the undefined-vs-`{...undefined}`
+// distinction, top-level-only) in
+// packages/plugins/plugin-security/src/app-default-permission-set.test.ts. What
+// neither of those can see, and what THIS file owns, is the composition: that the
+// config `createStandaloneStack` / `createDefaultHostConfig` actually return is a
+// config that resolution reads correctly.
+import { appDefaultPermissionSetName, appSecurityPluginOptions } from '@objectstack/plugin-security';
 
 // A minimal `objectstack build` artifact carrying an app-declared default
 // profile with a hierarchy read scope, an add-on permission set, app roles,
@@ -31,7 +54,16 @@ const ARTIFACT = {
     { name: 'manager', label: 'Manager' },
     { name: 'contributor', label: 'Contributor' },
   ],
+  // Declaration order is deliberate and load-bearing (#7092): the NON-default set
+  // comes FIRST, so the resolution cases below discriminate `isDefault` rather
+  // than agreeing with "take permissions[0]". With the default set first, a
+  // resolution that had degenerated to the first entry would have been green.
   permissions: [
+    {
+      name: 'app_contributor',
+      label: 'Contributor add-on',
+      objects: { note: { allowEdit: true } },
+    },
     {
       name: 'app_member_default',
       label: 'App Member (Default)',
@@ -40,29 +72,8 @@ const ARTIFACT = {
         note: { allowRead: true, allowCreate: true, readScope: 'unit_and_below', writeScope: 'unit' },
       },
     },
-    {
-      name: 'app_contributor',
-      label: 'Contributor add-on',
-      objects: { note: { allowEdit: true } },
-    },
   ],
 };
-
-// Mirrors `appDefaultPermissionSetName` from @objectstack/plugin-security (not a
-// runtime dependency, so the resolution rule is reproduced here): the first
-// first `isDefault` permission set's name (ADR-0090 D5).
-function appDefaultPermissionSetName(permissions: unknown): string | undefined {
-  if (!Array.isArray(permissions)) return undefined;
-  for (const p of permissions) {
-    if (p && typeof p === 'object') {
-      const ps = p as { name?: unknown; isDefault?: unknown };
-      if (ps.isDefault === true && typeof ps.name === 'string' && ps.name.length > 0) {
-        return ps.name;
-      }
-    }
-  }
-  return undefined;
-}
 
 // The first createStandaloneStack call cold-loads heavy deps (objectql,
 // metadata, driver-memory) via dynamic import — on a cold CI worker that can
@@ -83,9 +94,14 @@ describe('createStandaloneStack — surfaces app RBAC from the artifact (ADR-005
   }, BOOT_TIMEOUT);
   afterAll(() => { try { rmSync(dir, { recursive: true, force: true }); } catch { /* noop */ } });
 
-  it('surfaces permissions[] (with isDefault profile + readScope) at the top level', () => {
+  it('surfaces permissions[] (with isDefault profile + readScope) at the top level, in DECLARATION order', () => {
     expect(Array.isArray(result.permissions)).toBe(true);
-    expect(result.permissions!.map((p: any) => p.name).sort()).toEqual(['app_contributor', 'app_member_default']);
+    // Unsorted, on purpose. `appDefaultPermissionSetName` resolves the FIRST
+    // `isDefault` set, so "which order does the artifact's array arrive in" is a
+    // precondition of that rule, not a presentation detail — and it is this
+    // package's half of it. A `.sort()` here erases exactly the property the
+    // resolution depends on (#7092).
+    expect(result.permissions!.map((p: any) => p.name)).toEqual(['app_contributor', 'app_member_default']);
     const def = result.permissions!.find((p: any) => p.name === 'app_member_default');
     expect(def.isDefault).toBe(true);
     // the hierarchy read scope must ride through intact — this is what was lost.
@@ -103,10 +119,17 @@ describe('createStandaloneStack — surfaces app RBAC from the artifact (ADR-005
     expect(result.manifest?.id).toBe('com.test.scope-app');
   });
 
-  it('the surfaced config drives appDefaultPermissionSetName → the app profile (the exact CLI wiring)', () => {
-    // Reproduce serve.ts: `config = { ...originalConfig, ...standaloneStack }`,
-    // then `appDefaultPermissionSetName(config.permissions)` → SecurityPlugin fallback.
+  it('the surfaced config feeds the REAL appSecurityPluginOptions → the app profile', () => {
+    // Reproduce serve.ts's merge: `config = { ...originalConfig, ...standaloneStack }`,
+    // then `new SecurityPlugin(appSecurityPluginOptions(config))`.
     const config: any = { ...{}, ...result };
+    // The whole constructor argument, deep-equalled — the OPTIONS shape is the
+    // half that was a decision (`name ? { fallbackPermissionSet: name }
+    // : undefined`), so asserting only the name would leave it unmeasured here.
+    expect(appSecurityPluginOptions(config)).toEqual({ fallbackPermissionSet: 'app_member_default' });
+    // …and the name half, read off the surfaced array exactly as the helper does.
+    // `app_contributor` sits ahead of it in the artifact, so this is a real
+    // discrimination on `isDefault`, not agreement with permissions[0].
     expect(appDefaultPermissionSetName(config.permissions)).toBe('app_member_default');
   });
 
@@ -116,6 +139,7 @@ describe('createStandaloneStack — surfaces app RBAC from the artifact (ADR-005
       artifactPath,
       databaseUrl: 'memory://standalone-rbac',
     });
+    expect(appSecurityPluginOptions(r)).toEqual({ fallbackPermissionSet: 'app_member_default' });
     expect(appDefaultPermissionSetName(r.permissions)).toBe('app_member_default');
     expect(r.positions!.map((x: any) => x.name).sort()).toEqual(['contributor', 'manager']);
   }, BOOT_TIMEOUT);

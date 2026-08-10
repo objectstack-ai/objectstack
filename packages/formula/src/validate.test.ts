@@ -50,6 +50,93 @@ describe('validateExpression (ADR-0032)', () => {
     });
   });
 
+  // #7073 — the trailer used to be undifferentiated: EVERY `celEngine.compile`
+  // refusal, bounds included, ended with the dialect prescription
+  // "`predicate`s are bare CEL (e.g. `record.rating >= 4`)". For a
+  // syntactically perfect but over-budget expression that sentence is advice
+  // that cannot succeed — the source IS bare CEL — and an author who follows
+  // the last sentence they were handed (an LLM author above all) rewrites the
+  // dialect and regresses.
+  //
+  // Both directions are pinned, deliberately. A test asserting only "the
+  // bounds message changed" would stay green on a fix that ALSO stripped the
+  // dialect trailer from genuine dialect faults, i.e. that shrank the refusal
+  // surface while appearing to widen it.
+  describe('bounds vs dialect: the prescription follows the fault class (#7073)', () => {
+    /** 80-term conjunction — the escalation's `maxAstNodes` shape (#6833's fixture). */
+    const OVER_AST_NODES = Array.from({ length: 80 }, (_, i) => `record.f${i} == ${i}`).join(' && ');
+    /** 60-level parenthesis nest — `maxDepth`. Counts recursion that leaves no AST node. */
+    const OVER_DEPTH = `${'('.repeat(60)}record.a${')'.repeat(60)} == 1`;
+    /** 200-element list literal — `maxListElements`. */
+    const OVER_LIST = `record.id in [${Array.from({ length: 200 }, (_, i) => `'u${i}'`).join(',')}]`;
+
+    /** The byte-for-byte dialect trailer, per role. Must survive on dialect faults. */
+    const dialectTrailer = (role: 'predicate' | 'value') =>
+      ` — ${role}s are bare CEL (e.g. \`record.rating >= 4\`).`;
+
+    describe.each([
+      { name: 'maxAstNodes (80-term conjunction)', source: OVER_AST_NODES, limit: 'maxAstNodes' },
+      { name: 'maxDepth (60-level nest)', source: OVER_DEPTH, limit: 'maxDepth' },
+      { name: 'maxListElements (200-element list)', source: OVER_LIST, limit: 'maxListElements' },
+    ])('an over-budget but valid CEL $name', ({ source, limit }) => {
+      it('is refused, names the exceeded bound and its value, and never says "bare CEL"', () => {
+        const r = validateExpression('predicate', source);
+        expect(r.ok).toBe(false);
+        expect(r.errors).toHaveLength(1);
+        const { message } = r.errors[0];
+        // The front half — cel-js's own reason — was always right; keep it.
+        expect(message).toMatch(/^invalid CEL predicate:/);
+        expect(message).toMatch(/Exceeded/);
+        // The bound is NAMED with the platform's value for it.
+        expect(message).toContain(`\`${limit}\` budget (limit `);
+        // …and the prescription is a size prescription, not a dialect one.
+        expect(message).toMatch(/SIZE fault, not a dialect mistake/);
+        expect(message).toMatch(/Shrink it/);
+        // ⛔ The defect itself: the dialect trailer must NOT reach this class.
+        expect(message).not.toContain(dialectTrailer('predicate'));
+        expect(message).not.toMatch(/bare CEL/);
+      });
+
+      it('applies to the `value` role too — one producer, all ~10 slots', () => {
+        const r = validateExpression('value', source);
+        expect(r.ok).toBe(false);
+        expect(r.errors[0].message).toMatch(/^invalid CEL value:/);
+        expect(r.errors[0].message).toMatch(/SIZE fault, not a dialect mistake/);
+        expect(r.errors[0].message).not.toContain(dialectTrailer('value'));
+      });
+    });
+
+    // The flipped pin. The refusal surface may never shrink: a genuine dialect
+    // or syntax fault keeps the ADR-0032 §1d trailer, byte for byte.
+    it.each([
+      { name: 'an unterminated comparison', source: 'record.stage ==' },
+      { name: 'a stray token', source: 'record.stage @@ "won"' },
+      { name: 'a SQL-dialect predicate', source: "stage = 'won' AND rating >= 4" },
+    ])('keeps the dialect trailer verbatim on $name', ({ source }) => {
+      const r = validateExpression('predicate', source);
+      expect(r.ok).toBe(false);
+      expect(r.errors[0].message).toContain(dialectTrailer('predicate'));
+      expect(r.errors[0].message).not.toMatch(/SIZE fault/);
+    });
+
+    it('keeps the #1491 braces hint on a brace fault (it outranks no bounds fault)', () => {
+      const r = validateExpression('predicate', '{record.rating} >= 4');
+      expect(r.ok).toBe(false);
+      expect(r.errors[0].message).toMatch(/template brace was used inside a CEL expression/);
+      expect(r.errors[0].message).not.toMatch(/SIZE fault/);
+    });
+
+    it('offers no split remedy without a caveat — combination semantics differ per slot', () => {
+      // PR #6831's RLS sentence ("splitting the top-level `&&` widens the
+      // grant") is TRUE for a security predicate and wrong-to-meaningless for a
+      // formula value. This shared producer therefore ships the caveat, not the
+      // slot-specific claim.
+      const message = validateExpression('predicate', OVER_AST_NODES).errors[0].message;
+      expect(message).toMatch(/changes how they combine at this authoring site/);
+      expect(message).not.toMatch(/widen|grant|permission/i);
+    });
+  });
+
   describe('templates', () => {
     it('accepts a valid {{ path }} template', () => {
       const r = validateExpression('template', 'Hot lead: {{ record.full_name }}');

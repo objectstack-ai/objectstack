@@ -72,6 +72,12 @@ export const Task = ObjectSchema.create({
       label: 'Reminder Date/Time',
     }),
     
+    // [#7036] Server-owned: `readonly` means "never editable in forms, AND a
+    // non-system caller's write is stripped on the write path". Nothing may
+    // hand this value in — `task.hook.ts` stamps it on the transition into
+    // `completed` and clears it on the transition back out, which is the one
+    // write the readonly strip is designed to let through (#2948/#5591).
+    // Callers (including `actions/task.handlers.ts`) send `status` alone.
     completed_date: Field.datetime({
       label: 'Completed Date',
       readonly: true,
@@ -186,6 +192,14 @@ export const Task = ObjectSchema.create({
   highlightFields: ['subject', 'status', 'priority', 'due_date', 'owner'],
   
   validations: [
+    // [#7036] This rule is satisfied by the SERVER, not by the caller. The
+    // `beforeUpdate` leg of `task.hook.ts` stamps `completed_date` before
+    // validation runs, so a completion write that carries only
+    // `status: 'completed'` passes. It stays as a rule rather than being
+    // deleted because it is the assertion that the stamp actually happened:
+    // if the hook is ever unregistered or its transition guard breaks, the
+    // write is refused loudly instead of committing a completed task with no
+    // completion date.
     {
       name: 'completed_date_required',
       type: 'script',
@@ -206,8 +220,13 @@ export const Task = ObjectSchema.create({
   // field — it was silently stripped at build and never ran (ADR-0032 "no
   // silent failure"). Record-triggered automation for this object lives in the
   // supported mechanisms instead:
-  //   • `task.hook.ts`        — lifecycle hook (defaults, completion logic)
-  //   • `actions/task.handlers.ts` — stamps `completed_date` on completion
+  //   • `task.hook.ts`        — lifecycle hook (insert defaults; stamps and
+  //                              clears `completed_date` on the completion
+  //                              transition). Registered via
+  //                              `defineStack({ hooks })` in
+  //                              `objectstack.config.ts` — a hook that is not
+  //                              in that array never runs (#7036).
+  //   • `actions/task.handlers.ts` — flips `status`; the stamp is the hook's
   //   • `flows/task.flow.ts`  — record_change + schedule flows (completion /
   //                              recurrence, reminders, overdue escalation)
 });

@@ -126,6 +126,8 @@
     "PromptVariable": "src/ai/model-registry.zod.ts#PromptVariable (type)",
     "PromptVariableParsed": "src/ai/model-registry.zod.ts#PromptVariableParsed (type)",
     "PromptVariableSchema": "src/ai/model-registry.zod.ts#PromptVariableSchema (const)",
+    "SKILL_TRIGGER_LIST_VALUE_OPERATORS": "src/ai/skill.zod.ts#SKILL_TRIGGER_LIST_VALUE_OPERATORS (const)",
+    "SKILL_TRIGGER_SCALAR_VALUE_OPERATORS": "src/ai/skill.zod.ts#SKILL_TRIGGER_SCALAR_VALUE_OPERATORS (const)",
     "Skill": "src/ai/skill.zod.ts#Skill (type)",
     "SkillParsed": "src/ai/skill.zod.ts#SkillParsed (type)",
     "SkillSchema": "src/ai/skill.zod.ts#SkillSchema (const)",

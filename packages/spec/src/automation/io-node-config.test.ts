@@ -136,6 +136,76 @@ describe('NotifyConfigSchema — strict as of #4001 批 9', () => {
     expect(NotifyConfigSchema.safeParse({ recipients: 'u1', title: 't', sourceObject: 'showcase_task' }).success).toBe(true);
     expect(NotifyConfigSchema.safeParse({ recipients: 'u1', title: 't', sourceId: 'r1' }).success).toBe(true);
   });
+
+  // ── #7086 — severity is a CLOSED vocabulary, at the gate and not only in prose ──
+  //
+  // Until this change `severity` was a bare `z.string()` whose `.describe()`
+  // read `'info | warning | critical'`. The enumeration lived only in the
+  // sentence, so `'urgent'` parsed green here, was forwarded raw by the
+  // executor, and was blind-cast by the dispatcher
+  // (`(p.severity as Notification['severity']) ?? 'info'`) into a union that
+  // declares those values impossible — silently falling through every
+  // downstream `switch`. The three surfaces that already agreed on the closed
+  // set: this describe, `Notification['severity']`, and the
+  // `sys_inbox_message.severity` select field.
+  describe('severity (#7086)', () => {
+    /** The `severity` issues of a failed parse, or `[]` when it was accepted. */
+    function severityIssues(value: unknown): ReadonlyArray<{ code: string; message: string }> {
+      const result = NotifyConfigSchema.safeParse({ recipients: 'u1', title: 't', severity: value });
+      if (result.success) return [];
+      return result.error.issues.filter((i) => i.path.length === 1 && i.path[0] === 'severity');
+    }
+
+    // Green BOTH before and after this change — pre-fix everything parsed, so
+    // these prove nothing about the tightening. Stated plainly because the
+    // template presumes before-green/after-red: their real job is the opposite
+    // direction, that closing the gate did not OVERSHOOT and take a legal
+    // spelling with it.
+    it.each(['info', 'warning', 'critical'])('accepts the declared value %s', (value) => {
+      expect(NotifyConfigSchema.safeParse({ recipients: 'u1', title: 't', severity: value }).success).toBe(true);
+    });
+
+    // The pins that carry the change. Measured RED on `origin/main` before the
+    // fix — all three parsed green there (probe on 3e8e669c0).
+    //
+    // `code` + `path`, never a bare `success === false`: a strictObject rejects
+    // for several reasons, so an assertion that only asks "did it fail" would
+    // stay green if the refusal ever came from an unknown key instead of the
+    // vocabulary — the two defects this file has to keep apart.
+    it.each([
+      ['urgent', 'an out-of-vocabulary spelling'],
+      ['INFO', 'a casing variant — the vocabulary is lower-case'],
+      ['', 'the empty string, which used to degrade to `info` two layers down'],
+    ])('rejects %s (%s)', (value) => {
+      const issues = severityIssues(value);
+      expect(issues.map((i) => i.code)).toEqual(['invalid_value']);
+      // The prescription is behaviour (this file's stated load-bearing half):
+      // the refusal has to tell the author what IS legal, or an AI author who
+      // guessed `urgent` has nothing to correct towards (ADR-0033).
+      for (const legal of ['info', 'warning', 'critical']) {
+        expect(issues[0]!.message).toContain(legal);
+      }
+    });
+
+    it('declares the vocabulary in the TYPE, not only in the sentence', () => {
+      const shape = (NotifyConfigSchema as unknown as {
+        shape: Record<string, { description?: string; unwrap(): { options?: readonly string[] } }>;
+      }).shape;
+
+      // The gate itself carries the closed set — this is what `'urgent'`
+      // now collides with, and what the generated reference renders as the
+      // `Enum<...>` type column instead of a free-text `string`.
+      expect(shape.severity!.unwrap().options).toEqual(['info', 'warning', 'critical']);
+
+      // …and the describe is now a sentence about the field rather than a
+      // bare value list standing in for a gate that did not exist. Non-empty
+      // arm first, so the negative arm below cannot pass vacuously (#6918).
+      const doc = shape.severity!.description ?? '';
+      expect(doc.length, 'severity .describe() must not be empty').toBeGreaterThan(0);
+      expect(doc).toMatch(/messaging service/i);
+      expect(doc, 'the vocabulary belongs in the enum, not smuggled back into prose').not.toMatch(/\|/);
+    });
+  });
 });
 
 describe('HttpConfigSchema — strict as of #4001 批 9', () => {

@@ -227,6 +227,81 @@ describe('validateActionNameRefs — navigation action items', () => {
   });
 });
 
+// Deep-link auto-run (#4848): `{ type: 'object', runAction }` is the declared
+// form of the `?runAction=<name>` URL contract (cloud#844) — an action name
+// bound by reference, dead like every other surface here when it resolves to
+// nothing: the entry navigates and the auto-run silently never fires.
+describe('validateActionNameRefs — navigation deep-link runAction (#4848)', () => {
+  it('errors on a runAction naming no defined action', () => {
+    const findings = validateActionNameRefs({
+      ...withActions(),
+      apps: [
+        {
+          name: 'crm',
+          navigation: [
+            { id: 'nav_leads', type: 'object', label: 'Leads', objectName: 'crm_lead', runAction: 'ghost_action' },
+          ],
+        },
+      ],
+    });
+    expect(findings).toHaveLength(1);
+    expect(findings[0].severity).toBe('error');
+    expect(findings[0].rule).toBe(ACTION_NAME_UNDEFINED);
+    expect(findings[0].path).toBe('apps[0].navigation[0].runAction');
+    expect(findings[0].where).toContain('nav "nav_leads"');
+  });
+
+  it('offers a did-you-mean for a near-miss and accepts a resolving name', () => {
+    const near = validateActionNameRefs({
+      ...withActions(),
+      apps: [
+        {
+          name: 'crm',
+          navigation: [
+            { id: 'nav_leads', type: 'object', label: 'Leads', objectName: 'crm_lead', runAction: 'crm_convert_leads' },
+          ],
+        },
+      ],
+    });
+    expect(near).toHaveLength(1);
+    expect(near[0].message).toContain('Did you mean "crm_convert_lead"?');
+
+    const clean = validateActionNameRefs({
+      ...withActions(),
+      apps: [
+        {
+          name: 'crm',
+          areas: [
+            {
+              id: 'a',
+              label: 'A',
+              navigation: [
+                { id: 'nav_leads', type: 'object', label: 'Leads', objectName: 'crm_lead', runAction: 'crm_convert_lead' },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+    expect(clean).toEqual([]);
+  });
+
+  it('ignores runAction on a non-object nav item — the slot is the object branch\'s', () => {
+    const findings = validateActionNameRefs({
+      ...withActions(),
+      apps: [
+        {
+          name: 'crm',
+          navigation: [
+            { id: 'nav_odd', type: 'url', label: 'Odd', url: 'https://example.com', runAction: 'ghost_action' },
+          ],
+        },
+      ],
+    });
+    expect(findings).toEqual([]);
+  });
+});
+
 describe('validateActionNameRefs — bulkActionDefs (#4457)', () => {
   it('errors on an aggregate def naming nothing', () => {
     // `resolveBulkActions` resolves an aggregate def's `name` against the

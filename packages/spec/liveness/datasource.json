@@ -25,25 +25,26 @@
       "children": {
         "min": {
           "status": "live",
-          "evidence": "packages/services/service-datasource/src/default-datasource-driver-factory.ts:181",
-          "note": "knex pool floor. Live only since #4465 — the factory used to hardcode `{ min: 0, max: 5 }` over the carried value."
+          "evidence": "packages/services/service-datasource/src/default-datasource-driver-factory.ts:191, packages/services/service-datasource/src/default-datasource-driver-factory.ts:482, packages/services/service-datasource/src/datasource-pool-support.ts:79",
+          "note": "knex pool floor on `postgres` / `mysql` (`buildSqlPool` :191, handed to `SqlDriver` at :403 and :458), and the MongoClient's `minPoolSize` on `mongodb` (:482). Live only since #4465 — the factory used to hardcode `{ min: 0, max: 5 }` over the carried value. NOT live on `memory` / `sqlite` / `sqlite-wasm`, and not silently dropped there either: declaring it is an authoring ERROR since #5714 (the SQLite pair) and #5931 (`memory`) — `POOL_UNSUPPORTED_DRIVER_IDS` (datasource-pool-support.ts:79). Still dropped in silence on `turso`. See the block note below for both."
         },
         "max": {
           "status": "live",
-          "evidence": "packages/services/service-datasource/src/default-datasource-driver-factory.ts:182",
-          "note": "knex pool ceiling; also mapped onto the Mongo client's maxPoolSize (#4465)."
+          "evidence": "packages/services/service-datasource/src/default-datasource-driver-factory.ts:192, packages/services/service-datasource/src/default-datasource-driver-factory.ts:483, packages/services/service-datasource/src/datasource-pool-support.ts:79",
+          "note": "knex pool ceiling on `postgres` / `mysql` (`buildSqlPool` :192); also mapped onto the Mongo client's `maxPoolSize` (:483, #4465). Same driver qualification as `min`: an authoring ERROR on `memory` / `sqlite` / `sqlite-wasm` (datasource-pool-support.ts:79 — #5714 / #5931), still dropped in silence on `turso`. See the block note below."
         },
         "idleTimeoutMillis": {
           "status": "live",
-          "evidence": "packages/services/service-datasource/src/default-datasource-driver-factory.ts:183",
-          "note": "passed through to knex verbatim."
+          "evidence": "packages/services/service-datasource/src/default-datasource-driver-factory.ts:193, packages/services/service-datasource/src/datasource-pool-support.ts:79",
+          "note": "passed through to knex verbatim on `postgres` / `mysql` (`buildSqlPool` :193) — the two SQL arms are the ONLY ones that read it. `mongodb` takes `min` / `max` out of the block and nothing else (:477-483), so this key reaches nothing on that arm; the unqualified `live` this row carried before #6214 overstated it. An authoring ERROR on `memory` / `sqlite` / `sqlite-wasm` (datasource-pool-support.ts:79 — #5714 / #5931; the rejection text names `min` / `max` and the timeouts together, :142-146), and still dropped in silence on `turso`. See the block note below."
         },
         "connectionTimeoutMillis": {
           "status": "live",
-          "evidence": "packages/services/service-datasource/src/default-datasource-driver-factory.ts:184",
-          "note": "mapped onto knex's `acquireTimeoutMillis` (different name, same meaning)."
+          "evidence": "packages/services/service-datasource/src/default-datasource-driver-factory.ts:194, packages/services/service-datasource/src/datasource-pool-support.ts:79",
+          "note": "mapped onto knex's `acquireTimeoutMillis` (different name, same meaning) on `postgres` / `mysql` (`buildSqlPool` :194-196). Carries `idleTimeoutMillis`' qualification exactly: `mongodb` reads only `min` / `max` from the block (:477-483) so this key reaches nothing there, it is an authoring ERROR on `memory` / `sqlite` / `sqlite-wasm` (datasource-pool-support.ts:79 — #5714 / #5931), and it is still dropped in silence on `turso`. See the block note below."
         }
-      }
+      },
+      "note": "QUALIFIED BY DRIVER 2026-08-10 (#6214) — the spec half of the #5931 ruling. `live` on the four rows above means \"honoured by the pooled arms\", never \"honoured everywhere\", and the rows said so nowhere until this repair: an author reading them got `pool` presented as an unconditional knob on a block that three built-in drivers now REFUSE and a fourth ignores. HONOURED: `postgres` / `mysql` hand `buildSqlPool(spec)` to `SqlDriver` (packages/services/service-datasource/src/default-datasource-driver-factory.ts:188-198, applied at :403 and :458), and `mongodb` maps `min` / `max` — only those two — onto the MongoClient's `minPoolSize` / `maxPoolSize` (:477-483). LOUDLY REJECTED on `memory` / `sqlite` / `sqlite-wasm`: `POOL_UNSUPPORTED_DRIVER_IDS` (packages/services/service-datasource/src/datasource-pool-support.ts:79) with one explanation per arm (:141-149), thrown at every door a `pool` block can come in through — the Setup wizard's create/update (datasource-admin-service.ts:243, :314), the boot-time auto-connect pre-pass (datasource-connection-service.ts:508), and the factory's last door (default-datasource-driver-factory.ts:374). Two arms, two reasons, one verdict: knex's better-sqlite3 dialect pins `{min:1,max:1}` on purpose because a second connection to `:memory:` opens a SEPARATE, empty database, so sizing the pool would split one datasource's data across several stores (#5714, maintainer ruling 2026-08-06 option B); `memory` opens no connection at all — its store is a plain data structure inside this process, reached by a direct call — so `min` / `max` and the timeouts have nothing to configure (#5931, maintainer ruling 2026-08-07, which also set the default that a silently-dropped key JOINS an existing rejection set rather than queueing for its own ruling, #6140). Measured through the real factory before the rejection existed (#5931): `postgres + pool{min:3,max:9}` → live `{min:3,max:9}`; `sqlite + pool{min:3,max:9}` → live `{min:1,max:1}`; `memory + pool{min:3,max:9}` → driver config `{\"persistence\":false}`, `pool` undefined. `examples/app-crm` was the live specimen — `CrmDatasource` declared `pool: { min: 1, max: 5 }` and ran on `{min:1,max:1}`. STILL SILENT, recorded rather than hidden: `turso` is not in the rejected set, so a declared `pool` is dropped there without a word — `TursoDriverConfig` has no `min` / `max`, only `concurrency`, and in local mode the driver is the very better-sqlite3 `SqlDriver` the set rejects for (datasource-pool-support.ts:90-99). Tightening that is a new rejection on an authoring surface and needs its own ruling; the same is true of the two timeouts on `mongodb`. A driver id the platform ships no contract for (`com.vendor.snowflake`) is deliberately NOT judged — \"we validate what we can construct\" (datasource-pool-support.ts:101-105)."
     },
     "ssl": {
       "children": {

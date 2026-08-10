@@ -8,7 +8,7 @@
  */
 
 import type { DriverOptions, FilterCondition, SchemaMode } from '@objectstack/spec/data';
-import { parseAutonumberFormat, renderAutonumber, missingFieldValues, isTenancyDisabled, type AutonumberToken } from '@objectstack/spec/data';
+import { parseAutonumberFormat, renderAutonumber, readAutonumberCounter, missingFieldValues, isTenancyDisabled, type AutonumberToken } from '@objectstack/spec/data';
 // The DECLARED aggregate vocabulary (#5907). Read from the spec so this driver's
 // "the protocol has no such function" refusal cannot drift from what
 // `AggregationNodeSchema.function` actually admits.
@@ -3618,9 +3618,16 @@ export class SqlDriver implements IDataDriver {
    *
    *   - **Either declared ⇒ ANCHORED**: the counter is the digit run at the
    *     START of what follows the prefix, after removing the declared suffix
-   *     when the row carries it.
+   *     when the row carries it. That reading is not this driver's to hold: it
+   *     is spec's `readAutonumberCounter`, the declared inverse of
+   *     `renderAutonumber`, called here and by the engine's seeding scan so one
+   *     edit moves both sides (#6560 — the ruling that retired the two
+   *     hand-written copies PR #6553 left).
    *   - **Neither declared ⇒ UNANCHORED**: the legacy reading (every digit in
-   *     the value, concatenated) is kept byte-for-byte.
+   *     the value, concatenated) is kept byte-for-byte, and stays HERE. The
+   *     engine's legacy reading of the same case differs on purpose (it takes
+   *     the last digit run), so there is nothing shared to hoist — spec answers
+   *     `undefined` for an unanchored slot rather than pick one of the two.
    *
    * ## Why the suffix is NOT pushed into the LIKE
    *
@@ -3654,15 +3661,14 @@ export class SqlDriver implements IDataDriver {
       if (typeof v !== 'string') continue;
       let n: number;
       if (anchored) {
-        // A driver-side `LIKE` can match looser than JS `startsWith` (collation,
-        // case-insensitive columns); re-check so another scope cannot inflate
-        // this counter, mirroring the engine's own JS-side re-check.
-        if (prefix && !v.startsWith(prefix)) continue;
-        let core = v.slice(prefix.length);
-        if (suffix && core.endsWith(suffix)) core = core.slice(0, core.length - suffix.length);
-        const head = core.match(/^\d+/);
-        if (!head) continue;
-        n = parseInt(head[0], 10);
+        // Spec's inverse of `renderAutonumber` (#6560). It also re-checks the
+        // prefix in JS: a driver-side `LIKE` can match looser than `startsWith`
+        // (collation, case-insensitive columns), and a row from another scope
+        // must not inflate this counter — it reads as `undefined`, same as a
+        // row carrying no counter at all.
+        const read = readAutonumberCounter(v, prefix, suffix);
+        if (read === undefined) continue;
+        n = read;
       } else {
         // Unanchored: `prefix` is '' here, so this is the whole value.
         n = parseInt(v.replace(/[^0-9]/g, ''), 10);

@@ -256,7 +256,7 @@ await client.approvals.approve(requestId, 'LGTM');
 await client.approvals.reject(requestId, 'Incomplete');
 
 // Notifications
-await client.notifications.list({ unreadOnly: true });
+await client.notifications.list({ read: false }); // unread only
 await client.notifications.markRead(['notif-1', 'notif-2']);
 
 // AI Services

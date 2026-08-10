@@ -42,7 +42,6 @@
     "system/AddFieldOperation — no type export",
     "system/CreateObjectOperation — no type export",
     "system/DeployStatusEnum — no type export",
-    "system/ServiceStatus — no type export",
     "ui/AIChatWindowProps — no type export",
     "ui/DerivedMeasureOp — no type export",
     "ui/ElementButtonProps — no type export",

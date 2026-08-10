@@ -34,6 +34,28 @@ import type { IStorageService } from '@objectstack/spec/contracts';
  *     any visible mistake — cannot widen who can read the bytes, because the
  *     second record gets its own copy.
  *
+ * ### The one write that cannot honour it, and is refused
+ *
+ * [#7102] A predicate (`multi: true`) update has ONE payload for N matched
+ * rows — `driver.updateMany` takes one `SET` clause — so writing a file id
+ * through one lands the SAME id in every matched record. Under exclusive
+ * ownership that is not a degraded outcome, it is the property above running
+ * backwards: one record owns the file and N−1 reference bytes whose
+ * readability is decided by a record they have nothing to do with. Neither
+ * hook branch can rescue it — claiming per row hands N−1 records an unowned
+ * reference, skipping hands ALL of them a reference nobody owns, which the
+ * release/tombstone path may eventually collect.
+ *
+ * So the write is REFUSED, in `beforeUpdate`, before the driver runs:
+ * {@link FileFieldBulkWriteError} (`FILE_FIELD_BULK_WRITE_REFUSED` / 400).
+ * The invariant above is a property this module holds, not prose describing
+ * the cases where it happens to work out. Refusal is narrow on purpose — it
+ * fires only on a file id TOKEN reaching a file-class field through a
+ * predicate update, which is exactly the condition that produces the shared
+ * id. A bulk CLEAR (`{ avatar: null }`) or a bulk write of a legacy inline
+ * blob or external URL owns nothing and stays supported; so does every
+ * single-record update, whose behaviour is byte-identical to before.
+ *
  * ## What this module does NOT do
  *
  * It records ownership, releases ownership, and — only on a deployment that
@@ -147,6 +169,37 @@ export class FileConstraintError extends Error {
   readonly code = 'ERR_FILE_CONSTRAINT';
   constructor(message: string) {
     super(message);
+  }
+}
+
+/**
+ * [#7102] Raised when a predicate (`multi: true`) update writes a file id into
+ * a file-class field. See the module header for why no hook branch can honour
+ * exclusive ownership for that write; this is the refusal that keeps the
+ * invariant true rather than aspirational.
+ *
+ * ADR-0112 envelope: a registered `code` plus a 4xx `status`, so the REST
+ * layer answers `400 FILE_FIELD_BULK_WRITE_REFUSED` instead of promoting a
+ * bare `Error` to a 500. `400` because the refusal is a verdict about what the
+ * CALLER asked for — the write is expressible and permitted, it just cannot be
+ * expressed as one payload — and the remedy is the caller's: issue the update
+ * per record.
+ */
+export class FileFieldBulkWriteError extends Error {
+  readonly code = 'FILE_FIELD_BULK_WRITE_REFUSED';
+  readonly status = 400;
+  readonly object: string;
+  readonly fields: readonly string[];
+  constructor(object: string, fields: readonly string[]) {
+    super(
+      `Refusing a multi-record update that writes a file id into ` +
+        `${fields.map((f) => `'${object}.${f}'`).join(', ')}: one payload writes one id to ` +
+        `every matched record, and a file is owned by at most one record's field ` +
+        `(ADR-0104 D3 exclusive ownership). Update each record separately, so each ` +
+        `one gets a file it owns.`,
+    );
+    this.object = object;
+    this.fields = [...fields];
   }
 }
 
@@ -579,10 +632,6 @@ export function installFileReferenceHooks(
       if (!object || !data || typeof data !== 'object') return;
       const fileFields = activeFileFields(engine, object);
       if (fileFields.length === 0) return;
-      // A multi-update writing a file id would give the same id to every
-      // matched record; only a single-record update can own one. Copy-on-claim
-      // needs a definite owner, so skip — `claimFile` then refuses to steal.
-      //
       // [#6966] "Is this a multi-update?" is the engine's marker, not the shape
       // of `input.id`. A per-row context names ITS row, so the old
       // `ids.length === 1` test answered "single update" on every row of a
@@ -593,9 +642,37 @@ export function installFileReferenceHooks(
       // to do, because the payload they would inspect is the same object the
       // first row already reconciled.
       const perRow = perRowDispatch(ctx);
+
+      // [#7102] The refusal. This hook is the last point that can see BOTH the
+      // predicate nature of the write (the engine's marker) and the payload,
+      // before `driver.updateMany` puts one `SET` clause across N rows — and a
+      // throw here propagates: `dispatchPerRowBeforeHooks` runs outside
+      // `update()`'s try block, so the ADR-0112 envelope reaches the caller
+      // intact and nothing is written. It fires on the FIRST row, so the
+      // remaining N−1 dispatches never happen either.
+      //
+      // The condition is `isFileIdToken`, the same single arbiter copy-on-claim
+      // and the read resolver ask — so the refusal covers exactly the writes
+      // this module would otherwise have to own, and nothing else. A bulk
+      // clear, a legacy inline blob and an external URL all own nothing and
+      // pass; see the module header.
+      if (perRow) {
+        const written = fileFields.filter(
+          (field) => field in data && idTokensIn(data[field]).length > 0,
+        );
+        if (written.length > 0) throw new FileFieldBulkWriteError(object, written);
+      }
+
       if (perRow && perRow.index !== 0) return;
       const ids = perRow ? null : asIdList(ctx?.input?.id);
       const recordId = ids && ids.length === 1 ? String(ids[0]) : null;
+      // [#7102] On a per-row dispatch this call is now provably a no-op, and
+      // deliberately left in place rather than branched around: copy-on-claim
+      // only ever acts on an id token, and the refusal above has just
+      // established the payload holds none. Keeping one unconditional
+      // copy-on-claim pass is what makes "the before hook always reconciles the
+      // payload it is given" a property of this handler instead of a case
+      // analysis a later edit has to re-derive.
       await applyCopyOnClaim(engine, getStorage, logger, object, recordId, data, fileFields);
     },
     { packageId: PACKAGE_ID },
@@ -649,12 +726,16 @@ export function installFileReferenceHooks(
       // leave that copy owned by NOBODY while N records still reference it —
       // exactly the unreferenced-but-referenced state the sweep may collect.
       //
-      // What is genuinely wrong here is older and wider than this card: a
-      // predicate update writing a file field gives N records one file id under
-      // an EXCLUSIVE-ownership model, so N−1 of them end up referencing bytes
-      // they do not own whichever branch is taken. That is a service-storage
-      // defect in its own right — filed as #7102 rather than smuggled into a
-      // dispatch-contract change.
+      // [#7102] The defect that comment named — a predicate update giving N
+      // records one file id, so N−1 reference bytes they do not own whichever
+      // branch is taken — is CLOSED, and not here: it is refused in
+      // `beforeUpdate`, before the driver write, so no such payload reaches
+      // this hook any more. What a predicate write can still deliver is a bulk
+      // CLEAR or a bulk write of a non-token value, and reconciling THOSE per
+      // row is exactly right — each row releases the file its own slot owned.
+      // Which is why this test stays as it is: it is what lets a per-row
+      // dispatch through to that release, and the `claimFile` half it also
+      // permits is now unreachable on the predicate path.
       if (!ids || ids.length !== 1) return;
       const recordId = String(ids[0]);
 

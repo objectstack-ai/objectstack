@@ -126,6 +126,8 @@
     "PromptVariable (type)",
     "PromptVariableParsed (type)",
     "PromptVariableSchema (const)",
+    "SKILL_TRIGGER_LIST_VALUE_OPERATORS (const)",
+    "SKILL_TRIGGER_SCALAR_VALUE_OPERATORS (const)",
     "Skill (type)",
     "SkillParsed (type)",
     "SkillSchema (const)",

@@ -191,6 +191,7 @@ export const ERROR_CODE_LEDGER = {
     'ERR_FILE_CONSTRAINT',
     'ERR_FILE_REFERENCE_COPY',
     'FILE_DOWNLOAD_DENIED',
+    'FILE_FIELD_BULK_WRITE_REFUSED', // a multi/predicate update wrote a file id into a file-class field (#7102)
     'FILE_NOT_FOUND',
     'INTERNAL',
     'INVALID_REQUEST',

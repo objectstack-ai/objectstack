@@ -744,6 +744,7 @@
     "ui/ObjectNavItem:requiredPermissions",
     "ui/ObjectNavItem:requiresObject",
     "ui/ObjectNavItem:requiresService",
+    "ui/ObjectNavItem:runAction",
     "ui/ObjectNavItem:type",
     "ui/ObjectNavItem:viewName",
     "ui/ObjectNavItem:visible",

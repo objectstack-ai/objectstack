@@ -21,7 +21,7 @@ import type { WriteObservabilityOptions } from '@objectstack/spec/contracts';
 // engine is what `metadata-protocol.validateData` returns, so letting the two
 // drift would put a translation layer between a verdict and its contract.
 import type { ValidateDataIssue, ValidateDataResponse } from '@objectstack/spec/api';
-import { parseAutonumberFormat, renderAutonumber, missingFieldValues, isTenancyDisabled, FILE_REFERENCE_TYPES, REFERENCE_VALUE_TYPES, referenceTargetOf, isFileIdToken, RAW_FILE_VALUES_CONTEXT_KEY, isCurrentUserDefaultToken, isNowDefaultToken } from '@objectstack/spec/data';
+import { parseAutonumberFormat, renderAutonumber, readAutonumberCounter, missingFieldValues, isTenancyDisabled, FILE_REFERENCE_TYPES, REFERENCE_VALUE_TYPES, referenceTargetOf, isFileIdToken, RAW_FILE_VALUES_CONTEXT_KEY, isCurrentUserDefaultToken, isNowDefaultToken } from '@objectstack/spec/data';
 // [#5158] Door 2's lowering sink — the SAME pair the protocol face (Door 1)
 // runs, so `FilterArray` has exactly one lowering in the product.
 import { isFilterAST, parseFilterAST, VALID_AST_OPERATORS } from '@objectstack/spec/data';
@@ -352,39 +352,30 @@ interface IssuedAutonumber {
  * (#6806) so both readings can never drift apart — a divergence here is a
  * duplicate record number, which is the harm the whole family is about.
  *
- * `prefix` and `suffix` are `renderAutonumber`'s own declared output; this
- * function derives no format understanding of its own (see `seedAutonumber`'s
- * "Locating the counter inside a stored value" section for the full rationale):
+ * The ANCHORED reading itself is NOT this package's (#6560): it is the inverse
+ * of `renderAutonumber`'s composition, so it lives beside it as spec's
+ * {@link readAutonumberCounter}, which the SQL driver's `scanMaxNumericTail`
+ * calls over the same two strings. This function adds only the piece the two
+ * sides genuinely do not share:
  *
- *   - **Either one declared ⇒ the slot is ANCHORED**: the counter is the digit
- *     run at the START of what follows the prefix, after removing the declared
- *     suffix when this row carries it. The suffix is stripped when it matches,
- *     never required to match — a dynamic suffix renders differently per row
- *     while the counter scope is the rendered PREFIX, so those rows share this
- *     counter and must still be read.
- *   - **Neither declared ⇒ UNANCHORED**: the legacy reading — the LAST digit
- *     run of the whole value.
+ *   - **Either `prefix` or `suffix` declared ⇒ ANCHORED**: spec answers, and its
+ *     TSDoc carries the rationale (counter after the prefix, suffix stripped
+ *     when it matches and never required to match, out-of-scope values read as
+ *     `undefined`).
+ *   - **Neither declared ⇒ UNANCHORED**: this engine's own legacy reading — the
+ *     LAST digit run of the whole value — kept byte-for-byte by PR #6553. The
+ *     SQL driver's legacy reading of the same case is deliberately DIFFERENT (it
+ *     concatenates every digit), which is exactly why spec refuses to answer for
+ *     an unanchored slot instead of picking one of the two.
  *
- * A value outside the scope (it does not carry the rendered prefix) reads as
- * `undefined`: it belongs to another counter and must not lift this one.
- *
- * Both branches use linear `/\d+/` forms — a backtracking lookahead here is a
- * polynomial-ReDoS sink on stored values full of zeros (CodeQL
+ * The unanchored branch uses the linear `/\d+/g` — a backtracking lookahead here
+ * is a polynomial-ReDoS sink on stored values full of zeros (CodeQL
  * js/polynomial-redos).
  */
-function readAutonumberCounter(value: string, prefix: string, suffix: string): number | undefined {
-  if (prefix && !value.startsWith(prefix)) return undefined;
-  const anchored = prefix !== '' || suffix !== '';
-  let digits: string | undefined;
-  if (anchored) {
-    let core = value.slice(prefix.length);
-    if (suffix && core.endsWith(suffix)) core = core.slice(0, core.length - suffix.length);
-    const head = core.match(/^\d+/);
-    digits = head ? head[0] : undefined;
-  } else {
-    const runs = value.match(/\d+/g);
-    digits = runs ? runs[runs.length - 1] : undefined;
-  }
+function readStoredAutonumberCounter(value: string, prefix: string, suffix: string): number | undefined {
+  if (prefix !== '' || suffix !== '') return readAutonumberCounter(value, prefix, suffix);
+  const runs = value.match(/\d+/g);
+  const digits = runs ? runs[runs.length - 1] : undefined;
   if (!digits) return undefined;
   const n = parseInt(digits, 10);
   return Number.isFinite(n) ? n : undefined;
@@ -846,13 +837,14 @@ function hookTargetList(target: string | string[] | undefined): string[] {
  *
  * The allow half keeps the TRUTHINESS test both copies used verbatim, rather
  * than the `!== undefined` that reads more precisely. They differ on exactly one
- * input, `object: ''`, which today registers a GLOBAL hook (falsy ⇒ no filter) —
- * #4281's failure mode surviving on the code path it never covered, since it
- * closed the metadata path at the schema and the binder. Flipping it here would
- * turn a hook that fires on everything into one that fires on nothing, silently,
- * inside a PR about a different face of the contract. Out of scope by
- * construction: preserved, pinned in `hook-exclude-objects.test.ts`, and filed
- * separately.
+ * input, `object: ''`, which reads here as a GLOBAL hook (falsy ⇒ no filter).
+ * That read is deliberately UNCHANGED, and #6573 is why: flipping it would turn
+ * a hook firing on everything into one firing on nothing, silently — the same
+ * class of defect pointing the other way. The shape is closed at the
+ * registration door instead ({@link assertValidHookObject}), so no live entry
+ * can carry `''` and this branch is unreachable for it in practice. It stays
+ * because this function is also called directly on hand-built entries, and
+ * because a matcher should describe one rule, not re-litigate the door's.
  */
 export function hookMatchesObject(
   entry: Pick<HookEntry, 'object' | 'excludeObjects'>,
@@ -927,6 +919,105 @@ function assertValidHookExcludeObjects(
       );
     }
   }
+}
+
+/**
+ * [#6573] Registration-time refusal for the `object` (ALLOW) face, closing
+ * #4281 / #4001's "an empty target is not *no* target" ruling on the path that
+ * ruling never reached.
+ *
+ * #4281 shut this shape at the two METADATA doors — `HookSchema.object`'s
+ * refine in `packages/spec`, and `normalizeObjects` in `hook-binder.ts`. The
+ * code door, `engine.registerHook`, goes through neither, so the same three
+ * spellings still walked in here, and the matching read (see
+ * {@link hookMatchesObject}) turns each of them into a defect:
+ *
+ *  - **`''`** is FALSY, so the allow half is skipped entirely and the entry
+ *    registers as a GLOBAL hook. #4281's headline failure mode exactly — blank
+ *    intent becoming the broadest possible blast radius — reproduced verbatim
+ *    on the uncovered path.
+ *  - **`[]` / `['']`** (or any blank member) are truthy but admit no object
+ *    name, so the entry can never fire: registered "successfully", inert
+ *    forever. ADR-0078's silently-inert declaration.
+ *
+ * Refused at REGISTRATION rather than fixed in the matcher, and that choice is
+ * the whole point of the separate card. Teaching `hookMatchesObject` to read
+ * `''` as a real (unmatchable) name would silently convert a hook firing on
+ * every object into one firing on none — the same class of defect pointing the
+ * other way, which is why #5928 declined to do it in passing. A throw at the
+ * door changes no dispatch and leaves nothing to misread.
+ *
+ * Note the asymmetry with {@link assertValidHookExcludeObjects}, which
+ * deliberately ACCEPTS `[]`: on the subtract face an empty list is the honest
+ * spelling of "subtract nothing", identical to omitting the key. On the allow
+ * face an empty list says "admit nothing", which is a hook that can never fire.
+ * Same value, opposite meaning, because the faces compose in opposite
+ * directions — and `[]` is named in #4281's own message, so accepting it here
+ * would contradict the ruling this reuses.
+ */
+function assertValidHookObject(
+  object: string | string[] | undefined,
+  event: string,
+): void {
+  if (object === undefined) return;
+  const names = hookTargetList(object);
+  const empty =
+    names.length === 0
+    || names.some((name) => typeof name !== 'string' || name.trim().length === 0);
+  if (!empty) return;
+  throw new Error(
+    `[ObjectQL] Hook '${event}' declares an empty \`object\` target. An empty target is `
+    + 'not "no target": `\'\'` is falsy, so the allow face is skipped entirely and the hook '
+    + 'registers on EVERY object, while `[]` and `[\'\']` admit no object name at all, so the '
+    + 'hook could never fire (ADR-0078: no silently inert declaration). Name the object(s) — '
+    + "`object: 'account'` or `object: ['account', 'contact']` — or, if firing on every "
+    + "object really is the intent, write the wildcard explicitly: `object: '*'`.",
+  );
+}
+
+/**
+ * [#6573] Refuse a scope whose two faces cancel each other out —
+ * `{ object: 'account', excludeObjects: 'account' }` and its list forms.
+ *
+ * The exclusion face subtracts from the allow face, so when the allow face is a
+ * FINITE enumeration and every name in it is also excluded, the admitted set is
+ * empty and the entry can never fire. #5928 named only three refusals (`''`,
+ * `['']`, and `'*'` in the excludes) and this shape falls outside their letter,
+ * so it was left registering silently — the same ADR-0078 inert declaration
+ * those three exist to prevent, reached by arithmetic instead of by a single
+ * bad name.
+ *
+ * Only a finite allow face can be decided here. `'*'` (and an absent `object`)
+ * admits an OPEN universe — `applyObjectRegistryMutation` registers objects
+ * into a running engine — so no finite exclusion list can empty it, and those
+ * scopes are left alone. `'*'` inside `excludeObjects` is the one exclusion
+ * that WOULD empty them, and it is already refused by
+ * {@link assertValidHookExcludeObjects}.
+ *
+ * Runs after both faces have been validated individually, so every name here is
+ * a non-blank string and the exclusion list carries no wildcard.
+ */
+function assertHookScopeNotSelfCancelling(
+  object: string | string[] | undefined,
+  excludeObjects: string | string[] | undefined,
+  event: string,
+): void {
+  if (object === undefined || excludeObjects === undefined) return;
+  const allow = hookTargetList(object);
+  // An open allow face cannot be emptied by a finite subtraction.
+  if (allow.length === 0 || allow.includes('*')) return;
+  const deny = hookTargetList(excludeObjects);
+  if (deny.length === 0) return;
+  const denied = new Set(deny);
+  if (!allow.every((name) => denied.has(name))) return;
+  throw new Error(
+    `[ObjectQL] Hook '${event}' excludes every object its \`object\` target admits `
+    + `(object: ${JSON.stringify(allow)}, excludeObjects: ${JSON.stringify(deny)}), leaving `
+    + 'a hook that can never fire (ADR-0078: no silently inert declaration). An exclusion '
+    + 'subtracts from a WIDER allow face — widen `object` (or drop it for a global hook) or '
+    + 'remove the overlapping names from `excludeObjects`; if the hook really should not be '
+    + 'registered, do not register it.',
+  );
 }
 
 /** Function registry entry — see `registerFunction`. */
@@ -1448,9 +1539,15 @@ export class ObjectQL implements IObjectQLEngine {
     /** Stable name from metadata (set by `bindHooksToEngine`). */
     hookName?: string;
   }) {
-    // [#5928] Refuse an exclusion face that subtracts nothing (`''`) or
-    // everything (`'*'`) before anything is registered or reported.
+    // Refuse a scope that is statically decidable as meaningless before
+    // anything is registered or reported. Each face is checked on its own
+    // first, so the combined check below can assume well-formed names.
+    // [#5928] An exclusion face that subtracts nothing (`''`) or everything (`'*'`).
     assertValidHookExcludeObjects(options?.excludeObjects, event);
+    // [#6573] An allow face that names nothing (`''` → global, `[]`/`['']` → never fires).
+    assertValidHookObject(options?.object, event);
+    // [#6573] Two well-formed faces that cancel out (`'account'` minus `'account'`).
+    assertHookScopeNotSelfCancelling(options?.object, options?.excludeObjects, event);
     // [#3195] Guard against enum-vs-dispatch drift: a hook on an event the
     // engine never triggers would register "successfully" and then silently
     // never fire. Warn loudly rather than swallow it. Not a hard reject — a
@@ -2592,9 +2689,9 @@ export class ObjectQL implements IObjectQLEngine {
    * (#6806) — the free half of the resync, and the one that closes the shape
    * #5495's PROBE1 measured on a warm database.
    *
-   * The value is parsed with {@link readAutonumberCounter}, i.e. by exactly the
-   * anchoring rules #6468 gave the seeding scan, against the prefix/suffix this
-   * record's own format renders. So adopting is the same reading a cold re-seed
+   * The value is parsed with {@link readStoredAutonumberCounter}, i.e. by
+   * exactly the anchoring rules #6468 gave the seeding scan, against the
+   * prefix/suffix this record's own format renders. So adopting is the same reading a cold re-seed
    * would perform over the same row — which is the invariant to hold on to: a
    * warm counter must answer what a restart would answer.
    *
@@ -2611,8 +2708,8 @@ export class ObjectQL implements IObjectQLEngine {
    *     persisted, so the first generating insert's own scan reads it.
    *   - **Never lowers.** A counter that has already issued numbers must not go
    *     back over them; the max is a floor that only rises.
-   *   - **Only within this record's scope.** `readAutonumberCounter` returns
-   *     `undefined` for a value that does not carry the rendered prefix, so a
+   *   - **Only within this record's scope.** The reading returns `undefined`
+   *     for a value that does not carry the rendered prefix, so a
    *     historical import into last month's date scope cannot lift THIS
    *     month's counter. Its own scope's counter is left untouched, which is
    *     harmless: a scope is derived from the write instant, so a past scope's
@@ -2647,7 +2744,7 @@ export class ObjectQL implements IObjectQLEngine {
     const counterKey = `${object}.${field}.${probe.scope}`;
     const seeded = this.autonumberCounters.get(counterKey);
     if (seeded == null) return; // not seeded yet — the first seed scan will read this row
-    const supplied = readAutonumberCounter(value, probe.prefix, probe.suffix);
+    const supplied = readStoredAutonumberCounter(value, probe.prefix, probe.suffix);
     if (supplied == null || supplied <= seeded) return;
     this.autonumberCounters.set(counterKey, supplied);
     this.logger.debug('Autonumber counter lifted to an externally supplied value', {
@@ -2827,15 +2924,19 @@ export class ObjectQL implements IObjectQLEngine {
    *
    *   - **Either one declared ⇒ the slot is ANCHORED**: the counter is the digit
    *     run at the START of what follows the prefix, after removing the declared
-   *     suffix when this row carries it.
+   *     suffix when this row carries it. That half is spec's
+   *     `readAutonumberCounter` — the declared inverse of `renderAutonumber`,
+   *     which the SQL driver's scan calls too, so one edit moves both sides
+   *     (#6560).
    *   - **Neither declared ⇒ UNANCHORED**: the legacy reading is kept — the LAST
    *     digit run of the whole value. A format with no `{0..0}` slot renders a
    *     bare trailing counter, and values predating any format have no anchor to
-   *     read from, so this stays exactly as it was.
+   *     read from, so this stays exactly as it was. The SQL driver's legacy
+   *     reading of this case differs on purpose, which is why it stays per-side.
    *
-   * That reading is {@link readAutonumberCounter}, module-level rather than
-   * inline, because #6806's resync must read an exempt writer's supplied value
-   * by exactly these rules.
+   * The two together are {@link readStoredAutonumberCounter}, module-level
+   * rather than inline, because #6806's resync must read an exempt writer's
+   * supplied value by exactly these rules.
    *
    * The suffix is *stripped when it matches*, never *required* to match: a
    * dynamic suffix renders differently per row (`{000}-{YYYY}` is `-2025` on
@@ -2911,12 +3012,14 @@ export class ObjectQL implements IObjectQLEngine {
         for (const r of page) {
           const v = r?.[field];
           if (v == null) continue;
-          // The reading itself lives in `readAutonumberCounter` (the section
-          // above describes it) because #6806's adopt-on-exempt-write resync
-          // must read a supplied value by the SAME rules this scan reads a
-          // stored one — two copies of it would drift into two different
-          // answers for one row, which is a duplicate record number.
-          const counter = readAutonumberCounter(String(v), prefix, suffix);
+          // The reading itself lives in `readStoredAutonumberCounter` (the
+          // section above describes it) because #6806's adopt-on-exempt-write
+          // resync must read a supplied value by the SAME rules this scan reads
+          // a stored one — two copies of it would drift into two different
+          // answers for one row, which is a duplicate record number. Its
+          // anchored half is spec's `readAutonumberCounter`, the one the SQL
+          // driver's own scan calls (#6560).
+          const counter = readStoredAutonumberCounter(String(v), prefix, suffix);
           if (counter != null) max = Math.max(max, counter);
         }
       }

@@ -736,6 +736,79 @@ describe('defineStack - Navigation Cross-Reference Validation', () => {
     expect(() => defineStack(config)).not.toThrow();
   });
 
+  // Deep-link auto-run (#4848): `runAction` is a declared action-name
+  // reference — the spec half of the `?runAction=<name>` URL contract that
+  // cloud#844 shipped as private strings on both sides. A name resolving to
+  // no defined action is rejected at build time instead of shipping an entry
+  // whose auto-run silently never fires.
+  it('should detect a nav runAction referencing an undefined action', () => {
+    const config = {
+      manifest: baseManifest,
+      objects: [{ name: 'task', fields: { title: { type: 'text' as const } } }],
+      actions: [
+        { name: 'create_task', label: 'Create', objectName: 'task', target: 'noop' },
+      ],
+      apps: [
+        {
+          name: 'my_app',
+          label: 'My App',
+          navigation: [
+            { id: 'nav_tasks', type: 'object' as const, label: 'Tasks', objectName: 'task', runAction: 'ghost_action' },
+          ],
+        },
+      ],
+    };
+    expect(() => defineStack(config)).toThrow('cross-reference validation failed');
+    expect(() => defineStack(config)).toThrow("deep-link references action 'ghost_action' (via runAction)");
+  });
+
+  it('should accept a nav runAction resolving to a global or object-embedded action', () => {
+    const config = {
+      manifest: baseManifest,
+      objects: [
+        {
+          name: 'task',
+          fields: { title: { type: 'text' as const } },
+          actions: [{ name: 'create_task', label: 'Create', target: 'noop' }],
+        },
+      ],
+      actions: [
+        { name: 'archive_all', label: 'Archive all', target: 'noop' },
+      ],
+      apps: [
+        {
+          name: 'my_app',
+          label: 'My App',
+          navigation: [
+            { id: 'nav_tasks', type: 'object' as const, label: 'Tasks', objectName: 'task', runAction: 'create_task' },
+            { id: 'nav_archive', type: 'object' as const, label: 'Archive', objectName: 'task', viewName: 'all', runAction: 'archive_all' },
+          ],
+        },
+      ],
+    };
+    expect(() => defineStack(config)).not.toThrow();
+  });
+
+  // Size-gated like the dashboard/page/report checks in the same walk: a stack
+  // declaring NO actions may reference one provided by another package —
+  // lint's `validate-action-name-refs` still reports it there.
+  it('should tolerate a nav runAction when the stack declares no actions at all', () => {
+    const config = {
+      manifest: baseManifest,
+      objects: [{ name: 'task', fields: { title: { type: 'text' as const } } }],
+      apps: [
+        {
+          name: 'my_app',
+          label: 'My App',
+          navigation: [
+            { id: 'nav_tasks', type: 'object' as const, label: 'Tasks', objectName: 'task', runAction: 'plugin_action' },
+          ],
+        },
+      ],
+    };
+    expect(() => defineStack(config)).not.toThrow();
+  });
+
   // Children hang off `object` nav items too, not just `group` ones.
   it('should detect an undefined object nested under an object nav item', () => {
     const config = {

@@ -31,6 +31,30 @@ import { FileSystemRepository } from '../src/index.js';
 const ref = (name: string): MetaRef => ({ org: 'system', type: 'view', name });
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
+/**
+ * Deadline for the **positive** watcher-arming assertion at the bottom of this
+ * file, raced against the event promise — a healthy run still finishes in
+ * roughly the poll interval, so the number is only paid on the way to a
+ * failure.
+ *
+ * Same value, and same reason, as `fs-behavior.test.ts` and
+ * `watch-dot-root.test.ts`: the merge queue runs the FULL suite while this
+ * watcher rides `usePolling: 1000ms` plus an `awaitWriteFinish` stability
+ * window, and those are wall-clock timers that stretch under a saturated
+ * runner. PR #7208 was ejected twice on exactly that mechanism, once from each
+ * of those two files. This case is the third instance of the identical
+ * event-wait shape in the same package and shard, so it is widened with them
+ * rather than left as the next one to eject.
+ */
+const EVENT_WAIT_MS = 20_000;
+
+/**
+ * Per-case ceiling. Must clear a full `EVENT_WAIT_MS` plus setup, or the case
+ * dies on the vitest timeout before reaching its own deadline — reporting as a
+ * timeout instead of as the missing event.
+ */
+const WATCHER_CASE_TIMEOUT_MS = 45_000;
+
 describe('FileSystemRepository — attaching creates nothing on disk (#7000)', () => {
   /** Stands in for the project directory: nothing below it exists yet. */
   let base: string;
@@ -166,12 +190,12 @@ describe('FileSystemRepository — attaching creates nothing on disk (#7000)', (
       JSON.stringify({ label: 'externally edited' }, null, 2),
     );
 
-    await Promise.race([collector, sleep(8000)]);
+    await Promise.race([collector, sleep(EVENT_WAIT_MS)]);
     await iter.return?.(undefined);
 
     expect(collected).toHaveLength(1);
     expect(collected[0]!.op).toBe('update');
     expect(collected[0]!.source).toBe('fs');
     expect(collected[0]!.actor).toBe('fs');
-  }, 20_000);
+  }, WATCHER_CASE_TIMEOUT_MS);
 });

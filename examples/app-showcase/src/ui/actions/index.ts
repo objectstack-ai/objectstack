@@ -173,14 +173,37 @@ export const LogTimeAction = defineAction({
   refreshAfter: true,
 });
 
-/** global nav command-palette action. */
+/**
+ * global nav command action — "New Task".
+ *
+ * `type: 'form'` + an `<object>.<view>` FORM-view target, structurally
+ * identical to `LogTimeAction` above. It used to be `type: 'modal'` +
+ * `target: 'showcase_component_gallery'` — a command labelled "New Task" whose
+ * target named the showcase HOME PAGE, so the dispatch opened the welcome page
+ * inside a dialog with zero form controls and nothing to create a task with
+ * (#6739).
+ *
+ * The fix is the TYPE, not the target. A `type: 'modal'` target names a PAGE
+ * and only a page: the spec TSDoc (`packages/spec/src/ui/action.zod.ts`), the
+ * published docs (`content/docs/ui/actions.mdx`) and `defineStack`'s
+ * cross-reference walk (`packages/spec/src/stack.zod.ts`) all say so, and the
+ * walk REJECTS a registered modal action whose target is not a declared page —
+ * so "just point the modal at `showcase_task`" is a build error, not a fix
+ * (maintainer ruling, #6739). Opening an object's form is what `type: 'form'`
+ * is for, and it is validated: a form target pointing at a LIST view is itself
+ * a build error (#2554, see LogTimeAction).
+ *
+ * Coverage is not lost: `QuickViewAction` above is the corpus's
+ * modal-targeting-a-page specimen, and there the "open a dialog/page" semantics
+ * match its "Quick View" label.
+ */
 export const NewTaskAction = defineAction({
   name: 'showcase_new_task',
   label: 'New Task',
   icon: 'plus',
   objectName: task,
-  type: 'modal',
-  target: 'showcase_component_gallery',
+  type: 'form',
+  target: 'showcase_task.edit',
   locations: ['global_nav'],
   refreshAfter: true,
 });

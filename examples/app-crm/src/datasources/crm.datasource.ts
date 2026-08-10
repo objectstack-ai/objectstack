@@ -33,9 +33,13 @@ export const CrmDatasource = defineDatasource({
  *
  * The label no longer promises read-only, because nothing here can deliver it:
  * `external.allowWrites: false` is the one enforced write gate and it applies
- * only to FEDERATED datasources, while this one is local and managed. Whether a
- * managed datasource should have a read-only gate at all is #4584 — until that
- * is answered, the honest demo is routing, not a safety claim.
+ * only to FEDERATED datasources, while this one is local and managed. #4584
+ * settled that a managed datasource gets NO platform read-only gate, on purpose:
+ * read-only is a database account privilege (`GRANT SELECT`), because an
+ * ObjectQL-only check cannot stop a direct connection, a migration or DDL, and a
+ * gate that holds in one path is worse than none. So the honest demo here is
+ * routing, not a safety claim — see "Read-only: grant it at the database, not in
+ * metadata" in the Database Drivers guide.
  */
 export const CrmAnalyticsDatasource = defineDatasource({
   name: 'crm_analytics',

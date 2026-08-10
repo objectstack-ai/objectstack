@@ -278,3 +278,75 @@ export function renderAutonumber(input: RenderAutonumberInput): RenderedAutonumb
     : `${prefix}${String(seq).padStart(width, '0')}${suffix}`;
   return { prefix, suffix, scope, value };
 }
+
+/**
+ * Read the counter back out of ONE stored record number — the inverse companion
+ * of {@link renderAutonumber}, and the reason this file's header says "shared by
+ * the ObjectQL engine and the SQL driver": both sides MUST call this rather than
+ * re-derive the rule, in either direction.
+ *
+ * # Why this lives here (#6560)
+ *
+ * `renderAutonumber` composes `prefix + zero-padded(seq) + suffix`, so a format
+ * with tokens AFTER the `{0..0}` slot renders a value that does NOT end in its
+ * counter (`{000}-{YYYY}` → `001-2026`). PR #6553 (#6468) taught both seeding
+ * paths to locate the counter by that declared pair — but as two hand-written
+ * copies of the same four lines, one in `packages/objectql` and one in
+ * `packages/drivers/driver-sql`. The defect they were fixing was *precisely*
+ * that shape: two independent readings of one composition rule had drifted into
+ * two DIFFERENT wrong answers over one dataset, so the record-number band a
+ * tenant received depended on which driver happened to run, and numbers burned
+ * that way are not reclaimable.
+ *
+ * The maintainer's ruling on #6560 (2026-08-10, and twice on 2026-08-08) puts
+ * the reverse rule beside the forward one: the composition is spec's, so its
+ * inverse is spec's, and no lower package exists for both consumers to share.
+ * Pure and non-authorable — no Zod, no vocabulary, nothing acceptance-facing.
+ *
+ * # The rule
+ *
+ * `prefix` and `suffix` are `renderAutonumber`'s own declared output for the
+ * record being written; a caller passing anything else is asking a question this
+ * function does not answer.
+ *
+ *   - **Either one non-empty ⇒ the slot is ANCHORED**: the counter is the digit
+ *     run at the START of what follows `prefix`, after removing `suffix` when
+ *     this value carries it.
+ *   - The suffix is stripped *when it matches*, never *required* to match. A
+ *     dynamic suffix renders differently per row (`{000}-{YYYY}` is `-2025` on
+ *     last year's rows) while the counter scope is the rendered PREFIX — `''`
+ *     there — so those rows share this very counter and must still be read.
+ *     Requiring the match would read BELOW the real max, which is the
+ *     duplicate-record-number harm #6249 fixed on the scan side.
+ *   - A value outside the scope (it does not carry `prefix`) reads as
+ *     `undefined`: it belongs to another counter and must not lift this one.
+ *     Callers that pre-filtered with a looser matcher — a SQL `LIKE` under a
+ *     case-insensitive collation — get that re-check here for free.
+ *
+ * `undefined` means "this value teaches this counter nothing", never `0`.
+ *
+ * # What this deliberately does NOT decide
+ *
+ * An UNANCHORED slot (both strings empty) has no canonical reading, and this
+ * returns `undefined` for it rather than inventing one. The two consumers keep
+ * *different* legacy readings there — the engine takes the LAST digit run of the
+ * value, the SQL driver concatenates every digit — and PR #6553 preserved both
+ * byte-for-byte on purpose: a format with no `{0..0}` slot renders a bare
+ * trailing counter, and values predating any format have no anchor at all.
+ * Hoisting either one here would make this contract claim an agreement that does
+ * not exist. Each side documents its own fallback at its own call site.
+ *
+ * The digit match is the linear `/^\d+/` — a backtracking lookahead here is a
+ * polynomial-ReDoS sink on stored values full of zeros (CodeQL
+ * js/polynomial-redos).
+ */
+export function readAutonumberCounter(value: string, prefix: string, suffix: string): number | undefined {
+  if (prefix === '' && suffix === '') return undefined;
+  if (prefix && !value.startsWith(prefix)) return undefined;
+  let core = value.slice(prefix.length);
+  if (suffix && core.endsWith(suffix)) core = core.slice(0, core.length - suffix.length);
+  const head = core.match(/^\d+/);
+  if (!head) return undefined;
+  const n = parseInt(head[0], 10);
+  return Number.isFinite(n) ? n : undefined;
+}

@@ -15,6 +15,30 @@ const baseRef = (name: string): MetaRef => ({
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
+/**
+ * Deadline for a **positive** watcher assertion — the longest a case waits for
+ * an event it expects to arrive. Raced against the event promise, so a healthy
+ * run still finishes in roughly the poll interval; the number is only ever
+ * paid on the way to a failure.
+ *
+ * Sized for the merge queue, not for a quiet laptop. The queue runs the FULL
+ * suite (PR-side CI runs only the affected subset), and this repository's
+ * watcher rides `usePolling: 1000ms` plus an `awaitWriteFinish` stability
+ * window — wall-clock timers that stretch under a saturated runner while the
+ * assertions themselves are unaffected. The `chokidar: external file change`
+ * case below ejected PR #7208 from the queue on its old 3s deadline while
+ * being green on the identical SHA in PR CI; `watch-dot-root.test.ts` ejected
+ * it a second time on an 8s one. Both are widened to this value.
+ */
+const EVENT_WAIT_MS = 20_000;
+
+/**
+ * Per-case ceiling for the watcher cases. Must clear a full `EVENT_WAIT_MS`
+ * plus setup, or the case dies on the vitest timeout before reaching its own
+ * deadline — which reports as a timeout instead of as the missing event.
+ */
+const WATCHER_CASE_TIMEOUT_MS = 45_000;
+
 describe('FileSystemRepository — on-disk semantics', () => {
   let root: string;
   let repo: FileSystemRepository;
@@ -98,14 +122,14 @@ describe('FileSystemRepository — on-disk semantics', () => {
     const file = path.join(root, 'view', 'externally_edited.json');
     await fs.writeFile(file, JSON.stringify({ label: 'externally edited' }, null, 2));
 
-    await Promise.race([collectorDone, sleep(3000)]);
+    await Promise.race([collectorDone, sleep(EVENT_WAIT_MS)]);
     await iter.return?.(undefined);
 
     expect(collected).toHaveLength(1);
     expect(collected[0]!.op).toBe('update');
     expect(collected[0]!.source).toBe('fs');
     expect(collected[0]!.actor).toBe('fs');
-  }, 10000);
+  }, WATCHER_CASE_TIMEOUT_MS);
 
   it('chokidar: own writes do not re-trigger events (self-write suppression)', async () => {
     repo = new FileSystemRepository({ root, org: 'system' });

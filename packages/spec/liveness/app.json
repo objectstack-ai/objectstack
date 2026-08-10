@@ -145,6 +145,13 @@
           "evidence": "objectui @940ba24: packages/layout/src/NavigationRenderer.tsx:416-418",
           "note": "serialized as filter[<field>]=<value> params onto the bare /data surface (objectui ADR-0055); exclusivity with recordId/viewName is parse-rejected (objectNavTargetExclusivity)."
         },
+        "runAction": {
+          "status": "planned",
+          "verifiedAt": "2026-08-10",
+          "authorWarn": true,
+          "authorHint": "The shell does not consume the declared slot yet — until the objectui half of #4848 lands, deep-link auto-run only fires via the transitional `?runAction=<name>` URL query param (objectui's EnvironmentListToolbar useAutoRunCreate, pinned by cloud#1048).",
+          "note": "[#4848] Contract-first spec half of the SDUI deep-link 'navigate = run action' promotion: the declared action-name reference IS validated at authoring (framework packages/spec/src/stack.zod.ts validateCrossReferences nav walk; packages/lint/src/validate-action-name-refs.ts nav runAction arm; runAction+recordId parse-rejected by objectNavTargetExclusivity), but no shipped shell reads the declared slot yet — the live consumer of the SEMANTICS is the raw URL query param read (objectui EnvironmentListToolbar's useAutoRunCreate, per cloud#1048's pin). `planned` + authorWarn per enforce-or-mark, same as object.externalSharingModel's P1: authors get told the auto-run does not fire from this slot yet. Flip to `live` with a NavigationRenderer evidence pointer when the objectui consumer card lands."
+        },
         "children": {
           "status": "live",
           "verifiedAt": "2026-08-01",

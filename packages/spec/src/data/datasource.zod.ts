@@ -64,8 +64,11 @@ const RETIRED_CAPABILITIES: Record<string, string> = {
     + 'so a datasource labelled a read replica accepted writes exactly like any other. The one '
     + 'enforced datasource-wide write gate is `external.allowWrites: false`, and it applies ONLY '
     + 'to a federated datasource (`schemaMode` other than `managed`) — for a managed datasource '
-    + 'there is currently no read-only gate at all, so delete the key rather than trusting it. '
-    + 'Tracked in #4584.',
+    + 'there is no read-only gate at all, so delete the key rather than trusting it. #4584 '
+    + 'settled that this stays so ON PURPOSE: grant the connection SELECT-only at the database '
+    + '(`GRANT SELECT`), which no direct connection, migration or DDL can talk past — an '
+    + 'application-layer flag holds in the ObjectQL path only, and one that looks like a boundary '
+    + 'without being one is worse than none.',
 };
 
 /**

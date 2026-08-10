@@ -656,6 +656,7 @@
     "parseFilterAST": "src/data/filter.zod.ts#parseFilterAST (function)",
     "percentScaleOf": "src/data/percent-scale.ts#percentScaleOf (function)",
     "provisionPrimary": "src/data/display-name.ts#provisionPrimary (function)",
+    "readAutonumberCounter": "src/data/autonumber-format.ts#readAutonumberCounter (function)",
     "reduceFilterKeyVerdict": "src/data/filter-verdict.ts#reduceFilterKeyVerdict (function)",
     "reduceFilterVerdict": "src/data/filter-verdict.ts#reduceFilterVerdict (function)",
     "referenceTargetOf": "src/data/field-value.zod.ts#referenceTargetOf (function)",

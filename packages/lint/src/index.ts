@@ -166,6 +166,7 @@ export {
   VISIBILITY_ROOT_MISLAYERED,
   VISIBILITY_BARE_IDENTIFIER,
   VISIBILITY_PREDICATE_SYNTAX,
+  VISIBILITY_PREDICATE_OVER_BUDGET,
 } from './validate-visibility-predicates.js';
 export type {
   VisibilityFinding,
@@ -173,6 +174,17 @@ export type {
   VisibilityLayer,
   VisibilityOptions,
 } from './validate-visibility-predicates.js';
+
+export {
+  validatePredicatePathRefs,
+  PREDICATE_PATH_UNRESOLVED,
+  PREDICATE_PATH_UNROOTED,
+} from './validate-predicate-path-refs.js';
+export type {
+  PredicatePathFinding,
+  PredicatePathSeverity,
+  PredicatePathOptions,
+} from './validate-predicate-path-refs.js';
 
 export {
   validateCapabilityReferences,
