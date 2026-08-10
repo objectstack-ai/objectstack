@@ -1240,7 +1240,8 @@ export type EngineMiddleware = (
 
 /**
  * The stack collections the engine decomposes into individual registry items —
- * ONE list, read by BOTH registration seams (the manifest seam in
+ * ONE list, read by the ONE body both registration seams run
+ * (`registerMetadataCollections()`, called from the manifest seam in
  * `registerApp()` and the nested-plugin seam in `registerPlugin()`).
  *
  * ## Why this is one constant and not two lists (#7049)
@@ -1255,13 +1256,23 @@ export type EngineMiddleware = (
  * of the two lists, which is how the remaining four survived it.
  *
  * The two loops were measured against each other before this was merged. They
- * differ in four ways — which object they read (`manifest` vs `plugin`), which
+ * differed in four ways — which object they read (`manifest` vs `plugin`), which
  * package id they stamp (both resolve to the SAME parent package: a nested
  * plugin contributes under its parent's ownership), a per-key `debug` line, and
  * the manifest seam's aggregated-view expansion plus its warn-on-nameless-item.
- * Every one of those lives in the loop BODY. Not one of them is a reason for
- * the two seams to enumerate different collections, so the enumeration is
- * shared and the divergence is now unrepresentable rather than merely unnoticed.
+ * Every one of those lived in the loop BODY. Not one of them was a reason for
+ * the two seams to enumerate different collections, so the enumeration was
+ * shared and that divergence is now unrepresentable rather than merely unnoticed.
+ *
+ * ## …and why the BODY is shared too (#7163)
+ *
+ * The last two entries on that list were not stylistic. The aggregated-view
+ * expansion is what makes ADR-0017's dual-read work, so the seam that lacked it
+ * under-registered every nested plugin's views silently — see
+ * `registerMetadataCollections()`, which is now the single body both seams run,
+ * for the measurement. Sharing the list made the seams' collection SET
+ * unanswerable-differently; sharing the body does the same for what they DO
+ * with a collection they both see.
  *
  * `check:stack-collection-maps` pins this list against
  * `ObjectStackDefinitionSchema` in both directions (#6242); it used to pin the
@@ -3435,40 +3446,10 @@ export class ObjectQL implements IObjectQLEngine {
           });
       }
 
-      // 5. Register all other metadata types generically.
-      //    The collection list is `METADATA_ARRAY_KEYS` (module scope) and is
-      //    SHARED with the nested-plugin seam in `registerPlugin()` — see the
-      //    constant's docblock for why the two seams may not enumerate
-      //    different collections (#7049).
-      for (const key of METADATA_ARRAY_KEYS) {
-          const items = (manifest as any)[key];
-          if (Array.isArray(items) && items.length > 0) {
-              this.logger.debug(`Registering ${key} from manifest`, { id, count: items.length });
-              for (const item of items) {
-                  const itemName = resolveMetadataItemName(key, item);
-                  if (itemName) {
-                      const toRegister = item.name === itemName ? item : { ...item, name: itemName };
-                      this._registry.registerItem(pluralToSingular(key), toRegister, 'name' as any, id);
-                      // "Object has-many View" (ADR-0017): a `defineView` document
-                      // aggregates an object's views. Register the container under
-                      // the bare <object> key (above, back-compat) AND expand it
-                      // into independent ViewItems registered under <object>.<key>,
-                      // so `getViewsByObject()` / `GET /meta/view?object=` surface
-                      // the per-view `package` layer the switcher + Studio consume.
-                      if (key === 'views' && isAggregatedViewContainer(toRegister)) {
-                          for (const vi of expandViewContainer(itemName, toRegister)) {
-                              for (const w of vi._diagnostics?.warnings ?? []) {
-                                  this.logger.warn(`View expansion warning for '${vi.name}': ${w.message}`, { from: id });
-                              }
-                              this._registry.registerItem('view', vi, 'name' as any, id);
-                          }
-                      }
-                  } else {
-                      this.logger.warn(`Skipping ${pluralToSingular(key)} without a derivable name`, { id });
-                  }
-              }
-          }
-      }
+      // 5. Register all other metadata types generically — the SAME seam the
+      //    nested-plugin path uses (`registerMetadataCollections`), so the two
+      //    entry points cannot answer differently for one collection (#7163).
+      this.registerMetadataCollections(manifest, id, 'manifest');
 
       // 6. Register seed data as metadata (keyed by target object name)
       const seedData = (manifest as any).data;
@@ -3582,21 +3563,85 @@ export class ObjectQL implements IObjectQLEngine {
           }
       }
 
-      // Register metadata arrays (actions, views, triggers, etc.) from the SAME
-      // list the manifest seam uses — same stamping seam, one level down: a
+      // Register metadata arrays (actions, views, triggers, etc.) through the
+      // SAME seam the manifest path uses — same stamping seam, one level down: a
       // nested plugin's declarations must carry the parent package's ADR-0010
       // provenance too, or the declared-≠-enforced hole reopens for packages
       // that ship a collection from a nested plugin (`capabilities` #5870;
       // `jobs` / `emailTemplates` / `tools` / `skills` #7049, which is why the
-      // list is no longer copied here to be patched one name at a time).
+      // list is no longer copied here to be patched one name at a time; the
+      // aggregated-view expansion, #7163, for why the loop BODY is no longer
+      // copied here either).
+      this.registerMetadataCollections(plugin, ownerId, 'nested plugin');
+  }
+
+  /**
+   * Register one source's stack collections into the registry — the SINGLE
+   * body both registration seams run.
+   *
+   * ## Why this is one method and not two loops (#7163)
+   *
+   * It used to be two, and #7049 only got halfway: that card hoisted the
+   * ENUMERATION (`METADATA_ARRAY_KEYS`) out of the two seams after they had
+   * drifted four collections apart, and measured the loop bodies against each
+   * other on the way past — recording that they still differed in a per-key
+   * `debug` line, the manifest seam's aggregated-view expansion, and its
+   * warn-on-nameless-item. Sharing the list made "which collections does a
+   * seam see?" unanswerable-differently; it left "what does a seam DO with a
+   * collection both see?" still answered in two places.
+   *
+   * `views` is where that cost was measurable. "Object has-many View"
+   * (ADR-0017 §2, §3.2) makes the loader **dual-read**: an aggregated
+   * `defineView` container is registered under the bare `<object>` key for
+   * back-compatible reads AND expanded into independent `ViewItem`s under
+   * `<object>.<viewKey>`. Only the expanded items carry `viewKind`, and
+   * `getViewsByObject()` (`metadata-manager.ts`) filters on exactly that — so
+   * a container that is registered but never expanded is invisible to it, and
+   * to `GET /meta/view?object=` and the view switcher above it. The manifest
+   * seam expanded; the nested-plugin seam did not, so one container registered
+   * `['account', 'account.all_accounts', 'account.form']` through the manifest
+   * and `['account']` through a nested plugin. No refusal, no diagnostic: a
+   * package shipping its views through `manifest.plugins[]` simply had no
+   * views, as far as every reader of the expanded layer was concerned.
+   *
+   * Both differences had the same structure — a loop body copied, then
+   * improved on one side only — so the body is shared rather than reconciled,
+   * for the reason #7049 gave for the list: a divergence that cannot be
+   * written down cannot be re-introduced by the next hand patch. What legally
+   * varies between the seams is passed in: which object is read, which package
+   * id is stamped (both resolve to the SAME owning package — a nested plugin
+   * contributes under its parent's ownership), and the label the `debug` line
+   * names the source with.
+   *
+   * @param source   The manifest or nested-plugin config to read collections from.
+   * @param ownerId  The owning package id — stamped as ADR-0010 provenance.
+   * @param sourceLabel Human-readable source name for the `debug` line.
+   */
+  private registerMetadataCollections(source: any, ownerId: string, sourceLabel: string) {
       for (const key of METADATA_ARRAY_KEYS) {
-          const items = (plugin as any)[key];
-          if (Array.isArray(items) && items.length > 0) {
-              for (const item of items) {
-                  const itemName = resolveMetadataItemName(key, item);
-                  if (itemName) {
-                      const toRegister = item.name === itemName ? item : { ...item, name: itemName };
-                      this._registry.registerItem(pluralToSingular(key), toRegister, 'name' as any, ownerId);
+          const items = (source as any)?.[key];
+          if (!Array.isArray(items) || items.length === 0) continue;
+          this.logger.debug(`Registering ${key} from ${sourceLabel}`, { id: ownerId, count: items.length });
+          for (const item of items) {
+              const itemName = resolveMetadataItemName(key, item);
+              if (!itemName) {
+                  this.logger.warn(`Skipping ${pluralToSingular(key)} without a derivable name`, { id: ownerId });
+                  continue;
+              }
+              const toRegister = item.name === itemName ? item : { ...item, name: itemName };
+              this._registry.registerItem(pluralToSingular(key), toRegister, 'name' as any, ownerId);
+              // "Object has-many View" (ADR-0017): a `defineView` document
+              // aggregates an object's views. Register the container under the
+              // bare <object> key (above, back-compat) AND expand it into
+              // independent ViewItems registered under <object>.<key>, so
+              // `getViewsByObject()` / `GET /meta/view?object=` surface the
+              // per-view `package` layer the switcher + Studio consume.
+              if (key === 'views' && isAggregatedViewContainer(toRegister)) {
+                  for (const vi of expandViewContainer(itemName, toRegister)) {
+                      for (const w of vi._diagnostics?.warnings ?? []) {
+                          this.logger.warn(`View expansion warning for '${vi.name}': ${w.message}`, { from: ownerId });
+                      }
+                      this._registry.registerItem('view', vi, 'name' as any, ownerId);
                   }
               }
           }

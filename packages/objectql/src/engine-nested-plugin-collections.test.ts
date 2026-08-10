@@ -156,14 +156,14 @@ describe('the two registration seams enumerate ONE collection list (#7049)', () 
    * make the test pass — see each entry.
    */
   const NOT_COMPARABLE: ReadonlyArray<readonly [key: string, why: string]> = [
-    // `views` has no top-level `name` and the manifest seam additionally expands
-    // an aggregated container into per-view items (ADR-0017); that expansion is
-    // a LOOP-BODY difference between the seams, not an enumeration difference,
-    // and closing it changes what a nested plugin serves. Measured while closing
-    // this card and filed as #7163 rather than folded in: one container
-    // registers `['account', 'account.all_accounts', 'account.form']` from a
-    // manifest and `['account']` from a nested plugin.
-    ['views', 'manifest seam additionally expands aggregated containers (ADR-0017) — #7163'],
+    // `views` used to sit here: the manifest seam expanded an aggregated
+    // container into per-view items (ADR-0017) and the nested seam did not — a
+    // LOOP-BODY difference rather than an enumeration one, so this card filed it
+    // as #7163 instead of folding it in. #7163 closed it by sharing the body
+    // (`registerMetadataCollections()`), so `views` is comparable now and is
+    // back in `CANDIDATES` below; the aggregated-container half of its parity is
+    // pinned in `engine-nested-plugin-view-expansion.test.ts`.
+    //
     // Retired kinds the loop still iterates; the schema rejects the keys long
     // before either seam runs, so a fixture cannot exercise them (the gate
     // carries them as an `extra` waiver row for the same reason).
@@ -184,7 +184,7 @@ describe('the two registration seams enumerate ONE collection list (#7049)', () 
    * behaviour and not the same literal the implementation reads.
    */
   const CANDIDATES = [
-    'actions', 'pages', 'dashboards', 'reports', 'datasets', 'themes',
+    'actions', 'views', 'pages', 'dashboards', 'reports', 'datasets', 'themes',
     'flows', 'webhooks', 'jobs',
     'permissions', 'capabilities', 'sharingRules',
     'agents', 'tools', 'skills', 'apis',
@@ -215,8 +215,12 @@ describe('the two registration seams enumerate ONE collection list (#7049)', () 
 
   it('records why each excluded collection is not comparable, rather than dropping it silently', () => {
     for (const [, why] of NOT_COMPARABLE) expect(why.length).toBeGreaterThan(0);
+    // `views` left this list in #7163 — the only entry that was ever excluded
+    // for a BEHAVIOUR difference rather than a retired-kind one. Every survivor
+    // is a kind the schema rejects before either seam runs.
     expect(NOT_COMPARABLE.map(([k]) => k)).toEqual([
-      'views', 'workflows', 'approvals', 'roles', 'profiles', 'policies', 'ragPipelines',
+      'workflows', 'approvals', 'roles', 'profiles', 'policies', 'ragPipelines',
     ]);
+    expect(NOT_COMPARABLE.map(([k]) => k)).not.toContain('views');
   });
 });
