@@ -366,8 +366,30 @@ function referenceIdsOf(value: any): string[] {
  * field unresolvable — falls back to the raw id, which is what this function
  * returned before the branch existed. The change is therefore restore-invariant:
  * it can only replace an id with a title, never a title with an id.
+ *
+ * [#7289] `optionLabelFor` is the locale-bound lookup for THIS field's option
+ * labels — `objects.<object>.fields.<field>.options.<value>`, the key shape the
+ * shipped bundles actually carry (`translations/zh-CN.objects.generated.ts`:
+ * `sys_audit_log.fields.action.options.create = "创建"`). Like `titlesFor` it is an
+ * already-resolved lookup and never I/O, so this function stays SYNCHRONOUS;
+ * and like `titlesFor`, a caller with nothing to resolve passes nothing and
+ * keeps today's behaviour exactly. That opt-in shape is load-bearing rather
+ * than stylistic — see {@link renderMilestoneSummary}, which passes nothing on
+ * purpose and is documented there.
+ *
+ * The lookup is consulted only where a DECLARED OPTION MATCHED, so a value
+ * matching no option still renders `String(value)` as before. Bundles are
+ * generated FROM the declared options (`os i18n extract`), so a bundle key with
+ * no matching declared option cannot arise, and a miss falls straight back to
+ * the authored `label`. Same restore-invariance as the reference branch: it can
+ * only replace an authored label with that label's translation.
  */
-function displayFieldValue(field: any, value: any, titlesFor?: Map<string, string>): string {
+function displayFieldValue(
+  field: any,
+  value: any,
+  titlesFor?: Map<string, string>,
+  optionLabelFor?: (optionValue: string) => string | undefined,
+): string {
   if (value === null || value === undefined || value === '') return '∅';
   if (titlesFor && typeof field?.type === 'string' && REFERENCE_FIELD_TYPES.has(field.type)) {
     const ids = referenceIdsOf(value);
@@ -379,7 +401,7 @@ function displayFieldValue(field: any, value: any, titlesFor?: Map<string, strin
       const ov = o && typeof o === 'object' ? (o.value ?? o.name ?? o.label) : o;
       if (ov === value) {
         const ol = o && typeof o === 'object' ? (o.label ?? o.name ?? ov) : o;
-        return String(ol);
+        return optionLabelFor?.(String(ov)) ?? String(ol);
       }
     }
   }
@@ -437,6 +459,14 @@ function planTrackedLookupReads(
  * shape is the bundle's own (`objects.<object>.fields.<field>.label`), and a
  * miss returns `undefined` so the authored def label, then the machine key,
  * still answer exactly as before.
+ *
+ * [#7289] The select/picklist VALUE is localized through that same translator
+ * on the bundles' own option key shape, one line below the label. This branch's
+ * FRAME is fully localized — the verb template and the object label (ADR-0053 /
+ * framework#3039), and the field label since #7230 — so an authored-language
+ * option value was the single remaining untranslated token inside it
+ * (`阶段: Proposal → Closed Won` on a zh-CN page). Filling it makes the string
+ * uniformly localized instead of half-localized, which is the whole defect.
  */
 function renderTrackedChangeSummary(
   objectName: string,
@@ -456,8 +486,19 @@ function renderTrackedChangeSummary(
       (typeof field.label === 'string' && field.label.length > 0 ? field.label : key);
     const reference = typeof field.reference === 'string' ? field.reference : undefined;
     const titlesFor = reference ? lookupTitles?.get(reference) : undefined;
-    const from = displayFieldValue(field, oldVals ? oldVals[key] : undefined, titlesFor);
-    const to = displayFieldValue(field, newVals[key], titlesFor);
+    // Only a field that DECLARES options can consume this, so the ordinary
+    // tracked scalar allocates no closure; both calls below share the one.
+    const optionLabelFor = Array.isArray(field.options)
+      ? (optionValue: string): string | undefined =>
+          translate(`objects.${objectName}.fields.${key}.options.${optionValue}`)
+      : undefined;
+    const from = displayFieldValue(
+      field,
+      oldVals ? oldVals[key] : undefined,
+      titlesFor,
+      optionLabelFor,
+    );
+    const to = displayFieldValue(field, newVals[key], titlesFor, optionLabelFor);
     parts.push(`${label}: ${from} → ${to}`);
   }
   return parts.length > 0 ? parts.join('; ') : null;
@@ -571,6 +612,32 @@ function planMilestoneTokenReads(
  *
  * Restore-invariant for the same reason `displayFieldValue`'s branch is: an id
  * with no resolved title renders exactly as it did before.
+ *
+ * [#7289] Select option labels are deliberately NOT localized here, and the
+ * opt-out is BY CONSTRUCTION: no option resolver is handed to
+ * `displayFieldValue`, so a select token renders its AUTHORED label byte-for-byte
+ * as it did before that card. This is neither an oversight nor an accident of a
+ * shared helper — the tracked-change branch localizes them, and the asymmetry is
+ * the ruling, so it is recorded here rather than inferred from the call.
+ *
+ * The two branches differ in what SURROUNDS the token. #7290's title resolution
+ * is locale-INDEPENDENT: `usr_1` → `张伟` is the record's own datum, the same
+ * string in every locale, so it could be added to an untranslated sentence
+ * without giving that sentence a locale. An option label is locale-DEPENDENT
+ * rendering, and a milestone template is an author-written sentence with NO
+ * bundle key of its own — #7290 ruled translating templates a contract decision
+ * and left it. So the author's own option label is the only rendering
+ * guaranteed to agree with the sentence around it: template and option label are
+ * both authored metadata, in one language, by one author. Reading the bundle
+ * here would GUARANTEE a split sentence (`Deal moved to 已赢单`) in exactly the
+ * case the bundle exists for — authoring language ≠ workspace locale — trading
+ * the reported half-localized string for its mirror image.
+ *
+ * The tracked-change branch has the opposite geometry: its frame is fully
+ * localized, so there the authored value is the mismatch and translating it is
+ * the fix. Pinned in `audit-option-label-summary.test.ts` as a WITH-LOCALE
+ * milestone case, because the pre-existing seam case in
+ * `audit-milestone-summary.test.ts` boots with no locale and cannot bite here.
  */
 function renderMilestoneSummary(
   template: string,
