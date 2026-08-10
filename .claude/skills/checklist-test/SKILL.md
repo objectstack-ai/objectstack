@@ -1,5 +1,5 @@
 ---
-name: checklist-run
+name: checklist-test
 description: >
   Execute the platform test checklist (docs/qa/platform-checklist/) against a real
   running app and produce a run record. Use whenever the maintainer says "测一下
@@ -7,7 +7,7 @@ description: >
   file", "验证 <功能点>", or points at a framework source file and asks whether it
   still works. Takes a SELECTOR (item id · area · capability kind · priority · a
   release · or a source-file path) and drives every matched item through its steps
-  following RUNNER.md. The companion to `coverage-sweep` (which AUTHORS items); this
+  following RUNNER.md. The companion to `checklist-author` (which AUTHORS items); this
   one RUNS them. NOT a customer-published skill — internal agent tooling (lives in
   .claude/, never in the published `skills/` dir).
 metadata:
@@ -17,7 +17,7 @@ metadata:
   internal: true
 ---
 
-# Checklist run — execute selected items against a live app
+# Checklist test — execute selected items against a live app
 
 You resolve a **selector** to a set of checklist items, boot the app in isolation, drive
 each item's steps in the browser / over the API, and emit a **run record**. The method

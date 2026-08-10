@@ -2,7 +2,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
 // checklist-select — resolve a SELECTOR into the concrete set of platform-checklist
-// items to run. The deterministic front half of the `checklist-run` skill: the skill
+// items to run. The deterministic front half of the `checklist-test` skill: the skill
 // drives a browser, this script decides WHAT to drive, with zero LLM guesswork.
 //
 //   node scripts/checklist-select.mjs <selector> [--json] [--include-blocked]

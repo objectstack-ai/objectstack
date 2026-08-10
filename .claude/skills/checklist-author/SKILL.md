@@ -1,5 +1,5 @@
 ---
-name: coverage-sweep
+name: checklist-author
 description: >
   Re-audit the platform test checklist (docs/qa/platform-checklist/) for coverage
   gaps and author the missing items — the five-angle capability sweep. Use whenever
@@ -16,7 +16,7 @@ metadata:
   internal: true
 ---
 
-# Coverage sweep — keep the platform test checklist honest
+# Checklist author — the coverage sweep that keeps the checklist honest
 
 The canonical method lives in **`docs/qa/platform-checklist/SWEEP.md`** — read it
 first and follow it; this skill is the trigger and the orchestration contract, not a

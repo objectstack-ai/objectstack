@@ -11,13 +11,13 @@ acceptance oracle and captured evidence.
 Validated by `pnpm check:platform-checklist` (`scripts/check-platform-checklist.mjs`) —
 a zero-dependency structural + coverage check. **By maintainer decision it runs on a
 periodic MANUAL cadence, not in CI**: run it before a release, after a large platform
-surface lands, or alongside a `coverage-sweep` / `checklist-run`. It is a QA ledger, not
+surface lands, or alongside a `checklist-author` / `checklist-test`. It is a QA ledger, not
 a per-PR code gate, so an unrelated PR is never blocked by checklist drift. Execution
 protocol for agents: [RUNNER.md](./RUNNER.md). Run records: [runs/](./runs/README.md).
 
 **Two internal skills drive this ledger** (`.claude/skills/`, never published):
-`coverage-sweep` **authors** items (find gaps → write them, per
-[SWEEP.md](./SWEEP.md)); `checklist-run` **executes** them (pick items by selector →
+`checklist-author` **authors** items (find gaps → write them, per
+[SWEEP.md](./SWEEP.md)); `checklist-test` **executes** them (pick items by selector →
 drive them → emit a run record, per [RUNNER.md](./RUNNER.md)). The runner resolves what
 to test with `scripts/checklist-select.mjs <selector>` — an item id, an `area:`, a
 `capability:`, a `priority:`, a `since:vN` release, or a **`file:<path>`** that maps a
@@ -179,7 +179,7 @@ checklist drift. It runs on a **manual / periodic cadence** instead. Run
 - **after a large platform surface lands** — a new metadata kind, a new enum, a new area;
 - **whenever you touch the checklist** — the structural + coverage check catches a
   dangling id or a forgotten `revision` bump in your own edit;
-- **alongside a `coverage-sweep`** (find gaps) **or `checklist-run`** (execute items).
+- **alongside a `checklist-author`** (find gaps) **or `checklist-test`** (execute items).
 
 The trade-off of staying out of CI: a new capability kind or enum value that lands on
 `main` between runs is caught at the **next** manual run, not the moment it merged. The
