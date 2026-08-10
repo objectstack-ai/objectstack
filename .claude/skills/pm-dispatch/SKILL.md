@@ -52,7 +52,7 @@ write state only through these signals:
 | label `needs-user-decision` | a decision is **pending** — never dispatch, never auto-answer; it sits in the maintainer's inbox and MAY be surfaced again in round reports |
 | label `pm:on-hold` | a decision was **made** and the answer is "not now" — never dispatch AND never nag; wait for the restart condition recorded in the hold comment |
 | label `pm:blocked` + body line `Blocked-by: #N` | waiting on another issue/PR — skip at selection; re-check when #N closes |
-| label `target:<major>`(如 `target:v17`) | 发版阻塞(发版板)—— 分诊座位唯一生产;step 3 优先、step 9 计数、维护者清单查询消费;详见「发版板」 |
+| label `target:<major>`(如 `target:v17`) | 发版阻塞(发版板)—— **每个 backlog 恰好一个生产者**(objectstack 分诊座位 / objectui 整仓座位);step 3 优先、step 9 计数取**两仓之和**、维护者清单按**两条查询**消费(objectstack + objectui 各一条);详见「发版板」 |
 | label `pm:epic`(on a parent)| 整棵子树已委托给一个专职 epic PM(会话与文件领地写在**父单正文**;`label:pm:epic` 即全量索引,`pm:seat` 座位贴体系不重复记)— 其它 PM 一律不把该子树的 sub-issue 当候选(见「Epic 子树车道」) |
 | open PR referencing the issue | implemented, in review |
 | merged PR with `Fixes #n` | done (GitHub closes the issue) |
@@ -1251,8 +1251,21 @@ Prime Directive #10 是一个强力生产者,而循环原本只有「修掉」�
   阻塞照抄本节)。两侧各清完那一次之后**只有增量**,⛔ 永不再全量重扫 ——
   全量重扫正是此前历次一次性标注腐烂的那步。
 - **消费者三处**(a label exists iff something reads it):维护者的发版清单 =
-  `label:target:<major> is:open` 一条查询(与 `pm:seat` 状态板同构,标签即
-  看板);step 3 批次选择板上项优先;step 9 轮次报告第四健康指标。
+  **两条查询**(与 `pm:seat` 状态板同构,标签即看板)——
+  `repo:objectstack-ai/objectstack label:target:<major> is:open` 与
+  `repo:objectstack-ai/objectui label:target:<major> is:open`;等价写法是一条
+  org 级搜索 `org:objectstack-ai label:target:<major> is:open`(GitHub 全局
+  搜索页支持 `org:`,仓内 issue 列表页不支持 —— 所以两条查询是随处可用的那个
+  写法,org 级只是省一次切换。org 级还会顺带扫到 cloud,而 cloud **按本节规则
+  永不带这个标签**,所以那里出现命中本身就是误标信号,不是多出来的板上项)。
+  step 3 批次选择板上项优先;step 9 轮次报告第四健康指标 = **两张板之和**,
+  「归零 = 可发版」指两张都空,单看 objectstack 归零不是可发版。
+  **为什么是两条,而不是一条加过渡态**:rule 1 自 #7165 起是 file-at-destination
+  —— 落点在 objectui 的执行卡就**长在** objectui,它的 `target:<major>` 由
+  objectui 整仓座位在它自己的仓里生产(见上面「每个 backlog 恰好一个生产者」)。
+  objectui 那一条查询因此是这套所有权模型的**结构性后果**,不是存量迁移的残留、
+  也不会随哪一次清仓消失;只读 objectstack 一条的人**按设计**漏掉整个前端半边,
+  而漏掉的读数看上去和「板已清空」完全一样。
 - **鲜度**:与发现分诊轮同节奏(每 ~5 轮)对板上 open 项做过时前提检查 ——
   已修/不成立的摘牌 + 一句评论(main 一天 ~18 合并,阻塞判断有半衰期)。
 - **发版时刻 = 清板,不是重扫**:板上每条三选一 —— 修掉 / 摘牌(不再成立)/
@@ -1260,9 +1273,20 @@ Prime Directive #10 是一个强力生产者,而循环原本只有「修掉」�
   notes 的 known issues)。姊妹仓同标签:objectui **在自己仓里上板**,生产者是
   objectui 整仓座位(见上),修复经 console bundle 随 pin bump 进这次发布;
   cloud 独立部署不入板,advisory 单列。⇒ 发版时刻的清单因此是**两条查询**
-  (objectstack 与 objectui 各一条 `label:target:<major> is:open`),两张板都要
-  清到空;上面「消费者三处」仍写作一条查询,口径更新与发版前 console bump 的
-  衔接归 #6906,不在本次改动范围。
+  (口径见上面「消费者三处」),**两张板都要清到空**;三选一对两张板**逐条**
+  适用,⛔ 不因为「那是前端仓」就整批默认接受 —— objectui 板上项的三选一由
+  objectui 整仓座位执行,读数回贴给发版清单。
+  ⚠️ **「随 pin bump 进这次发布」是机制事实,不是流程保证 —— 反着读会以为
+  console bump 已被谁盯着(#6906 交付项 2 的核查结论;缺口另立单 #7275)。**
+  队列管家的 #6162 机械产出(见「入队与落地」B)判据是**窗口收口**
+  (`.objectui-sha` 落后 objectui main **且** objectui 合并队列已空),不是发版
+  时刻;而且它立的是 `pm:queue` 单,**按构造不带 `target:<major>`** —— 那张
+  bump 单因此既不在上面两条查询里,也没有对应的「明示接受」摘牌形态(#7268 是
+  2026-08-10 的实测标本:`pm:queue` 独一份)。发版**记录**另有硬门兜底
+  (`check:objectui-pin-fresh` —— 发版 PR 上 required、发布路径上 enforcing,
+  #3340 / #6170),所以陈旧 pin **发不出去**;缺的只是**发版时刻那张单或那次
+  豁免**,处置形态待裁。⛔ 在 #7275 有裁决之前,不要把「两张板已清空」读成
+  「console bump 也已就位」——这两件事今天没有任何机械关联。
 
 ### 1. Fetch candidates
 
@@ -2840,8 +2864,9 @@ area; that is the loop working, not failing):
 - **dispatchable inventory** — open `pm:queue` unassigned, and its trend;
 - **decision inbox** — `needs-user-decision` count awaiting the maintainer;
 - **finding median age** — aging findings mean the 发现分诊轮 is overdue;
-- **release blockers** — open `target:<major>` count and trend(归零 = 可发版;
-  清板协议见「发版板」)。
+- **release blockers** — open `target:<major>` count and trend,取 objectstack
+  与 objectui **两条查询之和**(归零 = **两张板都空** = 可发版,单看 objectstack
+  归零不是;查询口径与清板协议见「发版板」)。
 
 **波次收工点 —— 会话型座位的压缩节奏(维护者 2026-08-09 裁定,#6902 评论)。**
 班内节奏是「一波任务处理完 → 收工存档 → `/compact` → 再继续」,⛔ 不是一直跑到
