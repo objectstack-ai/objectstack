@@ -240,6 +240,13 @@ means "the realms named in the evidence", never "everywhere".
 
 ### ⚠️ An authoring/preview renderer is NOT a runtime consumer
 
+> **Scope narrowed 2026-08-10 (#7131) — read the next section with this one.** What
+> follows holds for a property that claims to **do** something: gate, bind, route,
+> filter, enforce. It does *not* settle a property whose declared effect is simply
+> to **be shown**, where the render is not a stand-in for the behaviour but *is* the
+> behaviour. None of the thirteen re-verifications below is reopened by that split —
+> all thirteen are behavioural keys.
+
 `live` means **authoring the property changes runtime behaviour**. A Studio
 `*.form.ts` input or a `metadata-admin/previews/*Preview.tsx` panel merely
 *echoes back what the author typed* — it proves the property round-trips, never
@@ -280,6 +287,58 @@ understated entry does have a cost: `undoable` sat behind a "declared but NOT
 enforced" warning for a month while it worked, which is an invitation to skip a
 shipped feature. Erring toward `dead` is the right default *and* a debt to
 re-verify.
+
+### Designer previews count as consumers (maintainer ruling, 2026-08-10, #7131)
+
+The section above is the *over-claim* guard. It also produced an under-claim, and
+the maintainer settled it directly:
+
+> **Maintainer ruling (2026-08-10, directed in session `session_01BPWqbmEFU8gJepBJTHESXd`): previews count as consumers.**
+>
+> A designer preview that renders a key to a human is a runtime consumer — the ledger's "no runtime consumer" verdict must include metadata-admin preview read points. The affected docs-shaped rows (`job.label`/`job.description`, `translation.label`/`.name`) re-grade from dead to live, and the ledger methodology note records the principle so the next sweep asks the question mechanically.
+
+**The mechanical rule, for the next sweep.** Before writing `"no runtime
+consumer"` — or any wording that means it — **enumerate the metadata-admin preview
+read points** for the type, in objectui, and say what you found. The population is
+small, enumerable, and registered by type name, so this is a lookup and not a
+search:
+
+```bash
+# 1. does this type have a preview at all?
+git -C ../objectui grep -n "registerMetadataPreview('<type>'" origin/main
+# 2. what does that preview read off the draft?
+git -C ../objectui show origin/main:packages/app-shell/src/views/metadata-admin/previews/<X>Preview.tsx \
+  | grep -n 'd\.<key>'
+```
+
+An absent preview is a finding to record, not a step to skip — "the type has no
+registered preview" is exactly the sentence a later sweep needs, and it is the one
+`translation.label`'s superseded *"no runtime consumer **in this repo**"* was
+missing. That hedge was never false; the cross-repo look simply was not taken,
+which is the blind spot `evidenceScope` (#4895) exists to expose.
+
+**Why this does not contradict the section above.** The two rules divide on what
+the property claims, not on what the surface is:
+
+| The property's declared effect | Does a preview render settle it? |
+|---|---|
+| **Display** — docs-shaped annotation, `label` / `description` / a title fallback | **Yes.** Being shown to a human is the whole of the claimed effect. There is no second layer where the "real" consumer would live, so the preview is not standing in for anything. |
+| **Behaviour** — gates, bindings, routes, filters, permissions | **No.** The 2026-07 sweep's verdict stands unchanged: 10 of 13 preview-cited entries were wrong. A panel echoing `shortcut` back is not a keybinding, and echoing `permissions` back is not a gate. |
+
+So the failure the section above records — a preview citation used as evidence
+that *something acts on* the value — is untouched. What is corrected is the
+opposite move: taking a preview's **absence from the search** as proof that
+*nothing reads* the value, for a key whose only job was ever to be read by a
+person.
+
+**What `live` does and does not mean on a re-graded row.** `job.label` is `live`
+because a human sees it in the designer; the scheduler still stores name/schedule
+only, and the row says so. A re-grade is **not** an ADR-0033 change: these four
+rows are docs-shaped, deliberately KEPT, and still not `authorWarn`'d — nothing
+about enforce-or-remove moves. Cite the preview the way any cross-repo evidence is
+cited: realm marker, pinned objectui commit, and a `producer` naming the
+`registerMetadataPreview` call plus the surface that resolves it — a preview no
+registry hands a draft to is a read point that never runs.
 
 ### How to verify a claim without fooling yourself
 
