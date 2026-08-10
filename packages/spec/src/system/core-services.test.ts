@@ -3,7 +3,7 @@ import {
   CoreServiceName,
   ServiceCriticalitySchema,
   ServiceRequirementDef,
-  ServiceStatusSchema,
+  KernelServiceStatusSchema,
   KernelServiceMapSchema,
   ServiceConfigSchema,
 } from './core-services.zod';
@@ -73,9 +73,9 @@ describe('ServiceRequirementDef', () => {
   });
 });
 
-describe('ServiceStatusSchema', () => {
+describe('KernelServiceStatusSchema', () => {
   it('should accept valid service status', () => {
-    const status = ServiceStatusSchema.parse({
+    const status = KernelServiceStatusSchema.parse({
       name: 'metadata',
       enabled: true,
       status: 'running',
@@ -90,7 +90,7 @@ describe('ServiceStatusSchema', () => {
     const statuses = ['running', 'stopped', 'degraded', 'initializing'];
 
     statuses.forEach((s) => {
-      expect(() => ServiceStatusSchema.parse({
+      expect(() => KernelServiceStatusSchema.parse({
         name: 'data',
         enabled: true,
         status: s,
@@ -99,7 +99,7 @@ describe('ServiceStatusSchema', () => {
   });
 
   it('should accept optional fields', () => {
-    const status = ServiceStatusSchema.parse({
+    const status = KernelServiceStatusSchema.parse({
       name: 'file-storage',
       enabled: true,
       status: 'running',
@@ -114,7 +114,7 @@ describe('ServiceStatusSchema', () => {
   });
 
   it('should reject invalid service name', () => {
-    expect(() => ServiceStatusSchema.parse({
+    expect(() => KernelServiceStatusSchema.parse({
       name: 'invalid',
       enabled: true,
       status: 'running',
@@ -122,8 +122,8 @@ describe('ServiceStatusSchema', () => {
   });
 
   it('should reject missing required fields', () => {
-    expect(() => ServiceStatusSchema.parse({})).toThrow();
-    expect(() => ServiceStatusSchema.parse({ name: 'metadata' })).toThrow();
+    expect(() => KernelServiceStatusSchema.parse({})).toThrow();
+    expect(() => KernelServiceStatusSchema.parse({ name: 'metadata' })).toThrow();
   });
 });
 

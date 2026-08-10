@@ -224,9 +224,17 @@ export const ServiceRequirementDef = {
 // ==========================================
 
 /**
- * Describes the availability and health of a service
+ * Describes the availability and health of a kernel service.
+ *
+ * Named `KernelServiceStatus`, not `ServiceStatus`: `./api` publishes its own
+ * `ServiceStatus` — the discovery health **enum** in `api/discovery.zod.ts` —
+ * and the two are different concepts (a health value vs this `features`-bearing
+ * object). One name for two declarations across two entry points is the
+ * #4411 trap `check:dual-source-exports` guards, so the kernel side carries the
+ * `Kernel` prefix its sibling `KernelServiceMapSchema` already uses (#6604,
+ * maintainer ruling 2026-08-08 Option B).
  */
-export const ServiceStatusSchema = lazySchema(() => z.object({
+export const KernelServiceStatusSchema = lazySchema(() => z.object({
   name: CoreServiceName,
   enabled: z.boolean(),
   status: z.enum(['running', 'stopped', 'degraded', 'initializing']),
@@ -234,6 +242,7 @@ export const ServiceStatusSchema = lazySchema(() => z.object({
   provider: z.string().optional().describe('Implementation provider (e.g. "s3" for storage)'),
   features: z.array(z.string()).optional().describe('List of supported sub-features'),
 }));
+export type KernelServiceStatus = z.input<typeof KernelServiceStatusSchema>;
 
 /**
  * The Contract definition for what the Kernel MUST expose
