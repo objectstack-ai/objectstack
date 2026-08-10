@@ -70,6 +70,49 @@
  * default: silently applying `0 / 0 / 0` to an unknown module would let a new
  * one pass by coincidence.
  *
+ * ## Two ways to be held: full counts, or dialect facts only
+ *
+ * `responses` counts WRITE SITES, and that only works where the honest
+ * declaration is zero: a module routing every body through the shared pair has
+ * no write sites to gain or lose, so the number cannot move under an edit that
+ * is not the drift being guarded.
+ *
+ * `packages/rest/src/rest-server.ts` is the one file where that is false, and
+ * that is why it sat outside `discover()` until #7295. It is by a wide margin
+ * the largest response-emitting file in the repo (#5949) — 208 write sites,
+ * changing several times a day — so pinning `responses` there would go red for
+ * every route added or removed, and the pressure would be to raise the ratchet
+ * rather than fix anything. That is #7295's option 2, and the maintainer ruling
+ * of 2026-08-10 rejected it for exactly that reason.
+ *
+ * What it takes instead is `dialectOnly`: the file IS audited, but only for the
+ * two non-conforming error DIALECTS it emits — never for how many bodies it
+ * builds.
+ *
+ *     { error: 'some message' }         → stringError  (the pre-#3675 dialect)
+ *     { error: someMessage, code }      → siblingCode  (the second one, #7035)
+ *
+ * Both are the same failure one key apart: the declared envelope nests the code
+ * and the message INSIDE `error`, so a consumer reading `body.error.message`
+ * (#3843) or `body.error.code` reads `undefined`. And both counts move only when
+ * an error SHAPE is added or removed, which is the thing being guarded — so an
+ * ordinary edit to this file cannot move them, and the gate stays quiet until it
+ * has something to say.
+ *
+ * The baselines below were measured on the file, not chosen, and the rule is
+ * one-directional: they only ever tick DOWN. A higher count is a new
+ * non-conforming body — fix the body. A lower one is progress, and banking it by
+ * lowering the declared number is what stops ground already won from being given
+ * back.
+ *
+ * Leaving `responses` unasserted is a deliberately narrower guarantee, not an
+ * oversight, and `dialectOnly` refuses to be declared beside it. This file is
+ * NOT held to "you build no bodies" — only to "you add no new dialects". The
+ * `exempt` state would have said less (nothing asserted at all); a full ratchet
+ * would have claimed more than a hot write-site count can honestly carry.
+ * Converting the file onto the shared pair (#7035 option 1) is the end state
+ * that retires this entry into an ordinary `0 / 0 / 0`.
+ *
  * ## Why AST, not regex
  *
  * The three copied blocks stripped comments with two `String.replace` calls and
@@ -113,16 +156,24 @@ const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
  *                sibling of where `success` belongs: a second word for it (#3689).
  *                Inside `data` the same literal is payload, not a flag (#3983).
  *   stringError— bodies whose `error` is a bare string (the pre-#3675 dialect)
+ *   siblingCode— bodies with a top-level `code` NEXT TO `error` rather than
+ *                inside it (the second dialect, #7035). Nested is conformant:
+ *                `{ error: { code, message } }` is what the envelope declares.
  *   ratchet    — set ONLY for a module with outstanding drift. It pins the
  *                CURRENT numbers so nothing gets worse, and names the issue that
- *                will drive them to the conformant 2 / 1 / 1 / 0 / 0.
+ *                will drive them to the conformant 2 / 1 / 1 / 0 / 0 / 0.
  *   exempt     — a REASON string for a module the envelope does not govern. The
  *                counts are then not asserted at all.
+ *   dialectOnly— a REASON string for a module whose write-site count is too hot
+ *                to pin (see the header). Only `stringError` and `siblingCode`
+ *                are asserted, both tick DOWN only, and declaring any write-site
+ *                key beside it is an error. Requires a `ratchet`.
  *
- * Three states, deliberately — conformant / ratcheted / exempt — because that is
- * the honest classification ADR-0049 requires: a module is either held to the
- * contract, tracked as failing it, or declared outside it *with a reason*.
- * There is no fourth state where nobody looked.
+ * Four states, deliberately — conformant / ratcheted / dialect-only / exempt —
+ * because that is the honest classification ADR-0049 requires: a module is
+ * either held to the contract, tracked as failing it, held to the part of it a
+ * stable number can carry, or declared outside it *with a reason*. There is no
+ * fifth state where nobody looked.
  */
 const MODULES = {
   // ── Conformant (#3675, #3689, #3843, #3983 — consolidated by #3973) ──────
@@ -163,9 +214,38 @@ const MODULES = {
 
   // ── Ratchet: real, tracked, NOT blessed ─────────────────────────────────
   //
-  // Empty as of #3983. The mechanism stays — it is how the next drifting module
-  // gets recorded honestly instead of being either fixed on the spot or quietly
-  // skipped. Declare current counts plus a `ratchet` naming the issue.
+  // The mechanism is how a drifting module gets recorded honestly instead of
+  // being either fixed on the spot or quietly skipped. Declare current counts
+  // plus a `ratchet` naming the issue.
+
+  // Dialect-only (#7295, maintainer ruling of 2026-08-10 — option 3). The file
+  // this gate was written about and never looked at: `discover()` collected
+  // `*-routes.ts` plus one named exception, and the repo's largest
+  // response-emitting file matched neither, so 208 hand-built write sites sat
+  // outside the surface whose own header says "a module nobody thought to
+  // convert still gets audited".
+  //
+  // `responses` is deliberately NOT declared — see the header. What is pinned
+  // is the two dialects, measured on this file at branch point:
+  //
+  //   stringError 44 — the ~44 bodies #7035 / PR #7293 deliberately left when it
+  //                    converged three `/meta` 501 sites.
+  //   siblingCode 77 — invisible to every counter this gate had, which is the
+  //                    half of #7035 that "add the file to the table" would have
+  //                    passed in silence. Not a subset of the 44: most of these
+  //                    carry a computed message (`String(err)`, `.replace(…)`),
+  //                    so `stringError` cannot see them.
+  //
+  // Both only ever tick down. The end state is #7035 option 1 — route the file
+  // through the shared sendOk/sendError — at which point this entry becomes
+  // `{ responses: 0, ok: 0, err: 0 }` like every other module above.
+  'packages/rest/src/rest-server.ts': {
+    dialectOnly:
+      'the repo\'s hottest response file (208 write sites, edited several times a day) — a `responses` ratchet would go red for edits that are not envelope drift',
+    ratchet: '#7035 (option 1: convert onto the shared sendOk/sendError)',
+    stringError: 44,
+    siblingCode: 77,
+  },
 };
 
 /** Identifiers whose `.json()` READS a request rather than writing a response. */
@@ -289,11 +369,14 @@ const DISPATCHER_DOMAINS = {
  * Count the envelope-relevant facts in one module's source.
  *
  * @param {string} source TypeScript source text.
- * @returns {{responses: number, ok: number, err: number, privateOk: number, stringError: number, sites: string[]}}
+ * @returns {{responses: number, ok: number, err: number, privateOk: number, stringError: number, siblingCode: number, sites: string[], stringErrorSites: string[], siblingCodeSites: string[]}}
  */
 export function scanSource(source, fileName = 'module.ts') {
   const sf = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true);
-  const found = { responses: 0, ok: 0, err: 0, privateOk: 0, stringError: 0, sites: [] };
+  const found = {
+    responses: 0, ok: 0, err: 0, privateOk: 0, stringError: 0, siblingCode: 0,
+    sites: [], stringErrorSites: [], siblingCodeSites: [],
+  };
 
   /** `req.json()` / `c.req.json()` read a request body — not a response write. */
   const isRequestRead = (expr) => {
@@ -321,9 +404,18 @@ export function scanSource(source, fileName = 'module.ts') {
       // are read off this call's own object literal rather than the whole module.
       const arg = node.arguments[0];
       if (arg && ts.isObjectLiteralExpression(arg)) {
+        // Every key written at the TOP of this body. Shorthand counts: the
+        // dialect `{ error: msg, code: 'X' }` and the dialect `{ error, code }`
+        // are the same body written two ways, and rest-server.ts writes both.
+        const topKeys = new Set();
         for (const prop of arg.properties) {
+          if (ts.isShorthandPropertyAssignment(prop)) {
+            topKeys.add(prop.name.text);
+            continue;
+          }
           if (!ts.isPropertyAssignment(prop) || !ts.isIdentifier(prop.name)) continue;
           const key = prop.name.text;
+          topKeys.add(key);
           const init = prop.initializer;
           // `error` as a bare string — the pre-#3675 dialect.
           if (
@@ -332,6 +424,7 @@ export function scanSource(source, fileName = 'module.ts') {
               ts.isNoSubstitutionTemplateLiteral(init))
           ) {
             found.stringError += 1;
+            found.stringErrorSites.push(`${fileName}:${line(node)}`);
           }
           // A literal `ok` is a second word for `success` only where it could BE
           // the flag: a sibling of `success` at the top of the body. The same
@@ -341,6 +434,19 @@ export function scanSource(source, fileName = 'module.ts') {
           if (key === 'ok' && (init.kind === ts.SyntaxKind.TrueKeyword || init.kind === ts.SyntaxKind.FalseKeyword)) {
             found.privateOk += 1;
           }
+        }
+
+        // The second dialect (#7035): `code` as a SIBLING of `error` instead of
+        // a key inside it. Read off this body's own top level for the same
+        // reason `ok` is — the envelope puts the code inside `error`, so a
+        // `code` one level down (`data: { code }`, or the conformant
+        // `error: { code, message }`) is not this dialect at all. What makes it
+        // worth a counter of its own is that `stringError` cannot stand in for
+        // it: most of these carry a computed message, so the pair is invisible
+        // to every count this gate had before #7295.
+        if (topKeys.has('error') && topKeys.has('code')) {
+          found.siblingCode += 1;
+          found.siblingCodeSites.push(`${fileName}:${line(node)}`);
         }
       }
     }
@@ -409,6 +515,24 @@ function discoverDomains() {
     .sort();
 }
 
+/**
+ * Files that answer REST but are not named `*-routes.ts`, by basename.
+ *
+ * The convention is the discovery surface, so anything outside it is invisible
+ * until it is named here — which is not a hypothetical cost. `rest-server.ts`
+ * was outside for as long as this gate has existed (#7295), while being the
+ * largest response-emitting file in the repo; the header's promise that "a
+ * module nobody thought to convert still gets audited" only holds over the
+ * files the walk can see. Adding a name here is cheap; the module then has to
+ * appear in `MODULES` or the audit fails, which is the point.
+ */
+const OFF_CONVENTION_MODULES = new Set([
+  // Registers its routes from a plugin entry point rather than a route module.
+  'i18n-service-plugin.ts',
+  // The dispatcher's own server. Audited `dialectOnly` — see the header.
+  'rest-server.ts',
+]);
+
 /** Recursively collect candidate route-module paths under `packages/`. */
 function discover() {
   const out = [];
@@ -420,15 +544,99 @@ function discover() {
       if (statSync(full).isDirectory()) { walk(full); continue; }
       if (!entry.endsWith('.ts') || entry.endsWith('.d.ts')) continue;
       if (entry.includes('.test.') || entry.includes('.conformance.')) continue;
-      // The repo's naming convention for a route registrar, plus the one
-      // module that registers routes from a plugin entry point instead.
-      if (entry.endsWith('-routes.ts') || entry === 'i18n-service-plugin.ts') {
+      // The repo's naming convention for a route registrar, plus the files that
+      // emit REST bodies without following it.
+      if (entry.endsWith('-routes.ts') || OFF_CONVENTION_MODULES.has(entry)) {
         out.push(relative(ROOT, full).split(sep).join('/'));
       }
     }
   };
   walk(join(ROOT, 'packages'));
   return out.sort();
+}
+
+/**
+ * The two non-conforming error dialects, and what each one costs a consumer.
+ *
+ * These are the only keys a `dialectOnly` module is held to, and the only ones
+ * that ratchet in one direction — see the header.
+ */
+const DIALECTS = {
+  stringError: {
+    sites: 'stringErrorSites',
+    what: '`error` is a bare string, so `body.error.message` reads `undefined`',
+  },
+  siblingCode: {
+    sites: 'siblingCodeSites',
+    what: '`code` sits beside `error` rather than inside it, so `body.error.code` reads `undefined`',
+  },
+};
+
+/** Keys a `dialectOnly` module must NOT declare — every one of them moves with the write-site list. */
+const NON_DIALECT_KEYS = ['responses', 'ok', 'err', 'privateOk'];
+
+/**
+ * Audit a module held to dialect facts only: a one-directional ratchet on
+ * `stringError` and `siblingCode`, and nothing else.
+ *
+ * @param {string} file            repo-relative path
+ * @param {object} declared        its `MODULES` entry
+ * @param {object} got             `scanSource` output for it
+ * @param {string[]} problems      collector, appended in place
+ */
+function auditDialectOnly(file, declared, got, problems) {
+  // A `dialectOnly` entry that also pins write sites is the ratchet #7295
+  // rejected, re-entered one key at a time. Refuse it here rather than let the
+  // table drift back into a number nobody can keep green.
+  for (const key of NON_DIALECT_KEYS) {
+    if (declared[key] !== undefined) {
+      problems.push(
+        `${file}\n    declares dialectOnly AND \`${key}\` — those are exclusive.\n` +
+        `    dialectOnly exists because this module's write-site count moves under\n` +
+        `    edits that are not envelope drift. Pin the dialects or convert the module;\n` +
+        `    do not pin both. See the header of scripts/check-route-envelope.mjs.`,
+      );
+    }
+  }
+  if (!declared.ratchet) {
+    problems.push(
+      `${file}\n    declares dialectOnly with no \`ratchet\`.\n` +
+      `    A pinned dialect count is tracked drift, not a blessing — name the issue\n` +
+      `    that will drive it to zero.`,
+    );
+  }
+
+  for (const [key, dialect] of Object.entries(DIALECTS)) {
+    const want = declared[key];
+    if (want === undefined) {
+      problems.push(
+        `${file}\n    dialectOnly but declares no \`${key}\` baseline.\n` +
+        `    Both dialects are asserted for such a module; a missing one is a dialect\n` +
+        `    nobody is counting. Measure it and enter the number.`,
+      );
+      continue;
+    }
+    if (got[key] === want) continue;
+
+    // Line numbers only: the file is named on the line above, and a dialect
+    // ratchet lists tens of sites where `responses` lists one or two.
+    const sites = got[dialect.sites].map((s) => s.slice(s.lastIndexOf(':') + 1)).join(', ') || '(none)';
+    problems.push(
+      got[key] > want
+        ? `${file}\n    ${key}: found ${got[key]}, declared ${want} — a NEW non-conforming body.\n` +
+          `    ${dialect.what}.\n` +
+          `    This ratchet only ticks DOWN: build the body through sendOk/sendError from\n` +
+          `    @objectstack/types (packages/types/src/response-envelope.ts), or put the code\n` +
+          `    and message inside \`error\`. Raising the declared number is not the fix.\n` +
+          `    (ratchet for ${declared.ratchet})\n` +
+          `    Lines: ${sites}`
+        : `${file}\n    ${key}: found ${got[key]}, declared ${want} — ${want - got[key]} fewer than pinned.\n` +
+          `    That is progress, and banking it is the other half of the ratchet: lower the\n` +
+          `    declared number to ${got[key]} in MODULES so the ground cannot be given back.\n` +
+          `    (ratchet for ${declared.ratchet})\n` +
+          `    Lines: ${sites}`,
+    );
+  }
 }
 
 function audit() {
@@ -449,10 +657,16 @@ function audit() {
     }
     if (declared.exempt) continue;
 
-    const want = { privateOk: 0, stringError: 0, ...declared };
     const got = scanSource(readFileSync(join(ROOT, file), 'utf8'), file);
 
-    for (const key of ['responses', 'ok', 'err', 'privateOk', 'stringError']) {
+    if (declared.dialectOnly) {
+      auditDialectOnly(file, declared, got, problems);
+      continue;
+    }
+
+    const want = { privateOk: 0, stringError: 0, siblingCode: 0, ...declared };
+
+    for (const key of ['responses', 'ok', 'err', 'privateOk', 'stringError', 'siblingCode']) {
       if (got[key] !== want[key]) {
         problems.push(
           `${file}\n    ${key}: found ${got[key]}, declared ${want[key]}` +
@@ -568,7 +782,12 @@ function audit() {
     `(${SHARED_BUILDER.counts.responses} write sites, pinned)`,
   );
   for (const [file, m] of ratcheted) {
-    console.log(`  ⚠ ratchet ${m.ratchet}: ${file} (pinned at current drift, not conformant)`);
+    console.log(
+      `  ⚠ ratchet ${m.ratchet}: ${file} ` +
+      (m.dialectOnly
+        ? `(dialect facts only — stringError ${m.stringError}, siblingCode ${m.siblingCode}; ticks down only, write sites NOT pinned)`
+        : '(pinned at current drift, not conformant)'),
+    );
   }
   for (const [file, m] of exempt) {
     console.log(`  – exempt: ${file} — ${m.exempt}`);
@@ -649,6 +868,47 @@ function selfTest() {
   // The pre-#3675 bare-string error.
   r = scanSource(`res.status(503).json({ error: 'datasource_admin_unavailable' });`);
   assert(r.stringError === 1, `bare-string error not caught → ${JSON.stringify(r)}`);
+
+  // ── The sibling-`code` dialect (#7035, counted since #7295) ───────────────
+  // A top-level `code` NEXT TO `error` instead of inside it. Same failure as
+  // the bare string one key over: `body.error.code` reads `undefined`.
+  r = scanSource(`res.status(400).json({ error: 'Batch too large', code: 'BATCH_TOO_LARGE' });`);
+  assert(
+    r.siblingCode === 1 && r.stringError === 1,
+    `sibling code not caught → ${JSON.stringify(r)}`,
+  );
+  // Order is not the fact — rest-server.ts writes the pair both ways round —
+  // and a COMPUTED message is the common case, which is exactly why
+  // `stringError` cannot stand in for this counter.
+  r = scanSource(`res.status(403).json({ code: 'PERMISSION_DENIED', error: msg.replace(/^X:/, '') });`);
+  assert(
+    r.siblingCode === 1 && r.stringError === 0,
+    `a computed message must not hide the sibling code → ${JSON.stringify(r)}`,
+  );
+  // Shorthand is the same dialect written shorter — the form #7295 quoted.
+  r = scanSource(`res.status(500).json({ error, code });`);
+  assert(r.siblingCode === 1, `shorthand sibling code not caught → ${JSON.stringify(r)}`);
+  // NEGATIVE: the declared envelope nests both keys inside `error`, so the
+  // conformant body — the one the shared sendError writes — is not this dialect.
+  // If this ever counted, every module in the table would fail at once.
+  r = scanSource(`res.status(404).json({ success: false, error: { code: 'GONE', message: 'gone' } });`);
+  assert(r.siblingCode === 0, `the conformant nested code counted → ${JSON.stringify(r)}`);
+  // NEGATIVE: one level down is payload, not the envelope — the same reasoning
+  // that keeps `ok` inside `data` from counting as a second success word.
+  r = scanSource(`res.json({ success: true, data: { error: 'row 3 failed', code: 'BAD_ROW' } });`);
+  assert(r.siblingCode === 0, `a code inside data counted → ${JSON.stringify(r)}`);
+  // NEGATIVE: `code` on its own is an ordinary payload key (a locale, a status,
+  // a country). Only the PAIR is the dialect.
+  r = scanSource(`res.json({ success: true, code: 'en-GB' });`);
+  assert(r.siblingCode === 0, `a lone code counted → ${JSON.stringify(r)}`);
+  // NEGATIVE: prose quoting the dialect is not a code path — the table above
+  // quotes it, and must not move anyone's count.
+  r = scanSource(`
+    /* Was: res.status(400).json({ error: 'nope', code: 'NOPE' }); */
+    // res.json({ error, code });
+    ${sound}
+  `);
+  assert(r.siblingCode === 0, `commented-out sibling code counted → ${JSON.stringify(r)}`);
 
   // A literal `ok` at the top of a body is a second success word.
   r = scanSource(`res.json({ ok: true, key });`);
