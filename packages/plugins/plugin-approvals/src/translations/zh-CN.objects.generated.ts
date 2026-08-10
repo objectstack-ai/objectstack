@@ -41,7 +41,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         label: "状态",
         help: "请求的生命周期状态",
         options: {
-          pending: "待处理",
+          pending: "待审批",
           approved: "已批准",
           rejected: "已拒绝",
           recalled: "已撤回",
@@ -87,9 +87,9 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
     },
     _views: {
       my_pending: {
-        label: "我的待办",
+        label: "待我审批",
         emptyState: {
-          title: "暂无待办审批",
+          title: "暂无待审批的请求",
           message: "全部处理完毕，没有等待你审批的请求。"
         }
       },
