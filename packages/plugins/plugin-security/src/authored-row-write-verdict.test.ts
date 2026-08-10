@@ -477,3 +477,118 @@ describe('[#5493] fail-closed: every failure is `abstain`, and nothing throws ou
     ).resolves.toBe('abstain');
   });
 });
+
+// ───────────────────────────────────────────────────────────────────────────
+
+/**
+ * [#7281] The probe read runs ELEVATED — and the elevation is confined to it.
+ *
+ * An elevated read inside a permission check is exactly the shape that has to
+ * be proven not to widen anything, so these cases measure the confinement
+ * rather than asserting it. What a fake engine can legitimately pin here is the
+ * CALL SHAPE — which context each engine call carries, what the query asks for,
+ * and whether anything is written — and that is precisely what these cases pin.
+ * What it cannot pin is the effect of the elevation on a `private`-OWD object,
+ * because this file's engine has no middleware chain: that lives on the real
+ * stack, in `packages/qa/dogfood/test/authored-row-write-scope.dogfood.test.ts`.
+ */
+describe('[#7281] the probe read is elevated, and the elevation is confined to the probe', () => {
+  /** Wrap every engine verb so the probe's own traffic is observable. */
+  const instrument = (engine: any) => {
+    const calls: { op: string; object: string; options: any }[] = [];
+    for (const op of ['find', 'findOne', 'insert', 'update', 'delete'] as const) {
+      const original = engine[op].bind(engine);
+      engine[op] = async (object: string, a?: any, b?: any) => {
+        // `update` is (object, data, options); the rest carry options second.
+        calls.push({ op, object, options: op === 'update' ? b : a });
+        return original(object, a, b);
+      };
+    }
+    return calls;
+  };
+
+  it('the probe reads under an elevated, PRINCIPAL-LESS context — and reads only', async () => {
+    const stack = await makeStack();
+    const calls = instrument(stack.engine);
+
+    await expect(
+      stack.security.checkAuthoredRowWrite('crm_opportunity', OPP_OPEN.id, 'update', OUTSIDER_WIDENED_CTX),
+    ).resolves.toBe('admit');
+
+    const onTarget = calls.filter((c) => c.object === 'crm_opportunity');
+    expect(onTarget.length, 'the probe touched the target object').toBeGreaterThan(0);
+    expect(
+      onTarget.filter((c) => c.op === 'insert' || c.op === 'update' || c.op === 'delete'),
+      'a permission PROBE writes nothing, ever',
+    ).toEqual([]);
+    for (const call of onTarget) {
+      expect(call.options?.context?.isSystem, `${call.op} runs elevated`).toBe(true);
+      expect(call.options?.context?.userId, `${call.op} carries no principal`).toBeUndefined();
+      expect(
+        call.options?.context,
+        'the elevated context is the probe\'s own object, never the caller\'s',
+      ).not.toBe(OUTSIDER_WIDENED_CTX);
+    }
+  });
+
+  it('the elevated scope carries the WHOLE question in the query: id AND the tenant wall AND the authored predicate', async () => {
+    // This is why elevating the read cannot widen the answer. Layer 0 (the
+    // tenant wall) and Layer 1 (the app-authored policies) are compiled from
+    // the CALLER's permission sets and the CALLER's tenant BEFORE the read and
+    // travel in the `where`. Delete either from the composed `parts` and the
+    // cross-tenant / non-matching-row cases above go red — which is exactly
+    // what makes them pins rather than decoration.
+    const stack = await makeStack();
+    const calls = instrument(stack.engine);
+
+    await stack.security.checkAuthoredRowWrite('crm_opportunity', OPP_OPEN.id, 'update', OUTSIDER_WIDENED_CTX);
+
+    const read = calls.find((c) => c.object === 'crm_opportunity' && c.options?.where);
+    const where = JSON.stringify(read?.options?.where ?? {});
+    expect(where, 'the record id').toContain(OPP_OPEN.id);
+    expect(where, 'Layer 0 — the tenant wall, from the caller\'s own tenant').toContain('organization_id');
+    expect(where, 'Layer 1 — the app-authored predicate').toContain('prospecting');
+    expect(
+      read?.options?.fields,
+      'projected to existence: the probe can learn THAT the row matches, never what is in it',
+    ).toEqual(['id']);
+  });
+
+  // ⚠️ GUARD, NOT A MEASUREMENT — this case is green against the pre-#7281
+  // producer too, and says so on purpose. It cannot bite on the scope change
+  // itself (the old code passed the caller's context straight through and
+  // mutated nothing either); what it bites on is the WRONG WAY to implement
+  // the elevation — stamping `isSystem` onto the caller's own object, which
+  // would silently elevate every later use of that context. Reverse-verified
+  // by mutation, not by reverting the fix.
+  it('the caller\'s own context object is not mutated by the probe', async () => {
+    const stack = await makeStack();
+    const before = JSON.parse(JSON.stringify(OUTSIDER_WIDENED_CTX));
+    await stack.security.checkAuthoredRowWrite('crm_opportunity', OPP_OPEN.id, 'update', OUTSIDER_WIDENED_CTX);
+    expect(JSON.parse(JSON.stringify(OUTSIDER_WIDENED_CTX))).toEqual(before);
+    expect((OUTSIDER_WIDENED_CTX as any).isSystem, 'no elevation is stamped onto the caller').toBeUndefined();
+  });
+
+  // ⚠️ GUARD, NOT A MEASUREMENT — green on both sides of #7281, deliberately.
+  // The write path never carried an elevated read before this change and must
+  // never carry one after it; the case exists so that a future widening of the
+  // probe's scope into the enforcement path goes red the day it is written,
+  // rather than the day someone measures a production leak.
+  it('the elevation does not reach the WRITE path: the by-id gate still resolves the row as the caller', async () => {
+    // The ruling leaves the write decision with the pre-image gate, and that
+    // gate reads as the CALLER. If the elevation ever leaked into it, a caller
+    // who cannot see a row would start writing it — so this case exists to go
+    // red the moment that happens.
+    const stack = await makeStack();
+    const calls = instrument(stack.engine);
+
+    await stack.update('crm_opportunity', OPP_OPEN.id, OUTSIDER_WIDENED_CTX);
+
+    const reads = calls.filter((c) => c.object === 'crm_opportunity' && c.op !== 'update');
+    expect(reads.length, 'the write path read the target row').toBeGreaterThan(0);
+    for (const call of reads) {
+      expect(call.options?.context?.isSystem, 'no elevated read on the write path').toBeFalsy();
+      expect(call.options?.context?.userId, 'the write path reads as the caller').toBe('u_outsider');
+    }
+  });
+});

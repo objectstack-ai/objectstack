@@ -43,6 +43,22 @@
 // `sharingModel: 'private'` but NO `access.default: 'private'` — because that
 // posture is exactly what withholds the ADR-0066 ① Layer-1 superuser
 // short-circuit, and it is the shape HotCRM ships.
+//
+// ⚠️ [#7281] WHAT THIS FILE CANNOT SEE — read before adding a case.
+// `makeEngine()` below implements `find` as a direct row filter and registers
+// no middleware of its own, so a nested re-read issued from INSIDE a middleware
+// (the by-id write pre-image gate's `findOne`, and `checkAuthoredRowWrite`'s
+// probe) is never scoped by `plugin-sharing`'s READ filter the way the real
+// engine scopes it. On a `private`-OWD object that filter is the difference
+// between a cross-owner row being visible and being invisible — and both of
+// those nested reads decide their verdict on exactly that. So this double is
+// LOOSER than the producer on the read-scope axis, and any assertion whose
+// outcome depends on it is green here for the double's reason rather than the
+// producer's. #7281 was filed because one such assertion shipped that way (a
+// `private` cross-owner write asserted as landing, which the real stack refuses
+// — see the case at the bottom of this file for the measurement).
+// Anything read-scope-dependent belongs in the real-stack pin:
+// `packages/qa/dogfood/test/authored-row-write-scope.dogfood.test.ts`.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { SharingService, buildSharingMiddleware } from '@objectstack/plugin-sharing';
@@ -486,32 +502,43 @@ describe('[#5492] the platform ownership floor still stands where nothing replac
   });
 });
 
-describe('[#5493] the sharing middleware DEFERS to an app-authored RLS widener instead of hard-refusing', () => {
+describe('[#5493 / #7281] the two authorities’ verdicts on a row an app-authored widener admits', () => {
   let stack: Stack;
   beforeEach(async () => { stack = await makeStack(); });
 
-  it('an APP-AUTHORED RLS update-widener passes the security gate AND the write now lands', async () => {
-    // ── what this case used to assert, and why it flipped ──────────────────
-    // #5492 (this file's subject) landed the composition and left #5493's
-    // symptom standing on purpose, so this case was written as a CONTROL of
-    // the old position: the security pre-image gate admitted the row and the
-    // SHARING middleware refused it first with `FORBIDDEN`. #5493 step 2 is
-    // the fix for exactly that, so the control flips — the two authorities are
-    // ONE composite determination (maintainer ruling, #5492 comment
-    // 5219846435; mirrored for this card in comment 5217346436), and this
-    // middleware may not hard-refuse a by-id write an app-authored widener
-    // admits by declaration.
+  it('sharing refuses on its own terms; the security service admits by DECLARATION', async () => {
+    // ⚠️ SCOPE-BLIND BY CONSTRUCTION — this case cannot bite on read scope.
     //
-    // Everything the old case measured is still measured here, and the load
-    // is the same load: sharing STILL refuses on its own terms (`checkEdit` →
-    // `deny`, unchanged — nothing widened the sharing verdict), the security
-    // gate STILL admits the row through the app policy `stage ==
-    // 'prospecting'` OR-combining past the platform ownership floor. What
-    // changed is the composition between them: the middleware consults
-    // `checkAuthoredRowWrite` before refusing, gets `admit`, and hands the row
-    // to the pre-image gate that makes the final decision. The write lands and
-    // the ROW REALLY CHANGES — a completed write with an unchanged row would
-    // mean the middleware chain was bypassed, not that the fix works.
+    // #7281 is what corrected it. The case used to end by driving the write
+    // through both middlewares and asserting `{ ok: true }` — "the write now
+    // lands" — on `crm_opportunity`, a `private`-OWD object, for a row owned
+    // and created by somebody else. The real stack does NOT do that. Measured
+    // end-to-end (`bootStack` + real SecurityPlugin + real SharingServicePlugin
+    // + real engine, two objects identical but for their OWD):
+    //
+    //   public_read  verdict admit   PATCH 200, row changes
+    //   private      verdict abstain PATCH 403 "[Security] Access denied: not
+    //                                permitted to update this record
+    //                                (row-level security)"
+    //
+    // The 403 on `private` is the SECURITY pre-image gate's, thrown before the
+    // sharing middleware is even reached — so on that posture the deferral this
+    // block is named for never runs at all. Both halves of the old assertion
+    // were green here for one reason: `makeEngine()` implements `find` as a
+    // direct row filter with NO middleware chain, so no nested re-read in this
+    // file is ever scoped by `plugin-sharing`'s read filter. The double was
+    // looser than the producer on exactly the axis those verdicts turn on.
+    //
+    // What survives is what a fake CAN legitimately pin: the two authorities'
+    // VERDICTS, composed by provenance against the real `member_default` seed.
+    // `checkAuthoredRowWrite` → `admit` is true on the real stack too (#7281
+    // moved the probe read to an elevated scope, so the declaration is what
+    // answers) — but it is green HERE for the fake's own reason and would stay
+    // green if the producer regressed to caller-scoped reads. The pin that
+    // bites on that axis is the real-stack one:
+    // `packages/qa/dogfood/test/authored-row-write-scope.dogfood.test.ts`.
+    // ⛔ Do not re-add an end-to-end write assertion to this file for a
+    // `private` object without giving this engine a real middleware chain.
     await expect(
       stack.sharing.checkEdit('crm_opportunity', OPP_THEIRS.id, WIDENED_CTX as any),
     ).resolves.toBe('deny');
@@ -520,9 +547,5 @@ describe('[#5493] the sharing middleware DEFERS to an app-authored RLS widener i
     await expect(
       stack.security.checkAuthoredRowWrite('crm_opportunity', OPP_THEIRS.id, 'update', WIDENED_CTX),
     ).resolves.toBe('admit');
-
-    const out = await stack.write('update', 'crm_opportunity', OPP_THEIRS.id, WIDENED_CTX);
-    expect(out, out.message).toMatchObject({ ok: true });
-    expect(rowById(stack, 'crm_opportunity', OPP_THEIRS.id)?.next_step).toBe('updated');
   });
 });

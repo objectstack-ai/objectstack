@@ -383,11 +383,27 @@ export interface ISecurityService {
    * **`admit` iff** at least one applicable, **non-floor** policy matches the
    * row for this operation. `abstain` in **every** other case, including:
    * the caller holds no authored policy for `(object, operation)`; the
-   * authored policies apply but none matches this row; the row is unreadable,
-   * absent, or in another tenant; the context carries no principal; the context
+   * authored policies apply but none matches this row; the row is absent, or
+   * in another tenant; the context carries no principal; the context
    * is on-behalf-of (ADR-0090 D10 — the delegator intersection is not computed
    * on this path, so an answer here would be resolved against the wrong
    * identity); or any internal probe fails.
+   *
+   * **[#7281] The caller's READ scope is not one of those cases**, and the
+   * omission is the maintainer's 2026-08-10 ruling rather than an oversight.
+   * The question is "does the declaration admit this row", which is about the
+   * row and the policy; an implementation that resolves it through the
+   * caller's own visibility folds a READ decision into a WRITE question and
+   * silently answers `abstain` for every cross-owner row on a `private`-OWD
+   * object — the posture the widener surface exists for (measured: two objects
+   * identical but for their OWD, same widener, same principal, same row shape;
+   * `public_read` → `admit`, `private` → `abstain`). Implementations therefore
+   * resolve the row under a scope that can SEE it, with the tenant wall and
+   * the authored predicate carried in the query rather than in the scope.
+   * This does not widen anything: `admit` remains evidence and never
+   * authorization (see below), so a caller who may not read a row still may
+   * not write it — that refusal belongs to the write gate, which makes it on
+   * its own terms.
    *
    * **Fail-closed by construction, in both halves.** The method itself never
    * throws outward — an internal failure becomes `abstain`. And the method is
