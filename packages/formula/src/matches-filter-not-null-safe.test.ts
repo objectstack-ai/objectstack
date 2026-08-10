@@ -119,9 +119,10 @@ describe('[#5146] matchesFilterCondition — $not over records with no value', (
       // rejects it. `driver-sql` follows this answer; `driver-memory`'s
       // REFERENCE matcher answers the opposite for a null-valued field.
       //
-      // ⚠️ [#5299, ruled 2026-08-10] This is the SUPERSEDED direction — see the
-      // block at the bottom of this file for the ruled target and the measured
-      // reason nothing has moved yet.
+      // ⚠️ [#5299, 2026-08-10] A ruling that morning would have reversed this
+      // direction; it was WITHDRAWN the same day and include re-affirmed. See
+      // the block at the bottom of this file for the affirmed direction and the
+      // measurement that settled it.
       expect(matched({ $not: { stage: { $notContains: 'w' } } })).toEqual(['1']);
     });
 
@@ -187,41 +188,44 @@ describe('[#5146] matchesFilterCondition — $not over records with no value', (
     });
   });
 
-  // ── The NON-negated negatives — pinned against a ruling that has not landed ─
+  // ── The NON-negated negatives — the affirmed direction, pinned ─────────────
 
   /**
-   * [#5299, ruled 2026-08-10] The maintainer took SQL's native three-valued
-   * logic as the common denominator: **negative operators never match no-value
-   * rows; the only ways to select "no value" are `$exists: false` /
-   * `$null: true`.** Under that rule this evaluator answers `['2']` below.
+   * [#5299, re-affirmed 2026-08-10] `$ne` / `$nin` / `$notContains` MATCH a
+   * no-value row. That is the platform semantics: ruled by #5146 for `$not`,
+   * extended to this operator family by #5298, and shipped across all eleven
+   * filter surfaces. This evaluator answers `['2','3','4']` below — the affirmed
+   * answer, not a lag behind a target.
    *
-   * It answers `['2','3','4']`, and that is pinned here rather than fixed,
-   * because flipping it ALONE would re-open the exact hole PR #5962 closed. That
-   * PR converged `formula` (the RLS write-side `check`) and `read-scope-sql`
-   * (the read-side lowering) in ONE change precisely because they are
-   * security-coupled: one policy string must not admit two row sets. Every SQL
-   * face still emits `nullSafeNegative` for these two operators
+   * It was challenged and it held. A ruling on 2026-08-10 07:33Z would have
+   * taken SQL's native three-valued logic as the common denominator — negative
+   * operators never matching no-value rows, `['2']` below — and cells 1 and 3 of
+   * it were WITHDRAWN the same day once the reversal's cost had been measured
+   * across every surface.
+   *
+   * These assertions are load-bearing under either direction, and the coupling
+   * that makes them so is a large part of why the reversal was declined: this
+   * evaluator is the RLS write-side `check` and `read-scope-sql` is the
+   * read-side lowering, and PR #5962 converged them in ONE change precisely
+   * because they are security-coupled — one policy string must not admit two row
+   * sets. Every SQL face emits `nullSafeNegative` for these two operators
    * (`col IS NULL OR col NOT IN (…)`), so a formula-only flip would make an RLS
    * `check` DENY a write on a null field that the read scope still RETURNS —
-   * #5962's defect with the sign reversed.
+   * #5962's defect with the sign reversed. Anyone re-proposing a reversal steps
+   * on these lines DELIBERATELY, in the same PR that moves `driver-sql`,
+   * `read-scope-sql`, `filter-normalizer` and `driver-turso`'s remote transport
+   * — not one evaluator at a time.
    *
-   * So these assertions are load-bearing in both directions. They say what this
-   * evaluator does today, and they are the tripwire the cross-backend PR must
-   * step on: whoever lands the ruled semantics changes these lines DELIBERATELY,
-   * in the same PR that moves `driver-sql`, `read-scope-sql`, `filter-normalizer`
-   * and `driver-turso`'s remote transport — not one evaluator at a time.
-   *
-   * The full eleven-surface measurement and the enrolment blocker (the
-   * conformance ledger has no per-row DEBT, and two of the five scored drivers
-   * are inside the #5499 freeze) are recorded on family 4 in
-   * `@objectstack/spec`'s `filter-logic-conformance.ts` header.
+   * The full eleven-surface measurement, and why the reversal was declined, are
+   * recorded on family 4 in `@objectstack/spec`'s
+   * `filter-logic-conformance.ts` header.
    */
-  describe('[#5299] $notContains / $nin over a value-less field — the pre-ruling answer', () => {
-    it('$notContains MATCHES a value-less field — ruled target is that it must NOT', () => {
+  describe('[#5299] $notContains / $nin over a value-less field — the affirmed direction', () => {
+    it('$notContains MATCHES a value-less field — re-affirmed 2026-08-10', () => {
       expect(matched({ stage: { $notContains: 'w' } })).toEqual(['2', '3', '4']);
     });
 
-    it('$nin MATCHES a value-less field — ruled target is that it must NOT', () => {
+    it('$nin MATCHES a value-less field — re-affirmed 2026-08-10', () => {
       expect(matched({ stage: { $nin: ['won'] } })).toEqual(['2', '3', '4']);
     });
 
@@ -233,9 +237,10 @@ describe('[#5146] matchesFilterCondition — $not over records with no value', (
       expect(matched({ stage: { $nin: ['won'] } })).toEqual(matched({ stage: { $ne: 'won' } }));
     });
 
-    it('the ruled ESCAPE HATCH already works, in both directions', () => {
-      // Whatever happens to the three cells above, the rule's second half is
-      // already true here: "no value" is selectable, precisely, today.
+    it('the ESCAPE HATCH works, in both directions', () => {
+      // The half of the 07:33Z rule that was never in dispute, and that its
+      // withdrawal did not touch: "no value" is selectable, precisely, today —
+      // and `$exists` reads has-value (cell 2, shipped in PR #5962, stands).
       expect(matched({ stage: { $exists: false } })).toEqual(['3', '4']);
       expect(matched({ stage: { $null: true } })).toEqual(['3', '4']);
       expect(matched({ stage: { $exists: true } })).toEqual(['1', '2']);

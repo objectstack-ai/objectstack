@@ -203,22 +203,30 @@ describe('[#5324] InMemoryDriver.find compiles a document-level $not', () => {
    * where this measurement is recorded. Pinned as measured so the fix that lands
    * there has to move these lines deliberately.
    *
-   * ⚠️ [#5299, ruled 2026-08-10] The ruling is in, and it says the REFERENCE
-   * column below is the target on all three rows: SQL three-valued logic is the
-   * common denominator, so **negative operators never match no-value rows; the
-   * only ways to select "no value" are `$exists: false` / `$null: true`.** The
-   * `live` column is therefore the side that is wrong on every row here —
-   * mingo's `$exists` is key-presence, and its `$nin` / `$notContains` match a
-   * value that is not there.
+   * ⚠️ [#5299, settled 2026-08-10] The semantics are settled, and neither column
+   * below is wholly right — they are correct on complementary rows:
    *
-   * ⛔ Still not flipped, and by decision rather than by difficulty: this package
-   * is inside the #5499 investment freeze. Note also what the ruling assumed and
-   * this file disproves — it says "driver-memory already reads has-value" and
-   * "driver-memory and SQL already agree", which is true of the reference
-   * matcher and FALSE of the live query path users actually reach. That is the
-   * reason this pin exists.
+   *   `$exists`      REFERENCE is correct. `$exists` means "has a value"
+   *                  (#5298 ③ / #5369, PR #5962), so mingo's key-presence
+   *                  reading is the divergent one.
+   *   `$nin`         LIVE is correct. Negative operators MATCH no-value rows —
+   *                  #5146, extended by #5298, re-affirmed 2026-08-10 — so a
+   *                  missing key satisfying `$nin` is the affirmed answer, and
+   *                  the reference matcher's early-exit guard is the divergence.
+   *   `$notContains` LIVE is correct, for the same reason.
+   *
+   * A ruling that morning (07:33Z) would have made the REFERENCE column the
+   * target on all three rows. Cells 1 and 3 of it were WITHDRAWN the same day,
+   * once the reversal's cross-backend cost had been measured, and the include
+   * direction was re-affirmed — which leaves the split above.
+   *
+   * ⛔ Nothing is flipped in either direction: this package is inside the #5499
+   * investment freeze. What the round trip confirmed is exactly why this pin
+   * exists — this package answers with two different faces, so a statement like
+   * "driver-memory already reads has-value" is true of the reference matcher and
+   * FALSE of the live query path users actually reach.
    */
-  describe('[#5299] the ruled cells, live vs reference — behaviour frozen (#5499)', () => {
+  describe('[#5299] the settled cells, live vs reference — behaviour frozen (#5499)', () => {
     const liveVsReference = async (where: unknown) => ({
       live: await idsFrom(nulled, where),
       reference: NULLED.filter((r) => match(r, where)).map((r) => r.id),

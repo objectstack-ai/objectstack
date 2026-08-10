@@ -128,25 +128,32 @@ describe('[#5146] memory-matcher — $not over records with no value', () => {
     });
   });
 
-  // ── The three cells #5299 ruled on — behaviour FROZEN, annotation current ──
+  // ── The three #5299 cells — behaviour FROZEN, annotation current ───────────
 
   /**
-   * [#5299, ruled 2026-08-10] These three cells were filed as "known
-   * disagreements with `formula`, not ruled on by #5146". They are ruled now:
-   * SQL's native three-valued logic is the common denominator, so **negative
-   * operators never match no-value rows; the only ways to select "no value" are
-   * `$exists: false` / `$null: true`.**
+   * [#5299, settled 2026-08-10] These three cells were filed as "known
+   * disagreements with `formula`, not ruled on by #5146". They are settled now,
+   * and the settled direction is INCLUDE: `$ne` / `$nin` / `$notContains` MATCH
+   * a no-value row (#5146, extended by #5298, shipped across eleven surfaces),
+   * and `$exists` means "has a value" (#5298 ③ / #5369, PR #5962).
    *
-   * ⛔ Nothing below is flipped, and the reason is not inertia. This package is
-   * inside the #5499 investment freeze, and the ruling itself says
-   * `checkCondition`'s early-exit guard STAYS AS IT IS. What the ruling changed
-   * is the annotation: the section is no longer "a divergence nobody has ruled
-   * on", it is "a ruled target, with this matcher's distance from it measured".
+   * A ruling on 2026-08-10 07:33Z briefly went the other way — SQL's native
+   * three-valued logic as the common denominator, negative operators never
+   * matching no-value rows — which would have made this matcher's answers below
+   * the canonical ones. Cells 1 and 3 of it were WITHDRAWN the same day, once
+   * the reversal's cross-backend cost had been measured, and include was
+   * re-affirmed. `$exists` = has-value is the leg that stands.
+   *
+   * ⛔ Nothing below is flipped, and the reason is not inertia: this package is
+   * inside the #5499 investment freeze, and both rulings leave `checkCondition`'s
+   * early-exit guard exactly as it is. So this section is what it always was — a
+   * measured divergence from the platform answer, pinned rather than harmonised
+   * — with its wording brought current.
    *
    * Re-measured on `60f0dd8`, because the old wording had gone stale in a way
    * that mattered — it named `formula` as the key-presence reader on `$exists`,
-   * and `formula` stopped being that in PR #5962 (#5298 ③ / #5369). Where each
-   * cell actually stands:
+   * and `formula` stopped being that in PR #5962. Where each cell stands against
+   * the affirmed include direction:
    *
    *   `$exists`      CONVERGED, and this matcher was already right. Both
    *                  evaluators read "has a value"; the formula-side assertion
@@ -155,29 +162,30 @@ describe('[#5146] memory-matcher — $not over records with no value', () => {
    *                  mingo query path and the analytics face — still read
    *                  key-presence, so the package disagrees with itself and this
    *                  test is the face that is correct.
-   *   `$notContains` This matcher ALREADY answers the ruled semantics; every
-   *                  other surface in the repo (including all four SQL
-   *                  compilers, deliberately, via #5298's `nullSafeNegative`)
-   *                  answers the opposite. Here the gap is theirs, not ours.
-   *   `$nin`         HALF right: a missing key already does not match, a
-   *                  present-but-null value still does. The ruled answer is "no"
-   *                  for both. Frozen at this state.
+   *   `$notContains` DIVERGES: a value-less field does not satisfy it here,
+   *                  while `formula` and all four SQL compilers say it does —
+   *                  deliberately, via #5298's `nullSafeNegative`. This matcher
+   *                  is the odd one out among the eleven surfaces, and frozen.
+   *   `$nin`         HALF converged: a present-but-null value already matches,
+   *                  as the affirmed direction requires; a MISSING key still
+   *                  does not, because the early-exit guard does not exempt
+   *                  `$nin`. Frozen at this state.
    */
-  describe('[#5299] the ruled no-value cells — target recorded, behaviour frozen (#5499)', () => {
+  describe('[#5299] the settled no-value cells — divergence measured, behaviour frozen (#5499)', () => {
     it('$nin: an ABSENT field is treated differently from a null one', () => {
       // The early `value === undefined` guard in `checkCondition` exempts only
       // `$exists` / `$ne` / `$null`, so an absent field fails `$nin` outright
-      // while a null field passes it. The ruling keeps this guard; the NULL half
-      // is the part still short of the ruled answer, and it is frozen.
+      // while a null field passes it. The guard stays; the MISSING half is the
+      // part still short of the affirmed include answer, and it is frozen.
       expect(ids(NULLED, { $not: { stage: { $nin: ['won'] } } })).toEqual(['1']);
       expect(ids(MISSING, { $not: { stage: { $nin: ['won'] } } })).toEqual(['1', '3', '4']);
     });
 
-    it('$notContains: a value-less field does NOT satisfy it here — the RULED answer', () => {
-      // `typeof null !== 'string'` → false, so the negation matches. This is
-      // what #5299 ruled canonical. `formula` and all four SQL compilers answer
-      // the opposite today; moving them is a cross-backend programme, not a
-      // change to this file.
+    it('$notContains: a value-less field does NOT satisfy it here — DIVERGENT', () => {
+      // `typeof null !== 'string'` → false, so the negation matches. The
+      // affirmed direction is the opposite: `formula` and all four SQL compilers
+      // say a value-less field DOES satisfy `$notContains`, and #5299 re-affirmed
+      // that on 2026-08-10. This matcher stays where it is under #5499.
       expect(matched({ $not: { stage: { $notContains: 'w' } } })).toEqual(['1', '3', '4']);
     });
 

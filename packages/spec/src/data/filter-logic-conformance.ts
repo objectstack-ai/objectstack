@@ -73,18 +73,19 @@
  * {@link FilterLogicRow.d} column carries it, and the four `d`-column cases
  * below enforce it on every backend.
  *
- * ⚠️ That answer is the INCLUDE direction, and a later ruling has replaced it as
- * the TARGET without any backend having moved yet. The four `d`-column cases
- * below still state what the tree does, which is what a conformance table is
- * for — but do not read them as the settled semantics. Family 4 below is the
- * ruling that supersedes them and the measurement of what it costs.
+ * ⚠️ That answer — the INCLUDE direction — was reversed by a ruling on
+ * 2026-08-10 and RE-AFFIRMED the same day, once the reversal's full cost had
+ * been measured. So the four `d`-column cases below ARE the settled semantics,
+ * not a placeholder for a pending target. The record of that round trip is
+ * family 4 at the bottom of this note, kept because the measurement in it is
+ * what makes this answer settled rather than merely unchallenged.
  *
  * ## Case families that are RULED but not yet enrolled
  *
- * Both families left were ruled by the maintainer and are implemented in some
- * backends. They are not in the table yet — a red row here does not enforce a
+ * The one family left was ruled by the maintainer and is implemented in some
+ * backends. It is not in the table yet — a red row here does not enforce a
  * ruling, it just turns another lane's unfinished work into this table's
- * failure, and each family still has a blocker standing, named below. Add the
+ * failure, and the family still has a blocker standing, named below. Add the
  * rows in the PR that closes the gap, not before.
  *
  * Two families have GRADUATED out of this note, and how they did is the note's
@@ -113,7 +114,7 @@
  * remains" written from a reading of the backend LIST rather than from a
  * measurement is the sentence that hides the next one.
  *
- * The family numbering of the ones that remain is kept as their historical id.
+ * The family numbering of the one that remains is kept as its historical id.
  *
  * ### 3. `{ field: {} }` — a field constrained by zero operators (#5240)
  *
@@ -131,41 +132,51 @@
  * invented here. The case lands with that extension, alongside the
  * schema-side narrowing that stays with the spec lane.
  *
- * ### 4. Negative operators over a no-value row — the EXCLUDE direction (#5299)
+ * ## A reversal that was ruled, measured, and WITHDRAWN — the record (#5299)
  *
- * Ruled by the maintainer on **2026-08-10** (#5299): *SQL three-valued logic is
- * the common denominator; align both JS evaluators to it.* Concretely —
- * `$notContains` on a value-less field does NOT match; `$exists` means "has a
- * value" (`!= null`), never key-presence; `$nin` on a no-value field does NOT
- * match. Stated for authors as one rule: **negative operators never match
- * no-value rows; select "no value" with `$exists: false` / `$null: true`.**
+ * Not a pending family, and nothing here is waiting on a backend. It is kept
+ * because the measurement below is the reason the null semantics above are
+ * settled, and because a record of a reversal that was costed and declined is
+ * what stops the same proposal being re-derived from first principles. The
+ * family number is its historical id.
  *
- * This REVERSES the include direction #5298 ruled on 2026-08-06 and #5146 ruled
- * for `$not` before it — the same direction the four `d`-column cases above
- * currently enforce. So the two enrolled rows `$ne returns the rows with no
- * value` and `$not returns the rows with no value` are not neighbours of this
- * family, they are the SAME family stating the opposite answer: under native
- * three-valued SQL, `d <> 'v1'` and `NOT (d = 'v1')` are UNKNOWN for a NULL `d`
- * and return `['2']`, not `['2','3','4']`. Enrolling family 4 therefore means
- * re-ruling those two rows in the same PR, not adding rows beside them.
+ * ### 4. Negative operators over a no-value row — EXCLUDE ruled, then withdrawn
  *
- * ⛔ What blocks enrolment is NOT a missing wording, and it is worth stating
- * because the obvious workaround does not exist: **the DEBT ledger in
- * `scripts/check-driver-conformance.mjs` is per (driver × case-set), not per
- * case.** An entry says "this driver's suite does not import this marker at
- * all". There is no spelling for "this driver fails one row while passing the
- * other thirty-five", so a row added ahead of a backend is simply a red gate —
- * the thing #5903's note calls "a gate that reports a known red", which teaches
- * every agent reading CI to discount the colour.
+ * Ruled by the maintainer on **2026-08-10 07:33Z** (#5299): *SQL three-valued
+ * logic is the common denominator; align both JS evaluators to it* — concretely
+ * `$notContains` and `$nin` would stop matching no-value rows, and `$exists`
+ * would mean "has a value" (`!= null`) rather than key-presence.
  *
- * The measurement, taken on `60f0dd8` by adding the candidate rows to this
- * table and running every suite that drives it. `MATCH` = a no-value row
- * satisfies the operator, i.e. the include direction the ruling reverses:
+ * **Cells 1 and 3 of that ruling were WITHDRAWN the same day**, hours later,
+ * with the eleven-surface measurement below in hand: 「选「维持 include」」 —
+ * maintain include. So the settled platform semantics are the ones this table
+ * already enforces:
+ *
+ * - **`$ne` / `$nin` / `$notContains` on a no-value row MATCH** — the include
+ *   direction, ruled by #5146 for `$not`, extended to the operator family by
+ *   #5298, shipped across all eleven surfaces below via `nullSafeNegative` and
+ *   `nullValueSatisfiesOperator`, and enrolled in {@link FILTER_LOGIC_CASES}.
+ *   Not merely unchallenged — challenged, measured, and re-affirmed with the
+ *   reversal option on the table.
+ * - **`$exists` means "has a value"** (`!= null`), never key-presence — cell 2,
+ *   the leg of the 07:33Z ruling that was never in conflict with #5298 and had
+ *   already shipped in PR #5962. It stands.
+ *
+ * So the two enrolled rows `$ne returns the rows with no value` and `$not
+ * returns the rows with no value` state the affirmed answer, and the `['2']`
+ * that native three-valued SQL would give for `d <> 'v1'` is the answer this
+ * platform deliberately does NOT take.
+ *
+ * ### Why the reversal was declined — the measurement
+ *
+ * Taken on `60f0dd8` by adding the candidate rows to this table and running
+ * every suite that drives it. `MATCH` = a no-value row satisfies the operator,
+ * i.e. the include direction — the affirmed one:
  *
  * | Surface | `$notContains` | `$nin` | `$exists: true` on a null value |
  * |---|---|---|---|
  * | `formula` `matchesFilterCondition` | MATCH | MATCH | no — already ruled-correct (#5962) |
- * | `driver-memory` reference matcher | no — already ruled-correct | MATCH on a null value, no on a missing key | no — already ruled-correct |
+ * | `driver-memory` reference matcher | no — DIVERGENT, frozen (#5499) | MATCH on a null value, no on a missing key | no — ruled-correct (#5962) |
  * | `driver-memory` live mingo path | MATCH | MATCH | MATCH — reads KEY-PRESENCE |
  * | `driver-memory` analytics face | MATCH | MATCH | MATCH — reads KEY-PRESENCE |
  * | `driver-sql` / `driver-sqlite-wasm` / `driver-turso` local | MATCH | MATCH | no — `IS NOT NULL` |
@@ -179,21 +190,37 @@
  * and the four independent copies of `nullValueSatisfiesOperator`
  * (`$nin` → true, `$notContains` → true) in `sql-driver.ts`,
  * `read-scope-sql.ts`, `filter-normalizer.ts` and `remote-transport.ts`. So
- * "SQL already agrees" is false of this tree: SQL was bent TOWARDS the JS
- * answer, and the ruling asks for it to be bent back.
+ * "SQL already agrees" was false of this tree: SQL had been bent TOWARDS the JS
+ * answer on purpose, and the reversal asked for it to be bent back.
  *
- * Two of the eleven surfaces — every `driver-memory` face and `driver-mongodb`
- * — are inside the #5499 investment freeze, and they are two of the FIVE
- * drivers this gate scores. Since the ledger cannot carry a per-row exemption,
- * enrolment cannot happen while the freeze stands, whatever the other nine do.
+ * That is what the table decided. The reversal was not a wording change but a
+ * cross-backend programme: flip `formula` and `service-analytics`'s
+ * `read-scope-sql` in ONE change (they are security-coupled — the RLS write-side
+ * `check` and the read-side lowering; splitting them re-opens the hole PR #5962
+ * closed, with the sign reversed), rewrite four independent copies of
+ * `nullValueSatisfiesOperator`, re-rule the two enrolled `$ne` / `$not` rows,
+ * and touch the live query paths of two backends inside the #5499 investment
+ * freeze. What it buys is a WORSE failure mode: a filter that silently drops
+ * rows the author expected, in place of one that returns rows they can see and
+ * narrow — silent absence for visible surplus. With no business pull behind it,
+ * the maintainer kept include.
  *
- * ⚠️ `$exists` is the one cell of the three that is NOT open on the JS
- * evaluators: `formula` and `driver-memory`'s reference matcher both already
- * read "has a value" (#5298 ③ / #5369, landed in #5962). What is still open on
- * that cell is `driver-memory`'s live mingo path and `driver-mongodb`, both of
- * which read key-presence — both frozen. So the ruling's `$exists` leg needs no
- * work on the surface it names, and cannot be enrolled because of two it does
- * not.
+ * ⚠️ One cell of the three is still short of its ruling, and it is the cell that
+ * SURVIVED. `$exists` = has-value is settled and shipped on the surfaces the
+ * ruling named — `formula` and `driver-memory`'s reference matcher both read it
+ * that way (#5298 ③ / #5369, landed in #5962). Still reading key-presence:
+ * `driver-memory`'s live mingo path and `driver-mongodb`, both frozen by #5499,
+ * and both among the FIVE drivers this gate scores. So a `$exists` row cannot be
+ * enrolled here yet.
+ *
+ * ⛔ And the blocker on that row is NOT a missing wording, which is worth
+ * stating because the obvious workaround does not exist: **the DEBT ledger in
+ * `scripts/check-driver-conformance.mjs` is per (driver × case-set), not per
+ * case.** An entry says "this driver's suite does not import this marker at
+ * all". There is no spelling for "this driver fails one row while passing the
+ * other thirty-five", so a row added ahead of a backend is simply a red gate —
+ * the thing #5903's note calls "a gate that reports a known red", which teaches
+ * every agent reading CI to discount the colour.
  */
 
 import type { FilterCondition } from './filter.zod';
@@ -385,14 +412,15 @@ export const FILTER_LOGIC_CASES: readonly FilterLogicCase[] = [
   // until it did, enrolling these two rows would have been a gate that reports a
   // known red — which teaches every agent reading CI to discount the colour.
   //
-  // ⚠️ [#5299, ruled 2026-08-10] These two rows now state the SUPERSEDED
-  // direction. The ruling took SQL's native three-valued logic as the common
-  // denominator, under which `d <> 'v1'` and `NOT (d = 'v1')` are UNKNOWN for a
-  // NULL `d` and both rows become `['2']`. They are left as they are on purpose:
-  // they are what all eleven surfaces answer today, and a conformance table that
-  // states the target instead of the tree is a gate reporting a known red. They
-  // move in the PR that moves the backends — see family 4 in this file's header
-  // for the measured blocker list.
+  // ⚠️ [#5299, 2026-08-10] These two rows were RE-AFFIRMED that day, and the
+  // round trip is worth knowing before anyone proposes it again. A morning
+  // ruling took SQL's native three-valued logic as the common denominator —
+  // `d <> 'v1'` and `NOT (d = 'v1')` are UNKNOWN for a NULL `d`, so both rows
+  // would become `['2']`. Hours later, with the cross-backend cost measured on
+  // all eleven surfaces, the maintainer WITHDREW that direction and kept
+  // include. So these rows are the settled semantics, not a tree lagging its
+  // target — see family 4 in this file's header for the measurement and why the
+  // reversal was declined.
   {
     name: '$ne returns the rows with no value',
     filter: { d: { $ne: 'v1' } },
