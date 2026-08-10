@@ -213,6 +213,20 @@ const RUNTIME_CREATE_ALLOWED_TYPES: ReadonlySet<string> = new Set(
 );
 
 /**
+ * [#6960] Types whose LOADER merges an overlay row on top of the artifact at
+ * read time — `supportsOverlay: true`. Derived from the same registry as the
+ * two sets above (Prime Directive #8), and deliberately a different question
+ * from {@link OVERLAY_ALLOWED_TYPES}: `supportsOverlay` is a capability of the
+ * READ path, `allowOrgOverride` a permission on the WRITE path. Read only by
+ * {@link SysMetadataRepository.assertDeleteAllowed}.
+ */
+const OVERLAY_CAPABLE_TYPES: ReadonlySet<string> = new Set(
+  DEFAULT_METADATA_TYPE_REGISTRY
+    .filter((e) => e.supportsOverlay)
+    .map((e) => e.type),
+);
+
+/**
  * Phase 3a-env-writable: parse `OS_METADATA_WRITABLE` (comma-
  * separated singular type names). Memoised; tests can reset via
  * {@link resetEnvWritableMetadataTypes}. Mirrors the same helper in
@@ -554,7 +568,10 @@ export class SysMetadataRepository implements MetadataRepository {
     opts: DeleteOptions & { state?: OverlayState },
   ): Promise<DeleteResult> {
     this.assertOpen();
-    this.assertAllowed(ref.type, opts.intent);
+    // [#6960] The DELETE verb's own gate — see {@link assertDeleteAllowed}.
+    // `put` keeps calling `assertAllowed` directly; the ruling moved removal
+    // only.
+    this.assertDeleteAllowed(ref.type, opts.intent);
 
     const state: OverlayState = opts.state ?? 'active';
     const result = await this.withTxn(async (ctx) => {
@@ -1078,6 +1095,62 @@ export class SysMetadataRepository implements MetadataRepository {
     err.code = code;
     err.status = 403;
     throw err;
+  }
+
+  /**
+   * [#6960] The DELETE half of {@link assertAllowed}, and the only place the
+   * two verbs diverge.
+   *
+   * ## Why the divergence exists
+   *
+   * `assertAllowed` refuses an `override-artifact` write on any type without
+   * `allowOrgOverride`, and it is TOPOLOGY-INDEPENDENT — a control-plane
+   * kernel (`environmentId === undefined`) skips the protocol's own two-tier
+   * block entirely and lands here instead. That made it the second of the two
+   * refusal points #6960 measured: on an environment carrying an overlay row
+   * authored BEFORE #6483 / PR #6608 rolled `allowOrgOverride` back to
+   * `false`, the row kept merging overlay-wins at read time while the ordinary
+   * "Reset to package default" answered 403 — the removal reachable only
+   * through `OS_METADATA_WRITABLE`. Maintainer ruling, 2026-08-10: the delete
+   * side moves. Removing an overlay restores the code-declared state; it is
+   * the narrowing direction and cannot widen anything.
+   *
+   * ## The boundary, which is the whole safety argument
+   *
+   * Keyed on `supportsOverlay` ({@link OVERLAY_CAPABLE_TYPES}), NOT on
+   * `allowOrgOverride`:
+   *
+   *  - `supportsOverlay: true` — the loader merges the row, so a row under
+   *    this name really is a customization sitting on top of a code-declared
+   *    default, and subtracting it restores that default. This is the tier
+   *    #6483 rolled back (`permission` / `position` / `page` / `app` /
+   *    `dataset` / `book`).
+   *  - `supportsOverlay: false` — `object` above all, whose overlay registers
+   *    as its own contributor LAYER (ADR-0029 D9) rather than merging, and
+   *    whose reset refusal is D9.6's declared, maintainer-approved cost. It
+   *    does not reach this carve-out, and `protocol-object-overlay-layer.test.ts`
+   *    pins that on both topologies — including the control-plane case, which
+   *    is refused HERE and nowhere else.
+   *
+   * ## Two things this deliberately does NOT do
+   *
+   *  - It does not touch `put`. Create and update on such an item stay refused
+   *    exactly as today; the asymmetry is the ruling, not an oversight, and
+   *    "restoring symmetry" here re-opens the write door #6483 closed.
+   *  - It does not widen `runtime-only`. That intent means "no artifact under
+   *    this name", which the `allowRuntimeCreate` tier already governs — so
+   *    the carve-out is scoped to the `override-artifact` intent, which is
+   *    precisely the artifact-backed case the ruling names.
+   */
+  private assertDeleteAllowed(
+    type: string,
+    intent: MetadataWriteIntent = 'override-artifact',
+  ): void {
+    if (intent !== 'runtime-only') {
+      const singular = PLURAL_TO_SINGULAR[type] ?? type;
+      if (OVERLAY_CAPABLE_TYPES.has(singular) || OVERLAY_CAPABLE_TYPES.has(type)) return;
+    }
+    this.assertAllowed(type, intent);
   }
 
   private whereFor(

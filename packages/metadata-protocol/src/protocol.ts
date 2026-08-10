@@ -7805,6 +7805,51 @@ export class ObjectStackProtocolImplementation implements
         return out;
     })();
 
+    /**
+     * [#6960] Metadata types whose LOADER merges a per-org/env overlay row on
+     * top of the artifact at read time — `supportsOverlay: true` on the
+     * registry entry, read straight off the declaration.
+     *
+     * This is a strictly different question from {@link OVERLAY_ALLOWED_TYPES}
+     * (`allowOrgOverride`), and the registry keeps the two flags apart on
+     * purpose: `supportsOverlay` is a CAPABILITY of the read path ("an overlay
+     * row under this name changes what is served"), `allowOrgOverride` is a
+     * PERMISSION on the write path ("a tenant may author one"). #6483 / PR
+     * #6608 rolled the permission back for six types — `permission`,
+     * `position`, `page`, `app`, `dataset`, `book` — and deliberately left
+     * the capability alone, which is exactly the state #6960 was filed about:
+     * a row authored BEFORE the rollback still merges overlay-wins today.
+     *
+     * Registry-derived, never a hand-written list (Prime Directive #8), and
+     * augmented with the plural spelling so `/api/v1/meta/pages/...` is judged
+     * identically to the singular — the same normalization every sibling set
+     * in this class does.
+     */
+    private static readonly OVERLAY_CAPABLE_TYPES: ReadonlySet<string> = (() => {
+        const out = new Set<string>();
+        for (const entry of DEFAULT_METADATA_TYPE_REGISTRY) {
+            if (!entry.supportsOverlay) continue;
+            out.add(entry.type);
+            const plural = SINGULAR_TO_PLURAL[entry.type];
+            if (plural) out.add(plural);
+        }
+        return out;
+    })();
+
+    /**
+     * [#6960] Does this type's loader merge an overlay row at read time?
+     * Normalizes plural→singular, like every other predicate here.
+     *
+     * Read ONLY by `deleteMetaItem`'s two-tier authorization (and mirrored by
+     * `SysMetadataRepository`'s delete gate); it never widens a create or an
+     * update. See the call site for the ruling that licenses the asymmetry.
+     */
+    private static mergesOverlayAtRead(type: string): boolean {
+        const singular = PLURAL_TO_SINGULAR[type] ?? type;
+        return this.OVERLAY_CAPABLE_TYPES.has(singular)
+            || this.OVERLAY_CAPABLE_TYPES.has(type);
+    }
+
     /** Normalize plural→singular before consulting the allow-list. */
     private static isOverlayAllowed(type: string): boolean {
         const singular = PLURAL_TO_SINGULAR[type] ?? type;
@@ -9075,6 +9120,33 @@ export class ObjectStackProtocolImplementation implements
         // type there unlocks it here too. `deleteMetaItem` is deliberately
         // NOT gated the same way — removing a code-only row that predates
         // this refusal is repair, and must stay possible.
+        //
+        // [#6960] THAT CARVE-OUT NOW NAMES BOTH TIERS, because as written it
+        // covered only the CODE-ONLY one (`allowRuntimeCreate: false` AND
+        // `allowOrgOverride: false`, i.e. the `if` immediately below) while
+        // the identical argument had grown a second population: an
+        // ARTIFACT-BACKED item of a type that kept `allowRuntimeCreate: true`
+        // and had its `allowOrgOverride` ROLLED BACK to `false` (#6483 / PR
+        // #6608 — `permission` / `position` / `page` / `app` / `dataset` /
+        // `book`). Its loader still merges the overlay at read time
+        // (`supportsOverlay: true`, untouched by the rollback), so a row
+        // authored before the rollback keeps shaping the effective body while
+        // the ordinary "Reset to package default" answered 403 — repair
+        // reachable only through the operator hatch. The maintainer ruled on
+        // 2026-08-10 that the delete side moves for that tier too: the
+        // removal restores the code-declared state, is strictly narrowing,
+        // and cannot widen anything.
+        //
+        // ⛔ THE ASYMMETRY IS DELIBERATE AND DELETE-ONLY. This gate and the
+        // artifact-backed refusal below it are UNCHANGED: create and update
+        // on such an item stay refused exactly as today. Do not "restore
+        // symmetry" in either direction — symmetrizing towards delete re-opens
+        // the write door #6483 closed, symmetrizing towards save re-traps the
+        // repair. And the relaxation is keyed on `supportsOverlay`, not on
+        // `allowOrgOverride`, so it stops at the tier boundary: `object`
+        // (`supportsOverlay: false`, its overlay a contributor LAYER per
+        // ADR-0029 D9) keeps refusing both verbs, which is D9.6's declared
+        // cost and is pinned. See {@link deleteMetaItem}.
         if (!overlayAllowed && !runtimeCreateAllowed) {
             throw this.isArtifactBacked(request.type, request.name)
                 ? ObjectStackProtocolImplementation.codeOnlyOverrideError(request.type, request.name)
@@ -11921,14 +11993,59 @@ export class ObjectStackProtocolImplementation implements
         request = canonicalizeMetaRequestType(request);
         // Two-tier authorization for delete (mirrors saveMetaItem).
         //  • Artifact-backed item → delete becomes a tombstone overlay,
-        //    requires `allowOrgOverride`.
+        //    requires `allowOrgOverride`…
+        //  • …EXCEPT when the type's loader merges overlays at read time
+        //    (`supportsOverlay: true`) — then removing the row is repair and
+        //    is allowed without it. [#6960, delete-only; see below.]
         //  • DB-only item → hard delete of a user-created row,
         //    requires `allowRuntimeCreate` (or `allowOrgOverride`).
         if (this.environmentId !== undefined) {
             const overlayAllowed = ObjectStackProtocolImplementation.isOverlayAllowed(request.type);
             const runtimeCreateAllowed = ObjectStackProtocolImplementation.isRuntimeCreateAllowed(request.type);
             const artifactBacked = this.isArtifactBacked(request.type, request.name);
-            if (artifactBacked && !overlayAllowed) {
+            // [#6960] …and the ONE removal the refusal above must not swallow.
+            //
+            // MAINTAINER RULING, 2026-08-10 (#6960): removing a legacy env
+            // overlay on a type whose per-org override channel was rolled back
+            // is allowed through the ordinary delete path. Deleting an overlay
+            // restores the code-declared state — it is the NARROWING direction
+            // and cannot widen anything — so refusing it serves no security
+            // purpose while trapping the repair behind `OS_METADATA_WRITABLE`.
+            //
+            // ⛔ DELETE ONLY, AND IT IS NOT AN OVERSIGHT. Create and update on
+            // the same item stay refused exactly as before (`saveMetaItem`'s
+            // sibling gate is untouched); a future tidy-up that "restores
+            // symmetry" here re-opens the write door the #6483 rollback closed.
+            // The asymmetry is the ruling.
+            //
+            // THE TIER BOUNDARY, which is what makes this narrow enough to be
+            // safe: {@link mergesOverlayAtRead} is `supportsOverlay`, NOT
+            // `allowOrgOverride`.
+            //
+            //  • `supportsOverlay: true` + `allowOrgOverride: false` — the
+            //    ROLLED-BACK OVERLAYABLE tier (`permission` / `position` /
+            //    `page` / `app` / `dataset` / `book`, and any type that lands
+            //    in this shape later). #6483 / PR #6608 closed the write door
+            //    and left the read path merging overlay-wins, so a row
+            //    authored before the rollback still shapes the effective body
+            //    and the ordinary "Reset to package default" flow answered 403
+            //    with the item still customized. That is the stuck operator
+            //    this branch releases.
+            //  • `supportsOverlay: false` — `object` above all, whose overlay
+            //    is a CONTRIBUTOR LAYER (ADR-0029 D9) rather than a merge, and
+            //    whose reset refusal is D9.6's declared and maintainer-approved
+            //    cost. This branch does not reach it and must not: pinned by
+            //    `protocol-object-overlay-layer.test.ts` on both topologies.
+            //
+            // The same carve-out is mirrored — deliberately, not by accident —
+            // in `SysMetadataRepository`'s delete gate, because that one is
+            // TOPOLOGY-INDEPENDENT: a control-plane kernel skips this whole
+            // block (`environmentId === undefined`) and would otherwise be
+            // refused there instead, leaving the fix half-done. See
+            // {@link SysMetadataRepository.assertDeleteAllowed}.
+            const legacyOverlayRemoval = ObjectStackProtocolImplementation
+                .mergesOverlayAtRead(request.type);
+            if (artifactBacked && !overlayAllowed && !legacyOverlayRemoval) {
                 const err = new Error(
                     `[not_overridable] Metadata item '${request.type}/${request.name}' is provided by a code package `
                     + `and the type has not opted into per-org overlay writes. `
