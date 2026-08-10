@@ -40,6 +40,7 @@ import { ObjectQLPlugin, type ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { SecurityPlugin, securityDefaultPermissionSets } from '@objectstack/plugin-security';
 import { PermissionSetSchema } from '@objectstack/spec/security';
+import { BUILTIN_OPERATION_MESSAGES } from '@objectstack/spec/system';
 import { AutomationServicePlugin } from './plugin.js';
 import type { AutomationEngine } from './engine.js';
 
@@ -303,11 +304,29 @@ describe('the #5494 admission flip: row content, not caller, decides (real Secur
     // difference between the two attempts is the row's stamp columns — the
     // issue's step-4/5 tell, reproduced in one build. (`owner_only_writes`
     // matches no one on a NULL `created_by`; the pre-image check fails closed.)
+    //
+    // [#7451] Re-spelled from `toThrow(/denied|permission/i)`, and the reason is
+    // worth recording: that regex was never asserting this refusal, it was
+    // asserting the SHAPE OF THE ENGLISH COPY, and it matched only because the
+    // sentence happened to open with "Access denied". The row-level gate's user
+    // half is now a localized catalog sentence ("You do not have access to this
+    // record…"), which contains neither word — so the regex went red on a change
+    // that altered nothing it was written to protect. Pinned properly now: the
+    // ADR-0112 envelope (`code` + `statusCode`, never a bare throw), the user
+    // half against the catalog CONSTANT so the next copy edit needs no re-spell,
+    // and the developer half — which still carries the English sentence verbatim
+    // — for the one thing the regex was reaching for, namely WHICH gate refused.
+    const rowLevelDenial = {
+      code: 'PERMISSION_DENIED',
+      statusCode: 403,
+      message: BUILTIN_OPERATION_MESSAGES.en.record_access_denied,
+      developerMessage: expect.stringContaining('(row-level security)'),
+    };
     await expect(
       ql.update('crm_task', { id: row.id, status: 'done' }, { context: { ...MEMBER_CTX } }),
-    ).rejects.toThrow(/denied|permission/i);
+    ).rejects.toMatchObject(rowLevelDenial);
     await expect(
       ql.delete('crm_task', { where: { id: row.id }, context: { ...MEMBER_CTX } }),
-    ).rejects.toThrow(/denied|permission/i);
+    ).rejects.toMatchObject(rowLevelDenial);
   });
 });
