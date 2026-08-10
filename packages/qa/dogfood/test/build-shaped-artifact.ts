@@ -20,12 +20,13 @@
 // The declared entry made a noise ONCE, on the path where the residue is fed
 // straight to the parse: `FlowFunctionEntrySchema` refuses an entry declaring an
 // effect for a function it does not carry, and that red CI job is the only
-// reason anybody learned about this (#4976). Measured here, it is not a general
-// guarantee — put the same husk back through the lowering and it never reaches
-// the schema at all (see the key-for-key check below). The BARE entry never made
-// a noise on any path: it vanishes key and all, the artifact holds
-// `functions: {}`, and the fixture parses green carrying zero of what it
-// advertises.
+// reason anybody learned about this (#4976). Putting the same husk back through
+// the lowering used to silence even that — the map branch deleted the entry
+// before the schema saw it — until #7318 taught the lowering to hand an
+// unrecognised entry on unchanged, so the refusal now happens on both paths.
+// The BARE entry still makes no noise anywhere: it vanishes key and all before
+// this module is ever called, the artifact holds `functions: {}`, and the
+// fixture parses green carrying zero of what it advertises.
 // `showcase-declarative-endpoints.dogfood.test.ts` shipped exactly that for its
 // whole existence. AGENTS.md, "Absence must be loud": a verifier that silently
 // degrades is worse than no verifier.
@@ -174,14 +175,22 @@ export function buildShapedArtifact(stack: Record<string, unknown>): BuildShaped
     );
   }
 
-  // Key-for-key on the `functions` MAP, which the lowering rebuilds rather than
-  // edits: its `out` object admits an entry only in the three shapes it knows
-  // (a callable, `{ handler: callable }`, a string ref), and anything else is
-  // dropped — no error, no warning, no key. Measured on this exact stack: hand
-  // the lowering the `{ effect: 'writes' }` husk `JSON.stringify` leaves behind
-  // and the artifact comes out with `functions: {}`, parsing green, which is the
-  // #6293 failure wearing a different hat. The parse below cannot see it: by the
-  // time it runs, the evidence has been deleted.
+  // Key-for-key on the `functions` MAP. This was the live gate until #7318: the
+  // lowering rebuilt the map and admitted an entry only in the three shapes it
+  // knew (a callable, `{ handler: callable }`, a string ref), dropping anything
+  // else — no error, no warning, no key. Measured on this exact stack then:
+  // hand the lowering the `{ effect: 'writes' }` husk `JSON.stringify` leaves
+  // behind and the artifact came out `functions: {}`, parsing green, which is
+  // the #6293 failure wearing a different hat; the parse below could not see it,
+  // because by the time it ran the evidence had been deleted.
+  //
+  // The producer was fixed at the source — an entry `lowerCallables` does not
+  // recognise now rides through under its own key and the parse below refuses
+  // it by name — so this check no longer has anything to catch on that path.
+  // It is KEPT as the backstop it always was: it is the only assertion that
+  // reconciles the input's `functions` keys against the output's, so a future
+  // lowering that starts deleting again fails here, named, instead of shrinking
+  // this stand-in in silence.
   const inputFns = normalized.functions;
   if (isPlainObject(inputFns)) {
     const kept = new Set(Object.keys((lowering.lowered.functions ?? {}) as Record<string, unknown>));

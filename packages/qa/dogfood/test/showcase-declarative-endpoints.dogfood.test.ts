@@ -194,14 +194,18 @@ describe('[#6293] the stand-in artifact carries what a built one carries', () =>
   it('REFUSES to build an artifact out of that residue instead of quietly shrinking', () => {
     // The reverse verification, kept in the suite rather than done once by hand:
     // feed the helper the very thing this fixture used to write and it must
-    // fail, loudly, naming what went missing. Direction predicted before it was
-    // run — and the mechanism is NOT the one #4976 documented. The schema never
-    // sees the husk: `lowerCallables` rebuilds the `functions` map from the three
-    // shapes it recognises and deletes everything else, so the residue would have
-    // reached the parse as `functions: {}` and passed. The gate that speaks here
-    // is the helper's own key-for-key reconciliation.
+    // fail, loudly. Which gate speaks CHANGED in #7318, and the new one is the
+    // mechanism #4976 documented: `lowerCallables` used to rebuild the
+    // `functions` map from the shapes it recognised and delete everything else,
+    // so the residue reached the parse as `functions: {}` and passed — only the
+    // helper's own key-for-key reconciliation caught it. The lowering now hands
+    // an unrecognised entry ON, so the husk reaches `FlowFunctionEntrySchema`
+    // and the SPEC refuses it, here and in `objectstack build` alike. The
+    // reconciliation stays as the backstop for a producer that starts dropping
+    // again.
     const residue = JSON.parse(JSON.stringify(showcaseStack)) as Record<string, unknown>;
-    expect(() => buildShapedArtifact(residue)).toThrowError(/dropped 1 `functions` entr.*sweepProjectHealth/s);
+    expect(() => buildShapedArtifact(residue))
+      .toThrowError(/does not satisfy ObjectStackDefinitionSchema[\s\S]*functions/);
   });
 });
 

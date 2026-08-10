@@ -165,11 +165,33 @@ export function lowerCallables(input: Record<string, unknown>): LoweringResult {
         taken.add(ref);
         functions[ref] = value.handler as AnyFn;
         out[ref] = { ...value, handler: ref };
+      } else {
+        // NOTHING ELSE IS THIS STEP'S TO JUDGE (#7318). Everything that is not
+        // a callable to lower rides through under its own key, untouched, and
+        // `FlowFunctionEntrySchema` decides whether it is legal.
+        //
+        // Two kinds of value arrive here, and passing both through is the same
+        // decision, not a compromise between two:
+        //
+        //   ALREADY LOWERED — a bare ref (`'scoreLead'`, #4343) or a lowered
+        //   declaration (`{ handler: 'scoreLead', effect: 'writes' }`, #4976).
+        //   Both are shapes the schema accepts, so lowering a lowered stack
+        //   must be a no-op: same key set, same declarations. Rebuilding the
+        //   map around a fixed list of recognised shapes made that false — the
+        //   lowered declaration matched none of them and was deleted, so a
+        //   second pass (a re-lowered artifact, a fixture that lowers what it
+        //   read back) silently un-declared the writer the FIRST pass had
+        //   carefully kept.
+        //
+        //   MALFORMED — the headless husk `{ effect: 'writes' }` that a plain
+        //   `JSON.stringify(stack)` leaves where a declaration was (#6293).
+        //   Deleting it here erased the evidence BEFORE the parse: the artifact
+        //   came out `functions: {}` and validated green, so the build shipped
+        //   an app missing the function instead of refusing. Handed on, it
+        //   reaches `FlowFunctionEntrySchema`, which names it — `invalid_union`
+        //   on this key — and `objectstack build` fails where it should.
+        out[key] = value;
       }
-    }
-    // Preserve any pre-existing string entries (legacy bundles).
-    for (const [key, value] of Object.entries(fnsField)) {
-      if (typeof value === 'string') out[key] = value;
     }
     (lowered as Record<string, unknown>).functions = out;
   }

@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
+import type { z } from 'zod';
 import { defineStack, normalizeStackInput, ObjectStackDefinitionSchema } from '@objectstack/spec';
 import { FlowFunctionEntrySchema } from '@objectstack/spec/automation';
 import { lowerCallables } from './lower-callables.js';
@@ -252,5 +253,121 @@ describe('lowerCallables → the spec parses what it emits (#4976, #6238)', () =
     expect(parsed.functions).toEqual([{ name: 'syncBilling', handler: 'syncBilling', effect: 'writes' }]);
     expect(JSON.parse(JSON.stringify(lowered)).functions)
       .toEqual([{ name: 'syncBilling', handler: 'syncBilling', effect: 'writes' }]);
+  });
+});
+
+// ── #7318: the `functions` map branch is a lowering, not a filter ───────────
+//
+// The map branch REBUILT the map from the shapes it recognised, so anything
+// else was deleted before the parse could see it. Two failures came out of that
+// one line, and both are pinned here:
+//
+//   1. Lowering stopped being IDEMPOTENT. The already-lowered declaration
+//      `{ handler: 'syncBilling', effect: 'writes' }` — which #4976 taught
+//      `FlowFunctionEntrySchema` to accept, and which is exactly what the first
+//      pass emits — matched none of the recognised shapes, so a second pass
+//      dropped the key entirely and silently un-declared the writer the first
+//      pass had gone out of its way to keep.
+//   2. A MALFORMED entry was destroyed rather than reported. The headless husk
+//      `{ effect: 'writes' }` (what a plain `JSON.stringify(stack)` leaves
+//      where a declaration was, #6293) left the lowering as `functions: {}` and
+//      the stack then parsed GREEN — the build writing an artifact missing the
+//      function instead of refusing.
+describe('lowerCallables — unrecognised `functions` entries reach the parse (#7318)', () => {
+  const base = {
+    manifest: { id: 'com.example.demo', name: 'demo', version: '1.0.0', type: 'app' as const },
+  };
+
+  /** `objectstack compile`'s first three steps, then `JSON.stringify` — the artifact. */
+  const buildArtifact = (functions: unknown) => {
+    const stack = defineStack({ ...base, functions } as never);
+    const { lowered } = lowerCallables(normalizeStackInput(stack as Record<string, unknown>));
+    return JSON.parse(JSON.stringify(lowered)) as Record<string, unknown>;
+  };
+
+  const functionsOf = (stack: Record<string, unknown>) =>
+    stack.functions as Record<string, unknown>;
+
+  /** Every `path` in a Zod error, including the branches folded inside a union. */
+  const allIssuePaths = (issues: readonly z.core.$ZodIssue[], prefix: PropertyKey[] = []): string[] =>
+    issues.flatMap((issue) => {
+      const path = [...prefix, ...issue.path];
+      const nested = 'errors' in issue && Array.isArray(issue.errors)
+        ? (issue.errors as z.core.$ZodIssue[][]).flatMap((branch) => allIssuePaths(branch, path))
+        : [];
+      return [path.join('.'), ...nested];
+    });
+
+  it('lowering a lowered stack changes nothing — same keys, same declarations', () => {
+    // The artifact carries BOTH lowered shapes: a bare ref and a lowered
+    // declaration. Neither may move, and no key may go missing.
+    const once = buildArtifact({
+      scoreLead: () => ({ score: 1 }),
+      syncBilling: { handler: () => ({ ok: true }), effect: 'writes' },
+    });
+    expect(functionsOf(once)).toEqual({
+      scoreLead: 'scoreLead',
+      syncBilling: { handler: 'syncBilling', effect: 'writes' },
+    });
+
+    const second = lowerCallables(once);
+
+    expect(
+      Object.keys(functionsOf(second.lowered)).sort(),
+      'the key set of an already-lowered `functions` map must survive a second pass',
+    ).toEqual(Object.keys(functionsOf(once)).sort());
+    expect(functionsOf(second.lowered)).toEqual(functionsOf(once));
+    // Nothing was left to lower, so nothing was registered — a lowered artifact
+    // carries its callables in the sibling module, not here.
+    expect(second.count).toBe(0);
+    expect(ObjectStackDefinitionSchema.safeParse(second.lowered).success).toBe(true);
+  });
+
+  it('is idempotent for the ARRAY form too', () => {
+    const once = buildArtifact([{ name: 'syncBilling', handler: () => ({ ok: true }), effect: 'writes' }]);
+    const second = lowerCallables(once);
+    expect(second.lowered.functions).toEqual(once.functions);
+    expect(second.count).toBe(0);
+  });
+
+  it('keeps a pre-existing bare string ref under its own key (legacy bundles)', () => {
+    const { lowered } = lowerCallables({ functions: { legacy: 'legacy' } });
+    expect(lowered.functions).toEqual({ legacy: 'legacy' });
+  });
+
+  it('passes the headless husk through, so the parse refuses it by key', () => {
+    // The card's measured case. `{ sweep: { effect: 'writes' } }` is what
+    // `JSON.stringify` leaves of a declared writer — a declaration for a
+    // function that is not there.
+    const husk = { sweep: { effect: 'writes' } };
+    const { lowered, count } = lowerCallables({ ...base, functions: husk });
+
+    expect(
+      lowered.functions,
+      'the husk must reach the artifact intact — deleting it here is what made the bad build green',
+    ).toEqual(husk);
+    expect(count).toBe(0);
+
+    // Refused at the entry…
+    const entry = FlowFunctionEntrySchema.safeParse(husk.sweep);
+    expect(entry.success).toBe(false);
+    expect(entry.success ? [] : entry.error.issues.map((i) => i.code)).toContain('invalid_union');
+
+    // …and refused by the whole-stack parse the build actually runs, with the
+    // offending key nameable in the tree rather than an `invalid_union` that
+    // stops at `functions`.
+    const result = ObjectStackDefinitionSchema.safeParse(lowered);
+    expect(result.success, 'a stack whose `functions` map holds a husk must NOT parse green').toBe(false);
+    const paths = result.success ? [] : allIssuePaths(result.error.issues);
+    expect(paths).toContain('functions');
+    expect(paths, 'the rejection must name the key it is about').toContain('functions.sweep');
+  });
+
+  it('refuses a declaration whose `handler` is neither callable nor a ref', () => {
+    // Same rule, the other way a declaration goes wrong: the key is kept and
+    // the schema gets to name it.
+    const { lowered } = lowerCallables({ ...base, functions: { sweep: { handler: 42, effect: 'writes' } } });
+    expect(lowered.functions).toEqual({ sweep: { handler: 42, effect: 'writes' } });
+    expect(ObjectStackDefinitionSchema.safeParse(lowered).success).toBe(false);
   });
 });
