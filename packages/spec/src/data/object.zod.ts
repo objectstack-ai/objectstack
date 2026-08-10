@@ -1386,9 +1386,10 @@ const ObjectSchemaBase = strictObject(
    *     set, or the `sys_` namespace — skip owner injection regardless.)
    *
    * NOTE: this is the RECORD-ownership model, DISTINCT from the package
-   * *contribution* kind (`own` | `extend`, {@link ObjectOwnershipEnum}) that lives
-   * on the registry's contributor record and is set via `registerObject` — do not
-   * conflate the two despite the shared word.
+   * *contribution* kind (`own` | `extend` | `overlay`,
+   * {@link ObjectOwnershipEnum}) that lives on the registry's contributor
+   * record and is set via `registerObject` — do not conflate the two despite
+   * the shared word.
    */
   ownership: z.enum(['user', 'org', 'none'], {
     error:
@@ -2419,20 +2420,42 @@ function normalizeRowCrudOverride(
 // =================================================================
 
 /**
- * How a package relates to an object it references.
+ * How a contribution relates to the object it targets — the registry's
+ * CONTRIBUTOR-kind vocabulary.
  * 
  * - `own`: This package is the original author/owner of the object.
  *   Only one package may own a given object name. The owner defines
  *   the base schema (table name, primary key, core fields).
  * 
+ * - `overlay`: [ADR-0029 D9.1] A TENANT customization layer over the owner's
+ *   definition, hydrated from a `sys_metadata` row. It REPLACES the base layer
+ *   at resolution time (`base = overlay ?? own`) while owning nothing — no
+ *   namespace claim, no package membership, no table — so the single-owner
+ *   invariant keeps counting exactly one `own` per object name with no
+ *   exemption clause.
+ * 
  * - `extend`: This package adds fields, views, or actions to an
  *   existing object owned by another package. Multiple packages
  *   may extend the same object. Extensions are merged at boot time.
  * 
+ * ## LOADER-FACING, NEVER AUTHOR-FACING
+ * 
+ * No author ever writes one of these values. A package author declares
+ * `objectExtensions: [{ extend: '…' }]` and the LOADER picks `extend`; the
+ * package loader picks `own`; ADR-0029 D9.1 binds `overlay` to the two
+ * `sys_metadata` hydration seams and to nothing else. This enum is the shared
+ * vocabulary those loaders name their choice with — not an authoring surface —
+ * and D9.1 binds it to stay that way, because a new kind that no hand-written
+ * or AI-written metadata can reach for adds no way to get metadata wrong.
+ * 
+ * NOTE: this is the package-CONTRIBUTION kind, DISTINCT from the RECORD
+ * -ownership model (`user` | `org` | `none`) that lives on the object schema's
+ * own `ownership` property — do not conflate the two despite the shared word.
+ * 
  * Follows Salesforce/ServiceNow patterns:
  *   object name = database table name, globally unique, no namespace prefix.
  */
-export const ObjectOwnershipEnum = z.enum(['own', 'extend']);
+export const ObjectOwnershipEnum = z.enum(['own', 'extend', 'overlay']);
 export type ObjectOwnership = z.input<typeof ObjectOwnershipEnum>;
 
 /**

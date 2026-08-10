@@ -8196,17 +8196,117 @@ export class ObjectStackProtocolImplementation implements
         if (request.type !== 'object' && request.type !== 'objects') return;
         this.engine.registry.registerItem(request.type, request.item, 'name');
         try {
+            const layer = this.classifyObjectContribution(request.name, request.packageId);
+            if (layer.kind === 'mismatch') {
+                // Unreachable from `saveMetaItem`, which refuses this row at
+                // the producer (D9.9) — but `applyRegistryWriteThrough` has
+                // other callers (rollback, publish promotion), and registering
+                // the layer anyway would put `sys_metadata` and the registry
+                // back into the disagreement D9.9 exists to prevent.
+                throw ObjectStackProtocolImplementation.overlayPackageMismatchError(
+                    request.name, layer.packageId, layer.ownerPackageId,
+                );
+            }
             this.engine.registry.registerObject(
                 { ...(request.item as Record<string, unknown>), _provenance: 'org' } as any,
-                // `||`, not `??`: an empty-string binding is "no package", the
-                // same normalisation the boot branch applies to `package_id`.
-                request.packageId || 'sys_metadata',
+                layer.packageId,
+                undefined,
+                // [ADR-0029 D9.8] The KIND, chosen by asking the registry a
+                // question it can answer: does a PACKAGED owner already hold
+                // this name? Registering unconditionally as `'own'` is what
+                // made this seam splice the packaged contributor out and
+                // destroy the code definition at write time (#6853).
+                layer.kind,
             );
         } catch (err: any) {
             console.warn(
                 `[Protocol] registerObject failed for ${request.name}: ${err?.message ?? err}`,
             );
         }
+    }
+
+    /**
+     * [ADR-0029 D9.8/D9.9] Which contributor KIND a `sys_metadata` object row
+     * registers as — and whether it may register at all.
+     *
+     * ```
+     * packaged `own` contributor already registered for this name?
+     *   no  -> `own`      (a runtime-authored object; today's behaviour, keyed
+     *                      by the row's package_id or the sentinel)
+     *   yes -> `overlay`  (a tenant layer over the code definition)
+     * ```
+     *
+     * Every row this classifies came out of `sys_metadata` and is therefore
+     * tenant-authored by definition, which is why the question is only about
+     * the OTHER side: a runtime-authored object's owner IS the tenant's own
+     * row, and re-writing it stays an ordinary re-registration rather than
+     * becoming a layer over itself.
+     *
+     * The row's `package_id` (`P`) is provenance ON the layer, never an
+     * ownership claim (D9.9), so against the packaged owner's id `O`:
+     *
+     * | case | verdict |
+     * |:--|:--|
+     * | `P == O` | the normal case — one overlay layer over `O`'s object. |
+     * | `P` empty / absent (the `'sys_metadata'` sentinel) | **accepted** — a package-less env-wide overlay is ADR-0005's platform-global shape. Before D9 this THREW `already owned by package "O"`, an artefact of the borrowed `own` slot rather than a decision (#6995, measured as P2). |
+     * | `P == Q`, some other package | **mismatch** — refused loudly. |
+     *
+     * Falls back to `'own'` — today's behaviour — for a registry that does not
+     * offer the discriminator, so a duck-typed engine double is never made to
+     * fail by a question it cannot answer.
+     */
+    private classifyObjectContribution(
+        name: string,
+        rowPackageId: string | null | undefined,
+    ):
+        | { kind: 'own' | 'overlay'; packageId: string }
+        | { kind: 'mismatch'; packageId: string; ownerPackageId: string } {
+        // `||`, not `??`: an empty-string binding is "no package", the same
+        // normalisation both hydration seams apply to `package_id`.
+        const binding = rowPackageId || '';
+        const registry: any = (this.engine as any)?.registry;
+        const owner = typeof registry?.getPackagedObjectOwner === 'function'
+            ? registry.getPackagedObjectOwner(name)
+            : undefined;
+        const ownerPackageId: unknown = owner?.packageId;
+        if (typeof ownerPackageId !== 'string' || ownerPackageId === '') {
+            return { kind: 'own', packageId: binding || 'sys_metadata' };
+        }
+        if (binding !== '' && binding !== ownerPackageId) {
+            return { kind: 'mismatch', packageId: binding, ownerPackageId };
+        }
+        return { kind: 'overlay', packageId: binding || 'sys_metadata' };
+    }
+
+    /**
+     * [ADR-0029 D9.9] The mis-bound overlay refusal.
+     *
+     * The overlay-uniqueness index keys on
+     * `(type, name, organization_id, COALESCE(package_id, ''))` (ADR-0005
+     * amendment, #6825), so `sys_metadata` can legitimately hold two active
+     * rows for one `(type, name)` bound to two packages. For every other type
+     * that is fine — two packages really can ship `page/home`. For `object` it
+     * is not representable: `computeFQN` is identity, so the registry holds
+     * exactly one entry per object name and could never serve two. Refusing
+     * the mis-bound row is what keeps the two stores in agreement instead of
+     * letting `sys_metadata` describe a shape the registry cannot hold.
+     */
+    private static overlayPackageMismatchError(
+        name: string, rowPackageId: string, ownerPackageId: string,
+    ): Error {
+        const err: any = new Error(
+            `[object_overlay_package_mismatch] Cannot layer object '${name}': the overlay is bound to package `
+            + `'${rowPackageId}', but the object is owned by package '${ownerPackageId}'. `
+            + `An object has exactly one registry entry, so it can carry exactly one overlay layer — bind the `
+            + `customization to '${ownerPackageId}', or have '${rowPackageId}' extend the object instead. `
+            + `See docs/adr/0029-kernel-object-ownership-and-platform-objects-decomposition.md.`,
+        );
+        err.code = 'OBJECT_OVERLAY_PACKAGE_MISMATCH';
+        err.status = 422;
+        err.packageId = rowPackageId;
+        err.ownerPackageId = ownerPackageId;
+        err.docs = 'docs/adr/0029-kernel-object-ownership-and-platform-objects-decomposition.md';
+        return err;
     }
 
     /**
@@ -8470,6 +8570,30 @@ export class ObjectStackProtocolImplementation implements
         try {
             const registry: any = this.engine.registry;
             const singular = PLURAL_TO_SINGULAR[type] ?? type;
+
+            // ── [ADR-0029 D9.7] THE OBJECT HALF'S LAYER SUBTRACTION ──
+            //
+            // Runs AHEAD of the tier walk, not inside tier 3, and the reason is
+            // the same asymmetry #6808 was filed for — one layer down. Tier 1
+            // (`removeRuntimeShadow`) returns as soon as it heals the generic
+            // `metadata` map, so an object whose plain-key shadow it can heal
+            // would never reach a tier-3 limb, and its overlay LAYER would stay
+            // registered in `objectContributors` — the deleted customization
+            // still being served by `getObject`, which is what the data plane
+            // dispatches on.
+            //
+            // Unconditionally correct for `object`, which is why it needs no
+            // tier: the row is gone, so its layer goes with it, and whatever
+            // was underneath — a packaged owner, or nothing — is what should be
+            // served next. When a packaged owner IS underneath, this is the
+            // whole restoration: it is already there, at its own priority, in
+            // its own namespace, with its own definition, so nothing has to be
+            // reconstructed from values that no longer exist (#6853's measured
+            // wall).
+            if (singular === 'object' && typeof registry.removeObjectOverlay === 'function') {
+                registry.removeObjectOverlay(name);
+            }
+
             let healed = false;
             if (typeof registry.removeRuntimeShadow === 'function') {
                 healed = registry.removeRuntimeShadow(singular, name);
@@ -8538,8 +8662,7 @@ export class ObjectStackProtocolImplementation implements
             // which for `object` reads the contributor definition and applies
             // exactly the artifact test the sibling verb applies to the plain
             // key), so this limb inherits that judgement instead of open-coding
-            // a second one — PLUS the package-binding check below, which exists
-            // because that inherited judgement is measurably falsifiable here.
+            // a second one.
             //
             // Not theoretical, and NOT already covered by the gate at the top of
             // `deleteMetaItem`: that two-tier authorization — which refuses an
@@ -8551,138 +8674,51 @@ export class ObjectStackProtocolImplementation implements
             // take that object off the whole data plane until restart, because
             // `assertObjectRegistered` fails closed.
             //
-            // The check lives HERE rather than in the verb because it is a
-            // statement about LAYERS, which is what this walk reasons about;
-            // `unregisterObject` stays a general removal whose only refusal is
-            // ADR-0029's extender rule.
+            // ── [ADR-0029 D9.7] THE LAYER-ADDRESSED VERB RUNS FIRST ──
+            //
+            // When a packaged owner survives underneath, the tenant's delete
+            // removes ONE thing: its overlay LAYER. The packaged definition is
+            // already there — its own priority, its own namespace, its own body
+            // — so restoring the artifact view is a SUBTRACTION, not a
+            // reconstruction. That is what dissolves #6853's measured wall
+            // (the delete-time heal needed five values and three of them no
+            // longer existed by the time it ran): the judgement moved to write
+            // time, where the packaged owner is one lookup away.
+            //
+            // It also retires #7012's package-binding guard, deliberately and
+            // measurably rather than by tidiness. That guard existed because
+            // `isArtifactBacked` was FALSIFIED here — an overlay row bound to
+            // the packaged owner's id destroyed the packaged contributor at
+            // write time, so the predicate answered "not shipped" for an object
+            // the package still ships. D9 removes the falsification at its
+            // source: the packaged `own` contributor is never spliced out, so
+            // the predicate is honest and the case the guard protected cannot
+            // reach the retirement limb at all (`removeObjectOverlay` returns
+            // first, and `isArtifactBacked` is true besides). What the guard
+            // still reached after that was only its own ACCEPTED COST — a
+            // package-bound RUNTIME-authored object (Studio's package
+            // workspace, #4636), indistinguishable from a shipped one by
+            // binding alone, kept listable-but-rowless until restart. With the
+            // predicate honest that is no longer the cheap direction, it is
+            // simply the wrong answer: nothing ships the name, the row WAS the
+            // item, and the operator asked for it to be gone.
             if (
                 singular === 'object'
                 && !this.isArtifactBacked(singular, name)
                 && typeof registry.unregisterObject === 'function'
             ) {
-                // [#7012] …AND `isArtifactBacked` ALONE CANNOT SEE THAT.
-                // See {@link installedPackageBindingForObject} for the whole
-                // argument; the one-line version is that an overlay row bound
-                // to the packaged owner's id DESTROYS the packaged contributor
-                // at write time, which turns the predicate above `false` for an
-                // object the package still ships.
-                const boundPackageId = this.installedPackageBindingForObject(name);
-                if (boundPackageId !== undefined) {
+                try {
+                    registry.unregisterObject(name);
+                } catch (err: any) {
                     console.warn(
                         `[Protocol] object '${name}' was deleted from sys_metadata but stays registered: `
-                        + `its owner contributor is bound to installed package '${boundPackageId}'. `
-                        + `A package-shipped object must not be retired by an overlay delete, and this seam `
-                        + `cannot tell one from a package-bound runtime-authored object (#7012 / #6853), so `
-                        + `the entry survives — listable, and rowless if the delete really was the whole item `
-                        + `— until the next restart.`,
+                        + `${err?.message ?? err}`,
                     );
-                } else {
-                    try {
-                        registry.unregisterObject(name);
-                    } catch (err: any) {
-                        console.warn(
-                            `[Protocol] object '${name}' was deleted from sys_metadata but stays registered: `
-                            + `${err?.message ?? err}`,
-                        );
-                    }
                 }
             }
         } catch {
             // Best-effort registry refresh; next read fixes it anyway
         }
-    }
-
-    /**
-     * [#7012] The package binding of a registered `object`, but only when it
-     * names a package this process has actually INSTALLED. `undefined` means
-     * "no installed package answers for this object" — the only state in which
-     * {@link restoreArtifactRegistryView}'s tier 3 may unregister it.
-     *
-     * ## Why tier 3 needs a second predicate at all
-     *
-     * `isArtifactBacked` is the natural question ("does a code package ship
-     * this?") and it is the WRONG question at this exact point, because the
-     * thing it reads has already been destroyed by the time the walk runs.
-     *
-     * `SchemaRegistry.registerObject` splices out the same-package `own`
-     * contributor before pushing the new one. So an overlay row whose
-     * `package_id` equals the packaged owner's id does not SHADOW the packaged
-     * definition — it REPLACES it, and no second copy exists anywhere in the
-     * registry. {@link loadMetaFromDb} replays that replacement on every boot,
-     * with no authorization gate and no log, stamping `_provenance: 'org'`
-     * server-side (deliberately — cloud#970). `getArtifactItem` for an `object`
-     * is exactly `_provenance !== 'org'`, so `isArtifactBacked` answers `false`
-     * for an object a code package still ships, and tier 3 then took the whole
-     * entry. Measured end to end on a tenant kernel with no escape hatch:
-     *
-     * ```
-     * loadMetaFromDb -> {"loaded":1,"errors":0,"invalid":0}   warnings: []
-     * DELETE         -> {"success":true,"reset":true}
-     * objectContributors: []   getObject: null
-     * data CRUD: OBJECT_NOT_FOUND / 404   (while the table still holds the rows)
-     * ```
-     *
-     * ## Why the BINDING is trustworthy where the definition is not
-     *
-     * The replacement rule fires only when the two package ids MATCH, so the
-     * surviving contributor provably carries the packaged owner's id — the one
-     * fact the overwrite cannot change, precisely because it is the overwrite's
-     * own precondition. The second half, "is that package installed", is a fact
-     * about the PROCESS rather than about the destroyed body:
-     * `SchemaRegistry.installPackage` writes the record and
-     * `ObjectQL.registerApp` calls it immediately before registering the
-     * manifest's objects, so a package-shipped object always has one. Durable
-     * packages (`sys_packages`) are re-installed at boot by `service-package`,
-     * and nested `registerPlugin` objects are keyed to the PARENT package,
-     * which `registerApp` installed. The `'sys_metadata'` sentinel — the key an
-     * overlay row bound to no package keeps — is handled by construction rather
-     * than by a special case: nothing installs a package under it, so it never
-     * resolves to a record.
-     *
-     * ## What this deliberately does NOT ask
-     *
-     * - NOT `enabled` / `status`. `disablePackage` flips lifecycle flags and
-     *   removes no contributor, so a disabled package's objects stay registered
-     *   and stay dispatchable; reading the flag here would unregister a
-     *   definition nothing else removes — the same outage through a second door.
-     * - NOT the manifest's `objects` list. That would re-ask "is this
-     *   code-shipped", which is the question whose answer was destroyed; it is
-     *   also absent for `registerPlugin`-contributed objects.
-     *
-     * ## The accepted cost, ruled and not to be worked around
-     *
-     * A package-bound RUNTIME-authored object (Studio's package workspace,
-     * #4636) carries a real `package_id` too, so it is indistinguishable from a
-     * package-shipped one by binding alone: some genuinely deleted objects stay
-     * registered until restart. Per this walk's own REGISTER WIDE / RETIRE
-     * NARROW argument that is the cheap direction — a surplus entry degrades to
-     * "listable but rowless" and the next reload heals it, a wrongly retired one
-     * 404s data CRUD for every tenant. The honest fix for the distinguishability
-     * itself is #6853's direction B (the tenant overlay registers as its own
-     * contributor layer instead of splicing out the packaged `own`), which
-     * re-arms `isArtifactBacked` here and at `saveMetaItem`'s overlay gate; it is
-     * an ADR-0029 amendment and a separate card by maintainer ruling
-     * (2026-08-09).
-     *
-     * Name-addressed, like every other verb in the walk: `getObjectOwner` reads
-     * the contributor list under the same key `getObject` and
-     * {@link SchemaRegistry.unregisterObject} resolve (`computeFQN` is identity,
-     * so the registry key IS the object name), which is what keeps the decision
-     * and the removal talking about the same entry.
-     */
-    private installedPackageBindingForObject(name: string): string | undefined {
-        const registry: any = (this.engine as any)?.registry;
-        if (
-            !registry
-            || typeof registry.getObjectOwner !== 'function'
-            || typeof registry.getPackage !== 'function'
-        ) {
-            return undefined;
-        }
-        const packageId: unknown = registry.getObjectOwner(name)?.packageId;
-        if (typeof packageId !== 'string' || packageId === '') return undefined;
-        const installed = registry.getPackage(packageId);
-        return installed === undefined || installed === null ? undefined : packageId;
     }
 
     /**
@@ -8914,11 +8950,35 @@ export class ObjectStackProtocolImplementation implements
             if (lockErr) throw lockErr;
         }
 
+        const singularType = PLURAL_TO_SINGULAR[request.type] ?? request.type;
+
+        // [ADR-0029 D9.9 / #6995] The refusal that is about REPRESENTABILITY
+        // rather than authorization: an `object` overlay bound to a package
+        // that does not own the object. See
+        // {@link overlayPackageMismatchError} for why one object name can
+        // carry at most one overlay layer while `sys_metadata` can hold two
+        // rows for it.
+        //
+        // AT THE PRODUCER, deliberately. Before D9 this row reached
+        // `registerObject`, which threw `already owned by package "…"` into
+        // `applyObjectRegistryMutation`'s best-effort `console.warn` — and
+        // `saveMetaItem` still returned a SUCCESS RECEIPT for a write the
+        // runtime had discarded (#6995, the silent write-side divergence).
+        // The receipt and the registry now agree because the write never
+        // happens: this precedes `ensureOverlayIndex` and every `put`.
+        if (singularType === 'object') {
+            const layer = this.classifyObjectContribution(request.name, request.packageId);
+            if (layer.kind === 'mismatch') {
+                throw ObjectStackProtocolImplementation.overlayPackageMismatchError(
+                    request.name, layer.packageId, layer.ownerPackageId,
+                );
+            }
+        }
+
         // Phase 3a-destructive: for object/field writes, diff against the
         // current schema and 409 if the change would drop data — unless the
         // caller has acknowledged the risk with `force: true`. The admin UI
         // surfaces the structured `issues` payload in a confirmation dialog.
-        const singularType = PLURAL_TO_SINGULAR[request.type] ?? request.type;
         if (!request.force && (singularType === 'object' || singularType === 'field')) {
             try {
                 const existing = await this.getMetaItem({
@@ -12110,9 +12170,30 @@ export class ObjectStackProtocolImplementation implements
                         // the write path's `request.packageId || 'sys_metadata'`:
                         // an empty binding is "no package", and the sentinel
                         // marks exactly that one thing.
+                        //
+                        // [ADR-0029 D9.8] …and the KIND is chosen, not
+                        // defaulted. Registering every row as `'own'` is what
+                        // made this seam replay a destruction of the packaged
+                        // definition on EVERY boot, silently and with a clean
+                        // `{loaded:1,errors:0,invalid:0}` receipt (#6853 P6).
+                        // [D9.9] A row bound to a package that does NOT own the
+                        // object throws here on purpose: the per-record catch
+                        // below counts it in `errors` with its reason, which is
+                        // the boot-side half of the write-path refusal.
+                        const layer = this.classifyObjectContribution(
+                            String(record.name),
+                            (record as { package_id?: string | null }).package_id,
+                        );
+                        if (layer.kind === 'mismatch') {
+                            throw ObjectStackProtocolImplementation.overlayPackageMismatchError(
+                                String(record.name), layer.packageId, layer.ownerPackageId,
+                            );
+                        }
                         this.engine.registry.registerObject(
                             { ...(data as Record<string, unknown>), _provenance: 'org' } as any,
-                            (record as { package_id?: string | null }).package_id || 'sys_metadata',
+                            layer.packageId,
+                            undefined,
+                            layer.kind,
                         );
                     } else {
                         // Same rule as the getMetaItems read-side hydration and

@@ -675,6 +675,30 @@ export class ObjectQLPlugin implements Plugin {
    * Removed objects are left registered until restart — same lifecycle as
    * their tables, which managed drift deliberately never drops.
    */
+  /**
+   * [ADR-0029 D9.8] Which contributor KIND a metadata-service body registers
+   * as. The SAME discriminator the two `sys_metadata` hydration seams ask, owed
+   * to these two ingest paths because they also register a reloaded body — left
+   * as an unconditional `'own'` they re-open the splice through a third door,
+   * and it is easy to miss precisely because they are about metadata-service
+   * reloads rather than about tenant overlays.
+   *
+   * Narrower than the `sys_metadata` seams' rule, and deliberately so: a row
+   * from `sys_metadata` is tenant-authored by definition, while THIS body can
+   * be either layer. A reload of the OWNER's own definition (HMR, a package
+   * re-registering its own object) must stay an `own` re-registration; it is a
+   * body that arrives under a different id, or one that says it is
+   * tenant-authored, that is a layer over the code definition.
+   */
+  private objectContributionKind(name: string, packageId: string, body: unknown): 'own' | 'overlay' {
+    const registry: any = this.ql?.registry;
+    if (typeof registry?.getPackagedObjectOwner !== 'function') return 'own';
+    const owner = registry.getPackagedObjectOwner(name);
+    if (!owner) return 'own';
+    const tenantAuthored = (body as { _provenance?: unknown } | null | undefined)?._provenance === 'org';
+    return owner.packageId === packageId && !tenantAuthored ? 'own' : 'overlay';
+  }
+
   private ingestReloadedObjects(ctx: PluginContext, payload: unknown): void {
     if (!this.ql) return;
     const objects = (payload as any)?.metadata?.objects;
@@ -685,11 +709,13 @@ export class ObjectQLPlugin implements Plugin {
       if (typeof name !== 'string' || name.length === 0) continue;
       try {
         this.ql.registry.invalidate(name);
+        const reloadPackageId = (obj as any)._packageId ?? 'metadata-service';
         this.ql.registry.registerObject(
           obj as any,
-          (obj as any)._packageId ?? 'metadata-service',
+          reloadPackageId,
           (obj as any).namespace,
-          'own',
+          // [ADR-0029 D9.8] See {@link objectContributionKind}.
+          this.objectContributionKind(name, reloadPackageId, obj),
         );
         ingested++;
       } catch (e: any) {
@@ -766,7 +792,8 @@ export class ObjectQLPlugin implements Plugin {
             fresh as any,
             packageId,
             namespace,
-            'own',
+            // [ADR-0029 D9.8] See {@link objectContributionKind}.
+            this.objectContributionKind(name, packageId, fresh),
           );
           ctx.logger.info('[ObjectQLPlugin] object metadata updated — registry refreshed', {
             name,

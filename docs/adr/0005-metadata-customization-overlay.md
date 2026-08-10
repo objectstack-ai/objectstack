@@ -6,7 +6,7 @@
 **Status**: Accepted (2026-05-16) · **Amended** (2026-05-22, see "Amendment: post-ADR-0006 v4 scope") · **Amended** (2026-04-13, branch concept removed — see [ADR-0008 §0](./0008-metadata-repository-and-change-log.md#0-2026-04-13-amendment--drop-project-and-branch-from-metaref)) · **Amended** (2026-08-09, #6825 — the Phase-1 overlay-index migration is deleted; see "Amendment (2026-08-09, #6825): overlay-index delivery after the Phase-1 migration was deleted")
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0003](./0003-package-as-first-class-citizen.md) (Package as first-class citizen), [ADR-0004](./0004-cloud-multi-kernel.md) (Cloud + per-project kernels)
-**Amended by**: [ADR-0006 v4](./0006-project-environment-split.v4.md) (drops `sys_project` entirely), [ADR-0008](./0008-metadata-repository-and-change-log.md) (re-expresses overlay as `LayeredRepository`; subsequently drops `project`/`branch` from `MetaRef`)
+**Amended by**: [ADR-0006 v4](./0006-project-environment-split.v4.md) (drops `sys_project` entirely), [ADR-0008](./0008-metadata-repository-and-change-log.md) (re-expresses overlay as `LayeredRepository`; subsequently drops `project`/`branch` from `MetaRef`), [ADR-0029 D9](./0029-kernel-object-ownership-and-platform-objects-decomposition.md#amendment-2026-08-09-6853-a-tenant-overlay-of-an-object-is-its-own-contributor-layer-not-a-second-own) (for `object` only: the overlay is a registry contributor LAYER over the packaged owner, resolved as `base = overlay ?? own`, instead of a destructive in-place overwrite)
 **Consumers**: `@objectstack/objectql`, `@objectstack/runtime`, `@objectstack/rest`, `apps/studio`, all customer-facing tenants
 
 > **2026-04-13 note** — overlays are keyed exclusively by `organization_id`.
