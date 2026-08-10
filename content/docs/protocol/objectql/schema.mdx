@@ -382,7 +382,7 @@ revenue:
   label: Annual Revenue
   scale: 2
   precision: 18
-  defaultValue: { value: 0, currency: 'USD' }
+  defaultValue: 0   # currency stores a bare number — never { value, currency }
 ```
 
 #### Date/Time Fields
@@ -396,7 +396,10 @@ start_date:
 due_datetime:
   type: datetime
   label: Due Date & Time
-  defaultValue: "daysFromNow(7)"  # 7 days from now (CEL)
+  # A CEL default needs the explicit `{ dialect, source }` envelope. Unlike a
+  # formula field's `expression`, `defaultValue` has NO bare-string shorthand —
+  # a bare string is stored as that literal text.
+  defaultValue: { dialect: 'cel', source: 'daysFromNow(7)' }  # 7 days from now, at UTC midnight
 ```
 
 #### Boolean Fields
