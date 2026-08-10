@@ -52,6 +52,13 @@
  * step in CI — alongside `check:api-surface` / the example-app typecheck, its
  * fellow "real consumer" gates — not before it like `check:skill-refs`.
  *
+ * Since #7181 that ordering is enforced rather than assumed: the type-check half
+ * refuses a dist that is missing or older than `src/`. The existing "is the spec
+ * built" guard below only answers ABSENCE; a present-but-stale dist type-checks
+ * every example against the previous build and prints `✅ N prose examples
+ * type-check against @objectstack/spec` — a green about a rename the developer
+ * has already made and this run never saw. See lib/dist-freshness.ts.
+ *
  * ── The third anti-idle assertion: no bare `any` in a marked block (#5943) ───
  * A marker is the author's claim "this block compiles", and the two guards above
  * (orphan marker, zero blocks) exist because a gate that checks nothing must not
@@ -100,6 +107,8 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import ts from 'typescript';
+
+import { inspectDistFreshness } from './lib/dist-freshness';
 
 // ── Paths ────────────────────────────────────────────────────────────────────
 
@@ -674,6 +683,33 @@ function main() {
         `  Nested \`any\` (\`Record<string, any>\`, \`any[]\`, \`Promise<any>\`) is NOT flagged\n` +
         `  — only an annotation, cast or alias that IS \`any\`.`,
     );
+  }
+
+  // BEFORE any declaration is resolved (#7181, adopting #7122's primitive).
+  //
+  // Placement differs from the two sibling gates on purpose, because the ROUTE to
+  // the dist differs: those resolve entry points in-process with
+  // `ts.createProgram`, so their first `.d.ts` read is their first statement of
+  // work. Here the declarations are reached indirectly — `specPaths()` turns the
+  // exports map into a tsconfig `paths` table and a spawned `tsc` follows it — and
+  // everything above this line (extraction, the orphan-marker guard, the zero-block
+  // guard, the bare-`any` guard) is dist-independent and worth reporting even when
+  // the build is stale. So the guard sits at the boundary rather than at the top:
+  // no verdict below it is computed, and no honest finding above it is suppressed.
+  //
+  // The `missing` check immediately following is NOT redundant. It answers "was
+  // the package built at all", which this also covers via `state: 'missing'`; but
+  // it stays because it is the one that survives a PARTIAL dist — a subpath whose
+  // `.d.ts` was never emitted while the newest declaration on disk is still newer
+  // than `src/`, which the mtime rule reads as fresh.
+  const freshness = inspectDistFreshness(
+    SPEC_DIR,
+    'check',
+    'pnpm --filter @objectstack/spec check:skill-examples',
+  );
+  if (!freshness.fresh) {
+    console.error(freshness.message);
+    process.exit(1);
   }
 
   const { paths, missing } = specPaths();

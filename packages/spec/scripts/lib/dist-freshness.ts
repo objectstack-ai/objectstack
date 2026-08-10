@@ -71,6 +71,28 @@
  * discarded: it still guards `pnpm dev`. It is simply blind to the half of the
  * dist that this generator is made of. Closing the `OS_SKIP_DTS` hole in the
  * stamp itself is a separate change to a separate script.
+ *
+ * ## Why the caller names ITSELF, and why that is not a third `mode` (#7181)
+ *
+ * #7181 adopted this in three more dist-reading gates and asked whether `mode`
+ * wants a third value. Measured against the code, it does not: `mode` is read in
+ * exactly two places, and only one of them is about semantics.
+ *
+ *   - the DAMAGE sentence — "writing a wrong baseline" vs "agreeing with one".
+ *     Those are the only two things a dist reader does, and all four call sites
+ *     land in one of them (`check:dual-source-exports --update` regenerates a
+ *     tracked baseline and is `generate`-shaped; the rest are `check`-shaped).
+ *   - the RE-RUN command, which used to be spelled `${gen|check}:api-surface` by
+ *     hand. That is not a semantic difference at all — it is the caller's own
+ *     name, and hardcoding it made three adopted gates print a fourth gate's.
+ *
+ * A third value would therefore have to mean "check-shaped, but print a different
+ * command", i.e. text wearing a semantic label — and it would still be wrong for
+ * the fifth caller. So the name is a REQUIRED argument instead: the compiler makes
+ * every new caller state how to re-run itself, and there is no default to inherit
+ * the wrong gate's identity from. `--update` above is the reason it is a full
+ * command string rather than an npm script name — that path is not reachable
+ * through one.
  */
 import { existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -112,8 +134,18 @@ function hasDeclarations(dir: string, depth = 0): boolean {
  * Returns the verdict rather than exiting so the rule and its wording can be
  * driven from a test in both directions — a guard only ever observed green is
  * indistinguishable from one that matches nothing (#4690).
+ *
+ * @param mode  what this run would do with the dist — see `DistReadMode`.
+ * @param rerun the exact command that re-runs THIS caller after the build, e.g.
+ *   `pnpm --filter @objectstack/spec check:exported-any`. Required on purpose:
+ *   a default would hand a new caller the previous gate's identity, which is the
+ *   defect #7181 was filed for (three gates printing `check:api-surface`).
  */
-export function inspectDistFreshness(pkgDir: string, mode: DistReadMode): DistFreshness {
+export function inspectDistFreshness(
+  pkgDir: string,
+  mode: DistReadMode,
+  rerun: string,
+): DistFreshness {
   if (!distIsStale(pkgDir)) return { fresh: true };
 
   const state: 'missing' | 'stale' = hasDeclarations(join(pkgDir, 'dist')) ? 'stale' : 'missing';
@@ -123,10 +155,10 @@ export function inspectDistFreshness(pkgDir: string, mode: DistReadMode): DistFr
       ? `Regenerating now would WRITE a baseline describing a build that no longer matches src:\n` +
         `   every export added since that build reads as a REMOVAL, and this generator's own rule\n` +
         `   calls a removed export a BREAKING change. The wrong baseline is then self-consistent —\n` +
-        `   check:api-surface compares it against the same stale dist and passes (#7122, #4687).`
+        `   the checking half compares it against the same stale dist and passes (#7122, #4687).`
       : `A verdict now would be computed against a build that no longer matches src, so this\n` +
-        `   check would report the public API "unchanged" without ever reading the exports under\n` +
-        `   test — a FALSE GREEN on exactly the change it exists to catch (#7122).`;
+        `   check would reach its conclusion without ever reading the declarations under test —\n` +
+        `   a FALSE GREEN on exactly the change it exists to catch (#7122).`;
 
   const cause =
     state === 'missing'
@@ -143,8 +175,8 @@ export function inspectDistFreshness(pkgDir: string, mode: DistReadMode): DistFr
       `   ${damage}\n\n` +
       `   Build first, then re-run:\n\n` +
       `     pnpm --filter @objectstack/spec build\n` +
-      `     pnpm --filter @objectstack/spec ${mode === 'generate' ? 'gen' : 'check'}:api-surface\n\n` +
-      `   (Do NOT use OS_SKIP_DTS=1 for this one — AGENTS.md §9 names it as the flag that cannot\n` +
-      `   serve gen:api-surface.)`,
+      `     ${rerun}\n\n` +
+      `   (Do NOT use OS_SKIP_DTS=1 for this one — AGENTS.md §9 names it as the flag that emits JS\n` +
+      `   and skips exactly the declarations this reads.)`,
   };
 }

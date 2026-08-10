@@ -73,7 +73,11 @@ const CHECK = process.argv.includes('--check');
 // `ts.createProgram` has run over a stale dist, every answer below it is
 // confidently wrong, and both writing it and checking against it are worse than
 // stopping here.
-const freshness = inspectDistFreshness(PKG_DIR, CHECK ? 'check' : 'generate');
+const freshness = inspectDistFreshness(
+  PKG_DIR,
+  CHECK ? 'check' : 'generate',
+  `pnpm --filter @objectstack/spec ${CHECK ? 'check' : 'gen'}:api-surface`,
+);
 if (!freshness.fresh) {
   console.error(freshness.message);
   process.exit(1);

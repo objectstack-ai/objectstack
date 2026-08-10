@@ -56,6 +56,13 @@ function write(rel: string, content: string, mtimeEpochSeconds: number): string 
 const OLD = Math.floor(Date.now() / 1000) - 3600;
 const NEW = Math.floor(Date.now() / 1000) - 60;
 
+// The caller's own re-run command. Passed rather than assumed since #7181: the
+// wording used to name `api-surface` by hand, so the three gates that adopted
+// this next each printed a fourth gate's name. `dist-freshness-adoption.test.ts`
+// pins that each of them now prints its own.
+const GEN_RERUN = 'pnpm --filter @objectstack/spec gen:api-surface';
+const CHECK_RERUN = 'pnpm --filter @objectstack/spec check:api-surface';
+
 beforeEach(() => {
   sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'os-dist-freshness-'));
 });
@@ -73,7 +80,7 @@ describe('inspectDistFreshness — the dist precondition gen:api-surface never e
     write('dist/contracts/index.d.ts', 'export {};', OLD);
     write('src/contracts/job-service.ts', 'export interface JobRunOutcome { ok: boolean }', NEW);
 
-    const verdict = inspectDistFreshness(sandbox, 'generate');
+    const verdict = inspectDistFreshness(sandbox, 'generate', GEN_RERUN);
     expect(verdict.fresh).toBe(false);
     if (verdict.fresh) return;
     expect(verdict.state).toBe('stale');
@@ -88,7 +95,7 @@ describe('inspectDistFreshness — the dist precondition gen:api-surface never e
     write('dist/contracts/index.d.ts', 'export {};', OLD);
     write('src/contracts/job-service.ts', 'export interface JobRunOutcome { ok: boolean }', NEW);
 
-    const verdict = inspectDistFreshness(sandbox, 'check');
+    const verdict = inspectDistFreshness(sandbox, 'check', CHECK_RERUN);
     expect(verdict.fresh).toBe(false);
     if (verdict.fresh) return;
     // The two modes must not print the same damage: one WRITES a wrong baseline,
@@ -103,7 +110,7 @@ describe('inspectDistFreshness — the dist precondition gen:api-surface never e
     write('dist/contracts/index.d.ts', 'export {};', OLD);
     write('src/contracts/job-service.ts', 'export interface JobRunOutcome { ok: boolean }', NEW);
 
-    const verdict = inspectDistFreshness(sandbox, 'generate');
+    const verdict = inspectDistFreshness(sandbox, 'generate', GEN_RERUN);
     if (verdict.fresh) throw new Error('expected a refusal');
     expect(verdict.message).toContain('WRITE a baseline');
     expect(verdict.message).toContain('BREAKING');
@@ -119,7 +126,7 @@ describe('inspectDistFreshness — the dist precondition gen:api-surface never e
     // regress into something quieter.
     write('src/contracts/job-service.ts', 'export interface JobRunOutcome { ok: boolean }', NEW);
 
-    const verdict = inspectDistFreshness(sandbox, 'generate');
+    const verdict = inspectDistFreshness(sandbox, 'generate', GEN_RERUN);
     expect(verdict.fresh).toBe(false);
     if (verdict.fresh) return;
     expect(verdict.state).toBe('missing');
@@ -134,7 +141,7 @@ describe('inspectDistFreshness — the dist precondition gen:api-surface never e
     write('src/contracts/job-service.ts', 'export interface JobRunOutcome { ok: boolean }', OLD);
     write('dist/contracts/index.js', 'export {};', NEW);
 
-    const verdict = inspectDistFreshness(sandbox, 'generate');
+    const verdict = inspectDistFreshness(sandbox, 'generate', GEN_RERUN);
     expect(verdict.fresh).toBe(false);
     if (verdict.fresh) return;
     expect(verdict.state).toBe('missing');
@@ -155,7 +162,7 @@ describe('inspectDistFreshness — the dist precondition gen:api-surface never e
     write('dist/contracts/index.js', 'export {};', NEW);
     write('dist/.build-input-hash', `${'a'.repeat(64)}\n`, NEW);
 
-    const verdict = inspectDistFreshness(sandbox, 'generate');
+    const verdict = inspectDistFreshness(sandbox, 'generate', GEN_RERUN);
     expect(verdict.fresh).toBe(false);
     if (verdict.fresh) return;
     expect(verdict.state).toBe('stale');
@@ -168,7 +175,24 @@ describe('inspectDistFreshness — the dist precondition gen:api-surface never e
     write('dist/index.d.ts', 'export {};', OLD + 60);
     write('src/contracts/nested/job-service.ts', 'export interface JobRunOutcome { ok: boolean }', NEW);
 
-    expect(inspectDistFreshness(sandbox, 'generate').fresh).toBe(false);
+    expect(inspectDistFreshness(sandbox, 'generate', GEN_RERUN).fresh).toBe(false);
+  });
+
+  it('prescribes the CALLER of the moment, not a gate name baked into the wording (#7181)', () => {
+    // The defect #7181 was filed on. `mode` used to select `${gen|check}:api-surface`
+    // by hand, so every gate that adopted this primitive told its user to re-run
+    // a gate they had not run — and following that instruction re-runs something
+    // that was never refused, which reads as "the refusal cleared itself".
+    //
+    // Written with a name no gate in this repo has, so it cannot pass by
+    // coincidence with any real caller's string.
+    write('dist/contracts/index.d.ts', 'export {};', OLD);
+    write('src/contracts/job-service.ts', 'export interface JobRunOutcome { ok: boolean }', NEW);
+
+    const verdict = inspectDistFreshness(sandbox, 'check', 'pnpm run check:not-a-real-gate');
+    if (verdict.fresh) throw new Error('expected a refusal');
+    expect(verdict.message).toContain('pnpm run check:not-a-real-gate');
+    expect(verdict.message).not.toContain('api-surface');
   });
 
   it('lets a dist NEWER than src through, in both modes', () => {
@@ -179,8 +203,8 @@ describe('inspectDistFreshness — the dist precondition gen:api-surface never e
     write('src/contracts/job-service.ts', 'export interface JobRunOutcome { ok: boolean }', OLD);
     write('dist/contracts/index.d.ts', 'export {};', NEW);
 
-    expect(inspectDistFreshness(sandbox, 'generate')).toEqual({ fresh: true });
-    expect(inspectDistFreshness(sandbox, 'check')).toEqual({ fresh: true });
+    expect(inspectDistFreshness(sandbox, 'generate', GEN_RERUN)).toEqual({ fresh: true });
+    expect(inspectDistFreshness(sandbox, 'check', CHECK_RERUN)).toEqual({ fresh: true });
   });
 });
 
