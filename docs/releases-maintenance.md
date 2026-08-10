@@ -197,6 +197,10 @@ node scripts/check-objectui-pin-fresh.mjs --ref v17.0.0 --json
   context always reports and can be a branch-protection *required* check — but passes
   `--advisory` outside the release lane, because a pin lagging between bumps is the
   normal state of an ordinary code PR.
+- **It does not run on the rc snapshot lane, deliberately.** `cut-rc` bumps the pin
+  *inside its own run* and then asserts self-consistency instead of liveness — see
+  "Cutting a release" below for why that preserves this gate's invariant rather than
+  bypassing it. This script is unchanged and still enforces on the GA publish path.
 - **It is not the Console Pin Gate.** `ci.yml`'s **Console Pin Gate** (#4290) proves the
   pinned SHA still **builds**; this one proves the pin is still **current**. Either can
   be green while the other is red; neither replaces the other.
@@ -209,6 +213,88 @@ node scripts/check-objectui-pin-fresh.mjs --ref v17.0.0 --json
   run the declaration-parity ratchet at the new pin (see "After the pin moves" above —
   the bump is that ratchet's only trigger), then re-source the Console section with
   `scripts/objectui-range.mjs`.
+
+## Cutting a release
+
+Two routes, and the choice is not a preference — an rc and a GA release need
+different things, so they get different lanes.
+
+| | **rc prerelease** | **GA** |
+|---|---|---|
+| Workflow | `.github/workflows/cut-rc.yml` | `.github/workflows/release.yml` |
+| Trigger | one `workflow_dispatch` | merge the Version Packages PR, then dispatch |
+| objectui pin | bumped **inside** the run, to a snapshot | must already be fresh on the PR |
+| Changelog review | none (the record is generated) | human review on the PR |
+| Board-clearing / #7275-A precondition | not required | required |
+
+Both lanes are `workflow_dispatch` + `environment: release`, and neither can be
+started by a push, a bot, a merge-queue landing or a schedule. That is the
+2026-08-07 ruling (「版本发布必须是人工的」) and it is not negotiable in either
+direction — see `release.yml`'s header for the two releases that were minted
+without a human and the lane split that ended it.
+
+### Cutting an rc — the snapshot flow (#7447)
+
+**Actions → Cut RC → Run workflow**, branch `main`, `version` = the version you
+expect to come out (e.g. `17.0.0-rc.6`). Run it once with **`dry_run` checked**
+first; that stops before anything irreversible and uploads the exact commit a real
+run would push, so the first real dispatch is never this workflow's first execution.
+
+What it does, in order:
+
+1. Checks out `main` and records that sha. Resolves objectui `main` HEAD **once**.
+   Those two values are the snapshot; nothing downstream re-reads either repo's
+   `main`, so **both repositories may keep moving for the whole run**.
+2. Bumps the pin to the snapshot (`scripts/bump-objectui.sh <sha>` — always with an
+   explicit sha; with no argument it pins the local checkout's HEAD, which is stale
+   by construction), builds the vendored Console, and runs the ADR-0082 D4
+   declaration-parity ratchet (`pnpm sdui:manifest`) — the mandatory second half of
+   every pin move. Because this lane moves the pin, it owes the ratchet too.
+3. Runs the gates that read `.changeset/*`, before versioning consumes it.
+4. Runs `pnpm run version` — the repo script, never a bare `changeset version` —
+   and **fails unless the computed version equals the one you typed**.
+5. Pushes one squashed version commit to `main`, then publishes **from that landed
+   commit**. Never the other way round: rc.3 and rc.4 tagged commits that lived only
+   on `changeset-release/main`, which is #6170.
+
+**Why this lane exists.** The Version-PR flow needs the pin fresh against a *moving*
+objectui `main`, which on a busy day is a race the cutter cannot win — rc.6 was
+chased across four pin-bump laps, every one overtaken before its CI finished, and
+finishing would have needed ~40 minutes of coordinated freezes across two repos. The
+standing Version Packages PR is also force-refreshed on every main push, so its CI
+cannot converge while main is busy. A snapshot removes the race instead of asking
+people to hold still.
+
+**On pin freshness.** `cut-rc` deliberately does **not** run
+`pnpm check:objectui-pin-fresh`; it asserts `.objectui-sha` equals the sha *this run*
+resolved. Liveness is exactly what a snapshot gives up, and re-checking it would
+re-introduce the race — one objectui merge mid-run would fail an otherwise perfect
+cut. #3340's real invariant ("everything shipped is covered by the changeset record")
+still holds by construction: the bump changeset covers `OLD_PIN..SNAPSHOT`, and
+objectui commits landing past the snapshot are the *next* release's record, not a gap
+in this one.
+
+**One-time admin prerequisite.** The lane pushes the version commit straight to
+`main`, so the pushing identity must be on main's ruleset **bypass** list —
+`contents: write` alone does not put it there. Either add the GitHub Actions app to
+the bypass list (ideally scoped to this workflow), or store a fine-grained PAT for an
+account already on that list as the repository secret `RELEASE_PUSH_TOKEN`. The
+workflow uses the secret when present and the Actions identity otherwise, so
+configuring either one is enough and neither needs a workflow edit. Until one is
+configured the push step fails with that message and **nothing is published**.
+
+**The runtime image is not built here.** `release.yml`'s `release-integrity` lane
+runs on every push to `main` and requests the image once the version is on npm, so it
+follows within the next merge or two. For one immediately, dispatch `docker-publish.yml`
+with the version.
+
+### Cutting a GA release — the Version Packages PR flow
+
+Unchanged, and everything that makes a GA release a *judgement* stays here: the
+board-clearing pass, the #7275-A cut precondition, the human review of the generated
+changelogs on the PR, and the pin-freshness gate above. Merge the `chore: version
+packages` PR (#4935), then **Actions → Release → Run workflow** with the version
+`main` now carries. `release.yml`'s three lanes are untouched by the rc lane.
 
 ## Drift guard
 

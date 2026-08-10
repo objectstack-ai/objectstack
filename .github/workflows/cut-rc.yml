@@ -1,0 +1,792 @@
+name: Cut RC
+
+# ══════════════════════════════════════════════════════════════════════════════
+# ONE DISPATCH, ONE SNAPSHOT, ZERO FREEZES. (#7447)
+# ══════════════════════════════════════════════════════════════════════════════
+#
+# Read `release.yml`'s header first — its 2026-08-07 ruling ("版本发布必须是人工的")
+# and its lane split are binding context for this file, and this lane preserves
+# both. Nothing here weakens them:
+#
+#   - `workflow_dispatch` is the ONLY trigger. No push, bot, merge-queue landing
+#     or schedule can synthesise the event; a human types the exact version.
+#   - `environment: release` gates it exactly as the publish lane is gated.
+#   - The publish still only ever ships a commit that is ALREADY on main
+#     (#6170): this lane PUSHES the version commit to main first and publishes
+#     from it second. It never publishes from a ref that only exists in the run.
+#
+# WHAT THIS SOLVES THAT `release.yml` CANNOT
+# ------------------------------------------
+# Cutting an rc through the standing "Version Packages" PR (#6208) requires the
+# objectui pin to be fresh at the moment of the cut, and `check:objectui-pin-fresh`
+# judges the pin against a MOVING objectui `main`. On a busy day that is a race the
+# cutter cannot win: rc.6 was chased across four pin-bump laps
+# (8aad9fd -> 9b9fa49 -> cfeb378 -> 1b6188d -> bcd3e02), every lap overtaken before
+# its CI finished, and finishing would have needed ~40 minutes of coordinated
+# freezes across two repositories. The version PR itself is force-refreshed on
+# every main push, so its CI can never converge while main is busy.
+#
+# The fix is not more discipline, it is a SNAPSHOT. This lane resolves objectui
+# `main` HEAD exactly once, records the objectstack `main` sha it checked out, and
+# does every downstream step against those two frozen values. Both repositories may
+# keep moving freely for the whole run.
+#
+# WHY NOT `check:objectui-pin-fresh` HERE (and why that is not a hole)
+# -------------------------------------------------------------------
+# That script asks "is the pin equal to objectui main RIGHT NOW", which is a
+# liveness question, and liveness is precisely what a snapshot gives up on purpose.
+# Calling it here would re-introduce the race the whole lane exists to remove: a
+# single objectui merge mid-run would fail a cut that is otherwise perfect.
+#
+# What this lane asserts instead is pin SELF-CONSISTENCY — `.objectui-sha` equals
+# the sha THIS run resolved and bumped to. #3340's actual invariant is "everything
+# shipped is covered by the changeset record", and that stays true by construction:
+# the bump changeset covers OLD_PIN..OBJECTUI_SHA, and objectui commits landing past
+# the snapshot are simply the next release's record, not a gap in this one.
+# `scripts/check-objectui-pin-fresh.mjs` is UNCHANGED and still enforces on the GA
+# path in `release.yml` — this lane adds a route, it does not relax a gate.
+#
+# SCOPE — rc PRERELEASES ONLY
+# ---------------------------
+# The guard step below refuses anything that is not `X.Y.Z-rc.N`, and refuses to
+# run at all unless `.changeset/pre.json` is in `mode: pre` with `tag: rc`. GA cuts
+# keep the `release.yml` + Version-PR flow, where board-clearing, the #7275-A cut
+# precondition and human changelog review live. See `docs/releases-maintenance.md`.
+#
+# THE RUNTIME IMAGE IS DELIBERATELY NOT BUILT HERE
+# ------------------------------------------------
+# This lane publishes to npm and pushes tags; it does not call `docker-publish.yml`.
+# That is not an oversight and not a gap that stays open: `release.yml`'s
+# `release-integrity` lane runs on EVERY push to main, and once this lane's version
+# is on npm the next main push finds the image missing and requests the build — the
+# #4900 repair path, doing exactly the job it was written for. On a repo with ~18
+# merges a working day that is minutes, not days. For an image immediately, dispatch
+# `docker-publish.yml` with the version. Duplicating the job here would be a second
+# copy of a repair path that already exists.
+
+on:
+  # The human lane, and the only one. Deliberately no `push:`, no `schedule:`.
+  workflow_dispatch:
+    inputs:
+      version:
+        description: >-
+          The EXPECTED resulting version, e.g. 17.0.0-rc.6 — what the version pass
+          should compute after this run's pin bump, not what main carries now.
+          Typing it is the human confirmation the 2026-08-07 ruling requires: the
+          run fails before anything irreversible if the computed version differs.
+        required: true
+        type: string
+      dry_run:
+        description: >-
+          Stop after building the version commit locally and upload it as a patch
+          artifact. Nothing is pushed and nothing is published. Run this first —
+          it means the first REAL dispatch is not this workflow's first execution.
+        required: false
+        type: boolean
+        default: false
+
+# ONE group for the whole lane, so two cuts can never interleave two snapshots
+# over one main. Note the eviction property `release.yml` documents: GitHub keeps
+# at most one PENDING run per group, so dispatching a third cut while one runs and
+# one waits silently drops the middle one. That is acceptable here and nowhere near
+# the hazard it would be on a shared group — every run of this workflow is a
+# deliberate human act, and a dropped one is visibly absent from the Actions list.
+# No `cancel-in-progress`: a cut that has begun publishing must never be killed.
+concurrency:
+  group: cut-rc
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  cut:
+    name: Cut an rc from one snapshot
+    runs-on: ubuntu-latest
+    # ⚠️ An environment with NO protection rules passes AUTOMATICALLY and silently
+    # — the same one-time setup note `release.yml`'s header carries applies here
+    # verbatim (Settings -> Environments -> release -> Required reviewers). The
+    # load-bearing guarantee until then is the `workflow_dispatch` trigger itself.
+    environment: release
+    permissions:
+      # For `git push origin main` and the tag push. See "THE ADMIN PREREQUISITE"
+      # on the checkout step: this permission is necessary and NOT sufficient when
+      # main carries a protection ruleset.
+      contents: write
+    timeout-minutes: 120
+
+    steps:
+      # ────────────────────────────────────────────────────────────────────────
+      # GUARDS THAT NEED NO CHECKOUT. Cheapest possible failure for the mistakes
+      # that are most likely: wrong event, wrong branch, wrong version shape.
+      # ────────────────────────────────────────────────────────────────────────
+      - name: Guard the dispatch (event, ref, version shape)
+        env:
+          # Human-supplied text: read through env, never interpolated into the
+          # shell. Same rule as `release.yml`'s guard step.
+          REQUESTED: ${{ inputs.version }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          # Belt and braces against a FUTURE edit adding a second trigger to this
+          # file. Today `workflow_dispatch` is the only one, so this cannot fire;
+          # the day someone adds `push:` for convenience, it fires instead of
+          # publishing. A structural guard is cheap; re-earning #6170 is not.
+          if [ "${GITHUB_EVENT_NAME}" != "workflow_dispatch" ]; then
+            echo "::error::cut-rc ran on event '${GITHUB_EVENT_NAME}'. This lane publishes to npm and may ONLY be started by a human dispatch (#6170, 2026-08-07 ruling). Remove whatever trigger produced this event."
+            exit 1
+          fi
+
+          if [ "${GITHUB_REF}" != "refs/heads/main" ]; then
+            echo "::error::dispatch cut-rc from main (got ${GITHUB_REF}). This workflow snapshots and pushes main; running it from another ref would execute that branch's workflow file against main's code."
+            exit 1
+          fi
+
+          # rc ONLY. A GA cut goes through release.yml + the Version Packages PR,
+          # where the human changelog review and the #7275-A precondition live.
+          if ! printf '%s' "$REQUESTED" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+-rc\.[0-9]+$'; then
+            echo "::error::'${REQUESTED}' is not an rc version. cut-rc cuts PRERELEASES only and expects the exact shape X.Y.Z-rc.N (e.g. 17.0.0-rc.6). For a GA release use the Release workflow and the 'chore: version packages' PR — see docs/releases-maintenance.md."
+            exit 1
+          fi
+
+          echo "Requested: ${REQUESTED} (dry_run=${DRY_RUN}), dispatched by ${GITHUB_ACTOR}."
+
+      # ────────────────────────────────────────────────────────────────────────
+      # THE SNAPSHOT, HALF 1 — objectstack.
+      #
+      # `ref: main` is explicit rather than inherited: the guard above already
+      # requires the dispatch ref to be main, and pinning it here means the two
+      # can never drift apart in a later edit.
+      #
+      # `fetch-depth: 0` is required, not tidiness: the changeset gates below diff
+      # against the snapshot sha, and `changesets` reads history.
+      #
+      # ⚠️ THE ADMIN PREREQUISITE — ONE-TIME, MAINTAINER-ONLY, AND THIS LANE
+      # CANNOT CREATE IT FOR ITSELF.
+      # This job pushes the version commit straight to `main`. If main carries a
+      # protection ruleset (it does), the pushing identity must be on that
+      # ruleset's BYPASS list, and `contents: write` alone does not put it there.
+      # Either of these satisfies it:
+      #
+      #   (a) add the GitHub Actions app to the ruleset's bypass list, ideally
+      #       scoped to this workflow, and leave RELEASE_PUSH_TOKEN unset; or
+      #   (b) create a fine-grained PAT with `contents: write` on this repository
+      #       for an account that IS on the bypass list, and store it as the
+      #       repository secret RELEASE_PUSH_TOKEN.
+      #
+      # The token below picks (b) when the secret exists and (a) when it does not,
+      # so configuring either one is enough and neither needs a workflow edit. The
+      # push step names this prerequisite in its failure message, because a
+      # rejected push is otherwise indistinguishable from a network fault.
+      #
+      # Whichever route is taken, the credential is persisted on `origin` here so
+      # the version-commit push AND `release-publish.sh`'s atomic tag push both use
+      # it — one credential, no second remote to keep in step.
+      # ────────────────────────────────────────────────────────────────────────
+      - name: Checkout main (full history)
+        uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.RELEASE_PUSH_TOKEN || github.token }}
+
+      - name: Record the objectstack snapshot + guard the release train
+        id: snapshot
+        env:
+          REQUESTED: ${{ inputs.version }}
+          # PRESENCE, not the value: `!= ''` is evaluated by the expression engine
+          # and yields 'true'/'false', so the secret itself never reaches the
+          # shell. Interpolating `secrets.X` into a `run:` block would put it in
+          # the process's argv — masked in the log, but still the pattern
+          # release.yml refuses ("read through env, never interpolated").
+          HAS_PUSH_TOKEN: ${{ secrets.RELEASE_PUSH_TOKEN != '' }}
+        run: |
+          SNAPSHOT_SHA="$(git rev-parse HEAD)"
+          echo "SNAPSHOT_SHA=${SNAPSHOT_SHA}" >> "$GITHUB_ENV"
+          echo "snapshot-sha=${SNAPSHOT_SHA}" >> "$GITHUB_OUTPUT"
+
+          # Report credential state on EVERY run, before anything can early-exit.
+          # Otherwise a repo with the secret and one without look identical until a
+          # push happens to be rejected, and "is it configured?" stays unanswerable
+          # (the pattern cross-repo-issue-closer.yml uses). Presence only — the
+          # value is never read into the log.
+          if [ "$HAS_PUSH_TOKEN" = "true" ]; then
+            echo "push credential: RELEASE_PUSH_TOKEN is configured (route b)."
+          else
+            echo "push credential: RELEASE_PUSH_TOKEN is NOT set — pushing as the Actions app (route a). That app must be on main's ruleset bypass list or the push below is rejected."
+          fi
+
+          # rc-only, asserted against committed state rather than trusted from the
+          # version string. Pre mode is what makes `changeset version` compute
+          # `-rc.N` at all; outside it this lane would silently cut a GA release
+          # through a path that has none of GA's review steps.
+          MODE="$(jq -r '.mode // empty' .changeset/pre.json 2>/dev/null || true)"
+          TAG="$(jq -r '.tag // empty' .changeset/pre.json 2>/dev/null || true)"
+          if [ "$MODE" != "pre" ] || [ "$TAG" != "rc" ]; then
+            echo "::error::.changeset/pre.json is mode='${MODE:-<absent>}' tag='${TAG:-<absent>}', but cut-rc requires mode='pre' tag='rc'. Outside pre mode 'pnpm run version' computes a FINAL version, and this lane has none of the GA review steps. Enter pre mode ('changeset pre enter rc') or use the Release workflow."
+            exit 1
+          fi
+
+          CURRENT="$(jq -r '.version' packages/cli/package.json)"
+          if [ "$CURRENT" = "$REQUESTED" ]; then
+            echo "::error::main already carries @objectstack/cli@${CURRENT}. cut-rc computes the NEXT version from the pending changesets — asking it for the version main already has means the cut has already happened. To (re)publish an existing version, use the Release workflow."
+            exit 1
+          fi
+
+          echo "objectstack snapshot: ${SNAPSHOT_SHA}"
+          echo "main currently carries @objectstack/cli@${CURRENT}; this run must compute ${REQUESTED}."
+
+      # ────────────────────────────────────────────────────────────────────────
+      # THE SNAPSHOT, HALF 2 — objectui, resolved EXACTLY ONCE.
+      #
+      # Everything downstream reads $OBJECTUI_SHA, never `main` again. This single
+      # line is what ends the pin-chasing treadmill: objectui may merge freely for
+      # the rest of the run and this cut neither notices nor cares.
+      # ────────────────────────────────────────────────────────────────────────
+      - name: Resolve objectui main HEAD (once)
+        run: |
+          # Network failure is NEVER green — the rule check-objectui-pin-fresh.mjs
+          # states for the same lookup. An unresolvable remote fails the cut.
+          if ! OUT="$(git ls-remote https://github.com/objectstack-ai/objectui.git refs/heads/main 2>&1)"; then
+            echo "::error::could not reach objectstack-ai/objectui to resolve main: ${OUT}"
+            exit 1
+          fi
+          OBJECTUI_SHA="$(printf '%s\n' "$OUT" | awk 'NR==1{print $1}')"
+          if ! printf '%s' "$OBJECTUI_SHA" | grep -qE '^[0-9a-f]{40}$'; then
+            echo "::error::git ls-remote returned no usable sha for objectui refs/heads/main (got '${OBJECTUI_SHA}'). Refusing to cut against an unknown frontend revision."
+            exit 1
+          fi
+          echo "OBJECTUI_SHA=${OBJECTUI_SHA}" >> "$GITHUB_ENV"
+          echo "objectui snapshot: ${OBJECTUI_SHA} (main HEAD at $(date -u +%FT%TZ)); objectui may move freely from here."
+
+      - name: Clone objectui at full depth
+        run: |
+          OBJECTUI_ROOT="${RUNNER_TEMP}/objectui"
+          # FULL clone, not shallow, and this is a measured requirement rather
+          # than caution: scripts/objectui-changeset-digest.mjs walks
+          # OLD_PIN..OBJECTUI_SHA to build the @objectstack/console changeset, and
+          # it exits 2 on a range it cannot walk. bump-objectui.sh degrades to a
+          # tip-subject-only changeset in that case — a DEGRADED release record
+          # that still exits 0. A shallow clone would therefore cost the cut its
+          # frontend history without failing (#4731's whole lesson).
+          git clone --no-tags https://github.com/objectstack-ai/objectui.git "$OBJECTUI_ROOT"
+          echo "OBJECTUI_ROOT=${OBJECTUI_ROOT}" >> "$GITHUB_ENV"
+
+          # The snapshot sha must be IN the clone. It normally is (the clone is a
+          # superset of the ls-remote moment); it is absent only if objectui
+          # rewrote main in between, which is exactly when continuing would pin a
+          # revision nobody can resolve later.
+          if ! git -C "$OBJECTUI_ROOT" cat-file -e "${OBJECTUI_SHA}^{commit}" 2>/dev/null; then
+            echo "::error::objectui ${OBJECTUI_SHA} is not present in a fresh full clone of main — main was rewritten mid-run. Re-dispatch."
+            exit 1
+          fi
+
+          OLD_PIN="$(tr -d '[:space:]' < .objectui-sha)"
+          if git -C "$OBJECTUI_ROOT" cat-file -e "${OLD_PIN}^{commit}" 2>/dev/null; then
+            AHEAD="$(git -C "$OBJECTUI_ROOT" rev-list --count "${OLD_PIN}..${OBJECTUI_SHA}")"
+            echo "objectui pin ${OLD_PIN:0:12} -> ${OBJECTUI_SHA:0:12} (${AHEAD} commit(s)); range is walkable, the changeset digest will be complete."
+          else
+            # Not fatal — bump-objectui.sh has a labelled degraded path — but it
+            # must never pass unremarked, because a degraded changeset and a
+            # complete one look alike in the release record.
+            echo "::warning::the current pin ${OLD_PIN:0:12} is not reachable in this objectui clone, so the console changeset will take bump-objectui.sh's DEGRADED path (tip subject only). The release record for this range will be incomplete — check the emitted .changeset/console-*.md before approving the publish."
+          fi
+
+      # ────────────────────────────────────────────────────────────────────────
+      # Toolchain. Mirrors release.yml's publish job step for step.
+      # ────────────────────────────────────────────────────────────────────────
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          # Cannot go below 22 — the downstream hotcrm smoke below clones
+          # hotcrm@v1.2.0, whose manifest pins engines.node >=22.
+          node-version: '22'
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Verify pnpm version
+        run: pnpm --version
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v6
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-v3-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-v3-
+
+      # Restore-only, like ci.yml's Console Pin Gate: this workflow runs a handful
+      # of times a month so its own namespace is almost always cold, and the
+      # build-core fallbacks seeded from main are the ones that actually hit.
+      # Saving is lint.yml's job.
+      - name: Restore Turbo cache
+        uses: actions/cache/restore@v6
+        with:
+          path: .turbo/cache
+          key: ${{ runner.os }}-turbo-${{ github.job }}-${{ github.ref_name }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-turbo-${{ github.job }}-${{ github.ref_name }}-
+            ${{ runner.os }}-turbo-${{ github.job }}-
+            ${{ runner.os }}-turbo-build-core-${{ github.ref_name }}-
+            ${{ runner.os }}-turbo-build-core-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # A fresh workspace must build local dists BEFORE the console build: the
+      # console's vite alias table (objectui#4103) resolves @objectstack/client to
+      # this tree's packages/client/dist, whose DTS needs @objectstack/core built,
+      # and build-console.sh's own fallback is a bare `pnpm build` inside
+      # packages/client that tsup cannot finish on its own. @objectstack/spec is
+      # named explicitly because generated-artifact reads need it even where the
+      # client closure would already have pulled it in. Same step, same reason, as
+      # ci.yml's Console Pin Gate and showcase-smoke.yml.
+      - name: Build the @objectstack/client and @objectstack/spec closures
+        run: pnpm exec turbo run build --filter=@objectstack/client... --filter=@objectstack/spec... --concurrency=4
+
+      # ────────────────────────────────────────────────────────────────────────
+      # PIN BUMP — at the snapshot sha, never at "whatever main is now".
+      # ────────────────────────────────────────────────────────────────────────
+      - name: Bump the objectui pin to the snapshot
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+
+          # The sha is passed EXPLICITLY. With no argument bump-objectui.sh pins
+          # the local checkout's HEAD (#7308 note 1) — which here is objectui main
+          # as of clone time, i.e. stale-by-construction the moment objectui
+          # merges anything. Passing $OBJECTUI_SHA is what makes this a snapshot.
+          #
+          # This commits, or exits 0 saying "already at <sha>" when objectui has
+          # not moved since the last cut. Both are correct; the assert below is
+          # what decides, not whether a commit happened.
+          bash scripts/bump-objectui.sh "$OBJECTUI_SHA"
+
+      # THE pin assertion for this lane — self-consistency, deliberately NOT
+      # liveness. See "WHY NOT check:objectui-pin-fresh HERE" in the header. Do not
+      # replace this with `pnpm check:objectui-pin-fresh`: that would fail this cut
+      # for any objectui merge landing during the run, which is the exact race the
+      # snapshot exists to remove.
+      - name: Assert the pin equals this run's snapshot
+        run: |
+          PINNED="$(tr -d '[:space:]' < .objectui-sha)"
+          if [ "$PINNED" != "$OBJECTUI_SHA" ]; then
+            echo "::error::.objectui-sha is ${PINNED} but this run snapshotted objectui at ${OBJECTUI_SHA}. The bump did not take effect; refusing to build a console the release record does not describe."
+            exit 1
+          fi
+          echo "pin is self-consistent at ${PINNED} — everything published by this run is covered by the changeset record for OLD_PIN..${PINNED:0:12} (#3340)."
+
+      - name: Build the vendored Console SPA at the new pin
+        run: pnpm objectui:build
+
+      - name: Verify the Console dist stamp matches the pin
+        run: pnpm check:console-sha
+
+      # ────────────────────────────────────────────────────────────────────────
+      # ADR-0082 D4 declaration-parity ratchet — the mandatory SECOND HALF of
+      # every pin move (#5960). The pin bump is this ratchet's only trigger, which
+      # is precisely why it belongs on this lane: cut-rc is now a route that moves
+      # the pin, so a cut that skipped it would be a pin move with no ratchet.
+      #
+      # Installing a Playwright browser is fine HERE. The #5960 ruling that keeps
+      # the ratchet off CI is about not putting an objectui build plus a browser
+      # download on every matching PR; this workflow runs a handful of times a
+      # month, on purpose, and has already built the console two steps above.
+      # ────────────────────────────────────────────────────────────────────────
+      - name: Install a Playwright browser for the manifest dump
+        run: |
+          # The dump runs INSIDE objectui's build tree (gen-sdui-manifest.sh does
+          # `pushd $BUILD_ROOT` and drives objectui's own playwright), so the
+          # browser must be installed against THAT workspace. `pnpm exec
+          # playwright` from the framework root resolves nothing — playwright is
+          # not a framework dependency.
+          BUILD_ROOT=".cache/objectui-${OBJECTUI_SHA:0:12}"
+          if [ ! -d "$BUILD_ROOT" ]; then
+            echo "::error::expected objectui build tree at ${BUILD_ROOT} (created by 'pnpm objectui:build'). Cannot install the browser the ratchet needs."
+            exit 1
+          fi
+          pnpm --dir "$BUILD_ROOT" exec playwright install chromium-headless-shell
+
+      - name: 'Declaration-parity ratchet at the new pin (ADR-0082 D4)'
+        run: pnpm sdui:manifest
+
+      # ────────────────────────────────────────────────────────────────────────
+      # PRE-VERSION GATES. Every one of these reads `.changeset/*`, so all of them
+      # must run BEFORE `pnpm run version` consumes it.
+      #
+      # ON THE `--base` VALUE: these three are FORWARD-ONLY DIFF gates — they judge
+      # what a change INTRODUCES, never the standing stock (their `--list` modes
+      # are audits that always exit 0, and `--audit-stock` says in its own header
+      # that a non-zero exit there would make it a gate, which it is not). So the
+      # honest base here is $SNAPSHOT_SHA, and the diff they judge is this run's
+      # OWN contribution: the @objectstack/console changeset the pin bump just
+      # emitted. That is a real gate, not a formality — the digest resolves its
+      # bump level from objectui's declarations, so an objectui `major` would
+      # otherwise promote all ~70 packages, and a digest bug emitting empty
+      # frontmatter would stall the release silently and greenly (#4898).
+      #
+      # $SNAPSHOT_SHA is a pinned sha, which #6129 warns against — but that warning
+      # is about pr-automation.yml's FROZEN `base.sha`, a value that goes stale as
+      # main moves under a PR. Here the snapshot is by construction the parent of
+      # the commit being judged, so it IS the merge base, and it cannot go stale
+      # because the run created the commit on top of it moments ago.
+      # ────────────────────────────────────────────────────────────────────────
+      - name: Gate — Changesets "fixed" group covers every public package
+        run: node scripts/check-changeset-fixed.mjs
+
+      - name: Gate — no control bytes anywhere in the tree
+        run: pnpm check:nul-bytes
+
+      - name: Gate — this cut introduces no empty-frontmatter changeset
+        run: |
+          node scripts/check-empty-changeset.mjs --self-test
+          node scripts/check-empty-changeset.mjs --base "$SNAPSHOT_SHA"
+
+      - name: Gate — this cut introduces no unregistered breaking change (ADR-0087)
+        run: |
+          node scripts/check-adr-0087-registration.mjs --self-test
+          node scripts/check-adr-0087-registration.mjs --base "$SNAPSHOT_SHA"
+
+      - name: Gate — this cut introduces no major bump
+        run: |
+          node scripts/check-changeset-no-major.mjs --self-test
+          node scripts/check-changeset-no-major.mjs --base "$SNAPSHOT_SHA"
+
+      # ────────────────────────────────────────────────────────────────────────
+      # VERSION. `pnpm run version`, never a bare `changeset version`: the repo
+      # script is `changeset version && sync-protocol-version.mjs &&
+      # sync-template-versions.mjs`, and the two sync steps are what keep
+      # PROTOCOL_VERSION and the scaffolder templates in lockstep with the number
+      # being cut. Pre mode (`.changeset/pre.json`, tag rc) is committed state and
+      # applies automatically — the guard step already proved it is active.
+      # ────────────────────────────────────────────────────────────────────────
+      - name: Version the workspace
+        run: pnpm run version
+
+      - name: Assert the computed version is the one that was dispatched
+        env:
+          REQUESTED: ${{ inputs.version }}
+        run: |
+          COMPUTED="$(jq -r '.version' packages/cli/package.json)"
+          if [ "$COMPUTED" != "$REQUESTED" ]; then
+            echo "::error::you dispatched '${REQUESTED}' but the pending changesets compute @objectstack/cli@${COMPUTED}. Nothing has been pushed or published. Re-dispatch with ${COMPUTED} if that is the intended cut, or find the changeset that moved the number."
+            exit 1
+          fi
+          echo "computed version ${COMPUTED} matches the dispatch."
+
+      # ────────────────────────────────────────────────────────────────────────
+      # THE SINGLE VERSION COMMIT.
+      #
+      # Squashed onto $SNAPSHOT_SHA so main receives exactly one commit for the
+      # cut: the pin bump and the version output are one atomic unit, and there is
+      # never a main commit carrying a bumped pin but an unversioned tree.
+      #
+      # WHAT MAY BE IN IT — measured on this train (17.0.0-rc.5 -> 17.0.0-rc.6, a
+      # full local `pnpm run version` over 1704 pending changesets), not assumed:
+      #   76 modified package.json, 76 modified CHANGELOG.md, and
+      #   .changeset/pre.json. Zero deletions, zero untracked files. In PRE mode
+      #   `changeset version` does NOT delete the consumed changesets — it records
+      #   them in pre.json and they are removed at `changeset pre exit` — so a cut
+      #   never races a lane PR over a `.changeset/*.md` file it wants to keep.
+      # Two more paths can appear at a major boundary and are allowed for that
+      # reason: packages/spec/src/kernel/protocol-version.ts and the blank
+      # template's objectstack.config.ts (both written by the sync scripts).
+      #
+      # The allowlist is ENFORCED rather than described. Only allowlisted paths are
+      # staged, and then every staged path is re-checked against the same rule and
+      # the worktree is asserted clean. If `pnpm run version` ever grows a new
+      # output, this fails loudly here instead of pushing a surprise to main — the
+      # "disjoint from lane PRs by construction" claim is only worth anything if
+      # something actually checks it.
+      # ────────────────────────────────────────────────────────────────────────
+      - name: Build the single version commit
+        id: commit
+        env:
+          REQUESTED: ${{ inputs.version }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          # Collapse the pin-bump commit (if bump-objectui.sh made one) back into
+          # the index, so bump + version become one commit on top of the snapshot.
+          git reset --soft "$SNAPSHOT_SHA"
+
+          git add -A -- \
+            '*package.json' \
+            '*CHANGELOG.md' \
+            .changeset \
+            .objectui-sha \
+            packages/spec/src/kernel/protocol-version.ts \
+            packages/create-objectstack/src/templates/blank/objectstack.config.ts
+
+          STAGED="$(git diff --cached --name-only)"
+          if [ -z "$STAGED" ]; then
+            echo "::error::the version pass produced no changes to commit. Nothing to cut."
+            exit 1
+          fi
+
+          # Re-check every staged path against the allowlist. The pathspec above is
+          # convenience; THIS is the guarantee.
+          BAD="$(printf '%s\n' "$STAGED" | grep -vE '(^|/)package\.json$|(^|/)CHANGELOG\.md$|^\.changeset/|^\.objectui-sha$|^packages/spec/src/kernel/protocol-version\.ts$|^packages/create-objectstack/src/templates/blank/objectstack\.config\.ts$' || true)"
+          if [ -n "$BAD" ]; then
+            echo "::error::the version commit would carry paths outside the release file surface. Refusing to push. Offending paths follow; if the version pass legitimately grew a new output, widen the allowlist in this workflow deliberately."
+            printf '%s\n' "$BAD" | sed 's/^/::error::  unexpected: /'
+            exit 1
+          fi
+
+          # Nothing tracked may be left behind: a modified-but-unstaged file means
+          # the version pass wrote somewhere the allowlist does not cover, and the
+          # commit would silently ship a partial cut.
+          LEFT="$(git diff --name-only)"
+          if [ -n "$LEFT" ]; then
+            echo "::error::tracked files were modified but fall outside the release file surface, so the version commit would be incomplete. Refusing to push."
+            printf '%s\n' "$LEFT" | sed 's/^/::error::  unstaged: /'
+            exit 1
+          fi
+
+          # Separate -m flags rather than one multi-line string: inside a YAML
+          # block scalar every continuation line carries the block's indentation,
+          # which would land verbatim in the commit body.
+          git commit -q \
+            -m "chore(release): ${REQUESTED}" \
+            -m "objectui pin -> ${OBJECTUI_SHA}" \
+            -m "cut from ${SNAPSHOT_SHA} by ${GITHUB_ACTOR} via cut-rc (#7447)"
+
+          COMMIT_SHA="$(git rev-parse HEAD)"
+          COUNT="$(printf '%s\n' "$STAGED" | wc -l | tr -d ' ')"
+          echo "commit-sha=${COMMIT_SHA}" >> "$GITHUB_OUTPUT"
+          echo "file-count=${COUNT}" >> "$GITHUB_OUTPUT"
+          echo "built ${COMMIT_SHA} on top of ${SNAPSHOT_SHA}: ${COUNT} file(s)."
+          {
+            echo "## Cut ${REQUESTED}"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| objectstack snapshot | \`${SNAPSHOT_SHA}\` |"
+            echo "| objectui snapshot | \`${OBJECTUI_SHA}\` |"
+            echo "| version commit | \`${COMMIT_SHA}\` |"
+            echo "| files in commit | ${COUNT} |"
+            echo "| dry run | ${DRY_RUN} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # ────────────────────────────────────────────────────────────────────────
+      # DRY RUN STOPS HERE.
+      #
+      # It stops AFTER the local commit rather than after the version step, which
+      # is strictly more of the pipeline than #7447's acceptance criterion asks
+      # for: the squash, the allowlist enforcement and the version assertion have
+      # all really executed, and the artifact is the exact commit a real run would
+      # push. Everything downstream of this point is irreversible.
+      # ────────────────────────────────────────────────────────────────────────
+      - name: Export the would-be version commit (dry run)
+        if: ${{ inputs.dry_run }}
+        env:
+          REQUESTED: ${{ inputs.version }}
+        run: |
+          mkdir -p "${RUNNER_TEMP}/cut-rc"
+          git format-patch -1 --stdout > "${RUNNER_TEMP}/cut-rc/version-commit.patch"
+          git show --stat --oneline HEAD > "${RUNNER_TEMP}/cut-rc/version-commit.stat.txt"
+          {
+            echo "# cut-rc dry run — ${REQUESTED}"
+            echo
+            echo "- objectstack snapshot: ${SNAPSHOT_SHA}"
+            echo "- objectui snapshot:    ${OBJECTUI_SHA}"
+            echo "- version commit:       $(git rev-parse HEAD)"
+            echo
+            echo "Nothing was pushed and nothing was published."
+            echo "version-commit.patch is byte-for-byte what a real dispatch would push to main."
+          } > "${RUNNER_TEMP}/cut-rc/README.md"
+
+      - name: Upload the dry-run artifact
+        if: ${{ inputs.dry_run }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: cut-rc-${{ inputs.version }}-dry-run
+          path: ${{ runner.temp }}/cut-rc
+          if-no-files-found: error
+
+      - name: Stop (dry run)
+        if: ${{ inputs.dry_run }}
+        run: |
+          echo "::notice::dry run complete — the version commit was built and verified locally, then discarded. Nothing was pushed, nothing was published. Re-dispatch with dry_run unchecked to cut for real."
+          echo "- **dry run**: stopped before the push. Nothing was published." >> "$GITHUB_STEP_SUMMARY"
+
+      # ────────────────────────────────────────────────────────────────────────
+      # LAND ON MAIN FIRST, PUBLISH SECOND (#6170).
+      #
+      # rc.3 and rc.4 tagged commits that lived only on `changeset-release/main`,
+      # so main kept a stale version and every later release recomputed an
+      # npm-occupied number. The ordering below is the structural fix: by the time
+      # anything reaches npm, the exact commit it was built from is on main.
+      #
+      # THE DRY-RUN GUARD IS WRITTEN TWICE, ON PURPOSE. The step-level `if:` is the
+      # primary control; the in-shell assert is there because a dropped `if:` in a
+      # future edit would otherwise publish from a run a human asked NOT to
+      # publish. Two languages, one decision — the same belt-and-braces reasoning
+      # release.yml applies to its own publish path.
+      # ────────────────────────────────────────────────────────────────────────
+      - name: Push the version commit to main
+        if: ${{ !inputs.dry_run }}
+        env:
+          DRY_RUN: ${{ inputs.dry_run }}
+          REQUESTED: ${{ inputs.version }}
+        run: |
+          if [ "$DRY_RUN" = "true" ]; then
+            echo "::error::refusing to push: this run was dispatched as a dry run. A step-level 'if:' has been dropped in an edit to this workflow."
+            exit 1
+          fi
+
+          # Bounded fetch-rebase-retry. main is busy by assumption — that is the
+          # premise of this whole workflow — so losing the push race is expected,
+          # not exceptional.
+          ATTEMPTS=5
+          for attempt in $(seq 1 "$ATTEMPTS"); do
+            if git push origin HEAD:main; then
+              echo "pushed $(git rev-parse HEAD) to main on attempt ${attempt}."
+              echo "PUSHED_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+              exit 0
+            fi
+
+            if [ "$attempt" -eq "$ATTEMPTS" ]; then
+              echo "::error::could not push the version commit to main after ${ATTEMPTS} attempts. Nothing has been published, so this is safe to retry."
+              echo "::error::If the rejection was 'protected branch' / 'refusing to allow ... to update', this is the ONE-TIME ADMIN PREREQUISITE and no re-run will clear it: the pushing identity must be on main's ruleset BYPASS list. Either add the GitHub Actions app to the ruleset bypass list (ideally scoped to this workflow), or create a fine-grained PAT with contents:write for an account already on that list and store it as the repository secret RELEASE_PUSH_TOKEN. See this workflow's checkout step for the full note."
+              exit 1
+            fi
+
+            echo "push rejected (attempt ${attempt}/${ATTEMPTS}) — refreshing main and rebasing the version commit."
+            git fetch origin main
+            if ! git rebase origin/main; then
+              git rebase --abort || true
+              echo "::error::the version commit conflicts with main. Nothing has been published. A commit landing during the cut touched the release file surface (package.json / CHANGELOG.md / .changeset / .objectui-sha) — resolve it and re-dispatch."
+              exit 1
+            fi
+
+            # The rebase moved the commit onto newer main, so the version
+            # assertion must be re-earned rather than inherited. If another
+            # version commit landed underneath us the number is now wrong, and
+            # that must stop the cut before npm, not after.
+            COMPUTED="$(jq -r '.version' packages/cli/package.json)"
+            if [ "$COMPUTED" != "$REQUESTED" ]; then
+              echo "::error::after rebasing onto refreshed main the tree carries @objectstack/cli@${COMPUTED}, not the dispatched ${REQUESTED}. Something else versioned main during this cut. Nothing has been published."
+              exit 1
+            fi
+
+            sleep $(( attempt * 5 ))
+          done
+
+      # From here the commit IS on main, so everything published is a commit main
+      # already carries — #6170's invariant, kept to the letter. If the loop above
+      # rebased, main also carries whatever landed during the cut; those commits
+      # passed their own CI, and the publish below builds from this exact tree, so
+      # the artifacts and the main commit still describe each other exactly.
+      - name: Confirm the pushed commit is main
+        if: ${{ !inputs.dry_run }}
+        run: |
+          git fetch origin main
+          REMOTE="$(git rev-parse origin/main)"
+          LOCAL="$(git rev-parse HEAD)"
+          if [ "$REMOTE" != "$LOCAL" ]; then
+            echo "::warning::main has already moved past the version commit (${LOCAL} -> ${REMOTE}). That is normal on a busy repository; the version commit itself is on main, which is what the publish requires."
+            if ! git merge-base --is-ancestor "$LOCAL" "$REMOTE"; then
+              echo "::error::the version commit ${LOCAL} is NOT an ancestor of origin/main. Refusing to publish a commit main does not carry (#6170)."
+              exit 1
+            fi
+          fi
+          echo "@objectstack/cli@$(jq -r '.version' packages/cli/package.json) is on main at ${LOCAL}."
+
+      # Pre-publish gate #2035, kept in step with release.yml's publish job rather
+      # than dropped for speed. In pre mode (which the guard step proved is active,
+      # so ALWAYS on this lane) the #3600 amendment makes it advisory: a major
+      # train exists to ship deliberate surface removals, and a migrated hotcrm
+      # cannot exist until the rc artifacts it would migrate against are published.
+      # It reports; it cannot block.
+      - name: Downstream backward-compat smoke (live hotcrm, advisory in pre mode)
+        if: ${{ !inputs.dry_run }}
+        env:
+          HOTCRM_REF: v2.1.0
+        run: |
+          if bash scripts/downstream-smoke.sh; then
+            echo "::notice::hotcrm@${HOTCRM_REF} is still compatible with the pre-release train."
+          else
+            echo "::warning::hotcrm@${HOTCRM_REF} is incompatible with the pre-release train — expected for this window's deliberate removals. Ship a migrated hotcrm release and bump HOTCRM_REF in release.yml before 'changeset pre exit' re-arms that gate."
+          fi
+
+      # ────────────────────────────────────────────────────────────────────────
+      # PUBLISH. `pnpm run release` = build + build-console + release-publish.sh,
+      # which is `changeset publish` followed by ONE atomic `git push origin --tags`
+      # (#2191: the changesets action's concurrent per-tag pushes raced GitHub's
+      # ref backend and lost ~half the tags).
+      #
+      # changesets/action is NOT used, exactly as in release.yml: handed a
+      # workspace with pending changesets it would take the VERSION path and mint a
+      # commit. `changeset publish` can only publish what the checked-out
+      # package.json files already declare — which is what main now carries.
+      # ────────────────────────────────────────────────────────────────────────
+      - name: Publish to npm + push version tags
+        id: publish
+        if: ${{ !inputs.dry_run }}
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          if [ "$DRY_RUN" = "true" ]; then
+            echo "::error::refusing to publish: this run was dispatched as a dry run. A step-level 'if:' has been dropped in an edit to this workflow."
+            exit 1
+          fi
+
+          printf '//registry.npmjs.org/:_authToken=%s\n' "$NPM_TOKEN" >> "$HOME/.npmrc"
+
+          pnpm run release
+
+          # `changeset publish` skips versions already on the registry, so a
+          # re-dispatch over a partially-published release is a repair rather than
+          # a duplicate. What is NOT optional is that the version is on npm when
+          # this step ends.
+          if ! npm view "@objectstack/cli@$VERSION" version >/dev/null 2>&1; then
+            echo "::error::publish ran but @objectstack/cli@$VERSION is still not on npm"
+            exit 1
+          fi
+          echo "published=true" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Releases (bodies truncated to the API limit)
+        # `!cancelled()` rather than the implicit success(): npm is already public
+        # by the time this runs, so a failure upstream must not be the reason the
+        # release record stays empty (#4900).
+        if: ${{ !cancelled() && steps.publish.outputs.published == 'true' }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # The fixed group releases every public package at one version, so the
+          # version alone drives the whole publishable workspace.
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: node scripts/release-github-releases.mjs
+
+      - name: Attach spec-changes.json to the GitHub Release (ADR-0087 D4)
+        # Ordering is load-bearing: `gh release upload` needs the Release the step
+        # above created.
+        if: ${{ !cancelled() && steps.publish.outputs.published == 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: bash scripts/release-spec-changes.sh
+
+      - name: Summarise the cut
+        if: ${{ !cancelled() && steps.publish.outputs.published == 'true' }}
+        env:
+          REQUESTED: ${{ inputs.version }}
+        run: |
+          {
+            echo
+            echo "**${REQUESTED} is published.**"
+            echo
+            echo "- npm: every package in the fixed group, dist-tag \`rc\`"
+            echo "- git: version tags pushed atomically"
+            echo "- main: carries the version commit (nothing was published that main does not have)"
+            echo
+            echo "The runtime image is NOT built by this lane — \`release-integrity\` in"
+            echo "\`release.yml\` requests it on the next push to main, or dispatch"
+            echo "\`docker-publish.yml\` with version \`${REQUESTED}\` for one immediately."
+          } >> "$GITHUB_STEP_SUMMARY"
