@@ -1701,6 +1701,9 @@ importers:
       '@objectstack/plugin-sharing':
         specifier: workspace:*
         version: link:../plugin-sharing
+      '@objectstack/service-i18n':
+        specifier: workspace:*
+        version: link:../../services/service-i18n
       '@types/node':
         specifier: ^26.1.2
         version: 26.1.2

@@ -5,9 +5,12 @@
  *
  * The localized message templates for the data path's OPERATION-level
  * refusals — a write the engine declines as a whole, rather than a constraint
- * one field violated. Today that is the referential-integrity refusal
- * (`409 DELETE_RESTRICTED`, `cascadeDeleteRelations`'s `restrict` branch); the
- * catalog is the seat for the rest of the family as they are localized.
+ * one field violated. Two members today: the referential-integrity refusal
+ * (`409 DELETE_RESTRICTED`, `cascadeDeleteRelations`'s `restrict` branch, #7307)
+ * and the object-permission refusal (`403 PERMISSION_DENIED`, plugin-security's
+ * CRUD gate, #7414). The catalog is the seat for the rest of the family as they
+ * are localized — a second mechanism for the second producer is exactly what
+ * this module exists to prevent.
  *
  * ## Why this is a SEPARATE catalog from `validation-message.ts`
  *
@@ -88,27 +91,45 @@ export function operationMessageTranslationKey(messageKey: string): string {
  * caller's locale (the API names live on `developerMessage` and on the
  * structured `object` / `dependentObject` fields), `{{field}}` is the
  * referencing field's label, `{{count}}` the number of dependent records.
+ *
+ * `permission_denied` (#7414) takes NO placeholders, and that is a deliberate
+ * divergence from its sibling rather than an omission. `delete_restricted`
+ * names the objects because the user must know WHICH related records block
+ * them — that is the action they can take. An object-permission refusal gives
+ * the user nothing to act on by naming the object, and on a cascade delete the
+ * object the gate refuses is a CHILD the operator never addressed and may not
+ * know exists (`cascadeDeleteRelations` re-authorises every child
+ * independently). Naming it would be accurate and still misleading, so the
+ * sentence names nothing: no object, no operation, no `positions`. The machine
+ * detail stays on the error's structured `details` and on `developerMessage`,
+ * which is logged server-side (see `plugin-security`'s CRUD gate).
  */
 export const BUILTIN_OPERATION_MESSAGES: Record<string, Record<string, string>> = {
   en: {
+    permission_denied:
+      'You do not have permission to perform this action. Contact your administrator if you need access.',
     delete_restricted:
       'This {{object}} is still referenced by {{count}} {{dependentObject}} record(s) through “{{field}}”. Delete or reassign them first.',
     delete_restricted_required:
       'This {{object}} is still referenced by {{count}} {{dependentObject}} record(s) through “{{field}}”, which is required and cannot be cleared. Delete or reassign them first.',
   },
   'zh-CN': {
+    permission_denied: '您没有执行此操作的权限,如需访问请联系管理员。',
     delete_restricted:
       '该{{object}}正被 {{count}} 条{{dependentObject}}记录通过「{{field}}」引用,请先删除或改派这些记录。',
     delete_restricted_required:
       '该{{object}}正被 {{count}} 条{{dependentObject}}记录通过「{{field}}」引用,且该字段为必填、无法清空,请先删除或改派这些记录。',
   },
   'ja-JP': {
+    permission_denied: 'この操作を実行する権限がありません。アクセスが必要な場合は管理者にお問い合わせください。',
     delete_restricted:
       'この{{object}}は {{count}} 件の{{dependentObject}}レコードから「{{field}}」で参照されています。先にそれらを削除するか、参照先を変更してください。',
     delete_restricted_required:
       'この{{object}}は {{count}} 件の{{dependentObject}}レコードから「{{field}}」で参照されています。この項目は必須のため空にできません。先にそれらを削除するか、参照先を変更してください。',
   },
   'es-ES': {
+    permission_denied:
+      'No tiene permiso para realizar esta acción. Póngase en contacto con su administrador si necesita acceso.',
     delete_restricted:
       '{{count}} registro(s) de {{dependentObject}} todavía hacen referencia a este {{object}} mediante «{{field}}». Elimínelos o reasígnelos primero.',
     delete_restricted_required:

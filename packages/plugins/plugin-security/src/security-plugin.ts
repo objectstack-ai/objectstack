@@ -4,6 +4,10 @@ import { Plugin, PluginContext, POSTURE_LADDER } from '@objectstack/core';
 import type { PermissionSet, RowLevelSecurityPolicy } from '@objectstack/spec/security';
 import { describeHighPrivilegeBits, describeAnchorForbiddenBits, PUBLIC_FORM_SERVER_MANAGED_FIELDS } from '@objectstack/spec/security';
 import { MCP_AGENT_PERMISSION_SET_RESTRICTED } from '@objectstack/spec/ai';
+// [#7414] The SHARED operation-message catalog #7307 built for the data path's
+// operation-level refusals. Second consumer, same mechanism — a second remedy
+// for one defect class is what that module exists to prevent.
+import { renderOperationMessage } from '@objectstack/spec/system';
 import { PermissionEvaluator, crudBucketForOperation } from './permission-evaluator.js';
 import { DelegatedAdminGate } from './delegated-admin-gate.js';
 import {
@@ -353,6 +357,48 @@ export interface SecurityPluginOptions {
  * gate share ONE definition. Re-exported here for existing consumers.
  */
 export { describeHighPrivilegeBits } from '@objectstack/spec/security';
+
+/**
+ * [#7414] The END USER's half of an object-permission refusal.
+ *
+ * Both transports put a 403's `Error.message` on the wire as the body's
+ * human-readable string — `@objectstack/rest`'s `mapDataError` as `body.error`,
+ * the runtime dispatcher as `error.message` — and Console renders that verbatim
+ * in a toast. The CRUD gate composed it English-only with the object's API name
+ * and the caller's `positions` concatenated in, so an operator in a fully
+ * localized app read a sentence naming a table they have never seen and an
+ * authorization vocabulary that reads as a contradiction to someone who does
+ * hold rights on the record they clicked. On a cascade delete it is worse
+ * still: `cascadeDeleteRelations` re-authorises every CHILD independently, so
+ * the object named is one the operator never addressed.
+ *
+ * Rendered through the SHARED operation-message catalog #7307 built
+ * (`@objectstack/spec/system`), not a second mechanism: same `errors.<key>`
+ * override address, same resolution ladder (deployment override → locale
+ * catalog → `en` → the key), same guarantee that a misbehaving i18n service
+ * cannot turn a 403 into a 500.
+ *
+ * The i18n service is optional and resolved per call: it is registered by a
+ * different plugin, may register after this one, and a deployment that runs
+ * without it still gets the built-in catalog in the caller's locale.
+ */
+function userFacingDenialMessage(ctx: PluginContext, locale: string | undefined): string {
+  let translate:
+    | ((key: string, loc: string, params?: Record<string, unknown>) => string)
+    | undefined;
+  try {
+    const i18n = ctx.getService<II18nService>('i18n');
+    const t = i18n?.t;
+    if (typeof t === 'function') {
+      translate = (key, loc, params) => t.call(i18n, key, loc, params);
+    }
+  } catch {
+    // i18n is optional (ADR-0029 D8 registers it from another plugin, possibly
+    // later than this one). The built-in catalog still renders the caller's
+    // locale without it.
+  }
+  return renderOperationMessage({ messageKey: 'permission_denied' }, { locale, translate });
+}
 
 export class SecurityPlugin implements Plugin {
   name = 'com.objectstack.security';
@@ -1156,10 +1202,54 @@ export class SecurityPlugin implements Plugin {
         );
 
         if (!allowed) {
-          throw new PermissionDeniedError(
+          // [#7414] TWO messages, two audiences — the split #7307 made for
+          // `DELETE_RESTRICTED`, reached from the authorization side and through
+          // the SAME catalog.
+          //
+          // `message` is what a BUSINESS USER reads, because both transports
+          // ship it verbatim as the body's human-readable string and Console
+          // renders it as-is in a toast. It is now a localized sentence that
+          // names no object, no operation and no position.
+          //
+          // `developerMessage` is the previous sentence BYTE FOR BYTE. Where it
+          // goes is where this card had to diverge from #7307, and the reason is
+          // measured, not assumed. #7423 shipped its developer half over the
+          // wire on the grounds that "it discloses nothing the envelope did not
+          // already carry: `dependentObject` and `object` are API names on the
+          // same body". That premise does NOT hold here on both transports:
+          //
+          //   - `@objectstack/rest`'s `mapDataError` 403 branch builds
+          //     `{ error, code, object? }` and never reads `error.details`, and
+          //     that `object` is the object the ROUTE named — so `positions`,
+          //     the operation, and (on a cascade) the CHILD object's API name
+          //     reach the client through NOTHING but this message today;
+          //   - the runtime dispatcher does spread `e.details` onto the body
+          //     (`http-dispatcher.ts` → `buildApiError` → `error.details`), so
+          //     there they are already disclosed.
+          //
+          // One error class cannot honestly have a per-transport disclosure
+          // policy, and a card whose purpose is to REDUCE what a browser is told
+          // must not add a new disclosure on the transport that discloses less.
+          // So the developer half is NOT shipped: it goes to the server log,
+          // which is where an app builder debugging a 403 already looks. It is
+          // attached to the error as a SIBLING of `details`, never a member of
+          // it — `details` is the field the dispatcher serialises.
+          //
+          // `code` / `statusCode` / `details` are untouched: one
+          // `PERMISSION_DENIED` (ADR-0112), one 403, two sentences.
+          const developerMessage =
             `[Security] Access denied: operation '${opCtx.operation}' on object '${opCtx.object}' ` +
-              `is not permitted for positions [${positions.join(', ')}]`,
+            `is not permitted for positions [${positions.join(', ')}]`;
+          ctx.logger.warn(developerMessage, {
+            operation: opCtx.operation,
+            object: opCtx.object,
+            positions,
+            userId: opCtx.context?.userId ?? 'unknown',
+          });
+          throw new PermissionDeniedError(
+            userFacingDenialMessage(ctx, opCtx.context?.locale),
             { operation: opCtx.operation, object: opCtx.object, positions, permissionSets: explicitPermissionSets },
+            developerMessage,
           );
         }
 

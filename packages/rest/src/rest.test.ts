@@ -2453,6 +2453,52 @@ describe('mapDataError — schema/constraint envelopes', () => {
     expect(r.body).not.toHaveProperty('developerMessage');
   });
 
+  // [#7414] The 403 does NOT get #7307's treatment, and this pins WHY rather
+  // than merely that it does not.
+  //
+  // #7423 shipped `developerMessage` on the 409 because "it discloses nothing
+  // the envelope did not already carry: `dependentObject` and `object` are API
+  // names on the same body". That premise is FALSE for this branch: the 403
+  // body below is `{ error, code, object? }` and never reads `error.details`,
+  // so `positions`, the operation, and — on a cascade delete, where every child
+  // is re-authorised independently — the CHILD object's API name are on the
+  // wire through NOTHING but the message. Mirroring #7307 here would therefore
+  // ADD a disclosure of internal authorization vocabulary, in a card whose
+  // whole purpose was to remove one. The developer half is logged at the throw
+  // site (`plugin-security`'s CRUD gate) instead.
+  it('never ships a PERMISSION_DENIED developer half or its structured details to the client', () => {
+    const r = mapDataError(
+      Object.assign(new Error('您没有执行此操作的权限,如需访问请联系管理员。'), {
+        code: 'PERMISSION_DENIED',
+        name: 'PermissionDeniedError',
+        statusCode: 403,
+        developerMessage:
+          "[Security] Access denied: operation 'delete' on object 'app_child_object' " +
+          'is not permitted for positions [org_member, everyone]',
+        details: {
+          operation: 'delete',
+          object: 'app_child_object',
+          positions: ['org_member', 'everyone'],
+          permissionSets: ['app_reader'],
+        },
+      }),
+      'app_parent_object',
+    );
+    expect(r.status).toBe(403);
+    // Positive identity first: the absence assertions below are only meaningful
+    // on top of a body that really carries the localized sentence.
+    expect(r.body.error).toBe('您没有执行此操作的权限,如需访问请联系管理员。');
+    expect(r.body.code).toBe('PERMISSION_DENIED');
+    expect(r.body).not.toHaveProperty('developerMessage');
+    expect(r.body).not.toHaveProperty('details');
+    expect(r.body).not.toHaveProperty('positions');
+    expect(JSON.stringify(r.body)).not.toContain('positions');
+    expect(JSON.stringify(r.body)).not.toContain('app_child_object');
+    // The object the ROUTE named still rides, unchanged — it is the object the
+    // caller themselves addressed, and this branch always carried it.
+    expect(r.body.object).toBe('app_parent_object');
+  });
+
   it('maps SQLite "has no column named" → 400 INVALID_FIELD with the field', () => {
     const r = mapDataError(
       sqliteError(

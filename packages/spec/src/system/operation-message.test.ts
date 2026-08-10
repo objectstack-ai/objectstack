@@ -91,3 +91,88 @@ describe('operation message catalog', () => {
     expect(operationMessageTranslationKey('delete_restricted')).not.toContain('validation.field');
   });
 });
+
+/**
+ * #7414 — the SECOND consumer of this catalog: plugin-security's object-CRUD
+ * gate (`403 PERMISSION_DENIED`). The call site is pinned in
+ * `packages/plugins/plugin-security/src/permission-denied-user-copy.test.ts`,
+ * against the real middleware and a real `II18nService`.
+ */
+describe('operation message catalog — permission_denied (#7414)', () => {
+  /**
+   * The vocabulary a business user must never read in a permission refusal.
+   * `positions` is the internal authorization noun the reporter quoted; the
+   * rest is the shape of the sentence it was embedded in.
+   */
+  const DEVELOPER_VOCABULARY = [
+    'positions',
+    'permissionSets',
+    'permission set',
+    '[Security]',
+    'Access denied',
+    'operation',
+  ];
+
+  it('renders the caller locale, not English', () => {
+    expect(renderOperationMessage({ messageKey: 'permission_denied' }, { locale: 'zh-CN' }))
+      .toBe('您没有执行此操作的权限,如需访问请联系管理员。');
+    expect(renderOperationMessage({ messageKey: 'permission_denied' }, { locale: 'en' }))
+      .toBe('You do not have permission to perform this action. Contact your administrator if you need access.');
+  });
+
+  it('matches a base language against a regional catalog key (ja → ja-JP)', () => {
+    expect(renderOperationMessage({ messageKey: 'permission_denied' }, { locale: 'ja' }))
+      .toBe(BUILTIN_OPERATION_MESSAGES['ja-JP'].permission_denied);
+  });
+
+  it('falls back to the en sentence for a locale the catalog does not carry', () => {
+    // `de-DE` has no catalog entry and no base-language sibling.
+    expect(renderOperationMessage({ messageKey: 'permission_denied' }, { locale: 'de-DE' }))
+      .toBe(BUILTIN_OPERATION_MESSAGES.en.permission_denied);
+  });
+
+  it('names no object, no operation and no position — in EVERY locale', () => {
+    const locales = Object.keys(BUILTIN_OPERATION_MESSAGES);
+    // Guard the guard: a catalog that lost its locales would make the loop
+    // below vacuously true, which is exactly the shape of an assertion that
+    // cannot fail.
+    expect(locales.length).toBeGreaterThanOrEqual(4);
+    for (const locale of locales) {
+      const rendered = renderOperationMessage({ messageKey: 'permission_denied' }, { locale });
+      // Non-empty and locale-specific, so the absence assertions below cannot
+      // be satisfied by an empty string.
+      expect(rendered).toBe(BUILTIN_OPERATION_MESSAGES[locale].permission_denied);
+      expect(rendered.length).toBeGreaterThan(10);
+      for (const word of DEVELOPER_VOCABULARY) {
+        expect(rendered.toLowerCase(), `${locale} must not say "${word}"`)
+          .not.toContain(word.toLowerCase());
+      }
+    }
+  });
+
+  it('ships no unfilled placeholder in any locale — the sentence takes no params', () => {
+    // ⚠️ This case is HYGIENE, not a revert-detector: it also passes on a
+    // catalog with the key removed entirely (the fallback is the bare
+    // messageKey, which has no braces either). Its value is catching a
+    // template that shipped a `{{name}}` / `{name}` nobody fills — the #7333
+    // class of bug, where the two brace conventions in this repo are mixed up.
+    for (const [locale, catalog] of Object.entries(BUILTIN_OPERATION_MESSAGES)) {
+      expect(catalog.permission_denied, `${locale} defines permission_denied`).toBeTypeOf('string');
+      expect(catalog.permission_denied, `${locale} placeholder-free`).not.toMatch(/[{}]/);
+    }
+  });
+
+  it('a deployment translation override wins, under the shared `errors.` address', () => {
+    expect(operationMessageTranslationKey('permission_denied')).toBe('errors.permission_denied');
+    const translate = (key: string) =>
+      key === 'errors.permission_denied' ? '此操作已被安全策略阻止。' : key;
+    expect(renderOperationMessage({ messageKey: 'permission_denied' }, { locale: 'zh-CN', translate }))
+      .toBe('此操作已被安全策略阻止。');
+  });
+
+  it('a throwing i18n service does not turn a 403 into a 500', () => {
+    const translate = () => { throw new Error('service down'); };
+    expect(renderOperationMessage({ messageKey: 'permission_denied' }, { locale: 'zh-CN', translate }))
+      .toBe(BUILTIN_OPERATION_MESSAGES['zh-CN'].permission_denied);
+  });
+});
