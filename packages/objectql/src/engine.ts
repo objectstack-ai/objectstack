@@ -1541,6 +1541,15 @@ export class ObjectQL implements IObjectQLEngine {
    */
   private readonly transactionUnsupportedReported = new Set<string>();
 
+  /**
+   * Objects already reported by {@link warnCascadeNotAtomic} — the `'split'`
+   * verdict of {@link planCascadeAtomicity} — so a cascade that cannot be one
+   * unit of work says so ONCE per engine instance per object rather than on
+   * every delete (#7413). Same "say it once" discipline, and same reason, as
+   * {@link transactionUnsupportedReported} above.
+   */
+  private readonly cascadeNotAtomicReported = new Set<string>();
+
   // Datasource mapping rules (imported from defineStack)
   private datasourceMapping: Array<{
     namespace?: string;
@@ -8395,6 +8404,143 @@ export class ObjectQL implements IObjectQLEngine {
   }
 
   /**
+   * Can the by-id delete of `object` and its whole cascade run as ONE unit of
+   * work? [#7413]
+   *
+   * `delete()`'s by-id branch ran `cascadeDeleteRelations` and then
+   * `driver.delete` with no transaction around either, and the cascade
+   * RE-ENTERS `this.delete()` / `this.update()` per dependent row — so every
+   * child committed on its own. A refusal partway (the `restrict` branch below,
+   * a child's permission check, a later child's `beforeDelete` hook) left an
+   * arbitrary PREFIX of the children deleted while the caller received 409/403
+   * and reasonably read it as "nothing happened". #4620 already ruled the
+   * principle for the batch path — *atomic honoured for real, or refused; a
+   * partial delete has no natural undo* — and this path never got it.
+   *
+   * Three verdicts, because "wrap it in a transaction" is only unconditionally
+   * right in one of them:
+   *
+   * - **`'none'`** — no registered object declares a `master_detail`/`lookup`
+   *   pointing at `object`, so `cascadeDeleteRelations` cannot write anything
+   *   and there is no multi-write unit to make atomic. The delete runs exactly
+   *   as it did before this card: one `driver.delete`, no transaction opened,
+   *   no degrade warning. A plain non-cascade delete is the CONTROL for this
+   *   change and must stay byte-identical.
+   * - **`'split'`** — dependents exist, but at least one participant (the
+   *   parent or a transitively-referencing child) resolves to a driver other
+   *   than the engine's DEFAULT one. `transaction()` opens on the default
+   *   driver and covers that connection alone (ADR-0119 D1 — no two-phase
+   *   commit on `IDataDriver`), so opening one here would not buy atomicity; it
+   *   would REFUSE the cascade outright, because `enforceTransactionOrigin`
+   *   throws {@link CrossDatasourceTransactionWriteError} for a business write
+   *   inside a transaction that does not cover it (#5351 / #5696 point 2, the
+   *   2026-08-06 ruling). A cross-datasource cascade delete works today, and
+   *   turning it into a hard refusal is a strictly worse answer than the
+   *   non-atomic one it has always had. So it keeps that answer and says so
+   *   once — see {@link warnCascadeNotAtomic}.
+   * - **`'atomic'`** — dependents exist and every participant sits on the
+   *   default driver. This is the shape the card measured and the shape
+   *   virtually every deployment has; the caller gets one unit of work.
+   *
+   * A pure registry walk — no I/O, no driver call. It answers from the SCHEMA
+   * (which objects *could* be reached), never from row counts, so the verdict
+   * is stable for a given schema and costs nothing on the common path. The walk
+   * is the transitive closure of "objects referencing X" because a cascade
+   * recurses into each child's own cascade; it is bounded by
+   * {@link ObjectQL.MAX_CASCADE_DEPTH}, the ceiling the recursion itself carries.
+   *
+   * Fails toward `'split'` on anything it cannot resolve (an unregistered
+   * reference, a `getDriver` throw): the degrade is today's behaviour, while a
+   * wrong `'atomic'` would manufacture the refusal this verdict exists to
+   * avoid.
+   */
+  private planCascadeAtomicity(object: string): 'none' | 'split' | 'atomic' {
+    let objects: ServiceObject[];
+    try {
+      objects = this._registry.getAllObjects();
+    } catch {
+      // Same swallow as `cascadeDeleteRelations` — an unreadable registry
+      // cascades nothing, so there is nothing to make atomic.
+      return 'none';
+    }
+
+    // Which objects reference `name` via a relation the cascade would follow.
+    // The `master_detail`/`lookup` + `reference` test is `cascadeDeleteRelations`'s
+    // own, so the two cannot disagree about who participates. `restrict` fields
+    // are INCLUDED deliberately: a restrict refusal is the card's core repro,
+    // and it must roll back the siblings already cascaded before it.
+    const referencing = (name: string): string[] => {
+      const out: string[] = [];
+      for (const child of objects) {
+        const childName = (child as any)?.name as string | undefined;
+        const fields = (child as any)?.fields as Record<string, any> | undefined;
+        if (!childName || !fields) continue;
+        for (const fdef of Object.values(fields)) {
+          if (!fdef || (fdef.type !== 'master_detail' && fdef.type !== 'lookup')) continue;
+          const ref = fdef.reference;
+          if (!ref) continue;
+          let resolvedRef: string | undefined;
+          try { resolvedRef = this.resolveObjectName(ref); } catch { resolvedRef = undefined; }
+          if (ref !== name && resolvedRef !== name) continue;
+          out.push(childName);
+          break;
+        }
+      }
+      return out;
+    };
+
+    const firstLevel = referencing(object);
+    if (firstLevel.length === 0) return 'none';
+
+    const defaultDriver = this.defaultDriver ? this.drivers.get(this.defaultDriver) : undefined;
+    if (!defaultDriver) return 'split';
+    const onDefaultDriver = (name: string): boolean => {
+      try { return this.getDriver(name) === defaultDriver; } catch { return false; }
+    };
+
+    if (!onDefaultDriver(object)) return 'split';
+    const seen = new Set<string>([object]);
+    let frontier = firstLevel;
+    for (let depth = 0; depth < ObjectQL.MAX_CASCADE_DEPTH && frontier.length > 0; depth++) {
+      const next: string[] = [];
+      for (const name of frontier) {
+        if (seen.has(name)) continue;
+        seen.add(name);
+        if (!onDefaultDriver(name)) return 'split';
+        next.push(...referencing(name));
+      }
+      frontier = next;
+    }
+    return 'atomic';
+  }
+
+  /**
+   * The `'split'` verdict of {@link planCascadeAtomicity}, said out loud — once
+   * per object per engine instance (#7413).
+   *
+   * Same reasoning as {@link warnTransactionUnsupported}, which this mirrors
+   * deliberately: a capability is not available, so the delete keeps the
+   * non-atomic behaviour it has always had. `warn`, not `error` — at this
+   * moment nothing claimed-persisted has failed to land; what is missing is the
+   * ability to undo the cascade if a later child refuses. Escalating it would
+   * train readers to skim `error`, which AGENTS.md names as the mirror-image
+   * mistake.
+   */
+  private warnCascadeNotAtomic(object: string): void {
+    if (this.cascadeNotAtomicReported.has(object)) return;
+    this.cascadeNotAtomicReported.add(object);
+    this.logger.warn(
+      `Cascade delete of '${object}' cannot run as one unit of work: the cascade reaches an object routed ` +
+        `to a datasource other than the default one ('${this.defaultDriver ?? '<none>'}'), and a transaction ` +
+        "covers one driver's connection only (ADR-0119 D1 — no two-phase commit). The cascade therefore runs " +
+        'UNWRAPPED, exactly as it did before #7413: if a later dependent refuses the delete, the rows already ' +
+        'removed stay removed while the call rejects. Route the cascading objects to one datasource to get the ' +
+        'atomic path. Reported once per object per engine instance.',
+      { object, defaultDatasource: this.defaultDriver ?? undefined },
+    );
+  }
+
+  /**
    * Apply referential delete behavior for relations pointing AT this record,
    * before it is removed. For every registered object with a `master_detail`
    * or `lookup` field referencing `object`, honor the field's `deleteBehavior`:
@@ -8828,8 +8974,61 @@ export class ObjectQL implements IObjectQLEngine {
           if (isByIdDelete) {
               // Honor referential delete behavior (cascade/set_null/restrict)
               // for relations pointing at this record before removing it.
-              await this.cascadeDeleteRelations(object, hookContext.input.id as string | number, opCtx.context);
-              result = await driver.delete(object, hookContext.input.id as string, hookContext.input.options as any);
+              //
+              // [#7413] ONE UNIT OF WORK — the cascade and the parent's own row
+              // removal, or neither. These two statements used to run bare, and
+              // the cascade re-enters `this.delete()`/`this.update()` per
+              // dependent, each committing as it executed; a refusal partway
+              // (the `restrict` branch, a child's permission check, a later
+              // child's `beforeDelete` hook) stranded an arbitrary prefix of the
+              // children deleted while the caller got 409/403 and read it as
+              // "nothing happened". #4620's changeset already ruled the shape
+              // for the batch path: atomic honoured for real, or refused — a
+              // partial delete has no natural undo.
+              //
+              // The recursion COMPOSES rather than deadlocking because
+              // `transaction()` publishes its handle into the ambient `txStore`
+              // and joins an already-open one (ADR-0067 D2 / #5696): the child
+              // `delete()` calls below receive `trxContext` explicitly AND see
+              // the ambient entry, so a grandchild's own wrap JOINS with
+              // `owned: false` instead of opening a second driver transaction on
+              // a second connection.
+              //
+              // The driver options are rebuilt INSIDE the callback on purpose:
+              // the ones computed above were built before any transaction
+              // existed, so they carry no handle and the parent's own
+              // `driver.delete` would execute outside the very transaction
+              // wrapping its cascade. `buildDriverOptions` only fills keys that
+              // are still `undefined`, so re-running it adds the handle and
+              // changes nothing else.
+              const runByIdDelete = async (writeContext?: ExecutionContext) => {
+                await this.cascadeDeleteRelations(object, hookContext.input.id as string | number, writeContext);
+                return await driver.delete(
+                  object,
+                  hookContext.input.id as string,
+                  this.buildDriverOptions(object, writeContext, hookContext.input.options as any),
+                );
+              };
+              // WHEN to open one is `planCascadeAtomicity`'s call — see there.
+              // `'none'` (nothing references this object) keeps the pre-#7413
+              // path exactly, so a plain non-cascade delete opens no
+              // transaction and emits no degrade warning; `'split'` keeps it
+              // too, because a transaction on the default driver cannot cover a
+              // cross-datasource cascade and would refuse it outright.
+              const plan = this.planCascadeAtomicity(object);
+              if (plan === 'atomic') {
+                  // No `require: true` — see the changeset. `delete()` never
+                  // asked for atomicity, so it must not start REFUSING on a
+                  // runtime that cannot roll back; `transaction()`'s declared
+                  // degrade (ADR-0119 D1) already warns once per driver (#4619).
+                  result = await this.transaction(
+                    async (trxCtx: any) => await runByIdDelete(trxCtx as ExecutionContext),
+                    opCtx.context,
+                  );
+              } else {
+                  if (plan === 'split') this.warnCascadeNotAtomic(object);
+                  result = await runByIdDelete(opCtx.context);
+              }
           } else {
                // [#2982] The AST asserted present and already used for the
                // pre-phase row read above.
