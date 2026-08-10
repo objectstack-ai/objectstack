@@ -6,9 +6,14 @@ import { PipelineDashboard } from '../src/dashboards/pipeline.dashboard.js';
 
 describe('app-crm minimal metadata bundle', () => {
   it('exposes the expected manifest', () => {
-    expect(stack.manifest.id).toBe('com.example.crm');
-    expect(stack.manifest.namespace).toBe('crm');
-    expect(stack.manifest.type).toBe('app');
+    // `manifest` is optional on the stack bundle type; this example always
+    // declares one. Assert that precondition first, then read through it —
+    // the same guard-then-`!` shape this file already uses for `stack.i18n`
+    // and `stack.translations` below.
+    expect(stack.manifest).toBeDefined();
+    expect(stack.manifest!.id).toBe('com.example.crm');
+    expect(stack.manifest!.namespace).toBe('crm');
+    expect(stack.manifest!.type).toBe('app');
   });
 
   it('registers the 6 core objects', () => {
