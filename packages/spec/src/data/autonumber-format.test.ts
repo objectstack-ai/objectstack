@@ -9,11 +9,65 @@ import {
   referencedFields,
   missingFieldValues,
   readAutonumberCounter,
+  resolveAutonumberFormat,
+  DEFAULT_AUTONUMBER_FORMAT,
 } from './autonumber-format';
 
 // A fixed instant: 2026-06-17 21:30 UTC. In Asia/Shanghai (UTC+8) this is
 // already 2026-06-18, which is exactly what makes the timezone assertions bite.
 const NOW = new Date('2026-06-17T21:30:00.000Z');
+
+// #6555 — the contract default for a format-less autonumber field. Before it,
+// the SQL driver and the engine's in-memory fallback each substituted their own
+// answer and the two disagreed (`0001` vs `1`) for the very same metadata.
+describe('DEFAULT_AUTONUMBER_FORMAT / resolveAutonumberFormat (#6555)', () => {
+  it('fixes the contract default at `{0000}` — four-digit zero padding', () => {
+    expect(DEFAULT_AUTONUMBER_FORMAT).toBe('{0000}');
+  });
+
+  it('resolves a format-less field to the declared default', () => {
+    // The exact metadata from the bug report: `{ type: 'autonumber' }`, no format.
+    expect(resolveAutonumberFormat({})).toBe(DEFAULT_AUTONUMBER_FORMAT);
+    expect(resolveAutonumberFormat(undefined)).toBe(DEFAULT_AUTONUMBER_FORMAT);
+    expect(resolveAutonumberFormat(null)).toBe(DEFAULT_AUTONUMBER_FORMAT);
+    expect(resolveAutonumberFormat({ autonumberFormat: undefined })).toBe(DEFAULT_AUTONUMBER_FORMAT);
+  });
+
+  it('prefers the canonical `autonumberFormat` over the `format` shorthand (#1603)', () => {
+    expect(resolveAutonumberFormat({ autonumberFormat: 'INV-{0000}' })).toBe('INV-{0000}');
+    expect(resolveAutonumberFormat({ format: 'TK-{00000}' })).toBe('TK-{00000}');
+    expect(resolveAutonumberFormat({ autonumberFormat: 'A-{000}', format: 'B-{000}' })).toBe('A-{000}');
+  });
+
+  it('treats a non-string or empty value as undeclared — the SQL driver\'s truthiness rule', () => {
+    // The engine used `??`, the driver used `||`; they disagreed on `''` too.
+    // Resolving `''` to the default is the direction that leaves already-stored
+    // driver-sql numbers unchanged.
+    expect(resolveAutonumberFormat({ autonumberFormat: '' })).toBe(DEFAULT_AUTONUMBER_FORMAT);
+    expect(resolveAutonumberFormat({ format: '' })).toBe(DEFAULT_AUTONUMBER_FORMAT);
+    expect(resolveAutonumberFormat({ autonumberFormat: '', format: 'B-{000}' })).toBe('B-{000}');
+    expect(resolveAutonumberFormat({ autonumberFormat: 42 })).toBe(DEFAULT_AUTONUMBER_FORMAT);
+    expect(resolveAutonumberFormat({ autonumberFormat: {} })).toBe(DEFAULT_AUTONUMBER_FORMAT);
+  });
+
+  it('renders the resolved default as `0001`, not the bare counter', () => {
+    // The end-to-end shape the ruling settles: one metadata document, one
+    // number shape, whichever side generates it.
+    const tokens = parseAutonumberFormat(resolveAutonumberFormat({}));
+    expect(renderAutonumber({ tokens, seq: 1, now: NOW }).value).toBe('0001');
+    expect(renderAutonumber({ tokens, seq: 11, now: NOW }).value).toBe('0011');
+    // …and the counter is untouched by the width — #6468's territory, pinned
+    // here only so a future widening of the default cannot be read as a reset.
+    expect(renderAutonumber({ tokens, seq: 12345, now: NOW }).value).toBe('12345');
+  });
+
+  it('leaves the bare-counter branch reachable for a declared slot-less format', () => {
+    // `width === null` is no longer what a format-LESS field renders through;
+    // it is what a format carrying no `{0..0}` slot renders through.
+    const tokens = parseAutonumberFormat(resolveAutonumberFormat({ autonumberFormat: 'CASE-' }));
+    expect(renderAutonumber({ tokens, seq: 1, now: NOW }).value).toBe('CASE-1');
+  });
+});
 
 describe('parseAutonumberFormat', () => {
   it('splits literal, sequence, date and field tokens in order', () => {

@@ -8,7 +8,7 @@
       "title": "Per-group sign-off (会签) needs one approval from EACH group",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "browser",
       "personas": ["approver holding exactly one group (e.g. manager)", "second approver holding the other group (e.g. finance/auditor)"],
@@ -26,7 +26,7 @@
         "boot showcase isolated (dogfood §0); sign in as the dev admin (the manager-group holder; NOT in the finance group of this node)",
         "GET /api/v1/approvals/requests?status=pending and locate the EXP-2001 request opened by showcase_expense_signoff's per_group node (groups manager + finance)",
         "GET /api/v1/approvals/requests/:id — record status, pending_approvers, pending_approver_names, pending_approver_groups, and the per-group tallies",
-        "open the inbox at /system/approvals (待我审批 tab); open the request drawer; screenshot the server-computed group chips",
+        "open the inbox the way a user reaches it — the Approvals entry in the account app's Inbox group, i.e. /_console/apps/com.objectstack.account/component/approvals/inbox (待我审批 tab) — NOT the bare /system/approvals deep-link route (#7234; that route stays supported and is exercised by approvals.notification-deep-link); open the request drawer; screenshot the server-computed group chips",
         "approve via the drawer dialog (ref-targeted click; fill the comment field); capture the decision POST /api/v1/approvals/requests/:id/approve",
         "re-read the request via API; then complete the finance group's decision (as Ada, or via the documented override path) and re-read again",
         "GET /api/v1/approvals/requests/:id/actions for the full decision timeline",
@@ -83,7 +83,8 @@
       ],
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "initial import from the #3358 evidence run (decisive oracle: group drops but request stays pending)", "ref": "#3358" },
-        { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" }
+        { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" },
+        { "revision": 3, "date": "2026-08-10", "change": "entry path refreshed: the inbox is opened through the account app's Approvals nav entry (component route) rather than the bare /system/approvals deep link, so the item exercises the path a real user takes after #7213", "ref": "#7331" }
       ]
     },
     {
@@ -166,7 +167,7 @@
       "title": "Inbox actions are metadata-driven and gated by the viewer's relationship",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "browser",
       "personas": ["approver who is NOT the submitter", "same user viewing a request they submitted"],
@@ -179,7 +180,7 @@
       },
       "steps": [
         "boot showcase isolated (dogfood §0); sign in as the dev admin",
-        "other-submitter case: open the EXP-DEMO request from the 待我审批 tab of /system/approvals; screenshot, then read the rendered action set from the drawer DOM",
+        "other-submitter case: reach the inbox the way a user does — the Approvals entry in the account app's Inbox group (/_console/apps/com.objectstack.account/component/approvals/inbox), NOT the bare /system/approvals deep link (#7234) — open the EXP-DEMO request from the 待我审批 tab; screenshot, then read the rendered action set from the drawer DOM",
         "own-request case: open the invoice request from the 我发起的 tab; screenshot, then read its action set",
         "GET /api/v1/approvals/requests/:id for both and record the server-computed viewer flags (can_act, is_submitter) and status",
         "cross-check each rendered action against the declared metadata actions on sys_approval_request (visibility expressions gate on record.viewer.can_act / record.viewer.is_submitter / record.status)",
@@ -231,7 +232,8 @@
       ],
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "initial import from the #3358 evidence run (7-action table proven after #3411 stamped real submitters)", "ref": "#3358" },
-        { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" }
+        { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" },
+        { "revision": 3, "date": "2026-08-10", "change": "entry path refreshed: the inbox is reached through the account app's Approvals nav entry (component route) instead of the bare /system/approvals deep link, so the item exercises the post-#7213 user path", "ref": "#7331" }
       ]
     },
     {
@@ -239,7 +241,7 @@
       "title": "A submitter who is not an approver sees no approver buttons",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "browser",
       "personas": ["submitter holding NO approver position on their own pending request"],
@@ -254,7 +256,7 @@
       "blocked": { "by": "fixture", "ref": "#3358 (needs a request routed to a position the viewing submitter does not hold)" },
       "steps": [
         "provision a sign-in account for the no-position submitter persona (Mei Phone) or an equivalent fixture user; sign in as that persona",
-        "open /system/approvals — the 我发起的 tab must list her pending EXP-2001 request",
+        "open the inbox through the account app's Approvals nav entry (/_console/apps/com.objectstack.account/component/approvals/inbox) — the 我发起的 tab must list her pending EXP-2001 request; the bare /system/approvals route stays supported but is not the user path being tested here (#7234)",
         "open the request drawer; screenshot the rendered action set",
         "GET /api/v1/approvals/requests/:id as this persona and record the viewer flags (can_act, is_submitter) and pending_approvers",
         "forge the gate: as this persona POST /api/v1/approvals/requests/:id/approve directly with an approve body",
@@ -297,7 +299,8 @@
       ],
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "initial import from #3358; upgraded the oracle from DOM-only to both-sides (UI absence + server rejection)", "ref": "#3358" },
-        { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" }
+        { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" },
+        { "revision": 3, "date": "2026-08-10", "change": "entry path refreshed to the account app's Approvals nav entry (component route) after #7213/#7234", "ref": "#7331" }
       ]
     },
     {
@@ -305,7 +308,7 @@
       "title": "An approval notification deep-links straight into the request drawer",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P2",
       "surface": "browser",
       "personas": ["any pending approver"],
@@ -319,7 +322,8 @@
         "cold-load that exact URL in a fresh page (no prior navigation); wait for settle; screenshot with the URL visible",
         "GET /api/v1/approvals/requests/:id and cross-check the drawer's request identity and status against the read",
         "repeat the cold load a second time on a fresh page (the hydration-race counter)",
-        "negative probe: cold-load /system/approvals?request=<nonexistent-id> and screenshot the result"
+        "negative probe: cold-load /system/approvals?request=<nonexistent-id> and screenshot the result",
+        "route-parity probe (#7213): cold-load the SAME ?request=<id> on the component route the account app's Approvals entry uses — /_console/apps/com.objectstack.account/component/approvals/inbox?request=<id> — and screenshot; both routes must open the same drawer"
       ],
       "acceptance": [
         {
@@ -341,6 +345,12 @@
           "evidence": "request read + drawer screenshot"
         },
         {
+          "clause": "the SAME ?request= deep link opens the drawer on BOTH routes — the /system/approvals route notification and email links carry, and the component route the account app's Approvals entry mounts (#7213 entry convergence)",
+          "oracle": "screenshot",
+          "verify": "cold-load the same request id on /system/approvals?request= and on /apps/<appId>/component/approvals/inbox?request=; both render the drawer for that id. The /system/approvals route MUST keep working — it is what already-delivered notifications and emails carry, so a component-route-only deep link is a FAIL",
+          "evidence": "one screenshot per route, same request id visible"
+        },
+        {
           "clause": "an unknown ?request id degrades to the inbox without a drawer (or an explicit not-found state) — never someone else's request",
           "oracle": "screenshot",
           "verify": "the nonexistent-id load renders the inbox list with no drawer or a not-found notice; assert no drawer carrying a different request id",
@@ -353,11 +363,13 @@
       "traps": ["hydration-race", "shared-browser-tab"],
       "source": [
         "#3358 §1",
+        "#7213", "#7233",
         "objectui apps/console/src/pages/system/ApprovalsInboxPage.tsx (#2678 P1.5 — 'notifications carry /system/approvals?request=<id>')"
       ],
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "initial import from #3358 (verified twice on fresh loads)", "ref": "#3358" },
-        { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" }
+        { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" },
+        { "revision": 3, "date": "2026-08-10", "change": "added the route-parity clause: after #7213 the same ?request= link must open the drawer on BOTH /system/approvals (what notifications carry) and the component route the account app mounts", "ref": "#7331" }
       ]
     },
     {
@@ -814,6 +826,208 @@
       ],
       "history": [
         { "revision": 1, "date": "2026-08-08", "change": "initial — pins the ADR-0042 SLA escalation (declared action fires once past timeout + escalate timeline row); blocked on a clock-control timing harness (hour granularity), with the sla_due_at materialization and the strict-schema build clause runnable today", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    },
+    {
+      "id": "approvals.account-app-entry",
+      "title": "A non-admin reaches the full Approvals Inbox from the account app's Approvals entry",
+      "since": "v17",
+      "status": "active",
+      "revision": 1,
+      "priority": "P0",
+      "surface": "browser",
+      "personas": ["a NON-ADMIN business user who is a pending approver and has no Setup access"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a bundled console: packages/console/dist is absent in a fresh checkout — build it with `pnpm objectui:build` and confirm dist/.objectui-sha equals .objectui-sha before trusting anything in the browser (`pnpm check:console-sha` exits 0 when there is NO dist at all, so a green check does not prove a console is present)",
+          "a non-admin sign-in account holding only business positions (showcase: contributor + finance) — the seeded personas (Ada Auditor, Mei Phone) are sys_user rows with no better-auth account, so provision one at runtime",
+          "at least one pending request routed to that user (showcase: PATCH a draft invoice to status=sent + issued_on to launch showcase_invoice_signoff, whose finance/legal positions the persona holds)"
+        ]
+      },
+      "steps": [
+        "build the console at the pin and verify the stamp; boot showcase isolated (dogfood §0)",
+        "grep the BUILT bundle for the registration key: `grep -o 'approvals:inbox' packages/console/dist/assets/index-*.js` — the entry chunk must carry the register call, because the unit pin (#7231) stubs the page at its module boundary and does not assert main.tsx performs the side-effect import",
+        "sign in as the non-admin persona; GET /api/v1/meta/app and record which apps the server returns for this session",
+        "open the account app and click the Approvals entry in the Inbox group; screenshot",
+        "read the resulting URL and the rendered surface (tabs, list rows, keyboard hint bar)",
+        "open a request drawer and read the rendered action set; execute one decision and re-read the request",
+        "cold-load the same request via ?request= on this component route",
+        "click a record link in the inbox row and record the resulting URL"
+      ],
+      "acceptance": [
+        {
+          "clause": "the registration survives BUNDLING — the built dist, not just source, contains the approvals:inbox component registration",
+          "oracle": "build",
+          "verify": "the console dist stamp equals .objectui-sha AND the built entry chunk contains the `approvals:inbox` register call; a source-only grep does not satisfy this clause",
+          "evidence": "dist/.objectui-sha + the grep hit with surrounding bundle context"
+        },
+        {
+          "clause": "the entry renders the FULL inbox — tabs (待我审批 / 我发起的 / 全部), the request list and the drawer — not a component-not-found empty state",
+          "oracle": "screenshot",
+          "verify": "screenshot the surface reached by clicking the nav entry; the tab strip and at least one request row must be visible. An empty state naming a missing component is a FAIL and means the side-effect import did not survive the bundle",
+          "evidence": "screenshot + the landed URL"
+        },
+        {
+          "clause": "a NON-ADMIN reaches it — the premise of the whole convergence: business roles have no Setup access",
+          "oracle": "api",
+          "verify": "GET /api/v1/meta/app for this session lists the account app (with the Approvals entry surviving filterAppForUser's nav gating) and does NOT list setup; the same session then renders the inbox",
+          "evidence": "the meta/app read for the non-admin session + the rendered inbox"
+        },
+        {
+          "clause": "decision actions render under the component mount and one of them actually moves the request",
+          "oracle": "api",
+          "verify": "the drawer renders the server-declared action set for a request where this user is a pending approver; executing one decision moves the node tally, drops the user from pending_approvers, appends a timeline row, and replaces the action bar with the can_act=false explanation",
+          "evidence": "before/after drawer screenshots + before/after GET /api/v1/approvals/requests/:id"
+        },
+        {
+          "clause": "?request= deep-links into the drawer on this component route too (route parity with /system/approvals)",
+          "oracle": "screenshot",
+          "verify": "cold-load /apps/<appId>/component/approvals/inbox?request=<id>; the drawer opens on that exact request. Cross-checked against the same id on /system/approvals by approvals.notification-deep-link",
+          "evidence": "screenshot with the URL and the request identity visible"
+        },
+        {
+          "clause": "a record link in an inbox row keeps the CURRENT app segment — it never hard-codes setup or a foreign app",
+          "oracle": "dom",
+          "verify": "after a screenshot confirms the list rendered, read the record link's href: it must be /apps/<the app the inbox is mounted in>/<objectName>/record/<recordId>. Landing on 'Record not found' is NOT automatically a routing failure — first check whether the approver can read that record at all (GET /api/v1/data/<object>/<id> as this persona); record-level invisibility is a separate finding, tracked at #7345",
+          "evidence": "the href + the persona's direct record read"
+        },
+        {
+          "clause": "zh-CN wording is consistent: the nav entry reads 待我审批 and the inbox's tab / status vocabulary reads 待我审批 / 待审批",
+          "oracle": "screenshot",
+          "verify": "set the console locale to zh and screenshot the nav entry and the inbox; nav label 待我审批, tab 待我审批, status badge 待审批",
+          "evidence": "zh screenshots of nav + inbox"
+        }
+      ],
+      "negative": [
+        "an empty state naming a missing component (or a blank pane) where the inbox should render is a FAIL — that is exactly the bundling gap the unit pin cannot see",
+        "the account app's Approvals entry disappearing for the non-admin persona is a FAIL — the nav gating must not strip it (contrast: setup must NOT appear for the same session)"
+      ],
+      "traps": ["stale-console-bundle", "hydration-race", "wrong-persona"],
+      "source": [
+        "#7213 (entry convergence epic)", "#7231", "#7234", "#7331 (this item's browser run)",
+        "packages/platform-objects/src/apps/account.app.ts (the Approvals nav entry, type component / componentRef approvals:inbox)",
+        "packages/platform-objects/src/apps/account-approvals-nav.test.ts (pins the entry shape; explicitly does NOT assert main.tsx's side-effect import)",
+        "objectui apps/console/src/main.tsx + the approvals:inbox registration (objectui#4071)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-10", "change": "initial — the account-app entry had no checklist coverage; authored from the #7331 browser run that first drove it end to end against a dist built at pin 8aad9fd50b16", "ref": "#7331" }
+      ]
+    },
+    {
+      "id": "approvals.setup-nav-entry",
+      "title": "Setup → Approvals leads with Approvals Inbox, above the raw tables",
+      "since": "v17",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "browser",
+      "personas": ["platform admin with Setup access"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a bundled console built at the current pin (see approvals.account-app-entry fixtures)",
+          "at least one pending request the admin is an approver on"
+        ]
+      },
+      "steps": [
+        "boot showcase isolated; sign in as the dev admin",
+        "GET /api/v1/meta/app and read the setup app's group_approvals children in declared order",
+        "open the Setup app, expand the Approvals group, screenshot the expanded group",
+        "read the group's child links in DOM order with their hrefs",
+        "click Approvals Inbox and screenshot the surface it opens"
+      ],
+      "acceptance": [
+        {
+          "clause": "the group's first child is Approvals Inbox, above Requests / Action History / Delegations (OOO)",
+          "oracle": "api",
+          "verify": "the setup app's group_approvals children, in the order the server returns them, are [component approvals:inbox, sys_approval_request, sys_approval_action, sys_approval_delegation]; the rendered sidebar order matches",
+          "evidence": "meta/app read + the sidebar screenshot and DOM link order"
+        },
+        {
+          "clause": "the entry opens the SAME inbox component the account app mounts, at /apps/<setupId>/component/approvals/inbox",
+          "oracle": "screenshot",
+          "verify": "the surface carries the same tab strip and list; the admin variant additionally offers the process / object filters",
+          "evidence": "screenshot + landed URL"
+        },
+        {
+          "clause": "zh-CN: the entry reads 审批中心 and sits above 审批申请 / 审批历史 / 审批委派（外出）",
+          "oracle": "screenshot",
+          "verify": "set the console locale to zh; screenshot the expanded group and read the link order",
+          "evidence": "zh sidebar screenshot + link order"
+        }
+      ],
+      "negative": [
+        "an Approvals group whose first child is the raw sys_approval_request grid is a FAIL — the engine's own table is a read-only wall of rows an approver cannot act on (the decision actions are gated on the viewer block only the approvals REST path attaches)"
+      ],
+      "traps": ["hydration-race", "stale-console-bundle"],
+      "source": [
+        "#7213", "#7268", "#7331 (this item's browser run)",
+        "packages/plugins/plugin-approvals/src/approvals-plugin.ts (navigationContributions → setup group_approvals)",
+        "packages/plugins/plugin-approvals/src/nav-contribution.test.ts"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-10", "change": "initial — the Setup-side Approvals Inbox entry had no checklist coverage", "ref": "#7331" }
+      ]
+    },
+    {
+      "id": "approvals.pending-count-surfaces",
+      "title": "The bell badge and Home's action card agree on the pending-approval count and lead to an app the user can open",
+      "since": "v17",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "browser",
+      "personas": ["a non-admin pending approver", "an admin with >9 combined unread notifications + pending approvals"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a bundled console built at the current pin",
+          "enough seeded sys_inbox_message rows plus pending approvals that the combined total exceeds 9, so the CLAMP case is the one exercised (a total of 9 or less never proves the breakdown is unclamped)"
+        ],
+        "knownGaps": [
+          "sys_inbox_message is granted by no platform permission set, so a plain member's notification count is structurally 0 and the >9 case can only be reached as an admin — tracked at #7344"
+        ]
+      },
+      "steps": [
+        "boot showcase isolated; seed >9 combined notifications + pending approvals for the persona",
+        "open the bell popover; screenshot the header line and read the button badge",
+        "open /_console/home; screenshot the 'Needs your attention' card",
+        "click the card's pending-approvals row and record the URL it navigates to",
+        "GET the approvals API for the same session and compare the counts"
+      ],
+      "acceptance": [
+        {
+          "clause": "the popover header reads `<total> total · N notifications + M pending approvals`, UNCLAMPED, while the bell button badge clamps at 9+",
+          "oracle": "screenshot",
+          "verify": "with a combined total above 9: the button shows 9+ and the popover header shows the real numbers with the breakdown spelled out",
+          "evidence": "screenshot of the badge and the popover header together"
+        },
+        {
+          "clause": "M matches Home's pending-approvals card and the inbox's 待我审批 tab count for the same session",
+          "oracle": "api",
+          "verify": "the popover's M, Home's card, the inbox tab count and the approvals API's pending list for this user are the same number; re-check after a decision moves it",
+          "evidence": "the three surfaces + the API read, before and after one decision"
+        },
+        {
+          "clause": "Home's pending-approvals card navigates within an app the user can open — never /apps/setup/...",
+          "oracle": "dom",
+          "verify": "after a screenshot confirms the card rendered, click it and read the URL: /apps/<an app in this session's meta/app list>/system/approvals. For a non-admin whose app list excludes setup, a setup URL is a FAIL",
+          "evidence": "the landed URL + the session's meta/app list"
+        }
+      ],
+      "negative": [
+        "a popover header that clamps its own breakdown (e.g. '9+ notifications') is a FAIL — the clamp belongs to the button badge; the popover exists to say which N and which M produced it",
+        "the bell's 'View all notifications' and Home's 'View all activity' links are OUT of this item's scope and are known to route into /apps/setup/... for every persona — tracked at objectui#4074 (moved from #7266), browser-confirmed by the #7331 run; do not record them here"
+      ],
+      "traps": ["hydration-race", "single-datapoint", "wrong-persona"],
+      "source": [
+        "#7213", "#7268", "#7331 (this item's browser run)",
+        "objectui packages/app-shell/src/layout/InboxPopover.tsx (totalBadge = unreadTopics + pendingApprovalsCount, clamped at 9+; the breakdown line)",
+        "objectui packages/app-shell/src/console/home/HomePage.tsx (onOpenApprovals → /apps/<approvalsAppSegment>/system/approvals)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-10", "change": "initial — the bell breakdown (objectui#4073) and Home's card target had no checklist coverage", "ref": "#7331" }
       ]
     }
   ]

@@ -21,7 +21,9 @@
     },
     "locations": {
       "status": "live",
-      "note": "objectui — where the action is surfaced."
+      "verifiedAt": "2026-08-10",
+      "evidence": "objectui `actionRendersAt` (packages/types/src/ui-action.ts) is the ONE placement predicate since objectui#3142 — `Array.isArray(declared) && declared.includes(location)` — consumed by action-bar.tsx and the record surfaces; `locations: []` therefore renders nowhere, which is the documented headless shape.",
+      "note": "The KEY is live; its VALUE SET was audited per-member in #6888 and `global_nav` was retired (no product surface read it — the console ⌘K palette composes its groups from nav items/objects/dashboards/pages/reports/recents/record search and reads no action metadata; the only renderer of the value was the Studio designer's mock preview frame). An enum-VALUE retirement leaves this row untouched in status: the key is still walked, still authorable and still enforced — see the conversion `action-global-nav-location-removed`."
     },
     "component": {
       "status": "live",

@@ -34,7 +34,7 @@ import { SysAttachment } from '@objectstack/platform-objects/audit';
 // `PlatformObjectsPlugin` (#4243), not by this service — this service only
 // consumes the ADR-0104 file-as-reference flag, which gates its released-file
 // collection (#3459 PR-5b).
-import { isDataMigrationVerified } from '@objectstack/platform-objects/system';
+import { mayActIrreversibly } from '@objectstack/platform-objects/system';
 import { FILE_REFERENCES_MIGRATION_ID } from '@objectstack/spec/system';
 import { SwappableStorageService } from './swappable-storage-service.js';
 import {
@@ -324,7 +324,17 @@ export class StorageServicePlugin implements Plugin {
                 // Fresh read each sweep — deliberately NOT the engine's
                 // memoized one: this sits at the moment of irreversibility,
                 // so a regressed gate must close without a restart.
-                isDataMigrationVerified(engine as any, FILE_REFERENCES_MIGRATION_ID),
+                //
+                // [#4797] And the STRONGER of the two predicates, because what
+                // a `true` here authorises is a byte delete.
+                // `isDataMigrationVerified` answers "was this deployment
+                // certified" — the right question for the recoverable
+                // consumers (strict enforcement, tombstoning), and the wrong
+                // one here: an `OS_ALLOW_LAX_*` escape hatch can admit a value
+                // the certificate forbids without disturbing `verified_at`, and
+                // this gate would go on deleting released field files on a
+                // certificate the deployment's own data has contradicted.
+                mayActIrreversibly(engine as any, FILE_REFERENCES_MIGRATION_ID),
               ),
             );
             // Abort the backend multipart upload before an abandoned/terminal

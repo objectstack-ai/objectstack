@@ -1,0 +1,7 @@
+{
+  "file": "packages/plugins/plugin-security/src/auto-org-admin-grant.ts",
+  "adrs": [
+    "ADR-0105"
+  ],
+  "invariant": "The one provisioning bridge from an admin-grade membership to the `organization_admin` capability grant — idempotent, and revoked on demotion. Under a wall-less posture it hands out `organization_admin_no_bypass` instead: blanket record visibility must be granted deliberately, never as a side effect of a membership role (the ADR-0105 F2 finding)."
+}

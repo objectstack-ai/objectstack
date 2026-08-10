@@ -1,0 +1,7 @@
+{
+  "file": "packages/drivers/driver-sql/src/sql-driver.ts",
+  "adrs": [
+    "ADR-0120"
+  ],
+  "invariant": "The bare-composite → NULL-safe tightening migrates through the ceremony (ADR-0120 D4): a `recreate_index` gated by the duplicate pre-flight probe — clean data grades it `safe` (dev autoMigrate may apply), duplicates BLOCK it with a row report and the old index stays in place; apply re-probes, so even --allow-destructive cannot drop a constraint whose replacement is not creatable. Storage stays NULL — GLOBAL_TENANT is an index-key fold, never written to the organization column."
+}

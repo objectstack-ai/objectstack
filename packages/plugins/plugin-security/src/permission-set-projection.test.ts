@@ -333,9 +333,12 @@ describe('upsertEnvPermissionSet (ADR-0094 — record is a pure projection)', ()
   });
 
   it('projects onto a PACKAGE-OWNED row (overlay customization) while preserving its provenance', async () => {
-    // Direction confirmed 2026-07-14: an env overlay of a packaged set is the
-    // platform's standard ADR-0005 customization — the record follows the
-    // effective body; the package still owns the row.
+    // Unit-level shape, unchanged by ADR-0094 D5-R: handed a body for a
+    // package-owned row, this function projects the facets and preserves the
+    // provenance. What D5-R retired is the CLAIM about where that body comes
+    // from — an env overlay of a packaged set is no longer a supported
+    // customization channel (#6483 / PR #6608); see the D5-R lifecycle block
+    // below for the refusal this projector now sits behind.
     const ql = makeQl();
     ql.permRows.push({ id: 'ps_pkg', name: 'organization_admin', managed_by: 'package', package_id: 'com.example.crm', system_permissions: '["pkg"]' });
     const r = await upsertEnvPermissionSet(ql, envBody());

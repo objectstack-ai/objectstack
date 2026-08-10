@@ -1,0 +1,8 @@
+{
+  "file": "packages/spec/src/identity/membership-role.ts",
+  "adrs": [
+    "ADR-0090",
+    "ADR-0108"
+  ],
+  "invariant": "The membership-role vocabulary is CLOSED and framework-owned (owner/admin/delegated_admin/member). Capability travels through positions, never through `sys_member.role`."
+}

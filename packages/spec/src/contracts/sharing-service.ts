@@ -197,6 +197,46 @@ export type SharingWriteVerdict = 'allow' | 'abstain' | 'deny';
  * `org_user_ids`, `systemPermissions`, `posture` (ADR-0095 D2) and
  * `tabPermissions` included. Which of those a deployment makes load-bearing
  * depends on its tenancy posture, which the caller cannot know.
+ *
+ * ## Write DEPTH is an input the CALLER supplies — absent means `own` (#7144)
+ *
+ * The write gates below widen ownership "by write DEPTH" (ADR-0057 D1: `own` /
+ * `own_and_reports` / `unit` / `unit_and_below` / `org`). That depth is NOT a
+ * field of {@link ExecutionContext}, and this service never derives it: the
+ * CRUD middleware resolves it for the object of the operation IN FLIGHT and
+ * stamps it on the operation context as an operation-private (`__`-prefixed)
+ * key, which the default implementation's owner-match reads. A caller that is
+ * not that middleware hands over no depth, and the owner-match then runs at its
+ * NARROWEST — owner-only, i.e. `own`.
+ *
+ * **For the PARENT-record gates that is deliberate, not an oversight.** The
+ * `sys_comment` gates (`@objectstack/plugin-audit`) and the `sys_attachment`
+ * kit (`@objectstack/service-storage`) ask this service about the PARENT
+ * record's object while the operation in flight is on the CHILD, so the stamped
+ * depth was resolved for a different object and is dropped rather than carried
+ * across. Stated as behaviour: a caller whose write depth on the parent object
+ * is `unit` / `unit_and_below` / `org` can edit that parent directly through
+ * the CRUD path, and is REFUSED when editing or deleting a comment or
+ * attachment on it. The divergence runs in the RESTRICTIVE direction —
+ * refusals, never a leak — and the maintainer ruling of 2026-08-10 (#7144,
+ * split from #7141 / PR #7143) is that these gates STAY at `own`.
+ *
+ * **Why the obvious "fix" is off the table** — recorded here so the next reader
+ * can tell "deliberately tighter" from "nobody got round to it". Making these
+ * gates inherit the parent's real edit authority means resolving the parent's
+ * depth through the only tool a package outside `plugin-security` has,
+ * `ISecurityService.resolveWriteScope` — and that fails OPEN on one input:
+ * `getEffectiveScope` returns `'org'` when NO permission set mentions the
+ * object at all (`plugin-security/src/permission-evaluator.ts` —
+ * `if (!matched) return 'org'`), which is byte-identical to what a genuine
+ * `modifyAllRecords` holder gets. That is why the method's own doc block calls
+ * `'org'` authoritative ONLY when paired with an explicit
+ * `ISecurityService.hasWriteBypass` check. Handed to a write gate as the depth
+ * it becomes fully authoritative on its own, and the owner-match short-exits
+ * `true` for EVERY owned row of an unmatched object — a real widening, not a
+ * theoretical one. So inheriting the parent's depth starts with a depth
+ * primitive that can tell "org depth" from "nothing matched", never with these
+ * gates.
  */
 export interface ISharingService {
   /**
@@ -247,6 +287,13 @@ export interface ISharingService {
    * ({@link ShareAccessLevel} `edit`) share, OR — [#4647] — the
    * `modifyAllRecords` super-user bypass. Always true for system context,
    * `public` objects, and objects with no owner field.
+   *
+   * [#7144] The write DEPTH in that first sentence is an INPUT this service is
+   * handed, never one it resolves — so a caller outside the CRUD middleware
+   * (the `sys_comment` and `sys_attachment` PARENT-record gates, which both
+   * reach this service through this method) matches ownership at `own`. That is
+   * the ruled shape, and the fail-open that blocks widening it is written up
+   * once in "Write DEPTH is an input the CALLER supplies" on this interface.
    *
    * [#6428] The two-state PROJECTION of {@link checkEdit}: `true` for every
    * verdict that is not `deny`, i.e. `allow` and `abstain` alike. That

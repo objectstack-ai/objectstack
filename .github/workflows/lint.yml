@@ -198,7 +198,7 @@ jobs:
       # That incident reversed three accepted ADRs with a patch-level changeset,
       # and the mechanism was simply that the edited file never mentioned them —
       # so the author could not have known. Presence check only; the invariant
-      # travels in the failure message (scripts/adr-anchors.json).
+      # travels in the failure message (scripts/adr-anchors/, one file per anchor since #6957).
       #
       # Since #5992 the same script also audits the premise the anchors rest on:
       # an ADR number names exactly ONE decision. Three numbers were each claimed

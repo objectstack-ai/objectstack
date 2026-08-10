@@ -1,0 +1,7 @@
+{
+  "file": "packages/spec/src/system/constants/system-names.ts",
+  "adrs": [
+    "ADR-0117"
+  ],
+  "invariant": "`OWNING_BUSINESS_UNIT_ID` is ADR-0117 D1's record-level BU ownership stamp, RESERVED-BUT-NOT-INJECTED (#4611): open-core provisions no such column yet, so the entry looks like dead weight to anyone reading the table alone — and this repo actively hunts dead surface. It is a NAME registry, not the injected set (tenant_id / user_id / deleted_at are the standing precedents), and reserving the spelling early is what stops consumers minting `business_unit_id` / `bu_id` / `dept_id` — the drift cloud#982 paid for with `tenant_id`/`org_id`/`space`. The enum value `ownership: 'business_unit'` is deliberately NOT added alongside it: `applySystemFields`' `wantOwner` is a DENY-list (`registry.ts` — only 'org'/'none' opt out), so a fourth enum member would be stamped with `owner_id`, the exact inverse of D1's table and an ADR-0049 declare-without-enforce violation. Name first, value with its injection. The public-form denylist entry is fail-closed on purpose: an ownership anchor of the owner_id/organization_id forge class must be un-suppliable on the anonymous surface BEFORE the column exists, because adding the denial after it ships is a hole with a release in it."
+}

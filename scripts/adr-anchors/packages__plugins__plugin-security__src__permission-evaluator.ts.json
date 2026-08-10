@@ -1,0 +1,8 @@
+{
+  "file": "packages/plugins/plugin-security/src/permission-evaluator.ts",
+  "adrs": [
+    "ADR-0057",
+    "ADR-0066"
+  ],
+  "invariant": "The superuser bypass derives solely from a resolved set carrying the `objects['*']` wildcard with `viewAllRecords`/`modifyAllRecords` (ADR-0066 D2) — no stored boolean, no role fast-path. Scope depth (own/unit/unit_and_below/org) resolves to an effective access depth per operation class (ADR-0057 D1); an unenforceable depth is a compile error, never silent fail-open (ADR-0049)."
+}

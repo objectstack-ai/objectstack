@@ -2,7 +2,7 @@
 
 import {
   BaseEngineOptions,
-  EngineQueryOptionsParsed,
+  EngineQueryOptions,
   DataEngineInsertOptions,
   EngineUpdateOptions,
   EngineDeleteOptions,
@@ -164,8 +164,18 @@ export interface IDataEngine {
    * permission-set loader among them — had to reach it through `any`, which is
    * exactly the erasure this issue is sweeping. `query.context` remains
    * supported; when both are given, `options.context` wins.
+   *
+   * [#6300] `query` is the AUTHOR state (`z.input`, ADR-0122): a key with a
+   * declared `.default()` — `orderBy[].order` — is optional to write, exactly
+   * as on `count`'s `EngineCountOptions`. #6083 had pinned these two methods
+   * back to the parsed state because the engine built its `QueryAST` by spread
+   * without filling any default; the engine now runs each defaulting node
+   * through its own schema before the AST is built (ObjectQL's
+   * `fillQueryAstDefaults`), so `find(obj, { orderBy: [{ field: 'updated_at' }] })`
+   * compiles and sorts ascending — the schema's declared default, and the same
+   * value every driver already coalesced a missing `order` to.
    */
-  find(objectName: string, query?: EngineQueryOptionsParsed, options?: BaseEngineOptions): Promise<any[]>;
+  find(objectName: string, query?: EngineQueryOptions, options?: BaseEngineOptions): Promise<any[]>;
   /**
    * Read the ONE record the query selects, or `null`.
    *
@@ -179,8 +189,10 @@ export interface IDataEngine {
    *
    * No ordering is imposed when the caller supplies none: `findOne` promises
    * *a* matching record, never a position in a sequence (#4363).
+   *
+   * [#6300] `query` is the author state (`z.input`), same as `find` above.
    */
-  findOne(objectName: string, query?: EngineQueryOptionsParsed, options?: BaseEngineOptions): Promise<any>;
+  findOne(objectName: string, query?: EngineQueryOptions, options?: BaseEngineOptions): Promise<any>;
   insert(objectName: string, data: any | any[], options?: DataEngineInsertOptions & WriteObservabilityOptions): Promise<any>;
   update(objectName: string, data: any, options?: EngineUpdateOptions & WriteObservabilityOptions): Promise<any>;
   delete(objectName: string, options?: EngineDeleteOptions): Promise<any>;

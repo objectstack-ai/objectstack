@@ -98,6 +98,7 @@ import { getMetadataTypeSchema, listMetadataTypeSchemaTypes } from '../../src/ke
 import { WebhookSchema } from '../../src/automation/webhook.zod';
 import { QuerySchema } from '../../src/data/query.zod';
 import { ValidationRuleSchema } from '../../src/data/validation.zod';
+import { TestSuiteSchema } from '../../src/qa/testing.zod';
 import {
   BOUND_PROOF_PATHS,
   HIGH_RISK_CLASSES,
@@ -145,7 +146,7 @@ const ledgerRoot = ledgerRootArg
 
 // Governed metadata types, rolled out highest-frequency / highest-risk first.
 // (`query` is not a metadata type — see SPEC_ONLY_SCHEMAS below.)
-const GOVERNED = ['object', 'field', 'flow', 'action', 'hook', 'permission', 'position', 'agent', 'tool', 'skill', 'dataset', 'page', 'view', 'report', 'dashboard', 'webhook', 'query', 'datasource', 'app', 'book', 'doc', 'email_template', 'job', 'mapping', 'seed', 'translation', 'validation', 'api', 'capability'];
+const GOVERNED = ['object', 'field', 'flow', 'action', 'hook', 'permission', 'position', 'agent', 'tool', 'skill', 'dataset', 'page', 'view', 'report', 'dashboard', 'webhook', 'query', 'datasource', 'app', 'book', 'doc', 'email_template', 'job', 'mapping', 'seed', 'translation', 'validation', 'api', 'capability', 'qa'];
 
 // Registered metadata types that are NOT yet governed — the coverage ratchet.
 //
@@ -209,10 +210,24 @@ const PENDING_GOVERNANCE: Record<string, string> = {
 // and update — so the ledger must keep governing `ValidationRuleSchema`; it is
 // the kind, not the schema, that went away. Governing it here is what stops the
 // retirement from quietly un-governing a live surface.
+//
+// `qa` is not a metadata type either — `TestSuiteSchema` is the FILE surface of
+// the shipped `os test` command: an author writes `qa/*.test.json`, the CLI
+// loads it, and `TestRunner`/`HttpTestAdapter` execute it. #6247 filed it as
+// declared-but-inert on a grep that scanned only `*Schema` identifiers; the
+// consumers read the TYPE names (`QA.TestSuite`, `QA.TestStep`, `QA.TestAction`),
+// so the grep missed an entire execution chain and the 2026-08-07 retire ruling
+// was withdrawn on 2026-08-08 in favour of enforce. Governing it here is the
+// half of that ruling that keeps the surface honest going forward: the runner
+// reads a real, measured subset of the declared keys, and the ones nothing reads
+// (`suite.name`, `scenario.tags`, `scenario.requires`) are now recorded as such
+// instead of being invisible. Like `query`, there is no registry to fold it back
+// onto — the override IS its governance.
 const SPEC_ONLY_SCHEMAS: Record<string, unknown> = {
   webhook: WebhookSchema,
   query: QuerySchema,
   validation: ValidationRuleSchema,
+  qa: TestSuiteSchema,
 };
 
 // ADR-0010 provenance/lock overlay fields — system-stamped, on every type; auto-live.

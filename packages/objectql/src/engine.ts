@@ -1,9 +1,13 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { QueryAST, HookContext, ServiceObject } from '@objectstack/spec/data';
+import { QueryAST, QueryInput, HookContext, ServiceObject } from '@objectstack/spec/data';
+// [#6300] The defaulting node schema `fillQueryAstDefaults` runs author input
+// through — the declared `.default()` stays in `packages/spec`, the engine
+// only invokes it.
+import { SortNodeSchema } from '@objectstack/spec/data';
 import {
-  EngineQueryOptionsParsed,
+  EngineQueryOptions,
   DataEngineInsertOptions,
   EngineUpdateOptions,
   EngineDeleteOptions,
@@ -5025,6 +5029,16 @@ export class ObjectQL implements IObjectQLEngine {
   private readonly retractedCreationAttestations = new Set<string>();
   /** Serializes retraction writes so concurrent violations issue one update. */
   private creationAttestationRetraction: Promise<void> = Promise.resolve();
+  /**
+   * Ids whose deviation marker this process has already written (#4797).
+   * Reset by {@link invalidateDataMigrationFlags}, which is what a host calls
+   * after running a migration in-process — a re-earned certificate opens a
+   * fresh witness window, and without the reset the next admitted value in the
+   * same process would be silently unrecorded.
+   */
+  private readonly recordedDeviations = new Set<string>();
+  /** Serializes deviation writes so concurrent violations issue one update. */
+  private deviationRecording: Promise<void> = Promise.resolve();
 
   /**
    * The sink `validateRecord` reports admitted violations to. Built per write
@@ -5046,7 +5060,124 @@ export class ObjectQL implements IObjectQLEngine {
         first: { object, field: violation.field, type: violation.type, detail: violation.detail },
       });
     }
+    // Two consumers of the same counterexample, answering different questions.
+    // The deviation marker goes first because it is the one that applies to
+    // EVERY verified deployment (#4797); the retraction below applies only to
+    // the narrow fresh-datastore case (#4769) and closes the gate outright
+    // there. Each is the other's backstop if one write fails.
+    this.recordObservedDeviation(migrationId);
     this.retractCreationAttestation(migrationId);
+  }
+
+  /**
+   * Record that this deployment has ADMITTED a value its own verified contract
+   * rejects (#4797) — without touching `verified_at`.
+   *
+   * ## The window
+   *
+   * Once a certificate holds, the write path is strict and a non-conforming
+   * value cannot land, so the certificate cannot go stale on its own. The
+   * operator escape hatches are the exception, and they exist *precisely* to
+   * relax a deployment that has already verified: with
+   * `OS_ALLOW_LAX_MEDIA_VALUES` / `OS_ALLOW_LAX_VALUE_SHAPES` on, the value is
+   * admitted and persisted while `sys_migration` still reads `verified_at`
+   * non-null, `blocking: 0`. Turn the switch off — or let any other process or
+   * machine run without it — and strict returns to reject the very data this
+   * deployment stored. Meanwhile the `adr-0104-file-references` gate, which
+   * also governs reclamation of released field files, keeps deleting bytes on
+   * the strength of a certificate that is now false.
+   *
+   * ## Why a marker rather than a revocation
+   *
+   * {@link retractCreationAttestation} clears `verified_at`, and is right to:
+   * its target is a certificate issued on the inference "created empty, so
+   * clean", which a single counterexample fully disproves. A certificate
+   * earned by `os migrate … --apply` is a walk of the whole store, and one
+   * admitted write is not evidence of that order — overturning it would make a
+   * deliberately temporary switch into a one-way door, forcing a full
+   * re-migration on anyone who used the escape hatch once.
+   *
+   * So the authority is withdrawn in proportion to reversibility. The marker
+   * leaves every recoverable behaviour running (strict enforcement once the
+   * switch is off, tombstoning, throttling — a rejected write is retried, a
+   * tombstone is lifted on re-attach) and stops only what cannot be undone:
+   * `authorisesIrreversibleAction` is false while it stands, so the reap
+   * guard's byte delete refuses. A real apply-mode run clears it.
+   *
+   * ## Cost
+   *
+   * At most one ledger read+update per migration id per process, never awaited
+   * by the write that triggered it, and skipped entirely once the marker is
+   * standing. A lax write is therefore not a ledger round-trip; the FIRST lax
+   * write of each class is, and only while the row is still verified.
+   *
+   * Deliberately never inserts. No row means nothing was certified, so there
+   * is no authority to withdraw — and inserting one would fabricate a run that
+   * never happened.
+   */
+  private recordObservedDeviation(migrationId: string): void {
+    if (this.recordedDeviations.has(migrationId)) return;
+    if (!this._registry.getObject(DATA_MIGRATION_FLAG_OBJECT)) return;
+    this.recordedDeviations.add(migrationId);
+    this.deviationRecording = this.deviationRecording
+      .then(async () => {
+        const rows = await this.find(DATA_MIGRATION_FLAG_OBJECT, {
+          where: { id: migrationId },
+          limit: 1,
+          context: { isSystem: true } as ExecutionContext,
+        });
+        const row: any = rows?.[0];
+        if (!row || row.id !== migrationId) return; // nothing certified — no authority to withdraw
+        if (row.deviation_observed_at != null && String(row.deviation_observed_at) !== '') return; // already standing
+        // Only a row that currently authorises something can have authority
+        // withdrawn. An unverified row already denies both halves, so marking
+        // it would add a diagnostic nobody gates on — and the next apply run
+        // would clear it before anything read it.
+        const verified = isDataMigrationFlagVerified({
+          id: migrationId,
+          last_run_at: String(row.last_run_at ?? ''),
+          verified_at: row.verified_at == null ? null : String(row.verified_at),
+          blocking: typeof row.blocking === 'number' ? row.blocking : Number(row.blocking ?? Number.NaN),
+        });
+        if (!verified) return;
+        const tally = this.admittedValueShapeViolations.get(migrationId);
+        const now = new Date().toISOString();
+        await this.update(
+          DATA_MIGRATION_FLAG_OBJECT,
+          {
+            id: migrationId,
+            deviation_observed_at: now,
+            deviation_detail: JSON.stringify({
+              observed: 'lax-admitted-violating-value',
+              ...(tally?.first ?? {}),
+            }),
+            updated_at: now,
+          },
+          { context: { isSystem: true } as ExecutionContext },
+        );
+        this.logger.warn(
+          `[value-shape] '${migrationId}': this deployment is recorded as verified, but an ` +
+            'escape hatch (OS_ALLOW_LAX_MEDIA_VALUES / OS_ALLOW_LAX_VALUE_SHAPES) just admitted a ' +
+            `value that contract rejects (${tally?.first.object}.${tally?.first.field}: ` +
+            `${tally?.first.detail}). The certificate stands for everything recoverable, but ` +
+            'irreversible actions are withheld — released field files are no longer collected, so ' +
+            'no byte is deleted on evidence this deployment has contradicted. Fix the data and run ' +
+            '`os migrate ' +
+            (migrationId === FILE_REFERENCES_MIGRATION_ID ? 'files-to-references' : 'value-shapes') +
+            ' --apply` to clear it (ADR-0104 / #4797).',
+        );
+      })
+      .catch((err: any) => {
+        // Bookkeeping must never surface as a write failure. Failing to record
+        // is the dangerous direction — it leaves the reclamation gate open on
+        // a certificate we now know is stale — so say so loudly.
+        this.logger.warn(
+          `[value-shape] could not record the observed deviation for '${migrationId}' ` +
+            `(${err?.message ?? err}) — the ledger still authorises irreversible collection while ` +
+            'this deployment holds a value its own contract rejects; run the migration to ' +
+            're-derive the gate (#4797)',
+        );
+      });
   }
 
   /**
@@ -5154,11 +5285,19 @@ export class ObjectQL implements IObjectQLEngine {
    * Drop the memoized deployment migration flags so the next write re-reads
    * them. For a host that runs a data migration in-process and wants its
    * effect without a restart.
+   *
+   * Also reopens the deviation witness window (#4797). The run that prompted
+   * this call cleared any standing marker, so the "already recorded, don't
+   * write again" guard would otherwise silence the next admitted value for the
+   * life of the process — a deployment could re-earn its certificate and then
+   * deviate again with nothing noticing. Costs at most one further ledger
+   * write per migration id per re-run.
    */
   invalidateDataMigrationFlags(): void {
     this.fileReferencesMigrationVerified = null;
     this.valueShapesMigrationVerified = null;
     this.migrationGatesAnnounced = false;
+    this.recordedDeviations.clear();
   }
 
   /**
@@ -5674,8 +5813,11 @@ export class ObjectQL implements IObjectQLEngine {
           referenceObject,
           {
             where,
-            ...(nestedAST.fields ? { fields: nestedAST.fields as any } : {}),
-            ...(nestedAST.orderBy ? { orderBy: nestedAST.orderBy as any } : {}),
+            // [#6300] The `as any` these two carried is gone: `find` takes the
+            // author state now, and the parsed nodes a `QueryAST` holds are
+            // valid author input (a present `order` is legal to write).
+            ...(nestedAST.fields ? { fields: nestedAST.fields } : {}),
+            ...(nestedAST.orderBy ? { orderBy: nestedAST.orderBy } : {}),
             context: { ...(execCtx ?? {}), __expandRead: true } as ExecutionContext,
           },
         ) ?? [];
@@ -5970,6 +6112,75 @@ export class ObjectQL implements IObjectQLEngine {
   }
 
   /**
+   * [#6300] Fill the author-state defaults the query schemas declare, so the
+   * AST handed to middlewares, hooks and drivers is the PARSED state
+   * `QueryAST` (a `z.infer` type) promises.
+   *
+   * ADR-0122 made `EngineQueryOptions` the author state (`z.input`): a key
+   * with a declared `.default()` is optional to write. `find`/`findOne` kept
+   * demanding the parsed state anyway (#6083 pinned them back) because the
+   * engine built its AST by bare spread and filled no default — `order:
+   * undefined` would have ridden straight to the driver. This is the filling.
+   * Each defaulting node is run through ITS OWN schema rather than
+   * hand-assigning values, so a default declared in `packages/spec` stays the
+   * single source of truth:
+   *
+   * - `orderBy[]` nodes through `SortNodeSchema` — fills `order: 'asc'`, the
+   *   query path's one declared default. Measured before the flip: every
+   *   driver already coalesces a missing `order` to `'asc'` (`sql-driver.ts`
+   *   `s.order || 'asc'`, `memory-driver.ts`, `mongodb-driver.ts`,
+   *   `remote-transport.ts` likewise), so the filled value changes no query's
+   *   answer — it makes the AST say what the drivers were already assuming.
+   *   Parsing also applies the node's declared strictness to type-BYPASSING
+   *   callers: an unknown sort key, or the retired `direction` spelling, is
+   *   now refused with the schema's own prescription instead of silently
+   *   dropped-or-honored per driver (#4721's defect class) — the same refusal
+   *   `normalizeSortNodes` already makes on the wire path.
+   * - `expand` values recurse: a nested query is the same authoring surface.
+   *   No driver reads `ast.expand` (the engine expands post-fetch), and the
+   *   nested read that executes re-enters `find()` — which fills again — so
+   *   the recursion keeps the AST's type honest without a cast.
+   *
+   * `search` is deliberately NOT parsed, though `FullTextSearchSchema` carries
+   * three flag defaults (`fuzzy`/`operator`/`highlight`). Two measurements
+   * decide it. First, nothing can ever read them off the AST: no executor
+   * reads the flags at all (#4286 — the ADR-0061 expansion reads only `query`
+   * + `fields`), and {@link expandSearchOnAst} deletes `search` from the AST
+   * before middlewares, hooks or the driver see it, so a filled value would be
+   * constructed and then discarded unread. Second, parsing would REFUSE input
+   * the engine deliberately accepts: the wire path hands this method
+   * `search.fields` in the comma-STRING shape (and the `q` spelling) that
+   * `resolveSearchFields`/`normalizeSearch` tolerate by design — pinned in
+   * `query-expression-conformance.test.ts` — while the schema declares
+   * `fields: string[]`. The type-level gap this leaves (author-state `search`
+   * inside a `QueryAST`-typed value, until the key is deleted a few lines
+   * later) is covered by the same single cast as `expand`, below.
+   *
+   * `where`/`fields`/`limit`/`offset`/`top` carry no `.default()` or
+   * `.transform()` (pinned in `filter.zod.ts`'s own docs) and are not parsed —
+   * the cost is one small-object parse per authored sort node / search
+   * config, only when the key is present.
+   */
+  private fillQueryAstDefaults<T extends Pick<QueryInput, 'orderBy' | 'search' | 'expand'>>(
+    query: T,
+  ): T & Pick<QueryAST, 'orderBy' | 'search'> & { expand?: Record<string, QueryAST> } {
+    const out: Record<string, unknown> = { ...query };
+    if (Array.isArray(out.orderBy)) {
+      out.orderBy = out.orderBy.map((node) => SortNodeSchema.parse(node));
+    }
+    if (out.expand != null && typeof out.expand === 'object') {
+      const expand: Record<string, unknown> = {};
+      for (const [field, nested] of Object.entries(out.expand)) {
+        expand[field] = this.fillQueryAstDefaults(nested as QueryInput);
+      }
+      out.expand = expand;
+    }
+    // The one cast in the flip: `orderBy`/`expand` are rebuilt above; `search`
+    // is claimed-but-not-parsed, per the doc — deleted from the AST unread.
+    return out as T & Pick<QueryAST, 'orderBy' | 'search'> & { expand?: Record<string, QueryAST> };
+  }
+
+  /**
    * Refuse a `findOne` that selects nothing in particular (#4419).
    *
    * The AST reaching here is the CALLER's own intent: aliases folded, unknown
@@ -6017,7 +6228,7 @@ export class ObjectQL implements IObjectQLEngine {
     );
   }
 
-  async find(object: string, query?: EngineQueryOptionsParsed, options?: EngineReadOptions): Promise<any[]> {
+  async find(object: string, query?: EngineQueryOptions, options?: EngineReadOptions): Promise<any[]> {
     object = this.resolveObjectName(object);
     // Normalize the alias spellings (`filter`→`where`, `top`→`limit`) by the
     // spec's slot table — the driver AST only understands the canonical keys,
@@ -6040,8 +6251,10 @@ export class ObjectQL implements IObjectQLEngine {
     // ADR-0122 the caller-supplied `context` is the AUTHOR state (every key
     // optional) while `QueryAST` carries the parsed one, so spreading it in and
     // removing it a line later would type the AST with a context it never holds.
+    // [#6300] The rest of the bag is author state too now — the defaults its
+    // schemas declare are filled here, before anything downstream reads the AST.
     const { context: _findContext, ...findQuery } = query ?? {};
-    const ast: QueryAST = { ...findQuery, object };
+    const ast: QueryAST = { ...this.fillQueryAstDefaults(findQuery), object };
 
     // Plan formula projection: rewrite ast.fields to drop virtual formula
     // names and inject their dependencies, so the driver returns the raw
@@ -6167,7 +6380,7 @@ export class ObjectQL implements IObjectQLEngine {
    *
    * Fires the same `beforeFind`/`afterFind` hooks as `find` (#3195).
    */
-  async findOne(objectName: string, query?: EngineQueryOptionsParsed, options?: EngineReadOptions): Promise<any> {
+  async findOne(objectName: string, query?: EngineQueryOptions, options?: EngineReadOptions): Promise<any> {
     objectName = this.resolveObjectName(objectName);
     // Same alias fold as find() (#4346). Without it, `findOne({ filter })`
     // matched the first row of the WHOLE table rather than the predicate.
@@ -6184,8 +6397,9 @@ export class ObjectQL implements IObjectQLEngine {
     // last — findOne is single-row by contract.
     // Same reason as find(): the caller's `context` is the author state and the
     // AST carries the parsed one, so it leaves before the AST is typed.
+    // [#6300] And the same default-filling as find(), for the same reason.
     const { context: _findOneContext, ...findOneQuery } = query ?? {};
-    const ast: QueryAST = { ...findOneQuery, object: objectName, limit: 1 };
+    const ast: QueryAST = { ...this.fillQueryAstDefaults(findOneQuery), object: objectName, limit: 1 };
 
     // Plan formula projection (same as find): rewrite ast.fields so the driver
     // returns the raw dependency fields, then evaluate formulas after fetch.

@@ -731,6 +731,15 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 upgradedFrom: conflict === 'marketplace' ? 'previous-marketplace-version' : null,
                 translationsLoaded: seededSummary.translationsLoaded,
                 seeded: seededSummary.seeded,
+                // #6721: the RESOLVED ledger directory on THIS host — the same
+                // value the GET listing serves (`handleList`), from the same
+                // field. It is here because the installer is remote: `os package
+                // install` never touches this machine's disk, so without it the
+                // CLI can only describe the directory by literal, and that
+                // literal is wrong the moment a host configures `storageDir`.
+                // Keep the two endpoints reading `this.storageDir` — a second
+                // derivation is how they diverged in the first place.
+                storageDir: this.storageDir,
                 note: 'App is now available in this runtime. Refresh the console to see it in the app switcher.',
             },
         }, 200);

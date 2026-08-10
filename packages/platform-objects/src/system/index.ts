@@ -17,6 +17,7 @@ export { SysMigrationJournal } from './sys-migration-journal.object.js';
 export {
   readDataMigrationFlag,
   isDataMigrationVerified,
+  mayActIrreversibly,
   recordDataMigrationRun,
   attestFreshDatastore,
   CREATION_ATTESTATION_DETAIL,

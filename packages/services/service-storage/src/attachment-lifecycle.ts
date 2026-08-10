@@ -213,11 +213,17 @@ export function installAttachmentLifecycleHooks(
  *    columns (`ref_*`). Either found (hook bypass, restore, re-claim) →
  *    un-tombstone and veto. A tombstone outside the `attachments` scope is
  *    field-file lineage (#3459 PR-5b) and additionally requires this
- *    deployment's `adr-0104-file-references` flag to be verified — re-read
- *    fresh each sweep via `isCollectionOpen`, so a regression recorded since
- *    (a later failing migration run clears `verified_at`) stops
- *    already-written tombstones from becoming byte deletes, without a
- *    restart. A closed gate vetoes but does NOT un-tombstone: the observed
+ *    deployment's `adr-0104-file-references` flag to authorise an
+ *    IRREVERSIBLE action — re-read fresh each sweep via `isCollectionOpen`,
+ *    so anything recorded since stops already-written tombstones from
+ *    becoming byte deletes, without a restart. Two things close it: a later
+ *    failing migration run clearing `verified_at`, and a deviation observed
+ *    on a still-verified deployment — a value an `OS_ALLOW_LAX_*` escape
+ *    hatch admitted against the very contract the certificate asserts
+ *    (#4797). The second is why the caller supplies `mayActIrreversibly`
+ *    rather than `isDataMigrationVerified`: the recoverable consumers of the
+ *    same flag keep running on the certificate, and only the byte delete
+ *    stops. A closed gate vetoes but does NOT un-tombstone: the observed
  *    release stands; only the permission to delete is withheld.
  *    Clear on both counts → delete bytes; a byte-delete failure vetoes so
  *    the row is retried next sweep (the row is the only pointer to the
@@ -300,9 +306,18 @@ export function createSysFileReapGuard(
       // Not a state this guard reaps — veto (fail toward retention).
     }
     if (keptGateClosed > 0) {
+      // The guard is handed a boolean, so it cannot name WHICH of the two
+      // closed the gate — and naming only the first was wrong once #4797
+      // added the second: a deployment whose `verified_at` is plainly set
+      // would be told its migration "is not verified" and sent hunting. Both
+      // causes are stated, and they share one remedy, so the instruction is
+      // unambiguous either way. `sys_migration` has the answer.
       logger.info(
         `[storage] reap guard: kept ${keptGateClosed} released field file(s) — this deployment's ` +
-          `file-as-reference migration is not verified (run \`os migrate files-to-references --apply\`)`,
+          `file-as-reference migration is not verified, or a deviation has been observed since it ` +
+          `was (a value an OS_ALLOW_LAX_* escape hatch admitted against the migration's own ` +
+          `contract). Either way: fix the data, then run \`os migrate files-to-references --apply\`. ` +
+          `See sys_migration.verified_at / deviation_observed_at (ADR-0104 / #4797)`,
       );
     }
     return confirmed;

@@ -145,6 +145,62 @@ function renderDate(pattern: string, p: CalendarParts): string {
   }
 }
 
+/**
+ * The format an `autonumber` field renders with when it declares none — the
+ * **contract default**, not a per-caller fallback (#6555).
+ *
+ * Before this constant existed, "what does a format-less autonumber look
+ * like?" was answered twice, by hand, and differently: the SQL driver
+ * substituted `'{0000}'` locally (`0001`, `0002`, …) while the engine's
+ * in-memory fallback path parsed the empty string and rendered the bare
+ * counter through {@link renderAutonumber}'s no-slot branch (`1`, `2`, …). One
+ * metadata document therefore produced a different number *shape* depending on
+ * which driver served it — a test asserting `'1'` against the memory driver
+ * did not hold in production on SQL.
+ *
+ * The maintainer ruling of 2026-08-08 on #6555 settles it at `{0000}` and puts
+ * the default in the contract rather than in either fallback: `{@link
+ * FieldSchema}`'s `autonumberFormat` declares it, and both sides resolve it
+ * through {@link resolveAutonumberFormat}. `{0000}` is the shape already
+ * stored by SQL deployments, so choosing it leaves landed data undisturbed.
+ */
+export const DEFAULT_AUTONUMBER_FORMAT = '{0000}';
+
+/**
+ * A field declaration, as far as autonumber formatting is concerned. Both
+ * spellings appear in real metadata: `autonumberFormat` is the spec-canonical
+ * key, `format` the shorthand that predates it (#1603). Typed loosely because
+ * the engine and the drivers both reach this with an unvalidated field
+ * document in hand, not a parsed {@link FieldSchema}.
+ */
+export interface AutonumberFormatSource {
+  autonumberFormat?: unknown;
+  format?: unknown;
+}
+
+/**
+ * Resolve the format an autonumber field renders with — the ONE place the
+ * contract default is applied, so no caller has to keep its own copy (#6555).
+ *
+ * Precedence: the canonical `autonumberFormat`, then the `format` shorthand,
+ * then {@link DEFAULT_AUTONUMBER_FORMAT}. A key holding anything other than a
+ * NON-EMPTY string counts as undeclared — which is deliberately the SQL
+ * driver's long-standing truthiness rule, not the engine's `??`. The two
+ * disagreed on `format: ''` as well as on the missing key, and resolving the
+ * empty string to the default is the direction that leaves already-stored
+ * driver-sql numbers unchanged.
+ *
+ * A format that IS declared is honoured exactly as written, including one with
+ * no `{0..0}` slot (`'CASE-'` → `CASE-1`) — see {@link renderAutonumber}.
+ */
+export function resolveAutonumberFormat(field: AutonumberFormatSource | null | undefined): string {
+  const canonical = field?.autonumberFormat;
+  if (typeof canonical === 'string' && canonical) return canonical;
+  const shorthand = field?.format;
+  if (typeof shorthand === 'string' && shorthand) return shorthand;
+  return DEFAULT_AUTONUMBER_FORMAT;
+}
+
 export interface RenderAutonumberInput {
   /** Parsed tokens (from {@link parseAutonumberFormat}). */
   tokens: AutonumberToken[];
@@ -209,6 +265,15 @@ export function renderAutonumber(input: RenderAutonumberInput): RenderedAutonumb
   const scope = dynamic ? prefix : '';
   const value = width === null
     // No `{0..0}` slot — append the bare counter (legacy behaviour).
+    //
+    // This branch is no longer how a FORMAT-LESS field renders (#6555): a
+    // field that declares no format now carries the contract default
+    // `{0000}` (see {@link DEFAULT_AUTONUMBER_FORMAT} /
+    // {@link resolveAutonumberFormat}), so it takes the padded branch below
+    // on both the engine and the SQL driver. What still reaches here is a
+    // format the author DID declare that happens to carry no sequence slot —
+    // `'CASE-'` → `CASE-1` — plus any caller that tokenizes a raw string
+    // without going through the resolver.
     ? `${prefix}${seq}`
     : `${prefix}${String(seq).padStart(width, '0')}${suffix}`;
   return { prefix, suffix, scope, value };

@@ -48,13 +48,37 @@
  * the exact install command ({@link MissingDriverPackageError}); it never falls
  * back to SQLite, which is the #3276 lesson kept intact: a silent step-down onto
  * a *different* engine writes an operator's data into the wrong database.
+ *
+ * ## #6268 — the loader itself lives in the runtime now
+ *
+ * That loader used to be written out twice: here, and in
+ * `packages/runtime/src/turso-driver-factory.ts` (#5820, for `os migrate` /
+ * `createStandaloneStack`). The two were kept equal BY HAND — one decision, two
+ * implementations, which is the #3741 → #3758 shape that goes wrong three months
+ * later. It had already started: #6345 moved this half onto `@objectstack/spec`'s
+ * shared driver vocabulary and left the runtime half on a private
+ * `Set(['turso', 'libsql'])`.
+ *
+ * The dependency direction allows cli → runtime, so the runtime owns it and this
+ * file consumes it. `MissingDriverPackageError` is RE-EXPORTED, not re-declared:
+ * `serve.ts` decides fatality with `e instanceof MissingDriverPackageError`, and
+ * two same-named classes would make that predicate silently stop matching —
+ * a fatal branch degraded to a non-fatal one with no diagnostic anywhere.
+ * `storage-driver.test.ts` pins that identity directly.
+ *
+ * What stays on this side is what is genuinely CLI semantics, not a copy:
+ * {@link UnsupportedDriverError} (the ruling keeps it here), the definition
+ * resolver below, and the dynamic-import thunk — see
+ * {@link loadTursoDriverFactory} for why the import specifier cannot move.
  */
 
 import type {
-  DatasourceConnectionSpec,
-  DatasourceDriverHandle,
   IDatasourceDriverFactory,
 } from '@objectstack/service-datasource';
+import {
+  loadTursoDriverFactory as loadRuntimeTursoDriverFactory,
+  type LoadTursoDriverFactoryOptions,
+} from '@objectstack/runtime';
 import {
   type BuiltinDriverId,
   DATABASE_DRIVER_SELECTION_ALIASES,
@@ -62,11 +86,22 @@ import {
   resolveDatabaseDriverId,
 } from '@objectstack/spec/data';
 
+/**
+ * The libSQL/Turso loader's single-sourced surface, re-exported so this module
+ * stays the CLI's one door to storage-driver concerns (#6268). These are the
+ * runtime's declarations, not copies of them — in particular
+ * {@link MissingDriverPackageError} is ONE class across both packages.
+ */
+export {
+  isTursoDriverId,
+  MissingDriverPackageError,
+  TURSO_DRIVER_PACKAGE,
+  TURSO_DRIVER_INSTALL_COMMAND,
+} from '@objectstack/runtime';
+export type { LoadTursoDriverFactoryOptions } from '@objectstack/runtime';
+
 /** Engines the shared sqlite step-down (`resolveSqliteDriver`) can produce. */
 export type SqliteFamilyEngine = 'better-sqlite3' | 'sqlite-wasm' | 'memory';
-
-/** The optional package that provides the libSQL/Turso driver. */
-export const TURSO_DRIVER_PACKAGE = '@objectstack/driver-turso';
 
 /**
  * Where each no-local-default kind's connection target actually comes from —
@@ -171,30 +206,6 @@ export class UnsupportedDriverError extends Error {
     // Defaults to `true` so the pre-#6345 call sites (turso with no URL) keep
     // their meaning without restating it.
     this.recognized = opts.recognized ?? true;
-  }
-}
-
-/**
- * Thrown by {@link loadTursoDriverFactory} when the OPTIONAL driver package the
- * selected kind needs is not installed (#5602).
- *
- * Carries the install command as data as well as prose, so a caller can render it
- * however it likes, and so the pin test asserts the command rather than a sentence
- * shape. `serve.ts` re-throws it as a fatal boot error — there is deliberately NO
- * fallback branch: degrading a `libsql://` selection to SQLite would boot the
- * server against an empty local file while the operator's remote data sits
- * untouched, and every write would land in the wrong database (#3276).
- */
-export class MissingDriverPackageError extends Error {
-  readonly driverType: string;
-  readonly packageName: string;
-  readonly installCommand: string;
-  constructor(args: { driverType: string; packageName: string; installCommand: string; message: string }) {
-    super(args.message);
-    this.name = 'MissingDriverPackageError';
-    this.driverType = args.driverType;
-    this.packageName = args.packageName;
-    this.installCommand = args.installCommand;
   }
 }
 
@@ -477,124 +488,39 @@ export function resolveStorageDefinition(
 }
 
 /**
- * True for the driver ids {@link loadTursoDriverFactory}'s factory builds.
- *
- * Resolved through the shared table since #6345 rather than a local `Set`, so
- * "which spellings mean libSQL" has one answer across the CLI, the standalone
- * stack and the metadata gate.
- */
-export function isTursoDriverId(driverId: string): boolean {
-  return resolveDatabaseDriverId(driverId) === 'turso';
-}
-
-/** The exact command an operator runs to install the optional libSQL driver. */
-export const TURSO_DRIVER_INSTALL_COMMAND = `npm install ${TURSO_DRIVER_PACKAGE}`;
-
-export interface LoadTursoDriverFactoryOptions {
-  /**
-   * Test seam: substitute the dynamic `import('@objectstack/driver-turso')`.
-   * Production passes nothing. Tests pass a stub module (dispatch WITH the package)
-   * or a rejecting thunk (dispatch WITHOUT it) — neither needs a real Turso
-   * endpoint, and the missing-package path must be testable in a workspace where
-   * the package happens to be installed.
-   */
-  importDriverPackage?: () => Promise<unknown>;
-}
-
-/**
  * Load the OPTIONAL libSQL/Turso driver package and wrap it as the host driver
  * factory `DefaultDatasourcePlugin` accepts (#5602).
  *
- * The package is an **optional peer** of the CLI: it drags `@libsql/client`
- * (native bindings included), so making it a hard dependency would weigh down every
- * `npx create-objectstack` install for a backend most projects do not use. The
- * import therefore happens here, at boot, only for a selection that actually asks
- * for libSQL.
+ * A thin delegation to the runtime's single owner since #6268 — the loading, the
+ * error class, the install command, the missing-package wording and the handle
+ * shape all live in `@objectstack/runtime`'s `turso-driver-factory.ts`. What this
+ * wrapper supplies is the two things that are genuinely the CLI's, and would be a
+ * behaviour change if they moved:
  *
- * Absent package ⇒ {@link MissingDriverPackageError}, carrying the exact install
- * command. There is no other branch: the caller must not fall back to SQLite (see
- * the class docstring), and the failure is raised BEFORE the plugin is registered so
- * the operator gets one clear message instead of a connect error later in boot.
+ *  1. **The import thunk — the module-resolution ROOT.**
+ *     `@objectstack/driver-turso` is an **optional peer** of `@objectstack/cli`
+ *     (it drags `@libsql/client` with native bindings, so making it a hard
+ *     dependency would weigh down every `npx create-objectstack` install for a
+ *     backend most projects do not use) and it is not declared by
+ *     `@objectstack/runtime` at all. A dynamic `import()` resolves from the
+ *     node_modules tree of the module that EVALUATES it, so letting the runtime's
+ *     default thunk serve the CLI would look for the package under
+ *     `@objectstack/runtime` — which pnpm's strict layout does not link. An
+ *     operator who ran the exact install command the error tells them to run
+ *     would still be told the package is missing. The specifier therefore stays
+ *     written here, in the package that peer-declares it, and is typed rather
+ *     than `as any` for the same reason.
+ *  2. **{@link UnsupportedDriverError} for a url-less turso config.** CLI-only
+ *     semantics by the #6268 ruling — `serve.ts` re-throws it as a fatal boot
+ *     error. Only the error TYPE is chosen here; the message comes from the
+ *     runtime, so the wording is not duplicated.
  */
 export async function loadTursoDriverFactory(
   opts: LoadTursoDriverFactoryOptions = {},
 ): Promise<IDatasourceDriverFactory> {
-  const load = opts.importDriverPackage ?? (() => import('@objectstack/driver-turso'));
-
-  let mod: unknown;
-  try {
-    mod = await load();
-  } catch (err) {
-    throw new MissingDriverPackageError({
-      driverType: 'turso',
-      packageName: TURSO_DRIVER_PACKAGE,
-      installCommand: TURSO_DRIVER_INSTALL_COMMAND,
-      message:
-        `A libSQL/Turso database was selected, but the driver package ${TURSO_DRIVER_PACKAGE} `
-        + `is not installed. Install it next to the CLI:\n\n    ${TURSO_DRIVER_INSTALL_COMMAND}\n\n`
-        + `(pnpm add ${TURSO_DRIVER_PACKAGE} / yarn add ${TURSO_DRIVER_PACKAGE}.) It is an `
-        + 'OPTIONAL peer dependency, so a default install stays free of @libsql/client. '
-        + 'The boot refuses rather than falling back to SQLite: a silent fallback would start '
-        + 'the server against an empty local database while your libSQL data stays untouched, '
-        + 'and every write would land in the wrong place. To use SQLite deliberately, set '
-        + 'OS_DATABASE_URL=file:./data/objectstack.db (or --database file:./data/objectstack.db). '
-        + `Import error: ${err instanceof Error ? err.message : String(err)}`,
-    });
-  }
-
-  const record = (mod ?? {}) as { TursoDriver?: unknown; default?: { TursoDriver?: unknown } };
-  const TursoDriverCtor = (record.TursoDriver ?? record.default?.TursoDriver) as
-    | (new (config: { url: string; authToken?: string }) => object)
-    | undefined;
-  if (typeof TursoDriverCtor !== 'function') {
-    // Resolvable but not the module we expect (a shadowing stub, a truncated
-    // install, an incompatible major that renamed its export). Same operator
-    // remedy, so the same typed error — never a fallback.
-    throw new MissingDriverPackageError({
-      driverType: 'turso',
-      packageName: TURSO_DRIVER_PACKAGE,
-      installCommand: TURSO_DRIVER_INSTALL_COMMAND,
-      message:
-        `${TURSO_DRIVER_PACKAGE} resolved but exports no TursoDriver class, so the libSQL `
-        + `database cannot be opened. Reinstall it:\n\n    ${TURSO_DRIVER_INSTALL_COMMAND}\n\n`
-        + 'The boot refuses rather than falling back to SQLite, which would write your data '
-        + 'into a different database than the one you configured.',
-    });
-  }
-
-  return {
-    supports: (driverId: string) => isTursoDriverId(driverId),
-    create: (spec: DatasourceConnectionSpec): DatasourceDriverHandle => {
-      const config = (spec.config ?? {}) as { url?: unknown; authToken?: unknown };
-      const url = typeof config.url === 'string' ? config.url : '';
-      if (!url) {
-        throw new UnsupportedDriverError(
-          'turso',
-          `datasource '${spec.name ?? 'default'}': driver '${spec.driver}' needs a libSQL url in its `
-            + 'config (e.g. libsql://my-db.turso.io or file:./data/objectstack.db).',
-        );
-      }
-      const driver = new TursoDriverCtor({
-        url,
-        ...(typeof config.authToken === 'string' && config.authToken
-          ? { authToken: config.authToken }
-          : {}),
-      }) as {
-        connect?: () => Promise<void>;
-        disconnect?: () => Promise<void>;
-        checkHealth?: () => Promise<boolean>;
-      };
-      // Same handle shape the open-core factory builds (`toHandle`): ownership
-      // stays the default `'factory'` — this instance was built for THIS connect,
-      // so kernel teardown disconnects it.
-      return {
-        ...(typeof driver.connect === 'function' ? { connect: () => driver.connect!() } : {}),
-        ...(typeof driver.disconnect === 'function' ? { disconnect: () => driver.disconnect!() } : {}),
-        ...(typeof driver.checkHealth === 'function'
-          ? { checkHealth: () => driver.checkHealth!(), ping: () => driver.checkHealth!() }
-          : {}),
-        driver,
-      };
-    },
-  };
+  return loadRuntimeTursoDriverFactory({
+    importDriverPackage: opts.importDriverPackage ?? (() => import('@objectstack/driver-turso')),
+    missingUrlError:
+      opts.missingUrlError ?? ((message: string) => new UnsupportedDriverError('turso', message)),
+  });
 }

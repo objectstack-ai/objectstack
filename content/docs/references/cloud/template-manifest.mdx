@@ -8,7 +8,7 @@ description: Template Manifest protocol schemas
 `objectstack.manifest.json` — on-disk descriptor for a template / package
 source tree. Strict projection of `CreatePackageRequestSchema` (server-
 managed fields excluded) plus scaffold-time extras (name slug,
-specVersion, skills, preview, scaffold, readmePath).
+specVersion, namespace, skills, preview, scaffold, readmePath).
 
 <Callout type="info">
 **Source:** `packages/spec/src/cloud/template-manifest.zod.ts`
@@ -48,6 +48,7 @@ objectstack.manifest.json — template / package source descriptor
 | **translations** | `Record<string, { displayName?: string; description?: string; readme?: string; tagline?: string; … }>` | optional | Locale-keyed overrides; missing keys fall back to base columns |
 | **name** | `string` | ✅ | CLI slug (kebab-case, no namespace prefix) |
 | **specVersion** | `string` | ✅ | Compatible @objectstack/spec semver range |
+| **namespace** | `string` | optional | Scaffold-only: the template’s own metadata namespace, rewritten by create-objectstack at scaffold time and read back as the fallback source for the template’s original namespace. NOT the publish namespace — publish reads that off the compiled artifact’s manifest.namespace (ADR-0048 addendum §A.2) |
 | **skills** | `string[]` | optional | Skill ids exercised by this template (for docs / picker) |
 | **preview** | `{ screenshots?: string[]; demoUrl?: string }` | optional |  |
 | **scaffold** | `{ variables?: Record<string, any>; postInstall?: string[] }` | optional |  |

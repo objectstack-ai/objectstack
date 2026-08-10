@@ -114,7 +114,7 @@ describe('[#5273] a bulk write carries no `ast` on `input`', () => {
     const { engine } = await boot();
     engine.registerHook('beforeFind', async (ctx: any) => { seen.push(ctx.input); }, { object: 'task' });
 
-    // No `as any` on the options: `find(object, query?: EngineQueryOptionsParsed)`
+    // No `as any` on the options: `find(object, query?: EngineQueryOptions)`
     // already infers an empty query, and erasing it would add a site to the
     // #4918 query-options ratchet (`check:query-options-erasure`) for no gain —
     // this call is in-contract, not a deliberate off-contract probe.

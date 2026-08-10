@@ -174,12 +174,42 @@ export function defineJob(config: z.input<typeof JobSchema>): JobParsed {
 /**
  * Job Execution Status Enum
  * Status of job execution
+ *
+ * [#7072] `degraded` executes the 2026-08-08 maintainer ruling on #5548, quoted
+ * verbatim: 「**Vocabulary stays minimal** — one additional outcome meaning
+ * "completed without accomplishing the work". ⛔ Do not open an enum family; a
+ * second key would need its own pull.」 It is the consumer-side half of the
+ * `JobRunOutcome` producer shape #6617 shipped on `contracts/job-service.ts`,
+ * and it is declared in exactly three places that must agree: this enum,
+ * `sys_job_run.status` and `sys_job.last_status` (both in
+ * `@objectstack/platform-objects`). The platform-object selects are *enforced*
+ * — ObjectQL's record validator refuses an out-of-vocabulary `select` value
+ * with `invalid_option` — so a value legal here and absent there is a silently
+ * swallowed write, not a type error.
+ *
+ * ⚠️ **`degraded` is NOT a failure and never retries.** It means the run ran to
+ * completion and its work did not happen (a store was unavailable, zero rows
+ * matched a precondition). Retry and failure are driven exclusively by a
+ * *rejected* handler promise; a resolved `{ outcome: 'degraded' }` never
+ * re-runs the job. See {@link JobHandler} in `contracts/job-service.ts` for the
+ * three-outcome table this mirrors.
+ *
+ * **Where the reason goes, and what that costs.** A degraded run's `reason`
+ * rides the existing `error` column (`sys_job.last_error` for the job-level
+ * mirror) and leaves `failure_count` flat — the ruling's minimal-vocabulary
+ * spirit applied to columns as to enum members, decided at the `domain:services`
+ * seat on #7072. The cost is stated here rather than left for the next reader: a
+ * column labelled **"Error"** may carry a non-error operator note whenever
+ * `status === 'degraded'`, so a reader must gate on the status before reading
+ * that column as a failure. Adding a distinct `reason` column would be the
+ * "second key" the ruling reserves for its own pull.
  */
 export const JobExecutionStatus = z.enum([
   'running',
   'success',
   'failed',
   'timeout',
+  'degraded',
 ]);
 
 export type JobExecutionStatus = z.input<typeof JobExecutionStatus>;

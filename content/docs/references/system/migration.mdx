@@ -100,6 +100,8 @@ Deployment-level record that a data migration ran here and its self-check passed
 | **blocking** | `integer` | ✅ | Blocking discrepancies reported by the last self-check. The gate requires 0 |
 | **advisory** | `integer` | optional | Advisory findings from the last run (external URLs, stale owners, …) — cost storage or need a modelling decision, never block the gate |
 | **details** | `string` | optional | JSON-encoded counts from the last run, for diagnostics |
+| **deviation_observed_at** | `string \| null` | optional | When this deployment last ADMITTED a value the verified contract rejects, via an OS_ALLOW_LAX_* escape hatch. Does not clear verified_at — it withdraws the irreversible half of what the certificate authorises (#4797) |
+| **deviation_detail** | `string \| null` | optional | JSON-encoded first counterexample behind deviation_observed_at (object, field, type, parse issue), for diagnostics |
 
 
 ---

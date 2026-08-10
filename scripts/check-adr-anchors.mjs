@@ -24,7 +24,7 @@
 //
 // ## What this checks
 //
-// For each entry in `scripts/adr-anchors.json`: the file exists, every ADR id
+// For each entry in `scripts/adr-anchors/`: the file exists, every ADR id
 // listed for it names a real record under `docs/adr/`, and every one of those
 // ids still appears somewhere in the file. That is all — a presence check,
 // deliberately dumb:
@@ -49,7 +49,7 @@
 // on two documents with nothing to choose between them, and the cost is worst
 // exactly where the pairs are furthest apart: `ADR-0057` is either the ERP
 // authorization core (security) or system-data retention (reclamation), and
-// four entries in `adr-anchors.json` ride that number today.
+// four entries in `adr-anchors/` ride that number today.
 //
 // Maintainer ruling 2026-08-07 on #5992, in order: **C first, B to finish, A
 // rejected.** C is this gate — stop the bleeding, so a FOURTH collision cannot
@@ -75,7 +75,7 @@
 //
 // ## The third thing it checks: a cited ADR number RESOLVES to a record (#6634)
 //
-// The two checks above only ever look at ids listed in `adr-anchors.json` — 30-odd
+// The two checks above only ever look at ids listed in `adr-anchors/` — 30-odd
 // ids, hand-registered. Every other `ADR-NNNN` written in a comment, a doc or a
 // changeset was unchecked, and the gap is not theoretical: `ADR-0079` was cited
 // by **77 files** in this repo, 14 times inside `packages/spec` alone, while
@@ -102,6 +102,18 @@
 //     explicit, shrink-only allowlist, audited in both directions like the
 //     collision list.
 //
+// ## Where the registry lives (#6957)
+//
+// `scripts/adr-anchors/` — **one JSON file per anchor**, named after the path it
+// anchors (`packages/objectql/src/engine.ts` →
+// `packages__objectql__src__engine.ts.json`), assembled in id order by
+// `scripts/adr-anchors.mjs`. It was a single `scripts/adr-anchors.json` until
+// that file turned out to have the same append-only-ledger conflict profile as
+// this repo's other hot files, on a registry where a mis-resolved merge drops an
+// anchor **silently** — the entry stops being checked and nothing goes red. The
+// full reasoning, the measurement and the maintainer's ruling are in
+// `scripts/adr-anchors.mjs`'s header; read that before changing the layout.
+//
 // ## Adding an entry
 //
 // Add one when an accepted ADR's decision is realized in code that would look
@@ -110,6 +122,11 @@
 // reverting a decision, anchor it. Do not anchor everything; a map of
 // everything is a map of nothing, and each entry must earn its failure mode.
 //
+// Mechanically: write ONE new file under `scripts/adr-anchors/`, named for the
+// path it anchors, carrying `file`, `adrs` and `invariant`. Touch nothing else —
+// there is no index to register it in, deliberately (an index would be the
+// single append-only file this layout exists to remove).
+//
 //   node scripts/check-adr-anchors.mjs
 //   node scripts/check-adr-anchors.mjs --self-test   # verify the checker itself
 
@@ -117,8 +134,11 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { ANCHORS_DIR, assembleAnchors, loadAnchors, shardNameFor } from './adr-anchors.mjs';
+
 const ROOT = process.cwd();
-const MAP_PATH = 'scripts/adr-anchors.json';
+/** Where the registry lives. One shard per anchor — see `scripts/adr-anchors.mjs`. */
+const MAP_PATH = ANCHORS_DIR;
 const ADR_DIR = 'docs/adr';
 const SELF_PATH = 'scripts/check-adr-anchors.mjs';
 
@@ -252,22 +272,19 @@ const KNOWN_NUMBER_COLLISIONS = [
     ],
     // The worst pair, and the one #5992 was filed over: security vs
     // reclamation, no shared vocabulary, and four `ADR-0057` entries in
-    // scripts/adr-anchors.json plus hundreds of bare references in packages/**.
+    // scripts/adr-anchors/ plus hundreds of bare references in packages/**.
     why: 'ERP authorization core (security) vs system-data lifecycle/retention (reclamation)',
   },
 ];
 
-let anchors;
-try {
-  ({ anchors } = JSON.parse(readFileSync(join(ROOT, MAP_PATH), 'utf8')));
-} catch (e) {
-  console.error(`check-adr-anchors: cannot read ${MAP_PATH} — ${e.message}`);
-  process.exit(1);
-}
-if (!Array.isArray(anchors)) {
-  console.error(`check-adr-anchors: ${MAP_PATH} must carry an "anchors" array.`);
-  process.exit(1);
-}
+/**
+ * The registry, assembled from its shards in id order.
+ *
+ * Layout errors are RETURNED rather than fatal, so they join the run's other
+ * findings instead of pre-empting them — and so `--self-test`, which runs below
+ * this line, no longer depends on the live registry parsing.
+ */
+const { anchors, errors: registryErrors } = loadAnchors(ROOT);
 
 /**
  * Inventory `docs/adr/` and audit the premise every anchor rests on: one
@@ -529,33 +546,37 @@ try {
 /** Decision records that actually exist, by number: `0090` → `0090-permission-model-...md`. */
 const { records, errors: numberErrors } = auditAdrDirectory(adrFiles, KNOWN_NUMBER_COLLISIONS);
 
-const errors = [...numberErrors];
+const errors = [...registryErrors, ...numberErrors];
 let checked = 0;
 
 // #6634 — every `ADR-NNNN` written anywhere in the tracked tree resolves to a
-// record, not just the ~30 ids registered in adr-anchors.json.
+// record, not just the ~30 ids registered in adr-anchors/.
 const citations = collectCitations();
 errors.push(...auditCitedNumbers(citations, records, UNRESOLVED_ADR_CITATIONS));
 
 for (const entry of anchors) {
-  const { file, adrs, invariant } = entry ?? {};
+  const { file, adrs, invariant } = entry;
+  // The shard that carries this entry — its name is a pure function of the id,
+  // so every message below can point at the exact file to edit.
+  const shard = `${MAP_PATH}/${shardNameFor(file)}`;
 
-  if (typeof file !== 'string' || !Array.isArray(adrs) || adrs.length === 0) {
-    errors.push(`${MAP_PATH}: every anchor needs a "file" and a non-empty "adrs" array (got ${JSON.stringify(entry)}).`);
+  if (!Array.isArray(adrs) || adrs.length === 0) {
+    errors.push(`${shard}: every anchor needs a non-empty "adrs" array (got ${JSON.stringify(entry.adrs)}).`);
     continue;
   }
   if (typeof invariant !== 'string' || invariant.trim() === '') {
     // The invariant IS the value of this check — an entry without one degrades
     // the failure into "put this string back", which teaches nothing.
-    errors.push(`${MAP_PATH}: anchor for ${file} has no "invariant" — state what the ADR decided, in a sentence or two.`);
+    errors.push(`${shard}: anchor for ${file} has no "invariant" — state what the ADR decided, in a sentence or two.`);
     continue;
   }
 
   const abs = join(ROOT, file);
   if (!existsSync(abs)) {
     errors.push(
-      `${file}: anchored file is missing. If it moved, update ${MAP_PATH}; if the code is gone, say so in ` +
-        `the ADR — a decision whose implementation vanished is one to revisit, not to drop silently.`,
+      `${file}: anchored file is missing. If it moved, rename ${shard} to match its new path and update the ` +
+        `"file" inside it; if the code is gone, say so in the ADR — a decision whose implementation vanished ` +
+        'is one to revisit, not to drop silently.',
     );
     continue;
   }
@@ -564,13 +585,13 @@ for (const entry of anchors) {
   for (const adr of adrs) {
     const m = ADR_ID.exec(adr);
     if (!m) {
-      errors.push(`${MAP_PATH}: "${adr}" is not an ADR id (expected e.g. ADR-0090).`);
+      errors.push(`${shard}: "${adr}" is not an ADR id (expected e.g. ADR-0090).`);
       continue;
     }
     // Anchoring a withdrawn or never-written record sends the next author to a
     // dead end (cf. ADR-0107, withdrawn before it landed).
     if (!records.has(m[1])) {
-      errors.push(`${MAP_PATH}: ${adr} has no record under ${ADR_DIR}/ — anchor a decision that exists.`);
+      errors.push(`${shard}: ${adr} has no record under ${ADR_DIR}/ — anchor a decision that exists.`);
       continue;
     }
     if (!body.includes(adr)) {
@@ -579,7 +600,7 @@ for (const entry of anchors) {
           `      ${invariant}\n` +
           `      If the code still obeys it, restore the reference where the decision shows up.\n` +
           `      If you are deliberately changing it, that needs a superseding ADR under ${ADR_DIR}/ — ` +
-          `not a comment edit — and then an update to ${MAP_PATH}.`,
+          `not a comment edit — and then an update to ${shard}.`,
       );
     }
   }
@@ -903,6 +924,99 @@ function selfTest() {
         );
       }
     }
+
+    // ---- the sharded registry's assembly (#6957) -----------------------------
+    //
+    // Two of these are the properties the split was adopted for, and they pull in
+    // OPPOSITE directions — so testing only the happy one would leave a layout
+    // that merges everything cleanly, including the two edits that must not.
+    {
+      const shard = (file) => [shardNameFor(file), JSON.stringify({ file, adrs: ['ADR-0001'], invariant: 'x' })];
+      const from = (pairs) => {
+        const m = new Map(pairs);
+        return assembleAnchors([...m.keys()], (n) => m.get(n));
+      };
+
+      {
+        const { anchors: a, errors: e } = from([shard('b/two.ts'), shard('a/one.ts')]);
+        assert('shards-assemble-clean', e.length === 0, `expected no errors, got:\n${joined(e)}`);
+        assert(
+          'shards-assemble-in-id-order',
+          JSON.stringify(a.map((x) => x.file)) === JSON.stringify(['a/one.ts', 'b/two.ts']),
+          `order is derived from the id, never declared — got ${JSON.stringify(a.map((x) => x.file))}`,
+        );
+      }
+
+      {
+        // The name IS the id. A shard whose filename disagrees with its `file`
+        // is the hole that would let two entries for one path coexist under two
+        // names — i.e. the silent-drop this layout removes, re-entering by the
+        // back door.
+        const [, body] = shard('a/one.ts');
+        const { anchors: a, errors: e } = from([['renamed.json', body]]);
+        assert(
+          'shard-name-must-match-its-id',
+          e.length === 1 && e[0].includes('filename does not match'),
+          `expected exactly one filename-mismatch error, got:\n${joined(e)}`,
+        );
+        assert('shard-name-mismatch-drops-the-entry', a.length === 0, `expected the entry to be rejected, got ${a.length}`);
+      }
+
+      assert(
+        'shard-name-is-a-pure-function-of-the-id',
+        shardNameFor('packages/objectql/src/engine.ts') === 'packages__objectql__src__engine.ts.json',
+        `got ${shardNameFor('packages/objectql/src/engine.ts')}`,
+      );
+      assert(
+        'shard-name-keeps-the-extension',
+        shardNameFor('a/x.ts') !== shardNameFor('a/x.tsx'),
+        'two source files differing only in extension must not collapse into one shard',
+      );
+
+      {
+        const { errors: e } = from([['packages__a__b.ts.json', '{ not json']]);
+        assert(
+          'unparseable-shard-is-red',
+          e.length === 1 && e[0].includes('cannot parse'),
+          `expected a parse error, got:\n${joined(e)}`,
+        );
+      }
+      {
+        const { errors: e } = from([['stray.txt', 'whatever']]);
+        assert(
+          'non-json-in-the-registry-is-red',
+          e.length === 1 && e[0].includes('not an anchor entry'),
+          `a stray file must not be silently skipped — a skipped typo is a dropped anchor. Got:\n${joined(e)}`,
+        );
+      }
+      {
+        const { errors: e } = from([['README.md', '# docs']]);
+        assert('readme-is-not-an-entry', e.length === 0, `README.md is allowed alongside the entries, got:\n${joined(e)}`);
+      }
+      {
+        const { errors: e } = from([['a__b.ts.json', JSON.stringify({ adrs: ['ADR-0001'], invariant: 'x' })]]);
+        assert(
+          'shard-without-an-id-is-red',
+          e.length === 1 && e[0].includes('has no "file"'),
+          `expected a missing-id error, got:\n${joined(e)}`,
+        );
+      }
+
+      {
+        // The live registry, through the real loader: it must assemble with zero
+        // layout errors and land in id order. This is the one impure assertion
+        // here, and it is the one that would catch a hand-renamed shard on main.
+        const { anchors: live, errors: e } = loadAnchors(ROOT);
+        assert('live-registry-assembles-clean', e.length === 0, `expected no layout errors, got:\n${joined(e)}`);
+        const ids = live.map((x) => x.file);
+        assert(
+          'live-registry-is-in-id-order',
+          JSON.stringify(ids) === JSON.stringify([...ids].sort()),
+          'the loader must emit id order regardless of readdir order',
+        );
+        assert('live-registry-is-not-empty', live.length > 0, 'an empty registry would make every check below vacuous');
+      }
+    }
   } catch (e) {
     // Never let the harness itself be the message.
     failures.push(`self-test threw before finishing — ${e && e.stack ? e.stack : e}`);
@@ -915,7 +1029,7 @@ function selfTest() {
   }
   console.log(
     `✓ check-adr-anchors --self-test: ${checked} assertions over the real auditAdrDirectory() / ` +
-      'auditCitedNumbers() paths.',
+      'auditCitedNumbers() / assembleAnchors() paths.',
   );
   process.exit(0);
 }

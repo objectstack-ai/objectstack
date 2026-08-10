@@ -1,0 +1,9 @@
+{
+  "file": "packages/types/src/unique-scope-install-gate.ts",
+  "adrs": [
+    "ADR-0120",
+    "ADR-0105",
+    "ADR-0104"
+  ],
+  "invariant": "The ADR-0120 D5e enumeration is PURE and posture-agnostic — the caller decides hard stop (install into `isolated`) vs advisory (`os doctor` / `os migrate plan`), which is what keeps those three surfaces from drifting into three different verdicts. Three classifications are load-bearing and must not be 'simplified': a declared index's bare `unique: true` COUNTS (D1 makes it the positional spelling of `'global'` — excluding it would make the gate bypassable by spelling for all of 17.x); field-level `true` does NOT (it means `'organization'`, valid indefinitely, Resolved #2); `sys_`/`base_` objects do NOT (the S5 engine idempotency inventory is platform-wide by construction — re-asking per install is the #4884 false-alarm class). An attestation recorded under another posture is NOT consent: `unconfirmedGlobalUniques` treats it as absent, because the `isolated` question was never asked there. ⛔ This must never be wired into a boot-time diagnostic (#4884)."
+}

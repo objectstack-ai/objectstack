@@ -16,8 +16,9 @@ import {
 //   ./studio — 3-value Studio IDE surface enum (`toolbar`, `contextMenu`,
 //     `commandPalette`), consumed only by `ActionContributionSchema.location`
 //     inside a Studio plugin manifest;
-//   ./ui     — 7-value platform-canonical vocabulary for where an action
-//     renders in a RUNNING APP's UI (`list_toolbar`, …, `global_nav`), whose
+//   ./ui     — the platform-canonical vocabulary for where an action renders
+//     in a RUNNING APP's UI (`list_toolbar`, …, `record_section`; 7 values at
+//     the time of this rename, 6 since #6888 retired `global_nav`), whose
 //     docblock declares it "single source of truth for the whole platform".
 //
 // Same name, disjoint vocabularies: which type a consumer got depended on
@@ -109,12 +110,13 @@ describe('[#4737] studio ActionLocation dual-source retirement', () => {
     // The two vocabularies were disjoint precisely here — the app-UI values
     // must NOT leak into the Studio contribution enum:
     expect(() => studio.ActionContributionLocationSchema.parse('list_toolbar')).toThrow();
-    expect(() => studio.ActionContributionLocationSchema.parse('global_nav')).toThrow();
+    expect(() => studio.ActionContributionLocationSchema.parse('record_section')).toThrow();
 
-    // ui side — untouched, and still the 7-value app-UI vocabulary.
+    // ui side — untouched by THIS rename, and still the app-UI vocabulary
+    // (`global_nav` left it later and separately, #6888).
     expect('ActionLocationSchema' in ui).toBe(true);
     expect('ACTION_LOCATIONS' in ui).toBe(true);
-    for (const loc of ['list_toolbar', 'record_header', 'global_nav']) {
+    for (const loc of ['list_toolbar', 'record_header', 'record_section']) {
       expect(() => ui.ActionLocationSchema.parse(loc)).not.toThrow();
     }
     expect(() => ui.ActionLocationSchema.parse('toolbar')).toThrow();

@@ -160,7 +160,7 @@ export function validateActionLocations(stack: AnyRec): ActionLocationsFinding[]
         'so it renders on no surface — the button exists in metadata and nowhere in the UI.',
       hint:
         'Add the surface it belongs on, e.g. `locations: [\'record_header\']` (or `list_item`, ' +
-        '`list_toolbar`, `record_more`, `record_section`, `record_related`, `global_nav`); or ' +
+        '`list_toolbar`, `record_more`, `record_section`, `record_related`); or ' +
         "place it from a list view's `bulkActions` / `bulkActionDefs` if it acts on a selection. " +
         'If it is meant to be callable over REST / MCP / AI with no UI surface, say so explicitly ' +
         'with `locations: []` — an empty array is the documented headless shape and is never flagged.',

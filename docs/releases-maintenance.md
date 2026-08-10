@@ -78,6 +78,49 @@ Needs a Playwright browser (`pnpm exec playwright install chromium-headless-shel
 the ratchet fires, the fix is a spec/overlay edit or an explicit `--update` to re-accept
 the baseline — see ADR-0082 D4 and its addendum 2.
 
+#### If the dispatch container's Playwright browser doesn't match the revision
+
+`pnpm exec playwright install chromium-headless-shell` — the remedy this ratchet and
+`scripts/gen-sdui-manifest.sh` both print — is **not runnable in an agent dispatch
+container**: `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1` is set there and agents are instructed
+not to override it. That collides with objectui pin bumps, because each bump can pull a
+newer `playwright` that expects a newer chromium **build revision** than the container
+pre-populated. Measured on PR #7308 (2026-08-10, pin `09987b680d53` → `8aad9fd50b16`):
+the container ships `chromium_headless_shell-1194` laid out the old way
+(`chromium_headless_shell-1194/chrome-linux/headless_shell`), while the newly-pulled
+`playwright@1.62.1` looks for build `1234` at the newer per-browser layout
+(`chromium_headless_shell-1234/chrome-headless-shell-linux64/chrome-headless-shell`) and
+fails with `browserType.launch: Executable doesn't exist at ...`.
+
+This is a **path/revision lookup gap, not a missing browser-capability**: chromium
+141.0.7390.37 (the binary backing build 1194) driven by playwright 1.62.1 ran the ratchet
+cleanly once it could be found — 57 public blocks written, no new DECLARATION divergence
+vs the accepted baseline. The fix is to make the already-installed binary discoverable
+under the revision-named path playwright expects, without touching anything
+container-shared. Build a symlink tree inside your own scratchpad (never under
+`/opt/pw-browsers`, which every parallel agent in the container shares) that mimics the
+new layout and points at the old binaries, then point `PLAYWRIGHT_BROWSERS_PATH` at it
+for this one invocation only:
+
+```bash
+D=$SCRATCH/pw/chromium_headless_shell-1234
+mkdir -p "$D/chrome-headless-shell-linux64"
+touch "$D/INSTALLATION_COMPLETE" "$D/DEPENDENCIES_VALIDATED"
+SRC=/opt/pw-browsers/chromium_headless_shell-1194/chrome-linux
+for f in "$SRC"/*; do ln -sfn "$f" "$D/chrome-headless-shell-linux64/$(basename "$f")"; done
+ln -sfn "$SRC/headless_shell" "$D/chrome-headless-shell-linux64/chrome-headless-shell"
+
+PLAYWRIGHT_BROWSERS_PATH=$SCRATCH/pw pnpm sdui:manifest
+```
+
+Replace `1234` / `1194` with whatever revisions your run actually reports (playwright
+prints the build it wants in the "Executable doesn't exist" error; the container's
+installed build is whatever directory name sits under `/opt/pw-browsers`). If the
+revisions ever line up on their own, this step is a no-op — try `pnpm sdui:manifest`
+unmodified first. See objectstack#7315 for the full writeup, including why this is
+recorded here rather than made the script's own fallback (options 3/4 there cross a
+repo/image boundary and are deliberately not taken by this note).
+
 ## 3. Platform layer — `content/docs/releases/vN.mdx` (curated)
 
 The curated, developer-facing "big picture", written for third parties building on

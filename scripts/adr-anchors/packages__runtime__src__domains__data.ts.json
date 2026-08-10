@@ -1,0 +1,7 @@
+{
+  "file": "packages/runtime/src/domains/data.ts",
+  "adrs": [
+    "ADR-0076"
+  ],
+  "invariant": "The `/data` body — D11 step ③'s terminal cut (PR-10) and the very handler ADR-0076 names when it describes the god implementation ('the dispatcher hardcodes a handler per domain: handleData / handleMcp / handleAnalytics / handleActions, each getService(...)'). It reaches dispatcher facilities ONLY through `DomainHandlerDeps`, and `HttpDispatcher.handleData` is a thin back-compat delegate: folding this module back into that delegate because 'the indirection buys nothing' re-couples the data plane to dispatcher state and restarts the ~3.8k-LOC accretion D11 decomposed. The multi-tenant refusal belongs to the BODY, not to an upstream gate — on a host with a registered KernelResolver, a data-plane request the resolver did not attach to an environment answers 428 and never falls through to the control-plane kernel (ADR-0006 Phase 5)."
+}

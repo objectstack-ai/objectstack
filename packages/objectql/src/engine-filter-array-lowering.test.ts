@@ -29,19 +29,21 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import type {
   EngineAggregateOptions,
   EngineCountOptions,
-  EngineQueryOptionsParsed,
+  EngineQueryOptions,
 } from '@objectstack/spec/data';
 import { ObjectQL } from './engine.js';
 
 /**
  * [#4918] `FilterArray` on `where` is off-contract BY DECLARATION, and these
- * tests exist to drive it: `EngineQueryOptionsParsed.where` is a `FilterCondition` /
+ * tests exist to drive it: `EngineQueryOptions.where` is a `FilterCondition` /
  * `Record< string, unknown >`, which an array is not assignable to, because
  * `FilterArray` is INPUT-ONLY authoring sugar the spec deliberately excludes
  * (#5285). So a test that hands the engine one has to say so, and
- * `as unknown as EngineQueryOptionsParsed` is how: it names the contract being
+ * `as unknown as EngineQueryOptions` is how: it names the contract being
  * bypassed, keeps the rest of the call type-checked, and greps as an
- * intentional act — none of which a bare `as any` does.
+ * intentional act — none of which a bare `as any` does. (#6300 flipped the
+ * find/findOne parameter from `EngineQueryOptionsParsed` to the author-state
+ * `EngineQueryOptions`; the cast target follows the contract it names.)
  *
  * Deliberately NOT used for the malformed-COMPARAND cases below
  * (`{ stage: { $nin: 'won' } }`). Those are ordinary objects that `tsc`
@@ -49,8 +51,8 @@ import { ObjectQL } from './engine.js';
  * reason the runtime gate this file pins has to exist. Erasing them would hide
  * that they are type-legal, which is the point.
  */
-const asFilterArrayQuery = (where: unknown): EngineQueryOptionsParsed =>
-  ({ where }) as unknown as EngineQueryOptionsParsed;
+const asFilterArrayQuery = (where: unknown): EngineQueryOptions =>
+  ({ where }) as unknown as EngineQueryOptions;
 
 const deal = {
   name: 'deal',

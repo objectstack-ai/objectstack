@@ -6184,6 +6184,136 @@ const appHiddenToUnpublished: MetadataConversion = {
   },
 };
 
+/**
+ * `global_nav` leaves `ACTION_LOCATIONS` (protocol 17, #6888 — ADR-0049
+ * enforce-or-remove, maintainer ruling 2026-08-09).
+ *
+ * The location was declared from the day the vocabulary was written and no
+ * product surface ever served it. The console's ⌘K palette
+ * (`app-shell/src/chrome/CommandPalette.tsx`) composes its seven groups from
+ * nav items, objects, dashboards, pages, reports, recent items, record search
+ * and theme — its `actions` group is hard-coded chrome — and the file
+ * references neither `global_nav` nor any action-metadata source at all. Of the
+ * five references to the value in the whole UI repo at the vendored SHA, four
+ * were the Studio designer and the fifth a doc comment.
+ *
+ * What makes it worse than an ordinary inert declaration is the direction of
+ * the lie: `metadata-admin/previews/ActionPreview.tsx` drew the author a mock
+ * `⌘K · Command palette` frame, so the authoring tool PROMISED a rendering the
+ * product cannot do. An author declares the location, watches it "work" in the
+ * designer, ships it, and it renders nowhere — the ADR-0078
+ * declares/renders/does-nothing shape, arriving through the location
+ * vocabulary rather than through a missing key. Retired rather than
+ * implemented: no user has asked for command-palette actions and the only two
+ * declarers were our own showcase corpus, so wiring the palette would have been
+ * capability expansion with no pull. If real appetite appears it re-enters
+ * through the front door, implementation first.
+ *
+ * Like `hook-body-crypto-hash-removed` and
+ * `dataset-measure-array-string-agg-removed` above, this is an enum-VALUE
+ * retirement: there is no `retiredKey()` tombstone to hang the prescription on,
+ * so the enum's own error map carries it (`GLOBAL_NAV_RETIRED`,
+ * `ui/action.zod.ts`), keyed on `issue.input` so only the spelling that used to
+ * be legal is told it "was removed". For the same reason nothing lands in
+ * `RETIRED_KEYS_BY_MAJOR` and the four surface ratchets are expected to be
+ * byte-identical — no def and no authorable KEY changed.
+ *
+ * ## The empty-array edge, decided deliberately
+ *
+ * The value is stripped from `locations` and **the key is kept even when the
+ * array empties** — `locations: []`, never `delete locations`. On this surface
+ * the two are different declarations, not two spellings of one:
+ * `content/docs/ui/actions.mdx` ("Headless actions: declare it, then hide it")
+ * documents `[]` as a first-class shape — the action stays callable over
+ * REST/MCP/AI and keeps its capability gate, param contract and audit trail —
+ * while an ABSENT key means the author never placed the action at all, which is
+ * exactly what `packages/lint`'s `action-no-placement` rule warns about. The
+ * rule states the distinction in those words: "an author who said 'nowhere,
+ * deliberately' (`[]`) and one who never said anything at all (key absent)".
+ * Dropping the key would therefore convert a deliberate placement into a lint
+ * finding and lose the author's own statement of intent. Stripping to `[]` is
+ * also the truthful reading of the retirement: the action's UI home is gone,
+ * and headless is what it now is.
+ *
+ * This differs from `dataset-measure-array-string-agg-removed`, which DROPS the
+ * measure, for a reason that is about validity rather than taste: a measure
+ * with neither `aggregate` nor `derived` fails the dataset's own `superRefine`,
+ * so stripping alone would emit an item that cannot parse. An action with
+ * `locations: []` parses, and is documented to. It follows
+ * `hook-body-crypto-hash-removed`'s "the `capabilities` key itself stays (an
+ * empty grant set is legal)" instead.
+ *
+ * `retiredFromLoadPath`: the enum rejects the value outright, so a live author
+ * is taught at parse rather than silently rewritten. The entry exists so stored
+ * 16.x/17-rc rows replay clean (`applyConversionsToStoredItem` — without it a
+ * pre-removal row flags `metadata_spec_invalid` forever, mislabelling
+ * chain-owned history as a current-contract violation) and so
+ * `os migrate meta --from 16` rewrites author sources.
+ */
+const actionGlobalNavLocationRemoved: MetadataConversion = {
+  id: 'action-global-nav-location-removed',
+  toMajor: 17,
+  retiredFromLoadPath: true,
+  surface: 'action.locations[]',
+  summary:
+    "action location 'global_nav' removed (#6888 — no running-app surface rendered it; the ⌘K "
+    + 'palette reads no action metadata, while the Studio designer previewed a command-palette '
+    + 'frame for it. The value is stripped and the key kept, so an action left with no location '
+    + 'becomes the documented headless shape `locations: []`)',
+  apply(stack, emit) {
+    return mapCollection(stack, 'actions', (action, path) => {
+      const locations = action.locations;
+      if (!Array.isArray(locations) || !locations.includes('global_nav')) return action;
+      emit({ from: 'global_nav', to: '(removed)', path: `${path}.locations` });
+      return { ...action, locations: locations.filter((l) => l !== 'global_nav') };
+    });
+  },
+  fixture: {
+    before: {
+      actions: [
+        // The empty-array edge: `global_nav` was this action's ONLY location,
+        // so the strip empties the array. The key survives — see the docblock.
+        {
+          name: 'portfolio_snapshot',
+          label: 'Portfolio Snapshot',
+          type: 'script',
+          locations: ['global_nav'],
+        },
+        // Surgical: the surviving locations stay, in order, beside the strip.
+        {
+          name: 'new_task',
+          label: 'New Task',
+          type: 'modal',
+          target: 'gallery',
+          locations: ['record_header', 'global_nav', 'list_toolbar'],
+        },
+        // An action without the retired value passes through untouched.
+        {
+          name: 'mark_done',
+          label: 'Mark Done',
+          type: 'script',
+          locations: ['list_item'],
+        },
+      ],
+    },
+    after: {
+      actions: [
+        { name: 'portfolio_snapshot', label: 'Portfolio Snapshot', type: 'script', locations: [] },
+        {
+          name: 'new_task',
+          label: 'New Task',
+          type: 'modal',
+          target: 'gallery',
+          locations: ['record_header', 'list_toolbar'],
+        },
+        { name: 'mark_done', label: 'Mark Done', type: 'script', locations: ['list_item'] },
+      ],
+    },
+    // One per rewritten action — `mark_done` is untouched.
+    expectedNotices: 2,
+  },
+};
+
 export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConversion[]>> = {
   11: [flowNodeHttpRename, pageKindJsxToHtml, flowNodeFilterAlias, objectCompactLayoutRename],
   13: [stackRolesToPositions, owdLegacyReadAliases, sharingRecipientRoleToPosition],
@@ -6252,6 +6382,7 @@ export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConv
     pageStructureInertKeysRemoved,
     recordDetailsLayoutRemoved,
     appHiddenToUnpublished,
+    actionGlobalNavLocationRemoved,
   ],
 };
 

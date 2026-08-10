@@ -1,0 +1,7 @@
+{
+  "file": "packages/plugins/plugin-auth/src/auth-manager.ts",
+  "adrs": [
+    "ADR-0108"
+  ],
+  "invariant": "better-auth's organization roles map registers the closed framework vocabulary ONLY. App-declared `position` / `permission` names are not organization roles — registering one makes it storable in `sys_member.role`, which `resolve-authz-context` projects into `current_user.positions`."
+}

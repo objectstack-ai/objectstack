@@ -1,0 +1,8 @@
+{
+  "file": "packages/spec/src/contracts/objectql-engine.ts",
+  "adrs": [
+    "ADR-0067",
+    "ADR-0119"
+  ],
+  "invariant": "`transaction` is DECLARED on the `objectql` slot contract — plugin space reaches ADR-0034's ambient transaction by name, not through `as unknown as` casts. Required, not optional, per this file's own rule. Its two ADR-0119 D1 caveats are no longer plain caveats (2026-08-06 ruling on #5351/#5696): the no-`beginTransaction` degrade stays the DEFAULT but `opts.require: true` refuses it, and single-driver coverage is now enforced rather than merely stated — a cross-driver BUSINESS write inside a transaction is refused by name, an append-only SYSTEM LEDGER (`lifecycle.class` audit/telemetry/event) is carved out and executed outside it (surviving rollback: the orphan row is the decided cost for a compliance ledger), and no driver is ever handed a transaction handle it does not own. The callback's `owned` argument tells it whether it opened the transaction or JOINED an outer one (ADR-0067 D2). Do not re-describe the old 'routed elsewhere are written outside it' text: measurement disproved it — they were written on the OWNER's connection."
+}
