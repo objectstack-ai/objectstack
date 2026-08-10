@@ -36,7 +36,7 @@ genuinely requires their call.
 | `epic:#<n>` | 队列 = 父 issue #n 的子树(open 未认领 sub-issue,每轮重读)— 见「Epic 子树车道」 | — |
 | `batch:<n>` | max developer agents in flight at once | `3` |
 | `rounds:<n>` | stop after N rounds | until queue empty |
-| `mode:subagent` \| `mode:cloud` | dispatch backend — see "Dispatch backends" | `subagent` |
+| `mode:subagent` \| `mode:cloud` | dispatch backend — see "Dispatch backends" | 按卡分流:M+ ⇒ `cloud`,S 级机械 ⇒ `subagent`(维护者 2026-08-10 裁定) |
 | `#12 #34 …` | explicit issue list — overrides the label query entirely | — |
 
 ## State model — all state lives in GitHub, none locally
@@ -1986,17 +1986,26 @@ regression passes) drop to `batch:2`, or dispatch that issue via
 `mode:cloud` so it gets its own container. If an agent dies with a
 heap/OOM signature, redispatch it alone rather than into a full batch.
 
-**单容器化任务在选择期单独派卡片(维护者 2026-08-07 拍板)。** 上一段的
-「重活走 `mode:cloud`」不是事后救火,而是**批次选择时的分类动作**:每轮选单时
-PM 先给每张候选卡判定验证重量,命中任一判据即**单独派一张 `mode:cloud` 卡**
-(独享容器),⛔ 不混进共享容器批次:
+**M 及以上默认云卡(维护者 2026-08-10 裁定,#7341 item 10 —— 取代 2026-08-07 的
+「重卡例外单容器」制)。** 原话逐字引用、未翻译:
 
-- **判据(任一命中即单容器)**:`size/l` / `size/xl`;全量重生成类(动 tracked
-  生成物需整套 regen,#5837 分片即此形);验证半径跨 3 个以上包的全量测试;
-  dogfood / 浏览器验证;依赖族升级、全量回归;预计持 heavy-verify 锁超过
-  ~10 分钟的验证管线。
-- **轻卡不升舱**:S/M 级(文档、JSDoc、单文件面)留 `mode:subagent` 共享容器
-  —— 为轻卡单开容器是纯开销,规则的两个方向同等硬。
+> 确认,M 及以上默认云卡,并进 #7341
+
+派发后端因此是**批次选择时按尺寸分流**,不再是「验证重量命中判据才例外升舱」:
+
+- **M 及以上 ⇒ 默认 `mode:cloud` 单独派卡**(独享容器),⛔ 不混进共享容器批次。
+  裁决理由(维护者同日讨论留档):全程可见、可直接对话干预,价值高于逐卡容器
+  启动的开销 —— 对任何非琐碎的卡这笔账都成立。旧判据清单(`size/l` / `size/xl`;
+  全量重生成类,#5837 分片即此形;验证半径跨 3 个以上包的全量测试;dogfood /
+  浏览器验证;依赖族升级、全量回归;预计持 heavy-verify 锁超过 ~10 分钟)自此是
+  **M+ 类的示例**,不再是触发清单 —— 一条都不命中的 M 卡照样走云卡。
+- **只有 S 级机械卡留 `mode:subagent` 共享容器** —— 为琐碎卡单开容器是纯开销,
+  规则的两个方向同等硬。**S 级但不机械**的卡(判断面在设计上,不在门禁上)按
+  M 待遇走云卡 —— 与 Model tiering「尺寸不是档位的充分判据」同款读法。
+- **三条随行纪律与新默认同段生效**(均为既有条款,点名以防散落):云卡创建即对
+  其 PR 挂 `subscribe_pr_activity`(入队与落地 B);dev 报告的权威通道是 issue
+  评论(`<!-- os-dev-report -->`,报告通道统一 —— step 6);卡到终局即
+  `archive_session`(入队与落地 B 的归档动作)。
 - **判定写进认领评论,并带上模型档位**(step 5「Model tiering」)。这一行现在同时
   承载两个决定 —— 尺寸/容器 与 档位 —— 因为两者用的是同一次判读,分开写只会漂移:
   「容器判定:S 级机械卡,`mode:subagent` 共享容器,`model: sonnet`」/
@@ -2012,16 +2021,21 @@ PM 先给每张候选卡判定验证重量,命中任一判据即**单独派一�
 
 #### Dispatch backends
 
-**`mode:subagent` (default).** The `Agent` tool, as described above. The devs
+**`mode:subagent` — the S-grade mechanical lane.** The `Agent` tool, as
+described above. The devs
 run inside the PM's own session container — which in Claude Code on the web is
 already a cloud container, so the whole loop runs server-side and survives the
 browser tab closing. Reports come back directly as the subagent's final
-message. Prefer this mode: it is simpler, and the report channel is lossless.
+message — the accelerator beside the authoritative issue comment (step 6).
+Since the 2026-08-10 ruling (「M 及以上默认云卡」, the sizing section above)
+this mode is for S-grade mechanical cards, not the default for everything.
 
-**`mode:cloud`.** Each issue becomes an **independent cloud session** in the
+**`mode:cloud` — the default for M and above** (same ruling). Each issue
+becomes an **independent cloud session** in the
 same environment — its own container and fresh clone, decoupled from the PM
-session's lifetime. Use it when devs need resources/lifetime beyond one
-container, or the maintainer asks for it. Requires the `Claude_Code_Remote`
+session's lifetime. Also the fallback for any card that needs
+resources/lifetime beyond one container, whatever its size. Requires the
+`Claude_Code_Remote`
 MCP tools (available in remote/web sessions; if absent, say so and fall back
 to `mode:subagent`).
 
