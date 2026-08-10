@@ -503,12 +503,16 @@ const TEST_DEBT = {
       + '`GET /meta/:type/:name` envelope convergence). Nothing else in the package moved.',
   },
   '@objectstack/rest': {
-    errors: 163,
-    note: 'TS2835 x67 (NodeNext extensions), TS7006 x57, TS2554 x13, TS2550 x10. Also in DEBT. Measured '
+    errors: 155,
+    note: 'TS2835 x67 (NodeNext extensions), TS7006 x57, TS2554 x13, TS2550 x10 (composition as counted at '
+      + '153; not re-tallied by class at the 155 below). Graduated from DEBT in #6905 -- this TEST_DEBT '
+      + 'entry is now the sole gate on the package\'s test layer (src moved to `turbo run typecheck`). '
+      + 'Measured '
       + '105 -> 136 (5ab08428) -> 143 (77adf29, hours later the same day) -> 153 (e8db1a230). Read the '
       + 'top-of-ledger NodeNext note before sizing this one: TS2835 and the implicit-any pile it causes '
       + 'are 124 of the 153, and '
-      + 'they are one repair, not 124. Of the latest +10, 8 are attributable to three test files this '
+      + 'they are one repair, not 124. Of the +10 that then bumped 153 to a bootstrap-margin RECORDED 163, '
+      + '8 are attributable to three test files that '
       + 'window added -- rest-meta-save-receipt-envelope.test.ts x4 (#5265 / PR #5926), '
       + 'meta-item-envelope.test.ts x2 (#5563 / PR #5895), '
       + 'analytics-dataset-unlisted-refusal-envelope.test.ts x2; the remaining 2 landed in files that '
@@ -517,9 +521,14 @@ const TEST_DEBT = {
       + 'fastest-moving entry in either ledger, and it is '
       + 'the one that proved the gate works: #5278\'s own PR went red in CI on it, because a `pull_request` '
       + 'run builds the branch MERGED INTO main and three rest-touching PRs had landed since the sweep. A '
-      + 'ledger number is always a number about a moment. RECORDED 163 is a bootstrap margin (+10 over 153 '
-      + 'measured at e8db1a230 and re-confirmed at 153 an hour later at 77c7c884b) -- tighten via the ℹ '
-      + 'hint immediately after landing (#5278 option A).',
+      + 'ledger number is always a number about a moment. RECORDED 163 stood as that bootstrap margin (+10 '
+      + 'over 153 measured at e8db1a230 and re-confirmed at 153 an hour later at 77c7c884b) until #6939 '
+      + '(a surplus finding filed right after the #6905 DEBT graduation) re-measured tsc at 155 -- an 8-error '
+      + 'surplus the margin had been silently absorbing, and #7038 caught the note\'s "Also in DEBT." sentence '
+      + 'going stale in the same graduation. Lowered 163 -> 155 at 55da611 (#6939, #7038): RECORDED now '
+      + 'equals the exact measurement, no margin, so the next new error here goes red immediately -- a '
+      + 'bootstrap margin can be re-established deliberately later if that slack is wanted again '
+      + '(#5278 option A).',
   },
   '@objectstack/plugin-auth': {
     errors: 131,
