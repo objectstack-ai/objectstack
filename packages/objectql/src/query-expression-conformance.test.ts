@@ -52,6 +52,7 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
+import type { EngineQueryOptions } from '@objectstack/spec/data';
 import { ObjectQL } from './engine.js';
 
 const projectObject = {
@@ -698,15 +699,23 @@ describe('#4226 — sort / select / expand on the list path (real ObjectQL engin
         expect(bySummary.map((r: any) => r.title)).toEqual(['E', 'C', 'D', 'B', 'A']);
     });
 
-    it.each([
+    // Typed as the contract rather than asserted through it: these three sorts
+    // are perfectly well-formed `SortNode[]` — it is the FIELD they name that
+    // the engine refuses, not their shape. An `as any` here would erase the one
+    // channel that enforces `{ field, order }` on a direct engine call
+    // (`query-options/no-any-erasure`, #4674/#4918), and would have hidden the
+    // very `direction`-vs-`order` mistake that rule exists to catch.
+    const REFUSED_SORTS: Array<[string, NonNullable<EngineQueryOptions['orderBy']>]> = [
         ['ascending', [{ field: 'sort_key', order: 'asc' }]],
         ['descending', [{ field: 'sort_key', order: 'desc' }]],
         ['second of two', [{ field: 'title', order: 'asc' }, { field: 'sort_key', order: 'asc' }]],
-    ])('`engine.find` REFUSES a formula ORDER BY instead of dropping it — %s', async (_label, orderBy) => {
+    ];
+
+    it.each(REFUSED_SORTS)('`engine.find` REFUSES a formula ORDER BY instead of dropping it — %s', async (_label, orderBy) => {
         // The public boundary, reached directly — no protocol, no ingress gate.
         // This is the exact call that answered 200-in-insertion-order before
         // #7095, for both directions, byte-identically.
-        await expect(engine.find('showcase_task', { orderBy: orderBy as any }))
+        await expect(engine.find('showcase_task', { orderBy }))
             .rejects.toMatchObject({
                 status: 400,
                 code: 'INVALID_SORT',
@@ -769,7 +778,7 @@ describe('#4226 — sort / select / expand on the list path (real ObjectQL engin
         // deliberately NOT ridden in on this card. Tracked as follow-up.
         const rows: any = await engine.find('showcase_task', {
             expand: { parent_id: { orderBy: [{ field: 'sort_key', order: 'asc' }] } },
-        } as any);
+        });
         // The call succeeds and the FK ids are retained UNEXPANDED — that is
         // the backstop's contract, and what makes this observable-not-refused.
         expect(rows).toHaveLength(5);
@@ -780,7 +789,7 @@ describe('#4226 — sort / select / expand on the list path (real ObjectQL engin
         // expand being broken for every sort.
         const ok: any = await engine.find('showcase_task', {
             expand: { parent_id: { orderBy: [{ field: 'title', order: 'asc' }] } },
-        } as any);
+        });
         expect(ok.some((r: any) => typeof r.parent_id === 'object' && r.parent_id !== null)).toBe(true);
     });
 
@@ -797,10 +806,15 @@ describe('#4226 — sort / select / expand on the list path (real ObjectQL engin
         // the ADR-0112 wire envelope — so this asserts the message, which is
         // what a caller reaching for such a flag would actually be told.)
         for (const smuggled of ['allowUnmaterializedSort', 'internal', '__internal', 'tolerateDroppedSort']) {
+            // `as unknown as EngineQueryOptions`, never a bare `as any`: this
+            // input is DELIBERATELY off-contract — that is the whole subject of
+            // the assertion — so the cast names the contract being bypassed and
+            // greps as an intentional act, while the rest of the call stays
+            // type-checked (#4918's prescription for exactly this case).
             await expect(engine.find('showcase_task', {
                 orderBy: [{ field: 'sort_key', order: 'asc' }],
                 [smuggled]: true,
-            } as any)).rejects.toThrow(new RegExp(`does not recognise option.*'${smuggled}'`));
+            } as unknown as EngineQueryOptions)).rejects.toThrow(new RegExp(`does not recognise option.*'${smuggled}'`));
         }
         // And the tolerance really is gone rather than merely unreachable: the
         // shape the old hole answered 200 for now throws.
