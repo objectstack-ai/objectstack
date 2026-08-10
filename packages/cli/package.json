@@ -115,7 +115,7 @@
   },
   "devDependencies": {
     "@objectstack/driver-turso": "workspace:*",
-    "@oclif/plugin-help": "^6.2.55",
+    "@oclif/plugin-help": "^6.2.56",
     "@oclif/plugin-plugins": "^5.4.86",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^26.1.2",
