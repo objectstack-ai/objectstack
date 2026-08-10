@@ -37,13 +37,46 @@ describe('ApprovalsServicePlugin schema + nav contribution (ADR-0029 K2.b)', () 
     expect(manifest.navigationContributions).toHaveLength(1);
     const contribution = manifest.navigationContributions[0];
     expect(contribution).toMatchObject({ app: 'setup', group: 'group_approvals' });
-    expect(contribution.items.map((i: any) => i.objectName).sort()).toEqual([
+
+    // ORDER IS THE ASSERTION, not a by-product (#7234). `applyNavContributions`
+    // appends `c.items` into the group verbatim, so this array's order IS the
+    // rendered order — the inbox must come first. A set-shaped assertion (the
+    // `.sort()` this case used to open with) cannot see that, and putting the
+    // working surface below three raw tables is most of the defect #7213
+    // reported.
+    expect(contribution.items.map((i: any) => i.id)).toEqual([
+      'nav_approvals_inbox',
+      'nav_approval_requests',
+      'nav_approval_actions',
+      'nav_approval_delegations',
+    ]);
+
+    // The inbox entry addresses the component REGISTRY KEY, never a console
+    // path (objectui#2763) — the console resolves `approvals:inbox` to
+    // `component/approvals/inbox` on its side (objectui#4071).
+    const [inbox, ...rawTables] = contribution.items as any[];
+    expect(inbox).toMatchObject({
+      id: 'nav_approvals_inbox',
+      type: 'component',
+      componentRef: 'approvals:inbox',
+    });
+    // It carries no object gate: `requiresObject` names the object an entry
+    // routes to, and this one routes to a component. It needs none — a
+    // navigation CONTRIBUTION only exists while its plugin is installed, which
+    // is the same condition that makes the inbox's REST path answer.
+    expect(inbox.objectName).toBeUndefined();
+    expect(inbox.requiresObject).toBeUndefined();
+
+    // The raw engine tables stay, unchanged, as the admin/diagnostic view.
+    expect(rawTables.map((i: any) => i.objectName)).toEqual([
+      'sys_approval_request',
       'sys_approval_action',
       'sys_approval_delegation',
-      'sys_approval_request',
     ]);
-    // Each entry is gated so the slot stays empty when the plugin is absent.
-    for (const item of contribution.items) {
+    // Each object entry is gated so the slot degrades cleanly when an object is
+    // not registered.
+    for (const item of rawTables) {
+      expect(item.type).toBe('object');
       expect(item.requiresObject).toBe(item.objectName);
     }
   });

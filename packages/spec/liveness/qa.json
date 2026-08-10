@@ -1,0 +1,68 @@
+{
+  "type": "qa",
+  "_note": "TestSuiteSchema (packages/spec/src/qa/testing.zod.ts) — the Quality Protocol file surface: an author writes `qa/*.test.json`, `os test` loads it, and core's TestRunner executes it. Seeded 2026-08-10 (#6247), the ENFORCE leg of an enforce-or-remove call that was ruled the other way first and then withdrawn, which is the lesson worth keeping. #6247 filed this domain as declared-but-inert on a grep that scanned only `*Schema` identifiers; every consumer here reads the TYPE names (`QA.TestSuite`, `QA.TestScenario`, `QA.TestStep`, `QA.TestAction`, `QA.TestAssertion`), so the search matched nothing and a complete execution chain read as zero consumers. The 2026-08-07 retire ruling rested on that reading and was WITHDRAWN on 2026-08-08 (issue comment 5225532429) once the sweep's pre-flight gate falsified it. A schema with no `parse` site is not the same finding as a schema with no consumer, and only the first one was true. The measured chain, by layer: the RUNNER (packages/core/src/qa/runner.ts) reads suite.scenarios, scenario.id/setup/steps/teardown and step.name/action/capture/assertions; the ADAPTER (packages/core/src/qa/http-adapter.ts) switches on action.type — its case labels ARE the TestActionTypeSchema values — and reads target/payload/user; both are published through packages/core/src/index.ts:25 (`export * as QA`); the driving entry point is the shipped oclif command `os test` (packages/cli/src/commands/test.ts), documented at content/docs/deployment/cli.mdx:987,1012-1020 and packages/cli/README.md:104. WALK BOUNDARY, recorded rather than silently skipped: the gate classifies one level and this file drills `scenarios` one more, so the verdicts here cover the suite and scenario levels only. Step / action / assertion keys sit BELOW the walk; they were measured in the same pass and their verdicts are recorded in the `setup`/`steps`/`teardown` notes instead of being fanned out into rows the gate would not check. AUTHOR-WARN CHANNEL: none exists for this type, and no entry is marked `authorWarn` for that reason (`_authorWarnSkipped`). The CLI lint (packages/lint/src/lint-liveness-properties.ts) walks stack COLLECTIONS — `stack.flows`, `stack.views`, … — and a QA suite is not part of a stack at all; it is a loose JSON file `os test` globs off disk. Marking an entry `authorWarn` here would produce a warning nothing can emit, which is the same silent no-op this ledger exists to catch, so the dead entries below carry their correction in `note` and the load-site parse (below) is what actually reaches the author. LOAD-SITE ENFORCEMENT: the same change that seeded this file replaced the CLI's `JSON.parse(content) as QA.TestSuite` cast — the schema author's own `// Should validate with Zod` TODO — with a real `TestSuiteSchema.safeParse`, so a malformed suite is named at load time instead of reaching the runner as a lie about its own shape. That is what makes the `live` rows below enforced rather than merely read. No `qa` property is a bound HIGH_RISK class in proof-registry.mts, so no entry carries a `proof`; none is invented to look thorough.",
+  "props": {
+    "name": {
+      "status": "dead",
+      "verifiedAt": "2026-08-10",
+      "evidenceScope": "in-repo",
+      "note": "Parsed and never read. `TestRunner.runSuite` (packages/core/src/qa/runner.ts:25-31) touches only `suite.scenarios`, and the one caller prints `path.basename(file)` as the suite heading (packages/cli/src/commands/test.ts:95) — so renaming a suite changes nothing an operator sees. Kept, not retired: it is display-shaped metadata whose describe() promises no capability ('Test suite name'), and it is the natural title the moment anything reports per-suite results. The honest reading is that the FILE NAME is the suite identity today. Recorded so the next reader does not have to re-derive that, and so that wiring it up counts as making a dead key live rather than as a no-op refactor."
+    },
+    "scenarios": {
+      "children": {
+        "id": {
+          "status": "live",
+          "evidence": "packages/core/src/qa/runner.ts:101 (TestResult.scenarioId), :47 (the same id on the setup-failure path)",
+          "verifiedAt": "2026-08-10",
+          "evidenceScope": "in-repo",
+          "note": "The scenario identity in every result the CLI prints (packages/cli/src/commands/test.ts:104) and the ONLY human-readable handle a failing run gives you — `name` is not printed anywhere. Not deduplicated: two scenarios may declare the same id and both run, so an id collision shows up as two indistinguishable result lines rather than an error."
+        },
+        "name": {
+          "status": "dead",
+          "verifiedAt": "2026-08-10",
+          "evidenceScope": "in-repo",
+          "note": "Its describe() says 'Scenario name for test reports' and no report carries it: `TestResult` (packages/core/src/qa/runner.ts:6-12) has `scenarioId` and no name field, and the CLI prints `result.scenarioId` (packages/cli/src/commands/test.ts:104). So an author who writes a careful human-readable `name` and a terse `id` gets the terse one in every failure message. Mildly misleading rather than benign — the describe() names an output that does not exist — but it is a display key with an obvious enforcement route (print it beside the id), which is why the note carries the correction instead of a retirement."
+        },
+        "description": {
+          "status": "dead",
+          "verifiedAt": "2026-08-10",
+          "evidenceScope": "in-repo",
+          "note": "Docs-shaped annotation, no consumer — the same disposition `flow.description` and `hook.label`/`description` carry and for the same reason: an author is not misled by a field that only claims to describe. Exempt from enforce-or-remove (ADR-0033)."
+        },
+        "tags": {
+          "status": "dead",
+          "verifiedAt": "2026-08-10",
+          "evidenceScope": "in-repo",
+          "note": "The sharpest row in this file. Its describe() promises 'Tags for filtering and categorization (e.g. \"critical\", \"regression\", \"crm\")' and NOTHING filters on it: `os test` has exactly two flags, `--url` and `--token` (packages/cli/src/commands/test.ts:62-65), the runner never reads `scenario.tags`, and the only selection the command offers is the file glob. So `os test --tags critical` is not a narrower run, it is an unknown-flag error, and a suite tagged `regression` runs on every invocation. This is the entry that would carry `authorWarn` if the type had a channel for one (see `_authorWarnSkipped` in the file note): an author tagging scenarios is buying a filter that does not exist. Enforce-or-remove worklist — the enforce route is a `--tags` filter in the command, the remove route drops the key; either is a decision, not a cleanup."
+        },
+        "setup": {
+          "status": "live",
+          "evidence": "packages/core/src/qa/runner.ts:41-54 (run before the main steps; a throw here aborts the scenario with 'Setup failed' and no step results)",
+          "verifiedAt": "2026-08-10",
+          "evidenceScope": "in-repo",
+          "note": "Array of TestStep — one level below the walk, measured in the same pass and recorded here rather than fanned into rows the gate would not check. Step keys: `name` LIVE (runner.ts:67, :76 — the label on every step result), `action` LIVE (:112, the only thing actually executed), `capture` LIVE (:118-121, writes result paths into the scenario variable context that `{{var}}` interpolation reads at :136), `assertions` LIVE (:125-128), `description` DEAD (docs-shaped, unread, kept). Action keys: `type` LIVE (http-adapter.ts:21 switch), `target` LIVE (:23-33), `payload` LIVE (:23-35), `user` LIVE (:17-18 — emitted as the `X-Run-As` header, so impersonation is only as real as the server's handling of that header). Assertion keys: `field` LIVE (runner.ts:160), `operator` LIVE (:164), `expectedValue` LIVE (:161). Two VALUE-level gaps, both loud rather than silent, and neither of them a key verdict (the api.json `type` precedent): `run_script` is in TestActionTypeSchema with no adapter branch and throws 'Unsupported action type', and the `not_contains`/`gt`/`gte`/`lt`/`lte`/`error` operators throw 'Unknown assertion operator'. The one genuinely silent path is `contains` against an actual that is neither array nor string (runner.ts:171-177), which falls through and PASSES — filed separately."
+        },
+        "steps": {
+          "status": "live",
+          "evidence": "packages/core/src/qa/runner.ts:62-83 (the main sequence; stops at the first failing step)",
+          "verifiedAt": "2026-08-10",
+          "evidenceScope": "in-repo",
+          "note": "The required member — a scenario with an empty `steps` array parses, runs nothing, and reports passed. Step/action/assertion sub-keys are recorded on the `setup` entry above; all three arrays are the same TestStep surface executed by the same `runStep`."
+        },
+        "teardown": {
+          "status": "live",
+          "evidence": "packages/core/src/qa/runner.ts:86-98 (runs even after a failed step, and does not mask an existing failure)",
+          "verifiedAt": "2026-08-10",
+          "evidenceScope": "in-repo",
+          "note": "Same TestStep surface as `setup`/`steps`. Worth knowing: a teardown throw only turns the scenario red when the scenario had otherwise PASSED (:92-95), so cleanup failures behind a real failure are swallowed on purpose."
+        },
+        "requires": {
+          "status": "dead",
+          "verifiedAt": "2026-08-10",
+          "evidenceScope": "in-repo",
+          "note": "Declared environment preconditions — `requires.params` (environment variables) and `requires.plugins` (plugins that must be loaded) — that nothing checks. Neither the runner nor the CLI reads `scenario.requires`; there is no skip path and no precondition failure in the code at all, so a suite that declares `plugins: ['plugin-sharing']` runs unchanged against a server without it and fails later as an unexplained HTTP error. That is the misleading direction — the author reads it as a guard and gets none — so it belongs on the enforce-or-remove worklist beside `tags`, not in the docs-shaped bucket with `description`. Enforce route: check requirements before running and report the scenario as skipped-with-reason. Remove route: drop the block, since a precondition that is never checked is worse than an absent one."
+        }
+      }
+    }
+  }
+}
