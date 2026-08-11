@@ -85,7 +85,18 @@ describe('provisionSearchCompanion', () => {
     expect(col.readonly).toBe(true);
     expect(col.system).toBe(true);
     expect(col.searchable).toBe(false);
-    expect(col.index).toBe(true);
+    // [#7561] Was `expect(col.index).toBe(true)` — this line pinned the DEFECT
+    // rather than the contract. `index` is not a `FieldSchema` key (removed in
+    // the 16.x line, #2377 / ADR-0049, because a field-level index flag built no
+    // index), and `FieldSchema` is a `strictObject`, so stamping it badged every
+    // object carrying a companion `_diagnostics: { valid: false }` and drove
+    // `GET /api/v1/meta/diagnostics` to 94/94 INVALID. The key is now absent,
+    // and no index is declared in its place: this column's only reader is a
+    // `$contains`, which no B-tree serves. See the docblock in
+    // `search-companion.ts` and the pins in
+    // `stamped-system-fields-spec-conformance.test.ts`.
+    expect(col.index).toBeUndefined();
+    expect(Object.keys(col)).not.toContain('index');
   });
 
   it('is idempotent and skips ineligible / opted-out objects unchanged', () => {

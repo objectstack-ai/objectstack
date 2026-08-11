@@ -415,14 +415,18 @@ export const RangeOperatorSchema = lazySchema(() => z.object({
  *
  * The `$contains`-family alignment the ruling above requires is likewise part
  * done rather than pending: #6518 made that family case-EXACT across the SQL
- * dialects, while `driver-memory`'s query path and `driver-mongodb` still fold
- * the whole Unicode range — the two rows #6682 tracks.
+ * dialects and #6682 did the same on `driver-mongodb` (the hardcoded
+ * `$options: 'i'` is off all four arms, and that driver's every face — query,
+ * count, write and the aggregation `$match` — routes through the one
+ * `translateFilter`, so there is no second answer). `driver-memory`'s query and
+ * analytics faces still fold the whole Unicode range while its reference
+ * matcher does not — the one row #6682 still tracks, and the one package that
+ * answers this operator two ways.
  *
  * `FILTER_TEXT_CASES` (`filter-text-conformance.ts`) is the standard that
  * measures all of the above, and the driver-conformance ledger still carries a
- * DEBT row for `driver-memory` and `driver-mongodb` — on requirement 2 alone
- * now, since #6520 closed requirement 1 on both — so what is open stays counted
- * rather than assumed.
+ * DEBT row for `driver-memory` — on requirement 2 alone now, since #6520 closed
+ * requirement 1 — so what is open stays counted rather than assumed.
  *
  * @see FILTER_TEXT_CASES — the conformance standard for every operator here.
  * @see RETIRED_FILTER_OPERATORS — why `$regex` is not in this list.
@@ -1351,6 +1355,22 @@ export function isFilterAST(filter: unknown): boolean {
 // ============================================================================
 
 /**
+ * [#7597] Is this comparand a Filter Protocol FIELD REFERENCE — the
+ * {@link FieldReferenceSchema} shape `{ $field: 'other_column' }`?
+ *
+ * The `$field` value must be a STRING, which is what the schema declares. The
+ * predicate deliberately matches `driver-sql`'s `fieldReferenceOf`: a comparand
+ * whose `$field` is not a string is not a field reference on any path, so it
+ * keeps the literal lowering below and is refused downstream as the
+ * uncompilable object it is — rather than being promoted here into a `$eq` the
+ * drivers would then have to un-recognise.
+ */
+function isFieldReferenceComparand(value: unknown): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  return typeof (value as Record<string, unknown>).$field === 'string';
+}
+
+/**
  * Convert a single AST comparison node `[field, operator, value]` to a FilterCondition object.
  */
 function convertComparison(node: [string, string, unknown]): FilterCondition {
@@ -1360,8 +1380,35 @@ function convertComparison(node: [string, string, unknown]): FilterCondition {
   // Special case: equality shorthand. `equals`/`eq` are the view vocabulary's
   // spellings of the same thing and must produce the same output, or one filter
   // would compile two different ways depending on how the author spelled it.
+  //
+  // [#7597] …with ONE comparand excepted: a `{ $field }` reference. The
+  // implicit-equality form `{ field: comparand }` says "equals" only because a
+  // LITERAL sitting in a field's value position means equality. A field
+  // reference sitting there produces `{ amount: { $field: 'budget' } }` — an
+  // object whose only key starts with `$`, which every consumer reads as an
+  // OPERATOR SPEC named `$field`, not as a comparand. Nothing implements that
+  // operator: the in-memory evaluator (`matches-filter.ts` `evalField` →
+  // `evalOp`) has no arm for it and answers its fail-closed `false`, so the
+  // filter silently matched NO record, while `['amount', '>', ref]` — which
+  // keeps its operator — worked on both paths. Two spellings of one intent,
+  // two fates, and the losing one is silent.
+  //
+  // So the reference comparand is lowered to the EXPLICIT `$eq` spelling, which
+  // is the spelling both evaluation paths already implement (the memory
+  // evaluator resolves the reference in `resolveValue`; `driver-sql` compiles it
+  // to a column-to-column comparison, #5222). This is a change to what the ARRAY
+  // SUGAR produces and nothing else — a hand-authored bare
+  // `{ field: { $field: … } }` FilterCondition keeps exactly today's fate
+  // (memory fail-closed `false`; SQL's refusal naming `$eq`), because the
+  // evaluator's unknown-operator posture is #6520's decision and stands.
+  //
+  // All four `$eq` spellings of {@link AST_OPERATOR_MAP} are covered — the
+  // condition below is that key set, and `filter.test.ts` pins the two lists
+  // together so a fifth spelling cannot enter the map and miss this branch.
   if (op === '=' || op === '==' || op === 'equals' || op === 'eq') {
-    return { [field]: value } as FilterCondition;
+    return isFieldReferenceComparand(value)
+      ? ({ [field]: { $eq: value } } as FilterCondition)
+      : ({ [field]: value } as FilterCondition);
   }
 
   // Null / empty predicates — direction comes from the operator NAME, not the

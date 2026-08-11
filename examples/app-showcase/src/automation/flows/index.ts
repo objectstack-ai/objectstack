@@ -411,9 +411,9 @@ export const ScheduledDigestFlow = defineFlow({
  * needs a real bot token + channel), this flow dispatches to the `rest`
  * connector contributed by `@objectstack/connector-rest`, configured to point
  * at the running server itself. On task completion it issues
- * `GET /api/v1/health`; the request and its `{ status: 'ok' }` response are
- * captured on the flow run, so the connector dispatch is fully observable
- * without any external service or credentials.
+ * `GET /api/v1/health`; the response body is captured on the flow run as the
+ * declared output variable `ping.body` (`{ status: 'ok' }`), so the connector
+ * dispatch is fully observable without any external service or credentials.
  */
 export const TaskCompletedRestPingFlow = defineFlow({
   name: 'showcase_task_completed_rest_ping',
@@ -421,6 +421,12 @@ export const TaskCompletedRestPingFlow = defineFlow({
   description: 'Calls the local server health endpoint via the rest connector when a task is marked Done.',
   type: 'autolaunched',
   status: 'active',
+  // Surface the health response on the run output. Nothing is captured on a run
+  // unless the flow ASKS for it: the engine collects `run.output` from the
+  // declared `isOutput` variables only (#7542). The `request` action of the
+  // `rest` connector returns `{ status, ok, body }`, written back under
+  // `${nodeId}.${key}` — so `ping.body` is the parsed `{ status: 'ok' }` payload.
+  variables: [{ name: 'ping.body', type: 'json', isOutput: true }],
   nodes: [
     {
       id: 'start',
@@ -464,8 +470,9 @@ export const TaskCompletedRestPingFlow = defineFlow({
  * `rest` generic executor (ADR-0097). Nothing registered it in code: the
  * `connectors:` entry named `provider: 'rest'`, and the automation service turned
  * it into a live connector. On task creation the flow issues `GET /api/v1/health`
- * through it; the call and its `{ status: 'ok' }` response are captured on the
- * flow run, proving the declarative path dispatches end-to-end.
+ * through it; the response body is captured on the flow run as the declared
+ * output variable `ping.body` (`{ status: 'ok' }`), proving the declarative path
+ * dispatches end-to-end.
  */
 export const ShowcaseDeclarativeConnectorPingFlow = defineFlow({
   name: 'showcase_declarative_connector_ping',
@@ -474,6 +481,11 @@ export const ShowcaseDeclarativeConnectorPingFlow = defineFlow({
     'Dispatches GET /api/v1/health through showcase_status_api — a provider-bound connector instance materialized from pure metadata at boot.',
   type: 'autolaunched',
   status: 'active',
+  // Same as TaskCompletedRestPingFlow above: the materialized `showcase_status_api`
+  // instance is built by the same `rest` factory, so its `request` action returns
+  // `{ status, ok, body }` and `ping.body` carries the `{ status: 'ok' }` payload
+  // onto `run.output` (#7542).
+  variables: [{ name: 'ping.body', type: 'json', isOutput: true }],
   nodes: [
     {
       id: 'start',

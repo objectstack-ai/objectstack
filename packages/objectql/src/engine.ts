@@ -6285,6 +6285,40 @@ export class ObjectQL implements IObjectQLEngine {
         // succeeds. `expand` is intentionally omitted from this query so `find`
         // does not re-expand — nested relations recurse below under the depth
         // guard.
+        //
+        // [#7537] The join key is MACHINERY, not a caller-chosen column. This
+        // sub-read's projection is forwarded from `nestedAST.fields`, and the
+        // map built below is keyed on `rec.id` — so a nested projection that did
+        // not name `id` returned rows carrying no `id`, built an EMPTY map, and
+        // fell through the `recordMap.get(...) ?? val` injection, writing the
+        // original foreign key back. The expansion was then indistinguishable
+        // from never having been requested: `200`, and the field still holds a
+        // valid-looking id.
+        //
+        // The failing spelling is the one the platform itself PRESCRIBES: both
+        // `FIELD_NODE_OBJECT_FORM_REMOVED` and `QUERY_JOINS_REMOVED`
+        // (`query.zod.ts`) tell authors migrating off the retired nested-select
+        // object form and off `query.joins` to write
+        // `expand: { owner: { object: 'user', fields: ['name'] } }`. Refusing the
+        // mismatch would turn two retirement messages' own migration target into
+        // an error, so the prescribed form is made to WORK instead: `id` is added
+        // to the sub-read unconditionally and stripped back out of the emitted
+        // nested record when the caller did not ask for it.
+        //
+        // `id` is the only join key there is, literally: `referenceTargetOf`
+        // yields the target OBJECT and a reference field carries no
+        // target-column metadata, so the batch filter above is `{ id: { $in } }`
+        // by construction. There is no configurable key to add instead.
+        //
+        // Only a driver that honours a projection exactly could ever show this —
+        // `SqlDriver` emits `builder.select(query.fields)` verbatim, while
+        // `InMemoryDriver.projectFields` force-adds `id` to every projection,
+        // which is why mock/in-memory suites could not reach the defect and a
+        // better-sqlite3 QA run (#7463) could.
+        const nestedFields = Array.isArray(nestedAST.fields) && nestedAST.fields.length > 0
+          ? nestedAST.fields
+          : undefined;
+        const joinKeyRequested = !nestedFields || nestedFields.includes('id');
         const relatedRecords = await this.find(
           referenceObject,
           {
@@ -6292,7 +6326,9 @@ export class ObjectQL implements IObjectQLEngine {
             // [#6300] The `as any` these two carried is gone: `find` takes the
             // author state now, and the parsed nodes a `QueryAST` holds are
             // valid author input (a present `order` is legal to write).
-            ...(nestedAST.fields ? { fields: nestedAST.fields } : {}),
+            ...(nestedAST.fields
+              ? { fields: joinKeyRequested ? nestedAST.fields : [...nestedFields!, 'id'] }
+              : {}),
             ...(nestedAST.orderBy ? { orderBy: nestedAST.orderBy } : {}),
             context: { ...(execCtx ?? {}), __expandRead: true } as ExecutionContext,
           },
@@ -6319,6 +6355,20 @@ export class ObjectQL implements IObjectQLEngine {
           for (const rec of expandedRelated) {
             const id = rec.id;
             if (id != null) recordMap.set(String(id), rec);
+          }
+        }
+
+        // [#7537] Strip the join key back out when the caller did not name it.
+        // It was added above for THIS function's own lookup, so the emitted
+        // nested record carries exactly the columns the projection asked for —
+        // the same contract a top-level `fields` gets. Deliberately AFTER the
+        // recursive expand: that block rebuilds `recordMap` keyed on `rec.id`
+        // and still needs the key present. Each related record is stripped once
+        // here rather than per-parent, because one record object is injected
+        // into every parent that points at it.
+        if (!joinKeyRequested) {
+          for (const rec of recordMap.values()) {
+            if (rec && typeof rec === 'object') delete rec.id;
           }
         }
 

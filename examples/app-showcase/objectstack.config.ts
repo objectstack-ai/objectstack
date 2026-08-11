@@ -35,6 +35,7 @@ import { allEmails } from './src/system/emails/index.js';
 import { allBooks } from './src/system/books/index.js';
 import { allApis } from './src/system/apis/index.js';
 import { allConnectors } from './src/system/connectors/index.js';
+import { resolveShowcaseSelfUrl } from './src/system/self-url.js';
 import {
   allPositions,
   allPermissionSets,
@@ -110,7 +111,11 @@ export default defineStack({
   // ships the dispatch node + an empty registry; these plugins populate it.
   //   • rest    → points at the running server itself, so the REST connector
   //               flow's call + response are observable on the flow run with no
-  //               external dependency. Override the target with SHOWCASE_SELF_URL.
+  //               external dependency. The target is resolved by
+  //               src/system/self-url.ts — SHOWCASE_SELF_URL, else the CLI's
+  //               own OS_PORT / PORT, else http://127.0.0.1:3000 — and the
+  //               declarative connector instances in src/system/connectors/
+  //               resolve through the SAME helper (#7538).
   //   • slack   → registered so TaskCompletedSlackFlow resolves its connector;
   //               live posting needs a real bot token (set SLACK_BOT_TOKEN).
   //   • openapi → option-less: contributes only the `openapi` provider factory
@@ -132,7 +137,10 @@ export default defineStack({
     new ConnectorMcpPlugin({ declarativeStdio: ['node'] }),
     new ConnectorRestPlugin({
       name: 'rest',
-      baseUrl: process.env.SHOWCASE_SELF_URL ?? 'http://127.0.0.1:3000',
+      // Shared with the declarative connector instances in
+      // src/system/connectors/ (#7538) — one resolver, so the two self-URL
+      // sources cannot drift apart.
+      baseUrl: resolveShowcaseSelfUrl(),
     }),
     new ConnectorSlackPlugin({
       token: process.env.SLACK_BOT_TOKEN ?? 'xoxb-showcase-demo-token',

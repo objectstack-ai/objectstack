@@ -135,7 +135,12 @@ const query: QueryAST = {
     industry: 'tech',
     annual_revenue: { $gt: 1000000 }
   },
-  fields: ['company_name', 'industry', 'owner.name'],
+  // `fields` names the object's OWN columns — a dotted path ('owner.name') is
+  // refused by the ingress (400 INVALID_FIELD, #7532). Related data comes from
+  // `expand`, which resolves THROUGH the foreign key, so `owner_id` has to stay
+  // in the projection.
+  fields: ['company_name', 'industry', 'owner_id'],
+  expand: { owner_id: { object: 'user', fields: ['name'] } },
   orderBy: [{ field: 'created_at', order: 'desc' }],
   limit: 10
 };
@@ -144,35 +149,27 @@ const query: QueryAST = {
 **Runtime compilation to different databases:**
 
 ```sql
--- PostgreSQL (with JOIN)
-SELECT c.company_name, c.industry, u.name AS "owner.name"
-FROM customer c
-LEFT JOIN user u ON c.owner_id = u.id
-WHERE c.industry = 'tech' AND c.annual_revenue > 1000000
-ORDER BY c.created_at DESC
+-- PostgreSQL
+SELECT company_name, industry, owner_id
+FROM customer
+WHERE industry = 'tech' AND annual_revenue > 1000000
+ORDER BY created_at DESC
 LIMIT 10;
+
+-- …then `expand` is a second, batched read on the related object — driver-agnostic,
+-- not a JOIN the driver renders:
+SELECT id, name FROM "user" WHERE id IN (…the owner_ids of the page above);
 ```
 
 ```javascript
 // MongoDB
-db.customer.aggregate([
-  {
-    $match: {
-      industry: 'tech',
-      annual_revenue: { $gt: 1000000 }
-    }
-  },
-  {
-    $lookup: {
-      from: 'user',
-      localField: 'owner_id',
-      foreignField: '_id',
-      as: 'owner'
-    }
-  },
-  { $sort: { created_at: -1 } },
-  { $limit: 10 }
-]);
+db.customer.find(
+  { industry: 'tech', annual_revenue: { $gt: 1000000 } },
+  { company_name: 1, industry: 1, owner_id: 1 }
+).sort({ created_at: -1 }).limit(10);
+
+// …then the same batched expand read, spelled $in:
+db.user.find({ _id: { $in: [/* the owner_ids of the page above */] } }, { name: 1 });
 ```
 
 ### 4. Validation: Business Rules as Data

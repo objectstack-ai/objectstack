@@ -73,3 +73,5 @@ is the segregation-of-duties case the axis exists for.
   revoked. `html_table` stays a read — it is a rendered view, not a bulk copy.
   Deployments without `plugin-security` are unaffected (no permission sets
   exist, so the axis does not apply).
+
+<!-- adr-0087: registered export-axis-opt-in -->
