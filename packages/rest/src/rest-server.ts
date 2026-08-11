@@ -587,6 +587,63 @@ const UNCLASSIFIED_FAULT = (): { status: number; body: Record<string, unknown> }
  * match: the fail-loud direction is what this issue asked for, and there is no
  * producer of the bare `table not found` phrasing in this repo to regress.
  */
+/**
+ * [#7525] The HTTP status a producer DECLARED for this error, or `undefined`
+ * when it declared none — read over BOTH spellings the repo's producers use,
+ * `status` first and `statusCode` second.
+ *
+ * **This is the seam the hook-refusal defect lived on.** `mapDataError`'s
+ * passthrough asked `typeof error.status === 'number'` and nothing else, while
+ * an engine lifecycle hook that refuses a write declares its status as
+ * `statusCode`:
+ *
+ * ```ts
+ * // plugin-approvals/src/lifecycle-hooks.ts
+ * err.code = 'RECORD_LOCKED'; err.statusCode = 409;   // a pending lockRecord approval
+ * err.code = 'FORBIDDEN';     err.statusCode = 403;   // a forged delegation row
+ * ```
+ *
+ * So the refusal never reached the passthrough at all: it fell past every
+ * structured branch, matched no message heuristic, and left through
+ * `UNCLASSIFIED_FAULT` as `500 INTERNAL_ERROR` with no `code` — for a
+ * deliberate, well-understood business refusal, on every direct `/api/v1/data`
+ * caller. #5582 widened that same passthrough's *range* (4xx -> 400-599) and is
+ * not the fix here; the status was being dropped one question earlier, at
+ * "did the producer declare one".
+ *
+ * **Why the boundary rather than the two hooks.** `status` -> `statusCode` -> default
+ * is already what EVERY other HTTP exit in this repo reads — `runtime`'s
+ * `HttpDispatcher.errorFromThrown` (#3867), `dispatcher-plugin.errorResponseBase`,
+ * `endpoint-executor`, `domains/actions`, `plugin-hono-server`'s user endpoints.
+ * `mapDataError` was the one exit that read a single spelling, which is why one
+ * thrown error came back as `403` through a dispatcher route and as `500`
+ * through `/api/v1/data`. Teaching the two approvals hooks to spell it `status`
+ * would fix two producers and leave the boundary answering 500 for the next
+ * one — including `runtime`'s own `action-execution.ts`, which throws
+ * `{ statusCode: 503 | 501 | 400 }`, and `metadata-protocol`'s
+ * `{ statusCode: 404 }`. The producers are well-behaved; the exit was strict
+ * about a spelling nobody standardised.
+ *
+ * ⚠️ Deliberately NOT the same question as {@link declaresServerFault}, whose
+ * `status`-only read is UNCHANGED and stays that way (#5811): that predicate is
+ * a *disclosure* rule — "may this message be withheld" — and was ruled to not
+ * depend on which spelling a producer reached for. This is *status resolution*,
+ * the read that has always been two-spelling everywhere else.
+ *
+ * The band is the same 400-599 {@link resolveErrorResponse} opens, so a
+ * nonsense status is not a declaration. A non-numeric `status` falls through to
+ * `statusCode` rather than blocking it, which is what makes better-auth's
+ * `APIError` (`{ statusCode: 403, status: 'FORBIDDEN' }` — the status field is a
+ * STRING there) resolve to the status it meant instead of to nothing.
+ */
+function declaredHttpStatus(error: any): number | undefined {
+    const declared =
+        (typeof error?.status === 'number' ? error.status : undefined) ??
+        (typeof error?.statusCode === 'number' ? error.statusCode : undefined);
+    if (declared === undefined || !(declared >= 400 && declared < 600)) return undefined;
+    return declared;
+}
+
 function missingRelationIsObject(raw: string, object: string | undefined): boolean {
     if (!object) return false;
     const named =
@@ -847,7 +904,13 @@ export function mapDataError(error: any, object?: string): { status: number; bod
     // fires precisely when a response dropped the error's own message — so the
     // 502/503 band that `isExpectedRouteError` keeps quiet still leaves the
     // operator a line carrying the full original error.
-    if (typeof error?.status === 'number' && error.status >= 400 && error.status < 600) {
+    //
+    // [#7525] The gate is {@link declaredHttpStatus} rather than an in-line read
+    // of `error.status`: the same 400-599 band, asked over both spellings a
+    // producer may have declared it in. See that docblock for why an engine
+    // hook's refusal never reached this branch at all.
+    const declaredStatus = declaredHttpStatus(error);
+    if (declaredStatus !== undefined) {
         // [#5582] A declared server fault: keep the status, keep the
         // machine-readable `code`, drop the prose. Byte-identical to
         // {@link resolveErrorResponse}'s 5xx arm — one condition, one wire
@@ -873,12 +936,26 @@ export function mapDataError(error: any, object?: string): { status: number; bod
         // would put a code on the wire the producer never wrote — while
         // re-deriving the status from the message text is the defect this
         // branch exists to remove.
-        if (error.status >= 500) {
+        //
+        // [#7525] It is asked over the RESOLVED status — `declaresServerFault({
+        // status: declaredStatus, code: error?.code })` — not over the raw
+        // error, and the two arguments are the predicate's entire input, so
+        // nothing about its verdict is loosened. Asking it over the raw error
+        // instead would split this branch against itself: a producer declaring
+        // `{ statusCode: 503, code: 'SERVICE_UNAVAILABLE' }` would take the 5xx
+        // arm (the status resolved) and then be told it declared no server
+        // fault (the `status` field being absent), shipping a 503 with its
+        // ADR-0112 code silently dropped. The predicate's OWN read stays
+        // `status`-only for its own callers — this is one call site handing it
+        // the status this boundary just resolved.
+        if (declaredStatus >= 500) {
             return {
-                status: error.status,
+                status: declaredStatus,
                 body: {
                     error: INTERNAL_ERROR_MESSAGE,
-                    ...(declaresServerFault(error) ? { code: error.code as string } : {}),
+                    ...(declaresServerFault({ status: declaredStatus, code: error?.code })
+                        ? { code: error.code as string }
+                        : {}),
                 },
             };
         }
@@ -892,7 +969,7 @@ export function mapDataError(error: any, object?: string): { status: number; bod
             ? truncateClientMessage(error.message)
             : 'Request failed';
         return {
-            status: error.status,
+            status: declaredStatus,
             body: {
                 error: msg,
                 ...(typeof error?.code === 'string' && error.code ? { code: error.code } : {}),
@@ -1258,6 +1335,13 @@ function resolveErrorResponse(error: any, object?: string): { status: number; bo
     // status-passthrough: `mapDataError` owns its canonical envelope
     // (`OBJECT_NOT_FOUND`), and short-circuiting here would ship a second wire
     // code for the same condition depending on which route caught it.
+    //
+    // [#7525] Deliberately still a `status`-only read HERE. An error that
+    // declares its status as `statusCode` instead is not skipped — it falls to
+    // `mapDataError` below, whose {@link declaredHttpStatus} gate reads both
+    // spellings and answers with the same status/code/withhold rules this arm
+    // applies. So the two doors already agree on the wire answer, and this one
+    // is not duplicating the two-spelling read to say so.
     const passThroughStatus = error?.code !== 'OBJECT_NOT_FOUND'
         && typeof error?.status === 'number' && error.status >= 400 && error.status < 600;
     if (passThroughStatus) {
