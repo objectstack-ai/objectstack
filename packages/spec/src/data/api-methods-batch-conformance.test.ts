@@ -42,14 +42,49 @@ const WRITE_PRIMITIVES = ['create', 'update', 'delete'] as const;
 
 /**
  * Objects that deliberately expose single-record writes but NO batch route,
- * keyed by object name with the reason. Empty today: every tightened whitelist
- * in the monorepo either grants `bulk` or grants no write verb at all.
+ * keyed by object name with the reason. Every other tightened whitelist in the
+ * monorepo either grants `bulk` or grants no write verb at all.
  *
  * Adding an entry is a real decision — batch denial is invisible until a user
  * multi-selects rows and `data-objectstack` rethrows the 405 without falling
  * back to per-row writes. Write down why the object is worth that.
  */
-const SINGLE_RECORD_WRITE_ONLY: Record<string, string> = {};
+const SINGLE_RECORD_WRITE_ONLY: Record<string, string> = {
+  // #7802. `update` arrived in #7727/#7769 for exactly one gesture on exactly
+  // one column: the `revoke_api_key` / `restore_api_key` row actions PATCH
+  // `revoked` on ONE key. The multi-select surface this rule protects does not
+  // exist for API keys, and the shape a future one would take does not need
+  // `bulk` either — both read off the console build this release pins
+  // (`.objectui-sha` 6314e87f2, `packages/plugin-grid`):
+  //
+  //  · No checkbox column is rendered. None of the object's four list views
+  //    declares `bulkActions` / `bulkActionDefs` / `selection`, and `ObjectGrid`
+  //    auto-enables multi-select only when a bulk action exists. The single
+  //    implicit one is bulk-delete, gated on the resolved `delete` affordance —
+  //    false here three times over (`managedBy: 'better-auth'` denies by
+  //    default, `userActions` opens `edit` alone, and `delete` is not in
+  //    `apiMethods`). So there is no selection to batch.
+  //  · A multi-select revoke, if the product ever wants one, still would not
+  //    reach `/batch`. Both actions are `locations: ['list_item']`; naming one
+  //    in a view's `bulkActions` promotes it to `operation: 'custom'` +
+  //    `actionDef`, which `useBulkExecutor` fans out through the action runner
+  //    as N single-record PATCHes against the route #7769 opened. The data-plane
+  //    `bulk` primitive is reached only by an `update`/`delete` bulk def, which
+  //    this object neither declares nor can acquire implicitly.
+  //
+  // Granting `bulk` would therefore open `POST /data/sys_api_key/batch` and the
+  // `*Many` routes to every API client, on a better-auth identity table whose
+  // authorable surface is one boolean — ADR-0092 D2's write guard whitelists
+  // `revoked` and strips everything else — with no consumer asking for it.
+  // Should a batch key lifecycle ever gain a real caller, delete this entry and
+  // add `'bulk'`; the stale-entry test below refuses to let both stand.
+  sys_api_key:
+    'Revoke/restore is a one-row, one-column PATCH (`revoked`, the only column ' +
+    "ADR-0092 D2's identity write guard admits). No console surface multi-selects " +
+    'API keys — the grid renders no checkbox column because the object grants no ' +
+    'delete affordance — and a promoted bulk revoke would fan out per row through ' +
+    'the action runner rather than hitting /batch (#7802).',
+};
 
 /** Every `*.object.ts` under `packages/`, skipping build output and deps. */
 function walkObjectFiles(dir: string, out: string[] = []): string[] {
