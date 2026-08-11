@@ -69,7 +69,7 @@ describe.skipIf(!sharedMongod)('driver-mongodb — filter logic conformance', ()
 
   for (const c of FILTER_LOGIC_CASES) {
     it(c.name, async () => {
-      const rows = await driver.find('conformance', { object: 'conformance', where: c.filter } as any);
+      const rows = await driver.find('conformance', { where: c.filter });
       const got = (rows as any[])
         .map((r) => String(r.id))
         .sort((x, y) => x.localeCompare(y));
@@ -82,7 +82,7 @@ describe.skipIf(!sharedMongod)('driver-mongodb — filter logic conformance', ()
    * failed cannot read as a case that correctly excluded everything.
    */
   it('the fixture really is all four rows', async () => {
-    const rows = await driver.find('conformance', { object: 'conformance' } as any);
+    const rows = await driver.find('conformance', {});
     expect((rows as any[]).map((r) => String(r.id)).sort()).toEqual(['1', '2', '3', '4']);
   });
 });

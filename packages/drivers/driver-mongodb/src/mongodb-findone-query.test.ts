@@ -58,7 +58,7 @@ describe.skipIf(!sharedMongod)('driver-mongodb — findOne executes the whole qu
 
   for (const c of FINDONE_CASES) {
     it(c.name, async () => {
-      const row = await driver.findOne('account', { object: 'account', ...c.query } as any);
+      const row = await driver.findOne('account', { ...c.query } as any);
       expect(row === null ? null : String((row as any).id)).toBe(c.expectId);
       if (c.expectKeys && row) expect(new Set(Object.keys(row))).toEqual(new Set(c.expectKeys));
     });
@@ -67,7 +67,7 @@ describe.skipIf(!sharedMongod)('driver-mongodb — findOne executes the whole qu
   it('find() is unchanged — a paged walk is still a partition of the rows', async () => {
     const seen: string[] = [];
     for (let offset = 0; offset < FINDONE_ROWS.length; offset += 2) {
-      const page = await driver.find('account', { object: 'account', limit: 2, offset } as any);
+      const page = await driver.find('account', { limit: 2, offset });
       seen.push(...page.map((r) => String(r.id)));
     }
     expect(seen).toHaveLength(FINDONE_ROWS.length);

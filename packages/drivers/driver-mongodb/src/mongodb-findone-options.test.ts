@@ -114,7 +114,7 @@ describe('MongoDBDriver.findOne hands Mongo the whole query (#4419)', () => {
 
   for (const c of FINDONE_CASES) {
     it(`emits the right options — ${c.name}`, async () => {
-      await driver.findOne('account', { object: 'account', ...c.query } as any);
+      await driver.findOne('account', { ...c.query } as any);
       const { options } = lastFindOne();
 
       // `undefined` here is a real assertion, not an absent one: it is the
@@ -133,7 +133,7 @@ describe('MongoDBDriver.findOne hands Mongo the whole query (#4419)', () => {
   }
 
   it('translates the predicate, as it always did', async () => {
-    await driver.findOne('account', { object: 'account', where: { id: 'a' }, limit: 1 } as any);
+    await driver.findOne('account', { where: { id: 'a' }, limit: 1 });
     expect(lastFindOne().filter).toMatchObject({ id: 'a' });
   });
 
@@ -141,7 +141,7 @@ describe('MongoDBDriver.findOne hands Mongo the whole query (#4419)', () => {
     const session = { id: 'sess-1' } as any;
     await driver.findOne(
       'account',
-      { object: 'account', where: { id: 'a' }, limit: 1 } as any,
+      { where: { id: 'a' }, limit: 1 },
       { transaction: session } as any,
     );
     expect(lastFindOne().options.session).toBe(session);
@@ -151,7 +151,7 @@ describe('MongoDBDriver.findOne hands Mongo the whole query (#4419)', () => {
 
   for (const c of FINDONE_CASES) {
     it(`selects the right row — ${c.name}`, async () => {
-      const row = await driver.findOne('account', { object: 'account', ...c.query } as any);
+      const row = await driver.findOne('account', { ...c.query } as any);
       expect(row === null ? null : String((row as any).id)).toBe(c.expectId);
       if (c.expectKeys && row) expect(new Set(Object.keys(row))).toEqual(new Set(c.expectKeys));
     });
@@ -160,12 +160,12 @@ describe('MongoDBDriver.findOne hands Mongo the whole query (#4419)', () => {
   // ── find() is unchanged: the carve-out is findOne-only ──────────────
 
   it('an unordered PAGED find still gets a deterministic order imposed', async () => {
-    await driver.find('account', { object: 'account', limit: 2, offset: 0 } as any);
+    await driver.find('account', { limit: 2, offset: 0 });
     expect(seen.find.at(-1)!.options.sort).toEqual({ id: 1 });
   });
 
   it('an unordered, unpaged find still gets none — that rule is unchanged', async () => {
-    await driver.find('account', { object: 'account' } as any);
+    await driver.find('account', {});
     expect(seen.find.at(-1)!.options.sort).toBeUndefined();
   });
 });
