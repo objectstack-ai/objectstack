@@ -40,6 +40,10 @@ import { RouteManager, type RouteEntry } from './route-manager.js';
 // single-valued; genuinely multi-valued ones (`select`, `expand`, `objects`,
 // `fields`, `searchFields`, `approverId`) are deliberately never listed.
 import { refuseRepeatedQueryParams } from './query-multiplicity.js';
+// [#7527] The other half of the same discipline: a parameter this route does
+// not KNOW is refused rather than dropped. See `query-allowlist.ts` for why an
+// ignored filter is the one wrong answer a caller cannot detect.
+import { refuseUnknownQueryParams } from './query-allowlist.js';
 import type { DirectMountedRoute, MountedRouteSource } from './direct-mount.js';
 import { RestServerConfig, RestApiConfig, CrudEndpointsConfig, MetadataEndpointsConfig, BatchEndpointsConfig, RouteGenerationConfig } from '@objectstack/spec/api';
 import { DataProtocol, MetadataProtocol } from '@objectstack/spec/api';
@@ -1535,6 +1539,28 @@ export function apiAccessDenialFromEnable(
         },
     };
 }
+
+/**
+ * [#7527] The closed query-parameter set of `GET {basePath}/approvals/requests`.
+ *
+ * Measured from the handler's own reads, not from the card or the docs: the
+ * five filters (`object`, `recordId`, `status`, `approverId`, `submitterId`),
+ * the free-text `q`, the paging pair (`limit`, `offset`), and the snake_case
+ * alias spellings the handler honours for the three camelCase filters. A name
+ * outside this set is refused with a located `400` instead of being dropped.
+ *
+ * Exported so the pin tests assert against THIS array rather than a
+ * hand-copied second list that can drift away from what the route accepts.
+ */
+export const APPROVAL_REQUEST_LIST_PARAMS: readonly string[] = [
+    'object',
+    'recordId', 'record_id',
+    'status',
+    'approverId', 'approver_id',
+    'submitterId', 'submitter_id',
+    'q',
+    'limit', 'offset',
+];
 
 /** Platform object backing async import jobs (see sys-import-job.object.ts). */
 const IMPORT_JOB_OBJECT = 'sys_import_job';
@@ -9233,6 +9259,15 @@ export class RestServer {
                         res.json({ data: [] });
                         return;
                     }
+                    // [#7527] The closed parameter set for this route, measured
+                    // from what the handler below actually reads. A name outside
+                    // it is REFUSED, never dropped: `?assignedToMe=true` used to
+                    // answer 200 with the whole list, and an ignored filter is
+                    // indistinguishable from one that matched everything. Paging
+                    // (`limit`/`offset`) and the snake_case alias spellings are
+                    // in the set because the handler honours them — a whitelist
+                    // built from the filters alone would break paging.
+                    if (refuseUnknownQueryParams(req, res, APPROVAL_REQUEST_LIST_PARAMS)) return;
                     // [#6877] `approverId` / `approver_id` are the model case
                     // for the multi-valued side and are therefore NOT listed:
                     // the block immediately below reads their array arm ON
