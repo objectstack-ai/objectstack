@@ -44,15 +44,25 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
+import type { ServiceObject } from '@objectstack/spec/data';
 import { ObjectQL } from './engine.js';
 
-const txt = (name: string, extra: Record<string, unknown> = {}) =>
+// `extra` is narrowed to the two keys these fixtures actually set. Typed as
+// `Record<string, unknown>` the spread adds an index signature to every field,
+// which makes the whole object unassignable to `ServiceObject` (TS2345) —
+// invisible to the package's own `typecheck` script, which excludes tests, and
+// a raw error to the shrink-only type-check-coverage ratchet, which does not.
+const txt = (name: string, extra: { primaryKey?: boolean; maxLength?: number; required?: boolean } = {}) =>
     ({ name, label: name, type: 'text' as const, ...extra });
 const num = (name: string) => ({ name, label: name, type: 'number' as const });
 const dt = (name: string) => ({ name, label: name, type: 'datetime' as const });
-const long = (name: string) => ({ name, label: name, type: 'longtext' as const });
+// `textarea`, not `longtext`: the latter is not in the FieldType union at all
+// (`packages/spec/src/data/field.zod.ts`). Several older fixtures in this
+// package spell it `longtext` and it type-errors there too — part of what the
+// TEST_DEBT ledger is counting.
+const long = (name: string) => ({ name, label: name, type: 'textarea' as const });
 
-const sysMetadataObject = {
+const sysMetadataObject: ServiceObject = {
     name: 'sys_metadata', label: 'System Metadata',
     fields: {
         id: txt('id', { primaryKey: true }),
@@ -65,7 +75,7 @@ const sysMetadataObject = {
     },
 };
 
-const sysMetadataHistoryObject = {
+const sysMetadataHistoryObject: ServiceObject = {
     name: 'sys_metadata_history', label: 'Metadata History',
     fields: {
         id: txt('id', { primaryKey: true }), event_seq: num('event_seq'),
@@ -79,7 +89,7 @@ const sysMetadataHistoryObject = {
     },
 };
 
-const sysMetadataCommitObject = {
+const sysMetadataCommitObject: ServiceObject = {
     name: 'sys_metadata_commit', label: 'Metadata Commit',
     fields: {
         id: txt('id', { primaryKey: true }), package_id: txt('package_id'),
@@ -187,9 +197,14 @@ describe('#7559 — the revert reads the history row under the key the writer st
         const { driver } = makeStubDriver();
         engine.registerDriver(driver, true);
         await engine.init();
-        engine.registry.registerObject(sysMetadataObject);
-        engine.registry.registerObject(sysMetadataHistoryObject);
-        engine.registry.registerObject(sysMetadataCommitObject);
+        // `packageId` is REQUIRED by `registerObject(schema, packageId, …)`.
+        // Omitting it compiles under the package's own `typecheck` script (which
+        // excludes `*.test.ts`) but is a raw TS2554 to the type-check-coverage
+        // ratchet, which measures `tsc --noEmit` with the tests put back —
+        // TEST_DEBT is shrink-only, so a new test file has to add zero.
+        engine.registry.registerObject(sysMetadataObject, 'test');
+        engine.registry.registerObject(sysMetadataHistoryObject, 'test');
+        engine.registry.registerObject(sysMetadataCommitObject, 'test');
         protocol = new ObjectStackProtocolImplementation(engine);
         (protocol as any).ensureOverlayIndex = async () => {};
     });
