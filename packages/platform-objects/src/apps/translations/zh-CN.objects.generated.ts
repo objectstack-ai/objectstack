@@ -349,6 +349,9 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       all_sessions: {
         label: "全部"
+      },
+      revoked: {
+        label: "已撤销"
       }
     },
     _actions: {

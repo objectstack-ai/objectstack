@@ -349,6 +349,9 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       all_sessions: {
         label: "すべて"
+      },
+      revoked: {
+        label: "取り消し済み"
       }
     },
     _actions: {

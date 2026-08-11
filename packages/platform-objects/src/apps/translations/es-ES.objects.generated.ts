@@ -349,6 +349,9 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       all_sessions: {
         label: "Todas"
+      },
+      revoked: {
+        label: "Revocadas"
       }
     },
     _actions: {

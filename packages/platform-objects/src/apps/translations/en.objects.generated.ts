@@ -349,6 +349,9 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       all_sessions: {
         label: "All"
+      },
+      revoked: {
+        label: "Revoked"
       }
     },
     _actions: {
