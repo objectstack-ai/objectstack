@@ -303,7 +303,10 @@
         },
         "sections": {
           "status": "live",
-          "note": "objectui: form renderers + spec-bridge form-view.ts:169 (audit L17)."
+          "verifiedAt": "2026-08-11",
+          "evidenceScope": "cross-repo",
+          "evidence": "objectui: form renderers + spec-bridge form-view.ts:169 (audit L17); packages/rest/src/rest-server.ts registerPublicFormEndpoints (the three /forms/:slug routes walk sections: resolve strips undeclared lookup/master_detail/user fields, submit builds allowedFields from them, and GET /forms/:slug/lookup/:field reads each field entry's publicPicker block)",
+          "note": "This row carries the blanket verdict for the whole FormField subtree beneath it (undrilled inheritance). [#7467] adds `publicPicker` {displayFields,maxResults,filter,object} to that subtree — live, measured reader: the GET /forms/:slug/lookup/:field handler in packages/rest/src/rest-server.ts (displayFields projection + contains search, maxResults clamp to hard ceiling 50, filter rows composed ahead of the search predicate, object override for the referenced object). The key had been ENFORCED there but declared nowhere — ADR-0049's mirror direction (enforced, never declarable) — until the maintainer ruled declare (option 1). The route also reads picker.sort, which stays deliberately UNDECLARED (outside the ruling's four-key enumeration; follow-up finding filed from #7467); a form authoring it is a loud parse error, pinned in view-public-picker.test.ts."
         },
         "groups": {
           "status": "live",

@@ -414,6 +414,30 @@ describe('GET /forms/:slug — the published schema IS the declared field set (#
 
 describe('GET /forms/:slug/lookup/:field — no picker on managed anchors (#3022)', () => {
   it('refuses a publicPicker declared on owner_id (would open anonymous sys_user search)', async () => {
+    // [#7467] Rebuilt THROUGH the schema. The original fixture was a raw
+    // object handed straight to the stubbed reader — it never met a parse
+    // door, which is exactly why nobody noticed that `publicPicker` was not
+    // declarable and this route was unreachable for every spec-valid form.
+    // Since #7467 the declaration IS spec-valid (proved here through the real
+    // `ViewMetadataSchema`), so this pin now says what it always meant to:
+    // even a form that legally authors a picker on a server-managed anchor
+    // gets 403 — the anchor refusal is the ROUTE's own boundary, not a
+    // side effect of the schema refusing the form.
+    const { ViewMetadataSchema } = await import('@objectstack/spec/ui');
+    const authored = {
+      name: 'ticket.contact_form',
+      object: 'ticket',
+      viewKind: 'form',
+      config: {
+        type: 'simple',
+        data: { provider: 'object', object: 'ticket' },
+        sections: [{ label: 'Details', fields: [{ field: 'owner_id', publicPicker: { displayFields: ['name'] } }] }],
+        sharing: { allowAnonymous: true, publicLink: '/forms/test' },
+      },
+    };
+    const parsed = ViewMetadataSchema.safeParse(authored);
+    expect(parsed.success, `the fixture must be SPEC-VALID for this pin to mean anything: ${JSON.stringify((parsed as any).error?.issues)}`).toBe(true);
+
     const { lookup } = buildServer([
       { fields: [{ field: 'owner_id', publicPicker: { displayFields: ['name'] } }] },
     ]);

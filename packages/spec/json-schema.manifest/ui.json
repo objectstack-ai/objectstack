@@ -62,6 +62,7 @@
     "ui/ElementTextProps",
     "ui/FormButtonConfig",
     "ui/FormField",
+    "ui/FormFieldPublicPicker",
     "ui/FormSection",
     "ui/FormView",
     "ui/GalleryConfig",

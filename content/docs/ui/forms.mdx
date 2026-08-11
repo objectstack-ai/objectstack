@@ -232,10 +232,57 @@ Errors:
 
 The companion `GET /api/v1/forms/:slug` route returns `500 FORM_RESOLVE_FAILED` if form resolution itself throws.
 
+### `GET /api/v1/forms/:slug/lookup/:field` — the public picker
+
+Lookup, master-detail and `user` fields are **stripped from a public form by
+default** — surfacing one to anonymous visitors means exposing a record search
+to the internet, so it is opt-in per field, like Airtable's "Allow linking to
+existing records" toggle. The opt-in is a `publicPicker` block on the field's
+entry in `sections[].fields[]` (declarable since #7467):
+
+```ts
+sections: [{
+  label: 'About you',
+  fields: [
+    'company',
+    { field: 'owner', publicPicker: { displayFields: ['name'], maxResults: 10 } },
+  ],
+}]
+```
+
+| `publicPicker` key | Meaning |
+|---|---|
+| `displayFields` | Fields projected into each result row (plus `id`); the visitor's `q` is `contains`-matched against the **first** entry. At most 5; omitted → `['name']`. |
+| `maxResults` | Rows per request, integer 1–50 (default 20). 50 is a hard server ceiling; there is **no pagination** on this surface (`offset` is pinned to 0), so a leaked endpoint cannot enumerate the table. |
+| `filter` | Static pre-filter rows (same `{ field, operator, value }` dialect as list-view filters), ANDed ahead of the visitor's search. |
+| `object` | The object to search; omit to let the server resolve it from the field definition. |
+
+The block admits exactly what the route enforces — an unknown subkey, a 6th
+display field, or `maxResults: 51` is a **parse error at authoring time**, not
+a silently-adjusted request.
+
+```bash
+curl 'http://localhost:3000/api/v1/forms/contact-us/lookup/owner?q=ada'
+```
+
+```json
+{ "data": [{ "id": "usr_1", "name": "Ada Lovelace" }],
+  "total": 1, "truncated": false, "displayFields": ["name"] }
+```
+
+Errors:
+
+| Status | Code | When |
+|---|---|---|
+| `400 INVALID_REQUEST` | missing / blank slug or field |
+| `403 LOOKUP_NOT_PUBLIC` | the field has no `publicPicker` block — the deliberate loud default (#3022); also any server-managed anchor (`owner_id`, `organization_id`, …), which never gets a picker even if one is declared |
+| `404 FORM_NOT_FOUND` | slug not registered on any `sharing.allowAnonymous: true` view |
+| `500 LOOKUP_TARGET_MISSING` | the referenced object could not be resolved — declare `publicPicker.object` |
+
 ### Auth model
 
-- Neither route calls `enforceAuth`, so they work under the always-on anonymous-deny default (there is no `requireAuth` knob to configure since v17).
-- The execution context handed to ObjectQL is `{ publicFormGrant: { object }, permissions: ['guest_portal'], anonymous: true }` with no `userId`. The Security plugin honors `publicFormGrant` first — a create + read-back grant scoped to exactly the declared object — so authorization holds even without a `guest_portal` profile. `permissions: ['guest_portal']` is retained for back-compat.
+- None of the three routes calls `enforceAuth`, so they work under the always-on anonymous-deny default (there is no `requireAuth` knob to configure since v17).
+- The execution context the **submit** route hands to ObjectQL is `{ publicFormGrant: { object }, permissions: ['guest_portal'], anonymous: true }` with no `userId`. The Security plugin honors `publicFormGrant` first — a create + read-back grant scoped to exactly the declared object — so authorization holds even without a `guest_portal` profile. `permissions: ['guest_portal']` is retained for back-compat. The **lookup** route's search context is `{ permissions: ['guest_portal'], anonymous: true }` — no `publicFormGrant` (it reads the picker's target object, not the form's), which is why its result set is bounded by the picker declaration instead.
 - No CSRF or auth header is needed; embed the form on any domain.
 
 ## 5. Embedding from a front-end

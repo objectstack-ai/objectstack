@@ -15,8 +15,8 @@ Migrated to [shared/http.zod.ts](/docs/references/shared/http). Re-exported here
 ## TypeScript Usage
 
 ```typescript
-import { AddRecordConfigSchema, AppearanceConfigSchema, CalendarConfigSchema, ColumnPrefixSchema, ColumnSummarySchema, ColumnSummaryConfigSchema, FormButtonConfigSchema, FormFieldSchema, FormSectionSchema, FormViewSchema, GalleryConfigSchema, GanttConfigSchema, GanttQuickFilterSchema, GroupingConfigSchema, GroupingFieldSchema, HttpMethodSubsetSchema, HttpRequestSchema, KanbanConfigSchema, ListChartConfigSchema, ListColumnSchema, ListViewSchema, NavigationConfigSchema, NavigationModeSchema, ObjectListViewSchema, ObjectUserFiltersSchema, PaginationConfigSchema, RowColorConfigSchema, RowHeightSchema, SelectionConfigSchema, TimelineConfigSchema, TreeConfigSchema, UserActionsConfigSchema, UserFilterFieldSchema, UserFiltersSchema, ViewSchema, ViewDataSchema, ViewFilterRuleSchema, ViewItemSchema, ViewItemNameSchema, ViewItemWireSchema, ViewKindSchema, ViewScopeSchema, ViewSharingSchema, ViewTabSchema, VisualizationTypeSchema } from '@objectstack/spec/ui';
-import type { AddRecordConfig, AppearanceConfig, CalendarConfig, ColumnPrefix, ColumnSummary, ColumnSummaryConfig, FormButtonConfig, FormField, FormSection, FormView, GalleryConfig, GanttConfig, GanttQuickFilter, GroupingConfig, HttpMethodSubset, HttpRequest, KanbanConfig, ListChartConfig, ListColumn, ListView, NavigationConfig, NavigationMode, PaginationConfig, RowColorConfig, RowHeight, SelectionConfig, TimelineConfig, TreeConfig, UserActionsConfig, UserFilterField, UserFilters, View, ViewData, ViewFilterRule, ViewItem, ViewItemName, ViewItemWire, ViewKind, ViewScope, ViewSharing, ViewTab, VisualizationType } from '@objectstack/spec/ui';
+import { AddRecordConfigSchema, AppearanceConfigSchema, CalendarConfigSchema, ColumnPrefixSchema, ColumnSummarySchema, ColumnSummaryConfigSchema, FormButtonConfigSchema, FormFieldSchema, FormFieldPublicPickerSchema, FormSectionSchema, FormViewSchema, GalleryConfigSchema, GanttConfigSchema, GanttQuickFilterSchema, GroupingConfigSchema, GroupingFieldSchema, HttpMethodSubsetSchema, HttpRequestSchema, KanbanConfigSchema, ListChartConfigSchema, ListColumnSchema, ListViewSchema, NavigationConfigSchema, NavigationModeSchema, ObjectListViewSchema, ObjectUserFiltersSchema, PaginationConfigSchema, RowColorConfigSchema, RowHeightSchema, SelectionConfigSchema, TimelineConfigSchema, TreeConfigSchema, UserActionsConfigSchema, UserFilterFieldSchema, UserFiltersSchema, ViewSchema, ViewDataSchema, ViewFilterRuleSchema, ViewItemSchema, ViewItemNameSchema, ViewItemWireSchema, ViewKindSchema, ViewScopeSchema, ViewSharingSchema, ViewTabSchema, VisualizationTypeSchema } from '@objectstack/spec/ui';
+import type { AddRecordConfig, AppearanceConfig, CalendarConfig, ColumnPrefix, ColumnSummary, ColumnSummaryConfig, FormButtonConfig, FormField, FormFieldPublicPicker, FormSection, FormView, GalleryConfig, GanttConfig, GanttQuickFilter, GroupingConfig, HttpMethodSubset, HttpRequest, KanbanConfig, ListChartConfig, ListColumn, ListView, NavigationConfig, NavigationMode, PaginationConfig, RowColorConfig, RowHeight, SelectionConfig, TimelineConfig, TreeConfig, UserActionsConfig, UserFilterField, UserFilters, View, ViewData, ViewFilterRule, ViewItem, ViewItemName, ViewItemWire, ViewKind, ViewScope, ViewSharing, ViewTab, VisualizationType } from '@objectstack/spec/ui';
 
 // Validate data
 const result = AddRecordConfigSchema.parse(data);
@@ -139,6 +139,7 @@ Column footer summary configuration
 | **type** | `Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| 'markdown' \| 'html' \| 'richtext' \| 'number' \| 'currency' \| 'percent' \| 'date' \| … +35 more>` | optional | Field type (auto-infers widget if omitted) |
 | **options** | `{ label: string; value: string; color?: string; default?: boolean; … }[]` | optional | Options for select/multiselect/radio/checkboxes fields |
 | **reference** | `string` | optional | Target object name for lookup/master_detail fields |
+| **publicPicker** | `{ displayFields?: string[]; maxResults?: integer; filter?: object[]; object?: string }` | optional | Opt this field into the anonymous public-form lookup picker (GET /forms/:slug/lookup/:field). Without it the route answers 403 LOOKUP_NOT_PUBLIC and the field is stripped from the rendered public form. |
 | **maxLength** | `number` | optional | Maximum character length (for text/textarea/email/url/phone) |
 | **minLength** | `number` | optional | Minimum character length |
 | **min** | `number` | optional | Minimum value (for number/currency/percent/slider) |
@@ -215,6 +216,22 @@ Column footer summary configuration
 * `progress`
 * `tags`
 * `vector`
+
+
+---
+
+## FormFieldPublicPicker
+
+Public-lookup opt-in: enables GET /forms/:slug/lookup/:field for this field on an anonymous public form (without it the route answers 403 LOOKUP_NOT_PUBLIC).
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **displayFields** | `string[]` | optional | Fields projected into each picker result (with `id`); the visitor's search matches `contains` on the first entry. At most 5 (the route projects no more); omitted → ['name']. |
+| **maxResults** | `integer` | optional | Maximum rows a lookup returns (default 20, hard ceiling 50 — the route clamps; anonymous visitors cannot paginate past it). |
+| **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'starts_with' \| … +14 more>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Static pre-filter rows ANDed ahead of the visitor's search (e.g. only active records are searchable). Same `{ field, operator, value }` dialect as list-view filters. |
+| **object** | `string` | optional | Referenced-object override for the picker search; omitted → resolved from the field definition (`referenceTo`). |
 
 
 ---
