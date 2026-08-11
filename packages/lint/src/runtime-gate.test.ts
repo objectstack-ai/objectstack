@@ -320,6 +320,40 @@ describe('the views[] visibility-predicate family at the runtime publish gate (#
     expect(errors.map((e) => e.rule)).toContain('predicate-path-unrooted');
   });
 
+  it('REFUSES a path on the RIGHT of `==` — which resolves cleanly and is broken anyway', () => {
+    // #7659, and the measurement that justifies the id existing: `data.type` and
+    // `data.label` are both keys of `FieldSchema`, so the rule directly above is
+    // silent here BY CONSTRUCTION. The renderer resolves only the left side and
+    // parses the right as a literal, so this compares against the string
+    // "data.label" and is false on every row.
+    const { errors } = gateView(schemaBoundForm('data.type == data.label'));
+    const f = errors.find((e) => e.rule === 'predicate-rhs-path-shaped');
+    expect(f, 'the right-hand position never evaluates a path').toBeDefined();
+    expect(f!.severity).toBe('error');
+    expect(
+      errors.map((e) => e.rule),
+      "#7214's check has nothing to say here — that silence is why this rule exists",
+    ).not.toContain('predicate-path-unresolved');
+  });
+
+  it('sends a BARE unquoted word down the advisory channel, not the refusal one', () => {
+    // The second severity the same id carries. `== active` is compared as the
+    // literal string "active" today — very likely what the author meant — so
+    // this rule does not refuse the write over metadata that renders correctly.
+    //
+    // The write IS refused, by `visibility-bare-identifier` from the sibling
+    // file, which reads `active` as a dropped binding root. Both findings are
+    // true about the token and they prescribe DIFFERENT fixes (`data.active` vs
+    // `'active'`), so this pins the pair rather than asserting a clean `errors`
+    // list that would go stale the moment either side moved.
+    const result = gateView(schemaBoundForm('data.type == active'));
+    const f = result.advisories.find((a) => a.rule === 'predicate-rhs-path-shaped');
+    expect(f, 'the subset boundary must still reach the author').toBeDefined();
+    expect(f!.severity).toBe('warning');
+    expect(result.errors.map((e) => e.rule)).not.toContain('predicate-rhs-path-shaped');
+    expect(result.errors.map((e) => e.rule)).toContain('visibility-bare-identifier');
+  });
+
   it('reports a MISLAYERED root through the advisory channel, not a refusal', () => {
     // The one family member that is `warning` on every surface, so it must not
     // 422 — and must not be silent either. #4717's `advisories` channel (the

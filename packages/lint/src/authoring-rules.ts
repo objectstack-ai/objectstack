@@ -822,7 +822,9 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   // in ONE edit, on the maintainer's 2026-08-10 ruling, sequenced after #4717's
   // `advisories` channel landed (PR #7435). Before that move a `view` written
   // through Studio / REST `/meta` / MCP — the only door most tenants have, and
-  // the door AI authors use — was judged by NONE of the family's six rule ids.
+  // the door AI authors use — was judged by NONE of the family's rule ids (six
+  // at the time of the move; seven since #7659 added
+  // `predicate-rhs-path-shaped` inside the second entry).
   //
   // They move together on purpose, and the two entries carry one comment because
   // they are one wall: #7214's implementer wired its own rule here alone and then
@@ -870,6 +872,17 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   // object's addressable path set is NOT closed (lookup traversal, system
   // columns, formula outputs), and an `error` gate over an open set generates
   // false build errors. See the rule's module note.
+  //
+  // #7659 adds a THIRD id here, `predicate-rhs-path-shaped`, which is not a
+  // resolution question at all: the metadata-admin renderer resolves paths only
+  // on the LEFT of `==` / `!=` and hands the right side to its literal parser,
+  // so `data.a == data.b` resolves both sides cleanly, passes the two rules
+  // above, and still compares against the string "data.b" — a constant verdict.
+  // It carries `error` on a dotted chain (no reading under which it worked) and
+  // `warning` on a bare word (`status == active` compares as the text today, so
+  // refusing it would fail a build over metadata that renders correctly). The
+  // per-finding severity is what gates, exactly as `lintFlowPatterns` has worked
+  // since #3760; the entry's `gating` tier is unchanged because it already was.
   {
     name: 'validatePredicatePathRefs',
     tier: 'gating',
