@@ -31,7 +31,7 @@ import { describe, expect, it, vi } from 'vitest';
 // its suite green. Both predicates live in metadata-core.
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
-import { RestServer } from './rest-server';
+import { RestServer } from './rest-server.js';
 
 // ─── the real save path (the seam that refused the picker before #7467) ─────
 
@@ -151,7 +151,7 @@ function routesOver(storedView: any, foundRows: any[]) {
     const rest = new RestServer(mockServer() as any, protocol, { api: { requireAuth: false } } as any);
     (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
     rest.registerRoutes();
-    const lookup = rest.getRoutes().find((r) => r.method === 'GET' && r.path.endsWith('/forms/:slug/lookup/:field'))!;
+    const lookup = rest.getRoutes().find((r: any) => r.method === 'GET' && r.path.endsWith('/forms/:slug/lookup/:field'))!;
     return { findData, lookup };
 }
 
