@@ -52,6 +52,9 @@ importers:
       eslint:
         specifier: ^10.8.0
         version: 10.8.0(jiti@2.7.0)
+      github-slugger:
+        specifier: 2.0.0
+        version: 2.0.0
       semver:
         specifier: ^7.8.5
         version: 7.8.5
