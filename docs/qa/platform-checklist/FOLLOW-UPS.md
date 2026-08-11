@@ -26,6 +26,8 @@ gaps. The one security-sensitive finding (D1) has since been fixed in #6683.
 | D9 | **`expand` discloses a record the caller is 403'd from reading** — the `#2850` expand waiver keys on the wrong axis, so it fires for *every* referenced object including ones the caller holds no grant on. | packages/plugins/plugin-security/src/security-plugin.ts (`expandSkipCrud`) | api-backend.query-contract-matrix clause 4 | **SECURITY — write-up below (§1a)** |
 | D10 | **Encrypted settings are echoed in plaintext on read** — storage is correct (`sys_secret`, aes-256-gcm) but the REST read decrypts and returns the secret verbatim, and repeats it in `cascadeChain`. | packages/services/service-settings/src/{settings-service.ts,settings-routes.ts} | platform-core.settings-hub-roundtrip clause 7 | **SECURITY (admin-gated) — write-up below (§1a)** |
 
+| D11 | **By-id WRITE is not gated by record visibility** — a low-privilege user PATCHes records they cannot read (404 by id, absent from list) on three objects. Two conformance rows claim this is `enforced`. | packages/plugins/plugin-security/src/security-plugin.ts (by-id write pre-image gate, `assertControlledByParentWrite`) | access-security.rls-both-sides c5 + owd-sharing-matrix c4 (one cause, two items) | **SECURITY — write-up below (§1a)** |
+
 ### §1a — Security-sensitive write-ups (delivered 2026-08-11, per the maintainer ruling on #7463)
 
 Held out of the public run cards (#7463, #7514) pending a disclosure decision, and delivered
@@ -140,3 +142,60 @@ these to the showcase would make them runnable:
 - The checklist itself (`areas/*.json`, `coverage.json`, `README.md`, `RUNNER.md`,
   `scripts/check-platform-checklist.mjs`) ships in this branch; this file carries the
   decisions that remain with the maintainer.
+
+#### D11 — a by-id write is not gated by record visibility ("you can't mutate what you can't see" is not enforced)
+
+**Impact.** An authenticated **low-privilege** user modifies records they cannot read.
+Not admin-only, not owner-only: the probing persona held the ordinary `showcase_contributor`
+set. Reproduced on **three objects** (`showcase_invoice`, `showcase_invoice_line`,
+`showcase_task`), twice each on fresh rows. This is the strongest finding of the sweep.
+
+**Reproduction (2/2 per object).** Provision two contributor personas C1 and C2 (sign-up +
+`sys_user_permission_set` showcase_contributor + `sys_user_position` `contributor`, then
+re-sign-in so the session carries the position).
+
+1. As **C1**: create an invoice (`owner` = C1) and a line under it.
+2. As **C2** — the read side is CORRECT:
+   - `GET /api/v1/data/showcase_invoice_line/<lineId>` -> **404 RECORD_NOT_FOUND**
+   - `GET /api/v1/data/showcase_invoice_line?$top=300` -> the line is **absent** (n=0)
+3. As **C2** — the write side is NOT:
+   - `PATCH /api/v1/data/showcase_invoice_line/<lineId>` `{"description":"C2-FORGED","quantity":999,"unit_price":12345}`
+     -> **200**, and an admin re-read shows the forged values persisted.
+   - Same shape on the master: C2 `GET` the invoice -> 404, C2 `PATCH` it -> **200 persisted**.
+   - Same shape on `showcase_task`: C2 `GET` by id -> 404 / list empty, C2 `PATCH` -> **200 persisted**.
+
+`DELETE` is correctly refused (403 — no delete bit), so only the **write** half is open.
+
+**Root cause (located).** The by-id write pre-image gate composes the RLS filter for the
+**UPDATE** operation and documents itself as skipped when that returns null. The showcase
+authors its contributor narrowing as `operation: 'select'` rules only (`task_own_rows`,
+`invoice_own_rows`), so there is **no update-scope predicate** and no read-visibility
+requirement is imposed on the by-id UPDATE path. The OWD is `public_read_write`, so
+`resolveSharingCanEdit` also returns true. For `showcase_invoice_line`
+(`controlled_by_parent`), `assertControlledByParentWrite` then derives the detail's write
+access from that same permissive master verdict.
+
+**The platform's own explain engine states the split**, which is the cleanest confirmation:
+- `POST /api/v1/security/explain {object:'showcase_invoice', operation:'read', userId:<C2>}`
+  -> rls layer **"narrows — Row-level security narrows the row set"**
+- the same call with `operation:'update'` -> rls layer **"not_applicable — No RLS policy applies"**
+
+**Why nothing caught it.**
+- `verify --rls` (`runRlsProofs`) reports **0 HOLES**, but its member probe holds **no object
+  grants**, so every such probe is masked by the object-level gate (403) before record scope
+  is ever reached. A second probe persona holding object read+edit but **outside** the record
+  scope would catch this class. Separately, a `showcase_account` auto-record 400 cascades into
+  5 downstream skips, so 8 of 23 objects are skipped on a stock run — and a skip is exactly
+  where this hid.
+- `authz-conformance.matrix.ts` marks **both** `rls-by-id-write` (#1994) and
+  `controlled-by-parent` as `state: 'enforced'`. Neither holds as shipped.
+- `examples/app-showcase/src/security/permission-sets.ts` comments that a contributor "can
+  by-id read/write a line only when they can read/write its master" — also false as shipped.
+
+**Suggested shape of a fix (not prescriptive).** Either the platform requires a by-id write
+target to be inside the caller's **readable** set (deriving a write scope from select-only
+rules when no update rule is authored), or the showcase authors `operation: 'update'` RLS on
+`showcase_invoice` and `showcase_task`. The platform-side fix is the one that generalises —
+any app authoring select-only narrowing has this shape today. Whichever is chosen, the
+regression guard wants a **second probe persona holding the object grants but outside the
+record scope**; the current proof structurally cannot fail.
