@@ -40,11 +40,11 @@
 //   node scripts/check-i18n-bundles.mjs             # check all; fail on either verdict
 //   node scripts/check-i18n-bundles.mjs --write      # regenerate bundles in place
 //   node scripts/check-i18n-bundles.mjs --filter=security
-//   node scripts/check-i18n-bundles.mjs --self-test  # prove both classifiers can go red
+//   node scripts/check-i18n-bundles.mjs --self-test  # prove every classifier can go red
 //
 // Requires the workspace build (it runs the built CLI), so it belongs after
 // the build step with the other consumer gates. `--self-test` does not: it runs
-// the two output classifiers against fixed samples, no build and no CLI. That
+// the output classifiers against fixed samples, no build and no CLI. That
 // self-test exists because a gate observed only green is indistinguishable from
 // a gate that matches nothing (#4690).
 //
@@ -70,6 +70,19 @@
 // The two pure functions that answer it moved to `scripts/cli-build-prerequisite.mjs`
 // when #5862 found the same missing precondition in `check-i18n-coverage.mjs`, one
 // lint.yml step away. They are imported, not copied: see that module's header.
+//
+// A BUILT CLI is not the only prerequisite, and #7681 is the second one arriving
+// in exactly the shape above. The extract this gate runs loads the workspace's own
+// packages, so a `packages/spec/dist` older than the commit that added an export
+// makes node refuse the import — and that failure matched no prerequisite
+// classifier, fell through to the in-loop `else`, and printed as
+// "check-i18n-bundles: 1 bundle problem(s) / extract failed …". One environment
+// fact, rendered as a CONTENT verdict about bundles nothing had compared, in the
+// same two words. The sibling coverage gate met the identical cause in the same
+// run and refused to judge ("Nothing was compared… the baseline was left exactly
+// as committed" — #6033/#5862); this gate graded it. `looksLikeStaleWorkspaceDist`
+// is the classifier that closes that gap, and the verdict it raises is a hard
+// prerequisite failure naming the package whose dist is stale — never a count.
 import { spawnSync } from 'node:child_process';
 import { readFileSync, existsSync } from 'node:fs';
 import { readdirSync, statSync } from 'node:fs';
@@ -78,8 +91,10 @@ import {
   CLI,
   CLI_BUILD_FIX,
   looksLikeMissingCliCommand,
+  looksLikeStaleWorkspaceDist,
   oclifCommandFileFor,
   resolveCliCommandFile,
+  workspaceBuildFix,
 } from './cli-build-prerequisite.mjs';
 
 /** The one command this gate invokes per package, as oclif topic/command parts. */
@@ -333,12 +348,176 @@ function selfTest() {
   const undeclaredTarget = oclifCommandFileFor({ oclif: {} }, ['i18n', 'extract']);
   expect('#5217 unreadable shape defers, loudly', !!undeclaredTarget.unknown && !undeclaredTarget.file, `an unreadable oclif block must yield a reason, not a guessed path; got ${JSON.stringify(undeclaredTarget)}`);
 
+  // -------------------------------------------------------------------------
+  // Fourth classifier (#7681): the OTHER prerequisite — a workspace package this
+  // gate loads whose build output no longer matches its source. Pinned here or
+  // nowhere, for the same reason as the third: CI builds the whole workspace
+  // before this gate runs, so nothing in CI ever reaches this path.
+  //
+  // Both directions are pinned on purpose. Over-widening this classifier would
+  // relabel a genuine drift or undeclared key as "your workspace is stale" and
+  // send the reader to a rebuild that changes nothing — the #5862 defect (a
+  // confident diagnosis pointing somewhere innocent) rebuilt one layer down.
+  // -------------------------------------------------------------------------
+
+  // The failure #7681 reported, as node actually prints it: produced locally by
+  // importing a name that a package's built ESM does not export — a fixture
+  // standing in for the stale `packages/spec/dist` of the QA run — under node
+  // v22.22.2, then normalised to `/repo`. The specifier and the export name are
+  // the run's own (`@objectstack/spec/system`, `authorisesIrreversibleAction`,
+  // added by #7285). Keep the frame and the stack: the sentence worth matching is
+  // the FOURTH line, the echoed source line above it mentions the same specifier
+  // in an import statement, and a per-line regex over stdout would meet the frame
+  // first. This is the corpus that used to reach `broken.push('extract failed')`.
+  const REAL_STALE_SPEC_DIST_AT_06BE54EC =
+    'file:///repo/packages/platform-objects/scripts/i18n-extract.config.bundled_9qzr4x.mjs:1\n' +
+    "import { authorisesIrreversibleAction } from '@objectstack/spec/system';\n" +
+    '         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n' +
+    "SyntaxError: The requested module '@objectstack/spec/system' does not provide an export named 'authorisesIrreversibleAction'\n" +
+    '    at ModuleJob._instantiate (node:internal/modules/esm/module_job:226:21)\n' +
+    '    at async ModuleJob.run (node:internal/modules/esm/module_job:335:5)';
+
+  /** The one sentence of that corpus worth quoting — the frame and stack are not evidence. */
+  const EXPECTED_STALE_SENTENCE =
+    "The requested module '@objectstack/spec/system' does not provide an export named 'authorisesIrreversibleAction'";
+
+  const staleDist = looksLikeStaleWorkspaceDist(REAL_STALE_SPEC_DIST_AT_06BE54EC);
+  expect('#7681 stale dist is a prerequisite', !!staleDist, 'the export-mismatch signature must be classified');
+  expect('#7681 names the package at fault', staleDist?.pkg === '@objectstack/spec', `got ${JSON.stringify(staleDist?.pkg)}`);
+  expect('#7681 names the missing export', staleDist?.missingExport === 'authorisesIrreversibleAction', `got ${JSON.stringify(staleDist?.missingExport)}`);
+  expect(
+    '#7681 quotes the sentence, not the frame',
+    staleDist?.sentence === EXPECTED_STALE_SENTENCE,
+    `the evidence must be the one sentence; got ${JSON.stringify(staleDist?.sentence)}`,
+  );
+
+  // …and the same failure after oclif has wrapped it into ` › ` lines.
+  expect(
+    '#7681 survives oclif wrapping',
+    looksLikeStaleWorkspaceDist(
+      " ›   Error: The requested module '@objectstack/spec/system' does not \n ›   provide an export named 'authorisesIrreversibleAction'",
+    )?.pkg === '@objectstack/spec',
+    'a wrapped sentence must still be classified',
+  );
+
+  // The sibling shape: the package is installed but was never built at all. Same
+  // prerequisite, different sentence — recorded in the form #6033 measured on the
+  // neighbouring coverage gate, retargeted at a package this gate loads.
+  const missingOutput = looksLikeStaleWorkspaceDist(
+    "Cannot find module '/repo/packages/platform-objects/node_modules/@objectstack/spec/dist/index.mjs' " +
+      'imported from /repo/packages/platform-objects/scripts/i18n-extract.config.bundled_9qzr4x.mjs',
+  );
+  expect('#7681 unbuilt dist is a prerequisite too', missingOutput?.kind === 'missing-output', `got ${JSON.stringify(missingOutput)}`);
+  expect('#7681 unbuilt dist names the package', missingOutput?.pkg === '@objectstack/spec', `got ${JSON.stringify(missingOutput?.pkg)}`);
+
+  // ⚠️ The negative direction — a CONTENT failure must still read as content.
+  // These are the three verdicts this gate exists to give; if any of them starts
+  // matching, a real problem gets reported as an environment fact and the reader
+  // is sent to a rebuild that fixes nothing.
+  expect('#7681 drift is not a stale dist', !looksLikeStaleWorkspaceDist(driftOutput), 'drift leaked into the prerequisite verdict');
+  expect(
+    '#7681 undeclared key is not a stale dist',
+    !looksLikeStaleWorkspaceDist(REAL_STDERR_AT_FFAB8033B_PARENT),
+    'the key verdict leaked into the prerequisite verdict',
+  );
+  expect(
+    '#7681 clean run is not a stale dist',
+    !looksLikeStaleWorkspaceDist('  ✓ 8 bundle(s) are in sync with the schema (487ms)'),
+    'clean output must not match',
+  );
+  expect(
+    '#7681 a broken config is not a stale dist',
+    !looksLikeStaleWorkspaceDist("Error: Duplicate object name 'contacts' in packages/x/scripts/i18n-extract.config.ts"),
+    'a config that is genuinely at fault must keep its own verdict',
+  );
+  // Narrowness, in the three shapes that look like this failure and are not it.
+  expect(
+    '#7681 a third-party export mismatch is not ours to diagnose',
+    !looksLikeStaleWorkspaceDist("SyntaxError: The requested module 'zod' does not provide an export named 'z'"),
+    'no rebuild of this repo would clear it, so it keeps the caller\'s verdict',
+  );
+  expect(
+    '#7681 CommonJS interop is not staleness',
+    !looksLikeStaleWorkspaceDist(
+      "SyntaxError: Named export 'defineStack' not found. The requested module '@objectstack/spec' is a CommonJS module, which may not support all module.exports as named exports.",
+    ),
+    'an interop authoring problem is not a stale build',
+  );
+  expect(
+    '#7681 a non-dist specifier is not a stale build',
+    !looksLikeStaleWorkspaceDist("Cannot find package '@objectstack/nope' imported from /repo/x.ts") &&
+      !looksLikeStaleWorkspaceDist("Cannot find module '/repo/packages/x/scripts/helpers.js' imported from /repo/x.ts"),
+    'only a specifier reaching into a workspace package\'s build output may claim this verdict',
+  );
+
+  // The two prerequisites must not claim each other: their remedies differ, and
+  // the wrong one sends the reader to a command that changes nothing. The second
+  // half of this pair is the root cause of #7681 stated as a pin — the
+  // export-mismatch signature never did match the missing-CLI classifier, which is
+  // exactly why it fell through to the content branch.
+  expect('#7681 a missing CLI is not a stale dist', !looksLikeStaleWorkspaceDist(OCLIF_WRAPPED_3_LINE), 'the CLI verdict leaked into this one');
+  expect(
+    '#7681 a stale dist is not a missing CLI',
+    !looksLikeMissingCliCommand(REAL_STALE_SPEC_DIST_AT_06BE54EC),
+    'the two prerequisite classifiers must stay distinct',
+  );
+
+  // …and the reason it landed in `broken` rather than being ignored: the corpus
+  // produces no drift lines and no key findings, so the `else` branch took it and
+  // printed one environment fact as "1 bundle problem(s)".
+  expect(
+    '#7681 the corpus produces no content findings at all',
+    collectDriftedBundles(REAL_STALE_SPEC_DIST_AT_06BE54EC).length === 0 &&
+      collectUndeclaredKeys(REAL_STALE_SPEC_DIST_AT_06BE54EC).findings.length === 0 &&
+      collectUndeclaredKeys(REAL_STALE_SPEC_DIST_AT_06BE54EC).unattributed.length === 0,
+    'if a content classifier matched this, the mislabel would have a second cause',
+  );
+
+  // The verdict this raises: it must blame the PACKAGE, exonerate the config that
+  // was merely holding the bag, and prescribe a rebuild of that package — never
+  // the CLI build, which would change nothing here.
+  //
+  // The fallback keeps a classifier that stopped matching FAILING these
+  // expectations by name, with their reasons, rather than crashing the self-test
+  // on an undefined field and hiding every other finding behind one stack.
+  const staleForDetail = staleDist ?? { kind: 'export-mismatch', pkg: '(unclassified)', missingExport: '', sentence: '' };
+  const staleDetail = staleWorkspaceDistDetail(staleForDetail, { pkg: 'platform-objects', status: 1, remaining: 7 }).join('\n');
+  expect('#7681 verdict names the stale package', staleDetail.includes('`@objectstack/spec`'), `got ${JSON.stringify(staleDetail)}`);
+  expect(
+    '#7681 verdict exonerates the config',
+    /not of platform-objects's i18n config/.test(staleDetail),
+    'the package holding the bag must be named innocent, in words',
+  );
+  expect('#7681 verdict carries the evidence', staleDetail.includes(EXPECTED_STALE_SENTENCE), 'a conclusion with no reading under it is not auditable');
+  expect('#7681 verdict says what it did not attempt', staleDetail.includes('(7 package(s) not attempted)'), `got ${JSON.stringify(staleDetail)}`);
+  expect(
+    '#7681 verdict does not claim a stop it did not make',
+    !staleWorkspaceDistDetail(staleForDetail, { pkg: 'platform-objects', status: 1, remaining: 0 })
+      .join('\n')
+      .includes('0 package(s) not attempted'),
+    'the last package in the loop stopped nothing — the wording must not say it did',
+  );
+  expect(
+    '#7681 prescribes rebuilding that package, not the CLI',
+    workspaceBuildFix('@objectstack/spec') === 'pnpm exec turbo run build --filter=@objectstack/spec' &&
+      workspaceBuildFix('@objectstack/spec') !== CLI_BUILD_FIX,
+    `got ${JSON.stringify(workspaceBuildFix('@objectstack/spec'))}`,
+  );
+  const longSentence = staleWorkspaceDistDetail(
+    { kind: 'export-mismatch', pkg: '@objectstack/spec', missingExport: 'x', sentence: 'S'.repeat(400) },
+    { pkg: 'p', status: 1, remaining: 0 },
+  ).join('\n');
+  expect('#7681 long evidence is truncated', longSentence.includes(`${'S'.repeat(160)}…`), 'a 400-char sentence must not be pasted whole');
+
   if (failures.length) {
     console.error(`✗ check:i18n --self-test — ${failures.length} failure(s)\n`);
     for (const f of failures) console.error(`  ${f}`);
     process.exit(1);
   }
-  console.log('✓ check:i18n --self-test — bundle-drift, undeclared-authoring-key and missing-CLI-build classifiers all go red, and stay distinct.');
+  console.log(
+    '✓ check:i18n --self-test — bundle-drift, undeclared-authoring-key, missing-CLI-build and ' +
+      'stale-workspace-dist classifiers all go red, and stay distinct.',
+  );
 }
 
 if (process.argv.includes('--self-test')) {
@@ -347,7 +526,8 @@ if (process.argv.includes('--self-test')) {
 }
 
 // ---------------------------------------------------------------------------
-// The prerequisite: this gate runs the BUILT CLI (#5217).
+// The prerequisites: this gate runs the BUILT CLI (#5217), and the extract it
+// runs loads the workspace's own built packages (#7681).
 // ---------------------------------------------------------------------------
 
 /**
@@ -357,18 +537,87 @@ if (process.argv.includes('--self-test')) {
  * Exits 1, the same code the two real verdicts use: any wrapper that treats
  * non-zero as failure keeps behaving identically, and inventing a second failure
  * code would be a new contract nobody asked for.
+ *
+ * `scanned` is how many packages the loop had already attempted when the
+ * prerequisite fired, and it is what keeps the closing paragraph TRUE. The
+ * pre-loop probe fires at 0, where "nothing was checked" is exact; the in-loop
+ * nets can fire later, and #7681's own run is that case — one package's extract
+ * blew up while others had already printed "in sync". Those earlier lines are not
+ * a clean bill either (they read the same unbuilt output), so the message says so
+ * instead of claiming a nothing that did not happen. Same invariant as the
+ * sibling coverage gate's partial-round wording (#6033): nothing judged, nothing
+ * written.
+ *
+ * @param {string} headline
+ * @param {string[]} detail
+ * @param {{ fix?: string, alsoFix?: string[], scanned?: number }} [options]
  */
-function reportPrerequisiteNotMet(headline, detail) {
+function reportPrerequisiteNotMet(headline, detail, options = {}) {
+  const { fix = CLI_BUILD_FIX, alsoFix = [], scanned = 0 } = options;
+  const nothingChecked =
+    scanned === 0
+      ? `  Nothing was checked: no bundle was compared and no config was parsed, so this\n` +
+        `  result says NOTHING about whether the committed translation bundles are in sync.`
+      : `  Nothing was judged: the failing package's bundles were never compared, the\n` +
+        `  packages after it were never attempted, and the ${scanned} attempted before it read the\n` +
+        `  same unbuilt output — an "in sync" line above is not a clean bill. So this\n` +
+        `  result says NOTHING about whether the committed translation bundles are in sync.`;
   console.error(
     `\ncheck-i18n-bundles: PREREQUISITE NOT MET — ${headline}\n\n` +
       detail.map((l) => (l ? `  ${l}` : '')).join('\n') +
-      `\n\n  Fix:  ${CLI_BUILD_FIX}\n\n` +
-      `  Nothing was checked: no bundle was compared and no config was parsed, so this\n` +
-      `  result says NOTHING about whether the committed translation bundles are in sync.\n` +
+      `\n\n  Fix:  ${fix}\n` +
+      alsoFix.map((l) => `        ${l}\n`).join('') +
+      `\n${nothingChecked}\n` +
       `  (Exit code 1 — but piping this gate reports the PIPE's status, so\n` +
       `  \`pnpm check:i18n | tail -4\` reads green either way. Use \`echo "EXIT=$?"\`.)`,
   );
   process.exit(1);
+}
+
+/**
+ * The stale-dependency prerequisite's detail lines (#7681). Pure and separate from
+ * the printer so `--self-test` can prove the verdict blames the PACKAGE whose
+ * build output is at fault, never the i18n config that was merely holding the bag
+ * when it blew up — the whole defect being fixed.
+ *
+ * @param {{ kind: string, pkg: string, missingExport: string, sentence: string }} stale
+ * @param {{ pkg: string, status: number, remaining: number }} at
+ * @returns {string[]}
+ */
+function staleWorkspaceDistDetail(stale, at) {
+  const quoted = stale.sentence.length > 160 ? `${stale.sentence.slice(0, 160)}…` : stale.sentence;
+  const cause =
+    stale.kind === 'export-mismatch'
+      ? [
+          `${at.pkg}'s extract exited ${at.status} loading \`${stale.pkg}\`: the module resolved,`,
+          `but its build output does not carry the export the config needs —`,
+          ``,
+          `  ${quoted}`,
+          ``,
+          `\`${stale.pkg}\`'s dist predates the source that declares '${stale.missingExport}'. That is a`,
+          `property of that package's build output — not of ${at.pkg}'s i18n config, and not`,
+          `of its committed translation bundles.`,
+        ]
+      : [
+          `${at.pkg}'s extract exited ${at.status} loading \`${stale.pkg}\`: the package is`,
+          `installed but has no build output in this worktree —`,
+          ``,
+          `  ${quoted}`,
+          ``,
+          `That is a property of \`${stale.pkg}\` — not of ${at.pkg}'s i18n config, and not of`,
+          `its committed translation bundles.`,
+        ];
+  return [
+    ...cause,
+    ``,
+    ...(at.remaining > 0
+      ? [
+          `Every remaining package's extract loads the same output, so the loop stopped here`,
+          `(${at.remaining} package(s) not attempted) rather than counting one environment fact as`,
+          `bundle problems.`,
+        ]
+      : [`No package was left to attempt, and one environment fact is not a bundle problem.`]),
+  ];
 }
 
 /**
@@ -414,7 +663,7 @@ const drifted = [];
 const broken = [];
 /** One entry per package that authored a key the schema does not declare. */
 const undeclared = [];
-for (const config of configs) {
+for (const [index, config] of configs.entries()) {
   const pkg = config.replace(/^packages\//, '').replace(/\/scripts\/i18n-extract\.config\.ts$/, '');
   const flags = flagsFromDocstring(config);
   const out = flags.find((f) => f.startsWith('--out='));
@@ -448,24 +697,51 @@ for (const config of configs) {
   const stderr = run.stderr ?? '';
   const failed = run.status !== 0;
 
-  // The prerequisite's safety net, and the reason the probe above is allowed to
+  // The prerequisites' safety net, and the reason the probe above is allowed to
   // defer instead of guessing. It fires on the cases the probe cannot see: a
   // stale build whose command surface no longer answers to this id, a partial
   // dist that satisfies the file check, or a package.json shape the derivation
   // could not read. Aborting on the FIRST package is the whole point — the
   // defect being fixed is nine reports of one cause, so the loop must not
   // continue accumulating them.
+  //
+  // TWO signatures are netted here, deliberately distinct (#7681). The CLI can be
+  // built and this gate still unable to run: the extract loads the workspace's own
+  // packages, and a `dist/` older than the source that added an export makes node
+  // refuse the import. That failure used to fall past this net into the `else`
+  // branch below — `broken.push('extract failed …')` — and printed as
+  // "N bundle problem(s)", which is a CONTENT verdict about translation bundles
+  // nothing ever compared, in the two words that send the reader to the i18n
+  // configs. Neither signature may claim the other's cause: the remedies differ
+  // (build the CLI vs rebuild that package), and a wrong one sends the reader to
+  // run a command that changes nothing.
   if (failed) {
     const signature = looksLikeMissingCliCommand(`${stdout}\n${stderr}`);
     if (signature) {
-      reportPrerequisiteNotMet('the built CLI cannot resolve the command this gate runs', [
-        `${pkg}'s extract exited ${run.status} with oclif's own "command not found":`,
-        ``,
-        `  ${signature.length > 160 ? `${signature.slice(0, 160)}…` : signature}`,
-        ``,
-        `Every remaining package would fail the same way for the same one reason, so the`,
-        `loop stopped here rather than reporting it ${configs.length} times as bundle problems.`,
-      ]);
+      reportPrerequisiteNotMet(
+        'the built CLI cannot resolve the command this gate runs',
+        [
+          `${pkg}'s extract exited ${run.status} with oclif's own "command not found":`,
+          ``,
+          `  ${signature.length > 160 ? `${signature.slice(0, 160)}…` : signature}`,
+          ``,
+          `Every remaining package would fail the same way for the same one reason, so the`,
+          `loop stopped here rather than reporting it ${configs.length} times as bundle problems.`,
+        ],
+        { scanned: index },
+      );
+    }
+    const stale = looksLikeStaleWorkspaceDist(`${stdout}\n${stderr}`);
+    if (stale) {
+      reportPrerequisiteNotMet(
+        `a workspace package this gate loads is ${stale.kind === 'export-mismatch' ? 'built from older source' : 'not built'} — \`${stale.pkg}\``,
+        staleWorkspaceDistDetail(stale, { pkg, status: run.status, remaining: configs.length - index - 1 }),
+        {
+          fix: workspaceBuildFix(stale.pkg),
+          alsoFix: ['…or `pnpm build`, on a tree whose other packages may be stale too.'],
+          scanned: index,
+        },
+      );
     }
   }
 
