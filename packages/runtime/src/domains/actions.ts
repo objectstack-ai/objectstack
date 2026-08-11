@@ -448,9 +448,13 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
         // no signal short of body-parsing at every hop.
         //
         // Told apart by the error's NAME, the same signal `@objectstack/rest`
-        // already uses on this exact distinction ("non-default names
-        // (`TypeError: …`) […] signal a genuine script bug rather than a
-        // deliberately thrown business rule"):
+        // uses on this exact distinction. [#7543] That citation used to quote
+        // rest's comment for the EVIDENCE while the two exits drew opposite
+        // conclusions from it: rest read a non-default name as "a genuine script
+        // bug" and then shipped it to the client as a 400 anyway. It no longer
+        // does — `mapDataError`'s `isScriptFaultMessage` now answers the
+        // sanitised `500 INTERNAL_ERROR` this branch has answered since #3913,
+        // so the two exits agree on the reading as well as the signal:
         //
         //   name === 'Error'        a deliberate `throw new Error(msg)` — the
         //                           shape a registered handler uses to reject.
