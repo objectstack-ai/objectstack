@@ -26,6 +26,7 @@
     "nanoid": "^6.0.0"
   },
   "devDependencies": {
+    "@objectstack/objectql": "workspace:*",
     "@types/node": "^26.1.2",
     "mongodb-memory-server": "^11.2.0",
     "typescript": "^6.0.3",
