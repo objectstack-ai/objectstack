@@ -38,7 +38,7 @@ const result = InvitationSchema.parse(data);
 | **organizationId** | `string` | ✅ | Organization ID |
 | **email** | `string` | ✅ | Invitee email address |
 | **role** | `string` | ✅ | Role to assign upon acceptance |
-| **status** | `Enum<'pending' \| 'accepted' \| 'rejected' \| 'expired'>` | ✅ | Invitation status |
+| **status** | `Enum<'pending' \| 'accepted' \| 'rejected' \| 'expired' \| 'canceled'>` | ✅ | Invitation status |
 | **expiresAt** | `string` | ✅ | Invitation expiry timestamp |
 | **inviterId** | `string` | ✅ | User ID of the inviter |
 | **createdAt** | `string` | ✅ | Invitation creation timestamp |
@@ -55,6 +55,7 @@ const result = InvitationSchema.parse(data);
 * `accepted`
 * `rejected`
 * `expired`
+* `canceled`
 
 
 ---
