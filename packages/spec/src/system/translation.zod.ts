@@ -318,7 +318,17 @@ export type LegacyObjectFirstKey = (typeof LEGACY_OBJECT_FIRST_KEYS)[number];
  * when the two carry different inner shapes and the content has to be rewritten,
  * not renamed.
  */
-const TRANSLATION_KEY_GUIDANCE: Record<LegacyObjectFirstKey | 'validationMessages', string> = {
+const TRANSLATION_KEY_GUIDANCE: Record<LegacyObjectFirstKey | 'validationMessages' | 'screens', string> = {
+  // Not a legacy key either — the top-level spelling of the group #7646 added.
+  // `screens` → `flows` is distance 4 and would never be suggested, and it is
+  // not a rename in any case: screen copy nests one level down, under the flow
+  // that owns the node. An author who writes it at the top level has to move
+  // the content, not re-spell the key, which is exactly the `app`/`apps`
+  // distinction this table was built to draw.
+  screens:
+    '`screens` is not a top-level translation group — screen copy is addressed under the flow that '
+    + "owns it: 'flows.<flow_name>.screens.<node_id>.title' and "
+    + "'flows.<flow_name>.screens.<node_id>.fields.<field_name>.label'.",
   // Not a legacy object-first key — a group that was live-looking and unread
   // until 17.0.0 (#4667, ADR-0049). The platform's own signature was on it
   // twice: the schema example showed a concrete override
@@ -386,6 +396,27 @@ const TRANSLATION_KEY_GUIDANCE: Record<LegacyObjectFirstKey | 'validationMessage
  * building the shape eagerly at module load would defeat the laziness those
  * exist for.
  */
+/**
+ * The two measured exclusions on `flows.<flow>.screens.<node>.fields.<field>`.
+ *
+ * Both are keys an author reaches for from a neighbouring surface — `help` is
+ * correct on an object FIELD translation and on a settings key, `options` on
+ * both of those too — and on a screen field neither has anything behind it.
+ * Written as `guidance` rather than aliases because there is no right key to
+ * send them to: the copy does not exist on this surface at all, and pointing
+ * at the nearest-looking one would translate the wrong string.
+ */
+const FLOW_SCREEN_FIELD_NO_HELP =
+  'a screen field declares no help/hint copy — `ScreenFieldConfig` is '
+  + '`name`/`label`/`type`/`required`/`options`/`defaultValue`/`placeholder`/`visibleWhen`, so there is '
+  + 'nothing here to translate. Use `placeholder` for the in-input hint the field does declare.';
+
+const FLOW_SCREEN_FIELD_NO_OPTIONS =
+  'select-option labels are not translatable on a screen field: `ScreenFieldConfig.options[].value` is '
+  + 'unconstrained (numbers and booleans are legal), so an option map keyed by value — the shape '
+  + '`objects.<object>.fields.<field>.options` uses — cannot address them unambiguously. Author the '
+  + "option labels on the node's `config`.";
+
 const translationDataShape = () => ({
   /** Object translations */
   objects: z.record(z.string(), ObjectTranslationDataSchema).optional().describe('Object translations keyed by object name'),
@@ -569,6 +600,120 @@ const translationDataShape = () => ({
   })).optional().describe('Page translations keyed by page name'),
 
   /**
+   * Screen-flow translations keyed by flow name (`Flow.name`).
+   *
+   * Convention:
+   *   flows.<flow_name>.label
+   *   flows.<flow_name>.screens.<node_id>.title
+   *   flows.<flow_name>.screens.<node_id>.fields.<field_name>.label
+   *   flows.<flow_name>.screens.<node_id>.fields.<field_name>.placeholder
+   *
+   * **The hole this closes (#7646).** A `type: 'screen'` flow is a wizard the
+   * user reads — a heading, a list of labelled inputs — and the bundle had no
+   * group for any of it. Not a drifted key: no key. HotCRM finished all four
+   * locales, retired its i18n exemption ledger, and its `lead_conversion`
+   * wizard still rendered "Conversion Details / Create Opportunity? /
+   * Opportunity Name" in English on a zh-CN console, because a translator had
+   * nowhere to put the strings and `.strict()` (correctly) refused the group
+   * they invented.
+   *
+   * **The addressing is the runner's own, not a second naming scheme.** Every
+   * key below is an identifier some consumer already holds at render time:
+   *
+   * | level | key | declared by |
+   * |:---|:---|:---|
+   * | flow | `Flow.name` | `flow.zod.ts` — the machine name the console launches the run by |
+   * | screen | `FlowNode.id` | `flow.zod.ts`; forwarded to the client verbatim as `ScreenSpec.nodeId` (`contracts/automation-service.ts`) |
+   * | field | `ScreenFieldConfig.name` | `builtin-node-config.zod.ts`; forwarded as `ScreenFieldSpec.name` |
+   *
+   * `nodeId` is what correlates a resume back to its pause point, so it is the
+   * one screen identifier that is guaranteed stable and present client-side —
+   * a positional index would renumber whenever a step is inserted, and node
+   * `label` is itself display copy. Addressing a translation surface by keys
+   * nothing produces is the declared-but-unresolvable trap this file exists to
+   * keep out.
+   *
+   * **The key face is measured against the flow schema, not mirrored from the
+   * report.** Two of the three per-field keys the issue proposed are real
+   * (`label`, `placeholder`); `help` is not:
+   *
+   * - **`help` is not here** — `ScreenFieldConfigSchema` declares
+   *   `name`/`label`/`type`/`required`/`options`/`defaultValue`/`placeholder`/`visibleWhen`
+   *   and nothing help-shaped at all. Declaring it would parse clean and
+   *   translate nothing, the ADR-0078 shape #6080 removed from the page
+   *   component face for exactly this reason. It is `guidance` instead, so an
+   *   author who reaches for it is told the field has no such copy rather than
+   *   sent to a neighbouring key that means something else.
+   *
+   * ⛔ **Runner chrome is NOT here** — the Cancel/Submit buttons the wizard
+   * draws around the author's screen belong to the console's own message
+   * catalog. They are the console's words in every app, so putting them in a
+   * per-app bundle would ask every app to re-translate the platform (maintainer
+   * ruling on #7646).
+   *
+   * ⚠️ The runner half is a separate, downstream change: this declares the
+   * vocabulary and closes it, and no shipped runner reads it yet — see the
+   * `flows` row in `liveness/translation.json`, which is `planned` and carries
+   * that warning for authors.
+   */
+  flows: z.record(z.string(), strictObject({
+    surface: 'this flow translation',
+    history: TRANSLATION_HISTORY,
+    aliases: { name: 'label', title: 'label', nodes: 'screens', steps: 'screens', screen: 'screens', pages: 'screens' },
+    guidance: {
+      successMessage:
+        '`flow.successMessage` / `flow.errorMessage` are not part of the flows translation surface — '
+        + 'it carries the flow label, per-screen headings and per-screen field copy (#7646). The terminal '
+        + 'toast renders the string authored on the flow.',
+      errorMessage:
+        '`flow.errorMessage` / `flow.successMessage` are not part of the flows translation surface — '
+        + 'it carries the flow label, per-screen headings and per-screen field copy (#7646). The terminal '
+        + 'toast renders the string authored on the flow.',
+    },
+  }, {
+    label: z.string().optional().describe('Translated flow label'),
+    screens: z.record(z.string(), strictObject({
+      surface: 'this flow screen translation',
+      history: TRANSLATION_HISTORY,
+      // A screen's headline is `title`; the FLOW's is `label`. Same document
+      // one level apart with opposite spellings — the trap
+      // `dashboards.widgets` and `pages.components` both name, so it gets the
+      // same alias table.
+      aliases: { label: 'title', name: 'title', heading: 'title', header: 'title', inputs: 'fields', items: 'fields' },
+      guidance: {
+        description:
+          "`description` — a screen's body text (`config.description`) — is not part of the flows "
+          + 'translation surface, which carries the heading (`title`) and per-field copy (#7646).',
+      },
+    }, {
+      // Overlays the screen node's `config.title`. A screen that declares no
+      // `title` shows its node `label` instead (`ScreenConfigSchema.title`,
+      // "falls back to the node label"), so this one key covers whichever of
+      // the two the runner ends up drawing — the same one-string-one-spelling
+      // rule `pages.<name>.title` follows over `label`.
+      title: z.string().optional().describe('Translated screen heading (overlays `config.title`, or the node label when the screen declares none)'),
+      fields: z.record(z.string(), strictObject({
+        surface: 'this flow screen field translation',
+        history: TRANSLATION_HISTORY,
+        aliases: { name: 'label', title: 'label', text: 'label' },
+        guidance: {
+          help: FLOW_SCREEN_FIELD_NO_HELP,
+          helpText: FLOW_SCREEN_FIELD_NO_HELP,
+          hint: FLOW_SCREEN_FIELD_NO_HELP,
+          tooltip: FLOW_SCREEN_FIELD_NO_HELP,
+          description: FLOW_SCREEN_FIELD_NO_HELP,
+          options: FLOW_SCREEN_FIELD_NO_OPTIONS,
+          choices: FLOW_SCREEN_FIELD_NO_OPTIONS,
+          values: FLOW_SCREEN_FIELD_NO_OPTIONS,
+        },
+      }, {
+        label: z.string().optional().describe('Translated screen field label'),
+        placeholder: z.string().optional().describe('Translated screen field placeholder'),
+      })).optional().describe('Screen field translations keyed by field name (`ScreenFieldConfig.name`)'),
+    })).optional().describe('Screen translations keyed by screen node id (`FlowNode.id`, the client\'s `ScreenSpec.nodeId`)'),
+  })).optional().describe('Screen-flow translations keyed by flow name'),
+
+  /**
    * Settings manifest translations keyed by settings namespace
    * (matches `SettingsManifest.namespace`, e.g. "mail", "branding").
    *
@@ -723,7 +868,7 @@ export const TranslationDataSchema = lazySchema(() => strictObject({
   surface: 'this locale of the translation bundle',
   history: TRANSLATION_HISTORY,
   guidance: TRANSLATION_KEY_GUIDANCE,
-  aliases: { object: 'objects', fields: 'objects', app: 'apps', page: 'pages', dashboard: 'dashboards', setting: 'settings', message: 'messages', strings: 'messages', labels: 'messages', actions: 'globalActions' },
+  aliases: { object: 'objects', fields: 'objects', app: 'apps', page: 'pages', dashboard: 'dashboards', flow: 'flows', setting: 'settings', message: 'messages', strings: 'messages', labels: 'messages', actions: 'globalActions' },
   // `locale` lives on the ITEM, not on a bundle entry (the bundle keys ARE the
   // locales). Naming it keeps the suggestion useful for an author who moved a
   // `translation` item into a bundle and left the field behind.
@@ -849,7 +994,7 @@ export const TranslationItemSchema = lazySchema(() => strictObject({
   surface: 'this translation',
   history: TRANSLATION_HISTORY,
   guidance: TRANSLATION_KEY_GUIDANCE,
-  aliases: { object: 'objects', app: 'apps', page: 'pages', setting: 'settings', message: 'messages', strings: 'messages', labels: 'messages', actions: 'globalActions', lang: 'locale', language: 'locale' },
+  aliases: { object: 'objects', app: 'apps', page: 'pages', flow: 'flows', setting: 'settings', message: 'messages', strings: 'messages', labels: 'messages', actions: 'globalActions', lang: 'locale', language: 'locale' },
 }, {
   ...translationDataShape(),
   locale: LocaleSchema.describe('BCP-47 locale this item translates (e.g. "zh-CN")'),

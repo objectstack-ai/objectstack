@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { z } from 'zod';
 import { PAGE_COMPONENT_COPY_KEYS } from './i18n-resolver';
+import { FlowSchema } from '../automation/flow.zod';
+import { ScreenConfigSchema, ScreenFieldConfigSchema } from '../automation/builtin-node-config.zod';
 import {
   TranslationDataSchema,
   TranslationBundleSchema,
@@ -892,6 +894,180 @@ describe('translation unknown-key strictness (#4001)', () => {
     });
   });
 
+  // ──────────────────────────────────────────────────────────────────────────
+  // #7646 — `flows.<name>.screens.<nodeId>`, the screen-flow wizard's copy
+  // ──────────────────────────────────────────────────────────────────────────
+  describe('screen-flow copy (#7646)', () => {
+    const parse = (flows: unknown) => TranslationDataSchema.safeParse({ flows });
+
+    it('accepts a fully-populated flow entry', () => {
+      const result = parse({
+        lead_conversion: {
+          label: '转化线索',
+          screens: {
+            conversion_details: {
+              title: '转化详情',
+              fields: {
+                create_opportunity: { label: '创建商机？' },
+                opportunity_name: { label: '商机名称', placeholder: '输入商机名称' },
+                opportunity_amount: { label: '商机金额' },
+              },
+            },
+          },
+        },
+      });
+      expect(result.success, JSON.stringify(result.error?.issues)).toBe(true);
+    });
+
+    it('accepts partial entries at every level — the family\'s partial-locale semantics', () => {
+      // Every key on this surface is optional for the same reason
+      // `ObjectTranslationDataSchema.label` is: partial translation is the
+      // normal state, and requiring a level to be complete would force
+      // translators to restate source strings just to pass validation.
+      expect(parse({ lead_conversion: {} }).success).toBe(true);
+      expect(parse({ lead_conversion: { label: '转化线索' } }).success).toBe(true);
+      expect(parse({ lead_conversion: { screens: {} } }).success).toBe(true);
+      expect(parse({ lead_conversion: { screens: { s1: {} } } }).success).toBe(true);
+      expect(parse({ lead_conversion: { screens: { s1: { fields: { f: {} } } } } }).success).toBe(true);
+      // …and one locale of a bundle may carry `flows` while another does not.
+      expect(TranslationBundleSchema.safeParse({
+        en: {},
+        'zh-CN': { flows: { lead_conversion: { screens: { s1: { title: '转化详情' } } } } },
+      }).success).toBe(true);
+    });
+
+    it('addresses flows/screens/fields by the identifiers the runner resolves against', () => {
+      // The trap this pins is declared-but-unresolvable: a translation surface
+      // keyed by names nothing produces parses clean and translates nothing.
+      // Each level's key is taken from the flow schema itself, and the two
+      // inner ones reach the client verbatim on the `ScreenSpec`
+      // (`nodeId` / `fields[].name`, contracts/automation-service.ts).
+      const flow = FlowSchema.parse({
+        name: 'lead_conversion',
+        label: 'Convert Lead',
+        type: 'screen',
+        nodes: [
+          { id: 'start', type: 'start', label: 'Start' },
+          {
+            id: 'conversion_details',
+            type: 'screen',
+            label: 'Conversion Details',
+            config: {
+              title: 'Conversion Details',
+              fields: [{ name: 'opportunity_name', label: 'Opportunity Name', placeholder: 'Enter a name' }],
+            },
+          },
+        ],
+        edges: [{ id: 'e1', source: 'start', target: 'conversion_details' }],
+      });
+      const screenNode = flow.nodes.find((n) => n.type === 'screen')!;
+      const screenConfig = ScreenConfigSchema.parse(screenNode.config);
+      const fieldName = screenConfig.fields![0]!.name;
+
+      const result = parse({
+        [flow.name]: {
+          label: 'Convert Lead',
+          screens: { [screenNode.id]: { title: '转化详情', fields: { [fieldName]: { label: '商机名称' } } } },
+        },
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it('stays `.strict()` — an invented key is refused at each of the three levels', () => {
+      for (const body of [
+        { lead_conversion: { labell: 'x' } },
+        { lead_conversion: { screens: { s1: { titel: 'x' } } } },
+        { lead_conversion: { screens: { s1: { fields: { f: { lable: 'x' } } } } } },
+      ]) {
+        const result = parse(body);
+        expect(result.success, JSON.stringify(body)).toBe(false);
+        expect(result.error?.issues.some((i) => i.code === 'unrecognized_keys')).toBe(true);
+      }
+    });
+
+    it('carries the `label`/`title` trap alias one level down, as its two siblings do', () => {
+      // A flow's headline is `label`; a screen's is `title`. One level apart,
+      // opposite spellings — the trap `dashboards.widgets` and
+      // `pages.components` both name.
+      expect(parse({ lead_conversion: { screens: { s1: { label: 'x' } } } })
+        .error?.issues.find((i) => i.code === 'unrecognized_keys')?.message)
+        .toContain('`label` → `title`');
+      expect(parse({ lead_conversion: { title: 'x' } })
+        .error?.issues.find((i) => i.code === 'unrecognized_keys')?.message)
+        .toContain('`title` → `label`');
+    });
+
+    it('refuses `help` on a screen field rather than declaring a key the field has not got', () => {
+      // The report proposed label/placeholder/help. `ScreenFieldConfigSchema`
+      // declares nothing help-shaped, so `help` would parse clean and translate
+      // nothing (ADR-0078) — and unlike #6080's page-component `help` there is
+      // no honest key to alias it to, since `placeholder` is the in-input hint
+      // and not help text. It is `guidance` instead.
+      const declared = Object.keys((ScreenFieldConfigSchema as unknown as z.ZodObject<z.ZodRawShape>).shape);
+      expect(declared).not.toContain('help');
+      expect(declared).not.toContain('helpText');
+      expect(declared).toContain('label');
+      expect(declared).toContain('placeholder');
+
+      const message = parse({ lead_conversion: { screens: { s1: { fields: { f: { help: 'x' } } } } } })
+        .error?.issues.find((i) => i.code === 'unrecognized_keys')?.message ?? '';
+      expect(message).toContain('a screen field declares no help/hint copy');
+      // …and it must not be re-pointed at `placeholder`, which means something else.
+      expect(message).not.toContain('`help` → `placeholder`');
+    });
+
+    it('says why select-option labels are not translatable here', () => {
+      const message = parse({ lead_conversion: { screens: { s1: { fields: { f: { options: {} } } } } } })
+        .error?.issues.find((i) => i.code === 'unrecognized_keys')?.message ?? '';
+      expect(message).toContain('unconstrained');
+    });
+
+    it('keeps runner chrome out of the bundle', () => {
+      // Cancel/Submit are the CONSOLE's words in every app; the maintainer
+      // ruling on #7646 keeps them in its own message catalog rather than
+      // asking each app to re-translate the platform. There is no key for them
+      // on any of the three levels.
+      expect(parse({ lead_conversion: { submitLabel: 'Submit', cancelLabel: 'Cancel' } }).success).toBe(false);
+      expect(parse({ lead_conversion: { screens: { s1: { submitLabel: 'Submit' } } } }).success).toBe(false);
+    });
+
+    it('states what the runner applies, and that chrome is not here', () => {
+      // The describes are the authoring surface's documentation — the JSON
+      // Schema and the generated reference are built from them.
+      const json = z.toJSONSchema(TranslationDataSchema as unknown as z.ZodType, { io: 'input' }) as any;
+      const flowsNode = json.properties.flows;
+      expect(flowsNode.description).toContain('flow name');
+      expect(flowsNode.additionalProperties.properties.screens.description).toContain('node id');
+      expect(
+        flowsNode.additionalProperties.properties.screens.additionalProperties.properties.fields.description,
+      ).toContain('field name');
+    });
+
+    it('sends a top-level `screens` group down to the flow that owns it', () => {
+      // A rename would be wrong: screen copy nests under its flow, so the
+      // content has to move, not be re-spelled — the `app`/`apps` distinction
+      // the guidance table was built to draw.
+      const message = TranslationDataSchema.safeParse({ screens: { s1: { title: 'x' } } })
+        .error?.issues.find((i) => i.code === 'unrecognized_keys')?.message ?? '';
+      expect(message).toContain('flows.<flow_name>.screens.<node_id>');
+      expect(message).not.toContain('`screens` → `flows`');
+    });
+
+    it('offers `flow` → `flows` as the rename it actually is', () => {
+      expect(TranslationDataSchema.safeParse({ flow: { lead_conversion: {} } })
+        .error?.issues.find((i) => i.code === 'unrecognized_keys')?.message)
+        .toContain('`flow` → `flows`');
+    });
+
+    it('reaches the metadata-item door too, not just the file-authored bundle', () => {
+      // #3778's guard closed one door and left the other open; a group added
+      // to the shared shape has to land on both by construction.
+      const flows = { lead_conversion: { screens: { s1: { title: '转化详情' } } } };
+      expect(TranslationItemSchema.safeParse({ locale: 'zh-CN', flows }).success).toBe(true);
+      expect(TranslationItemSchema.safeParse({ locale: 'zh-CN', flows: { f: { titel: 'x' } } }).success).toBe(false);
+    });
+  });
+
   it('names which action surface the key landed on', () => {
     const onObject = TranslationDataSchema.safeParse({
       objects: { account: { _actions: { merge: { confirm: 'ok?' } } } },
@@ -913,6 +1089,7 @@ describe('translation unknown-key strictness (#4001)', () => {
       globalActions: { export_csv: { label: 'Export', params: { format: { label: 'Format' } } } },
       dashboards: { sales: { label: 'Sales', widgets: { rev: { title: 'Revenue' } } } },
       pages: { home: { label: 'Home', title: 'Welcome' } },
+      flows: { lead_conversion: { label: 'Convert Lead', screens: { details: { title: 'Details', fields: { name: { label: 'Name', placeholder: 'Enter a name' } } } } } },
       settings: { mail: { title: 'Mail', keys: { host: { label: 'Host' } } } },
       metadataForms: { object: { label: 'Object', fields: { name: { label: 'Name' } } } },
       settingsCommon: { sourceLabels: { env: 'Env', tenant: 'Tenant' } },
