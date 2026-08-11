@@ -743,38 +743,59 @@ function translateFieldOperators(
       }
 
       // String operators → $regex
+      //
+      // [#6682] Case-SENSITIVE, and the sensitivity is the absence of one key:
+      // every arm here used to set `$options: 'i'` beside its pattern, which is
+      // MongoDB's full-Unicode fold. #4706 Q2 = A rules this family
+      // case-sensitive on EVERY backend — #6518 flipped the SQL family (GLOB on
+      // the SQLite dialects, `LIKE` over a binary cast on MySQL), `formula`,
+      // objectql's `having` and service-analytics were already case-exact, and
+      // this driver was the last face still folding. The fold both OVER-matched
+      // (`{ name: { $contains: 'acme' } }` returned `ACME Corp` — rows the
+      // filter excludes, which on an RLS read scope is over-reach rather than a
+      // loose filter, #3948) and overshot the ASCII-only boundary Q1 = A holds
+      // `$icontains` to, since `i` folds `É` to `é` as well.
+      //
+      // `escapeRegex` is what keeps the comparand LITERAL, and it is unchanged:
+      // dropping the flag changes which CASES match, never which characters are
+      // metacharacters. The deliberate case-insensitive spelling is
+      // `$icontains` below — one operator, one answer, per #5374.
       case '$contains':
         result.$regex = escapeRegex(String(value));
-        result.$options = 'i';
         break;
 
       case '$notContains':
-        result.$not = { $regex: escapeRegex(String(value)), $options: 'i' };
+        // The negated twin needs the same treatment in this ONE place: the
+        // pattern under `$not` is the same predicate, so a flag left here would
+        // have excluded rows the positive form includes — the negation widening
+        // rather than mirroring.
+        result.$not = { $regex: escapeRegex(String(value)) };
         break;
 
       case '$startsWith':
         result.$regex = `^${escapeRegex(String(value))}`;
-        result.$options = 'i';
         break;
 
       case '$endsWith':
         result.$regex = `${escapeRegex(String(value))}$`;
-        result.$options = 'i';
         break;
 
       // [#6520] `$icontains` — case-insensitive over ASCII and nothing else.
       //
-      // The one arm in this family that does NOT set `$options: 'i'`, and the
-      // omission is the whole implementation. Mongo's `i` flag folds the full
-      // Unicode range, so it would match `CAFÉ` against `café` — the answer
-      // SQLite cannot give and therefore the one the protocol forbids (#4706
-      // Q1 = A). The fold lives in the pattern instead, one `[Aa]` class per
-      // ASCII letter, from the spec's shared `asciiCaseInsensitiveRegexSource`
-      // — the same source `driver-memory`'s mingo path binds.
+      // No arm in this family sets `$options: 'i'` any more, and for this one
+      // the omission is the whole implementation. Mongo's `i` flag folds the
+      // full Unicode range, so it would match `CAFÉ` against `café` — the
+      // answer SQLite cannot give and therefore the one the protocol forbids
+      // (#4706 Q1 = A). The fold lives in the pattern instead, one `[Aa]` class
+      // per ASCII letter, from the spec's shared
+      // `asciiCaseInsensitiveRegexSource` — the same source `driver-memory`'s
+      // mingo path binds.
       //
-      // Its four neighbours above ARE `$options: 'i'`, and that is not a
-      // precedent to copy: it is them folding Unicode for the case-SENSITIVE
-      // `$contains` family, the open defect #6682 tracks on this driver.
+      // Its four neighbours above carried `$options: 'i'` until #6682, which
+      // was them folding Unicode for the case-SENSITIVE `$contains` family.
+      // That flag is now spelled nowhere in this function, which is the shape
+      // to keep: `$options` is a RETIRED operator (#5702), and the only
+      // sanctioned case-insensitive answer on this driver is the pattern below.
       case '$icontains':
         result.$regex = asciiCaseInsensitiveRegexSource(String(value));
         break;

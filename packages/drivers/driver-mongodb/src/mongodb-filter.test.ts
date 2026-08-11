@@ -85,30 +85,61 @@ describe('MongoDB Filter Translator', () => {
     });
   });
 
+  /**
+   * [#6682] Every pin in here used to carry `$options: 'i'` beside its pattern.
+   * That flag was MongoDB's full-Unicode fold, and #4706 Q2 = A rules this
+   * family case-SENSITIVE on every backend — so the assertions are not
+   * "`$options` deleted", they are the ROW SET the flag was widening: the pins
+   * below assert the emitted pattern, and `mongodb-filter-text-conformance.
+   * test.ts` asserts which of `FILTER_TEXT_ROWS` it then selects (`$contains:
+   * 'acme'` no longer returns `ACME Corp`).
+   *
+   * `escapeRegex` is untouched and still pinned here: the comparand is LITERAL
+   * whichever way case is answered, and conflating the two is how a "case fix"
+   * turns `a.b` back into a metacharacter.
+   */
   describe('string operators', () => {
-    it('translates $contains to $regex', () => {
+    it('translates $contains to a case-SENSITIVE $regex — no $options (#6682)', () => {
       const result = translateFilter({ name: { $contains: 'test' } });
-      expect(result).toEqual({ name: { $regex: 'test', $options: 'i' } });
+      expect(result).toEqual({ name: { $regex: 'test' } });
     });
 
-    it('translates $startsWith to ^prefix regex', () => {
+    it('translates $startsWith to a case-SENSITIVE ^prefix regex (#6682)', () => {
       const result = translateFilter({ name: { $startsWith: 'Pre' } });
-      expect(result).toEqual({ name: { $regex: '^Pre', $options: 'i' } });
+      expect(result).toEqual({ name: { $regex: '^Pre' } });
     });
 
-    it('translates $endsWith to suffix$ regex', () => {
+    it('translates $endsWith to a case-SENSITIVE suffix$ regex (#6682)', () => {
       const result = translateFilter({ email: { $endsWith: '.com' } });
-      expect(result).toEqual({ email: { $regex: '\\.com$', $options: 'i' } });
+      expect(result).toEqual({ email: { $regex: '\\.com$' } });
     });
 
     it('escapes special regex characters', () => {
       const result = translateFilter({ name: { $contains: 'a.b+c' } });
-      expect(result).toEqual({ name: { $regex: 'a\\.b\\+c', $options: 'i' } });
+      expect(result).toEqual({ name: { $regex: 'a\\.b\\+c' } });
     });
 
-    it('translates $notContains', () => {
+    it('translates $notContains — the negation is case-SENSITIVE too (#6682)', () => {
       const result = translateFilter({ name: { $notContains: 'spam' } });
-      expect(result).toEqual({ name: { $not: { $regex: 'spam', $options: 'i' } } });
+      expect(result).toEqual({ name: { $not: { $regex: 'spam' } } });
+    });
+
+    /**
+     * The flag is gone from the whole family, asserted as an absence rather
+     * than arm by arm: `$options` is a RETIRED operator (#5702), so a future
+     * arm reintroducing it would be emitting a spelling this same driver
+     * refuses on input.
+     */
+    it('emits no $options anywhere in the family (#6682)', () => {
+      for (const filter of [
+        { name: { $contains: 'acme' } },
+        { name: { $startsWith: 'acme' } },
+        { name: { $endsWith: 'acme' } },
+        { name: { $notContains: 'acme' } },
+        { name: { $icontains: 'acme' } },
+      ] as const) {
+        expect(JSON.stringify(translateFilter(filter))).not.toContain('$options');
+      }
     });
   });
 
@@ -198,7 +229,9 @@ describe('MongoDB Filter Translator', () => {
       ['<', ['age', '<', 65], { age: { $lt: 65 } }],
       ['<=', ['score', '<=', 100], { score: { $lte: 100 } }],
       ['in', ['status', 'in', ['active', 'pending']], { status: { $in: ['active', 'pending'] } }],
-      ['contains', ['name', 'contains', 'test'], { name: { $regex: 'test', $options: 'i' } }],
+      // [#6682] Case-SENSITIVE, like the object spelling it lowers to — the
+      // authoring sugar must not be a second answer to #4706 Q2.
+      ['contains', ['name', 'contains', 'test'], { name: { $regex: 'test' } }],
       ['implicit AND list', [['name', '=', 'Alice'], ['age', '>', 18]],
         { $and: [{ name: 'Alice' }, { age: { $gt: 18 } }] }],
       // PREFIX is the declared spelling of a logical join. The infix form this

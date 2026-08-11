@@ -273,6 +273,19 @@ const CASE_SETS = [
 //   TEMPORAL_CASES,            opt-in only — `mongodb-temporal-conformance.test.ts`
 //   TEMPORAL_TIME_CASES        has no server-free half.
 //
+// Two markers joined that column after the day it was measured, and both joined
+// it SERVER-FREE, which is the shape this note asks for rather than a way around
+// it — the driver's answer to each is a pure translation, so a suite that
+// evaluates the emitted document tests the driver and not MongoDB:
+//
+//   AGGREGATION_CASES          [#6850/#6814] `mongodb-aggregation-translation.
+//                              test.ts` runs the case-set by default. The
+//                              real-mongod half is absent, recorded on #6814.
+//   FILTER_TEXT_CASES          [#6682] `mongodb-filter-text-conformance.test.ts`
+//                              runs the case-set by default, rejection rows
+//                              included. The real-mongod half is absent,
+//                              recorded on #6682.
+//
 // Why: on a cold binary cache two vitest workers downloaded the same ~123 MB
 // archive and the loser's `rename` blew up an all-green run as an unhandled
 // rejection, ejecting unrelated PRs from the merge queue. The maintainer retired
@@ -280,16 +293,29 @@ const CASE_SETS = [
 // investment is frozen (#5499). Un-freezing it is what should re-run these cells
 // in CI; until then, this note is the honest state of the mongo column.
 
-// ## FILTER_TEXT_CASES: two DEBT rows left of the five #5701 opened
+// ## FILTER_TEXT_CASES: ONE DEBT row left of the five #5701 opened
 //
 // The ledger was EMPTY (see the note above) until `FILTER_TEXT_CASES` arrived.
 // Those five rows were not a regression in coverage: the case-set is the
 // CONTRACT half of the #4706 ruling, landed deliberately ahead of every
 // implementation, and one row per driver is what made "ahead of" a counted fact
 // instead of an assumption. #5702 cleared two of the three requirements; #6518
-// cleared the third on the SQL family and DELETED its three rows. What remains
-// is the #5499 frozen family — driver-memory and driver-mongodb — where the
-// freeze, not the difficulty, is why the cells are open.
+// cleared the third on the SQL family and DELETED its three rows.
+//
+// [#6682] `driver-mongodb`'s row is GONE too — the maintainer unfroze that
+// package on 2026-08-11 (#5499), requirement 2 landed there (the hardcoded
+// `$options: 'i'` is off all four `$contains`-family arms), and
+// `mongodb-filter-text-conformance.test.ts` imports the marker and drives all
+// SEVENTEEN cases including every rejection row. Measured rather than argued:
+// on `origin/main` @ `744b8f5` that suite failed exactly the five
+// case-sensitivity rows and passed the other twelve, so the fix was the whole
+// remaining gap and nothing else was quietly widened to reach green. It is the
+// SERVER-FREE half #5517 requires — this package's real-mongod suites are
+// opt-in, so a suite needing a server would not run in CI — and it evaluates
+// the emitted documents rather than pinning their spelling.
+//
+// What remains is `driver-memory`, still in the #5499 frozen family, where the
+// freeze rather than the difficulty is why the cell is open.
 //
 // What the case-set demands, and where each requirement stands:
 //
@@ -315,11 +341,15 @@ const CASE_SETS = [
 //      `LIKE` is already case-exact), and `LIKE` over `CAST(… AS BINARY)` on
 //      MySQL (whose answer otherwise follows the column's collation). turso's
 //      remote transport carries the twin in `pushLike`, and the two are held to
-//      the same rows by `turso-local-remote-text-parity.test.ts`. **STILL OPEN
-//      on driver-memory and driver-mongodb**, which fold the full Unicode range
-//      on their live query paths — and on driver-memory the REFERENCE matcher
-//      answers the same operator case-sensitively, so that package disagrees
-//      with itself. Both are the #5499 frozen family; tracked as #6682.
+//      the same rows by `turso-local-remote-text-parity.test.ts`. **DONE on
+//      driver-mongodb too** (#6682): `translateFieldOperators` no longer sets
+//      `$options: 'i'` on any of the four arms, and because every face of that
+//      driver — `find`/`count`/`update`/`delete` and the aggregation `$match`
+//      — routes through the one `translateFilter`, there is no second answer to
+//      align. **STILL OPEN on driver-memory**, which folds the full Unicode
+//      range on its live query path while its REFERENCE matcher answers the
+//      same operator case-sensitively, so that package disagrees with itself.
+//      It is the remaining #5499 frozen half; tracked as #6682.
 //
 //      Two faces #6518 measured and did NOT have to change, recorded because
 //      "not mentioned" reads as "not checked": `formula`'s `matchesFilter` and
@@ -405,35 +435,6 @@ const LEDGER = [
       + 'not import it — #6520\'s suites drive `FILTER_TEXT_ROWS` and spell their own `$icontains` cases '
       + 'rather than naming the marker, which would flip this cell to covered and fail RECONCILED while '
       + 'requirement 2 is open.',
-    issue: 'https://github.com/objectstack-ai/objectstack/issues/6682',
-  },
-  {
-    driver: 'driver-mongodb',
-    marker: 'FILTER_TEXT_CASES',
-    kind: 'DEBT',
-    why:
-      'Re-measured after #6518, which cleared requirement 2 on the SQL family and NOT here — #5499 freezes '
-      + 'this package, so the cell stays open by decision rather than by difficulty. Still the FURTHEST from '
-      + 'the ruling, but the ENVELOPE half is closed (#5702): that arm used to throw a bare '
-      + "`new Error('[mongodb] unsupported filter operator …')` — no `code`, no `status` — three lines from "
-      + 'this file\'s own `unsupportedFilterError` helper, which sets `INVALID_FILTER` / 400 and which three '
-      + 'other refusals here already used. It now routes through the helper, and a RETIRED spelling '
-      + 'additionally gets the spec prescription naming `$icontains`, so requirement 3 is DONE (mongo was '
-      + 'already the only backend REFUSING `$regex`; what was missing was the shape of the refusal). '
-      + 'Requirement 2 is inverted here and requirement 1\'s ASCII boundary violated in the same expression: '
-      + '`translateFieldOperators` lowers `$contains`/`$startsWith`/`$endsWith`/`$notContains` to `$regex` '
-      + 'with a HARDCODED `$options: "i"` — tracked as #6682, the successor #6518 left behind for this pair '
-      + 'of frozen packages. `escapeRegex` does escape metacharacters, so the literal-comparand cases hold. '
-      + 'Requirement 1 is DONE here since #6520: `translateFieldOperators` has a `$icontains` arm, and it is '
-      + 'the ONE arm in that family that does not set `$options: "i"` — the fold lives in the pattern '
-      + '(`asciiCaseInsensitiveRegexSource`, one `[Aa]` class per ASCII letter), because mongo\'s `i` flag '
-      + 'folds the whole Unicode range and would fail the CAFÉ rows. The non-empty-string comparand rule '
-      + 'sits on the validating WALK beside `$null`\'s, not in the emitter, so it cannot be skipped by a '
-      + 'boolean identity settling the enclosing node. So this row now carries ONE open requirement, not '
-      + 'two. It still cannot go: '
-      + 'coverage is judged by importing the whole case-set, so a half-answered cell must not import it. Note '
-      + 'this package is in the #5499 frozen family: its real-mongod suites are opt-in, so whatever clears '
-      + 'this cell needs a server-free half like `mongodb-filter-logic-translation.test.ts` has.',
     issue: 'https://github.com/objectstack-ai/objectstack/issues/6682',
   },
   {
