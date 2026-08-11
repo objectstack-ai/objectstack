@@ -670,6 +670,12 @@ The nested `where` is **AND-merged** with the batch `$in` the engine uses to loa
 records, so a related record is attached only when it also matches your filter. A foreign
 key whose target is filtered out is left as the raw id (unresolved) rather than dropped.
 
+The nested `fields` is a **projection of the related record**, and you do not have to name
+`id` in it to make the expansion work. `id` is the join key the batch `$in` re-attaches by,
+so the engine adds it to its own sub-read and strips it back out when you did not ask for
+it — the attached record carries exactly the columns you listed. Name `id` explicitly when
+you want it (e.g. to link to the related record).
+
 <Callout type="warn">
 **Per-parent shaping (`limit` / `offset` / `orderBy`) is not honored on the expand path.**
 The engine batch-loads every parent's related records in a single `$in` query and then
