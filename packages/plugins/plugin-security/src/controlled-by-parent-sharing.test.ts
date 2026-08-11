@@ -65,6 +65,24 @@ const CONTACT_SCHEMA = {
   },
 };
 
+/**
+ * [#7474] The same detail, AUTHORED WRONG: `controlled_by_parent` with nothing
+ * to derive access from — no master_detail field, and no required lookup for
+ * `resolveCbpRelation` to fall back to. The gate's metadata-defect leg is the
+ * only thing between this object and a write that answers a false 403.
+ */
+const CONTACT_SCHEMA_NO_MASTER_DETAIL = {
+  name: 'crm_contact',
+  sharingModel: 'controlled_by_parent',
+  fields: {
+    id: { name: 'id', type: 'text' },
+    name: { name: 'name', type: 'text' },
+    // A lookup, but OPTIONAL — the third fallback `resolveCbpRelation` tries
+    // requires `required: true`, so this object resolves to no relation at all.
+    account: { name: 'account', type: 'lookup', reference: 'crm_account' },
+  },
+};
+
 const SHARE_SCHEMA = {
   name: 'sys_record_share',
   isSystem: true,
@@ -106,10 +124,10 @@ type Row = Record<string, unknown>;
  * security plugin itself uses, so a filter this suite asserts on is a filter
  * that was really applied rather than one merely inspected.
  */
-function makeStore(rows: Record<string, Row[]>) {
+function makeStore(rows: Record<string, Row[]>, brokenDetail = false) {
   const schemas: Record<string, unknown> = {
     crm_account: ACCOUNT_SCHEMA,
-    crm_contact: CONTACT_SCHEMA,
+    crm_contact: brokenDetail ? CONTACT_SCHEMA_NO_MASTER_DETAIL : CONTACT_SCHEMA,
     sys_record_share: SHARE_SCHEMA,
   };
   return {
@@ -160,11 +178,24 @@ interface BootOptions {
   shareLevel?: 'read' | 'edit' | null;
   /** `'none'` boots a deployment WITHOUT plugin-sharing; `'throws'` a broken one. */
   sharing?: 'real' | 'none' | 'throws';
+  /**
+   * [#7474] `'no-master-detail'` swaps the detail's schema for the AUTHORING
+   * DEFECT the metadata-defect leg exists to report: `controlled_by_parent`
+   * declared on an object with no relation to derive access from.
+   */
+  detail?: 'valid' | 'no-master-detail';
+  /** [#7474] Replace the detail rows — e.g. one whose master FK is null. */
+  contacts?: Row[];
+  /** [#7474] Replace the caller's permission set (the master-CRUD / master-RLS legs). */
+  sets?: PermissionSet[];
 }
 
 async function boot(options: BootOptions = {}) {
   const shareLevel = options.shareLevel === undefined ? 'edit' : options.shareLevel;
-  const store = makeStore(fixtureRows(shareLevel));
+  const fixture = fixtureRows(shareLevel);
+  if (options.contacts) fixture.crm_contact = options.contacts;
+  const store = makeStore(fixture, options.detail === 'no-master-detail');
+  const sets = options.sets ?? [REP_SET];
 
   let middleware: any;
   const ql = {
@@ -179,7 +210,7 @@ async function boot(options: BootOptions = {}) {
   const services: Record<string, unknown> = {
     manifest: { register: vi.fn() },
     objectql: ql,
-    metadata: { get: async (n: string) => store.getSchema(n), list: async () => [REP_SET] },
+    metadata: { get: async (n: string) => store.getSchema(n), list: async () => sets },
   };
   if ((options.sharing ?? 'real') === 'real') {
     // The REAL sharing service over the same store — the point of the fix is
@@ -206,7 +237,7 @@ async function boot(options: BootOptions = {}) {
     },
   };
   const plugin = new SecurityPlugin({
-    defaultPermissionSets: [REP_SET],
+    defaultPermissionSets: sets,
     fallbackPermissionSet: 'crm_rep',
   });
   await plugin.init(ctx);
@@ -266,6 +297,18 @@ async function boot(options: BootOptions = {}) {
     return out;
   };
 
+  /** [#7474] The INSERT face — the one leg that reads the master FK off the body. */
+  const insertContact = async (data: Row): Promise<void> => {
+    const opCtx: any = {
+      object: 'crm_contact',
+      operation: 'insert',
+      data,
+      options: {},
+      context: repContext(),
+    };
+    await middleware(opCtx, async () => {});
+  };
+
   return {
     store,
     ctx,
@@ -274,6 +317,7 @@ async function boot(options: BootOptions = {}) {
     visibleContacts,
     analyticsVisibleContacts,
     updateContact,
+    insertContact,
     writableContacts,
   };
 }
@@ -465,5 +509,207 @@ describe('[#5815] getReadFilter enforces the same read scope as the engine middl
     const h = await boot({ shareLevel: 'edit' });
     const delegated = { ...h.repContext(), onBehalfOf: { userId: OTHER } };
     expect(await h.analyticsVisibleContacts(delegated)).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+/**
+ * [#7474] SIX conditions refuse a write in `assertControlledByParentWrite`, and
+ * until the maintainer ruling of 2026-08-11 they answered with ONE sentence and
+ * ONE code: `403 PERMISSION_DENIED — requires edit access to its master record`.
+ *
+ * Three of them are genuine authorization verdicts and keep exactly that. Three
+ * are not verdicts at all — a broken `master_detail` declaration, a row that
+ * does not exist, a null master FK — and the shared sentence was a false
+ * statement with a false remedy: "ask whoever owns the parent record" cannot
+ * fix any of them. Worse for the app author, the metadata defect is a precisely
+ * detectable AUTHORING error that was wearing the costume of routine RBAC
+ * noise, which is the class of thing nobody ever investigates.
+ *
+ * ## Why these cases assert `code` and `status`, never just a throw
+ *
+ * The defect is the ENVELOPE, not the refusal: every one of these six threw
+ * before this change too. A `rejects.toThrow()` — or a message-only assertion —
+ * carries one bit where the defect has two, so it stays green on precisely the
+ * behaviour the issue reported. The minimum here is therefore the ADR-0112 pair
+ * (`code` + `status`), plus the message where the WORDING is the contract: the
+ * three authorization legs must keep their sentence verbatim, because that
+ * sentence is what a user reads and what consumers already pin.
+ *
+ * The pinned pairs are the split itself:
+ *
+ *   | leg                                    | status | code                    |
+ *   |----------------------------------------|--------|-------------------------|
+ *   | no object-level `update` on the master | 403    | PERMISSION_DENIED       |
+ *   | master row outside the write RLS       | 403    | PERMISSION_DENIED       |
+ *   | no `edit`-level share grant            | 403    | PERMISSION_DENIED       |
+ *   | controlled_by_parent, no master_detail | 422    | INVALID_METADATA        |
+ *   | target record not found                | 404    | RECORD_NOT_FOUND        |
+ *   | detail has no master reference         | 422    | MISSING_REQUIRED_FIELD  |
+ */
+describe('[#7474] the six refusal legs answer with six envelopes, not one', () => {
+  /** The thrown error itself — `rejects.toThrow` cannot see `code` / `status`. */
+  const refusalOf = async (run: Promise<unknown>): Promise<any> => {
+    try {
+      await run;
+    } catch (e) {
+      return e;
+    }
+    throw new Error('expected the write to be refused, but it resolved');
+  };
+
+  /** REP_SET with the master's object-level `update` withheld. */
+  const NO_MASTER_EDIT: PermissionSet = {
+    name: 'crm_rep',
+    label: 'CRM Rep',
+    objects: {
+      crm_account: { allowRead: true, allowCreate: true, allowEdit: false, allowDelete: true },
+      crm_contact: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true },
+    },
+  } as unknown as PermissionSet;
+
+  /** REP_SET plus a write RLS on the MASTER that matches no row in the fixture. */
+  const MASTER_WRITE_RLS: PermissionSet = {
+    name: 'crm_rep',
+    label: 'CRM Rep',
+    objects: {
+      crm_account: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true },
+      crm_contact: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true },
+    },
+    rowLevelSecurity: [
+      { object: 'crm_account', operation: 'update', using: "name = 'No Such Corp'" },
+    ],
+  } as unknown as PermissionSet;
+
+  // ── the three GENUINE authorization verdicts — unchanged, verbatim ────────
+
+  it('403 PERMISSION_DENIED: the caller holds no object-level update on the master', async () => {
+    const h = await boot({ shareLevel: 'edit', sets: [NO_MASTER_EDIT] });
+    const err = await refusalOf(h.updateContact('ct_own'));
+    expect(err.code).toBe('PERMISSION_DENIED');
+    expect(err.statusCode).toBe(403);
+    // The sentence is contract on this leg — a user reads it, and consumers
+    // pin it. It must survive the split byte-for-byte.
+    expect(err.message).toContain("requires edit access to its master record");
+    expect(err.message).toContain("no edit permission on master 'crm_account'");
+  });
+
+  it('403 PERMISSION_DENIED: the master row is outside the caller\'s write RLS', async () => {
+    const h = await boot({ shareLevel: 'edit', sets: [MASTER_WRITE_RLS] });
+    const err = await refusalOf(h.updateContact('ct_own'));
+    expect(err.code).toBe('PERMISSION_DENIED');
+    expect(err.statusCode).toBe(403);
+    expect(err.message).toContain('requires edit access to its master record');
+    expect(err.message).toContain('row-level security');
+  });
+
+  it('403 PERMISSION_DENIED: the master carries no edit-level share grant', async () => {
+    const h = await boot({ shareLevel: 'read' });
+    const err = await refusalOf(h.updateContact('ct_us'));
+    expect(err.code).toBe('PERMISSION_DENIED');
+    expect(err.statusCode).toBe(403);
+    expect(err.message).toContain('requires edit access to its master record');
+    expect(err.message).toContain('record sharing');
+  });
+
+  // ── the three NON-VERDICT legs — split by true semantics ──────────────────
+
+  it('422 INVALID_METADATA: controlled_by_parent declared with no master_detail relation', async () => {
+    const h = await boot({ shareLevel: 'edit', detail: 'no-master-detail' });
+    const err = await refusalOf(h.updateContact('ct_own'));
+    expect(err.code).toBe('INVALID_METADATA');
+    expect(err.status).toBe(422);
+    expect(err.statusCode).toBe(422);
+    // The remedy has to be IN the message: `details` is not a carrier the
+    // client can rely on (#7450), so the sentence is the whole fix-it.
+    expect(err.message).toContain('no master_detail relation');
+    expect(err.message).toContain('Declare a required master_detail field');
+    // …and it must NOT wear the 403's costume: that prefix is a MATCHER at both
+    // transports, so borrowing it would re-flatten this to PERMISSION_DENIED.
+    expect(err.message).not.toContain('[Security] Access denied');
+    expect(err.message).not.toContain('requires edit access to its master record');
+  });
+
+  it('404 RECORD_NOT_FOUND: the by-id write targets a detail row that does not exist', async () => {
+    const h = await boot({ shareLevel: 'edit' });
+    const err = await refusalOf(h.updateContact('ct_deleted_concurrently'));
+    expect(err.code).toBe('RECORD_NOT_FOUND');
+    expect(err.status).toBe(404);
+    expect(err.statusCode).toBe(404);
+    expect(err.message).toContain('ct_deleted_concurrently');
+    expect(err.message).not.toContain('requires edit access to its master record');
+  });
+
+  it('404 is real absence, not an RLS-hidden row: the probe reads under a SYSTEM context', async () => {
+    // The one thing a 404 must never become is an oracle. `ct_eu` exists but
+    // its master is unreachable to the caller — the row is read as system, so
+    // it is FOUND here and falls through to the authorization leg. Both halves
+    // asserted together: this is what makes the 404 above mean "absent".
+    const h = await boot({ shareLevel: 'edit' });
+    const hidden = await refusalOf(h.updateContact('ct_eu'));
+    expect(hidden.code).toBe('PERMISSION_DENIED');
+    expect(hidden.statusCode).toBe(403);
+    expect(hidden.message).toContain('requires edit access to its master record');
+  });
+
+  it('422 MISSING_REQUIRED_FIELD: the stored detail row has no master reference', async () => {
+    const h = await boot({
+      shareLevel: 'edit',
+      contacts: [{ id: 'ct_orphan', name: 'Orphan contact', account: null }],
+    });
+    const err = await refusalOf(h.updateContact('ct_orphan'));
+    expect(err.code).toBe('MISSING_REQUIRED_FIELD');
+    expect(err.status).toBe(422);
+    expect(err.statusCode).toBe(422);
+    // The stored-row wording names the row, because the caller cannot fix this
+    // one by sending a different payload.
+    expect(err.message).toContain("record 'ct_orphan' has no value in 'account'");
+    expect(err.message).not.toContain('requires edit access to its master record');
+  });
+
+  it('422 MISSING_REQUIRED_FIELD: an insert that omits the master reference', async () => {
+    const h = await boot({ shareLevel: 'edit' });
+    const err = await refusalOf(h.insertContact({ name: 'New contact' }));
+    expect(err.code).toBe('MISSING_REQUIRED_FIELD');
+    expect(err.status).toBe(422);
+    // Same condition, same code, and the wording says which shape it is: the
+    // REQUEST omitted the FK, so the remedy is to send it.
+    expect(err.message).toContain("did not supply 'account'");
+    expect(err.message).not.toContain('requires edit access to its master record');
+  });
+
+  // ── the split itself ─────────────────────────────────────────────────────
+
+  it('the non-verdict legs are DISTINGUISHABLE from the verdicts and from each other', async () => {
+    const authorization = await refusalOf(
+      (await boot({ shareLevel: 'read' })).updateContact('ct_us'),
+    );
+    const metadataDefect = await refusalOf(
+      (await boot({ shareLevel: 'edit', detail: 'no-master-detail' })).updateContact('ct_own'),
+    );
+    const missingRow = await refusalOf(
+      (await boot({ shareLevel: 'edit' })).updateContact('ct_gone'),
+    );
+    const nullMaster = await refusalOf(
+      (await boot({
+        shareLevel: 'edit',
+        contacts: [{ id: 'ct_orphan', name: 'Orphan contact', account: null }],
+      })).updateContact('ct_orphan'),
+    );
+
+    // Four conditions, four envelopes. Before the split these were one:
+    // `403 PERMISSION_DENIED` with a single sentence, which is exactly what an
+    // assertion set that only checked "it threw" could not see.
+    const envelope = (e: any) => `${e.status ?? e.statusCode}/${e.code}`;
+    expect([authorization, metadataDefect, missingRow, nullMaster].map(envelope)).toEqual([
+      '403/PERMISSION_DENIED',
+      '422/INVALID_METADATA',
+      '404/RECORD_NOT_FOUND',
+      '422/MISSING_REQUIRED_FIELD',
+    ]);
+    // The two 422s share a status and must still be told apart by `code` —
+    // which is the field ADR-0112 makes the branch point.
+    expect(metadataDefect.code).not.toBe(nullMaster.code);
   });
 });

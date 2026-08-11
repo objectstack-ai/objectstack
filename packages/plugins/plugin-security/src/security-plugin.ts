@@ -66,7 +66,12 @@ import {
 import { matchesFilterCondition } from '@objectstack/formula';
 import { FieldMasker } from './field-masker.js';
 import { assertReadableQueryFields } from './predicate-guard.js';
-import { PermissionDeniedError } from './errors.js';
+import {
+  PermissionDeniedError,
+  MasterDetailRelationMissingError,
+  DetailRecordNotFoundError,
+  MasterReferenceMissingError,
+} from './errors.js';
 import { assertEngineOwnedWriteAllowed, type EngineOwnedSchemaLike } from './system-write-guard.js';
 import { bootstrapPlatformAdmin } from './bootstrap-platform-admin.js';
 import {
@@ -4051,6 +4056,22 @@ export class SecurityPlugin implements Plugin {
    *
    * v1 scope: single-id writes. Bulk writes flow through the AST and are already
    * scoped by the controlled-by-parent READ filter (to readable masters).
+   *
+   * [#7474] SIX conditions refuse a write here, and they are NOT one verdict.
+   * Three are genuine authorization answers (no object-level `update` on the
+   * master, the master row outside the caller's write RLS, no `edit`-level
+   * share grant) and answer `403 PERMISSION_DENIED` with the sentence above.
+   * Three are not answers about access at all, and used to borrow that same
+   * sentence — telling a caller they lacked access to a record when the truth
+   * was a broken declaration, a deleted row, or a null FK, with a remedy
+   * ("ask whoever owns the parent record") that could not fix any of them:
+   *
+   *   - `controlled_by_parent` with no `master_detail` relation → `422
+   *     INVALID_METADATA` ({@link MasterDetailRelationMissingError})
+   *   - the target row does not exist → `404 RECORD_NOT_FOUND`
+   *     ({@link DetailRecordNotFoundError})
+   *   - the detail's master reference is empty → `422 MISSING_REQUIRED_FIELD`
+   *     ({@link MasterReferenceMissingError})
    */
   private async assertControlledByParentWrite(
     permissionSets: PermissionSet[],
@@ -4063,7 +4084,14 @@ export class SecurityPlugin implements Plugin {
     const sharingModel = schema?.sharingModel ?? schema?.security?.sharingModel;
     if (sharingModel !== 'controlled_by_parent') return;
 
-    const deny = (reason: string, recordId?: unknown) => {
+    // [#7474] The AUTHORIZATION verdicts — and ONLY those. Three of this gate's
+    // conditions really do mean "you may not write this detail because you may
+    // not edit its master", and they keep `403 PERMISSION_DENIED` and this
+    // exact sentence. The other three conditions (broken master_detail
+    // declaration / missing row / null master FK) are not verdicts at all and
+    // throw their own errors below — see `./errors.ts` for the ruling and the
+    // reasoning behind each code.
+    const denyMasterEdit = (reason: string, recordId?: unknown): never => {
       throw new PermissionDeniedError(
         `[Security] Access denied: ${operation} on '${object}' requires edit access to its master record (${reason})`,
         { operation, object, recordId },
@@ -4071,46 +4099,53 @@ export class SecurityPlugin implements Plugin {
     };
 
     const rel = this.resolveCbpRelation(object);
-    if (!rel) deny('controlled_by_parent declared but no master_detail relation');
+    // A metadata defect, not an access verdict: the object declares that its
+    // access is derived from a master and gives us no master to derive it from.
+    // Thrown rather than routed through a `never`-returning helper so the
+    // narrowing is real — the non-null assertions this branch used to need
+    // (`rel!.fk`) were the load-bearing half of the same defect.
+    if (!rel) throw new MasterDetailRelationMissingError(object, operation);
 
     // Resolve the master id: from the incoming body on insert, else from the
     // target row (read as system — we only need its FK value).
     let masterId: unknown;
+    let detailRecordId: unknown;
     if (operation === 'insert') {
       const data = opCtx.data;
-      masterId = data && typeof data === 'object' && !Array.isArray(data) ? (data as any)[rel!.fk] : undefined;
+      masterId = data && typeof data === 'object' && !Array.isArray(data) ? (data as any)[rel.fk] : undefined;
     } else {
       const targetId = this.extractSingleId(opCtx);
       if (targetId == null) return; // bulk write — scoped by the read filter on the AST
+      detailRecordId = targetId;
       const row = await this.readRowById(object, targetId, { isSystem: true });
-      if (!row) deny('target record not found', targetId);
-      masterId = row![rel!.fk];
+      if (!row) throw new DetailRecordNotFoundError(object, operation, targetId);
+      masterId = row[rel.fk];
     }
-    if (masterId == null) deny('detail record has no master reference');
+    if (masterId == null) throw new MasterReferenceMissingError(object, operation, rel.fk, detailRecordId);
 
     // Master edit access = CRUD update on the master AND the master row reachable
     // under BOTH halves of its own write gate (write RLS + record sharing).
-    if (!this.permissionEvaluator.checkObjectPermission('update', rel!.master, permissionSets)) {
-      deny(`no edit permission on master '${rel!.master}'`, masterId);
+    if (!this.permissionEvaluator.checkObjectPermission('update', rel.master, permissionSets)) {
+      denyMasterEdit(`no edit permission on master '${rel.master}'`, masterId);
     }
-    const masterWriteFilter = await this.computeRlsFilter(permissionSets, rel!.master, 'update', context);
+    const masterWriteFilter = await this.computeRlsFilter(permissionSets, rel.master, 'update', context);
     if (masterWriteFilter) {
       let visible: unknown = null;
       try {
-        visible = await this.ql.findOne(rel!.master, {
+        visible = await this.ql.findOne(rel.master, {
           where: { $and: [{ id: masterId }, masterWriteFilter] },
           context,
         });
       } catch {
         visible = null;
       }
-      if (!visible) deny(`master '${rel!.master}' not editable by this user (row-level security)`, masterId);
+      if (!visible) denyMasterEdit(`master '${rel.master}' not editable by this user (row-level security)`, masterId);
     }
     // [#5386] The OWD / record-share half — asked UNCONDITIONALLY, because the
     // RLS half above is skipped whole when the master authors no write policy,
     // which is exactly the common case this closes.
-    if (!(await this.resolveSharingCanEdit(rel!.master, String(masterId), context, permissionSets))) {
-      deny(`master '${rel!.master}' not editable by this user (record sharing)`, masterId);
+    if (!(await this.resolveSharingCanEdit(rel.master, String(masterId), context, permissionSets))) {
+      denyMasterEdit(`master '${rel.master}' not editable by this user (record sharing)`, masterId);
     }
   }
 
