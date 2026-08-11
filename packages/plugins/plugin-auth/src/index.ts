@@ -40,6 +40,11 @@ export * from './secondary-storage.js';
 export * from './register-sso-provider.js';
 export * from './send-verification-email.js';
 export * from './objectql-adapter.js';
+// [#7732] ADR-0069 D4's revoke-audit trail. Exported alongside the adapter it
+// plugs into, so a host reading `sys_session` knows the one rule that governs
+// those rows: a `revoked_at` row is a TOMBSTONE — an ended session kept as the
+// audit record of its ending — never a live session.
+export * from './session-tombstone.js';
 // [#4586] The better-auth actor seam. Exported because a host that writes an
 // identity table on better-auth's behalf (a control-plane provisioning hook,
 // an SSO JIT path) must construct the SAME two-part context —

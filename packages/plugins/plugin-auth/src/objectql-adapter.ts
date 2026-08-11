@@ -5,6 +5,11 @@ import { createAdapterFactory } from 'better-auth/adapters';
 import type { CleanedWhere, WhereOperator } from 'better-auth/adapters';
 import { SystemObjectName } from '@objectstack/spec/system';
 import { resolveAttributedUserId } from './auth-actor-attribution.js';
+import {
+  filterRevokedSessionRows,
+  hideRevokedSessionRow,
+  reconcileSessionDelete,
+} from './session-tombstone.js';
 
 /**
  * Mapping from better-auth model names to ObjectStack protocol object names.
@@ -671,10 +676,22 @@ export function createObjectQLAdapterFactory(rawDataEngine: IDataEngine) {
         const objectName = resolveProtocolName(model);
         const bridged = objectName !== model;
         const filter = convertWhere(model, bridged ? remapWhere(where) : where);
-        const fields = bridged && select ? select.map(camelToSnake) : select;
+        let fields = bridged && select ? select.map(camelToSnake) : select;
+        // [#7732] A projection that omits `revoked_at` would make every row look
+        // live to the tombstone rule. Ask for it, then drop it again below if
+        // the caller did not.
+        const revokedAtIsBorrowed =
+          objectName === SystemObjectName.SESSION &&
+          Array.isArray(fields) &&
+          fields.length > 0 &&
+          !fields.includes('revoked_at');
+        if (revokedAtIsBorrowed) fields = [...(fields as string[]), 'revoked_at'];
 
         const result = await dataEngine.findOne(objectName, { where: filter, fields });
         if (!result) return null;
+        // [#7732] A revoked session is not a session — see `session-tombstone.ts`.
+        if (await hideRevokedSessionRow(objectName, result)) return null;
+        if (revokedAtIsBorrowed) delete (result as Record<string, unknown>).revoked_at;
         const norm = normaliseLegacyDates(model, result);
         return (bridged ? remapKeys(norm, snakeToCamel) : norm) as T;
       },
@@ -693,12 +710,14 @@ export function createObjectQLAdapterFactory(rawDataEngine: IDataEngine) {
           ? [{ field: bridged ? camelToSnake(sortBy.field) : sortBy.field, order: sortBy.direction as 'asc' | 'desc' }]
           : undefined;
 
-        const results = await dataEngine.find(objectName, {
+        const found = await dataEngine.find(objectName, {
           where: filter,
           limit: limit || 100,
           offset,
           orderBy,
         });
+        // [#7732] A revoked session is not a session — see `session-tombstone.ts`.
+        const results = await filterRevokedSessionRows(objectName, found);
 
         return results.map((r) => {
           const norm = normaliseLegacyDates(model, r as Record<string, any>);
@@ -761,6 +780,10 @@ export function createObjectQLAdapterFactory(rawDataEngine: IDataEngine) {
         const record = await dataEngine.findOne(objectName, { where: filter });
         if (!record) return;
 
+        // [#7732] An interactive revoke ends the session by stamping it, not by
+        // deleting it — see `session-tombstone.ts` for the ledger and the seam.
+        if (!(await reconcileSessionDelete(dataEngine, objectName, record))) return;
+
         await dataEngine.delete(objectName, { where: { id: record.id } });
       },
 
@@ -771,8 +794,12 @@ export function createObjectQLAdapterFactory(rawDataEngine: IDataEngine) {
         const bridged = objectName !== model;
         const filter = convertWhere(model, bridged ? remapWhere(where) : where);
 
-        const records = await dataEngine.find(objectName, { where: filter });
+        const found = await dataEngine.find(objectName, { where: filter });
+        // [#7732] Same rule, per row: a matched session the platform has
+        // already tombstoned is left exactly as it is.
+        const records = await filterRevokedSessionRows(objectName, found);
         for (const record of records) {
+          if (!(await reconcileSessionDelete(dataEngine, objectName, record))) continue;
           await dataEngine.delete(objectName, { where: { id: record.id } });
         }
         return records.length;
