@@ -137,9 +137,12 @@ interface AggregationNode {
 }
 // `distinct?: boolean` was REMOVED in protocol 17 (#6815) — see the callout above.
 
-// FieldNode — one entry of the select list. A field name, optionally dotted to
-// reach through a relationship ('owner.name'). Related *records* come from
-// `expand`, not from inside this list.
+// FieldNode — one entry of the select list. One of the queried object's OWN
+// column names. The type is `string`, so a dotted path ('owner.name') still
+// PARSES, but it resolves nothing: no driver ever implemented dotted
+// projection, and the ingress refuses it (400 INVALID_FIELD, #7532). Related
+// data — whole records and single related columns alike — comes from `expand`,
+// not from inside this list.
 //
 // The `{ field, fields, alias }` nested-select member this union used to carry
 // was REMOVED in protocol 17 (#4196): nothing produced it and nothing read
@@ -704,6 +707,12 @@ The nested `where` is **AND-merged** with the batch `$in` the engine uses to loa
 records, so a related record is attached only when it also matches your filter. A foreign
 key whose target is filtered out is left as the raw id (unresolved) rather than dropped.
 
+The nested `fields` is a **projection of the related record**, and you do not have to name
+`id` in it to make the expansion work. `id` is the join key the batch `$in` re-attaches by,
+so the engine adds it to its own sub-read and strips it back out when you did not ask for
+it — the attached record carries exactly the columns you listed. Name `id` explicitly when
+you want it (e.g. to link to the related record).
+
 <Callout type="warn">
 **Per-parent shaping (`limit` / `offset` / `orderBy`) is not honored on the expand path.**
 The engine batch-loads every parent's related records in a single `$in` query and then
@@ -1003,9 +1012,30 @@ as a single-table query. The key is tombstoned — authoring it is a `tsc` error
 query that still carries it (even as an empty array) fails to parse with the upgrade
 prescription. The `JoinNode` / `JoinType` / `JoinStrategy` exports left with it.
 
-Use `expand` (§4) for relationship loading — the live spelling for related records —
-a dotted `fields` path (`'owner.name'`) for a single related column, or two queries
-joined in application code.
+Use `expand` (§4) for relationship loading — the live spelling for related records,
+and for single related columns too, since its nested `QueryAST` both filters (`where`)
+and selects (`fields`) the related record's columns. Otherwise, two queries joined in
+application code.
+
+**A dotted `fields` path is not the alternative.** `'owner.name'` still *parses* —
+`FieldNode` is `string`, a shape check — but no driver ever resolved one, and the
+ingress refuses it with `400 INVALID_FIELD` (#7532). Where the value is wanted on the
+queried object itself, denormalise it onto that object (a stored field, written when
+the source changes) — the same remedy the sort axis prescribes (#6924).
+
+<Callout type="warn">
+**`expand` needs the foreign key in the projection.** The relation is carried by the
+FK column, so a narrowed projection that projects it away leaves expansion nothing to
+resolve:
+
+```typescript
+{ fields: ['title'],                expand: { project_id: { object: 'project' } } }
+// -> nothing to resolve; no related record comes back
+
+{ fields: ['title', 'project_id'],  expand: { project_id: { object: 'project' } } }
+// -> works
+```
+</Callout>
 
 ### Window Functions — removed from the request surface (#4286)
 

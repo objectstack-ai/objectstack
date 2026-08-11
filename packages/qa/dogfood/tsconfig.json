@@ -8,7 +8,14 @@
     "skipLibCheck": true,
     "noEmit": true,
     "types": ["node"],
-    "rootDir": "."
+    // No `rootDir`. This project emits nothing (`noEmit`), so `rootDir` never
+    // shaped an output layout here — its only effect was to forbid importing a
+    // sibling package's SOURCE file, and the route-ledger ↔ live-mount parity
+    // gate (#7526) must read the five ledgers exactly that way: each one is
+    // package-internal on purpose (the guard's data, not public API), so there
+    // is no entry point to import them from. Every other ledger guard in the
+    // repo compiles them as relative sources for the same reason.
+    "rootDir": "../../.."
   },
   "include": ["src/**/*", "test/**/*"],
   "exclude": ["node_modules"]

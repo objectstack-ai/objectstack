@@ -128,8 +128,31 @@ export function resolveSearchCompanionSources(schema: CompanionObjectMeta | unde
  * it never appears in auto-generated views/forms, is excluded from the
  * `$search` auto-default (hidden fields are skipped) and from `$searchFields`
  * overrides (the override intersects with the allowed set), and non-system
- * callers cannot forge it on update (#2948 readonly write guard). It IS
- * `index`ed — every search touches it.
+ * callers cannot forge it on update (#2948 readonly write guard).
+ *
+ * [#7561] It carries NO index — and the stamp that claimed otherwise is gone.
+ * This block used to append `index: true` and the paragraph above used to read
+ * "It IS `index`ed — every search touches it". Both were false, in the #6810
+ * shape one field over (`applySystemFields` stamping `indexed` on
+ * `organization_id`): `index` was removed from `FieldSchema` in the 16.x line
+ * (#2377, ADR-0049) because a field-level index flag built no index, and
+ * `FieldSchema` is a `strictObject`, so the key was rejected BY NAME. The
+ * companion is provisioned BEFORE the document is stored and `/meta` re-parses
+ * the served body, so the stamp put `_diagnostics: { valid: false, errors:
+ * [{ path: 'fields.__search', code: 'unrecognized_keys' }] }` on every object
+ * the platform provisions a companion for — a defect the platform reported
+ * about its own column, on a document no author wrote or could fix.
+ *
+ * Unlike #6810 the index is NOT re-declared in the object's `indexes[]`, and
+ * that is a measured difference rather than an omission. #6810's predicate is
+ * `organization_id = ?` — equality, which a B-tree serves. This column's ONLY
+ * reader is `buildSearchFilter`, which emits `{ __search: { $contains: term } }`
+ * (`search-filter.ts`) — a leading-wildcard `LIKE '%term%'` that no B-tree can
+ * answer, and `IndexSchema` spells nothing else (`name` / `fields` / `unique`;
+ * no trigram/GIN method). Declaring one would buy write amplification on every
+ * row for a read path that cannot use it. If the companion ever warrants a
+ * real substring index, it needs an `IndexSchema` that can express one — a
+ * separate change, not a dead index declared here.
  *
  * Objects that opt out of search entirely (`searchable: false`, ADR-0061 D2)
  * are skipped: a companion no query will ever read is dead weight.
@@ -152,7 +175,6 @@ export function provisionSearchCompanion<T extends CompanionObjectMeta>(schema: 
         readonly: true,
         system: true,
         searchable: false,
-        index: true,
         description:
           `Search-normalized forms of the display/name field (normalizers: ${SEARCH_COMPANION_NORMALIZERS.join(', ')}) — ` +
           'e.g. full pinyin + initials for CJK names. Maintained by plugin-pinyin-search; never hand-edited. See #2486.',

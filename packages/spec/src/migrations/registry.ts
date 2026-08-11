@@ -3059,7 +3059,15 @@ const step17: MigrationStep = {
     {
       id: 'query-field-node-object-form-retired',
       surface: 'data.query.fields',
-      replacement: "expand (`expand: { owner: { object: 'user', fields: ['name'] } }`), or a dotted path for a single related column (`fields: ['owner.name']`)",
+      replacement:
+        "expand (`expand: { owner_id: { object: 'user', fields: ['name'] } }`), whose nested "
+        + "query selects the related record's own columns — keeping the foreign key in your own "
+        + "projection (`fields: ['title', 'owner_id']`), because the relation is carried by that "
+        + 'column and projecting it away leaves expansion nothing to resolve. A dotted `fields` '
+        + 'path is NOT a replacement: no driver ever resolved one, and the ingress refuses it '
+        + '(`400 INVALID_FIELD`, #7532). Where the value is wanted on the queried object itself, '
+        + 'denormalise it onto that object (a stored field, written when the source changes) — the '
+        + 'same remedy the sort axis prescribes (#6924)',
       reason:
         'The `FieldNode` union declared a nested-select object form `{ field, fields, alias }` that '
         + 'was inert end to end: no producer emitted it, and no consumer read `.fields` or `.alias` '
@@ -3071,8 +3079,9 @@ const step17: MigrationStep = {
         + 'authors one), so there is no source for the chain to rewrite: the schema narrows to '
         + '`z.string()` and callers move their own select lists. ADR-0049 / ADR-0078, #4196.',
       acceptanceCriteria:
-        'No caller puts an object in `fields[]`; related records are read through `expand` and '
-        + 'single related columns through dotted paths. A `fields` entry that is not a string '
+        'No caller puts an object in `fields[]`; related records AND single related columns are '
+        + 'read through `expand`, with the foreign-key column retained in the projection so '
+        + 'expansion has something to resolve. A `fields` entry that is not a string '
         + 'fails to parse with the removal prescription, and the list/query/export routes answer '
         + '400 INVALID_FIELD naming the retired form instead of the field `"[object Object]"`.',
     },
@@ -3080,8 +3089,14 @@ const step17: MigrationStep = {
       id: 'query-joins-retired',
       surface: 'data.query.joins',
       replacement:
-        "expand (`expand: { owner: { object: 'user', fields: ['name'] } }`), or a dotted "
-        + "`fields` path for a single related column (`fields: ['owner.name']`)",
+        "expand (`expand: { owner_id: { object: 'user', fields: ['name'] } }`), whose nested "
+        + "query selects the related record's own columns — keeping the foreign key in your own "
+        + "projection (`fields: ['title', 'owner_id']`), because the relation is carried by that "
+        + 'column and projecting it away leaves expansion nothing to resolve. A dotted `fields` '
+        + 'path is NOT a replacement: no driver ever resolved one, and the ingress refuses it '
+        + '(`400 INVALID_FIELD`, #7532). Where the value is wanted on the queried object itself, '
+        + 'denormalise it onto that object (a stored field, written when the source changes) — the '
+        + 'same remedy the sort axis prescribes (#6924)',
       reason:
         'The `joins` array was declared-but-inert: no engine or driver read `query.joins` '
         + 'anywhere on the query path, so a query carrying it behaved exactly as if the key were '
@@ -3093,10 +3108,10 @@ const step17: MigrationStep = {
         + 'is no source for the chain to rewrite; callers move their own queries. '
         + 'ADR-0049 / ADR-0078, #4286.',
       acceptanceCriteria:
-        'No caller sends `joins`; related records are read through `expand` and single related '
-        + 'columns through dotted `fields` paths. A query that still carries `joins` fails to '
-        + 'parse with the removal prescription (even as an empty array), and authoring it is a '
-        + '`tsc` error at the call site.',
+        'No caller sends `joins`; related records AND single related columns are read through '
+        + '`expand`, with the foreign-key column retained in the projection so expansion has '
+        + 'something to resolve. A query that still carries `joins` fails to parse with the removal '
+        + 'prescription (even as an empty array), and authoring it is a `tsc` error at the call site.',
     },
     {
       id: 'query-window-functions-retired',
