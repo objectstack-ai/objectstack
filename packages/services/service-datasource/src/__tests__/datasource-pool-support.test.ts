@@ -24,12 +24,36 @@
 // The pin that used to hold `memory` OUT of the set is flipped below, not
 // deleted — it is the same fact, re-judged.
 
+// #7243 — THE REMAINDER. #6214's ledger pass read every arm and found the two
+// faces the rejected set could not cover, both still silent:
+//
+//   turso   + pool{min:3,max:9,idleTimeoutMillis:30000}  `spec.pool` never read by the arm
+//   mongodb + pool{max:20,idleTimeoutMillis:30000,connectionTimeoutMillis:3000}
+//                          → driver config {"url":…,"database":"orders","maxPoolSize":20}
+//
+// The mongodb line is the half-effective one: `max` landed, the timeouts did
+// not, so the author's evidence that "my pool config works" was real and half
+// wrong. Maintainer ruling 2026-08-11: `turso` joins the set WHOLE-ARM (no fork
+// by url mode), and mongodb's two timeouts are REJECTED, not wired — MongoClient
+// has `maxIdleTimeMS` / `connectTimeoutMS`, and wiring them with no measured
+// consumer would be behaviour-surface expansion.
+//
+// ⚠️ Every case below asserts the message's CONTENT, never merely that
+// something threw. On the turso arm a bare `.toThrow()` is green before the fix
+// too: `@objectstack/driver-turso` is not installed in this package, so the
+// unfixed arm throws the missing-package error a few lines further down.
+
 import { describe, it, expect, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { DatasourceSchema } from '@objectstack/spec/data';
 import {
   POOL_UNSUPPORTED_DRIVER_IDS,
+  POOL_UNREAD_KEYS_BY_DRIVER,
   driverReadsDeclaredPool,
+  unreadPoolKeys,
   unsupportedPoolIssue,
   unsupportedPoolMessage,
+  unreadPoolKeysMessage,
   assertDatasourcePoolSupported,
 } from '../datasource-pool-support.js';
 import { createDefaultDatasourceDriverFactory } from '../default-datasource-driver-factory.js';
@@ -42,8 +66,8 @@ import { DatasourceAdminService, type StoredDatasource } from '../datasource-adm
 import type { IDatasourceDriverFactory } from '../contracts/datasource-driver-factory.js';
 
 describe('#5714 — which driver arms read a declared `pool`', () => {
-  it('names the two sqlite arms and `memory` as unable to honour it (#5931)', () => {
-    expect([...POOL_UNSUPPORTED_DRIVER_IDS]).toEqual(['memory', 'sqlite', 'sqlite-wasm']);
+  it('names the two sqlite arms, `memory` and `turso` as unable to honour it (#5931 / #7243)', () => {
+    expect([...POOL_UNSUPPORTED_DRIVER_IDS]).toEqual(['memory', 'sqlite', 'sqlite-wasm', 'turso']);
   });
 
   it('rejects every spelling of the sqlite arms, case-insensitively', () => {
@@ -553,6 +577,423 @@ describe('#5714 — the Setup wizard rejects it before the record is stored', ()
       },
     ]);
     const summary = await service.updateDatasource('local_cache', { active: false });
+    expect(summary.active).toBe(false);
+  });
+});
+
+// A rejection that RESOLVED is the failure this card is about — silently
+// accepting a declaration nothing reads — so it must not surface as a confusing
+// `undefined.message`. Reverse-verified: with the fix reverted, every caller of
+// this helper fails with "…built it instead of rejecting", naming the cell.
+// `IDatasourceDriverFactory.create` may answer synchronously, so this takes an
+// `unknown` outcome rather than a `Promise` — a sync THROW still escapes to the
+// call site, which fails the case with the real message either way.
+async function rejectionOf(outcomeOrPromise: unknown): Promise<Error> {
+  const outcome = await Promise.resolve(outcomeOrPromise).then(
+    (value) => ({ value }),
+    (error: Error) => ({ error }),
+  );
+  if ('error' in outcome) return outcome.error;
+  throw new Error(
+    `expected the declaration to be rejected, but it built it instead of rejecting: `
+    + `${JSON.stringify(outcome.value)?.slice(0, 200)}`,
+  );
+}
+
+// ── #7243, half one: `turso` joins the rejected set, whole-arm ───────────────
+describe('#7243 — a declared `pool` on a turso datasource is rejected, not dropped', () => {
+  it('answers `false` for every spelling of the arm, case-insensitively', () => {
+    for (const id of ['turso', 'libsql', 'Turso', 'LibSQL', '  TURSO  ']) {
+      expect(driverReadsDeclaredPool(id), id).toBe(false);
+    }
+  });
+
+  it('explains turso in its own terms — both transports, neither pooled', () => {
+    const msg = unsupportedPoolIssue({ driver: 'turso', pool: { min: 3, max: 9 }, name: 'edge' }) ?? '';
+    expect(msg).toContain(`Datasource 'edge'`);
+    expect(msg).toContain(`the 'turso' driver does not read it`);
+    // The local mode's reason and the remote mode's reason are BOTH named: the
+    // ruling was whole-arm precisely because the two differ, and an author on
+    // `libsql://` told only about `:memory:` would think the message was about
+    // somebody else's datasource.
+    expect(msg).toMatch(/`file:` \/ `:memory:` url runs the local engine/);
+    expect(msg).toMatch(/better-sqlite3/);
+    expect(msg).toMatch(/`libsql:\/\/` url is a remote request transport/);
+    expect(msg).toMatch(/capped by `config\.concurrency`/);
+    expect(msg).toMatch(/`TursoDriverConfig` has no `min` \/ `max`/);
+    // The shared frame survives.
+    expect(msg).toMatch(/rejected instead of dropped/);
+    expect(msg).toMatch(/Remove `pool` from this datasource declaration/);
+  });
+
+  it('quotes the `libsql` spelling the author wrote, with the turso reason behind it', () => {
+    const msg = unsupportedPoolIssue({ driver: 'libsql', pool: { max: 9 }, name: 'edge' }) ?? '';
+    expect(msg).toContain(`the 'libsql' driver does not read it`);
+    expect(msg).toMatch(/neither libSQL transport has a connection pool to size/);
+  });
+
+  it('does not paraphrase SQLite\'s reasoning, though it names the shared engine', () => {
+    const msg = unsupportedPoolMessage('turso', 'edge');
+    expect(msg).not.toMatch(/opens a SEPARATE, empty database/);
+    expect(msg).not.toMatch(/split one datasource's data/);
+    expect(msg).not.toMatch(/connection strategy is owned by the driver/);
+  });
+
+  it('offers no escape hatch and no "use another driver" advice', () => {
+    const msg = unsupportedPoolIssue({ driver: 'turso', pool: { max: 9 }, name: 'edge' }) ?? '';
+    expect(msg).not.toMatch(/OS_[A-Z_]*=1/);
+    expect(msg).not.toMatch(/switch|instead use|change the driver/i);
+  });
+
+  it('treats an absent or empty block as no declaration, as on every other arm', () => {
+    expect(unsupportedPoolIssue({ driver: 'turso' })).toBeUndefined();
+    expect(unsupportedPoolIssue({ driver: 'turso', pool: {} })).toBeUndefined();
+    expect(unsupportedPoolIssue({ driver: 'libsql', pool: undefined })).toBeUndefined();
+  });
+
+  // The arm's `pool`-blindness is the premise of the whole-arm verdict, so it is
+  // pinned against the source rather than remembered. If someone ever wires
+  // `spec.pool` into `TursoDriver`, this fails and the verdict gets re-judged
+  // instead of quietly contradicting the code.
+  it('pins that the turso arm reads no `spec.pool` key at all', () => {
+    const src = readFileSync(new URL('../default-datasource-driver-factory.ts', import.meta.url), 'utf8');
+    const arm = src.slice(src.indexOf(`if (kind === 'turso')`), src.indexOf(`if (kind === 'memory')`));
+    expect(arm.length).toBeGreaterThan(500);
+    expect(arm).toContain('new TursoDriver(');
+    // Only comment lines may mention it — the constructor call must not.
+    const ctor = arm.slice(arm.indexOf('new TursoDriver('));
+    expect(ctor).not.toMatch(/spec\.pool|pool\./);
+  });
+});
+
+// ── #7243, half two: mongodb's two unread timeout keys ───────────────────────
+describe('#7243 — mongodb reads `min` / `max` and rejects the two timeouts by name', () => {
+  it('still reads the block, so the whole-block gate must not fire for it', () => {
+    for (const id of ['mongo', 'mongodb', 'MongoDB']) {
+      expect(driverReadsDeclaredPool(id), id).toBe(true);
+    }
+    expect(unsupportedPoolIssue({ driver: 'mongodb', pool: { min: 1, max: 20 }, name: 'orders' }))
+      .toBeUndefined();
+  });
+
+  it('names exactly the two keys the arm never takes out of the block', () => {
+    expect([...(POOL_UNREAD_KEYS_BY_DRIVER.mongodb ?? [])])
+      .toEqual(['idleTimeoutMillis', 'connectionTimeoutMillis']);
+  });
+
+  it('reports only the keys actually declared, in table order', () => {
+    expect(unreadPoolKeys('mongodb', { min: 1, max: 20 })).toEqual([]);
+    expect(unreadPoolKeys('mongodb', { max: 20, idleTimeoutMillis: 30_000 }))
+      .toEqual(['idleTimeoutMillis']);
+    expect(unreadPoolKeys('mongodb', { connectionTimeoutMillis: 3000 }))
+      .toEqual(['connectionTimeoutMillis']);
+    // Author order does not change the message: one declaration, one text.
+    expect(unreadPoolKeys('mongodb', { connectionTimeoutMillis: 3000, idleTimeoutMillis: 30_000 }))
+      .toEqual(['idleTimeoutMillis', 'connectionTimeoutMillis']);
+    expect(unreadPoolKeys('mongo', { idleTimeoutMillis: 30_000 })).toEqual(['idleTimeoutMillis']);
+  });
+
+  it('judges no arm but mongodb — the pooled ones read them, the rejected ones are the block gate\'s', () => {
+    for (const driver of ['postgres', 'mysql', 'com.vendor.snowflake']) {
+      expect(unreadPoolKeys(driver, { idleTimeoutMillis: 30_000, connectionTimeoutMillis: 3000 }), driver)
+        .toEqual([]);
+    }
+    for (const driver of ['sqlite', 'memory', 'turso']) {
+      expect(unreadPoolKeys(driver, { idleTimeoutMillis: 30_000 }), driver).toEqual([]);
+    }
+  });
+
+  it('names the datasource, both keys and the edit that fixes it', () => {
+    const msg = unsupportedPoolIssue({
+      driver: 'mongodb',
+      pool: { max: 20, idleTimeoutMillis: 30_000, connectionTimeoutMillis: 3000 },
+      name: 'orders',
+    }) ?? '';
+    expect(msg).toContain(`Datasource 'orders'`);
+    expect(msg).toContain('`idleTimeoutMillis` and `connectionTimeoutMillis`');
+    expect(msg).toContain(`the 'mongodb' driver does not read them`);
+    expect(msg).toMatch(/maps them onto the MongoClient's `minPoolSize` \/ `maxPoolSize`/);
+    expect(msg).toMatch(/This rejection is deliberate/);
+    expect(msg).toMatch(/Remove `idleTimeoutMillis` and `connectionTimeoutMillis` from this datasource's `pool`/);
+    // …and says what SURVIVES, which the whole-block message cannot: deleting
+    // `pool` here would throw away two keys that are honoured.
+    expect(msg).toMatch(/`min` \/ `max` stay meaningful here/);
+    expect(msg).not.toMatch(/Remove `pool` from this datasource declaration/);
+  });
+
+  it('agrees in number for a single key', () => {
+    const msg = unsupportedPoolIssue({ driver: 'mongodb', pool: { idleTimeoutMillis: 30_000 } }) ?? '';
+    expect(msg).toContain('This datasource declares `idleTimeoutMillis` in its `pool` block');
+    expect(msg).toContain(`the 'mongodb' driver does not read it`);
+    expect(msg).not.toContain('and `connectionTimeoutMillis`');
+  });
+
+  it('offers no escape hatch and no "use another driver" advice', () => {
+    const msg = unsupportedPoolIssue({
+      driver: 'mongodb', pool: { idleTimeoutMillis: 1 }, name: 'orders',
+    }) ?? '';
+    expect(msg).not.toMatch(/OS_[A-Z_]*=1/);
+    expect(msg).not.toMatch(/switch|instead use|change the driver/i);
+  });
+
+  it('borrows no arm\'s reasoning for a driver with no entry in the table', () => {
+    const msg = unreadPoolKeysMessage('com.vendor.snowflake', ['idleTimeoutMillis']);
+    expect(msg).toMatch(/nothing in the arm reads it/);
+    expect(msg).toMatch(/the rest of the block is unaffected/);
+    expect(msg).not.toMatch(/MongoClient/);
+    // Not mongodb's "what survives" clause either — an arm with no entry has no
+    // measured `min` / `max` behaviour to promise.
+    expect(msg).not.toMatch(/`min` \/ `max` stay meaningful here/);
+  });
+
+  it('assert throws exactly when the issue is reported', () => {
+    expect(() => assertDatasourcePoolSupported({ driver: 'mongodb', pool: { idleTimeoutMillis: 1 } }))
+      .toThrow(/does not read it/);
+    expect(() => assertDatasourcePoolSupported({ driver: 'mongodb', pool: { min: 1, max: 5 } }))
+      .not.toThrow();
+  });
+
+  // THE ANTI-DRIFT PIN. The table is a claim about the factory arm's source and
+  // about the spec's block, so it is re-derived from both rather than trusted:
+  // every declared `pool` key is either read by the arm or listed as unread, and
+  // never both. Wiring `maxIdleTimeMS` up later (the option the ruling deferred)
+  // fails here until the key leaves the table — which is the point.
+  it('covers the spec\'s pool block exactly: read ∪ rejected, disjoint', () => {
+    const declared = Object.keys((DatasourceSchema.shape.pool as any).unwrap().shape);
+    expect(declared).toEqual(['min', 'max', 'idleTimeoutMillis', 'connectionTimeoutMillis']);
+
+    const src = readFileSync(new URL('../default-datasource-driver-factory.ts', import.meta.url), 'utf8');
+    const arm = src.slice(src.indexOf(`if (kind === 'mongodb')`), src.indexOf(`if (kind === 'turso')`));
+    const ctor = arm.slice(arm.indexOf('new MongoDBDriver('));
+    const read = [...new Set([...ctor.matchAll(/pool\.([A-Za-z]+)/g)].map((m) => m[1]))].sort();
+    expect(read).toEqual(['max', 'min']);
+
+    const rejected = [...(POOL_UNREAD_KEYS_BY_DRIVER.mongodb ?? [])];
+    expect(rejected.filter((k) => read.includes(k))).toEqual([]);
+    expect([...read, ...rejected].sort()).toEqual([...declared].sort());
+  });
+});
+
+// ── #7243 at all three doors ─────────────────────────────────────────────────
+describe('#7243 — the factory rejects both remainders before it builds anything', () => {
+  const factory = () => createDefaultDatasourceDriverFactory({ dev: false });
+
+  // ⚠️ The assertion here is the MESSAGE, not the throw. `@objectstack/driver-turso`
+  // is not installed in this package, so before the fix this same call threw the
+  // missing-package error — a bare `.rejects.toThrow()` could not tell them apart.
+  it('turso + pool is rejected by the pool gate, not by the missing-package arm', async () => {
+    const err = await rejectionOf(
+      factory().create({
+        name: 'edge',
+        driver: 'turso',
+        config: { url: 'file::memory:' },
+        pool: { min: 3, max: 9 },
+      }),
+    );
+    expect(err.message).toContain(`Datasource 'edge' declares a \`pool\` block`);
+    expect(err.message).toMatch(/neither libSQL transport has a connection pool to size/);
+    // The gate runs BEFORE the dynamic import, so the author is told about their
+    // declaration rather than about an optional package they may not need.
+    expect(err.message).not.toMatch(/is not installed/);
+    expect(err.message).not.toMatch(/npm install @objectstack\/driver-turso/);
+  });
+
+  it('a remote-mode turso datasource is rejected the same way', async () => {
+    const err = await rejectionOf(
+      factory().create({
+        name: 'edge',
+        driver: 'libsql',
+        config: { url: 'libsql://my-db.turso.io', authToken: 'jwt' },
+        pool: { max: 9 },
+      }),
+    );
+    expect(err.message).toContain(`Datasource 'edge' declares a \`pool\` block`);
+    expect(err.message).not.toMatch(/is not installed/);
+  });
+
+  it('mongodb + the two timeouts is rejected instead of built with them dropped', async () => {
+    const err = await rejectionOf(
+      factory().create({
+        name: 'orders',
+        driver: 'mongodb',
+        config: { host: 'db.internal', database: 'orders' },
+        pool: { max: 20, idleTimeoutMillis: 30_000, connectionTimeoutMillis: 3000 },
+      }),
+    );
+    expect(err.message).toContain(`Datasource 'orders' declares \`idleTimeoutMillis\` and \`connectionTimeoutMillis\``);
+    expect(err.message).toMatch(/does not read them/);
+  });
+
+  // The half of the contract this change must not disturb — measured on
+  // `origin/main` as `{"url":…,"database":"orders","maxPoolSize":20}`.
+  it('mongodb + min/max still builds and still maps onto minPoolSize / maxPoolSize', async () => {
+    const handle: any = await factory().create({
+      name: 'orders',
+      driver: 'mongodb',
+      config: { host: 'db.internal', database: 'orders' },
+      pool: { min: 2, max: 20 },
+    });
+    const driver = handle.driver ?? handle;
+    expect(driver?.constructor?.name).toMatch(/MongoDBDriver$/);
+    expect(driver.config).toMatchObject({ minPoolSize: 2, maxPoolSize: 20 });
+    expect(driver.config).not.toHaveProperty('idleTimeoutMillis');
+    try { await handle.disconnect?.(); } catch { /* never connected */ }
+  });
+
+  it('postgres keeps receiving both timeouts — this gate is mongodb\'s alone', async () => {
+    const handle: any = await factory().create({
+      driver: 'postgres',
+      config: { host: 'db.internal', database: 'analytics' },
+      pool: { min: 3, max: 9, idleTimeoutMillis: 45_000, connectionTimeoutMillis: 3000 },
+    });
+    const cfg = (handle.driver ?? handle)?.config ?? {};
+    expect(cfg.pool).toMatchObject({ min: 3, max: 9, idleTimeoutMillis: 45_000, acquireTimeoutMillis: 3000 });
+    try { await handle.disconnect?.(); } catch { /* pool never opened */ }
+  });
+});
+
+describe('#7243 — boot and the Setup wizard refuse both remainders too', () => {
+  it('boot: a turso datasource carrying a pool never reaches a connect', async () => {
+    const { service, factory, engine } = svc();
+    const err = await rejectionOf(
+      service.connectDeclared({
+        datasources: [{ name: 'edge', driver: 'turso', config: { url: 'libsql://x.turso.io' }, pool: { max: 9 } }],
+        objects: [],
+      }),
+    );
+    expect(err.message).toContain(`Datasource 'edge' declares a \`pool\` block`);
+    expect(err.message).toMatch(/neither libSQL transport has a connection pool to size/);
+    expect((factory.create as any).mock.calls.length).toBe(0);
+    expect(engine.drivers.size).toBe(0);
+  });
+
+  it('boot: a mongodb datasource carrying the timeouts never reaches a connect', async () => {
+    const { service, factory, engine } = svc();
+    const err = await rejectionOf(
+      service.connectDeclared({
+        datasources: [{
+          name: 'orders',
+          driver: 'mongodb',
+          config: { host: 'db.internal' },
+          pool: { max: 20, idleTimeoutMillis: 30_000 },
+        }],
+        objects: [],
+      }),
+    );
+    expect(err.message).toContain(`Datasource 'orders' declares \`idleTimeoutMillis\``);
+    expect((factory.create as any).mock.calls.length).toBe(0);
+    expect(engine.drivers.size).toBe(0);
+  });
+
+  it('boot: each offender keeps its own explanation in the aggregate', async () => {
+    const { service } = svc();
+    const err = await rejectionOf(
+      service.connectDeclared({
+        datasources: [
+          { name: 'edge', driver: 'turso', config: { url: 'libsql://x.turso.io' }, pool: { max: 9 } },
+          { name: 'orders', driver: 'mongodb', config: {}, pool: { idleTimeoutMillis: 30_000 } },
+        ],
+        objects: [],
+      }),
+    );
+    expect(err.message).toMatch(/2 declared datasource\(s\)/);
+    expect(err.message).toMatch(/neither libSQL transport has a connection pool to size/);
+    expect(err.message).toMatch(/maps them onto the MongoClient's `minPoolSize` \/ `maxPoolSize`/);
+  });
+
+  it('boot: a mongodb datasource sizing only min/max connects as before', async () => {
+    const { service, engine } = svc();
+    const results = await service.connectDeclared({
+      datasources: [{
+        name: 'orders',
+        driver: 'mongodb',
+        config: { host: 'db.internal' },
+        pool: { min: 2, max: 20 },
+        autoConnect: true,
+      }],
+      objects: [],
+    });
+    expect(results.map((r) => r.status)).toEqual(['connected']);
+    expect(engine.drivers.has('orders')).toBe(true);
+  });
+
+  it('wizard: a turso draft carrying a pool never reaches the store', async () => {
+    const { service, records, registered } = adminHarness();
+    const err = await rejectionOf(
+      service.createDatasource({
+        name: 'edge', driver: 'turso', config: { url: 'libsql://x.turso.io' }, pool: { max: 9 },
+      }),
+    );
+    expect(err.message).toMatch(/neither libSQL transport has a connection pool to size/);
+    expect(records).toHaveLength(0);
+    expect(registered).toHaveLength(0);
+  });
+
+  it('wizard: a mongodb draft carrying a timeout never reaches the store', async () => {
+    const { service, records, registered } = adminHarness();
+    const err = await rejectionOf(
+      service.createDatasource({
+        name: 'orders',
+        driver: 'mongodb',
+        config: { host: 'db.internal', database: 'orders' },
+        pool: { max: 20, connectionTimeoutMillis: 3000 },
+      }),
+    );
+    expect(err.message).toContain('`connectionTimeoutMillis`');
+    expect(err.message).toMatch(/does not read it/);
+    expect(records).toHaveLength(0);
+    expect(registered).toHaveLength(0);
+  });
+
+  it('wizard: a mongodb draft sizing only min/max is stored as before', async () => {
+    const { service, records } = adminHarness();
+    await service.createDatasource({
+      name: 'orders',
+      driver: 'mongodb',
+      config: { host: 'db.internal', database: 'orders' },
+      pool: { min: 2, max: 20 },
+    });
+    expect(records[0]?.pool).toEqual({ min: 2, max: 20 });
+  });
+
+  it('wizard: patching a timeout onto a stored mongodb datasource is rejected', async () => {
+    const { service } = adminHarness([
+      {
+        name: 'orders',
+        driver: 'mongodb',
+        config: { host: 'db.internal', database: 'orders' },
+        pool: { max: 20 },
+        origin: 'runtime',
+      },
+    ]);
+    await expect(
+      service.updateDatasource('orders', { pool: { max: 20, idleTimeoutMillis: 30_000 } }),
+    ).rejects.toThrow(/`idleTimeoutMillis`/);
+  });
+
+  it('wizard: switching a pooled datasource TO turso is rejected on the merged record', async () => {
+    const { service } = adminHarness([
+      { name: 'reporting', driver: 'postgres', config: {}, pool: { min: 3, max: 9 }, origin: 'runtime' },
+    ]);
+    await expect(
+      service.updateDatasource('reporting', { driver: 'turso', config: { url: 'libsql://x.turso.io' } }),
+    ).rejects.toThrow(/neither libSQL transport has a connection pool to size/);
+  });
+
+  // The same carve-out the block gate has: a record written before this gate
+  // must stay editable, including the `active: false` that takes it out of
+  // service. Otherwise the remedy for a bad declaration is itself blocked.
+  it('wizard: a write touching neither pool nor driver is not re-judged', async () => {
+    const { service } = adminHarness([
+      {
+        name: 'orders',
+        driver: 'mongodb',
+        config: { host: 'db.internal', database: 'orders' },
+        pool: { max: 20, idleTimeoutMillis: 30_000 },
+        origin: 'runtime',
+      },
+    ]);
+    const summary = await service.updateDatasource('orders', { active: false });
     expect(summary.active).toBe(false);
   });
 });

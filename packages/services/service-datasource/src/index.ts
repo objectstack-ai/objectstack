@@ -78,11 +78,19 @@ export type {
 // Which driver arms read `datasource.pool`, and the loud rejection for the ones
 // that do not (#5714) — exported so a host that injects its OWN driver factory
 // can hold the same contract instead of re-deriving (or silently dropping) it.
+// `POOL_UNREAD_KEYS_BY_DRIVER` / `unreadPoolKeys` / `unreadPoolKeysMessage` are
+// the per-KEY half added by #7243, for the arm that reads the block but not
+// every key in it (`mongodb`). `unsupportedPoolIssue` already covers both, so an
+// injected factory needs only that one; the parts are exported for the same
+// reason the block-level ones are — so a host can ask the narrower question.
 export {
   POOL_UNSUPPORTED_DRIVER_IDS,
+  POOL_UNREAD_KEYS_BY_DRIVER,
   driverReadsDeclaredPool,
+  unreadPoolKeys,
   unsupportedPoolIssue,
   unsupportedPoolMessage,
+  unreadPoolKeysMessage,
   assertDatasourcePoolSupported,
 } from './datasource-pool-support.js';
 export type { PoolUnsupportedDriverId } from './datasource-pool-support.js';
