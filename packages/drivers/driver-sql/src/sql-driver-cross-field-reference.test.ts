@@ -227,16 +227,35 @@ describe('[#5222] SqlDriver `$field` position matrix — compiled vs refused', (
     });
 
     it('the bare `{ field: { $field } }` spelling names the operator form to use', async () => {
-      // What `parseFilterAST(['amount', '=', { $field: 'budget' }])` lowers to.
-      // Refused because the in-memory evaluator answers `false` for it rather
-      // than reading it as an equality — compiling it would open a divergence
-      // in the change that closes one — so the message points at `$eq`.
-      const lowered = parseFilterAST([['amount', '=', { $field: 'budget' }]] as any);
-      const err = await refusalOf(() => find(lowered));
+      // HAND-AUTHORED, and that spelling matters (#7597). This used to be
+      // derived from `parseFilterAST(['amount', '=', ref])`, because the sink
+      // dropped the operator on an equality triple and produced exactly this
+      // shape — the defect #7597 fixed. The sink now lowers that triple to
+      // `{ $eq: ref }` (pinned in the conformance suite's authoring arm), so
+      // the bare form no longer has an authoring route into the driver.
+      //
+      // The refusal itself is UNCHANGED and stays pinned here on the shape a
+      // caller can still write by hand: the in-memory evaluator answers
+      // `false` for it rather than reading it as an equality (#6520's
+      // unknown-operator posture, deliberately kept), so compiling it would
+      // open a divergence — and the message points at the `$eq` spelling that
+      // does compile.
+      const err = await refusalOf(() => find({ amount: { $field: 'budget' } }));
       expect(err.code).toBe('INVALID_FILTER');
       expect(err.status).toBe(400);
       expect(err.message).toContain('$eq');
       expect(err.message).toContain('budget');
+    });
+
+    it('the equality TRIPLE no longer lowers to that bare spelling (#7597)', async () => {
+      // The other half of the case above, and the reason it had to change:
+      // the authoring route that used to reach the bare form now reaches the
+      // compiled one. Asserted here — beside the refusal it replaced — so a
+      // regression that restores the bare lowering fails next to the pin
+      // whose comment explains it, not only in the conformance sweep.
+      const lowered = parseFilterAST([['amount', '=', { $field: 'budget' }]] as any);
+      expect(lowered).toEqual({ amount: { $eq: { $field: 'budget' } } });
+      await expect(find(lowered)).resolves.toBeDefined();
     });
   });
 

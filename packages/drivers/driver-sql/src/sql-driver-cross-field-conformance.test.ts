@@ -54,10 +54,11 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { matchesFilterCondition } from '@objectstack/formula';
-import type { FilterCondition } from '@objectstack/spec/data';
+import { parseFilterAST, type FilterCondition } from '@objectstack/spec/data';
 import { SqlDriver } from './index.js';
 import { DIALECT_CELLS, declareUnprovisionedCell, type DialectCell } from './live-dialect-matrix.testkit.js';
 import {
+  CROSS_FIELD_AUTHORED_CASES,
   CROSS_FIELD_CASES,
   CROSS_FIELD_OBJECT_FIELDS,
   CROSS_FIELD_REFUSALS,
@@ -135,6 +136,27 @@ describe(`[#5222] driver-sql — cross-field \`$field\` push-down conformance ($
       expect(await sqlIds(testCase.filter), `SQL push-down disagreed${note}`).toEqual(expected);
     });
   }
+
+  describe('[#7597] the AUTHORING arm — the array sugar a client actually sends', () => {
+    // The sink these cases enter through (`parseFilterAST`) is where #7597
+    // was: the four equality spellings dropped the operator on a `{ $field }`
+    // comparand and produced a field spec no backend reads as an equality, so
+    // `['amount', '=', ref]` silently matched nothing while `['amount', '>',
+    // ref]` worked. Lowering and row set are asserted together because either
+    // one alone can be right while the pair is wrong.
+    for (const authoredCase of CROSS_FIELD_AUTHORED_CASES) {
+      it(`${authoredCase.name} — lowers as declared, same rows on both paths`, async () => {
+        const note = authoredCase.note ? `\n${authoredCase.note}` : '';
+        const lowered = parseFilterAST(authoredCase.authored);
+        expect(lowered, `parseFilterAST lowered the authored array to an unexpected shape${note}`)
+          .toEqual(authoredCase.loweredTo);
+
+        const expected = [...authoredCase.expected].sort();
+        expect(memoryIds(lowered), `in-memory evaluator disagreed${note}`).toEqual(expected);
+        expect(await sqlIds(lowered), `SQL push-down disagreed${note}`).toEqual(expected);
+      });
+    }
+  });
 
   describe('the refusal arm — narrowed, never removed (ADR-0112 envelope)', () => {
     for (const refusal of CROSS_FIELD_REFUSALS) {

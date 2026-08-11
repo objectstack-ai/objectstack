@@ -1026,22 +1026,28 @@ function crossFieldComparisonError(field: string, op: string, ref: string, index
  * field spec, i.e. in the implicit-equality position where a literal comparand
  * would mean `field = value`.
  *
- * It is not a hypothetical spelling: `parseFilterAST` lowers the authored
- * triple `['amount', '=', { $field: 'budget' }]` (and its `equals` word form)
- * to exactly this shape, while `['amount', '>', …]` lowers to `{ $gt: … }`.
- * So one authoring dialect produces both a supported and an unsupported
- * spelling of the same intent, and the caller cannot see why from the generic
- * "unsupported operator" message this used to fall through to.
+ * ## [#7597] It no longer has an AUTHORING route — and is still refused
  *
- * Refused rather than compiled to `$eq`, deliberately, and the reason is the
- * conformance rule the rest of this capability is held to: the in-memory
- * evaluator does NOT read this shape as an equality. `matches-filter.ts`
- * `evalField` sees an all-`$` key set and dispatches `$field` to `evalOp`,
- * which has no arm for it and answers `false` (its fail-closed default). So
- * compiling a column-to-column equality here would make SQL answer rows for a
- * filter the memory path answers `false` for — a NEW divergence, in the same
- * change that closes one. The two paths must move together, which is a spec
- * question rather than a driver one; filed separately.
+ * `parseFilterAST` used to lower the authored triple
+ * `['amount', '=', { $field: 'budget' }]` (and its `==` / `equals` / `eq`
+ * spellings) to exactly this shape, while `['amount', '>', …]` kept its
+ * operator and lowered to `{ $gt: … }` — one authoring dialect producing both
+ * a supported and an unsupported spelling of the same intent, with the
+ * unsupported one silent on the path that produced it. #7597 fixed the sink:
+ * an equality triple whose comparand is a `FieldReferenceSchema` now lowers to
+ * `{ $eq: ref }`, which this driver compiles. The array sugar therefore cannot
+ * reach this error any more.
+ *
+ * What CAN still reach it is a hand-authored `FilterCondition` carrying the
+ * bare form, and that keeps being refused rather than compiled to `$eq`,
+ * deliberately: the in-memory evaluator does NOT read this shape as an
+ * equality. `matches-filter.ts` `evalField` sees an all-`$` key set and
+ * dispatches `$field` to `evalOp`, which has no arm for it and answers `false`
+ * (its fail-closed default). Compiling a column-to-column equality here would
+ * make SQL answer rows for a filter the memory path answers `false` for — a
+ * NEW divergence. #7597 ruled that the evaluator's unknown-operator posture
+ * stays as #6520 left it and moved the LOWERING instead, so this message keeps
+ * pointing at the `$eq` spelling that does compile.
  */
 function bareFieldReferenceError(field: string, ref: string): Error {
   return unsupportedFilterError(
