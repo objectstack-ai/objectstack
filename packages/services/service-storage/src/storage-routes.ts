@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import type { IHttpServer, IHttpRequest, IHttpResponse, IStorageService } from '@objectstack/spec/contracts';
 // The declared envelope is written in ONE place for the whole platform (#3973).
 import { sendOk, sendError } from '@objectstack/types';
-import type { StorageMetadataStore, FileRecord } from './metadata-store.js';
+import type { StorageMetadataStore, FileRecord, UploadSessionRecord } from './metadata-store.js';
 import type { LocalStorageAdapter } from './local-storage-adapter.js';
 import { contentDispositionValue } from './content-disposition.js';
 
@@ -161,6 +161,74 @@ export function registerStorageRoutes(
       return false;
     }
     return session;
+  };
+
+  // ── Terminal upload-session statuses (#7667) ─────────────────────────────
+  // `sys_upload_session.status` declares `failed` and `expired`, the retention
+  // backstop reaps on them (`onlyWhen: { status: { $in: ['completed',
+  // 'failed', 'expired'] } }`), and `UploadProgressSchema`
+  // (packages/spec/src/api/storage.zod.ts) publishes both to every client that
+  // reads the contract. Until #7667 NOTHING wrote either one — a declaration
+  // with no producer, which ADR-0049 treats as enforce-or-remove. Both are
+  // enforced here rather than removed, because the two failure states are real
+  // and were previously invisible:
+  //
+  //  - `failed`: a completion whose backend `completeChunkedUpload` threw left
+  //    the row at `completing` FOREVER. That is a non-terminal status, so the
+  //    retention backstop never reaped it, and a progress poller read "still
+  //    assembling" for a session that had already given up.
+  //  - `expired`: a session past its own `expires_at` kept answering
+  //    `in_progress` and kept accepting chunks, until the TTL sweep deleted the
+  //    row out from under the caller — so the deadline the init response
+  //    already announced (`expiresAt`) was advisory on the way in and abrupt on
+  //    the way out.
+  //
+  // The reap guard (`createUploadSessionReapGuard`) already handled both — it
+  // aborts the backend multipart for any non-`completed` row with a
+  // `backend_upload_id` — so this closes the loop rather than opening one.
+
+  /** Statuses no longer in flight — never re-statused by the expiry guard. */
+  const TERMINAL_SESSION_STATUSES = new Set(['completed', 'failed', 'expired']);
+
+  /**
+   * Status an in-flight session `expired` once it is past its own `expires_at`,
+   * and hand back the row as it now stands.
+   *
+   * A row with no `expires_at` (or an unparseable one) has no declared deadline
+   * and is left alone: this enforces the deadline the session itself carries,
+   * it does not invent one. Terminal rows are returned untouched — a
+   * `completed` upload does not become `expired` by sitting around.
+   */
+  const expireIfPastDeadline = async (session: UploadSessionRecord): Promise<UploadSessionRecord> => {
+    if (TERMINAL_SESSION_STATUSES.has(session.status)) return session;
+    const deadline = session.expires_at ? Date.parse(session.expires_at) : NaN;
+    if (!Number.isFinite(deadline) || deadline > Date.now()) return session;
+    const updated = await store.updateSession(session.id, { status: 'expired' });
+    // `updateSession` answers null only when the row went away under us (the
+    // TTL sweep, most likely) — the caller is refused either way.
+    return updated ?? { ...session, status: 'expired' };
+  };
+
+  /**
+   * Best-effort `failed` stamp for a completion that threw.
+   *
+   * Deliberately swallowing-but-loud: the caller is already on its way to a
+   * 500 carrying the REAL cause, and letting the status write replace that
+   * cause would trade a diagnosable backend error for a metadata-store one.
+   * The row staying at `completing` is the pre-#7667 behaviour, so the warn
+   * names the consequence rather than pretending nothing happened.
+   */
+  const markSessionFailed = async (uploadId: string): Promise<void> => {
+    try {
+      await store.updateSession(uploadId, { status: 'failed' });
+    } catch (statusErr: any) {
+      opts.logger?.warn(
+        `[storage] upload session ${uploadId} failed to complete, and the 'failed' status could not be ` +
+          `persisted (${statusErr?.message ?? statusErr}) — the row stays at 'completing', so the 7d ` +
+          'retention backstop will not reap it and progress reads will overstate it. Restore the data ' +
+          'engine; the reap guard still aborts the backend multipart when the TTL sweep reaches the row.',
+      );
+    }
   };
 
   // ---------------------------------------------------------------------------
@@ -369,6 +437,19 @@ export function registerStorageRoutes(
         return;
       }
 
+      // Expiry is checked AFTER the resume token: a caller who cannot prove it
+      // owns the session learns nothing about its state (#7667).
+      const live = await expireIfPastDeadline(session);
+      if (live.status === 'expired') {
+        sendError(
+          res,
+          410,
+          'UPLOAD_SESSION_EXPIRED',
+          `Upload session expired at ${live.expires_at}; start a new chunked upload`,
+        );
+        return;
+      }
+
       // Get raw body (binary data)
       let data: Buffer;
       if (req.rawBody) {
@@ -422,6 +503,17 @@ export function registerStorageRoutes(
         return;
       }
 
+      const live = await expireIfPastDeadline(session);
+      if (live.status === 'expired') {
+        sendError(
+          res,
+          410,
+          'UPLOAD_SESSION_EXPIRED',
+          `Upload session expired at ${live.expires_at}; start a new chunked upload`,
+        );
+        return;
+      }
+
       await store.updateSession(uploadId, { status: 'completing' });
 
       const partsFromBody = (req.body?.parts ?? []) as Array<{ chunkIndex: number; eTag: string }>;
@@ -431,13 +523,23 @@ export function registerStorageRoutes(
       }));
 
       let finalKey = session.key;
-      if (storage.completeChunkedUpload) {
-        finalKey = await storage.completeChunkedUpload(uploadId, partsForBackend);
-      }
+      try {
+        if (storage.completeChunkedUpload) {
+          finalKey = await storage.completeChunkedUpload(uploadId, partsForBackend);
+        }
 
-      // Update file + session
-      await store.updateFile(session.file_id, { status: 'committed', key: finalKey });
-      await store.updateSession(uploadId, { status: 'completed' });
+        // Update file + session
+        await store.updateFile(session.file_id, { status: 'committed', key: finalKey });
+        await store.updateSession(uploadId, { status: 'completed' });
+      } catch (completionErr) {
+        // Terminal for THIS attempt, not a lock: nothing here reads `failed` as
+        // a refusal, so a client that retries the same uploadId after a
+        // transient backend blip runs the happy path again and overwrites it
+        // with `completed`. What the stamp buys is that an attempt which is
+        // NOT retried stops claiming to be in flight (#7667).
+        await markSessionFailed(uploadId);
+        throw completionErr;
+      }
 
       sendOk(res, {
         fileId: session.file_id,
@@ -458,11 +560,17 @@ export function registerStorageRoutes(
     try {
       if ((await requireUploadSession(req, res)) === false) return;
       const { uploadId } = req.params;
-      const session = await store.getSession(uploadId);
-      if (!session) {
+      const stored = await store.getSession(uploadId);
+      if (!stored) {
         sendError(res, 404, 'UPLOAD_SESSION_NOT_FOUND', 'Upload session not found');
         return;
       }
+
+      // Progress REPORTS the expiry rather than refusing it: `expired` is a
+      // declared member of `UploadProgressSchema.status`, and a resuming client
+      // (the SDK's `resumeUpload` polls this first) needs to be told the
+      // session is gone, not handed a 410 it has to interpret (#7667).
+      const session = await expireIfPastDeadline(stored);
 
       const uploadedChunks = session.uploaded_chunks ?? 0;
       const uploadedSize = session.uploaded_size ?? 0;
