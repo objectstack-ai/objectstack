@@ -39,6 +39,14 @@
  *  - a registry entry that stopped describing a real, still-unmapped
  *    better-auth object fails as stale, so the exemption list cannot rot into
  *    documentation of nothing.
+ *
+ * There is a SECOND axis of the same blindness that this file does not close:
+ * the `getAuthTables()` call below loads `organization` only, while the auth
+ * manager loads many more plugins behind feature flags, so a column an unloaded
+ * plugin owns is invisible to the comparison even for a MAPPED object.
+ * `sys_user.phone_number` is a live instance — filed as #7820, deliberately not
+ * fixed here, because widening the plugin set turns this guard red on an
+ * ownership question nobody has decided.
  */
 
 import { describe, it, expect } from 'vitest';
