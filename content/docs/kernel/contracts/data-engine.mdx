@@ -105,7 +105,8 @@ Defined by `EngineQueryOptionsSchema` in `@objectstack/spec`:
 ```typescript
 interface EngineQueryOptions {
   where?: FilterCondition;                   // WHERE clause — MongoDB-style $op
-  fields?: FieldNode[];                      // SELECT — field names ('name', 'owner.name')
+  fields?: FieldNode[];                      // SELECT — the object's OWN column names; related
+                                             // data comes from `expand`, not a dotted path (#7532)
   orderBy?: SortNode[];                      // ORDER BY
   limit?: number;                            // LIMIT
   offset?: number;                           // OFFSET

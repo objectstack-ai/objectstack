@@ -40,7 +40,7 @@ Directive #12: one capability, one contract.
 | :--- | :--- |
 | `fields: [{ field: 'owner', fields: ['name'] }]` | `expand: { owner: { object: 'user', fields: ['name'] } }` |
 | `fields: [{ field: 'owner' }]` | `fields: ['owner']` |
-| `fields: [{ field: 'owner', fields: ['name'] }]`, one column only | `fields: ['owner.name']` (dotted path) |
+| `fields: [{ field: 'owner', fields: ['name'] }]`, one column only | the same `expand`, keeping the FK in your own projection (`fields: ['title', 'owner_id']`) — **not** a dotted `fields` path, which no driver resolves and the ingress refuses (#7532) |
 | `fields: [{ field: 'total', alias: 't' }]` | `aggregations` / `windowFunctions` — they carry the live `alias` |
 
 The one-line fix: **a `fields[]` entry is a string.** Move nested selection to

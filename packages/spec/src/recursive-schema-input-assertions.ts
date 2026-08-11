@@ -68,11 +68,18 @@ import type {
 
 /* ── data/query.zod.ts ─────────────────────────────────────────────────────── */
 
-/** The authoring shape: only `object` is required, `expand` recurses. */
+/**
+ * The authoring shape: only `object` is required, `expand` recurses.
+ *
+ * The projection names the object's OWN columns, and keeps the foreign key
+ * (`owner_id`) that `expand` resolves through — this pin doubles as the one
+ * canonical query in the file, so it spells the shape the spec prescribes
+ * (#7601) rather than the dotted path the ingress refuses (#7532).
+ */
 export const queryInput: QueryInput = {
   object: 'account',
-  fields: ['name', 'owner.email'],
-  expand: { owner: { object: 'user', fields: ['name'] } },
+  fields: ['name', 'owner_id'],
+  expand: { owner_id: { object: 'user', fields: ['name'] } },
 };
 
 // @ts-expect-error — a query is not a string (`unknown` would take it)
@@ -86,7 +93,7 @@ export const queryNeedsObject: QueryInput = { fields: ['name'] };
 // `QuerySchema` — is gone, so there is no input half left to pin.
 
 /**
- * A select entry is a field name, optionally dotted through a relationship.
+ * A select entry is a field name — one of the queried object's own columns.
  *
  * `FieldNode` stopped being recursive in #4196 — the `{ field, fields, alias }`
  * member it used to carry was declared-but-inert and is gone, so
@@ -94,9 +101,23 @@ export const queryNeedsObject: QueryInput = { fields: ['name'] };
  * `z.ZodType<Output, Input>` annotation. The probes stay: this file's job is that
  * the input side is CHECKED, and a `z.string()` that someone re-widens to
  * `z.ZodType<FieldNode>` fails here exactly as a dropped type parameter would.
+ *
+ * ## The dotted probe is a NON-NARROWING guard, not an endorsement (#7601)
+ *
+ * A dotted string still satisfies `FieldNode`, and that must stay true: the
+ * refusal of dotted projections (#7532) is a SEMANTIC verdict at the ingress
+ * gate (`assertProjectionFieldsExist`, `400 INVALID_FIELD`), where the field map
+ * is available to judge against — not a SHAPE check. `FieldNodeSchema` stays
+ * `z.string()`, so every input valid before #7601 parses byte-identically after
+ * it. The probe below pins exactly that: it fails if someone "fixes" the docs
+ * defect by narrowing the type, which would move a semantic verdict into the
+ * shape check and refuse the registry-less internal callers the ingress
+ * deliberately tolerates. It does NOT assert that a dotted path RESOLVES —
+ * no driver ever implemented that, which is the defect #7601 corrected in the
+ * prose. Named for what it guards so it stops reading as a feature pin.
  */
 export const fieldNodeString: FieldNode = 'name';
-export const fieldNodeDotted: FieldNode = 'owner.email';
+export const fieldNodeDottedNotNarrowed: FieldNode = 'owner.email';
 
 // @ts-expect-error — a select entry is not a number
 export const fieldNodeNotANumber: FieldNode = 42;
