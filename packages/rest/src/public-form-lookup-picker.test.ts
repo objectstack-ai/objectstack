@@ -197,6 +197,9 @@ describe('#7467 a spec-valid stored form carrying a publicPicker reaches the loo
         expect(call.query.limit).toBe(10);
         expect(call.query.offset).toBe(0);
         expect(call.query.select).toEqual(['id', 'name', 'email']);
+        // [#7485] Ordering is fixed, not authorable: first display field,
+        // ascending. The route's `picker.sort ??` read is retired.
+        expect(call.query.sort).toEqual([{ field: 'name', order: 'asc' }]);
         expect(call.query.filters).toEqual([
             { field: 'is_active', operator: 'equals', value: true },
             { field: 'name', operator: 'contains', value: 'ad' },
@@ -216,5 +219,93 @@ describe('#7467 a spec-valid stored form carrying a publicPicker reaches the loo
         expect(res.statusCode).toBe(403);
         expect(res.body.code).toBe('LOOKUP_NOT_PUBLIC');
         expect(findData).not.toHaveBeenCalled();
+    });
+});
+
+// ─── [#7485] the retired fifth read ─────────────────────────────────────────
+
+/**
+ * Run a save and report a single verdict, however the door refuses: a
+ * `{ success: false }` result and a thrown validation error are the same
+ * answer here (the row is not written), and this suite pins the answer, not
+ * which of the two spellings the protocol currently uses.
+ */
+async function saveVerdict(item: unknown): Promise<{ ok: boolean; detail: string }> {
+    const { engine, rows } = stubEngine();
+    const protocol = new ObjectStackProtocolImplementation(engine, () => new Map()) as any;
+    try {
+        const result = await protocol.saveMetaItem({ type: 'view', name: 'lead.contact', item });
+        const wrote = rows.some((r) => r.type === 'view');
+        return { ok: result?.success === true && wrote, detail: JSON.stringify(result) };
+    } catch (error: any) {
+        return { ok: false, detail: String(error?.message ?? error) };
+    }
+}
+
+describe('#7485 publicPicker.sort is retired — not declarable, and not read', () => {
+    it('the schema REFUSES a new form authoring publicPicker.sort — no row is written', async () => {
+        // Half one of the pin, from the authoring side. `sort` was never in
+        // `FormFieldPublicPickerSchema` (#7467), and #7485 chose to keep it
+        // that way by removing the route's read rather than adding the key —
+        // so the strict block (ADR-0089 D3a) is the enforcement, and it must
+        // stay loud. `packages/spec/src/ui/view-public-picker.test.ts` pins the
+        // same refusal at the schema; this pins it at the real write path.
+        const withSort = await saveVerdict(studioForm([{
+            field: 'owner',
+            publicPicker: { ...PICKER, sort: [{ field: 'email', order: 'desc' }] },
+        }]));
+        expect(withSort.ok, `the save was expected to fail: ${withSort.detail}`).toBe(false);
+
+        // The control, and the reason this pin does not match on the error
+        // text: through `ViewMetadataSchema`'s union the failing ViewItem
+        // branch loses to the container branch's diagnostic, so the reported
+        // message names `viewKind`/`config` rather than `sort` (a pre-existing
+        // union-diagnostic wart, filed separately — not caused by #7485). The
+        // byte-identical form MINUS `sort` saving proves `sort` is the sole
+        // cause, which is what this test is actually about.
+        const withoutSort = await saveVerdict(studioForm([{ field: 'owner', publicPicker: PICKER }]));
+        expect(withoutSort.ok, `the control save must succeed: ${withoutSort.detail}`).toBe(true);
+    });
+
+    it('a PRE-SCHEMA stored row still carrying sort is IGNORED, not an error — and the query keeps the fixed default', async () => {
+        // Half two, from the stored-row side, and the reason this file rather
+        // than the spec suite owns it: rows written before #7467 declared the
+        // block never went through `ViewMetadataSchema`, so one can carry a
+        // `sort` the schema would refuse today. The route must neither honor it
+        // (that is the read #7485 retired) nor choke on it (a 500 on an
+        // anonymous surface would be a regression the removal caused). It is
+        // dead data: read past, answered 200, ordering unchanged.
+        const stored = await persistedBody(studioForm([{ field: 'owner', publicPicker: PICKER }]));
+        stored.config.sections[0].fields[0].publicPicker.sort = [{ field: 'email', order: 'desc' }];
+
+        const { findData, lookup } = routesOver(stored, [{ id: 'usr_1', name: 'Ada', email: 'ada@example.com' }]);
+        const res = mockRes();
+        await lookup.handler({ params: { slug: 'contact', field: 'owner' }, query: {} } as any, res);
+
+        expect(res.statusCode).toBe(200);
+        expect(res.body.data).toEqual([{ id: 'usr_1', name: 'Ada', email: 'ada@example.com' }]);
+        // The stored `{ field: 'email', order: 'desc' }` reaches `findData`
+        // nowhere: the fixed default is the only ordering the route composes.
+        expect(findData).toHaveBeenCalledTimes(1);
+        expect(findData.mock.calls[0][0].query.sort).toEqual([{ field: 'name', order: 'asc' }]);
+    });
+
+    it('…and the fixed sort tracks displayFields[0], including the no-displayFields default', async () => {
+        // The ordering is not a constant — it is "first display field,
+        // ascending". An empty block defaults displayFields to ['name'], so the
+        // sort follows to `name`; a declared list sorts by its first entry.
+        // Pinning both keeps a future refactor from freezing the field name.
+        const stored = await persistedBody(studioForm([{ field: 'owner', publicPicker: { object: 'sys_user' } }]));
+        const { findData, lookup } = routesOver(stored, []);
+        await lookup.handler({ params: { slug: 'contact', field: 'owner' }, query: {} } as any, mockRes());
+        expect(findData.mock.calls[0][0].query.sort).toEqual([{ field: 'name', order: 'asc' }]);
+
+        const stored2 = await persistedBody(studioForm([{
+            field: 'owner',
+            publicPicker: { displayFields: ['email', 'name'], object: 'sys_user' },
+        }]));
+        const second = routesOver(stored2, []);
+        await second.lookup.handler({ params: { slug: 'contact', field: 'owner' }, query: {} } as any, mockRes());
+        expect(second.findData.mock.calls[0][0].query.sort).toEqual([{ field: 'email', order: 'asc' }]);
     });
 });
