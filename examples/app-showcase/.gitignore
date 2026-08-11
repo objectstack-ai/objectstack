@@ -2,3 +2,11 @@
 # Playwright smoke artifacts
 test-results/
 playwright-report/
+
+# Transient checklist-test driver scripts. A browser-lane runner must write its
+# Playwright driver INSIDE this app so `require('@playwright/test')` resolves
+# through pnpm's nesting (a script in /tmp cannot). Runners delete these when
+# they finish, but a run in flight legitimately has them on disk — ignoring the
+# pattern keeps `git status` honest for the other agents sharing this checkout.
+.qa-*.cjs
+.qa-*.mjs
