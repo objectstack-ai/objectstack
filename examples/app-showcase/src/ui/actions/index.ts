@@ -138,14 +138,25 @@ export const RecalcEstimateAction = defineAction({
  * shape, minus the zip). Contrast with RecalcEstimateAction above: same
  * endpoint, one POST per record.
  *
- * `locations` still has to be declared, even though the selection bar entry
- * comes from the view. Omitting it does NOT mean "nowhere": the action:bar
- * renderer treats a missing/empty `locations` as "every location"
- * (objectui `action-bar.tsx`), so a locations-less action also lands on the
- * LIST TOOLBAR — where there is no selection, so the dispatch posts no
- * `_selectedIds` and the endpoint rejects it. Declaring `record_more` keeps
- * the single-record entry somewhere it works (the endpoint's per-record
- * branch, via `recordIdParam`) and off the toolbar. See objectui#3142.
+ * `locations` is a SEPARATE declaration from that selection-bar entry, which
+ * the view owns. It is not redundant, and it is not an opt-out of anything:
+ * since objectui#3142 an action renders at a location only if it DECLARES
+ * that location. That release collapsed four disagreeing renderers onto one
+ * membership predicate (`actionRendersAt`, objectui
+ * `packages/types/src/ui-action.ts`), so a missing or EMPTY `locations`
+ * matches NO location at all — an action nobody placed has no UI surface,
+ * which is precisely the inert shape this repo's `action-no-placement` rule
+ * warns about (`packages/lint/src/validate-action-locations.ts`), and `[]` is
+ * that same nowhere said deliberately (see NewTaskAction).
+ *
+ * So `record_more` here is an explicit SINGLE-RECORD placement, not a way of
+ * dodging an everywhere-default: it puts the action in the record overflow
+ * menu, where the dispatch carries exactly one id and the recalc endpoint's
+ * per-record branch handles it (via `recordIdParam`). Placement being
+ * declared rather than inherited is also what keeps the action off the LIST
+ * TOOLBAR — a toolbar dispatch would carry neither a selection (no
+ * `_selectedIds`) nor a record id, and the endpoint would reject it — but
+ * that is a consequence of naming one location, not the reason for naming it.
  */
 export const RecalcSelectionAction = defineAction({
   name: 'showcase_recalc_selection',

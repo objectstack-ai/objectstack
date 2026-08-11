@@ -35,7 +35,14 @@
  *       assign + claim comment (state model / step 4).
  *   H2  assignee set on a pm-tracked card, but no claim comment on the thread
  *       (a comment whose body carries a "Claim:" line) — the assignee field
- *       alone cannot say WHICH session owns it (step 4; #4588).
+ *       alone cannot say WHICH session owns it (step 4; #4588). The marker is
+ *       read with an OPTIONAL leading blockquote ">", because step 4's own
+ *       claim template is a blockquote (SKILL.md, "> Claim: …") — the predicate
+ *       used to reject the exact shape the skill tells every seat to write, and
+ *       reported a correctly-claimed card as a half-state (#7488, measured on
+ *       #6752). The strictness either side of that marker is deliberate and
+ *       stays: the line must BEGIN with the word, so ordinary prose containing
+ *       "claim" is not a claim comment.
  *   H3  `pm:queue` + `pm:dispatched` both present — reads as available to the
  *       queue view and in-flight to the lane view; neither is trustworthy
  *       (#5925 2026-08-09 correction, the measured specimen).
@@ -84,7 +91,7 @@ export function h2AssigneeNoClaimComment(issue, commentBodies) {
   const labels = labelNames(issue);
   const pmTracked = labels.some((l) => l === 'pm:queue' || l === 'pm:dispatched');
   if (!pmTracked || (issue.assignees ?? []).length === 0) return false;
-  return !commentBodies.some((b) => /^\s*Claim(?:ed)?\s*[::]/mi.test(b ?? ''));
+  return !commentBodies.some((b) => /^\s*>?\s*Claim(?:ed)?\s*[::]/mi.test(b ?? ''));
 }
 
 export function h3QueueAndDispatched(issue) {
@@ -212,6 +219,14 @@ function selfTest() {
   t('H2: assignee + no claim comment -> finding', h2AssigneeNoClaimComment(issue(['pm:dispatched'], ['os-help']), ['looks good', 'triage: routed']), true);
   t('H2: assignee + claim comment -> clean', h2AssigneeNoClaimComment(issue(['pm:dispatched'], ['os-help']), ['Claim: PM loop round 3\nSession: session_x']), false);
   t('H2: unassigned card is out of scope', h2AssigneeNoClaimComment(issue(['pm:queue']), []), false);
+  // #7488: SKILL.md step 4's claim template IS a blockquote, so the documented
+  // shape must read as a claim. Live specimen: #6752's "> Claim: PM loop wave 9".
+  t('H2: blockquote claim comment (the documented shape) -> clean', h2AssigneeNoClaimComment(issue(['pm:dispatched'], ['os-help']), ['> Claim: PM loop wave 9 (seat #6019)\n> Session: `session_x`\n> Branch: `claude/issue-6752-x`']), false);
+  t('H2: indented blockquote claim -> clean', h2AssigneeNoClaimComment(issue(['pm:dispatched'], ['os-help']), ['   > Claimed: PM loop round 3']), false);
+  // …and the strictness the relaxation must NOT cost: the line still has to
+  // BEGIN with the word, blockquote or not (#7488's explicit width limit).
+  t('H2: prose containing the word claim -> still a finding', h2AssigneeNoClaimComment(issue(['pm:dispatched'], ['os-help']), ['Nobody will claim: this card is ready\nthe seat did not claim it']), true);
+  t('H2: blockquoted prose containing claim -> still a finding', h2AssigneeNoClaimComment(issue(['pm:dispatched'], ['os-help']), ['> the next seat should claim: only after the ruling lands']), true);
   t('H3: both queue labels -> finding', h3QueueAndDispatched(issue(['pm:queue', 'pm:dispatched'])), true);
   t('H3: dispatched alone -> clean', h3QueueAndDispatched(issue(['pm:dispatched'])), false);
   t('H4: blocked without body line -> finding', h4BlockedNoBlockedBy(issue(['pm:blocked'], [], 'waiting on upstream')), true);

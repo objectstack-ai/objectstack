@@ -340,7 +340,7 @@ const CASE_SETS = [
 //      refusal face — objectql's `having` (`having-filter.ts`) — was outside
 //      that scope and kept its bare `new Error` until #7047.
 //
-// ## AGGREGATION_CASES: two DEBT rows on arrival, and they are the same pair
+// ## AGGREGATION_CASES: two DEBT rows on arrival, and they were the same pair
 //
 // The column arrived with #6409, which lowered `count_distinct` to
 // `COUNT(DISTINCT x)` on the SQL family — the ENFORCE leg of #6188's split
@@ -350,14 +350,30 @@ const CASE_SETS = [
 // whose suite pins the inherited statement surviving a different ENGINE, the
 // same judgement #4405 recorded for its filter-logic cell.
 //
-// The two open cells are `driver-memory` and `driver-mongodb` — the #5499 frozen
-// family, and open by that decision rather than by difficulty. #6409's ruling
-// put both explicitly out of scope and left their partial implementations
-// untouched, so the rows below record what each ANSWERS today, read from the
-// source on this branch. Neither is a prediction, and neither is a permission
-// slip: the cell clears when a suite runs the case-set, not when someone argues
-// the driver would pass it. Both would go RED as they stand, which is the
-// reason the rows exist rather than a reason to omit them.
+// The two open cells were `driver-memory` and `driver-mongodb` — the #5499
+// frozen family, and open by that decision rather than by difficulty. #6409's
+// ruling put both explicitly out of scope and left their partial
+// implementations untouched, so the rows recorded what each ANSWERS, read from
+// the source. Neither was a prediction, and neither was a permission slip: the
+// cell clears when a suite runs the case-set, not when someone argues the
+// driver would pass it.
+//
+// [#6850/#6814] `driver-mongodb`'s cell is now CLEARED, and its row is gone
+// with the suite that replaced it (`mongodb-aggregation-translation.test.ts`)
+// — the maintainer unfroze this package on 2026-08-11 (#5499). What the row
+// predicted held, and it under-counted: on top of the `count_distinct` null
+// (3 where the standard says 2) and the `"[object Object]"` `$group._id`, the
+// suite measured a THIRD divergence neither card named — `count(col)` ignored
+// `field` and answered the ROW count, so `count(stage)` came back 6 where the
+// case-set says 4. That is what a cell clears against: an executed case-set,
+// not a re-reading. The suite is the SERVER-FREE half #5517 requires, driving
+// the emitted pipeline through an in-process evaluator; the real-mongod half
+// is still absent and is recorded as such on #6814 rather than implied here.
+//
+// `driver-memory`'s row stands. The 2026-08-11 ruling lifted the freeze for
+// `driver-mongodb` alone, so that cell — a missing `count_distinct` arm and the
+// two-face divergence beside it — stays open by the same decision as before,
+// and #6814 stays OPEN for it.
 
 const LEDGER = [
   {
@@ -441,31 +457,6 @@ const LEDGER = [
       + '`{ field, alias: node.alias ?? node.field }` and projects the group value under `alias` — the answer '
       + '#6401 converged the three SQL faces onto. It had reached it independently, so the enforce leg needed '
       + 'NO mechanical alignment here. The cell stays open on `count_distinct` alone.',
-    issue: 'https://github.com/objectstack-ai/objectstack/issues/6814',
-  },
-  {
-    driver: 'driver-mongodb',
-    marker: 'AGGREGATION_CASES',
-    kind: 'DEBT',
-    why:
-      'Measured on this branch by reading `mongodb-aggregation.ts`: `count_distinct` lowers to '
-      + '`{ $addToSet: fieldRef ?? null }` and `postProcessAggregation` takes the array\'s `.length`. '
-      + '`$addToSet` adds an explicit `null` to the set, so a nullable column sizes ONE HIGHER than '
-      + '`COUNT(DISTINCT col)` does — 3 where the case-set says 2 over `AGGREGATION_ROWS`. `$addToSet` on a '
-      + 'MISSING field adds nothing, so the divergence shows only for an explicitly-null value, which is '
-      + 'exactly what the fixture seeds and what a nullable column produces in practice. Not executed — this '
-      + 'package has no suite for the cell, which is the debt. #5499 freezes it; the fix is a `$ne: null` '
-      + 'before the `$addToSet` (or sizing a `$setDifference` against `[null]`). Tracked as #6814. Note the '
-      + 'real-mongod suites are opt-in since #5517, so whatever clears this cell needs a server-free half '
-      + 'like `mongodb-filter-logic-translation.test.ts` has. '
-      + '[#6401] Re-measured when the case-set gained its `groupByAlias` axis, and the finding is WIDER than '
-      + 'the alias: `buildAggregationPipeline` annotates `groupBy` as `string[]` and builds '
-      + '`groupId[field] = \'$\' + field` (`mongodb-aggregation.ts:66-69`, mirrored in the `$project` at '
-      + '`:85-88`). A STRUCTURED `GroupByNode` — aliased or not — is an object there, so the `$group._id` key '
-      + 'becomes the literal `"[object Object]"` and its value `"$[object Object]"`. This face cannot take '
-      + 'the structured half of the declared union at all, so the alias is unreachable rather than ignored. '
-      + '`mongodb-driver.ts:512` passes `(query as any).groupBy`, which is why the union never met that '
-      + '`string[]` annotation at `tsc`. Read from the source; not executed. Same #6814 home.',
     issue: 'https://github.com/objectstack-ai/objectstack/issues/6814',
   },
 ];

@@ -66,7 +66,9 @@
  * non-null values in PostgreSQL and MySQL alike. A backend that counted NULL as
  * a distinct value would answer `3` where {@link AGGREGATION_CASES} says `2`,
  * and that is not a theoretical failure mode: it is what `driver-mongodb`'s
- * `$addToSet` → `$size` lowering does today (see the DEBT list below).
+ * `$addToSet` → `$size` lowering did until #6850/#6814 enrolled it — measured by
+ * running this table against the emitted pipeline, not predicted (see the DEBT
+ * list below, where `driver-memory` still carries the open half).
  *
  * The `count` cases sit beside them on purpose. `count(stage)` is `4` while
  * `count_distinct(stage)` is `2` and `count(*)` is `6`: three different numbers
@@ -84,6 +86,15 @@
  * - **`driver-sqlite-wasm`** — `sqlite-wasm-aggregation-conformance.test.ts`. It
  *   inherits `SqlDriver`'s compiler, so what it re-checks is the sql.js dialect
  *   the statement then has to survive, not a second lowering.
+ * - **`driver-mongodb`** — `mongodb-aggregation-translation.test.ts` [#6850/#6814].
+ *   The one enrolled face with NO engine behind it: this package's real-mongod
+ *   suites are opt-in since #5517, so the suite drives the pipeline
+ *   `buildAggregationPipeline` EMITS through a strict in-process evaluator of
+ *   the stages it emits, and refuses every shape it does not model. That bounds
+ *   what the cell claims — it holds the LOWERING to the table, and it does not
+ *   answer "does MongoDB agree?", which is the question a real-mongod half would
+ *   own. Recorded here rather than left to be discovered, because a green cell
+ *   reads as more than that.
  * - **`objectql`'s in-memory fallback** — `in-memory-aggregation-conformance.test.ts`
  *   in `packages/objectql`. [#6401] Not a SQL face and not a driver, which is
  *   why #6409 left it out; enrolled here because it is the face that has always
@@ -109,15 +120,23 @@
  * |---|---|---|
  * | `driver-memory` (data face) | **RED** — answers `null` | `MemoryDriver.computeAggregate` has no `count_distinct` arm; the `switch` falls to `default: return null`, so the aggregation resolves with no value and no error. |
  * | `driver-memory` (analytics face) | **agrees** | `memory-analytics.ts` collects `$addToSet` and sizes it — the same NULL question as MongoDB below; not executed against this table. |
- * | `driver-mongodb` | **RED** — counts NULL | `count_distinct` lowers to `$addToSet` and `postProcessAggregation` takes the array's `.length`, so an explicit `null` is one of the distinct values. Read from the source; not executed. |
+ * | ~~`driver-mongodb`~~ | **CLEARED** [#6850/#6814] | Was RED and under-stated: the `count_distinct` null (3 for the standard's 2), the `"[object Object]"` `$group._id` below, AND a third divergence neither row named — `count(col)` ignored `field` and answered the ROW count (6 for the standard's 4). All three fixed and enrolled; see the list above. |
  * | `driver-memory` — the #6401 alias cases | **agrees** | `MemoryDriver.performAggregation`'s `normalizeGroupBy` (`memory-driver.ts:1066-1068`) already returns `{ field, alias: node.alias ?? node.field }` and projects the group value under `alias`. It reached the enforce answer independently, so the alias leg needed NO mechanical alignment here — measured, not assumed. |
- * | `driver-mongodb` — the #6401 alias cases | **RED** — and wider than alias | `buildAggregationPipeline` types `groupBy` as `string[]` and does `groupId[field] = '$' + field` (`mongodb-aggregation.ts:66-69`, mirrored in the `$project` at `:85-88`). A STRUCTURED node — with or without an alias — is an object there, so the `$group._id` key becomes the literal `"[object Object]"` and its value `"$[object Object]"`. The alias is not so much ignored as unreachable: this face cannot take a structured `GroupByNode` at all. `mongodb-driver.ts:512` passes `(query as any).groupBy`, which is why the declared union never met the `string[]` annotation at `tsc`. Read from the source; not executed. |
+ * | ~~`driver-mongodb` — the #6401 alias cases~~ | **CLEARED** [#6850] | Was RED and wider than the alias: `buildAggregationPipeline` typed `groupBy` as `string[]` and did `groupId[field] = '$' + field`, so a STRUCTURED node — aliased or not — stringified into a `"[object Object]"` `$group._id` keyed on a field path that matches nothing. The alias was unreachable rather than ignored. It now reads the union, keys `_id` on `alias ?? field`, and refuses a `dateGranularity` node with NOT_IMPLEMENTED/501 rather than dropping a declared key; `mongodb-driver.ts` spells the declared type instead of `(query as any).groupBy`, so the next drift is a `tsc` error. |
  *
- * Both packages are inside the **#5499 investment freeze**, which is why these
- * are DEBT rows and not fixes: #6409's ruling put them explicitly out of scope
- * and left their partial implementations untouched. Enrolling either means
- * lifting the freeze for it first — the row is here so that decision is made
- * against a measured verdict instead of an assumption that they already agree.
+ * `driver-memory` is inside the **#5499 investment freeze**, which is why its
+ * row is a DEBT row and not a fix: #6409's ruling put it explicitly out of scope
+ * and left its partial implementation untouched. Enrolling it means lifting the
+ * freeze for it first — the row is here so that decision is made against a
+ * measured verdict instead of an assumption that it already agrees. The
+ * maintainer lifted the freeze for `driver-mongodb` alone on 2026-08-11, which
+ * is why the two rows above are struck through and this one is not.
+ *
+ * What the strike-throughs are worth keeping for: every one of those verdicts
+ * was reached by READING, and when the suite finally executed the case-set it
+ * found a divergence none of the readings had (`count(col)`). The rows were
+ * right about what they measured and incomplete about what they had not — which
+ * is the argument for the suite rather than against the ledger.
  *
  * `objectql`'s in-memory fallback (`in-memory-aggregation.ts`) is a fourth
  * lowering and is NOT frozen: it computes `count_distinct` as

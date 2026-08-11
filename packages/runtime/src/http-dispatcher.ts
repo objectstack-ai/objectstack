@@ -43,6 +43,10 @@ import {
     resolveExecutionContext,
     isPermissionDeniedError,
 } from './security/resolve-execution-context.js';
+import {
+    permissionDeniedErrorDetails,
+    describeDeniedDiagnostics,
+} from './security/permission-denied-envelope.js';
 import { validationFailureDetails, VALIDATION_FAILED_STATUS } from './validation-failure.js';
 
 // randomUUID moved to ./domains/auth.ts with its only consumer (D11③ PR-7).
@@ -1847,7 +1851,24 @@ export class HttpDispatcher {
         // order-equivalent to their original chain positions.
         const domainRoute = this.domainRegistry.resolve(cleanPath, method);
         if (domainRoute) {
-            return domainRoute.handler({ path: cleanPath, method, body, query }, context);
+            // [#7450] `return await`, not `return`. In an async function a bare
+            // `return <promise>` settles OUTSIDE the enclosing `try`, so a
+            // domain handler's rejection never reached the `catch` at the foot
+            // of this method — and every domain that can raise an object-gate
+            // denial (`/data` first among them) resolves HERE, which made that
+            // catch's `PERMISSION_DENIED` branch unreachable in practice. The
+            // denial escaped to the Hono catch-all instead, which answered
+            // `{ error: { message, code: 403 } }` — a NUMERIC `code`, i.e. the
+            // #3842 shape this package's error envelope exists to prevent, and
+            // no `PERMISSION_DENIED` for a client to branch on.
+            //
+            // Awaiting is what makes the ruled 403 contract actually apply on
+            // this transport; it must land together with the details allowlist
+            // in the catch below, because awaiting ALONE would start shipping
+            // the `positions` / `permissionSets` payload the ruling withholds.
+            // Non-denial errors are unaffected: the catch rethrows them, so
+            // they reach the adapter exactly as before.
+            return await domainRoute.handler({ path: cleanPath, method, body, query }, context);
         }
 
         // 0. Discovery Endpoint (GET /discovery or GET /)
@@ -1943,9 +1964,32 @@ export class HttpDispatcher {
         };
         } catch (e) {
             if (isPermissionDeniedError(e)) {
+                // [#7450] The denial's `details` does NOT reach the wire.
+                //
+                // This used to be `{ code: 'PERMISSION_DENIED', ...(e.details ?? {}) }`,
+                // and `buildApiError` puts everything that is not the `code` on
+                // the wire as `error.details` — so the security gate's
+                // `positions` / `permissionSets` (the caller's authorization
+                // topology) and its `object` (on a cascade delete, a CHILD the
+                // caller never addressed — `cascadeDeleteRelations` re-authorises
+                // each one independently) were answered to the browser, while
+                // `@objectstack/rest`'s `mapDataError` shipped none of it.
+                //
+                // Per the 2026-08-11 ruling on #7450 the two transports agree on
+                // REST's shape — message + code + the ROUTE-derived object. The
+                // object below therefore comes from `cleanPath`, the dispatcher's
+                // equivalent of REST's `req.params.object`, and never from
+                // `e.details.object`: those are different values on exactly the
+                // cascade path that made this a disclosure. See
+                // `./security/permission-denied-envelope.ts`.
+                const withheld = describeDeniedDiagnostics(e.details);
+                if (withheld) {
+                    // Dropped from the response, not from the operator's reach.
+                    console.warn(`[HttpDispatcher] PERMISSION_DENIED on ${method} ${cleanPath} — ${withheld}`);
+                }
                 return {
                     handled: true,
-                    response: this.error(e.message, 403, { code: 'PERMISSION_DENIED', ...(e.details ?? {}) }),
+                    response: this.error(e.message, 403, permissionDeniedErrorDetails(cleanPath)),
                 };
             }
             throw e;

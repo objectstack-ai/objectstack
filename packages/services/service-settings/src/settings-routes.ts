@@ -19,6 +19,11 @@ import type { IHttpServer, IHttpRequest, RouteHandler } from '@objectstack/spec/
 // #4224 retired from this module cannot come back through it either.
 import { sendOk, sendError } from '@objectstack/types';
 import { SettingsService } from './settings-service.js';
+// #7522 — the REST boundary is where an encrypted setting stops being cleartext.
+// The service decrypts on purpose (in-process plugins need the real secret);
+// nothing that leaves over HTTP may carry it. See the module header for the
+// mask shape and why it mirrors ADR-0100's encrypted-field convention.
+import { dropEchoedSecretMasks, redactSecretValues } from './settings-secret-redaction.js';
 import {
   SettingsForbiddenError,
   SettingsLockedError,
@@ -77,7 +82,11 @@ export function registerSettingsRoutes(
     try {
       const ctx = await ctxOf(req);
       const payload = await service.getNamespace(ns, ctx);
-      sendOk(res, payload);
+      // #7522 — redact BEFORE the payload leaves the process. `values.<key>.value`
+      // and every `cascadeChain` entry of a secret-backed key are masked;
+      // `source`, `locked` and `lockedReason` are untouched, so the console's
+      // "configured" state and the env-lock affordances read the same as before.
+      sendOk(res, { ...payload, values: redactSecretValues(payload.values, service.secretKeysOf(ns)) });
     } catch (err: any) {
       if (err instanceof SettingsForbiddenError) {
         sendError(res, 403, 'SETTINGS_FORBIDDEN', err.message, { details: { namespace: err.namespace } });
@@ -114,8 +123,21 @@ export function registerSettingsRoutes(
     }
     try {
       const ctx = await ctxOf(req);
-      const result = await service.setMany(ns, body, ctx);
-      sendOk(res, { values: result });
+      // #7522 — the echoed-mask no-op. GET now answers a secret with the mask;
+      // a form that submits back what it read means "unchanged", so the key is
+      // dropped rather than persisted as the mask's literal text. Resolved here
+      // (not in the service) for the same reason the redaction is: in-process
+      // callers write real values and must keep doing so.
+      //
+      // `secretKeysOf` throws `UnknownNamespaceError` for an unregistered
+      // namespace — the same 404 `setMany` would have raised one line later, in
+      // the same order relative to the 403 authz check.
+      const secretKeys = service.secretKeysOf(ns);
+      const result = await service.setMany(ns, dropEchoedSecretMasks(body, secretKeys), ctx);
+      // The write response carries resolved values too — including cascade
+      // entries the caller never submitted (an upper-scope secret it may not
+      // have set). Same boundary, same redaction.
+      sendOk(res, { values: redactSecretValues(result, secretKeys) });
     } catch (err: any) {
       if (err instanceof SettingsForbiddenError) {
         sendError(res, 403, 'SETTINGS_FORBIDDEN', err.message, { details: { namespace: err.namespace } });
