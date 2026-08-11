@@ -379,8 +379,8 @@ formViews: {
       message: 'A specialist will reach out within 24 hours.',
     },
 
-    // Or: redirect (great for marketing pages)
-    // submitBehavior: { kind: 'redirect', url: 'https://example.com/thanks', delayMs: 500 },
+    // Or: redirect to an in-app path (relative only — see below)
+    // submitBehavior: { kind: 'redirect', url: '/thanks', delayMs: 500 },
 
     // Or: reset the form for another response (kiosks, batch entry)
     // submitBehavior: { kind: 'continue' },
@@ -397,6 +397,31 @@ formViews: {
 | `redirect` | `window.location.assign(url)` after `delayMs` (defaults to 0). |
 | `continue` | Re-read prefill values and reset state — user can submit another response without reload. |
 | `next-record` | Stub for queue contexts; falls back to thank-you when no queue is wired. |
+
+### What a `redirect` `url` may be
+
+`url` is **not** a free-form address. It was ruled on 2026-08-11 ([#7496](https://github.com/objectstack-ai/objectstack/issues/7496)) and the schema enforces it, so a URL outside this shape is a parse error at authoring time rather than a surprise in the browser:
+
+1. **Relative paths only.** The value must start with a single `/`. Absolute URLs (`https://example.com/thanks`, and equally `javascript:` / `data:`), protocol-relative `//example.com/thanks`, backslashes, and smuggled whitespace or control characters are all refused. A post-submit redirect is authored metadata that sends a real browser somewhere — leaving it open to any address makes every form an open redirect waiting for one careless copy-paste. To send someone **out** of the app deliberately, that is an app navigation item (`{ type: 'url', url }`), which is declared for external addresses.
+2. **Interpolation only from declared record fields**, spelled `{{record.field_name}}` — the same double-brace template dialect the rest of the platform uses, narrowed to the record that was just submitted and to a flat field name. Every interpolated value is **URL-escaped** when the redirect is built, so a token is a *value* in the path or query and can never add path structure.
+3. **A verbatim redirect on the resolved relative path is the intended consumption** — what the renderer navigates to is exactly this string with its tokens substituted.
+
+```ts
+// ✅ accepted
+submitBehavior: { kind: 'redirect', url: '/thanks' }
+submitBehavior: { kind: 'redirect', url: '/records/{{record.id}}', delayMs: 500 }
+submitBehavior: { kind: 'redirect', url: '/thanks?ref={{record.public_ref}}' }
+
+// ❌ refused, with the rule named in the error
+submitBehavior: { kind: 'redirect', url: 'https://example.com/thanks' }  // absolute
+submitBehavior: { kind: 'redirect', url: '//example.com/thanks' }        // protocol-relative
+submitBehavior: { kind: 'redirect', url: 'thanks' }                      // document-relative
+submitBehavior: { kind: 'redirect', url: '/u/{{os.user.id}}' }           // not a record field
+```
+
+Widening this — an allowlist of absolute origins, say — waits for measured demand; the ruling took the narrowest shape deliberately.
+
+> **Current renderer status (2026-08-11).** The console shipping at the pinned `.objectui-sha` redirects **verbatim** on this value: it does not yet substitute `{{record.…}}` tokens or escape them. The three rules above are the contract, and the consumer half is tracked in [objectui#4190](https://github.com/objectstack-ai/objectui/issues/4190). Until it lands, a token would reach the browser literally — so write a plain path unless you are following that issue.
 
 ### The default is mode-aware
 
