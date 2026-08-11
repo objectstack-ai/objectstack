@@ -2175,6 +2175,69 @@ function suggestFieldName(name: string, knownFields: readonly string[]): string 
 }
 
 /**
+ * [#7534] The logical combinators a `FilterCondition` may carry. These hold
+ * NESTED CONDITIONS rather than naming a field, so {@link collectFilterFieldKeys}
+ * descends through them instead of judging them.
+ *
+ * Exactly the three the contract declares (`FilterConditionSchema`,
+ * `@objectstack/spec`) — `$and` / `$or` / `$not`. `$nor` is deliberately absent:
+ * it is a driver-INTERNAL lowering (`driver-memory` rewrites an input `$not`
+ * into a one-operand `$nor`, MongoDB's document-level negation) and is REFUSED
+ * as input vocabulary by that same driver, so a `$nor` arriving on the wire is
+ * not a combinator this layer should silently descend into.
+ */
+const FILTER_LOGICAL_KEYS: ReadonlySet<string> = new Set(['$and', '$or', '$not']);
+
+/**
+ * [#7534] Every key of a `FilterCondition` that NAMES A FIELD, structure
+ * discarded — whether a predicate sits under an `$or` changes nothing about
+ * whether its column exists.
+ *
+ * Two rules, and both are deliberately conservative in the direction that
+ * cannot invent a rejection:
+ *
+ * - **A `$`-prefixed key is never a field.** `$and`/`$or`/`$not` are recursed
+ *   into; any OTHER `$` key is skipped WITHOUT descending. An unrecognised
+ *   combinator therefore leaves the fields beneath it ungated — a hole, not a
+ *   false 400 — which is the right failure direction for a gate whose whole
+ *   purpose is to stop wrong answers, not to invent new ones.
+ * - **A field key's VALUE is not descended into.** It is either an operator bag
+ *   (`{$gte: 18}`) or a nested-relation condition (`{owner: {region: 'NA'}}`),
+ *   and the latter's keys belong to a DIFFERENT object whose field map this
+ *   gate has not resolved. Judging them against THIS object's fields would
+ *   refuse legitimate relation filters. The head segment — `owner` — is a field
+ *   of this object and IS judged, which is the same reach
+ *   {@link ObjectStackProtocolImplementation.assertQueryParamsAreFields} has on
+ *   a dotted path (`owner_id.name`).
+ *
+ * `depth` is a cheap backstop against a self-referential `where`. JSON cannot
+ * produce one, but `POST /data/:object/query` is not the only door — the RPC
+ * dispatcher and in-process callers hand over live objects — and a gate that
+ * can hang the read path is worse than the defect it closes.
+ */
+function collectFilterFieldKeys(
+    where: unknown,
+    out: string[] = [],
+    depth = 0,
+): string[] {
+    if (depth > 32) return out;
+    if (!where || typeof where !== 'object' || Array.isArray(where)) return out;
+    for (const [key, value] of Object.entries(where as Record<string, unknown>)) {
+        if (key.startsWith('$')) {
+            if (!FILTER_LOGICAL_KEYS.has(key)) continue;
+            if (Array.isArray(value)) {
+                for (const arm of value) collectFilterFieldKeys(arm, out, depth + 1);
+            } else {
+                collectFilterFieldKeys(value, out, depth + 1);
+            }
+            continue;
+        }
+        out.push(key);
+    }
+    return out;
+}
+
+/**
  * Service Configuration for Discovery
  * Maps service names to their routes and plugin providers.
  *
@@ -5184,6 +5247,84 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
+     * [#7534] The same read-path gate, on the EXPLICIT filter axes — the `where`
+     * object, the `$filter` string and the filter AST.
+     *
+     * #4134 closed this defect for the filters `findData` DERIVES from leftover
+     * query parameters, and {@link resolveQueryFields} was written for "ONE
+     * resolution shared by all four read axes". The explicit axes never called
+     * it, so one endpoint family answered ONE mistake two ways, chosen by which
+     * door the caller used:
+     *
+     * ```
+     * GET  /data/showcase_invoice?not_a_field=x            -> 400 INVALID_FIELD
+     * POST /data/showcase_invoice/query {where:{not_a_field:'x'}} -> 200 {records:[],total:0}
+     * ```
+     *
+     * The losing answer is the exact failure #4134 was filed about: an unknown
+     * name lowers into a field-equality predicate that can only match zero rows,
+     * so the response is indistinguishable from "no data" — and it cost a real
+     * investigation once already, where an empty list was read as an RLS /
+     * org-scope visibility bug rather than a typo.
+     *
+     * ONE call covers all three doors because they are not three code paths:
+     * `where` / `filter` / `filters` / `$filter` resolve to one slot at the
+     * #3795 fold, and a filter AST is lowered by `parseFilterAST` — the single
+     * sink for that sugar — before this runs. So this gate reads the same
+     * `FilterCondition` the driver will read, which is what keeps "the field the
+     * gate saw" and "the column that reached the driver" from drifting apart.
+     *
+     * # Ordering: after the #4134 param gate, before the #4164 merge
+     *
+     * Deliberately NOT reordered relative to its siblings. Running it AFTER
+     * {@link assertQueryParamsAreFields} keeps that gate's verdict first when a
+     * request gets both wrong, so no existing precedence moves; running it
+     * BEFORE the #4164 implicit/explicit merge is what lets it name the axis the
+     * caller actually used, since after the merge the two are one `$and` and the
+     * distinction is gone.
+     *
+     * # What it does NOT do
+     *
+     * The `param` in the message is the caller's own wire spelling (#4226's
+     * discipline — telling someone who sent `?$filter=…` that "'where' is
+     * invalid" names a parameter absent from their request). The message states
+     * the zero-row consequence rather than just the bad name, because that is
+     * the part a caller cannot infer from a `200`.
+     *
+     * Value shapes are NOT judged here: a wrong-typed or unrunnable filter is
+     * `INVALID_FILTER`'s job (#4121 / #4181), already answered upstream in this
+     * same block. This gate answers exactly one question — does this field
+     * exist — with exactly the envelope the write path and the bare-key door
+     * already give it.
+     */
+    private assertFilterFieldsExist(object: string, where: unknown, param: string): void {
+        if (!where || typeof where !== 'object') return;
+        const names = collectFilterFieldKeys(where);
+        if (names.length === 0) return;
+        const gate = this.resolveQueryFields(object);
+        if (!gate) return;
+        // Head segment only, exactly as the bare-key door judges `owner_id.name`.
+        const unknown = names.filter((f) => !gate.known.has(f.split('.')[0]));
+        if (unknown.length === 0) return;
+        const first = unknown[0];
+        const err: any = new Error(
+            `Query parameter '${param}' filters on '${first}', which is not a field on object `
+            + `'${object}'`
+            + (unknown.length > 1 ? ` (also: ${unknown.slice(1).join(', ')})` : '')
+            + '. A filter on a field that does not exist can only match zero records, so the '
+            + 'query was refused instead of answered with an empty list.'
+            + suggestFieldName(first, gate.declared),
+        );
+        err.code = 'INVALID_FIELD';
+        err.status = 400;
+        err.field = first;
+        err.fields = unknown;
+        err.object = object;
+        err.param = param;
+        throw err;
+    }
+
+    /**
      * [#4226] SORT axis. A sort naming a field the object does not have is
      * refused (`400 INVALID_SORT`) instead of being dropped on the floor.
      *
@@ -6292,6 +6433,15 @@ export class ObjectStackProtocolImplementation implements
         if (leftoverParams.length > 0) {
             this.assertQueryParamsAreFields(request.object, leftoverParams);
         }
+
+        // [#7534] The same question, on the EXPLICIT filter the caller wrote —
+        // the sibling door #4134's fix never reached. `options.where` is a
+        // lowered `FilterCondition` by this point whichever of the three doors
+        // carried it (`where` object, `$filter` string, filter AST), so one call
+        // covers all three. Placed here, and not earlier, on purpose: see
+        // `assertFilterFieldsExist` for why it runs after the param gate above
+        // and before the #4164 merge below.
+        this.assertFilterFieldsExist(request.object, options.where, filterKey);
 
         // Flat field filters: REST-style query params like ?id=abc&status=open
         // are implicit field-level equality predicates. Every leftover key is a
