@@ -10,7 +10,8 @@ import { Field, ObjectSchema } from '@objectstack/spec/data';
  * deliveries). Shared by the Flow `http` node executor and webhook fan-out so
  * both inherit retry / idempotency / dead-letter from one substrate. Generalises
  * `sys_webhook_delivery`: `webhook_id`→`ref_id`, `event_id`→`dedup_key`,
- * `event_type`→`label`, `secret`→`signing_secret`.
+ * `event_type`→`label`, `secret`→`signature` (#7722 — the row carries the HMAC
+ * this delivery sends, never the key that computed it).
  *
  * Designed for the SqlHttpOutbox claim algorithm:
  *   1. Producers INSERT pending rows (dedup'd by `(source, dedup_key)`).
@@ -123,7 +124,21 @@ export const HttpDelivery = ObjectSchema.create({
 
         method: Field.text({ label: 'Method', required: false, maxLength: 10 }),
         headers_json: Field.textarea({ label: 'Headers JSON', required: false }),
-        signing_secret: Field.text({ label: 'HMAC Secret', required: false, maxLength: 256 }),
+        // [#7722] The SIGNATURE, not the key that produced it. This column used
+        // to be `signing_secret` — a verbatim copy of the subscriber's shared
+        // secret on every attempt row — and this table is readable over the
+        // ordinary data API, so reading it recovered the key that authenticates
+        // ObjectStack to every receiver. The body is fixed at enqueue and
+        // replayed byte-for-byte by retries and redelivery, so the outbox signs
+        // once and keeps only the result: `sha256=<hex>`, the same value the
+        // receiver is handed on the wire, one-way in the secret.
+        signature: Field.text({
+            label: 'HMAC Signature',
+            required: false,
+            maxLength: 128,
+            description:
+                'X-Objectstack-Signature sent with this delivery (sha256=<hex>). Computed at enqueue; the signing secret is never persisted.',
+        }),
         timeout_ms: Field.number({ label: 'Timeout (ms)', required: false }),
         payload_json: Field.textarea({ label: 'Payload JSON', required: true }),
 

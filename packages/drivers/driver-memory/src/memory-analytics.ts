@@ -260,6 +260,38 @@ const CUBE_OPERATOR_TO_MONGO_PREDICATE: Readonly<Record<CubeOperator, MongoPredi
 });
 
 /**
+ * [#6814] The size of a collected `$addToSet`, as `count_distinct` defines it:
+ * distinct NON-NULL values of the column.
+ *
+ * That is what `COUNT(DISTINCT col)` computes on SQLite, PostgreSQL and MySQL
+ * alike, what objectql's fallback computes (`in-memory-aggregation.ts`), what
+ * this package's own data face computes (`MemoryDriver.computeAggregate`), and
+ * what `AGGREGATION_CASES` says — 2 over `AGGREGATION_ROWS`.
+ *
+ * ## Why the exclusion is HERE and not in the `$group` expression
+ *
+ * The two server-side spellings were considered and not taken, for the same
+ * reasons `driver-mongodb`'s twin records (#6814):
+ *
+ * - **`$ne: null` before the `$addToSet`** — as a `$match` it drops the row from
+ *   the WHOLE pipeline, so a `count` or `sum` measure sharing the query would
+ *   silently lose the null rows too. Correct only for a pipeline carrying one
+ *   measure, which this builder cannot assume.
+ * - **`$size` of a `$setDifference` against `[null]`** — sound, but it puts the
+ *   rule in the `$project` stage while the collection stays in `$group`, so the
+ *   two halves of one definition sit in different stages built by different
+ *   methods. Here they are one expression next to its own explanation.
+ *
+ * `undefined` is excluded beside `null`: mingo's `$addToSet` skips a MISSING
+ * field the way MongoDB's does, so this arm sees `undefined` only via an
+ * explicitly-undefined stored value — one state with `null` in SQL, and there is
+ * no third.
+ */
+function sizeDistinctSet(values: readonly unknown[]): number {
+  return new Set(values.filter((v) => v !== null && v !== undefined)).size;
+}
+
+/**
  * Configuration for MemoryAnalyticsService
  */
 export interface MemoryAnalyticsConfig {
@@ -475,6 +507,22 @@ export class MemoryAnalyticsService implements IAnalyticsService {
     // Execute the aggregation pipeline
     const tableName = this.extractTableName(cube.sql);
     const rawRows = await this.driver.aggregate(tableName, pipeline);
+
+    // [#6814] `$addToSet` COLLECTS; a `count_distinct` measure has to ANSWER a
+    // number. Without this step the value reached the caller as the raw array
+    // of values — under a field `measureTypeToFieldType` describes as `number`,
+    // so the response's own metadata disagreed with the cell beside it — and it
+    // included `null`, so even sizing it where it landed would have answered
+    // one HIGHER than the standard on any nullable column.
+    if (query.measures) {
+      for (const measure of query.measures) {
+        if (this.resolveMeasure(cube, measure)?.type !== 'count_distinct') continue;
+        const shortName = this.getShortName(measure);
+        for (const row of rawRows) {
+          if (Array.isArray(row[shortName])) row[shortName] = sizeDistinctSet(row[shortName]);
+        }
+      }
+    }
 
     // Rename fields from short names to full cube.field names
     const rows = rawRows.map(row => {
@@ -904,7 +952,10 @@ export class MemoryAnalyticsService implements IAnalyticsService {
       case 'max':
         return { $max: `$${fieldPath}` };
       case 'count_distinct':
-        return { $addToSet: `$${fieldPath}` }; // Will need post-processing for count
+        // Collects the distinct values; {@link sizeDistinctSet} turns the array
+        // into the NUMBER, excluding null — see the note there for why the
+        // exclusion is on that side rather than in this expression.
+        return { $addToSet: `$${fieldPath}` };
       default:
         return { $sum: 1 }; // Default to count
     }

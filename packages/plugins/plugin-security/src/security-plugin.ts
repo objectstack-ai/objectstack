@@ -1426,9 +1426,13 @@ export class SecurityPlugin implements Plugin {
       // engine with `{ id } AND <writeFilter>`; a `find` does not re-enter this
       // block, so there is no recursion, and read-side RLS/tenant scoping
       // compose naturally. A `null` result means the row is either gone or
-      // RLS-hidden → deny. When `computeRlsFilter` returns `null` (no policy
-      // applies — e.g. an admin set with no RLS, or `modifyAllRecords`) the
-      // check is skipped and behaviour is unchanged.
+      // RLS-hidden → deny. When `computeRlsFilter` returns `null` the check
+      // is skipped — but since #7665 that is a far smaller class than "no
+      // WRITE policy applies": an empty write-class collection now derives
+      // its scope from the caller's SELECT narrowing inside
+      // `computeLayeredRlsFilter`, so the skip happens only when the caller's
+      // READABLE set is unbounded too (an admin set with no RLS at all, or a
+      // posture-permitting superuser bypass).
       //
       // [#5492] The filter is composed BY PROVENANCE. Two of the policies that
       // can land in it are the platform's OWN ownership floor
@@ -1586,8 +1590,12 @@ export class SecurityPlugin implements Plugin {
 
       // 2.8. ADR-0055 — controlled-by-parent WRITE: a detail write (insert/update/
       // delete) requires edit access to its master. The detail itself carries no
-      // authored RLS, so the #1994 pre-image check above is a no-op for it; this
-      // closes the by-id write path by checking the master instead.
+      // authored RLS (nothing to derive from either, #7665), so the #1994
+      // pre-image check above is a no-op for it; this closes the by-id write
+      // path by checking the master instead — and the master's own write
+      // filter, since #7665, derives from its SELECT narrowing when no
+      // write-class policy applies, so a select-only master gates its details
+      // by visibility too.
       if (
         ['insert', 'update', 'delete', 'transfer', 'restore', 'purge'].includes(opCtx.operation) &&
         permissionSets.length > 0 &&
@@ -3925,7 +3933,54 @@ export class SecurityPlugin implements Plugin {
     // longer skip the tenant wall (that is Layer 0's own exemption, below).
     let layer1: Record<string, unknown> | null = null;
     if (!(posturePermits && superuserBypass)) {
-      const collected = this.collectRLSPolicies(permissionSets, object, operation, (context?.positions ?? []) as string[]);
+      let collected = this.collectRLSPolicies(permissionSets, object, operation, (context?.positions ?? []) as string[]);
+      // [#7665] The write-visibility floor: a write target must be inside the
+      // caller's READABLE set. When NO policy of the write class applies to
+      // this (principal, object, operation) — nothing authored for the class,
+      // and the platform ownership floor outside its `positions` domain — the
+      // write class used to compile to a null Layer 1, and every write-side
+      // row gate composed from it became a no-op at once: the by-id pre-image
+      // gate (step 2.7), the controlled_by_parent master check, and the bulk
+      // write AST injection. QA #7637 measured the result on the stock
+      // showcase (select-only narrowing, `contributor` position, OWD
+      // `public_read_write`): a contributor PATCHed by id records they could
+      // not read — on the master AND on a controlled_by_parent detail — while
+      // the read side correctly hid them.
+      //
+      // So an empty write-class collection now DERIVES the write scope from
+      // the caller's SELECT narrowing — the same policies, compiled by the
+      // same compiler, that the read path enforces. "You cannot mutate what
+      // you cannot see" then holds by construction, and the explain engine
+      // reports the same narrowing for update/delete that it reports for
+      // read, instead of "No RLS policy applies".
+      //
+      // Deliberately NOT derived:
+      //   - when ANY write-class policy applies (an authored predicate, or
+      //     the in-domain platform floor): those paths keep their exact
+      //     semantics, including every widening direction #7401 / #6736
+      //     track — #7665 criterion 5 (derive ONLY when no update-scope
+      //     predicate exists). `checkAuthoredRowWrite` is additionally
+      //     protected by its own authored-set pre-check, so a derived scope
+      //     can never masquerade as an authored admission (#5493 / #7281);
+      //   - for `insert` — there is no pre-existing row to be visible (a
+      //     controlled_by_parent detail INSERT is still gated through its
+      //     master's derived scope by step 2.8);
+      //   - when the caller holds the read-side superuser bypass on a
+      //     posture-permitting object — their readable set is unbounded, so
+      //     the readability requirement imposes nothing. This is the mirror
+      //     of the read path's own Layer-1 short-circuit above, so the
+      //     derived write scope can never be NARROWER than the read scope it
+      //     is derived from.
+      if (
+        collected.length === 0 &&
+        (operation === 'update' || operation === 'delete') &&
+        !(
+          posturePermits &&
+          this.permissionEvaluator.hasSuperuserReadBypass(object, permissionSets, { isPrivate: meta.isPrivate })
+        )
+      ) {
+        collected = this.collectRLSPolicies(permissionSets, object, 'select', (context?.positions ?? []) as string[]);
+      }
       // [#5492] Provenance composition: the caller (the by-id write pre-image
       // gate) has already asked the declared write authority — `ISharingService`
       // — and received a positive `allow`. Its answer REPLACES the platform's own

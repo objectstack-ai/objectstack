@@ -31,6 +31,7 @@ import { registerShareLinkRoutes } from './share-link-routes.js';
 import { bindRuleHooks, unbindAllRuleHooks, bindRuleCriteriaGuard, RULE_REBIND_TRIGGER_PACKAGE } from './rule-hooks.js';
 import { bindRuleProvenanceStamp, unbindRuleProvenanceStamp } from './sharing-rule-provenance.js';
 import { bindPrimaryBuHooks, backfillPrimaryBu } from './primary-bu-projection.js';
+import { bindBusinessUnitTreeRecompute } from './bu-tree-recompute.js';
 import { bindRecordShareCascade } from './record-share-cascade.js';
 import { bootstrapDeclaredSharingRules } from './bootstrap-declared-sharing-rules.js';
 
@@ -576,6 +577,22 @@ export class SharingServicePlugin implements Plugin {
             unbindAllRuleHooks(engine);
             bindRuleHooks(engine, this.ruleService, rules, ctx.logger as any);
             this.bindRuleRebindTriggers(engine, ctx);
+
+            // [#7729] A rule whose recipient resolves through the BUSINESS-UNIT
+            // graph changes audience when the graph moves, not when the shared
+            // record is written — and `bindRuleHooks` above binds only on each
+            // rule's own object, so a re-parent or a membership edit reached
+            // nothing. Left unbound, a business unit moved OUT of a shared
+            // subtree kept its members' read access until somebody happened to
+            // write the shared record: a revocation with no bound in time.
+            //
+            // Bound OUTSIDE the rebind seam on purpose. It carries no rule
+            // snapshot — the handler reads `listRules()` live on each BU write —
+            // so a runtime-authored rule is picked up without a rebind, and
+            // `unbindAllRuleHooks` (which every rebind calls) cannot tear it
+            // down. Inside `enforce`, unlike the primary-BU projection next to
+            // it: this one IS an access-control surface.
+            bindBusinessUnitTreeRecompute(engine, this.ruleService, ctx.logger as any);
 
             // [#3896] Authoring a rule in Setup is a plain INSERT on
             // sys_sharing_rule — it bypasses defineRule's validation, so the

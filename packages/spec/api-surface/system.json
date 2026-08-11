@@ -781,6 +781,7 @@
     "isPlatformProvidedToolName (function)",
     "isPublicAudience (function)",
     "minioStorageExample (const)",
+    "normalizeSupportedLocales (function)",
     "objectFieldLabelKey (function)",
     "objectLabelKey (function)",
     "operationMessageTranslationKey (function)",

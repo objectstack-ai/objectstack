@@ -11624,7 +11624,38 @@ export class ObjectStackProtocolImplementation implements
         cleanups: UninstallCleanupOutcome[];
     }> {
         const where: Record<string, unknown> = { package_id: request.packageId };
-        if (request.organizationId) where.organization_id = request.organizationId;
+        // [#7705] Surface BOTH org-scoped rows and env-wide (`organization_id
+        // IS NULL`) rows to an org-scoped uninstall. A strict
+        // `organization_id = <org>` equality silently dropped every env-wide
+        // row, and env-wide is where a package's metadata normally LANDS: the
+        // REST `PUT /meta/:type/:name` save path does not thread the session's
+        // active org, and AI-authored metadata is written env-wide too. So an
+        // uninstall issued by a session that HAS an active org (the dispatcher
+        // door, `packages/runtime/src/domains/packages.ts`, is the one that
+        // resolves and passes `organizationId`) selected only the handful of
+        // rows that happened to be org-scoped and left the rest behind —
+        // reporting `deletedCount` > 0 and `success: true` while the package's
+        // rows demonstrably survived (the orphaned-uninstall bug).
+        //
+        // Same defect and same remedy as the #3115 "orphaned draft" bug one
+        // file over ({@link SysMetadataRepository.listDrafts}), and the shape
+        // is deliberately identical to it. The driver's own implicit tenant
+        // wall already reads this way (`field = :tenant OR field IS NULL`,
+        // #2734); only author-supplied predicates are strict, which is what
+        // made this silent.
+        //
+        // The no-org branch is deliberately NOT narrowed to `organization_id
+        // IS NULL`: the other door of this route (the direct-mount REST
+        // registrar, `packages/rest/src/package-routes.ts`) passes no
+        // `organizationId` at all, and restricting it to env-wide rows would
+        // orphan every org-scoped row — the same bug, re-created on the other
+        // door. Absent an org, a full uninstall stays package-wide.
+        if (request.organizationId) {
+            where.$or = [
+                { organization_id: request.organizationId },
+                { organization_id: null },
+            ];
+        }
         const rows = (await this.engine.find('sys_metadata', { where })) as any[];
 
         const dropStorage = request.keepData !== true;
@@ -12083,7 +12114,42 @@ export class ObjectStackProtocolImplementation implements
     }>> {
         try {
             const where: Record<string, unknown> = { package_id: request.packageId };
-            if (request.organizationId) where.organization_id = request.organizationId;
+            // [#7779] Surface BOTH org-scoped and env-wide (`organization_id IS
+            // NULL`) commit rows to an org-scoped caller — the same defect and
+            // the same remedy as the sibling {@link deletePackage} read one
+            // function above (#7705), and as {@link
+            // SysMetadataRepository.listDrafts} (#3115) in this package.
+            //
+            // Env-wide commit rows are not hypothetical: {@link
+            // recordPackageCommit} stores `organization_id: request.
+            // organizationId ?? null`, and the ONLY door into a publish — the
+            // dispatcher's `POST /packages/:id/publish-drafts` — forwards an
+            // org only when `resolveActiveOrganizationId` yields one. That
+            // resolver answers `undefined` for a session with no active
+            // organization AND for every failure on the auth seam (it is
+            // `catch`-wrapped). So a publish made before an org was selected —
+            // or during a transient auth blip — lands its commit env-wide,
+            // permanently, and the strict equality then hid it from every
+            // org-scoped read of that package's timeline.
+            //
+            // This is NOT merely an observability miss. {@link
+            // rollbackToPackageCommit} derives the set of commits to undo from
+            // this list, so an invisible commit was silently never reverted:
+            // measured pre-fix, a rollback past an env-wide commit answered
+            // `{success: true, revertedCommits: []}` while that commit's
+            // changes stayed live.
+            //
+            // The no-org branch is deliberately NOT narrowed to
+            // `organization_id IS NULL`, exactly as #7705 left its own: a
+            // caller with no active org reads the package's whole timeline,
+            // and restricting it to env-wide rows would hide every org-scoped
+            // commit instead — the same bug pointed the other way.
+            if (request.organizationId) {
+                where.$or = [
+                    { organization_id: request.organizationId },
+                    { organization_id: null },
+                ];
+            }
             const rows = (await this.engine.find('sys_metadata_commit', {
                 where,
                 ...(request.limit ? { limit: request.limit } : {}),

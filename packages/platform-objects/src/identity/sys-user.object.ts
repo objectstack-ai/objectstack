@@ -96,7 +96,16 @@ export const SysUser = ObjectSchema.create({
       recordIdParam: 'userId',
       successMessage: 'User banned',
       refreshAfter: true,
-      confirmText: 'Ban this user? They will be signed out and unable to sign in until unbanned.',
+      // The confirm question rides `description`, not `confirmText`: this action
+      // collects params, and the console action runner chains confirmation THEN
+      // param collection (both awaited), so pairing the two keys opens two
+      // dialogs for one decision — and the first already reads as "it ran".
+      // Maintainer ruling on #7278 (2026-08-10), swept across the remaining
+      // in-repo sites by #7309. The param dialog renders this under its title,
+      // and nothing is POSTed until that one dialog's own Confirm.
+      // NB: the top-level `description` (#7367), never `ai.description` — that
+      // one is the LLM-facing tool contract and is shown to no user.
+      description: 'Ban this user? They will be signed out and unable to sign in until unbanned.',
       params: [
         { name: 'banReason', label: 'Ban Reason', type: 'text', required: false },
       ],
@@ -361,7 +370,8 @@ export const SysUser = ObjectSchema.create({
       // Self-delete needs a local password; managed users are deprovisioned
       // via the IdP (org-removal / SCIM), not local self-service. Hide for them.
       visible: 'record.id == ctx.user.id && record.source != "idp_provisioned"',
-      confirmText: 'Permanently delete your account? This cannot be undone — all your sessions will be terminated and all data you own will be removed per the configured retention policy.',
+      // Confirm question on `description` — one dialog, not two (#7278/#7309).
+      description: 'Permanently delete your account? This cannot be undone — all your sessions will be terminated and all data you own will be removed per the configured retention policy.',
       successMessage: 'Account deleted',
       refreshAfter: false,
       params: [
@@ -400,7 +410,8 @@ export const SysUser = ObjectSchema.create({
       target: '/api/v1/auth/two-factor/disable',
       visible: 'record.id == ctx.user.id && record.two_factor_enabled == true',
       requiresFeature: 'twoFactor',
-      confirmText: 'Turn off two-factor authentication? Your account will be less secure.',
+      // Confirm question on `description` — one dialog, not two (#7278/#7309).
+      description: 'Turn off two-factor authentication? Your account will be less secure.',
       successMessage: 'Two-factor authentication disabled.',
       refreshAfter: true,
       params: [
@@ -417,7 +428,8 @@ export const SysUser = ObjectSchema.create({
       target: '/api/v1/auth/two-factor/generate-backup-codes',
       visible: 'record.id == ctx.user.id && record.two_factor_enabled == true',
       requiresFeature: 'twoFactor',
-      confirmText: 'Generate a new set of backup codes? Any previously generated codes will stop working.',
+      // Confirm question on `description` — one dialog, not two (#7278/#7309).
+      description: 'Generate a new set of backup codes? Any previously generated codes will stop working.',
       successMessage: 'New backup codes generated — save them somewhere safe.',
       refreshAfter: false,
       params: [

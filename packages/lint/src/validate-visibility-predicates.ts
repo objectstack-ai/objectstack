@@ -68,7 +68,9 @@
  * - `visibility-bare-identifier` (**error**, #6128 / #5149 requirement 3) — a
  *   predicate referencing a top-level identifier that no binding root can
  *   resolve (`status == 'active'` instead of `record.status == 'active'`). See
- *   the §Bare identifiers block below for the mechanism and the boundaries.
+ *   the §Bare identifiers block below for the mechanism and the boundaries, and
+ *   §The one position this rule does not judge for the metadata-form right-hand
+ *   slot it stands down on (#7696).
  * - `visibility-root-mislayered` — a visibility predicate whose binding root does
  *   not match its layer (ADR-0089 D3, §Context). The check is **bidirectional**:
  *   - **runtime** view/page surfaces (`*.view.ts` / `*.page.ts`) bind
@@ -253,6 +255,34 @@
  *   `type(record.x) == string` is legitimate CEL over the very same names. A
  *   measured blind spot in the safe direction — a missed catch, never a false
  *   build error — pinned by a test so it reads as a decision.
+ *
+ * ### The one position this rule does not judge (#7696)
+ *
+ * A bare word on the RIGHT of `==` / `!=`, on a **metadata-editing form**
+ * (`{ provider: 'schema', schemaId }`), is not judged here — see
+ * `predicate-rhs-position.ts` for the mechanism and
+ * `validate-predicate-path-refs.ts`'s §One position, one prescription for the
+ * argument. The short form: on that surface the console's evaluator hands the
+ * right side to its literal parser and never resolves it (objectui#4049), so
+ * this rule's prescription — write `<root>.<word>` — is not a fix but a second
+ * defect, and the SAME publish gate refuses it at `error` under
+ * `predicate-rhs-path-shaped`. Telling an author to write a spelling the gate
+ * refuses is the harm #7696 was filed about, and it is loudest here because
+ * this is the finding that BLOCKS.
+ *
+ * The stand-down is narrow in all three directions that matter:
+ *
+ * - **Per identifier, not per predicate.** `status == active` is still refused
+ *   over `status`; only names occurring *solely* in a right-hand slot are let
+ *   through.
+ * - **Only where the replacement fires.** A runtime `*.view.ts` / `*.page.ts`
+ *   predicate goes to real CEL, where a path on the right is legal and a bare
+ *   word there really is a dropped root — `record.status == active` keeps its
+ *   `error`, with the same hint it always had.
+ * - **Never a silence.** The condition is the same `schemaIdOf` test
+ *   `validatePredicatePathRefs` walks on, so every token this rule stops
+ *   reporting is reported by that one — as a `warning`, which is the severity
+ *   #7659 already argued for a spelling that renders correctly today.
  */
 
 import {
@@ -265,6 +295,7 @@ import type { CelAstNode, CelBoundsOverrun } from '@objectstack/formula';
 
 import { collectionEntries } from './collection-entries.js';
 import { walkPageComponents } from './page-walk.js';
+import { bareRhsOnlyIdentifiers, schemaIdOf } from './predicate-rhs-position.js';
 import { formViewSites } from './view-walk.js';
 
 export const VISIBILITY_ROOT_MISLAYERED = 'visibility-root-mislayered';
@@ -568,15 +599,31 @@ function namespaceRoots(node: unknown, out: Set<string>): void {
  * when every reference is rooted. See the module note for why this is two
  * oracles (the canonical AST for namespace roots, the shared strict-environment
  * checker for the verdict) and for the shapes it deliberately leaves alone.
+ *
+ * `literalRhs` is set for a METADATA-EDITING form, where the console's
+ * evaluator hands the right of `==` / `!=` to its literal parser and never
+ * resolves it (objectui#4049). A bare word there is not a dropped root — it is
+ * a literal, possibly missing its quotes — and `predicate-rhs-path-shaped`
+ * (#7659) is the rule that says so, with the two spellings this surface
+ * actually accepts. Standing down here is what makes that ONE finding instead
+ * of two that prescribe opposite fixes (#7696). It is fed through the DECLARED
+ * list rather than post-filtering the verdict, which is the same conservative
+ * direction {@link namespaceRoots} takes: a name added there can only remove a
+ * finding, never invent one.
  */
-function firstBareIdentifier(source: string): string | null {
+function firstBareIdentifier(source: string, literalRhs: boolean): string | null {
   const ast = parseCelToAst(source);
   // Not parseable through the canonical front end (syntax fault, or over
   // DEFAULT_LIMITS) — not this rule's verdict to give.
   if (!ast) return null;
   const rooted = new Set<string>();
   namespaceRoots(ast, rooted);
-  return firstUndeclaredReference(source, [...VIEW_PAGE_EXTRA_ROOTS, ...rooted]);
+  const literalSlot = literalRhs ? bareRhsOnlyIdentifiers(ast) : [];
+  return firstUndeclaredReference(source, [
+    ...VIEW_PAGE_EXTRA_ROOTS,
+    ...rooted,
+    ...literalSlot,
+  ]);
 }
 
 /**
@@ -638,6 +685,7 @@ function checkElement(
   path: string,
   layer: VisibilityLayer,
   findings: VisibilityFinding[],
+  literalRhs = false,
 ): void {
   // (1) mis-layered binding root — check the effective predicate (canonical wins)
   // against the root expected for this layer.
@@ -733,8 +781,18 @@ function checkElement(
   // rather than relying on `firstBareIdentifier`'s own null-AST guard, so the
   // one-finding-per-broken-predicate property is visible at the call site
   // instead of depending on a callee's internals.
+  //
+  // #7696 — and skipped for the ONE position where this rule's prescription is
+  // not available: a bare word on the right of `==` / `!=` on a
+  // metadata-editing form. There the console parses the right side as a
+  // literal, so `<root>.<word>` is not a fix but a second defect (a path on the
+  // right, which `predicate-rhs-path-shaped` refuses at `error`), and this
+  // rule's own bar — "there is no reading under which it was going to work" —
+  // is false, because the literal reading works today. `literalRhs` is set only
+  // where that replacement rule actually fires, so the token is never silenced,
+  // only diagnosed once.
   if (source && !refusal) {
-    const bare = firstBareIdentifier(source);
+    const bare = firstBareIdentifier(source, literalRhs);
     if (bare) {
       const root = CANONICAL_ROOT_BY_LAYER[layer];
       findings.push({
@@ -801,6 +859,16 @@ export function validateVisibilityPredicates(
 
     for (const site of formViewSites(view, viewPath)) {
       const where = site.surface ? `view "${viewName}" · ${site.surface}` : `view "${viewName}"`;
+      // A `{ provider: 'schema', schemaId }` data source is a METADATA-EDITING
+      // form — the surface the console renders through its own predicate
+      // evaluator, whose right-hand slot is a literal slot (objectui#4049).
+      // That is exactly the set `validatePredicatePathRefs` judges, so it is
+      // exactly the set where standing the bare-identifier verdict down for a
+      // right-hand word leaves a finding behind rather than a silence (#7696).
+      // A runtime `*.view.ts` predicate goes to real CEL, where a path on the
+      // right is perfectly legal and a bare word there really is a dropped
+      // root — so it is not in this set and its refusal is untouched.
+      const literalRhs = schemaIdOf(site.view) !== undefined;
       // `sections` (canonical) and `groups` (legacy alias → sections) both hold
       // FormSection objects with an optional visibility predicate + `fields`.
       for (const bucket of ['sections', 'groups'] as const) {
@@ -809,13 +877,13 @@ export function validateVisibilityPredicates(
           const sec = sections[s];
           if (!sec || typeof sec !== 'object') continue;
           const secPath = `${site.path}.${bucket}[${s}]`;
-          checkElement(sec as AnyRec, where, secPath, layer, findings);
+          checkElement(sec as AnyRec, where, secPath, layer, findings, literalRhs);
 
           const secFields = Array.isArray((sec as AnyRec).fields) ? ((sec as AnyRec).fields as unknown[]) : [];
           for (let f = 0; f < secFields.length; f++) {
             const entry = secFields[f];
             if (isFieldObject(entry)) {
-              checkElement(entry, where, `${secPath}.fields[${f}]`, layer, findings);
+              checkElement(entry, where, `${secPath}.fields[${f}]`, layer, findings, literalRhs);
             }
           }
         }

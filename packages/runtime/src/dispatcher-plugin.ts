@@ -916,14 +916,38 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
             // Public SKILL.md download (env-customized portable Agent Skill).
             // Separate registration: `/mcp` above is an exact-path mount, so
             // the sub-path needs its own route to be reachable over HTTP.
-            server.get(`${prefix}/mcp/skill`, async (req: any, res: any) => {
-                try {
-                    const result = await dispatcher.dispatch('GET', '/mcp/skill', req.body, req.query, { request: req });
-                    sendResult(result, res);
-                } catch (err: any) {
-                    errorResponse(err, res);
-                }
-            });
+            //
+            // [#7649] Mounted for the SAME method set as `/mcp` above rather
+            // than GET alone, even though GET is the only method this route
+            // SERVES. The domain owns a 405 branch for the rest
+            // (`handleMcpSkillRequest`: "Method not allowed — use GET", body
+            // built through `buildApiError` per #3842) — but a branch can only
+            // answer a mismatch that REACHES the dispatcher. With GET as the
+            // sole registration, Hono routed `POST /api/v1/mcp/skill` to
+            // `notFound`, where the adapter's `unmatchedResponse()` answered
+            // with its own `{error, code, message, method, path, allowed}`
+            // shape: a second, non-standard 405 envelope on the wire, and the
+            // domain branch dead code on this adapter. Registering the verbs
+            // hands the mismatch to the branch that already exists.
+            //
+            // The method set tracks `/mcp`'s deliberately: `server.get/post/
+            // delete` are also the three verbs the observability Proxy above
+            // instruments, so a PUT/PATCH mount here would be both wider than
+            // the sibling route and silently un-instrumented.
+            const mountMcpSkill = (method: 'GET' | 'POST' | 'DELETE') => {
+                const register = method === 'GET' ? server.get : method === 'DELETE' ? server.delete : server.post;
+                register.call(server, `${prefix}/mcp/skill`, async (req: any, res: any) => {
+                    try {
+                        const result = await dispatcher.dispatch(method, '/mcp/skill', req.body, req.query, { request: req });
+                        sendResult(result, res);
+                    } catch (err: any) {
+                        errorResponse(err, res);
+                    }
+                });
+            };
+            mountMcpSkill('GET');
+            mountMcpSkill('POST');
+            mountMcpSkill('DELETE');
 
             server.post(`${prefix}/keys`, async (req: any, res: any) => {
                 try {
