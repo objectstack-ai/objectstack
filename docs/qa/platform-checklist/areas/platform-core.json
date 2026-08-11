@@ -220,8 +220,7 @@
       "fixtures": {
         "app": "showcase",
         "knownGaps": [
-          "no stock showcase fixture deliberately throws inside a route, so the ErrorBoundary fallback ('Something went wrong' + Try Again / Go Home — objectui packages/app-shell/src/chrome/ErrorBoundary.tsx) is verified opportunistically on any failure encountered, plus via the bad-route probe below",
-          "the pinned suite still MEASURES charts with a fixed `page.waitForTimeout(1500)` followed by a SINGLE `boundingBox()` read (examples/app-showcase/e2e/showcase-smoke.spec.ts) — a coin-flip red whenever that fixed instant lands inside the recharts ResponsiveContainer initial-layout window. Until that read is replaced by a bounded poll-until-non-null (the #7472 / #7409 de-flake shape: loop the predicate against a DEADLINE derived from the case's own budget, never sleep-then-read-once — a bigger fixed number is not the fix), a null-box chart red must be RE-MEASURED per the steps before it is recorded. Tracked by #7569, whose harness half lands in the spec file, not in this checklist"
+          "no stock showcase fixture deliberately throws inside a route, so the ErrorBoundary fallback ('Something went wrong' + Try Again / Go Home — objectui packages/app-shell/src/chrome/ErrorBoundary.tsx) is verified opportunistically on any failure encountered, plus via the bad-route probe below"
         ]
       },
       "steps": [
@@ -229,7 +228,7 @@
         "GET /api/v1/meta/app?id=com.example.showcase and extract every nav destination from the response",
         "diff the served nav destinations against the SURFACES array; hand-walk any destination the suite does not cover (screenshot first, then DOM)",
         "on each hand-walked surface: wait for render, screenshot, then check for pageerror / empty <main> / placeholder leaks ('no actions configured')",
-        "chart surfaces (the chart:true entries in SURFACES — Delivery Operations, Chart Gallery, Command Center): if the suite reports a NULL chart boundingBox, do NOT record it as a product red — RE-MEASURE it by polling boundingBox until non-null within a bounded budget. #7569 measured the difference on this exact assertion: 3 fresh loads each drew 5 real charts, and polling every 400 ms returned null ONLY at t = 1.5 s — the suite's fixed measurement instant, and exactly the recharts ResponsiveContainer initial-layout window — and non-null on all 19 later samples; the same item re-run in isolation is 4/4 green. A box that stays null through the whole bounded poll IS a product finding; one that resolves on a later sample is the harness's measurement window, not the product",
+        "chart surfaces (the chart:true entries in SURFACES — Delivery Operations, Chart Gallery, Command Center): the suite now POLLS boundingBox against a bounded deadline (SURFACE_BUDGET_MS in the spec) instead of reading it once after a fixed wait, so a chart red here is a real finding and not the measurement window — #7569 measured the difference: 3 fresh loads each drew 5 real charts, and polling every 400 ms returned null ONLY at t = 1.5 s, the old fixed measurement instant and exactly the recharts ResponsiveContainer initial-layout window, then non-null on all 19 later samples. Read WHICH assertion failed: 'no chart SVG laid out' means the box stayed null for the whole budget; a width/height failure means the chart laid out but collapsed (#2616 D). If you hand-walk a chart surface outside the suite, poll the same way — never sleep-then-read-once",
         "probe the failure path: navigate to a nonexistent route under the app (/_console/apps/com.example.showcase/object_that_does_not_exist); screenshot what renders",
         "if ANY surface fails during the sweep, verify the failure presents as the shell's error boundary or a named empty/error state — capture it"
       ],
@@ -237,8 +236,8 @@
         {
           "clause": "no surface throws a pageerror, renders an empty <main>, or leaks a 'no actions configured' placeholder; chart surfaces draw a real SVG whose box is measured by POLLING until non-null within a bounded budget — never by a fixed wall-clock wait followed by a single boundingBox read, which measures the layout window rather than the product",
           "oracle": "test",
-          "verify": "pnpm -C examples/app-showcase test:smoke (SURFACES array in e2e/showcase-smoke.spec.ts) — green; a chart clause that failed on a NULL box counts only after the bounded re-measure in the steps confirms it stays null (the pinned suite still reads the box once after a fixed 1500 ms wait — see knownGaps, #7569)",
-          "evidence": "test run output +, for any null-box chart failure, the bounded re-measure's sample series"
+          "verify": "pnpm -C examples/app-showcase test:smoke (SURFACES array in e2e/showcase-smoke.spec.ts) — green; the chart assertion polls boundingBox against a bounded deadline and keeps the last non-null sample, so a null-box failure and a collapsed-panel failure report as different assertions (#7569)",
+          "evidence": "test run output + the failing assertion's message for any chart red"
         },
         {
           "clause": "the smoke's coverage is CURRENT: every nav destination served in meta/app is either in the SURFACES array or hand-walked this run — no surface silently outside the net",
@@ -262,7 +261,7 @@
       "negative": [
         "a surface that renders a blank <main> is a FAIL even with no console error — transitional emptiness must be ruled out by the screenshot-first protocol, then the persistent blank is the finding",
         "a bad route producing a white page (shell gone) is a FAIL of the error-boundary clause",
-        "a chart red obtained from a SINGLE boundingBox read at a fixed instant is NOT a product finding and must not be filed as one — it measures the ResponsiveContainer layout window, and it costs a triage cycle every run (#7569). Re-measure with a bounded poll first. The converse still holds both ways: a box that stays null through the whole poll, or a resolved width ≤ 200 (the #2616 D collapsed-panel case), IS a FAIL"
+        "a chart red obtained from a SINGLE boundingBox read at a fixed instant is NOT a product finding and must not be filed as one — it measures the ResponsiveContainer layout window, and it cost a triage cycle every run until #7569 replaced that read with a bounded poll. Re-introducing any fixed sleep-then-read-once in this suite re-opens it. The converse holds both ways: a box that stays null through the WHOLE bounded poll, or a laid-out width ≤ 200 (the #2616 D collapsed-panel case), IS a FAIL"
       ],
       "automated": { "kind": "e2e", "ref": "examples/app-showcase/e2e/showcase-smoke.spec.ts" },
       "traps": ["hydration-race", "single-datapoint", "stale-console-bundle"],
@@ -275,7 +274,7 @@
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "initial — wraps the existing automated smoke as a checklist row so runs report it alongside manual items", "ref": "#3358" },
         { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" },
-        { "revision": 3, "date": "2026-08-11", "change": "de-flaked the chart clause's MEASUREMENT: a null boundingBox read once at a fixed instant is the recharts ResponsiveContainer layout window, not a product defect (measured: null only at t=1.5s, non-null on all 19 later samples, 5 real charts on each of 3 fresh loads). The clause now requires a bounded poll-until-non-null, the steps tell the runner to re-measure before recording a red, and knownGaps records that the pinned suite's fixed 1500 ms wait + single read is still there", "ref": "#7569" }
+        { "revision": 3, "date": "2026-08-11", "change": "de-flaked the chart clause's MEASUREMENT, both halves in one change: a null boundingBox read once at a fixed instant is the recharts ResponsiveContainer layout window, not a product defect (measured: null only at t=1.5s, non-null on all 19 later samples, 5 real charts on each of 3 fresh loads). The clause now requires a bounded poll-until-non-null, and the pinned suite was changed to match — showcase-smoke.spec.ts's fixed page.waitForTimeout(1500) plus single boundingBox() read are gone, replaced by deadline-bounded polling (the #7472/#7409 shape), keeping the last non-null sample so a collapsed panel (#2616 D) still fails on its width rather than as 'no chart SVG'", "ref": "#7569" }
       ]
     },
     {

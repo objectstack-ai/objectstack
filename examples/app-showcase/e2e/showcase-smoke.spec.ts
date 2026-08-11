@@ -43,32 +43,99 @@ const SURFACES: { name: string; path: string; chart?: boolean }[] = [
   { name: 'Work Map', path: base('page/showcase_task_map') },
 ];
 
+/**
+ * The budget every wait in this file spends, measured from the start of the
+ * surface that calls it — and the SOURCE of each wait's deadline, rather than
+ * one more number chosen in advance. It sits inside the config's 45s per-test
+ * `timeout`, which stays the only wall-clock budget left to expire after it.
+ *
+ * ⛔ Never put a fixed wall-clock wait back in front of an assertion here. The
+ * shape this replaced was `await page.waitForTimeout(1500)` followed by a
+ * SINGLE `boundingBox()` read, and #7569 measured what that costs: across 3
+ * fresh loads each drawing 5 real charts, polling every 400 ms returned null
+ * ONLY at t = 1.5 s — precisely the instant this suite measured at, and
+ * precisely the recharts `ResponsiveContainer` initial-layout window — and
+ * non-null on all 19 later samples; the same surfaces re-run in isolation were
+ * 4/4 green. So the assertion reported a failing surface whenever the fixed
+ * wait landed inside the layout window: a coin-flip red on a correct product,
+ * costing a triage cycle every run. A bigger fixed number is not the fix — the
+ * budget is a constant while the thing it times is not. Wait on a predicate
+ * the page can actually satisfy, bounded by a deadline.
+ */
+const SURFACE_BUDGET_MS = 25_000;
+const POLL_MS = 100;
+
+const surfaceDeadline = (): number => Date.now() + SURFACE_BUDGET_MS;
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Poll `probe` until it returns a truthy value, or until `deadline`. Returns
+ * whatever the last sample was either way, so the CALLER still asserts on it —
+ * a timeout then fails as the assertion it belongs to, naming the surface,
+ * instead of as a bare timeout that says nothing about what was missing.
+ */
+async function pollUntil<T>(probe: () => Promise<T>, deadline: number): Promise<T> {
+  let sample = await probe();
+  while (!sample && Date.now() < deadline) {
+    await sleep(POLL_MS);
+    sample = await probe();
+  }
+  return sample;
+}
+
 for (const surface of SURFACES) {
   test(`surface renders cleanly: ${surface.name}`, async ({ page }) => {
     const pageErrors: string[] = [];
     page.on('pageerror', (e) => pageErrors.push(e.message));
 
+    const deadline = surfaceDeadline();
     await page.goto(surface.path, { waitUntil: 'domcontentloaded' });
-    await page.locator('main').first().waitFor({ state: 'visible', timeout: 25_000 });
-    await page.waitForTimeout(1500);
+    const main = page.locator('main').first();
+    await main.waitFor({ state: 'visible', timeout: SURFACE_BUDGET_MS });
 
+    // Replaces the fixed 1500 ms settle with a wait on the thing the assertion
+    // below actually needs — rendered main content — on the same deadline.
+    const mainText = await pollUntil(
+      async () => ((await main.innerText().catch(() => '')) || '').trim(),
+      deadline,
+    );
+
+    let chartBox: { width: number; height: number } | null = null;
+    if (surface.chart) {
+      const svg = page.locator('.recharts-wrapper svg, .recharts-surface').first();
+      await svg.waitFor({ state: 'visible', timeout: SURFACE_BUDGET_MS });
+      // `visible` commits before ResponsiveContainer has sized its child, which
+      // is why reading the box once lands inside the layout window. Poll it
+      // instead, and keep the last non-null sample: a chart that IS laid out but
+      // collapsed must still fail on its width (#2616 D below) rather than be
+      // reported as "no chart SVG", which is a different defect.
+      let lastSeen: { width: number; height: number } | null = null;
+      const laidOut = await pollUntil(async () => {
+        const box = await svg.boundingBox();
+        if (box) lastSeen = box;
+        return box && box.width > 200 && box.height > 0 ? box : null;
+      }, deadline);
+      chartBox = laidOut ?? lastSeen;
+    }
+
+    // Asserted after the waits above, so the error-collection window is as long
+    // as the render actually took rather than a fixed slice of it.
     expect(pageErrors, `uncaught errors on ${surface.name}`).toEqual([]);
     await expect(
       page.getByText(/no actions configured/i),
       `leaked placeholder on ${surface.name}`,
     ).toHaveCount(0);
-    const mainText = (await page.locator('main').first().innerText().catch(() => '')) || '';
-    expect(mainText.trim().length, `${surface.name} rendered no main content`).toBeGreaterThan(0);
+    expect(mainText.length, `${surface.name} rendered no main content`).toBeGreaterThan(0);
 
     if (surface.chart) {
-      const svg = page.locator('.recharts-wrapper svg, .recharts-surface').first();
-      await svg.waitFor({ state: 'visible', timeout: 25_000 });
-      const box = await svg.boundingBox();
-      expect(box, `${surface.name}: no chart SVG`).not.toBeNull();
+      expect(
+        chartBox,
+        `${surface.name}: no chart SVG laid out within ${SURFACE_BUDGET_MS}ms`,
+      ).not.toBeNull();
       // >0 alone previously passed even on a collapsed ~130px-wide chart panel
       // (#2616 D) — require a width a real chart panel would actually have.
-      expect(box!.width, `${surface.name}: chart width`).toBeGreaterThan(200);
-      expect(box!.height, `${surface.name}: chart height`).toBeGreaterThan(0);
+      expect(chartBox!.width, `${surface.name}: chart width`).toBeGreaterThan(200);
+      expect(chartBox!.height, `${surface.name}: chart height`).toBeGreaterThan(0);
     }
   });
 }
