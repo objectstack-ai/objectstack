@@ -36,6 +36,8 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import showcaseStack, { onEnable } from '@objectstack/example-showcase';
 import { bootStack, type VerifyStack } from '@objectstack/verify';
+import type { IObjectQLEngine, ISecurityService } from '@objectstack/spec/contracts';
+import type { ServiceObject } from '@objectstack/spec/data';
 
 /** The federated object the showcase ships, bound to remote table `customers`. */
 const FEDERATED = 'showcase_ext_customer';
@@ -65,10 +67,8 @@ function mentionsOrgColumn(filter: unknown): boolean {
 
 describe('[#7835] federated objects and the plugin-security tenant wall', () => {
   let stack: VerifyStack;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let ql: any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let security: any;
+  let ql: IObjectQLEngine;
+  let security: ISecurityService;
 
   beforeAll(async () => {
     // Stand up the "remote" database (the showcase's fixture provisioner), then
@@ -78,10 +78,12 @@ describe('[#7835] federated objects and the plugin-security tenant wall', () => 
     // PREDICATE plugin-security composes, not whether an org wall holds.
     await onEnable({ logger: { info() {}, warn() {} } } as never);
     stack = await bootStack(showcaseStack, { multiTenant: 'posture-only' });
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const kernel = stack.kernel as any;
-    ql = kernel.getService('objectql');
-    security = kernel.getService('security');
+    // `ObjectKernel.getService` is already generic over the slot's contract, so
+    // neither the kernel handle nor either result needs erasing: `objectql` is
+    // `IObjectQLEngine` and `security` is `ISecurityService`, both declared in
+    // `packages/spec/src/contracts/core-service-contracts.ts`.
+    ql = stack.kernel.getService<IObjectQLEngine>('objectql');
+    security = stack.kernel.getService<ISecurityService>('security');
   }, 120_000);
 
   afterAll(async () => { await stack?.stop?.(); });
@@ -90,7 +92,12 @@ describe('[#7835] federated objects and the plugin-security tenant wall', () => 
     // Not an aspiration — the state of the tree this fix was written against.
     // `Engine.syncObjectSchema` returns early for `external != null` and issues
     // no DDL, so this column exists in the registry and in no table.
-    const schema = ql.getSchema(FEDERATED);
+    // `IObjectQLEngine.getSchema` declares `unknown` on purpose — the engine's
+    // own return type (`ServiceObject | undefined`, `engine.ts:4766`) is a spec
+    // type, but the contract keeps its edges loose so `spec` never depends on
+    // the engine package, and tells consumers to narrow at the call site. This
+    // is that narrowing, to the type the implementation already declares.
+    const schema = ql.getSchema(FEDERATED) as ServiceObject | undefined;
     expect(schema?.external, `${FEDERATED} must be a federated object`).toBeTruthy();
     expect(fieldNames(schema)).toContain('organization_id');
     // The remote table's real columns, for contrast.
