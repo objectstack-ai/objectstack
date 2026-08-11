@@ -74,6 +74,7 @@ export default defineStack({
 | App navigation | `apps.<app>.navigation.<id>.label` |
 | Dashboards and widgets | `dashboards.<name>` |
 | Page labels and `page:header` copy | `pages.<name>.label` / `description` / `title` / `subtitle` |
+| Screen-flow wizards (flow label, screen headings, screen field copy) | `flows.<flow>.label` / `flows.<flow>.screens.<node_id>.title` / `.fields.<field>.label` / `.placeholder` — see the boundary note below |
 | Global actions, settings, messages | `globalActions`, `settings`, `messages` |
 
 The metadata types resolved per request are **object, view, action, app,
@@ -240,6 +241,15 @@ Honest limits worth knowing before you plan around them:
   consumer, so a translated rule message was stored and never shown. Author the
   message on the rule itself (`object.validations[].message`), which the engine
   returns on every rejected write.
+- **The `flows` group is declared, not yet applied.** A screen flow's copy has
+  somewhere to live (#7646) and the keys are addressed the way the runner
+  resolves them — flow name, screen node id, screen field name — but no shipped
+  screen-flow runner reads the group yet, so a wizard still renders the strings
+  authored on the flow. The liveness ledger carries it as `planned` and the
+  compile lint warns when you author it. Two related limits are deliberate: a
+  screen field has no help text to translate (it declares none), and the
+  runner's own chrome — the Cancel and Submit buttons — belongs to the
+  console's message catalog rather than your app's bundle.
 - **No ICU MessageFormat** — plural/gender formatting isn't available;
   interpolation is always simple `{variable}` substitution.
 - **Runtime authoring is process-wide.** The authored layer is synced across all
