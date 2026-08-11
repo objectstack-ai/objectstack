@@ -8,7 +8,7 @@
       "title": "Row-level security: restricted member sees only their rows; admin sees all",
       "since": "v15",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P0",
       "surface": "api",
       "personas": [
@@ -63,14 +63,16 @@
           "evidence": "formatRlsReport output"
         },
         {
-          "clause": "skipped objects in the verify report are each explainable (no plain-text probe field / blocked fixture) — a skip hiding a hole is the #3415 seed-defect class",
+          "clause": "skipped objects in the verify report are each explainable (no plain-text probe field / blocked fixture) — a skip hiding a hole is the #3415 seed-defect class; this clause is ALSO the CANONICAL home of the standing expected-fail probe for the security-sensitive defect held privately under the FOLLOW-UPS handle D11",
           "oracle": "test",
-          "verify": "for each status:'skipped' row, the detail names the benign reason; spot-check one skipped object by hand with the by-id read/write probe",
+          "verify": "for each status:'skipped' row, the detail names the benign reason; spot-check one skipped object by hand with the by-id read/write probe. ⚠ The D11 write-up was delivered to the maintainer PRIVATELY under the ruling recorded on #7463 (same handling as D1) and is deliberately not reproduced in this repo's FOLLOW-UPS.md, in run record #7637, or here — judge the spot-check against that private write-up and its private fix card, never tick this clause green over it, and never restate the defect in a public run issue",
           "evidence": "report detail lines + the spot-check trace"
         }
       ],
       "negative": [
-        "the foreign by-id write must not silently succeed: a 2xx on the forged PATCH, or a 4xx that still mutated the row (verified by the admin re-read), is a FAIL even though every list looked correctly filtered"
+        "the foreign by-id write must not silently succeed: a 2xx on the forged PATCH, or a 4xx that still mutated the row (verified by the admin re-read), is a FAIL even though every list looked correctly filtered",
+        "the private D11 defect is recorded ONCE, here: access-security.owd-sharing-matrix clause 4 reaches the same defect through the controlled_by_parent path and cross-references this clause, so a run carries the verdict on THIS item only — recording it on both double-counts one defect (#7687)",
+        "⚠ naming collision, never conflate the two: the private FOLLOW-UPS handle D11 is unrelated to 'ADR-0090 D11', the external-OWD authoring clause cited by access-security.owd-save-gate — two different things sharing two characters"
       ],
       "traps": [
         "wrong-persona"
@@ -83,7 +85,9 @@
         "packages/verify/src/rls.ts",
         "ADR-0057 D10",
         "packages/qa/dogfood/test/showcase-private-owd.dogfood.test.ts",
-        "authz-conformance.matrix.ts rows rls-read / rls-by-id-write"
+        "authz-conformance.matrix.ts rows rls-read / rls-by-id-write",
+        "#7637 (run record) — the by-id spot-check on a skipped object is where the private D11 defect surfaced",
+        "#7463 (maintainer ruling: the D11 write-up stays private, same handling as D1)"
       ],
       "history": [
         {
@@ -97,6 +101,12 @@
           "date": "2026-08-07",
           "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants",
           "ref": "claude/platform-test-checklist-ocwugl"
+        },
+        {
+          "revision": 3,
+          "date": "2026-08-11",
+          "change": "dedupe of the private D11 defect (#7637 found it on this item's clause 5 AND on owd-sharing-matrix clause 4, one defect counted twice): clause 5 becomes the CANONICAL expected-fail probe, non-disclosing and referenced by the FOLLOW-UPS D11 handle only, with a negative pinning the one-count rule and the ADR-0090-D11 naming collision; owd-sharing-matrix clause 4 now cross-references here",
+          "ref": "#7687"
         }
       ]
     },
@@ -487,7 +497,7 @@
       "title": "Sharing-model / OWD matrix: private, public_read, public_read_write, controlled_by_parent each enforce their declared baseline",
       "since": "v15",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P0",
       "surface": "api",
       "personas": [
@@ -542,7 +552,7 @@
         {
           "clause": "controlled_by_parent: line access derives from the master (ADR-0055) — C2 cannot list, read by id, or PATCH C1's line (C1's invoice is outside C2's owner-RLS read set); C1 reads and writes their own line by id",
           "oracle": "api",
-          "verify": "C2's three denials (list excludes, by-id non-200, PATCH >=400 + unchanged) and C1's 2xx pair; no line-level rule is authored — derivation is the only mechanism in play",
+          "verify": "C2's three denials (list excludes, by-id non-200, PATCH >=400 + unchanged) and C1's 2xx pair; no line-level rule is authored — derivation is the only mechanism in play. ⚠ DEDUPE: C2's by-id probes reach the SAME security-sensitive defect that access-security.rls-both-sides clause 5 carries canonically under the private FOLLOW-UPS handle D11 (#7463 ruling; nothing about it is described in this ledger, in run record #7637, or here). Record the verdict THERE and cross-reference it from here — one defect, one count (#7687). Not the same thing as 'ADR-0090 D11'",
           "evidence": "all traces"
         },
         {
@@ -579,7 +589,8 @@
         "packages/spec/src/security/sharing.zod.ts (the four-model enum — variant source)",
         "examples/app-showcase/access-matrix.json (sharingModel column)",
         "ADR-0055",
-        "authz-conformance.matrix.ts rows owd-private / owd-public-read / controlled-by-parent"
+        "authz-conformance.matrix.ts rows owd-private / owd-public-read / controlled-by-parent",
+        "cross-ref access-security.rls-both-sides clause 5 — canonical home of the private D11 expected-fail probe (#7637, #7463 ruling)"
       ],
       "history": [
         {
@@ -587,6 +598,12 @@
           "date": "2026-08-07",
           "change": "new — OWD matrix over the four spec sharing models, per the deep-test contract",
           "ref": "claude/platform-test-checklist-ocwugl"
+        },
+        {
+          "revision": 2,
+          "date": "2026-08-11",
+          "change": "dedupe of the private D11 defect: clause 4's by-id probes reach the same defect as rls-both-sides clause 5, so this clause now CROSS-REFERENCES that canonical home instead of carrying a second statement of it — #7637 recorded one defect on two items; the text stays non-disclosing and names only the FOLLOW-UPS D11 handle",
+          "ref": "#7687"
         }
       ]
     },
@@ -971,7 +988,7 @@
       "title": "Per-record manual shares grant, scope, and revoke access on a private-OWD record; rule evaluate reconciles the audience",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1039,10 +1056,10 @@
           "evidence": "the mis-scoped DELETE trace + survival read"
         },
         {
-          "clause": "rule evaluate reconciles the audience: POST /sharing/rules/share_red_projects_with_execs/evaluate returns {ruleId, matchedRecords>=1, grantsCreated/grantsUpdated} and a sys_record_share row exists for the matched red project with source 'rule' and source_id the rule name",
+          "clause": "rule evaluate reconciles the audience: POST /sharing/rules/share_red_projects_with_execs/evaluate returns {ruleId, matchedRecords>=1, grantsCreated/grantsUpdated} and a sys_record_share row exists for the matched red project with source 'rule' and source_id = the rule's ROW ID (sys_sharing_rule.id, e.g. srule_…), NOT the rule name",
           "oracle": "api",
-          "verify": "the SharingRuleEvaluationResult body (packages/plugins/plugin-sharing/src/sharing-rule-service.ts evaluateRule) + the materialized rule-sourced share row",
-          "evidence": "evaluate response + the sys_record_share read"
+          "verify": "the SharingRuleEvaluationResult body (packages/plugins/plugin-sharing/src/sharing-rule-service.ts evaluateRule) + the materialized rule-sourced share row: assert share.source_id === the sys_sharing_rule row's id, not 'share_red_projects_with_execs'. The row id is the stable FK the reconcile path relies on — purgeRuleGrants(ruleId) deletes on where {source:'rule', source_id: ruleId} with ruleId = rule.id (sharing-rule-service.ts), and sys-sharing-rule.object.ts documents 'source_id={rule.id}' — so a run asserting the NAME here would be asserting a value the implementation never writes",
+          "evidence": "evaluate response + the sys_record_share read (both the row's source_id and the sys_sharing_rule id it must equal)"
         }
       ],
       "negative": [
@@ -1066,6 +1083,12 @@
           "date": "2026-08-08",
           "change": "new — per-record manual share grant/scope/revoke lifecycle on showcase_private_note plus rule-evaluate reconcile, grounded in the ADR-0111 record-shares routes",
           "ref": "claude/platform-test-checklist-ocwugl"
+        },
+        {
+          "revision": 2,
+          "date": "2026-08-11",
+          "change": "clause 6 text corrected against the implementation (run #7637): a rule-materialized share carries source_id = the sys_sharing_rule ROW ID, not the rule name — the stable FK purgeRuleGrants reconciles on. Semantic intent was already right; the asserted value was not",
+          "ref": "#7687"
         }
       ]
     },
@@ -1472,7 +1495,7 @@
       "title": "Suggested audience bindings reconcile, confirm materializes the anchor binding, dismiss removes it; bad states 404/409/400 and non-admins are refused",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -1487,7 +1510,8 @@
           "showcase's isDefault permission set showcase_member_default (examples/app-showcase/src/security/permission-sets.ts) — the one declared install-time suggestion"
         ],
         "knownGaps": [
-          "stock showcase AUTO-BINDS its only isDefault set (everyone → showcase_member_default) at boot (examples/app-showcase/src/security/bind-position-sets.ts docblock: the security plugin auto-binds the app's isDefault/fallbackPermissionSet to everyone), so the reconcile marks that suggestion 'confirmed (observed)', NOT pending — there is no PENDING suggestion to confirm/dismiss on stock. The list/reconcile, status-filter, idempotent-409, 404, non-admin-403 and anon-401 clauses run against the confirmed row; the confirm-a-PENDING and dismiss-a-PENDING clause needs a scratch package that suggests a not-auto-bound binding → knownGap until that fixture lands"
+          "stock showcase produces NO suggestion row AT ALL — not a 'confirmed (observed)' one (corrected against the observed run #7637; the pre-#7687 text claimed a confirmed row and was wrong). GET /api/v1/security/suggested-bindings answers 200 {suggestions: [], synced: {created: 0}} on a stock boot: the security plugin auto-binds the app's only isDefault set (everyone → showcase_member_default) at BOOT, before any list call, so syncAudienceBindingSuggestions takes its `if (bound) continue` branch ('satisfied before ever being surfaced — nothing pending', suggested-audience-bindings.ts) and never inserts a row, while the 'confirmed (observed)' transition one branch above only fires for a row ALREADY in status 'pending'. This contradicts the module's own docblock ('binding already present → confirmed (observed)') and is filed as the product defect #7677 — so clause 0 states the intended behaviour and currently FAILS on stock, it is not a fixture excuse",
+          "consequence — every clause that needs a suggestion id has nothing to run against until the row is PROVISIONED by the unbind sequence: (1) delete the live sys_position_permission_set row pairing the `everyone` anchor position with showcase_member_default (system context), (2) re-list → synced {created: 1} and a genuine PENDING row appears, (3) drive confirm/dismiss against it (confirm also restores the stock binding). Clauses needing a row: 0 (list/reconcile), 1 (status-filter narrowing), 2 (idempotent-409, which needs a SETTLED row — confirm the pending row first), 6 (the confirm/dismiss-a-PENDING loop). Clauses 3 (404), 4 (non-admin 403) and 5 (anon 401) need no row and run on stock unchanged. A second, independent pending row can be raised by installing a scratch package declaring a not-auto-bound suggestion — that fixture is still worth adding (FOLLOW-UPS.md §3), but it is no longer what blocks the loop: the run closed clause 6 by provisioning rather than recording blocked"
         ]
       },
       "steps": [
@@ -1548,7 +1572,7 @@
       "negative": [
         "a confirm that binds a high-privilege set onto everyone/guest must be refused by the D5/D9 audience-anchor gate (403), never silently accepted",
         "a confirm running under the SYSTEM context rather than the caller's is the ADR-0090 D9 violation — the write must carry the admin's identity through the gates",
-        "the pending-loop clause is fixture-gapped (stock auto-binds the only suggestion) — do not tick confirm/dismiss-a-pending on stock showcase"
+        "do not tick confirm/dismiss-a-pending on an unprovisioned stock boot — stock auto-binds the only isDefault suggestion at boot and therefore surfaces NO row at all; run the knownGaps unbind sequence to raise a genuine PENDING row, or record blocked, but never tick it green off an empty list"
       ],
       "traps": [
         "wrong-persona"
@@ -1567,6 +1591,12 @@
           "date": "2026-08-08",
           "change": "new — suggested-binding admin loop (ADR-0090 D5/D9): reconcile/list, status-filter validation, idempotent-409, 404, admin-only + anon-deny; confirm/dismiss-a-pending carried as a knownGap because stock auto-binds its only isDefault suggestion",
           "ref": "claude/platform-test-checklist-ocwugl"
+        },
+        {
+          "revision": 2,
+          "date": "2026-08-11",
+          "change": "knownGaps corrected against run #7637: stock surfaces NO suggestion row at all (the old text claimed a 'confirmed (observed)' row), so the row-dependent clauses have nothing to run against until the unbind sequence provisions one — the sequence, the per-clause dependency split, and the product defect #7677 behind it are now recorded on the item; the pending-loop negative is re-worded from 'fixture-gapped' to 'unprovisioned'",
+          "ref": "#7687"
         }
       ]
     },
@@ -1575,7 +1605,7 @@
       "title": "Authoring a sharing rule in Setup materializes matching grants for exactly the audience; deleting the rule retracts them",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -1587,22 +1617,25 @@
         "app": "showcase",
         "requires": [
           "the Setup 'Sharing Rules' surface (objectui plugin-sharing sharing-plugin.ts nav_sharing_rules → sys_sharing_rule record form, requiredPermissions manage_platform_settings) OR the POST /api/v1/sharing/rules authoring endpoint",
-          "a private-OWD object with authorable matching/non-matching rows (showcase_project — health field) and a position to receive the grant (e.g. auditor or a scratch position)"
+          "a genuinely private-OWD object with authorable matching/non-matching rows: showcase_contact (sharingModel 'private', examples/app-showcase/src/data/objects/contact.object.ts) — its `stage` select (new | working | qualified | closed) is the criteria field. ⛔ NOT showcase_project: it declares sharingModel 'public_read_write', so its record baseline is already org-wide and a rule on it widens NOTHING observable (the pre-#7687 text called it private-OWD and was wrong). The other genuinely private-OWD showcase objects are showcase_inquiry and showcase_private_note",
+          "an audience position holding object-level allowRead on showcase_contact at the DEFAULT (own) record scope — this needs a SCRATCH permission set bound to a scratch position, because stock's only showcase_contact grant is showcase_manager { allowRead: true, readScope: 'org' } (permission-sets.ts), whose org-depth read already sees every contact and would mask the widening; and no other stock set grants showcase_contact at all, so any other stock position is refused by the OBJECT gate before record scope is ever consulted"
         ],
         "knownGaps": [
-          "authoring a rule in Setup issues a direct sys_sharing_rule insert (packages/spec/src/security/sharing.zod.ts) — use a criteria DISTINCT from the seeded red-project rules (e.g. record.health == 'green') so this item does not overlap access-security.sharing-rules-widen, which tests the SEEDED rules' enforcement"
+          "authoring a rule in Setup issues a direct sys_sharing_rule insert (packages/spec/src/security/sharing.zod.ts). Targeting showcase_contact keeps this item disjoint from access-security.sharing-rules-widen structurally rather than by convention: the four seeded rules cover showcase_project (×2), showcase_inquiry and showcase_task (examples/app-showcase/src/security/sharing-rules.ts) and NONE covers showcase_contact, so no criteria-distinctness dance is needed — that item tests the SEEDED rules' enforcement, this one authors a rule on an object no seeded rule touches",
+          "the audience persona must be provisioned in-run (scratch permission set + scratch position, see fixtures.requires); a stock position cannot serve as the audience for a showcase_contact rule. Until that provisioning is scripted, treat a run that skips it as blocked(fixture) — never as a pass off the admin's own reads"
         ]
       },
       "steps": [
         "boot showcase with the console; admin session",
-        "author a NEW criteria sharing rule via Setup → Sharing Rules (create a sys_sharing_rule record) OR POST /api/v1/sharing/rules: object showcase_project, condition record.health == 'green' (distinct from the seeded red rules), accessLevel 'read', sharedWith {type:'position', value:'<a position>'} — capture the 2xx",
-        "as admin: seed a MATCHING probe (a green-health showcase_project owned by someone else) and a NON-MATCHING probe (a red-health project)",
-        "as the audience persona (holding that position): GET /api/v1/data/showcase_project (list) + GET each probe by id",
+        "provision the audience: create a scratch permission set granting showcase_contact { allowRead: true } at the DEFAULT record scope, create a scratch position, bind them, and sign up the audience persona onto that position (fixtures.requires — no stock position can serve this rule)",
+        "author a NEW criteria sharing rule via Setup → Sharing Rules (create a sys_sharing_rule record) OR POST /api/v1/sharing/rules: object showcase_contact, condition record.stage == 'qualified', accessLevel 'read', sharedWith {type:'position', value:'<the scratch position>'} — capture the 2xx",
+        "as admin: seed a MATCHING probe (a stage='qualified' showcase_contact owned by someone other than the audience persona) and a NON-MATCHING probe (a stage='new' contact, also foreign)",
+        "as the audience persona (holding that position): GET /api/v1/data/showcase_contact (list) + GET each probe by id",
         "as a member OUTSIDE the audience: the same reads",
-        "read sys_record_share for the matching project — a row with source 'rule', source_id the new rule name",
+        "read sys_record_share for the matching contact — a row with source 'rule' and source_id = the new rule's ROW ID (sys_sharing_rule.id), NOT its name",
         "negative-authoring probe: POST /api/v1/sharing/rules with a missing/empty criteria — capture the rejection (defineRule refuses a match-all, #3896)",
         "delete the rule via Setup (delete the sys_sharing_rule record) OR DELETE /api/v1/sharing/rules/:idOrName",
-        "as the audience persona: re-read the matching project by id — refused again; re-read sys_record_share — the rule-sourced grant is gone",
+        "as the audience persona: re-read the matching contact by id — refused again; re-read sys_record_share — the rule-sourced grant is gone",
         "screenshot the Setup Sharing Rules list before authoring, after authoring, and after delete"
       ],
       "acceptance": [
@@ -1619,21 +1652,21 @@
           "evidence": "the rejection"
         },
         {
-          "clause": "the rule materializes grants for MATCHING rows only: a sys_record_share (source 'rule', source_id the rule name) exists for the matching green project and none for the non-matching red project",
+          "clause": "the rule materializes grants for MATCHING rows only: a sys_record_share (source 'rule', source_id = the rule's ROW ID — sys_sharing_rule.id, never the rule name) exists for the matching qualified contact and none for the non-matching new contact",
           "oracle": "api",
-          "verify": "system-context sys_record_share reads for both probes",
-          "evidence": "the two share reads"
+          "verify": "system-context sys_record_share reads for both probes; assert the matching row's source_id equals the created rule's id (the FK purgeRuleGrants reconciles on, sharing-rule-service.ts), not 'the rule name'",
+          "evidence": "the two share reads + the sys_sharing_rule id they are compared against"
         },
         {
-          "clause": "the audience persona gains exactly the matching rows, both sides: the audience persona reads the matching project (list + by-id) but not the non-matching; a member OUTSIDE the audience reads neither — widening is scoped",
+          "clause": "the audience persona gains exactly the matching rows, both sides: the audience persona reads the matching contact (list + by-id) but not the non-matching; a member OUTSIDE the audience reads neither — widening is scoped, and because showcase_contact is OWD private the pre-rule baseline for BOTH personas is 'neither'",
           "oracle": "api",
-          "verify": "audience: matching by-id 200 + present in list, non-matching by-id non-200; outsider: both by-id non-200",
-          "evidence": "the four+ reads"
+          "verify": "capture the pre-authoring baseline first (audience by-id non-200 on both probes — private OWD, foreign rows), then audience: matching by-id 200 + present in list, non-matching by-id non-200; outsider: both by-id non-200",
+          "evidence": "the pre-authoring baseline + the four+ post-authoring reads"
         },
         {
-          "clause": "delete retracts: deleting the rule removes its materialized sys_record_share grants and the audience persona's next by-id read of the matching project is refused again",
+          "clause": "delete retracts: deleting the rule removes its materialized sys_record_share grants and the audience persona's next by-id read of the matching contact is refused again",
           "oracle": "api",
-          "verify": "post-delete: sys_record_share for the matching project has no rule-sourced row; audience by-id GET non-200",
+          "verify": "post-delete: sys_record_share for the matching contact has no rule-sourced row; audience by-id GET non-200",
           "evidence": "post-delete share read + persona read"
         },
         {
@@ -1644,8 +1677,9 @@
         }
       ],
       "negative": [
-        "a rule that shares the NON-matching (red) project, or grants that survive the rule's deletion (orphaned sys_record_share), is a FAIL",
-        "do not overlap access-security.sharing-rules-widen: that item verifies the SEEDED rules' enforcement — this item authors a DISTINCT criteria in-run and verifies authoring + retraction"
+        "a rule that shares the NON-matching (stage='new') contact, or grants that survive the rule's deletion (orphaned sys_record_share), is a FAIL",
+        "do not overlap access-security.sharing-rules-widen: that item verifies the SEEDED rules' enforcement — this item authors a rule in-run on showcase_contact, which no seeded rule covers, and verifies authoring + retraction",
+        "⛔ a run that authors the rule on a public_read_write object (showcase_project, showcase_task, …) proves nothing: the baseline is already org-wide, so the audience persona would read the 'matching' row with or without the rule and the item passes vacuously — the object under test must be OWD private"
       ],
       "traps": [
         "wrong-persona",
@@ -1656,6 +1690,7 @@
         "packages/spec/src/security/sharing.zod.ts (criteria rule authoring + match-all refusal #3896)",
         "packages/plugins/plugin-sharing/src/objects/sys-sharing-rule.object.ts + sys-record-share.object.ts",
         "objectui packages/plugins/plugin-sharing/src/sharing-plugin.ts (nav_sharing_rules Setup nav → sys_sharing_rule)",
+        "examples/app-showcase/src/data/objects/contact.object.ts (showcase_contact — sharingModel 'private', `stage` select) + src/security/permission-sets.ts (the showcase_manager readScope 'org' grant this item must avoid as its audience)",
         "cross-ref access-security.sharing-rules-widen (seeded-rule enforcement), ADR-0058 D3, ADR-0111 D6"
       ],
       "history": [
@@ -1664,6 +1699,12 @@
           "date": "2026-08-08",
           "change": "new — sharing-rule AUTHORING loop (Setup create → materialized matching grants → delete retracts), distinct from sharing-rules-widen which tests the seeded rules' enforcement",
           "ref": "claude/platform-test-checklist-ocwugl"
+        },
+        {
+          "revision": 2,
+          "date": "2026-08-11",
+          "change": "retargeted from showcase_project to showcase_contact (run #7637): showcase_project reports sharingModel 'public_read_write', so calling it 'a private-OWD object' was wrong and a rule on it widened nothing observable — the run substituted showcase_contact, which is genuinely OWD private and which no seeded rule covers, so the sharing-rules-widen non-overlap now holds structurally instead of by criteria convention. Criteria moves health=='green' → stage=='qualified'; the audience-provisioning requirement (scratch set + position, because stock's only showcase_contact grant reads org-wide) and a vacuous-pass negative are recorded. Same-fact fix as record-share-grant-revoke rev 2: source_id is the rule ROW ID, not the rule name",
+          "ref": "#7687"
         }
       ]
     },
