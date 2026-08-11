@@ -90,6 +90,34 @@ handoff assertion, and leaves both negative directions and both no-org doors
 green, since strict equality is *narrower* than the `$or`. Measured: 3 failed |
 11 passed, exactly those three.
 
+## A blind test double, taught rather than accommodated
+
+`packages/objectql/src/protocol-commit-history.test.ts` went red on two
+org-scoped revert cases. Measured, not assumed: its `matchesWhere` was pure flat
+equality, so it compared `row['$or']` against the array and matched nothing.
+
+The double was the blind party, not the fix — both failing rows carry the
+**caller's own** org (`organization_id: 'org_a'`, request org `'org_a'`), so
+they match the first `$or` branch outright: the same row the strict equality
+already accepted. Neither case's subject (#6602's registry org-asymmetry)
+involves the commit lookup at all; it is merely the door they enter through.
+
+It now understands `$or`/`$and`, **conjoined with the sibling keys in the
+entries loop** — the corrected form #7846 landed across six doubles in this
+package (part of #7620), not the early-returning `if ($or) return …some(…)`
+shape those six carried before it. That shape discards sibling keys, so
+`{ id, $or: [...] }` would stop constraining `id` and the lookup could return
+some *other* commit whose org matched. This file was not among #7846's six
+because it had no operator handling to correct, so it reads as a new member of
+the #7620 lane rather than a regression of it.
+
+⚠️ Recorded deliberately: this makes the double a *reimplementation* of `$or`,
+so any assertion whose **subject** is the org predicate would be measuring the
+double rather than the protocol. No case in that file has that subject — which
+is exactly why it could never see this family — and a comment there says so and
+asks that org-scoping cases not be added. The operator's real behaviour against
+a real driver stays pinned on the real engine in `packages/runtime`.
+
 ## Scope
 
 Tier 1 of #7819 only. The two remaining strict equalities in this file —
