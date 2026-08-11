@@ -2740,9 +2740,16 @@ export class ObjectStackProtocolImplementation implements
      *
      * [#6710] Row scoping ONLY. This key keeps every one of its other jobs —
      * the `environment_id` stamp/filter, the ADR-0005 overlay-whitelist gate,
-     * the #3050 authoring-gate scope, the local metadata-storage provisioning
-     * decision — but it no longer decides whether the #4463 runtime authoring
-     * rules run. See {@link authoringChannel}.
+     * the local metadata-storage provisioning decision — but it no longer
+     * decides whether the #4463 runtime authoring rules run.
+     * See {@link authoringChannel}.
+     *
+     * [#7674] …and no longer whether the #3050 pre-persistence authoring gate
+     * runs either. The sentence above used to list "the #3050 authoring-gate
+     * scope" among this key's surviving jobs, and that call site kept the
+     * `environmentId !== undefined` wrapper #6710 had just retired next door —
+     * so the identical proxy-signal defect outlived its own diagnosis on the
+     * sibling gate. Both doors read {@link authoringChannel} now.
      */
     private environmentId?: string;
 
@@ -2751,10 +2758,12 @@ export class ObjectStackProtocolImplementation implements
      * which is what makes the #4463 gate active on every kernel that does not
      * explicitly claim to be the package author's own bootstrap channel.
      *
-     * Read by {@link assertRuntimeAuthoringRules} and nothing else — this is
-     * deliberately NOT a general-purpose authorization key. The ADR-0005
-     * overlay gate and the #3050 authoring gate keep reading `environmentId`,
-     * because those two really are about row scope.
+     * Read by {@link assertRuntimeAuthoringRules} and, since #7674, by the
+     * #3050 pre-persistence authoring gate's call site in {@link saveMetaItem}
+     * — the two doors that ask "is this an AUTHOR publishing, or the package
+     * author's own bootstrap?". It is deliberately NOT a general-purpose
+     * authorization key: the ADR-0005 overlay-whitelist gate keeps reading
+     * `environmentId`, because that one really is about row scope.
      */
     private authoringChannel: MetadataAuthoringChannel;
 
@@ -3089,8 +3098,12 @@ export class ObjectStackProtocolImplementation implements
         // mechanism, because the failure mode being designed out is precisely
         // "a new assembly variant nobody thought about".
         //
-        // `environmentId` keeps every other job it has, including the #3050
-        // authoring gate's own scope check below.
+        // `environmentId` keeps its row-scoping jobs — the `environment_id`
+        // stamp/filter and the ADR-0005 overlay-whitelist gate. [#7674] It no
+        // longer keys the #3050 authoring gate below either: #6710 re-keyed
+        // this activation and left that one on the retired proxy, which cost
+        // the ADR-0090 D11 object posture gate every host-config deployment
+        // until #7674 finished the move.
         if (this.authoringChannel === 'package-author') return [];
         if (evt.state !== 'active') return [];
         // `os migrate meta --stored --apply` rewrites rows that ALREADY EXIST
@@ -10052,10 +10065,32 @@ export class ObjectStackProtocolImplementation implements
         // Pre-persistence authoring gate (#3050): a domain plugin may veto the
         // body before it persists (throws propagate to the caller with their
         // status/code). Runs for BOTH draft and publish-mode saves, so a later
-        // publishMetaItem promotes an already-gated body. Environment writes
-        // only — control-plane bootstrap writes (environmentId undefined) are
-        // the package author's own channel, mirroring the ADR-0005 gate above.
-        if (this.environmentId !== undefined) {
+        // publishMetaItem promotes an already-gated body.
+        //
+        // [#7674] Keyed on the DECLARED authoring channel, exactly as #6710
+        // re-keyed `assertRuntimeAuthoringRules` a few hundred lines up. This
+        // line used to read `if (this.environmentId !== undefined)`, and its
+        // own comment reaffirmed the reasoning #6710 had already retired:
+        // "control-plane bootstrap writes (environmentId undefined) are the
+        // package author's own channel". They are not the only such writes.
+        // The CLI's lightweight host-config assembler (`serve.ts`'s
+        // `config.objects && !hasObjectQL` branch → `new ObjectQLPlugin()`
+        // with no options) leaves `environmentId` undefined too, and it serves
+        // an END-USER `PUT /api/v1/meta/*` — `isHostConfig` →
+        // `shouldBootWithLibrary === false` is the flagship showcase's own boot
+        // shape. So plugin-security's ADR-0090 D11 object posture gate — R1
+        // `owd_widening_forbidden` and R2 `owd_external_wider` — ran on NO
+        // self-hosted deployment at all, while `AUTHORING_RULES` deliberately
+        // withheld its own `validateSecurityPosture` from the runtime surface
+        // on the stated grounds that this gate already covered it
+        // (`packages/lint/src/authoring-rules.ts`, `surfaceReason`). Declared,
+        // not enforced, on both tables at once.
+        //
+        // The direction is #6710's and matters more than the mechanism: the
+        // DEFAULT is the gated one, so an assembly variant nobody has thought
+        // of yet gets more enforcement, never less. Only a caller that claims
+        // to BE the package author is treated as one.
+        if (this.authoringChannel !== 'package-author') {
             await this.runAuthoringGate({
                 type: request.type,
                 name: request.name,
