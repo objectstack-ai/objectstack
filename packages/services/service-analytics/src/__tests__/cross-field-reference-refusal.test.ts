@@ -80,15 +80,28 @@
  *   - `comparand-shape-refusal.test.ts` stayed green in full (1 file failed, 1
  *     passed), confirming nothing in the #5234 pins depends on this change.
  *
- * ## The one cell that does NOT refuse on the `where` door, recorded not hidden
+ * ## The one cell that did NOT refuse on the `where` door — CLOSED by #7693
  *
- * `$icontains` is absent from `comparand-shape.ts`'s `TEXT_PATTERN_OPERATORS`,
- * so the analytics `where` door applies NO comparand-shape gate to it at all —
- * a #5234-class hole that arrived with the operator itself (#6520 added
- * `$icontains` to `MONGO_TO_CUBE_OP` and to `read-scope-sql`'s
- * `assertRenderableText`, but not to that set). It is out of this card's scope
- * and is filed separately; the block at the bottom pins the CURRENT behaviour so
- * the gap is visible in test output rather than discovered again from scratch.
+ * This file used to end in a RECORDED GAP block: `$icontains` was absent from
+ * `comparand-shape.ts`'s `TEXT_PATTERN_OPERATORS`, so the analytics `where`
+ * door applied NO comparand-shape gate to it at all — a #5234-class hole that
+ * arrived with the operator itself (#6520 added `$icontains` to
+ * `MONGO_TO_CUBE_OP` and to `read-scope-sql`'s `assertRenderableText`, but not
+ * to that set). #7598 left it alone deliberately and filed it as #7693.
+ *
+ * #7693 added the entry, so the pin FLIPPED: the block at the bottom now
+ * asserts the refusal it used to record the absence of, and the corpus loop
+ * below no longer has to filter the operator out of `CROSS_FIELD_REFUSALS`.
+ *
+ * Reverse-verified by deleting the entry again and re-running the WHOLE
+ * package: **5 failed / 1553 passed** (green: 1558 / 0). The five are exactly
+ * the `where`-door cells — the three new ones here, this file's now-unfiltered
+ * corpus case, and `comparand-shape-refusal.test.ts`'s fifth loop member. What
+ * stayed GREEN is the other half of the proof: every read-scope `$icontains`
+ * assertion (that door's refusal comes from its own `assertRenderableText`, not
+ * from this entry), and every narrowness control below — a well-formed
+ * `$icontains` comparand compiles identically in both states, so the entry is
+ * shown to close a hole rather than retire the operator #6520 added.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -171,11 +184,14 @@ describe("[#7598] the #5222 corpus's SUPPORTED arm is refused by both analytics 
 
 describe("[#7598] the #5222 corpus's REFUSAL arm stays refused on both doors", () => {
   // These are refused on the drivers too, so this block asserts CONVERGENCE
-  // rather than asymmetry. `$icontains` is the single exception on the `where`
-  // door — see the recorded-gap block at the bottom.
-  const cases = CROSS_FIELD_REFUSALS.filter((c) => !JSON.stringify(c.filter).includes('$icontains'));
-
-  for (const testCase of cases) {
+  // rather than asymmetry.
+  //
+  // [#7693] The corpus is driven WHOLE. It used to be filtered — `$icontains`
+  // was the single exception on the `where` door, because it was missing from
+  // `TEXT_PATTERN_OPERATORS` — and dropping that filter is half of this card's
+  // proof: `$icontains against a field reference is refused` is a corpus case
+  // that only passes here once the entry exists.
+  for (const testCase of CROSS_FIELD_REFUSALS) {
     it(`the \`where\` door refuses: ${testCase.name}`, () => {
       const err = refusalOf(() => tree(testCase.filter));
       expect(err.code, testCase.name).toBe('INVALID_FILTER');
@@ -335,21 +351,70 @@ describe('[#7598] a read scope keeps working on the ObjectQL engine path', () =>
   });
 });
 
-// ── A measured gap this card does not close, recorded so it is not re-found ──
+// ── The gap #7598 recorded here, CLOSED by #7693 ─────────────────────────────
 
-describe('[#7598] RECORDED GAP: `$icontains` has no comparand-shape gate on the `where` door', () => {
-  it('an object comparand still reaches the pattern builder there', () => {
-    // NOT an endorsement — a pin on current behaviour. `$icontains` is missing
-    // from `TEXT_PATTERN_OPERATORS`, so the #5234 fence has never covered it on
-    // this door, while `read-scope-sql` DOES refuse it (its `$icontains` arm
-    // calls `assertRenderableText`). One operator, two answers inside one
-    // package — the split #5234 closed for its four siblings. Filed separately;
-    // fixing it here would be a second defect riding this card.
-    expect(tree({ stage: { $icontains: { $field: 'owner' } } })).toEqual({
-      kind: 'leaf', member: 'stage', operator: 'icontains', values: [{ $field: 'owner' }],
+describe('[#7693] `$icontains` is fenced on the `where` door, like its four siblings', () => {
+  // This block is the FLIPPED #7598 pin. It used to assert that
+  // `tree({stage: {$icontains: {$field: 'owner'}}})` RETURNED a leaf, with the
+  // read-scope refusal beside it for contrast; the contrast is now a
+  // convergence, and the block only goes green when
+  // `TEXT_PATTERN_OPERATORS` actually carries the operator.
+
+  it('a `{$field}` comparand is refused on BOTH doors now, not just one', () => {
+    const where = refusalOf(() => tree({ stage: { $icontains: { $field: 'owner' } } }));
+    expect(where.code).toBe('INVALID_FILTER');
+    expect(where.status).toBe(400);
+    // The LIKE-family wording, not the #7598 cross-field one: `$icontains` is a
+    // pattern operator, so the diagnosis a caller gets is "this position holds
+    // the TEXT of a pattern" — the same sentence `$contains` gets, which is what
+    // makes the two operators one answer rather than two.
+    expect(where.message).toContain('StringOperatorSchema');
+    expect(where.message).toContain('$icontains');
+
+    const scoped = refusalOf(() => scope({ stage: { $icontains: { $field: 'owner' } } }));
+    expect(scoped.code).toBe('READ_SCOPE_COMPILE_FAILED');
+    expect(scoped.status).toBe(500);
+  });
+
+  it('the plain malformed comparand `{foo: 1}` is refused rather than bound as `%[object Object]%`', () => {
+    // #5234's own shape, at the operator its fence never reached. Measured
+    // pre-fix on `origin/main` @ `b54aaab`: this filter compiled to the leaf
+    // `{operator: 'icontains', values: [{foo: 1}]}`, and
+    // `NativeSQLStrategy.generateSql` bound `'%[object Object]%'` into a
+    // syntactically perfect, parameterised `LIKE` nobody wrote.
+    const where = refusalOf(() => tree({ name: { $icontains: { foo: 1 } } }));
+    expect(where.code).toBe('INVALID_FILTER');
+    expect(where.status).toBe(400);
+    expect(where.message).toContain('[object Object]');
+
+    // The envelope `$contains` gets, said about the same shape — the point of
+    // the card is that these two rows are now identical apart from the operator.
+    const sibling = refusalOf(() => tree({ name: { $contains: { foo: 1 } } }));
+    expect(where.code).toBe(sibling.code);
+    expect(where.status).toBe(sibling.status);
+    expect(where.message.replace('$icontains', '$contains')).toBe(sibling.message);
+  });
+
+  it('an ARRAY comparand is refused too — the other half of the #5234 shape', () => {
+    const err = refusalOf(() => tree({ name: { $icontains: ['al', 'be'] } }));
+    expect(err.code).toBe('INVALID_FILTER');
+    expect(err.message).toContain('an array');
+  });
+
+  it('the fence is NARROW — every legitimate `$icontains` comparand still compiles', () => {
+    // The control group. `$icontains` reached this door ungated, so a gate that
+    // over-reached would silently retire a working operator (#6520's whole
+    // subject) rather than close a hole.
+    expect(tree({ name: { $icontains: 'admin' } })).toEqual({
+      kind: 'leaf', member: 'name', operator: 'icontains', values: ['admin'],
     });
-    // The sibling door, for contrast — this is what the `where` door should say.
-    const err = refusalOf(() => scope({ stage: { $icontains: { $field: 'owner' } } }));
-    expect(err.code).toBe('READ_SCOPE_COMPILE_FAILED');
+    expect(tree({ name: { $icontains: 5 } })).toEqual({
+      kind: 'leaf', member: 'name', operator: 'icontains', values: [5],
+    });
+    expect(tree({ name: { $icontains: null } })).toEqual({
+      kind: 'leaf', member: 'name', operator: 'icontains', values: [null],
+    });
+    // …and the sibling door is unmoved, which is the no-regression half.
+    expect(scope({ name: { $icontains: 'admin' } }).params).toEqual(['%admin%', '\\']);
   });
 });

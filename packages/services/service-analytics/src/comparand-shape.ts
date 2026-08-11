@@ -189,9 +189,29 @@ export const CROSS_FIELD_COMPARISON_OPERATORS: ReadonlySet<string> = new Set([
  * it: `MONGO_TO_CUBE_OP` has no entry and `read-scope-sql` refuses it by name.
  * (`driver-sql` DOES list it, because the better-auth adapter emits it there for
  * a substring search.)
+ *
+ * [#7693] `$icontains` belongs here for the same reason its four siblings do,
+ * and was missing for the ordinary reason a set goes stale: the operator
+ * arrived AFTER the fence. #6520 added it to `MONGO_TO_CUBE_OP` and gave
+ * `read-scope-sql`'s arm its `assertRenderableText` call, but not this entry —
+ * so the analytics `where` door, this set's only reader, applied NO
+ * comparand-shape gate to it at all. Measured on `origin/main` @ `b54aaab`:
+ *
+ * | door | `{name: {$icontains: {foo: 1}}}` |
+ * |---|---|
+ * | analytics `where` | compiled — `NativeSQLStrategy` bound `'%[object Object]%'` into its `LIKE` |
+ * | `read-scope-sql` | REFUSED (`READ_SCOPE_COMPILE_FAILED` / 500) |
+ *
+ * One operator, two answers inside one package — #5234's defect verbatim, at
+ * the operator its fence was never extended to. The ASCII fold `$icontains`
+ * adds rides ON TOP of the pattern text (`likeShape` maps it to `'contains'`
+ * on both executing compilers), so the question this set asks of a comparand
+ * is the same question and the answer had no business differing. `driver-sql`'s
+ * own `TEXT_PATTERN_OPERATORS` has listed it since #6520; this entry closes the
+ * third and last face, after #7158 closed the objectql `having` one.
  */
 export const TEXT_PATTERN_OPERATORS: ReadonlySet<string> = new Set([
-  '$contains', '$notContains', '$startsWith', '$endsWith',
+  '$contains', '$notContains', '$startsWith', '$endsWith', '$icontains',
 ]);
 
 /** A short, non-throwing rendering of an offending comparand for a message. */
