@@ -253,6 +253,15 @@ are inserted, updated, or deleted. `relationshipField` is optional when the chil
 has only one `lookup`/`master_detail` field pointing back to the parent; set it
 when multiple relationships target the same parent object.
 
+Because the roll-up is engine-derived state rather than a user write, the
+recompute runs under a system context: a user who may create a child does not
+also need edit access on the parent, and the aggregate is computed over the
+whole child collection rather than the writer's visible subset. The permission
+decision that governs the write is the one on the **child**. The parent's own
+row is unaffected — a user still needs edit access to change any other field on
+it — and the summary column stays subject to the parent's field-level security
+on read.
+
 ### Specialized Types
 
 | Type | Factory | Description |
