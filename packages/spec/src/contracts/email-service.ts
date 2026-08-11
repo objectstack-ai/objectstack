@@ -140,7 +140,20 @@ export interface SendTemplateInput {
   to: EmailAddress | EmailAddress[];
   /** Render context — placeholders in subject/body are resolved against this object. */
   data?: Record<string, unknown>;
-  /** Preferred BCP-47 locale (e.g. user's locale). Falls back to `'en-US'`. */
+  /**
+   * Preferred BCP-47 locale (e.g. user's locale). Falls back to `'en-US'`.
+   *
+   * Resolution is exact, then default, then deterministic — never "whichever
+   * row the store yields first" (#7731):
+   *
+   *  1. this locale, matched exactly (no language-only prefix matching: `zh`
+   *     does not resolve `zh-CN`);
+   *  2. `'en-US'` — which is also where a call that omits `locale` STARTS, so
+   *     "no locale" means the default rather than an arbitrary row;
+   *  3. only for a call that named no locale, and only when the bundle has no
+   *     `en-US` row at all: its lowest locale tag, so a single-locale tenant
+   *     keeps rendering and does so identically on every boot.
+   */
   locale?: string;
   /**
    * Reference timezone (IANA name, e.g. `America/New_York`) for rendering
@@ -187,8 +200,11 @@ export interface IEmailService {
    * Resolve a named template from `sys_email_template`, render its
    * subject/body against `input.data`, then deliver via `send()`.
    *
+   * Locale resolution is the ladder on {@link SendTemplateInput.locale}.
+   *
    * Errors:
-   * - `TEMPLATE_NOT_FOUND` — no row matches `(name, locale|en-US)`.
+   * - `TEMPLATE_NOT_FOUND` — no row matches `(name, locale|en-US)`, and (for a
+   *   call that named no locale) the name carries no rows at all.
    * - `TEMPLATE_INACTIVE`  — row exists but `active=false`.
    * - `MISSING_VARIABLES`  — declared `required` variables absent from `data`.
    */

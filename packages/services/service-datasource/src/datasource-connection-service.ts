@@ -605,7 +605,17 @@ export class DatasourceConnectionService {
 
       // Register read metadata for bound federated objects (DDL-free). Boot
       // schema-sync ran before this driver existed, so do it on-demand now.
-      for (const objectName of opts.objects ?? []) {
+      //
+      // #7737 — `mappedObjects` belongs in this loop too. An object a
+      // `datasourceMapping` rule routes here (#4462) has exactly the problem
+      // an explicitly-bound one has: boot schema-sync skipped it because this
+      // driver did not exist yet, so without a re-drive its object ->
+      // remote-table mapping is never installed and every read resolves to a
+      // table named after the object. The two lists are already treated as
+      // equals by the fail-fast policy below (both mean "no fallback
+      // driver"); they were unequal only here. `syncObjectSchema` is
+      // idempotent, so an object in both lists is harmless.
+      for (const objectName of [...(opts.objects ?? []), ...(opts.mappedObjects ?? [])]) {
         try {
           await engine.syncObjectSchema?.(objectName);
         } catch (err) {

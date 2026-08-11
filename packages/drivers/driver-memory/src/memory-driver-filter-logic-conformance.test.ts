@@ -532,11 +532,21 @@ const OPERATOR_CASES: Array<[name: string, where: FilterCondition, expected: str
   ['$notContains treats a metacharacter as a literal', { name: { $notContains: 'a.p' } } as FilterCondition, ['1', '2', '3']],
 
   // ── Case folding, borrowed rather than re-derived ──────────────────────────
-  // The live path matches `/…/i`; this face built a case-SENSITIVE regex, so one
-  // `where` meant two different things depending on which face read it (#5240).
-  ['$contains is case-insensitive, as the live path is', { name: { $contains: 'ALPHA' } } as FilterCondition, ['1']],
-  ['$notContains is case-insensitive, as the live path is', { name: { $notContains: 'ALPHA' } } as FilterCondition, ['2', '3']],
-  ['$contains matches a mixed-case comparand', { name: { $contains: 'Bet' } } as FilterCondition, ['2']],
+  // These rows have always asserted that the two faces answer ONE rule, and they
+  // still do — what changed is WHICH rule. #5374 pinned the shared rule as the
+  // live path's `/…/i`, because this face was the one that had drifted then.
+  // #6682 ruled the whole `$contains` family case-SENSITIVE (#4706 Q2 = A), the
+  // flag came off `filterSubstringPattern`, and this face moved with the live
+  // path — which is the property #5374 bought, working in the direction it was
+  // built for. Flipped to the ruled substance rather than deleted: "the faces
+  // agree on case" is exactly the assertion that must survive the ruling.
+  ['$contains is case-SENSITIVE, as the live path is', { name: { $contains: 'ALPHA' } } as FilterCondition, []],
+  ['$notContains is case-SENSITIVE, as the live path is', { name: { $notContains: 'ALPHA' } } as FilterCondition, ['1', '2', '3']],
+  ['$contains misses a mixed-case comparand', { name: { $contains: 'Bet' } } as FilterCondition, []],
+  // The positive control beside them, so the three rows above cannot be passed
+  // by a predicate that stopped matching anything at all: the exactly-cased
+  // comparand still selects its row.
+  ['$contains still matches an exactly-cased comparand', { name: { $contains: 'bet' } } as FilterCondition, ['2']],
 
   // ── A pattern is not a comparand (#4047) ───────────────────────────────────
   // Every operand used to go through the storage-form conversion, so on a

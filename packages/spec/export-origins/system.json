@@ -781,6 +781,7 @@
     "isPlatformProvidedToolName": "src/system/constants/platform-tool-names.ts#isPlatformProvidedToolName (function)",
     "isPublicAudience": "src/system/book.zod.ts#isPublicAudience (function)",
     "minioStorageExample": "src/system/object-storage.zod.ts#minioStorageExample (const)",
+    "normalizeSupportedLocales": "src/system/i18n-resolver.ts#normalizeSupportedLocales (function)",
     "objectFieldLabelKey": "src/system/i18n-resolver.ts#objectFieldLabelKey (function)",
     "objectLabelKey": "src/system/i18n-resolver.ts#objectLabelKey (function)",
     "operationMessageTranslationKey": "src/system/operation-message.ts#operationMessageTranslationKey (function)",

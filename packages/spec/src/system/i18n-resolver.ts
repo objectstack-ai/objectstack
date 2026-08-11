@@ -1131,6 +1131,48 @@ export function toLocaleDescriptors(
 }
 
 /**
+ * Normalize an app's declared `i18n.supportedLocales` into the value an
+ * `II18nService` stores for `setSupportedLocales` — or `undefined`, meaning
+ * "no narrowing".
+ *
+ * [#7679] Shared for the same reason `toLocaleDescriptors` above is: BOTH
+ * providers of the `i18n` slot implement `setSupportedLocales`
+ * (`createMemoryI18n` in core, `FileI18nAdapter` in service-i18n) and either
+ * one can be the thing mounting `GET /i18n/locales`. Two copies of "what
+ * counts as a declaration" is how the same route came to answer in two shapes
+ * before (#3636), one narrowing rule over.
+ *
+ * `undefined` — no narrowing — is returned for every input that is not a
+ * declaration of at least one usable code:
+ * - absent / not an array: the app opted into nothing, so it keeps reporting
+ *   every loaded locale. Narrowing an undeclared app to zero (or to its
+ *   default alone) would silently regress every app that predates #7679.
+ * - an array that yields no usable code (empty, or nothing but blanks and
+ *   non-strings): read as an authoring accident rather than as "serve no
+ *   locales at all". An empty report breaks every picker built on this route,
+ *   and `TranslationConfigSchema` requires `supportedLocales` when `i18n` is
+ *   declared at all — so the empty array is not a shape the spec asks anyone
+ *   to write.
+ *
+ * Otherwise: the declared codes, trimmed, de-duplicated, in DECLARED order.
+ * Order is preserved because it is authored — a picker rendering the list in
+ * the order the app wrote it is the useful default, and the loaded-key order
+ * it replaces was an insertion-order accident of plugin registration.
+ */
+export function normalizeSupportedLocales(
+  locales: readonly string[] | undefined,
+): string[] | undefined {
+  if (!Array.isArray(locales)) return undefined;
+  const seen = new Set<string>();
+  for (const raw of locales) {
+    if (typeof raw !== 'string') continue;
+    const code = raw.trim();
+    if (code) seen.add(code);
+  }
+  return seen.size > 0 ? [...seen] : undefined;
+}
+
+/**
  * Enumerate an object's translated field labels out of ONE locale's
  * `TranslationData` — the `GET /i18n/labels/:object/:locale` body.
  *

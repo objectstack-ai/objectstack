@@ -1472,6 +1472,49 @@ export class AppPlugin implements Plugin {
             ctx.logger.debug('[i18n] Set default locale', { appId, locale: i18nConfig.defaultLocale });
         }
 
+        // [#7679] Narrow what `getLocales()` REPORTS to the locales the app
+        // declared. This is the only layer that can: `getLocales()` sees the
+        // loaded set, and what is loaded is not the app's decision — every
+        // platform plugin (platform-objects, service-settings, service-storage,
+        // service-messaging, service-realtime, plugin-security, plugin-sharing,
+        // plugin-webhooks) pushes its own `en/zh-CN/ja-JP/es-ES` bundle at
+        // `kernel:ready`. A showcase declaring `['en','zh-CN']` therefore
+        // advertised four locales on `GET /i18n/locales`, two of which
+        // translate `sys_*` metadata and nothing the app owns.
+        //
+        // Threaded exactly like `defaultLocale` immediately above, and applied
+        // through the same optional-capability probe: `setSupportedLocales` is
+        // optional on `II18nService`, so a provider that has not implemented it
+        // keeps today's behaviour rather than breaking.
+        //
+        // Only the REPORTED set narrows. The bundles stay loaded and stay
+        // servable — an unreported locale still returns its `sys_*`
+        // translations if asked for by code. Unloading them is a bigger change
+        // than this fix and buys nothing.
+        //
+        // A locale declared with no bundle behind it is still reported
+        // (declared-but-unserved) rather than intersected away — see
+        // `normalizeSupportedLocales` / `II18nService.setSupportedLocales` for
+        // why, and note that an intersection computed HERE would in any case be
+        // wrong: the platform bundles have not arrived yet at this point in the
+        // lifecycle.
+        // Guarded on "declared something" rather than called unconditionally,
+        // for the same reason `setDefaultLocale` above is: several AppPlugins
+        // can share one kernel (the config apps are AppPlugins too), and an app
+        // that declares no `i18n` block must not clear the narrowing another
+        // app declared. Absent stays absent — that is the no-narrowing default,
+        // not something anyone has to write.
+        const declaredLocales = i18nConfig?.supportedLocales;
+        if (
+            Array.isArray(declaredLocales) && declaredLocales.length > 0
+            && typeof i18nService.setSupportedLocales === 'function'
+        ) {
+            i18nService.setSupportedLocales(declaredLocales);
+            ctx.logger.debug('[i18n] Narrowed reported locales to the app\'s declared set', {
+                appId, supportedLocales: declaredLocales,
+            });
+        }
+
         if (bundles.length === 0) {
             return;
         }
