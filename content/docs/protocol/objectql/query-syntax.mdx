@@ -254,9 +254,43 @@ const query: QueryAST = {
 | `$notContains` | String does not contain, **case-sensitive** | `{ name: { $notContains: 'test' } }` |
 | `$startsWith` | String starts with, **case-sensitive** | `{ email: { $startsWith: 'admin' } }` |
 | `$endsWith` | String ends with, **case-sensitive** | `{ domain: { $endsWith: '.com' } }` |
+| `$like` | `LIKE` pattern — **you write the wildcards**, **case-sensitive** | `{ name: { $like: '%Industries' } }` |
+| `$ilike` | Same pattern language, **ignoring ASCII case** | `{ name: { $ilike: '%industries' } }` |
 | `$between` | Range (inclusive) | `{ close_date: { $between: ['2024-01-01', '2024-12-31'] } }` |
 | `$null` | Null check | `{ manager_id: { $null: true } }` / `{ phone: { $null: false } }` |
 | `$exists` | Field exists (NoSQL) | `{ metadata: { $exists: true } }` |
+
+### `$like` is not a spelling of `$contains`
+
+The two take different things and picking the wrong one is a silently wrong
+answer rather than an error:
+
+- **`$contains` takes TEXT.** It is matched literally as a substring, and `%`,
+  `_` and regex metacharacters in your comparand are ordinary characters —
+  escaped on your behalf.
+- **`$like` takes a PATTERN.** `%` matches any sequence, `_` matches exactly one
+  character, and a backslash escapes either. The pattern is matched against the
+  **whole value**, so a pattern with no wildcards is an *exact comparison*, not
+  a substring search.
+
+```ts
+{ name: { $contains: 'Industries' } }  // Acme Industries, Industries Ltd, Industries
+{ name: { $like: 'Industries' } }      // Industries          — exact
+{ name: { $like: '%Industries' } }     // Acme Industries, Industries — ends with
+```
+
+A pattern ending in a lone unpaired backslash is refused (`INVALID_FILTER`): no
+reading of it survives every backend, so it is rejected rather than guessed.
+
+<Callout type="warn">
+  **Backend coverage.** `$like` / `$ilike` are executed by the SQL family
+  (`driver-sql`, `driver-sqlite-wasm`, `driver-turso` on both transports),
+  `driver-memory`, and the in-memory `matchesFilter` evaluator.
+  `driver-mongodb`, ObjectQL `having` and the analytics compilers **refuse**
+  them with `INVALID_FILTER` rather than approximating them — use `$contains` /
+  `$icontains` there. That split is deliberate: a backend that quietly answered
+  a *different* question is the defect these operators exist to end (#7536).
+</Callout>
 
 ### Case Sensitivity
 
