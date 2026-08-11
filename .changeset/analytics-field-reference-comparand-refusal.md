@@ -4,6 +4,8 @@
 
 fix(analytics)!: a `{ $field }` comparand is refused on both SQL-lowering doors instead of being BOUND as the comparison's value (#7598)
 
+<!-- adr-0087: not-required (no-migration-prescription) This change retires NO key and adds none. `FieldReferenceSchema` stays declared in `packages/spec` exactly as it is, stays implemented by `@objectstack/formula`'s in-memory evaluator, and stays COMPILED by `driver-sql` / `driver-sqlite-wasm` under #5222 — `packages/spec` is untouched by this PR, no metadata schema gains or loses a key, and no authored or stored shape becomes unparseable. What moves is one COMPILER's posture at two doors of `@objectstack/service-analytics`: a shape that used to compile into a predicate binding the reference OBJECT as a value now refuses. There is therefore nothing for `objectstack migrate meta` to rewrite — the FROM shape is still valid metadata everywhere it was valid before, and rewriting it would be wrong, since the identical filter continues to execute on the ObjectQL engine path and on both SQL drivers. Nor is there a FROM/TO rule a ledger entry could state: the correct repair depends on which face the author's query routes to, which is a deployment fact rather than a metadata one. The channels that do reach an affected reader are this changeset's CHANGELOG text and the refusal message itself, which names the operator, the field, the referenced column, the faces that DO execute the shape, and why this compiler cannot — all shipped with this change. -->
+
 **⚠️ Behaviour change.** A filter whose comparand is a field reference —
 `{ amount: { $gt: { $field: 'budget' } } }`, the shape
 `FieldReferenceSchema` declares and `compileCelToFilter` emits for a
