@@ -1,5 +1,6 @@
 ---
 "@objectstack/plugin-email": patch
+"@objectstack/spec": patch
 ---
 
 fix(plugin-email): a `sendTemplate` with no locale renders the documented en-US default, not an arbitrary row (#7731)
@@ -26,3 +27,7 @@ A bundle with no en-US row at all (a single-locale tenant) keeps rendering:
 the lowest locale tag in the bundle is used, ordered rather than arbitrary.
 Explicit locales are unchanged — exact match, then en-US. Language-only prefix
 matching (`zh` → `zh-CN`) is still not performed; no contract declares it.
+
+`SendTemplateInput.locale` (spec, doc-comment only) now spells the whole ladder
+out, including that last rung — behaviour a caller can rely on has to be
+declared where the contract is, not only where it is implemented.
