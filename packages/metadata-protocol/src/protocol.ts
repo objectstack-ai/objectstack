@@ -3477,7 +3477,34 @@ export class ObjectStackProtocolImplementation implements
             comments: !!this.engine.registry?.getObject?.('sys_comment'),
             automation: registeredServices.has('automation'),
             cron: registeredServices.has('job'),
-            search: registeredServices.has('search'),
+            // [#7541] Serveability-gated on the protocol's OWN search
+            // implementation, was slot presence. This is the same predicate the
+            // route refuses on: `registerSearchEndpoints`
+            // (packages/rest/src/rest-server.ts) 501s exactly when
+            // `typeof protocol.searchAll !== 'function'`, so the two ends can no
+            // longer answer the same question differently — the rule stated at
+            // the top of this block, applied to the key that was still exempt.
+            //
+            // The old predicate was wrong in the direction discovery exists to
+            // prevent: `searchAll` is implemented by this class unconditionally,
+            // nothing in either repository registers the `search` slot
+            // (CORE_SERVICE_PROVIDER records that, verified), so every REST host
+            // served `GET /api/v1/search` 200 while advertising
+            // `capabilities.search = false`. A conforming client — one that
+            // trusts the document instead of probing — skipped a working
+            // surface. Prime Directive #10 inverted.
+            //
+            // `services.search` is deliberately NOT collapsed into this. The
+            // slot is a distinct question with its own answer: `CoreServiceName`
+            // declares it "Search Engine (Elastic/Meili)" and `ISearchService`
+            // is an index/query contract, so `services.search` reports WHICH
+            // ENGINE occupies the slot while this bit reports WHETHER THE
+            // SURFACE IS SERVED (`WellKnownCapabilitiesSchema.search`: "whether
+            // the backend supports full-text search"). They may legitimately
+            // differ — an empty slot with a served endpoint is today's normal
+            // host — and `serviceUnavailableMessage('search')` now says so in
+            // the same document, the way `ui` does for the same shape (#4146).
+            search: typeof this.searchAll === 'function',
             export: registeredServices.has('automation') || registeredServices.has('queue'),
             // [#5672] Serveability-gated, was presence-only. Two reasons, and
             // the second is the binding one:

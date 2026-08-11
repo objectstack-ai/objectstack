@@ -3790,6 +3790,25 @@ export class RestServer {
                             + '{ $ref: <opIndex> } parent references (#1604 / ADR-0034).',
                     };
 
+                    // [#7541] Global search — the same two-layer AND, for the
+                    // same reason. The protocol answered whether IT can serve a
+                    // search (`typeof searchAll === 'function'`, the predicate
+                    // `registerSearchEndpoints` 501s on); this server answers
+                    // whether it MOUNTED the route at all (`api.enableSearch`,
+                    // the flag gated in registerRoutes). A deployment that opts
+                    // out gets a 404, so advertising the protocol's `true`
+                    // unqualified would re-open the declared ≠ enforced gap one
+                    // layer up from the one this issue closed. Neither half is a
+                    // fallback for a wrong bit: each layer states the fact only
+                    // it knows, and `enabled` is their conjunction.
+                    //
+                    // The flag is read with the mount's own `?? true` spelling
+                    // rather than the equivalent `!== false` — same predicate,
+                    // same characters, so the two cannot be edited apart.
+                    caps.search = {
+                        enabled: !!caps.search?.enabled && (this.config.api.enableSearch ?? true),
+                    };
+
                     // Attach scoping metadata so clients can detect dual-mode routing.
                     (discovery as any).scoping = {
                         enabled: this.config.api.enableProjectScoping,

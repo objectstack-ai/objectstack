@@ -97,12 +97,16 @@ export const CORE_SERVICE_PROVIDER: Readonly<Record<string, string | null>> = {
   // the `ui` slot itself has no implementation anywhere (#4093 / #4146).
   'ui':           '@objectstack/metadata-protocol',
   // `null` means "no name belongs in an `Install X` sentence", which covers two
-  // different situations — see REMEDY_DETAIL, which is how the second one still
-  // gets an accurate message.
+  // different situations — see REMEDY_DETAIL, which is how BOTH of them still
+  // get an accurate message.
   //
   //   Nothing provides the slot at all: `search` (no consumer either —
   //   ADR-0115 Evidence 5). Verified across BOTH repositories: nothing in
-  //   `objectstack-ai/cloud` registers it.
+  //   `objectstack-ai/cloud` registers it. Still true, and since #7541 it is
+  //   also no longer the whole story a reader needs: the cross-object
+  //   `/search` endpoint is served by the protocol whether or not this slot is
+  //   filled, so `search` carries a REMEDY_DETAIL sentence saying which of the
+  //   two questions this entry answers.
   //
   //   A provider exists but cannot be installed: `ai`. `@objectstack/service-ai`
   //   registers this slot in `objectstack-ai/cloud` and is `private: true`, so
@@ -131,9 +135,27 @@ export const CORE_SERVICE_PROVIDER: Readonly<Record<string, string | null>> = {
  * `/ui` is the case (#4146): it is served by the `protocol` service, and
  * nothing anywhere registers `ui` — so the sentence has to say what actually
  * serves it, not just what to install.
+ *
+ * `search` is the same shape (#7541), reached from the other side. Its
+ * capability bit is now derived from what actually serves the endpoint
+ * (`protocol.searchAll` — the predicate `registerSearchEndpoints` refuses on)
+ * rather than from this slot, so an ordinary REST host reports
+ * `capabilities.search.enabled: true` beside `services.search.status:
+ * 'unavailable'`. Both are true, and they answer different questions — but the
+ * bare "nothing ships" sentence read as "search is dead here", which is exactly
+ * how the two halves of one discovery document come to look like they
+ * contradict each other. The slot keeps its honest `unavailable`; the message
+ * now says which question it is answering.
  */
 const REMEDY_DETAIL: Readonly<Record<string, string>> = {
   'ui': 'Served by the protocol service — register MetadataPlugin (@objectstack/metadata-protocol) to enable',
+  // Deliberately keeps the generic sentence's "No implementation ships for the
+  // 'search' slot" opening: that fact is unchanged, and it is pinned by
+  // core-service-provider.test.ts. Everything after it is the disambiguation.
+  'search': "No implementation ships for the 'search' slot — a dedicated search engine (Elasticsearch/Meilisearch); "
+    + 'register a service under it to enable. Cross-object search does not depend on it: '
+    + 'GET {basePath}/search is served by the protocol itself, and whether it is served on this host is '
+    + 'reported by capabilities.search — not by this slot.',
   // A provider EXISTS — `@objectstack/service-ai` registers this slot — but it
   // lives in the `objectstack-ai/cloud` repository and is `private: true`, so
   // there is nothing to install and no name that belongs in an "Install X"

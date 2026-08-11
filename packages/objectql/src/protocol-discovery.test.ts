@@ -448,17 +448,24 @@ describe('ObjectStackProtocolImplementation - Dynamic Service Discovery', () => 
     expect(discovery.capabilities).toBeDefined();
     // ui is registered but doesn't map to a well-known capability directly
     expect(discovery.services.ui.enabled).toBe(true);
-    // All well-known capabilities should be disabled since ui doesn't map to any
-    // (comments derives from the sys_comment object, which is not registered here).
+    // The SLOT-DERIVED well-known capabilities should be disabled since ui maps
+    // to none of them (comments derives from the sys_comment object, which is
+    // not registered here).
     expect(discovery.capabilities!.comments).toEqual({ enabled: false });
     expect(discovery.capabilities!.automation).toEqual({ enabled: false });
     expect(discovery.capabilities!.cron).toEqual({ enabled: false });
-    expect(discovery.capabilities!.search).toEqual({ enabled: false });
     expect(discovery.capabilities!.export).toEqual({ enabled: false });
     expect(discovery.capabilities!.chunkedUpload).toEqual({ enabled: false });
+    // [#7541] `search` is NOT in that list any more. It is no longer derived
+    // from a service slot at all — it reports whether this protocol can serve
+    // `/search` (`typeof searchAll === 'function'`, the predicate the route's
+    // own 501 uses), and this class always can. Asserting `false` here was
+    // asserting the defect: the endpoint served 200s while the document said
+    // the capability was off.
+    expect(discovery.capabilities!.search).toEqual({ enabled: true });
   });
 
-  it('should set all capabilities to false when no services are registered', async () => {
+  it('should set all slot-derived capabilities to false when no services are registered', async () => {
     protocol = new ObjectStackProtocolImplementation(engine);
     const discovery = await protocol.getDiscovery();
 
@@ -466,9 +473,18 @@ describe('ObjectStackProtocolImplementation - Dynamic Service Discovery', () => 
     expect(discovery.capabilities!.comments).toEqual({ enabled: false });
     expect(discovery.capabilities!.automation).toEqual({ enabled: false });
     expect(discovery.capabilities!.cron).toEqual({ enabled: false });
-    expect(discovery.capabilities!.search).toEqual({ enabled: false });
     expect(discovery.capabilities!.export).toEqual({ enabled: false });
     expect(discovery.capabilities!.chunkedUpload).toEqual({ enabled: false });
+    // [#7541] Same reason as above — and this is the exact host the issue was
+    // reported against: an empty registry, a live `/search`. The two halves of
+    // the document stay independent and both stay honest: the SLOT is still
+    // empty here...
+    expect(discovery.capabilities!.search).toEqual({ enabled: true });
+    expect(discovery.services.search.enabled).toBe(false);
+    expect(discovery.services.search.status).toBe('unavailable');
+    // ...and its message now says which question that answers, instead of
+    // reading as "search is dead on this host".
+    expect(discovery.services.search.message).toMatch(/capabilities\.search/);
   });
 
   it('should dynamically set capabilities based on registered services', async () => {
@@ -482,11 +498,18 @@ describe('ObjectStackProtocolImplementation - Dynamic Service Discovery', () => 
 
     expect(discovery.capabilities!.automation).toEqual({ enabled: true });
     expect(discovery.capabilities!.cron).toEqual({ enabled: false });
-    expect(discovery.capabilities!.search).toEqual({ enabled: true });
     expect(discovery.capabilities!.export).toEqual({ enabled: true });
     expect(discovery.capabilities!.chunkedUpload).toEqual({ enabled: true });
     // comments is independent of services — it tracks the sys_comment object (#3180).
     expect(discovery.capabilities!.comments).toEqual({ enabled: false });
+    // [#7541] `search` is true here too, but NOT because the slot above is
+    // filled — this line proves nothing about the slot and is kept only so the
+    // reader is not left thinking it does. The discriminating cases live in
+    // `packages/rest/src/discovery-search-capability-agreement.test.ts`, which
+    // drives the capability builder and the route together.
+    expect(discovery.capabilities!.search).toEqual({ enabled: true });
+    // What the slot DOES still decide, unchanged: the `services` half.
+    expect(discovery.services.search.enabled).toBe(true);
   });
 
   // ── Atomic cross-object batch capability (#3298 / #1604 / ADR-0034) ─────────
