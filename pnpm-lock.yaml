@@ -1703,6 +1703,9 @@ importers:
       '@objectstack/formula':
         specifier: workspace:*
         version: link:../../formula
+      '@objectstack/metadata-core':
+        specifier: workspace:*
+        version: link:../../metadata-core
       '@objectstack/platform-objects':
         specifier: workspace:*
         version: link:../../platform-objects
@@ -1710,9 +1713,6 @@ importers:
         specifier: workspace:*
         version: link:../../spec
     devDependencies:
-      '@objectstack/metadata-core':
-        specifier: workspace:*
-        version: link:../../metadata-core
       '@objectstack/plugin-sharing':
         specifier: workspace:*
         version: link:../plugin-sharing

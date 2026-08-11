@@ -50,6 +50,7 @@ import { RLSCompiler, RLS_DENY_FILTER } from './rls-compiler.js';
 import { computeTenantLayer0Filter, andComposeLayers } from './tenant-layer.js';
 import { isPlatformTenantPolicy, isAuthoredTenantPolicy } from './platform-tenant-policies.js';
 import { isPlatformOwnershipFloorPolicy } from './platform-ownership-policies.js';
+import { hasPhantomTenantAnchor } from './federated-phantom-anchors.js';
 import {
   normalizeTenancyPosture,
   postureEnforcesWall,
@@ -163,6 +164,19 @@ interface ObjectSecurityMeta {
   isPrivate: boolean;
   tenancyDisabled: boolean;
   isBetterAuthManaged: boolean;
+  /**
+   * [#7835] The object is FEDERATED (ADR-0015 `external`) and its
+   * `organization_id` is the anchor the REGISTRY injected, not a column the
+   * author declared — so the column exists in the registered schema and in no
+   * backing store, because `syncObjectSchema` issues no DDL for a federated
+   * object. Layer 0 reads this to answer "is this a tenant object?" truthfully;
+   * see `federated-phantom-anchors.ts` for the provenance test and for why the
+   * question is provenance rather than `external != null`.
+   *
+   * `false` on every local object and on a federated object that declares a
+   * real remote `organization_id` — both keep the tenant wall exactly as it is.
+   */
+  tenantAnchorIsPhantom: boolean;
   requiredPermissions: NormalizedRequiredPermissions;
   fieldRequiredPermissions: Record<string, string[]>;
   /**
@@ -4027,7 +4041,25 @@ export class SecurityPlugin implements Plugin {
       // [ADR-0105 D2] The `group` wall's predicate. Resolved by
       // `resolveAuthzContext` and carried on the context — never re-derived here.
       accessibleOrgIds: context?.accessible_org_ids,
-      objectHasOrgIdField: objectFields ? objectFields.has('organization_id') : undefined,
+      // [#7835] A FEDERATED object's `organization_id` may be the registry's
+      // injected anchor rather than a remote column — present in the field set,
+      // absent from the store the query actually runs against (the platform
+      // issues no DDL for `external` objects). Answering "yes, tenant object"
+      // there AND-composes `organization_id = <org>` onto a federated read,
+      // where it isolates nothing and — on SQLite — degrades to a constant-false
+      // string comparison: 0 rows, no error, HTTP 200. This is the
+      // plugin-security sibling of #7738 / PR #7833, which withheld
+      // `DriverOptions.tenantId` for the same objects one layer down; that fix
+      // cannot reach a `where` predicate composed into the AST.
+      //
+      // Only the PLATFORM's anchor is discounted (provenance, per
+      // `federated-phantom-anchors.ts`): a federated object that DECLARES a real
+      // remote `organization_id` keeps its wall, and every local object is
+      // untouched. `undefined` (schema unresolvable) still means "assume tenant
+      // object" — the fail-toward-isolation default is unchanged.
+      objectHasOrgIdField: objectFields
+        ? objectFields.has('organization_id') && !meta.tenantAnchorIsPhantom
+        : undefined,
       tenancyDisabled,
       posturePermitsCrossTenant: posturePermits,
       isPlatformAdmin,
@@ -4498,6 +4530,9 @@ export class SecurityPlugin implements Plugin {
       // exemption; their `_self` carve-outs are their Layer 1 scoping, and Layer
       // 0 stays inert on a column-less table), so it can never leak to non-admins.
       isBetterAuthManaged: (obj as any)?.managedBy === 'better-auth',
+      // [#7835] Federated object carrying the registry's INJECTED
+      // `organization_id` — a column the platform provisions no storage for.
+      tenantAnchorIsPhantom: hasPhantomTenantAnchor(obj),
       requiredPermissions: normalizeRequiredPermissions((obj as any)?.requiredPermissions),
       fieldRequiredPermissions,
       unresolved: !obj,
