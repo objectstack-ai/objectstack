@@ -298,10 +298,11 @@ interface ResolvedPermissionSetLike {
 export interface ManagedSchemaLike {
     managedBy?: string;
     userActions?: {
-        create?: boolean;
-        // edit/delete accept the #2614 object form ({ enabled, visibleWhen,
-        // disabledWhen }); only the object-level `enabled` matters here — the
-        // per-record predicates are UI gating, not a permission grant.
+        // create/edit/delete all accept the object form
+        // ({ enabled, visibleWhen, disabledWhen }) — #2614 gave it to the row
+        // pair, #7692 to `create`. Only the object-level `enabled` matters
+        // here: the predicates are UI gating, not a permission grant.
+        create?: boolean | { enabled?: boolean };
         edit?: boolean | { enabled?: boolean };
         delete?: boolean | { enabled?: boolean };
     } | null;
@@ -441,7 +442,10 @@ export function clampManagedObjectWrites(
         if (!schema?.managedBy || !GUARDED_WRITE_BUCKETS.has(schema.managedBy)) continue;
         const ua = schema.userActions ?? {};
         if (!isWriteOptedIn(ua.edit)) acc.allowEdit = false;
-        if (ua.create !== true) acc.allowCreate = false;
+        // `create` reads through the same opt-in helper as edit/delete since
+        // #7692 widened it to the object form — a bare `ua.create !== true`
+        // would clamp away a legitimate `{ enabled: true, visibleWhen: … }`.
+        if (!isWriteOptedIn(ua.create)) acc.allowCreate = false;
         if (!isWriteOptedIn(ua.delete)) acc.allowDelete = false;
     }
 }
