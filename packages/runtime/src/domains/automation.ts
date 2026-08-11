@@ -122,7 +122,7 @@ export function createAutomationDomain(deps: DomainHandlerDeps): DomainRoute {
  *   PUT    /:name                → updateFlow
  *   DELETE /:name                → deleteFlow (unregisterFlow)
  *   POST   /:name/trigger        → execute (legacy: trigger/:name also supported)
- *   POST   /:name/toggle         → toggleFlow
+ *   POST   /:name/toggle         → toggleFlow (unknown name → 404, #7535)
  *   GET    /:name/runs           → listRuns (query: limit, cursor — validated, #7300;
  *                                  status — validated AND honoured, #7359)
  *   GET    /:name/runs/:runId    → getRun
@@ -369,6 +369,40 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                     ]);
                 }
                 const enabled = (toggleBody as { enabled?: boolean }).enabled ?? true;
+                // [#7535] The unknown-FLOW arm, brought up to the standard the
+                // body arm above already meets. `toggleFlow` on a name the
+                // registry does not hold throws a plain `Error` ("Flow '<name>'
+                // not found", service-automation's engine) carrying no
+                // `.status`, so both dispatcher catches fell back to **500
+                // INTERNAL_ERROR** for what is purely a caller mistake. That
+                // tells every client the opposite of the truth: 5xx reads as
+                // "the server broke, retry", so a typo'd flow name had
+                // retry-on-5xx callers hammering a request that can never
+                // succeed. 404 says "your request was wrong" — and names which
+                // flow was wrong, the way the body rejection names the key.
+                //
+                // Answered HERE rather than by teaching a generic catch to
+                // recognise that message: which HTTP status a plain domain
+                // error means is the serving boundary's decision (see
+                // ../validation-failure.ts), and this is the SAME existence
+                // probe `GET /:name` uses below, so the two routes cannot
+                // disagree about which flows exist.
+                //
+                // Deliberately AFTER the body checks: a malformed body is still
+                // refused without the registry being consulted at all, so
+                // #3899's "nothing reaches the service until the body is legal"
+                // holds unchanged.
+                //
+                // `getFlow` is optional on `IAutomationService`; an
+                // implementation that omits it cannot be asked whether the flow
+                // exists, so the toggle proceeds as before rather than this
+                // inventing an answer.
+                if (typeof automationService.getFlow === 'function') {
+                    const existing = await automationService.getFlow(name);
+                    if (!existing) {
+                        return { handled: true, response: deps.error(`Flow '${name}' not found`, 404) };
+                    }
+                }
                 await automationService.toggleFlow(name, enabled);
                 return { handled: true, response: deps.success({ name, enabled }) };
             }
