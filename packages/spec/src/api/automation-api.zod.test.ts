@@ -24,6 +24,7 @@ import {
   AutomationApiErrorCode,
   AutomationApiContracts,
 } from './automation-api.zod';
+import { ExecutionStatus } from '../automation/execution.zod';
 
 // ==========================================
 // Path Parameters
@@ -378,6 +379,20 @@ describe('ListRunsRequestSchema', () => {
       name: 'my_flow',
       status: 'success',
     })).toThrow();
+  });
+
+  it('declares exactly the canonical ExecutionStatus set (#7359)', () => {
+    // The wire's filter and the runtime boundary that now enforces it must
+    // accept ONE set. The boundary reads `ExecutionStatus.options`; this pins
+    // that the schema does too, so a member added to the enum cannot end up
+    // advertised by one and refused with a 400 by the other. The members used
+    // to be re-listed inline here — identical, but only by hand.
+    for (const member of ExecutionStatus.options) {
+      expect(
+        () => ListRunsRequestSchema.parse({ name: 'my_flow', status: member }),
+        `?status=${member} is a declared ExecutionStatus but the request schema refuses it`,
+      ).not.toThrow();
+    }
   });
 });
 

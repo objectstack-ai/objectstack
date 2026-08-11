@@ -14,7 +14,7 @@
  */
 
 import type { FlowParsed } from '../automation/flow.zod';
-import type { ExecutionLog, FlowRunSummary } from '../automation/execution.zod';
+import type { ExecutionLog, ExecutionStatus, FlowRunSummary } from '../automation/execution.zod';
 import type { ActionDescriptor } from '../automation/node-executor.zod';
 import type { ConnectorDescriptor } from '../integration/connector-descriptor';
 import type { ConversionNotice, ConversionConflictNotice } from '../conversions/types';
@@ -409,11 +409,23 @@ export interface IAutomationService {
 
     /**
      * List execution runs for a flow
+     *
+     * `status` is the wire's declared filter (`ListRunsRequestSchema`) reaching
+     * the implementation at last: it was declared on `GET /:name/runs`, had no
+     * slot here, and was therefore dropped at the HTTP boundary — so
+     * `?status=failed` answered 200 with EVERY run of the flow (#7359). An
+     * implementation that accepts the option must narrow by it across every
+     * store it merges; a filter that sees only half the rows is the same class
+     * of confident wrong answer as not filtering at all.
+     *
      * @param flowName - Flow name (snake_case)
-     * @param options - Pagination options
+     * @param options - Filter and pagination options
      * @returns Array of execution logs
      */
-    listRuns?(flowName: string, options?: { limit?: number; cursor?: string }): Promise<ExecutionLog[]>;
+    listRuns?(
+        flowName: string,
+        options?: { limit?: number; cursor?: string; status?: ExecutionStatus },
+    ): Promise<ExecutionLog[]>;
 
     /**
      * Get a single execution run by ID

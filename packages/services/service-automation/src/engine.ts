@@ -3,6 +3,7 @@
 import type { FlowParsed, FlowNodeParsed, FlowEdgeParsed } from '@objectstack/spec/automation';
 import type {
     ExecutionLog,
+    ExecutionStatus,
     ActionDescriptor,
     ExecutionStepMetrics,
     ExecutionStepSkipReason,
@@ -2442,7 +2443,10 @@ export class AutomationEngine implements IAutomationService {
         this.logger.info(`Flow '${name}' rolled back to version ${version}`);
     }
 
-    async listRuns(flowName: string, options?: { limit?: number; cursor?: string }): Promise<ExecutionLogEntry[]> {
+    async listRuns(
+        flowName: string,
+        options?: { limit?: number; cursor?: string; status?: ExecutionStatus },
+    ): Promise<ExecutionLogEntry[]> {
         const limit = options?.limit ?? 20;
         const inMem = this.executionLogs.filter(l => l.flowName === flowName);
 
@@ -2481,7 +2485,45 @@ export class AutomationEngine implements IAutomationService {
         const byId = new Map<string, ExecutionLogEntry>();
         for (const e of durable) byId.set(e.id, e);
         for (const e of inMem) byId.set(e.id, e); // freshest wins
-        return [...byId.values()]
+
+        // [#7359] The wire has always declared `?status=`, but it reached
+        // neither the contract nor this method, so the filter was dropped at
+        // the HTTP boundary and every run came back as if it matched — a
+        // monitoring caller paging for failures read the first `limit` runs of
+        // any status and concluded those were the failures.
+        //
+        // Filtering HERE, after the merge, is load-bearing in two ways:
+        //
+        //  1. It covers BOTH stores at once — the in-memory ring buffer and the
+        //     durable rows. Narrowing only the buffer would answer "no
+        //     failures" for a flow whose failures are all in durable history
+        //     (i.e. after any restart, which is exactly when someone asks);
+        //     narrowing only the durable rows would hide the live ones. Half a
+        //     filter is the same class of confident wrong answer as none.
+        //  2. It reads each run's RESOLVED status. `executionLogs` holds more
+        //     than one entry per run id — a run that pauses and later finishes
+        //     appends 'paused' and then its terminal entry — and the merge above
+        //     is what collapses them to the freshest. Filtering the two arms
+        //     BEFORE that collapse would drop the terminal entry for
+        //     `?status=paused` and let the stale 'paused' one survive, so every
+        //     approval / screen / wait run that had since completed would report
+        //     itself as still paused. That is the exact defect
+        //     `run-history.test.ts`'s "latest entry wins" block pins for
+        //     `getRun`, re-introduced one method over.
+        //
+        // The durable arm's window is still the store's newest `limit` rows —
+        // `listHistory(flowName, limit)` has no status slot, so the filter is
+        // applied to what comes back rather than pushed down. A status filter
+        // therefore narrows WITHIN that window and can return fewer than
+        // `limit` matches while older ones exist. That is the merge's
+        // pre-existing shape (durable was already capped at `limit` before the
+        // sort-and-slice) and closing it is a store-contract change, not this
+        // card's. What it never does is return a run of another status.
+        const status = options?.status;
+        const merged = status === undefined
+            ? [...byId.values()]
+            : [...byId.values()].filter(e => e.status === status);
+        return merged
             .sort((a, b) => (b.startedAt ?? '').localeCompare(a.startedAt ?? ''))
             .slice(0, limit);
     }

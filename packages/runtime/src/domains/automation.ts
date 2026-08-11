@@ -16,7 +16,8 @@ import { CoreServiceName } from '@objectstack/spec/system';
 import type { IAutomationService } from '@objectstack/spec/contracts';
 import { isServiceServeable } from '../service-serveable.js';
 import { validationFailure } from '../validation-failure.js';
-import { parseIntegerParam, parseStringParam } from '../query-param.js';
+import { ExecutionStatus } from '@objectstack/spec/automation';
+import { parseEnumParam, parseIntegerParam, parseStringParam } from '../query-param.js';
 import { capabilityUnavailable } from './unavailable.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
@@ -120,7 +121,8 @@ export function createAutomationDomain(deps: DomainHandlerDeps): DomainRoute {
  *   DELETE /:name                → deleteFlow (unregisterFlow)
  *   POST   /:name/trigger        → execute (legacy: trigger/:name also supported)
  *   POST   /:name/toggle         → toggleFlow
- *   GET    /:name/runs           → listRuns (query: limit, cursor — validated, #7300)
+ *   GET    /:name/runs           → listRuns (query: limit, cursor — validated, #7300;
+ *                                  status — validated AND honoured, #7359)
  *   GET    /:name/runs/:runId    → getRun
  *   POST   /:name/runs/:runId/resume → resume a paused run (screen input / ADR-0019)
  *   GET    /:name/runs/:runId/screen → the screen a paused run awaits
@@ -459,8 +461,30 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                 // service's declared business (`ListRunsRequestSchema` bounds it
                 // 1..100); this gate only refuses values that were never whole
                 // numbers.
+                //
+                // [#7359] `status` is the THIRD declared parameter, and until
+                // now the only one this handler never read. `ListRunsRequestSchema`
+                // has always declared it (`z.enum([...8 ExecutionStatus members])
+                // .optional()`), but it had no slot on `IAutomationService.listRuns`
+                // and was never built into this object — so `?status=failed` was
+                // dropped here, silently, and the caller was answered 200 with
+                // EVERY run of the flow capped by `limit`. That is worse than an
+                // empty page: a monitoring caller paging for failures reads the
+                // first 20 runs of any status and concludes those are the
+                // failures. #7300 deliberately left the key ignored rather than
+                // decide between honouring and retiring it; this card takes the
+                // enforce route (ADR-0049), so the declared surface is true.
+                //
+                // The members come from the spec's own `ExecutionStatus` enum
+                // rather than a list copied into this file: the wire schema is
+                // built from that same enum, so a future member cannot be
+                // accepted by one and refused by the other.
                 const options = query
-                    ? { limit: parseIntegerParam('limit', query.limit), cursor: parseStringParam('cursor', query.cursor) }
+                    ? {
+                        limit: parseIntegerParam('limit', query.limit),
+                        cursor: parseStringParam('cursor', query.cursor),
+                        status: parseEnumParam('status', query.status, ExecutionStatus.options),
+                    }
                     : undefined;
                 const runs = await automationService.listRuns(name, options);
                 return { handled: true, response: deps.success({ runs, hasMore: false }) };

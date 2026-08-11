@@ -83,6 +83,7 @@ import type {
   ApprovalStatus,
   ApprovalDecisionResult,
 } from '@objectstack/spec/contracts';
+import type { ExecutionStatus } from '@objectstack/spec/automation';
 import { Logger, createLogger } from '@objectstack/core/logger';
 import { RealtimeAPI } from './realtime-api';
 
@@ -3130,12 +3131,17 @@ export class ObjectStackClient {
       /** Alias for `automation.runs.list`. */
       listRuns: async <T = any>(
           flowName: string,
-          opts?: { limit?: number; cursor?: string },
+          opts?: { limit?: number; cursor?: string; status?: ExecutionStatus },
       ): Promise<T> => {
           const route = this.getRoute('automation');
           const params = new URLSearchParams();
           if (opts?.limit != null) params.set('limit', String(opts.limit));
           if (opts?.cursor) params.set('cursor', opts.cursor);
+          // [#7359] The route's declared `status` filter, now that the boundary
+          // honours it instead of dropping it. Until this card the typed client
+          // could not send it at all — which is why nothing had tripped over the
+          // server-side gap.
+          if (opts?.status) params.set('status', opts.status);
           const qs = params.toString();
           const res = await this.fetch(
               `${this.baseUrl}${route}/${encodeURIComponent(flowName)}/runs${qs ? `?${qs}` : ''}`,
@@ -5261,14 +5267,16 @@ export class ScopedProjectClient {
       });
       return this.parent._unwrap<T>(res);
     },
-    /** List recent runs for a flow. */
+    /** List recent runs for a flow, optionally narrowed to one status. */
     listRuns: async <T = any>(
       flowName: string,
-      opts?: { limit?: number; cursor?: string },
+      opts?: { limit?: number; cursor?: string; status?: ExecutionStatus },
     ): Promise<T> => {
       const params = new URLSearchParams();
       if (opts?.limit != null) params.set('limit', String(opts.limit));
       if (opts?.cursor) params.set('cursor', opts.cursor);
+      // [#7359] — see the sibling `listRuns` alias above.
+      if (opts?.status) params.set('status', opts.status);
       const qs = params.toString();
       const res = await this.parent._fetch(
         this.url(`/automation/${encodeURIComponent(flowName)}/runs${qs ? `?${qs}` : ''}`),

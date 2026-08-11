@@ -233,6 +233,160 @@ describe('automation run history (durable observability)', () => {
     });
 });
 
+// ── #7359: `listRuns`'s status filter, across BOTH stores ───────────────────
+//
+// `?status=failed` was declared on the wire, absent from the service contract,
+// and never built into the runtime handler's option object, so it was dropped
+// at the HTTP boundary and the caller was answered 200 with EVERY run of the
+// flow. The boundary half is pinned in
+// `runtime/src/domains/automation-runs-query-validation.test.ts`; what is
+// pinned HERE is the half that has to be true for the forwarded option to mean
+// anything — that the engine narrows by it across the in-memory ring buffer AND
+// the durable rows it merges. A filter that sees only one of the two answers
+// "no failures" for a flow that has them, which is the same confident wrong
+// answer the card was filed against.
+
+describe('#7359 — listRuns filters by status across both the ring buffer and durable history', () => {
+    /** Run `bad_flow` (throws) and `ok_flow` (succeeds) n times each on one engine. */
+    async function seed(engine: AutomationEngine, ok: number, bad: number) {
+        engine.registerNodeExecutor({ type: 'boom', async execute() { throw new Error('kaboom'); } } as never);
+        engine.registerFlow('mixed', failingFlow('mixed') as never);
+        engine.registerFlow('mixed_ok', trivialFlow('mixed_ok') as never);
+        for (let i = 0; i < bad; i++) await engine.execute('mixed', { event: 'test' } as AutomationContext);
+        for (let i = 0; i < ok; i++) await engine.execute('mixed_ok', { event: 'test' } as AutomationContext);
+        await flush();
+    }
+
+    it('narrows the IN-MEMORY ring buffer — the live half', async () => {
+        // No store at all, so every run is in the ring buffer and nowhere else.
+        const engine = new AutomationEngine(silent, undefined as never);
+        engine.registerNodeExecutor({ type: 'boom', async execute() { throw new Error('kaboom'); } } as never);
+        engine.registerFlow('mixed', failingFlow('mixed') as never);
+        await engine.execute('mixed', { event: 'test' } as AutomationContext);
+        await flush();
+
+        expect(await engine.listRuns('mixed', { status: 'failed' })).toHaveLength(1);
+        // The arm that would pass a filter applied to the durable store only:
+        // this asks for a status the flow has never had and must get nothing.
+        expect(await engine.listRuns('mixed', { status: 'completed' })).toEqual([]);
+    });
+
+    it('narrows the DURABLE rows — the half that survives a restart', async () => {
+        const store = new InMemorySuspendedRunStore();
+        const engineA = new AutomationEngine(silent, store);
+        await seed(engineA, 0, 2);
+
+        // A fresh engine sharing the store: its ring buffer is EMPTY, so every
+        // row here comes from durable history. A filter applied only to the
+        // in-memory arm would answer `[]` — "this flow has never failed" — for a
+        // flow with two recorded failures, which is exactly the state anyone
+        // asking after a restart is in.
+        const engineB = new AutomationEngine(silent, store);
+        expect(engineB.listRuns).toBeTypeOf('function');
+        const failed = await engineB.listRuns('mixed', { status: 'failed' });
+        expect(failed).toHaveLength(2);
+        expect(failed.every((r) => r.status === 'failed')).toBe(true);
+        expect(await engineB.listRuns('mixed', { status: 'completed' })).toEqual([]);
+    });
+
+    it('narrows the MERGED listing — one status per store, each reachable and neither leaking', async () => {
+        // ONE flow name with runs of BOTH statuses, split across the two stores:
+        // the failure exists only in durable history (engineB's ring buffer is
+        // empty of it), the success only in engineB's live buffer. So a correct
+        // filter must reach into a different store for each of the two answers,
+        // and — the part a filter-less merge cannot fake — must EXCLUDE the
+        // other store's run from each. A fixture whose runs all share one status
+        // passes with no filter at all and proves nothing.
+        const store = new InMemorySuspendedRunStore();
+        const engineA = new AutomationEngine(silent, store);
+        engineA.registerNodeExecutor({ type: 'boom', async execute() { throw new Error('kaboom'); } } as never);
+        engineA.registerFlow('mixed', failingFlow('mixed') as never);
+        await engineA.execute('mixed', { event: 'test' } as AutomationContext); // → failed, durable
+        await flush();
+        // `execute` only surfaces a `runId` when a run PAUSES, so the two runs
+        // are told apart by the ids the listing itself reports.
+        const failedId = (await engineA.listRuns('mixed', { limit: 10 }))[0].id;
+
+        // A "restart" whose `boom` node now succeeds: same flow, a completed run.
+        const engineB = new AutomationEngine(silent, store);
+        engineB.registerNodeExecutor({ type: 'boom', async execute() { return { success: true }; } } as never);
+        engineB.registerFlow('mixed', failingFlow('mixed') as never);
+        await engineB.execute('mixed', { event: 'test' } as AutomationContext); // → completed, live
+        await flush();
+
+        const all = await engineB.listRuns('mixed', { limit: 10 });
+        expect(all).toHaveLength(2); // both runs, unfiltered
+        const completedId = all.find((r) => r.status === 'completed')!.id;
+        expect(completedId).not.toBe(failedId);
+
+        // Each answer comes out of a different store, and neither leaks the
+        // other store's run.
+        expect((await engineB.listRuns('mixed', { status: 'failed', limit: 10 })).map((r) => r.id))
+            .toEqual([failedId]);
+        expect((await engineB.listRuns('mixed', { status: 'completed', limit: 10 })).map((r) => r.id))
+            .toEqual([completedId]);
+    });
+
+    it('an ABSENT status still returns everything, unchanged (the preservation half)', async () => {
+        const store = new InMemorySuspendedRunStore();
+        const engine = new AutomationEngine(silent, store);
+        await seed(engine, 2, 2);
+
+        // The filter must be genuinely optional: no `status` is not "match
+        // nothing" and not "match some default", it is the listing this method
+        // has always returned.
+        const all = await engine.listRuns('mixed');
+        expect(all).toHaveLength(2);
+        expect(await engine.listRuns('mixed', { limit: 10 })).toHaveLength(2);
+        expect(await engine.listRuns('mixed_ok', { limit: 10 })).toHaveLength(2);
+        expect(new Set(all.map((r) => r.status))).toEqual(new Set(['failed']));
+    });
+
+    it('reads each run\'s RESOLVED status — a paused run that finished is no longer paused', async () => {
+        // The ring buffer holds MORE THAN ONE entry per run id: a run that
+        // pauses appends 'paused' and then its terminal entry, and the merge is
+        // what collapses them to the freshest. Filtering the arms before that
+        // collapse would drop the terminal entry for `?status=paused` and let
+        // the stale one survive, so every approval / screen / wait run that had
+        // since completed would report itself as still paused — the defect the
+        // "latest entry wins" block above pins for `getRun`, one method over.
+        const engine = new AutomationEngine(silent, new InMemorySuspendedRunStore());
+        engine.registerNodeExecutor({
+            type: 'hold', descriptor: HOLD_DESCRIPTOR,
+            async execute() { return { success: true, suspend: true, correlation: 'held' }; },
+        } as never);
+        engine.registerNodeExecutor({ type: 'noop', async execute() { return { success: true }; } } as never);
+        engine.registerFlow('held', {
+            name: 'held', label: 'held', type: 'autolaunched',
+            nodes: [
+                { id: 'start', type: 'start', label: 's' },
+                { id: 'hold', type: 'hold', label: 'h' },
+                { id: 'tail', type: 'noop', label: 't' },
+                { id: 'end', type: 'end', label: 'e' },
+            ],
+            edges: [
+                { id: 'e1', source: 'start', target: 'hold' },
+                { id: 'e2', source: 'hold', target: 'tail' },
+                { id: 'e3', source: 'tail', target: 'end' },
+            ],
+        } as never);
+
+        const paused = await engine.execute('held', { event: 'test' } as AutomationContext);
+        expect(paused.status).toBe('paused');
+        // Accurate while it really is paused — the filter must not regress this.
+        expect(await engine.listRuns('held', { status: 'paused' })).toHaveLength(1);
+
+        expect((await engine.resume(paused.runId!)).success).toBe(true);
+        await flush();
+
+        // Now it is completed, and `?status=paused` must no longer claim it.
+        expect(await engine.listRuns('held', { status: 'paused' })).toEqual([]);
+        const done = await engine.listRuns('held', { status: 'completed' });
+        expect(done).toHaveLength(1);
+        expect(done[0].id).toBe(paused.runId);
+    });
+});
+
 // ── #3234: region-aware durable-history compaction ──────────────────────────
 
 const AT = '2026-07-18T00:00:00.000Z';

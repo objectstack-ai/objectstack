@@ -23,6 +23,16 @@
  * second hand-rolled refusal for the same condition drifting away from the
  * first.
  *
+ * #7359 added the near neighbour of a coercion — a declared filter the
+ * boundary never read at all, which is the same 200-with-the-wrong-answer with
+ * the narrowing dropped instead of invented:
+ *
+ *   ?status=failed  →  (nothing) →  EVERY run, as if all of them had failed
+ *
+ * Its gate is {@link parseEnumParam}, and it lives here for the reason the
+ * others do: the moment a closed-set filter is honoured, the value outside the
+ * set needs a refusal, and that refusal must be the same one every route makes.
+ *
  * The refusal is the house shape, not a new channel: `validationFailure` — the
  * duck-typed `{ code: 'VALIDATION_FAILED', fields[] }` that BOTH dispatcher
  * error exits map to `400` with `details.fields[]` (#3918). No new spec
@@ -115,6 +125,59 @@ export function parseIntegerParam(param: string, raw: unknown): number | undefin
         throw invalidQueryParam(param, 'invalid_number', 'a whole number', raw);
     }
     return parsed;
+}
+
+/**
+ * A CLOSED-SET parameter — a filter whose declared values are an enum on the
+ * wire (`?status=failed` on `GET /api/automation/:name/runs`, whose
+ * `ListRunsRequestSchema` bounds it to the eight `ExecutionStatus` members).
+ *
+ * Written for #7359, which is the third shape in this module's family and the
+ * one that fails widest. The other two are coercions that invent a value; this
+ * one is a filter the boundary never read at all. `status` was declared on the
+ * wire, absent from `IAutomationService.listRuns`'s options, and never built
+ * into the handler's option object — so `?status=failed` was dropped silently
+ * and the caller was answered `200` with **every** run of the flow. A
+ * monitoring caller paging for failures read the first 20 runs of any status
+ * and concluded those were the failures.
+ *
+ * Once such a parameter is honoured, a value outside the set has no safe
+ * reading left. `?status=faild` cannot mean "no filter" — the caller plainly
+ * asked to narrow — and it cannot mean the empty result either, because
+ * "no runs are `faild`" and "no runs failed" are the same sentence to a caller
+ * who cannot see the typo. So it is refused, in the house shape: the closed
+ * ADR-0114 catalog already carries `invalid_option` for exactly this
+ * constraint ("not a member of the field's declared options").
+ *
+ * REFUSED: a non-empty string outside `allowed` (`invalid_option`); anything
+ * that was never a single string at all — a repeated `?status=a&status=b`, a
+ * structured `?status[$ne]=x`, a number (`invalid_type`, the same mapping
+ * {@link parseStringParam} makes for the same condition).
+ *
+ * ACCEPTED as "no filter": absent, `null`, and the EMPTY string. The empty
+ * spelling is the one judgement call here and it follows
+ * {@link parseIntegerParam}'s falsy gate rather than
+ * {@link parseBooleanParam}'s refusal, because the prior answers differ in
+ * kind. `?read=` used to serve the UNREAD half — a wrong answer, so refusing it
+ * strictly improved on it. `?status=` used to serve every run, which is
+ * precisely what "no filter" means, so it already had a defensible answer and
+ * this gate must not turn it into a new `400`. It is also the spelling an "All
+ * statuses" `<select>` submits, and that client is asking for exactly what it
+ * gets.
+ */
+export function parseEnumParam<T extends string>(
+    param: string,
+    raw: unknown,
+    allowed: readonly T[],
+): T | undefined {
+    if (raw === undefined || raw === null || raw === '') return undefined;
+    if (typeof raw !== 'string') {
+        throw invalidQueryParam(param, 'invalid_type', 'a single string', raw);
+    }
+    if (!(allowed as readonly string[]).includes(raw)) {
+        throw invalidQueryParam(param, 'invalid_option', `one of ${allowed.join(', ')}`, raw);
+    }
+    return raw as T;
 }
 
 /**

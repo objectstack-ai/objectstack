@@ -3,7 +3,7 @@
 import { z } from 'zod';
 import { BaseResponseSchema } from './contract.zod';
 import { FlowSchema } from '../automation/flow.zod';
-import { ExecutionLogSchema } from '../automation/execution.zod';
+import { ExecutionLogSchema, ExecutionStatus } from '../automation/execution.zod';
 
 /**
  * Automation API Protocol
@@ -271,7 +271,14 @@ export type ToggleFlowResponseParsed = z.infer<typeof ToggleFlowResponseSchema>;
  * @example GET /api/automation/approval_flow/runs?status=completed&limit=10
  */
 export const ListRunsRequestSchema = lazySchema(() => AutomationFlowPathParamsSchema.extend({
-  status: z.enum(['pending', 'running', 'paused', 'completed', 'failed', 'cancelled', 'timed_out', 'retrying']).optional()
+  // [#7359] The canonical `ExecutionStatus`, not a copy of its members. The
+  // runtime boundary that now enforces this filter reads its accepted set from
+  // the same enum, so the set the wire DECLARES and the set the boundary
+  // ACCEPTS cannot drift — a member added to `ExecutionStatus` cannot end up
+  // advertised here and refused with a 400 there. (The members were previously
+  // re-listed inline; the two lists were identical, so this is not a wire
+  // change.)
+  status: ExecutionStatus.optional()
     .describe('Filter by execution status'),
   limit: z.number().int().min(1).max(100).default(20)
     .describe('Maximum number of runs to return'),
