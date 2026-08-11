@@ -23,8 +23,20 @@
 // keep the agreement from holding vacuously.
 
 import { describe, it, expect, vi } from 'vitest';
+import type { IHttpRequest } from '@objectstack/spec/contracts';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { RestServer } from './rest-server.js';
+
+/**
+ * A complete `IHttpRequest`, typed against the contract rather than cast to
+ * `any`. Not ceremony: `enforceAuth` — which runs before either predicate under
+ * test — reads `method` and `path`, so a partial literal would exercise the
+ * gate with `undefined` on both. Building the real shape is what makes the
+ * measured statuses below the statuses a real caller gets.
+ */
+function request(path: string, query: Record<string, string> = {}): IHttpRequest {
+  return { params: {}, query, headers: {}, method: 'GET', path };
+}
 
 function createMockServer() {
   return {
@@ -109,7 +121,7 @@ async function measure(opts: {
     json: (b: any) => { discoveryBody = b; },
     status: () => discoveryRes,
   };
-  await discoveryEntry.handler({ params: {}, query: {} }, discoveryRes);
+  await discoveryEntry.handler(request('/api/v1/discovery'), discoveryRes);
   const declared = discoveryBody?.capabilities?.search?.enabled;
 
   const searchEntry = routes.get('GET', '/api/v1/search');
@@ -124,7 +136,7 @@ async function measure(opts: {
     status: (s: number) => { status = s; return searchRes; },
     json: (b: any) => { searchBody = b; },
   };
-  await searchEntry.handler({ params: {}, query: { q: 'audit' } }, searchRes);
+  await searchEntry.handler(request('/api/v1/search', { q: 'audit' }), searchRes);
   return { declared, status, hits: searchBody?.hits?.length ?? 0 };
 }
 
