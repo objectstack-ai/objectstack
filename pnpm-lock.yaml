@@ -1305,6 +1305,12 @@ importers:
         specifier: workspace:*
         version: link:../spec
     devDependencies:
+      '@objectstack/core':
+        specifier: workspace:*
+        version: link:../core
+      '@objectstack/formula':
+        specifier: workspace:*
+        version: link:../formula
       '@types/node':
         specifier: ^26.1.2
         version: 26.1.2
