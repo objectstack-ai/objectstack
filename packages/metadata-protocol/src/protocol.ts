@@ -2740,9 +2740,16 @@ export class ObjectStackProtocolImplementation implements
      *
      * [#6710] Row scoping ONLY. This key keeps every one of its other jobs —
      * the `environment_id` stamp/filter, the ADR-0005 overlay-whitelist gate,
-     * the #3050 authoring-gate scope, the local metadata-storage provisioning
-     * decision — but it no longer decides whether the #4463 runtime authoring
-     * rules run. See {@link authoringChannel}.
+     * the local metadata-storage provisioning decision — but it no longer
+     * decides whether the #4463 runtime authoring rules run.
+     * See {@link authoringChannel}.
+     *
+     * [#7674] …and no longer whether the #3050 pre-persistence authoring gate
+     * runs either. The sentence above used to list "the #3050 authoring-gate
+     * scope" among this key's surviving jobs, and that call site kept the
+     * `environmentId !== undefined` wrapper #6710 had just retired next door —
+     * so the identical proxy-signal defect outlived its own diagnosis on the
+     * sibling gate. Both doors read {@link authoringChannel} now.
      */
     private environmentId?: string;
 
@@ -2751,10 +2758,12 @@ export class ObjectStackProtocolImplementation implements
      * which is what makes the #4463 gate active on every kernel that does not
      * explicitly claim to be the package author's own bootstrap channel.
      *
-     * Read by {@link assertRuntimeAuthoringRules} and nothing else — this is
-     * deliberately NOT a general-purpose authorization key. The ADR-0005
-     * overlay gate and the #3050 authoring gate keep reading `environmentId`,
-     * because those two really are about row scope.
+     * Read by {@link assertRuntimeAuthoringRules} and, since #7674, by the
+     * #3050 pre-persistence authoring gate's call site in {@link saveMetaItem}
+     * — the two doors that ask "is this an AUTHOR publishing, or the package
+     * author's own bootstrap?". It is deliberately NOT a general-purpose
+     * authorization key: the ADR-0005 overlay-whitelist gate keeps reading
+     * `environmentId`, because that one really is about row scope.
      */
     private authoringChannel: MetadataAuthoringChannel;
 
@@ -3089,8 +3098,12 @@ export class ObjectStackProtocolImplementation implements
         // mechanism, because the failure mode being designed out is precisely
         // "a new assembly variant nobody thought about".
         //
-        // `environmentId` keeps every other job it has, including the #3050
-        // authoring gate's own scope check below.
+        // `environmentId` keeps its row-scoping jobs — the `environment_id`
+        // stamp/filter and the ADR-0005 overlay-whitelist gate. [#7674] It no
+        // longer keys the #3050 authoring gate below either: #6710 re-keyed
+        // this activation and left that one on the retired proxy, which cost
+        // the ADR-0090 D11 object posture gate every host-config deployment
+        // until #7674 finished the move.
         if (this.authoringChannel === 'package-author') return [];
         if (evt.state !== 'active') return [];
         // `os migrate meta --stored --apply` rewrites rows that ALREADY EXIST
@@ -4379,14 +4392,28 @@ export class ObjectStackProtocolImplementation implements
         // MetadataService merges above can re-introduce them (e.g. an app/view
         // persisted in sys_metadata). Re-apply the filter on the final merged
         // set so a disabled package's metadata stops surfacing in the console.
-        // Never filter `package` (the Packages page must list disabled packages
-        // to re-enable them) nor `object`/`objects` (filtering objects would
-        // break data queries that depend on their schema).
-        if (
-            request.type !== 'package' &&
-            request.type !== 'object' &&
-            request.type !== 'objects'
-        ) {
+        //
+        // Never filter `package`: the Packages page must list disabled packages
+        // to re-enable them, so filtering it would make disable irreversible.
+        //
+        // [#7557] `object` USED to be exempt here too, on the reasoning that
+        // "filtering objects would break data queries that depend on their
+        // schema". That conflated two different readers. Data queries resolve
+        // schema through `registry.getObject` / `listItems('object')` — the
+        // registry primitives, which this filter does not touch and which
+        // deliberately keep serving a disabled package's objects so migrations,
+        // cross-package references and the runtime authoring gate (`protocol.ts`
+        // resolution context) still see a complete object universe. NOTHING
+        // resolves a query's schema through `getMetaItems`, which is the API
+        // READ surface. So the exemption bought no safety and cost the
+        // enforcement: `/meta/objects` kept listing a disabled package's objects
+        // while its nav and views correctly vanished.
+        //
+        // The data plane is refused separately and loudly, in
+        // `assertObjectRegistered` (`OBJECT_PACKAGE_DISABLED`) — absence here
+        // and refusal there are the two halves of one answer, pinned together
+        // by `protocol.package-disable-enforcement.test.ts`.
+        if (request.type !== 'package') {
             items = (items as any[]).filter(
                 (it) => !this.engine.registry.isPackageDisabled((it as any)?._packageId),
             );
@@ -5247,7 +5274,44 @@ export class ObjectStackProtocolImplementation implements
             }
             return;
         }
-        if (registry.getObject(object)) return;
+        if (registry.getObject(object)) {
+            // [#7557] Registered is not the same as SERVING. A disabled package
+            // keeps its objects registered on purpose — disable is reversible
+            // and destroys no data, and the schema stays resolvable for the
+            // machinery that needs it (the runtime authoring gate resolves its
+            // object universe through `listItems('object')`, migrations and
+            // cross-package references through `getObject`). What must stop is
+            // the API serving its rows, which until now it did: nav and views
+            // dropped on disable while `GET /data/<object>` still answered 200
+            // with every row.
+            //
+            // Refused LOUDLY rather than by silent absence. The 404 status
+            // matches the closest sibling in this codebase — `OBJECT_API_DISABLED`
+            // for `enable.apiEnabled: false` (rest-server.ts) — so "this object
+            // exists but is switched off" keeps ONE status across both switches,
+            // and it keeps the data plane consistent with the metadata listing,
+            // which now drops the object too (`getMetaItems`). The distinct code
+            // is what makes it loud: a bare `OBJECT_NOT_FOUND` sends a caller —
+            // an AI agent especially — hunting for a typo or re-creating an
+            // object that is merely switched off, while this one names the cause
+            // and therefore the fix (re-enable the package).
+            //
+            // Optional-called: registry doubles across the test suites implement
+            // `isPackageDisabled` but not this, and a host whose registry cannot
+            // answer must not have every read refused.
+            if (typeof registry.isObjectPackageDisabled === 'function'
+                && registry.isObjectPackageDisabled(object)) {
+                const disabled: any = new Error(
+                    `Object '${object}' belongs to a disabled package and is not being served. `
+                    + 'Re-enable the package to restore access.',
+                );
+                disabled.code = 'OBJECT_PACKAGE_DISABLED';
+                disabled.status = 404;
+                disabled.object = object;
+                throw disabled;
+            }
+            return;
+        }
         const err: any = new Error(`Object '${object}' not found`);
         err.code = 'OBJECT_NOT_FOUND';
         err.status = 404;
@@ -10053,10 +10117,32 @@ export class ObjectStackProtocolImplementation implements
         // Pre-persistence authoring gate (#3050): a domain plugin may veto the
         // body before it persists (throws propagate to the caller with their
         // status/code). Runs for BOTH draft and publish-mode saves, so a later
-        // publishMetaItem promotes an already-gated body. Environment writes
-        // only — control-plane bootstrap writes (environmentId undefined) are
-        // the package author's own channel, mirroring the ADR-0005 gate above.
-        if (this.environmentId !== undefined) {
+        // publishMetaItem promotes an already-gated body.
+        //
+        // [#7674] Keyed on the DECLARED authoring channel, exactly as #6710
+        // re-keyed `assertRuntimeAuthoringRules` a few hundred lines up. This
+        // line used to read `if (this.environmentId !== undefined)`, and its
+        // own comment reaffirmed the reasoning #6710 had already retired:
+        // "control-plane bootstrap writes (environmentId undefined) are the
+        // package author's own channel". They are not the only such writes.
+        // The CLI's lightweight host-config assembler (`serve.ts`'s
+        // `config.objects && !hasObjectQL` branch → `new ObjectQLPlugin()`
+        // with no options) leaves `environmentId` undefined too, and it serves
+        // an END-USER `PUT /api/v1/meta/*` — `isHostConfig` →
+        // `shouldBootWithLibrary === false` is the flagship showcase's own boot
+        // shape. So plugin-security's ADR-0090 D11 object posture gate — R1
+        // `owd_widening_forbidden` and R2 `owd_external_wider` — ran on NO
+        // self-hosted deployment at all, while `AUTHORING_RULES` deliberately
+        // withheld its own `validateSecurityPosture` from the runtime surface
+        // on the stated grounds that this gate already covered it
+        // (`packages/lint/src/authoring-rules.ts`, `surfaceReason`). Declared,
+        // not enforced, on both tables at once.
+        //
+        // The direction is #6710's and matters more than the mechanism: the
+        // DEFAULT is the gated one, so an assembly variant nobody has thought
+        // of yet gets more enforcement, never less. Only a caller that claims
+        // to BE the package author is treated as one.
+        if (this.authoringChannel !== 'package-author') {
             await this.runAuthoringGate({
                 type: request.type,
                 name: request.name,
@@ -11538,7 +11624,38 @@ export class ObjectStackProtocolImplementation implements
         cleanups: UninstallCleanupOutcome[];
     }> {
         const where: Record<string, unknown> = { package_id: request.packageId };
-        if (request.organizationId) where.organization_id = request.organizationId;
+        // [#7705] Surface BOTH org-scoped rows and env-wide (`organization_id
+        // IS NULL`) rows to an org-scoped uninstall. A strict
+        // `organization_id = <org>` equality silently dropped every env-wide
+        // row, and env-wide is where a package's metadata normally LANDS: the
+        // REST `PUT /meta/:type/:name` save path does not thread the session's
+        // active org, and AI-authored metadata is written env-wide too. So an
+        // uninstall issued by a session that HAS an active org (the dispatcher
+        // door, `packages/runtime/src/domains/packages.ts`, is the one that
+        // resolves and passes `organizationId`) selected only the handful of
+        // rows that happened to be org-scoped and left the rest behind —
+        // reporting `deletedCount` > 0 and `success: true` while the package's
+        // rows demonstrably survived (the orphaned-uninstall bug).
+        //
+        // Same defect and same remedy as the #3115 "orphaned draft" bug one
+        // file over ({@link SysMetadataRepository.listDrafts}), and the shape
+        // is deliberately identical to it. The driver's own implicit tenant
+        // wall already reads this way (`field = :tenant OR field IS NULL`,
+        // #2734); only author-supplied predicates are strict, which is what
+        // made this silent.
+        //
+        // The no-org branch is deliberately NOT narrowed to `organization_id
+        // IS NULL`: the other door of this route (the direct-mount REST
+        // registrar, `packages/rest/src/package-routes.ts`) passes no
+        // `organizationId` at all, and restricting it to env-wide rows would
+        // orphan every org-scoped row — the same bug, re-created on the other
+        // door. Absent an org, a full uninstall stays package-wide.
+        if (request.organizationId) {
+            where.$or = [
+                { organization_id: request.organizationId },
+                { organization_id: null },
+            ];
+        }
         const rows = (await this.engine.find('sys_metadata', { where })) as any[];
 
         const dropStorage = request.keepData !== true;

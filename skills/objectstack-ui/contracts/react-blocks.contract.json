@@ -148,7 +148,7 @@
           "type": "object",
           "kind": "data",
           "required": false,
-          "description": "Post-submit behavior"
+          "description": "Post-submit behavior. On the `redirect` arm, `url` is relative-only and interpolates only declared record fields as `{{record.field_name}}`, URL-escaped (ruled…"
         }
       ]
     },

@@ -175,6 +175,12 @@ export const ERROR_CODE_LEDGER = {
     'EXPIRED_OR_REVOKED',         // share link
     'INVALID_OR_EXPIRED',         // share-link token
     'NEEDS_PASSWORD',             // share link requires a password
+    // [#7557] `DELETE /packages/:id` on the DISPATCHER door — per-item failures
+    // used to ride inside a 200 with a hardcoded `success: true`. Second
+    // EMITTER of the code `@objectstack/rest` already registers for the
+    // direct-mount door of the same route; the two doors now state the same
+    // failure the same way. Provenance, not identity (see above).
+    'PACKAGE_DELETE_PARTIAL',
     'PROJECT_MEMBERSHIP_REQUIRED',
     'RECORD_GONE',                // share link resolves but the record was deleted
     'ROUTE_NOT_FOUND',
@@ -275,7 +281,8 @@ export const ERROR_CODE_LEDGER = {
     'NOT_CREATABLE',
     'NOT_OVERRIDABLE',
     'OBJECT_OVERLAY_PACKAGE_MISMATCH',  // [ADR-0029 D9.9] object overlay row bound to a package that does not own the object
-    'ROLLED_BACK',                // atomic data-batch row was written, then undone by the batch rollback (#4793)
+    'OBJECT_PACKAGE_DISABLED',    // [#7557] object is registered but its owning package is disabled — data plane refuses rather than serving rows
+    'ROLLED_BACK',             // atomic data-batch row was written, then undone by the batch rollback (#4793)
     'UNSUPPORTED_QUERY_PARAM',
     'VALIDATION_FAILED',
     'VERSION_NOT_FOUND',

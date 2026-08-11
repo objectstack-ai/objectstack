@@ -1953,6 +1953,9 @@ importers:
       '@objectstack/objectql':
         specifier: workspace:*
         version: link:../objectql
+      '@objectstack/plugin-security':
+        specifier: workspace:*
+        version: link:../plugins/plugin-security
       '@objectstack/service-analytics':
         specifier: workspace:*
         version: link:../services/service-analytics
