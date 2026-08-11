@@ -57,3 +57,39 @@ infer from a `200`.
   `200` with `total: 0`. A filter that cannot be *run* at all is still
   `INVALID_FILTER` (#4121 / #4181), which answers first; this gate answers only
   "does this field exist".
+
+## Upgrade note — data import: a `matchField` naming no field now fails the row
+
+The gate sits at the `findData` ingress, so it also reaches the record-matching
+lookup the CSV/JSON import runner performs for `update` and `upsert` writes.
+This is a **user-visible behaviour change on a second surface**, and it is
+deliberate — the ruling on #7534 was to keep it rather than exempt the import
+path.
+
+**Before.** A `matchFields` entry naming a field the target object does not have
+produced a filter that could only match zero rows. The lookup read that as
+`'none'` — "no existing record" — and an `upsert` therefore fell through to a
+**create**. The import reported success while writing duplicate rows the caller
+believed were being matched and updated, and nothing in the response
+distinguished that from a genuinely new record.
+
+**Now.** That row fails with `400 INVALID_FIELD` naming the field. The failure
+is contained by the row loop's own `try`/`catch`, so it is reported as one
+failed row in the import results and **the rest of the import proceeds** — it is
+not an aborted job.
+
+**Remedy.** Correct the `matchFields` name to a field that exists on the object.
+The rejection names the offending field and, when it reads like a typo, suggests
+the closest real field name.
+
+Exempting the import path would have meant *adding* code — catching
+`INVALID_FIELD` and restoring `'none'` — to preserve a silent data-correctness
+bug of exactly the family this change closes, so the invariant is restored
+instead.
+
+**Unaffected: reference resolution.** The import runner's `resolveRef` probes
+candidate display fields (`name`, `title`, `label`, `full_name`, `email`,
+`username`) that legitimately may not exist on the object being referenced, and
+it already wraps each probe in a deliberate `catch` that moves on to the next
+candidate. A `400` lands exactly where the empty result did, so reference
+resolution behaves as before.
