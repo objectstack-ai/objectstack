@@ -1801,8 +1801,17 @@ describe('ObjectQL Engine', () => {
             // projection-honouring driver does (`SqlDriver`:
             // `builder.select(query.fields)`). The real-driver end of this pins
             // at `runtime/src/expand-nested-fields-join-key.integration.test.ts`.
+            // The surrounding file reaches `vi.mocked(SchemaRegistry.getObject)`
+            // directly, which tsc reports twice per site (TS2339 — `getObject`
+            // is not on the static type — plus TS7006 on the untyped `name`).
+            // Those sites are frozen TEST_DEBT; this block routes through one
+            // typed helper instead of adding four more to the pile.
+            const mockSchema = (impl: (name: string) => any) => {
+                vi.mocked((SchemaRegistry as any).getObject).mockImplementation(impl);
+            };
+
             const registerTaskUser = () => {
-                vi.mocked(SchemaRegistry.getObject).mockImplementation((name) => {
+                mockSchema((name: string) => {
                     if (name === 'task') return {
                         name: 'task',
                         fields: {
@@ -1863,7 +1872,7 @@ describe('ObjectQL Engine', () => {
             });
 
             it('strips the join key from a MULTIPLE (array-valued) expansion too', async () => {
-                vi.mocked(SchemaRegistry.getObject).mockImplementation((name) => {
+                mockSchema((name: string) => {
                     if (name === 'task') return {
                         name: 'task',
                         fields: { watchers: { type: 'lookup', reference: 'user', multiple: true } },
@@ -1890,7 +1899,7 @@ describe('ObjectQL Engine', () => {
                 // The recursion rebuilds the map keyed on `rec.id`, so the strip
                 // must happen after it — a strip done at sub-read time would
                 // break the inner level exactly the way the outer one was broken.
-                vi.mocked(SchemaRegistry.getObject).mockImplementation((name) => {
+                mockSchema((name: string) => {
                     if (name === 'task') return {
                         name: 'task',
                         fields: { assignee: { type: 'lookup', reference: 'user' } },
