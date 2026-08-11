@@ -118,7 +118,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       approval_reject: {
         label: "拒绝",
-        confirmText: "拒绝该请求？拒绝对所有审批人立即生效。",
+        description: "拒绝该请求？拒绝对所有审批人立即生效。",
         successMessage: "已拒绝。",
         params: {
           comment: {
@@ -171,7 +171,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       approval_recall: {
         label: "撤回",
-        confirmText: "撤回该请求？撤回后审批人将无法继续处理，记录随即解锁。",
+        description: "撤回该请求？撤回后审批人将无法继续处理，记录随即解锁。",
         successMessage: "已撤回。",
         params: {
           comment: {

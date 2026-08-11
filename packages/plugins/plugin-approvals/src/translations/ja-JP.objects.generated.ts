@@ -118,7 +118,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       approval_reject: {
         label: "却下",
-        confirmText: "このリクエストを却下しますか？却下はすべての承認者に対して最終決定になります。",
+        description: "このリクエストを却下しますか？却下はすべての承認者に対して最終決定になります。",
         successMessage: "却下しました。",
         params: {
           comment: {
@@ -171,7 +171,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       approval_recall: {
         label: "取り下げ",
-        confirmText: "このリクエストを取り下げますか？承認者は操作できなくなり、レコードのロックが解除されます。",
+        description: "このリクエストを取り下げますか？承認者は操作できなくなり、レコードのロックが解除されます。",
         successMessage: "取り下げました。",
         params: {
           comment: {
