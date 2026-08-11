@@ -135,7 +135,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       ban_user: {
         label: "Ban User",
-        confirmText: "Ban this user? They will be signed out and unable to sign in until unbanned.",
+        description: "Ban this user? They will be signed out and unable to sign in until unbanned.",
         successMessage: "User banned",
         params: {
           banReason: {
@@ -251,7 +251,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       delete_my_account: {
         label: "Delete My Account",
-        confirmText: "Permanently delete your account? This cannot be undone — all your sessions will be terminated and all data you own will be removed per the configured retention policy.",
+        description: "Permanently delete your account? This cannot be undone — all your sessions will be terminated and all data you own will be removed per the configured retention policy.",
         successMessage: "Account deleted",
         params: {
           password: {
@@ -270,7 +270,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       disable_two_factor: {
         label: "Disable Two-Factor Auth",
-        confirmText: "Turn off two-factor authentication? Your account will be less secure.",
+        description: "Turn off two-factor authentication? Your account will be less secure.",
         successMessage: "Two-factor authentication disabled.",
         params: {
           password: {
@@ -280,7 +280,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       generate_backup_codes: {
         label: "Regenerate Backup Codes",
-        confirmText: "Generate a new set of backup codes? Any previously generated codes will stop working.",
+        description: "Generate a new set of backup codes? Any previously generated codes will stop working.",
         successMessage: "New backup codes generated — save them somewhere safe.",
         params: {
           password: {
@@ -452,7 +452,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       unlink_account: {
         label: "Unlink Account",
-        confirmText: "Unlink this identity link? The user will no longer be able to sign in with this provider until they re-link it from their account settings.",
+        description: "Unlink this identity link? The user will no longer be able to sign in with this provider until they re-link it from their account settings.",
         successMessage: "Identity link removed"
       }
     }
@@ -555,7 +555,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       change_slug: {
         label: "Change Slug",
-        confirmText: "Renaming the slug rewrites every platform subdomain for this org and parks the old slug for 90 days. Continue?",
+        description: "Renaming the slug rewrites every platform subdomain for this org and parks the old slug for 90 days. Continue?",
         successMessage: "Organization slug changed"
       }
     }
@@ -794,7 +794,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       remove_team_member: {
         label: "Remove from Team",
-        confirmText: "Remove this user from the team? They will lose any team-scoped access.",
+        description: "Remove this user from the team? They will lose any team-scoped access.",
         successMessage: "Team member removed"
       }
     }
@@ -1057,7 +1057,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       disable_two_factor: {
         label: "Disable 2FA",
-        confirmText: "Disable two-factor authentication on your account?",
+        description: "Disable two-factor authentication on your account?",
         successMessage: "2FA disabled",
         params: {
           password: {
@@ -1067,7 +1067,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       regenerate_backup_codes: {
         label: "Regenerate Backup Codes",
-        confirmText: "Regenerate backup codes? All previous backup codes will stop working immediately.",
+        description: "Regenerate backup codes? All previous backup codes will stop working immediately.",
         params: {
           password: {
             label: "Current Password"
@@ -1333,12 +1333,12 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
     _actions: {
       disable_oauth_application: {
         label: "Disable OAuth Application",
-        confirmText: "Disable this OAuth application? Active access/refresh tokens issued to it will continue to be rejected at the token, authorize, and introspect endpoints. Existing integrations will stop working immediately.",
+        description: "Disable this OAuth application? Active access/refresh tokens issued to it will continue to be rejected at the token, authorize, and introspect endpoints. Existing integrations will stop working immediately.",
         successMessage: "OAuth application disabled"
       },
       enable_oauth_application: {
         label: "Enable OAuth Application",
-        confirmText: "Re-enable this OAuth application? Token issuance, authorization, and introspection will resume immediately.",
+        description: "Re-enable this OAuth application? Token issuance, authorization, and introspection will resume immediately.",
         successMessage: "OAuth application enabled"
       },
       create_oauth_application: {
@@ -1373,7 +1373,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       rotate_client_secret: {
         label: "Rotate Client Secret",
-        confirmText: "Rotate this OAuth client's secret? The previous secret will stop working immediately and any integrations using it will break until they are updated with the new secret. The new secret is shown only once.",
+        description: "Rotate this OAuth client's secret? The previous secret will stop working immediately and any integrations using it will break until they are updated with the new secret. The new secret is shown only once.",
         resultDialog: {
           title: "Client secret rotated",
           description: "Save the new secret now — it is shown only once. Update every integration before the previous secret's grace period ends.",
@@ -1385,7 +1385,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       delete_oauth_application: {
         label: "Delete OAuth Application",
-        confirmText: "Permanently delete this OAuth application? All issued tokens and consents will be invalidated and integrations using this client_id will stop working immediately. This cannot be undone.",
+        description: "Permanently delete this OAuth application? All issued tokens and consents will be invalidated and integrations using this client_id will stop working immediately. This cannot be undone.",
         successMessage: "OAuth application deleted"
       }
     }
@@ -1860,7 +1860,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       delete_sso_provider: {
         label: "Delete SSO Provider",
-        confirmText: "Delete this SSO provider? Users from its domain will no longer be able to sign in through it.",
+        description: "Delete this SSO provider? Users from its domain will no longer be able to sign in through it.",
         successMessage: "SSO provider deleted"
       }
     }

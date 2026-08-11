@@ -135,7 +135,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       ban_user: {
         label: "Bloquear usuario",
-        confirmText: "¿Bloquear a este usuario? Cerrará sesión y no podrá volver a iniciarla hasta que se desbloquee.",
+        description: "¿Bloquear a este usuario? Cerrará sesión y no podrá volver a iniciarla hasta que se desbloquee.",
         successMessage: "Usuario bloqueado",
         params: {
           banReason: {
@@ -251,7 +251,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       delete_my_account: {
         label: "Eliminar mi cuenta",
-        confirmText: "¿Eliminar tu cuenta de forma permanente? Esta acción no se puede deshacer: se cerrarán todas tus sesiones y se eliminarán todos los datos de tu propiedad según la política de retención configurada.",
+        description: "¿Eliminar tu cuenta de forma permanente? Esta acción no se puede deshacer: se cerrarán todas tus sesiones y se eliminarán todos los datos de tu propiedad según la política de retención configurada.",
         successMessage: "Cuenta eliminada",
         params: {
           password: {
@@ -270,7 +270,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       disable_two_factor: {
         label: "Deshabilitar autenticación de dos factores",
-        confirmText: "¿Desactivar la autenticación de dos factores? Tu cuenta será menos segura.",
+        description: "¿Desactivar la autenticación de dos factores? Tu cuenta será menos segura.",
         successMessage: "Autenticación de dos factores deshabilitada.",
         params: {
           password: {
@@ -280,7 +280,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       generate_backup_codes: {
         label: "Regenerar códigos de respaldo",
-        confirmText: "¿Generar un nuevo juego de códigos de respaldo? Los códigos generados anteriormente dejarán de funcionar.",
+        description: "¿Generar un nuevo juego de códigos de respaldo? Los códigos generados anteriormente dejarán de funcionar.",
         successMessage: "Nuevos códigos de respaldo generados; guárdalos en un lugar seguro.",
         params: {
           password: {
@@ -452,7 +452,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       unlink_account: {
         label: "Desvincular cuenta",
-        confirmText: "¿Desvincular este vínculo de identidad? El usuario ya no podrá iniciar sesión con este proveedor hasta que lo vuelva a vincular desde la configuración de su cuenta.",
+        description: "¿Desvincular este vínculo de identidad? El usuario ya no podrá iniciar sesión con este proveedor hasta que lo vuelva a vincular desde la configuración de su cuenta.",
         successMessage: "Vínculo de identidad eliminado"
       }
     }
@@ -555,7 +555,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       change_slug: {
         label: "Cambiar slug",
-        confirmText: "Renombrar el slug reescribe todos los subdominios de la plataforma para esta organización y reserva el slug anterior durante 90 días. ¿Continuar?",
+        description: "Renombrar el slug reescribe todos los subdominios de la plataforma para esta organización y reserva el slug anterior durante 90 días. ¿Continuar?",
         successMessage: "Slug de la organización cambiado"
       }
     }
@@ -794,7 +794,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       remove_team_member: {
         label: "Eliminar del equipo",
-        confirmText: "¿Eliminar a este usuario del equipo? Perderá cualquier acceso con ámbito de equipo.",
+        description: "¿Eliminar a este usuario del equipo? Perderá cualquier acceso con ámbito de equipo.",
         successMessage: "Miembro del equipo eliminado"
       }
     }
@@ -1057,7 +1057,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       disable_two_factor: {
         label: "Deshabilitar 2FA",
-        confirmText: "¿Deshabilitar la autenticación de doble factor en su cuenta?",
+        description: "¿Deshabilitar la autenticación de doble factor en su cuenta?",
         successMessage: "2FA deshabilitado",
         params: {
           password: {
@@ -1067,7 +1067,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       regenerate_backup_codes: {
         label: "Regenerar códigos de respaldo",
-        confirmText: "¿Regenerar los códigos de respaldo? Todos los códigos de respaldo anteriores dejarán de funcionar de inmediato.",
+        description: "¿Regenerar los códigos de respaldo? Todos los códigos de respaldo anteriores dejarán de funcionar de inmediato.",
         params: {
           password: {
             label: "Contraseña actual"
@@ -1333,12 +1333,12 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
     _actions: {
       disable_oauth_application: {
         label: "Deshabilitar aplicación OAuth",
-        confirmText: "¿Deshabilitar esta aplicación OAuth? Los tokens de acceso/actualización activos emitidos para ella seguirán siendo rechazados en los endpoints token, authorize e introspect. Las integraciones existentes dejarán de funcionar de inmediato.",
+        description: "¿Deshabilitar esta aplicación OAuth? Los tokens de acceso/actualización activos emitidos para ella seguirán siendo rechazados en los endpoints token, authorize e introspect. Las integraciones existentes dejarán de funcionar de inmediato.",
         successMessage: "Aplicación OAuth deshabilitada"
       },
       enable_oauth_application: {
         label: "Habilitar aplicación OAuth",
-        confirmText: "¿Volver a habilitar esta aplicación OAuth? La emisión de tokens, la autorización y la introspección se reanudarán de inmediato.",
+        description: "¿Volver a habilitar esta aplicación OAuth? La emisión de tokens, la autorización y la introspección se reanudarán de inmediato.",
         successMessage: "Aplicación OAuth habilitada"
       },
       create_oauth_application: {
@@ -1373,7 +1373,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       rotate_client_secret: {
         label: "Rotar Client Secret",
-        confirmText: "¿Rotar el secreto de este cliente OAuth? El secreto anterior dejará de funcionar de inmediato y cualquier integración que lo utilice fallará hasta que se actualice con el nuevo secreto. El nuevo secreto se muestra una sola vez.",
+        description: "¿Rotar el secreto de este cliente OAuth? El secreto anterior dejará de funcionar de inmediato y cualquier integración que lo utilice fallará hasta que se actualice con el nuevo secreto. El nuevo secreto se muestra una sola vez.",
         resultDialog: {
           title: "Secreto de cliente rotado",
           description: "Guarde el nuevo secreto ahora: se muestra una sola vez. Actualice todas las integraciones antes de que termine el periodo de gracia del secreto anterior.",
@@ -1385,7 +1385,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       delete_oauth_application: {
         label: "Eliminar aplicación OAuth",
-        confirmText: "¿Eliminar de forma permanente esta aplicación OAuth? Todos los tokens y consentimientos emitidos quedarán invalidados y las integraciones que usen este client_id dejarán de funcionar de inmediato. Esta acción no se puede deshacer.",
+        description: "¿Eliminar de forma permanente esta aplicación OAuth? Todos los tokens y consentimientos emitidos quedarán invalidados y las integraciones que usen este client_id dejarán de funcionar de inmediato. Esta acción no se puede deshacer.",
         successMessage: "Aplicación OAuth eliminada"
       }
     }
@@ -1860,7 +1860,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       delete_sso_provider: {
         label: "Eliminar proveedor SSO",
-        confirmText: "¿Eliminar este proveedor SSO? Los usuarios de su dominio ya no podrán iniciar sesión a través de él.",
+        description: "¿Eliminar este proveedor SSO? Los usuarios de su dominio ya no podrán iniciar sesión a través de él.",
         successMessage: "Proveedor SSO eliminado"
       }
     }
