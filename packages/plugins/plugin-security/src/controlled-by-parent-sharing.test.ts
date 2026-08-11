@@ -124,7 +124,7 @@ type Row = Record<string, unknown>;
  * security plugin itself uses, so a filter this suite asserts on is a filter
  * that was really applied rather than one merely inspected.
  */
-function makeStore(rows: Record<string, Row[]>, brokenDetail = false) {
+function makeStore(rows: Record<string, Row[]>, brokenDetail = false, faultOn?: string) {
   const schemas: Record<string, unknown> = {
     crm_account: ACCOUNT_SCHEMA,
     crm_contact: brokenDetail ? CONTACT_SCHEMA_NO_MASTER_DETAIL : CONTACT_SCHEMA,
@@ -139,10 +139,38 @@ function makeStore(rows: Record<string, Row[]>, brokenDetail = false) {
       return typeof options?.limit === 'number' ? hits.slice(0, options.limit) : hits;
     }),
     findOne: vi.fn(async (object: string, options: any = {}) => {
+      // [#7505] The one thing this double gains: a store that is DOWN for one
+      // object, so "the row is not there" and "I could not look" stop being the
+      // same observation.
+      if (faultOn && object === faultOn) throw datasourceOutage(object);
       const all = rows[object] ?? [];
       return all.find((r) => matchesFilterCondition(r, options?.where ?? null)) ?? null;
     }),
   };
+}
+
+/**
+ * [#7505] A driver outage shaped like the real one. Modelled field-for-field on
+ * `@objectstack/objectql`'s `DatasourceUnavailableError` — `code`, `name`,
+ * `datasource`, and NO `status`, because that class declares none: `rest`'s
+ * `mapDataError` routes it to 503 off the CODE (`rest-server.ts`, pinned by
+ * `rest.test.ts` "maps ERR_DATASOURCE_UNAVAILABLE → 503"). Giving the double a
+ * `status` the producer does not set would let these cases pass against an
+ * error no engine can throw.
+ *
+ * `plugin-security` does not depend on `objectql` (it is not even a
+ * devDependency — the plugin talks to the engine through the injected service),
+ * so the shape is restated here rather than imported.
+ */
+function datasourceOutage(object: string): Error {
+  const e = new Error(
+    `[ObjectQL] Datasource 'primary' configured for object '${object}' is declared but not connected: ` +
+      `it failed to connect at startup and the server was started with OS_ALLOW_DRIVER_CONNECT_FAILURE.`,
+  ) as Error & { code: string; datasource: string };
+  e.name = 'DatasourceUnavailableError';
+  e.code = 'ERR_DATASOURCE_UNAVAILABLE';
+  e.datasource = 'primary';
+  return e;
 }
 
 /** The fixture rows — identical for every case; only the grant level varies. */
@@ -188,13 +216,18 @@ interface BootOptions {
   contacts?: Row[];
   /** [#7474] Replace the caller's permission set (the master-CRUD / master-RLS legs). */
   sets?: PermissionSet[];
+  /**
+   * [#7505] Make `findOne` on this object throw a datasource outage, so a gate
+   * that probes it gets "could not read" rather than "not there".
+   */
+  faultOn?: string;
 }
 
 async function boot(options: BootOptions = {}) {
   const shareLevel = options.shareLevel === undefined ? 'edit' : options.shareLevel;
   const fixture = fixtureRows(shareLevel);
   if (options.contacts) fixture.crm_contact = options.contacts;
-  const store = makeStore(fixture, options.detail === 'no-master-detail');
+  const store = makeStore(fixture, options.detail === 'no-master-detail', options.faultOn);
   const sets = options.sets ?? [REP_SET];
 
   let middleware: any;
@@ -711,5 +744,133 @@ describe('[#7474] the six refusal legs answer with six envelopes, not one', () =
     // The two 422s share a status and must still be told apart by `code` —
     // which is the field ADR-0112 makes the branch point.
     expect(metadataDefect.code).not.toBe(nullMaster.code);
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+/**
+ * [#7505] The FIFTH condition the by-id gate can meet, and the one it used to
+ * answer with somebody else's envelope: the store could not be read at all.
+ *
+ * `readRowById` flattened a thrown read into `null`, and `null` on this path
+ * means "no such row" — so a driver outage arrived at the client as `404
+ * RECORD_NOT_FOUND`. #7474 made that leg explicit and thereby made the lie
+ * specific: an SDK treats 404 as TERMINAL (drop the id, stop retrying) exactly
+ * when the truthful answer was "come back in a minute".
+ *
+ * Maintainer ruling of 2026-08-11: fail-closed, and never 404 for an outage.
+ * The write is still refused — the gate throws before `next()`, so nothing
+ * reaches the driver — but it is refused with the ENGINE's error, not with a
+ * verdict this gate invented.
+ *
+ * Both directions are pinned per case: a genuinely absent row keeps its 404
+ * (the steady state #7474 shipped), and only the fault path moved.
+ */
+describe('[#7505] a store fault is not an absent row', () => {
+  /** REP_SET plus a write RLS on the MASTER — the leg that runs the master probe. */
+  const MASTER_WRITE_RLS_SET: PermissionSet = {
+    name: 'crm_rep',
+    label: 'CRM Rep',
+    objects: {
+      crm_account: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true },
+      crm_contact: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true },
+    },
+    rowLevelSecurity: [
+      { object: 'crm_account', operation: 'update', using: "name = 'No Such Corp'" },
+    ],
+  } as unknown as PermissionSet;
+
+  const refusalOf = async (run: Promise<unknown>): Promise<any> => {
+    try {
+      await run;
+    } catch (e) {
+      return e;
+    }
+    throw new Error('expected the write to be refused, but it resolved');
+  };
+
+  it('the detail-row probe faulting propagates ERR_DATASOURCE_UNAVAILABLE, not 404', async () => {
+    const h = await boot({ shareLevel: 'edit', faultOn: 'crm_contact' });
+    const err = await refusalOf(h.updateContact('ct_own'));
+
+    // The engine's own error, unchanged: this gate is not the producer of a
+    // datasource outage and re-badging one under a security code would relabel
+    // a dependency failure as an authorization event. `rest`'s `mapDataError`
+    // turns this code into 503 (pinned in `rest.test.ts`), which is the answer
+    // an SDK can actually act on.
+    expect(err.code).toBe('ERR_DATASOURCE_UNAVAILABLE');
+    expect(err.name).toBe('DatasourceUnavailableError');
+
+    // …and the negative half, which is the whole ruling: NOT the absent-row
+    // envelope, and not a borrowed 403 either.
+    expect(err.code).not.toBe('RECORD_NOT_FOUND');
+    expect(err.status ?? err.statusCode).not.toBe(404);
+    expect(err.code).not.toBe('PERMISSION_DENIED');
+    expect(err.message).not.toContain('does not exist');
+    expect(err.message).not.toContain('requires edit access to its master record');
+  });
+
+  it('an engine error with NO code still never becomes a 404', async () => {
+    // Not every read failure is a declared-datasource outage — a timeout or a
+    // dropped socket arrives as a bare `Error`. It has no code for a transport
+    // to map, so it lands in the 5xx catch-all: still fail-closed, still
+    // truthful about being OUR problem, and still not "that record is gone".
+    const h = await boot({ shareLevel: 'edit' });
+    h.store.findOne.mockImplementation(async (object: string) => {
+      if (object === 'crm_contact') throw new Error('read ECONNRESET');
+      return null;
+    });
+    const err = await refusalOf(h.updateContact('ct_own'));
+    expect(err.message).toContain('ECONNRESET');
+    expect(err.code).toBeUndefined();
+    expect(err.code).not.toBe('RECORD_NOT_FOUND');
+    expect(err.name).not.toBe('DetailRecordNotFoundError');
+  });
+
+  it('STEADY STATE: a genuinely absent row still answers 404 RECORD_NOT_FOUND', async () => {
+    // The other direction, on the same fixture and in the same describe, so
+    // "fault propagates" can never be satisfied by a probe that simply throws
+    // on everything. This is #7474's leg, unchanged.
+    const h = await boot({ shareLevel: 'edit' });
+    const err = await refusalOf(h.updateContact('ct_deleted_concurrently'));
+    expect(err.code).toBe('RECORD_NOT_FOUND');
+    expect(err.status).toBe(404);
+  });
+
+  it('STEADY STATE: the three authorization verdicts are untouched by the change', async () => {
+    // A fault-path change that quietly moved a real 403 would be a regression
+    // the case above cannot see, because it never reaches the master legs.
+    const envelope = (e: any) => `${e.status ?? e.statusCode}/${e.code}`;
+    const noShare = await refusalOf((await boot({ shareLevel: 'read' })).updateContact('ct_us'));
+    const hidden = await refusalOf((await boot({ shareLevel: 'edit' })).updateContact('ct_eu'));
+    expect([envelope(noShare), envelope(hidden)]).toEqual([
+      '403/PERMISSION_DENIED',
+      '403/PERMISSION_DENIED',
+    ]);
+    // And a write that should SUCCEED still does — the fail-closed direction
+    // must not have swallowed the happy path.
+    await expect((await boot({ shareLevel: 'edit' })).updateContact('ct_own')).resolves.toBeUndefined();
+  });
+
+  it('the MASTER-visibility probe deliberately still fails closed to 403, not 503', async () => {
+    // The per-caller half of the ruling, pinned so the asymmetry reads as a
+    // decision instead of an oversight. Two probes, two questions:
+    //
+    //   • "does this detail row exist?" — an outage leaves it UNANSWERED, and
+    //     answering "no" is the terminal lie the case above removes;
+    //   • "is the master visible to you under your own write policy?" — an
+    //     outage leaves it unanswered too, but the fail-closed default for a
+    //     visibility question is "not visible", which is precisely what the
+    //     403 says. The issue and the ruling both name this probe as the house
+    //     posture to MATCH, not a site to change.
+    //
+    // Faulting `crm_account` reaches it: the detail read succeeds, so the gate
+    // gets as far as resolving the master.
+    const h = await boot({ shareLevel: 'edit', sets: [MASTER_WRITE_RLS_SET], faultOn: 'crm_account' });
+    const err = await refusalOf(h.updateContact('ct_own'));
+    expect(err.code).toBe('PERMISSION_DENIED');
+    expect(err.statusCode).toBe(403);
+    expect(err.message).toContain('row-level security');
   });
 });
