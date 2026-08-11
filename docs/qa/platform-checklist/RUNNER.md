@@ -76,6 +76,26 @@ test-run output the clause's `evidence` field names.
    captured evidence alone (not from the first agent's narrative) before it is acted
    on. Disagreement → re-run the item.
 
+### Environment facts the runner should not re-derive
+
+Standing facts about the stock showcase environment that have each cost a run a
+detour. They are briefing material, not verdicts — re-confirm one only when a run
+contradicts it, and correct it here when it does.
+
+- **`view` is in the overlay-allowed set, so authoring a view on the stock read-only
+  showcase package is NOT blocked and needs no escape hatch.** The org-overridable
+  types are derived from the metadata-type registry, not a hand-written list, and are
+  exactly **`view`, `dashboard`, `report`, `translation`, `email_template`**
+  (`packages/spec/src/kernel/metadata-plugin.zod.ts` — the `allowOrgOverride: true`
+  entries; pinned by `protocol.org-scoped-write-refused.test.ts` G5). So
+  `PUT /api/v1/meta/view/<name>` answers 2xx on stock showcase with no
+  `OS_METADATA_WRITABLE` and no `?package=` trick, while the same shape on `object`,
+  `field`, `hook`, `seed`, `mapping` or `flow` is refused. ⛔ Do not record a view
+  step as `blocked(environment)` on a "the showcase package is read-only" assumption:
+  read-only-ness is per metadata TYPE here, not per package, and the read-only-package
+  lock the console renders is a *different* gate (see
+  `access-security.readonly-package-locks-studio`).
+
 ### Trap vocabulary (`traps` field)
 
 | trap | what it fakes | counter |

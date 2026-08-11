@@ -12,8 +12,9 @@
 //
 // What rides on that context is total: plugin-security's middleware opens with
 // `if (opCtx.context?.isSystem) return next()` — the whole RLS/FLS/CRUD chain
-// skipped — and `__expandRead` waives the object-level CRUD gate for public
-// objects. Neither is ever schema-stripped on the read path
+// skipped — and `__expandRead` marks a read as an expansion sub-read (it waived
+// the object-level CRUD gate for "public" objects until #7626 removed that).
+// Neither is ever schema-stripped on the read path
 // (`ExecutionContextSchema.parse` runs only in `createContext`).
 //
 // The auth gate is what stands between that and a live exploit: `enforceAuth`

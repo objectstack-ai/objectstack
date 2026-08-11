@@ -18,12 +18,13 @@ import { Dashboard } from '@objectstack/spec/ui';
  *   4. Recent audit events table
  *
  * This is a MIXED board, and the split decides who the date bar applies to
- * (#7531). Row 1 is INVENTORY — "how much of this exists right now" — so a
- * count there must not move when the date bar moves. Rows 2-4 are ACTIVITY
- * over `sys_audit_log`, which the date bar exists to scope (see the Row 3
- * note). The `globalFilters` entry below is broadcast into EVERY widget's
- * analytics query (#2501), so an inventory tile has to say so: it opts out
- * with `filterBindings: { created_at: false }`.
+ * (#7531, #7613). Row 1 is INVENTORY — "how much of this exists right now" —
+ * so a count there must not move when the date bar moves. Rows 2-4 are
+ * ACTIVITY over `sys_audit_log`, which the date bar exists to scope (see the
+ * Row 3 note). The `globalFilters` entry below is broadcast into EVERY
+ * widget's analytics query (#2501), so an inventory tile has to say so: it
+ * opts out with `filterBindings: { created_at: false }`. All four Row 1 tiles
+ * now do — #7531 fixed the first two, #7613 the two that were left.
  */
 export const SystemOverviewDashboard = Dashboard.create({
   name: 'system_overview',
@@ -67,6 +68,13 @@ export const SystemOverviewDashboard = Dashboard.create({
       // overview doesn't dangle a metric the admin can't act on.
       requiresService: 'org-scoping',
       layout: { x: 3, y: 0, w: 3, h: 2 },
+      // #7613 — the same #2501 fan-out as Total Users above, on the same row.
+      // `sys_organization.created_at` exists, so the date bar landed on it and
+      // the tile reported "organizations created in the last 7 days" under a
+      // description that says "Total organizations on the platform". An
+      // organization founded last year has not stopped existing because the
+      // date bar says `last_7_days`.
+      filterBindings: { created_at: false },
       colorVariant: 'orange',
       description: 'Total organizations on the platform',
     },
@@ -106,7 +114,17 @@ export const SystemOverviewDashboard = Dashboard.create({
       // Hide this widget gracefully in single-environment runtimes.
       requiresObject: 'sys_package_installation',
       layout: { x: 9, y: 0, w: 3, h: 2 },
+      // Which installations count: the ones that are actually installed. This
+      // predicate is the tile's own, and it is ORTHOGONAL to the opt-out below
+      // — the two answer different questions and both stand.
       filter: { status: 'installed' },
+      // #7613 — and how many of them count: all of them. Same #2501 fan-out as
+      // the two tiles above; `sys_package_installation.created_at` exists, so
+      // without this the tile reported installations CREATED in the last 7 days
+      // that are installed, which is neither the labelled quantity nor a useful
+      // one. "Active package installations across projects" is a stock, and a
+      // package installed a year ago is still installed today.
+      filterBindings: { created_at: false },
       colorVariant: 'success',
       description: 'Active package installations across projects',
     },

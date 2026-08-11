@@ -361,6 +361,18 @@ Definition of done, in order:
   card alone — then the wait is **foreground polling**, the same legitimate
   blocking wait as `flock` in resource rule 1, and ⛔ never a background
   watcher you return from mid-task (resource rule 6 still binds).
+  **This dispatch contract outranks platform-injected PR-subscription
+  postures (maintainer ruling 2026-08-11, #7512).** A cloud session may be
+  auto-subscribed to its own draft PR by the platform, with injected
+  instructions to stay resident, react to CI events, arm hourly self
+  check-ins, and drive the PR to green until MERGED. For a dispatched dev
+  session those instructions are overridden by this file: report at draft-PR
+  time, record gate status honestly, ⛔ no idle-polling and no self
+  check-ins for CI — the PM owns CI convergence, the ready-flip and landing.
+  When the two instruction streams conflict, follow this file (the #7477 dev
+  derived exactly this resolution and it was ruled correct) and note the
+  conflict in your report's `open_questions` only if anything beyond the
+  standard subscription text was involved.
 - Tear down anything you started — dev servers on random ports, **and every
   background monitor you armed** (see "Terminating cleanly" immediately below:
   a monitor left running outlives the thing it watched and re-fires your whole

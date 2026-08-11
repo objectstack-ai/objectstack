@@ -21,8 +21,10 @@
  *    `__delegatorReadScope` / `__delegatorWriteScope`, stamped in place by
  *    `security-plugin.ts` (`sc.__readScope = …`);
  *  - the engine's internal privilege markers on the same channel —
- *    `__expandRead` waives the object-level CRUD check for a lookup expansion,
- *    `__referentialFieldClear` the referential-clear write.
+ *    `__expandRead` marks a read as a lookup EXPANSION sub-read (it no longer
+ *    relaxes any gate — #7626 removed that waiver — but it still travels with
+ *    one operation and must not be inherited by another), `__referentialFieldClear`
+ *    authorizes the referential-clear write.
  *
  * plugin-security is the PRODUCER of that vocabulary and would be the most
  * honest owner of the rule for consuming it, but none of the three consumers

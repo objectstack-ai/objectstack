@@ -13,10 +13,14 @@
  *    every currently-declared `isDefault` set — boot-declared stack metadata
  *    AND installed package manifests (which the registry updates at
  *    `installPackage` time, so a runtime install is visible immediately,
- *    no reboot needed) — and reconciles the table: missing → pending row;
- *    binding already present → confirmed (observed); declaration gone
- *    (uninstall / flag dropped) → pending row pruned. It runs at boot, after
- *    a package-door `permission` publish, and on every list call.
+ *    no reboot needed) — and reconciles the table: missing → pending row, or
+ *    a `confirmed` (observed) row when the binding is already present;
+ *    binding observed under an existing pending row → confirmed (observed);
+ *    declaration gone (uninstall / flag dropped) → pending row pruned. It runs
+ *    at boot, after a package-door `permission` publish, and on every list
+ *    call. Every declaration is represented either way — an `isDefault` set
+ *    the boot baseline auto-binds before the first sync is surfaced as
+ *    confirmed/observed, never omitted (#7677).
  *  - `confirmAudienceBindingSuggestion` creates the anchor binding **with the
  *    caller's execution context**, so the ADR-0090 write gates do the real
  *    enforcement: the D5/D9 audience-anchor gate (no high-privilege set on
@@ -221,7 +225,25 @@ export async function syncAudienceBindingSuggestions(
       continue;
     }
 
-    if (bound) continue; // satisfied before ever being surfaced — nothing pending
+    // No row yet. A declaration that is ALREADY satisfied is recorded as
+    // `confirmed` (observed) rather than skipped — the same end state the
+    // pending→confirmed branch above reaches, just arrived at without ever
+    // passing through `pending`. [#7677] Skipping it entirely left the whole
+    // surface empty on stock: the security plugin binds the app's `isDefault`
+    // set to `everyone` at boot BEFORE the first sync runs, so "already bound"
+    // is the normal stock case, not the exception, and the declaration was
+    // only ever surfaced after someone deleted the binding by hand.
+    //
+    // `confirmed` and not `pending` because a bound declaration is not
+    // awaiting an admin decision: `pending` is the actionable-prompt state
+    // (the console panel lists exactly `status=pending` and offers
+    // confirm/dismiss, and both service methods 409 on anything else), so a
+    // pending row here would prompt an admin to "accept" a binding that
+    // already exists. `resolved_by` is left empty, which is precisely how the
+    // object schema defines an observed row: "Empty on a confirmed row means
+    // the binding was observed (e.g. bound at boot or by hand), not confirmed
+    // through the prompt."
+    const observed = bound;
 
     try {
       await ql.insert(SUGGESTION_OBJECT, {
@@ -229,7 +251,8 @@ export async function syncAudienceBindingSuggestions(
         package_id: d.packageId,
         permission_set_name: d.set.name,
         anchor: d.anchor,
-        status: 'pending',
+        status: observed ? 'confirmed' : 'pending',
+        ...(observed ? { resolved_at: new Date().toISOString() } : {}),
       }, { context: SYSTEM_CTX });
       out.created += 1;
     } catch { /* unique-index race with a concurrent sync — benign */ }

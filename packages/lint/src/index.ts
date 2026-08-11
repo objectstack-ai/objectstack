@@ -179,6 +179,7 @@ export {
   validatePredicatePathRefs,
   PREDICATE_PATH_UNRESOLVED,
   PREDICATE_PATH_UNROOTED,
+  PREDICATE_RHS_PATH_SHAPED,
 } from './validate-predicate-path-refs.js';
 export type {
   PredicatePathFinding,

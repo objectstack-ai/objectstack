@@ -54,6 +54,14 @@
  *       a title claiming 🟢 <login> must have that login as assignee; a title
  *       claiming ⏳ vacant must have none. (Routine seats declare 🟢 Routine
  *       and are exempt from the assignee half — bots can't be assigned.)
+ *   H6  `pm:seat` sticker whose body exceeds ~10 KB — the seat-post protocol
+ *       bounds the live body to current state (six-section template, #7583,
+ *       maintainer-accepted 2026-08-11); an oversized body means shift
+ *       narration is accreting where per-card state already lives (cards,
+ *       PRs, round reports). Soft report-only signal: the remedy is a
+ *       takeover-style compaction (edit history is the archive), never
+ *       truncation. #6019 reached ~61 KB and exceeded tool read limits
+ *       before this rule existed.
  *
  * The body half of H5 (the 「当前 PM」 paragraph) is NOT machine-checked here:
  * seat-sticker bodies are prose with no pinned grammar, and a fuzzy parser
@@ -130,6 +138,18 @@ export function h5SeatStickerDesync(issue) {
   return `unrecognized status word 「${status}」`;
 }
 
+// H6 — soft size bound on seat-sticker bodies (#7583). Report-only like every
+// other item; the threshold is deliberately generous (the compacted #6019 body
+// is ~4.5 KB, the pathological one was ~61 KB) so a healthy six-section body
+// never trips it. Byte length, not code points: the read-limit failure this
+// guards against is byte-sized.
+export const SEAT_BODY_SOFT_LIMIT = 10_000;
+
+export function h6SeatBodyOversized(issue, limit = SEAT_BODY_SOFT_LIMIT) {
+  if (!labelNames(issue).includes('pm:seat')) return false;
+  return Buffer.byteLength(issue.body ?? '', 'utf8') > limit;
+}
+
 // ---------------------------------------------------------------------------
 // Live sweep
 // ---------------------------------------------------------------------------
@@ -178,6 +198,10 @@ async function sweep() {
     if (labels.includes('pm:seat')) {
       const desync = h5SeatStickerDesync(issue);
       if (desync) findings.push([issue, 'H5', desync]);
+      if (h6SeatBodyOversized(issue)) {
+        const kb = (Buffer.byteLength(issue.body ?? '', 'utf8') / 1024).toFixed(1);
+        findings.push([issue, 'H6', `seat body is ${kb} KB (soft bound ~10 KB) — compact to the six-section current-state template (#7583; edit history is the archive)`]);
+      }
     } else if ((issue.assignees ?? []).length > 0 && labels.some((l) => l.startsWith('pm:'))) {
       // H2 needs the comment thread — fetched only for candidates, and only
       // their first pages: a claim comment is posted at claim time, so on a
@@ -238,6 +262,12 @@ function selfTest() {
   t('H5: ⏳ vacant clean', h5SeatStickerDesync(issue(['pm:seat'], [], '', '[PM seat] domain:cli — ⏳ vacant')), null);
   t('H5: Routine seat needs no assignee', h5SeatStickerDesync(issue(['pm:seat'], [], '', '[PM seat] 分诊 — 🟢 Routine')), null);
   t('H5: unparseable title -> finding', typeof h5SeatStickerDesync(issue(['pm:seat'], [], '', 'devx seat registry')), 'string');
+  t('H6: seat body over the soft bound -> finding', h6SeatBodyOversized(issue(['pm:seat'], [], 'x'.repeat(10_001), '[PM seat] domain:devx — ⏳ vacant')), true);
+  t('H6: seat body at the bound -> clean', h6SeatBodyOversized(issue(['pm:seat'], [], 'x'.repeat(10_000), '[PM seat] domain:devx — ⏳ vacant')), false);
+  // Byte length, not code points: multi-byte bodies trip the bound at the same
+  // byte size the read-limit failure cares about (3 bytes per CJK char).
+  t('H6: multi-byte body measured in bytes', h6SeatBodyOversized(issue(['pm:seat'], [], '账'.repeat(3_400), '[PM seat] domain:devx — ⏳ vacant')), true);
+  t('H6: oversized body without pm:seat is out of scope', h6SeatBodyOversized(issue(['pm:queue'], [], 'x'.repeat(20_000), 'big card')), false);
 
   let failed = 0;
   for (const [name, actual, expected] of cases) {

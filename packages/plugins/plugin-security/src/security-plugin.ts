@@ -1191,29 +1191,65 @@ export class SecurityPlugin implements Plugin {
         );
       }
 
-      // [#2850] $expand sub-read gate relaxation. The engine's expand path
-      // re-enters `find` for a referenced object carrying `__expandRead` (a
-      // server-set marker; `executionContext` is never client-built). For a
-      // PUBLIC referenced object — covered by the '*' wildcard grant and thus
-      // already broadly readable — applying the object-level CRUD /
-      // requiredPermissions gate to the EXPANSION would only surface "never
-      // designed for expand" modeling gaps (over-blocking a legitimate
-      // status/owner lookup) without adding protection, since the row is
-      // already visible. So waive those two throw-gates for PUBLIC expand
-      // sub-reads only. RLS injection (step 3) and FLS masking (step 4) still
-      // run, and a PRIVATE referenced object keeps the FULL gate — expansion
-      // may reveal only rows the caller could have read directly.
-      const expandSkipCrud =
-        opCtx.operation === 'find' &&
-        opCtx.context?.__expandRead === true &&
-        !secMeta.isPrivate;
+      // [#2850 / #7626] $expand sub-reads take the FULL gate — there is no
+      // waiver here any more, and the deletion is the fix.
+      //
+      // #2850 routed the engine's expand path back through this middleware
+      // (`find` re-entered for the referenced object carrying `__expandRead`, a
+      // server-set marker `executionContext` never takes from a client), which
+      // is what put the referenced object's RLS and FLS on the expansion at
+      // all. That part stands. What it also added was a relaxation:
+      //
+      //     operation === 'find' && __expandRead && !secMeta.isPrivate
+      //         → skip the CRUD + requiredPermissions throw-gates
+      //
+      // …justified as "a PUBLIC referenced object is covered by the '*'
+      // wildcard grant and thus already broadly readable, so gating the
+      // EXPANSION adds no protection and only surfaces never-designed-for-
+      // expand modeling gaps". Neither half of that premise held (#7626):
+      //
+      //   1. `secMeta.isPrivate` reads `access.default` (ADR-0066 D2 — whether
+      //      a `'*'` wildcard COVERS the object), which is a different axis
+      //      from the `sharingModel` OWD an object declares to scope its ROWS.
+      //      `showcase_contact` declares `sharingModel: 'private'` and no
+      //      `access` block, so it read as "public" and the waiver fired for it
+      //      — as it did for every object that leaves `access` unset, which is
+      //      almost all of them.
+      //   2. "already broadly readable" was never CHECKED. The waiver asks
+      //      nothing about the caller's grants, so it fired hardest for the
+      //      caller who holds NONE — #2850's own pin waives the gate for a
+      //      permission set with `objects: {}`. Where the premise is true the
+      //      waiver is inert (the CRUD gate would pass anyway); its only
+      //      non-vacuous effect is on callers the gate meant to refuse.
+      //
+      // Measured on the real showcase app: a `contributor`-only session 403'd
+      // on `GET /data/showcase_contact/:id` received the same contact FULLY
+      // materialised — all 18 fields, `email` included — through
+      // `?$expand=contact` on an invoice it legitimately owns. Both gates were
+      // bypassed at once, because step 2.6 below stashes `__readScope` from
+      // `getEffectiveScope`, which answers `'org'` when NO set grants the op
+      // (safe only because the caller is denied separately — and the waiver is
+      // what stopped them being denied). So the skipped CRUD check also handed
+      // plugin-sharing an org-wide read depth and dissolved the OWD row scope.
+      //
+      // Removing it restores one rule for every referenced object, the rule
+      // #2850 already applied to the private half: an expansion may reveal only
+      // rows the caller could have read directly. Nothing over-blocks a
+      // legitimate lookup — `expandRelatedRecords` catches the refusal and
+      // retains the bare FK id (its documented graceful degradation), so a
+      // caller who cannot read the referenced object gets the id it already
+      // had, not an error on the parent read.
+      //
+      // `__expandRead` itself stays: it is the marker the storage/comment
+      // access hooks strip as a privileged widening input, and `core`'s
+      // operation-private-keys list is what keeps it unforgeable from the wire.
 
       // 1.5. [ADR-0066 D3/⑤] requiredPermissions AND-gate — a capability
       //      prerequisite checked BEFORE the CRUD grant (ADR §Precedence): a
       //      caller missing any required capability is denied regardless of how
       //      permissive their grants are. Per-operation (⑤): only the caps for
       //      THIS operation's CRUD class (plus any all-operations caps) apply.
-      if (permissionSets.length > 0 && !expandSkipCrud) {
+      if (permissionSets.length > 0) {
         const required = requiredCapsForOperation(secMeta.requiredPermissions, opCtx.operation);
         if (required.length > 0) {
           const held = this.permissionEvaluator.getSystemPermissions(permissionSets);
@@ -1271,7 +1307,7 @@ export class SecurityPlugin implements Plugin {
       }
 
       // 2. CRUD permission check
-      if (permissionSets.length > 0 && !expandSkipCrud) {
+      if (permissionSets.length > 0) {
         const allowed = this.permissionEvaluator.checkObjectPermission(
           opCtx.operation,
           opCtx.object,
@@ -1804,19 +1840,29 @@ export class SecurityPlugin implements Plugin {
                 if (single && isScalarId(row.owner_id)) {
                   const targetId = this.extractSingleId(opCtx);
                   if (targetId != null && this.ql) {
-                    try {
-                      // Read the pre-image under the CALLER's context (NOT
-                      // isSystem): a form echo only makes sense for a row the
-                      // caller can already see. This threads the caller's open
-                      // transaction (an in-tx echo isn't spuriously denied) AND
-                      // closes the owner-enumeration oracle a system read would
-                      // open (a caller who can't read the row gets null → deny,
-                      // indistinguishable from a non-owner).
-                      const pre = await this.getCallerPreImage(opCtx, targetId);
-                      unchanged = !!pre && pre.owner_id != null && String(pre.owner_id) === String(row.owner_id);
-                    } catch {
-                      unchanged = false; // fail closed
-                    }
+                    // Read the pre-image under the CALLER's context (NOT
+                    // isSystem): a form echo only makes sense for a row the
+                    // caller can already see. This threads the caller's open
+                    // transaction (an in-tx echo isn't spuriously denied) AND
+                    // closes the owner-enumeration oracle a system read would
+                    // open (a caller who can't read the row gets null → deny,
+                    // indistinguishable from a non-owner).
+                    //
+                    // [#7505] A throw here is NOT evidence about ownership, so
+                    // it no longer collapses into `unchanged = false`. That
+                    // catch predates the probe distinguishing "row absent"
+                    // from "could not be read": with both facts arriving as
+                    // `null` it was the only available fail-closed answer, and
+                    // it answered a store outage with `403 changing record
+                    // ownership` — a refusal an SDK also treats as terminal.
+                    // The fault now propagates (the write is still refused —
+                    // this throws before `next()`), so the caller learns the
+                    // store is down instead of that it tried to steal a
+                    // record. The oracle is untouched: an absent row, and a
+                    // row the caller cannot read, both still come back `null`
+                    // and still deny below.
+                    const pre = await this.getCallerPreImage(opCtx, targetId);
+                    unchanged = !!pre && pre.owner_id != null && String(pre.owner_id) === String(row.owner_id);
                   }
                 }
                 if (!unchanged) denyOwnerWrite(`changing record ownership on ${opCtx.operation}`);
@@ -3523,9 +3569,15 @@ export class SecurityPlugin implements Plugin {
       const packageWhere = writeWhere && typeof writeWhere === 'object'
         ? { $and: [writeWhere, { managed_by: 'package' }] }
         : { managed_by: 'package' };
+      // [#7505] No `.catch(() => null)`: a fault here is not "no package row
+      // matched". Swallowed, it stood this guard down for the duration of a
+      // store outage and let the admin-door write through — the same collapse
+      // `readRowById` carried on the by-id branch just below, and this gate
+      // must not answer one way for a single id and the opposite for a filter.
+      // The fault propagates, so the write is refused and the caller sees the
+      // outage.
       const hitsPackageRow = await this.ql
-        .findOne('sys_permission_set', { where: packageWhere, context: { isSystem: true } })
-        .catch(() => null);
+        .findOne('sys_permission_set', { where: packageWhere, context: { isSystem: true } });
       if (hitsPackageRow) {
         throw new PermissionDeniedError(
           `[Security] Access denied: this '${op}' on 'sys_permission_set' targets one or more package-managed ` +
@@ -3629,9 +3681,11 @@ export class SecurityPlugin implements Plugin {
         writeWhere && typeof writeWhere === 'object'
           ? { $and: [writeWhere, { managed_by: { $in: managedValues } }] }
           : { managed_by: { $in: managedValues } };
+      // [#7505] No `.catch(() => null)` — see the sibling gate: a swallowed
+      // fault made this asset guard answer "nothing managed matched" and admit
+      // the write. Fail-closed: propagate.
       const hitsManagedRow = await this.ql
-        .findOne(opCtx.object, { where: managedWhere, context: { isSystem: true } })
-        .catch(() => null);
+        .findOne(opCtx.object, { where: managedWhere, context: { isSystem: true } });
       if (hitsManagedRow) {
         throw new PermissionDeniedError(
           `[Security] Access denied: this '${op}' on '${opCtx.object}' targets one or more ${spec.pluralNoun} ` +
@@ -3675,21 +3729,64 @@ export class SecurityPlugin implements Plugin {
   }
 
   /**
-   * By-id row read with the standard FAIL-CLOSED contract (missing engine,
-   * null id, or a thrown read → `null`), shared by every provenance / pre-image
-   * gate. Centralising the read SHAPE keeps a future change (soft-delete filter,
-   * field projection) from drifting across the ~5 call sites that used to
-   * inline it (#3018 review — Reuse). A `null` return always DENIES downstream;
-   * it never bypasses a gate.
+   * By-id row read shared by every provenance / pre-image gate. Centralising
+   * the read SHAPE keeps a future change (soft-delete filter, field
+   * projection) from drifting across the ~5 call sites that used to inline it
+   * (#3018 review — Reuse).
+   *
+   * ## `null` means ABSENT, and only absent (#7505)
+   *
+   * This probe used to answer `null` for three different facts — the row does
+   * not exist, the engine threw (driver down, table missing, timeout), and no
+   * engine is wired — and every caller read all three as "no such row". Its
+   * own contract note claimed a `null` "always DENIES downstream"; that was
+   * true of one caller and false of the other three, in two opposite ways:
+   *
+   *   - `assertControlledByParentWrite` answered `404 RECORD_NOT_FOUND` — an
+   *     SDK treats that as TERMINAL (drop the id, do not retry) when the
+   *     truthful answer was a transient outage it should have backed off on;
+   *   - the two admin-door provenance gates
+   *     (`assertPackageManagedWriteGate`, `assertSystemRowWriteGate`) read
+   *     `null` as "this row is not package/platform-managed" and let the write
+   *     THROUGH — fail-OPEN, the whole guard silently stood down for the
+   *     duration of a store fault.
+   *
+   * Maintainer ruling of 2026-08-11 on #7505: FAIL-CLOSED. An engine fault
+   * PROPAGATES out of this probe instead of being flattened, so the write is
+   * refused and the caller is told what actually happened. The error is
+   * re-thrown exactly as thrown — objectql's `DatasourceUnavailableError`
+   * keeps its `ERR_DATASOURCE_UNAVAILABLE` code and both transports map that
+   * to `503` (`rest-server.ts`'s `mapDataError`) — because this gate is not
+   * the producer of that condition and has nothing to add to it. Wrapping it
+   * in a security code would relabel a dependency outage as an authorization
+   * event and would register a second spelling of an existing ADR-0112 ledger
+   * entry under a package that does not own it.
+   *
+   * Every call site therefore sees exactly two outcomes: a row, or `null` for
+   * a row that is genuinely absent. Steady-state behaviour is unchanged
+   * everywhere; only the fault path moved.
+   *
+   * The probe reads under whatever context the caller passes — `isSystem` for
+   * the provenance / existence gates, the CALLER's context for the pre-image —
+   * and that choice is the caller's, not this method's.
    */
   private async readRowById(object: string, id: unknown, context: any): Promise<Record<string, unknown> | null> {
-    if (id == null || typeof this.ql?.findOne !== 'function') return null;
-    try {
-      const row = await this.ql.findOne(object, { where: { id }, context });
-      return row && typeof row === 'object' ? (row as Record<string, unknown>) : null;
-    } catch {
-      return null;
+    // Not a read at all: there is no id to look one up by. Every call site
+    // already screens this; the guard is defence, and `null` is honest here
+    // because nothing was ever asked of the store.
+    if (id == null) return null;
+    if (typeof this.ql?.findOne !== 'function') {
+      // The third collapsed fact, and it is not absence either: the probe
+      // could not run. Unreachable in a real deployment — `start()` registers
+      // no security middleware at all without a query engine, so no gate can
+      // reach this line — but a non-conforming engine double must fail closed
+      // rather than manufacture a 404 for a row nobody looked for.
+      throw new Error(
+        `[Security] Cannot verify record '${String(id)}' on '${object}': no query engine is available to read it.`,
+      );
     }
+    const row = await this.ql.findOne(object, { where: { id }, context });
+    return row && typeof row === 'object' ? (row as Record<string, unknown>) : null;
   }
 
   /**
@@ -3699,6 +3796,12 @@ export class SecurityPlugin implements Plugin {
    * this collapses the two reads into one. Safe: no write to the row happens
    * between the gates (the driver write runs after the whole middleware pass),
    * so the pre-image is stable within the operation.
+   *
+   * [#7505] `null` here means the row is absent OR invisible to the caller —
+   * both of which DENY at every consumer, and are deliberately
+   * indistinguishable (the owner-enumeration oracle). A store fault is neither:
+   * it propagates. Nothing is memoized on the fault path, so a retry within the
+   * same operation re-probes rather than caching an outage as a verdict.
    */
   private async getCallerPreImage(opCtx: any, id: unknown): Promise<Record<string, unknown> | null> {
     if (id == null) return null;
@@ -4135,6 +4238,12 @@ export class SecurityPlugin implements Plugin {
    *     ({@link DetailRecordNotFoundError})
    *   - the detail's master reference is empty → `422 MISSING_REQUIRED_FIELD`
    *     ({@link MasterReferenceMissingError})
+   *
+   * [#7505] A seventh outcome is not a leg of this gate at all: if the store
+   * cannot be read, the engine's own error propagates (typically
+   * `ERR_DATASOURCE_UNAVAILABLE` → `503`) and this gate answers nothing. It
+   * used to answer the 404 above, because the existence probe flattened a
+   * fault into "absent" — the one thing an outage must never be reported as.
    */
   private async assertControlledByParentWrite(
     permissionSets: PermissionSet[],
@@ -4194,6 +4303,15 @@ export class SecurityPlugin implements Plugin {
     const masterWriteFilter = await this.computeRlsFilter(permissionSets, rel.master, 'update', context);
     if (masterWriteFilter) {
       let visible: unknown = null;
+      // [#7505] This catch STAYS, and the difference from the existence probe
+      // above is the whole per-caller distinction the ruling asks for. That
+      // probe asks "does this row exist" — a question an outage leaves
+      // unanswered, and answering it "no" is a lie with a terminal 404 on it.
+      // This one asks "is the master VISIBLE to you under your own write
+      // policy" — a question whose fail-closed default IS "not visible", which
+      // is what the 403 below says. The ruling names this probe (and the
+      // sharing half beneath it) as the house fail-closed posture to match,
+      // not as a site to change.
       try {
         visible = await this.ql.findOne(rel.master, {
           where: { $and: [{ id: masterId }, masterWriteFilter] },

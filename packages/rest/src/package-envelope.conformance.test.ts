@@ -72,7 +72,7 @@ function mount(svc: Svc, options: any = {}) {
   // the gate (holding both the read and write capability); a test can override
   // `resolveExecutionContext` to exercise the gate itself. The gate itself is
   // pinned in the `packages authz` describe at the bottom of this file.
-  registerPackageRoutes(server, svc as any, '/api/v1', {
+  registerPackageRoutes(server, () => svc as any, '/api/v1', {
     resolveExecutionContext: async () => ({
       userId: 'u_pkg', systemPermissions: ['manage_metadata', 'studio.access', 'setup.access'],
     }),

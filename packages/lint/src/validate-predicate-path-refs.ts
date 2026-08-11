@@ -115,6 +115,88 @@
  * both halves: the root is still spelled `data` at every depth, and the object it
  * binds is the ROW. This rule descends with the same rebinding, which is what
  * makes the shipped corpus read 0 instead of 16 false positives.
+ *
+ * ## The right-hand side is a different question entirely (#7659)
+ *
+ * Both rules above ask whether a path RESOLVES. `data.a == data.b` answers yes
+ * twice and is still broken, because the right-hand **position** does not
+ * evaluate paths at all. objectui's metadata-admin evaluator
+ * (`packages/app-shell/src/views/metadata-admin/predicate.ts`) resolves the LEFT
+ * side through `resolveValue` and hands the RIGHT side to `parseLiteral`, whose
+ * tail returns anything it does not recognise as a literal VERBATIM — so
+ * `data.a == data.b` compares `data.a`'s value against the seven-character
+ * string `"data.b"`. It is FALSE however equal the two sides are, and
+ * `data.a != data.b` is correspondingly TRUE. The declared subset says so
+ * (`path == 'literal'`, never `path == path`), but until objectui#4049 the
+ * boundary was enforced by silence, and #7010's resolution check cannot reach
+ * it: both paths resolve, so there is nothing for it to report.
+ *
+ * ### One grammar, two enforcement points
+ *
+ * {@link PATH_SHAPED_RHS} is quoted verbatim from the consumer's
+ * `PATH_SHAPED_LITERAL` (objectui PR #4264, verified against
+ * `objectstack-ai/objectui@37cd8e4` rather than against the issue body — a regex
+ * relayed through two issue texts is exactly the thing that drifts by a
+ * character). Producer and renderer must refuse and warn about the same set, or
+ * an author fixes one door and trips the other.
+ *
+ * The token comes from the canonical AST, not from re-splitting the source: a
+ * `==` / `!=` node whose right operand is a plain identifier or a `.`-chain of
+ * identifiers. That agrees with the consumer on every shape it can reach —
+ * `foo(1)`, `data.b[0]` and `-3` all fail the consumer's regex on their text and
+ * all fail `memberChain` here — and it costs exactly one case: an identifier
+ * containing `$`, which the grammar admits but CEL's own identifier syntax does
+ * not, so `data.a == $b` never parses and is `visibility-predicate-syntax`'s
+ * (#6253) verdict rather than a missed catch here. `true` / `false` / `null` /
+ * numbers / quoted strings arrive as `value` nodes, never identifiers, so the
+ * negative controls are structural rather than a hand-maintained deny-list —
+ * the same early returns `parseLiteral` makes before its tail.
+ *
+ * ### Two severities under one id, and why that is not a hedge
+ *
+ * The shape is one question with one fix; the CONSEQUENCE splits, and the
+ * family's own bar is written on consequence — `error` where "there is no
+ * reading of the metadata under which it was going to work"
+ * (`visibility-bare-identifier`), `warning` where the predicate is merely
+ * advisory-wrong (`visibility-root-mislayered`).
+ *
+ *  - **A dotted chain** (`data.a == data.b`, or `'x' == data.a` with the sides
+ *    swapped) — `error`. Nobody writes a dotted identifier chain meaning the
+ *    literal text of it, so there is no reading under which this worked; the
+ *    verdict does not depend on the right-hand path at all, and for `==` it is
+ *    false whatever the two sides hold, which HIDES the element. That is the
+ *    same silent-wrong-verdict consequence
+ *    `predicate-path-unresolved` already gates on one function up, so gating
+ *    here is the file's existing bar, not a new one.
+ *  - **A bare single word** (`status == active`) — `warning`. This one WORKS
+ *    today, and the consumer's ruling says so in as many words: resolving the
+ *    right side was rejected precisely because "it would flip
+ *    `data.type == text`, the unquoted-string spelling that works today by
+ *    accident, into a fail-open `true`". An author who meant the text gets the
+ *    text. It is still outside the declared subset and still stops working when
+ *    ROADMAP M9 swaps this evaluator for `@objectstack/formula` (bare `active`
+ *    becomes an undeclared reference), so it must be reported — but refusing a
+ *    `view` write at the runtime publish door over metadata that renders
+ *    correctly is a false build error in the one direction a gate may not fail
+ *    in.
+ *
+ * ### What this rule deliberately does NOT do
+ *
+ *  - **Suppress the resolution limbs.** `data.a == data.tpye` reports twice —
+ *    once because `tpye` is not a key, once because the position is a literal.
+ *    Both statements are true and their fixes differ, and #7214's behaviour is
+ *    not this rule's to narrow.
+ *  - **Judge `in`'s array parse.** The same `parseLiteral` tail is reachable
+ *    through `x in [...]` (objectui#4266), which is a distinct defect in the
+ *    consumer and deliberately not folded in here.
+ *  - **Descend into a comprehension macro body.** `data.tags.all(t, t == x)`
+ *    binds `t` inside the body; the interim evaluator supports no macros at all,
+ *    so a comparison in there is not a statement about this subset. The receiver
+ *    is still walked.
+ *  - **Reach a form whose `schemaId` resolves to no schema.** This rule needs no
+ *    oracle, but it shares the walk with the two that do, and that walk stops at
+ *    an unresolvable `schemaId`. A missed catch in the safe direction, stated
+ *    here rather than silently inherited.
  */
 
 import { parseCelToAst } from '@objectstack/formula';
@@ -126,8 +208,18 @@ import { formViewSites } from './view-walk.js';
 
 export const PREDICATE_PATH_UNRESOLVED = 'predicate-path-unresolved';
 export const PREDICATE_PATH_UNROOTED = 'predicate-path-unrooted';
+/**
+ * A `==` / `!=` RIGHT-hand side that is path-shaped — an unquoted identifier
+ * chain (#7659). See the module note's §The right-hand side for the two
+ * severities this one id carries and why they are not the same defect.
+ */
+export const PREDICATE_RHS_PATH_SHAPED = 'predicate-rhs-path-shaped';
 
-/** Both rules GATE — see the module note for why each is safe at `error`. */
+/**
+ * The two path-RESOLUTION rules always GATE; {@link PREDICATE_RHS_PATH_SHAPED}
+ * gates on a dotted chain and is advisory on a bare word — see the module note
+ * for why the same shape earns two answers.
+ */
 export type PredicatePathSeverity = 'error' | 'warning';
 
 export interface PredicatePathFinding {
@@ -384,6 +476,57 @@ function rootedPaths(node: unknown, out: string[][]): void {
 }
 
 /**
+ * The identifier grammar a path-shaped right-hand side matches — quoted
+ * verbatim from objectui's `PATH_SHAPED_LITERAL`
+ * (`packages/app-shell/src/views/metadata-admin/predicate.ts`, objectui#4049 /
+ * PR #4264). One grammar, two enforcement points: the renderer warns on exactly
+ * this set in dev, and this rule refuses it at the publish door.
+ *
+ * Every chain {@link memberChain} can build already satisfies it (CEL's
+ * identifier syntax is a strict subset — no `$`), so today it accepts
+ * everything it is handed. It stays as the DEFINITION rather than as a
+ * comment: it is the line a reviewer diffs against the consumer, and it is the
+ * boundary if either side ever widens.
+ */
+const PATH_SHAPED_RHS = /^[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)*$/;
+
+/** The comparison operators whose right side the renderer parses as a literal. */
+const EQUALITY_OPS = new Set(['==', '!=']);
+
+/** One `==` / `!=` site: the operator as written, and its right operand. */
+interface EqualitySite {
+  op: string;
+  right: unknown;
+}
+
+/**
+ * Every `==` / `!=` comparison in the AST, with its RIGHT operand.
+ *
+ * A comprehension macro's BODY is skipped (its receiver is not) — see the
+ * module note. Written as an explicit early return rather than a filter on the
+ * results, so the boundary is visible where the walk makes it.
+ */
+function equalitySites(node: unknown, out: EqualitySite[]): void {
+  if (Array.isArray(node)) {
+    for (const child of node) equalitySites(child, out);
+    return;
+  }
+  if (!isNode(node)) return;
+  const args = node.args;
+  if (
+    node.op === 'rcall' && Array.isArray(args) && typeof args[0] === 'string'
+    && COMPREHENSION_MACROS.has(args[0])
+  ) {
+    equalitySites(args[1], out);
+    return;
+  }
+  if (typeof node.op === 'string' && EQUALITY_OPS.has(node.op) && Array.isArray(args) && args.length === 2) {
+    out.push({ op: node.op, right: args[1] });
+  }
+  equalitySites(args, out);
+}
+
+/**
  * Split the AST's identifiers into the ones used as a NAMESPACE (`a.b`, `a?.b`,
  * `a['b']`, `a.exists(…)`) or BOUND by a comprehension macro, and the plain
  * value references. Only the latter can be a dropped root.
@@ -522,6 +665,49 @@ function checkPredicate(
         + `still spelled \`${ROOT}\` (there is no implicit row scope).`,
     });
   }
+
+  // ── `predicate-rhs-path-shaped` (#7659) ──
+  //
+  // Deliberately independent of `scope`: this asks about the POSITION a token
+  // sits in, never about what it resolves to. It therefore runs even where the
+  // two limbs above went opaque, and it does not suppress them — see the module
+  // note's §The right-hand side.
+  const sites: EqualitySite[] = [];
+  equalitySites(ast, sites);
+  for (const { op, right } of sites) {
+    const chain = memberChain(right);
+    if (!chain) continue;
+    const text = chain.join('.');
+    if (!PATH_SHAPED_RHS.test(text)) continue;
+    const dotted = chain.length > 1;
+    findings.push({
+      severity: dotted ? 'error' : 'warning',
+      rule: PREDICATE_RHS_PATH_SHAPED,
+      where,
+      path,
+      message: dotted
+        ? `predicate compares against \`${text}\` on the RIGHT of \`${op}\`, which is a path but is `
+          + `not evaluated as one. A metadata-editing form resolves paths on the LEFT of \`${op}\` `
+          + `only; the right-hand side goes to the literal parser, so \`${text}\` is compared as the `
+          + `literal string "${text}". The verdict therefore does not depend on the right-hand path `
+          + `at all: \`a == ${text}\` is FALSE even when both sides hold the same value, and `
+          + `\`a != ${text}\` is correspondingly TRUE. An \`==\` written this way hides the element `
+          + `on every row, and nothing in the console says why (objectui#4049).`
+        : `predicate compares against the unquoted word \`${text}\` on the RIGHT of \`${op}\`. The `
+          + `right-hand side of \`${op}\` is a literal, never a reference, so this is read as the `
+          + `literal string "${text}" — which is probably what you meant, and is why it appears to `
+          + `work. It is outside the declared subset all the same (\`path == 'literal'\`), it is `
+          + `indistinguishable from a dropped \`${ROOT}.\` root, and it stops working when this `
+          + `surface moves to the real CEL evaluator, where a bare \`${text}\` resolves to nothing `
+          + `(objectui#4049).`,
+      hint:
+        `Two sanctioned spellings. (1) If you meant the TEXT, quote it: \`${op} '${text}'\`. `
+        + `(2) If you meant the PATH, restructure so the path is on the LEFT and a literal is on `
+        + `the right — comparing one path against another is outside the subset this surface `
+        + `renders, which is \`path == 'literal'\` / \`path != 'literal'\` and nothing wider. There `
+        + `is no third spelling that compares two paths here.`,
+    });
+  }
 }
 
 function walkFields(
@@ -567,11 +753,18 @@ function walkFields(
  * resolves, is skipped: see the module note for why the `record.*` layer is out
  * of scope rather than merely unimplemented.
  *
- * Both rules emit `error` and the caller is expected to fail the build on them.
- * The corpus measurement behind that severity is on the PR for #7010: over the
- * shipped `METADATA_FORM_REGISTRY` (17 forms, 46 predicates) the count is **0**
- * for both, and 16 for `predicate-path-unrooted` once #6254's pre-fix
- * `object.form.ts` is restored.
+ * Both path-resolution rules emit `error` and the caller is expected to fail the
+ * build on them. The corpus measurement behind that severity is on the PR for
+ * #7010: over the shipped `METADATA_FORM_REGISTRY` (17 forms, 46 predicates) the
+ * count is **0** for both, and 16 for `predicate-path-unrooted` once #6254's
+ * pre-fix `object.form.ts` is restored.
+ *
+ * The third rule, `predicate-rhs-path-shaped` (#7659), asks a different question
+ * about the same predicates — whether a `==` / `!=` RIGHT-hand side is
+ * path-shaped, which the renderer parses as a literal — and carries two
+ * severities: `error` on a dotted chain, `warning` on a bare word. Its corpus
+ * count over the same shipped forms is **0** at both severities. See the module
+ * note.
  *
  * Returns findings (empty = clean).
  */

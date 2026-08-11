@@ -350,7 +350,10 @@
 import { isFilterAST, parseFilterAST, VALID_AST_OPERATORS } from '@objectstack/spec/data';
 import { StandardErrorCode } from '@objectstack/spec/api';
 import {
+  CROSS_FIELD_COMPARISON_OPERATORS,
+  fieldReferenceComparandMessage,
   isBindableComparand,
+  isFieldReference,
   isRenderableTextComparand,
   TEXT_PATTERN_OPERATORS,
   unbindableListMemberMessage,
@@ -559,10 +562,18 @@ function andOf(children: NormalizedFilterNode[]): NormalizedFilterNode | null {
  * `FilterCondition` that never passes through here — and carries the same two
  * checks in its own fail-closed envelope.
  *
- * Only the two shapes #5234 measured are refused; `$eq` and friends keep binding
- * an object as JSON (`toSqlBindValue`), which is a separate account.
+ * Three shapes are refused: the two #5234 measured, and — since #7598 — a
+ * `{$field}` reference in the comparand of a scalar comparison, the position
+ * both of #5234's checks are simply never asked about. `$eq` and friends keep
+ * binding any OTHER object as JSON (`toSqlBindValue`), which remains a separate
+ * account.
  */
 function assertCompilableComparand(opKey: string, field: string, value: unknown): void {
+  // [#7598] The field-reference arm runs FIRST, and only over the positions that
+  // were BOUND — see {@link assertNoFieldReferenceComparand} for the measured
+  // table, for why the LIKE / list positions keep their own (converging) wording
+  // instead, and for why refusing is the answer rather than compiling.
+  assertNoFieldReferenceComparand(opKey, field, value);
   if (TEXT_PATTERN_OPERATORS.has(opKey)) {
     // An array reaches this door as `values[0]` — i.e. every member after the
     // first is silently DROPPED — while `read-scope-sql` and `driver-sql`
@@ -580,6 +591,79 @@ function assertCompilableComparand(opKey: string, field: string, value: unknown)
       }
     });
   }
+}
+
+/**
+ * [#7598] A `{ $field: 'col' }` reference in a comparand position this door
+ * BOUND instead of refusing.
+ *
+ * ## The measured cell, on `origin/main` (`5823d593d`)
+ *
+ * `{ amount: { $gt: { $field: 'budget' } } }` produced the leaf
+ * `{member: 'amount', operator: 'gt', values: [{$field: 'budget'}]}` — and then
+ * the THREE consumers of that leaf answered three different ways, which is the
+ * split this module's header spends its length removing:
+ *
+ * | consumer | answer |
+ * |---|---|
+ * | `NativeSQLStrategy` (the statement that executes) | `WHERE amount > $1`, bound to the JSON TEXT `{"$field":"budget"}` |
+ * | `ObjectQLStrategy.generateSql` (the `/analytics/sql` echo) | `WHERE amount > $1`, bound to the reference OBJECT |
+ * | `ObjectQLStrategy.convertFilter` (the engine path) | `{amount: {$gt: {$field: 'budget'}}}` — reaches `driver-sql`, which COMPILES it correctly since #5222 |
+ *
+ * Two wrong answers and one right one, chosen by which strategy the datasource
+ * routed to. The two wrong ones are wrong in the silent way (#3650 / #5234): a
+ * valid statement comparing a column against a value no row can hold, so a
+ * widget draws an empty chart with nothing to read.
+ *
+ * ## Why this refuses instead of compiling — and what it costs
+ *
+ * ⚠️ Refusing at the door NARROWS the engine path, which today passes the
+ * reference through to a driver that handles it properly. That cost is taken
+ * deliberately and is the part to re-open if the maintainer rules otherwise:
+ *
+ *   - the pass-through is an ACCIDENT of {@link convertFilter} forwarding an
+ *     unrecognised comparand, not a capability this package implements — nothing
+ *     here validates it, and no test pinned it;
+ *   - leaving it makes one authored `where` mean two things depending on the
+ *     backend behind the cube, which is the exact "whichever face took the query
+ *     is the answer you get" split #5146 / #5332 / #5567 / #5298 each spent a
+ *     round removing — and the loud half of it would still be missing, since the
+ *     other two emitters cannot be made to agree;
+ *   - the four #5222 rulings that make a referenced column name safe in a SQL
+ *     identifier position (declared-only enumeration, declared types for the
+ *     comparison class, the tenant-isolation column, federation) turn on
+ *     metadata `StrategyContext` does not expose, so this door cannot enforce
+ *     them for the two emitters that would need it.
+ *
+ * So the package answers ONE way, loudly, exactly as it already does for
+ * `{$contains: {$field: …}}` — a refusal that CONVERGES with `driver-sql`'s own
+ * #5222 refusal arm. Whether the capability should instead be IMPLEMENTED here
+ * (which needs a `StrategyContext` hook, i.e. a `packages/spec` change) is the
+ * open question on #7598, and is deliberately not decided by this gate.
+ *
+ * ## Positions
+ *
+ * Only the ones that were bound: the six scalar comparison operators'
+ * whole comparand ({@link CROSS_FIELD_COMPARISON_OPERATORS}) and the two
+ * `$between` endpoints. `$between` needs naming because its branch in
+ * {@link fieldLeaves} lowers to `gte` / `lte` leaves BEFORE this gate is
+ * consulted, so its endpoints were the one position no shape gate on this door
+ * ever saw. The LIKE family and `$in` / `$nin` members keep their existing
+ * wording — they were already refused here AND on `driver-sql`.
+ */
+function assertNoFieldReferenceComparand(opKey: string, field: string, value: unknown): void {
+  if (CROSS_FIELD_COMPARISON_OPERATORS.has(opKey) && isFieldReference(value)) {
+    throw invalidFilterError(
+      `[analytics] ${fieldReferenceComparandMessage(opKey, field, value.$field)}`,
+    );
+  }
+  if (opKey !== '$between' || !Array.isArray(value)) return;
+  value.forEach((member, index) => {
+    if (!isFieldReference(member)) return;
+    throw invalidFilterError(
+      `[analytics] ${fieldReferenceComparandMessage(opKey, field, member.$field, `index ${index}`)}`,
+    );
+  });
 }
 
 /**
@@ -880,6 +964,13 @@ function fieldLeaves(key: string, raw: unknown): NormalizedFilterNode[] {
               `${JSON.stringify(v)}. Dropping the predicate would silently widen the query to every row.`,
             );
           }
+          // [#7598] The endpoints are comparands in their own right, and this
+          // branch RETURNS before `assertCompilableComparand` below — so a
+          // reference in a `$between` bound was the one comparand position on
+          // this door that no shape gate ever saw. Asserted under the `$between`
+          // name, not under the `gte` / `lte` the bounds lower to, because the
+          // author wrote `$between` and that is the key they have to repair.
+          assertNoFieldReferenceComparand(opKey, key, v);
           leaf('gte', [comparand(v[0])]);
           leaf('lte', [comparand(v[1])]);
           continue;

@@ -8,7 +8,7 @@
       "title": "os dev boots to healthy with a loginable seeded admin, honest DB selection, reported port shifts, and a staleness warning",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P0",
       "surface": "cli",
       "personas": ["operator (local shell)"],
@@ -25,7 +25,8 @@
         "stop; in a scratch dir with NO objectstack.config.ts and no --artifact, run `os dev; echo $?` and capture the message",
         "back in the app dir with the server DOWN, touch a src file so it is newer than dist/objectstack.json, boot WITHOUT --compile, and capture the staleness warning block",
         "with instance A still running, boot instance B on the same requested port and capture the '↪ server bound to port <actual> (requested <requested>)' line",
-        "run once with NONE of --database/--fresh/env-db set and record the printed Database line (must be the project-anchored file:<cwd>/.objectstack/data/dev.db); then run with `--fresh` and record the '🧪 Fresh OS_HOME' tempdir line and its deletion on exit",
+        "run once with NONE of --database/--fresh/env-db set and no config-declared default datasource, and record the printed Database line (must be the project-anchored UNIFIED default file:<cwd>/.objectstack/data/objectstack.db); then run with `--fresh` and record the '🧪 Fresh OS_HOME' tempdir line (its DB is the SAME unified filename under the ephemeral home) and its deletion on exit",
+        "legacy compat-read: in a scratch project whose .objectstack/data holds a legacy dev.db and NO objectstack.db, boot with nothing chosen and capture both the Database line (must resolve to the legacy file — never a fresh empty objectstack.db beside it) and the one loud notice line naming that file and how to converge on the unified name",
         "capture `echo $?` after every terminated invocation"
       ],
       "acceptance": [
@@ -42,9 +43,9 @@
           "evidence": "the two auth responses"
         },
         {
-          "clause": "DB selection honors the resolveDefaultDevDbUrl matrix: with nothing chosen, dev defaults to the PERSISTENT project-anchored sqlite file (.objectstack/data/dev.db) — never the serve default of :memory: that wipes work on restart",
+          "clause": "DB selection honors the ONE shared resolution matrix (#6469 resolveProjectDatabaseUrl, which dev maps its flags onto via resolveDevDatabase and start/migrate resolve through too): with nothing chosen, dev defaults to the PERSISTENT project-anchored sqlite file — the unified <state dir>/data/objectstack.db, i.e. .objectstack/data/objectstack.db under the project — never the historical serve default of :memory: that wipes work on restart",
           "oracle": "log",
-          "verify": "the printed Database key-value per variant matches the matrix (default file path; -d url; --fresh tempdir; env url; memory driver imposes no file default)",
+          "verify": "the printed Database key-value per variant matches the matrix, tier for tier (explicit -d url; env url; memory driver imposes no file default; config-declared default datasource; legacy dev.db/standalone.db compat-read WITH its notice line; otherwise the unified objectstack.db default) — and dev carries no fallback filename of its own",
           "evidence": "the per-variant Database boot lines"
         },
         {
@@ -73,31 +74,37 @@
         }
       ],
       "negative": [
-        "a dev boot that wipes an existing dev DB when the user chose nothing (a regression to the :memory: serve default) is the FAIL the persistent default exists for",
+        "a dev boot that wipes an existing dev DB when the user chose nothing (a regression to the historical :memory: serve default) is the FAIL the persistent default exists for",
+        "a boot that silently opens a fresh empty objectstack.db beside an existing legacy dev.db — or reads the legacy file WITHOUT printing the notice — is a FAIL: the compat-read exists so an established dev environment never looks like data loss",
         "an auto-shifted port that is not reported (URL printed for the requested port while the server bound elsewhere) is a FAIL"
       ],
       "variants": [
-        "default: file:<cwd>/.objectstack/data/dev.db (persistent, imposed only when nothing else chosen)",
+        "unified default: file:<cwd>/.objectstack/data/objectstack.db (persistent, imposed only when nothing else chosen)",
         "--database <url> (explicit; no default imposed)",
-        "--fresh (ephemeral tempdir OS_HOME; implies --seed-admin)",
-        "OS_DATABASE_URL / DATABASE_URL env (env wins over the default)",
-        "--database-driver memory / OS_DATABASE_DRIVER=memory (explicit in-memory; no file default)"
+        "--fresh (ephemeral tempdir OS_HOME; same unified filename under it; implies --seed-admin)",
+        "OS_DATABASE_URL / DATABASE_URL / TURSO_DATABASE_URL env (env wins over the default)",
+        "--database-driver memory / OS_DATABASE_DRIVER=memory (explicit in-memory; no file default)",
+        "config-declared default datasource (the project config's default home wins over the unified default)",
+        "legacy compat-read: an existing dev.db / standalone.db when no objectstack.db exists (resolved WITH one loud notice line; probe order objectstack.db → dev.db → standalone.db)"
       ],
       "traps": ["stale-dist", "stale-console-bundle", "shared-browser-tab"],
       "source": [
-        "packages/cli/src/commands/dev.ts (resolveDefaultDevDbUrl matrix; --fresh coverage note #5594; seed-admin idempotency contract; IPC bound-port report; #5148 staleness warning + rebuild-restart coordinator)",
+        "packages/cli/src/commands/dev.ts (resolveDevDatabase — dev's ONE resolution seam onto the shared matrix, carrying no fallback filename of its own; the persistent-default rationale; --fresh coverage note #5594; seed-admin idempotency contract; IPC bound-port report; #5148 staleness warning + rebuild-restart coordinator)",
+        "packages/runtime/src/resolve-project-database.ts (#6469 resolveProjectDatabaseUrl — the shared priority matrix explicit → env → memory driver → config-declared default datasource → unified <state dir>/data/objectstack.db, the state-dir order homeDir/OS_HOME/<projectRoot>/.objectstack/~/.objectstack, and the legacy dev.db/standalone.db compat-read with its loud notice)",
+        "packages/cli/src/commands/unified-db-resolution.pin.test.ts (pins dev/start/migrate all resolving through that one seam)",
         ".claude/skills/dogfood-verification/SKILL.md §0–§1 (port isolation, health probe, fixed admin creds, /_console layout)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-07", "change": "new area item: the os dev boot contract read directly out of dev.ts (DB-selection matrix as variants, seed idempotency, port-shift reporting, #5148 staleness warning, #5594 fresh-isolation carve-out) plus the dogfood skill's boot shapes", "ref": "claude/platform-test-checklist-ocwugl" }
+        { "revision": 1, "date": "2026-08-07", "change": "new area item: the os dev boot contract read directly out of dev.ts (DB-selection matrix as variants, seed idempotency, port-shift reporting, #5148 staleness warning, #5594 fresh-isolation carve-out) plus the dogfood skill's boot shapes", "ref": "claude/platform-test-checklist-ocwugl" },
+        { "revision": 2, "date": "2026-08-11", "change": "text refresh only, no property change: the DB-selection clause, step, variants and sources named the retired resolveDefaultDevDbUrl helper and the .objectstack/data/dev.db default, both superseded by #6469's unified <state dir>/data/objectstack.db resolved through the shared resolveProjectDatabaseUrl (dev's seam is now resolveDevDatabase). Re-derived from dev.ts + resolve-project-database.ts: added the config-datasource and legacy compat-read tiers as variants, a step and negative for the legacy dev.db notice, and the pin test to sources. The load-bearing assertion is UNCHANGED in substance — nothing-chosen still defaults to a PERSISTENT project-anchored sqlite file, never :memory:", "ref": "#7650" }
       ]
     },
     {
       "id": "cli.build-own-contract",
-      "title": "os build's own contract: exit 0/1 only, located errors for schema and author-time rule failures, artifact + stats output, warnings never flip the exit",
+      "title": "os build's own contract: no computed value in the exit slot, located errors for schema and author-time rule failures, artifact + stats output, warnings never flip the exit",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "build",
       "personas": ["operator (local shell)"],
@@ -114,6 +121,8 @@
         "break an author-time rule: author a flow whose Approval node approver expression does not parse (the #4409 worked example that once built green while os lint rejected it) and run `os build; echo $?`",
         "re-run both failing builds with --json and capture the failure payloads",
         "restore the config, add one UNDECLARED authoring key (the #3786 advisory class) and run `os build; echo $?` — the warning prints, the build passes",
+        "the exit-slot pair: make the config throw at LOAD time and run BOTH `os build; echo $?` (human path — expect oclif's ExitError 2 out of compile.ts's this.error() catch) and `os build --json; echo $?` (expect 1 via emitJson) — the pair that separates the framework's error exit from the #4873 leak",
+        "repeat one successful run and one failing run verbatim and compare the two exit codes each time — a code that MOVES between identical runs is the #4873 signature, and only a repeat can see it",
         "confirm `os build` and `os compile` produce identical behavior on the same input (build is the documented alias)"
       ],
       "acceptance": [
@@ -142,10 +151,10 @@
           "evidence": "the paired --json payloads"
         },
         {
-          "clause": "exit codes are exactly 0 or 1 (the CliExitCode union) — never a count, never a duration",
+          "clause": "#4873 exit-code honesty: the exit code is a STATUS, never a computed value — no duration, count or finding total ever reaches the exit-code slot. The legitimate exits are 0 and 1 through the CliExitCode union (every emitJson/emitText caller, i.e. both --json paths here), plus oclif's ExitError 2 when the human path (the run without --json) ends in this.error(): a config-load-time throw exiting 2 is the framework's error exit and is NOT a violation of this clause — cli.flag-command-error-ux pins that same 2 as the correct oclif error code, and the two items must not disagree",
           "oracle": "build",
-          "verify": "echo $? across all runs is only ever 0 or 1 (the type that pins the #4873 class for every emitJson caller)",
-          "evidence": "the collected exit codes"
+          "verify": "every observed exit is 0, 1, or an oclif 2 from a this.error() path, AND none of them varies with the run: the #4873 shape is a value that TRACKS something (timer.elapsed() in emitJson's positional exit slot made a fully successful run exit 531 & 0xFF = 19, a different nonzero every time). Repeat one success and one failure to show the codes are stable; a nonzero that is neither 1 nor an oclif error exit, or any code that changes between two identical runs, FAILS",
+          "evidence": "the collected exit codes with the --json and human paths labelled separately, plus the repeat runs showing each code is stable"
         },
         {
           "clause": "advisories never flip the exit: the undeclared-authoring-key build warns visibly AND exits 0 — both sides of the warn/fail line",
@@ -156,16 +165,20 @@
       ],
       "negative": [
         "exit 0 with no artifact written, or nonzero on the clean config, is a FAIL",
+        "an exit code that tracks a computed value — a duration, a count, a finding total — is the #4873 leak this item's exit clause exists for: a SUCCESSFUL run exiting nonzero, or any code that differs between two identical runs, FAILS. Oclif's fixed ExitError 2 on a this.error() path is NOT that leak and must not be filed as one (that reading is what collided with cli.flag-command-error-ux, reconciled in #7648)",
         "the DEEP gate content (date-arithmetic formula errors, retired-key tombstones) is api-backend.formula-gates / api-backend.enforce-or-remove-authoring-gates — cite pinned passes there; this item owns only the build's OWN exit/error/output contract"
       ],
       "traps": ["stale-dist"],
       "source": [
-        "packages/cli/src/commands/compile.ts (the full gate pipeline: Zod parse, #4409 author-time rule registry, #3786 unknown-key advisory, --json shapes, #3782 conversion-notice parity) + build.ts (alias)",
-        "packages/cli/src/utils/format.ts (CliExitCode = 0 | 1 — the narrowed exit-code slot)",
+        "packages/cli/src/commands/compile.ts (the full gate pipeline: Zod parse, #4409 author-time rule registry, #3786 unknown-key advisory, --json shapes, #3782 conversion-notice parity; the human-path catches ending in this.error() — oclif's ExitError 2 — while the --json branch answers through emitJson + this.exit(1)) + build.ts (alias)",
+        "packages/cli/src/utils/format.ts (CliExitCode = 0 | 1 — the narrowed emitJson/emitText exit slot, NOT a bound on oclif's own error exit)",
+        "packages/cli/src/utils/format.exit-code.test.ts (the #4873 pin: the defect was an argument in the wrong slot — timer.elapsed() landing in emitJson's positional exit code — and a number can no longer reach it at all)",
+        "cli.flag-command-error-ux (the sibling item that owns oclif's exit 2 — cross-referenced so the two never re-collide)",
         "api-backend.formula-gates, api-backend.enforce-or-remove-authoring-gates (gate content — cross-referenced, not duplicated)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-07", "change": "new item: the build command's own contract (exit-code discipline, located schema + rule errors, --json parity, advisory both-sides) read from compile.ts, with the gate-content items cross-referenced instead of re-proven", "ref": "claude/platform-test-checklist-ocwugl" }
+        { "revision": 1, "date": "2026-08-07", "change": "new item: the build command's own contract (exit-code discipline, located schema + rule errors, --json parity, advisory both-sides) read from compile.ts, with the gate-content items cross-referenced instead of re-proven", "ref": "claude/platform-test-checklist-ocwugl" },
+        { "revision": 2, "date": "2026-08-11", "change": "narrowed the exit-code clause to the #4873 duration-leak it exists to pin. As phrased ('exactly 0 or 1') it also forbade oclif's standard ExitError 2, which compile.ts's human-path this.error() catches legitimately produce on a config-load-time throw — so it contradicted cli.flag-command-error-ux, which asserts that same 2 is correct, and a run reported the collision as a product violation (#7648). The clause now pins what #4873 was: a computed value (duration/count) reaching the exit slot, detectable as a nonzero on success or a code that moves between identical runs; 0/1 via CliExitCode and oclif's fixed 2 on the human path are named as legitimate. Still load-bearing — a duration in the exit slot FAILS it — with a repeat-run step and a negative added to keep it falsifiable, and the CliExitCode source note corrected to say it narrows the emitJson/emitText slot, not oclif's error exit", "ref": "#7648" }
       ]
     },
     {

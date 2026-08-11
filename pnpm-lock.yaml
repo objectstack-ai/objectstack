@@ -2082,6 +2082,9 @@ importers:
         specifier: workspace:*
         version: link:../../types
     devDependencies:
+      '@objectstack/driver-sql':
+        specifier: workspace:*
+        version: link:../../drivers/driver-sql
       '@types/node':
         specifier: ^26.1.2
         version: 26.1.2
