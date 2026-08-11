@@ -476,9 +476,12 @@ export const StringOperatorSchema = lazySchema(() => z.object({
     + '$contains for containment. A pattern ending in a lone unpaired backslash '
     + 'is refused (INVALID_FILTER). Comparison is case-SENSITIVE, same contract '
     + 'as $contains (#4706 Q2 = A); $ilike is the case-insensitive twin. '
-    + '[#7536 declared it and lowered it on the SQL family; the JS evaluation '
-    + 'faces refuse it loudly until their follow-up lands — see '
-    + 'FILTER_OPERATORS for the staging.]'
+    + '[#7536. Answered by the SQL family (driver-sql, driver-sqlite-wasm, '
+    + 'driver-turso on both transports), by driver-memory and by '
+    + '@objectstack/formula. driver-mongodb, objectql `having` and '
+    + 'service-analytics REFUSE it in the INVALID_FILTER envelope rather than '
+    + 'approximating it — see FILTER_OPERATORS for why it is staged out of that '
+    + 'allowlist.]'
   ),
 
   /**
@@ -1688,8 +1691,9 @@ export const FilterArraySchema: z.ZodType<FilterArray, FilterArray> = z.lazy(() 
  * |---|---|
  * | `driver-sql` (and `driver-sqlite-wasm`, which inherits its compiler) | ANSWERS — `LIKE` / `GLOB` per dialect, caller-bound wildcards |
  * | `driver-turso` — local (inherits `SqlDriver`) and remote (its own compiler) | ANSWERS on both transports |
+ * | `driver-memory` — query path and reference matcher | ANSWERS — it widens its own `SUPPORTED_FIELD_OPERATORS` by hand, the way `driver-turso`'s remote transport has carried `$icontains` since #5702. It is the in-memory DOUBLE: an app whose tests run there and whose production runs SQL must not get a 400 for a filter that works |
  * | `@objectstack/formula` `matchesFilterCondition` | ANSWERS — {@link matchesLikePattern}, so a write-side `check` agrees with the read-side SQL |
- * | `driver-memory`, `driver-mongodb`, `objectql` `having`, `service-analytics` | REFUSE, loudly, in the ADR-0112 `INVALID_FILTER` envelope — because THIS array does not name the operator |
+ * | `driver-mongodb`, `objectql` `having`, `service-analytics` | REFUSE, loudly, in the ADR-0112 `INVALID_FILTER` envelope — they derive acceptance from THIS array, which does not name the operator |
  *
  * That split is the point rather than a gap: #7536 exists because a `like`
  * predicate was being SILENTLY given `$contains`' meaning, and a face that

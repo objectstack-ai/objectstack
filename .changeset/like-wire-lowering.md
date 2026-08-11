@@ -96,7 +96,10 @@ every face, by one shared test.
    `like` is now an exact match.
 2. **`like`/`ilike` on `driver-mongodb`, objectql `having` and analytics now
    return `400 INVALID_FILTER`** where a (wrong) substring answer came back
-   before. Write `$contains`/`$icontains` on those backends.
+   before. Write `$contains`/`$icontains` on those backends. `driver-memory` is
+   deliberately NOT in that list — it implements the operators, because an
+   application whose tests run on the in-memory double and whose production runs
+   SQL must not meet a 400 in test for a filter that works in production.
 3. **`@objectstack/client`'s `.contains()`, `.startsWith()` and `.endsWith()`
    emit different operators.** They used to build a `like` tuple by gluing
    wildcards onto the caller's value (`[field, 'like', '%' + value + '%']`),
