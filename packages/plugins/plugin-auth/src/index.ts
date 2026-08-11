@@ -50,6 +50,11 @@ export * from './auth-schema-config.js';
 // ADR-0093 — membership reconciler + tenancy service (public host API: hosts
 // compose the reconciler into their own hooks; embeddings query tenancy mode).
 export * from './reconcile-membership.js';
+// [#7725] The other half of that invariant: what happens when better-auth tries
+// to create a membership the reconciler already created. Exported alongside the
+// reconciler because a host composing its own membership writes needs the same
+// "the unique pair IS the membership, and acceptance never demotes" rule.
+export * from './adopt-membership.js';
 export * from './tenancy-service.js';
 // [ADR-0108 / #3723] `./org-roles.js` is gone: there is no app-declared
 // organization-role vocabulary to collect, normalize or materialize. The four

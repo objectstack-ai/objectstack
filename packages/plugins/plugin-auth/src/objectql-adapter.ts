@@ -5,6 +5,7 @@ import { createAdapterFactory } from 'better-auth/adapters';
 import type { CleanedWhere, WhereOperator } from 'better-auth/adapters';
 import { SystemObjectName } from '@objectstack/spec/system';
 import { resolveAttributedUserId } from './auth-actor-attribution.js';
+import { adoptExistingMembership } from './adopt-membership.js';
 
 /**
  * Mapping from better-auth model names to ObjectStack protocol object names.
@@ -660,7 +661,17 @@ export function createObjectQLAdapterFactory(rawDataEngine: IDataEngine) {
         const objectName = resolveProtocolName(model);
         const bridged = objectName !== model;
         const payload = normaliseIdentifierWrite(model, data);
-        const result = await dataEngine.insert(objectName, bridged ? remapKeys(payload, camelToSnake) : payload);
+        const row = bridged ? remapKeys(payload, camelToSnake) : payload;
+        // [#7725] `sys_member` declares `{organization_id, user_id}` unique, and
+        // the platform auto-binds every user at sign-up (ADR-0093 D1/D2), so
+        // better-auth's accept-invitation `createMember` collides on a pair that
+        // by declaration IS the membership it is trying to create. Adopt that row
+        // instead of minting a second one. Returns `null` for every other case —
+        // other object, unidentifiable pair, no existing row — and then this is a
+        // plain insert, byte for byte as before. See `adopt-membership.ts` for
+        // why the seam is here and what adoption does to the role.
+        const adopted = await adoptExistingMembership(dataEngine as any, objectName, row);
+        const result = adopted ?? (await dataEngine.insert(objectName, row));
         const norm = normaliseLegacyDates(model, result);
         return (bridged ? remapKeys(norm, snakeToCamel) : norm) as T;
       },
