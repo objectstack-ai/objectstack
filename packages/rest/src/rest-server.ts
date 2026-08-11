@@ -9684,6 +9684,24 @@ export class RestServer {
                     if (this.enforceAuth(req, res, context)) return;
                     const svc = await resolveService(environmentId);
                     if (!svc) return respond501(res);
+                    // [#7603] Both deny arms — an unknown scheduleId and another
+                    // owner's — reach the caller as the one 404 emitted by the
+                    // single `handleValidation` call below, because
+                    // `unscheduleReport` is contracted to throw the SAME
+                    // `REPORT_NOT_FOUND: <scheduleId>` for both, before the delete
+                    // fires. It used to resolve silently for the unknown id, which
+                    // landed here as a 204 and let a prober read another owner's
+                    // schedule ids off the status code (#7523's oracle, in the
+                    // 404-vs-204 costume its card warned about).
+                    //
+                    // Unlike the sibling `DELETE /reports/:id`, this route cannot
+                    // pre-empt the two arms itself: that one collapses them with
+                    // `getReport()`, already blind to the difference (#2980),
+                    // whereas the caller here presents a scheduleId and
+                    // `IReportService` exposes no by-id schedule read to be blind
+                    // with — `listSchedules` is keyed by reportId. So the blinding
+                    // is the service's obligation (stated on the contract), and the
+                    // route's job is to keep ONE emitter for whatever it throws.
                     await svc.unscheduleReport(req.params.scheduleId, context ?? {});
                     res.status(204).end();
                 } catch (error: any) {

@@ -1,15 +1,20 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// System Overview tile label/query agreement (#7531).
+// System Overview tile label/query agreement (#7531, extended by #7613).
 //
-// Two tiles on the shipped board reported something other than what their
-// labels promised. "Total Users" was a 7-day count, because the dashboard's
+// All four Row 1 tiles on the shipped board reported something other than what
+// their labels promised, and three of them for one reason: the dashboard's
 // `created_at` global filter is broadcast into EVERY widget's analytics query
-// (#2501) and `sys_user.created_at` happens to exist; "Active Sessions" was a
-// count of every `sys_session` row, because the dataset is a bare count and the
-// widget carried no predicate at all. Both numbers were LIVE and correct for
-// the query issued — the query was answering a different question from the one
-// on the card.
+// (#2501), and a `created_at` column happens to exist on `sys_user`,
+// `sys_organization` and `sys_package_installation` alike — so each "Total"
+// quietly became a 7-day count. "Active Sessions" was the fourth and carried a
+// second cause of its own: the dataset is a bare count and the widget had no
+// predicate at all. Every number was LIVE and correct for the query issued —
+// the query was answering a different question from the one on the card.
+//
+// #7531 fixed "Total Users" and "Active Sessions". #7613 fixed the two left on
+// the same row, "Organizations" and "Packages Installed", and extended this
+// file with their fixtures and blocks.
 //
 // # What this file pins, and what it deliberately does not
 //
@@ -21,7 +26,9 @@
 //   - a TOTAL is invariant under the date bar — the same rows whatever window
 //     is selected, and none at all when it is cleared;
 //   - an ACTIVE count equals an active-only count computed independently from
-//     the fixture, and equals it at NOW rather than within a window.
+//     the fixture, and equals it at NOW rather than within a window;
+//   - a tile's OWN predicate is orthogonal to that opt-out and survives it —
+//     opting out of the date bar decides HOW MANY rows count, never WHICH.
 //
 // Each assertion carries its OPPOSITE DIRECTION in the same block, because
 // every one of them has a way to pass vacuously:
@@ -36,7 +43,20 @@
 //   - "the sessions count is active-only" also holds if the predicate matched
 //     nothing, or everything ⇒ the kept set is named row by row, and both the
 //     expired and the revoked row must be dropped while an OLD-but-live session
-//     is kept.
+//     is kept;
+//   - "the `status` predicate still applies" also holds if the date bar had
+//     already removed the rows it was supposed to drop ⇒ the fixture carries a
+//     non-installed row INSIDE the 7-day window as well as outside it, and the
+//     claim is checked with the bar set and with it cleared.
+//
+// ⛔ Every "still bound" control in this file is an AUDIT widget, and that is a
+// deliberate choice rather than an arbitrary pick. An audit tile is *correctly*
+// windowed — scoping rows 2-4 is what the date bar was added for — so it stays
+// bound by intent and is a legitimate control. A Row 1 tile is not: before
+// #7613, `widget_organizations` was "still bound" too, and would have served as
+// a control here perfectly well, which is exactly the problem — pinning it that
+// way would have written this bug into the suite as the expected behaviour.
+// Need another control? Take another audit widget.
 //
 // # Why the query is composed here rather than imported
 //
@@ -144,11 +164,38 @@ const USERS = [
   { id: 'u_this_week', created_at: daysAgo(2) },
 ];
 
+const ORGANIZATIONS = [
+  { id: 'o_founding', created_at: daysAgo(400) },
+  { id: 'o_last_quarter', created_at: daysAgo(200) },
+  { id: 'o_this_week', created_at: daysAgo(2) },
+];
+
 const AUDIT_EVENTS = [
   { id: 'e_ancient', action: 'login', created_at: daysAgo(400) },
   { id: 'e_old', action: 'login', created_at: daysAgo(200) },
   { id: 'e_recent', action: 'login', created_at: daysAgo(2) },
 ];
+
+const PACKAGE_INSTALLATIONS = [
+  // Installed long ago and still installed — the row the opt-out is FOR.
+  { id: 'p_legacy', status: 'installed', created_at: daysAgo(400) },
+  { id: 'p_last_quarter', status: 'installed', created_at: daysAgo(200) },
+  { id: 'p_this_week', status: 'installed', created_at: daysAgo(2) },
+  // Not installed. These must be dropped by the widget's own `status`
+  // predicate, and one of them sits INSIDE the 7-day window on purpose: with
+  // only the old one, "the predicate still applies" would also pass on a board
+  // where the date bar had quietly removed it.
+  { id: 'p_failed_this_week', status: 'failed', created_at: daysAgo(2) },
+  { id: 'p_uninstalled_long_ago', status: 'uninstalled', created_at: daysAgo(400) },
+];
+
+/**
+ * "Installed" computed from the fixture directly, with no reference to the
+ * board — the same independence {@link ACTIVE_SESSIONS} has, and for the same
+ * reason: deriving it from the widget's own filter would make the comparison a
+ * tautology.
+ */
+const INSTALLED_PACKAGES = PACKAGE_INSTALLATIONS.filter((p) => p.status === 'installed');
 
 const SESSIONS = [
   // Signed in this week, still valid — active by any reading.
@@ -175,7 +222,7 @@ const ACTIVE_SESSIONS = SESSIONS.filter(
 
 // ── The date bar is still a date bar ─────────────────────────────────────────
 
-describe('the dashboard filter the two tiles opt out of', () => {
+describe('the dashboard filter the Row 1 inventory tiles opt out of', () => {
   // `filterBindings` is keyed by the filter's NAME, which defaults to its
   // `field`. Give the global filter an explicit `name` and every opt-out below
   // silently stops matching — the widgets go back to being windowed, with no
@@ -269,5 +316,107 @@ describe('widget_active_sessions — "Active" means active now', () => {
     );
     expect(windowed.map((s) => s.id)).toEqual(['s_active']);
     expect(windowed.length).toBeLessThan(ACTIVE_SESSIONS.length);
+  });
+});
+
+// ── Tile 3: "Organizations" ─────────────────────────────────────────────────
+// #7613. The plainest instance of the #2501 fan-out on this row: no widget
+// predicate of its own, no `{now}` token, nothing but a bare count that the
+// date bar was silently narrowing.
+
+describe('widget_organizations — "Total organizations" means total', () => {
+  it('reports the same organizations under any date-range window, and with none', () => {
+    for (const windowDays of [7, 30, 365, null]) {
+      expect(
+        keep(ORGANIZATIONS, composeWidgetQuery('widget_organizations', windowDays)).map((o) => o.id),
+        `window=${windowDays}`,
+      ).toEqual(['o_founding', 'o_last_quarter', 'o_this_week']);
+    }
+  });
+
+  it('opposite direction — the harness really does apply the window (an audit tile moves)', () => {
+    // Deliberately a DIFFERENT audit widget from the one the Total Users block
+    // uses, and deliberately an audit widget at all: see the ⛔ note in the file
+    // header — a Row 1 tile that is "still bound" is bound by the defect this
+    // block exists to close, never by intent.
+    expect(keep(AUDIT_EVENTS, composeWidgetQuery('widget_recent_events', 7)).map((e) => e.id))
+      .toEqual(['e_recent']);
+    expect(keep(AUDIT_EVENTS, composeWidgetQuery('widget_recent_events', 365)).map((e) => e.id))
+      .toEqual(['e_old', 'e_recent']);
+  });
+
+  it('opposite direction — the opt-out is load-bearing on this fixture', () => {
+    // The pre-#7613 board, on the same rows: two of the three organizations
+    // disappear under a description that says "Total organizations on the
+    // platform". Drop `filterBindings` and the first assertion goes red rather
+    // than passing for free.
+    const windowed = keep(
+      ORGANIZATIONS,
+      composeWidgetQuery('widget_organizations', 7, { ignoreOptOut: true }),
+    );
+    expect(windowed.map((o) => o.id)).toEqual(['o_this_week']);
+    expect(windowed.length).toBeLessThan(ORGANIZATIONS.length);
+  });
+});
+
+// ── Tile 4: "Packages Installed" ────────────────────────────────────────────
+// #7613. The one tile on this row that already carried a predicate of its own,
+// so it is also where "the opt-out is orthogonal to the widget filter" is
+// pinned: the two decide different things and both must survive.
+
+describe('widget_packages_installed — installed now, not installed this week', () => {
+  it('matches an independently-computed installed-only count, under any window', () => {
+    expect(INSTALLED_PACKAGES.map((p) => p.id)).toEqual([
+      'p_legacy',
+      'p_last_quarter',
+      'p_this_week',
+    ]);
+    for (const windowDays of [7, 30, 365, null]) {
+      expect(
+        keep(PACKAGE_INSTALLATIONS, composeWidgetQuery('widget_packages_installed', windowDays))
+          .map((p) => p.id),
+        `window=${windowDays}`,
+      ).toEqual(INSTALLED_PACKAGES.map((p) => p.id));
+    }
+  });
+
+  it('the widget-level `status` filter still stands after the opt-out', () => {
+    // Both stand: opting out of the date bar decides how many rows count, never
+    // which. Checked with the bar set AND cleared, because with only the
+    // window-7 leg this would also pass on a board that had simply windowed the
+    // non-installed rows away — hence `p_failed_this_week`, which is inside the
+    // window and must still be dropped.
+    expect(widgetById('widget_packages_installed').filter).toEqual({ status: 'installed' });
+    for (const windowDays of [7, null]) {
+      const kept = keep(
+        PACKAGE_INSTALLATIONS,
+        composeWidgetQuery('widget_packages_installed', windowDays),
+      ).map((p) => p.id);
+      expect(kept, `window=${windowDays}`).not.toContain('p_failed_this_week');
+      expect(kept, `window=${windowDays}`).not.toContain('p_uninstalled_long_ago');
+      expect(kept, `window=${windowDays}`).toContain('p_legacy');
+    }
+  });
+
+  it('opposite direction — the harness really does apply the window (an audit tile moves)', () => {
+    // An audit widget that carries a predicate of its own, mirroring this
+    // tile's shape: it keeps its `action: 'login'` filter AND moves with the
+    // date bar, which is what a correctly-windowed tile looks like.
+    expect(keep(AUDIT_EVENTS, composeWidgetQuery('widget_login_events', 7)).map((e) => e.id))
+      .toEqual(['e_recent']);
+    expect(keep(AUDIT_EVENTS, composeWidgetQuery('widget_login_events', 365)).map((e) => e.id))
+      .toEqual(['e_old', 'e_recent']);
+  });
+
+  it('opposite direction — the opt-out is load-bearing on this fixture', () => {
+    // The pre-#7613 board: "Active package installations across projects"
+    // reports one of three, because the other two were installed before the
+    // window opened — and they are still installed.
+    const windowed = keep(
+      PACKAGE_INSTALLATIONS,
+      composeWidgetQuery('widget_packages_installed', 7, { ignoreOptOut: true }),
+    );
+    expect(windowed.map((p) => p.id)).toEqual(['p_this_week']);
+    expect(windowed.length).toBeLessThan(INSTALLED_PACKAGES.length);
   });
 });

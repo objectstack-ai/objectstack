@@ -16,6 +16,14 @@
 //
 // What is deliberately NOT shared is the WORDING. Only the gate knows what it did
 // not check, and "nothing was checked" is the load-bearing half of the message.
+//
+// #7681 added the SECOND prerequisite these gates run on, in the same shape and
+// for the same reason: the CLI can be built and a gate still unable to run,
+// because the command it invokes loads the workspace's OWN packages and one of
+// them has a `dist/` older than its source. `looksLikeStaleWorkspaceDist` is that
+// classifier. It is a sibling of the first, never a widening of it — an unbuilt
+// CLI and a stale dependency are different facts with different remedies, and the
+// two signatures must not match each other's corpus.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -25,6 +33,26 @@ export const CLI = 'packages/cli/bin/run.js';
 export const CLI_PKG = 'packages/cli';
 /** The one command that satisfies the prerequisite, for every gate that reports it. */
 export const CLI_BUILD_FIX = 'pnpm exec turbo run build --filter=@objectstack/cli';
+
+/**
+ * The npm scope every workspace package publishes under (`create-objectstack` is
+ * the one exception, and no gate's input imports it). It is used for exactly one
+ * decision: whether a failed module specifier names a package THIS repo builds —
+ * which is the difference between "that package's `dist/` is stale, rebuild it"
+ * and a diagnosis this module has no standing to make about someone else's
+ * dependency.
+ *
+ * Hardcoded rather than derived, and the drift direction is why that is safe: if
+ * the scope is ever renamed, `looksLikeStaleWorkspaceDist` stops matching and its
+ * callers fall back to the verdict they gave before it existed. A stale constant
+ * costs a missed classification here, never a confident wrong one.
+ */
+export const WORKSPACE_SCOPE = '@objectstack';
+
+/** Rebuilds one workspace package and the packages it depends on. */
+export function workspaceBuildFix(pkg) {
+  return `pnpm exec turbo run build --filter=${pkg}`;
+}
 
 /**
  * Where oclif will look for a command, derived from the CLI package's own
@@ -75,13 +103,80 @@ export function oclifCommandFileFor(pkgJson, commandId) {
  * @returns {string} the error sentence, or '' when this is not that failure
  */
 export function looksLikeMissingCliCommand(text) {
-  const flat = String(text ?? '')
+  return flattenCliOutput(text).match(/Error:\s*command\b.*?\bnot found\b/)?.[0] ?? '';
+}
+
+/**
+ * oclif's ` › ` prefixes off, every line joined, whitespace collapsed. Shared by
+ * the classifiers below because a signature that a per-line regex can miss is the
+ * defect both of them exist to avoid: oclif hard-wraps mid-sentence and even
+ * mid-token, and node prints its own diagnostics as a frame plus a stack, so the
+ * sentence worth matching is almost never alone on a line.
+ */
+function flattenCliOutput(text) {
+  return String(text ?? '')
     .split('\n')
     .map((l) => l.replace(/^\s*›\s*/, ''))
     .join(' ')
     .replace(/\s+/g, ' ')
     .trim();
-  return flat.match(/Error:\s*command\b.*?\bnot found\b/)?.[0] ?? '';
+}
+
+/** A specifier's workspace package (`@scope/name`), or '' when it names none. */
+const WORKSPACE_PACKAGE_IN_SPECIFIER = new RegExp(`(?:^|node_modules/)(${WORKSPACE_SCOPE}/[^/'"\\s]+)`);
+
+/**
+ * A DEPENDENCY whose build output no longer matches its source — the other
+ * environment prerequisite a gate that shells out to the CLI depends on, and the
+ * one `looksLikeMissingCliCommand` cannot see (#7681).
+ *
+ * The CLI can be perfectly built and the gate still unable to run: the extract /
+ * lint the gate invokes loads the workspace's own packages, and a `dist/` older
+ * than the source that added an export makes node refuse the import outright:
+ *
+ *   SyntaxError: The requested module '@objectstack/spec/system' does not provide
+ *   an export named 'authorisesIrreversibleAction'
+ *
+ * That is an environment fact about one `dist/`, not a fact about the input file
+ * the gate happened to be holding — so a gate must not fold it into a content
+ * verdict about that input. #7681 is the measured case: `packages/spec/dist`
+ * predated the commit that added the export, and `check-i18n-bundles` reported
+ * "1 bundle problem(s) … extract failed", pointing the reader at i18n configs
+ * that were never at fault, while its sibling `check-i18n-coverage` refused to
+ * judge at all.
+ *
+ * DELIBERATELY NARROW — the mirror-image defect is a confident diagnosis pointing
+ * somewhere innocent (#5862/#6033), so this claims a package only when the
+ * specifier names one this repo builds:
+ *
+ *   • an export mismatch on a `@objectstack/*` specifier   → stale build output;
+ *   • `Cannot find module` reaching INTO a `@objectstack/*` package's `dist/`
+ *                                                          → no build output at all.
+ *
+ * Everything else keeps whatever verdict the caller gave before: a third party's
+ * export mismatch (no rebuild this repo can prescribe), a `Cannot find module`
+ * for a path that is not build output (not installed / a genuinely wrong import),
+ * and CommonJS interop's differently-worded `Named export 'x' not found`, which is
+ * an authoring problem and not staleness.
+ *
+ * @param {string} text combined stdout/stderr
+ * @returns {{ kind: 'export-mismatch' | 'missing-output', pkg: string, missingExport: string, sentence: string } | null}
+ */
+export function looksLikeStaleWorkspaceDist(text) {
+  const flat = flattenCliOutput(text);
+  const mismatch = flat.match(/The requested module '([^']+)' does not provide an export named '([^']+)'/);
+  if (mismatch) {
+    const pkg = mismatch[1].match(WORKSPACE_PACKAGE_IN_SPECIFIER)?.[1] ?? '';
+    return pkg ? { kind: 'export-mismatch', pkg, missingExport: mismatch[2], sentence: mismatch[0] } : null;
+  }
+  const missing = flat.match(/Cannot find (?:module|package) '([^']+)'/);
+  if (missing) {
+    const pkg = missing[1].match(WORKSPACE_PACKAGE_IN_SPECIFIER)?.[1] ?? '';
+    if (pkg && /(?:^|\/)dist\//.test(missing[1])) {
+      return { kind: 'missing-output', pkg, missingExport: '', sentence: missing[0] };
+    }
+  }
+  return null;
 }
 
 /**

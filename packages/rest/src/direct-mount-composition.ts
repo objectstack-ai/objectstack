@@ -20,18 +20,26 @@
  * Each registrar returns the array it iterated to mount, and that array is what
  * gets recorded on the `RestServer`. So:
  *
- *  - a registrar this boot called ⇒ its routes are enumerable through
- *    `getRoutes()` and appear in `GET {apiPath}/openapi.json`;
- *  - a registrar this boot skipped (no `package` service) ⇒ nothing is
- *    recorded, nothing is documented, and the 404 a caller would get from that
- *    deployment is what the document says too.
+ *  - a route this boot mounted ⇒ it is enumerable through `getRoutes()` and
+ *    appears in `GET {apiPath}/openapi.json`;
+ *  - a route this boot skipped (a package route needing a `package` service
+ *    that is not there) ⇒ nothing is recorded, nothing is documented, and the
+ *    404 a caller would get from that deployment is what the document says too.
  *
- * The service gate stays exactly where it was — here, at composition — and the
- * record follows it rather than restating it. What is deliberately NOT recorded
- * is any verdict about a service that a later phase could still contradict: the
- * federation routes mount unconditionally and decide per request whether the
- * `external-datasource` service is there (503 if not), so this file records
- * them as mounted and says nothing about federation being available.
+ * [#7563] That second bullet promised a 404 and, for `POST /packages/publish`,
+ * did not get one: with no owner for the path, the dispatcher's
+ * `/packages/:id` matched it (`id = "publish"`) and the router answered 405
+ * with THAT route's `Allow` set. The publish route therefore mounts on every
+ * boot and answers its own honest 404 — see `package-routes.ts` for why the
+ * other three must not follow it.
+ *
+ * The service gate stays exactly where it was — around the package registrar's
+ * routes — and the record follows it rather than restating it. What is
+ * deliberately NOT recorded is any verdict about a service that a later phase
+ * could still contradict: the federation routes mount unconditionally and
+ * decide per request whether the `external-datasource` service is there (503 if
+ * not), so this file records them as mounted and says nothing about federation
+ * being available.
  */
 
 import type { PluginContext } from '@objectstack/core';
@@ -73,27 +81,49 @@ export function mountAndRecordDirectRoutes(composition: DirectMountComposition):
     const enableProjectScoping = composition.enableProjectScoping ?? false;
     const projectResolution = composition.projectResolution ?? 'auto';
 
-    // Package management routes — only when the service backing them exists.
-    try {
-        const packageService = ctx.getService<PackageService>('package');
-        if (packageService) {
-            // `required` scoping serves ONLY the scoped variant; `auto` serves
-            // both. Unchanged from the pre-#5822 plugin — expressed as the list
-            // of bases so the mount and the record cannot disagree about it.
-            const scopedBase = `${versionedBase}/environments/:environmentId`;
-            const bases = enableProjectScoping
-                ? (projectResolution === 'required' ? [scopedBase] : [versionedBase, scopedBase])
-                : [versionedBase];
-            for (const base of bases) {
-                recorder.recordDirectMountedRoutes(
-                    registerPackageRoutes(server, packageService, base, { protocol, resolveExecutionContext }),
-                );
-            }
-            ctx.logger.info('Package management routes registered');
+    // Package management routes. [#7563] The registrar is called on EVERY boot
+    // and the `package` service is handed to it as a RESOLVER, not as a
+    // resolved instance — the gate did not move, it stopped being a
+    // boot-instant snapshot. `objectstack serve` registers the capability
+    // providers (`requires: ['marketplace']` → `PackageServicePlugin`) after
+    // `createRestApiPlugin`, and start order follows registration order for
+    // plugins with no edge between them, so asking once here answered "no
+    // package service" on precisely the deployments that have one.
+    //
+    // `registerPackageRoutes` decides what that resolver's answer means per
+    // route: `POST /packages/publish` mounts either way (nobody else serves it,
+    // and an unowned path is answered by a `/packages/:id` sibling's 405
+    // instead of a 404 — #7563), the other three only when a service is there
+    // (they shadow live dispatcher twins). It reports back exactly what it
+    // mounted, so the record still follows the gate rather than restating it.
+    const resolvePackageService = () => {
+        try {
+            return ctx.getService<PackageService>('package');
+        } catch {
+            // Not registered (yet) — an absence, not a failure.
+            return undefined;
         }
-    } catch (e) {
-        // Package service not available, skip
-        ctx.logger.debug('Package service not available, package routes skipped');
+    };
+    try {
+        // `required` scoping serves ONLY the scoped variant; `auto` serves
+        // both. Unchanged from the pre-#5822 plugin — expressed as the list
+        // of bases so the mount and the record cannot disagree about it.
+        const scopedBase = `${versionedBase}/environments/:environmentId`;
+        const bases = enableProjectScoping
+            ? (projectResolution === 'required' ? [scopedBase] : [versionedBase, scopedBase])
+            : [versionedBase];
+        for (const base of bases) {
+            recorder.recordDirectMountedRoutes(
+                registerPackageRoutes(server, resolvePackageService, base, { protocol, resolveExecutionContext }),
+            );
+        }
+        ctx.logger.info('Package management routes registered');
+    } catch (e: any) {
+        // Nothing is recorded on this path, for the same reason the federation
+        // arm below records nothing when it throws: a registrar that failed
+        // part-way may have mounted some rows, and under-claiming is the safe
+        // direction.
+        ctx.logger.warn('Package management routes registration failed', { error: e?.message });
     }
 
     // External Datasource Federation routes (ADR-0015): catalog / draft /

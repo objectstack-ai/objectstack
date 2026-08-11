@@ -213,7 +213,7 @@
       "title": "Every showcase nav surface renders without page errors, and failures surface the error boundary — never a blank page",
       "since": "v15",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P0",
       "surface": "browser",
       "personas": ["seeded admin (admin@objectos.ai / admin123)"],
@@ -228,15 +228,16 @@
         "GET /api/v1/meta/app?id=com.example.showcase and extract every nav destination from the response",
         "diff the served nav destinations against the SURFACES array; hand-walk any destination the suite does not cover (screenshot first, then DOM)",
         "on each hand-walked surface: wait for render, screenshot, then check for pageerror / empty <main> / placeholder leaks ('no actions configured')",
+        "chart surfaces (the chart:true entries in SURFACES — Delivery Operations, Chart Gallery, Command Center): the suite now POLLS boundingBox against a bounded deadline (SURFACE_BUDGET_MS in the spec) instead of reading it once after a fixed wait, so a chart red here is a real finding and not the measurement window — #7569 measured the difference: 3 fresh loads each drew 5 real charts, and polling every 400 ms returned null ONLY at t = 1.5 s, the old fixed measurement instant and exactly the recharts ResponsiveContainer initial-layout window, then non-null on all 19 later samples. Read WHICH assertion failed: 'no chart SVG laid out' means the box stayed null for the whole budget; a width/height failure means the chart laid out but collapsed (#2616 D). If you hand-walk a chart surface outside the suite, poll the same way — never sleep-then-read-once",
         "probe the failure path: navigate to a nonexistent route under the app (/_console/apps/com.example.showcase/object_that_does_not_exist); screenshot what renders",
         "if ANY surface fails during the sweep, verify the failure presents as the shell's error boundary or a named empty/error state — capture it"
       ],
       "acceptance": [
         {
-          "clause": "no surface throws a pageerror, renders an empty <main>, or leaks a 'no actions configured' placeholder; chart surfaces draw a real SVG",
+          "clause": "no surface throws a pageerror, renders an empty <main>, or leaks a 'no actions configured' placeholder; chart surfaces draw a real SVG whose box is measured by POLLING until non-null within a bounded budget — never by a fixed wall-clock wait followed by a single boundingBox read, which measures the layout window rather than the product",
           "oracle": "test",
-          "verify": "pnpm -C examples/app-showcase test:smoke (SURFACES array in e2e/showcase-smoke.spec.ts) — green",
-          "evidence": "test run output"
+          "verify": "pnpm -C examples/app-showcase test:smoke (SURFACES array in e2e/showcase-smoke.spec.ts) — green; the chart assertion polls boundingBox against a bounded deadline and keeps the last non-null sample, so a null-box failure and a collapsed-panel failure report as different assertions (#7569)",
+          "evidence": "test run output + the failing assertion's message for any chart red"
         },
         {
           "clause": "the smoke's coverage is CURRENT: every nav destination served in meta/app is either in the SURFACES array or hand-walked this run — no surface silently outside the net",
@@ -259,7 +260,8 @@
       ],
       "negative": [
         "a surface that renders a blank <main> is a FAIL even with no console error — transitional emptiness must be ruled out by the screenshot-first protocol, then the persistent blank is the finding",
-        "a bad route producing a white page (shell gone) is a FAIL of the error-boundary clause"
+        "a bad route producing a white page (shell gone) is a FAIL of the error-boundary clause",
+        "a chart red obtained from a SINGLE boundingBox read at a fixed instant is NOT a product finding and must not be filed as one — it measures the ResponsiveContainer layout window, and it cost a triage cycle every run until #7569 replaced that read with a bounded poll. Re-introducing any fixed sleep-then-read-once in this suite re-opens it. The converse holds both ways: a box that stays null through the WHOLE bounded poll, or a laid-out width ≤ 200 (the #2616 D collapsed-panel case), IS a FAIL"
       ],
       "automated": { "kind": "e2e", "ref": "examples/app-showcase/e2e/showcase-smoke.spec.ts" },
       "traps": ["hydration-race", "single-datapoint", "stale-console-bundle"],
@@ -271,7 +273,8 @@
       ],
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "initial — wraps the existing automated smoke as a checklist row so runs report it alongside manual items", "ref": "#3358" },
-        { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" }
+        { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" },
+        { "revision": 3, "date": "2026-08-11", "change": "de-flaked the chart clause's MEASUREMENT, both halves in one change: a null boundingBox read once at a fixed instant is the recharts ResponsiveContainer layout window, not a product defect (measured: null only at t=1.5s, non-null on all 19 later samples, 5 real charts on each of 3 fresh loads). The clause now requires a bounded poll-until-non-null, and the pinned suite was changed to match — showcase-smoke.spec.ts's fixed page.waitForTimeout(1500) plus single boundingBox() read are gone, replaced by deadline-bounded polling (the #7472/#7409 shape), keeping the last non-null sample so a collapsed panel (#2616 D) still fails on its width rather than as 'no chart SVG'", "ref": "#7569" }
       ]
     },
     {
@@ -535,10 +538,10 @@
     },
     {
       "id": "platform-core.settings-hub-roundtrip",
-      "title": "Settings hub round-trip: a value saves, PERSISTS, reaches an observable consumer, audits, env-locks, tests honestly, and stores secrets as handles — anonymous denied",
+      "title": "Settings hub round-trip: a value saves, PERSISTS, reaches an observable consumer, audits, env-locks, tests honestly, and stores secrets as handles served MASKED — anonymous denied",
       "since": "v15",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -564,7 +567,10 @@
         "source badge: open /apps/setup/system/settings/localization and confirm the timezone field's source indicator flips from default to the persisted scope after save; screenshot",
         "env-lock: set OS_LOCALIZATION_TIMEZONE=Europe/Paris (envKeyOf convention: OS_<NAMESPACE>_<KEY>, settings-service.types.ts) and restart; GET /api/settings/localization now reports timezone source='env', locked=true, lockedReason 'Set via env: OS_LOCALIZATION_TIMEZONE', and the console renders the EnvLockBadge; PUT /api/settings/localization { timezone: 'UTC' } is REFUSED 409 SETTINGS_LOCKED (server-side, effectiveEnvOverride)",
         "test action at the dev transport: POST /api/settings/mail/test with provider=log (or no email plugin mounted) — the handler answers ok:false and NO mail is faked (mail.manifest.ts mailTestActionHandler / plugin-email honest degradation, framework#5087)",
-        "secret handling: on a namespace with an encrypted specifier (mail.smtp_password or ai.*_api_key — type 'password' or encrypted:true), PUT a value; then read sys_secret + sys_setting — the ciphertext lands in sys_secret keyed by a 'sec_' handle and sys_setting.value_enc holds the handle id, NOT plaintext; GET /api/settings never returns the plaintext",
+        "secret handling — AT REST: on a namespace with an encrypted specifier (mail.smtp_password or ai.*_api_key — type 'password' or encrypted:true), PUT a value; then read sys_secret + sys_setting — the ciphertext lands in sys_secret keyed by a 'sec_' handle and sys_setting.value_enc holds the handle id, NOT plaintext",
+        "secret handling — the MASKED READ (positive contract, #7522/PR #7554): GET /api/settings/<ns> and check what IS served, not merely that plaintext is absent — the SET secret's values.<key>.value is exactly SETTINGS_SECRET_MASK ('••••••••', eight U+2022 BULLETs — settings-secret-redaction.ts); an UNSET secret's value is still null (the redaction is presence-preserving, and the console renders 'configured vs not configured' from exactly this field); EVERY cascadeChain entry of a secret-backed key is the mask or null (walk a namespace whose scope is 'user' so the chain carries more than one entry); and the whole serialised body contains no plaintext. Do BOTH specifier flavours — type:'password' AND an explicit encrypted:true",
+        "secret handling — metadata survives the redaction: on an env-pinned secret (OS_<NAMESPACE>_<KEY>) confirm the GET still reports source='env', locked=true and lockedReason naming that env var WHILE value is the mask, and that PUT is still refused 409 SETTINGS_LOCKED — masking must not disturb the lock affordances",
+        "secret handling — the ECHOED-MASK round-trip (the half a redaction fix most often breaks): PUT the mask straight back in BOTH shapes the console can send — { <key>: '••••••••' } and the read-shape envelope { values: { <key>: { value: '••••••••' } } } — and confirm 200 plus an UNCHANGED stored secret: re-read it through an in-process consumer (settings client / getNamespace, which is deliberately NOT redacted) and confirm it is still the original plaintext, and that no new sys_secret ciphertext row appeared. Then PUT a genuinely NEW secret: it takes effect, but the PUT RESPONSE is redacted too. Control: a NON-encrypted key whose value genuinely is '••••••••' is written verbatim — the drop is scoped to secret keys and must not swallow a legal write",
         "anonymous deny: GET /api/settings/localization with no session → 403 SETTINGS_FORBIDDEN (assertPermitted read); GET /api/settings (list) as anon returns an EMPTY manifest set — zero namespaces enumerated (Finding-1 secure default)",
         "guardrails: PUT /api/settings/localization { timezone: 'Mars/Phobos' } → 400 SETTINGS_VALIDATION invalid_option (declared options table); PUT { bogus_key: 1 } → 400 UNKNOWN_KEY"
       ],
@@ -612,10 +618,28 @@
           "evidence": "the action response"
         },
         {
-          "clause": "an encrypted specifier's value lands in sys_secret as a handle, never plaintext: sys_setting.value_enc holds a 'sec_' handle id and sys_secret holds the ciphertext; GET /api/settings never echoes the plaintext",
+          "clause": "an encrypted specifier's value lands in sys_secret as a handle, never plaintext: sys_setting.value_enc holds a 'sec_' handle id and sys_secret holds the ciphertext",
           "oracle": "api",
-          "verify": "the sys_secret row (id starts 'sec_', ciphertext present) + sys_setting.value_enc = that handle + the redacted GET (materialiseRow dereferences through sys_secret)",
-          "evidence": "the sys_secret row + sys_setting.value_enc + the redacted GET"
+          "verify": "the sys_secret row (id starts 'sec_', ciphertext present) + sys_setting.value_enc = that handle (materialiseRow dereferences through sys_secret)",
+          "evidence": "the sys_secret row + sys_setting.value_enc"
+        },
+        {
+          "clause": "the REST read states a POSITIVE contract, not just an absent plaintext: a SET secret is SERVED AS the mask SETTINGS_SECRET_MASK ('••••••••'), an UNSET one stays null (presence-preserving), and the masking covers values.<key>.value AND every cascadeChain entry — an OMITTED value or a VANISHED key also satisfies 'never returns the plaintext' and is a FAIL, because the console renders configured-vs-not-configured from exactly this field",
+          "oracle": "api",
+          "verify": "GET /api/settings/<ns>: values.<key>.value === '••••••••' for the set secret and === null for the unset one; every cascadeChain entry of a secret-backed key is the mask or null; the serialised body contains no plaintext; both flavours (type:'password' and encrypted:true) — mirrors the route-level pins in packages/services/service-settings/src/settings-routes.test.ts (#7522 / PR #7554)",
+          "evidence": "the GET body showing values.<key>.value and the full cascadeChain per secret key, set and unset"
+        },
+        {
+          "clause": "the redaction is METADATA-preserving: source, locked and lockedReason are unchanged by it, so an env-pinned secret still reports source='env' / locked=true / lockedReason naming OS_<NAMESPACE>_<KEY> and still refuses the write 409 SETTINGS_LOCKED — exactly as a non-secret key does",
+          "oracle": "api",
+          "verify": "the env-pinned secret's GET (value = mask, source='env', locked=true, lockedReason names the env var, cascadeChain entry scope='env' masked and locked) + the 409 on its PUT",
+          "evidence": "the locked GET + the 409"
+        },
+        {
+          "clause": "PUTting the echoed mask back is a NO-OP, not an overwrite: a form save that returns the masked value verbatim leaves the stored secret intact — in BOTH shapes ({key: mask} and the read-shape {values:{key:{value: mask}}}) — while a genuinely NEW value still writes and its PUT response is redacted too; the in-process read path is deliberately NOT masked (mail/sms/storage/auth plugins read their credentials there), and a non-encrypted key whose value really is the mask is written verbatim",
+          "oracle": "api",
+          "verify": "after each echoed-mask PUT (200): the in-process consumer still resolves the ORIGINAL plaintext and the sys_secret row inventory is unchanged — never the mask's literal text, which would decrypt back to itself and look fine until the dependent transport failed; after the real new value: it took effect in the store but the PUT response body carries the mask; the non-encrypted control key stores '••••••••' literally",
+          "evidence": "the echoed-mask PUT responses + the resolved in-process value + the sys_secret inventory before/after + the new-secret PUT response"
         },
         {
           "clause": "anonymous is denied: GET /api/settings/:namespace → 403 SETTINGS_FORBIDDEN, and GET /api/settings lists ZERO namespaces for an unauthenticated caller (no enumeration — Finding-1)",
@@ -634,6 +658,9 @@
         "a saved settings form treated as proof of effect (no observable consumer checked) is the ai.json anti-pattern — ticking the effect clause on the form alone is a FALSE PASS",
         "a 200 on an env-locked PUT is a FAIL (the lock is a server contract, effectiveEnvOverride)",
         "an encrypted value returned as plaintext by GET /api/settings, or stored inline in sys_setting.value rather than sys_secret, is a FAIL",
+        "a masked read satisfied by OMITTING the value or dropping the KEY from the response is a FAIL, not a pass — omission satisfies 'never returns the plaintext' just as masking does, and it breaks the console's configured-vs-not-configured rendering while a negative-only clause stays green (#7573)",
+        "an echoed-mask PUT that OVERWRITES the stored secret with the mask's literal text is a FAIL — it re-encrypts and decrypts back to itself, so nothing looks wrong until the dependent transport (SMTP login, provider API key) fails",
+        "a mask on the IN-PROCESS read path (settings client / getNamespace / snapshot) is a FAIL — the redaction is a REST-boundary contract only; masking there breaks every plugin that reads its credentials through it",
         "a test action answering ok:true for a send that did not happen is a FAIL (framework#5087)",
         "GET /api/settings enumerating namespaces for an anonymous caller is a FAIL (Finding-1 — the old default trusted x-user-id/x-permissions headers)"
       ],
@@ -657,10 +684,13 @@
         "packages/services/service-settings/src/settings-service.types.ts (envKeyOf OS_<NAMESPACE>_<KEY>)",
         "packages/services/service-settings/src/manifests/{localization,mail,ai,branding}.manifest.ts",
         "packages/core/src/security/resolve-authz-context.ts (localization timezone/locale/currency → ExecutionContext — the observable consumer)",
+        "packages/services/service-settings/src/settings-secret-redaction.ts (SETTINGS_SECRET_MASK = eight U+2022 BULLETs; READ: set→mask, unset→null; WRITE: a submitted value equal to the mask means 'unchanged' and the key is DROPPED from the patch)",
+        "packages/services/service-settings/src/settings-routes.test.ts (#7522 / PR #7554 — the ten route-level pins these secret clauses mirror rather than re-inventing)",
         "framework#5087 (a test action must not fake success), #5204 (env override enforcement)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-08", "change": "initial — settings hub round-trip with persistence + observable-consumer effect (honoring the ai.json form-is-not-effect caveat), sys_setting_audit, env-lock server refusal, honest test action, sys_secret handle-not-plaintext, anonymous deny", "ref": "claude/platform-test-checklist-ocwugl" }
+        { "revision": 1, "date": "2026-08-08", "change": "initial — settings hub round-trip with persistence + observable-consumer effect (honoring the ai.json form-is-not-effect caveat), sys_setting_audit, env-lock server refusal, honest test action, sys_secret handle-not-plaintext, anonymous deny", "ref": "claude/platform-test-checklist-ocwugl" },
+        { "revision": 2, "date": "2026-08-11", "change": "secret clauses strengthened from negative-only ('never returns the plaintext', which omission and a vanished key also satisfy) to the POSITIVE contract #7522/PR #7554 pinned at the route level: set→mask / unset→null presence-preserving, masking across values.<key>.value AND every cascadeChain entry, source/locked/lockedReason unchanged, both specifier flavours, plus the distinct echoed-mask-PUT-is-a-no-op round-trip clause and the in-process-path-is-NOT-masked guard", "ref": "#7573" }
       ]
     },
     {

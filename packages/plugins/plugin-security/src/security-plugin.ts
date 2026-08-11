@@ -1191,29 +1191,65 @@ export class SecurityPlugin implements Plugin {
         );
       }
 
-      // [#2850] $expand sub-read gate relaxation. The engine's expand path
-      // re-enters `find` for a referenced object carrying `__expandRead` (a
-      // server-set marker; `executionContext` is never client-built). For a
-      // PUBLIC referenced object — covered by the '*' wildcard grant and thus
-      // already broadly readable — applying the object-level CRUD /
-      // requiredPermissions gate to the EXPANSION would only surface "never
-      // designed for expand" modeling gaps (over-blocking a legitimate
-      // status/owner lookup) without adding protection, since the row is
-      // already visible. So waive those two throw-gates for PUBLIC expand
-      // sub-reads only. RLS injection (step 3) and FLS masking (step 4) still
-      // run, and a PRIVATE referenced object keeps the FULL gate — expansion
-      // may reveal only rows the caller could have read directly.
-      const expandSkipCrud =
-        opCtx.operation === 'find' &&
-        opCtx.context?.__expandRead === true &&
-        !secMeta.isPrivate;
+      // [#2850 / #7626] $expand sub-reads take the FULL gate — there is no
+      // waiver here any more, and the deletion is the fix.
+      //
+      // #2850 routed the engine's expand path back through this middleware
+      // (`find` re-entered for the referenced object carrying `__expandRead`, a
+      // server-set marker `executionContext` never takes from a client), which
+      // is what put the referenced object's RLS and FLS on the expansion at
+      // all. That part stands. What it also added was a relaxation:
+      //
+      //     operation === 'find' && __expandRead && !secMeta.isPrivate
+      //         → skip the CRUD + requiredPermissions throw-gates
+      //
+      // …justified as "a PUBLIC referenced object is covered by the '*'
+      // wildcard grant and thus already broadly readable, so gating the
+      // EXPANSION adds no protection and only surfaces never-designed-for-
+      // expand modeling gaps". Neither half of that premise held (#7626):
+      //
+      //   1. `secMeta.isPrivate` reads `access.default` (ADR-0066 D2 — whether
+      //      a `'*'` wildcard COVERS the object), which is a different axis
+      //      from the `sharingModel` OWD an object declares to scope its ROWS.
+      //      `showcase_contact` declares `sharingModel: 'private'` and no
+      //      `access` block, so it read as "public" and the waiver fired for it
+      //      — as it did for every object that leaves `access` unset, which is
+      //      almost all of them.
+      //   2. "already broadly readable" was never CHECKED. The waiver asks
+      //      nothing about the caller's grants, so it fired hardest for the
+      //      caller who holds NONE — #2850's own pin waives the gate for a
+      //      permission set with `objects: {}`. Where the premise is true the
+      //      waiver is inert (the CRUD gate would pass anyway); its only
+      //      non-vacuous effect is on callers the gate meant to refuse.
+      //
+      // Measured on the real showcase app: a `contributor`-only session 403'd
+      // on `GET /data/showcase_contact/:id` received the same contact FULLY
+      // materialised — all 18 fields, `email` included — through
+      // `?$expand=contact` on an invoice it legitimately owns. Both gates were
+      // bypassed at once, because step 2.6 below stashes `__readScope` from
+      // `getEffectiveScope`, which answers `'org'` when NO set grants the op
+      // (safe only because the caller is denied separately — and the waiver is
+      // what stopped them being denied). So the skipped CRUD check also handed
+      // plugin-sharing an org-wide read depth and dissolved the OWD row scope.
+      //
+      // Removing it restores one rule for every referenced object, the rule
+      // #2850 already applied to the private half: an expansion may reveal only
+      // rows the caller could have read directly. Nothing over-blocks a
+      // legitimate lookup — `expandRelatedRecords` catches the refusal and
+      // retains the bare FK id (its documented graceful degradation), so a
+      // caller who cannot read the referenced object gets the id it already
+      // had, not an error on the parent read.
+      //
+      // `__expandRead` itself stays: it is the marker the storage/comment
+      // access hooks strip as a privileged widening input, and `core`'s
+      // operation-private-keys list is what keeps it unforgeable from the wire.
 
       // 1.5. [ADR-0066 D3/⑤] requiredPermissions AND-gate — a capability
       //      prerequisite checked BEFORE the CRUD grant (ADR §Precedence): a
       //      caller missing any required capability is denied regardless of how
       //      permissive their grants are. Per-operation (⑤): only the caps for
       //      THIS operation's CRUD class (plus any all-operations caps) apply.
-      if (permissionSets.length > 0 && !expandSkipCrud) {
+      if (permissionSets.length > 0) {
         const required = requiredCapsForOperation(secMeta.requiredPermissions, opCtx.operation);
         if (required.length > 0) {
           const held = this.permissionEvaluator.getSystemPermissions(permissionSets);
@@ -1271,7 +1307,7 @@ export class SecurityPlugin implements Plugin {
       }
 
       // 2. CRUD permission check
-      if (permissionSets.length > 0 && !expandSkipCrud) {
+      if (permissionSets.length > 0) {
         const allowed = this.permissionEvaluator.checkObjectPermission(
           opCtx.operation,
           opCtx.object,

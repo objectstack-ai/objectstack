@@ -454,8 +454,61 @@ describe('ReportService', () => {
       expect(engine._tables['sys_report_schedule'].length).toBe(0);
     });
 
-    it('unscheduleReport: an unknown schedule id is idempotent, not a leak', async () => {
-      await expect(svc.unscheduleReport('rsch_nope', OTHER)).resolves.toBeUndefined();
+    // [#7603] SUPERSEDES `unscheduleReport: an unknown schedule id is
+    // idempotent, not a leak`, which asserted on this same input
+    // (`'rsch_nope'` as OTHER) that the call `resolves.toBeUndefined()`.
+    //
+    // Its title stated the conclusion backwards. Idempotence is only "not a
+    // leak" where every caller may see the row; here the sibling arm — another
+    // owner's schedule — threw REPORT_NOT_FOUND, so resolving quietly was the
+    // one behaviour that told a stranger apart "no such schedule" from "not
+    // yours". The route turns that into 204-vs-404, which is an enumeration
+    // oracle over other owners' schedule ids (#7523's defect on `deleteReport`,
+    // in a quieter costume). Same input, opposite assertion: the unknown id now
+    // throws, exactly as the cross-owner id does.
+    it('unscheduleReport: an unknown schedule id is denied as not-found, not silently idempotent', async () => {
+      await expect(svc.unscheduleReport('rsch_nope', OTHER)).rejects.toThrow(/REPORT_NOT_FOUND/);
+    });
+
+    // The assertion that actually closes the oracle, and the one to keep if any
+    // of these ever have to be merged: it compares the two deny arms to EACH
+    // OTHER instead of pinning each one's outcome separately. #7523's mutation
+    // table showed per-arm assertions cannot fail on the plausible half-fix
+    // (one arm corrected, the other left alone) — an equality cannot pass
+    // through one.
+    it('unscheduleReport: the unknown-id and cross-owner deny arms are indistinguishable', async () => {
+      const r = await svc.saveReport({ name: 'Mine', object: 'lead', query: {} }, CTX);
+      const s = await svc.scheduleReport({ reportId: r.id, recipients: ['x@t'] }, CTX);
+
+      // A prober holds one id at a time and can only compare what comes back.
+      const outcome = async (scheduleId: string) => {
+        try {
+          await svc.unscheduleReport(scheduleId, OTHER);
+          return { threw: false, message: null as string | null };
+        } catch (err) {
+          // The whole message, not a pattern: the route puts it in the 404 body
+          // verbatim, so any difference here is a difference on the wire.
+          return { threw: true, message: (err as Error).message };
+        }
+      };
+
+      // Same id on both sides, so this is literal equality with nothing
+      // normalised away — the id that does not exist is `s.id` itself, in a
+      // world where the schedule was never created.
+      const crossOwner = await outcome(s.id);
+      await svc.unscheduleReport(s.id, CTX);              // owner drops it for real
+      const unknownId = await outcome(s.id);              // same id, now nonexistent
+
+      expect(unknownId).toEqual(crossOwner);
+      expect(crossOwner).toEqual({ threw: true, message: `REPORT_NOT_FOUND: ${s.id}` });
+    });
+
+    it('unscheduleReport: does not buy equal denials by refusing the owner too', async () => {
+      // The cheap way to make two arms agree is to break the feature.
+      const r = await svc.saveReport({ name: 'Mine', object: 'lead', query: {} }, CTX);
+      const s = await svc.scheduleReport({ reportId: r.id, recipients: ['x@t'] }, CTX);
+      await expect(svc.unscheduleReport(s.id, CTX)).resolves.toBeUndefined();
+      expect(engine._tables['sys_report_schedule'].length).toBe(0);
     });
 
     it('listSchedules: a non-owner cannot see another user\'s schedules', async () => {

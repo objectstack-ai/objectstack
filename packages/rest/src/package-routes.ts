@@ -89,6 +89,23 @@ async function refusePackageRequest(
  */
 
 /**
+ * Resolve the `package` service AT REQUEST TIME.
+ *
+ * [#7563] Deliberately a function and not a resolved instance. The composition
+ * step used to ask `ctx.getService('package')` ONCE, during
+ * `RestApiPlugin.start()`, and mount nothing when the answer was "not yet" —
+ * which is a different question from "not composed". `objectstack serve`
+ * registers the capability providers (`requires: ['marketplace']` →
+ * `PackageServicePlugin`) AFTER `createRestApiPlugin`, and plugin start order
+ * follows registration order for plugins with no edge between them
+ * (`plugin-order.ts`), so on every showcase-shaped deployment the service is
+ * present at request time and absent at the one instant the mount decision was
+ * taken. Resolving per request makes the answer independent of composition
+ * order instead of silently encoding it.
+ */
+export type PackageServiceResolver = () => PackageService | undefined;
+
+/**
  * Options for package route registration.
  */
 export interface PackageRoutesOptions {
@@ -132,9 +149,7 @@ export interface PackageRoutesOptions {
  *
  * Returns the routes it mounted, so the caller can record them on the
  * `RestServer` that owns the surface (#5822) — the returned array IS the array
- * that was iterated to mount, never a second, hand-kept table. A boot without a
- * `package` service never calls this registrar, so nothing is mounted and
- * nothing is reported; see `direct-mount.ts`.
+ * that was iterated to mount, never a second, hand-kept table.
  *
  * Routes:
  * - POST /api/v1/packages/publish - Publish a package to the marketplace registry
@@ -149,6 +164,35 @@ export interface PackageRoutesOptions {
  * swallowed every `client.packages.install` call with a 400. The
  * dispatcher's own `POST /packages/:id/publish` (ADR-0033 draft publish)
  * is two segments — different shape, no clash.
+ *
+ * ## Which of these four mount, and why they differ (#7563)
+ *
+ * `POST /packages/publish` mounts UNCONDITIONALLY; the other three stay gated
+ * on the `package` service. That asymmetry is not a compromise — it is the one
+ * shape that is honest for each:
+ *
+ *  - The three gated routes have DISPATCHER TWINS at byte-identical patterns
+ *    (`packages/runtime/src/domains/packages.ts` — `GET /packages`,
+ *    `GET /packages/:id`, `DELETE /packages/:id`), mounted unconditionally.
+ *    This registrar shadows them when it runs (first-match-wins). Mounting them
+ *    without a `package` service would replace three WORKING routes with a
+ *    degraded refusal, so absence keeps them where they are.
+ *  - `POST /packages/publish` has NO twin. Nobody else serves that verb+path,
+ *    so when this registrar sits out, the request does not 404 — it is absorbed
+ *    by the dispatcher's `/packages/:id` (with `id = "publish"`), and the
+ *    router answers `405` with `Allow: DELETE, GET, HEAD, PATCH`: ANOTHER
+ *    route's method set, describing verbs that would each operate on a package
+ *    literally named `publish` (#7563). "Use a different method" is the one
+ *    answer that misinforms here, because `POST` is the only verb this surface
+ *    ever had. Mounting it always means the path has an owner that can tell the
+ *    truth — the handler when a package service is reachable, and an honest
+ *    404 naming this surface when none is.
+ *
+ * The degraded answer is 404 and not 503: a deployment that composed no
+ * marketplace capability is not going to grow one on retry, and 503 invites
+ * exactly that retry. It is also what `direct-mount-composition.ts` has always
+ * documented as the answer for a skipped registrar — until #7563 that promise
+ * was simply not true on the wire for this one path.
  *
  * ## Where this module's error codes came from
  *
@@ -181,19 +225,16 @@ export interface PackageRoutesOptions {
  */
 export function registerPackageRoutes(
   server: IHttpServer,
-  packageService: PackageService,
+  resolvePackageService: PackageServiceResolver,
   basePath: string = '/api/v1',
   options: PackageRoutesOptions = {},
 ): readonly DirectMountedRoute[] {
   const packagesPath = `${basePath}/packages`;
 
   /**
-   * ONE declaration of this registrar's surface (#5822): the array below is
-   * what gets mounted on the host server AND what is handed back as the
-   * description of what was mounted. There is no second table to keep in sync —
-   * see `direct-mount.ts` for why that identity is the whole point.
+   * The always-mounted half — see "Which of these four mount" above.
    */
-  const routes: readonly DirectMountedRoute[] = [
+  const publishRoute: DirectMountedRoute =
   // POST /api/v1/packages/publish - Publish a package to the marketplace
   {
     method: 'POST',
@@ -202,6 +243,25 @@ export function registerPackageRoutes(
     handler: async (req, res) => {
     try {
       if (await refusePackageRequest(options, req, res, 'write')) return;
+      // Resolved HERE, not at composition (#7563). Authorization runs first so
+      // an anonymous prober cannot read a deployment's capability composition
+      // off this seam.
+      const packageService = resolvePackageService();
+      if (!packageService) {
+        // The honest answer for a surface this host does not serve. It names
+        // the surface rather than a package id, so it cannot be confused with
+        // the `RESOURCE_NOT_FOUND` a real publish emits for a missing package,
+        // and it can never be the `405` of a route that merely shares the
+        // `/packages` prefix.
+        sendError(
+          res,
+          404,
+          'RESOURCE_NOT_FOUND',
+          'This deployment serves no marketplace publish surface — it composes no `package` service. '
+          + "Add the `marketplace` capability to the app's `requires` to enable publishing.",
+        );
+        return;
+      }
       const { manifest, metadata } = req.body || {};
 
       if (!manifest || !metadata) {
@@ -232,8 +292,19 @@ export function registerPackageRoutes(
       sendError(res, 500, 'INTERNAL_ERROR', (error as Error).message);
     }
     },
-  },
+  };
 
+  /**
+   * The service-gated half — mounted only when a `package` service is
+   * reachable, because each of these three SHADOWS a live dispatcher twin at
+   * the same pattern and a degraded shadow is worse than no shadow.
+   *
+   * These take the RESOLVED service, not the resolver: the gate below already
+   * decided on presence, and handing them an optional they would each have to
+   * re-check would add three branches no deployment can reach. Their bodies are
+   * unchanged from before #7563.
+   */
+  const serviceGatedRoutes = (packageService: PackageService): readonly DirectMountedRoute[] => [
   // GET /api/v1/packages - List all packages (merges registry + database)
   {
     method: 'GET',
@@ -413,6 +484,19 @@ export function registerPackageRoutes(
     },
   },
   ];
+
+  /**
+   * ONE declaration of this registrar's surface (#5822): the array below is
+   * what gets mounted on the host server AND what is handed back as the
+   * description of what was mounted. There is no second table to keep in sync —
+   * see `direct-mount.ts` for why that identity is the whole point. The gate is
+   * inside the declaration rather than around the call, so "what was mounted"
+   * stays the array that mounted it on both branches.
+   */
+  const packageService = resolvePackageService();
+  const routes: readonly DirectMountedRoute[] = packageService
+    ? [publishRoute, ...serviceGatedRoutes(packageService)]
+    : [publishRoute];
 
   return mountDirectRoutes(server, routes);
 }

@@ -210,7 +210,7 @@ describe('installCommentReadVisibility', () => {
   // [#7141] The parent probe reads a DIFFERENT object than the one the security
   // middleware resolved its depth for, so the caller's envelope crosses over
   // but the operation-private keys must not: `__readScope` is `sys_comment`'s
-  // access DEPTH and `__expandRead` waives the object-level CRUD check.
+  // access DEPTH and `__expandRead` marks THAT read as an expansion sub-read.
   it('probes the parent with the caller ENVELOPE, minus the operation-private keys', async () => {
     const { mw, calls } = install(dataset);
     await runRead(mw, {
