@@ -26,6 +26,10 @@
  * conversion chain is a different seam, untouched by this card.
  */
 import { describe, expect, it, vi } from 'vitest';
+// The engine-double contract (#4434 / #5619): a fake engine's update/delete
+// must be exactly as strict as ObjectQL's dispatch, or a dead route ships with
+// its suite green. Both predicates live in metadata-core.
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { RestServer } from './rest-server';
 
@@ -46,8 +50,14 @@ function stubEngine() {
                 rows.push({ id: `r_${nextId}`, ...data });
                 return { id: `r_${nextId}` };
             },
-            async update() { return { id: null }; },
-            async delete() { return { deleted: 0 }; },
+            async update(_t: string, data: Record<string, unknown>, opts: { where: Record<string, unknown> }) {
+                assertEngineUpdateDispatch(data, opts);
+                return { id: null };
+            },
+            async delete(_t: string, opts: { where: Record<string, unknown> }) {
+                assertEngineDeleteDispatch(opts);
+                return { deleted: 0 };
+            },
             registry: { registerItem: () => {}, registerObject: () => {}, listItems: () => [] },
         } as any,
     };
