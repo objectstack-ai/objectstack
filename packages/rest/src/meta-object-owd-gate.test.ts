@@ -73,7 +73,7 @@ import {
 // of the verdict. A local copy of the gate would make this suite a test of the
 // copy, which is the failure mode the file exists to close.
 import { registerObjectPostureGate } from '@objectstack/plugin-security';
-import { RestServer } from './rest-server';
+import { RestServer } from './rest-server.js';
 
 const META_ITEM = '/api/v1/meta/:type/:name';
 
@@ -184,12 +184,21 @@ async function boot(opts: { channel?: MetadataAuthoringChannel; envWritableObjec
     liveEngines.push(engine);
     engine.registerDriver(makeSqliteDriver(), true);
     await engine.init();
-    engine.registry.registerObject(SysMetadata as any);
-    engine.registry.registerObject(SysMetadataHistoryObject as any);
-    // The ADR-0029 save-audit sink. Registered so a permitted write's audit row
-    // lands rather than degrading into a logged best-effort failure — the noise
-    // would otherwise read like a defect in a suite about refusals.
-    engine.registry.registerObject(SysMetadataAuditObject as any);
+    // The metadata-storage platform objects, registered through the SAME seam
+    // `assembleMetadataProtocol` uses — one `registerApp` manifest under
+    // `com.objectstack.metadata-objects`, not three hand-rolled
+    // `registerObject` calls. The audit sink is in the list so a permitted
+    // write's audit row lands rather than degrading into a logged best-effort
+    // failure, which would otherwise read like a defect in a suite about
+    // refusals.
+    engine.registerApp({
+        id: 'com.objectstack.metadata-objects',
+        name: 'Metadata Platform Objects',
+        version: '1.0.0',
+        type: 'plugin',
+        scope: 'system',
+        objects: [SysMetadata, SysMetadataHistoryObject, SysMetadataAuditObject],
+    });
     engine.registry.registerObject(PACKAGED_ACCOUNT as any, 'demo_pkg');
     await engine.syncSchemas();
 
@@ -228,9 +237,19 @@ async function boot(opts: { channel?: MetadataAuthoringChannel; envWritableObjec
         return res;
     };
 
-    /** Overlay rows actually in `sys_metadata` for a name — the persistence half. */
+    /**
+     * Overlay rows actually in `sys_metadata` for a name — the persistence half.
+     *
+     * The options bag is TYPED, not erased. `ObjectQL.find`'s second parameter
+     * is already `EngineQueryOptions`, so the literal infers against it and
+     * `tsc` stays the enforcing channel for these keys — the #4674 lesson the
+     * `query-options/no-any-erasure` rule exists for (an unknown key here is
+     * silently DROPPED, never rejected, because the options schemas are not
+     * `.strict()`). Nothing about this query is off-contract, so it needs no
+     * `as unknown as EngineQueryOptions` escape either.
+     */
     const storedRows = async (name: string) =>
-        engine.find('sys_metadata', { where: { type: 'object', name } } as any);
+        engine.find('sys_metadata', { where: { type: 'object', name } });
 
     return { engine, protocol, put, storedRows };
 }
