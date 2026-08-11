@@ -2491,17 +2491,41 @@ export class ObjectQL implements IObjectQLEngine {
    *
    * Carries `tenantId` from the active ExecutionContext so the driver can
    * enforce per-tenant isolation (SQL driver auto-scopes reads and
-   * auto-injects the tenant column on writes) — EXCEPT for objects that
-   * declare `tenancy.enabled: false` (ADR-0066 platform-global posture,
-   * e.g. `sys_license`): stamping the caller's active-org tenantId there
-   * would org-scope a global catalog at the driver, and its NULL-org rows
-   * would vanish for authenticated org-context reads while anonymous
-   * reads still see them (#3249). The SQL driver has its own opt-out
-   * (sticky tenant-field cache), but withholding tenantId here protects
-   * every driver at the source. Existing user-supplied shapes
-   * (transactions, AST extras) are preserved by spreading them first — an
-   * explicitly-passed `base.tenantId` is deliberate caller intent and
-   * still wins.
+   * auto-injects the tenant column on writes) — EXCEPT for the two object
+   * postures below. The SQL driver has its own opt-out (sticky tenant-field
+   * cache), but withholding tenantId here protects every driver at the
+   * source. Existing user-supplied shapes (transactions, AST extras) are
+   * preserved by spreading them first — an explicitly-passed `base.tenantId`
+   * is deliberate caller intent and still wins, under both exemptions.
+   *
+   * 1. **`tenancy.enabled: false`** (ADR-0066 platform-global posture, e.g.
+   *    `sys_license`): stamping the caller's active-org tenantId there would
+   *    org-scope a global catalog at the driver, and its NULL-org rows would
+   *    vanish for authenticated org-context reads while anonymous reads still
+   *    see them (#3249).
+   *
+   * 2. **`external != null`** — a federated object (ADR-0015), whose schema
+   *    is owned by the REMOTE database (#7738). The driver turns `tenantId`
+   *    into `(organization_id = :tenant OR organization_id IS NULL)`, and
+   *    against a remote table that carries no such column that is a SQL error
+   *    on Postgres/MySQL — or worse on SQLite, whose quoted-identifier
+   *    fallback reinterprets the unresolvable identifier as the string
+   *    literal `'organization_id'`, makes both disjuncts constant-false, and
+   *    answers **0 rows with HTTP 200**: a correctly-bound external object
+   *    silently reads empty.
+   *
+   *    Note the reason is NOT "the remote happens to lack the column". The
+   *    column the driver detects is the platform's OWN: `applySystemFields`
+   *    (`resolveInjectedSystemColumns`) injects `organization_id` into every
+   *    object it registers, with no `external` branch, and
+   *    `SqlDriver.registerExternalObject` is DDL-free by design and runs no
+   *    introspection — so it computes the tenant column from the platform's
+   *    field set, never from the remote's. On a federated object
+   *    `organization_id`'s presence is therefore always the injection and
+   *    never evidence about the remote, which leaves the engine no ground on
+   *    which to scope by it. Tenant isolation for federated data belongs to
+   *    the remote and to the layers above (RBAC/RLS, the datasource binding),
+   *    not to a predicate the platform guesses onto someone else's table.
    *
    * System / isSystem callers may still cross tenants by clearing
    * `tenantId` themselves on the resulting object; this helper does not
@@ -2525,9 +2549,15 @@ export class ObjectQL implements IObjectQLEngine {
     // reaches the driver that owns it. It covers READS too, which have no gate
     // of their own and were riding the same wrong connection.
     const hasTx = tx !== undefined && this.transactionCoversDriverFor(object, tx);
+    const objectSchema = this._registry.getObject(object) as any;
+    // `external != null` is the same predicate `syncObjectSchema` routes a
+    // federated object by — one spelling of "this schema is the remote's",
+    // not a second reading of it.
+    const isFederated = objectSchema?.external != null;
     const hasTenant =
       execCtx?.tenantId !== undefined &&
-      !isTenancyDisabled(this._registry.getObject(object));
+      !isTenancyDisabled(objectSchema) &&
+      !isFederated;
     const hasTz = execCtx?.timezone !== undefined;
     const isSystem = execCtx?.isSystem === true;
     const preserveAudit = (execCtx as any)?.preserveAudit === true;
