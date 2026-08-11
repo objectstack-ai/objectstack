@@ -239,9 +239,10 @@ export interface ISecurityService {
    * served, as opposed to which columns of a row it may read.
    *
    * Identical to {@link getReadableFields} in every respect but one — a caller
-   * that resolves to **zero** permission sets goes through the same fallback-set
-   * resolution `/auth/me/permissions` uses (`security.fallbackPermissionSet`,
-   * default `member_default`) instead of falling open to the full field set.
+   * that resolves to **zero** permission sets goes through the same baseline
+   * resolution `/auth/me/permissions` uses (`security.baselinePermissionSets`:
+   * the app-declared baseline COMPOSED with the platform `member_default`,
+   * #7555) instead of falling open to the full field set.
    *
    * **Why the two differ rather than converge.** `getReadableFields` mirrors the
    * engine middleware, which skips its whole field gate for a caller with no

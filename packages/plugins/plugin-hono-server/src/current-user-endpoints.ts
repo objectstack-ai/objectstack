@@ -313,6 +313,36 @@ function isWriteOptedIn(v: boolean | { enabled?: boolean } | undefined | null): 
 }
 
 /**
+ * [#7555, ADR-0090 D5] The baseline permission-set NAMES this deployment
+ * applies to a human principal — read from SecurityPlugin, never re-derived.
+ *
+ * The plugin registers `security.baselinePermissionSets` (the app-declared
+ * baseline COMPOSED with the platform `member_default`); this file's two
+ * resolutions must ask for that list rather than the single
+ * `security.fallbackPermissionSet` name, or an app that declares an `isDefault`
+ * set gets the pre-#7555 DISPLACEMENT here — its members' capability and tab
+ * surface computed from the app set alone, disagreeing with the data plane one
+ * function call away.
+ *
+ * The `security.fallbackPermissionSet` read is kept as the fallback for a
+ * SecurityPlugin too old to register the list, and the bare `member_default`
+ * default for a stack with no SecurityPlugin at all — both pre-existing
+ * behaviours, unchanged.
+ */
+function baselinePermissionSetNames(ctx: { getService: <T>(name: string) => T | undefined }): string[] {
+    const composed = (() => {
+        try { return ctx.getService<string[] | undefined>('security.baselinePermissionSets'); }
+        catch { return undefined; }
+    })();
+    if (Array.isArray(composed)) return composed;
+    const declared: string | null = (() => {
+        try { return ctx.getService<string | null>('security.fallbackPermissionSet') ?? 'member_default'; }
+        catch { return 'member_default'; }
+    })();
+    return declared ? [declared] : [];
+}
+
+/**
  * Buckets whose user-context generic writes are guarded fail-closed at the
  * engine: `better-auth` by plugin-auth's identity write guard (ADR-0092 D2),
  * `engine-owned` / `append-only` by plugin-security's engine-owned write guard
@@ -665,10 +695,7 @@ export function registerCurrentUserEndpoints(
                 try { return ctx.getService<any[]>('security.bootstrapPermissionSets') ?? []; }
                 catch { return []; }
             })();
-            const fallbackName: string | null = (() => {
-                try { return ctx.getService<string | null>('security.fallbackPermissionSet') ?? 'member_default'; }
-                catch { return 'member_default'; }
-            })();
+            const fallbackNames: string[] = baselinePermissionSetNames(ctx);
             // DB loader: surfaces user-defined permission sets
             // (created via the admin UI as `sys_permission_set`
             // rows) that aren't in metadata or bootstrap.
@@ -737,9 +764,9 @@ export function registerCurrentUserEndpoints(
             let resolved: ResolvedPermissionSetLike[] = await evaluator
                 .resolvePermissionSets(requested, metadata, bootstrap, dbLoader)
                 .catch(() => []);
-            if (resolved.length === 0 && fallbackName) {
+            if (resolved.length === 0 && fallbackNames.length > 0) {
                 resolved = await evaluator
-                    .resolvePermissionSets([fallbackName], metadata, bootstrap, dbLoader)
+                    .resolvePermissionSets(fallbackNames, metadata, bootstrap, dbLoader)
                     .catch(() => []);
             }
             // Most-permissive merge of `objects` and `fields` across
@@ -915,10 +942,7 @@ export function registerCurrentUserEndpoints(
                         try { return ctx.getService<any[]>('security.bootstrapPermissionSets') ?? []; }
                         catch { return []; }
                     })();
-                    const fallbackName: string | null = (() => {
-                        try { return ctx.getService<string | null>('security.fallbackPermissionSet') ?? 'member_default'; }
-                        catch { return 'member_default'; }
-                    })();
+                    const fallbackNames: string[] = baselinePermissionSetNames(ctx);
                     const requested = [
                         ...((execCtx as any).positions ?? []),
                         ...((execCtx as any).permissions ?? []),
@@ -951,9 +975,9 @@ export function registerCurrentUserEndpoints(
                     let resolved: ResolvedPermissionSetLike[] = await evaluator
                         .resolvePermissionSets(requested, metadata, bootstrap, dbLoader)
                         .catch(() => []);
-                    if (resolved.length === 0 && fallbackName) {
+                    if (resolved.length === 0 && fallbackNames.length > 0) {
                         resolved = await evaluator
-                            .resolvePermissionSets([fallbackName], metadata, bootstrap, dbLoader)
+                            .resolvePermissionSets(fallbackNames, metadata, bootstrap, dbLoader)
                             .catch(() => []);
                     }
                     const tabRank: Record<string, number> = { hidden: 0, default_off: 1, default_on: 2, visible: 3 };

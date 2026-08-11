@@ -9,6 +9,7 @@ import { MCP_AGENT_PERMISSION_SET_RESTRICTED } from '@objectstack/spec/ai';
 // for one defect class is what that module exists to prevent.
 import { renderOperationMessage } from '@objectstack/spec/system';
 import { PermissionEvaluator, crudBucketForOperation } from './permission-evaluator.js';
+import { composeHumanBaselinePermissionSets, PLATFORM_BASELINE_PERMISSION_SET } from './app-default-permission-set.js';
 import { DelegatedAdminGate } from './delegated-admin-gate.js';
 import {
   INVITATION_PLACEMENT_SERVICE,
@@ -320,11 +321,18 @@ export interface SecurityPluginOptions {
    */
   defaultPermissionSets?: PermissionSet[];
   /**
-   * Permission set name applied as an implicit baseline whenever an
-   * authenticated request has no resolved permission sets (and no positions
-   * that map to one). This guarantees baseline tenant/owner RLS for
-   * every logged-in user even before an admin assigns explicit
-   * profiles. Set to `null` to disable.
+   * Permission set name applied as an implicit ADDITIVE baseline on every
+   * authenticated human request (ADR-0090 D5: `baseline ∪ explicit, always`).
+   * This guarantees baseline tenant/owner RLS for every logged-in user even
+   * before an admin assigns explicit profiles.
+   *
+   * [#7555] Naming a set here ADDS it to the baseline; it does not REPLACE the
+   * platform baseline (`member_default`), which composes in alongside it — see
+   * {@link composeHumanBaselinePermissionSets}. An app declaring `isDefault`
+   * therefore keeps the built-in Account destinations working for its members
+   * instead of silently costing them the whole platform floor.
+   *
+   * Set to `null` to disable the baseline entirely — the platform one included.
    *
    * @default 'member_default'
    */
@@ -424,7 +432,7 @@ export class SecurityPlugin implements Plugin {
    * Services init() registers on every path (ADR-0116, #4131) — lets the
    * kernel name this plugin when a consumer requires one before it inits.
    */
-  providesServices = ['security.permissions', 'security.rls', 'security.fieldMasker', 'security.bootstrapPermissionSets', 'security.fallbackPermissionSet'];
+  providesServices = ['security.permissions', 'security.rls', 'security.fieldMasker', 'security.bootstrapPermissionSets', 'security.fallbackPermissionSet', 'security.baselinePermissionSets'];
   type = 'standard';
   version = '1.0.0';
   dependencies = ['com.objectstack.engine.objectql'];
@@ -434,6 +442,17 @@ export class SecurityPlugin implements Plugin {
   private fieldMasker = new FieldMasker();
   private readonly bootstrapPermissionSets: PermissionSet[];
   private readonly fallbackPermissionSet: string | null;
+  /**
+   * [#7555, ADR-0090 D5] The HUMAN baseline, as the list of set names it is:
+   * {@link fallbackPermissionSet} COMPOSED WITH the platform baseline
+   * (`member_default`), deduped — `[]` when the baseline is disabled (`null`).
+   *
+   * `fallbackPermissionSet` stays the single name the app/deployment DECLARED
+   * (that is what the `security.fallbackPermissionSet` service means, and what
+   * consumers key attribution on); this is what actually RESOLVES per request.
+   * Agents never see it — ADR-0090 D10 gives them a restricted ceiling instead.
+   */
+  private readonly baselinePermissionSets: string[];
   /**
    * Runtime probe — set in `start()` from
    * `ctx.getService('org-scoping')`. When `false`, the PLATFORM's own
@@ -522,8 +541,11 @@ export class SecurityPlugin implements Plugin {
         // ADR-0056 D7: an app may declare its default profile via `isDefault: true`
         // on a permission set; it becomes the fallback for users with no explicit
         // grants. Falls back to the built-in `member_default` when none is declared.
-        ? (this.bootstrapPermissionSets.find((p) => (p as { isDefault?: boolean }).isDefault)?.name ?? 'member_default')
+        ? (this.bootstrapPermissionSets.find((p) => (p as { isDefault?: boolean }).isDefault)?.name ?? PLATFORM_BASELINE_PERMISSION_SET)
         : options.fallbackPermissionSet;
+    // [#7555] …and the baseline that actually resolves is that name COMPOSED
+    // with the platform's own, never one displacing the other (ADR-0090 D5).
+    this.baselinePermissionSets = composeHumanBaselinePermissionSets(this.fallbackPermissionSet);
   }
 
   async init(ctx: PluginContext): Promise<void> {
@@ -541,6 +563,14 @@ export class SecurityPlugin implements Plugin {
     // the platform-objects package directly.
     ctx.registerService('security.bootstrapPermissionSets', this.bootstrapPermissionSets);
     ctx.registerService('security.fallbackPermissionSet', this.fallbackPermissionSet);
+    // [#7555] The baseline as it actually RESOLVES — the declared name composed
+    // with the platform's own (ADR-0090 D5). `security.fallbackPermissionSet`
+    // above keeps meaning "the single name this deployment declared", so
+    // existing consumers keep their `string | null` contract; a consumer that
+    // wants the effective baseline (`/auth/me/permissions`, REST) reads THIS
+    // one and falls back to `[fallbackPermissionSet]` on a stack too old to
+    // register it.
+    ctx.registerService('security.baselinePermissionSets', this.baselinePermissionSets);
 
     ctx.getService<{ register(m: any): void }>('manifest').register({
       ...securityPluginManifestHeader,
@@ -2275,8 +2305,8 @@ export class SecurityPlugin implements Plugin {
         } catch (e) {
           ctx.logger.warn('[security] built-in role seeding failed', { error: (e as Error).message });
         }
-        // [ADR-0090 D5] Bind the configured baseline set to the `everyone`
-        // audience anchor (idempotent). This makes the CLI/dev fallback
+        // [ADR-0090 D5] Bind the configured baseline set(s) to the `everyone`
+        // audience anchor (idempotent). This makes the CLI/dev baseline
         // (`fallbackPermissionSet` — the app's `isDefault` set) visible as an
         // ordinary position binding: same table, same audit path, same explain
         // surface as any admin-authored default grant. The binding is validated
@@ -2285,31 +2315,40 @@ export class SecurityPlugin implements Plugin {
         // `bootstrapBuiltinRoles` (which seeds the `everyone` anchor) and before
         // `syncAudienceBindingSuggestions` (so the app's own fallback set is
         // already bound and never generates a redundant pending suggestion).
+        //
+        // [#7555] Every name in the COMPOSED baseline is bound, not just the
+        // declared one — the join table takes many rows per position, and the
+        // explain surface's whole job is to answer "what does a new member get"
+        // truthfully. Binding only the app's set while `member_default` also
+        // resolves at request time would make `security/explain` report a
+        // narrower default than the runtime actually applies. The refusal is
+        // PER SET: a high-privilege name is skipped loudly and the rest still
+        // bind (the D5/D9 anchor gate is untouched, and each set faces it).
         try {
-          if (this.fallbackPermissionSet) {
-            const boot = this.bootstrapPermissionSets.find((p) => p.name === this.fallbackPermissionSet);
+          for (const baselineName of this.baselinePermissionSets) {
+            const boot = this.bootstrapPermissionSets.find((p) => p.name === baselineName);
             const offending = boot ? describeHighPrivilegeBits(boot) : null;
             if (offending) {
               ctx.logger.warn('[security] refusing to bind fallback set to everyone — high-privilege bits', {
-                set: this.fallbackPermissionSet, offending,
+                set: baselineName, offending,
               });
-            } else {
-              const everyoneRows = await ql.find('sys_position', { where: { name: 'everyone' }, limit: 1, context: { isSystem: true } });
-              const everyone: any = Array.isArray(everyoneRows) && everyoneRows[0] ? everyoneRows[0] : null;
-              const setRows = await ql.find('sys_permission_set', { where: { name: this.fallbackPermissionSet }, limit: 1, context: { isSystem: true } });
-              const set: any = Array.isArray(setRows) && setRows[0] ? setRows[0] : null;
-              if (everyone?.id && set?.id) {
-                const existing = await ql.find('sys_position_permission_set', {
-                  where: { position_id: everyone.id, permission_set_id: set.id }, limit: 1, context: { isSystem: true },
-                });
-                if (!(Array.isArray(existing) && existing[0])) {
-                  await ql.insert('sys_position_permission_set', {
-                    id: `pps_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
-                    position_id: everyone.id,
-                    permission_set_id: set.id,
-                  }, { context: { isSystem: true } });
-                  ctx.logger.info('[security] baseline set bound to everyone anchor (ADR-0090 D5)', { set: this.fallbackPermissionSet });
-                }
+              continue;
+            }
+            const everyoneRows = await ql.find('sys_position', { where: { name: 'everyone' }, limit: 1, context: { isSystem: true } });
+            const everyone: any = Array.isArray(everyoneRows) && everyoneRows[0] ? everyoneRows[0] : null;
+            const setRows = await ql.find('sys_permission_set', { where: { name: baselineName }, limit: 1, context: { isSystem: true } });
+            const set: any = Array.isArray(setRows) && setRows[0] ? setRows[0] : null;
+            if (everyone?.id && set?.id) {
+              const existing = await ql.find('sys_position_permission_set', {
+                where: { position_id: everyone.id, permission_set_id: set.id }, limit: 1, context: { isSystem: true },
+              });
+              if (!(Array.isArray(existing) && existing[0])) {
+                await ql.insert('sys_position_permission_set', {
+                  id: `pps_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
+                  position_id: everyone.id,
+                  permission_set_id: set.id,
+                }, { context: { isSystem: true } });
+                ctx.logger.info('[security] baseline set bound to everyone anchor (ADR-0090 D5)', { set: baselineName });
               }
             }
           }
@@ -2574,7 +2613,7 @@ export class SecurityPlugin implements Plugin {
           fp = this.foldFieldRequiredPermissions(fp, fieldRequired, sets as any);
           return fp as any;
         },
-        fallbackPermissionSet: this.fallbackPermissionSet,
+        baselinePermissionSets: this.baselinePermissionSets,
         // ── record-grained deps (only consulted when recordId is present) ──
         computeLayeredRlsFilter: (sets, o, engineOp, c) => this.computeLayeredRlsFilter(sets as any, o, engineOp, c),
         fetchRecord: async (o: string, rid: string) => {
@@ -3268,15 +3307,27 @@ export class SecurityPlugin implements Plugin {
     // user's own baseline still applies on the OTHER side of the intersection
     // (resolved from `onBehalfOf` via a context without this flag).
     const isAgent = context?.principalKind === 'agent';
-    const baseline = isAgent ? MCP_AGENT_PERMISSION_SET_RESTRICTED : this.fallbackPermissionSet;
-    // [ADR-0090 D5] Baseline is ADDITIVE, always (for humans): the configured
-    // baseline set applies to every authenticated request IN ADDITION to
-    // whatever else resolved. The former "only when the user has nothing else"
-    // conditional was the fallback CLIFF — receiving your first explicit grant
-    // silently cost you the entire baseline. Agents skip this additive step
-    // (their ceiling is closed, not floored) — see above.
-    if (!isAgent && context?.userId && baseline && !requested.includes(baseline)) {
-      requested.push(baseline);
+    // [#7555] The human side is a LIST, and the agent side deliberately is not:
+    // the agent's ceiling is EXACTLY the restricted set, and composing the
+    // platform baseline into it is precisely the widening D10 forbids. The two
+    // branches produce arrays only so the code below reads once.
+    const baseline: string[] = isAgent
+      ? [MCP_AGENT_PERMISSION_SET_RESTRICTED]
+      : this.baselinePermissionSets;
+    // [ADR-0090 D5] Baseline is ADDITIVE, always (for humans): the baseline
+    // set(s) apply to every authenticated request IN ADDITION to whatever else
+    // resolved. The former "only when the user has nothing else" conditional
+    // was the fallback CLIFF — receiving your first explicit grant silently
+    // cost you the entire baseline. Agents skip this additive step (their
+    // ceiling is closed, not floored) — see above.
+    // [#7555] The same cliff had a second spelling the list closes: an app
+    // declaring an `isDefault` set REPLACED `member_default` here, so every
+    // member of that app lost the platform floor (and with it every built-in
+    // Account destination) the moment the app declared a posture of its own.
+    if (!isAgent && context?.userId) {
+      for (const name of baseline) {
+        if (!requested.includes(name)) requested.push(name);
+      }
     }
     let permissionSets = await this.permissionEvaluator.resolvePermissionSets(
       requested,
@@ -3293,10 +3344,10 @@ export class SecurityPlugin implements Plugin {
     if (
       permissionSets.length === 0 &&
       context?.userId &&
-      baseline
+      baseline.length > 0
     ) {
       permissionSets = await this.permissionEvaluator.resolvePermissionSets(
-        [baseline],
+        baseline,
         this.metadata,
         this.bootstrapPermissionSets,
         this.dbLoader,
@@ -3307,9 +3358,9 @@ export class SecurityPlugin implements Plugin {
   }
 
   /**
-   * [ADR-0106 D7] Resolve the configured fallback permission set on its own —
-   * the second step `/auth/me/permissions` takes when a caller's own names
-   * resolve to nothing (`resolved.length === 0 && fallbackName`).
+   * [ADR-0106 D7] Resolve the configured baseline permission set(s) on their
+   * own — the second step `/auth/me/permissions` takes when a caller's own
+   * names resolve to nothing (`resolved.length === 0 && fallbackName`).
    *
    * Distinct from the post-resolution fallback inside
    * {@link resolvePermissionSetsForContext}, which is gated on `context.userId`
@@ -3318,13 +3369,25 @@ export class SecurityPlugin implements Plugin {
    * principal at all, so that a guest-facing deployment's metadata exposure is
    * a permission-set decision rather than an accidental everything-default.
    *
-   * Returns `[]` when no fallback set is configured or it does not resolve.
+   * [#7555] Reads the COMPOSED baseline, deliberately — D7 warrants it. This
+   * method exists to answer "what does this deployment's baseline disclose",
+   * and its whole justification is being *the same* resolution the data plane
+   * performs ("the same two-step `/auth/me/permissions` performs", above); one
+   * plane composing while the other displaced would put the two planes in
+   * disagreement about what the baseline even is, which is the drift D7 is
+   * written to avoid. On every deployment that declares no app baseline the
+   * list is exactly `['member_default']` and nothing changes; on one that does,
+   * exposure becomes platform ∪ app — both deliberate permission-set decisions,
+   * which is the bar D7 sets, rather than an app declaration silently NARROWING
+   * a guest's schema view relative to a deployment that declared nothing.
+   *
+   * Returns `[]` when no baseline is configured or none of it resolves.
    */
   private async resolveFallbackPermissionSets(): Promise<PermissionSet[]> {
-    const fallback = this.fallbackPermissionSet;
-    if (!fallback) return [];
+    const fallback = this.baselinePermissionSets;
+    if (fallback.length === 0) return [];
     return this.permissionEvaluator.resolvePermissionSets(
-      [fallback],
+      fallback,
       this.metadata,
       this.bootstrapPermissionSets,
       this.dbLoader,

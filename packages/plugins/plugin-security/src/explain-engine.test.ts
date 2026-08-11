@@ -36,7 +36,7 @@ function makeDeps(overrides: Partial<ExplainEngineDeps> & { sets?: any[]; schema
     },
     computeRlsFilter: async () => overrides.rls !== undefined ? overrides.rls : null,
     getFieldMask: () => ({}),
-    fallbackPermissionSet: 'member_default',
+    baselinePermissionSets: ['member_default'],
     ...overrides,
   };
 }
