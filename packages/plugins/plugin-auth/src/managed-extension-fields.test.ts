@@ -160,8 +160,31 @@ const UNMAPPED_MANAGED_OBJECTS: Record<string, UnmappedManagedObject> = {
   sys_oauth_client_assertion: { reason: '@better-auth/oauth-provider — separate package, covered by oauth-provider-schema-parity.test.ts.' },
 };
 
-/** The nine objects `MODEL_TO_OBJECT` maps, pinned so coverage cannot shrink. */
+/** The objects `MODEL_TO_OBJECT` maps right now — the live skip criterion. */
 const MAPPED_OBJECTS: readonly string[] = Object.values(MODEL_TO_OBJECT);
+
+/**
+ * The nine objects this guard has real collision coverage for, written out as
+ * a LITERAL rather than derived from `MODEL_TO_OBJECT`.
+ *
+ * Deriving it would have made the pin below unable to see the regression it
+ * exists for: deleting a mapping shrinks the derived surface and the expected
+ * list together, so the assertion stays green while an object drops out of the
+ * collision loop. Measured — an ablation that removed `teamMember` left a
+ * derived version of this pin green and was caught only by the accounting
+ * assertion. Two independent lists, so one of them has to be wrong out loud.
+ */
+const COVERED_OBJECTS: readonly string[] = [
+  'sys_user',
+  'sys_session',
+  'sys_account',
+  'sys_verification',
+  'sys_organization',
+  'sys_member',
+  'sys_invitation',
+  'sys_team',
+  'sys_team_member',
+];
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 /** …/packages/plugins/plugin-auth/src → repo root */
@@ -262,11 +285,21 @@ describe('managed extension fields (ADR-0105 D7)', () => {
   });
 
   it('keeps the nine mapped models covered, exactly (coverage cannot shrink)', () => {
-    // A model that stops appearing in getAuthTables() would silently withdraw
-    // its object from the collision loop — the #7770 shape, arriving from the
-    // library side instead of from the map.
-    expect(Object.keys(byObject).sort()).toEqual([...MAPPED_OBJECTS].sort());
-    for (const object of MAPPED_OBJECTS) {
+    // Two ways an object can silently withdraw from the collision loop, and
+    // this pins both against the same literal: the LIBRARY stops emitting the
+    // model, or the MAP stops naming it. Either is the #7770 shape arriving
+    // as a regression rather than as a pre-existing absence.
+    expect(
+      [...MAPPED_OBJECTS].sort(),
+      'MODEL_TO_OBJECT no longer maps exactly the nine covered objects — a deleted mapping '
+        + 'withdraws an object from the collision loop as surely as a missing one ever did.',
+    ).toEqual([...COVERED_OBJECTS].sort());
+    expect(
+      Object.keys(byObject).sort(),
+      'getAuthTables() no longer emits a model for every mapped object — the derived surface '
+        + 'shrank underneath the map, so the objects it dropped are no longer being compared.',
+    ).toEqual([...COVERED_OBJECTS].sort());
+    for (const object of COVERED_OBJECTS) {
       expect(byObject[object]?.size ?? 0, `${object} derived an empty field set`).toBeGreaterThan(0);
     }
   });
