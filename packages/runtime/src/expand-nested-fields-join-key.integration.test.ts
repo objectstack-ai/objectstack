@@ -152,7 +152,7 @@ describe('#7537 expand with a nested `fields` that omits the join key (REAL SqlD
     const row: any = await e.findOne('showcase_invoice', {
       where: { id: inv.id },
       expand: { account: { object: 'showcase_account', fields: ['name'] } },
-    } as any);
+    });
 
     expect(row.account).toEqual({ name: 'Acme' });
   });
