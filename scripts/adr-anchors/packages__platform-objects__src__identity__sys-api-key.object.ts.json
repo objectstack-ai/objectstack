@@ -1,0 +1,8 @@
+{
+  "file": "packages/platform-objects/src/identity/sys-api-key.object.ts",
+  "adrs": [
+    "ADR-0092",
+    "ADR-0103"
+  ],
+  "invariant": "`enable.apiMethods` carries `update` and `userActions.edit` is open, and neither is arbitrary. ADR-0092 D2's identity write guard clamps every user-context update on this better-auth-managed table to the registered column whitelist, which lists `revoked` alone — so opening the METHOD does not open the COLUMNS, and the readonly stamps on the non-whitelisted columns are D4's form-rendering constraint, not cosmetics. The affordance is what ADR-0103's `reconcileManagedApiMethods` requires before it will let a managed object keep a write verb: drop `userActions.edit` and the reconciler silently strips `update` again, which is how the declared revoke/restore row actions came to answer 405 (#7727)."
+}
