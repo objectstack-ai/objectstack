@@ -212,6 +212,52 @@ function classifyFilterKey(key: string, value: unknown, here: string): FilterVer
   // verdict, so the two never disagree about what this node is worth.
   if (QUERY_LEVEL_KEYS.has(key)) return 'true';
 
+  // [#5346] Everything still `$`-prefixed at this point is an UNDECLARED
+  // combinator — the shared walk resolved `$and` / `$or` / `$not` before this
+  // key ever reached the hook (#5659), and the four query-level keys are gone
+  // one line up. It must come BEFORE the field gates below, because accepting
+  // `$where` as a FIELD NAME is precisely what the emitter's field path did:
+  // the key carries no `$`-prefixed sub-keys, so it fell to the implicit-equality
+  // arm and was written into the outgoing document verbatim. Measured on
+  // `origin/main` @ 76d74ecb4:
+  //
+  //   translateFilter({ $where: 'return true' })    => {"$where":"return true"}
+  //   translateFilter({ $nor: [{ stage: 'won' }] }) => {"$nor":[{"stage":"won"}]}
+  //
+  // Both documents reached MongoDB unchanged and were EXECUTED by it. `$where`
+  // is server-side JavaScript — the exact hazard the emitter's `default:` arm
+  // names as its P0 reason for refusing the same spellings one level down, in
+  // the FIELD position. That gate was only ever installed at the field position;
+  // this is the node position, where the driver was still passing them through.
+  //
+  // On the walk rather than in the emitter for the reason #5327 gave and this
+  // driver's `$null` / `$icontains` gates below already follow: the emitter is
+  // skipped wholesale when a boolean identity settles the enclosing node.
+  // Measured on the same commit, `{ $or: [ {}, { $where: 'x' } ] }` translated
+  // to `{}` — the `{}` disjunct reduces the `$or` to TRUE and no emitter arm
+  // ever sees the `$where`, so an emitter-side gate would refuse it or ignore it
+  // depending on its SIBLINGS.
+  if (key.startsWith('$')) throw unknownLogicalOperatorError(key, here);
+
+  // [#5376] `{ field: {} }` — a field constrained by ZERO operators, ruled
+  // REFUSE on #5240 and gated by #5327 on driver-sql / driver-sqlite-wasm /
+  // driver-memory / formula. This driver was the fifth backend and the one still
+  // ANSWERING it: `translateFilter({ stage: {} })` => `{"stage":{}}`, which
+  // MongoDB reads as "stage is deep-equal to the empty document" — not FALSE, a
+  // DIFFERENT filter that merely looks like FALSE on ordinary data (the same
+  // reading #5327 measured mingo giving it, where a deliberately seeded `a: {}`
+  // row WAS selected).
+  //
+  // Here for the same reason as the gate above, and #5327's original argument
+  // verbatim: `{ $or: [ { a: {} }, {} ] }` translated to `{}` on the measured
+  // commit, so the emitter never reached `{ a: {} }` at all.
+  //
+  // The VERDICT is deliberately unchanged — a field key still contributes
+  // `'clause'`, exactly as #5239 classified it. This adds a refusal; it does not
+  // reclassify a surviving shape, so every filter that translated before
+  // translates byte-identically now.
+  if (isEmptyFieldConstraint(value)) throw emptyFieldConstraintError(key, here);
+
   // [#5347] `$null`'s comparand is a boolean by declaration. Checked on THIS
   // walk rather than in the emitter's `$null` arm because the emitter is
   // skipped wholesale by a boolean identity: `{ $or: [ {}, { stage: { $null:
@@ -249,14 +295,29 @@ function classifyFilterKey(key: string, value: unknown, here: string): FilterVer
     throw icontainsComparandError(key, value.$icontains, `${here}.$icontains`);
   }
 
-  // A field key always contributes a predicate. This stays `'clause'` even for
-  // `{ field: {} }` (a field constrained by zero operators), which this
-  // translator emits as `{ field: {} }` — an exact-match on an empty document.
-  // That shape is a SEPARATE divergence, ruled REJECT in #5240 and since gated
-  // on driver-sql / driver-sqlite-wasm / driver-memory / formula by #5327 —
-  // this driver is now the one backend still answering it, tracked by #5376.
-  // Classifying it as `'clause'` rather than `'true'` is precisely what keeps
-  // this change from silently ruling on it.
+  // [#5346] `$between`'s comparand is a two-element `[min, max]` array, gated on
+  // the WALK for the third time in this function and for the same reason. The
+  // emitter's arm was `if (Array.isArray(value) && value.length === 2) { … }`
+  // with NO else, so a malformed comparand wrote nothing and the field
+  // normalised to `{}` — measured on `origin/main` @ 76d74ecb4, all three of
+  // `$between: 5`, `$between: [1]` and `$between: [1,2,3]` translated to
+  // `{"score":{}}`, i.e. the range silently became the empty-document
+  // exact-match one paragraph up. The twin of the arm #5328 fixed on
+  // driver-memory, down to the missing else.
+  //
+  // `{ $or: [ {}, { s: { $between: 5 } } ] }` translated to `{}` on the same
+  // commit — the sibling dependence again, so the load-bearing copy is here.
+  if (
+    isFilterNode(value) &&
+    Object.prototype.hasOwnProperty.call(value, '$between') &&
+    !isBetweenRange(value.$between)
+  ) {
+    throw malformedBetweenError(key, value.$between, `${here}.$between`);
+  }
+
+  // A field key always contributes a predicate — `'clause'`, exactly as #5239
+  // classified it. The refusals above do not change that verdict for any shape
+  // that survives them.
   return 'clause';
 }
 
@@ -328,6 +389,118 @@ function nonBooleanNullComparandError(field: string, value: unknown, path: strin
       `compiled IS NOT NULL (anything but true), and driver-memory's matcher dropped the ` +
       `constraint entirely. Note "false" the STRING is truthy, so it landed on the side opposite ` +
       `the false it was written to mean (#5347).`,
+  );
+}
+
+/** [#5376] Is this field spec `{}` — a field constrained by ZERO operators? */
+function isEmptyFieldConstraint(spec: unknown): boolean {
+  return isFilterNode(spec) && Object.keys(spec).length === 0;
+}
+
+/** [#5346] Is this `$between` comparand the declared two-element `[min, max]`? */
+function isBetweenRange(value: unknown): value is [unknown, unknown] {
+  return Array.isArray(value) && value.length === 2;
+}
+
+/**
+ * [#5376 / #5240] `{ field: {} }` — a field constrained by ZERO operators.
+ *
+ * The leading sentences are `driver-sql`'s and `driver-memory`'s, verbatim —
+ * one condition, one wording (#5240). Only the closing clause differs, because
+ * only it is about what THIS driver used to do with the shape.
+ *
+ * One declared shape, four answers before #5327: `driver-sql` refused it at the
+ * top level while DROPPING it inside `$and`/`$or`/`$not` (a predicate that emits
+ * nothing matches every row), `driver-memory` and `@objectstack/formula`
+ * answered "matches nothing", and this driver translated it to `{ field: {} }`
+ * — which MongoDB reads as a field deep-equal to the empty document. That is the
+ * subtlest of the four: it is not the FALSE the ruling declined to take, it is a
+ * DIFFERENT filter that returns zero rows on ordinary data and non-zero rows the
+ * moment a document actually stores `{}` there. #5327's measurement of mingo
+ * found exactly that — a deliberately seeded `a: {}` row was selected.
+ *
+ * Ruled on #5240: refused everywhere, in the ADR-0112 envelope every sibling
+ * filter refusal speaks. The shape is almost always an authoring accident (a
+ * filter builder that recorded a field and never its operator, or generated
+ * metadata that lost one), and every silent reading answers it with a row count
+ * the author never asked for.
+ */
+function emptyFieldConstraintError(field: string, path: string): Error {
+  return unsupportedFilterError(
+    `Field constraint at ${path} carries zero operators ({ "${field}": {} }). A field constraint ` +
+      `must name at least one operator (e.g. { "${field}": { "$eq": "value" } }) or be a direct ` +
+      `comparand (e.g. { "${field}": "value" }). It is refused rather than translated because the ` +
+      `backends disagreed on what it means — driver-sql dropped it inside $and/$or/$not (matching ` +
+      `EVERY row), driver-memory / @objectstack/formula answered "matches nothing", and this ` +
+      `driver translated it to { "${field}": {} }, which MongoDB evaluates as "${field} equals the ` +
+      `empty document" — a DIFFERENT filter that only looks like "matches nothing" until a ` +
+      `document actually stores an empty object there. #5240.`,
+  );
+}
+
+/**
+ * [#5346] A `$`-prefixed key in a NODE position that is not a declared
+ * combinator.
+ *
+ * `FilterConditionSchema` declares exactly three (`LOGICAL_OPERATORS`: `$and`,
+ * `$or`, `$not`); every other key of a node is a FIELD NAME. This translator's
+ * field path was written on that assumption and nothing checked it, so `$where`,
+ * `$nor`, `$expr` and friends fell to the implicit-equality arm and were written
+ * into the outgoing query document VERBATIM:
+ *
+ * ```
+ * { $where: 'return true' }    →  {"$where":"return true"}
+ * { $nor: [{ stage: 'won' }] } →  {"$nor":[{"stage":"won"}]}
+ * ```
+ *
+ * Measured on `translateFilter` directly (#5346, comment 5186668033 and
+ * re-measured on `origin/main` @ 76d74ecb4). This is the one backend where the
+ * consequence is EXECUTION rather than a wrong row count: `driver-sql` and
+ * `driver-sqlite-wasm` compiled the same keys as COLUMN names and returned zero
+ * rows (#5348, since refused), cloud's `RemoteTransport` did the same
+ * (cloud#1077), but MongoDB is handed the document as written — `$where` is
+ * server-side JavaScript and `$nor` is a real combinator the Filter Protocol
+ * never declared. The emitter's field-level `default:` arm has refused these
+ * exact spellings for that exact reason for two releases; the node position had
+ * no such gate.
+ *
+ * The wording is `driver-memory`'s and `driver-sql`'s `unknownLogicalOperatorError`,
+ * verbatim through the vocabulary sentence, because #3948 made the backends AGREE
+ * that an uncompilable filter is a refusal and #5240 made one condition speak one
+ * wording. Only the closing clause differs: it names what THIS driver used to do.
+ */
+function unknownLogicalOperatorError(key: string, path: string): Error {
+  return unsupportedFilterError(
+    `Unsupported filter combinator "${key}" at ${path}. A filter node's $-prefixed keys are the ` +
+      `declared logical operators $and, $or and $not (@objectstack/spec LOGICAL_OPERATORS); every ` +
+      `other key is a field name. It is refused rather than written into the query document as a ` +
+      `FIELD of that name, which is what this driver used to do — sending it to MongoDB to be ` +
+      `evaluated, so $where ran server-side JavaScript and $nor applied a combinator the Filter ` +
+      `Protocol never declared (#5346).`,
+  );
+}
+
+/**
+ * [#5346] `$between` whose comparand is not a two-element `[min, max]` array.
+ *
+ * The leading sentence is `driver-sql`'s and `driver-memory`'s, verbatim — one
+ * condition, one wording (#5240) — and the tail records what this driver did
+ * instead. The arm was the exact twin of the one #5328 fixed on `driver-memory`,
+ * down to the missing `else`: the two bounds were written only when the shape
+ * checked out, so a malformed comparand left the field's operator document EMPTY
+ * and the whole range vanished into `{ "field": {} }` — the empty-document
+ * exact-match {@link emptyFieldConstraintError} refuses in its own right. One
+ * dropped range, and `if (!rows.length)` cannot tell "genuinely none" from "the
+ * range never compiled".
+ */
+function malformedBetweenError(field: string, value: unknown, path: string): Error {
+  return unsupportedFilterError(
+    `Operator "$between" on field "${field}" requires a [min, max] value array. ` +
+      `Received ${describeFilterOperand(value)} (${safeShapePreview(value)}) at ${path}. ` +
+      `It is refused rather than skipped: a range that compiles to no predicate answers with a ` +
+      `row count the author never asked for. This driver dropped both bounds and normalised the ` +
+      `field to {}, which MongoDB then evaluates as "equals the empty document" — so the query ` +
+      `ran, reported nothing, and returned rows chosen by a filter nobody wrote (#5346).`,
   );
 }
 
@@ -608,14 +781,31 @@ function translateFieldOperators(
 
       // Range operator → $gte + upper bound (half-open on a bare-day max,
       // inheriting `$lte`'s whole-day rule — #4042)
-      case '$between':
-        if (Array.isArray(value) && value.length === 2) {
-          result.$gte = store(value[0]);
-          const betweenNextDay = nextUtcCalendarDay(value[1]);
-          if (betweenNextDay != null) result.$lt = store(betweenNextDay);
-          else result.$lte = store(value[1]);
-        }
+      //
+      // [#5346] The arm used to be this `if` with NO else, so a comparand that
+      // was not a two-element array wrote NEITHER bound and the field's operator
+      // document came out empty — `{ score: { $between: 5 } }` translated to
+      // `{"score":{}}`, the whole range gone and the field turned into an
+      // empty-document exact-match. The twin of the arm #5328 fixed on
+      // `driver-memory`.
+      //
+      // Since #5239's reduction the LOAD-BEARING copy of this gate sits in
+      // `classifyFilterKey`, on the validating walk, for the reason the `$null`
+      // arm below spells out at length: this emitter is skipped wholesale
+      // whenever a boolean identity settles the enclosing node, so a gate only
+      // here would refuse or ignore the same comparand depending on its
+      // SIBLINGS. This arm keeps the check as local defense for its own
+      // invariant — that both bounds are written or neither the range nor the
+      // field survives — and both sites call the one constructor with the same
+      // path spelling, so the wire answer is identical whichever fires.
+      case '$between': {
+        if (!isBetweenRange(value)) throw malformedBetweenError(field, value, `${path}.$between`);
+        result.$gte = store(value[0]);
+        const betweenNextDay = nextUtcCalendarDay(value[1]);
+        if (betweenNextDay != null) result.$lt = store(betweenNextDay);
+        else result.$lte = store(value[1]);
         break;
+      }
 
       // Null check
       //

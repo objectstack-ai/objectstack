@@ -274,13 +274,29 @@ describe('[#5239] translateFilter reduces empty combinators to their boolean ide
       expect(translateFilter({ stage: 'won', limit: 5 })).toEqual({ stage: 'won' });
     });
 
-    it('a field constrained by zero operators is still not ruled on (#5240)', () => {
-      // `{ stage: {} }` translates to an exact-match on an empty document, as it
-      // always did. Reducing it to TRUE would have decided #5240 from here.
-      expect(translateFilter({ stage: {} })).toEqual({ stage: {} });
-      expect(translateFilter({ $or: [{ stage: {} }, { owner: 'u1' }] })).toEqual({
-        $or: [{ stage: {} }, { owner: 'u1' }],
-      });
+    it('a field constrained by zero operators is now REFUSED (#5240 / #5376)', () => {
+      // This pin used to read "still not ruled on", and asserted that
+      // `{ stage: {} }` translated to an exact-match on an empty document as it
+      // always did — #5239 deliberately declined to decide #5240 from inside a
+      // reduction change, and recorded the non-decision here.
+      //
+      // #5376 is that decision arriving: #5240 ruled REFUSE, #5327 gated the
+      // four other backends, and this driver was the fifth and last still
+      // answering. What #5239 was careful about is still true and still pinned
+      // below — the VERDICT did not change. The key is classified `'clause'`
+      // exactly as before; a refusal was added in front of it, not a
+      // reclassification to TRUE, which is the one direction that would have
+      // turned the shape into match-all.
+      const err = refusalOf({ stage: {} });
+      expect(err.code).toBe('INVALID_FILTER');
+      expect(err.status).toBe(400);
+      expect(err.message).toContain('Field constraint at filter.stage carries zero operators');
+
+      // And inside a combinator, where the emitter would never have reached it.
+      const nested = refusalOf({ $or: [{ stage: {} }, { owner: 'u1' }] });
+      expect(nested.code).toBe('INVALID_FILTER');
+      expect(nested.status).toBe(400);
+      expect(nested.message).toContain('filter.$or[0].stage');
     });
 
     it('an ARRAY where is outside the reduction entirely (#5158/#5329)', () => {
