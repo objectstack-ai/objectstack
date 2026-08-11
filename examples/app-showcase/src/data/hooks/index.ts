@@ -30,8 +30,15 @@ export const NormalizeTaskTitleHook = {
   object: 'showcase_task',
   events: ['beforeInsert', 'beforeUpdate'] as LifecycleEvent[],
   body: {
+    // [#7543] The guard is `typeof … === 'string'`, not truthiness. A JSON body
+    // may put a number in a `text` field — `{"title": 12345}` — which is truthy,
+    // has no `.trim`, and made this body throw `TypeError: not a function` on a
+    // write the platform otherwise ACCEPTS (`record-validator` coerces a `text`
+    // value with `String(value)`). These bodies are read as documentation, so
+    // the type-safe shape is the one to show: a hook must not assume a field's
+    // runtime type just because its metadata declares one.
     language: 'js' as const,
-    source: "if (ctx.input.title) ctx.input.title = ctx.input.title.trim();",
+    source: "if (typeof ctx.input.title === 'string') ctx.input.title = ctx.input.title.trim();",
   },
   priority: 50,
   onError: 'abort' as const,

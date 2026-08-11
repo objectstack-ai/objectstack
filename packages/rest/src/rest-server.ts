@@ -565,6 +565,58 @@ const UNCLASSIFIED_FAULT = (): { status: number; body: Record<string, unknown> }
 });
 
 /**
+ * [#7543] Does an unwrapped sandbox message name a JS RUNTIME fault rather than
+ * a business refusal the hook body deliberately reported?
+ *
+ * The two sandbox-unwrap branches below exist for ONE shape: a hook or action
+ * body that runs `throw new Error('删除被阻断：仍有未结清的发票')`, i.e. an
+ * author writing a business rule whose message IS the remedy. They answer 400
+ * with that message verbatim and deliberately no `code` (see each branch).
+ *
+ * A body that instead CRASHES — `ctx.input.title.trim()` where `title` is the
+ * number `12345` — also arrives as a thrown error, so it entered the same
+ * branch and its raw `TypeError: not a function` went out as the client-facing
+ * message of a 400 with no `code`. That is two contract breaks at once: an
+ * internal runtime fault echoed verbatim, and a body outside the ledgered
+ * envelope (a client keying on `code` gets nothing).
+ *
+ * The classification this restores is NOT new policy — it is the ruling
+ * {@link UNCLASSIFIED_FAULT} already records one door down, which names this
+ * exact case ("or a plain handler bug (`TypeError: x is not a function`) …
+ * server faults that a caller cannot fix and a caller SHOULD retry"). The
+ * sandbox unwraps simply sit ABOVE that branch and were intercepting the crash
+ * before it could reach the answer the file had already settled on. Same
+ * separation `quickjs-runner`'s own `sandboxFault` path draws (#4431/#3951):
+ * the sandbox REFUSING is a fault, and so is the body FAULTING — only the
+ * body's deliberate `throw` is an answer addressed to the caller.
+ *
+ * **Matched by constructor name, not by phrasing.** These eight are the ECMA-262
+ * native error constructors (plus SpiderMonkey's `InternalError`, which QuickJS
+ * also raises for stack exhaustion); the sandbox stringifies a thrown error as
+ * `<name>: <message>`, so the name is structural evidence rather than a keyword
+ * heuristic over prose. `Error:` is deliberately absent — a plain `Error` is the
+ * documented way to author a refusal, and `userFacingMessage` strips that prefix
+ * upstream anyway.
+ *
+ * **Deliberate, accepted cost:** a body that expresses a business rule as
+ * `throw new RangeError('数量超出范围')` now gets the sanitised 500 instead of
+ * its own words. That authoring style is not the documented one, and erring
+ * toward "a native error name means a crash" is the fail-safe direction — the
+ * opposite default is what shipped `TypeError: not a function` to a client.
+ *
+ * The words are not lost: 500 is outside `isExpectedDataStatus`, so
+ * `handleRouteError` prints `[REST] Unhandled error` with the whole error, and
+ * `sendError`'s `logWithheldServerFault` (#5437) covers the routes that bypass
+ * it — the same operator path {@link UNCLASSIFIED_FAULT} relies on.
+ */
+const NATIVE_ERROR_NAME_RE =
+    /^(?:Type|Reference|Range|Syntax|URI|Eval|Internal|Aggregate)Error(?::|$)/;
+
+function isScriptFaultMessage(message: string): boolean {
+    return NATIVE_ERROR_NAME_RE.test(message.trim());
+}
+
+/**
  * [#5462] Does a driver's missing-relation message name the very object this
  * request asked for?
  *
@@ -810,6 +862,11 @@ export function mapDataError(error: any, object?: string): { status: number; bod
     // bundled in deployed consoles) prepend any `code` to the human-readable
     // message, which would reintroduce the English noise this branch removes.
     if (typeof error?.innerMessage === 'string' && error.innerMessage) {
+        // [#7543] …but only when the body REPORTED something. A body that
+        // CRASHED arrives here too, and its `TypeError: not a function` is an
+        // internal fault, not a business message — see
+        // {@link isScriptFaultMessage}.
+        if (isScriptFaultMessage(error.innerMessage)) return UNCLASSIFIED_FAULT();
         return {
             status: 400,
             body: {
@@ -1040,14 +1097,21 @@ export function mapDataError(error: any, object?: string): { status: number; bod
     // Fallback for the same sandbox wrapper when the SandboxError instance
     // (and its `innerMessage`) was lost crossing a rethrow/serialization
     // boundary: strip the debug wrapper from the raw message. A leading
-    // default `Error: ` name is dropped; non-default names (`TypeError: …`)
-    // are kept — they signal a genuine script bug rather than a deliberately
-    // thrown business rule, which is useful context.
+    // default `Error: ` name is dropped.
+    //
+    // [#7543] A non-default name (`TypeError: …`) used to be KEPT here and
+    // shipped as the 400's message "as useful context". It is useful context —
+    // for an OPERATOR, in the log, which is where it still goes. On the wire it
+    // was a raw runtime fault presented to a client as their own mistake. This
+    // door and the `innerMessage` door above produce byte-identical bodies, so
+    // they must classify identically or the fix would depend on whether the
+    // SandboxError instance happened to survive the rethrow.
     const sandboxWrapper = /^(?:hook|action) '[^']*' threw:\s*(.+)$/s.exec(raw);
     if (sandboxWrapper) {
         const msg = sandboxWrapper[1].startsWith('Error: ')
             ? sandboxWrapper[1].slice('Error: '.length)
             : sandboxWrapper[1];
+        if (isScriptFaultMessage(msg)) return UNCLASSIFIED_FAULT();
         return {
             status: 400,
             body: {
