@@ -23,14 +23,22 @@
  * where `DatabaseLoader`'s `engine.find('sys_metadata', …)` tries to acquire a
  * second knex connection while the transaction holds SQLite's only one, and
  * knex waits out `acquireConnectionTimeout` (60s). That hazard is live on the
- * current stack: `DatabaseLoader._find()` still does not thread the caller's
- * transaction, and `driver-sql` still models SQLite as a single-connection pool
- * (`activeTransactions`, `assertBareKnexSafe` — a dev/test guard that no-ops in
- * production, so production still eats the timeout), which is why
- * `plugin-audit`'s `captureBefore` threads the transaction by hand. Refusing to
- * cache degraded reads would swap one 30s silent window for a 60s stall *per
- * call*. So the policy is: cache it, but mark it `degraded` and expire it on a
- * far shorter TTL.
+ * current stack, re-measured under #7708 on 2026-08-11 against a real
+ * `ObjectQL` + `SqlDriver` (better-sqlite3): `DatabaseLoader._find()` still
+ * does not thread the caller's transaction, and `driver-sql` still models
+ * SQLite as a single-connection pool (`activeTransactions`,
+ * `assertBareKnexSafe` — a dev/test guard that no-ops in production, so
+ * production still eats the timeout). The re-measurement narrowed it to a
+ * CONDITION rather than retiring it: a transaction opened directly on the
+ * driver stalls the full 60s and then throws knex's acquire-timeout, while one
+ * opened through `engine.transaction()` returns at once because the engine
+ * publishes it into the ambient `txStore` (ADR-0034) and threads it onto the
+ * read. `SqlDriver.ensureSequencesTable()` is the live witness that this is
+ * worth designing against — it takes `parentTrx` for exactly this reason. (The
+ * witness cited here until #7708 was `plugin-audit`'s `captureBefore`, retired
+ * by #6656; it was replaced, not dropped.) Refusing to cache degraded reads
+ * would swap one 30s silent window for a 60s stall *per call*. So the policy
+ * is: cache it, but mark it `degraded` and expire it on a far shorter TTL.
  *
  * These tests pin all three halves of that: the flag exists on the entry, the
  * degraded TTL is short, and the healthy TTL is untouched.
