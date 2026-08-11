@@ -1637,4 +1637,43 @@ describe('toLocaleDescriptors', () => {
     expect(toLocaleDescriptors(undefined, 'en')).toEqual([]);
     expect(toLocaleDescriptors([], 'en')).toEqual([]);
   });
+
+  it('sets `label` to the code, and the declaration promises exactly that (#7634)', () => {
+    // The SUBSTANCE pin: producer output vs the DECLARED shape, both halves.
+    //
+    // `GetLocalesResponseSchema` described `label` as "Display name of the
+    // locale" while this helper — the ONLY producer, shared by the
+    // dispatcher's `/i18n` domain and service-i18n's route — echoed the code
+    // back. Declared ≠ enforced, one field wide (ADR-0049), and it misleads in
+    // exactly one direction: a client that trusts the describe renders `th`
+    // where `ไทย` belongs. objectui#4039 hit that and routed around the field
+    // (`apps/console/src/loadLocales.ts` reads `code` alone).
+    //
+    // Two assertions because the drift has two sides. Restoring `label: code`
+    // to a real display name turns the first red; restoring the describe's
+    // display-name promise turns the second red. Neither can move alone.
+    const out = toLocaleDescriptors(['en', 'zh-CN', 'ja-JP', 'th'], 'en');
+    expect(out).toHaveLength(4);
+    for (const descriptor of out) {
+      expect(
+        descriptor.label,
+        `toLocaleDescriptors must set label to the code (${descriptor.code}) — producing a real `
+        + 'display name is a product decision nothing pulls for, and the describe promises the code (#7634)',
+      ).toBe(descriptor.code);
+    }
+
+    const shape = (GetLocalesResponseSchema as unknown as {
+      shape: { locales: { element: { shape: Record<string, { description?: string }> } } };
+    }).shape;
+    const description = shape.locales.element.shape.label?.description ?? '';
+    expect(description.length, 'the `label` field must carry a describe at all').toBeGreaterThan(0);
+    expect(
+      description,
+      'the `label` describe must not promise a display name while every producer sets the code (#7634)',
+    ).not.toMatch(/display name/i);
+    expect(
+      description,
+      'the `label` describe must state the code-equality convention it actually ships (#7634)',
+    ).toMatch(/equals `code`/i);
+  });
 });

@@ -40,10 +40,12 @@ import process from 'node:process';
 
 const SKILL_PATH = new URL('../../.claude/skills/pm-dispatch/SKILL.md', import.meta.url);
 
-// Post-#7341-extraction count: 2,997. Headroom ≈ 50 lines for rule edits
-// between extractions. Shrink-only: lower freely, raise only with a maintainer
-// ruling quoted in the raising PR (see header).
-export const MAX_LINES = 3050;
+// Post-#7754-compression count: 2,568 — the #7631 batch's PR₂ moved the
+// remaining narratives/沿革/worked examples into references/incidents.md,
+// keeping every imperative + criteria/command + one-line case anchor in the
+// main file. Shrink-only: lower freely, raise only with a maintainer ruling
+// quoted in the raising PR (see header).
+export const MAX_LINES = 2568;
 
 export function verdict(lineCount, maxLines) {
   if (lineCount === 0) return { ok: false, msg: 'SKILL.md read as empty — refusing to treat a missing/empty input as a pass (#4690).' };
