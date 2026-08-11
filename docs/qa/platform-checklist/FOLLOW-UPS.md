@@ -27,6 +27,7 @@ gaps. The one security-sensitive finding (D1) has since been fixed in #6683.
 | D10 | **Encrypted settings are echoed in plaintext on read** — storage is correct (`sys_secret`, aes-256-gcm) but the REST read decrypts and returns the secret verbatim, and repeats it in `cascadeChain`. | packages/services/service-settings/src/{settings-service.ts,settings-routes.ts} | platform-core.settings-hub-roundtrip clause 7 | **SECURITY (admin-gated) — write-up below (§1a)** |
 | D11 | **By-id WRITE is not gated by record visibility** — a low-privilege user PATCHes records they cannot read (404 by id, absent from list) on three objects. Two conformance rows claim this is `enforced`. | packages/plugins/plugin-security/src/security-plugin.ts (by-id write pre-image gate, `assertControlledByParentWrite`) | access-security.rls-both-sides c5 + owd-sharing-matrix c4 (one cause, two items) | **SECURITY — write-up below (§1a)** |
 | D12 | **Webhook HMAC signing secrets persisted in cleartext** — every `sys_http_delivery` row stores the subscriber's signing key verbatim, readable over the ordinary data API; the sibling datasource path splits its secret out correctly. | packages/plugins/plugin-webhooks (`sys_http_delivery.signing_secret`, outbox writer) | integration-system.webhook-lifecycle (adjacent observation, held back from the run card) | **SECURITY (admin-gated) — write-up below (§1a)** |
+| D13 | **RLS policy silently discarded on Studio's package door** — the author fills in a row filter, Save succeeds with no error, and no `rowLevelSecurity` is sent or stored. The package slice whitelists five keys and reverts every advanced facet to the server's copy. | objectui `PermissionMatrixEditor.doSave` → `permission-slice.ts:117-124` | studio-authoring.expression-editors (finding B, held back from the run card) | **SECURITY (silent control loss) — write-up below (§1a)** |
 
 ### §1a — Security-sensitive write-ups (delivered 2026-08-11, per the maintainer ruling on #7463)
 
@@ -134,6 +135,54 @@ other outbox/delivery table copies a credential the same way.
 **Verification note.** The webhook item itself is otherwise clean and passes — signature
 computation, custom headers, per-attempt durability, timeout enforcement and the retry ladder
 were all proven correct. This finding does not change that verdict.
+
+#### D13 — An RLS policy authored in Studio's package door is silently discarded
+
+**Impact.** The author fills in a row-level-security policy (name, object, USING, CHECK), clicks
+a fully-enabled Save, gets no error, and is told the permission set saved. **No row filter is
+ever persisted.** Anyone reading the Studio surface afterwards sees a permission set that looks
+configured. The records the policy was meant to scope are unprotected, and the failure mode is
+silence — which is worse than a refusal, because the admin has positive (false) evidence that a
+control is in place.
+
+**Reproduction (observed on the wire).** Studio → Access pillar for a **writable package** → a
+permission set → Row-Level Security → Add policy → fill Policy name, Object, USING (and CHECK) →
+Save. The PUT body is:
+
+```
+{"name":"qa_st2_rls","label":"QA ST2 RLS","objects":{},"fields":{}}
+```
+
+— no `rowLevelSecurity` key at all. Server answers 200, and a `GET /api/v1/meta/permission/<n>`
+after publish carries no policy.
+
+**Control that isolates the door.** The **environment** door (the routed editor at
+`/apps/setup/metadata/permission/<n>`, no `packageId`) **does** send `rowLevelSecurity` in the
+body — so this is specific to the package path, not to the editor's data collection.
+
+**Root cause (located).** `PermissionMatrixEditor.doSave()` routes through
+`mergePermissionSlice()` whenever `packageId` is set, and `permission-slice.ts:117-124` returns
+`{...base, name, label, isDefault, objects, fields}` — i.e. it carries only those five keys from
+`edited` and takes **every advanced facet from `base`**, a fresh server read. So
+`rowLevelSecurity`, tab visibility and delegated-admin scope are all silently reverted to
+whatever the server already had. The slice is a whitelist that has drifted behind the facets the
+editor can author.
+
+**Companion defect (filed publicly, not sensitive on its own).** The console seeds a new policy
+with the **retired `priority` key** (`PermissionAdvancedFacets.tsx:368`), which the environment
+door rejects with a located 422 ("`rowLevelSecurity[].priority` was removed in
+@objectstack/spec 17.0.0 (#3896 security audit)… Delete the key"). The identical body without
+`priority` is accepted and reads back correctly.
+
+**Net effect of the two together: an RLS policy cannot currently be saved from the console on
+either door** — one refuses loudly, the other accepts and discards. The loud one is the safe
+failure; this write-up is about the quiet one.
+
+**Suggested shape of a fix (not prescriptive).** Make the package slice carry the same facet set
+the editor can edit (or invert it to a deny-list so a newly-authored facet is included by
+default rather than dropped by omission). Independently, consider refusing a permission-set save
+that would drop a facet present in `edited` but absent from the outgoing body — a silent
+narrowing of a security control should be an error, not a default.
 
 ## 2. Docs promise capabilities the runtime doesn't deliver (PD#10, docs side — file docs issues)
 
