@@ -797,6 +797,8 @@ interface ExecutionLogEntry {
     completedAt?: string;
     durationMs?: number;
     trigger: { type: string; userId?: string; object?: string; recordId?: string };
+    // ↑ built by `buildRunTrigger` at EVERY site — see its doc comment for why
+    // that is a chokepoint rather than eight object literals.
     steps: StepLogEntry[];
     variables?: Record<string, unknown>;
     output?: unknown;
@@ -808,6 +810,47 @@ interface ExecutionLogEntry {
      * are persisted.
      */
     summary?: FlowRunSummary;
+}
+
+/**
+ * Build a run's trigger attribution block from its {@link AutomationContext} —
+ * **the one place `ExecutionLogEntry.trigger` is constructed** (#7533).
+ *
+ * It is a chokepoint rather than an object literal per call site because the
+ * literal was copied eight times (three on the `execute` path, three on
+ * `resume`, one on `failSuspendedRun`, one on `cancelRun`) and every copy
+ * populated `type` / `userId` / `object` and silently omitted `recordId`. The
+ * field was declared in `ExecutionLogSchema` from the start and never written
+ * by anything, so a `record_change` run — the platform's most common kind —
+ * could not be correlated back to the record that caused it: "which record
+ * provoked this run?" and "which runs did this record provoke?" were both
+ * unanswerable from the run log. Eight literals is eight chances to omit the
+ * next field too; one function is one.
+ *
+ * `recordId` is read off `context.record.id` rather than a context field of its
+ * own: `record` is the declared carrier of the triggering row
+ * ({@link AutomationContext.record}, populated by the record-change trigger's
+ * `buildContext`) and `id` is the platform primary key. Empty-string and
+ * nullish ids are dropped rather than persisted, mirroring
+ * {@link AutomationEngine.expandDeclaredLookups}'s guard on the same read — a
+ * blank `recordId` would read as an attribution the row does not have.
+ */
+function buildRunTrigger(
+    context: AutomationContext | undefined,
+): { type: string; userId?: string; object?: string; recordId?: string } {
+    const rawId = (context?.record as Record<string, unknown> | undefined)?.id;
+    const recordId =
+        typeof rawId === 'string'
+            ? rawId || undefined
+            : typeof rawId === 'number'
+                ? String(rawId)
+                : undefined;
+    return {
+        type: context?.event ?? 'manual',
+        userId: context?.userId,
+        object: context?.object,
+        recordId,
+    };
 }
 
 /**
@@ -983,6 +1026,26 @@ export interface RunRecord {
     nodeId?: string;
     organizationId?: string | null;
     userId?: string | null;
+    /**
+     * Trigger attribution — **why** this run ran (#7533), flattened here the
+     * same way `userId` already is (it, too, is a field of the run's trigger
+     * block). Persisted as `sys_automation_run` COLUMNS so the durable history
+     * answers the two questions the in-memory log answers:
+     *
+     *   - `triggerType` — 'record-after-update' / 'schedule' / 'api' / … Before
+     *     this existed the terminal row carried no trigger information at all,
+     *     so a scheduled run, a webhook intake and a record change became
+     *     indistinguishable rows the moment the process restarted: the durable
+     *     copy of the history was strictly LESS informative than the volatile
+     *     one.
+     *   - `triggerObject` / `triggerRecordId` — the record that caused the run.
+     *
+     * All optional: rows written before #7533 have none, and absent must read
+     * as "not recorded", never as "no trigger".
+     */
+    triggerType?: string;
+    triggerObject?: string;
+    triggerRecordId?: string;
     /**
      * Bounded per-node step log (see {@link AutomationEngine.compactStepsForHistory}),
      * so "which node blew up?" survives a restart. Optional — history rows
@@ -2540,7 +2603,20 @@ export class AutomationEngine implements IAutomationService {
             startedAt: r.startedAt,
             completedAt: r.finishedAt,
             durationMs: r.durationMs,
-            trigger: { type: '', userId: r.userId ?? undefined },
+            // #7533 — the persisted trigger attribution, so a run rehydrated
+            // after a restart still says what fired it and (for a record
+            // change) which record. `type` falls back to `''` ONLY for rows
+            // written before those columns existed: the field is required by
+            // `ExecutionLogSchema`, and `''` is the same "not recorded" this
+            // method already returned for every row. It is a legacy-row
+            // default, not an alias — a row written today always carries a
+            // real type.
+            trigger: {
+                type: r.triggerType ?? '',
+                userId: r.userId ?? undefined,
+                object: r.triggerObject,
+                recordId: r.triggerRecordId,
+            },
             steps: r.steps ?? [],
             error: r.error,
             // #4354 — the PERSISTED summary, never re-folded from `r.steps`:
@@ -2900,11 +2976,7 @@ export class AutomationEngine implements IAutomationService {
                 startedAt,
                 completedAt: new Date().toISOString(),
                 durationMs,
-                trigger: {
-                    type: context?.event ?? 'manual',
-                    userId: context?.userId,
-                    object: context?.object,
-                },
+                trigger: buildRunTrigger(context),
                 steps,
                 output,
             });
@@ -2945,11 +3017,7 @@ export class AutomationEngine implements IAutomationService {
                     status: 'paused',
                     startedAt,
                     durationMs,
-                    trigger: {
-                        type: context?.event ?? 'manual',
-                        userId: context?.userId,
-                        object: context?.object,
-                    },
+                    trigger: buildRunTrigger(context),
                     steps,
                 });
                 return {
@@ -2973,11 +3041,7 @@ export class AutomationEngine implements IAutomationService {
                 startedAt,
                 completedAt: new Date().toISOString(),
                 durationMs,
-                trigger: {
-                    type: context?.event ?? 'manual',
-                    userId: context?.userId,
-                    object: context?.object,
-                },
+                trigger: buildRunTrigger(context),
                 steps,
                 error: errorMessage,
             });
@@ -3657,11 +3721,7 @@ export class AutomationEngine implements IAutomationService {
                     startedAt: run.startedAt,
                     completedAt: new Date().toISOString(),
                     durationMs,
-                    trigger: {
-                        type: context.event ?? 'manual',
-                        userId: context.userId,
-                        object: context.object,
-                    },
+                    trigger: buildRunTrigger(context),
                     steps,
                     output,
                 });
@@ -3707,11 +3767,7 @@ export class AutomationEngine implements IAutomationService {
                         status: 'paused',
                         startedAt: run.startedAt,
                         durationMs,
-                        trigger: {
-                            type: context.event ?? 'manual',
-                            userId: context.userId,
-                            object: context.object,
-                        },
+                        trigger: buildRunTrigger(context),
                         steps,
                     });
                     return { success: true, status: 'paused', runId, durationMs, screen: err.screen };
@@ -3727,11 +3783,7 @@ export class AutomationEngine implements IAutomationService {
                     startedAt: run.startedAt,
                     completedAt: new Date().toISOString(),
                     durationMs,
-                    trigger: {
-                        type: context.event ?? 'manual',
-                        userId: context.userId,
-                        object: context.object,
-                    },
+                    trigger: buildRunTrigger(context),
                     steps,
                     error: errorMessage,
                 });
@@ -3957,11 +4009,7 @@ export class AutomationEngine implements IAutomationService {
             startedAt: run.startedAt,
             completedAt: new Date().toISOString(),
             durationMs: Date.now() - run.startTime,
-            trigger: {
-                type: run.context?.event ?? 'manual',
-                userId: run.context?.userId,
-                object: run.context?.object,
-            },
+            trigger: buildRunTrigger(run.context),
             steps: run.steps,
             error,
         });
@@ -4039,11 +4087,7 @@ export class AutomationEngine implements IAutomationService {
             startedAt: run.startedAt,
             completedAt: new Date().toISOString(),
             durationMs: Date.now() - run.startTime,
-            trigger: {
-                type: run.context?.event ?? 'manual',
-                userId: run.context?.userId,
-                object: run.context?.object,
-            },
+            trigger: buildRunTrigger(run.context),
             steps: run.steps,
             error: reason,
         });
@@ -4244,6 +4288,14 @@ export class AutomationEngine implements IAutomationService {
                 durationMs: entry.durationMs,
                 error: entry.error,
                 userId: entry.trigger?.userId,
+                // #7533 — the rest of the trigger block, not just its userId.
+                // The information exists at this exact point (the in-memory log
+                // entry one line up carries it); it was simply not copied onto
+                // the record handed to the store, which is where the durable
+                // history lost the answer to "what fired this run?".
+                triggerType: entry.trigger?.type || undefined,
+                triggerObject: entry.trigger?.object,
+                triggerRecordId: entry.trigger?.recordId,
                 nodeId: lastStep?.nodeId,
                 steps: this.compactStepsForHistory(entry.steps),
                 summary: entry.summary,
@@ -5849,11 +5901,7 @@ export class AutomationEngine implements IAutomationService {
                 startedAt,
                 completedAt: new Date().toISOString(),
                 durationMs,
-                trigger: {
-                    type: context?.event ?? 'manual',
-                    userId: context?.userId,
-                    object: context?.object,
-                },
+                trigger: buildRunTrigger(context),
                 steps,
                 output,
             });
@@ -5872,11 +5920,7 @@ export class AutomationEngine implements IAutomationService {
                 startedAt,
                 completedAt: new Date().toISOString(),
                 durationMs,
-                trigger: {
-                    type: context?.event ?? 'manual',
-                    userId: context?.userId,
-                    object: context?.object,
-                },
+                trigger: buildRunTrigger(context),
                 steps,
                 error: errorMessage,
             });
