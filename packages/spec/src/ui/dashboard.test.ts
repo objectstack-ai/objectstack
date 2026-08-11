@@ -79,7 +79,7 @@ describe('DashboardWidgetSchema (dataset-bound)', () => {
     expect(() => DashboardWidgetSchema.parse({ id: 'x', type: 'metric', object: 'opportunity', aggregate: 'count', layout: { x: 0, y: 0, w: 3, h: 2 } } as any)).toThrow();
   });
 
-  // ── .strict() endpoint (framework#3251, protocol 16 step16) ───────────────
+  // ── .strict() endpoint (framework#3251, protocol 16 step16) ────────────────────────────
   it('rejects an otherwise-valid widget carrying a legacy analytics key, and points at the dataset shape', () => {
     const legacy = { id: 'w_legacy', type: 'bar', dataset: 'sales', values: ['revenue'], categoryField: 'stage' } as any;
     const res = DashboardWidgetSchema.safeParse(legacy);
@@ -561,7 +561,7 @@ describe('[#4876] DashboardWidgetSchema — retired `responsive`', () => {
     expect(w.dataset).toBe('orders');
   });
 
-  // ── CONTROL: the shared shape is NOT retired, only this embed ──────────────
+  // ── CONTROL: the shared shape is NOT retired, only this embed ────────────────
   it('CONTROL: `ResponsiveConfigSchema` is still exported and still parses', async () => {
     const ui = await import('./index');
     expect(ui.ResponsiveConfigSchema).toBeTruthy();
@@ -662,7 +662,7 @@ describe('[#5010] DashboardWidgetSchema — retired action trio + `aria`', () =>
     expect(w.values).toEqual(['total']);
   });
 
-  // ── CONTROLS: only the WIDGET embeds go ──────────────────────────
+  // ── CONTROLS: only the WIDGET embeds go ────────────────────────────────────
   it('CONTROL: `header.actions[]` still takes the whole action vocabulary', () => {
     const d = DashboardSchema.parse({
       name: 'ops', label: 'Ops',
