@@ -74,15 +74,6 @@ unsaved drafts that block navigation, and dirty the working tree. Isolate up fro
       (separate origin → needs its own `admin@objectos.ai/admin123` login). Skipping this
       cost a full spawn-a-fix cycle on an action-create dead-end that was already fixed in
       objectui main.
-- [ ] **A drifted build no longer boots silently (#7752).** `build-console.sh` stamps the
-      SHA it built from into `packages/console/dist/.objectui-sha`; when that stamp differs
-      from the repo's `.objectui-sha` pin, `os dev` **refuses to mount `/_console`** and
-      prints the remediation — `/_console/` 404s and the banner advertises no console URL.
-      That is a precondition to fix, not a product bug: run **`pnpm objectui:build`**
-      (rebuild at the *pinned* SHA — `objectui:refresh` would re-bump the pin to your local
-      `../objectui` HEAD) and reboot. `pnpm check:console-sha` reports the same comparison
-      without booting. `OS_ALLOW_CONSOLE_DRIFT=1` boots the stale bundle deliberately — and
-      then every console observation you make describes a commit the repo does not pin.
 
 ## 3. Verify — visual / API first, DOM last (the anti-false-positive rule)
 
