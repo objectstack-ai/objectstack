@@ -81,10 +81,12 @@ async function persistedBody(item: unknown): Promise<any> {
 
 /**
  * The picker under test: every key is one the route reads, nothing more.
- * `object` is declared because the route's fallback resolution reads only the
- * LEGACY field-def spellings (`referenceTo` / `target` / `options.objectName`)
- * and not the canonical `reference` — recorded as a follow-up finding on
- * #7467; against a canonical object schema the override is what works today.
+ * `object` is declared here to exercise the explicit override branch. It used
+ * to be declared because it was the ONLY branch that worked — the route's
+ * fallback read the legacy field-def spellings and not the canonical
+ * `reference` (#7486, fixed). The omitted-`object` case now has its own suite
+ * at the bottom of this file; leaving that path untested would leave the fix
+ * unguarded at the level users actually hit.
  */
 const PICKER = {
     displayFields: ['name', 'email'],
@@ -134,15 +136,19 @@ function mockRes() {
     return res;
 }
 
-/** Mount the real routes over a protocol that serves the STORED view body. */
-function routesOver(storedView: any, foundRows: any[]) {
+/**
+ * Mount the real routes over a protocol that serves the STORED view body.
+ * `objectDef` defaults to the canonical `leadObject`; the #7486 suite passes
+ * variants to cover the legacy pre-fold spellings of the same field.
+ */
+function routesOver(storedView: any, foundRows: any[], objectDef: any = leadObject) {
     const findData = vi.fn().mockResolvedValue({ data: foundRows });
     const protocol: any = {
         getDiscovery: vi.fn().mockResolvedValue({ version: 'v0', routes: { data: '', metadata: '' } }),
         getMetaTypes: vi.fn().mockResolvedValue([]),
         getMetaItems: vi.fn(async ({ type }: { type: string }) => {
             if (type === 'view') return [storedView];
-            if (type === 'object') return [leadObject];
+            if (type === 'object') return [objectDef];
             return [];
         }),
         createData: vi.fn().mockResolvedValue({ object: 'lead', id: 'rec_1', record: {} }),
@@ -307,5 +313,98 @@ describe('#7485 publicPicker.sort is retired — not declarable, and not read', 
         const second = routesOver(stored2, []);
         await second.lookup.handler({ params: { slug: 'contact', field: 'owner' }, query: {} } as any, mockRes());
         expect(second.findData.mock.calls[0][0].query.sort).toEqual([{ field: 'email', order: 'asc' }]);
+    });
+});
+
+// ─── [#7486] the fallback resolution, against CANONICAL metadata ────────────
+
+/**
+ * The defect this suite pins: the route's fallback chain read only the LEGACY
+ * field-def spellings (`referenceTo` / `target` / `options.objectName`), while
+ * `packages/spec/src/data/field.zod.ts` folds every one of those onto the
+ * canonical `reference` at parse. A parsed object schema therefore carried
+ * NONE of the keys the route read — the chain resolved `undefined` and a
+ * well-formed form got `500 LOOKUP_TARGET_MISSING`, making `publicPicker.object`
+ * de-facto REQUIRED while the schema and docs present it as optional.
+ *
+ * Every case below omits `object` deliberately: that is the axis under test.
+ * The suite above covers the override branch and must stay that way — between
+ * them the two branches of the resolution are both pinned.
+ */
+describe('#7486 the picker target resolves from the field definition when `object` is omitted', () => {
+    /** The picker an author writes when they take the docs at their word. */
+    const NO_OBJECT_PICKER = { displayFields: ['name', 'email'], maxResults: 10 };
+
+    const savedWithoutObject = () => persistedBody(studioForm([{ field: 'owner', publicPicker: NO_OBJECT_PICKER }]));
+
+    it('a CANONICAL `{ type: lookup, reference: sys_user }` field resolves with no `object` override', async () => {
+        // The headline case, and the one the platform actually produces: this
+        // exact request answered 500 LOOKUP_TARGET_MISSING before #7486.
+        const stored = await savedWithoutObject();
+        expect(stored.config.sections[0].fields[0].publicPicker.object).toBeUndefined();
+
+        const { findData, lookup } = routesOver(stored, [{ id: 'usr_1', name: 'Ada', email: 'ada@example.com' }]);
+        const res = mockRes();
+        await lookup.handler({ params: { slug: 'contact', field: 'owner' }, query: { q: 'ad' } } as any, res);
+
+        expect(res.statusCode).toBe(200);
+        expect(res.body.data).toEqual([{ id: 'usr_1', name: 'Ada', email: 'ada@example.com' }]);
+        // Resolved from `leadObject.fields.owner.reference` — not from the
+        // picker, which declares no object at all.
+        expect(findData).toHaveBeenCalledTimes(1);
+        expect(findData.mock.calls[0][0].object).toBe('sys_user');
+    });
+
+    // Stored pre-fold rows never went through the alias table, so the legacy
+    // spellings are live data, not history. The fix EXTENDS the chain; one that
+    // replaced it would turn these three green cases into 500s.
+    const LEGACY_DEFS: Array<[string, Record<string, unknown>]> = [
+        ['referenceTo', { type: 'lookup', referenceTo: 'sys_user' }],
+        ['target', { type: 'lookup', target: 'sys_user' }],
+        ['options.objectName', { type: 'lookup', options: { objectName: 'sys_user' } }],
+    ];
+    for (const [spelling, ownerDef] of LEGACY_DEFS) {
+        it(`a stored PRE-FOLD row spelling the target \`${spelling}\` still resolves`, async () => {
+            const stored = await savedWithoutObject();
+            const legacyObject = { ...leadObject, fields: { ...leadObject.fields, owner: ownerDef } };
+            const { findData, lookup } = routesOver(stored, [], legacyObject);
+            const res = mockRes();
+            await lookup.handler({ params: { slug: 'contact', field: 'owner' }, query: {} } as any, res);
+
+            expect(res.statusCode).toBe(200);
+            expect(findData.mock.calls[0][0].object).toBe('sys_user');
+        });
+    }
+
+    it('the canonical `reference` WINS over a legacy spelling on the same def', async () => {
+        // Head-of-chain, not merely present-in-chain: a row carrying both (a
+        // partially-migrated def) must follow the canonical key. Appending
+        // `reference` to the tail of the chain would pass every case above and
+        // fail only this one.
+        const stored = await savedWithoutObject();
+        const bothObject = {
+            ...leadObject,
+            fields: { ...leadObject.fields, owner: { type: 'lookup', reference: 'sys_user', referenceTo: 'stale_legacy' } },
+        };
+        const { findData, lookup } = routesOver(stored, [], bothObject);
+        const res = mockRes();
+        await lookup.handler({ params: { slug: 'contact', field: 'owner' }, query: {} } as any, res);
+
+        expect(res.statusCode).toBe(200);
+        expect(findData.mock.calls[0][0].object).toBe('sys_user');
+    });
+
+    it('GUARD: a field def carrying NO target at all still answers 500 LOOKUP_TARGET_MISSING', async () => {
+        // The error did not become unreachable — it became RARE. Widening the
+        // chain must not make an unresolvable picker silently search nothing.
+        const stored = await savedWithoutObject();
+        const targetless = { ...leadObject, fields: { ...leadObject.fields, owner: { type: 'lookup' } } };
+        const { findData, lookup } = routesOver(stored, [], targetless);
+        const res = mockRes();
+        await lookup.handler({ params: { slug: 'contact', field: 'owner' }, query: {} } as any, res);
+
+        expect(res.statusCode).toBe(500);
+        expect(res.body.code).toBe('LOOKUP_TARGET_MISSING');
+        expect(findData).not.toHaveBeenCalled();
     });
 });

@@ -129,6 +129,20 @@ export const REST_ROUTE_LEDGER: readonly RestRouteLedgerEntry[] = [
 
   // ── metadata ──────────────────────────────────────────────────────────────
   { route: 'GET /api/v1/meta', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.getTypes' },
+  // [#7526] The same `listMetaTypes` closure as the row above, at the spelling
+  // the dispatcher branch and `route-ledger.ts` have always used. It is
+  // `server-only` for the reason that ledger's row gives — Studio tooling
+  // calls this path directly and the SDK goes to `GET /meta` — and NOT `gap`:
+  // the gap ratchet is pinned at zero and a new `gap` row needs its own
+  // reviewed decision, which mounting a route the SDK already reaches by
+  // another path does not carry.
+  //
+  // MUST stay registered before `GET /api/v1/meta/:type`. It was absent
+  // entirely until #7526, so `/meta/types` answered from the `:type` catch-all
+  // with `{"type":"types","items":[]}` — a 200 indistinguishable from
+  // `/meta/zzz_not_a_type`.
+  { route: 'GET /api/v1/meta/types', family: 'metadata', source: 'route-manager', disposition: 'server-only',
+    note: 'richer types listing consumed by Studio tooling directly; the SDK reads the same body from GET /meta (meta.getTypes). Mirrors the `GET /meta/types` row in runtime/src/route-ledger.ts' },
   { route: 'GET /api/v1/meta/diagnostics', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.getDiagnostics' },
   { route: 'GET /api/v1/meta/_drafts', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.listDrafts' },
   { route: 'POST /api/v1/meta/_migrate-stored', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.migrateStored',
@@ -168,6 +182,25 @@ export const REST_ROUTE_LEDGER: readonly RestRouteLedgerEntry[] = [
     note: 'per-item ADR-0033 publish; packages.publishDrafts remains the package-scoped flow' },
   { route: 'POST /api/v1/meta/:type/:name/rollback', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.rollbackItem' },
   { route: 'GET /api/v1/meta/:type/:name/diff', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.diffItem' },
+  // [#7526] The two routes that were ledgered in `runtime/src/route-ledger.ts`
+  // and implemented in the dispatcher, but which no registrar ever mounted —
+  // so the SDK guard (#3642) certified them off a DECLARATION while they died
+  // at runtime. Both are `route-manager` mounts here now.
+  //
+  // Order is load-bearing and pinned by `meta-route-registration-order.test.ts`:
+  // the `/state/:field` pair precedes the compound `/published` twin (they
+  // collide only on a field literally named `published`), and BOTH `/published`
+  // rows precede `GET /api/v1/meta/:type/:section/:name` — a three-segment
+  // literal registered after that catch-all is mounted and unreachable.
+  { route: 'GET /api/v1/meta/objects/:name/state/:field', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.getLegalNextStates',
+    note: 'ADR-0020 D3.3 legal-next-state introspection. `next: null` = no state_machine governs the field, `next: []` = a declared dead end; the SDK spells the segment `objects`' },
+  { route: 'GET /api/v1/meta/object/:name/state/:field', family: 'metadata', source: 'route-manager', disposition: 'server-only',
+    note: 'singular-spelling alias of the row above — metadata-protocol folds object/objects (#4432) and the dispatcher branch this mount replaces accepted both, so the replacement is not pickier than what it replaced. The SDK calls the plural only' },
+  { route: 'GET /api/v1/meta/:type/:name/published', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.getPublished',
+    note: 'ADR-0033 published snapshot; 404s for a name that does not exist, which the pre-#7526 fall-through into the compound-name route structurally could not do (it answered a protection-envelope stub identical before publish and for a bogus name)' },
+  { route: 'GET /api/v1/meta/:type/:section/:name/published', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.getPublished',
+    note: 'compound-name arity of the row above — the SDK documents getPublished(\'lead\', \'views/all_leads\'), the same unencoded pass-through getItem/saveItem carry' },
+
   { route: 'GET /api/v1/meta/:type/:section/:name', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.getItem',
     note: 'compound names pass through getItem unencoded (URL-pinned in client.test.ts); only deleteItem encodes' },
   { route: 'PUT /api/v1/meta/:type/:section/:name', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.saveItem',

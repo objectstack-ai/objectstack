@@ -96,3 +96,5 @@ server suite never had: a real DELETE over HTTP whose body is read as
 `deleted.success` and whose key set is asserted literally — `z.object` strips
 unknown keys, so a passing parse alone cannot prove no stray `deleted` rode
 along.
+
+<!-- adr-0087: registered client-delete-result-success -->

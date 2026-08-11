@@ -343,6 +343,59 @@ function baselinePermissionSetNames(ctx: { getService: <T>(name: string) => T | 
 }
 
 /**
+ * [#7608, ADR-0090 D5] The permission-set names to resolve for an
+ * AUTHENTICATED caller: their own grants ∪ the deployment baseline, ADDITIVE
+ * and unconditional.
+ *
+ * This mirrors `SecurityPlugin.resolvePermissionSetsForContext` — the data
+ * plane's resolution — deliberately and by name, because the two used to
+ * disagree. Both handlers below resolved the caller's own names first and
+ * applied the baseline only in a SECOND call gated on
+ * `resolved.length === 0`: the fallback CLIFF D5 abolishes, verbatim —
+ *
+ *   > The fallback cliff is abolished. Today's semantics ("fallback applies
+ *   > only while the user has *zero* explicit grants") mean the first real
+ *   > grant silently removes the user's baseline. `everyone` is additive like
+ *   > any other position: baseline ∪ explicit, always.
+ *
+ * The plane it left disagreeing with is one function call away. The engine
+ * middleware resolves additively, so a member who received their FIRST
+ * position or permission-set grant kept the baseline on the data plane and
+ * lost it here: `/auth/me/permissions` reported object/field access narrower
+ * than a read actually returns, and `/me/apps` dropped every app whose
+ * `requiredPermissions` or tab visibility came from the baseline. The
+ * fail-direction is CLOSED (the console hides what the API allows), which is
+ * why it read as cosmetic for as long as it did.
+ *
+ * Pushing the baseline into `requested` also retires the second
+ * `resolvePermissionSets` call outright rather than merely widening its guard:
+ * once the baseline is in the FIRST call's input, a second call over a SUBSET
+ * of those same names can add nothing.
+ *
+ * No `principalKind === 'agent'` branch, unlike the plugin's copy — and that is
+ * a property of this surface, not an omission. D10 withholds the human baseline
+ * from an agent principal because its ceiling must stay exactly its
+ * scope-derived set; these two endpoints are reached only through
+ * {@link makeExecutionContextResolver}, which resolves a better-auth SESSION
+ * and never marks a principal kind. An agent has no session to present here, so
+ * the branch would be unreachable code asserting a case this transport cannot
+ * produce.
+ */
+function effectivePermissionSetNames(
+    execCtx: { positions?: unknown; permissions?: unknown },
+    baselineNames: string[],
+): string[] {
+    const requested: string[] = [
+        ...(Array.isArray(execCtx.positions) ? execCtx.positions as string[] : []),
+        ...(Array.isArray(execCtx.permissions) ? execCtx.permissions as string[] : []),
+    ];
+    for (const name of baselineNames) {
+        if (!requested.includes(name)) requested.push(name);
+    }
+    return requested;
+}
+
+/**
  * Buckets whose user-context generic writes are guarded fail-closed at the
  * engine: `better-auth` by plugin-auth's identity write guard (ADR-0092 D2),
  * `engine-owned` / `append-only` by plugin-security's engine-owned write guard
@@ -695,7 +748,7 @@ export function registerCurrentUserEndpoints(
                 try { return ctx.getService<any[]>('security.bootstrapPermissionSets') ?? []; }
                 catch { return []; }
             })();
-            const fallbackNames: string[] = baselinePermissionSetNames(ctx);
+            const baselineNames: string[] = baselinePermissionSetNames(ctx);
             // DB loader: surfaces user-defined permission sets
             // (created via the admin UI as `sys_permission_set`
             // rows) that aren't in metadata or bootstrap.
@@ -752,23 +805,15 @@ export function registerCurrentUserEndpoints(
                     fields: {},
                 });
             }
-            // Resolve the same way SecurityPlugin middleware does:
-            // role names + explicit permission-set names, with a
-            // fallback to `member_default` when authenticated users
-            // resolve to zero permission sets (matches the
-            // post-resolution fallback in security-plugin.ts).
-            const requested = [
-                ...(execCtx.positions ?? []),
-                ...(execCtx.permissions ?? []),
-            ];
-            let resolved: ResolvedPermissionSetLike[] = await evaluator
+            // [#7608] Resolve the same way SecurityPlugin middleware does:
+            // position names + explicit permission-set names + the deployment
+            // baseline, all in ONE call — see effectivePermissionSetNames for
+            // why the baseline is additive rather than a second, cliff-gated
+            // resolution.
+            const requested = effectivePermissionSetNames(execCtx, baselineNames);
+            const resolved: ResolvedPermissionSetLike[] = await evaluator
                 .resolvePermissionSets(requested, metadata, bootstrap, dbLoader)
                 .catch(() => []);
-            if (resolved.length === 0 && fallbackNames.length > 0) {
-                resolved = await evaluator
-                    .resolvePermissionSets(fallbackNames, metadata, bootstrap, dbLoader)
-                    .catch(() => []);
-            }
             // Most-permissive merge of `objects` and `fields` across
             // all resolved permission sets — same semantics as
             // PermissionEvaluator.getFieldPermissions but for ALL
@@ -942,11 +987,13 @@ export function registerCurrentUserEndpoints(
                         try { return ctx.getService<any[]>('security.bootstrapPermissionSets') ?? []; }
                         catch { return []; }
                     })();
-                    const fallbackNames: string[] = baselinePermissionSetNames(ctx);
-                    const requested = [
-                        ...((execCtx as any).positions ?? []),
-                        ...((execCtx as any).permissions ?? []),
-                    ];
+                    // [#7608] Baseline ∪ explicit, in ONE resolution — the
+                    // same additive rule /auth/me/permissions applies above
+                    // and the engine middleware applies on the data plane.
+                    const requested = effectivePermissionSetNames(
+                        execCtx as { positions?: unknown; permissions?: unknown },
+                        baselinePermissionSetNames(ctx),
+                    );
                     const qlSvc = (() => {
                         try { return ctx.getService<IDataEngine>('objectql') ?? null; } catch { return null; }
                     })();
@@ -972,14 +1019,9 @@ export function registerCurrentUserEndpoints(
                             }));
                         }
                         : undefined;
-                    let resolved: ResolvedPermissionSetLike[] = await evaluator
+                    const resolved: ResolvedPermissionSetLike[] = await evaluator
                         .resolvePermissionSets(requested, metadata, bootstrap, dbLoader)
                         .catch(() => []);
-                    if (resolved.length === 0 && fallbackNames.length > 0) {
-                        resolved = await evaluator
-                            .resolvePermissionSets(fallbackNames, metadata, bootstrap, dbLoader)
-                            .catch(() => []);
-                    }
                     const tabRank: Record<string, number> = { hidden: 0, default_off: 1, default_on: 2, visible: 3 };
                     for (const ps of resolved) {
                         for (const sp of (Array.isArray(ps?.systemPermissions) ? ps.systemPermissions : [])) {

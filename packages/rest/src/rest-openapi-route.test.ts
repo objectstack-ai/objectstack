@@ -232,12 +232,22 @@ describe('#5588 — built-in routes come from rest, not from the static artifact
     for (const phantom of PHANTOM_PATHS) {
       expect(body.paths[phantom], `'${phantom}' is served by nothing`).toBeUndefined();
     }
-    // `/api/meta/types` and `/api/.well-known/objectstack` had no route on ANY
-    // prefix — the first exists nowhere in the repo, the second is the runtime
-    // dispatcher's, mounted on the root. Neither may come back under `/api/v1`.
-    expect(body.paths['/api/v1/meta/types']).toBeUndefined();
+    // `/api/.well-known/objectstack` had no route on ANY prefix under this
+    // server: the real one is the runtime dispatcher's, mounted at the SITE
+    // ROOT, so it must not appear here on either spelling.
     expect(body.paths['/api/v1/.well-known/objectstack']).toBeUndefined();
     expect(body.paths['/.well-known/objectstack']).toBeUndefined();
+
+    // `/api/v1/meta/types` used to be asserted absent here, on the grounds
+    // that it "exists nowhere in the repo". That was true of the ROUTE and not
+    // of the path: it was ledgered and implemented in the dispatcher all
+    // along, and only the REST registration was missing — so `/meta/types`
+    // answered from the `/meta/:type` catch-all instead of 404ing, which is
+    // why nobody noticed (#7526). It is a real mount now, and this document is
+    // built from mounted routes, so it belongs in the document. The
+    // unversioned `/api/meta/types` spelling in PHANTOM_PATHS is still a
+    // phantom and is still asserted absent by the loop above.
+    expect(body.paths['/api/v1/meta/types']).toBeDefined();
   });
 
   it('documents the real CRUD surface, with the real verbs', async () => {
