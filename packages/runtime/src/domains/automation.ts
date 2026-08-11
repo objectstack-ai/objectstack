@@ -113,8 +113,10 @@ export function createAutomationDomain(deps: DomainHandlerDeps): DomainRoute {
  *
  * Routes:
  *   GET    /                     → listFlows
- *   GET    /actions              → getActionDescriptors (ADR-0018; ?paradigm/?source/?category filters)
- *   GET    /connectors           → getConnectorDescriptors (ADR-0022; ?type filter)
+ *   GET    /actions              → getActionDescriptors (ADR-0018; ?paradigm/?source/?category
+ *                                  single-string filters — validated, #7360)
+ *   GET    /connectors           → getConnectorDescriptors (ADR-0022; ?type single-string
+ *                                  filter — validated, #7360)
  *   GET    /:name                → getFlow
  *   POST   /                     → createFlow (registerFlow)
  *   PUT    /:name                → updateFlow
@@ -230,17 +232,39 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
     // Backs the designer palette + flow validation; the registry is open
     // and marketplace-extensible (built-in + plugin-contributed actions).
     if (parts[0] === 'actions' && parts.length === 1 && m === 'GET') {
+        // [#7360] The three filters below used to compare the RAW query value
+        // against a string field. A repeated parameter arrives as an ARRAY from
+        // every query parser these routes run behind, and an array is never
+        // `===` any string and never a member of `paradigms[]` — so
+        // `?source=builtin&source=plugin` (a caller widening its filter, or a UI
+        // serialising a multi-select the obvious way) answered **200 with zero
+        // descriptors**, which the designer palette reads as "this deployment
+        // registers no actions". That is a different sentence from "no actions
+        // matched", and nothing in the response distinguishes them. Same for a
+        // structured `?category[$ne]=x`.
+        //
+        // Parsed AHEAD of the capability probe below on purpose: a malformed
+        // query is malformed whichever automation service this deployment
+        // mounts, and a 400 that appears only where `getActionDescriptors` is
+        // implemented would be a contract that varies by deployment.
+        const paradigm = parseStringParam('paradigm', query?.paradigm);
+        const source = parseStringParam('source', query?.source);
+        const category = parseStringParam('category', query?.category);
         if (typeof automationService.getActionDescriptors === 'function') {
             let actions = automationService.getActionDescriptors() ?? [];
-            // Optional filters mirror descriptor fields.
-            if (query?.paradigm) {
-                actions = actions.filter((a: any) => Array.isArray(a?.paradigms) && a.paradigms.includes(query.paradigm));
+            // Optional filters mirror descriptor fields. The falsy gate is the
+            // one these always had: an absent or empty spelling means "no
+            // filter", and every other string — including one naming no live
+            // paradigm/source/category — still filters to a legitimate empty
+            // list exactly as before. Only a non-string is refused.
+            if (paradigm) {
+                actions = actions.filter((a: any) => Array.isArray(a?.paradigms) && a.paradigms.includes(paradigm));
             }
-            if (query?.source) {
-                actions = actions.filter((a: any) => a?.source === query.source);
+            if (source) {
+                actions = actions.filter((a: any) => a?.source === source);
             }
-            if (query?.category) {
-                actions = actions.filter((a: any) => a?.category === query.category);
+            if (category) {
+                actions = actions.filter((a: any) => a?.category === category);
             }
             return { handled: true, response: deps.success({ actions, total: actions.length }) };
         }
@@ -256,6 +280,12 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
     // empty in baseline and populated by connector plugins (e.g.
     // @objectstack/connector-rest, @objectstack/connector-slack).
     if (parts[0] === 'connectors' && parts.length === 1 && m === 'GET') {
+        // [#7360] The `/actions` note above applies verbatim to this filter:
+        // `?type=rest&type=slack` arrived as an array, matched no connector,
+        // and answered 200 with an empty registry to a picker that cannot tell
+        // that from "no connector plugins are installed". Parsed ahead of the
+        // capability probe for the same reason as `/actions`.
+        const type = parseStringParam('type', query?.type);
         // [#4127] The method is declared on IAutomationService now, so the
         // `?type=` filter reads `ConnectorDescriptor['type']` instead of
         // re-typing each element as `any` — a filter on a field the contract
@@ -264,8 +294,8 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
         if (typeof svc.getConnectorDescriptors === 'function') {
             let connectors = svc.getConnectorDescriptors() ?? [];
             // Optional filter mirrors the descriptor's connector type.
-            if (query?.type) {
-                connectors = connectors.filter((c) => c?.type === query.type);
+            if (type) {
+                connectors = connectors.filter((c) => c?.type === type);
             }
             return { handled: true, response: deps.success({ connectors, total: connectors.length }) };
         }
