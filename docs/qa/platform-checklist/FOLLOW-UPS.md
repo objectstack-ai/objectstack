@@ -23,6 +23,79 @@ gaps. The one security-sensitive finding (D1) has since been fixed in #6683.
 | D6 | **`/api/v1/datasources` admin CRUD has no route ledger** — mounted by serve.ts, absent from rest-route-ledger.ts (tranche-3 discipline gap). | packages/services/service-datasource/src/admin-routes.ts | integration-system.datasource-admin-lifecycle (source note) | low — internal discipline |
 | D7 | **Parent-only PATCH does not revalidate a stale dependent child** — `evaluateOptionVisibility` skips fields absent from the payload, so changing only the parent leaves a now-invalid child value in place server-side; integrity rests entirely on the client clear. | packages/objectql/src/validation/rule-validator.ts (`!(name in data) continue`) | records-forms.cascading-multilevel-and-clear (knownGap) | integrity — safe to file |
 | D8 | **Lookup cascade scope is existence-only server-side** — `assertReferencesResolve` accepts any EXISTING id regardless of `lookupFilters` scope (a cross-account contact that exists is accepted on direct POST). May be by-design (filters = UI courtesy) — needs a maintainer ruling: declared ≠ enforced, or documented courtesy. | packages/objectql/src/engine.ts (assertReferencesResolve) | records-forms.cascading-multilevel-and-clear (knownGap) | integrity/design — needs ruling |
+| D9 | **`expand` discloses a record the caller is 403'd from reading** — the `#2850` expand waiver keys on the wrong axis, so it fires for *every* referenced object including ones the caller holds no grant on. | packages/plugins/plugin-security/src/security-plugin.ts (`expandSkipCrud`) | api-backend.query-contract-matrix clause 4 | **SECURITY — write-up below (§1a)** |
+| D10 | **Encrypted settings are echoed in plaintext on read** — storage is correct (`sys_secret`, aes-256-gcm) but the REST read decrypts and returns the secret verbatim, and repeats it in `cascadeChain`. | packages/services/service-settings/src/{settings-service.ts,settings-routes.ts} | platform-core.settings-hub-roundtrip clause 7 | **SECURITY (admin-gated) — write-up below (§1a)** |
+
+### §1a — Security-sensitive write-ups (delivered 2026-08-11, per the maintainer ruling on #7463)
+
+Held out of the public run cards (#7463, #7514) pending a disclosure decision, and delivered
+here on the D1 precedent. Both were found by real runs against a live server; neither is
+reachable from a unit test, which is why both pins stayed green.
+
+#### D9 — `expand` bypasses the CRUD gate and the OWD scope on the sub-read
+
+**Impact.** A low-privilege authenticated user reads records they are explicitly denied.
+Not an admin-only weakness: the probing persona held only the `contributor` position.
+
+**Reproduction (2/2).** As a user holding only `contributor`:
+1. `GET /api/v1/data/showcase_contact/<contactId>` → **403 PERMISSION_DENIED**
+   (`operation 'findOne' on object 'showcase_contact' is not permitted for positions
+   [org_member, contributor, everyone]`).
+2. Same session, on an invoice **they own** that references that contact:
+   `GET /api/v1/data/showcase_invoice?$expand=contact` → **200 with the contact fully
+   materialised** — all 18 fields including `email` — **byte-identical to the admin's
+   response** (`JSON.stringify` equality true).
+3. Also via the body form: `POST /api/v1/data/showcase_invoice/query`
+   `{"expand":{"contact":{"object":"showcase_contact","fields":["id","name"]}}}`.
+
+`showcase_contact` is `sharingModel:'private'` and the row is admin-owned, so **both** the
+CRUD gate and the OWD row scope were bypassed on the expand sub-read. RLS on the *direct*
+path still works (a contributor's query for a foreign invoice returns 200 with 0 rows), so
+this is specific to the expand seam.
+
+**Root cause (located).** `expandSkipCrud = operation === 'find' && context.__expandRead && !secMeta.isPrivate`,
+where `secMeta.isPrivate` reads `obj.access?.default === 'private'`. That is a **different
+axis** from `sharingModel`, and `access` is `null` for every object in the built artifact —
+so the waiver fires for every referenced object, including ones the caller holds no grant
+on. The waiver's premise ("already broadly readable") does not hold.
+
+**Why the pin didn't catch it.** The `#2850` unit pin asserts only that the sub-read
+re-enters `find()` tagged `__expandRead`; it never asserts the end-to-end authorization
+outcome, so it passes while the live server discloses.
+
+**Suggested shape of a fix (not prescriptive).** Either evaluate the waiver against the
+same axis the object actually declares (`sharingModel`), or drop the waiver and let the
+sub-read carry the caller's context through the normal gate. Any fix wants an end-to-end
+both-personas assertion, not a re-tagged unit pin.
+
+#### D10 — `GET /api/settings/:namespace` returns the plaintext of encrypted specifiers
+
+**Impact.** Stored credentials (SMTP password, API keys) are readable back over the API by
+any caller holding `setup.access`. Admin-gated (anonymous → 403), so this is a
+defense-in-depth failure rather than a privilege escalation — but it defeats the point of
+encrypting them at rest.
+
+**Reproduction (2/2, on both specifier flavours).** Write a secret through
+`PUT /api/settings/mail`, then observe the split:
+- **Storage is correct** — `sys_setting` row has `value: null`, `encrypted: true`,
+  `value_enc: 'sec_<hex>'`, and the matching `sys_secret` row holds the aes-256-gcm
+  ciphertext (`kms_key_id: 'local:v1'`, `alg: 'aes-256-gcm'`).
+- **The read echoes it** — `GET /api/settings/mail` returns the written plaintext in
+  `values.<key>.value`, and repeats it inside every `cascadeChain` entry.
+
+Affects both `type: 'password'` and `encrypted: true` specifiers.
+
+**Root cause (located).** `settings-service.ts materialiseRow()` dereferences `sec_` handles
+and **decrypts** to plaintext; `getNamespace()` copies that plaintext into every cascade
+entry; `settings-routes.ts` applies **no redaction** on the way out. The service-layer
+round-trip is deliberately pinned (`settings-service.test.ts`: *"Round-trip read returns the
+plaintext"*), so the missing boundary is the **REST read**, not the service.
+
+**Suggested shape of a fix (not prescriptive).** Redact at the route: return a set-flag /
+masked marker instead of the value for any specifier that is `encrypted` or
+`type: 'password'`, and scrub `cascadeChain` the same way. If some internal caller genuinely
+needs the plaintext, that should be an explicit service-layer call, not the namespace read
+the settings UI uses.
 
 ## 2. Docs promise capabilities the runtime doesn't deliver (PD#10, docs side — file docs issues)
 
