@@ -3,7 +3,7 @@
   "info": {
     "title": "Showcase Status API",
     "version": "1.0.0",
-    "description": "Minimal OpenAPI document for the showcase's own health probe. Referenced by the StatusOpenApiConnector declarative instance (src/system/connectors/index.ts) as a package-relative file path — the #3016 / ADR-0096 spec form resolved and confined to this package's root at boot."
+    "description": "Minimal OpenAPI document for the showcase's own health probe. Referenced by the StatusOpenApiConnector declarative instance (src/system/connectors/index.ts) as a package-relative file path — the #3016 / ADR-0096 spec form resolved and confined to this package's root at boot. NOTE (#7538): a static document cannot follow the port this instance actually bound, so `servers[0].url` below is only the documentation default. The connector supplies an env-resolved `providerConfig.baseUrl` (src/system/self-url.ts), and createOpenApiConnector resolves `config.baseUrl ?? document.servers[0].url` — so the value below is overridden on every dispatch."
   },
   "servers": [{ "url": "http://127.0.0.1:3000" }],
   "paths": {
