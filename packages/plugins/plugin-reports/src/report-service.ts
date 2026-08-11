@@ -598,13 +598,34 @@ export class ReportService implements IReportService {
 
   async unscheduleReport(scheduleId: string, context: ExecutionContext): Promise<void> {
     if (!scheduleId) throw new Error('VALIDATION_FAILED: scheduleId is required');
-    const schedule = await this.loadScheduleRow(scheduleId);
-    if (!schedule) return; // idempotent — nothing to drop (mirrors deleteReport)
     // A schedule is owned through its report (#2980): a caller may only delete
     // the schedules of a report they own. Others get a not-found so the delete
     // neither fires nor reveals the schedule's existence — deny-as-404, never a
     // cross-owner 2xx.
-    const report = await this.loadReportRow(schedule.report_id);
+    //
+    // [#7603] That intent used to have a hole one line wide. An id with no row
+    // behind it returned early and silently — `if (!schedule) return; //
+    // idempotent` — while another owner's id threw. The route maps those to 204
+    // and 404, so a caller who could delete neither still learned which of the
+    // two they had hit: an enumeration oracle over other owners' schedule ids,
+    // the same one #7523 closed on `DELETE /reports/:id` in its 500-vs-204
+    // costume. Idempotence is only harmless where every caller may see the row;
+    // here it was the tell.
+    //
+    // Both deny arms are now ONE decision, taken before the delete fires, by the
+    // predicate that is already blind to the difference between them:
+    // `canAccessReport` is false for a schedule that does not exist, for one
+    // whose report is gone, and for one owned by somebody else alike. A single
+    // throw site means a single message, so the route's single `handleValidation`
+    // call emits a single response — status and body cannot drift apart.
+    //
+    // Unlike `deleteReport`, this cannot be pre-empted in the route: the caller
+    // presents a scheduleId, and `IReportService` exposes no by-id schedule read
+    // to be blind with (`listSchedules` is keyed by reportId). The blinding has
+    // to live here, which is why the contract now states it as an obligation
+    // rather than leaving it to each implementation.
+    const schedule = await this.loadScheduleRow(scheduleId);
+    const report = schedule ? await this.loadReportRow(schedule.report_id) : null;
     if (!this.canAccessReport(report, context)) {
       throw new Error(`REPORT_NOT_FOUND: ${scheduleId}`);
     }

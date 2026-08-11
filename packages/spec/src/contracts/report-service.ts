@@ -147,7 +147,24 @@ export interface IReportService {
   /** Create or update a schedule. */
   scheduleReport(input: ScheduleReportInput, context: ExecutionContext): Promise<ReportSchedule>;
 
-  /** Remove a schedule by id. */
+  /**
+   * Remove a schedule by id.
+   *
+   * MUST reject every schedule the caller cannot see with the SAME
+   * `REPORT_NOT_FOUND: <scheduleId>` error — one that does not exist and one
+   * owned by somebody else alike — and MUST take that decision before the
+   * delete fires. Resolving quietly for the unknown id (the "idempotent
+   * delete" reflex) while throwing for the cross-owner id is what makes
+   * `DELETE /reports/schedules/:scheduleId` an enumeration oracle over other
+   * owners' schedule ids: the caller can delete neither, but learns which of
+   * the two they hit (#7603 — #7523 is the same defect on `deleteReport`).
+   *
+   * The obligation is stated here because it cannot be enforced at the route.
+   * `deleteReport`'s two arms are pre-empted by `getReport`, which is already
+   * blind to the same difference (#2980); this contract has no by-id schedule
+   * read to do that with — `listSchedules` is keyed by reportId — so a caller
+   * holding only a scheduleId depends on the implementation to blind itself.
+   */
   unscheduleReport(scheduleId: string, context: ExecutionContext): Promise<void>;
 
   /** List schedules — optionally filtered by report. */

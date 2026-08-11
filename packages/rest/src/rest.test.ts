@@ -1648,7 +1648,38 @@ describe('RestServer', () => {
       expect(res.status).toHaveBeenCalledWith(201);
     });
 
-    it('DELETE /reports/schedules/:scheduleId returns 204', async () => {
+    // [#7603] SUPERSEDES the former test `DELETE /reports/schedules/:scheduleId
+    // returns 204`, which stood right here and drove this same input —
+    // `{ scheduleId: 'rsch_1' }` against a service whose `unscheduleReport`
+    // resolved — asserting 204 as the route's answer for ANY schedule id.
+    //
+    // That expectation was wrong, and load-bearing in the wrong direction:
+    // resolving quietly was precisely what `unscheduleReport` did for an id that
+    // DOES NOT EXIST, while another owner's id threw REPORT_NOT_FOUND. So the 204
+    // pinned under the old title was one arm of an enumeration oracle — a caller
+    // who could delete neither schedule still read which of the two they had hit
+    // straight off the status code — and this pin held it green.
+    //
+    // Same input, opposite assertion. Post-#7603 the two deny arms are a single
+    // throw in the service, so the route answers 404 to both; a resolving
+    // `unscheduleReport` now means only "the caller owned it and it is gone",
+    // which is the second test below. That the two deny arms agree on the WHOLE
+    // response — body included, not just the status — is asserted in
+    // schedule-delete-enumeration-oracle.test.ts: a pair of per-arm status
+    // assertions like these cannot fail on a half-fix, which is why that file
+    // exists alongside this one.
+    it('DELETE /reports/schedules/:scheduleId returns 404 for a schedule the caller cannot see', async () => {
+      const unscheduleReport = vi.fn(async () => { throw new Error('REPORT_NOT_FOUND: rsch_1'); });
+      const rest = makeRest(async () => ({ unscheduleReport }));
+      const { unschedule } = getReportRoutes(rest);
+      const res = { json: vi.fn(), status: vi.fn().mockReturnThis(), end: vi.fn() };
+      await unschedule!.handler({ params: { scheduleId: 'rsch_1' } } as any, res as any);
+      expect(unscheduleReport).toHaveBeenCalledWith('rsch_1', expect.anything());
+      expect(res.status).toHaveBeenCalledWith(404);
+      expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ code: 'REPORT_NOT_FOUND' }));
+    });
+
+    it('DELETE /reports/schedules/:scheduleId returns 204 when the caller owned the schedule', async () => {
       const unscheduleReport = vi.fn(async () => undefined);
       const rest = makeRest(async () => ({ unscheduleReport }));
       const { unschedule } = getReportRoutes(rest);
