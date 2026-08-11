@@ -37,15 +37,31 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 import { HttpDispatcher } from '../http-dispatcher.js';
 import { PermissionDeniedError } from '@objectstack/plugin-security';
-// The other transport, imported at its declaration: `@objectstack/rest`'s
-// public entry does not re-export the mapper, and this card must not widen that
-// package's API surface — `packages/rest` is the reference shape here, not an
-// edit target. Reaching the source directly keeps the parity assertion honest
-// (it runs the real mapper) without touching the reference.
-import { mapDataError } from '../../../rest/src/rest-server.js';
 
 /** The end-user sentence the CRUD gate renders (#7414) — no API names in it. */
 const USER_MESSAGE = '您没有执行此操作的权限,如需访问请联系管理员。';
+
+/**
+ * REST's answer to the SAME denial, transcribed from the pin PR #7449 added:
+ * `packages/rest/src/rest.test.ts`, "never ships a PERMISSION_DENIED developer
+ * half or its structured details to the client". That test drives the real
+ * `mapDataError` over a fixture identical to {@link cascadeChildDenial} below,
+ * down to the position and permission-set names, and asserts exactly this body.
+ *
+ * Transcribed rather than imported on purpose. `@objectstack/rest`'s public
+ * entry does not re-export `mapDataError`, and reaching into its source from
+ * here drags eleven of that package's modules outside this package's `rootDir`
+ * (TS6059) — the fix for a disclosure card must not widen the reference
+ * package's API surface or its type-check debt to buy itself a test. So parity
+ * is pinned by TWO tests over ONE fixture: REST's asserts the constant below is
+ * what `mapDataError` produces, this file asserts the dispatcher agrees with it.
+ * Change either side's shape and the other side's pin fails.
+ */
+const REST_DENIAL_BODY = {
+    error: USER_MESSAGE,
+    code: 'PERMISSION_DENIED',
+    object: 'app_parent_object',
+} as const;
 
 /**
  * A denial raised while cascading `DELETE /data/app_parent_object/1` into a
@@ -172,7 +188,9 @@ describe('/data PERMISSION_DENIED body — #7450', () => {
 
         await dispatch('DELETE', '/data/app_parent_object/1');
 
-        const lines = warn.mock.calls.map((c) => String(c[0])).filter((l) => l.includes('PERMISSION_DENIED'));
+        const lines = warn.mock.calls
+            .map((c: unknown[]) => String(c[0]))
+            .filter((l: string) => l.includes('PERMISSION_DENIED'));
         expect(lines).toHaveLength(1);
         const line = lines[0]!;
         expect(line).toContain('DELETE /data/app_parent_object/1');
@@ -185,34 +203,35 @@ describe('/data PERMISSION_DENIED body — #7450', () => {
 
     /**
      * The card's third decision: "either way the two transports should agree on
-     * what a PERMISSION_DENIED body carries". Run BOTH mappers over the SAME
-     * error and compare the field sets — the envelopes nest differently
-     * (REST is flat, the dispatcher wraps in `success`/`error`), so what is
-     * pinned is the semantic content, which is what leaked.
+     * what a PERMISSION_DENIED body carries".
+     *
+     * The two envelopes NEST differently — REST is flat, the dispatcher wraps in
+     * `success` / `error` — and this card does not change that. What has to
+     * agree is the semantic content, which is what leaked. So the comparison is
+     * field-by-field against {@link REST_DENIAL_BODY}, the body REST's own pin
+     * asserts for this identical error.
      */
-    it('agrees with @objectstack/rest on what a denial discloses', async () => {
-        const error = cascadeChildDenial();
-        mockObjectQL.delete.mockRejectedValue(error);
+    it('discloses exactly what @objectstack/rest discloses for the same denial', async () => {
+        mockObjectQL.delete.mockRejectedValue(cascadeChildDenial());
 
         const runtime = await dispatch('DELETE', '/data/app_parent_object/1');
-        const rest = mapDataError(error, 'app_parent_object');
+        const error = runtime.response?.body?.error;
 
-        expect(rest.status).toBe(runtime.response?.status);
+        expect(runtime.response?.status).toBe(403);
+        expect({
+            error: error?.message,
+            code: error?.code,
+            object: (error?.details as { object?: string } | undefined)?.object,
+        }).toEqual({ ...REST_DENIAL_BODY });
 
-        const restFacts = { message: rest.body.error, code: rest.body.code, object: rest.body.object };
-        const runtimeError = runtime.response?.body?.error;
-        const runtimeFacts = {
-            message: runtimeError?.message,
-            code: runtimeError?.code,
-            object: runtimeError?.details?.object,
-        };
-        expect(runtimeFacts).toEqual(restFacts);
+        // Nothing rides beyond those three: `details` holds the object alone,
+        // and no other key was smuggled onto the error member.
+        expect(error?.details).toEqual({ object: REST_DENIAL_BODY.object });
+        expect(Object.keys(error ?? {}).sort()).toEqual(['code', 'details', 'httpStatus', 'message']);
 
-        // And neither one discloses anything the other does not.
-        for (const wire of [JSON.stringify(rest.body), JSON.stringify(runtime.response?.body)]) {
-            expect(wire).not.toContain('positions');
-            expect(wire).not.toContain('permissionSets');
-            expect(wire).not.toContain('app_child_object');
-        }
+        const wire = JSON.stringify(runtime.response?.body);
+        expect(wire).not.toContain('positions');
+        expect(wire).not.toContain('permissionSets');
+        expect(wire).not.toContain('app_child_object');
     });
 });
