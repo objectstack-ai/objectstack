@@ -361,6 +361,30 @@ const baseDefaultPermissionSets: PermissionSet[] = [
       // implicit; making it explicit is the migration, not a widening — the
       // effective access for a member is byte-identical.
       sys_user_preference: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: false },
+      // [#7344] The personal inbox, READ-ONLY. Same reasoning as the line above,
+      // applied to the other pair of platform objects a platform app points every
+      // authenticated member at: the Account app's `Inbox` group declares a
+      // Notifications entry with `requiresObject: 'sys_inbox_message'`
+      // (`packages/platform-objects/src/apps/account.app.ts`) and declares no
+      // `requiredPermissions`, so the app is reachable by design while the object
+      // behind the entry was named by no shipped set — every non-admin got
+      // `403 PERMISSION_DENIED` and the bell's notification half was structurally
+      // zero. `sys_notification_receipt` rides along because read-state lives
+      // there (ADR-0030), not on the inbox row, so the entry needs both.
+      //
+      // Maintainer ruling (2026-08-11): READ grants only. Rows are produced by
+      // the always-on `inbox` messaging channel keyed on the recipient
+      // (`service-messaging/src/inbox-channel.ts`) under the service's own engine
+      // access, and mark-read is served by `/api/v1/notifications` rather than the
+      // generic data API — so no create/edit bit is needed by the flow, and
+      // `allowDelete` stays false like everything else in this anchor-bound set.
+      // `sys_activity` is deliberately NOT included: it is not a per-user-scoped
+      // shape (no `user_id` to scope by), and it is a separate question if it ever
+      // matters. Two NAMED additions in #5491's explicit-allow shape — the
+      // `_self` policies below scope both to the caller — not a widening pattern
+      // and not a step back toward a wildcard.
+      sys_inbox_message: { allowRead: true, allowCreate: false, allowEdit: false, allowDelete: false },
+      sys_notification_receipt: { allowRead: true, allowCreate: false, allowEdit: false, allowDelete: false },
     },
     rowLevelSecurity: [
       // [ADR-0095 D1] The wildcard `tenant_isolation` policy RETIRED here — the
@@ -506,6 +530,25 @@ const baseDefaultPermissionSets: PermissionSet[] = [
         name: 'sys_oauth_application_self',
         object: 'sys_oauth_application',
         operation: 'all',
+        using: 'user_id == current_user.id',
+      },
+      // [#7344] The personal inbox (Account → Inbox → Notifications, and the
+      // console bell). Neither object declares `organization_id`, so Layer 0 is
+      // inert on them exactly as it is on `sys_oauth_application` above and these
+      // `_self` policies ARE their row scoping — without them the read bit added
+      // to `objects` would be org-wide, which is the one outcome the ruling's
+      // "RLS-scoped to the caller" forbids. `select` (not `all`) because the
+      // grants are read-only; the writer is the inbox channel, not the member.
+      {
+        name: 'sys_inbox_message_self',
+        object: 'sys_inbox_message',
+        operation: 'select',
+        using: 'user_id == current_user.id',
+      },
+      {
+        name: 'sys_notification_receipt_self',
+        object: 'sys_notification_receipt',
+        operation: 'select',
         using: 'user_id == current_user.id',
       },
     ],

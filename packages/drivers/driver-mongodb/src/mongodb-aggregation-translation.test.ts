@@ -29,7 +29,7 @@
  * possible at all — the same split as `mongodb-filter-logic-translation.test.ts`
  * and the shape #6814's closing conditions asked for.
  *
- * ## Why there is a pipeline evaluator in here
+ * ## Why there is a pipeline evaluator
  *
  * The builder's output is a pipeline and the shared cases are stated as VALUES,
  * so something has to bridge the two. Pinning the emitted stages literally for
@@ -46,11 +46,18 @@
  * pre-fix lowerings is replayed through it and must FAIL the case it broke — so
  * "all green" cannot mean "the evaluator says yes to anything".
  *
+ * [#7580] The evaluator itself now lives in
+ * `mongodb-pipeline-evaluator.testkit.ts`, because the date-bucket parity suite
+ * needs the same strict reader and a second, laxer copy of it would be the
+ * easiest way to bless a broken lowering. It moved verbatim; only the date
+ * operators the bucket lowering emits were ADDED, so nothing this file asserts
+ * changed meaning.
+ *
  * What it deliberately does NOT answer: whether a real mongod agrees. `$cond` /
- * `$ifNull` / `$addToSet` are modelled here from the documentation, not
- * observed. That is the question the opt-in half would answer, and it is
- * recorded as open rather than implied — this environment cannot fetch a mongod
- * binary at all, and a suite nobody has executed is a claim, not a check.
+ * `$ifNull` / `$addToSet` are modelled from the documentation, not observed.
+ * That is the question the opt-in half would answer, and it is recorded as open
+ * rather than implied — this environment cannot fetch a mongod binary at all,
+ * and a suite nobody has executed is a claim, not a check.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -60,213 +67,16 @@ import {
   type AggregationCase,
   type GroupByNode,
 } from '@objectstack/spec/data';
-import { buildAggregationPipeline, postProcessAggregation, type AggregationInput } from './mongodb-aggregation.js';
+import {
+  buildAggregationPipeline,
+  postProcessAggregation,
+  MONGODB_DATE_GRANULARITIES,
+  type AggregationInput,
+} from './mongodb-aggregation.js';
+import { runPipeline, type Doc } from './mongodb-pipeline-evaluator.testkit.js';
 
 /** The alias every case's measure is projected under — never a fixture column. */
 const MEASURE = 'measure';
-
-// ── A deliberately strict reader of the emitted pipeline ────────────────────
-
-/** Thrown for any shape this evaluator does not model — never swallowed. */
-class UnsupportedShape extends Error {}
-
-/** A field path that resolved to nothing. MongoDB distinguishes it from `null`. */
-const MISSING = Symbol('missing');
-
-type Doc = Record<string, unknown>;
-
-/** Resolve a `'$a.b'` field path against a document, or {@link MISSING}. */
-function resolvePath(doc: Doc, ref: string): unknown {
-  if (!ref.startsWith('$')) throw new UnsupportedShape(`not a field path: ${ref}`);
-  let current: unknown = doc;
-  for (const part of ref.slice(1).split('.')) {
-    if (current === null || typeof current !== 'object' || Array.isArray(current)) return MISSING;
-    if (!Object.prototype.hasOwnProperty.call(current, part)) return MISSING;
-    current = (current as Doc)[part];
-  }
-  return current;
-}
-
-/**
- * Evaluate an aggregation EXPRESSION against one document.
- *
- * Models only the operators this builder emits. `$$`-prefixed system variables
- * are refused rather than guessed at — `$$ROOT` reaches the `array_agg` arm, and
- * an evaluator that quietly resolved it would be asserting a semantics nobody
- * checked.
- */
-function evalExpr(doc: Doc, expr: unknown): unknown {
-  if (typeof expr === 'string' && expr.startsWith('$')) {
-    if (expr.startsWith('$$')) throw new UnsupportedShape(`system variable '${expr}' is not modelled`);
-    return resolvePath(doc, expr);
-  }
-  if (expr === null || typeof expr !== 'object') return expr; // literal
-  if (Array.isArray(expr)) return expr.map((e) => evalExpr(doc, e));
-
-  const keys = Object.keys(expr as Doc);
-  if (keys.length !== 1) throw new UnsupportedShape(`expression with ${keys.length} keys: ${keys.join(', ')}`);
-  const [op] = keys;
-  const arg = (expr as Doc)[op];
-
-  switch (op) {
-    case '$ifNull': {
-      if (!Array.isArray(arg) || arg.length !== 2) throw new UnsupportedShape('$ifNull takes [expr, replacement]');
-      const value = evalExpr(doc, arg[0]);
-      return value === MISSING || value === null ? evalExpr(doc, arg[1]) : value;
-    }
-    case '$eq': {
-      if (!Array.isArray(arg) || arg.length !== 2) throw new UnsupportedShape('$eq takes two operands');
-      // MISSING and null compare EQUAL under `$eq` in the aggregation language,
-      // which is why the `count` lowering routes through `$ifNull` first rather
-      // than relying on it.
-      const left = evalExpr(doc, arg[0]);
-      const right = evalExpr(doc, arg[1]);
-      const norm = (v: unknown) => (v === MISSING ? null : v);
-      return norm(left) === norm(right);
-    }
-    case '$cond': {
-      if (!Array.isArray(arg) || arg.length !== 3) throw new UnsupportedShape('$cond takes [if, then, else]');
-      return evalExpr(doc, arg[0]) ? evalExpr(doc, arg[1]) : evalExpr(doc, arg[2]);
-    }
-    default:
-      throw new UnsupportedShape(`unsupported aggregation expression operator '${op}'`);
-  }
-}
-
-/** One accumulator, folded over the documents of a single group. */
-function accumulate(rows: Doc[], acc: unknown): unknown {
-  if (acc === null || typeof acc !== 'object' || Array.isArray(acc)) {
-    throw new UnsupportedShape(`accumulator must be a one-key document, got ${JSON.stringify(acc)}`);
-  }
-  const keys = Object.keys(acc as Doc);
-  if (keys.length !== 1) throw new UnsupportedShape(`accumulator with ${keys.length} keys`);
-  const [op] = keys;
-  const arg = (acc as Doc)[op];
-  const values = rows.map((row) => evalExpr(row, arg));
-  /** MongoDB's arithmetic accumulators ignore missing and non-numeric values. */
-  const numbers = values.filter((v): v is number => typeof v === 'number');
-
-  switch (op) {
-    case '$sum':
-      return numbers.reduce((a, b) => a + b, 0);
-    case '$avg':
-      return numbers.length === 0 ? null : numbers.reduce((a, b) => a + b, 0) / numbers.length;
-    case '$min':
-      return numbers.length === 0 ? null : Math.min(...numbers);
-    case '$max':
-      return numbers.length === 0 ? null : Math.max(...numbers);
-    case '$addToSet': {
-      // `$addToSet` skips a MISSING field and keeps an explicit `null` — the
-      // whole of #6814 lives in that second half.
-      const set: unknown[] = [];
-      for (const v of values) {
-        if (v === MISSING) continue;
-        if (!set.includes(v)) set.push(v);
-      }
-      return set;
-    }
-    case '$push':
-      return values.filter((v) => v !== MISSING);
-    default:
-      throw new UnsupportedShape(`unsupported accumulator '${op}'`);
-  }
-}
-
-/** Execute an emitted pipeline over the fixture. Throws on any shape not modelled. */
-export function runPipeline(rows: readonly Doc[], pipeline: readonly Doc[]): Doc[] {
-  let docs: Doc[] = rows.map((row) => ({ ...row }));
-
-  for (const stage of pipeline) {
-    const keys = Object.keys(stage);
-    if (keys.length !== 1) throw new UnsupportedShape(`pipeline stage with ${keys.length} keys`);
-    const [name] = keys;
-    const spec = stage[name];
-
-    switch (name) {
-      case '$group': {
-        const { _id: idSpec, ...accumulators } = spec as Doc;
-        const groups = new Map<string, { id: unknown; rows: Doc[] }>();
-        for (const doc of docs) {
-          let id: unknown;
-          if (idSpec === null) {
-            id = null;
-          } else if (idSpec && typeof idSpec === 'object' && !Array.isArray(idSpec)) {
-            const key: Doc = {};
-            for (const [outKey, ref] of Object.entries(idSpec as Doc)) {
-              const value = evalExpr(doc, ref);
-              key[outKey] = value === MISSING ? null : value;
-            }
-            id = key;
-          } else {
-            throw new UnsupportedShape(`$group._id must be null or a document, got ${JSON.stringify(idSpec)}`);
-          }
-          const bucket = JSON.stringify(id);
-          if (!groups.has(bucket)) groups.set(bucket, { id, rows: [] });
-          groups.get(bucket)!.rows.push(doc);
-        }
-        docs = [...groups.values()].map(({ id, rows: groupRows }) => {
-          const out: Doc = { _id: id };
-          for (const [alias, acc] of Object.entries(accumulators)) {
-            out[alias] = accumulate(groupRows, acc);
-          }
-          return out;
-        });
-        break;
-      }
-      case '$project': {
-        docs = docs.map((doc) => {
-          const out: Doc = {};
-          for (const [key, rule] of Object.entries(spec as Doc)) {
-            if (rule === 0 || rule === false) continue;
-            if (rule === 1 || rule === true) {
-              const value = resolvePath(doc, `$${key}`);
-              if (value !== MISSING) out[key] = value;
-              continue;
-            }
-            if (typeof rule === 'string') {
-              const value = resolvePath(doc, rule);
-              if (value !== MISSING) out[key] = value;
-              continue;
-            }
-            throw new UnsupportedShape(`unsupported $project rule for '${key}': ${JSON.stringify(rule)}`);
-          }
-          return out;
-        });
-        break;
-      }
-      case '$match':
-        // Reachable only from `opts.where`, which no case in the shared set
-        // spells. Refused rather than approximated: this file's `$match` would
-        // be a second, weaker copy of the matcher
-        // `mongodb-filter-logic-translation.test.ts` already owns.
-        throw new UnsupportedShape('$match is not modelled here — see mongodb-filter-logic-translation.test.ts');
-      case '$sort': {
-        const entries = Object.entries(spec as Doc);
-        docs = [...docs].sort((a, b) => {
-          for (const [field, dir] of entries) {
-            if (dir !== 1 && dir !== -1) throw new UnsupportedShape(`$sort direction ${String(dir)}`);
-            const av = a[field];
-            const bv = b[field];
-            if (av === bv) continue;
-            return ((av as never) < (bv as never) ? -1 : 1) * (dir as number);
-          }
-          return 0;
-        });
-        break;
-      }
-      case '$skip':
-        docs = docs.slice(spec as number);
-        break;
-      case '$limit':
-        docs = docs.slice(0, spec as number);
-        break;
-      default:
-        throw new UnsupportedShape(`unsupported pipeline stage '${name}'`);
-    }
-  }
-
-  return docs;
-}
 
 // ── Driving the shared case-set ─────────────────────────────────────────────
 
@@ -375,25 +185,56 @@ describe('the emitted pipeline', () => {
 describe('a groupBy entry with no lowering is REFUSED, not ignored', () => {
   const aggregations: AggregationInput[] = [{ function: 'count', alias: 'n' }];
 
-  it('a dateGranularity node answers NOT_IMPLEMENTED / 501', () => {
+  /**
+   * [#7580] These two pins USED to assert that every declared granularity is
+   * refused. That was the true statement while this driver bucketed nothing; it
+   * is false now, and the honest update is to assert the NEW substance rather
+   * than to delete the coverage:
+   *
+   *  - a granularity the driver ADVERTISES must LOWER (below, and in full in
+   *    `mongodb-date-bucket-parity.test.ts`);
+   *  - a granularity it does not advertise must still refuse, with the ADR-0112
+   *    envelope intact.
+   *
+   * Since the advertised record is now all five of `DateGranularity`, the second
+   * population is reachable only from outside the declared enum — a caller that
+   * hands this exported builder a granularity the spec does not name, which is
+   * exactly the caller the refusal was always written for. It is tested with one
+   * rather than deleted as unreachable, because "unreachable today" is how a
+   * refusal quietly becomes a `default:` that answers.
+   */
+  it('an ADVERTISED granularity lowers instead of refusing', () => {
+    for (const g of ['day', 'week', 'month', 'quarter', 'year'] as const) {
+      expect(MONGODB_DATE_GRANULARITIES[g], `${g} must be advertised`).toBe(true);
+      const pipeline = buildAggregationPipeline({
+        aggregations,
+        groupBy: [{ field: 'closed_at', dateGranularity: g }],
+      });
+      expect(pipeline[0], g).toHaveProperty('$group');
+      expect(JSON.stringify(pipeline), g).toContain('$dateToString');
+    }
+  });
+
+  it('an UNADVERTISED granularity answers NOT_IMPLEMENTED / 501', () => {
     let thrown: (Error & { code?: string; status?: number }) | undefined;
     try {
-      buildAggregationPipeline({ aggregations, groupBy: [{ field: 'closed_at', dateGranularity: 'month' }] });
+      // Outside `DateGranularity` — the only population left, and the one the
+      // refusal exists for: a direct caller going around the capability record.
+      buildAggregationPipeline({
+        aggregations,
+        groupBy: [{ field: 'closed_at', dateGranularity: 'fortnight' } as unknown as GroupByNode],
+      });
     } catch (err) {
       thrown = err as Error & { code?: string; status?: number };
     }
     expect(thrown, 'a granularity this backend cannot bucket must not be silently dropped').toBeDefined();
     expect(thrown!.code).toBe('NOT_IMPLEMENTED');
     expect(thrown!.status).toBe(501);
-    expect(thrown!.message).toMatch(/Date bucketing by 'month' is not supported/);
+    expect(thrown!.message).toMatch(/Date bucketing by 'fortnight' is not supported/);
     expect(thrown!.message).toMatch(/queryDateGranularity/);
-  });
-
-  it('refuses every declared granularity, so none is half-supported', () => {
-    for (const g of ['day', 'week', 'month', 'quarter', 'year'] as const) {
-      expect(() => buildAggregationPipeline({ aggregations, groupBy: [{ field: 'closed_at', dateGranularity: g }] }))
-        .toThrow(new RegExp(`Date bucketing by '${g}'`));
-    }
+    // The message names what IS bucketed, so a reader is told where the boundary
+    // is rather than only that they crossed it — the driver-sql wording.
+    expect(thrown!.message).toContain('Bucketed here: day, month, quarter, week, year (driver-mongodb)');
   });
 
   it('an entry that is neither half of the union answers INVALID_QUERY / 400', () => {
@@ -414,7 +255,7 @@ describe('a groupBy entry with no lowering is REFUSED, not ignored', () => {
   it('refuses before a pipeline exists, so no stage is built from a half-read groupBy', () => {
     expect(() => buildAggregationPipeline({
       aggregations,
-      groupBy: ['region', { field: 'closed_at', dateGranularity: 'year' }],
+      groupBy: ['region', { field: 'closed_at', dateGranularity: 'fortnight' } as unknown as GroupByNode],
     })).toThrow(/Date bucketing/);
   });
 });

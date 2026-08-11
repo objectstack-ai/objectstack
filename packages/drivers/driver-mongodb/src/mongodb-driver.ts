@@ -31,6 +31,7 @@ import {
 import {
   buildAggregationPipeline,
   postProcessAggregation,
+  MONGODB_DATE_GRANULARITIES,
 } from './mongodb-aggregation.js';
 import { syncCollectionSchema, dropCollection } from './mongodb-schema.js';
 import {
@@ -86,13 +87,35 @@ export class MongoDBDriver implements IDataDriver {
    * Capability advertisement (#4634, ADR-0049): only the bits with an engine
    * reader survive. This driver batches its schema DDL round-trips
    * ({@link syncSchemasBatch}), so it opts in via the one bit the engine ANDs
-   * with method presence. It owns neither persistent autonumber sequences nor
-   * native date bucketing here, so `autonumber`/`queryDateGranularity` stay
-   * absent and the engine keeps its fallbacks. Everything the old 30-bit
-   * literal declared is expressed by the methods this class implements.
+   * with method presence. It owns no persistent autonumber sequences, so
+   * `autonumber` stays absent and the engine keeps that fallback. Everything the
+   * old 30-bit literal declared is expressed by the methods this class
+   * implements.
+   *
+   * [#7580] `queryDateGranularity` is now PUBLISHED, where it used to be
+   * deliberately absent. `buildAggregationPipeline` lowers a
+   * `dateGranularity`-bearing `groupBy` into `$dateToString` bucket labels
+   * server-side, so `engine.aggregate` may push a bucketed aggregate down here
+   * instead of fetching every row and bucketing it in JS. The record published
+   * is the builder's own `MONGODB_DATE_GRANULARITIES` — not a second literal
+   * that could drift from it — because an advertised granularity the builder
+   * then refuses turns a query the engine used to answer into a 501.
+   *
+   * What this bit does NOT claim: agreement with a real mongod. The lowering's
+   * `$dateToString` / `$convert` semantics are documentation-derived and held to
+   * the engine's labels by an in-process evaluator, because this fleet cannot
+   * fetch a mongod binary (#5517) — the bound is stated in full at the top of
+   * `mongodb-date-bucket-parity.test.ts`, and it is the reason that suite exists
+   * rather than an enrolment in `checkDateBucketParity`, which needs a server.
+   *
+   * Timezones stay engine-side: `engine.aggregate` forces the in-memory path for
+   * any non-UTC reference zone (ADR-0053 Phase 2 D2), and the AST it hands a
+   * driver carries no `timezone` at all, so this bucketing is UTC by
+   * construction — the only thing it could mean.
    */
   public readonly supports = {
     batchSchemaSync: true,
+    queryDateGranularity: MONGODB_DATE_GRANULARITIES,
   };
 
   private client: MongoClient;

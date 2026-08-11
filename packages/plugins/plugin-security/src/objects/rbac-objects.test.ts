@@ -102,6 +102,11 @@ describe('default permission sets', () => {
       'sys_account_self',
       'sys_api_key_self',
       'sys_device_code_self',
+      // [#7344] The personal-inbox pair — not better-auth tables, but the same
+      // `_self` shape for the same reason: no `organization_id`, so Layer 0 is
+      // inert and these policies are the row scoping for their read grants.
+      'sys_inbox_message_self',
+      'sys_notification_receipt_self',
       'sys_oauth_access_token_self',
       'sys_oauth_application_self',
       'sys_oauth_consent_self',
