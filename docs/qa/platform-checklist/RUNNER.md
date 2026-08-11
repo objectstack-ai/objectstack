@@ -101,7 +101,7 @@ contradicts it, and correct it here when it does.
 | trap | what it fakes | counter |
 |---|---|---|
 | `hydration-race` | empty nav/list right after navigation | screenshot first; settle; then read DOM |
-| `stale-console-bundle` | UI bug already fixed upstream in objectui | check against objectui HMR console / fresh build (skill §2) |
+| `stale-console-bundle` | UI bug already fixed upstream in objectui | check against objectui HMR console / fresh build (skill §2). `os dev` refuses to mount a console whose stamp ≠ the `.objectui-sha` pin, so a 404 `/_console/` reads "rebuild with `pnpm objectui:build`", never "console broken" |
 | `stale-dist` | src edits with no runtime effect | rebuild package + restart before judging |
 | `automation-input` | dead buttons / empty submits caused by the driver | ref-targeted clicks; native setter + input/change events |
 | `shared-browser-tab` | drifting origin, foreign drafts | pin absolute origin; own port/DB (skill §0) |
