@@ -1132,6 +1132,32 @@ export class SettingsService {
     return { manifest: reg.manifest, values };
   }
 
+  /**
+   * The namespace's secret-backed keys — every specifier declared
+   * `encrypted: true` or `type: 'password'` (#7522).
+   *
+   * Published so the REST boundary can redact exactly the values this service
+   * encrypts, reading the SAME set `setMany` consults to decide what gets
+   * encrypted at all. Re-deriving the predicate at the boundary is how the two
+   * sides drift into "encrypted on write, cleartext on read", which is the
+   * defect this accessor exists to close.
+   *
+   * Note what it deliberately does NOT do: the values themselves keep coming
+   * back as plaintext from `get()` / `getNamespace()` / `snapshotOf()`, because
+   * in-process consumers (the mail, sms, storage and auth plugins, via
+   * `createClient()`) need the real secret. Redaction is the caller's step, and
+   * belongs to the REST read boundary only.
+   *
+   * Throws `UnknownNamespaceError` for an unregistered namespace rather than
+   * answering an empty set: "I don't know this namespace" must never read as
+   * "nothing here is secret".
+   */
+  secretKeysOf(namespace: string): ReadonlySet<string> {
+    const reg = this.registry.get(namespace);
+    if (!reg) throw new UnknownNamespaceError(namespace);
+    return reg.encryptedKeys;
+  }
+
   // ---------------------------------------------------------------------
   // Reactive client (Phase 1)
   // ---------------------------------------------------------------------
