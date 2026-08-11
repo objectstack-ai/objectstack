@@ -6264,8 +6264,9 @@ export class ObjectStackProtocolImplementation implements
         //
         // What rides on it is total: plugin-security's middleware opens with
         // `if (opCtx.context?.isSystem) return next()` — the entire RLS / FLS /
-        // CRUD chain skipped — and `__expandRead` waives the object-level CRUD
-        // gate for public objects (#2850). Neither is ever schema-stripped on
+        // CRUD chain skipped — and `__expandRead` marks a read as an expansion
+        // sub-read (#2850; it waived the object-level CRUD gate for "public"
+        // objects until #7626 removed that). Neither is ever schema-stripped on
         // this path: `ExecutionContextSchema.parse` runs only in
         // `engine.createContext`, which the read path does not use.
         //

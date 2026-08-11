@@ -6274,14 +6274,17 @@ export class ObjectQL implements IObjectQLEngine {
         //
         // The `__expandRead` marker (set here, never from client input —
         // `executionContext` is server-built) tells the security layer this is
-        // an expansion sub-read: it waives ONLY the object-level CRUD /
-        // requiredPermissions gate for PUBLIC referenced objects (already
-        // broadly readable, so a common status/owner lookup isn't over-blocked),
-        // while PRIVATE referenced objects keep the full RLS + CRUD treatment
-        // (you may expand only rows you could read directly). FLS masking
-        // applies to both. `expand` is intentionally omitted from this query so
-        // `find` does not re-expand — nested relations recurse below under the
-        // depth guard.
+        // an expansion sub-read. It does NOT relax that layer: since #7626 the
+        // referenced object takes the FULL treatment — CRUD gate,
+        // requiredPermissions, RLS and FLS — so you may expand only rows you
+        // could have read directly. (#2850 shipped a waiver for "public"
+        // referenced objects; it keyed on an axis almost no object declares and
+        // never checked the caller's grants, so it disclosed private records to
+        // callers the gate had already refused.) A refusal is caught below and
+        // the bare FK id is retained, which is why the parent read still
+        // succeeds. `expand` is intentionally omitted from this query so `find`
+        // does not re-expand — nested relations recurse below under the depth
+        // guard.
         const relatedRecords = await this.find(
           referenceObject,
           {
