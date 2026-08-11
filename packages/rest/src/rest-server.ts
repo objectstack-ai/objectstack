@@ -7990,7 +7990,22 @@ export class RestServer {
                             const items: any[] = Array.isArray(r?.items) ? r.items : Array.isArray(r) ? r : [];
                             const obj = items.find((o: any) => o?.name === match.object);
                             const def = obj?.fields?.[fieldName];
-                            referenceTo = def?.referenceTo ?? def?.target ?? def?.options?.objectName;
+                            // [#7486] `reference` FIRST — it is the canonical
+                            // key on `FieldSchema`, and `data/field.zod.ts`
+                            // folds `relatedTo` / `referenceTo` / `target` /
+                            // `targetObject` / `lookupObject` all onto it at
+                            // parse. Reading only the legacy spellings meant a
+                            // well-formed object schema carried NONE of them,
+                            // the chain resolved `undefined`, and the route
+                            // answered 500 — making `publicPicker.object`
+                            // de-facto required while the schema and docs
+                            // present it as an optional override. The legacy
+                            // spellings stay after it for stored pre-fold rows,
+                            // which never went through the alias table.
+                            referenceTo = def?.reference
+                                ?? def?.referenceTo
+                                ?? def?.target
+                                ?? def?.options?.objectName;
                         } catch {/* ignore */}
                     }
                     if (!referenceTo) {
