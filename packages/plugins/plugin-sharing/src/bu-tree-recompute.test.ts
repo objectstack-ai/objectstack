@@ -47,8 +47,14 @@ const RULE = 'share_new_inquiries_with_field_ops';
 
 function matches(row: Row, f: any): boolean {
   if (!f || typeof f !== 'object') return true;
-  if (Array.isArray(f.$or)) return f.$or.some((x: any) => matches(row, x));
-  if (Array.isArray(f.$and)) return f.$and.every((x: any) => matches(row, x));
+  // [#7676] A combinator is CONJOINED with its sibling field keys, never a
+  // short-circuit that returns before they are read — the looseness #7760 had
+  // to remove from `sharing-rule.test.ts`'s fake one commit before this one.
+  // `listRules` composes `{object_name, active, $or:[…org scope…]}`, and a
+  // matcher that returned on the `$or` alone would match the whole table here
+  // while driver-sql and driver-memory conjoin the two.
+  if (Array.isArray(f.$or) && !f.$or.some((x: any) => matches(row, x))) return false;
+  if (Array.isArray(f.$and) && !f.$and.every((x: any) => matches(row, x))) return false;
   for (const [k, v] of Object.entries(f)) {
     if (k === '$or' || k === '$and') continue;
     const rv = row[k];
