@@ -42,14 +42,20 @@ const WRITE_PRIMITIVES = ['create', 'update', 'delete'] as const;
 
 /**
  * Objects that deliberately expose single-record writes but NO batch route,
- * keyed by object name with the reason. Empty today: every tightened whitelist
- * in the monorepo either grants `bulk` or grants no write verb at all.
+ * keyed by object name with the reason.
  *
  * Adding an entry is a real decision — batch denial is invisible until a user
  * multi-selects rows and `data-objectstack` rethrows the 405 without falling
  * back to per-row writes. Write down why the object is worth that.
  */
-const SINGLE_RECORD_WRITE_ONLY: Record<string, string> = {};
+const SINGLE_RECORD_WRITE_ONLY: Record<string, string> = {
+  sys_api_key:
+    "row actions revoke/restore (#7769/#7727) opened 'update' for a working " +
+    "PATCH /api/v1/data/sys_api_key/{id} route; 'create'/'delete' deliberately " +
+    "stay off apiMethods (minting is POST /api/v1/keys, retirement is revoking " +
+    'rather than deleting) — and batch revoke is not a declared product route, ' +
+    "so 'bulk' is intentionally withheld too. See #7769's commit message for the ruling.",
+};
 
 /** Every `*.object.ts` under `packages/`, skipping build output and deps. */
 function walkObjectFiles(dir: string, out: string[] = []): string[] {
