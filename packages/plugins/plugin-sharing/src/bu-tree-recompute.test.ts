@@ -23,7 +23,7 @@
  * record was never touched.
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi, type MockInstance } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/objectql';
 import { SharingService } from './sharing-service.js';
 import { SharingRuleService } from './sharing-rule-service.js';
@@ -333,8 +333,15 @@ describe('#7729 business-unit graph writes recompute BU-tree sharing rules', () 
 describe('#7729 non-regression — rules that do not read the BU tree are left alone', () => {
   let engine: ReturnType<typeof makeEngine>;
   let rules: SharingRuleService;
-  let revokeSpy: ReturnType<typeof vi.spyOn>;
-  let evaluateSpy: ReturnType<typeof vi.spyOn>;
+  // Typed from the METHODS rather than as a bare `ReturnType<typeof vi.spyOn>`.
+  // That erased spelling drops the signature, so `mock.calls` degrades to an
+  // implicit `any` per element — invisible to `pnpm typecheck` here (this
+  // package's tsconfig excludes `*.test.ts`) and caught only by
+  // `check:type-check-debt`, whose ratchet may not be raised for new code.
+  // Deriving from the service also keeps the assertions honest: `c[0]` is the
+  // real argument type, so the `as any` this used to need is gone.
+  let revokeSpy: MockInstance<SharingRuleService['revokeRuleGrantsForRetiredRecipients']>;
+  let evaluateSpy: MockInstance<SharingRuleService['evaluateRule']>;
 
   beforeEach(() => {
     engine = makeEngine();
@@ -385,7 +392,7 @@ describe('#7729 non-regression — rules that do not read the BU tree are left a
     await engine.update('sys_business_unit', { id: 'bu_west', parent_business_unit_id: null });
     await ruleRegrantQueue.whenIdle();
 
-    expect(revokeSpy.mock.calls.map((c) => (c[0] as any).id)).toEqual(['srule_bu']);
+    expect(revokeSpy.mock.calls.map((c) => c[0].id)).toEqual(['srule_bu']);
     expect(evaluateSpy.mock.calls.map((c) => c[0])).toEqual(['srule_bu']);
   });
 
