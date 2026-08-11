@@ -4,7 +4,10 @@ import type { FilterCondition } from '@objectstack/spec/data';
 import type { RegisteredErrorCode } from '@objectstack/spec/api';
 import { likePattern, LIKE_ESCAPE_CHAR, asciiLowerSqlExpr } from './like-pattern.js';
 import {
+  CROSS_FIELD_COMPARISON_OPERATORS,
+  fieldReferenceComparandMessage,
   isBindableComparand,
+  isFieldReference,
   isRenderableTextComparand,
   unbindableListMemberMessage,
   unrenderableTextComparandMessage,
@@ -203,6 +206,31 @@ import {
  * `looksLikeInternalErrorLeak` too — FALSE, like the other eleven — so it is
  * withheld from the response BY DECLARATION and teaches no sniffing list a new
  * phrase.
+ *
+ * ## A `{ $field }` comparand is refused, not bound (#7598)
+ *
+ * THIRTEEN refusing sites, and {@link assertNoFieldReferenceComparand} is the
+ * thirteenth's — the first whose shape is not wrong everywhere, only
+ * uncompilable HERE. #5222 taught `driver-sql` / `driver-sqlite-wasm` to compile
+ * `{ amount: { $gt: { $field: 'budget' } } }` into a same-table column-to-column
+ * comparison, under four maintainer rulings (same-table only, declared-only
+ * enumeration, tenant-isolation column forbidden on both sides, same comparison
+ * class). This compiler was measured in the same family and answered a fifth way
+ * again: it BOUND the reference object, so an admin's RLS predicate compared a
+ * column against a value no row can hold — see that function for the measured
+ * table and for why the four rulings cannot be enforced from here at all
+ * (`StrategyContext` exposes neither an object's declared field set nor its
+ * tenant-isolation column, so the enumeration the rulings turn on does not
+ * exist on this side).
+ *
+ * ⚠️ Note what this does NOT do: it does not make the capability available.
+ * A read scope carrying a field-to-field comparison still cannot be served by
+ * the raw-SQL analytics path — it is now REFUSED there instead of silently
+ * mis-answered, which is the whole of the change. The same scope continues to
+ * work on the ObjectQL engine path, where the driver compiles it and enforces
+ * the rulings with the metadata it owns (measured: `ObjectQLStrategy` ANDs the
+ * scope into the `FilterCondition` it hands `engine.aggregate`, so the reference
+ * reaches `driver-sql` intact and never passes through this file).
  */
 
 const IDENT = /^[a-z_][a-z0-9_]*$/i;
@@ -361,6 +389,17 @@ function compileField(field: string, value: unknown, qAlias: string, params: unk
   // domains are disjoint by construction (`assertDefinedComparands` skips these
   // two operators by name), so neither can shadow the other's message.
   assertBooleanFlagComparands(field, value);
+
+  // [#7598] …and the comparand that is neither a position nor a domain problem
+  // but a CAPABILITY one: a `{ $field }` reference the SQL drivers compile since
+  // #5222 and this compiler cannot. Third call rather than a widened first, for
+  // the reason the second one is separate — the three gates gate different
+  // things, and their triggers are disjoint by construction (a reference is
+  // never `undefined`, and `$null` / `$exists` are outside this gate's operator
+  // set), so none can shadow another's message. Runs AFTER both, so a
+  // `{ $gt: undefined }` keeps being an undefined comparand rather than becoming
+  // "not a field reference".
+  assertNoFieldReferenceComparand(field, value);
 
   // Scalar / null → implicit equality.
   if (value === null) return `${col} IS NULL`;
@@ -748,6 +787,87 @@ function assertBooleanFlagComparands(field: string, spec: unknown): void {
     if (!Object.prototype.hasOwnProperty.call(spec, op)) continue;
     if (typeof spec[op] === 'boolean') continue;
     throw nonBooleanFlagComparandError(op, field, `"${field}".${op}`);
+  }
+}
+
+/**
+ * [#7598] A `{ $field: 'col' }` reference in a comparand position this compiler
+ * BOUND instead of refusing — the THIRTEENTH refusing site, and the first one
+ * whose shape is executed correctly somewhere else.
+ *
+ * ## The measured cell, on `origin/main` (`5823d593d`), alias `person`
+ *
+ * | read scope | compiled to | bind list |
+ * |---|---|---|
+ * | `{ amount: { $gt: { $field: 'budget' } } }` | `"person"."amount" > ?`  | `[{"$field":"budget"}]` |
+ * | `{ amount: { $eq: { $field: 'budget' } } }` | `"person"."amount" = ?`  | `[{"$field":"budget"}]` |
+ *
+ * The reference OBJECT goes into the bind list verbatim — `applyReadScope`
+ * (`native-sql-strategy.ts`) pushes `scopeParams[i]` into the driver's array
+ * while it renumbers `?` → `$N`, exactly as #6125 measured for `undefined`. What
+ * the driver then does with a plain object is its own business: JSON text on the
+ * `toSqlBindValue` drivers, a bare `Undefined binding(s)`-class crash on the ones
+ * that refuse to guess. Either way an admin's RLS predicate compared a column
+ * against a value no row can hold, silently. In a module whose contract is
+ * "a read-scope predicate must never be silently dropped" a predicate that is
+ * silently MEANINGLESS is the same defect one step further on — and unlike
+ * #6125's cell it is not reliably fail-closed, because the comparison it
+ * degrades to depends on the driver rather than on the scope.
+ *
+ * ## Which positions this gate covers, and why the others keep their wording
+ *
+ * ONLY the positions that were BOUND: the whole comparand of the six scalar
+ * comparison operators ({@link CROSS_FIELD_COMPARISON_OPERATORS}) and the two
+ * `$between` endpoints. Everything else a reference can occupy already refused
+ * here BEFORE this change, with a diagnosis of its own, and each of those
+ * refusals converges with `driver-sql`'s own #5222 refusal arm — so widening
+ * this gate over them would restate a rule that is already right in a second
+ * wording (#5240, read in the direction that matters: a second sentence for a
+ * shape refused either way only sends the operator to the wrong repair):
+ *
+ *   - the LIKE family → {@link assertRenderableText} ("matches against the TEXT
+ *     of a pattern"), and `driver-sql` refuses a reference there too — a
+ *     column-side LIKE pattern cannot be metacharacter-escaped portably;
+ *   - `$in` / `$nin` members → {@link assertCompilableMembers} ("cannot be bound
+ *     as a SQL parameter"), and `driver-sql` refuses those members as well,
+ *     because the memory evaluator does not resolve a reference inside a list
+ *     either;
+ *   - a bare `{ field: { $field: … } }` → `unsupported operator "$field"` from
+ *     {@link compileOperator}'s default arm.
+ *
+ * `$between` is in the covered set even though {@link assertCompilableMembers}
+ * would also refuse its endpoints, because this gate runs FIRST and the truer
+ * diagnosis wins: "a field reference is not compiled here" tells the policy
+ * author what to write, where "cannot be bound as a SQL parameter" describes a
+ * consequence of the shape rather than the shape.
+ *
+ * ## Envelope: unchanged, deliberately (#5367 ruling, 2026-08-06)
+ *
+ * `READ_SCOPE_COMPILE_FAILED` / 500, like the other twelve. The two arguments
+ * that ruling gave apply to this shape verbatim rather than by analogy: the
+ * producer is an ADMIN-authored sharing rule / permission set and its CEL
+ * lowering — `compileCelToFilter` is exactly what emits `{ $field: path }` — so
+ * a 4xx would bill the caller for a document they cannot author, and a 4xx
+ * echoes the message, which here names the POLICY's field names. Whether an
+ * unsupported-capability refusal on this path should nevertheless get a code and
+ * status of its own is a contract-face question raised on #7598 and left to the
+ * maintainer; it is not decided as a rider by the change that stops the bind.
+ */
+function assertNoFieldReferenceComparand(field: string, spec: unknown): void {
+  if (!isFilterNode(spec)) return;
+  for (const [op, opValue] of Object.entries(spec)) {
+    if (CROSS_FIELD_COMPARISON_OPERATORS.has(op) && isFieldReference(opValue)) {
+      throw readScopeCompileError(
+        `[read-scope-sql] ${fieldReferenceComparandMessage(op, field, opValue.$field)}`,
+      );
+    }
+    if (op !== '$between' || !Array.isArray(opValue)) continue;
+    opValue.forEach((member, index) => {
+      if (!isFieldReference(member)) return;
+      throw readScopeCompileError(
+        `[read-scope-sql] ${fieldReferenceComparandMessage(op, field, member.$field, `index ${index}`)}`,
+      );
+    });
   }
 }
 
