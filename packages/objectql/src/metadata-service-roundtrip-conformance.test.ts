@@ -38,18 +38,33 @@
  * assertion the others get. The weaker match is scoped to the ONE subject that
  * needs it rather than applied to the whole table.
  *
- * ## Divergences are PINNED, not resolved
+ * ## Two rows were RULED (#7378); one is still a pinned divergence
  *
- * Three cases get different answers from `MetadataFacade` than from the other
- * implementations and the contract's reference double. Each is recorded below
- * as a `// DIVERGENCE` entry stating the measured behaviour — this file asserts
- * what each implementation does TODAY and changes no shipped behaviour. Which
- * answer is correct is a separate ruling, filed as its own card (see the
- * per-divergence notes). If you are here because one of these tests failed
- * after a behaviour change: that is the pin working. Update it in the PR that
- * makes the ruling, not silently.
+ * This file used to carry three `// DIVERGENCE` entries — three cases
+ * `MetadataFacade` answered differently from every other implementation and
+ * from the contract's reference double. The maintainer ruling of 2026-08-11
+ * (#7378, option (a) — **the `name` argument is the effective key and
+ * `data.name` never overrides it**) settled two of them, the contract TSDoc
+ * now says so, and `MetadataFacade` was aligned to it:
  *
- * Refs #7223, #6725, PR #7211, #6745.
+ *  - the effective key (`key-is-the-name-argument-object` / `-nonobject`) —
+ *    now `RULED_1` below, asserting the ruled answer rather than the old
+ *    `absent`;
+ *  - the dropped non-object `data` (`primitive-data-roundtrips` and its array
+ *    sibling) — no per-subject entry at all any more: the facade simply
+ *    conforms, held to the table's own reference answer like every other
+ *    subject.
+ *
+ * `DIVERGENCE_2` (the plural `objects` alias) survives, deliberately, with the
+ * measurement for why the same ruling could not carry it — read it before
+ * assuming it was overlooked.
+ *
+ * If you are here because one of these tests failed after a behaviour change:
+ * that is the pin working. A RULED row going red means an implementation
+ * drifted off a decided contract, and the fix belongs in the implementation;
+ * update the pin only in the PR that changes the ruling.
+ *
+ * Refs #7223, #7378, #6725, PR #7211, #6745.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -81,18 +96,30 @@ type RoundTrippingService = Pick<IMetadataService, 'register' | 'get' | 'exists'
 type DocumentFidelity = 'verbatim' | 'runtime-effective';
 
 /**
- * A per-subject answer that differs from the table's reference answer.
- * `readable-as-last-write` means "the document the case's final write carried".
+ * A per-subject answer that differs from the table's reference answer — either
+ * because the subject DIVERGES from it (unruled, pinned as measured) or because
+ * the ruling that settled the row prescribes a different observable shape for
+ * this subject than the reference double's.
+ *
+ * - `absent` — the subject finds nothing under the key the case reads.
+ * - `readable-as-last-write` — the document the case's final write carried.
+ * - `readable-keyed-by-argument` — RULED (#7378): the authored document is
+ *   readable under the `name` ARGUMENT, with its own `name` reconciled to that
+ *   argument. This is what a document-keyed store must do to honour the ruling
+ *   (see `MetadataFacade.toKeyedDefinition`), and it is a strictly STRONGER
+ *   assertion than the `absent` pin it replaced: the document must come back,
+ *   under the argument, carrying every other key it was authored with.
  */
-type DivergentAnswer =
+type SubjectAnswer =
     | { readonly kind: 'absent'; readonly note: string }
-    | { readonly kind: 'readable-as-last-write'; readonly note: string };
+    | { readonly kind: 'readable-as-last-write'; readonly note: string }
+    | { readonly kind: 'readable-keyed-by-argument'; readonly note: string };
 
 interface PinnedImplementation {
     readonly label: string;
     readonly documentFidelity: DocumentFidelity;
     /** Keyed by {@link MetadataRoundTripCase.id}. Every key is checked to exist. */
-    readonly divergences?: Readonly<Record<string, DivergentAnswer>>;
+    readonly divergences?: Readonly<Record<string, SubjectAnswer>>;
     create(): RoundTrippingService;
 }
 
@@ -159,26 +186,32 @@ class WritableFixtureLoader implements MetadataLoader {
 }
 
 /**
- * ── DIVERGENCE 1 — the effective key is `data.name`, not the `name` argument ──
+ * ── RULED 1 — the effective key is the `name` ARGUMENT ──
  *
- * Cases `key-is-the-name-argument-object` / `-nonobject`.
+ * Cases `key-is-the-name-argument-object` / `-nonobject`. Was DIVERGENCE 1.
  *
- * `MetadataFacade.register` opens with
- * `{ ...data, name: data.name ?? name }` and then hands the DOCUMENT to
+ * `MetadataFacade.register` used to open with
+ * `{ ...data, name: data.name ?? name }` and hand the DOCUMENT to
  * `SchemaRegistry.registerObject` / `registerItem`, which key on the document's
- * own `name`. The `name` argument is therefore only a fallback for a document
- * that carries none: when the two disagree, the item lands under `data.name`
- * and `get(type, <the name that was passed>)` answers `undefined`, `exists`
- * answers `false`, and `listNames` reports the other spelling. Measured on both
- * an object-typed and a view-typed write.
+ * own `name`. The argument was therefore only a fallback for a document that
+ * carried none: when the two disagreed the item landed under `data.name`, and
+ * `get(type, <the name that was passed>)` answered `undefined`, `exists`
+ * answered `false`, and `listNames` reported the other spelling.
  *
- * `MetadataManager` and `createMemoryMetadata` both key on the argument, as does
- * the contract's reference double. The contract TSDoc names the parameter on
- * both members (`@param name - Item name/identifier (snake_case)`) and says
- * nothing about `data.name`, so nothing in-tree currently RULES which is right —
- * which is why this is pinned as measured and filed, not fixed here.
+ * The maintainer ruling of 2026-08-11 (#7378, option (a)) settled it the other
+ * way — the argument is the effective key, `data.name` never overrides it —
+ * `IMetadataService.register` / `get` now say so, and the facade was aligned
+ * (`toKeyedDefinition`). All five implementations answer this row the same way
+ * today.
+ *
+ * What stays subject-specific is only the SHAPE of the answer, and only because
+ * the facade's stores are keyed by the document itself: reconciling the
+ * document to the argument means the `name` that comes back IS the argument,
+ * where the verbatim subjects hand back the authored `name` under the argument
+ * key. Both honour the ruling — the key is the argument in every case — so this
+ * entry asserts the ruled answer rather than suppressing the row.
  */
-const DIVERGENCE_1 = 'MetadataFacade keys on `data.name` when it disagrees with the `name` argument; the other implementations key on the argument. Pinned as measured (#7223).';
+const RULED_1 = 'MetadataFacade keys on the `name` argument (#7378 ruling (a)); reconciling its document-keyed stores to that argument also normalizes the stored `name` to it.';
 
 /**
  * ── DIVERGENCE 2 — the plural `objects` type is aliased to `object` ──
@@ -194,27 +227,67 @@ const DIVERGENCE_1 = 'MetadataFacade keys on `data.name` when it disagrees with 
  * `MetadataManager` and `createMemoryMetadata` key their type stores on the
  * string they are handed, so the two spellings are two stores and the item is
  * invisible under the singular.
+ *
+ * ── Why the #7378 ruling did NOT carry this row (measured 2026-08-11) ──
+ *
+ * The ruling aligned the facade on the other two rows and named this one with
+ * them, but aligning it is not a facade-local change and the two candidate
+ * routes are both worse than the divergence:
+ *
+ *  1. **The alias that decides this row is `SchemaRegistry`'s, not the
+ *     facade's.** `registry.getItem` and `registry.listItems` special-case
+ *     BOTH spellings straight to `getObject` / `getAllObjects`
+ *     (`registry.ts`, "Special handling for 'object' and 'objects' types"), so
+ *     the READ this case makes is aliased one layer below anything
+ *     `metadata-facade.ts` controls. Narrowing the facade's own `isObjectType`
+ *     to the singular would therefore make `register('objects', n, d)` write
+ *     into `metadata['objects']` while `get('objects', n)` still resolves
+ *     through `registry.getItem` → `getObject(n)` → `undefined`: the write
+ *     lands nowhere any read looks. That is #6725 EXACTLY, re-opened for the
+ *     plural spelling — the silent loss this whole table exists because of, and
+ *     the row would go green while the bug got worse.
+ *  2. **Removing the registry alias runs against the platform's own
+ *     normalization direction.** Plural→singular folding is owned by the layers
+ *     below this contract and is enforced there: `canonicalMetaType`
+ *     (`PLURAL_TO_SINGULAR`) canonicalizes every `/meta` request type at the
+ *     protocol boundary (#4432), `RestServer.metaTypeSingular` does it at the
+ *     REST boundary, and `check:meta-type-normalized` is a CI gate whose whole
+ *     job is to refuse a decision made on the un-normalized `:type` — three
+ *     authorization bypasses (#3984, #5881, #6241) came from exactly that.
+ *     `registry.test.ts` pins `listItems("objects")` as a deliberate alias.
+ *     "The two spellings are one type" is a decided platform-wide position;
+ *     this row asks for the opposite, and that is a ruling of its own, not an
+ *     implementation detail this card can settle.
+ *
+ * So this stays pinned as measured, and the question — does `IMetadataService`
+ * key its type stores on the raw string (reference semantics) or on the
+ * canonical type (what the rest of the platform does)? — is escalated on #7378
+ * rather than answered here.
  */
-const DIVERGENCE_2 = 'MetadataFacade aliases the plural `objects` type to `object`; the other implementations keep one store per type string. Pinned as measured (#7223).';
+const DIVERGENCE_2 = 'MetadataFacade aliases the plural `objects` type to `object` — through SchemaRegistry\'s own read-side special-case, not its own; the other implementations keep one store per type string. Still pinned as measured: the #7378 ruling did not carry this row (see the note above), and the open question is escalated there.';
 
 /**
- * ── DIVERGENCE 3 — a non-object `data` value is dropped ──
+ * ── RULED 3 — a non-object `data` value round-trips (no entry needed) ──
  *
- * Case `primitive-data-roundtrips`.
+ * Cases `primitive-data-roundtrips`, `array-data-roundtrips`. Was DIVERGENCE 3,
+ * and is deliberately NOT replaced by an entry in `divergences` below: the
+ * facade now conforms to the table's own reference answer, so the row is held
+ * against it like every other subject's.
  *
- * The contract declares `data: unknown`. `MetadataFacade.register` passes a
- * non-object value through unchanged (its `{ ...data }` branch is guarded on
- * `typeof data === 'object' && data !== null`) and then registers it under the
- * document's own `name` — which a string does not have. The write is ACCEPTED
- * (no throw), the registry logs `Registered setting: undefined`, and the value
- * is readable back through nothing: `get` answers `undefined`, `exists` answers
- * `false`, `listNames` is empty. Silent loss, the same family of failure as
- * #6725 — which is the reason this row is in the table at all.
+ * What it used to measure: the contract declares `data: unknown`, and
+ * `MetadataFacade.register` passed a non-object value through unchanged (its
+ * `{ ...data }` branch is guarded on `typeof data === 'object' && data !== null`)
+ * and then registered it under the document's own `name` — which a string does
+ * not have. The write was ACCEPTED (no throw), the registry logged
+ * `Registered setting: undefined`, and the value was readable back through
+ * nothing. Silent loss, the same family as #6725.
  *
- * `MetadataManager` and `createMemoryMetadata` store the value against the key
- * and hand it straight back.
+ * Under the #7378 ruling the argument is the key, so a value with no `name` of
+ * its own HAS one; `toKeyedDefinition` boxes it as `{ name, content }`, which
+ * is the shape this class's own reads already unwrap. The array row is the
+ * sibling shape that `typeof data === 'object'` got wrong in the other
+ * direction — spread into `{ 0: …, 1: … }` rather than dropped.
  */
-const DIVERGENCE_3 = 'MetadataFacade silently drops a non-object `data` value — accepted by `register`, readable back through no member. The other implementations round-trip it. Pinned as measured (#7223).';
 
 const IMPLEMENTATIONS: readonly PinnedImplementation[] = [
     {
@@ -238,10 +311,9 @@ const IMPLEMENTATIONS: readonly PinnedImplementation[] = [
         label: 'MetadataFacade',
         documentFidelity: 'runtime-effective',
         divergences: {
-            'key-is-the-name-argument-object': { kind: 'absent', note: DIVERGENCE_1 },
-            'key-is-the-name-argument-nonobject': { kind: 'absent', note: DIVERGENCE_1 },
+            'key-is-the-name-argument-object': { kind: 'readable-keyed-by-argument', note: RULED_1 },
+            'key-is-the-name-argument-nonobject': { kind: 'readable-keyed-by-argument', note: RULED_1 },
             'plural-objects-type-is-its-own-store': { kind: 'readable-as-last-write', note: DIVERGENCE_2 },
-            'primitive-data-roundtrips': { kind: 'absent', note: DIVERGENCE_3 },
         },
         create: () => new MetadataFacade(new SchemaRegistry({ multiTenant: false })),
     },
@@ -254,17 +326,49 @@ function lastWrittenDocument(testCase: MetadataRoundTripCase): unknown {
 
 /**
  * The answer this subject is held to for this case: the table's reference
- * answer, unless the subject declares a divergence for it.
+ * answer, unless the subject declares a per-subject answer for it.
  */
 function expectationFor(
     implementation: PinnedImplementation,
     testCase: MetadataRoundTripCase,
 ): { kind: 'readable'; document: unknown } | { kind: 'absent' } {
-    const divergence = implementation.divergences?.[testCase.id];
-    if (!divergence) return testCase.expected;
-    return divergence.kind === 'absent'
-        ? { kind: 'absent' }
-        : { kind: 'readable', document: lastWrittenDocument(testCase) };
+    const answer = implementation.divergences?.[testCase.id];
+    if (!answer) return testCase.expected;
+    switch (answer.kind) {
+        case 'absent':
+            return { kind: 'absent' };
+        case 'readable-as-last-write':
+            return { kind: 'readable', document: lastWrittenDocument(testCase) };
+        case 'readable-keyed-by-argument':
+            // The authored document, with its own `name` reconciled to the
+            // effective key — see RULED_1. Every other authored key is asserted
+            // unchanged, so this cannot degrade into "something came back".
+            return {
+                kind: 'readable',
+                document: {
+                    ...(lastWrittenDocument(testCase) as Record<string, unknown>),
+                    name: testCase.read.name,
+                },
+            };
+    }
+}
+
+/**
+ * The `name` a case's written document carries when that is NOT the key the
+ * case reads — i.e. the spelling an implementation keying on `data.name` would
+ * file the item under. `undefined` when the case does not pose the question.
+ *
+ * [#7378] Asserting this stale spelling is ABSENT from `listNames` is what
+ * keeps the ruled rows from passing for the wrong reason: an implementation
+ * that stored the item twice, or that kept the document's own name as a second
+ * key, satisfies every other assertion on those rows and fails only this one.
+ */
+function staleDocumentName(testCase: MetadataRoundTripCase): string | undefined {
+    const written = lastWrittenDocument(testCase);
+    const documentName = (written as { name?: unknown } | undefined)?.name;
+    return typeof documentName === 'string' && documentName !== testCase.read.name
+        ? documentName
+        : undefined;
 }
 
 describe.each(IMPLEMENTATIONS)(
@@ -306,6 +410,10 @@ describe.each(IMPLEMENTATIONS)(
                     // overwriting would satisfy every assertion above on the
                     // re-register rows and fail only this one.
                     expect(names.filter((name) => name === testCase.read.name)).toHaveLength(1);
+
+                    // [#7378] …and never ALSO under the document's own name.
+                    const stale = staleDocumentName(testCase);
+                    if (stale !== undefined) expect(names).not.toContain(stale);
                 } else {
                     expect(got).toBeUndefined();
                     expect(exists).toBe(false);

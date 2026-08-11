@@ -22,6 +22,51 @@ function isObjectType(type: string): boolean {
 const RUNTIME_AUTHORED_PACKAGE_ID = 'sys_metadata';
 
 /**
+ * [#7378] Reconcile a `register(type, name, data)` payload to the key the
+ * contract says it is stored under: **the `name` ARGUMENT**.
+ *
+ * `IMetadataService.register` (`@objectstack/spec/contracts`) rules that the
+ * argument is the effective key and `data.name` never overrides it (maintainer
+ * ruling 2026-08-11 on #7378, option (a)). Every store this class writes into
+ * derives its key from the DOCUMENT — `SchemaRegistry.registerItem` reads
+ * `item[keyField]`, `registerObject` keys `objectContributors` on the schema's
+ * own `name` — so the only way to honour the argument here is to reconcile the
+ * document to it before either store sees it. Two shapes, one rule:
+ *
+ *  - **An object document** keeps every key it was authored with, with `name`
+ *    set to the argument. This is the same normalization
+ *    `ObjectQL.registerMetadataCollections` already applies on the plugin
+ *    ingest path (`item.name === itemName ? item : { ...item, name: itemName }`,
+ *    engine.ts), so a facade write and a plugin write agree about identity
+ *    rather than each keying on a different field. It is also the only
+ *    coherent answer for the `object` type specifically: an object's `name` IS
+ *    its identity to `getObject`, to the data plane and to every driver, so a
+ *    body whose `name` disagreed with its registry key would be dispatched on
+ *    under one spelling and addressable under the other.
+ *  - **Anything else** — a string, a number, a boolean, an array, `null` — is
+ *    boxed as `{ name, content }`. `data` is declared `unknown`, not `object`,
+ *    and a primitive has no `name` to key on: the previous code passed it
+ *    through untouched, `registerItem` read `item['name']` off a string, and
+ *    the value was filed under the literal key `undefined` — accepted with no
+ *    throw and readable back through no member of this class (#7378 cell 3).
+ *    The box is not a new convention: this class's own reads already unwrap it
+ *    (`get`/`list` return `item?.content ?? item`, `listNames` reads
+ *    `item?.name`), so the write half now produces exactly what the read half
+ *    was already prepared to consume. Arrays are boxed rather than spread for
+ *    the same reason — `{ ...[1, 2] }` is `{ 0: 1, 1: 2 }`, which is the same
+ *    silent corruption one shape over.
+ *
+ * ⛔ Not a ruling on the DISAGREEMENT itself. Refusing `data.name !== name`
+ * loudly (option (c)) is recorded on #7378 as the v18 strictness candidate and
+ * is deliberately NOT implemented here.
+ */
+function toKeyedDefinition(name: string, data: unknown): any {
+  return typeof data === 'object' && data !== null && !Array.isArray(data)
+    ? { ...(data as Record<string, unknown>), name }
+    : { name, content: data };
+}
+
+/**
  * MetadataFacade
  *
  * Provides a clean, injectable interface over SchemaRegistry.
@@ -39,12 +84,15 @@ export class MetadataFacade {
   constructor(private registry: SchemaRegistry) {}
 
   /**
-   * Register a metadata item
+   * Register a metadata item under the `name` ARGUMENT.
+   *
+   * [#7378] The argument is the effective key and `data.name` never overrides
+   * it — the contract's ruling, and what {@link toKeyedDefinition} exists to
+   * honour against two document-keyed stores. Read that helper before changing
+   * either branch below.
    */
   async register(type: string, name: string, data: any): Promise<void> {
-    const definition = typeof data === 'object' && data !== null
-      ? { ...data, name: data.name ?? name }
-      : data;
+    const definition = toKeyedDefinition(name, data);
     // Pass through the item's own source package id (when stamped by an
     // artifact loader) so provenance survives re-registration. Never
     // synthesize one here — unstamped items are runtime-authored by
@@ -54,7 +102,12 @@ export class MetadataFacade {
     if (isObjectType(type)) {
       this.registerObjectBothPlaces(type, definition, packageId);
     } else {
-      this.registry.registerItem(type, definition, definition.id ? 'id' as any : 'name' as any, packageId);
+      // Always keyed on `name` — which {@link toKeyedDefinition} has just set
+      // to the argument. The former `definition.id ? 'id' : 'name'` keyField
+      // was the same defect as `data.name ?? name` one field over: a document
+      // carrying an `id` was filed under THAT, so `get(type, name)` missed it
+      // whenever the two disagreed (#7378).
+      this.registry.registerItem(type, definition, 'name' as any, packageId);
     }
   }
 

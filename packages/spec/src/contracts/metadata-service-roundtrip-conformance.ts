@@ -46,14 +46,26 @@
  * ## What `expected` means, precisely
  *
  * **The reference semantics: a store keyed by `type` × the `name` ARGUMENT.**
- * That is what the contract's own double implements, and what its parameter
- * names say (`@param name - Item name/identifier (snake_case)` on both
- * members). It is deliberately NOT a ruling that every shipped implementation
- * currently satisfies it — three cases below are answered differently by
- * `MetadataFacade` today, and those answers are pinned as measured, with a
- * `// DIVERGENCE` marker, in the objectql driver. Pinning ≠ blessing: read the
- * divergence notes there and the card they link before treating either answer
- * as the intended one.
+ * That is what the contract's own double implements, what its parameter names
+ * say (`@param name - Item name/identifier (snake_case)` on both members) —
+ * and, since the maintainer ruling of 2026-08-11 on #7378 (option (a)), what
+ * {@link ../contracts/metadata-service | IMetadataService.register} RULES in
+ * so many words: the argument is the effective key and `data.name` never
+ * overrides it.
+ *
+ * That ruling settled two of the three rows `MetadataFacade` used to answer
+ * differently — the effective key (`key-is-the-name-argument-*`) and the
+ * dropped non-object `data` (`primitive-data-roundtrips` and its array
+ * sibling) — and `MetadataFacade` was aligned to the contract on both. What
+ * they pin in the objectql driver is now RULED BEHAVIOUR, not a measured
+ * divergence.
+ *
+ * ONE row is still measured-and-unresolved: `plural-objects-type-is-its-own-store`.
+ * The alias it measures is `SchemaRegistry`'s, not the facade's, and removing
+ * it collides with the platform's own plural→singular normalization direction —
+ * the objectql driver's surviving `// DIVERGENCE` note carries the evidence and
+ * the escalation. Pinning ≠ blessing: read that note and the card it links
+ * before treating either answer as the intended one.
  *
  * ## Deliberate scope
  *
@@ -147,6 +159,12 @@ const PIN_CASED = objectDocument('Pin_Cased');
 /** `data.name` disagrees with the `name` argument — see the two cases using it. */
 const PIN_KEYED_OBJECT = objectDocument('pin_data_name');
 const PIN_KEYED_VIEW = viewDocument('pin_data_name_view');
+
+/**
+ * A non-object `data` that is nonetheless `typeof 'object'` — the shape a
+ * spread-to-key implementation corrupts rather than drops.
+ */
+const PIN_ARRAY = ['alpha', 'beta'];
 
 const PIN_PLURAL = objectDocument('pin_plural');
 
@@ -245,7 +263,7 @@ export const METADATA_ROUNDTRIP_CASES: readonly MetadataRoundTripCase[] = [
         writes: [{ type: 'object', name: 'pin_key', data: PIN_KEYED_OBJECT }],
         read: { type: 'object', name: 'pin_key' },
         expected: { kind: 'readable', document: PIN_KEYED_OBJECT },
-        why: 'Whether `name` or `data.name` is the key is the whole round-trip. The contract names the parameter on both members and says nothing about `data.name`, so the reference answer is the argument. **Shipped implementations disagree here** — see the DIVERGENCE notes in the objectql driver.',
+        why: 'Whether `name` or `data.name` is the key is the whole round-trip. **Ruled** (#7378, maintainer 2026-08-11, option (a)): the argument is the effective key and `data.name` never overrides it. Every shipped implementation now answers this way; `MetadataFacade` was aligned to it in the same PR.',
     },
     {
         id: 'key-is-the-name-argument-nonobject',
@@ -261,7 +279,7 @@ export const METADATA_ROUNDTRIP_CASES: readonly MetadataRoundTripCase[] = [
         writes: [{ type: 'objects', name: 'pin_plural', data: PIN_PLURAL }],
         read: { type: 'object', name: 'pin_plural' },
         expected: { kind: 'absent' },
-        why: 'The two spellings of the object type. The reference store keys on the string it is given; some implementations alias the plural to the singular. **Shipped implementations disagree here** — see the DIVERGENCE notes in the objectql driver.',
+        why: 'The two spellings of the object type. The reference store keys on the string it is given; some implementations alias the plural to the singular. **Shipped implementations still disagree here, and this row is the one #7378 did NOT settle** — the alias is `SchemaRegistry`\'s own, on the READ side, and the objectql driver\'s surviving DIVERGENCE note carries the measurement and the escalation.',
     },
     {
         id: 'primitive-data-roundtrips',
@@ -269,7 +287,15 @@ export const METADATA_ROUNDTRIP_CASES: readonly MetadataRoundTripCase[] = [
         writes: [{ type: 'setting', name: 'pin_flag', data: 'enabled' }],
         read: { type: 'setting', name: 'pin_flag' },
         expected: { kind: 'readable', document: 'enabled' },
-        why: '`data` is declared `unknown`, not `object`. An implementation that derives its key from `data.name` has nothing to derive it from here. **Shipped implementations disagree here** — see the DIVERGENCE notes in the objectql driver.',
+        why: '`data` is declared `unknown`, not `object`. An implementation that derives its key from `data.name` has nothing to derive it from here — which is why the #7378 ruling (the ARGUMENT is the key) is what makes this row answerable at all. Accepting the write and dropping the value is the one answer the ruling forbids.',
+    },
+    {
+        id: 'array-data-roundtrips',
+        title: 'an array `data` value is readable back as an array',
+        writes: [{ type: 'setting', name: 'pin_list', data: PIN_ARRAY }],
+        read: { type: 'setting', name: 'pin_list' },
+        expected: { kind: 'readable', document: PIN_ARRAY },
+        why: 'The sibling shape of the row above, and the one a `typeof data === "object"` guard gets WRONG rather than drops: an array passes that test, so an implementation that keys by spreading the document turns [a, b] into { 0: a, 1: b } — silent corruption where the primitive row measured silent loss. Neither survives the #7378 ruling.',
     },
     {
         id: 'absent-after-unregister',

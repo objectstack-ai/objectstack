@@ -226,9 +226,38 @@ export interface IMetadataService {
      * `options.notify === false` — see {@link MetadataWriteOptions.notify}
      * before silencing it.
      *
+     * ## The `name` ARGUMENT is the effective key (#7378)
+     *
+     * `name` — not `data.name` — is what this item is stored under, and it is
+     * what {@link get}, {@link exists}, {@link listNames} and
+     * {@link unregister} address it by. When a document carries a `name` of its
+     * own and the two disagree, **the argument wins and `data.name` never
+     * overrides it**: `register(t, n, d)` followed by `get(t, n)` holds for
+     * every `d`, including one whose own `name` says something else, and
+     * including a `data` that is not an object at all and so has no `name` to
+     * derive (`data` is declared `unknown`, not `object`).
+     *
+     * An implementation whose store derives the key from the document —
+     * `SchemaRegistry`, whose objects are keyed by their own identity — must
+     * reconcile the document to the argument rather than the other way round;
+     * what it may NOT do is accept the write and file it somewhere the
+     * caller's own `name` cannot reach it. `METADATA_ROUNDTRIP_CASES`
+     * (`./metadata-service-roundtrip-conformance`) is the executable form of
+     * this paragraph.
+     *
+     * Maintainer ruling of 2026-08-11 on #7378, option (a), taken because it is
+     * what 4 of the 5 measured implementations already did and what this
+     * member's own `@param name` already implied. Option (c) — **refuse a
+     * `data.name !== name` disagreement loudly** instead of silently resolving
+     * it either way — is recorded there as the long-term strictness candidate
+     * and PARKED for v18 consideration: it is the only answer that cannot
+     * misplace an item, and it is a behaviour change on every implementation,
+     * so it is not this contract's rule today. Do not implement it ahead of
+     * that ruling.
+     *
      * @param type - Metadata type (e.g. 'object', 'view', 'flow')
-     * @param name - Item name/identifier (snake_case)
-     * @param data - The metadata definition to register
+     * @param name - Item name/identifier (snake_case) — the effective storage key
+     * @param data - The metadata definition to register; a `name` it carries does NOT displace the argument
      * @param options - Write options; `{ notify: false }` suppresses the watcher event
      */
     register(type: string, name: string, data: unknown, options?: MetadataWriteOptions): Promise<void>;
@@ -255,12 +284,19 @@ export interface IMetadataService {
     /**
      * Get a metadata item by type and name
      *
+     * `name` is the key {@link register} was called with — the ARGUMENT, never
+     * a `name` the stored document happens to carry (#7378, maintainer ruling
+     * 2026-08-11). So `register(t, n, d)` → `get(t, n)` resolves for every `d`,
+     * and the document's own `name` disagreeing with `n` changes nothing about
+     * where it is found. See {@link register} for the full statement and for
+     * the strictness option parked behind it.
+     *
      * `undefined` is AMBIGUOUS by construction — it means "not found" *and*
      * "every loader that could hold it failed". Prefer {@link getDiagnosed}
      * wherever the difference could change a decision (#5840).
      *
      * @param type - Metadata type
-     * @param name - Item name/identifier
+     * @param name - Item name/identifier — the key `register` was called with
      * @returns The metadata definition, or undefined if not found
      */
     get(type: string, name: string): Promise<unknown | undefined>;
