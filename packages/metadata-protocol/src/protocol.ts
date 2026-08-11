@@ -5429,6 +5429,52 @@ export class ObjectStackProtocolImplementation implements
      * narrowing it cost no caller anything; nothing equivalent has been measured
      * for the projection axis, and this sentence is not a licence to assume it.
      *
+     * [#7532] The DOTTED leg, which this gate used to pass on its head
+     * segment. `f.split('.')[0]` is what let `fields=['name','account.name']`
+     * through: `account` IS a field, so the entry cleared the unknown-name
+     * check above and reached the driver as a projection column. Measured at
+     * that commit on a REAL `SqlDriver` (better-sqlite3), against the same
+     * object the card reports:
+     *
+     * ```
+     * no projection              -> account amount created_at id name status updated_at
+     * fields ['name']            -> name                          (a plain name narrows)
+     * fields ['name','account.name'] -> account amount created_at id name status updated_at
+     * fields ['account.name']    -> account amount created_at id name status updated_at
+     * ```
+     *
+     * The dotted rows are BYTE-IDENTICAL to no projection at all — the exact
+     * "asked for less, received more" this axis' first paragraph describes,
+     * reached by a different route. Knex renders `"account"."name"` against a
+     * table that was never joined, sqlite answers `no such column`, and
+     * `SqlDriver`'s #3821 recovery ladder retries `select('*')` because rows
+     * matter more than the projection. That ladder is a DRIVER-side tolerance
+     * for internal callers and is deliberately left alone here (filed
+     * separately as defence-in-depth); refusing at this ingress is what stops a
+     * request from reaching it carrying a projection no driver can apply.
+     *
+     * It also settles the card's second complaint: an unknown PLAIN column was
+     * a 400 while an unknown DOTTED one was a 200 with every field, so one
+     * mistake got opposite verdicts on one endpoint depending on spelling.
+     *
+     * The governing precedent is #5918 on the analytics MEASURES axis, which
+     * faced this exact shape and ruled the same way: refuse the dotted member
+     * loudly, naming the caller's original spelling, *because there is no
+     * correct answer to converge on*. That is the distinction from #5739, where
+     * refusing would have rejected queries that already compiled correctly.
+     * Here — as there — nothing resolved these paths, so both the typo
+     * (`titel.name`) and the genuine traversal intent (`account.name`) eat this
+     * 400: the two are not separable at this door, and the alternative is the
+     * over-return above.
+     *
+     * NOT a removal of a working feature — nothing resolved these paths. The
+     * spec's `fields` description, `query-syntax.mdx`, `data/query.mdx` and the
+     * `query.joins` / nested-select retirement prescriptions all still offer a
+     * dotted `fields` path as the way to read one related column; every one of
+     * them describes behaviour no driver implements. Aligning that prose with
+     * `expand` is spec/docs surface with its own blast radius and is called out
+     * on the PR rather than smuggled in here.
+     *
      * [#4196] It also owns the projection's SHAPE, which is a different
      * question from its names and is answered first — see below.
      */
@@ -5452,9 +5498,15 @@ export class ObjectStackProtocolImplementation implements
                     ? ' The nested-select object form `{ field, fields, alias }` was removed in '
                       + '@objectstack/spec 17 (#4196) — no engine or driver ever read it.'
                     : '')
-                + " Select related records with `expand` (`expand=owner` / `{ expand: { owner: "
-                + "{ object: 'user', fields: ['name'] } } }`), or name one related column with a "
-                + 'dotted path (`select=owner.name`).',
+                // [#7532] The dotted-path half of this prescription is GONE.
+                // It pointed at a spelling this same gate now refuses — and
+                // before that refusal it pointed at a spelling no driver
+                // resolves, which answered with every field. Naming it here
+                // sent the author from one refusal straight into the widening
+                // defect, the same dead end #6924 removed from the SORT axis'
+                // hint. `expand` is the one door for related data on this axis.
+                + " Select related records with `expand` (`expand=owner`, or `{ expand: { owner: "
+                + "{ object: 'user', fields: ['name'] } } }` to choose its columns).",
             );
             err.code = 'INVALID_FIELD';
             err.status = 400;
@@ -5464,24 +5516,68 @@ export class ObjectStackProtocolImplementation implements
         }
         const gate = this.resolveQueryFields(object);
         if (!gate) return;
-        const unknown = (fields as string[]).filter((f) => !gate.known.has(f.split('.')[0]));
-        if (unknown.length === 0) return;
-        const first = unknown[0];
-        const err: any = new Error(
-            `Unknown field '${first}' on object '${object}'`
-            + (unknown.length > 1 ? ` (also: ${unknown.slice(1).join(', ')})` : '')
-            + `. '${param}' chooses which fields to return; dropping an unknown one silently `
-            + 'answered a NARROWER projection with a WIDER one — a projection naming no known '
-            + 'field fell all the way back to every field.'
-            + suggestFieldName(first, gate.declared),
+        const names = fields as string[];
+        const unknown = names.filter((f) => !gate.known.has(f.split('.')[0]));
+        if (unknown.length > 0) {
+            const first = unknown[0];
+            const unknownErr: any = new Error(
+                `Unknown field '${first}' on object '${object}'`
+                + (unknown.length > 1 ? ` (also: ${unknown.slice(1).join(', ')})` : '')
+                + `. '${param}' chooses which fields to return; dropping an unknown one silently `
+                + 'answered a NARROWER projection with a WIDER one — a projection naming no known '
+                + 'field fell all the way back to every field.'
+                + suggestFieldName(first, gate.declared),
+            );
+            unknownErr.code = 'INVALID_FIELD';
+            unknownErr.status = 400;
+            unknownErr.field = first;
+            unknownErr.fields = unknown;
+            unknownErr.object = object;
+            unknownErr.param = param;
+            throw unknownErr;
+        }
+        // [#7532] The DOTTED verdict — the leg the head-segment check above
+        // does not cover, and the one that made this axis fail in the very
+        // direction its own docblock warns about.
+        //
+        // Ordered `unknown` > `dotted`, the same precedence
+        // {@link assertSortFieldsExist} applies, so the two axes agree about
+        // which complaint a caller hears first when an entry is both.
+        //
+        // It sits AFTER the `gate` early-return for the same reason the sort
+        // axis' dotted verdict does: the relation-vs-not split below reads
+        // `gate.fields`, and a registry-less host has no field map to read.
+        const dotted = names.filter((f) => f.includes('.'));
+        if (dotted.length === 0) return;
+        const first = dotted[0];
+        const head = first.split('.')[0];
+        const headDef: any = gate.fields[head];
+        const crossesRelation = headDef != null && REFERENCE_VALUE_TYPES.has(headDef.type);
+        const dottedErr: any = new Error(
+            (crossesRelation
+                ? `Field '${first}' on object '${object}' follows the relationship '${head}' into `
+                  + `another object — '${param}' reaches only columns of '${object}' itself`
+                : `Field '${first}' on object '${object}' is a dotted path — '${param}' reaches only `
+                  + `whole columns of '${object}', not values inside them`)
+            + (dotted.length > 1 ? ` (also: ${dotted.slice(1).join(', ')})` : '')
+            + '. No driver resolves it: the path reaches the driver as a column name, matches no '
+            + 'column, and the projection falls back to EVERY field — a narrower request answered '
+            + 'with a wider response, which is the same failure the unknown-name refusal above '
+            + 'exists to stop.'
+            + (crossesRelation
+                ? ` Read the related record with 'expand' (\`expand=${head}\`, or `
+                  + `\`{ expand: { ${head}: { object: '<target>', fields: ['<column>'] } } }\` to `
+                  + `choose its columns), or denormalise the value onto '${object}' (a stored `
+                  + 'field, written when the source changes) and name that.'
+                : ` Name the whole column ('${head}') and read into its value in the caller.`),
         );
-        err.code = 'INVALID_FIELD';
-        err.status = 400;
-        err.field = first;
-        err.fields = unknown;
-        err.object = object;
-        err.param = param;
-        throw err;
+        dottedErr.code = 'INVALID_FIELD';
+        dottedErr.status = 400;
+        dottedErr.field = first;
+        dottedErr.fields = dotted;
+        dottedErr.object = object;
+        dottedErr.param = param;
+        throw dottedErr;
     }
 
     /**
