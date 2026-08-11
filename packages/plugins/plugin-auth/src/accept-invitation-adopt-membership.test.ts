@@ -315,7 +315,7 @@ describe('#7725 — accepting an invitation when the invitee is already auto-bou
     // better-auth would have written — this pins what ACCEPTANCE does with such
     // an invitation, however it came to exist (a stale invitation the invitee
     // signed up against, an operator's import, a re-invite after a role change).
-    engine.tables.get('sys_invitation')!.push({
+    await engine.insert('sys_invitation', {
       id: 'inv_demote',
       email: 'owner@example.com',
       role: 'member',
@@ -345,7 +345,7 @@ describe('#7725 — accepting an invitation when the invitee is already auto-bou
     const { engine, manager, owner } = await bootWithOwner();
 
     // Give the owner a membership in the partner org so they may invite there.
-    engine.tables.get('sys_member')!.push({
+    await engine.insert('sys_member', {
       id: 'mem_owner_partner',
       organization_id: PARTNER_ORG,
       user_id: owner.userId,
