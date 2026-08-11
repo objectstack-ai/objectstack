@@ -86,7 +86,14 @@ describe('POST /api/v1/mcp/skill answers the standard 405 envelope (integration,
         kernel.use(fakeMcpPlugin());
         // port 0 → OS-assigned free port; resolved via getPort() after listening.
         kernel.use(new HonoServerPlugin({ port: 0, cors: false }));
-        kernel.use(createDispatcherPlugin({ prefix: '/api/v1', securityHeaders: false, requireAuth: false }));
+        // No `requireAuth: false` here, though the sibling integration suites in
+        // this package still pass one: `DispatcherPluginConfig` has no such field
+        // (the deployment-wide gate was removed — see the comment at
+        // `dispatcher-plugin.ts:209` and `http-dispatcher.requireauth.test.ts:56`,
+        // "There is no `requireAuth: false` any more"). It was silently ignored,
+        // and copying it here bought nothing but a type error. The route under
+        // test is public by design, so nothing needs relaxing.
+        kernel.use(createDispatcherPlugin({ prefix: '/api/v1', securityHeaders: false }));
 
         await kernel.bootstrap();
 
@@ -105,10 +112,26 @@ describe('POST /api/v1/mcp/skill answers the standard 405 envelope (integration,
         }
     }, 30_000);
 
+    /**
+     * Drive the route and parse the body.
+     *
+     * `Response.json()` is typed `unknown`, and there is no honest interface to
+     * narrow it to HERE: this suite exists precisely because **two different
+     * body shapes** can arrive on this path, and one of the cases reads keys
+     * that must NOT exist. A type admitting only the correct envelope would
+     * encode the very conclusion the suite is meant to prove, and would make
+     * the negative case unwritable. So the cast is to an open record and every
+     * assertion below stays a RUNTIME assertion — nothing is checked by the
+     * compiler here that the wire is not also checked for.
+     */
+    async function call(method: string): Promise<{ res: Response; body: Record<string, any> }> {
+        const res = await fetch(`${baseUrl}${SKILL_PATH}`, { method });
+        return { res, body: (await res.json()) as Record<string, any> };
+    }
+
     // ── ① the defect ────────────────────────────────────────────────────────
     it('POST returns {success:false, error:{code, message, httpStatus}} — not the adapter\'s hand-rolled body', async () => {
-        const res = await fetch(`${baseUrl}${SKILL_PATH}`, { method: 'POST' });
-        const body = await res.json();
+        const { res, body } = await call('POST');
 
         expect(res.status).toBe(405);
         // The envelope, field by field — the whole defect is that these differ,
@@ -121,8 +144,7 @@ describe('POST /api/v1/mcp/skill answers the standard 405 envelope (integration,
     });
 
     it('POST does not answer with `unmatchedResponse()`\'s shape', async () => {
-        const res = await fetch(`${baseUrl}${SKILL_PATH}`, { method: 'POST' });
-        const body = await res.json();
+        const { body } = await call('POST');
 
         // The four keys that identify the adapter's unmatched-route answer.
         // `error` as a STRING is the tell — the standard envelope nests an
@@ -150,8 +172,7 @@ describe('POST /api/v1/mcp/skill answers the standard 405 envelope (integration,
     // verbs, and one of them answering a different 405 envelope than the other
     // is the drift this issue closes.
     it('DELETE gets the same standard envelope', async () => {
-        const res = await fetch(`${baseUrl}${SKILL_PATH}`, { method: 'DELETE' });
-        const body = await res.json();
+        const { res, body } = await call('DELETE');
 
         expect(res.status).toBe(405);
         expect(body.success).toBe(false);
@@ -170,7 +191,7 @@ describe('POST /api/v1/mcp/skill answers the standard 405 envelope (integration,
         expect(res.headers.get('cache-control')).toBe('no-store');
         expect(text).toContain(SKILL_MARKER);
         // Derived from the request host — the auth service is absent here.
-        expect(text).toContain(`${baseUrl.replace('http://', 'http://')}/api/v1/mcp`);
+        expect(text).toContain(`${baseUrl}/api/v1/mcp`);
     });
 
     // A verb with no mount at all still falls to the adapter, and should:
@@ -178,8 +199,8 @@ describe('POST /api/v1/mcp/skill answers the standard 405 envelope (integration,
     // exist under that verb. This pins the BOUNDARY of the fix rather than
     // claiming the adapter answer is wrong everywhere.
     it('PUT — unmounted — still falls through to the adapter (boundary, not a regression)', async () => {
-        const res = await fetch(`${baseUrl}${SKILL_PATH}`, { method: 'PUT' });
+        const { res, body } = await call('PUT');
         expect(res.status).toBe(405);
-        expect(await res.json()).toHaveProperty('allowed');
+        expect(body).toHaveProperty('allowed');
     });
 });
