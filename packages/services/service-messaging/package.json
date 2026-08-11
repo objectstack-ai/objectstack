@@ -25,7 +25,9 @@
     "@objectstack/types": "workspace:*"
   },
   "devDependencies": {
+    "@objectstack/driver-sql": "workspace:*",
     "@objectstack/metadata-core": "workspace:*",
+    "@objectstack/objectql": "workspace:*",
     "@types/node": "^26.1.2",
     "typescript": "^6.0.3",
     "vitest": "^4.1.10"
