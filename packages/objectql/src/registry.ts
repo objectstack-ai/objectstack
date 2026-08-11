@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { ServiceObject, ObjectSchema, ObjectOwnership, provisionPrimary, resolveCrudAffordances, resolveInjectedSystemColumns, LEGACY_API_METHODS, AUDIT_PROVENANCE_FIELDS } from '@objectstack/spec/data';
+import { ServiceObject, ObjectSchema, ObjectOwnership, provisionPrimary, resolveInjectedSystemColumns, checkManagedApiMethodAffordances, LEGACY_API_METHODS, AUDIT_PROVENANCE_FIELDS } from '@objectstack/spec/data';
 // [#4513] The audit-family governance table, and [#6562] the injected-column
 // DEFINITION tables it governs — see the re-exports below for why both live in a
 // package `objectql` and `metadata-protocol` both depend on.
@@ -610,31 +610,6 @@ function declaresTenantIndex(schema: ServiceObject): boolean {
 }
 
 /**
- * Generic-write `apiMethods` verbs mapped to the {@link resolveCrudAffordances}
- * flag each one needs. Read verbs (`get`/`list`/`search`/`history`/…) are
- * always permitted, so they are absent here and never stripped.
- *
- * ⚠️ Two orthogonal axes — do NOT merge this with the API-tightening table.
- * This table (verb → *affordance*) is the UI-intent axis: it strips write verbs
- * a managed bucket does not *offer* from the whitelist. The verb → *primitive*
- * derivation that decides what the automatic API *admits* lives in
- * `@objectstack/spec/data` `API_METHOD_DERIVATION` / `resolveEffectiveApiMethods`
- * (#3391). The identical-shaped `WRITE_OP_AFFORDANCE` in plugin-security
- * `system-write-guard.ts` is the runtime enforcement of this same UI-intent
- * axis. The enum shrink (#3543) DELIBERATELY kept the three tables separate —
- * merging would blur a UX-affordance concern into a security concern (ADR-0103).
- * The `upsert`/`purge` keys survive the shrink: raw (un-parsed) whitelists may
- * still carry legacy verbs, and stripping here must keep covering them.
- */
-const MANAGED_WRITE_VERB_AFFORDANCE: Record<string, 'create' | 'edit' | 'delete'> = {
-  create: 'create',
-  update: 'edit',
-  upsert: 'edit',
-  delete: 'delete',
-  purge: 'delete',
-};
-
-/**
  * Reconcile a managed object's `enable.apiMethods` against the generic-write
  * affordances it actually grants (ADR-0092 / ADR-0103).
  *
@@ -647,8 +622,21 @@ const MANAGED_WRITE_VERB_AFFORDANCE: Record<string, 'create' | 'edit' | 'delete'
  * This is the registration-time backstop that makes the contradiction
  * impossible to *ship*: any write verb whose CRUD affordance the object does
  * not grant — via the `managedBy` bucket default plus `userActions` overrides,
- * exactly as {@link resolveCrudAffordances} computes for the UI — is stripped,
+ * exactly as `resolveCrudAffordances` computes for the UI — is stripped,
  * with a warning. Reads are never touched.
+ *
+ * The judgement itself is NOT here. `checkManagedApiMethodAffordances`
+ * (`@objectstack/spec/data`) owns the verb → affordance table, and
+ * `@objectstack/lint`'s `validateManagedApiMethods` — the authoring-time gate
+ * that reports the same contradiction where the AUTHOR is, rather than in a
+ * boot log nobody reads (#7521) — reads that same predicate. This function is
+ * only the registration-time REACTION to it: strip and warn. If a verdict seems
+ * wrong, fix the predicate, never this reaction — a second table here is the
+ * declared≠enforced drift the predicate exists to detect.
+ *
+ * WARN and strip, never throw — deliberately (the #7521 ruling, 2026-08-11):
+ * failing registration closed would let one metadata typo kill a control-plane
+ * boot, which is too harsh for ops. The author-time gate is where this blocks.
  *
  * Runs for every managed bucket (ADR-0103). Objects that legitimately take
  * user-context writes declare `userActions` opening those verbs, so their
@@ -667,30 +655,22 @@ export function reconcileManagedApiMethods(
   schema: ServiceObject,
   opts?: { warn?: (msg: string) => void },
 ): ServiceObject {
-  if ((schema as any).managedBy == null) return schema;
+  const conflicts = checkManagedApiMethodAffordances(schema);
+  if (conflicts.length === 0) return schema;
 
-  const methods = (schema as any).enable?.apiMethods;
-  if (!Array.isArray(methods) || methods.length === 0) return schema;
-
-  const affordances = resolveCrudAffordances(schema);
-  const stripped: string[] = [];
-  const kept = methods.filter((m: string) => {
-    const need = MANAGED_WRITE_VERB_AFFORDANCE[m];
-    if (need && !affordances[need]) {
-      stripped.push(m);
-      return false;
-    }
-    return true;
-  });
-
-  if (stripped.length === 0) return schema;
+  const methods = (schema as any).enable.apiMethods as unknown[];
+  const strippedIndexes = new Set(conflicts.map((c) => c.index));
+  const kept = methods.filter((_m, i) => !strippedIndexes.has(i));
+  const stripped = conflicts.map((c) => c.verb);
 
   const warn = opts?.warn ?? ((msg: string) => console.warn(msg));
   warn(
     `[Registry] Object "${schema.name}" is managedBy:'${(schema as any).managedBy}' but advertised ` +
       `generic write verb(s) [${stripped.join(', ')}] in enable.apiMethods its resolved affordances ` +
       `do not permit — stripping them (ADR-0092/ADR-0103). Declare userActions to open a verb the ` +
-      `object legitimately takes from a user context. Kept: [${kept.join(', ')}].`,
+      `object legitimately takes from a user context. Kept: [${kept.join(', ')}]. ` +
+      `\`os lint\` reports the same contradiction as \`object/managed-api-method-unaffordable\` ` +
+      `with full authoring context.`,
   );
 
   return {
