@@ -534,6 +534,45 @@ export const FieldSchema = lazySchema(() => strictObject({
   scale: z.number().optional().describe('Decimal places'),
   min: z.number().optional().describe('Minimum value'),
   max: z.number().optional().describe('Maximum value'),
+  /**
+   * Presentation hint (#7768): whether a `number` field renders with digit
+   * grouping (`Intl.NumberFormat`'s `useGrouping`, e.g. `2,026` vs `2026`).
+   * `scale` was the ONLY presentation-adjacent property `number` had, and it
+   * governs decimal places, not grouping — console renderers construct
+   * `Intl.NumberFormat` with grouping unconditionally ON, so an
+   * ordinal/identifier integer stored as `Field.number({ scale: 0, min: 1900
+   * })` (a year) renders `2,026` everywhere it is shown. Downstream apps hit
+   * this three times (hotcrm-heimao#35/#40/#59) and each time converted the
+   * field to `Field.text` to escape the comma — trading away numeric
+   * semantics (range validation, sort-as-number, arithmetic) for a display
+   * detail that had nothing to do with the field's TYPE.
+   *
+   * Three-valued, and the absent case is deliberately NOT "grouping off":
+   *   - **absent** (default state) — the author has not judged whether this
+   *     number reads as a quantity or an identifier; the RENDERER decides.
+   *     Today that is an interim heuristic (objectui#4033, e.g. `scale: 0`
+   *     + no upper bound reads as a plain count and keeps grouping, a small
+   *     bounded integer range reads as ordinal-shaped and drops it);
+   *     eventually the locale's own default. Neither contract lives here —
+   *     this key only carries the author's EXPLICIT override when they have
+   *     one, exactly like `min`/`max`/`scale` carry constraints without
+   *     asserting what an unconstrained field means.
+   *   - **`false`** — the author's explicit opt-out: this integer is an
+   *     identifier/ordinal (year, ID, zip code, quantity meant to scan
+   *     un-grouped), never grouped regardless of what the renderer's
+   *     heuristic would have guessed.
+   *   - **`true`** — the author pins grouping ON, overriding the heuristic
+   *     the other way (a large monetary-like count that should always read
+   *     with separators even if it would otherwise be judged ordinal-shaped).
+   *
+   * Maps 1:1 onto `Intl.NumberFormat`'s `useGrouping` option; the console
+   * number renderers are expected to pass it straight through. No default is
+   * declared here on purpose — unlike `autonumberFormat`'s JSON-Schema
+   * `default` annotation, there is no single grouping behavior every
+   * `number` field should present until the renderer half of this contract
+   * (objectui#4033) lands and retires the interim heuristic.
+   */
+  useGrouping: z.boolean().optional().describe('Digit-grouping presentation hint for `number` fields (#7768) — maps to `Intl.NumberFormat`\'s `useGrouping`. Absent = renderer decides (interim heuristic today, locale default eventually); `false` = author opts out of grouping (e.g. a year or other ordinal/identifier integer); `true` = author pins grouping on.'),
 
   /**
    * Media Constraints (ADR-0104 D3 wave 2)
