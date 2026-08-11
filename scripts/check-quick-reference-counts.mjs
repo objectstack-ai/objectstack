@@ -77,12 +77,12 @@
  *
  * ## Curation also happens one level up
  *
- * `references/studio/` (3 pages) and `references/contracts/` (0 pages) have no
- * section on the page at all. Left implicit, that is the same unwatched drift
- * one level up, so the page carries a `## Categories Without a Section` table
- * and this gate reads it: every category directory under
- * `content/docs/references/` must either be a section's derived category or be
- * declared there with its real page count — never both, never neither.
+ * `references/studio/` (3 pages) has no section on the page at all. Left
+ * implicit, that is the same unwatched drift one level up, so the page carries
+ * a `## Categories Without a Section` table and this gate reads it: every
+ * category directory under `content/docs/references/` must either be a
+ * section's derived category or be declared there with its real page count —
+ * never both, never neither.
  *
  * ## Absence must be loud
  *
